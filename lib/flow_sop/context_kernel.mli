@@ -33,17 +33,6 @@ val uses_context : Flow.Workspace.graph -> bool
 (** Whether [specialize] can change the graph: it names a context or provenance operator. A graph
     for which this is false is its own specialization. *)
 
-val fusable : Flow.Workspace.node_definition -> bool
-(** B.F: whether a Lisp node body is one [let*] with a single [sop/with_attr in0 :P] and no scans,
-    folds, errors or branches on cooked data. *)
-
-val fuse :
-  Flow.Workspace.node_definition ->
-  Flow.Workspace.node_definition ->
-  baked:(string * Flow.Eval.value) list ->
-  Flow.Workspace.node_definition option
-(** [fuse x u ~baked]: [x] with [u]'s [P] kernel folded in; [baked] are [u]'s parameter values. *)
-
 val reachable_defs : Flow.Workspace.t -> Flow.Workspace.graph list -> Flow.Workspace.graph list
 (** The checked helpers the graphs reach, directly or through the Lisp nodes they call, in
     declaration order. *)

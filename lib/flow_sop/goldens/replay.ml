@@ -610,84 +610,78 @@ let compare_check cache source factories with_ =
 
 let check_row ?capture ?(prepared = true) ?(times : replay_times option) (cache : replay_cache)
     directory row =
-  Fun.protect ~finally:Flow_sop.Lower.Private.clear_cache (fun () ->
-      match children "golden" row with
-      | [ name; fixture; case; source; input_forms; expected ] ->
-          let name = string name and fixture = string fixture and case = string case in
-          let label = Printf.sprintf "%s/%s/%s" name fixture case in
-          let parsed =
-            try source_workspace_and_call (string source)
-            with Failure message -> fail (label ^ ": malformed Lisp source: " ^ message)
+  match children "golden" row with
+  | [ name; fixture; case; source; input_forms; expected ] ->
+      let name = string name and fixture = string fixture and case = string case in
+      let label = Printf.sprintf "%s/%s/%s" name fixture case in
+      let parsed =
+        try source_workspace_and_call (string source)
+        with Failure message -> fail (label ^ ": malformed Lisp source: " ^ message)
+      in
+      let with_, factories, ops =
+        timed times
+          (fun times elapsed -> times.inputs <- times.inputs +. elapsed)
+          (fun () -> inputs ~key:name cache.inputs directory (children "inputs" input_forms))
+      in
+      Option.iter (fun times -> times.rows <- times.rows + 1) times;
+      let actual =
+        try
+          let node =
+            if prepared then
+              lower ~cache ~parsed ?times (string source) factories (ops @ Flow_sop.Operators.all)
+                with_
+            else lower ~parsed ?times (string source) factories (ops @ Flow_sop.Operators.all) with_
           in
-          let with_, factories, ops =
-            timed times
-              (fun times elapsed -> times.inputs <- times.inputs +. elapsed)
-              (fun () -> inputs ~key:name cache.inputs directory (children "inputs" input_forms))
-          in
-          Option.iter (fun times -> times.rows <- times.rows + 1) times;
-          let actual =
-            try
-              let node =
-                if prepared then
-                  lower ~cache ~parsed ?times (string source) factories
-                    (ops @ Flow_sop.Operators.all) with_
-                else
-                  lower ~parsed ?times (string source) factories (ops @ Flow_sop.Operators.all)
-                    with_
-              in
-              timed times
-                (fun times elapsed -> times.cook <- times.cook +. elapsed)
-                (fun () -> output node)
-              |> function
-              | `Ok digest -> `Ok digest
-              | `Error (code, message) -> `Error (code, message)
-            with Failure message ->
-              let code, message = stable_error message in
-              `Error (code, message)
-          in
-          let matches =
-            match (expected.Flow.Syntax.node, actual) with
-            | List [ { node = Sym "ok"; _ }; digest ], `Ok actual ->
-                let expected = string digest in
-                String.length expected = 32
-                && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) expected
-                && expected = actual
-            | List [ { node = Sym "error"; _ }; code; message ], `Error (actual_code, actual_message)
-              ->
-                string code <> "" && string code = actual_code && string message = actual_message
-            | _ -> false
-          in
-          if (not matches) && capture <> None then
-            Option.iter (fun capture -> capture actual) capture
-          else if not matches then
-            let describe = function
-              | `Ok digest -> "ok " ^ digest
-              | `Error (code, message) -> "error " ^ code ^ " " ^ message
+          timed times
+            (fun times elapsed -> times.cook <- times.cook +. elapsed)
+            (fun () -> output node)
+          |> function
+          | `Ok digest -> `Ok digest
+          | `Error (code, message) -> `Error (code, message)
+        with Failure message ->
+          let code, message = stable_error message in
+          `Error (code, message)
+      in
+      let matches =
+        match (expected.Flow.Syntax.node, actual) with
+        | List [ { node = Sym "ok"; _ }; digest ], `Ok actual ->
+            let expected = string digest in
+            String.length expected = 32
+            && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) expected
+            && expected = actual
+        | List [ { node = Sym "error"; _ }; code; message ], `Error (actual_code, actual_message) ->
+            string code <> "" && string code = actual_code && string message = actual_message
+        | _ -> false
+      in
+      if (not matches) && capture <> None then Option.iter (fun capture -> capture actual) capture
+      else if not matches then
+        let describe = function
+          | `Ok digest -> "ok " ^ digest
+          | `Error (code, message) -> "error " ^ code ^ " " ^ message
+        in
+        let expected =
+          match expected.Flow.Syntax.node with
+          | List [ { node = Sym "ok"; _ }; digest ] -> "ok " ^ string digest
+          | List [ { node = Sym "error"; _ }; code; message ] ->
+              "error " ^ string code ^ " " ^ string message
+          | _ -> "malformed outcome"
+        in
+        let reference =
+          try
+            let node =
+              if prepared then
+                lower ~reference:true ~cache (string source) factories
+                  (ops @ Flow_sop.Operators.all) with_
+              else
+                lower ~reference:true (string source) factories (ops @ Flow_sop.Operators.all) with_
             in
-            let expected =
-              match expected.Flow.Syntax.node with
-              | List [ { node = Sym "ok"; _ }; digest ] -> "ok " ^ string digest
-              | List [ { node = Sym "error"; _ }; code; message ] ->
-                  "error " ^ string code ^ " " ^ string message
-              | _ -> "malformed outcome"
-            in
-            let reference =
-              try
-                let node =
-                  if prepared then
-                    lower ~reference:true ~cache (string source) factories
-                      (ops @ Flow_sop.Operators.all) with_
-                  else
-                    lower ~reference:true (string source) factories (ops @ Flow_sop.Operators.all)
-                      with_
-                in
-                describe (output node)
-              with Failure message -> "lower error " ^ message
-            in
-            fail
-              (label ^ ": Lisp golden changed (expected " ^ expected ^ ", got " ^ describe actual
-             ^ "; reference " ^ reference ^ ")")
-      | _ -> fail "malformed golden row")
+            describe (output node)
+          with Failure message -> "lower error " ^ message
+        in
+        fail
+          (label ^ ": Lisp golden changed (expected " ^ expected ^ ", got " ^ describe actual
+         ^ "; reference " ^ reference ^ ")")
+  | _ -> fail "malformed golden row"
 
 let key_of tag row =
   match (tag, children tag row) with

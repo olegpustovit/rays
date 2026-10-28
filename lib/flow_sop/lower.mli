@@ -233,12 +233,3 @@ val counts : t -> int * int
 val status : t -> seconds:float -> string option
 (** The viewport header [t N live · M cached · cook X ms] ([t] for the study's ◷, which
     DepartureMono lacks); [None] when nothing is live. *)
-
-module Private : sig
-  val cache_hits : int Atomic.t
-
-  val nested_lowerings : int Atomic.t
-  (** Lisp node bodies lowered as their own workspace; the single-program design drives it to 0. *)
-
-  val clear_cache : unit -> unit
-end

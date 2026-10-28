@@ -957,11 +957,9 @@ the parameter is blank) or `$param~prefix` (the parameter's value as a prefix pa
 by `Check.resolve_component_names` at the node's parameters and, in the catalog, at their
 defaults. Cooking still refuses an undeclared write or a replaced topology.
 
-Adjacent Lisp nodes whose bodies each write `P` once over their single input
-(`Context_kernel.fusable`: one geometry slot, scalar parameters, no validators or normalizers,
-`map` as the only higher-order form, no loops, state, calls or other `sop/` operations, branch
-conditions over parameters only) lower into one kernel run (`Lower.fused_view`); four chained
-`noise_displace` nodes cook in one run.
+Lisp node calls inline in the calling program, and chained point writes fold across cards into
+one record node (`Lower.fold_writes`, [sop.md](sop.md)); four chained `noise_displace` cards cook
+in one run.
 
 An authored node body's evaluated errors occur when the node cooks, even when
 static parameters select the failing arm during construction. Parameter edits

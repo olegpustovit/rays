@@ -80,6 +80,8 @@ and node = {
   kind : string;  (** catalog kind or deferred operator, including [sop/curve] and [draw/*] *)
   ty : Ty.t;  (** the declared result type of the deferred node *)
   args : (string * value) list;
+  error : Diagnostic.t option;
+      (** a Lisp node call whose inlined body failed: the card's cook error *)
 }
 
 module Residual : sig
@@ -241,10 +243,6 @@ val card_kind : string
     residual the host cooks behind the marker), [kind] the card's qualified kind, [parameters] its
     canonical parameters, and each function argument of the call under its name. The marker sits at
     the call's site. *)
-
-val node_error : string
-(** The reserved argument of a card whose inlined body failed: its diagnostic, marshalled. The host
-    lowers the card as a node that returns it when cooked. *)
 
 val static :
   ?record:bool ->
