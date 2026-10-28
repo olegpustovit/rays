@@ -1,5 +1,7 @@
-(** Serializable structured frame programs. Locals and constants are numbered in
-    authored traversal order. Values are immutable after publication. *)
+(** Structured frame programs. Locals and constants are numbered in
+    authored traversal order. Values are immutable after publication. A program is
+    not serializable: [Source] holds a host-owned [Flow.Eval.value], which may contain
+    closures or residuals, so the web exporter refuses programs that carry one. *)
 type literal =
   | Int of int | Float of float | Bool of bool | Text of string
   | Vector of float array | List of literal array
