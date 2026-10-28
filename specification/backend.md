@@ -364,8 +364,15 @@ holder (a SOP write's deferred attribute, specification/sop.md, Device placement
 `materialise` is the only read (an `invalidate_mapped` and a conversion, callable from any domain
 because it does no queue work), the runner takes a fresh or recycled buffer for its next dispatch,
 a collected holder's buffer is recycled or destroyed on the initial domain at the runner's next
-dispatch, and `Run.close` materialises live holders before destroying their buffers. Binding a held
-buffer as a later kernel's input or a display's vertex source is the next step.
+dispatch, and `Run.close` materialises live holders before destroying their buffers. `materialise` cannot
+fail: the status read at `keep` already covered completion and every output's finiteness, the range
+is the buffer's own and the buffer is destroyed only under the holder's lock. A held buffer is also
+a later kernel's input without a readback: `keep` returns a one-element placeholder array, and
+`Run.dispatch` (any runner) binds an input that is physically that array to the held buffer while
+its holder has not read it back (the buffer is then released). On a discrete backend
+`invalidate_mapped` becomes the copy, so `materialise` turns into queue work on the initial domain
+(or a staging copy at the settle point); a display's vertex source binding a held buffer is still to
+do (specification/sop.md, Device placement).
 
 Ray tracing: geometry variants are `Triangles`, `Motion_triangles` (one vertex
 buffer per keyframe), `Bounding_boxes`, and `Curves`; descriptors are `Blas`,

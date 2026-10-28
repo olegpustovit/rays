@@ -439,6 +439,20 @@ collected (a finaliser names it; the runner recycles at most 4 and destroys the 
 dispatch, on the initial domain); closing the runner first materialises every holder still alive,
 so a geometry outliving the GPU stays valid. `test_chain_gpu_native` fails if a recook reads back,
 if reading P materialises more than one output or twice, or if a buffer outlives its geometry.
+A later fused write reads a resident attribute where it is (GPU to GPU): the deferred storage
+carries an rdk holder (`Rdk.Packed.Deferred.holder`, an extensible tag rdk never inspects) naming
+the output's placeholder (`Gpu.planes.resident`, one element), `Attribute_kernel.resident_read`
+answers a whole-attribute `sop/attr` of unread resident storage with it, and
+`Packed.Host.prepare_values ?resident` evaluates each source with a resolve that answers
+placeholders, keeping one only when the source is exactly that placeholder (counted as its count);
+a source that computes over a placeholder is evaluated again with the cook's resolve, so a
+placeholder never reaches a CPU kernel, and the CPU fallback never sees one (it resolves afresh).
+`Run.dispatch` binds the placeholder to the held buffer. `sop/has_attr` and `sop/attr_type` read
+the kind without materialising (`Attribute_metadata.kind`): a transform's `:when` on N used to read
+N back. `test_chain_gpu_native` cooks two consecutive fused writes (the first is read twice, so
+they do not fold into one) and fails if their recook uploads, reads back or materialises anything,
+or if reading the second's P materialises more than one output. 1M points: 0.014-0.019 s for both
+(0.007 each alone, loaded M1).
 An input is resident when it is the same array as the last dispatch's, never by comparing floats:
 sources are immutable, and a recook keeps them the same arrays because the facts they come from are
 remembered by identity (`Flow.Value.remember`, weak): a static grid's point planes, an attribute's
@@ -452,24 +466,32 @@ back (eager readback before: 0.009-0.027 s, of which 7-10 ms converted all seven
 when the previous results have been collected and their buffers recycled, against 0.11-0.15 s on
 the CPU; about 2 ms of a recook is the kernel itself, waited for its status check, and 3 ms a fresh
 28 MB of output buffers while the previous geometries are still uncollected. First cook
-0.043-0.050 s, of which 0.035-0.038 s is emitting and compiling the kernel's pipeline: uploads are
-not what bounds it. One dispatch, largest difference 3.4e-7. A light map (transform alone) costs
+0.043-0.050 s (broken down below). One dispatch, largest difference 3.4e-7. A light map (transform alone) costs
 about its transfer on the CPU blocks and stays there. Any device failure (a form refusal, a status)
 leaves the record to the CPU, which reports its own errors.
 
-Not yet, in order of value: (1) a later fused write binding a resident attribute as its input
-without materialising it: `Attribute_kernel.read` would return, for a resident storage and only
-for `Packed.Host.prepare` on the device path, a placeholder the GPU host maps by physical identity
-to the held buffer (as the resident fold's placeholders are, `Flow_gpu.Host.resident`), passed as
-`Run.dispatch ~bound`; the held buffer is interleaved float32 of the kernel's input layout, and the
-CPU fallback must re-resolve sources so a placeholder never reaches a CPU kernel; (2) a display
-binding a resident P as its vertex buffer (`Workspace_gpu.marks`/`Renderer` already bind device
-buffers for marks; SOP display converts through `rdk_rays` meshes and reads P); (3) a persistent
-pipeline cache (Metal binary archive) for the first cook, then grid planes and `array/range`
-generated from the thread index (a new element-index instruction across the CPU blocks, MSL,
-SPIR-V and WGSL, and the grid's point map fused into the write); (4) the status check deferred to
-the cook's end and one command buffer per cook across consecutive fused nodes (no wait between
-them); fills bound as uniforms.
+First cook, measured (M1, 2026-10-28, `test_chain_gpu_native`, 1M points): of 0.043-0.050 s,
+about 26 ms is acquiring the GPU lease lazily on the first prepare (`Workspace_gpu.owner`: a device
+and a queue headless; in the editor the window's device is shared and only a queue is made), 4 ms
+emitting the MSL, 2.4 ms compiling it (warm: the OS Metal shader cache already keys compiled
+sources persistently; a cold, never-seen source takes 60 ms) and 7 ms the first dispatch's fresh
+buffers and uploads. A Metal binary archive would only save part of the 2.4 ms, so none is kept; a
+Vulkan backend will need its own `VkPipelineCache`, which has no OS cache behind it.
+
+Not yet, in order of value: (1) the status check deferred and one command buffer per cook: a
+steady 1M recook is about 5 ms of device path (2 ms waiting for the kernel's status at `Run.keep`,
+3 ms making 28 MB of fresh mapped output buffers: `memset` of the posix_memalign pages plus the
+GC slice their custom-block accounting triggers) of 7-10 ms. The wait can move only to a point that
+precedes every CPU reader, and readers run on any domain (Metal stays on the initial domain), so it
+needs a settle hook the session runs before any CPU node cooks and at the cook's end (Sop.Session),
+with a status failure turning into a CPU recook of the failed writes; buffers then come back
+deterministically when the session drops a result rather than at a GC (a ring that materialises
+still-uncollected holders costs more than the allocation); (2) a display binding a resident P as
+its vertex buffer (`Workspace_gpu.marks`/`Renderer` already bind device buffers for marks; SOP
+display converts through `rdk_rays` meshes and reads P; the held buffer is packed float3, so the
+vertex layout must read it packed); (3) grid planes and `array/range` generated from the thread
+index (a new element-index instruction across the CPU blocks, MSL, SPIR-V and WGSL, and the grid's
+point map fused into the write); fills bound as uniforms.
 
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's
