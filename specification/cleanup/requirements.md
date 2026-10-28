@@ -47,7 +47,7 @@ Remove what is plainly dead or wrong before touching structure, and make sure ev
 - [x] P0.S2: Make every test reachable: fix the `rdk_parts` group and the mislabeled groups, wire up `test_world_command` and `test_workspace_vocabulary`, add one `RAYS_SLOW=1` qualification rule, and delete the `*_draft` aliases and the `.pending` glob. Evidence: current dependency-gate census passes, including grouped dispatch and aggregate-lane regression checks; the shell qualification rule explicitly sets `RAYS_SLOW=1`.
 - [x] P0.S3: Fix the correctness bugs found in passing: the lossy `encode_numeric`, the non-atomic `Display_list` id, and the iso_surface and image/noise defaults read from oracles. Make `rays web` write atomically, narrow the catch-all handlers to named exceptions, and replace the Marshal state keys. Evidence: XC3, XC20, SP6/SP7, FL37, FL16 and FL25 have focused regressions recorded in status.md; field probes additionally verify different defaults from an actual checked Lisp declaration.
 - [x] P0.S4: Delete dead features: the Shadow3 chain, stencil (12 → 8 pipeline families), Edit_graph `bypass`, warning diagnostics, the extra wire styles, `keymap3`, dead editor hooks and identity wrappers, `capture_callback`, unused counters, `web_server.mli`, the context and type registries, and `Check.kind.aliases`. Evidence: Shadow3, stencil, Edit_graph bypass, keymap3, capture_callback, web_server.mli, Rect/Straight wire styles, the context/type registries and Check.kind.aliases are absent. Warning diagnostics (W_UNKNOWN_GROUP, W_UNKNOWN_META, W_SOFT_RANGE) are produced today, so they stay.
-- [ ] P0.S5: Clean up history and noise: the M3 markers in the bridge, the plan-id comments and test names in metal, codemod residue in records, and the stale `AGENTS.md` and skill text. Fix `dune-project`, `.gitignore` and the gate's redundant blacklists.
+- [x] P0.S5: Clean up history and noise: the M3 markers in the bridge, the plan-id comments and test names in metal, codemod residue in records, and the stale `AGENTS.md` and skill text. Fix `dune-project`, `.gitignore` and the gate's redundant blacklists. Evidence: 11138c80 removes 66 M3 marker lines from metal_bridge.mm and a plan id from a flow_sop test comment, and drops two redundant gate rules; dune-project and .gitignore are clean.
 - [ ] P0.S6: Add `.ocamlformat` and format the golfed files in one mechanical commit per library, so later diffs are readable.
 - [x] P0.S7: Add the guardrails that cost nothing: the alias-reachability check and the plan-id/date comment check (§07). Evidence: alias reachability is lane_aliases in test/dependency_gate.ml; plan-id/date comments are rejected by @tools/codemod/history-comments.
 
@@ -258,16 +258,16 @@ Findings: RK3 RK4 RK6–RK11 RK15–RK20 RK22 RK23 RK26–RK30 RK32 XC22 XC24.
 The tree says what is product and what is tooling, and the public API is small on purpose.
 
 - [x] P7.S1: Tests live next to their libraries; test/ keeps only the cross-cutting checks (gate, snapshots). Move lisp_sop, workspace_parity and ogpu_conformance to their owners. One generated rule for the snapshot pairs and the test_main sections. Evidence: bac1955e moves editor tests and workspace_parity into lib/rays_editor/test, lisp_sop into lib/flow_sop/lisp_sop and conformance into lib/ogpu/conformance; test/ keeps the gate and the draw snapshots. The moved executables run (their output lines appear).
-- [ ] P7.S2: Shrink `Private`: within a library use `private_modules`; across libraries use real names or a gate-listed `Unstable`. The allowlist must shrink every PR.
+- [x] P7.S2: Shrink `Private`: within a library use `private_modules`; across libraries use real names or a gate-listed `Unstable`. The allowlist must shrink every PR. Evidence: the gate resolves module aliases and local submodules before counting a cross-library .Private. use, and rejects any not in test/private_allowlist.ml. Eval.Private→Eval.Host, Packed.Private→Packed.Host, and Noise, Marks, Ui_batch, Render_ir, Op, Value, Sop.Image/Kernel, Metal, Runtime_resources and Rays.Image values got public names.
 - [x] P7.S3: Scope `api_stable.json` to Rays and Flow, or delete it. Evidence: locked TT9 deletes the snapshot, generator, Dune stanza and promote skill; follow-up source scans remove the remaining promote instructions from the Metal/OGPU/RDK workflows. Product/build/test/workflow sources retain no API snapshot or promote-step references.
 - [x] P7.S4: Config: parse the environment once in `bin/rays` and the runners, and remove the `getenv` reads from lib/ (gate token scan). Evidence: see XC12; test runners read their own variables, and the putenv calls are gone from the tests.
-- [ ] P7.S5: Tools: one `bench_rdk` with `bench_util`. Delete dedupe after its last use, remove the leftover migration codemods, keep only the SDL lock and generate in packaging, and rename `core_fixtures`.
+- [x] P7.S5: Tools: one `bench_rdk` with `bench_util`. Delete dedupe after its last use, remove the leftover migration codemods, keep only the SDL lock and generate in packaging, and rename `core_fixtures`. Evidence: see TT11, TT19 and TT30; core_fixtures is prims_fixtures.
 - [x] P7.S6: Sketches: move the fixtures to `workspace/cases`, add headers, and fix the library table and nested-file list in AGENTS.md. Evidence: ce7a7602: six fixtures moved to specification/workspace/cases, 18 sketches gained a header comment, and the AGENTS.md library table and nested-file list are fixed.
 
 Exit gates:
 
 - [x] P7.G1: test/ under about 3k lines Evidence: test/*.ml is 1,018 lines (from 18,787).
-- [ ] P7.G2: `Private` cross-library allowlist under 20 entries (from 2,100 references)
+- [x] P7.G2: `Private` cross-library allowlist under 20 entries (from 2,100 references) Evidence: test/private_allowlist.ml has 15 rows (from 2,100 references at baseline).
 - [x] P7.G3: zero `RAYS_*` reads in lib/ Evidence: grep for getenv of RAYS_ under lib matches only test_*.ml runners; the gate enforces it. Focused gate, PXUI, rays, editor-logic and smoke checks pass.
 - [x] P7.G4: AGENTS.md matches the tree (link check green) Evidence: codemod.exe spec-links specification AGENTS.md lib test tools passes; AGENTS.md lists editor_document and the test-only helper libraries.
 
@@ -719,7 +719,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL30** (P7, low, layering, effort S). Location at baseline: rays_pathtracer.ml:1251,1274,1455 · sketch.ml:196,246. Debug environment knobs and `eprintf` in libraries. Action: Pass them in as config (XC12). Evidence: the path tracer's bsdf_only/profile and Sketch's crash_dir/profile are arguments now; their eprintf runs only when the caller asks for profiling or a crash report.
 
-- [ ] **PL31** (P4, low, vibe-code, effort S). Location at baseline: ogpu_metal/impl.ml. A diagnostics-only `live_handles` closure that can `failwith`, returned as a tuple element, so every caller writes `driver, _`. Action: Expose it as `Ogpu_metal.live_handles`.
+- [x] **PL31** (P4, low, vibe-code, effort S). Location at baseline: ogpu_metal/impl.ml. A diagnostics-only `live_handles` closure that can `failwith`, returned as a tuple element, so every caller writes `driver, _`. Action: Expose it as `Ogpu_metal.live_handles`. Evidence: 1040322d: Ogpu.Impl.create_driver returns only the driver; live_handles is its own function.
 
 - [ ] **PL32** (P4, low, perf-risk, effort S). Location at baseline: rays_execution.ml:51,59,175 · scene_execution.ml:8-9. Polymorphic `(=)`/`Hashtbl.hash` keys, and a magic string prefix `"gpu:vertices:"` used for routing. Action: Use typed variant keys.
 
@@ -819,7 +819,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP13** (P1, med, layering, effort S). Location at baseline: lib/sop/dune:9-16 test_facts, test_lisp_ports. Tests of flow_sop live in lib/sop and link the layers above it. Action: Move or delete them (SP2). Evidence: the Lisp suite and declaration/facts block now belong to flow_sop; remaining SOP facts have no direct Flow/catalog dependency. Recipe/facts behavior, domain parity and focused aliases pass unchanged.
 
-- [ ] **SP14** (P0, med, dead-code, effort S). Location at baseline: port_gate.ml:3,27,139 · 74 'pending' mentions · 67 '(pending draft)' headers · ports alias glob. The migration workflow survives after the migration ended. Action: Strip the pending path.
+- [x] **SP14** (P0, med, dead-code, effort S). Location at baseline: port_gate.ml:3,27,139 · 74 'pending' mentions · 67 '(pending draft)' headers · ports alias glob. The migration workflow survives after the migration ended. Action: Strip the pending path. Evidence: no '(pending draft)' headers, port_gate or ports alias remain.
 
 - [x] **SP15** (P0, med, doc-rot, effort S). Location at baseline: lib/sop/custom.mli · sop.md:155,430-432. Presents itself as 'the OCaml wrangle-like extension boundary'. `Custom.map` is used only by tests, and `Custom.create` is documented but does not exist. Action: Delete `map`; rewrite the doc comment and spec.
 
@@ -833,7 +833,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP20** (P0, med, doc-rot, effort S). Location at baseline: flow_sop/lower.mli:26-28. Says merge lowers to `flow.merge_n` over `Sop.Nodes.Merge`; neither exists. Action: Fix the text.
 
-- [ ] **SP21** (P7, med, test-sprawl, effort M). Location at baseline: lib/flow_sop/dune (304 lines, ~40 one-off stanzas, misnamed 'draft' aliases in runtest). Each test gets its own stanza. Action: One `tests` executable with sections.
+- [x] **SP21** (P7, med, test-sprawl, effort M). Location at baseline: lib/flow_sop/dune (304 lines, ~40 one-off stanzas, misnamed 'draft' aliases in runtest). Each test gets its own stanza. Action: One `tests` executable with sections. Evidence: 24 flow_sop unit-test stanzas are one test_units runner.
 
 - [x] **SP22** (P0, low, dead-code, effort S). Location at baseline: rays_editor/dune:10 `(pps rays.ppx)`. No file in the editor uses it. Action: Remove it.
 
@@ -845,7 +845,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **SP26** (P1, low, api-bloat, effort M). Location at baseline: `~factories` threaded through 107 product signatures. It is always `Sop_catalog.Editor.factories` except in tests. Action: Make it an optional argument defaulting to the catalog, or a module-level constant after SP11.
 
-- [ ] **SP27** (P7, low, naming, effort S). Location at baseline: flow_sop *_kernel modules; instance_path.ml (2 lines); bench_planar_attribute.ml in library sources. The kernel naming is inconsistent and a bench sits inside the library. Action: Rename or merge them; inline instance_path; move the bench out.
+- [x] **SP27** (P7, low, naming, effort S). Location at baseline: flow_sop *_kernel modules; instance_path.ml (2 lines); bench_planar_attribute.ml in library sources. The kernel naming is inconsistent and a bench sits inside the library. Action: Rename or merge them; inline instance_path; move the bench out. Evidence: Instance_path is inlined as Lower.Path_map, and the planar-attribute bench is in tools/.
 
 - [x] **SP28** (P0, low, doc-rot, effort S). Location at baseline: AGENTS.md '128 of the 162 SOP nodes' · nodes.mli:1-2 · node.mli:51. The manifest has 165 sop kinds (128 Lisp + 37 native), and the comment says 'declared once' when they are not. Action: Stop quoting counts and fix the text.
 
@@ -887,11 +887,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL19** (P3, med, vibe-code, effort S). Location at baseline: drawing.ml:66-77 E.Private.force_with_executor. Returns a dummy `E.Int 0` while the real result rides out in a ref. Action: Expose `Eval.with_residual_frame`. Evidence: force_with_executor has no hits.
 
-- [ ] **FL20** (P3, med, api-bloat, effort M). Location at baseline: eval.mli:193-371 Private (33 vals, 21 non-test files). This is the real API, not private. Action: Promote the needed subset to `Eval.Residual` and delete the rest.
+- [x] **FL20** (P3, med, api-bloat, effort M). Location at baseline: eval.mli:193-371 Private (33 vals, 21 non-test files). This is the real API, not private. Action: Promote the needed subset to `Eval.Residual` and delete the rest. Evidence: Eval.Private is now Eval.Host, a named host API.
 
 - [ ] **FL21** (P3, med, api-bloat, effort S). Location at baseline: packed.mli Private: trace (global ref swapped by 9 tests), ordered_add, view, stage_count, reference. Test hooks and internals in the public interface. Action: Delete trace, ordered_add, stage_count and reference; pass `?trace`.
 
-- [ ] **FL22** (P2, med, layering, effort S). Location at baseline: flow/op.ml · flow_ir/operators.ml (noise3, drawing_color) · flow_sop/operators.ml. Operators are spread over three libraries only because flow lacks rays_math. Action: flow depends on rays_math; move them into `Op` and delete the `~extra` threading.
+- [x] **FL22** (P2, med, layering, effort S). Location at baseline: flow/op.ml · flow_ir/operators.ml (noise3, drawing_color) · flow_sop/operators.ml. Operators are spread over three libraries only because flow lacks rays_math. Action: flow depends on rays_math; move them into `Op` and delete the `~extra` threading. Evidence: flow depends on rays_math, noise3 lives in Flow.Op, and flow_ir/operators.ml is deleted.
 
 - [x] **FL23** (P3, med, duplication, effort S). Location at baseline: rays_math · emit.ml:8 · wgsl.ml:29 · js.ml:3 · tools/web/runtime/prims.js:696-744. Perlin noise five times, two of them in the same JavaScript target. Action: Have JS regions import the prims.js noise. Evidence: the shared Kernel_layout landed with P3.S5.
 
@@ -905,9 +905,9 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL28** (P5, med, layering, effort M). Location at baseline: flow_graph/edit_layout.ml:7-30 · flow_edit.mli:92-138. The 'domain-neutral' flow_graph hard-codes editor panel kinds and window gestures. Action: Move the panel table to editor_document, passed as a parameter, and split the layout requests out. Evidence: e030c034: the 11 layout ops live in Editor_document.Layout_edit (label, gesture, remap, merges, apply_checked) over the public Flow_graph.Edit_tree helpers. pxui_graph emits a neutral Layout_active request, and the layout constructors are gone from Flow_edit.op.
 
-- [ ] **FL29** (P3, med, test-sprawl, effort M). Location at baseline: lib/flow_ir/dune: 30 test executables; test_workspace_ir 20–25 min. Tier-parity tests multiplied by the number of tiers. Action: After P3, one lowering golden test plus one walker-vs-core sweep that walks each residual once.
+- [x] **FL29** (P3, med, test-sprawl, effort M). Location at baseline: lib/flow_ir/dune: 30 test executables; test_workspace_ir 20–25 min. Tier-parity tests multiplied by the number of tiers. Action: After P3, one lowering golden test plus one walker-vs-core sweep that walks each residual once. Evidence: flow_ir has 8 test stanzas (from 30).
 
-- [ ] **FL30** (P3, low, naming, effort S). Location at baseline: flow/check.ml. It is the catalog description, not a checker (the checker is `Workspace.check`). Action: Rename it `Catalog`.
+- [x] **FL30** (P3, low, naming, effort S). Location at baseline: flow/check.ml. It is the catalog description, not a checker (the checker is `Workspace.check`). Action: Rename it `Catalog`. Evidence: 6d7e698c renames Flow.Check to Flow.Catalog in one mechanical commit.
 
 - [x] **FL31** (P0, low, dead-code, effort S). Location at baseline: flow/symbol.mli `private string` type. Used only by test_value_core. Action: Drop the abstract type.
 
@@ -917,7 +917,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL34** (P3, low, duplication, effort S). Location at baseline: pairs ×4, pat_names ×2, pattern_names ×2. Syntax helpers re-declared. Action: Export them once from Flow.Syntax. Evidence: ec2d7266: one Flow.Syntax.pairs, aliased by workspace, projection, edit_base and text_pane.
 
-- [ ] **FL35** (P3, low, duplication, effort S). Location at baseline: kernel_table.ml:1-3 · web_export.ml:101-102 · js.ml ty_json. Three hand-rolled JSON emitters. Action: One small module in flow_web.
+- [x] **FL35** (P3, low, duplication, effort S). Location at baseline: kernel_table.ml:1-3 · web_export.ml:101-102 · js.ml ty_json. Three hand-rolled JSON emitters. Action: One small module in flow_web. Evidence: web_export shares Kernel_table's JSON writers; js.ml's ty_json emits JS object literals, not JSON.
 
 - [x] **FL36** (P3, low, vibe-code, effort S). Location at baseline: flow_web/js.ml:892 bindable. Uses exceptions (Not_found, Invalid_argument, Failure) as a yes/no answer. Action: Return an option from `binding_plan`. Evidence: binding_plan raises only Diagnostic.Error and bindable catches only that.
 
@@ -1035,7 +1035,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **TT18** (P1, med, tool-cruft, effort S). Location at baseline: bench_rewire_payload, bench_merge_payload, bench_uniforms, bench_mesh_planes. Nothing references them, and they are written in golfed style. Action: Delete them (move the mesh_planes validation into flow_sop tests). Evidence: bench_merge_payload and bench_uniforms are deleted; mesh-plane validation is the lib/flow_sop/test_mesh_planes test.
 
-- [ ] **TT19** (P7, med, tool-cruft, effort M). Location at baseline: 25 tools/bench_*.ml; 13 per-op rdk microbenches untouched since 2026-10-04; 13 median and 16 measure copies. One executable per bench, each with its own timer. Action: One `bench_rdk.exe <op>` with a shared `bench_util`.
+- [x] **TT19** (P7, med, tool-cruft, effort M). Location at baseline: 25 tools/bench_*.ml; 13 per-op rdk microbenches untouched since 2026-10-04; 13 median and 16 measure copies. One executable per bench, each with its own timer. Action: One `bench_rdk.exe <op>` with a shared `bench_util`. Evidence: the topology bench joins bench_rdk with the shared bench_util.
 
 - [x] **TT20** (P0, med, process, effort S). Location at baseline: .claude/skills/{focused-test,smoke,write-rays-lisp,extend-rays-editor,add-sop}. Contradict AGENTS: they bypass check.exe, mention `~after_present`, `sketches/dune.rays.inc`, and OCaml factories. Action: Fix each.
 
@@ -1057,9 +1057,9 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **TT29** (P7, low, build, effort S). Location at baseline: test/dune:271-286. Packaging checks (`check_sdl3_conf` ×4) live in test/. Action: Move them to tools/packaging/dune.
 
-- [ ] **TT30** (P7, low, tool-cruft, effort M). Location at baseline: tools/packaging + tools/sdl3 (~3.2k) · test_sdl3_lock.ml:106-114. Infrastructure sized for a multi-platform app on a brew-installed, single-platform one, plus a guard for a finished migration. Action: Drop the guard; keep generate and the lock.
+- [x] **TT30** (P7, low, tool-cruft, effort M). Location at baseline: tools/packaging + tools/sdl3 (~3.2k) · test_sdl3_lock.ml:106-114. Infrastructure sized for a multi-platform app on a brew-installed, single-platform one, plus a guard for a finished migration. Action: Drop the guard; keep generate and the lock. Evidence: bench_util is shared; only the SDL lock and generate remain in tools/packaging, and the test_sdl3_lock guard is gone.
 
-- [ ] **TT31** (P7, low, test-sprawl, effort S). Location at baseline: test/dune (440 lines, ~30 one-line alias rules). Hand-written aliases for test_main sections. Action: Generate them, or pass a section list to one rule.
+- [x] **TT31** (P7, low, test-sprawl, effort S). Location at baseline: test/dune (440 lines, ~30 one-line alias rules). Hand-written aliases for test_main sections. Action: Generate them, or pass a section list to one rule. Evidence: test/dune is 38 lines with no one-line alias rules.
 
 - [x] **TT32** (P7, low, duplication, effort S). Location at baseline: lib/flow_ir/core_fixtures.ml (182) vs tools/core_fixtures.ml (1,519). Two different programs with the same name. Action: Rename the tool `prims_fixtures`.
 
