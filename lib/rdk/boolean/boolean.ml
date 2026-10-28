@@ -1,7 +1,7 @@
 type operation = Boolean_solid.operation =
   | Union | Intersection | Difference | Reverse_difference | Xor | Shatter
 type treatment = Boolean_solid.treatment = Solid | Surface
-type point_conflict = Boolean_corner_payload.point_conflict = Reject | Promote_to_vertex
+type point_conflict = Boolean_payload.point_conflict = Reject | Promote_to_vertex
 type seam_points = Shared_seam_points | Split_seam_points
 type detriangulation = Boolean_materialization.detriangulation =
   | Triangles | All_polygons | Unchanged_polygons
