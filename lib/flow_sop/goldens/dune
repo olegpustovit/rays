@@ -37,20 +37,6 @@
    4
    (run %{exe:replay.exe} data))))
 
-; Step A of the single-program design: the same rows with simple Lisp nodes inlined in the caller.
-
-(rule
- (alias runtest)
- (deps
-  data/ports.sexp.gz
-  data/coverage.sexp.gz
-  (glob_files data/inputs/*.gz))
- (action
-  (setenv
-   REPLAY_JOBS
-   4
-   (run %{exe:replay.exe} --inline-nodes data))))
-
 (rule
  (alias qualification-scale)
  (deps

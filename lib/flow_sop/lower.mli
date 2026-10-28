@@ -132,7 +132,8 @@ type t = {
   card_node : node:int -> (Sop.Node.t, string) result;
       (** The factory node of the card with this compiled id (the node menu's and inspector's: its
           parameter schema, rebuilds and facts), over the nodes its call's slots name, with the
-          call's parameters. It keeps the card's id. A card with function arguments has none yet. *)
+          call's parameters and functions. It keeps the card's id and tags; its cook is one inlined
+          call of the kind over its inputs. *)
 }
 
 val source_context : t -> node:int -> (image_context, Diagnostic.t) result
@@ -232,12 +233,3 @@ val counts : t -> int * int
 val status : t -> seconds:float -> string option
 (** The viewport header [t N live · M cached · cook X ms] ([t] for the study's ◷, which
     DepartureMono lacks); [None] when nothing is live. *)
-
-module Private : sig
-  val cache_hits : int Atomic.t
-
-  val nested_lowerings : int Atomic.t
-  (** Lisp node bodies lowered as their own workspace; the single-program design drives it to 0. *)
-
-  val clear_cache : unit -> unit
-end

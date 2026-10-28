@@ -349,7 +349,8 @@ choices, encoded text through the normalizers, `sop/material` values as their fi
 validations refuse the lowering as a node build did, an error in its body is that card's cook
 error (the body's nodes are dropped and the card lowers as a node that returns it), and each
 body has its own step budget. Nodes the body makes sit under the card's `node:kind` site and
-compile strictly, as a nested body did; their refusals cook as errors.
+compile strictly; their refusals cook as errors. There is one model: no Lisp node body is
+lowered as a workspace of its own.
 
 Each card is a marker plan node (`Flow.Eval.card_kind`) at the call's site carrying the body's
 value, the kind, the canonical parameters and the call's function arguments (an iso surface's
@@ -404,12 +405,26 @@ field has nothing to canonicalize, and so is a cooked-data argument (`(sop/count
 source the cook resolves once; a body whose structure follows a per-frame argument and a
 validation that reads one keep the card a node of its own.
 
-That node (and every factory node, for menus and inspection) owns one ordinary session cache
-entry and schema-derived parameter identity. Its internal graph uses the existing `Session`
-cooker with zero retained entries and bytes: per-cook sharing, payload handling, instance
-materialization, diagnostics and cancellation retain their native semantics. Its cook derives
-read/write/topology facts from the specialized body, so mode and parameter changes rebuild the
-relevant facts, and the context dependencies of delegated nodes belong to it. SOP ownership remains in
+That node (and every factory node, for menus and inspection: `Lower.t.card_node` builds a card's,
+with the card's id, parameters, functions and provenance base) owns one ordinary session cache
+entry and schema-derived parameter identity. Its cook is one program of one call: a graph whose
+inputs are the node's parameters (a vec3 group as one argument), slots and forwarded function
+captures, and whose body calls the kind, which inlines there as any card does. That call staying a
+node (it would cook the same lowering again) is the card's cook error. The graph cooks with the
+existing `Session` cooker with zero retained entries and bytes: per-cook sharing, payload handling,
+instance materialization, diagnostics and cancellation retain their native semantics. Its cook
+derives read/write/topology facts from the inlined body, so mode and parameter changes rebuild the
+relevant facts, and the context dependencies of delegated nodes belong to it. A card whose body
+failed is a plan node with a typed `error` (`Flow.Eval.node.error`) that cooks as that diagnostic.
+
+History: the nested model (each Lisp node body lowered as its own workspace) was measured against
+inline before it was deleted (M-series, 2026-10-28, interleaved, `tools/bench_sop_cook.exe`):
+
+| | inline | nested |
+|---|---|---|
+| `sop_gallery` cook | 0.93-1.08 s | 1.25-1.31 s |
+| `sop_gallery` lower | 0.39 s | 2.0 s |
+| edit to recook | 0.51 s | 0.75 s | SOP ownership remains in
 `sop`; the Lisp declaration and lowering stay in `flow_sop`, and `flow` never
 depends on geometry.
 

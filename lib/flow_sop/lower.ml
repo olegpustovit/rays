@@ -361,7 +361,7 @@ let geometry_arrays_data args =
        args)
 
 (* A kernel over data that reads its cook context (an inlined body's seed, frame or time) is built
-   per context from the specialized data, as the nested card rebuilt its body: the last context's
+   per context from the specialized data: the last context's
    build is kept. The node at the default context gives the identity, facts and strict refusals. *)
 let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
   let reads = Attribute_kernel.context_reads value in
@@ -704,9 +704,9 @@ let lisp_body_failed ~(checked : Workspace.t) ~(definition : Workspace.node_defi
   in
   ((fun _ -> Error diagnostic), dependencies, facts)
 
-let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
-    ~(definition : Workspace.node_definition) ~provenance ~label ~context ~inputs ~parameters
-    ~bindings ~functions ~factories ~def_context_use =
+let build_call ~gpu ~lower_call ~record_profile ~checked ~(definition : Workspace.node_definition)
+    ~provenance ~label ~context ~inputs ~parameters ~bindings ~functions ~factories ~def_context_use
+    =
   Phase_timer.without (fun () ->
       let rec function_elements = function
         | E.Fn fn -> [ fn ]
@@ -869,7 +869,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
           definition.validations
       in
       let reached = Context_kernel.reachable_defs checked (body :: validations) in
-      let nested =
+      let library =
         {
           checked with
           graphs = body :: validations;
@@ -892,13 +892,13 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
               List.filter
                 (fun (name, _) -> List.exists (fun (input, _, _) -> input = name) g.inputs)
                 (parameters @ functions) ))
-          nested.graphs
+          library.graphs
       in
       let invalid_parameter code message =
         Error (if code = "E_PARAM" then message else code ^ ": " ^ message)
       in
       let refused =
-        match E.static ~inputs:(List.tl overrides) { nested with graphs = validations } with
+        match E.static ~inputs:(List.tl overrides) { library with graphs = validations } with
         | Error d -> invalid_parameter d.code d.message
         | Ok validated ->
             let rec first index = function
@@ -923,7 +923,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
                  else
                    let forwarded_evaluation =
                      match
-                       E.static ~inputs:[ List.hd overrides ] { nested with graphs = [ body ] }
+                       E.static ~inputs:[ List.hd overrides ] { library with graphs = [ body ] }
                      with
                      | Ok evaluated -> evaluated
                      | Error diagnostic -> raise (Diagnostic.Error diagnostic)
@@ -979,18 +979,71 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
                      List.map (fun (_, _, _, index, sources) -> (index, sources)) remapped )
                in
                let capture_factories = make_capture_factories aliases in
-               let nested =
+               (* one program of one call: the graph's inputs (the node's parameters, slots and
+                  forwarded captures) feed a call of the kind, which inlines in the calling
+                  program, its context read through the cook context as a card's is *)
+               let term node ty =
+                 Workspace.{ path = None; ty; form = Syntax.make (List []); node }
+               in
+               let call =
+                 {
+                   body with
+                   body =
+                     term
+                       (Workspace.Call
+                          {
+                            kind = definition.kind.qualified;
+                            ctx = Context.sop;
+                            args =
+                              List.filter_map
+                                (fun (name, ty, _) ->
+                                  let read name = term (Ref_binding (name, [])) Ty.Float in
+                                  match
+                                    List.find_map
+                                      (fun (f : Param.field_view) ->
+                                        if f.name = name then f.vec3 else None)
+                                      definition.fields
+                                  with
+                                  | None -> Some (name, term (Ref_binding (name, [])) ty)
+                                  | Some (group, 0) ->
+                                      (* a vec3 group is one argument, as written *)
+                                      let component i =
+                                        List.find_map
+                                          (fun (f : Param.field_view) ->
+                                            if f.vec3 = Some (group, i) then Some (read f.name)
+                                            else None)
+                                          definition.fields
+                                        |> Option.get
+                                      in
+                                      Some
+                                        ( group,
+                                          term
+                                            (Vec [ component 0; component 1; component 2 ])
+                                            Ty.Vec3 )
+                                  | Some _ -> None)
+                                definition.body.inputs;
+                          })
+                       Ty.geometry;
+                 }
+               in
+               let library =
                  ok
-                   (lower_nested ~gpu ~kernel_bindings
+                   (lower_call ~gpu ~kernel_bindings
                       ~factories:
                         (List.map snd capture_factories
                         @ List.map (fun (_, _, _, factory) -> factory) geometry_captures
                         @ factories)
-                      ~inputs:[ body_overrides ] { nested with graphs = [ body ] })
+                      ~inputs:[ body_overrides ]
+                      {
+                        library with
+                        graphs = [ call ];
+                        defs = List.filter (fun def -> List.memq def reached) checked.defs;
+                        nodes = checked.nodes;
+                      })
                in
-               record_profile nested.profile;
+               record_profile library.profile;
                let graph =
-                 match nested.graphs with
+                 match library.graphs with
                  | [ graph ] -> graph
                  | _ -> fail "E_LOWER" "A Lisp node body needs one SOP graph"
                in
@@ -1130,27 +1183,11 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
              with Diagnostic.Error diagnostic ->
                lisp_body_failed ~checked ~definition ~inputs ~parameters diagnostic))
 
-module Build_cache = Lru.Make (String)
-
 (* 2048 inlined-body kernel nodes, by cook identity (Lowerer.reuse); every access under the lock. *)
 module Built = Lru.Make (String)
 
 let built = Built.create 2048
 let built_lock = Mutex.create ()
-
-(* 512 Lisp node body builds (the 16 lowerings of a 30-node workspace fit); every access under the lock. *)
-let build_cache = Build_cache.create 512
-let build_lock = Mutex.create ()
-
-let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
-  a.fast = b.fast && a.policy = b.policy
-  && match (a.backend, b.backend) with None, None -> true | Some a, Some b -> a == b | _ -> false
-
-module Private = struct
-  let cache_hits = Atomic.make 0
-  let nested_lowerings = Atomic.make 0
-  let clear_cache () = Mutex.protect build_lock (fun () -> Build_cache.clear build_cache)
-end
 
 let geo_of args =
   let rec sources = function
@@ -1542,7 +1579,7 @@ type digest_key = {
   extra_definitions : Workspace.node_definition list;
 }
 
-(* Physical, elementwise: a nested lowering shares its forms. A structural [=] walks the whole
+(* Physical, elementwise: a node's one-call lowering shares its forms. A structural [=] walks the whole
    library for every lookup, seconds per lowering of a freshly loaded workspace. *)
 let same_content_list left right = left == right || List.equal ( == ) left right
 
@@ -1558,7 +1595,7 @@ let digest_cache = Lru.Identity_list.create ~equal:same_digest_key 8
 let digest_lock = Mutex.create ()
 
 let cached_digest (checked : Workspace.t) extra compute =
-  (* elementwise: a nested lowering rebuilds the lists (graphs = [body]) but shares their forms *)
+  (* elementwise: a one-call lowering rebuilds the lists (graphs = [call]) but shares their forms *)
   let key =
     {
       source_forms = checked.source;
@@ -1577,11 +1614,12 @@ let cached_digest (checked : Workspace.t) extra compute =
       digest
 
 (* One lowering of a checked workspace: the qualified plan, the per-kind node builders and the
-   zone, kernel and preview machinery over it. [lower_checked] recurses for cooked calls and nested
-   bodies, so it arrives as a parameter. *)
+   zone, kernel and preview machinery over it. [lower_checked] recurses for cooked calls and a
+   node's own cook (one inlined call), so it arrives as a parameter. *)
 module Lowerer (P : sig
   val factories : Edit.factory list
   val provenance_tags : bool
+  val tag_base : int
   val reference : bool
   val gpu : Flow_ir.Gpu.config
   val strict_body : bool
@@ -1597,6 +1635,7 @@ module Lowerer (P : sig
   val lower_checked :
     factories:Edit.factory list ->
     ?provenance_tags:bool ->
+    ?tag_base:int ->
     ?reference:bool ->
     ?gpu:Flow_ir.Gpu.config ->
     ?strict_body:bool ->
@@ -1647,8 +1686,8 @@ struct
   and geometry_arrays_label = geometry_arrays_label
   and geometry_arrays_data = geometry_arrays_data
 
-  (* A node of an inlined body (its site is under a card's [node:kind]) compiles strictly, as the
-     nested body did; its refusals cook as errors rather than refusing the program. *)
+  (* A node of an inlined body (its site is under a card's [node:kind]) compiles strictly; its
+     refusals cook as errors rather than refusing the program. *)
   let inlined = function
     | Some (n : E.node) -> List.exists (String.starts_with ~prefix:"node:") n.site
     | None -> false
@@ -1732,7 +1771,7 @@ struct
     | _ -> kernel_source
 
   (* An inlined body's kernel node, built once for its card: an edit elsewhere relowers the program
-     but takes the node it built (over its new inputs), as the nested card took its body build. The
+     but takes the node it built (over its new inputs). The
      key is the node's cook identity (the card's key, the data, the inputs'). *)
   let reuse ?node ?state ?elems what data inputs build =
     let key () =
@@ -2571,10 +2610,9 @@ struct
       String.sub definition.kind.qualified 4 (String.length definition.kind.qualified - 4)
     in
     let record_profile profile = Option.iter (fun record -> record profile) on_profile in
-    let lower_nested ~gpu ~kernel_bindings ~factories ~inputs checked =
-      Atomic.incr Private.nested_lowerings;
+    let lower_call ~gpu ~kernel_bindings ~factories ~inputs checked =
       lower_checked ~reference ~gpu ~strict_body:true ~defer_body_errors:true ~kernel_bindings
-        ?on_profile ~factories ~inputs checked
+        ~provenance_tags ?tag_base:provenance ?on_profile ~factories ~inputs checked
     in
     (* the evaluated error belongs to the call's own parameters (the first build's): a rebuild
        with others evaluates the body *)
@@ -2592,57 +2630,10 @@ struct
       | Some diagnostic when failed ->
           Ok (lisp_body_failed ~checked ~definition ~inputs ~parameters diagnostic)
       | _ ->
-          build_lisp_body ~gpu ~lower_nested ~record_profile ~checked ~definition ~provenance ~label
+          build_call ~gpu ~lower_call ~record_profile ~checked ~definition ~provenance ~label
             ~context ~inputs ~parameters ~bindings ~functions ~factories ~def_context_use
     in
-    (* A top-level body build is a pure function of the key below, so an edit elsewhere reuses it. Key: declaration,
-         label, reference flag, approx, provenance, bindings, context seed/frame/time, input ids, parameters; an
-         entry is valid only for the same factories and GPU backend+policy. Bypassed: callable slots, strict nested
-         lowerings, kernel bindings, recorded profiles, non-data parameters (key_of raises). *)
-    let build bindings ~label ~context inputs parameters =
-      let uncached () = build_body bindings ~label ~context inputs parameters in
-      if
-        functions <> [] || error <> None || strict_body || kernel_bindings <> []
-        || on_profile <> None
-      then uncached ()
-      else
-        match
-          String.concat "\000"
-            [
-              Lazy.force declaration_source;
-              label;
-              string_of_bool reference;
-              Marshal.to_string
-                ( Workspace.Paths.elements checked.approx,
-                  provenance,
-                  bindings,
-                  Sop.Context.seed context,
-                  Sop.Context.frame context,
-                  Int64.bits_of_float (Sop.Context.time context),
-                  List.map Sop.Node.id inputs )
-                [];
-              String.concat "\001"
-                (List.map
-                   (fun (name, value) ->
-                     name ^ "=" ^ Flow.Value.key_of ~residual:(fun _ -> raise Exit) value)
-                   parameters);
-            ]
-        with
-        | exception Exit -> uncached ()
-        | key -> (
-            let cached =
-              Mutex.protect build_lock (fun () -> Build_cache.find_opt build_cache key)
-            in
-            match cached with
-            | Some (owner, old_gpu, result) when owner == factories && same_gpu old_gpu gpu ->
-                Atomic.incr Private.cache_hits;
-                result
-            | _ ->
-                let result = uncached () in
-                Mutex.protect build_lock (fun () ->
-                    Build_cache.add build_cache key (factories, gpu, result));
-                result)
-    in
+    let build = build_body in
     let category = if definition.category = [] then [ "Custom" ] else definition.category in
     let construct inputs =
       let next = ref 0 in
@@ -2734,7 +2725,7 @@ struct
 
   let pending = ref []
   and provenance = ref Network.Int_map.empty
-  and tags = ref 0
+  and tags = ref tag_base
   and zones = ref []
 
   let prepared = Hashtbl.create 256
@@ -2748,62 +2739,8 @@ struct
           values
     | _ -> fail "E_LOWER" "sop/curve needs :points"
 
-  (* B.F: a Lisp point deformer whose only input is another such deformer's single-consumer output
-       reads that deformer's P values directly; the producer's own cook is skipped. *)
-  let consumers =
-    lazy
-      (let counts = Array.make (Array.length plan.nodes) 0 in
-       Array.iter
-         (fun (n : E.node) -> List.iter (fun id -> counts.(id) <- counts.(id) + 1) (deps n))
-         plan.nodes;
-       let rec mark = function
-         | E.Deferred (_, id) -> counts.(id) <- counts.(id) + 1
-         | E.List values -> Array.iter mark values
-         | E.Record fields -> List.iter (fun (_, value) -> mark value) fields
-         | _ -> ()
-       in
-       Array.iter
-         (fun (i : E.instance) ->
-           mark i.result;
-           List.iter (fun (_, value) -> mark value) i.inputs)
-         plan.instances;
-       counts)
-
   let lisp_definition kind =
     List.find_opt (fun (d : Workspace.node_definition) -> d.kind.qualified = kind) checked.nodes
-
-  let rec fused_view (n : E.node) =
-    match lisp_definition n.kind with
-    | Some d
-      when (not templ.(n.id))
-           && (not (List.mem_assoc E.node_error n.args))
-           && Context_kernel.fusable d -> (
-        let slot = (List.hd d.slots).name in
-        let own = Some (d, n.args) in
-        match List.assoc_opt slot n.args with
-        | Some (E.Deferred (_, id)) when (Lazy.force consumers).(id) = 1 && not templ.(id) -> (
-            let u = plan.nodes.(id) in
-            if List.exists (fun (_, v) -> E.is_live v) u.args then own
-            else
-              match fused_view u with
-              | Some (du, uargs) -> (
-                  let context_free =
-                    List.for_all
-                      (fun op -> op = "sop/provenance_base")
-                      (Context_kernel.context_ops_reached ~inputs:u.args ~defs:checked.defs du.body)
-                  in
-                  match if context_free then Context_kernel.fuse d du ~baked:u.args else None with
-                  | Some fused ->
-                      Some
-                        ( fused,
-                          List.map
-                            (fun (name, v) ->
-                              if name = slot then (name, List.assoc slot uargs) else (name, v))
-                            n.args )
-                  | None -> own)
-              | None -> own)
-        | _ -> own)
-    | _ -> None
 
   (* the editor's provenance: a merge tags its input i with base + i *)
   let tag_sources cid args =
@@ -2820,29 +2757,17 @@ struct
       sources;
     base
 
-  let lower_default (node : E.node) args cid =
+  (* the provenance base an inlined merge body's sop/concat allocated, by its (site, iter), so the
+     card's factory node tags as the card did *)
+  let concat_tags = Hashtbl.create 4
+
+  let lower_default ?tag_base (node : E.node) args cid =
     let kind = node.kind and dynamic = ref [] in
-    let node_error =
-      match List.assoc_opt E.node_error args with
-      | Some (E.Text text) -> Some (Marshal.from_string text 0 : Diagnostic.t)
-      | _ -> None
-    in
-    let args = List.remove_assoc E.node_error args in
+    let node_error = node.error in
     let args =
       if kind = "image/noise" then
         List.map (fun (name, value) -> ((if name = "freq" then "frequency" else name), value)) args
       else args
-    in
-    let args, fused_definition =
-      match fused_view node with
-      | Some (d, fused_args) when fused_args != node.args ->
-          let slot = (List.hd d.slots).name in
-          ( List.map
-              (fun (name, v) ->
-                if name = slot then (name, List.assoc slot fused_args) else (name, v))
-              args,
-            Some d )
-      | _ -> (args, None)
     in
     let key =
       match String.split_on_char '/' kind with
@@ -2858,14 +2783,22 @@ struct
             (fun (d : Workspace.node_definition) -> d.kind.qualified = kind)
             checked.nodes
         with
+        | Some _
+          when defer_body_errors && node_error = None
+               && List.exists
+                    (fun (g : Workspace.graph) -> node.site = [ g.name; "@result" ])
+                    checked.graphs ->
+            (* a node's own cook is one inlined call: that call staying a node would cook the
+               same lowering again *)
+            fail "E_LOWER" (kind ^ " does not inline in its own cook")
         | Some definition ->
             (* the editor's provenance: a Lisp sop/merge tags input i with base + i *)
             let tag_base =
               if kind <> "sop/merge" || not provenance_tags then None
+              else if tag_base <> None then tag_base
               else Some (tag_sources cid args)
             in
-            lisp_factory ?error:node_error ~functions:args ?provenance:tag_base
-              (Option.value fused_definition ~default:definition)
+            lisp_factory ?error:node_error ~functions:args ?provenance:tag_base definition
         | None -> find_factory key
     in
     let names = Edit.factory_slot_names factory and parameters = parameters factory in
@@ -2943,7 +2876,20 @@ struct
     Hashtbl.create 16
 
   (* a card's canonical parameters as the values of its schema's fields *)
-  let card_values defaults parameters =
+  let card_values (fields : Param.field_view list) defaults parameters =
+    (* a vec3 group's argument is one vec3 *)
+    let parameters =
+      parameters
+      @ List.filter_map
+          (fun (f : Param.field_view) ->
+            match f.vec3 with
+            | Some (group, i) -> (
+                match List.assoc_opt group parameters with
+                | Some (E.Vec3 (x, y, z)) -> Some (f.name, E.Float [| x; y; z |].(i))
+                | _ -> None)
+            | None -> None)
+          fields
+    in
     List.map
       (fun (name, default) ->
         ( name,
@@ -3001,7 +2947,7 @@ struct
           let schema =
             Lisp_node.schema "parameters" d.fields (Encoded_parameters.for_node checked d)
           in
-          let values = card_values (Param.default schema) parameters in
+          let values = card_values d.fields (Param.default schema) parameters in
           let rec attach node =
             Result.value ~default:node
               (Sop.Node.Build.parameterize_with_key ~schema ~values
@@ -3047,8 +2993,9 @@ struct
             List.exists
               (function "tag_base", E.Int n -> n = Operators.provenance_sentinel | _ -> false)
               node.args
-          then
+          then (
             let base = if provenance_tags then tag_sources cid node.args else -1 in
+            Hashtbl.replace concat_tags (node.site, node.iter) base;
             {
               node with
               args =
@@ -3058,7 +3005,7 @@ struct
                         ("tag_base", E.Int base)
                     | arg -> arg)
                   node.args;
-            }
+            })
           else node
         in
         let live = List.filter (fun (_, v) -> E.is_live v) node.args in
@@ -3317,7 +3264,7 @@ struct
           kernels = [];
           slots = List.mapi (fun i source -> (i, source)) sources;
         });
-    reg Resource (fun (node : E.node) args cid ->
+    reg Resource (fun (node : E.node) _args cid ->
         let factory =
           Edit.factory ~key:node.kind ~label:node.kind ~category:[ "Image" ] ~arity:0 (fun _ ->
               Result.ok
@@ -3384,7 +3331,7 @@ struct
               (fun (i, source) -> if source < 0 then None else Some (i, source))
               (List.mapi (fun i source -> (i, source)) sources);
         });
-    reg Attribute_delete (fun (node : E.node) args cid ->
+    reg Attribute_delete (fun (_node : E.node) args cid ->
         let name =
           match List.assoc "attribute" args with
           | E.Text name -> name
@@ -3413,7 +3360,7 @@ struct
           kernels = [];
           slots = List.mapi (fun i source -> (i, source)) sources;
         });
-    reg Curve (fun (node : E.node) args cid ->
+    reg Curve (fun (_node : E.node) args cid ->
         let dynamic = ref [] in
         let encode points =
           [ (Curve.parameter, Param.Text_value (Curve.encode (curve_points points))) ]
@@ -3879,10 +3826,6 @@ struct
         evaluated.plan.nodes
     with
     | None -> Error "No card has this compiled id"
-    | Some n when List.exists (fun (_, v) -> match v with E.Fn _ -> true | _ -> false) n.args ->
-        (* ponytail: the call's functions would be forwarded into a second evaluation whose
-           function ids can equal the body's own; narrow [same_function] before allowing it *)
-        Error "A card with function arguments has no factory node"
     | Some n -> (
         match
           ( List.assoc_opt "kind" n.args,
@@ -3915,16 +3858,33 @@ struct
                     | E.List ids -> Some (name, E.List (Array.map slot_value ids))
                     | _ -> None)
                   slots
-                @ List.filter (fun (_, v) -> match v with E.Fn _ -> true | _ -> false) n.args
+                @ List.filter
+                    (fun (name, _) ->
+                      not (List.mem name [ "value"; "kind"; "parameters"; "slots" ]))
+                    n.args
+              in
+              let tag_base =
+                let card = n.site @ [ "node:" ^ kind ] in
+                Hashtbl.fold
+                  (fun (site, iter) base found ->
+                    if
+                      iter = n.iter
+                      && List.length site > List.length card
+                      && List.filteri (fun i _ -> i < List.length card) site = card
+                    then Some base
+                    else found)
+                  concat_tags None
               in
               (* its own site: the call's kernels must not take the ids of the body's *)
               let p =
-                lower_default { n with kind; args; site = n.site @ [ "~factory" ] } args cid
+                lower_default ?tag_base
+                  { n with kind; args; site = n.site @ [ "~factory" ] }
+                  args cid
               in
               let changes =
                 match lisp_definition kind with
                 | Some d ->
-                    card_values
+                    card_values d.fields
                       (Param.default
                          (Lisp_node.schema "parameters" d.fields
                             (Encoded_parameters.for_node checked d)))
@@ -3974,7 +3934,7 @@ struct
     }
 end
 
-let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false)
+let rec lower_checked ~factories ?(provenance_tags = true) ?(tag_base = 0) ?(reference = false)
     ?(gpu = Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false)
     ?(kernel_bindings = []) ?(clock = Unix.gettimeofday) ?on_profile
     ?(compiled_ids = Path_map.empty) ?(sites = []) ?inputs checked =
@@ -3983,6 +3943,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false)
         let module L = Lowerer (struct
           let factories = factories
           let provenance_tags = provenance_tags
+          let tag_base = tag_base
           let reference = reference
           let gpu = gpu
           let strict_body = strict_body
@@ -4170,8 +4131,7 @@ let field_calls ?state ~live ~resolve lowered =
     Array.to_list lowered.plan.nodes
     |> List.filter_map (fun (node : E.node) ->
         let args =
-          if node.kind = "sop/iso_surface" then Some node.args
-          else if
+          if
             node.kind = E.card_kind
             && List.assoc_opt "kind" node.args = Some (E.Text "sop/iso_surface")
           then

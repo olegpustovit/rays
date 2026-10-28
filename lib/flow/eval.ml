@@ -230,6 +230,7 @@ and node = {
   kind : string;
   ty : Ty.t;
   args : (string * value) list;
+  error : Diagnostic.t option;
 }
 
 and cell = {
@@ -494,7 +495,9 @@ let mk_node c ?(authored = 0) ?(ty = Ty.geometry) kind args =
     | _ -> false
   in
   if st.time = None && List.exists (fun (_, v) -> cooked_geometry v) args then raise Needs_t;
-  let n = { id = st.nnodes; inst = c.inst; site = site c; iter = c.iter; kind; ty; args } in
+  let n =
+    { id = st.nnodes; inst = c.inst; site = site c; iter = c.iter; kind; ty; args; error = None }
+  in
   st.nodes <- n :: st.nodes;
   st.authored <- authored :: st.authored;
   st.nnodes <- st.nnodes + 1;
@@ -597,7 +600,6 @@ let rec is_live = function
   | _ -> false
 
 (* the reserved argument of a card whose inlined body failed: its marshalled diagnostic *)
-let node_error = "$node_error"
 let card_kind = "$card"
 
 (* the argument naming an inlined card's cook label on its context operators *)
@@ -904,7 +906,7 @@ and ev c env (x : W.term) : value =
           r
       | exception Diagnostic.Error d when d.span = None ->
           raise_diagnostic { d with span = span_of x })
-  | Some live -> (
+  | Some _live -> (
       let evaluate () = ev_raw c env x in
       let kernel =
         match x.node with
@@ -1511,8 +1513,12 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
       | exception Diagnostic.Error e when e.code <> "cancelled" && e.code <> "E_CANCELLED" ->
           st.steps <- steps;
           drop ();
-          (* ponytail: the diagnostic rides as marshalled text in a reserved argument *)
-          call (vals @ [ (node_error, Text (Marshal.to_string e [])) ])
+          let v = call vals in
+          (match (v, st.nodes) with
+          | Deferred (_, id), n :: rest when n.id = id ->
+              st.nodes <- { n with error = Some e } :: rest
+          | _ -> ());
+          v
       | exception x ->
           st.steps <- steps;
           raise x)
@@ -1532,6 +1538,7 @@ and card c ~form (d : W.node_definition) parameters ~vals v =
         iter = c.iter;
         kind = card_kind;
         ty = Ty.geometry;
+        error = None;
         args =
           [
             ("value", v);
@@ -1556,7 +1563,15 @@ and card c ~form (d : W.node_definition) parameters ~vals v =
                    d.slots) );
           ]
           (* the call's functions, which the host's field probes sample *)
-          @ List.filter (fun (_, v) -> match v with Fn _ -> true | _ -> false) vals;
+          @ List.filter
+              (fun (_, v) ->
+                let rec callable = function
+                  | Fn _ -> true
+                  | List xs -> Array.exists callable xs
+                  | _ -> false
+                in
+                callable v)
+              vals;
       }
     in
     st.nodes <- n :: st.nodes;
@@ -2262,7 +2277,6 @@ and graph_value ?(rec_ = true) c name over =
 (* ---- entry points ---- *)
 
 let diagnostic code msg span = Diagnostic.error ?span ~code msg
-let inline_nodes = Atomic.make true
 
 let inline_parameters =
   Atomic.make (fun _ (d : W.node_definition) ->
@@ -2297,11 +2311,10 @@ let new_state ?(budget = max_steps) ~record ws =
     kind_fns = ws.W.kind_fns;
     node_defs =
       (let t = Hashtbl.create 8 in
-       if Atomic.get inline_nodes then
-         List.iter
-           (fun (d : W.node_definition) ->
-             Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
-           ws.W.nodes;
+       List.iter
+         (fun (d : W.node_definition) ->
+           Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
+         ws.W.nodes;
        t);
     ops = ws.ops;
     find_op = Op.finder ws.ops;
@@ -2574,7 +2587,6 @@ let show v = show_with Fun.id v
 
 module Host = struct
   let static_with_requests = static_impl
-  let bind_live = bind_live
 
   let map_function ?site ?path ~(signature : Ty.fn_signature) fn arrays =
     protect (fun () ->

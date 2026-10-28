@@ -1,6 +1,5 @@
-(* Single-program design, step A: a Lisp node call evaluates its body in the calling program
-   ([Flow.Eval.inline_nodes]), so chained nodes are one program for the region passes. The bytes equal
-   the nested lowering's; the region count is printed for the step report. *)
+(* Single-program design: a Lisp node call evaluates its body in the calling program, so chained
+   nodes are one program for the region passes; the region count is printed for the step report. *)
 open Rdk_test_support
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
@@ -18,13 +17,8 @@ let chains =
        :rows 33)) :low_red 7)" );
   ]
 
-(* the switch's value outside these checks, restored after each *)
-let default = Atomic.get Flow.Eval.inline_nodes
-
-let run inline body =
-  Atomic.set Flow.Eval.inline_nodes inline;
+let run body =
   let profiles = ref [] in
-  let before = Atomic.get L.Private.nested_lowerings in
   let forms =
     Flow.Syntax.parse (Printf.sprintf "(workspace w (graph g :context sop %s))" body) |> flow_ok
   in
@@ -34,49 +28,55 @@ let run inline body =
     | Error d -> failwith (Diagnostic.to_string d)
   in
   let graph = List.hd l.graphs in
-  let compiled = Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root) in
-  let session =
-    Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok
-  in
-  let context = Sop.Context.create ~domains:1 ~time:0. ~grain:257 () |> get_string_ok in
-  let output = Session.cook session ~context (get_string_ok compiled) in
-  Session.close session;
-  let bytes =
+  let cook node =
+    let session =
+      Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok
+    in
+    let context = Sop.Context.create ~domains:1 ~time:0. ~grain:257 () |> get_string_ok in
+    let output = Session.cook session ~context node in
+    Session.close session;
     match output with
     | Ok (o : Session.output) -> geometry_bytes (Result.get_ok (Sop.Payload.geometry o.payload))
     | Error d -> failwith (Diagnostic.error_to_string d)
+  in
+  let bytes =
+    cook (get_string_ok (Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)))
   in
   let runs =
     List.fold_left
       (fun n p -> n + List.length (Flow_ir.Profile.executions p))
       0 (l.profile :: !profiles)
   in
-  (bytes, runs, Atomic.get L.Private.nested_lowerings - before)
+  (bytes, runs, cook (get_string_ok (Lisp_sop.root l graph)))
 
 let () =
   List.iter
     (fun (name, body) ->
-      let nested_bytes, nested_runs, nested = run false body in
-      let inline_bytes, inline_runs, inlined = run true body in
-      Printf.printf "inline %s: region runs %d -> %d, nested lowerings %d -> %d, bytes equal\n" name
-        nested_runs inline_runs nested inlined;
-      (* the chained bodies are one program with the grid's (its validations inline too): no nested
-         lowering, no more region runs (inlined nodes compile strictly, as the nested bodies did;
-         fusing the chained regions is step E) *)
-      assert (nested_bytes = inline_bytes);
-      assert (nested = 3 && inlined = 0 && inline_runs <= nested_runs))
-    chains;
-  Atomic.set Flow.Eval.inline_nodes default
+      let bytes, runs, factory = run body in
+      Printf.printf "inline %s: region runs %d, bytes equal the factory node's\n" name runs;
+      (* the chained bodies are one program with the grid's; the card's factory node (its own cook
+         is one inlined call) gives the same bytes *)
+      assert (bytes = factory))
+    chains
+
+(* Lisp cards lower inline unless they keep a node of their own (a structure that follows the
+   frame): no plan node is a Lisp kind *)
+let inlined (l : L.t) =
+  not
+    (Array.exists
+       (fun (n : Flow.Eval.node) ->
+         List.exists (fun f -> "sop/" ^ Edit.factory_key f = n.kind) l.factories)
+       l.plan.nodes)
 
 (* Step B: an inlined card keeps the node's boundaries. A body error is that card's cook error, a
    refused parameter (validation, normalizer) refuses the lowering, as a node build did; canonical
    parameters (hard ranges, encoded text, rest slots) give the same bytes. *)
-let outcome ?(seed = 0L) inline text =
-  Atomic.set Flow.Eval.inline_nodes inline;
+let outcome ?(seed = 0L) ?(inline = ref true) text =
   let result =
     match L.workspace (Flow.Syntax.parse text |> flow_ok) with
     | Error d -> Error ("lower", d.code, d.message, d.cause)
     | Ok l -> (
+        inline := inlined l;
         let graph = List.hd l.graphs in
         let live = Input.at_time 0.125 in
         let resolved =
@@ -102,7 +102,6 @@ let outcome ?(seed = 0L) inline text =
         | Ok o -> Ok (geometry_bytes (Result.get_ok (Sop.Payload.geometry o.payload)))
         | Error d -> Error ("cook", d.code, d.message, d.cause))
   in
-  Atomic.set Flow.Eval.inline_nodes default;
   result
 
 let () =
@@ -116,11 +115,9 @@ let () =
   List.iter
     (fun (expected, defnode, call) ->
       let text = Printf.sprintf "(workspace b %s (graph g :context sop %s))" defnode call in
-      let nested = outcome false text and inline = outcome true text in
-      (match (expected, nested) with
+      match (expected, outcome text) with
       | `Cook, Error ("cook", _, _, _) | `Lower, Error ("lower", _, _, _) | `Ok, Ok _ -> ()
-      | _ -> failwith ("step B baseline changed: " ^ call));
-      if nested <> inline then failwith ("step B: inline differs from nested for " ^ call))
+      | _ -> failwith ("step B outcome changed: " ^ call))
     [
       ( `Cook,
         {|(defnode sop/b_fail [(geo : geometry)] (sop/with_attr geo :w (error "E_POINTS" "selected points" :cause "point cause")))|},
@@ -153,21 +150,10 @@ let () =
            :context sop %s))"
           call
       in
-      let nested = outcome ~seed:2026L false text in
-      let before = Atomic.get L.Private.nested_lowerings in
-      let inline = outcome ~seed:2026L true text in
-      let lowered = Atomic.get L.Private.nested_lowerings - before in
-      if nested <> inline then begin
-        let show = function
-          | Ok b -> "ok " ^ string_of_int (String.length b)
-          | Error (w, c, m, _) -> w ^ " " ^ c ^ " " ^ m
-        in
-        failwith
-          ("step C: inline differs from nested for " ^ call ^ ": " ^ show nested ^ " vs "
-         ^ show inline)
-      end;
-      if Result.is_error nested then failwith ("step C: " ^ call ^ " did not cook");
-      if lowered = 0 <> inlines then failwith ("step C: " ^ call ^ " inlined wrongly"))
+      let inline = ref true in
+      if Result.is_error (outcome ~seed:2026L ~inline text) then
+        failwith ("step C: " ^ call ^ " did not cook");
+      if !inline <> inlines then failwith ("step C: " ^ call ^ " inlined wrongly"))
     [
       ("(sop/noise_displace (sop/line :points 9) :context_seed true :amplitude 0.5)", true);
       ("(sop/noise_displace (sop/line :points 9) :seed 4 :amplitude 0.5)", true);
@@ -195,20 +181,17 @@ let () =
   in
   let timed points =
     let start = Unix.gettimeofday () in
-    let result = outcome true (text "(/ (float (sop/count g :points)) 4096.0)" points) in
+    let result = outcome (text "(/ (float (sop/count g :points)) 4096.0)" points) in
     (result, Unix.gettimeofday () -. start)
   in
   List.iter
     (fun points ->
       let inline, _ = timed points in
-      let written = outcome true (text (Printf.sprintf "%.17g" (float points /. 4096.)) points) in
+      let written = outcome (text (Printf.sprintf "%.17g" (float points /. 4096.)) points) in
       if inline <> written || Result.is_error inline then
         failwith (Printf.sprintf "step E2: cooked argument differs at %d points" points))
     [ 9; 4096 ];
-  let before = Atomic.get L.Private.nested_lowerings in
   let _, small = timed 20_000 and _, large = timed 80_000 in
-  if Atomic.get L.Private.nested_lowerings <> before then
-    failwith "step E2: a cooked argument nested";
   if large > (12. *. small) +. 0.05 then
     failwith (Printf.sprintf "step E2: 4x points took %.3fs vs %.3fs" large small);
   Printf.printf "inline cards: cooked-data arguments resolve once per cook (20k %.3fs, 80k %.3fs)\n"
