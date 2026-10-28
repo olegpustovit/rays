@@ -7,9 +7,14 @@ val make :
 val of_string : operation:string -> code:string -> string -> t
 val guard : operation:string -> code:string -> (unit -> ('a, string) result) ->
   ('a, t) result
-val unguard : ('a, t) result -> ('a, string) result
-(** Inverse of {!guard} for kernels composing a typed operation inside a
-    string-result pipeline: re-raises cancellation, keeps the message. *)
+exception Fail of string
+(** A failure message raised inside {!guard}, which wraps it as the outer
+    operation's error. *)
+
+val fail : string -> 'a
+val get : ('a, t) result -> 'a
+(** Unwrap a typed operation inside a {!guard} body: re-raises cancellation,
+    raises {!Fail} with the message. *)
 
 val operation : t -> string
 val code : t -> string

@@ -325,9 +325,9 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
         (Attribute.Int colors) |> get in
     let output = Geometry.with_attribute color_attribute_value geometry |> get in
     let output = if not sort_output then output else
-        Error.unguard (Ordering.sort ?cancel ~grain ~owner:(ordering_owner owner)
+        Ok (Error.get (Ordering.sort ?cancel ~grain ~owner:(ordering_owner owner)
           ~key:(Ordering.Attribute_component {
-            name = color_attribute; component = 0 }) output) |> get in
+            name = color_attribute; component = 0 }) output)) |> get in
     match worksets with
     | None -> Ok output
     | Some worksets ->

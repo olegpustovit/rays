@@ -458,7 +458,7 @@ let soft_transform_raw ?cancel ?(grain = 16_384) ?selection
                 Geometry.find_attribute ~owner "N" geometry <> None)
                 [Attribute.Point; Attribute.Vertex] in
             let output = List.fold_left (fun result owner -> Result.bind result
-                (fun output -> Error.unguard (Normal_ops.run ?cancel ~grain ~owner output)))
+                (fun output -> Ok (Error.get (Normal_ops.run ?cancel ~grain ~owner output))))
                 (Ok output) normal_owners in
             Result.bind output (fun output -> match falloff_attribute with
               | None -> Ok output

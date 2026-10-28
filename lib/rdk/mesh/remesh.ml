@@ -1618,7 +1618,7 @@ let run ?cancel ?(grain = 16_384) ?(iterations = 3) ?(smoothing = 0.5)
       Result.bind (install_feature_groups ?cancel ~grain ~hard_points ~hard_edges
           ~preserve_uv_seams ~uv_attribute ~point_name ~edge_name geometry)
         (fun prepared ->
-      Result.bind (Error.unguard (Triangulate.run ?cancel ~grain prepared)) (fun initial ->
+      Result.bind (Ok (Error.get (Triangulate.run ?cancel ~grain prepared))) (fun initial ->
       let current = ref initial in
       let failure = ref None and iteration = ref 0 in
       let projection_scratch = ref None in
