@@ -125,6 +125,15 @@ let payload_components value =
   @ (Array.to_list value.edge_groups
     |> List.map (fun group -> (Edge_group.data_id group, Edge_group.payload_bytes group)))
 
+let releasers value =
+  Option.to_list
+    (Option.map
+       (fun r -> (Packed.Float3.data_id value.positions, r))
+       (Packed.Float3.releaser value.positions))
+  @ List.filter_map
+      (fun a -> Option.map (fun r -> (Attribute.storage_id a, r)) (Attribute.releaser a))
+      (Array.to_list value.attributes)
+
 let attributes value = Array.to_list value.attributes
 let groups value = Array.to_list value.groups
 let edge_groups value = Array.to_list value.edge_groups

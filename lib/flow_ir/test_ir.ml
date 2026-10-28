@@ -516,7 +516,15 @@ let () =
               readback = (fun _ -> Ok (E.Float_array [||]));
               planes =
                 (fun _ ->
-                  Ok { count = 0; width = 0; materialise = (fun () -> [||]); resident = None });
+                  Ok
+                    {
+                      count = 0;
+                      width = 0;
+                      materialise = (fun () -> [||]);
+                      resident = None;
+                      settle = (fun () -> Ok ());
+                      release = ignore;
+                    });
             });
     }
   in

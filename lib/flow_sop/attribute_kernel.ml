@@ -686,8 +686,8 @@ let install ~owner ~kind name planes geometry =
    needs it (any domain); until then the geometry holds the device's buffer. *)
 type Rdk.Packed.Deferred.holder += Resident of E.value * int
 
-let install_deferred ~owner ~kind name ({ count; materialise; resident; _ } : Flow_ir.Gpu.planes)
-    geometry =
+let install_deferred ~owner ~kind name
+    ({ count; materialise; resident; release; _ } : Flow_ir.Gpu.planes) geometry =
   let holder = Option.map (fun v -> Resident (v, count)) resident in
   Result.map_error
     (Diagnostic.error ~code:"E_ATTR_TYPE")
@@ -696,11 +696,12 @@ let install_deferred ~owner ~kind name ({ count; materialise; resident; _ } : Fl
        (fun like ->
          if owner = A.Point && name = "P" then
            match like with
-           | A.Float3 _ -> G.with_positions (P.deferred ?holder ~length:count materialise) geometry
+           | A.Float3 _ ->
+               G.with_positions (P.deferred ?holder ~release ~length:count materialise) geometry
            | _ -> Error "Canonical point P requires vec3 storage."
          else
            Result.bind
-             (A.create_deferred ?holder ~name ~owner ~like ~length:count (fun () ->
+             (A.create_deferred ?holder ~release ~name ~owner ~like ~length:count (fun () ->
                   Result.get_ok (make_storage kind (materialise ()))))
              (fun attr -> G.with_attribute attr geometry)))
 
@@ -843,12 +844,13 @@ let plane_copies :
     float array array * float array array =
   Flow.Value.remember ()
 
-let owned_copies planes =
-  let copy () = Array.map Array.copy planes in
+(* [checked]: the copies were made before, of planes that passed [finite] then *)
+let owned_copies ?(finite = fun _ -> true) planes =
+  let copy () = if Array.for_all finite planes then Some (Array.map Array.copy planes) else None in
   if Array.length planes = 0 || Array.length planes.(0) <= 4096 then copy ()
   else
-    match plane_copies planes.(0) (fun () -> (planes, copy ())) with
-    | seen, copies when Array.for_all2 ( == ) seen planes -> copies
+    match plane_copies planes.(0) (fun () -> (planes, Option.value (copy ()) ~default:[||])) with
+    | seen, copies when Array.length copies > 0 && Array.for_all2 ( == ) seen planes -> Some copies
     | _ -> copy ()
 
 let write_storage ~owned_fields ~grain ~owner ~kind name values geometry =
@@ -892,7 +894,7 @@ let write_storage ~owned_fields ~grain ~owner ~kind name values geometry =
             error "E_ATTR_COUNT"
               (Printf.sprintf "%s needs %d %s values; got %d." name count (owner_name owner)
                  (Array.length data))
-        | None ->
+        | None -> (
             let finite data =
               let i = ref 0 in
               while !i < Array.length data && Float.is_finite data.(!i) do
@@ -900,9 +902,10 @@ let write_storage ~owned_fields ~grain ~owner ~kind name values geometry =
               done;
               !i = Array.length data
             in
-            if not (Array.for_all finite planes) then
-              error "E_NONFINITE" "Attribute values must be finite."
-            else install ~owner ~kind name (owned_copies planes) geometry)
+            (* a recook writing the same planes reuses their copies and their check *)
+            match owned_copies ~finite planes with
+            | None -> error "E_NONFINITE" "Attribute values must be finite."
+            | Some copies -> install ~owner ~kind name copies geometry))
   | ("float_array" | "int_array"), E.Record fields -> (
       match (List.assoc_opt "offsets" fields, List.assoc_opt "values" fields) with
       | Some (E.Int_array offsets), Some values -> (
@@ -1625,7 +1628,7 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
   let node =
     N.Build.make_geometry ~label:("Write " ^ name) ~operation:"flow.with_attr" ~version:1
       ~parameters ~cook_mode:(N.Duplicate_input 0) ~dependencies ~inputs:(Array.of_list inputs)
-      (fun ~node_id:_ context geometries ->
+      (fun ~node_id context geometries ->
         let geometry id =
           Option.map (fun index -> geometries.(index)) (List.find_index (( = ) id) sources)
         in
@@ -1652,7 +1655,8 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
               Result.bind program (fun program ->
                   let live = Sop.Context.input context in
                   let device =
-                    if reference || elems <> None then Ok None
+                    if reference || elems <> None || Sop.Context.device_refused context node_id then
+                      Ok None
                     else
                       Flow_ir.Executor.record_on_device ?state ~resolve
                         ~resident:(resident_read ~geometry) ?gpu program ~live
@@ -1670,14 +1674,21 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                   in
                   Result.bind device (function
                     | Some fields ->
-                        (* the device's planes are status-checked: kept there until read *)
+                        (* in flight: the session settles the dispatch before a CPU reader, and
+                           recooks this write on the CPU if its status fails *)
+                        (match fields with
+                        | (_, kept) :: _ -> Sop.Context.defer context ~node:node_id kept.settle
+                        | [] -> ());
                         write geometries.(0) (fun key name kind geometry ->
                             let kept = List.assoc key fields in
                             let count = owner_count geometry owner in
                             if width kind = kept.width && kept.count = count then
                               install_deferred ~owner ~kind name kept geometry
                             else
-                              let planes = kept.materialise () in
+                              let planes =
+                                ignore (kept.settle ());
+                                kept.materialise ()
+                              in
                               write_storage ~owned_fields:[] ~grain ~owner ~kind name
                                 (match (kind, planes) with
                                 | "int", [| p |] -> E.Int_array (Array.map int_of_float p)

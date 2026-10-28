@@ -25,6 +25,9 @@ type kept = {
   mutable destroyed : bool;
   placeholder : float array;
       (** one element of zeros: a later kernel's source that is this array reads the buffer *)
+  kept_epoch : int64;
+  settled : bool Atomic.t;  (** completed, its status read: CPU readers may read it *)
+  mutable revoked : bool;  (** released unread: its buffer is back with the runner *)
 }
 
 (* Kept outputs a later dispatch may bind by their placeholder, on the initial domain. *)
@@ -41,7 +44,7 @@ let held_input array ~length =
         Option.bind (Weak.get w 0) (fun kept ->
             if
               Atomic.get kept.planes = None
-              && (not kept.destroyed)
+              && (not kept.destroyed) && (not kept.revoked)
               && kept.kept_count * kept.kept_width >= length
             then Some kept.kept_buffer
             else None))
@@ -77,6 +80,8 @@ type t = {
       (** collected holders' buffers, at most 4, which output slots take before creating one *)
   released : int list Atomic.t;  (** collected holders, pushed by their finalisers *)
   materialised : int Atomic.t;
+  mutable verdicts : (int64 * Diagnostic.t) list;
+      (** failed statuses of superseded dispatches no one had settled, newest first, at most 8 *)
 }
 
 type scene = {
@@ -176,6 +181,7 @@ let create_owned device queue pipelines (msl : Emit.msl) =
     free = [];
     released = Atomic.make [];
     materialised = Atomic.make 0;
+    verdicts = [];
   }
 
 (* on the initial domain: destroy what collected holders gave back *)
@@ -414,6 +420,15 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
             msl.counts
         in
         if reset_status then begin
+          (* the last dispatch's status, if no one settled it, is kept before this one resets it *)
+          if (not t.status_checked) && t.last_epoch > 0L && t.status.buffer <> None then begin
+            if t.last_epoch > B.completed_epoch t.queue then
+              get (B.complete_through t.queue t.last_epoch);
+            let flags = Bytes.get_int32_le (get (B.read_buffer status ~offset:0L ~length:4)) 0 in
+            t.status_reads <- t.status_reads + 1;
+            if flags <> 0l then
+              t.verdicts <- List.take 8 ((t.last_epoch, kernel_status flags) :: t.verdicts)
+          end;
           Bytes.set_int32_le t.status.bytes 0 0l;
           get (B.write_buffer status ~offset:0L t.status.bytes);
           t.status_checked <- false
@@ -583,14 +598,18 @@ let select_output ~index output =
 let check_status t ~epoch =
   try
     if epoch > B.completed_epoch t.queue then get (B.complete_through t.queue epoch);
-    if not t.status_checked then begin
-      let flags = get (B.read_buffer (Option.get t.status.buffer) ~offset:0L ~length:4) in
-      t.status_reads <- t.status_reads + 1;
-      let flags = Bytes.get_int32_le flags 0 in
-      if flags <> 0l then raise (Diagnostic.Error (kernel_status flags));
-      t.status_checked <- true
-    end;
-    Ok ()
+    if epoch < t.last_epoch then
+      match List.assoc_opt epoch t.verdicts with Some d -> Error d | None -> Ok ()
+    else begin
+      if not t.status_checked then begin
+        let flags = get (B.read_buffer (Option.get t.status.buffer) ~offset:0L ~length:4) in
+        t.status_reads <- t.status_reads + 1;
+        let flags = Bytes.get_int32_le flags 0 in
+        if flags <> 0l then raise (Diagnostic.Error (kernel_status flags));
+        t.status_checked <- true
+      end;
+      Ok ()
+    end
   with Diagnostic.Error error -> Error error
 
 (* A completed, status-checked output's slot and width. *)
@@ -717,10 +736,28 @@ let release released id =
 
 (* The planes, from any domain; racing readers may both convert, the first result wins. Once read,
    the holder no longer needs the buffer: it goes back to the runner at once, not at collection. *)
+(* On the initial domain: the dispatch completed and its status read (once). *)
+let settle t kept =
+  if Atomic.get kept.settled || kept.destroyed then Ok ()
+  else if Domain.self () <> t.domain then
+    Error (Diagnostic.error ~code:"E_GPU" "A device output settles on its owner's domain.")
+  else Result.map (fun () -> Atomic.set kept.settled true) (check_status t ~epoch:kept.kept_epoch)
+
 let materialise t kept =
   match Atomic.get kept.planes with
   | Some planes -> planes
   | None ->
+      if kept.revoked then
+        invalid_arg "Run.materialise: a device output was read after its owner released it";
+      (* a reader on the initial domain waits for the kernel itself; any other reader runs after its
+         cook settled (Sop.Session settles before every CPU node and at a cook's end) *)
+      if not (Atomic.get kept.settled) then
+        if Domain.self () = t.domain then begin
+          if kept.kept_epoch > B.completed_epoch t.queue then
+            ignore (B.complete_through t.queue kept.kept_epoch);
+          Atomic.set kept.settled true
+        end
+        else invalid_arg "Run.materialise: a device output was read before its cook settled";
       let length = kept.kept_count * kept.kept_width in
       (* Nothing here can fail, so no reader (an rdk accessor on any domain) ever sees an error:
          the buffer is mapped, the range is its own, it is destroyed only under this lock after
@@ -746,44 +783,84 @@ let materialise t kept =
 
 let next_kept = Atomic.make 0
 
-(* Hand the output's buffer to a lazy planar store: nothing is read now. *)
-let keep ?index output =
-  Result.bind (ready ?index output) @@ fun (slot, width) ->
+(* Its owner (a session dropping the result) no longer needs an unread output: the buffer goes back
+   to the runner at once, from any domain; a later read refuses. *)
+let revoke t kept =
+  if Atomic.get kept.planes = None then begin
+    Mutex.protect kept.lock (fun () -> kept.revoked <- true);
+    release t.released kept.id
+  end
+
+(* Hand the output's buffer to a lazy planar store: nothing is read or waited for now. *)
+let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
+  let index = Option.value ~default:output.index index in
   let t = output.owner in
-  match (slot.buffer, slot.floats) with
-  | Some buffer, Some floats when output.count > 0 ->
-      let kept =
-        {
-          id = Atomic.fetch_and_add next_kept 1;
-          kept_buffer = buffer;
-          kept_floats = floats;
-          kept_count = output.count;
-          kept_width = width;
-          lock = Mutex.create ();
-          planes = Atomic.make None;
-          destroyed = false;
-          placeholder = Array.make width 0.;
-        }
-      in
-      let capacity = slot.capacity in
-      slot.buffer <- None;
-      slot.floats <- None;
-      slot.capacity <- 0;
-      slot.uploaded <- None;
-      let weak = Weak.create 1 in
-      Weak.set weak 0 (Some kept);
-      t.kept <- weak :: t.kept;
-      Hashtbl.replace t.held kept.id (buffer, floats, capacity);
-      (* any domain, any allocation: only name the holder; after close nothing drains it *)
-      let id = kept.id and released = t.released in
-      Gc.finalise (fun _ -> release released id) kept;
-      bindable := (kept.placeholder, weak) :: !bindable;
-      Ok (output.count, width, (fun () -> materialise t kept), Some kept.placeholder)
-  | _ ->
-      (* an empty or unmapped output is read now *)
-      Result.map
-        (fun planes -> (output.count, width, (fun () -> planes), None))
-        (planes ?index output)
+  if t.closed || Domain.self () <> t.domain || output.generation <> t.generation then
+    Error (Diagnostic.error ~code:"E_GPU" "GPU output was closed or superseded.")
+  else if index < 0 || index >= Array.length t.outputs then
+    Error (Diagnostic.error ~code:"E_GPU" "GPU output index is outside its producer.")
+  else
+    let slot = t.outputs.(index) and width = t.msl.output_widths.(index) in
+    match (slot.buffer, slot.floats) with
+    | Some buffer, Some floats when output.count > 0 && output.epoch > 0L ->
+        let kept =
+          {
+            id = Atomic.fetch_and_add next_kept 1;
+            kept_buffer = buffer;
+            kept_floats = floats;
+            kept_count = output.count;
+            kept_width = width;
+            lock = Mutex.create ();
+            planes = Atomic.make None;
+            destroyed = false;
+            placeholder = Array.make width 0.;
+            kept_epoch = output.epoch;
+            settled = Atomic.make false;
+            revoked = false;
+          }
+        in
+        let capacity = slot.capacity in
+        slot.buffer <- None;
+        slot.floats <- None;
+        slot.capacity <- 0;
+        slot.uploaded <- None;
+        let weak = Weak.create 1 in
+        Weak.set weak 0 (Some kept);
+        t.kept <- weak :: t.kept;
+        Hashtbl.replace t.held kept.id (buffer, floats, capacity);
+        (* any domain, any allocation: only name the holder; after close nothing drains it *)
+        let id = kept.id and released = t.released in
+        Gc.finalise (fun _ -> release released id) kept;
+        bindable := (kept.placeholder, weak) :: !bindable;
+        let resident : Flow.Eval.value =
+          match width with
+          | 1 -> Float_array kept.placeholder
+          | 2 -> Vec2_array kept.placeholder
+          | 3 -> Vec3_array kept.placeholder
+          | _ -> Vec4_array kept.placeholder
+        in
+        Ok
+          {
+            count = output.count;
+            width;
+            materialise = (fun () -> materialise t kept);
+            resident = Some resident;
+            settle = (fun () -> settle t kept);
+            release = (fun () -> revoke t kept);
+          }
+    | _ ->
+        (* an empty, unmapped or caller-encoded output is read now *)
+        Result.map
+          (fun planes ->
+            {
+              Flow_ir.Gpu.count = output.count;
+              width;
+              materialise = (fun () -> planes);
+              resident = None;
+              settle = (fun () -> Ok ());
+              release = ignore;
+            })
+          (planes ~index output)
 
 let buffer ?index output =
   let index = Option.value ~default:output.index index in

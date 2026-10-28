@@ -7,7 +7,9 @@
    it). Two consecutive fused writes run on the device with nothing uploaded or read back on a
    recook (the second binds the first's resident P), and reading the second's P materialises one
    output. Once the geometries are collected no buffer is held. CPU and GPU cook times are
-   printed, median of 5. *)
+   printed, median of 5. One session toggles an edit 20 times (two lowerings): what the session
+   drops goes back to the device at once (held buffers stay bounded and no buffer is created once
+   warm, with no collection), nothing is uploaded or read back, and the median recook is printed. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 
@@ -51,6 +53,14 @@ let node ?gpu ?(text = text) ?after () =
         Flow_sop.Network.Int_map.find last.id lowered.compiled
   in
   Sop.Edit_graph.compile_node graph.network.geometry ~node_id |> Result.get_ok
+
+let cook_in session node =
+  let start = Unix.gettimeofday () in
+  match
+    Sop.Session.cook session ~context:(Sop.Context.create ~time:0. () |> Result.get_ok) node
+  with
+  | Ok output -> (Result.get_ok (Sop.Payload.geometry output.payload), Unix.gettimeofday () -. start)
+  | Error d -> failwith (Diagnostic.error_to_string d)
 
 let cook node =
   let session = Sop.Session.create ~max_entries:4 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok in
@@ -216,7 +226,59 @@ let () =
             failwith (Printf.sprintf "chained GPU P differs from CPU by %.3e" !worst);
           Printf.printf
             "two consecutive fused writes: GPU recook %.3f s, largest difference %.2e\n%!"
-            chained_seconds !worst);
+            chained_seconds !worst;
+          (* one session toggling an edit (two lowerings, translations 1 and 2): the grid hits,
+             each cook evicts the other write, whose buffers come back without a collection *)
+          let session =
+            Sop.Session.create ~max_entries:2 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok
+          in
+          Fun.protect
+            ~finally:(fun () -> Sop.Session.close session)
+            (fun () ->
+              let edit y =
+                node ~gpu:counted
+                  ~text:
+                    (Printf.sprintf
+                       "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point \
+                        counts\" :connectivity \"Points\" :columns %d :rows %d) \
+                        (sop/attribute_noise :name \"noise\" :seed 7) (sop/transform :translate \
+                        [0.0 %g 0.0]))))"
+                       side side y)
+                  ()
+              in
+              let a = edit 1.0 and b = edit 2.0 in
+              let toggles = List.init 20 (fun i -> if i mod 2 = 0 then a else b) in
+              List.iter (fun n -> ignore (cook_in session n)) (List.take 4 toggles);
+              let before = stats () in
+              dispatches := 0;
+              let seconds =
+                List.map
+                  (fun n ->
+                    let geometry, seconds = cook_in session n in
+                    if not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)) then
+                      failwith "the edited chain's P is not device-resident";
+                    seconds)
+                  (List.drop 4 toggles)
+              in
+              let after = stats () in
+              if !dispatches <> List.length toggles - 4 then
+                failwith (Printf.sprintf "16 edited recooks took %d dispatches" !dispatches);
+              if after.buffer_creations <> before.buffer_creations then
+                failwith
+                  (Printf.sprintf "edited recooks created %d buffers"
+                     (after.buffer_creations - before.buffer_creations));
+              if
+                after.readback_bytes <> before.readback_bytes
+                || after.input_uploads <> before.input_uploads
+              then failwith "edited recooks moved data";
+              (* each write's three outputs, held by its entry or recycled *)
+              if after.held_buffers > before.held_buffers then
+                failwith
+                  (Printf.sprintf "edited recooks hold %d more buffers"
+                     (after.held_buffers - before.held_buffers));
+              let sorted = List.sort compare seconds in
+              Printf.printf "edited chain, one session: GPU recook median %.4f s (min %.4f)\n%!"
+                (List.nth sorted 8) (List.hd sorted)));
       (* the geometries are gone: every buffer they held is back with its runner *)
       Gc.full_major ();
       let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in

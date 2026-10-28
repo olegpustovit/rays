@@ -127,30 +127,33 @@ let admit t =
 
 let record t epoch = if epoch > 0L then t.flight <- epoch :: t.flight
 
-let output t (value : G.value) =
-  let stale = Ok None in
-  if not (live t) then stale
+(* The runner's current output for [value], not waited for. *)
+let current t (value : G.value) =
+  if not (live t) then None
   else
     match Cache.find_first t.runners (fun _ runner -> runner.identity = value.identity) with
-    | None -> stale
-    | Some runner when runner.stamp <> value.stamp -> stale
-    | Some runner -> (
+    | Some runner when runner.stamp = value.stamp -> (
         match Option.bind runner.output (Run.select_output ~index:value.output) with
-        | None -> stale
         | Some output
-          when Run.count output <> value.count
-               || Run.width output <> value.width
-               || (Run.count output > 0 && Run.buffer output = None) ->
-            stale
-        | Some output ->
-            Result.bind
-              (complete t (Run.epoch output))
-              (fun () ->
-                if Run.count output = 0 then Ok (Some output)
-                else
-                  Result.map
-                    (fun () -> Some output)
-                    (Run.Private.check_status runner.run ~epoch:(Run.epoch output))))
+          when Run.count output = value.count
+               && Run.width output = value.width
+               && (Run.count output = 0 || Run.buffer output <> None) ->
+            Some (runner, output)
+        | _ -> None)
+    | _ -> None
+
+let output t (value : G.value) =
+  match current t value with
+  | None -> Ok None
+  | Some (runner, output) ->
+      Result.bind
+        (complete t (Run.epoch output))
+        (fun () ->
+          if Run.count output = 0 then Ok (Some output)
+          else
+            Result.map
+              (fun () -> Some output)
+              (Run.Private.check_status runner.run ~epoch:(Run.epoch output)))
 
 let backend t : G.backend =
   {
@@ -216,24 +219,9 @@ let backend t : G.backend =
                         | Ok (Some output) -> Run.readback output);
                     planes =
                       (fun value ->
-                        match output t value with
-                        | Error diagnostic -> Error diagnostic
-                        | Ok None -> error "GPU output was closed or superseded."
-                        | Ok (Some output) ->
-                            Result.map
-                              (fun (count, width, materialise, placeholder) ->
-                                let resident =
-                                  Option.map
-                                    (fun p : Flow.Eval.value ->
-                                      match width with
-                                      | 1 -> Float_array p
-                                      | 2 -> Vec2_array p
-                                      | 3 -> Vec3_array p
-                                      | _ -> Vec4_array p)
-                                    placeholder
-                                in
-                                { G.count; width; materialise; resident })
-                              (Run.keep output));
+                        match current t value with
+                        | None -> error "GPU output was closed or superseded."
+                        | Some (_, output) -> Run.keep output);
                   })
                 (Pipelines.get t.pipelines msl)));
   }

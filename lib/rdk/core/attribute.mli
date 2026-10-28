@@ -34,6 +34,7 @@ val create_owned : name:string -> owner:owner -> storage -> (t, string) result
 
 val create_deferred :
   ?holder:Packed.Deferred.holder ->
+  ?release:(unit -> unit) ->
   name:string ->
   owner:owner ->
   like:storage ->
@@ -49,6 +50,9 @@ val resident : t -> bool
 
 val holder : t -> Packed.Deferred.holder option
 (** A resident attribute's holder ({!Packed.Deferred.holder}). *)
+
+val releaser : t -> (unit -> unit) option
+(** A resident attribute's [release] ({!Packed.Deferred.create}). *)
 
 val name : t -> string
 val owner : t -> owner

@@ -136,13 +136,13 @@ and storage_payload_bytes = function
       Array.fold_left (fun total text -> total + String.length text) 0 values
       + (Array.length values * (Sys.word_size / 8))
 
-let create_deferred ?holder ~name ~owner ~like ~length materialise =
+let create_deferred ?holder ?release ~name ~owner ~like ~length materialise =
   if String.trim name = "" then Error "Attribute.create_deferred: empty name"
   else
     match like with
     | (Float _ | Float2 _ | Float3 _ | Float4 _ | Int _) when length >= 0 ->
         let value =
-          Packed.Deferred.create ?holder (fun () ->
+          Packed.Deferred.create ?holder ?release (fun () ->
               let storage = materialise () in
               if storage_length storage = length && kind_of storage = kind_of like then storage
               else invalid_arg "Attribute.create_deferred: materialised storage changed shape")
@@ -162,6 +162,9 @@ let resident value =
 
 let holder value =
   match value.body with Deferred d -> Packed.Deferred.holder d.value | Ready _ -> None
+
+let releaser value =
+  match value.body with Deferred d -> Packed.Deferred.releaser d.value | Ready _ -> None
 
 let kind_name value =
   match match value.body with Ready storage -> storage | Deferred d -> d.like with

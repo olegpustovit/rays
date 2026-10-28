@@ -40,8 +40,15 @@ type cache_event =
 
 module Entry_cache = Lru.Make (String)
 
-(* Cook outputs share packed payload planes; the pool counts each plane once. *)
-type payload_pool = { refs : (int, int * int) Hashtbl.t; mutable bytes : int }
+(* Cook outputs share packed payload planes; the pool counts each plane once. A plane a device
+   still holds (resident) has a release, by id: once no entry retains it, it is [dropped], and at
+   the end of a cook released unless the cook's root output holds it. *)
+type payload_pool = {
+  refs : (int, int * int) Hashtbl.t;
+  mutable bytes : int;
+  resident : (int, unit -> unit) Hashtbl.t;
+  mutable dropped : int list;
+}
 
 type t = {
   mutable clock : unit -> float;
@@ -65,7 +72,15 @@ type t = {
   mutable journal : cache_event list option;
   mutable parallel_override : bool option;
   mutable fanouts : int;
+  mutable written : (string, int) Either.t list;
+      (* cache keys and volatile slots this cook attempt wrote, dropped if it settles a failure *)
 }
+
+let drop payload id =
+  if Hashtbl.mem payload.resident id then payload.dropped <- id :: payload.dropped
+
+let releasers (output : output) =
+  match output.payload with Geometry g -> Rdk.Geometry.releasers g | Image _ | Kernel _ -> []
 
 let release_components payload components =
   List.iter
@@ -74,6 +89,7 @@ let release_components payload components =
       | None -> ()
       | Some (_, 1) ->
           Hashtbl.remove payload.refs id;
+          drop payload id;
           payload.bytes <- payload.bytes - bytes
       | Some (_, references) -> Hashtbl.replace payload.refs id (bytes, references - 1))
     components
@@ -82,7 +98,14 @@ let create ~max_entries ~max_payload_bytes =
   if max_entries < 0 then Error "Session.create: max_entries must be non-negative"
   else if max_payload_bytes < 0 then Error "Session.create: max_payload_bytes must be non-negative"
   else
-    let payload = { refs = Hashtbl.create (min (max_entries * 4) 4096); bytes = 0 } in
+    let payload =
+      {
+        refs = Hashtbl.create (min (max_entries * 4) 4096);
+        bytes = 0;
+        resident = Hashtbl.create 16;
+        dropped = [];
+      }
+    in
     Ok
       {
         clock = Unix.gettimeofday;
@@ -108,6 +131,7 @@ let create ~max_entries ~max_payload_bytes =
         journal = None;
         parallel_override = None;
         fanouts = 0;
+        written = [];
       }
 
 let set_clock session clock = session.clock <- clock
@@ -120,6 +144,8 @@ let insert session key entry =
   if session.max_entries > 0 then begin
     let components = Payload.payload_components entry.output.payload in
     let payload = session.payload in
+    session.written <- Left key :: session.written;
+    List.iter (fun (id, r) -> Hashtbl.replace payload.resident id r) (releasers entry.output);
     List.iter
       (fun (id, bytes) ->
         match Hashtbl.find_opt payload.refs id with
@@ -162,8 +188,22 @@ let store_slot session id key entry =
   | None -> ()
   | Some events -> session.journal <- Some (Write (Some id, key, entry) :: events));
   if session.max_entries > 0 then begin
+    let payload = session.payload in
+    let fresh = releasers entry.output in
+    let gone (_, (old : entry)) =
+      List.iter
+        (fun (i, _) ->
+          if (not (Hashtbl.mem payload.refs i)) && not (List.mem_assoc i fresh) then drop payload i)
+        (releasers old.output)
+    in
     (* bounded: one slot per node id, dropped wholesale past max_entries *)
-    if Hashtbl.length session.slots >= session.max_entries then Hashtbl.reset session.slots;
+    if Hashtbl.length session.slots >= session.max_entries then begin
+      Hashtbl.iter (fun _ slot -> gone slot) session.slots;
+      Hashtbl.reset session.slots
+    end;
+    Option.iter gone (Hashtbl.find_opt session.slots id);
+    List.iter (fun (i, r) -> Hashtbl.replace payload.resident i r) fresh;
+    session.written <- Right id :: session.written;
     Hashtbl.replace session.slots id (key, entry)
   end
 
@@ -252,6 +292,10 @@ let cache_key node context inputs =
 exception Invalid_facts of string
 
 let refuse_facts message = raise_notrace (Invalid_facts message)
+
+let settle_failed =
+  Diagnostic.error ~code:"E_DEVICE_SETTLE"
+    "device work failed its status check; recooking on the CPU"
 
 let node_result f =
   try f () with
@@ -421,7 +465,15 @@ let memo_find memo node =
 (* Snapshot metadata, not payload planes. Exact CLOCK touch bits matter when
    an earlier branch evicts an entry a later branch initially found. *)
 let snapshot session =
-  let payload = { refs = Hashtbl.copy session.payload.refs; bytes = session.payload.bytes } in
+  (* a worker's drops are the parent's to decide when it replays the worker's writes *)
+  let payload =
+    {
+      refs = Hashtbl.copy session.payload.refs;
+      bytes = session.payload.bytes;
+      resident = Hashtbl.create 1;
+      dropped = [];
+    }
+  in
   {
     session with
     cache =
@@ -682,6 +734,8 @@ and evaluate_many memo session context roots =
         let indices = Array.of_list (candidates ()) in
         if Array.length indices < 2 then sequential ()
         else begin
+          (* the shared prefix's device work settles before branches read it *)
+          ignore (Context.settle ~all:true context);
           session.fanouts <- session.fanouts + 1;
           let transactions = Array.make count None in
           let workers = Array.map (fun _ -> (snapshot session, Hashtbl.copy memo)) indices in
@@ -813,9 +867,12 @@ and evaluate_uncached memo session context node =
             let started = session.clock () in
             let cooked =
               node_result (fun () ->
-                  match cook_node memo session context node geometries with
-                  | Error _ as error -> error
-                  | Ok cooked -> Ok (cooked, delta node geometries cooked))
+                  (* no CPU reader sees device work still in flight *)
+                  if Context.settle context <> [] then Error settle_failed
+                  else
+                    match cook_node memo session context node geometries with
+                    | Error _ as error -> error
+                    | Ok cooked -> Ok (cooked, delta node geometries cooked))
             in
             let seconds = max 0. (session.clock () -. started) in
             let points =
@@ -837,6 +894,32 @@ and evaluate_uncached memo session context node =
                   else insert session key entry;
                 Ok output))
 
+(* At a cook's end, on the cooking domain: what entries dropped and the root does not hold goes back
+   to its device now, not when it is collected. *)
+let release_dropped session (result : (output, Diagnostic.t) result) =
+  let payload = session.payload in
+  if payload.dropped <> [] then begin
+    let held = match result with Ok output -> List.map fst (releasers output) | Error _ -> [] in
+    let slots =
+      Hashtbl.fold
+        (fun _ (_, entry) ids -> List.map fst (releasers entry.output) @ ids)
+        session.slots []
+    in
+    let dropped = payload.dropped in
+    payload.dropped <- [];
+    List.iter
+      (fun id ->
+        if Hashtbl.mem payload.refs id || List.mem id slots then ()
+        else if List.mem id held then payload.dropped <- id :: payload.dropped
+        else
+          match Hashtbl.find_opt payload.resident id with
+          | Some release ->
+              Hashtbl.remove payload.resident id;
+              release ()
+          | None -> ())
+      (List.sort_uniq Int.compare dropped)
+  end
+
 let cook session ~context node =
   if session.closed then
     Error
@@ -844,9 +927,28 @@ let cook session ~context node =
       |> Diagnostic.prepend_trace (Node.trace node))
   else
     Parallel.run ~domains:(Context.domains context) (fun () ->
-        match evaluate (Hashtbl.create 64) session context node with
-        | Error _ as error -> error
-        | Ok output -> Ok output)
+        (* a device failure found at a settle point refuses the device to the nodes that failed:
+           what this attempt wrote is dropped and the graph cooks again (each retry refuses one
+           more node, so it ends) *)
+        let rec attempt () =
+          session.written <- [];
+          let refused = Context.refusals context in
+          let result = evaluate (Hashtbl.create 64) session context node in
+          ignore (Context.settle ~all:true context);
+          if Context.refusals context = refused then result
+          else begin
+            List.iter
+              (function
+                | Either.Left key -> Entry_cache.remove session.cache key
+                | Right id -> Hashtbl.remove session.slots id)
+              session.written;
+            attempt ()
+          end
+        in
+        let result = attempt () in
+        session.written <- [];
+        release_dropped session result;
+        result)
 
 let stats session =
   {
@@ -862,13 +964,19 @@ let stats session =
     last_node = session.last_node;
   }
 
+(* what a clear or close drops is left to its holders' collection: results handed out stay valid *)
+let forget_resident session =
+  Hashtbl.reset session.payload.resident;
+  session.payload.dropped <- []
+
 let clear session =
   Mutex.protect session.times_lock (fun () -> Hashtbl.reset session.times);
   ();
   Entry_cache.clear session.cache;
   Hashtbl.reset session.slots;
   Hashtbl.clear session.payload.refs;
-  session.payload.bytes <- 0
+  session.payload.bytes <- 0;
+  forget_resident session
 
 let close session =
   if not session.closed then begin
@@ -891,5 +999,6 @@ module Private = struct
     Hashtbl.reset session.slots;
     Hashtbl.reset session.payload.refs;
     session.payload.bytes <- 0;
+    forget_resident session;
     session.materialized <- []
 end

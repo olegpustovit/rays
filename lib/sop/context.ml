@@ -34,6 +34,8 @@ type t = {
   domains : int;
   grain : int;
   cancel : Cancel.t;
+  deferred : (Domain.id * int * (unit -> (unit, Diagnostic.t) result)) list Atomic.t;
+  refused : int list Atomic.t;
 }
 
 let create ?(frame = 0L) ?(time = 0.) ?input ?(seed = 0L) ?domains ?(grain = 16_384) ?cancel () =
@@ -62,6 +64,8 @@ let create ?(frame = 0L) ?(time = 0.) ?input ?(seed = 0L) ?domains ?(grain = 16_
           domains;
           grain;
           cancel = Option.value ~default:(Cancel.create ()) cancel;
+          deferred = Atomic.make [];
+          refused = Atomic.make [];
         })
       (Input.validate input)
 
@@ -73,6 +77,34 @@ let domains value = value.domains
 let grain value = value.grain
 let cancel_token value = value.cancel
 let cancelled value = Cancel.is_cancelled value.cancel
+
+let rec push cell value =
+  let old = Atomic.get cell in
+  if not (Atomic.compare_and_set cell old (value :: old)) then push cell value
+
+let defer value ~node settle = push value.deferred (Domain.self (), node, settle)
+let device_refused value node = List.mem node (Atomic.get value.refused)
+let refusals value = List.length (Atomic.get value.refused)
+
+let rec take_own cell =
+  let old = Atomic.get cell in
+  let self = Domain.self () in
+  let own, others = List.partition (fun (d, _, _) -> d = self) old in
+  if own = [] then [] else if Atomic.compare_and_set cell old others then own else take_own cell
+
+let settle ?(all = false) value =
+  match if all then Atomic.exchange value.deferred [] else take_own value.deferred with
+  | [] -> []
+  | pending ->
+      (* oldest first; every pending check runs, so each failed node is known *)
+      List.filter_map
+        (fun (_, node, settle) ->
+          match settle () with
+          | Ok () -> None
+          | Error _ ->
+              push value.refused node;
+              Some node)
+        (List.rev pending)
 
 let cache_projection dependencies value =
   if dependencies = Dependencies.static then ""

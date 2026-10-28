@@ -27,12 +27,16 @@ module Gpu : sig
     width : int;
     materialise : unit -> float array array;
     resident : Flow.Eval.value option;
+    settle : unit -> (unit, Diagnostic.t) result;
+    release : unit -> unit;
   }
-  (** An output kept where it was computed: [materialise] (once, from any domain, never failing: the
-      dispatch's completion and status were checked when it was kept) reads it as [width] owned
-      planes of [count] floats, for a planar store. Until then the device owns it, and [resident] is
-      a placeholder array (of one element) the same backend binds to that buffer when a later
-      kernel's source is it, without reading it. *)
+  (** An output kept where it was computed, possibly still in flight. [settle] (on the initial
+      domain, once per dispatch; every output of one dispatch settles it) waits for the dispatch and
+      checks its status: an [Error] means the values are not to be used. [materialise] (once, from
+      any domain once settled, never failing) reads it as [width] owned planes of [count] floats,
+      for a planar store. Until then the device owns it, and [resident] is a placeholder array (of
+      one element) the same backend binds to that buffer when a later kernel's source is it, without
+      reading it. [release] hands an unread buffer back (its owner dropped the result). *)
 
   type kernel = {
     run : Packed.Host.inputs -> (value, Diagnostic.t) result;

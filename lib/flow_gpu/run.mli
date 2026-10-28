@@ -66,18 +66,16 @@ val planes : ?index:int -> output -> (float array array, Diagnostic.t) result
     [planes.(c).(i)]), converted once from the mapped float32 contents in parallel blocks, with the
     finite check folded in. *)
 
-val keep :
-  ?index:int ->
-  output ->
-  (int * int * (unit -> float array array) * float array option, Diagnostic.t) result
-(** Hand a completed, status-checked output to a lazy planar store: its count, width and a
-    [materialise] that reads {!planes} once, from any domain (an invalidate and a conversion, no
-    queue work), and cannot fail: completion and finiteness were checked here. The runner makes a
-    fresh buffer for its next dispatch; the holder's buffer is destroyed after the holder is
-    collected (at the runner's next dispatch) or at {!close}, which first materialises every holder
-    still alive. The last component is the output's placeholder, an array of [width] zeros: a later
-    {!dispatch} (of any runner) whose input is that array binds the held buffer instead, while it is
-    held and not yet read back. *)
+val keep : ?index:int -> output -> (Flow_ir.Gpu.planes, Diagnostic.t) result
+(** Hand an output, possibly still in flight, to a lazy planar store without waiting. [settle] (on
+    the initial domain) waits for the dispatch and reads its status once; [materialise] reads
+    {!planes} once, from any domain after [settle] succeeded (on the initial domain it waits
+    itself), with no queue work. [release] gives an unread buffer back to the runner at once (its
+    owner dropped the result; a later read raises [Invalid_argument]). The runner makes or recycles
+    a buffer for its next dispatch; a held buffer also comes back once read, when its holder is
+    collected, or at {!close}, which first materialises every holder still alive. [resident] is the
+    output's placeholder, an array of [width] zeros: a later {!dispatch} (of any runner) whose input
+    is that array binds the held buffer instead, while it is held, unread and unreleased. *)
 
 val buffer : ?index:int -> output -> Ogpu.Backend.buffer option
 val count_record : output -> Ogpu.Backend.buffer option

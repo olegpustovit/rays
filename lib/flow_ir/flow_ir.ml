@@ -26,6 +26,8 @@ module Gpu = struct
     width : int;
     materialise : unit -> float array array;
     resident : E.value option;
+    settle : unit -> (unit, Diagnostic.t) result;
+    release : unit -> unit;
   }
 
   type kernel = {
@@ -42,7 +44,15 @@ module Gpu = struct
           let planes =
             Array.init width (fun c -> Array.init count (fun i -> data.((i * width) + c)))
           in
-          Ok { count; width; materialise = (fun () -> planes); resident = None }
+          Ok
+            {
+              count;
+              width;
+              materialise = (fun () -> planes);
+              resident = None;
+              settle = (fun () -> Ok ());
+              release = ignore;
+            }
       | _ -> Error (Diagnostic.error ~code:"E_GPU" "GPU output is not a float array."))
 
   type backend = {

@@ -81,7 +81,8 @@
   test_lisp_fusion
   test_lisp_inline
   test_trace
-  test_mesh_planes)
+  test_mesh_planes
+  test_settle)
  (deps
   nodes/prelude.rays
   (env_var RAYS_SLOW))

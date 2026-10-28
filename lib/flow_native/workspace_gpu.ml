@@ -247,7 +247,15 @@ let proxy t =
                              route_result (fun () -> route t (fun () -> kernel.readback value)));
                          planes =
                            (fun value ->
-                             route_result (fun () -> route t (fun () -> kernel.planes value)));
+                             route_result (fun () ->
+                                 Result.map
+                                   (fun (planes : G.planes) ->
+                                     {
+                                       planes with
+                                       settle =
+                                         (fun () -> route_result (fun () -> route t planes.settle));
+                                     })
+                                   (route t (fun () -> kernel.planes value))));
                        }
                         : G.kernel))
                     prepared));

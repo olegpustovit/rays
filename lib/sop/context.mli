@@ -39,6 +39,23 @@ val grain : t -> int
 val cancel_token : t -> Cancel.t
 val cancelled : t -> bool
 
+val defer : t -> node:int -> (unit -> (unit, Diagnostic.t) result) -> unit
+(** Node [node] left device work in flight (from any domain): [settle] waits for it and checks its
+    status. {!Session} settles before it cooks any node and at a cook's end, so no CPU reader sees
+    an unsettled output. *)
+
+val settle : ?all:bool -> t -> int list
+(** Runs the deferred checks this domain registered ([all]: every one), oldest first, and returns
+    the nodes whose device work failed; those are {!device_refused} from then on, and the session
+    recooks them. A parallel branch settles only its own work, so it never waits on a request
+    another branch's domain would have to serve. *)
+
+val device_refused : t -> int -> bool
+(** The node's device work failed in this context: it cooks on the CPU. *)
+
+val refusals : t -> int
+(** How many device failures this context has settled. *)
+
 val cache_projection : Dependencies.t -> t -> string
 (** Exact cache-key projection for the declared facts. Static dependencies always return the same
     projection, independent of the context. *)
