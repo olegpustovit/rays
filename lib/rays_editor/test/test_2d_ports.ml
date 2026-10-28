@@ -67,10 +67,13 @@ let serialize scene=Scene.Private.commands scene |> Scene_command.Render_ir.crea
   |> Scene_command.Render_ir.serialize
 let mode_parity ()=List.iter(fun name->
   let workspace=load name in
+  (* One text cache for all modes, as Sketch.run_state installs: a fresh cache re-rasterizes text under a new image identity. *)
+  let fonts=Font.Private.create_cache_context()in
+  Fun.protect~finally:(fun()->Font.Private.clear_cache_context fonts)(fun()->Font.Private.with_cache_context fonts(fun()->
   let expected=Array.map serialize(pictures name workspace 1)in
   List.iter(fun(_,domains)->
     let actual=Array.map serialize(pictures name workspace domains)in
-    assert(actual=expected))modes;
+    assert(actual=expected))modes));
   Printf.printf "port %s: source roundtrip, four synthetic frames, four-mode command parity\n%!"name)names
 
 let moving_circles ()=match Rays_editor.Workspace.load {|(workspace moving

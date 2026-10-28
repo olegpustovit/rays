@@ -127,8 +127,6 @@ let entries = [
   "tools", "Sop.Image.Private";
   "tools", "Sop.Node.Private";
   "tools", "Topology.Private";
-  "web_export", "Font.Private"; (* embedded present.js comment *)
-  "web_export", "Rays_math.Noise.Private";
   "web_export", "E.Private";
   "web_export", "Flow_ir.Packed.Private";
 ]

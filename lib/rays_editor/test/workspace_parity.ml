@@ -294,7 +294,8 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
           end) evaluated.results
         end); results)) modes in
       (match results with [a;b] -> if not (List.for_all2 equal a b) then failwith (name ^ ": IR/reference value mismatch") | _ -> assert false);
-      if E.state_stamp ir_state <> E.state_stamp ref_state then failwith (name ^ ": fold state mismatch"))
+      let folds state = List.map key (E.Private.state_values state) in
+      if folds ir_state <> folds ref_state then failwith (name ^ ": fold state mismatch"))
       [0.;0.125;1.25;7.]))) [1;8]);
   Printf.printf "%s: %d nodes, %d instances, %d values, four times, domains 1/8%s\n%!" name
     (Array.length evaluated.plan.nodes) (Array.length evaluated.plan.instances) (List.length prepared)
