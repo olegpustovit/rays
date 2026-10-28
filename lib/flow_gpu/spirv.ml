@@ -457,165 +457,56 @@ let int_compare_opcode = function
 (* An in-loop analytic test after the ray query, over [count] records: [values] are the nine fields so far;
    the loop carries them through phis and [body index phis] returns whether record [index] is nearer and its
    fields. No inner branches. *)
-let analytic_loop e count values body =
-  let words = e.words and float = e.float in
-  let pre = e.block and header = Words.id words and body_label = Words.id words and continuing = Words.id words
-  and finished = Words.id words and index_phi = Words.id words in
-  let phis = Array.map (fun _ -> Words.id words) values in
-  let main = words.body and loop_words = Buffer.create 512 and phi_words = Buffer.create 256 in
-  jump e header;
-  words.body <- loop_words;
-  e.block <- header;
-  let more = compare e 176 index_phi count in
-  Words.instruction words.body 246 [ finished; continuing; 0 ];
-  Words.instruction words.body 250 [ more; body_label; finished ];
-  label e body_label;
-  let take, next = body index_phi phis in
-  let chosen = Array.mapi (fun k value -> select e float take value phis.(k)) next in
-  jump e continuing;
-  label e continuing;
-  let following = result e e.uint 128 [ index_phi; u e 1 ] in
-  jump e header;
-  words.body <- phi_words;
-  label e header;
-  Words.instruction words.body 245 [ e.uint; index_phi; u e 0; pre; following; continuing ];
-  Array.iteri (fun k phi -> Words.instruction words.body 245 [ float; phi; values.(k); pre; chosen.(k); continuing ]) phis;
-  words.body <- main;
-  Buffer.add_buffer main phi_words;
-  Buffer.add_buffer main loop_words;
-  label e finished;
-  phis
+(* A ray query (Flow_gpu.Trace's gpu/trace-* intrinsics) over origin, direction, tmin and tmax: the
+   committed triangle's t, primitive (uint), barycentrics, hit (bool) and instance (uint), or for an
+   any-hit query (terminate on first hit) only hit; once a ray in a block. *)
+let query e r any =
+  let key = (if any then -1 else -2) :: Array.to_list r and block = e.block in
+  match List.find_opt (fun (k, b, _) -> k = key && b = block) e.trace_cache with
+  | Some (_, _, values) -> values
+  | None ->
+      let accel, accel_type, _, _, _, query, vec3, vec2 = Option.get e.scene in
+      let v3 a b c = result e vec3 80 [ a; b; c ] and one = u e 1 in
+      Words.instruction e.words.body 4473
+        [ query; result e accel_type 61 [ accel ]; u e (if any then 5 else 1); u e 255; v3 r.(0) r.(1) r.(2); r.(6); v3 r.(3) r.(4) r.(5); r.(7) ];
+      ignore (result e e.boolean 4477 [ query ]);
+      let hit = compare e 170 (result e e.uint 4479 [ query; one ]) one in
+      let values = if any then [| hit |] else
+        let barycentrics = result e vec2 6024 [ query; one ] in
+        [| result e e.float 6018 [ query; one ]; result e e.uint 6023 [ query; one ];
+           result e e.float 81 [ barycentrics; 0 ]; result e e.float 81 [ barycentrics; 1 ]; hit;
+           result e e.uint 6020 [ query; one ] |] in
+      e.trace_cache <- (key, block, values) :: e.trace_cache;
+      values
 
-let add e a b = floating e 129 [ a; b ] and sub e a b = floating e 131 [ a; b ] and mul e a b = floating e 133 [ a; b ]
-let dot e a b = add e (mul e a.(0) b.(0)) (add e (mul e a.(1) b.(1)) (mul e a.(2) b.(2)))
-let unit_direction e argument =
-  let length = ext e 31 [ add e (mul e (argument 4) (argument 4)) (add e (mul e (argument 5) (argument 5)) (mul e (argument 6) (argument 6))) ] in
-  let direction k = floating e 136 [ argument (4 + k); length ] in
-  [| direction 0; direction 1; direction 2 |]
+(* A scene table read at uint indices (Emit's scene_read): a triangle corner through the instance's
+   vertex base, an instance-table word, a sphere or a strand end component. *)
+let scene_read e stage index =
+  let _, _, vertices, spheres, instances, _, _, _ = Option.get e.scene in
+  let add a b = result e e.uint 128 [ a; b ] and times a k = result e e.uint 132 [ a; u e k ] in
+  match stage with
+  | Flow_ir.Core.Region.Scene_vertex (false, c) ->
+      let base = match instances with None -> index.(1)
+        | Some table -> add (result e e.uint 109 [ load e table (times index.(0) 16) ]) index.(1) in
+      load e vertices (add (times (add (times base 3) index.(2)) 3) (u e c))
+  | Scene_instance -> load e (Option.get instances) (add (times index.(0) 16) index.(1))
+  | Scene_sphere c -> load e spheres (add (times index.(0) 4) (u e c))
+  | Scene_strand c -> load e (Option.get e.strands) (add (times (add (times index.(0) 2) index.(1)) 4) (u e c))
+  | _ -> fail "scene/trace motion and native curves have no SPIR-V ray-query form."
 
-(* The procedural spheres of scene/trace. *)
-let spheres_loop e (layout : Flow_ir.Kernel_layout.t) float_of r spheres values =
-  let float = e.float in
-  let argument k = float_of r.(k) in
-  let count = uniform e (Option.get layout.scene_spheres) in
-  analytic_loop e count values (fun index_phi phis ->
-  let add = add e and sub = sub e and mul = mul e in
-  let at = result e e.uint 132 [ index_phi; u e 4 ] in
-  let sphere k = load e spheres (result e e.uint 128 [ at; u e k ]) in
-  let radius = sphere 3 in
-  let dn = unit_direction e argument in
-  let oc = Array.init 3 (fun k -> sub (argument (1 + k)) (sphere k)) in
-  let dot = dot e in
-  let b = dot oc dn in
-  let q = Array.init 3 (fun k -> sub oc.(k) (mul b dn.(k))) in
-  let disc = sub (mul radius radius) (dot q q) in
-  let root = ext e 31 [ select e float (compare e 190 disc (f e 0.)) disc (f e 0.) ] in
-  let near = sub (floating e 127 [ b ]) root and far = add (floating e 127 [ b ]) root in
-  let t = select e float (compare e 190 near (argument 7)) near far in
-  let both = result e e.boolean 167 in
-  let nearer = result e e.boolean 166 [ result e e.boolean 168 [ truth e phis.(7) ]; compare e 184 t phis.(0) ] in
-  let take = both [ both [ compare e 190 disc (f e 0.); compare e 190 t (argument 7) ];
-    both [ compare e 188 t (argument 8); nearer ] ] in
-  let radius_inverse k = floating e 136 [ add oc.(k) (mul t dn.(k)); radius ] in
-  take, [| t; sub (f e (-2.)) (result e float 112 [ index_phi ]); f e 0.; f e 0.;
-    radius_inverse 0; radius_inverse 1; radius_inverse 2; f e 1.; f e (-1.) |])
-
-(* The strands of scene/trace without native curves (Emit's strand_t and strand_hit): each segment a capsule,
-   the cylinder's two roots within it and each end sphere's two roots beyond it; the nearest in
-   [tmin, limit] wins. *)
-let strands_loop e (layout : Flow_ir.Kernel_layout.t) float_of r strands values =
-  let float = e.float in
-  let argument k = float_of r.(k) in
-  let count = uniform e (Option.get layout.scene_strand_count) in
-  analytic_loop e count values (fun index_phi phis ->
-  let add = add e and sub = sub e and mul = mul e and dot = dot e in
-  let both = result e e.boolean 167 and gt a b = compare e 186 a b and ge a b = compare e 190 a b
-  and lt a b = compare e 184 a b and le a b = compare e 188 a b in
-  let at = result e e.uint 132 [ index_phi; u e 8 ] in
-  let field k = load e strands (result e e.uint 128 [ at; u e k ]) in
-  let a = Array.init 3 field and b = Array.init 3 (fun k -> field (4 + k)) and radius = field 3 in
-  let dn = unit_direction e argument and o = Array.init 3 (fun k -> argument (1 + k)) in
-  (* roots from the ray's point nearest the segment's middle, [shift] along it, as Emit's strand_t *)
-  let shift = dot (Array.init 3 (fun k -> sub (mul (f e 0.5) (add a.(k) b.(k))) o.(k))) dn in
-  let o = Array.init 3 (fun k -> add o.(k) (mul shift dn.(k))) in
-  let ba = Array.init 3 (fun k -> sub b.(k) a.(k)) and oa = Array.init 3 (fun k -> sub o.(k) a.(k)) in
-  let baba = dot ba ba and bard = dot ba dn and baoa = dot ba oa and rr = mul radius radius in
-  let limit = sub (select e float (truth e phis.(7)) phis.(0) (argument 8)) shift and tmin = sub (argument 7) shift in
-  let best = ref (f e Float.infinity) in
-  let consider valid t =
-    let y = add baoa (mul t bard) in
-    let ok = both [ both [ valid y; both [ ge t tmin; le t limit ] ]; lt t !best ] in
-    best := select e float ok t !best in
-  let roots disc minus_b scale valid =
-    let root = ext e 31 [ ext e 40 [ disc; f e 0. ] ] and real = ge disc (f e 0.) in
-    List.iter (fun sign -> consider (fun y -> both [ real; valid y ])
-      (floating e 136 [ (if sign then add else sub) minus_b root; scale ])) [ false; true ] in
-  let big_a = sub baba (mul bard bard) in
-  let big_b = sub (mul baba (dot dn oa)) (mul baoa bard) in
-  let big_c = sub (sub (mul baba (dot oa oa)) (mul baoa baoa)) (mul rr baba) in
-  roots (sub (mul big_b big_b) (mul big_a big_c)) (floating e 127 [ big_b ]) big_a
-    (fun y -> both [ gt big_a (f e 0.); both [ gt y (f e 0.); lt y baba ] ]);
-  List.iter (fun (centre, valid) ->
-    let oc = Array.init 3 (fun k -> sub o.(k) centre.(k)) in
-    let half = dot oc dn in
-    roots (sub (mul half half) (sub (dot oc oc) rr)) (floating e 127 [ half ]) (f e 1.) valid)
-    [ (a, fun y -> le y (f e 0.)); (b, fun y -> ge y baba) ];
-  let t = !best in
-  let along = ext e 43 [ floating e 136 [ add baoa (mul t bard); baba ]; f e 0.; f e 1. ] in
-  let off = Array.init 3 (fun k -> sub (add oa.(k) (mul t dn.(k))) (mul along ba.(k))) in
-  let scale = floating e 136 [ dot off ba; ext e 40 [ baba; f e 1e-8 ] ] in
-  let off = Array.init 3 (fun k -> sub off.(k) (mul ba.(k) scale)) in
-  let length = ext e 31 [ dot off off ] in
-  le t limit, [| add t shift; result e float 112 [ index_phi ]; along; f e 0.; floating e 136 [ off.(0); length ];
-    floating e 136 [ off.(1); length ]; floating e 136 [ off.(2); length ]; f e 1.; f e (-2.) |])
-
-let trace_values e (layout : Flow_ir.Kernel_layout.t) float_of r =
-  let words = e.words and float = e.float and boolean = e.boolean in
-    let block = e.block and key = Array.to_list r in
-    match List.find_opt (fun (k, b, _) -> k = key && b = block) e.trace_cache with
-    | Some (_, _, values) -> values
-    | None ->
-        let accel, accel_type, vertices, spheres, instances, query, vec3, vec2 = Option.get e.scene in
-        let v3 a b c = result e vec3 80 [ a; b; c ] and one = u e 1 in
-        let argument k = float_of r.(k) in
-        let direction = result e vec3 12 [ e.glsl; 69; v3 (argument 4) (argument 5) (argument 6) ] in
-        Words.instruction words.body 4473
-          [ query; result e accel_type 61 [ accel ]; one; u e 255; v3 (argument 1) (argument 2) (argument 3); argument 7; direction; argument 8 ];
-        ignore (result e boolean 4477 [ query ]);
-        let hit = compare e 170 (result e e.uint 4479 [ query; one ]) one in
-        let t = result e float 6018 [ query; one ] and primitive = result e e.uint 6023 [ query; one ]
-        and barycentrics = result e vec2 6024 [ query; one ] in
-        let primitive = select e e.uint hit primitive (u e 0) in
-        let instance = Option.map (fun _ -> select e e.uint hit (result e e.uint 6020 [ query; one ]) (u e 0)) instances in
-        let row k = load e (Option.get instances) (result e e.uint 128 [ result e e.uint 132 [ Option.get instance; u e 16 ]; u e k ]) in
-        let base = result e e.uint 132 [ (match instances with
-          | None -> primitive
-          | Some _ -> result e e.uint 128 [ result e e.uint 109 [ row 0 ]; primitive ]); u e 9 ] in
-        let vertex corner = v3 (load e vertices (result e e.uint 128 [ base; u e (3 * corner) ]))
-            (load e vertices (result e e.uint 128 [ base; u e (3 * corner + 1) ]))
-            (load e vertices (result e e.uint 128 [ base; u e (3 * corner + 2) ])) in
-        let a = vertex 0 in
-        let edge corner = result e vec3 131 [ vertex corner; a ] in
-        let normal = result e vec3 12 [ e.glsl; 69; result e vec3 12 [ e.glsl; 68; edge 1; edge 2 ] ] in
-        let pick value miss = select e float hit value (f e miss) in
-        let component vector k = result e float 81 [ vector; k ] in
-        let world_normal k = (* the transpose of the world-to-object matrix applied to the object normal, normalised *)
-          match instances with
-          | None -> component normal k
-          | Some _ ->
-              let sum j = List.fold_left (fun acc i -> floating e 129 [ acc; floating e 133 [ row (1 + (4 * i) + j); component normal i ] ])
-                (f e 0.) [ 0; 1; 2 ] in
-              let x = sum 0 and y = sum 1 and z = sum 2 in
-              let length = ext e 31 [ floating e 129 [ floating e 133 [ x; x ]; floating e 129 [ floating e 133 [ y; y ]; floating e 133 [ z; z ] ] ] ] in
-              floating e 136 [ (match k with 0 -> x | 1 -> y | _ -> z); length ] in
-        let values = [| pick t 0.; pick (result e float 112 [ primitive ]) (-1.);
-          pick (component barycentrics 0) 0.; pick (component barycentrics 1) 0.;
-          pick (world_normal 0) 0.; pick (world_normal 1) 0.; pick (world_normal 2) 0.; pick (f e 1.) 0.;
-          pick (match instance with None -> f e 0. | Some i -> result e float 112 [ i ]) (-1.) |] in
-        let values = spheres_loop e layout float_of r spheres values in
-        let values = match e.strands with None -> values | Some strands -> strands_loop e layout float_of r strands values in
-        e.trace_cache <- (key, e.block, values) :: e.trace_cache;
-        values
+(* A gpu/trace-* field (an integer one as a long when [wide]) or a scene table read, over the operands as
+   floats and as uint words; the uniform word of a scene count. *)
+let trace_stage e stage floats words ~wide = match stage with
+  | Flow_ir.Core.Region.Trace_triangles k ->
+      let value = (query e (floats ()) false).(k) in
+      if k = 4 then numeric_truth e value
+      else if wide && (k = 1 || k = 5) then result e (Option.get e.long) 124 [ result e (Option.get e.ulong) 113 [ value ] ]
+      else value
+  | Trace_any -> numeric_truth e (query e (floats ()) true).(0)
+  | stage -> scene_read e stage (words ())
+let scene_count e (layout : Flow_ir.Kernel_layout.t) name ~wide =
+  let word = uniform e (Option.get (if name = "gpu/scene-spheres" then layout.scene_spheres else layout.scene_strand_count)) in
+  if wide then result e (Option.get e.long) 124 [ result e (Option.get e.ulong) 113 [ word ] ] else word
 
 (* The status bits of a zero divisor or a shift count outside [0, 62], from the exact count. *)
 let integer_status e operation b =
@@ -655,11 +546,23 @@ let element e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width compo
   let at = result e e.uint 113 [ at ] in
   result e e.float 124 [ load_uint e gathers.(k) (offset e at width component) ]
 
+(* A raster-stage intrinsic's operands: floats, but a store's table (its array uniform), a store's index
+   and Int value and a group scan's operand as uint words *)
+let stage_operands ~table_of ~low ~float_of ~integer stage a = Array.mapi (fun k x -> match stage with
+  | Flow_ir.Core.Region.Store when k = 0 -> table_of x
+  | (Store | Group_scan _) when integer x -> low x | _ -> float_of x) a
+
 (* A raster placement of the instruction printer (Raster): element inputs, gathers from the bound
    buffers (uniform, uint index, width, component), raster-stage intrinsics and output stores. *)
 type raster = { input : int -> int -> int; int_input : int -> int; gather : int -> int -> int -> int -> int;
   int_gather : int -> int -> int; intrinsic : Flow_ir.Core.Region.stage -> int array -> int;
   output : int -> int -> int -> unit; builtin : string -> int }
+
+let frame_word e (raster : raster option) layout name = match raster with Some x -> x.builtin name | None -> scene_count e layout name ~wide:false
+(* a stage instruction's value: the placement's intrinsic, or a ray query field or scene table read *)
+let stage_value e raster ~table_of ~low ~float_of ~integer ~wide stage r = match raster with
+  | Some x -> x.intrinsic stage (stage_operands ~table_of ~low ~float_of ~integer stage r)
+  | None -> trace_stage e stage (fun () -> Array.map float_of r) (fun () -> Array.map low r) ~wide
 
 let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
@@ -707,16 +610,18 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
     | Int_binary (op, a, b) -> integer_status e op (int_of b); narrow_binary e op (low a) (low b)
     | Int_select (condition, yes, no) -> if yes = no then low yes else select e e.uint (truth e (float_of condition)) (low yes) (low no)
     | Loop_result (loop, component, _) -> registers.(loop + 1 + component)
+    | Stage (stage, r) -> stage_value e raster ~table_of ~low ~float_of ~integer ~wide:false stage r | Int_frame name -> frame_word e raster layout name
     | _ -> assert false
     else wide_expression slot instruction
   and wide_expression slot = function
-    | P.Trace (field, r) -> (trace_values e layout float_of r).(field)
+    | P.Stage (stage, r) when raster = None -> stage_value e raster ~table_of ~low ~float_of ~integer ~wide:(integer slot) stage r
+    | P.Int_frame name when Flow_ir.Kernel_layout.scene_fact name -> scene_count e layout name ~wide:true
     | P.Const value ->
         if e.long <> None && Float.is_integer value && Float.abs value < 9007199254740992. then
           whole.(slot) <- Some (l e (Int64.of_float value));
         f e value
     | (Input _ | Int_input _ | Gather _ | Int_gather _ | Stage _) as i when raster <> None -> let r = Option.get raster in (match i with
-      | Input (k, _, c) -> r.input k c | Int_input k -> r.int_input k | Stage (s, a) -> r.intrinsic s (Array.map float_of a)
+      | Input (k, _, c) -> r.input k c | Int_input k -> r.int_input k | Stage (s, a) -> r.intrinsic s (stage_operands ~table_of ~low ~float_of ~integer s a)
       | Gather (p, at, w, c) -> r.gather (table_of p) (low at) w c | Int_gather (p, at) -> r.int_gather (table_of p) (low at) | _ -> assert false)
     | Input (input, width, component) -> load e inputs.(input) (offset e index width component)
     | Uniform (input, component) -> uniform_float e (layout.uniforms.(input) + component)
@@ -989,11 +894,13 @@ let resident_count e (layout : Flow_ir.Kernel_layout.t) index buffers =
   | None, None -> n
   | _ -> assert false
 
-let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = false) program =
+let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = false) ?(spheres = true) program =
   try
     (match P.gpu_refusals ~fused:true ~fast program with
     | [] -> ()
     | diagnostic :: _ -> raise (Diagnostic.Error diagnostic));
+    let program, back = match Trace.expand ~instanced ~motion ~curves:(if curves then Some `Loop else None) ~spheres program with
+      | Ok x -> x | Error d -> raise (Diagnostic.Error d) in
     let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves program in
     (* SPV_NV_ray_tracing_motion_blur moves only trace-rays pipelines, not ray queries *)
     if layout.scene_motion then
@@ -1165,14 +1072,14 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
         bytes = Buffer.to_bytes module_bytes;
         entry;
         interface = List.rev !interface;
-        layout;
+        layout = { layout with uniform_layout = Trace.frames back layout.uniform_layout };
         uniform_bytes = Flow_ir.Kernel_layout.uniform_words layout * 16;
       }
   with Diagnostic.Error diagnostic -> Error diagnostic
 
 type output = Position | Point_size | Varying of int * bool | Colour | Discard
 type stage = { vertex : bool; inputs : (int * int * bool) array; outputs : output array;
-  buffers : (int * int * bool) list }
+  buffers : (int * int * bool) list; workgroup : int option }
 
 (* A raster stage as a Vulkan vertex or fragment module, entry [main] (Raster's placement of
    [emit_program]): element [k] of a fragment is the interpolated input at location [k]'s
@@ -1237,11 +1144,32 @@ let stage (s : stage) program =
       let id = variable (pointer 1 ty) 1 in decorate id 11 [ decoration ]; interface := id :: !interface;
       Hashtbl.add builtins decoration id; id in
     let discard = ref None in
+    (* a group scan of x over the workgroup: Hillis-Steele in Workgroup memory between barriers, once a
+       scanned value; the exclusive prefix and the total *)
+    let scans = Hashtbl.create 1 in
+    let scan x = match Hashtbl.find_opt scans x with Some values -> values | None ->
+      let n = Option.get s.workgroup in
+      let shared = variable (pointer 4 (typ 28 [ uint; u e n ])) 4 and lid = result e uint 61 [ builtin uint 29 ] in
+      let at index = result e (pointer 4 uint) 65 [ shared; index ] in
+      let barrier () = Words.instruction words.body 224 [ u e 2; u e 2; u e 0x108 ] in
+      Words.instruction words.body 62 [ at lid; x ];
+      let rec step d v = if d >= n then v else begin
+        barrier ();
+        let reach = result e boolean 174 [ lid; u e d ] in
+        let w = result e uint 61 [ at (select e uint reach (result e uint 130 [ lid; u e d ]) (u e 0)) ] in
+        barrier ();
+        let v = result e uint 128 [ v; select e uint reach w (u e 0) ] in
+        Words.instruction words.body 62 [ at lid; v ];
+        step (2 * d) v end in
+      let v = step 1 x in
+      barrier ();
+      let values = [| result e uint 130 [ v; x ]; result e uint 61 [ at (u e (n - 1)) ] |] in
+      Hashtbl.add scans x values; values in
     let raster = {
       input = (fun k c -> let _, width, _ = s.inputs.(k) in
         let value = result e (vector width) 61 [ inputs.(k) ] in
         if width = 1 then value else result e float 81 [ value; c ]);
-      int_input = (fun _ -> to_long (result e uint 61 [ Option.get vertex_index ]));
+      int_input = (fun _ -> to_long (result e uint 61 [ match vertex_index with Some id -> id | None -> builtin uint 29 ]));
       gather = (fun u at width component -> let var, w = List.assoc u buffers in
         if w then result e float 124 [ load_uint e var (offset e at width component) ] else load e var (offset e at width component));
       int_gather = (fun u at -> to_long (load_uint e (fst (List.assoc u buffers)) at));
@@ -1260,8 +1188,12 @@ let stage (s : stage) program =
             result e float 81 [ result e vec4 95 [ result e image 61 [ texture t ]; at ]; c ]
         | Texture_size (t, c) -> sizes := true; let i = texture t in
             let size = result e (typ 23 [ sint; 2 ]) 103 [ result e image 61 [ i ]; Words.constant words sint 0l ] in
-            result e float 111 [ result e sint 81 [ size; c ] ]);
-      output = (fun k c value -> match s.outputs.(k) with
+            result e float 111 [ result e sint 81 [ size; c ] ]
+        | Group_scan field -> (scan operands.(0)).(field)
+        | Store -> let var, w = List.assoc operands.(0) buffers in
+            (if w then store_uint e var operands.(1) operands.(2) else store e var operands.(1) operands.(2)); u e 1
+        | _ -> fail "A ray query or scene table read runs only in a compute kernel.");
+      output = (fun k c value -> if s.workgroup = None then match s.outputs.(k) with
         | Discard -> discard := Some value
         | _ -> let width = Array.length layout.view.outputs.(k) in
             let target = if width = 1 then outputs.(k) else result e (pointer 3 float) 65 [ outputs.(k); u e c ] in
@@ -1292,8 +1224,9 @@ let stage (s : stage) program =
     if !sizes then Words.instruction bytes 17 [ 50 ];
     Words.instruction bytes 11 (glsl :: Words.string_words "GLSL.std.450");
     Words.instruction bytes 14 [ 0; 1 ];
-    Words.instruction bytes 15 (((if s.vertex then 0 else 4) :: main :: Words.string_words "main") @ List.rev !interface);
-    if not s.vertex then Words.instruction bytes 16 [ main; 7 ];
+    Words.instruction bytes 15 (((if s.workgroup <> None then 5 else if s.vertex then 0 else 4) :: main :: Words.string_words "main") @ List.rev !interface);
+    (match s.workgroup with Some n -> Words.instruction bytes 16 [ main; 17; n; 1; 1 ]
+     | None -> if not s.vertex then Words.instruction bytes 16 [ main; 7 ]);
     List.iter (Buffer.add_buffer bytes) [ words.annotations; words.declarations; words.body ];
     Ok (Buffer.to_bytes bytes)
   with Diagnostic.Error diagnostic -> Error diagnostic

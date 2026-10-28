@@ -40,139 +40,6 @@ let structure_type instanced motion = match instanced, motion with
   | true, false -> "instance_acceleration_structure" | false, false -> "primitive_acceleration_structure"
   | true, true -> "acceleration_structure<instancing, instance_motion>"
   | false, true -> "acceleration_structure<primitive_motion>"
-(* Strands (linear round curves, pathtrace.metal's): segment k is two float4s (end a, radius; end b, radius). A
-   hit reports prim = k, u = the curve parameter, v = 0, instance = -2 and the reference's normal: the offset from
-   the axis point at u, less its tangential part. Without native curves the segment is a capsule (the cylinder
-   within it, the end spheres beyond it) tested in-loop like the spheres.
-   ponytail: the loop is linear in segments; an AABB structure with a candidate loop when strand counts grow. *)
-let strand_functions = {|void strand_hit(thread TraceHit& h, float3 o, float3 dn, float t, uint k, float u, device const float4* strands) {
-  float3 a = strands[2*k].xyz, b = strands[2*k+1].xyz, tangent = b - a;
-  float3 off = o + t*dn - mix(a, b, u);
-  off -= tangent * (dot(off, tangent) / max(dot(tangent, tangent), 1e-8f));
-  h.t = t; h.prim = float(k); h.u = u; h.v = 0.0f; h.n = normalize(off); h.hit = 1.0f; h.inst = -2.0f;
-}
-float strand_t(float3 o, float3 dn, float tmin, float tmax, float4 sa, float4 sb, thread float& u) {
-  // roots from the ray's point nearest the segment's middle, s along it: float32 keeps them precise
-  float shift = dot(0.5f*(sa.xyz + sb.xyz) - o, dn);
-  o += shift*dn; tmin -= shift; tmax -= shift;
-  float3 ba = sb.xyz - sa.xyz, oa = o - sa.xyz;
-  float r = sa.w, baba = dot(ba, ba), bard = dot(ba, dn), baoa = dot(ba, oa), best = INFINITY;
-  float A = baba - bard*bard, B = baba*dot(dn, oa) - baoa*bard, C = baba*dot(oa, oa) - baoa*baoa - r*r*baba;
-  float disc = B*B - A*C;
-  if (A > 0.0f && disc >= 0.0f) {
-    float root = sqrt(disc);
-    for (int s = -1; s <= 1; s += 2) {
-      float t = (-B + float(s)*root) / A, y = baoa + t*bard;
-      if (y > 0.0f && y < baba && t >= tmin && t <= tmax && t < best) best = t;
-    }
-  }
-  for (int end = 0; end < 2; end++) {
-    float3 oc = end == 0 ? oa : o - sb.xyz;
-    float b = dot(oc, dn), cap = b*b - (dot(oc, oc) - r*r);
-    if (cap >= 0.0f) {
-      for (int s = -1; s <= 1; s += 2) {
-        float t = -b + float(s)*sqrt(cap), y = baoa + t*bard;
-        if ((end == 0 ? y <= 0.0f : y >= baba) && t >= tmin && t <= tmax && t < best) best = t;
-      }
-    }
-  }
-  u = clamp((baoa + best*bard) / baba, 0.0f, 1.0f);
-  return best + shift;
-}
-|}
-let native_strands = {|  intersector<curve_data> strand_query;
-  strand_query.assume_geometry_type(geometry_type::curve);
-  strand_query.force_opacity(forced_opacity::opaque);
-  strand_query.assume_curve_type(curve_type::round);
-  strand_query.assume_curve_basis(curve_basis::linear);
-  strand_query.assume_curve_control_point_count(2);
-  |}
-let trace_prelude ?curves instanced motion =
-  let pick yes no = if instanced then yes else no and moving text = if motion then text else "" in
-  let stranded text = if curves = None then "" else text and native = curves = Some `Native in
-  let structure = structure_type instanced motion in
-  let parameters = structure ^ {| scene, device const packed_float3* vertices,
-    |} ^ moving (pick "" "device const packed_float3* vertices_end, ") ^ {|device const float4* spheres, uint sphere_count, |}
-    ^ stranded ("device const float4* strands, uint strand_count, " ^ (if native then "primitive_acceleration_structure curves, " else ""))
-    ^ pick "device const float* instances, " "" ^ {|float3 o, float3 d, float tmin, float tmax|} ^ moving ", float time" in
-  let tags = moving (pick ", instance_motion" ", primitive_motion") in
-  let target = "scene" ^ moving ", time" in
-  let vertices = if motion && not instanced then
-      {|float s = clamp(time, 0.0f, 1.0f);
-    float3 a = mix(float3(vertices[base]), float3(vertices_end[base]), s), b = mix(float3(vertices[base+1]), float3(vertices_end[base+1]), s),
-      c = mix(float3(vertices[base+2]), float3(vertices_end[base+2]), s);|}
-    else "float3 a = vertices[base], b = vertices[base+1], c = vertices[base+2];" in
-  (* instance motion: the table holds both object-to-world keyframes; the normal is the inverse transpose of
-     their interpolation, the cofactor columns signed by the determinant *)
-  let instance_normal = if motion then
-      {|float s = clamp(time, 0.0f, 1.0f);
-    float3 c0 = mix(float3(m[1], m[5], m[9]), float3(m[13], m[17], m[21]), s), c1 = mix(float3(m[2], m[6], m[10]), float3(m[14], m[18], m[22]), s),
-      c2 = mix(float3(m[3], m[7], m[11]), float3(m[15], m[19], m[23]), s);
-    float3 w = h.n.x*cross(c1, c2) + h.n.y*cross(c2, c0) + h.n.z*cross(c0, c1);
-    h.n = normalize(dot(c0, cross(c1, c2)) < 0.0f ? -w : w); h.inst = float(k);|}
-    else "h.n = normalize(float3(m[1]*h.n.x + m[5]*h.n.y + m[9]*h.n.z, m[2]*h.n.x + m[6]*h.n.y + m[10]*h.n.z, m[3]*h.n.x + m[7]*h.n.y + m[11]*h.n.z)); h.inst = float(k);" in
-  let strands = stranded (if native then native_strands ^ {|intersection_result<curve_data> sh = strand_query.intersect(ray(o, dn, tmin, h.hit != 0.0f ? h.t : tmax), curves);
-  if (sh.type == intersection_type::curve) strand_hit(h, o, dn, sh.distance, sh.primitive_id, sh.curve_parameter, strands);
-|} else {|  for (uint k = 0; k < strand_count; k++) {
-    float u, t = strand_t(o, dn, tmin, h.hit != 0.0f ? h.t : tmax, strands[2*k], strands[2*k+1], u);
-    if (t <= tmax) strand_hit(h, o, dn, t, k, u, strands);
-  }
-|}) in
-  let occluding = stranded (if native then native_strands ^ {|strand_query.accept_any_intersection(true);
-  if (strand_query.intersect(ray(o, dn, tmin, tmax), curves).type == intersection_type::curve) return 1.0f;
-|} else {|  for (uint k = 0; k < strand_count; k++) {
-    float u;
-    if (strand_t(o, dn, tmin, tmax, strands[2*k], strands[2*k+1], u) <= tmax) return 1.0f;
-  }
-|}) in
-  {|#include <metal_raytracing>
-using namespace metal::raytracing;
-struct TraceHit { float t; float prim; float u; float v; float3 n; float hit; float inst; };
-|} ^ stranded strand_functions ^ {|TraceHit trace_scene(|} ^ parameters ^ {|) {
-  intersector<triangle_data|} ^ pick ", instancing" "" ^ tags ^ {|> query;
-  query.assume_geometry_type(geometry_type::triangle);
-  query.force_opacity(forced_opacity::opaque);
-  intersection_result<triangle_data|} ^ pick ", instancing" "" ^ tags ^ {|> hit = query.intersect(ray(o, normalize(d), tmin, tmax), |} ^ target ^ {|);
-  TraceHit h = {0.0f, -1.0f, 0.0f, 0.0f, float3(0.0f), 0.0f, -1.0f};
-  if (hit.type == intersection_type::triangle) {
-    uint p = hit.primitive_id;
-    |} ^ pick ("uint k = hit.instance_id; device const float* m = instances + k*" ^ (if motion then "32" else "16") ^ "; uint base = (uint(m[0]) + p)*3;") "uint base = p*3;" ^ {|
-    |} ^ vertices ^ {|
-    h.t = hit.distance; h.prim = float(p); h.u = hit.triangle_barycentric_coord.x; h.v = hit.triangle_barycentric_coord.y;
-    h.n = normalize(cross(b - a, c - a)); h.hit = 1.0f;
-    |} ^ pick instance_normal "h.inst = 0.0f;" ^ {|
-  }
-  float3 dn = normalize(d);
-|} ^ strands ^ {|  for (uint k = 0; k < sphere_count; k++) {
-    float4 s = spheres[k]; float3 oc = o - s.xyz;
-    float b = dot(oc, dn); float3 q = oc - b*dn; float disc = s.w*s.w - dot(q, q);
-    if (disc >= 0.0f) {
-      float root = sqrt(disc), t = (-b - root >= tmin) ? -b - root : -b + root;
-      if (t >= tmin && t <= tmax && (h.hit == 0.0f || t < h.t)) {
-        h.t = t; h.prim = -2.0f - float(k); h.u = 0.0f; h.v = 0.0f; h.n = (oc + t*dn) / s.w; h.hit = 1.0f; h.inst = -1.0f;
-      }
-    }
-  }
-  return h;
-}
-float trace_occluded(|} ^ parameters ^ {|) {
-  intersector<|} ^ pick "instancing" "" ^ (if instanced then tags else moving "primitive_motion") ^ {|> query;
-  query.assume_geometry_type(geometry_type::triangle);
-  query.force_opacity(forced_opacity::opaque);
-  query.accept_any_intersection(true);
-  if (query.intersect(ray(o, normalize(d), tmin, tmax), |} ^ target ^ {|).type == intersection_type::triangle) return 1.0f;
-  float3 dn = normalize(d);
-|} ^ occluding ^ {|  for (uint k = 0; k < sphere_count; k++) {
-    float4 s = spheres[k]; float3 oc = o - s.xyz;
-    float b = dot(oc, dn); float3 q = oc - b*dn; float disc = s.w*s.w - dot(q, q);
-    if (disc >= 0.0f) {
-      float root = sqrt(disc), t = (-b - root >= tmin) ? -b - root : -b + root;
-      if (t >= tmin && t <= tmax) return 1.0f;
-    }
-  }
-  return 0.0f;
-}
-|}
 (* A raster-stage intrinsic (Flow_ir.Core.Region.stage); texture t is sampled with sampler t + 1 and read
    (whole texels, no sampler) at integer coordinates. *)
 let stage_intrinsic stage operands = match stage with
@@ -181,6 +48,7 @@ let stage_intrinsic stage operands = match stage with
   | Sample_level (t, c) -> Printf.sprintf "texture%d.sample(sampler%d,float2(%s,%s),level(%s)).%c" t (t + 1) operands.(0) operands.(1) operands.(2) "xyzw".[c]
   | Read (t, c) -> Printf.sprintf "texture%d.read(uint2(%s,%s)).%c" t operands.(0) operands.(1) "xyzw".[c]
   | Texture_size (t, c) -> Printf.sprintf "float(texture%d.get_%s())" t (if c = 0 then "width" else "height")
+  | _ -> invalid_arg "Emit.stage_intrinsic"
 let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
 let register index = "r" ^ string_of_int index
 let rec guarded guards = function
@@ -269,14 +137,83 @@ let narrow_integer operation a b =
 let comparison operation a b =
   let op = match operation with Flow.Packed_ops.Ilt -> "<" | Ile -> "<=" | Igt -> ">" | Ige -> ">=" | Ieq -> "==" in
   "(" ^ a ^ op ^ b ^ "?1.0f:0.0f)"
+(* A ray query (Trace): its result is held in locals declared in the scope and stored once a scope,
+   guard set and ray (registers [r]), where its first field is read; [a k] prints operand k. *)
+let trace_query ~hits ~instancing ~moving (current : Scope.t) guards slot stage r a =
+    let curve = (match stage with Flow_ir.Core.Region.Trace_curves _ | Trace_curves_any -> true | _ -> false)
+    and any = (stage = Flow_ir.Core.Region.Trace_any || stage = Trace_curves_any) in
+    let key = (current.Scope.id, guards, curve, any, Array.to_list r) in
+    let name = match Hashtbl.find_opt hits key with Some name -> name | None ->
+      let name = Printf.sprintf "hit%d" slot in
+      let declare ty field zero = Printf.bprintf current.Scope.decls "  %s %s%s=%s;\n" ty name field zero in
+      let tags = if not moving then [] else [ if instancing then "instance_motion" else "primitive_motion" ] in
+      let data = String.concat ", " ((if curve then [ "curve_data" ] else if any then [] else [ "triangle_data" ])
+        @ (if instancing && not curve then [ "instancing" ] else []) @ (if curve then [] else tags)) in
+      let target = if curve then "scene_curves" else "scene" ^ (if moving then "," ^ a 8 else "") in
+      let call = Printf.sprintf "q.intersect(ray(float3(%s,%s,%s),float3(%s,%s,%s),%s,%s),%s)"
+        (a 0) (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) target in
+      let kind = if curve then "curve" else "triangle" in
+      let store = if any then (declare "bool" "" "false"; Printf.sprintf "%s=%s.type==intersection_type::%s;" name call kind)
+        else begin
+          declare "bool" "_h" "false"; declare "float" "_t" "0.0f"; declare "uint" "_p" "0u";
+          if curve then declare "float" "_u" "0.0f" else declare "float2" "_uv" "0.0f";
+          if instancing && not curve then declare "uint" "_i" "0u";
+          Printf.sprintf "auto h=%s;%s_h=h.type==intersection_type::%s;%s_t=h.distance;%s_p=h.primitive_id;%s" call name kind name name
+            (if curve then name ^ "_u=h.curve_parameter;" else name ^ "_uv=h.triangle_barycentric_coord;"
+              ^ (if instancing then name ^ "_i=h.instance_id;" else ""))
+        end in
+      Printf.bprintf current.Scope.code "%s{intersector<%s> q;q.assume_geometry_type(geometry_type::%s);q.force_opacity(forced_opacity::opaque);%s%s%s}\n"
+        (indent current) data kind
+        (if curve then "q.assume_curve_type(curve_type::round);q.assume_curve_basis(curve_basis::linear);q.assume_curve_control_point_count(2);" else "")
+        (if any then "q.accept_any_intersection(true);" else "") store;
+      Hashtbl.add hits key name; name in
+    match stage with
+    | Trace_any | Trace_curves_any -> "(" ^ name ^ "?1.0f:0.0f)"
+    | Trace_triangles 0 | Trace_curves 0 -> name ^ "_t"
+    | Trace_triangles 1 | Trace_curves 1 -> name ^ "_p"
+    | Trace_triangles 2 -> name ^ "_uv.x" | Trace_triangles 3 -> name ^ "_uv.y" | Trace_curves 2 -> name ^ "_u"
+    | Trace_triangles 4 | Trace_curves 3 -> "(" ^ name ^ "_h?1.0f:0.0f)"
+    | _ -> if instancing then name ^ "_i" else "0u"
+(* a scene table read at uint indices [index k]: a triangle corner (through the instance's vertex base),
+   an instance-table word, a sphere or a strand end *)
+let scene_read ~instancing ~stride stage index =
+    let xyz c = String.make 1 "xyzw".[c] in
+    match stage with
+    | Flow_ir.Core.Region.Scene_vertex (ending, c) ->
+        let base = if instancing then Printf.sprintf "(uint(scene_instances[%s*%du])+%s)" (index 0) stride (index 1) else index 1 in
+        Printf.sprintf "scene_vertices%s[%s*3u+%s].%s" (if ending then "_end" else "") base (index 2) (xyz c)
+    | Scene_instance -> Printf.sprintf "scene_instances[%s*%du+%s]" (index 0) stride (index 1)
+    | Scene_sphere c -> Printf.sprintf "scene_spheres[%s].%s" (index 0) (xyz c)
+    | Scene_strand c -> Printf.sprintf "scene_strands[2u*%s+%s].%s" (index 0) (index 1) (xyz c)
+    | _ -> fail "A raster-stage intrinsic runs only in a fragment stage."
 (* A raster placement (Raster): elements are vertex ids or interpolated fragment inputs, gathers read the
    renderer's bound buffers, and outputs are stage results; the stage function around the body is Raster's. *)
 type raster = { input : int -> int -> string; int_input : int -> string; buffer : int -> string;
   output : int -> int -> string -> string; builtin : string -> string }
-let rec kernel ?fast ?instanced ?motion ?curves program = generate ?fast ?instanced ?motion ?curves program
+(* A compute stage's workgroup intrinsics (Raster.compute): a group scan of x is a Hillis-Steele scan in
+   threadgroup memory between barriers, printed once a scanned register where its first field is read
+   (in uniform control flow: the root scope); a store writes a bound buffer's element and is 1. *)
+let group_intrinsic ~scans ~(raster : raster) (current : Scope.t) guards stage (r : int array) ~table ~low ~float_of =
+  match stage with
+  | Flow_ir.Core.Region.Group_scan field ->
+      if current.Scope.id <> 0 || guards <> [] then fail "A group scan runs in uniform control flow, outside loops and branches.";
+      let name = Printf.sprintf "scan%d" r.(0) and size = raster.builtin "gpu/group-size" and x = low r.(0) in
+      if not (Hashtbl.mem scans r.(0)) then begin
+        Hashtbl.add scans r.(0) ();
+        Printf.bprintf current.Scope.decls "  uint %s_before=0u;\n  uint %s_total=0u;\n" name name;
+        Printf.bprintf current.Scope.code "  threadgroup uint %s[%s];\n  {uint v=%s;%s[lid]=v;for(uint d=1u;d<%su;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?%s[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;%s[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);%s_before=v-%s;%s_total=%s[%s-1];}\n"
+          name size x name size name name name x name name size
+      end;
+      name ^ (if field = 0 then "_before" else "_total")
+  | Store -> let u, ty = table r.(0) in
+      Printf.sprintf "(%s[%s]=%s,1u)" (raster.buffer u) (low r.(1)) (if ty = Flow.Ty.Array Flow.Ty.Int then low r.(2) else float_of r.(2))
+  | _ -> fail "Not a workgroup intrinsic."
+let rec kernel ?fast ?instanced ?motion ?curves ?spheres program = generate ?fast ?instanced ?motion ?curves ?spheres program
 and stage_body ~raster program = Result.map (fun msl -> msl.source) (generate ~fast:true ~raster program)
-and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster program = try
+and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=true) ?raster program = try
   (match P.gpu_refusals ~fused:true ~fast program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));
+  let program, back = if raster <> None then program, Fun.id
+    else match Trace.expand ~instanced ~motion ~curves ~spheres program with Ok x -> x | Error d -> raise (Diagnostic.Error d) in
   let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves:(curves <> None) program in
   let native = curves = Some `Native && layout.scene_strands <> None in
   let {Flow_ir.Kernel_layout.view; used; finite_checks; uniforms; frames; table_seeds;
@@ -309,7 +246,8 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
      glyph fragment never pays for a rectangle's varyings *)
   let inline slot instruction = not !counting && raster <> None && not named.(slot) && (match instruction with P.Input _ -> true | _ -> false)
     || not !counting && references.(slot) = 1 && not named.(slot) && not finite_checks.(slot)
-    && (match instruction with P.Trace _ | Int_binary ((Idiv | Imod | Ishl | Ishr), _, _) -> false | _ -> true)
+    && (match instruction with P.Trace _ | Int_binary ((Idiv | Imod | Ishl | Ishr), _, _)
+        | Stage ((Trace_triangles _ | Trace_any | Trace_curves _ | Trace_curves_any | Group_scan _ | Store), _) -> false | _ -> true)
     && fst defined.(slot) = fst referenced.(slot) && prefix (defined_in.(slot), read_in.(slot)) in
   let narrow = layout.narrow in
   let int_of r = if integer_register r && not narrow.(r) then register r else "long(" ^ register r ^ ")" in
@@ -335,16 +273,20 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
     | None -> Printf.sprintf "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])"
       k index gather_lengths.(k) width component in
   let hits = Hashtbl.create 4 in
-  (* a ray whose only read field is [hit] is an occlusion test: any intersection answers it *)
-  let fields = Hashtbl.create 4 in
-  Array.iteri (fun slot instruction -> match snd (guarded [] instruction) with
-    | P.Trace (field, r) when used.(slot) -> Hashtbl.replace fields (Array.to_list r)
-        (field = 7 && Option.value (Hashtbl.find_opt fields (Array.to_list r)) ~default:true)
-    | _ -> ()) view.code;
+  let instancing = scene_instances <> None and moving = layout.scene_motion in
+  let query current guards slot stage r =
+    trace_query ~hits ~instancing ~moving current guards slot stage r (fun k -> float_of r.(k)) in
+  let scene_read stage r = scene_read ~instancing ~stride:(if moving then 32 else 16) stage (fun k -> low r.(k)) in
+  let scans = Hashtbl.create 1 in
+  let group raster current guards stage r = group_intrinsic ~scans ~raster current guards stage r
+    ~table:(fun x -> match snd (guarded [] view.code.(x)) with P.Array_prepare (u, ty) -> u, ty | _ -> fail "A store names a bound buffer.")
+    ~low ~float_of in
+  let scene_count name = Printf.sprintf "uniforms[%d]"
+    (Option.get (if name = "gpu/scene-spheres" then scene_spheres else layout.scene_strand_count)) in
   let outputs = Array.length view.outputs in
   let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
   let print () =
-  Hashtbl.reset hits;
+  Hashtbl.reset hits; Hashtbl.reset scans;
   let root = scope ~next:(ref 0) 0 in
   let scopes = ref [root] in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
@@ -367,6 +309,8 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
       | Int_select (_,yes,no) when yes = no -> low yes
       | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (low yes) (low no)
       | Loop_result (loop,component,_) -> register (loop+1+component)
+      | Stage (stage,r) -> (match raster with Some x -> group x current guards stage r | None -> query current guards slot stage r)
+      | Int_frame name -> (match raster with Some x -> x.builtin name | None -> scene_count name)
       | _ -> assert false
     else match instruction with
       | P.Const value ->
@@ -393,6 +337,7 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
       | Int_input input -> Printf.sprintf "long(input%d[i])" input
       | Int_uniform index -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" uniforms.(index)
       | Int_frame name when raster <> None -> "long(" ^ (Option.get raster).builtin name ^ ")"
+      | Int_frame name when Flow_ir.Kernel_layout.scene_fact name -> "long(" ^ scene_count name ^ ")"
       | Int_frame _ -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" frames.(slot)
       | Int_binary (op,a,b) -> integer op (int_of a) (int_of b)
       | Int_compare (op,a,b) -> comparison op (int_of a) (int_of b)
@@ -411,24 +356,13 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
       | Convert (Ceil,a) -> "long(ceil(" ^ float_of a ^ "))"
       | Convert (Round,a) -> "long(round(" ^ float_of a ^ "))"
       | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> fail "Text kernels stay on the CPU."
-      | Trace (field, r) ->
-          let rays = Array.to_list r in
-          let occlusion = Hashtbl.find fields rays and key = (current.Scope.id, guards, rays) in
-          let hit = match Hashtbl.find_opt hits key with Some name -> name | None ->
-            let name = Printf.sprintf "hit%d" slot and a k = float_of r.(k) in
-            Printf.bprintf current.Scope.decls "  %s %s;\n" (if occlusion then "float" else "TraceHit") name;
-            Printf.bprintf body "%s%s=%s(scene,scene_vertices,%sscene_spheres,uniforms[%d],%s%sfloat3(%s,%s,%s),float3(%s,%s,%s),%s,%s%s);\n"
-              indentation name (if occlusion then "trace_occluded" else "trace_scene")
-              (if layout.scene_vertices_end = None then "" else "scene_vertices_end,")
-              (Option.get scene_spheres)
-              (match layout.scene_strand_count with None -> "" | Some w ->
-                 Printf.sprintf "scene_strands,uniforms[%d],%s" w (if native then "scene_curves," else ""))
-              (if scene_instances = None then "" else "scene_instances,") (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) (a 8)
-              (if layout.scene_motion then "," ^ a 9 else "");
-            Hashtbl.add hits key name; name in
-          if occlusion then hit else hit ^ [| ".t"; ".prim"; ".u"; ".v"; ".n.x"; ".n.y"; ".n.z"; ".hit"; ".inst" |].(field)
       | Select (_,yes,no) when yes = no -> register yes
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
+      | Stage ((Trace_triangles _ | Trace_any | Trace_curves _ | Trace_curves_any) as stage,r) when raster = None ->
+          let value = query current guards slot stage r in
+          if integer_register slot then "long(" ^ value ^ ")" else value
+      | Stage (stage,r) when raster = None -> scene_read stage r
+      | Stage ((Group_scan _ | Store) as stage,r) when raster <> None -> "long(" ^ group (Option.get raster) current guards stage r ^ ")"
       | Stage (stage,r) when raster <> None -> stage_intrinsic stage (Array.map float_of r)
       | Stage _ -> fail "A raster-stage intrinsic runs only in a fragment stage."
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
@@ -516,6 +450,19 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
   if raster <> None then Ok {source="  uint sb=0u;\n" ^ Buffer.contents body;entry="";interface=[];uniform_layout=[];
     uniform_bytes=0;table_seeds=[||];output_widths=[||];input_widths=[||];gathers=[||];counts=None;scene=None} else
   let count = Array.length view.widths in
+  (* the scene's structures and the tables the trace helpers read (Metal reflects only those) *)
+  let reads name = let text = Buffer.contents body and n = String.length name in
+    let rec at k = k + n <= String.length text && (String.sub text k n = name || at (k + 1)) in at 0 in
+  let scene_tables = match scene_binding with None -> [] | Some b -> List.filter_map (fun (accel, declaration, binding, name) ->
+    if reads name then Some (accel, declaration, binding) else None)
+    ([ true, structure_type (scene_instances <> None) layout.scene_motion ^ " scene", b, "";
+       false, "device const packed_float3* scene_vertices", b+1, "scene_vertices[";
+       false, "device const float4* scene_spheres", b+2, "scene_spheres[" ]
+     @ (if scene_instances = None then [] else [ false, "device const float* scene_instances", b+3, "scene_instances[" ])
+     @ (if layout.scene_vertices_end = None then [] else [ false, "device const packed_float3* scene_vertices_end", b+3, "scene_vertices_end[" ])
+     @ (match layout.scene_strands with None -> [] | Some s ->
+         (false, "device const float4* scene_strands", s, "scene_strands[")
+         :: (if native then [ true, "primitive_acceleration_structure scene_curves", s+1, "scene_curves" ] else []))) in
   (* fast: the element count may come from a device cell (another kernel's, times mul over div,
      when use is set) and is written to this kernel's own count record {n, 6n, 1, 0, 0, 0}: a
      resident fold never reads it, and its last five words are the indexed indirect draw of n
@@ -529,19 +476,11 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
     @ List.mapi (fun k _ -> Printf.sprintf "device const uint* gather%d [[buffer(%d)]]" k (gather_base+k)) gathers
     @ (if counts=None then [] else [Printf.sprintf "device const uint* count_in [[buffer(%d)]]" count_base;
         Printf.sprintf "device uint* count_out [[buffer(%d)]]" (count_base+1)])
-    @ (match scene_binding with None -> [] | Some b ->
-        [Printf.sprintf "%s scene [[buffer(%d)]]" (structure_type (scene_instances <> None) layout.scene_motion) b;
-         Printf.sprintf "device const packed_float3* scene_vertices [[buffer(%d)]]" (b+1);
-         Printf.sprintf "device const float4* scene_spheres [[buffer(%d)]]" (b+2)]
-        @ (if scene_instances = None then [] else [Printf.sprintf "device const float* scene_instances [[buffer(%d)]]" (b+3)])
-        @ (if layout.scene_vertices_end = None then [] else [Printf.sprintf "device const packed_float3* scene_vertices_end [[buffer(%d)]]" (b+3)])
-        @ (match layout.scene_strands with None -> [] | Some s ->
-            Printf.sprintf "device const float4* scene_strands [[buffer(%d)]]" s
-            :: (if native then [Printf.sprintf "primitive_acceleration_structure scene_curves [[buffer(%d)]]" (s+1)] else [])))
+    @ List.map (fun (_, declaration, binding) -> Printf.sprintf "%s [[buffer(%d)]]" declaration binding) scene_tables
     @ ["uint i [[thread_position_in_grid]]"] in
   let prefix = "#include <metal_stdlib>\nusing namespace metal;\n" ^
     (if fast then "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n" else "") ^
-    (if scene_binding=None then "" else trace_prelude ?curves:(if layout.scene_strands = None then None else curves) (scene_instances<>None) layout.scene_motion) ^ (if table_seeds=[||] then "" else perlin) in
+    (if scene_binding=None then "" else "#include <metal_raytracing>\nusing namespace metal::raytracing;\n") ^ (if table_seeds=[||] then "" else perlin) in
   let signature = String.concat ",\n  " arguments in
   let guard = match counts with
     | None -> "  if(i>=uniforms[0]) return;\n"
@@ -555,42 +494,19 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
   let interface = List.init (count_base+(if counts=None then 0 else 2)) Fun.id
     |>List.filter(fun binding->binding>=count || input_used.(binding))
     |>List.map(fun binding->S.{group=0;binding;kind=(if binding=uniform_binding then Uniform_buffer else Storage_buffer);visibility=[Compute]})in
-  let interface = interface @ (match scene_binding with None -> [] | Some b ->
-    [S.{group=0;binding=b;kind=Acceleration_structure;visibility=[Compute]};
-     S.{group=0;binding=b+1;kind=Storage_buffer;visibility=[Compute]};
-     S.{group=0;binding=b+2;kind=Storage_buffer;visibility=[Compute]}]
-    @ (if scene_instances=None && layout.scene_vertices_end=None then [] else [S.{group=0;binding=b+3;kind=Storage_buffer;visibility=[Compute]}])
-    @ (match layout.scene_strands with None -> [] | Some s -> S.{group=0;binding=s;kind=Storage_buffer;visibility=[Compute]}
-        :: (if native then [S.{group=0;binding=s+1;kind=Acceleration_structure;visibility=[Compute]}] else []))) in
+  let interface = interface @ List.map (fun (accel, _, binding) ->
+    S.{group=0;binding;kind=(if accel then Acceleration_structure else Storage_buffer);visibility=[Compute]}) scene_tables in
+  let uniform_layout = Trace.frames back uniform_layout in
   Ok {source;entry;interface;uniform_layout;uniform_bytes;scene=scene_binding;
     table_seeds;output_widths=Array.map Array.length view.outputs;input_widths=view.widths;
     gathers=Array.of_list (List.map snd gathers);counts}
 with Diagnostic.Error diagnostic -> Error diagnostic
 
 (* Stream compaction for a resident fold: the indices of a mask's nonzero elements, in order, as
-   floats, and their count.  One threadgroup of up to 1,024 threads: each counts a contiguous chunk,
-   thread 0 turns the counts into offsets, each writes its chunk's indices. *)
+   floats, and their count; one threadgroup of 1,024 threads. The kernel is shaders/compact.rays, a
+   compute stage printed by Raster.compute_msl (lib/flow_gpu/test_raster.exe --write lib). *)
 let compaction =
-  let entry = "flow_compact_mask" in
-  let source = {|#include <metal_stdlib>
-using namespace metal;
-kernel void flow_compact_mask(device const float* mask [[buffer(0)]], device float* kept [[buffer(1)]],
-  device uint* total [[buffer(2)]], constant uint2& bound [[buffer(3)]], device const uint* count_in [[buffer(4)]],
-  uint t [[thread_position_in_threadgroup]], uint size [[threads_per_threadgroup]]) {
-  threadgroup uint offsets[1024];
-  uint n = bound.y != 0u ? min(bound.x, count_in[0]) : bound.x;
-  uint chunk = (n + size - 1) / size, first = min(n, t * chunk), last = min(n, first + chunk), count = 0;
-  for (uint i = first; i < last; i++) if (mask[i] != 0.0f) count++;
-  offsets[t] = count;
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  if (t == 0) { uint sum = 0; for (uint k = 0; k < size; k++) { uint v = offsets[k]; offsets[k] = sum; sum += v; } total[0] = sum; }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  uint at = offsets[t];
-  for (uint i = first; i < last; i++) if (mask[i] != 0.0f) kept[at++] = float(i);
-}
-|} in
-  {source; entry; uniform_layout = []; uniform_bytes = 8; table_seeds = [||];
+  {source = Compact_source.source; entry = "compact_mask"; uniform_layout = []; uniform_bytes = 8; table_seeds = [||];
    output_widths = [|1|]; input_widths = [|1|]; gathers = [||]; counts = None; scene = None;
    interface = List.map (fun binding -> S.{group = 0; binding;
      kind = (if binding = 3 then Uniform_buffer else Storage_buffer); visibility = [Compute]}) [0; 1; 2; 3; 4]}
-

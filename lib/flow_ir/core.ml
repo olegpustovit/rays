@@ -91,8 +91,17 @@ module Region = struct
   type loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
     span:Diagnostic.span}
   type stage = Fwidth | Sample of int * int | Sample_level of int * int | Read of int * int | Texture_size of int * int
+    | Trace_triangles of int | Trace_any | Trace_curves of int | Trace_curves_any
+    | Scene_vertex of bool * int | Scene_instance | Scene_sphere of int | Scene_strand of int
+    | Group_scan of int | Store
     (** [fwidth x]; component c of texture t sampled at (u, v) (its sampler at t + 1); axis c of
-        texture t's size in texels *)
+        texture t's size in texels. The device side of scene/trace (Flow_gpu.Trace): field k of a
+        triangle query (0 t, 1 prim, 2 u, 3 v, 4 hit, 5 instance) or a curve query (0 t, 1 prim, 2 u,
+        3 hit) over origin, direction, tmin, tmax (and time), an any-hit query, and component c of a
+        scene table row: a triangle corner (of the shutter's end), an instance-table word, a sphere, a
+        strand end. A compute stage's group scan of an Int register (0 the exclusive prefix, 1 the
+        total), in uniform control flow, and a store of a value at an index of a bound buffer (its
+        table register), which is 1. Int-typed operands are integer registers. *)
   type instruction =
     | Const of float | Input of int * int * int
     | Uniform of int * int | Frame of string | Accumulator of int
@@ -123,6 +132,7 @@ module Region = struct
     | Convert (To_float,_) -> false | Convert _ -> true
     | Guarded (_,instruction) -> integer_register instruction
     | Loop_begin _ | Loop_carry (_,_,Flow.Ty.Int) | Loop_result (_,_,Flow.Ty.Int) -> true
+    | Stage ((Trace_triangles (1|5) | Trace_curves 1 | Group_scan _ | Store),_) -> true
     | _ -> false
   let rec text_register = function
     | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _
@@ -264,6 +274,9 @@ module Region = struct
       if not (List.for_all (ok slot) (operands instruction)) then operands_ok := false;
       (match instruction with
        | Gather _ | Int_gather _ | Text_gather _ | Guarded _ -> ()
+       (* a store names its buffer by its table *)
+       | Stage (Store, registers) -> if Array.exists array_handle (Array.sub registers 1 (Array.length registers - 1))
+           || not (array_handle registers.(0) && prepared_for selected registers.(0)) then operands_ok := false
        | _ -> if List.exists array_handle (operands instruction) then operands_ok := false);
       (match instruction with
        | Text_select _ | Guarded _ | Loop_begin _ | Loop_end _ | Loop_result _ -> ()

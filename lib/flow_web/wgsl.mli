@@ -56,7 +56,14 @@ val kernel_fast : Flow_ir.Packed.t -> (wgsl, Diagnostic.t) result
     words, then from byte 24 the arguments of WebGPU's [drawIndirect] of n six-vertex instances (the
     presenter draws a mark set from them); both follow the gathers. *)
 
+val compute : size:int -> name:string -> buffers:(int * int * bool * bool) list -> Flow_ir.Packed.t ->
+  (string, Diagnostic.t) result
+(** A compute stage (Flow_gpu.Raster's) as the module of entry [name], one workgroup of [size]
+    ([@builtin(local_invocation_index)] is its element): [buffers] are (array uniform, binding, u32
+    words, stored), read unclamped; [gpu/group-scan] is a [var<workgroup>] scan between
+    [workgroupBarrier]s and [gpu/store] a statement. Its result is discarded. *)
+
 val compaction : string
-(** The WGSL of a resident fold's [array/compact] (entry [flow_compact_mask], one workgroup of 256):
-    bindings mask (f32), kept (f32 indices), total (the count cell), the uniform [vec4<u32>] bound
-    (count, use) and count_in. *)
+(** The WGSL of a resident fold's [array/compact] (entry [compact_mask], one workgroup of 256), generated
+    from Flow_gpu's shaders/compact.rays: bindings mask (f32), kept (f32 indices), total (the count
+    cell), bound (u32 count, use) and count_in. *)

@@ -40,7 +40,7 @@ viewport), `sketches/million_marks.rays` (the marks pipeline).
 ## Marks and UI from Lisp (P9.S3)
 
 `lib/renderer/shaders/marks.rays` and `ui.rays` replace `marks.metal` and `ui.metal`; the
-`.metal` files are now generated (`lib/flow_gpu/test_raster.exe --write lib/renderer/shaders`,
+`.metal` files are now generated (`lib/flow_gpu/test_raster.exe --write lib`,
 checked by `@lib/flow_gpu/runtest`). Pixels: `test_ui_parity` exact (kit panel, overlays, zones,
 table), `test_ui_pipeline` matches Scene2 at 1x and 2x, `test_marks_native` keeps marks pixel for
 pixel equal to the UI pipeline for rect, circle and line at 63/64/65/100000 instances, 1x/2x.
@@ -112,7 +112,18 @@ double decode (Scene2 0.745 to 0.741 ms).
 
 ## Open
 
-The UI pipeline's last 0.1 ms (above). Handwritten MSL left in product code: the presentation blit
-(`ogpu_metal/presentation.ml`, a backend detail below the renderer), the resident fold's stream
-compaction (`Emit.compaction`: threadgroup memory and barriers, which stages cannot say) and the
-`scene/trace` intersection helpers `Emit` splices into traced kernels.
+The UI pipeline's last 0.1 ms (above). The three handwritten MSL sites left after P9.S4 are Lisp
+(2026-10-28, M1, interleaved; the machine shared with other agents' builds, load 15-60):
+
+- Presentation blit: `ogpu_metal/shaders/present.rays`, the same full-screen triangle and texel read.
+- Resident-fold compaction (`shaders/compact.rays`, a compute stage): kept indices and count byte-equal
+  to the handwritten kernel's on 1K-4M masks at 5%, 50% and 95% density; GPU median ms handwritten vs
+  Lisp, 15 interleaved pairs: 1,000 elements 0.133 vs 0.009, 4,096 0.137 vs 0.013, 65,536 0.398 vs
+  0.274, 1M 4.35 vs 4.23, 4M 9.6-12.9 vs 9.5-15.2 (minima 9.62-9.80 vs 9.55-9.67: equal within noise).
+  The parallel scan replaces thread 0's serial pass.
+- `scene/trace` helpers (`flow_gpu/trace.rays`): path tracer films byte-identical on the 16x12 dome,
+  instanced dome and World scenes (and the M1 exact digests); trace kernel lines 1408/1445/1680 to
+  1417/1473/1691 (gate 1816); maxTotalThreadsPerThreadgroup unchanged (448/384/448); GPU ms over frames
+  9-16 at 480x360, five interleaved runs, median handwritten vs Lisp: dome 114.3 vs 112.9, instanced
+  147.2 vs 124.3, World 121.4 vs 111.1. `test_trace` rays: triangles, spheres and instance motion
+  bit-identical; vertex motion and capsule strands within an ulp or two (1e-5 gate).

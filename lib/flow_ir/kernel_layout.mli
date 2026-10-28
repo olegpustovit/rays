@@ -43,6 +43,8 @@ type t = {
 
 (** [fast] includes gather lengths and the count record; [image] reserves the two
     dimensions used by WGSL image kernels and has no input bindings. *)
+val scene_fact : string -> bool
+(** [gpu/scene-spheres] and [gpu/scene-strands]: built-in counts read from the scene's uniform words, not frame facts. *)
 val plan : ?fast:bool -> ?image:bool -> ?instanced:bool -> ?motion:bool -> ?curves:bool -> Packed.t -> t
 val uniform_words : t -> int
 
