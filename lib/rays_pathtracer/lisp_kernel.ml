@@ -134,7 +134,6 @@ let kernel t ~lease ~pipelines name =
         | Flow_ir.Packed.Private.Value v ->
             Option.map (fun (n, (ty, _)) -> n, ty) (List.find_opt (fun (_, (_, p)) -> p == v) t.values)
         | _ -> None) (Flow_ir.Packed.Private.uniform_shapes template) in
-      Option.iter (fun d -> Out_channel.with_open_bin (d ^ "/" ^ name ^ ".metal") (fun o -> output_string o msl.Flow_gpu.Emit.source)) (Sys.getenv_opt "PT_DUMP_DIR");
       let k = { runner = Flow_gpu.Run.create lease pipelines msl; msl; base; slots; zeros = Array.copy base.tables;
                 indices = [||] } in
       t.kernels <- (name, k) :: t.kernels;
