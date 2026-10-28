@@ -28,7 +28,7 @@ module Vector_fixture = struct
   let factory = parameters_factory build
 end
 
-module Registered_vector = Vector_fixture [@@sop.register]
+module Editor = struct let factories = [Vector_fixture.factory] end
 
 module Optional_rest_fixture = struct
   type parameters = {

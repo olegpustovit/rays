@@ -7,7 +7,7 @@ let fail message = failwith ("test_workspace_cook: " ^ message)
 let check condition message = if not condition then fail message
 let read path = In_channel.with_open_bin path In_channel.input_all
 let cases = "../specification/workspace/cases"
-let factories = Sop_catalog.Editor.factories
+let factories = Sop.Nodes.factories
 let merge nodes =
   let with_ = List.mapi (fun i n -> Printf.sprintf "i%d" i, n) nodes in
   Lisp_sop.node ~with_ ("(sop/merge " ^ String.concat " " (List.map (fun (k, _) -> "(sop/ext_" ^ k ^ ")") with_) ^ ")")

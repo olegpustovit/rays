@@ -36,7 +36,7 @@ let run () =
     end;
     Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
     Unix.rmdir directory) (fun () ->
-  let factories = Sop_catalog.Editor.factories in
+  let factories = Sop.Nodes.factories in
   let workspace = Ws_fixture.of_text text in
   let doc = match Editor_document.Contexts.of_workspace ~factories workspace with
     | Ok doc -> doc | Error d -> failwith (Diagnostic.to_string d) in

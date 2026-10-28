@@ -4,7 +4,7 @@ module W = Flow.Workspace
 module P = Flow_graph.Projection
 module E = Flow_graph.Flow_edit
 let ok = Result.get_ok
-let factories = Sop_catalog.Editor.factories
+let factories = Sop.Nodes.factories
 let catalog = ok (Editor_document.Contexts.catalog ~version:1 factories)
 let source = {|(workspace sample
   (graph img :context image (image/noise :width 2 :height 2 :seed 9))

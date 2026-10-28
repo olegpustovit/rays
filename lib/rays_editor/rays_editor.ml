@@ -5,7 +5,7 @@ module Source = Source_file
 module Workspace_doc = Workspace_doc
 module Timeline = Timeline
 
-let workspace_catalog ?(factories = Sop_catalog.Editor.factories) () =
+let workspace_catalog ?(factories = Sop.Nodes.factories) () =
   Contexts.catalog ~version:Flow_sop.Manifest.version factories
 
 type window = Contexts.window =
@@ -170,7 +170,7 @@ module Workspace = struct
      light below is a default of a workspace with no scene graph (Contexts.of_workspace).
      Piece preparation is shared with the hand-written shattered-cube host. *)
   (* Every [sop] graph of the document, lowered and compiled, for headless cooking. *)
-  let sop_graphs ?(factories = Sop_catalog.Editor.factories) (doc : Workspace_doc.t) =
+  let sop_graphs ?(factories = Sop.Nodes.factories) (doc : Workspace_doc.t) =
     let ( let* ) = Result.bind in
     let* lowered = Result.map_error Diagnostic.to_string
         (Flow_sop.Lower.workspace ~extra:Contexts.descriptors ~inputs:doc.inputs ~factories doc.source) in
@@ -190,7 +190,7 @@ module Workspace = struct
         ~target:(Rays.Camera.target view) base
     | None -> base
 
-  let declared_camera ?(factories = Sop_catalog.Editor.factories) doc base =
+  let declared_camera ?(factories = Sop.Nodes.factories) doc base =
     match Contexts.of_workspace ~factories doc with
     | Error _ -> base
     | Ok document -> document_camera document base
@@ -210,7 +210,7 @@ module Workspace = struct
       let opened = match factories with
         | Some [] -> None
         | _ -> Result.to_option (Contexts.of_workspace
-            ~gpu ~factories:(Option.value factories ~default:Sop_catalog.Editor.factories) doc) in
+            ~gpu ~factories:(Option.value factories ~default:Sop.Nodes.factories) doc) in
       let window=match opened with Some document->Contexts.document_window document
         |None->workspace_window doc in
       Result.bind window (fun window ->
@@ -238,7 +238,7 @@ module Workspace = struct
             (Rays.Sketch.error_to_string error))))
 
   let export ?graph ?(fps = 60) ~directory ~frames doc =
-    let factories = Sop_catalog.Editor.factories in
+    let factories = Sop.Nodes.factories in
     let ( let* ) = Result.bind in
     let* () = if fps > 0 && frames > 0 then Ok () else
       Error (Diagnostic.error ~code:"E_EXPORT_RANGE" "Export frame count and fps must be positive.") in

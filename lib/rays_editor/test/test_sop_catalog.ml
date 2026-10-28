@@ -3,7 +3,7 @@ open Sop
 open Test_support
 
 let registered_factories = lazy (
-  let native = Sop_catalog.Editor.factories in
+  let native = Sop.Nodes.factories in
   let catalog = Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version native
     |> Result.get_ok in
   let source = Flow.Syntax.parse "(workspace registered_nodes)" |> Result.get_ok in
@@ -103,7 +103,7 @@ let test_morph_sketch () =
     | Ok forms ->
         match Flow_sop.Lower.workspace
             ~extra:Editor_document.Contexts.descriptors
-            ~factories:Sop_catalog.Editor.factories forms with
+            ~factories:Sop.Nodes.factories forms with
         | Ok lowered -> lowered
         | Error d -> fail (Diagnostic.to_string d) in
   let cook_graph ~domains name =
@@ -579,10 +579,10 @@ let run ?(exhaustive = false) () =
      "promote_attributes"];
   let vector_groups = ref 0 in
   let flow_catalog = match Flow_sop.Catalog.of_factories ~version:1
-      Sop_catalog.Editor.factories with
+      Sop.Nodes.factories with
     | Ok catalog -> catalog
     | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
-  let manifest, digest = Flow_sop.Manifest.generate Sop_catalog.Editor.factories
+  let manifest, digest = Flow_sop.Manifest.generate Sop.Nodes.factories
     |> Result.get_ok in
   let catalog_from_manifest, read_digest = Flow.Check.catalog_of_manifest manifest
     |> Result.get_ok in
@@ -603,7 +603,7 @@ let run ?(exhaustive = false) () =
        && diagnostic.message = "Flow manifest digest does not match its contents")
        "Flow manifest reader reported the wrong digest error"
    | Ok _ -> fail "Flow manifest reader accepted changed contents");
-  check (Flow_sop.Manifest.generate Sop_catalog.Editor.factories
+  check (Flow_sop.Manifest.generate Sop.Nodes.factories
     = Ok (manifest, digest)) "Flow catalog manifest is not deterministic";
   let children name (form : Flow.Syntax.t) = match form.node with
     | List ({node = Sym head; _} :: children) when head = name -> children

@@ -11,7 +11,7 @@ separate compiler target, not a fallback: the native program never selects it.
 
 Nested `AGENTS.md` files hold subsystem rules: `lib/metal`, `lib/ogpu`
 (also for `lib/ogpu_core`),
-`lib/runtime`, `lib/rdk`, `lib/rays_editor`, `lib/editor_document`, `lib/pxui_graph`, `lib/sop_catalog`.
+`lib/runtime`, `lib/rdk`, `lib/rays_editor`, `lib/editor_document`, `lib/pxui_graph`, `lib/flow_sop`.
 Read the one for the directory you change. Design notes live in `specification/`;
 the shared frame/region compiler contract is [specification/core.md](specification/core.md).
 Update them when behavior or architecture changes materially.
@@ -79,7 +79,6 @@ task plan are `specification/web-export/plan.md`.
 | `rays_pathtracer` | Hardware ray-traced path tracer |
 | `rdk` | The single packed geometry/topology compute core, built from `rdk_core` → `rdk_exact` → `rdk_spatial` → `rdk_attrib` → `rdk_gen`/`rdk_curve` → `rdk_mesh` → `rdk_boolean`; `rdk_rays` is its glue to `rays` meshes |
 | `sop` | Immutable SOP graphs over `rdk` operations |
-| `sop_catalog` | Inspectable SOP node factories registered by PPX |
 | `flow` | UI-free workspace language over `diagnostic`, `param`, `input` and pure `rays_math`: reader, printer, macros, checker, evaluator, frame folds, packed arrays and typed deferred nodes |
 | `flow_ir` | Typed dataflow IR over `flow` evaluations with sharing, hoisting, pruning, fusion and precision passes, block-at-a-time CPU kernels, and bounded caches; uses `parallel`, `lru` and the `scene_command` marks contract as pure data; `flow` never depends on it |
 | `flow_gpu` | Metal and binary SPIR-V emission from `flow_ir` packed programs, a pipeline cache of 64 and owned native runners; depends on `flow`, `flow_ir`, `ogpu`, `renderer`, `rays_math`, `lru` and `parallel`; never reaches geometry or UI |
@@ -206,8 +205,8 @@ shipping check. GPU rendering integration and presentation timeouts live in
 Warnings are errors. Automated application loops arrange
 their own termination. Build, generation, and validation glue is OCaml under
 Dune, never Python; external-tool comparisons belong in `../rays-support`.
-The generated `lib/sop_catalog/flow_manifest.sexp` is also checked by
-`dune build @lib/sop_catalog/runtest`; when SOP metadata changes, review and
+The generated `lib/flow_sop/flow_manifest.sexp` is also checked by
+`dune build @lib/flow_sop/runtest`; when SOP metadata changes, review and
 accept its diff with `dune promote`.
 
 SDL3 versions live only in `packaging/sdl3.lock` (a floor per library and the

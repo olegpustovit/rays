@@ -15,7 +15,7 @@
 (executable
  (name prims_fixtures)
  (modules prims_fixtures)
- (libraries flow flow_ir flow_web input flow_sop sop sop_catalog rdk parallel))
+ (libraries flow flow_ir flow_web input flow_sop sop rdk parallel))
 
 (executable
  (enabled_if (= %{system} macosx))
@@ -52,14 +52,14 @@
  (enabled_if (= %{system} macosx))
  (name bench_shattered_renderer)
  (modules bench_shattered_renderer)
- (libraries rays rays_math flow rdk rdk_rays sop sop_catalog rays_editor ogpu_metal unix parallel))
+ (libraries rays rays_math flow rdk rdk_rays sop rays_editor ogpu_metal unix parallel))
 
 (executable
  (enabled_if (= %{system} macosx))
  (name render_workspace)
  (modules render_workspace)
  (libraries rays rays_math rays_pathtracer sop rdk rdk_rays flow flow_sop
-  editor_document sop_catalog rays_editor ogpu_metal parallel runtime_resources unix))
+  editor_document rays_editor ogpu_metal parallel runtime_resources unix))
 
 (executable
  (name bench_material_assign)

@@ -65,7 +65,7 @@ let run () =
   let custom_factories =
     Edit_graph.factory ~key:"my_custom_sop" ~label:"My Custom SOP" ~category:[ "Custom" ]
       ~arity:0 (function [] -> Lisp_sop.snapshot (Rdk.Line_geometry.points [| 0., 0., 0. |]) | _ -> invalid_arg "none")
-    :: Sop_catalog.Editor.factories in
+    :: Sop.Nodes.factories in
   let text = {|(workspace test_custom
     (graph scene :context scene
       (let* [cam (scene/camera :eye [1 2 3] :target [0 0 0])

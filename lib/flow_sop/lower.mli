@@ -164,7 +164,7 @@ val workspace :
   ?compiled_ids:int Instance_path.Map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   Flow.Syntax.t list -> (t, Diagnostic.t) result
-(** [factories] is the SOP catalog ([Sop_catalog.Editor.factories]). [ops]
+(** [factories] is the SOP catalog ([Sop.Nodes.factories]). [ops]
     defaults to {!Operators.all}; an explicit list replaces those extensions.
     Errors:
     the checker's first error, the evaluator's, or [E_LOWER]. *)

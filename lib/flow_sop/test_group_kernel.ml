@@ -134,7 +134,7 @@ let () =
   print_endline "Groups: native wildcard/escape/exclusion/name order and count/mask/order/owner/source refusals"
 
 let () =
-  let catalog=Flow_sop.Catalog.of_factories ~version:1 Sop_catalog.Editor.factories |>flow_ok in
+  let catalog=Flow_sop.Catalog.of_factories ~version:1 Sop.Nodes.factories |>flow_ok in
   let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all in
   let forms=Flow.Syntax.parse {|(workspace group_projection (graph g :context sop
     (let* [geo (sop/line) mask (sop/group geo :name "selected" :owner point)
@@ -223,7 +223,7 @@ let () =
         (if (int/eq (int/mod counter 2) 1) value 0)) (array/int (sop/count geo :points) 1)))
         :name "selected"))))|} |>flow_ok in
   List.iter(fun domains->
-    let lowered=Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories forms |>flow_ok in
+    let lowered=Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories forms |>flow_ok in
     let graph=List.hd lowered.graphs and lane=Flow_sop.Value_lane.create() in
     let session=create_session() in
     Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->

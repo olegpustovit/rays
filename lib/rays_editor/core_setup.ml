@@ -55,7 +55,7 @@ let create ?gpu ?settings
     ?domains ?(max_entries = 512)
     ?(max_payload_bytes = 256 * 1024 * 1024) ?await ?(carry_budget = 0.5)
     ?preferences ?(ui_text_size = default_text_size) ?ui_font ?opened ~workspace ~prepare () =
-  let factories = if factories = [] then Sop_catalog.Editor.factories else factories in
+  let factories = if factories = [] then Sop.Nodes.factories else factories in
   let settings = Option.value settings ~default:workspace.Workspace_doc.settings in
   let gpu = Option.value ~default:Flow_ir.Gpu.default gpu in
   let opened = workspace_doc ~gpu ?opened ~factories ~seed_scene:(seed_scene factories)

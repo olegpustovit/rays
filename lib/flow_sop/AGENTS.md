@@ -1,4 +1,4 @@
-# lib/sop_catalog rules
+# lib/flow_sop catalog rules
 
 A SOP node is declared in Lisp: a `defnode` in `lib/flow_sop/nodes/<key>.rays`
 owns the schema and defaults in its header and the operation in its body, and
@@ -82,7 +82,7 @@ inputs names its slots in their existing order; without the attribute slots are
 `in0`, `in1`, .... Generated factories carry field metadata for the node menu's
 search, and the inspector uses the same schema for pins and vector rows.
 Value operators (`+`, `range`, `value/rand`, ...) are built into `lib/flow`, never here.
-`lib/sop_catalog/flow_manifest.sexp` is generated from the registered OCaml factories,
+`lib/flow_sop/flow_manifest.sexp` is generated from the registered OCaml factories,
 embedded Lisp declarations (with `(body lisp)` and checked `(calls ...)`),
 and the scene, World and settings kinds of `Editor_document.Contexts`. Its runtest rule diffs the live catalog; accept an
 intended metadata change with `dune promote`.

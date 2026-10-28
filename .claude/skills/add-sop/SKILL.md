@@ -5,7 +5,7 @@ description: Add a geometry node in Rays Lisp, including checked metadata, graph
 
 # Add a SOP node
 
-1. Read `lib/sop_catalog/AGENTS.md`, `specification/sop.md` and
+1. Read `lib/flow_sop/AGENTS.md`, `specification/sop.md` and
    `specification/flow.md`. Search `lib/flow_sop/nodes/` and the host
    operations before adding a capability.
 2. Write `lib/flow_sop/nodes/<key>.rays` with one `defnode sop/<key>`.
@@ -30,7 +30,7 @@ description: Add a geometry node in Rays Lisp, including checked metadata, graph
    (`--update-all DIR`), then review the `ports.sexp.gz` diff.
 6. Build `tools/check.exe` once; time focused checks through
    `_build/default/tools/check.exe`. Include `@lib/flow_sop/runtest`,
-   `@lib/sop_catalog/runtest` and affected graph/language aliases.
+   `@lib/flow_sop/runtest` and affected graph/language aliases.
    Review generated manifest changes and promote only intentional metadata.
    Keep full failure output and fix timeouts rather than increasing limits.
 7. Add a `.rays` sketch when the capability needs an example. Finish with
@@ -39,4 +39,4 @@ description: Add a geometry node in Rays Lisp, including checked metadata, graph
 The stable Lisp key is the node identity. Use the existing lowercase
 underscore vocabulary and do not add operation-name aliases without a
 concrete compatibility requirement. Add an OCaml native node only for exact
-predicates, spatial indexes, solvers, wiring or carriers (see lib/sop_catalog/AGENTS.md).
+predicates, spatial indexes, solvers, wiring or carriers (see lib/flow_sop/AGENTS.md).

@@ -7,7 +7,7 @@ let () =
   let doc = match Rays_editor.Workspace.load text with
     | Ok doc -> doc
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let catalog = Result.get_ok (Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories) in
+  let catalog = Result.get_ok (Editor_document.Contexts.catalog ~version:1 Sop.Nodes.factories) in
   let module N = Rays_editor.Private.Navigator in
   let outline = N.rows N.initial {N.workspace = doc.checked; active = Some "picture"; scope = None;
     records = None; probes = (fun _ -> 0); selected = []; chips = []; objects = [];

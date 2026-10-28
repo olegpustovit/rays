@@ -16,7 +16,7 @@ let fixture () =
   Geometry.with_attribute point_normal geometry |> get
 
 let test_declarations () =
-  let native = Sop_catalog.Editor.factories in
+  let native = Sop.Nodes.factories in
   let lowered = Result.bind
     (Flow.Syntax.parse "(workspace facts (graph unused :context value 0.0))")
     (Flow_sop.Lower.workspace ~factories:native)

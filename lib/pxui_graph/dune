@@ -11,7 +11,7 @@
  (name test_main)
  (modules test_main test_pxui_graph)
  (libraries rays rays_math pxui pxui_graph editor_core editor_document flow flow_sop flow_graph
-  sop_catalog scene_command ogpu_mock unix))
+    scene_command ogpu_mock unix))
 
 (rule
  (alias test_pxui_graph)

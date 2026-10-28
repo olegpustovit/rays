@@ -76,7 +76,7 @@ let reach graph =
 let gpu = ["sdl3"; "sdl3_image"; "sdl3_ttf"; "sdl3_mixer"; "metal"; "ogpu_core"; "ogpu"; "ogpu_mock"; "ogpu_metal"; "ogpu_metal_native";
            "runtime"; "runtime_input"; "runtime_resources"; "renderer"]
 let upper = ["param"; "flow"; "flow_ir"; "flow_web"; "flow_gpu"; "flow_graph"; "flow_sop"; "flow_native"; "rays"; "editor_core"; "pxui"; "pxui_shell"; "pxui_graph"; "sop"; "rdk";
-             "sop_catalog"; "rays_editor"]
+             "rays_editor"]
 let foundational = ["sdl3"; "sdl3_image"; "sdl3_ttf"; "sdl3_mixer"; "metal";
                     "native_layer_token"; "scene_command"; "lru"; "rays_diagnostic"]
 
@@ -85,7 +85,7 @@ let rules =
   List.map (fun lib -> lib, "runtime" :: "runtime_resources"
                             :: "renderer" :: upper) foundational
   @ ["ppx_rays", "rays" :: "rdk" :: "sop" :: "editor_core"
-       :: "pxui" :: "pxui_shell" :: "pxui_graph" :: "sop_catalog" :: "editor_document"
+       :: "pxui" :: "pxui_shell" :: "pxui_graph" :: "editor_document"
        :: "rays_editor" :: gpu]
   @ [ "runtime", ["metal"; "ogpu_metal_native"; "ogpu_metal"];
       "renderer", ["metal"; "ogpu_metal_native"; "ogpu_metal"];
@@ -98,7 +98,7 @@ let rules =
       "lisp_sop", ["editor_document"; "rays"; "runtime"; "pxui"; "rays_editor"];
       "renderer", ["runtime_input"];
       "rays", ["pxui"; "pxui_shell"; "pxui_graph"; "sop"; "rdk";
-                  "sop_catalog"; "rays_editor"];
+                  "rays_editor"];
       "rays_math", ["rays"; "rdk_core"; "rdk_exact"; "rdk_spatial"; "rdk_attrib"; "rdk_gen"; "rdk_curve"; "rdk_mesh"; "rdk_boolean"; "rdk"; "rdk_rays"; "sop"] @ gpu;
       "rdk_core", "rdk_exact" :: "rdk_spatial" :: "rdk_attrib" :: "rdk_gen" :: "rdk_curve" :: "rdk_mesh" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
       "rdk_exact", "rdk_spatial" :: "rdk_attrib" :: "rdk_gen" :: "rdk_curve" :: "rdk_mesh" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
@@ -108,24 +108,20 @@ let rules =
       "rdk_curve", "rdk_gen" :: "rdk_mesh" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
       "rdk_mesh", "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
       "rdk_boolean", "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
-      "rdk", "rays" :: "rdk_rays" :: "sop" :: "pxui" :: "pxui_shell" :: "sop_catalog" :: gpu;
-      "sop", "rays" :: "rdk_rays" :: "pxui" :: "pxui_shell" :: "pxui_graph" :: "sop_catalog"
+      "rdk", "rays" :: "rdk_rays" :: "sop" :: "pxui" :: "pxui_shell" :: gpu;
+      "sop", "rays" :: "rdk_rays" :: "pxui" :: "pxui_shell" :: "pxui_graph"
                     :: "rays_editor" :: gpu;
       "editor_core", ["pxui"; "pxui_shell"; "pxui_graph"; "rays_editor"; "sop";
-                 "rdk"; "sop_catalog"];
+                 "rdk"];
       "editor_document", ["pxui"; "pxui_shell"; "pxui_graph"; "rays_editor"];
       "pxui", ["editor_core"; "pxui_shell"; "sop"; "rdk"; "pxui_graph";
                "rays_editor"];
-      "pxui_shell", ["sop"; "rdk"; "sop_catalog";
-                     "pxui_graph"; "rays_editor"];
-      "pxui_graph", ["sop"; "rdk"; "pxui_shell"; "rays_editor"; "sop_catalog"];
-      "sop_catalog", "rays" :: "renderer" :: "pxui" :: "pxui_shell" :: "pxui_graph"
-                     :: "rays_editor" :: gpu;
+      "pxui_shell", ["sop"; "rdk"; "pxui_graph"; "rays_editor"];
+      "pxui_graph", ["sop"; "rdk"; "pxui_shell"; "rays_editor"];
       "rays_pathtracer", ["metal"; "ogpu_metal_native"; "ogpu_metal"; "ogpu_mock"; "rdk_core"; "sop";
-                          "sop_catalog"; "flow_sop"; "editor_core"; "editor_document"; "pxui"; "pxui_shell";
+                          "flow_sop"; "editor_core"; "editor_document"; "pxui"; "pxui_shell";
                           "pxui_graph"; "rays_editor"];
-      "rdk_rays", ["metal"; "ogpu_metal_native"; "ogpu_metal"; "rdk_boolean"; "rdk"; "sop"; "sop_catalog";
-                   "flow"; "editor_core"; "editor_document"; "pxui"; "pxui_shell"; "pxui_graph";
+      "rdk_rays", ["metal"; "ogpu_metal_native"; "ogpu_metal"; "rdk_boolean"; "rdk"; "sop"; "flow"; "editor_core"; "editor_document"; "pxui"; "pxui_shell"; "pxui_graph";
                    "rays_pathtracer"; "rays_editor"];
       "scene_execution_fixtures", "metal" :: "ogpu_metal_native" :: "ogpu_metal" :: upper ]
 
@@ -155,14 +151,13 @@ let only =
     "scene_execution_fixtures", ["renderer"; "ogpu"];
     "pxui", ["rays"; "rays_math"];
     "pxui_shell", ["rays"; "rays_math"; "editor_core"; "pxui"];
-    "sop_catalog", ["rays_math"; "rdk"; "sop"];
     "flow_gpu", ["flow"; "flow_ir"; "param"; "rays_math"; "ogpu_core"; "ogpu"; "renderer"; "lru"; "parallel"];
     "flow_web", ["flow"; "flow_ir"; "param"; "rays_math"; "scene_command"; "parallel"];
     "web_export", ["flow"; "flow_ir"; "flow_web"; "flow_sop"; "editor_document";
-                   "sop_catalog"; "input"; "param"; "scene_command"; "sdl3_image"];
+                   "input"; "param"; "scene_command"; "sdl3_image"];
     "rays_pathtracer", ["rays"; "ogpu"; "renderer"; "flow"; "flow_ir"; "flow_gpu";
                        "runtime_resources"; "rays_math"; "unix"];
-    "lisp_sop", ["flow"; "flow_sop"; "sop_catalog"; "sop"; "rdk"; "rays_math"] ]
+    "lisp_sop", ["flow"; "flow_sop"; "sop"; "rdk"; "rays_math"] ]
 
 (* A backend's modules stay within that backend: its modules, the directories
    that own them, and the files that name it on purpose (binding tooling,
@@ -669,7 +664,7 @@ let run () =
      "flow_gpu", "rays_editor"; "flow_gpu", "pxui";
      "flow", "rays"; "param", "flow"; "sdl3", "flow";
      "ppx_rays", "sop"; "ppx_rays", "pxui";
-     "flow_sop", "pxui"; "flow_sop", "sop_catalog"; "flow_sop", "rays";
+     "flow_sop", "pxui"; "flow_sop", "rays";
      "flow_sop", "editor_document"; "flow_sop", "ogpu"; "sdl3", "flow_sop";
      "flow", "flow_sop"; "ppx_rays", "flow_sop";
      "flow_native", "pxui"; "flow_native", "pxui_graph"; "flow_native", "rays_editor";
@@ -678,7 +673,6 @@ let run () =
      "flow_web", "rays"; "flow_web", "flow_gpu"; "flow_web", "sop"; "flow_web", "rdk";
      "flow_web", "pxui"; "flow_web", "rays_editor"; "flow_web", "ogpu"; "flow_web", "unix";
      "scene_command", "flow_web";
-     "sop_catalog", "rays"; "sop_catalog", "runtime"; "sop_catalog", "metal";
      "rays_pathtracer", "ogpu_metal"; "rays_pathtracer", "sop"; "rays_pathtracer", "pxui";
      "rays_pathtracer", "rdk"; "rays_pathtracer", "rdk_core"; "rays_pathtracer", "rdk_rays";
      "rdk_rays", "sop"; "rdk_rays", "metal"; "rdk_rays", "pxui";
@@ -689,7 +683,7 @@ let run () =
      "scene_command", "flow_ir";
      "ogpu", "native_layer_token"; "ogpu_mock", "lru"; "param", "unix"; "flow", "unix";
      "ogpu_metal_native", "native_layer_token"; "ogpu_metal", "lru"; "metal", "lru";
-     "sop_catalog", "flow"; "rays_diagnostic", "unix";
+     "rays_diagnostic", "unix";
      "flow", "unix"; "sop", "flow"; "flow_sop", "scene_command"];
   List.iter (fun (lib, _) -> if not (List.mem_assoc lib graph) then
     failwith ("dependency gate has a rule for unknown library " ^ lib)) (rules @ only);

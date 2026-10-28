@@ -11,7 +11,7 @@ let check condition message = if not condition then fail message
 open Test_text
 
 let cases = "../../../specification/workspace/cases"
-let factories = Sop_catalog.Editor.factories
+let factories = Sop.Nodes.factories
 let geometry_bytes = Test_support.Workspace_cook.geometry_bytes
 
 let lower ?compiled_ids ?sites source =

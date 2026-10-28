@@ -125,7 +125,7 @@ let run () =
     "inspector toggle did not collapse the third column";
 
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
-      ~factories:Sop_catalog.Editor.factories
+      ~factories:Sop.Nodes.factories
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
@@ -441,7 +441,7 @@ let run () =
     | _ -> fail "unreadable camera line" in
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
-      ~factories:Sop_catalog.Editor.factories
+      ~factories:Sop.Nodes.factories
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
@@ -611,7 +611,7 @@ let run () =
   let mesh_scene mesh = Scene.D3.create [Scene.D3.mesh mesh] in
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
-      ~factories:Sop_catalog.Editor.factories
+      ~factories:Sop.Nodes.factories
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)

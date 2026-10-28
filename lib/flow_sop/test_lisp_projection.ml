@@ -50,7 +50,7 @@ let graph = {|(graph g :context sop
 let source maximum = "(workspace w " ^ definition maximum ^ " " ^ graph ^ ")"
 let catalog factories = ok (Flow_sop.Catalog.of_factories
   ~version:Flow_sop.Manifest.version factories)
-let base = catalog Sop_catalog.Editor.factories
+let base = catalog Sop.Nodes.factories
 
 let native_node values input =
   let rec rebuild ~label:_ ~inputs values =
@@ -59,7 +59,7 @@ let native_node values input =
 let factory = Sop.Edit_graph.factory ~key:"test_card" ~label:"Test card" ~category:["Test"]
   ~slots:["geo"] ~fields:(Param.view schema (Param.default schema)) ~arity:1
   (function [input] -> native_node (Param.default schema) input | _ -> assert false)
-let native_catalog = catalog (factory :: Sop_catalog.Editor.factories)
+let native_catalog = catalog (factory :: Sop.Nodes.factories)
 
 (* Form ids and source spans vary with the declaration prefix; authored content
    and all card metadata must remain structurally equal. *)

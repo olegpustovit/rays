@@ -31,7 +31,7 @@
 (test
  (name test_lisp_node)
  (modules test_lisp_node)
- (libraries flow flow_sop sop sop_catalog rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries flow flow_sop sop rdk rdk_test_support lisp_sop rays_math parallel))
 
 (rule
  (alias test_lisp_node)
@@ -40,7 +40,7 @@
 (test
  (name test_node_facts)
  (modules test_node_facts)
- (libraries flow flow_sop sop_catalog sop rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries flow flow_sop sop rdk rdk_test_support lisp_sop rays_math parallel))
 
 (rule
  (alias test_node_facts)
@@ -50,12 +50,12 @@
  (name test_geometry_collections)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_geometry_collections)
- (libraries flow flow_sop sop sop_catalog rdk rdk_test_support parallel))
+ (libraries flow flow_sop sop rdk rdk_test_support parallel))
 
 (test
  (name test_encoded_parameters)
  (modules test_encoded_parameters)
- (libraries flow flow_sop flow_graph sop sop_catalog rdk parallel))
+ (libraries flow flow_sop flow_graph sop rdk parallel))
 
 (rule
  (alias test_encoded_parameters)
@@ -64,7 +64,7 @@
 (test
  (name test_lisp_projection)
  (modules test_lisp_projection)
- (libraries flow flow_sop flow_graph sop sop_catalog rdk lisp_sop parallel))
+ (libraries flow flow_sop flow_graph sop rdk lisp_sop parallel))
 
 (test
  (name test_merge_source)
@@ -79,34 +79,34 @@
 (test
  (name test_keyword_ports)
  (modules test_keyword_ports)
- (libraries flow flow_ir flow_graph flow_sop sop sop_catalog lisp_sop parallel)
+ (libraries flow flow_ir flow_graph flow_sop sop lisp_sop parallel)
  (preprocess (pps rays.ppx)))
 
 (test
  (name test_attribute_kernel)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_attribute_kernel)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop rays_math parallel))
 
 (test
  (name test_metadata_kernel)
  (modules test_metadata_kernel)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_topology_kernel)
  (modules test_topology_kernel)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_geometry_arrays)
  (modules test_geometry_arrays)
- (libraries flow flow_ir flow_web flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow flow_ir flow_web flow_graph flow_sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_group_kernel)
  (modules test_group_kernel)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_noise_kernel)
@@ -116,7 +116,7 @@
 (test
  (name test_noise_displace_contract)
  (modules test_noise_displace_contract)
- (libraries flow flow_sop sop sop_catalog rdk rdk_test_support lisp_sop parallel unix))
+ (libraries flow flow_sop sop rdk rdk_test_support lisp_sop parallel unix))
 
 (rule
  (alias test_noise_displace_contract)
@@ -136,7 +136,7 @@
 (executable
  (name test_main)
  (modules test_main test_projection test_workspace_edit test_workspace_cook test_workspace_zone)
- (libraries flow flow_sop flow_graph editor_document sop_catalog sop rdk unix str lisp_sop ogpu_mock parallel))
+ (libraries flow flow_sop flow_graph editor_document sop rdk unix str lisp_sop ogpu_mock parallel))
 
 (rule
  (alias test_projection)
@@ -165,48 +165,48 @@
 (test
  (name test_error_rows)
  (modules test_error_rows)
- (libraries flow_sop flow flow_ir sop_catalog sop rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries flow_sop flow flow_ir sop rdk rdk_test_support lisp_sop rays_math parallel))
 
 (test
  (name test_remap)
  (modules test_remap)
- (libraries flow_sop flow flow_ir flow_graph sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow_sop flow flow_ir flow_graph sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_concat)
  (modules test_concat)
- (libraries flow_sop flow flow_ir flow_graph sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow_sop flow flow_ir flow_graph sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_planes)
  (modules test_planes)
- (libraries flow_sop flow flow_ir flow_graph sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow_sop flow flow_ir flow_graph sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_iterate)
  (modules test_iterate)
- (libraries flow flow_ir flow_graph flow_sop sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow flow_ir flow_graph flow_sop sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_adjacency)
  (modules test_adjacency)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_graph)
  (modules test_graph)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_lisp_fusion)
  (modules test_lisp_fusion)
- (libraries flow flow_ir flow_graph flow_sop sop sop_catalog rdk rdk_test_support lisp_sop parallel))
+ (libraries flow flow_ir flow_graph flow_sop sop rdk rdk_test_support lisp_sop parallel))
 
 (test
  (name test_gpu_bulk)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_gpu_bulk)
- (libraries flow flow_ir flow_sop sop sop_catalog rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries flow flow_ir flow_sop sop rdk rdk_test_support lisp_sop rays_math parallel))
 
 (test
  (name test_trace)
@@ -217,3 +217,18 @@
  (name test_mesh_planes)
  (modules test_mesh_planes)
  (libraries flow flow_sop rdk rdk_test_support rays_math unix parallel))
+
+(executable
+ (name flow_manifest)
+ (modules flow_manifest)
+ (libraries flow_sop flow editor_document ogpu_mock parallel))
+
+(rule
+ (targets flow_manifest.gen.sexp)
+ (action
+  (with-stdout-to %{targets}
+   (run %{exe:flow_manifest.exe}))))
+
+(rule
+ (alias runtest)
+ (action (diff flow_manifest.sexp flow_manifest.gen.sexp)))

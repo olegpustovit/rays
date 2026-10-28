@@ -72,7 +72,7 @@ let source_text ?(edge=true) body=Printf.sprintf {|(workspace remap_test
     (if body="" then "(sop/remap source target :points points :vertices vertices :primitives primitives :positions positions"^
       (if edge then " :edges edge_map)" else ")") else body)
 let compile ?(reference=false) ?(edge=true) ?(body="") source target args=
-  let factories=factory "src" source::factory "dst" target::Sop_catalog.Editor.factories in
+  let factories=factory "src" source::factory "dst" target::Sop.Nodes.factories in
   let lowered=L.workspace ~reference ~factories ~inputs:["g",args](parse(source_text ~edge body)) |>flow in
   let graph=List.hd lowered.graphs in
   Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)|>get_string_ok
@@ -233,7 +233,7 @@ let ()=
     check((Sop.Session.stats session).misses>first.misses)"metadata-only source update did not miss")
 let ()=
   let src=source 3 and dst=target 1(source 3) in
-  let factories=factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories in
+  let factories=factory "src" src::factory "dst" dst::Sop.Nodes.factories in
   let catalog=Flow_sop.Catalog.of_factories ~version:1 factories|>flow in
   let forms=parse(source_text "") in
   let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all in
@@ -284,7 +284,7 @@ let ()=
   List.iter(fun reference->ignore(geometry(run(compile ~reference ~body src dst inputs)))) [false;true];
   let body={|(let* [chosen (if (< t 1.0) points (exact (map (fn [(i : int)] (int/mod (int/add i 1) 3)) points)))]
     (sop/remap source target :points chosen :vertices vertices :primitives primitives :edges edge_map :positions "mapped"))|} in
-  let factories=factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories in
+  let factories=factory "src" src::factory "dst" dst::Sop.Nodes.factories in
   let lowered=L.workspace ~factories ~inputs:["g",inputs](parse(source_text body))|>flow in
   let graph=List.hd lowered.graphs in
   let session=Sop.Session.create ~max_entries:32 ~max_payload_bytes:64_000_000|>get_string_ok in
@@ -316,7 +316,7 @@ let ()=
   and offsets=Array.init 32770 Fun.id in
   let expected=oracle src dst p p prim offsets p true in
   List.iter(fun reference->let lowered=L.workspace ~reference
-    ~factories:(factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories)(parse text)|>flow in
+    ~factories:(factory "src" src::factory "dst" dst::Sop.Nodes.factories)(parse text)|>flow in
     let graph=List.hd lowered.graphs in
     let node=Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)|>get_string_ok in
     List.iter(fun domains->List.iter(fun grain->check
@@ -575,7 +575,7 @@ let () =
   List.iter(fun text->match Flow.Syntax.parse text with
     |Error d->failwith(Diagnostic.to_string d)
     |Ok forms->
-      let factories=factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories in
+      let factories=factory "src" src::factory "dst" dst::Sop.Nodes.factories in
       check(Result.is_error(L.workspace ~factories forms)) "malformed weighted remap lowered")
     ["(workspace w (graph g :context sop (sop/remap (sop/src) (sop/dst) :points (array/int 0) :point_mix {:a (array/int 0) :b (array/int 0) :t (array/float 0 0.0)} :vertices (array/int 0) :primitives (array/int 0))))";
      "(workspace w (graph g :context sop (sop/remap (sop/src) (sop/dst) :vertices (array/int 0) :primitives (array/int 0))))";

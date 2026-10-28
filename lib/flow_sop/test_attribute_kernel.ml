@@ -5,7 +5,7 @@ module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
 module Session = Sop.Session
 let flow_ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
-let factories = Sop_catalog.Editor.factories
+let factories = Sop.Nodes.factories
 let catalog = Flow_sop.Catalog.of_factories ~version:1 factories |> flow_ok
 let source ?(columns = 33) ?(amp = "0.8") body = Printf.sprintf
   "(workspace kernel (graph g :context sop (let* [g (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns %d :rows 2) amp %s freq 0.16 result %s] result)))"

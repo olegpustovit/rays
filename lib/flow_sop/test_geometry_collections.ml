@@ -11,7 +11,7 @@ let factory counter key geometry=Sop.Edit_graph.factory ~key ~label:key ~categor
 let ()=
   let count=5001 in
   let a=source 1. and b=source 2. and a_calls=ref 0 and b_calls=ref 0 in
-  let factories=factory a_calls "collection_a" a::factory b_calls "collection_b" b::Sop_catalog.Editor.factories in
+  let factories=factory a_calls "collection_a" a::factory b_calls "collection_b" b::Sop.Nodes.factories in
   let many=String.concat " "(List.init count(fun i->if i mod 2=0 then "a" else "b")) in
   (* [parts] is a real checked geometry rest slot. A frame-dependent index
      keeps map live while preserving the fixed geometry network shape. *)

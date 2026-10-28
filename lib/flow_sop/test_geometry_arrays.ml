@@ -5,7 +5,7 @@ module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
 let flow = function Ok value->value|Error diagnostic->failwith(Diagnostic.to_string diagnostic)
 let parse source=Flow.Syntax.parse source |>flow
-let factories=Sop_catalog.Editor.factories
+let factories=Sop.Nodes.factories
 let with_session fn=
   let session=Sop.Session.create ~max_entries:64 ~max_payload_bytes:64_000_000 |>get_string_ok in
   Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->fn session)

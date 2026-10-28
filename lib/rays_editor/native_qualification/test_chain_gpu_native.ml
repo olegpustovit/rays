@@ -16,7 +16,7 @@ let cook node =
     | Ok output -> Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload)), Unix.gettimeofday () -. start
     | Error d -> failwith (Diagnostic.error_to_string d))
 let () =
-  let lowered = Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories (Flow.Syntax.parse text |> ok) |> ok in
+  let lowered = Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories (Flow.Syntax.parse text |> ok) |> ok in
   let graph = List.hd lowered.graphs in
   let node = Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root) |> Result.get_ok in
   let count = side * side in
@@ -24,7 +24,7 @@ let () =
     List.nth (List.sort compare (List.map snd runs)) 2, fst (List.hd runs) in
   let cpu_seconds, cpu = median (fun () -> cook node) in
   let base_text = Printf.sprintf "(workspace b (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns %d :rows %d)))" side side in
-  let base = Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories (Flow.Syntax.parse base_text |> ok) |> ok in
+  let base = Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories (Flow.Syntax.parse base_text |> ok) |> ok in
   let base_graph = List.hd base.graphs in
   let grid_seconds, _ = median (fun () -> cook (Sop.Edit_graph.compile_node base_graph.network.geometry ~node_id:(Option.get base_graph.root) |> Result.get_ok)) in
   Printf.printf "grid alone cooks in %.3f s on the CPU\n%!" grid_seconds;

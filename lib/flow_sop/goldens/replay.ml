@@ -84,7 +84,7 @@ let external_input name node =
       body = (fun ~live:_ ~node _ -> node ("sop/" ^ key) []) }) image_name
 
 let native_factories key = List.filter (fun factory ->
-  Sop.Edit_graph.factory_key factory <> key) Sop_catalog.Editor.factories
+  Sop.Edit_graph.factory_key factory <> key) Sop.Nodes.factories
 
 let inputs ~key cache directory forms =
   let geometry = ref 0 and image = ref 0 in

@@ -1,5 +1,6 @@
 let ok = function Ok value -> value | Error diagnostic -> failwith (Diagnostic.to_string diagnostic)
 let parse text = Flow.Syntax.parse text |> ok
+let null_factory = List.find (fun f -> Sop.Edit_graph.factory_key f = "null") Sop.Nodes.factories
 let line_nodes () = List.filter (fun (n:Flow.Defnode.t) -> n.kind.qualified = "sop/line") (ok (Flow_sop.Catalog.node_definitions ()))
 let checked = function Some workspace, [] -> workspace
   | _, diagnostics -> failwith (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
@@ -118,7 +119,7 @@ let () =
     (sop/embedded_fixture (sop/line) :distance 2.0)))|} in
   (* The body delegates to a real native kind; the custom fixture itself is Lisp. *)
   let native = Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version
-      ~nodes:(line_nodes ()) [Sop.Nodes.Null.factory] |> ok in
+      ~nodes:(line_nodes ()) [null_factory] |> ok in
   let catalog = {catalog with Flow.Check.kinds = native.kinds @ catalog.kinds} in
   let workspace = Flow_sop.Catalog.check_workspace ~sources:forms catalog authored |> checked in
   assert (workspace.source == authored);
@@ -138,7 +139,7 @@ let () =
   assert (List.length (Flow_sop.Catalog.check_workspace ~sources:forms catalog (parse saved)
     |> checked).nodes = 1);
   let manifest, digest = Flow_sop.Manifest.generate ~nodes:(node :: line_nodes ())
-      [Sop.Nodes.Null.factory] |> ok in
+      [null_factory] |> ok in
   let reread, read_digest = Flow.Check.catalog_of_manifest manifest |> ok in
   assert (digest = read_digest && List.sort compare reread.kinds = List.sort compare catalog.kinds);
   let tree = parse manifest |> List.hd in

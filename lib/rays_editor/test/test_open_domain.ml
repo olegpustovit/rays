@@ -183,7 +183,7 @@ let () =
       (Printf.sprintf "host menu did not insert custom operator (%d nodes): %s" count (D.to_text after));
     let path = Filename.concat presets "saved.rays" in
     Out_channel.with_open_bin path (fun oc -> output_string oc (D.to_text (E.workspace !host)));
-    let loaded = Editor_document.Preset.load_with_ops ~ops:host_ops ~path ~factories:Sop_catalog.Editor.factories
+    let loaded = Editor_document.Preset.load_with_ops ~ops:host_ops ~path ~factories:Sop.Nodes.factories
       ~settings:Editor_document.Settings.none () |> Result.get_ok in
     check (Array.length (snd loaded.doc.workspace).evaluated.plan.nodes = 3)
       "preset reload discarded custom operators");

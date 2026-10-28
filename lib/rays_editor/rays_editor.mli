@@ -14,7 +14,7 @@ module Timeline = Timeline
 val workspace_catalog : ?factories:Sop.Edit_graph.factory list -> unit ->
   (Flow.Check.catalog, Diagnostic.t) result
 (** The catalog a workspace text is checked against ({!Workspace_doc.of_text}):
-    the SOP factories (default [Sop_catalog.Editor.factories]) plus the scene,
+    the SOP factories (default [Sop.Nodes.factories]) plus the scene,
     world and settings kinds generated from the editor's schemas. *)
 
 type window = Editor_document.Contexts.window =
@@ -415,9 +415,9 @@ module Editor : sig
     prepare:(Settings.t -> Sop.Session.output -> ('prepared, string) result) ->
     draw:(Sop.Node.t -> 'prepared -> Rays.Scene.D3.t) ->
     unit -> ('prepared t, string) result
-  (** [factories] is the SOP catalog (default [Sop_catalog.Editor.factories]);
+  (** [factories] is the SOP catalog (default [Sop.Nodes.factories]);
       passing a non-empty list replaces it (prepend custom SOPs to
-      [Sop_catalog.Editor.factories] to extend).
+      [Sop.Nodes.factories] to extend).
       [await] (default: false) makes each
       [update] block on the cook it submits, so a fixed-step run or a test sees the
       settled result of every frame instead of racing the worker. [carry_budget] (default 0.5)

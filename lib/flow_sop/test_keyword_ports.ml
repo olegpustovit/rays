@@ -31,8 +31,8 @@ let () =
   let module Edit = Sop.Edit_graph in
   assert (Edit.factory_keyword_inputs Field.factory = ["field"; "picture"]);
   assert (Edit.factory_input_types Field.factory = ["fn(vec3,float)->float"; "image"]);
-  let catalog = Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version (Field.factory :: Sop_catalog.Editor.factories) |> ok in
-  let text, _ = Flow_sop.Manifest.generate (Field.factory :: Sop_catalog.Editor.factories) |> ok in
+  let catalog = Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version (Field.factory :: Sop.Nodes.factories) |> ok in
+  let text, _ = Flow_sop.Manifest.generate (Field.factory :: Sop.Nodes.factories) |> ok in
   let loaded, _ = Flow.Check.catalog_of_manifest text |> ok in
   assert (catalog = loaded);
   let kind = List.hd catalog.kinds in
@@ -81,7 +81,7 @@ let () =
                   (sop/test_field :field field :picture (image/noise :width 1 :height 1)))]
          (sop/merge a b))))" offset in
   let lower ?(reference = false) ?previous offset =
-    L.workspace ~factories:(Field.factory :: Sop_catalog.Editor.factories) ~reference
+    L.workspace ~factories:(Field.factory :: Sop.Nodes.factories) ~reference
       ?compiled_ids:(Option.map (fun (p : L.t) -> p.compiled_ids) previous)
       ?sites:(Option.map (fun (p : L.t) -> p.sites) previous)
       (Flow.Syntax.parse (text offset) |> ok) |> ok in
@@ -140,7 +140,7 @@ let () =
       (sop/merge samples))))" in
   List.iter (fun (text, expected) -> List.iter (fun reference ->
     let l = Flow_sop.Lower.workspace ~reference
-        ~factories:(Field.factory :: Sop_catalog.Editor.factories)
+        ~factories:(Field.factory :: Sop.Nodes.factories)
         (Flow.Syntax.parse text |> ok) |> ok in
     let graph = List.hd l.graphs in
     let node = Sop.Edit_graph.compile_node graph.network.geometry

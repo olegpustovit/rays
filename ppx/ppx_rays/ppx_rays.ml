@@ -39,9 +39,6 @@ let node_slots_attribute = type_expression_attribute "sop.node_slots"
 let node_types_attribute = type_expression_attribute "sop.node_types"
 let node_keywords_attribute = type_expression_attribute "sop.node_keywords"
 let record_validate_attribute = type_expression_attribute "sop.validate"
-let register_attribute =
-  Attribute.declare_flag "sop.register" Attribute.Context.module_binding
-
 let located_lident ~loc value = { loc; txt = Longident.Lident value }
 
 let longident_of_list = function
@@ -638,26 +635,6 @@ let generate_node_impl ~ctxt (_recursive, declarations) =
   let _loc = Expansion_context.Deriver.derived_item_loc ctxt in
   List.concat_map generate_node_type declarations
 
-let registered_module = function
-  | { pstr_desc = Pstr_module binding; _ }
-      when Attribute.has_flag register_attribute binding -> binding.pmb_name.txt
-  | _ -> None
-
-let manifest structure =
-  let names = List.filter_map registered_module structure in
-  match names with
-  | [] -> structure
-  | names ->
-      let loc = (List.hd structure).pstr_loc in
-      let factories = List.map (fun name ->
-        ident ~loc [name; "factory"]) names in
-      let editor = pmod_structure ~loc
-          [value_binding ~loc "factories" (elist ~loc factories);
-           pstr_value ~loc Nonrecursive [Ast_builder.Default.value_binding ~loc
-             ~pat:(ppat_any ~loc) ~expr:(evar ~loc "factories")]] in
-      structure @ [pstr_module ~loc (module_binding ~loc
-        ~name:{ loc; txt = Some "Editor" } ~expr:editor)]
-
 let attributes = List.map (fun attribute -> Attribute.T attribute)
     [ default_attribute; label_attribute; name_attribute; description_attribute;
       folder_attribute; impact_attribute; soft_min_attribute; soft_max_attribute;
@@ -679,4 +656,3 @@ let () =
   let node_structure = Deriving.Generator.V2.make_noarg
       ~attributes:node_attributes generate_node_impl in
   Deriving.add "sop_node" ~str_type_decl:node_structure |> Deriving.ignore;
-  Driver.register_transformation "sop_manifest" ~impl:manifest
