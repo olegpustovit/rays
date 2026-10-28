@@ -26,7 +26,7 @@ let run () =
       let indices=Bytes.make 12 '\000' in
       Bytes.set_int32_le indices 4 1l; Bytes.set_int32_le indices 8 2l;
       let mesh : Scene_execution.mesh =
-        {key="offscreen-fullscreen";vertices=Bytes.make 48 '\000';
+        {key=Host "offscreen-fullscreen";vertices=Bytes.make 48 '\000';
          vertex_count=3;indices;index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
       and state : Scene_execution.state =
         {viewport=(0,0,4,4);scissor=(0,0,4,4);
@@ -69,7 +69,7 @@ let run () =
       let dense=List.init 257 (fun index ->
         {Scene_execution.family=Scene2;blend=Ogpu.Pipeline.Replace;
          texture=None;auxiliary=None;vertex_attributes=None;samples=1;
-         draw={mesh={mesh with key=Printf.sprintf "dense-%d" index};
+         draw={mesh={mesh with key=Host(Printf.sprintf "dense-%d" index)};
            state={state with scissor=(index mod 2,0,3,4)}}}) in
       for frame=1 to 60 do
         if not (get (Scene_execution.submit ~clear

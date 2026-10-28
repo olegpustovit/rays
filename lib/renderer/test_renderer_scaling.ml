@@ -4,7 +4,7 @@ let state viewport scissor : Scene_execution.state =
    depth_load=Ogpu.Render_pass.Load;depth_clear=1.;transform_uniforms=None}
 
 let run () =
-  let mesh:Scene_execution.mesh={key="scale";vertices=Bytes.empty;
+  let mesh:Scene_execution.mesh={key=Host "scale";vertices=Bytes.empty;
     vertex_count=1;indices=Bytes.empty;index_count=1;
     primitive=Ogpu.Render_pass.Triangle_list}in
   let draw={Scene_execution.mesh;state=state(1,2,3,4)(0,0,4,4)}in

@@ -49,7 +49,7 @@ let run () =
         [ (-1., -1.); (3., -1.); (-1., 3.) ];
       let mesh : Renderer.Scene_execution.mesh =
         {
-          key = "scene3-shared-mesh";
+          key = Host "scene3-shared-mesh";
           vertices;
           vertex_count = 3;
           indices;

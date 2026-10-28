@@ -23,7 +23,7 @@ let run () =
           Bytes.set_int32_le vertices (offset + 8) 0x4080BFFFl)
         [ -1., -1.; 3., -1.; -1., 3. ];
       let mesh : Renderer.Scene_execution.mesh =
-        { key = "runtime-next-fullscreen"; vertices; vertex_count = 3; indices;
+        { key = Host "runtime-next-fullscreen"; vertices; vertex_count = 3; indices;
           index_count = 3; primitive = Ogpu.Render_pass.Triangle_list }
       in
       let state : Renderer.Scene_execution.state =

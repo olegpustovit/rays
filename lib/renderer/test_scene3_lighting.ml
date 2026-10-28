@@ -66,7 +66,7 @@ let run () =
         [ (-1., -1.); (3., -1.); (-1., 3.) ];
       let mesh : Renderer.Scene_execution.mesh =
         {
-          key = "runtime-scene3-light";
+          key = Host "runtime-scene3-light";
           vertices;
           vertex_count = 3;
           indices;

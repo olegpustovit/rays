@@ -5,7 +5,7 @@ let state : Scene_execution.state =
     transform_uniforms=Some(Bytes.make 208 '\000')}
 
 let mesh : Scene_execution.mesh =
-  {key="scene3:test";vertices=Bytes.make(3*68)'\000';vertex_count=3;
+  {key=Host "scene3:test";vertices=Bytes.make(3*68)'\000';vertex_count=3;
    indices=Bytes.make 12 '\000';index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
 
 let entry : Scene_execution.scene3_entry =
@@ -93,7 +93,7 @@ let run () =
     "World without texture",{entry with family=Scene3_world;auxiliary=Some auxiliary};
     "World without environment",{textured with family=Scene3_world;
       auxiliary=Some{auxiliary with environment=None}};
-    "empty mesh key",with_mesh{mesh with key=""};
+    "empty mesh key",with_mesh{mesh with key=Host ""};
     "negative vertex count",with_mesh{mesh with vertex_count= -1};
     "negative index count",with_mesh{mesh with index_count= -1};
     "short indices",with_mesh{mesh with indices=Bytes.make 11 '\000'};

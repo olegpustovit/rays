@@ -16,7 +16,7 @@ let state : Scene_execution.state =
 let mesh index : Scene_execution.mesh =
   let indices=Bytes.make 12 '\000' in
   Bytes.set_int32_le indices 4 1l; Bytes.set_int32_le indices 8 2l;
-  {key=Printf.sprintf "eviction-%d" index; vertices=Bytes.make 48 '\000';
+  {key=Host(Printf.sprintf "eviction-%d" index); vertices=Bytes.make 48 '\000';
    vertex_count=3; indices; index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
 
 let texture index : Scene_execution.sampled_texture =

@@ -38,7 +38,7 @@ let run () =
       Bytes.set_int32_le indices 8 2l;
       let mesh : Renderer.Scene_execution.mesh =
         {
-          key = "scene2-retained-argument";
+          key = Host "scene2-retained-argument";
           vertices;
           vertex_count = 3;
           indices;
@@ -165,7 +165,7 @@ let run () =
              (Int64.sub churn.uploaded_bytes uploaded));
       if !peak_live <> Option.get !settled_release then
         failwith "managed-image churn grew native live-handle state";
-      let plain_mesh = { mesh with Renderer.Scene_execution.key = "scene2-retained-plain" } in
+      let plain_mesh = { mesh with Renderer.Scene_execution.key = Host "scene2-retained-plain" } in
       let plain_draw =
         {
           draw with
@@ -194,7 +194,7 @@ let run () =
         let mesh =
           {
             mesh with
-            Renderer.Scene_execution.key = Printf.sprintf "scene2-plan-churn-%02d" identity;
+            Renderer.Scene_execution.key = Host (Printf.sprintf "scene2-plan-churn-%02d" identity);
           }
         in
         if not (get (Renderer.draw runtime

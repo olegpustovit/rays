@@ -67,7 +67,7 @@ let ()=
     ignore(get(Ogpu.Backend.destroy_device other));
     ignore(get(Ogpu.Backend.destroy_device device))) (fun()->
     let alive=ref true in
-    let key="gpu:vertices:ownership-test"in
+    let key="ownership-test"in
     let register device=get(Scene_execution.Private.register_gpu_vertices owner
       ~key~device~buffer~vertex_count:8~valid:(fun()-> !alive)())in
     let source=register device in registration:=Some source;
@@ -79,7 +79,7 @@ let ()=
     let affine=Bytes.make 24 '\000'in
     Bytes.set_int32_le affine 0(Int32.bits_of_float 1.);
     Bytes.set_int32_le affine 16(Int32.bits_of_float 1.);
-    let mesh:Scene_execution.mesh={key;vertices=Bytes.empty;vertex_count=8;
+    let mesh:Scene_execution.mesh={key=Gpu_vertices key;vertices=Bytes.empty;vertex_count=8;
       indices;index_count=12;primitive=Triangle_list}in
     let state:Scene_execution.state={viewport=(0,0,16,16);scissor=(2,3,10,11);
       cull=Cull_none;depth_compare=Always;depth_write=false;depth_load=Load;
@@ -104,11 +104,11 @@ let ()=
     expect Stale_handle(Scene_execution.replay_prepared_sampled_resources
       ~identity:"gpu-vertex-plan"~version:1L renderer);
     alive:=true;
-    let next_key="gpu:vertices:ownership-test-next"in
+    let next_key="ownership-test-next"in
     let next_source=get(Scene_execution.Private.register_gpu_vertices owner
       ~key:next_key~device~buffer~vertex_count:8~valid:(fun()-> !alive)())in
     Fun.protect~finally:(fun()->Scene_execution.Private.unregister_gpu_vertices next_source)(fun()->
-      let next={entry with draw={entry.draw with mesh={mesh with key=next_key}}}in
+      let next={entry with draw={entry.draw with mesh={mesh with key=Gpu_vertices next_key}}}in
       assert(get(Scene_execution.submit
         ~prepared:("gpu-vertex-plan",2L) renderer[next]));
       assert(Scene_execution.upload_bytes renderer=uploaded&& !mesh_uploads=48));
@@ -126,39 +126,39 @@ let ()=
         [{entry with draw={entry.draw with mesh=candidate}}]);
       assert(!releases=1&&Scene_execution.upload_bytes renderer=uploaded))[
       {mesh with indices=Bytes.make 47 '\000'};
-      {mesh with key="cpu:index-overflow";vertices=Bytes.make 128 '\000';
+      {mesh with key=Host "cpu:index-overflow";vertices=Bytes.make 128 '\000';
         index_count=1 lsl(Sys.int_size-2);indices=Bytes.empty}
     ];
     let bounded=ref[]in
     Fun.protect~finally:(fun()->List.iter Scene_execution.Private.unregister_gpu_vertices !bounded)(fun()->
       for index=1 to 127 do bounded:=get(Scene_execution.Private.register_gpu_vertices owner
-        ~key:("gpu:vertices:capacity:"^string_of_int index)~device~buffer
+        ~key:("capacity:"^string_of_int index)~device~buffer
         ~vertex_count:4~valid:(fun()->true)())::!bounded done;
       assert(Scene_execution.Private.gpu_vertex_count_for_test owner=128);
       let other_source=get(Scene_execution.Private.register_gpu_vertices other_owner
-        ~key:"gpu:vertices:capacity:other-device"~device:other~buffer:other_buffer
+        ~key:"capacity:other-device"~device:other~buffer:other_buffer
         ~vertex_count:4~valid:(fun()->true)())in
       assert(Scene_execution.Private.gpu_vertex_count_for_test other_owner=1);
       Scene_execution.Private.unregister_gpu_vertices other_source;
       expect Capacity(Scene_execution.Private.register_gpu_vertices owner
-        ~key:"gpu:vertices:capacity:overflow"~device~buffer~vertex_count:4~valid:(fun()->true)()));
+        ~key:"capacity:overflow"~device~buffer~vertex_count:4~valid:(fun()->true)()));
     let malformed={entry with draw={entry.draw with mesh={mesh with vertex_count=4}}}in
     expect Invalid_argument(Scene_execution.submit renderer[malformed]);
     (* A Marks draw needs exactly five extra buffers, a Ui draw none; the extras bind at 1 to 5. *)
     expect Invalid_argument(Scene_execution.submit renderer[{entry with family=Marks}]);
     let extra=List.init 5(fun _->get(Ogpu.Backend.create_buffer device
       {label=Some"marks-extra";size=64L;usage=[Vertex;Storage;Copy_dst]}))in
-    let marks_key="gpu:vertices:marks-test"in
+    let marks_key="marks-test"in
     let marks_source=get(Scene_execution.Private.register_gpu_vertices owner~extra
       ~key:marks_key~device~buffer~vertex_count:8~valid:(fun()->true)())in
     let marks_entry={entry with family=Marks;texture=None;
-      draw={entry.draw with mesh={mesh with key=marks_key}}}in
+      draw={entry.draw with mesh={mesh with key=Gpu_vertices marks_key}}}in
     indices_seen:=[];
     assert(get(Scene_execution.submit renderer[marks_entry]));
     assert(List.for_all(fun i->List.mem i !indices_seen)[0;1;2;3;4;5;6]);
     expect Invalid_argument(Scene_execution.submit renderer[{marks_entry with family=Ui}]);
     expect Invalid_argument(Scene_execution.Private.register_gpu_vertices owner~extra:[]
-      ~key:"gpu:vertices:marks-small"~device~buffer:(List.hd extra)~vertex_count:8~valid:(fun()->true)());
+      ~key:"marks-small"~device~buffer:(List.hd extra)~vertex_count:8~valid:(fun()->true)());
     Scene_execution.Private.unregister_gpu_vertices marks_source;
     List.iter(fun b->ignore(get(Ogpu.Backend.destroy_buffer b)))extra;
     Scene_execution.Private.unregister_gpu_vertices source;

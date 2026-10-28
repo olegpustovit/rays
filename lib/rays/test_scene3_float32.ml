@@ -30,8 +30,8 @@ let legacy source (entry:Renderer.Scene_execution.scene3_entry)=
   let uniforms=Bytes.copy(Option.get entry.draw.state.transform_uniforms)in
   Bytes.set_int32_le uniforms(82*4)0l;
   {entry with vertex_attributes=None;draw={
-    mesh={entry.draw.mesh with key=entry.draw.mesh.key^":legacy:"^
-      Digest.to_hex(Digest.bytes bytes);vertices=bytes};
+    mesh={entry.draw.mesh with key=Renderer.Scene_execution.Host(Renderer.Scene_execution.mesh_key_string entry.draw.mesh.key^":legacy:"^
+      Digest.to_hex(Digest.bytes bytes));vertices=bytes};
     state={entry.draw.state with transform_uniforms=Some uniforms}}}
 
 let native source second_source first second=
