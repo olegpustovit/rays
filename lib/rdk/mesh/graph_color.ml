@@ -1,4 +1,3 @@
-open Rays_math
 
 type connectivity =
   | Graph_primitives_by_point

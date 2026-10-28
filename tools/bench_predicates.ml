@@ -112,18 +112,6 @@ let () =
       ~z:underflow_z 0 1 2 3 |> sign_code);
   let module Point = struct
     include Rdk_exact.Implicit_point
-    let sign value = match reference value with
-      | -1 -> Predicates.Negative | 0 -> Predicates.Zero
-      | 1 -> Predicates.Positive | _ -> assert false
-    let ray_edge_reference ~query ~first ~second ~dx ~dy ~dz =
-      sign (Ray_edge (query,first,second,dx,dy,dz))
-    let ray_edge_symbolic_reference ~query ~first ~second =
-      sign (Ray_edge_symbolic (query,first,second))
-    let normal_dot_direction_reference a b c ~dx ~dy ~dz =
-      sign (Normal_dot_direction (a,b,c,dx,dy,dz))
-    let normal_dot_symbolic_reference a b c =
-      sign (Normal_dot_symbolic (a,b,c))
-    let radial_dot_reference a b c d = sign (Radial_dot (a,b,c,d))
   end in
   let construction_x = [|
     0.; 2.; 1.; 1.; 1.; 1.;
@@ -181,30 +169,4 @@ let () =
   measure "implicit_source_barycentric_exact_arena" fallback_count (fun _ ->
     Point.barycentric_source_triangle construction_source
       ~a:0 ~b:1 ~c:7 lpi |> barycentric_code);
-  measure "implicit_ray_edge_exact_arena" fallback_count (fun _ ->
-    Point.ray_edge ~query:origin ~first:lpi ~second:tpi
-      ~dx:1. ~dy:0.25 ~dz:(-0.5) |> sign_code);
-  measure "implicit_ray_edge_exact_reference" fallback_count (fun _ ->
-    Point.ray_edge_reference ~query:origin ~first:lpi ~second:tpi
-      ~dx:1. ~dy:0.25 ~dz:(-0.5) |> sign_code);
-  measure "implicit_ray_edge_symbolic_arena" fallback_count (fun _ ->
-    Point.ray_edge_symbolic ~query:origin ~first:lpi ~second:tpi
-    |> sign_code);
-  measure "implicit_ray_edge_symbolic_reference" fallback_count (fun _ ->
-    Point.ray_edge_symbolic_reference ~query:origin ~first:lpi ~second:tpi
-    |> sign_code);
-  measure "implicit_normal_direction_exact_arena" fallback_count (fun _ ->
-    Point.normal_dot_direction origin lpi tpi
-      ~dx:1. ~dy:0.25 ~dz:(-0.5) |> sign_code);
-  measure "implicit_normal_direction_exact_reference" fallback_count (fun _ ->
-    Point.normal_dot_direction_reference origin lpi tpi
-      ~dx:1. ~dy:0.25 ~dz:(-0.5) |> sign_code);
-  measure "implicit_normal_symbolic_arena" fallback_count (fun _ ->
-    Point.normal_dot_symbolic origin lpi tpi |> sign_code);
-  measure "implicit_normal_symbolic_reference" fallback_count (fun _ ->
-    Point.normal_dot_symbolic_reference origin lpi tpi |> sign_code);
-  measure "implicit_radial_dot" fallback_count (fun _ ->
-    Point.radial_dot origin x_axis lpi tpi |> sign_code);
-  measure "implicit_radial_dot_exact_reference" fallback_count (fun _ ->
-    Point.radial_dot_reference origin x_axis lpi tpi |> sign_code);
   if !sink = min_int then Printf.eprintf "unreachable\n"

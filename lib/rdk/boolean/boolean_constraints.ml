@@ -18,7 +18,7 @@ type t = {
   left_triangle_points : int array;
   right_triangle_points : int array;
   points : Implicit_point.t array;
-  kinds : bytes;
+
   first : int array;
   second : int array;
   constraint_first_sides : bytes;
@@ -33,7 +33,7 @@ type t = {
   coplanar_first_triangles : int array;
   coplanar_second_sides : bytes;
   coplanar_second_triangles : int array;
-  candidate_pairs : int;
+
   degenerate_pairs : int;
 }
 
@@ -41,8 +41,6 @@ let error code message = Error (Error.make ~operation ~code message)
 
 let point_count value = Array.length value.points
 let constraint_count value = Array.length value.first
-let constraint_kind value constraint_index =
-  if Bytes.unsafe_get value.kinds constraint_index = '\000' then Point else Segment
 let constraint_first value constraint_index = value.first.(constraint_index)
 let constraint_second value constraint_index = value.second.(constraint_index)
 let side_at sides index = if Bytes.unsafe_get sides index = '\000' then Left else Right
@@ -54,16 +52,6 @@ let constraint_first_triangle value constraint_index =
   value.constraint_first_triangles.(constraint_index)
 let constraint_second_triangle value constraint_index =
   value.constraint_second_triangles.(constraint_index)
-let constraint_left_triangle value constraint_index =
-  if constraint_first_side value constraint_index = Left then
-    constraint_first_triangle value constraint_index
-  else if constraint_second_side value constraint_index = Left then
-    constraint_second_triangle value constraint_index else -1
-let constraint_right_triangle value constraint_index =
-  if constraint_first_side value constraint_index = Right then
-    constraint_first_triangle value constraint_index
-  else if constraint_second_side value constraint_index = Right then
-    constraint_second_triangle value constraint_index else -1
 let left_triangle_count value = Array.length value.left_offsets - 1
 let right_triangle_count value = Array.length value.right_offsets - 1
 let left_constraint_range value triangle =
@@ -77,16 +65,7 @@ let coplanar_first_side value pair = side_at value.coplanar_first_sides pair
 let coplanar_second_side value pair = side_at value.coplanar_second_sides pair
 let coplanar_first_triangle value pair = value.coplanar_first_triangles.(pair)
 let coplanar_second_triangle value pair = value.coplanar_second_triangles.(pair)
-let coplanar_left_triangle value pair =
-  if coplanar_first_side value pair = Left then coplanar_first_triangle value pair
-  else if coplanar_second_side value pair = Left then coplanar_second_triangle value pair
-  else -1
-let coplanar_right_triangle value pair =
-  if coplanar_first_side value pair = Right then coplanar_first_triangle value pair
-  else if coplanar_second_side value pair = Right then coplanar_second_triangle value pair
-  else -1
 let degenerate_pair_count value = value.degenerate_pairs
-let candidate_pair_count value = value.candidate_pairs
 
 module Private = struct
   let left_geometry value = value.left_geometry
@@ -556,12 +535,12 @@ let build ?cancel ?(resolve_left_self_intersections = false)
                        resolve_right_self_intersections;
                        left_surface; right_surface; source; source_points;
                        left_triangle_points; right_triangle_points;
-                       points; kinds; first; second; constraint_first_sides;
+                       points;  first; second; constraint_first_sides;
                        constraint_first_triangles; constraint_second_sides;
                        constraint_second_triangles; left_offsets; left_constraints;
                        right_offsets; right_constraints; coplanar_first_sides;
                        coplanar_first_triangles; coplanar_second_sides;
-                       coplanar_second_triangles; candidate_pairs = candidate_count;
+                       coplanar_second_triangles;
                        degenerate_pairs = !degenerate_pairs }
   with
   | Cancel.Cancelled -> error "cancelled" "Boolean constraint planning was cancelled"

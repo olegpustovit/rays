@@ -14,12 +14,6 @@ type key =
   | Reverse
   | Shift of int
 exception Sort_error of string
-val apply_points :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int -> int array -> Rdk_core.Geometry.t -> Rdk_core.Geometry.t
-val apply_primitives :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int -> int array -> Rdk_core.Geometry.t -> Rdk_core.Geometry.t
 val sort :
   ?cancel:Rdk_core.Cancel.t ->
   ?grain:int ->

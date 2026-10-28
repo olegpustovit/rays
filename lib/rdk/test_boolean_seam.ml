@@ -57,41 +57,6 @@ let seam ?resolve_left_self_intersections ?resolve_right_self_intersections
   pipeline ?resolve_left_self_intersections ?resolve_right_self_intersections
     left right |> Seam.build |> get
 
-let test_transverse_between_curve () =
-  let left = triangle [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.|]
-  and right = triangle
-      [|0.5,-0.5,-1.; 0.5,1.5,1.; 0.5,1.5,-1.|] in
-  let complex = pipeline left right in
-  let value = Seam.build complex |> get
-  and expected = [|0.5,0.5,0.; 0.5,1.5,0.|] in
-  check (Seam.Private.complex value == complex)
-    "Boolean seam product did not retain its exact complex identity";
-  let curves = Seam.curves value in
-  check (Geometry.primitive_count curves = 1)
-    "transverse intersection did not produce one seam curve";
-  check (Geometry.point_count curves = 2)
-    "transverse seam did not contain its two exact endpoints";
-  check (Topology.primitive_kind (Geometry.topology curves) 0
-      = Topology.Open_polyline)
-    "transverse seam is not an open polyline";
-  check (Seam.curve_kind value 0 = Seam.Between)
-    "transverse operand seam has the wrong kind";
-  check (Seam.curve_edge_range value 0 = (0, 1))
-    "transverse curve lost complex-edge ancestry";
-  check (Seam.Private.is_seam_edge value (Seam.curve_edge value 0))
-    "transverse curve ancestry points at a non-seam complex edge";
-  let positions = Packed.Float3.Private.view (Geometry.positions curves) in
-  let actual = Array.init 2 (fun point ->
-      positions.x.(point), positions.y.(point), positions.z.(point)) in
-  Array.sort Stdlib.compare actual;
-  Array.sort Stdlib.compare expected;
-  Array.iteri (fun point (x, y, z) ->
-      let ex, ey, ez = expected.(point) in
-      check (close x ex && close y ey && close z ez)
-        "transverse seam endpoint is wrong") actual;
-  check (Geometry.primitive_count (Seam.coincident value) = 0)
-    "transverse intersection produced coincident area"
-
 let test_coincident_products () =
   let identical_left = triangle [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.|]
   and identical_right = triangle [|0.,2.,0.; 2.,0.,0.; 0.,0.,0.|] in
@@ -160,50 +125,12 @@ let tetra ~origin:(ox, oy, oz) size = geometry
     [|ox,oy,oz; ox+.size,oy,oz; ox,oy+.size,oz; ox,oy,oz+.size|]
     [|0;2;1; 0;1;3; 1;2;3; 2;0;3|]
 
-let test_closed_between_curve () =
-  let value = seam
-      (tetra ~origin:(0.,0.,0.) 2.)
-      (tetra ~origin:(0.5,0.2,0.2) 2.) in
-  let curves = Seam.curves value in
-  check (Geometry.primitive_count curves = 1)
-    "two convex solid boundaries did not chain into one intersection loop";
-  check (Topology.primitive_kind (Geometry.topology curves) 0
-      = Topology.Closed_polyline)
-    "solid intersection seam did not close";
-  check (Seam.curve_kind value 0 = Seam.Between)
-    "closed solid intersection has the wrong seam kind";
-  let first, last = Seam.curve_edge_range value 0 in
-  check (last - first = Topology.primitive_size (Geometry.topology curves) 0)
-    "closed seam edge ancestry cardinality differs from its curve cardinality"
-
 let geometry_signature geometry =
   let positions = Packed.Float3.Private.view (Geometry.positions geometry)
   and topology = Topology.Private.view (Geometry.topology geometry) in
   Array.copy positions.x, Array.copy positions.y, Array.copy positions.z,
   Array.copy topology.vertex_points, Array.copy topology.primitive_offsets,
   Bytes.copy topology.primitive_kinds
-
-let seam_signature value =
-  let curve_count = Geometry.primitive_count (Seam.curves value) in
-  let edge_count = if curve_count = 0 then 0 else
-      snd (Seam.curve_edge_range value (curve_count - 1)) in
-  geometry_signature (Seam.curves value),
-  geometry_signature (Seam.coincident value),
-  Array.init curve_count (Seam.curve_kind value),
-  Array.init (curve_count + 1) (fun curve ->
-      if curve = curve_count then edge_count
-      else fst (Seam.curve_edge_range value curve)),
-  Array.concat (Array.to_list (Array.init curve_count (fun curve ->
-      let first, last = Seam.curve_edge_range value curve in
-      Array.init (last - first) (fun local -> Seam.curve_edge value (first + local)))))
-
-let test_domain_exactness () =
-  let left = triangle [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.|]
-  and right = triangle [|0.,3.,0.; 4.,3.,0.; 2.,-1.,0.|] in
-  let run domains = Parallel.run ~domains (fun () ->
-      pipeline left right
-      |> Seam.build ~grain:1 ~parallel_cutoff:1 |> get |> seam_signature) in
-  check (run 1 = run 4) "Boolean seam product differs between domain counts"
 
 let test_cancellation () =
   let complex = pipeline
@@ -320,13 +247,10 @@ let test_verification_scale () =
     "scale seam verification failed or differs across domain counts"
 
 let run () =
-  test_transverse_between_curve ();
   test_coincident_products ();
   test_self_kinds ();
   test_same_operand_coincidence ();
   test_native_nonmanifold_is_not_self_intersection ();
-  test_closed_between_curve ();
-  test_domain_exactness ();
   test_cancellation ();
   test_invalid_grain ();
   test_edge_classification_retention ();

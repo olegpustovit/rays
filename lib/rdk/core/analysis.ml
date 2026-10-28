@@ -1,4 +1,3 @@
-open Rays_math
 
 type bounds = {
   min : Rays_math.Vec3.t;
@@ -229,10 +228,6 @@ let total values =
 
 let surface_area ?cancel ?grain ?primitives geometry =
   Result.map total (primitive_measure ?cancel ?grain ?primitives Area geometry)
-
-let perimeter ?cancel ?grain ?primitives geometry =
-  Result.map total
-    (primitive_measure ?cancel ?grain ?primitives Perimeter geometry)
 
 let signed_volume ?cancel ?grain ?primitives geometry =
   Result.map total
@@ -484,84 +479,3 @@ let classify_connectivity ?cancel ?grain ?primitives ?points ?seams
   | Invalid_argument message -> Error (Error.make ~operation:"connectivity"
       ~code:"invalid_parameter" message)
 
-let with_measure_raw ?cancel ?grain ?primitives ?(accumulation = Per_element)
-    ?name ?total_name measure geometry =
-  let name = Option.value ~default:(measure_label measure) name in
-  Result.bind (selected_primitives ?primitives geometry) (fun selected ->
-    let grain = Option.value ~default:16_384 grain in
-    Result.bind (primitive_measure_selected ?cancel ~grain selected measure geometry)
-      (fun measured ->
-        let measured_total = total measured in
-        let output = match Geometry.find_attribute ~owner:Attribute.Primitive
-            name geometry with
-          | None when accumulation = Per_element -> Ok measured
-          | None -> Ok (Array.make (Geometry.primitive_count geometry) 0.)
-          | Some attribute ->
-              (match Attribute.Private.storage attribute with
-               | Attribute.Float values -> Ok (Array.copy values)
-               | Attribute.Int _ | Attribute.Int_array _ | Attribute.Float_array _
-               | Attribute.Float2 _ | Attribute.Float3 _
-               | Attribute.Float4 _ | Attribute.Text _ -> Error (Printf.sprintf
-                   "Rdk.Analysis.measure: existing primitive attribute %s is not float"
-                   name)) in
-        Result.bind output (fun output ->
-          iter_selected selected (fun primitive -> output.(primitive) <- match accumulation with
-            | Per_element -> measured.(primitive)
-            | Throughout -> measured_total);
-          Result.bind (Attribute.create_owned ~name ~owner:Attribute.Primitive
-              (Attribute.Float output)) (fun attribute ->
-            Result.bind (Geometry.with_attribute attribute geometry) (fun geometry ->
-              match total_name with
-              | None -> Ok geometry
-              | Some name ->
-                  Result.bind (Attribute.create_owned ~name ~owner:Attribute.Detail
-                      (Attribute.Float [|measured_total|])) (fun attribute ->
-                    Geometry.with_attribute attribute geometry))))))
-
-let with_measure ?cancel ?grain ?primitives ?accumulation ?name ?total_name
-    measure geometry =
-  try Result.map_error
-      (Error.of_string ~operation:"measure" ~code:"invalid_measure")
-      (with_measure_raw ?cancel ?grain ?primitives ?accumulation ?name
-         ?total_name measure geometry)
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"measure" ~code:"cancelled"
-      "measurement was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"measure"
-      ~code:"invalid_parameter" message)
-
-let with_connectivity ?cancel ?(grain = 16_384) ?primitives ?points ?seams
-    ?uv_attribute ?(owner = Connectivity_primitives) ?(name = "class")
-    ?(attribute = Connectivity_integer) geometry =
-  try
-    if String.trim name = "" then Error (Error.make ~operation:"connectivity"
-        ~code:"invalid_parameter" "attribute name must not be empty")
-    else Result.bind (classify_connectivity ?cancel ~grain ?primitives ?points
-        ?seams ?uv_attribute owner geometry) (fun (classes, class_count) ->
-      let attribute_owner = match owner with
-        | Connectivity_points -> Attribute.Point
-        | Connectivity_primitives -> Attribute.Primitive in
-      let storage = match attribute with
-        | Connectivity_integer -> Attribute.Int classes
-        | Connectivity_text prefix ->
-            let labels = Array.init class_count (fun class_id ->
-              prefix ^ string_of_int class_id) in
-            let values = Array.make (Array.length classes) "" in
-            if Array.length values > 0 then
-              Parallel.for_ ~chunk_size:grain ~start:0
-                ~finish:(Array.length values - 1) (fun element ->
-                  if element land 16_383 = 0 then Cancel.check_opt cancel;
-                  let class_id = classes.(element) in
-                  if class_id >= 0 then values.(element) <- labels.(class_id));
-            Attribute.Text values in
-      Result.bind (Attribute.create_owned ~name ~owner:attribute_owner storage
-        |> Result.map_error (Error.of_string ~operation:"connectivity"
-          ~code:"invalid_attribute")) (fun attribute ->
-        Geometry.with_attribute attribute geometry
-        |> Result.map_error (Error.of_string ~operation:"connectivity"
-          ~code:"invalid_geometry")))
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"connectivity"
-      ~code:"cancelled" "connectivity attribute creation was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"connectivity"
-      ~code:"invalid_parameter" message)

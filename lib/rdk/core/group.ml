@@ -1,4 +1,3 @@
-open Rays_math
 
 type owner = Point | Vertex | Primitive
 type t = {
@@ -211,19 +210,6 @@ let intersection = combine Intersection_order (land)
 let difference = combine Difference_order (fun left right -> left land lnot right)
 let symmetric_difference = combine Xor_order (lxor)
 
-let complement value =
-  let count = Bytes.length value.bits in
-  let bits = Bytes.make count '\000' in
-  if count > 0 then
-    Parallel.for_ ~chunk_size:4096 ~start:0 ~finish:(count - 1) (fun index ->
-      Bytes.unsafe_set bits index
-        (Char.chr (lnot (Char.code (Bytes.unsafe_get value.bits index)) land 255)));
-  if value.length land 7 <> 0 && count > 0 then begin
-    let last = count - 1 and mask = (1 lsl (value.length land 7)) - 1 in
-    Bytes.unsafe_set bits last
-      (Char.chr (Char.code (Bytes.unsafe_get bits last) land mask))
-  end;
-  { value with bits; order = None; data_id = Data_id.fresh () }
 let iter = iter_membership
 let iter_ordered operation value =
   match value.order with

@@ -1,4 +1,3 @@
-open Rays_math
 
 type element = Poly_cut_points | Poly_cut_edges
 type strategy = Poly_cut_remove | Poly_cut_cut

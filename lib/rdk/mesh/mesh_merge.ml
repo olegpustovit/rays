@@ -1,4 +1,3 @@
-open Rays_math
 
 let points values =
   let count = Array.length values in

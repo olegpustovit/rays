@@ -12,14 +12,6 @@ val point_selected :
   selection option -> Rdk_core.Topology_index.t option -> int -> bool
 val point_vector_attribute :
   string -> String.t -> Rdk_core.Geometry.t -> (planes, string) result
-val face_vectors :
-  ?cancel:Rdk_core.Cancel.t ->
-  grain:int ->
-  Rdk_core.Geometry.t -> (planes, string) result
-val geometric_point_vectors :
-  ?cancel:Rdk_core.Cancel.t ->
-  grain:int ->
-  Rdk_core.Geometry.t -> (planes, string) result
 val resolve_directions :
   ?cancel:Rdk_core.Cancel.t ->
   grain:int ->
@@ -34,15 +26,6 @@ val peak :
   ?cancel:Cancel.t -> ?grain:int -> ?selection:selection ->
   ?direction_attribute:string -> ?normalize_direction:bool ->
   ?mask_attribute:string -> distance:float -> ?recompute_normals:bool ->
-  Geometry.t -> (Geometry.t, Error.t) result
-
-val bend :
-  ?cancel:Cancel.t -> ?grain:int -> ?selection:selection ->
-  ?mask_attribute:string -> ?origin:Rays_math.Vec3.t ->
-  ?direction:Rays_math.Vec3.t -> ?up:Rays_math.Vec3.t ->
-  length:float -> ?bend_angle:float -> ?twist_angle:float ->
-  ?limit:bool -> ?both_directions:bool -> ?continuous_twist:bool ->
-  ?capture_attribute:string -> ?recompute_normals:bool ->
   Geometry.t -> (Geometry.t, Error.t) result
 
 val mountain :

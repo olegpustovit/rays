@@ -291,46 +291,6 @@ let test_destination_owners_group_blend_and_misses () =
   if float_values ~owner:Attribute.Point "weight" prescaled <> [|5.|] then
     fail "UVW pre-scale"
 
-let test_packed_array_storage_and_structural_ops () =
-  List.iter (fun (offsets, values) ->
-    match Packed.Int_array.create_owned ~offsets ~values with
-    | Error _ -> ()
-    | Ok _ -> fail "invalid CSR integer array accepted")
-    [([||], [||]); ([|1|], [||]); ([|0;2;1|], [|1;2|]);
-      ([|0;3|], [|1;2|]); ([|0;1|], [|1;2|])];
-  let packed = int_rows [|[|1;2|]; [||]; [|3|]|] in
-  let copy = Packed.Int_array.get packed 0 in
-  copy.(0) <- 99;
-  if Packed.Int_array.length packed <> 3
-      || Packed.Int_array.value_count packed <> 3
-      || Packed.Int_array.get packed 0 <> [|1;2|]
-      || Packed.Int_array.payload_bytes packed
-         <> ((4 + 3) * (Sys.word_size / 8)) then
-    fail "packed integer-array invariants/copy/payload";
-  let base = points 3
-      |> add (Attribute.Int_array packed) ~owner:Attribute.Point ~name:"neighbors"
-      |> add (Attribute.Float_array (float_rows
-        [|[|0.25;0.75|]; [||]; [|1.|]|]))
-           ~owner:Attribute.Point ~name:"weights" in
-  let duplicated = Instance_copy.duplicate ~copies:2 base |> Result.get_ok in
-  let rows = int_array_values ~owner:Attribute.Point "neighbors" duplicated in
-  if Packed.Int_array.length rows <> 9
-      || Array.init 9 (Packed.Int_array.get rows)
-         <> [|[|1;2|];[||];[|3|];[|1;2|];[||];[|3|];
-              [|1;2|];[||];[|3|]|] then
-    fail "Duplicate did not remap packed array rows";
-  let merged = Mesh_merge.run [base; base] |> Result.get_ok in
-  let rows = int_array_values ~owner:Attribute.Point "neighbors" merged in
-  if Array.init 6 (Packed.Int_array.get rows)
-      <> [|[|1;2|];[||];[|3|];[|1;2|];[||];[|3|]|] then
-    fail "Merge did not concatenate packed array rows";
-  let fused = Fuse_grid.fuse ~tolerance:0. base |> Result.get_ok in
-  if Geometry.point_count fused <> 1
-      || Packed.Int_array.get
-           (int_array_values ~owner:Attribute.Point "neighbors" fused) 0
-         <> [|1;2|] then
-    fail "Fuse did not select the stable first packed array row"
-
 let test_explicit_weight_modes () =
   let source = triangle_source () in
   let point_target = points 3
@@ -830,7 +790,6 @@ let run () =
   test_triangle_mixed_storage_and_position ();
   test_quad_ngon_and_curves ();
   test_destination_owners_group_blend_and_misses ();
-  test_packed_array_storage_and_structural_ops ();
   test_explicit_weight_modes ();
   test_signed_normalization_and_group_threshold ();
   test_array_field_row_selection ();

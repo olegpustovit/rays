@@ -1,5 +1,4 @@
 module Bits = struct
-  let byte_count length = (length + 7) / 8
 
   let[@inline always] mem bits index =
     Char.code (Bytes.unsafe_get bits (index lsr 3))
@@ -9,69 +8,6 @@ module Bits = struct
     let byte = index lsr 3 and mask = 1 lsl (index land 7) in
     Bytes.unsafe_set bits byte
       (Char.chr (Char.code (Bytes.unsafe_get bits byte) lor mask))
-end
-
-module Key_map = struct
-  type keep = First | Last
-
-  let capacity length =
-    if length < 0 || length > (Sys.max_array_length - 1) / 3 * 2 then None
-    else
-      let wanted = max 16 (length + (length / 2) + 1) in
-      let capacity = ref 16 in
-      while !capacity < wanted && !capacity <= Sys.max_array_length / 2 do
-        capacity := !capacity lsl 1
-      done;
-      if !capacity < wanted then None else Some !capacity
-
-  let[@inline always] integer_hash value mask =
-    let value = if Sys.word_size > 32 then value lxor (value lsr 32) else value in
-    let value = value lxor (value lsr 16) in
-    (value * 0x45d9f3b) land mask
-
-  (* Specialized per key type: a shared higher-order builder would call
-     [hash]/[equal] through closures in the probe loops. *)
-  let ints keep (values : int array) =
-    Option.map (fun capacity ->
-      let indices = Array.make capacity (-1) and mask = capacity - 1 in
-      Array.iteri (fun index key ->
-        let slot = ref (integer_hash key mask) in
-        while indices.(!slot) >= 0 && values.(indices.(!slot)) <> key do
-          slot := (!slot + 1) land mask
-        done;
-        if keep = Last || indices.(!slot) < 0 then indices.(!slot) <- index) values;
-      fun key ->
-        let slot = ref (integer_hash key mask) and searching = ref true
-        and result = ref (-1) in
-        while !searching do
-          let index = indices.(!slot) in
-          if index < 0 then searching := false
-          else if values.(index) = key then begin
-            result := index; searching := false
-          end else slot := (!slot + 1) land mask
-        done;
-        !result) (capacity (Array.length values))
-
-  let strings keep (values : string array) =
-    Option.map (fun capacity ->
-      let indices = Array.make capacity (-1) and mask = capacity - 1 in
-      Array.iteri (fun index key ->
-        let slot = ref (Hashtbl.hash key land mask) in
-        while indices.(!slot) >= 0 && not (String.equal values.(indices.(!slot)) key) do
-          slot := (!slot + 1) land mask
-        done;
-        if keep = Last || indices.(!slot) < 0 then indices.(!slot) <- index) values;
-      fun key ->
-        let slot = ref (Hashtbl.hash key land mask) and searching = ref true
-        and result = ref (-1) in
-        while !searching do
-          let index = indices.(!slot) in
-          if index < 0 then searching := false
-          else if String.equal values.(index) key then begin
-            result := index; searching := false
-          end else slot := (!slot + 1) land mask
-        done;
-        !result) (capacity (Array.length values))
 end
 
 module Identity_cache = struct

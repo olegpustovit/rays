@@ -25,16 +25,5 @@ val extract_dense : resolution:int * int * int -> min:Rays_math.Vec3.t ->
   max:Rays_math.Vec3.t -> iso:float -> field:Field.t -> unit ->
   (Geometry.t, Error.t) result
 
-val extract_sampled : ?cancel:Cancel.t -> ?grain:int -> ?smooth:bool ->
-  resolution:int * int * int -> min:Rays_math.Vec3.t ->
-  max:Rays_math.Vec3.t -> iso:float -> samples:float array -> unit ->
-  (Geometry.t, Error.t) result
-(** Resolutions count cells. [samples] contains exactly
-    [(rx + 1) * (ry + 1) * (rz + 1)] finite values, x fastest, then y, then z:
-    [samples.(x + (rx + 1) * (y + (ry + 1) * z))]. Lattice coordinates are
-    [Float.fma (float_of_int index) ((max - min) / float_of_int cells) min].
-    The array is borrowed read-only for this call and is never retained.
-    Marching, normals and output order are shared with [extract_dense]. *)
-
 module Private : sig
 end

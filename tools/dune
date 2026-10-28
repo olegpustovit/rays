@@ -93,34 +93,9 @@
  (libraries rays rdk ogpu_mock unix parallel))
 
 (executable
- (name bench_extract_centroid)
- (modules bench_extract_centroid)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_extract_point_curve)
- (modules bench_extract_point_curve)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_circle_from_edges)
- (modules bench_circle_from_edges)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
  (name bench_graph_color)
  (modules bench_graph_color)
  (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_laplacian)
- (modules bench_laplacian)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_delaunay2)
- (modules bench_delaunay2)
- (libraries rays rdk rays_math ogpu_mock unix parallel))
 
 (executable
  (name bench_core)
@@ -286,12 +261,6 @@
  (action
   (system "if command -v node >/dev/null 2>&1; then node web/test/open_all.mjs ../bin/rays.exe .. sketches/audio.rays sketches/basic.rays sketches/drawing.rays sketches/file_dialog.rays sketches/generative.rays sketches/noise.rays sketches/particles.rays sketches/pxui.rays sketches/recursive_rectangles.rays sketches/flow_contours.rays sketches/flow_image.rays sketches/flow_image_kernel.rays sketches/flow_particles_gpu.rays sketches/flow_shader.rays sketches/flow_vectors.rays; else echo 'open_all: skipped (node not found)'; fi")))
 
-; Before/after public Rewire payload/edge ancestry baseline; execution is explicit.
-(executable
- (name bench_rewire_payload)
- (modules bench_rewire_payload)
- (libraries rdk rdk_test_support rays_math unix parallel))
-
 (executable
  (name bench_merge_payload)
  (modules bench_merge_payload)
@@ -309,3 +278,4 @@
  (name runtest)
  (deps
   (alias mesh_plane_validation)))
+

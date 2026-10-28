@@ -1,4 +1,3 @@
-open Rays_math
 
 let operation = "boolean_detect"
 

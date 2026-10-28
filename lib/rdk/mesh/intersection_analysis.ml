@@ -1,4 +1,3 @@
-open Rays_math
 
 let operation = "intersection_analysis"
 let error code message = Error (Error.make ~operation ~code message)

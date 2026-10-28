@@ -72,14 +72,3 @@ module String_table :
     val replace_seq : 'a t -> (key * 'a) Seq.t -> unit
     val of_seq : (key * 'a) Seq.t -> 'a t
   end
-val copy :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?source_group:Rdk_core.Group.t ->
-  ?target_group:Rdk_core.Group.t ->
-  ?match_:match_mode ->
-  ?allow_position:bool ->
-  group_owner:Rdk_core.Group.owner ->
-  rules:rule list ->
-  source:Rdk_core.Geometry.t ->
-  target:Rdk_core.Geometry.t -> unit -> (Rdk_core.Geometry.t, string) result

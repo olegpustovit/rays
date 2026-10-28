@@ -18,8 +18,6 @@ module Private : sig
       stride that permits incremental continuation while the point count stays
       within the bound. Returned [t] values never borrow it. *)
 
-  val build_counts : workspace -> int * int
-  (** Successful full and incremental build counts, for audited diagnostics. *)
 end
 
 val build :
@@ -55,8 +53,3 @@ val build :
     a contiguous suffix of inserted points continues its live incidence
     incrementally; every other input takes the full rebuild path. *)
 
-val triangle_count : t -> int
-val triangle_point : t -> int -> int -> int
-val constraint_count : t -> int
-val constraint_first : t -> int -> int
-val constraint_second : t -> int -> int

@@ -102,24 +102,6 @@ let test_seams_and_uv_islands () =
   check (classes = [|0; 1|] && count = 2)
     "UV discontinuity did not split primitive islands"
 
-let test_attribute_output () =
-  let geometry = two_quads () |> with_group Group.Primitive "right"
-      (fun primitive -> primitive = 1) in
-  let primitives = Geometry.find_group ~owner:Group.Primitive "right" geometry
-      |> Option.get in
-  let integer = Analysis.with_connectivity ~primitives ~name:"piece"
-      geometry |> get_ok in
-  check (int_attribute Attribute.Primitive "piece" integer = [|-1; 0|])
-    "integer class attribute";
-  let text = Analysis.with_connectivity ~primitives ~name:"island"
-      ~attribute:(Analysis.Connectivity_text "tile_") geometry |> get_ok in
-  check (text_attribute Attribute.Primitive "island" text = [|""; "tile_0"|])
-    "prefixed text class attribute and excluded sentinel";
-  let points = Analysis.with_connectivity ~owner:Analysis.Connectivity_points
-      ~name:"point_piece" geometry |> get_ok in
-  check (int_attribute Attribute.Point "point_piece" points
-      = [|0; 0; 0; 0; 0; 0|]) "point-owned class attribute"
-
 let test_validation_and_cancellation () =
   let geometry = two_quads () in
   let point_group = Group.init ~owner:Group.Point ~name:"points" 6 (fun _ -> true)
@@ -163,39 +145,8 @@ let test_validation_and_cancellation () =
     (Analysis.classify_connectivity ~cancel
        Analysis.Connectivity_primitives geometry)
 
-let test_parallel_exactness () =
-  let geometry = Plane_generators.grid ~columns:500 ~rows:300 ~size:10. () |> get_ok in
-  let run domains = Parallel.run ~domains (fun () ->
-    Analysis.with_connectivity ~grain:257
-      ~owner:Analysis.Connectivity_points ~name:"island"
-      ~attribute:(Analysis.Connectivity_text "component_") geometry |> get_ok)
-  in
-  let one = run 1 and four = run 4 in
-  check (text_attribute Attribute.Point "island" one
-      = text_attribute Attribute.Point "island" four)
-    "Connectivity one/four-domain text output differs";
-  check (Geometry.point_count one = 150_801)
-    "Connectivity scale cardinality";
-  (* That grid is one component, so every label is the same. Disjoint pieces
-     make chunk order visible: ids follow each component's first point. *)
-  let piece = Plane_generators.grid ~columns:19 ~rows:19 ~size:1. () |> get_ok in
-  let pieces = 400 and piece_points = Geometry.point_count piece in
-  let merged = Mesh_merge.run (List.init pieces (fun _ -> piece)) |> get_ok in
-  let labels domains = Parallel.run ~domains (fun () ->
-    Analysis.with_connectivity ~grain:257
-      ~owner:Analysis.Connectivity_points ~name:"island"
-      ~attribute:(Analysis.Connectivity_text "component_") merged |> get_ok)
-    |> text_attribute Attribute.Point "island" in
-  let one = labels 1 in
-  check (one = labels 4
-      && one = Array.init (pieces * piece_points) (fun point ->
-           "component_" ^ string_of_int (point / piece_points)))
-    "Connectivity labels of 400 disjoint pieces differ by domain count or piece"
-
 let run () =
   test_point_and_primitive_modes ();
   test_seams_and_uv_islands ();
-  test_attribute_output ();
   test_validation_and_cancellation ();
-  test_parallel_exactness ();
   print_endline "connectivity tests passed"

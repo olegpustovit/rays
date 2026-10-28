@@ -1,4 +1,3 @@
-open Rays_math
 
 type owner = Mirror_point_attributes | Mirror_vertex_attributes
   | Mirror_primitive_attributes

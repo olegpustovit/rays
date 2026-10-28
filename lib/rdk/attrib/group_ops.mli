@@ -69,8 +69,6 @@ type range_rule = {
   range_merge : boolean_operation;
   range_specification : range;
 }
-val range_rule :
-  owner:owner -> name:string -> range -> range_rule
 type rename_conflict =
     Rename_skip
   | Rename_error
@@ -149,69 +147,14 @@ type group_store = {
   mutable dirty : bool;
 }
 
-val expand :
-  ?cancel:Rdk_core.Cancel.t -> ?grain:int -> ?name:string -> ?steps:int ->
-  ?flood:bool -> ?step_attribute:string ->
-  ?primitive_connectivity:primitive_connectivity -> ?normal_spread:float ->
-  ?normal_attribute:expand_normal_attribute ->
-  ?connectivity_attributes:boundary_attribute list ->
-  ?connectivity_tolerance:float -> ?collision:expand_collision ->
-  owner:owner -> group:string -> Rdk_core.Geometry.t ->
-  (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-val promotions :
-  ?cancel:Rdk_core.Cancel.t -> ?grain:int -> ?max_outputs:int ->
-  ?max_payload_bytes:int -> rules:promotion_rule list ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 (* Groups-from-name spelling: nonempty ASCII letters, digits and underscore, no leading digit. *)
 val valid_group_name : string -> bool
 (* Every other byte becomes "_" and a leading digit gets a "_" prefix. *)
 val force_valid_group_name : string -> string
 (* Typed boundary with the former Ops error and cancellation behavior. *)
-val groups_from_name :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?prefix:string ->
-  ?conflict:name_conflict ->
-  ?invalid_names:invalid_name_policy ->
-  ?max_groups:int ->
-  ?max_payload_bytes:int ->
-  owner:Rdk_core.Attribute.owner ->
-  attribute:string ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 (* Typed boundary with the former Ops error and cancellation behavior. *)
-val name_from_groups :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?attribute:string ->
-  ?pattern:string ->
-  ?default:string ->
-  ?overlap:name_overlap ->
-  ?delete_groups:bool ->
-  owner:Rdk_core.Attribute.owner ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 (* Typed boundary with the former Ops error and cancellation behavior. *)
-val group_random :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?seed:Rays_math.Rand.t ->
-  ?seed_attribute:string ->
-  ?base:string ->
-  ?merge:boolean_operation ->
-  probability:float ->
-  owner:owner ->
-  name:string -> Rdk_core.Geometry.t ->
-  (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 (* Typed boundary with the former Ops error and cancellation behavior. *)
-val group_bounds :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?base:string ->
-  ?containment:containment ->
-  ?merge:boolean_operation ->
-  bounds ->
-  owner:owner ->
-  name:string -> Rdk_core.Geometry.t ->
-  (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 type range_connectivity_configuration = {
   range_attributes : string option;
   range_tolerance : float;
@@ -230,14 +173,6 @@ type element_map =
     Identity of int
   | Explicit of int array
   | Proximity of { indices : int array; distances_squared : float array; }
-val copy :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?rules:copy_rule list ->
-  ?conflict:copy_conflict ->
-  ?copy_empty:bool ->
-  source:Rdk_core.Geometry.t ->
-  target:Rdk_core.Geometry.t -> unit -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 val transfer :
   ?cancel:Rdk_core.Cancel.t ->
   ?grain:int ->
@@ -247,115 +182,4 @@ val transfer :
   ?distance:float ->
   source:Rdk_core.Geometry.t ->
   target:Rdk_core.Geometry.t -> unit -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-val group_from_attribute_boundary :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?attributes:boundary_attribute list ->
-  ?tolerance:float ->
-  ?include_unshared_edges:bool ->
-  ?include_all_unshared_curve_edges:bool ->
-  ?include_all_primitives_sharing_boundary_points:bool ->
-  owner:owner ->
-  name:string -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 
-val group_normal :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?normal_attribute:string ->
-  ?use_existing_normal:bool ->
-  ?base:string ->
-  ?include_opposite:bool ->
-  ?merge:boolean_operation ->
-  direction:Rays_math.Vec3.t ->
-  spread_angle:float ->
-  owner:owner ->
-  name:string -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val group_non_planar :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?base:string ->
-  ?merge:boolean_operation ->
-  tolerance:float ->
-  name:string -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val group_backface :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?base:string ->
-  ?merge:boolean_operation ->
-  viewpoint:Rays_math.Vec3.t ->
-  name:string -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val group_edge_depth :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?merge:boolean_operation ->
-  depth:int ->
-  point_group:string ->
-  name:string -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val group_unshared :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?merge:boolean_operation ->
-  owner:owner ->
-  name:string -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val group_boundary_components :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?prefix:string ->
-  ?conflict:name_conflict ->
-  ?max_groups:int ->
-  ?max_payload_bytes:int ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val group_promote_boundary :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?name:string ->
-  ?keep_original:bool ->
-  ?output_attribute:string ->
-  ?attributes:boundary_attribute list ->
-  ?tolerance:float ->
-  ?include_unshared_edges:bool ->
-  ?include_all_unshared_curve_edges:bool ->
-  ?include_all_primitives_sharing_boundary_points:bool ->
-  source:owner ->
-  destination:owner ->
-  group:string -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val combine :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  owner:owner ->
-  name:string ->
-  base:operand ->
-  steps:combine_step list ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val range :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?base:string ->
-  ?invert:bool ->
-  ?filter:range_filter ->
-  ?connectivity:range_connectivity ->
-  ?merge:boolean_operation ->
-  owner:owner ->
-  name:string ->
-  range -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val ranges :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  rules:range_rule list ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
-val invert :
-  ?conflict:rename_conflict ->
-  ?owner:owner ->
-  pattern:string ->
-  ?new_name:string ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

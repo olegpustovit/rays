@@ -1,5 +1,4 @@
 open Rdk_core
-open Rays_math
 
 let normalize_plane_axis = Plane_generators.normalize_plane_axis
 

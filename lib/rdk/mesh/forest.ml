@@ -1,4 +1,3 @@
-open Rays_math
 
 (* Tree scan over a parent array: the shared core of Edge Transport Parent and
    the Lisp [graph/forest]. *)

@@ -4,19 +4,14 @@ type t = {
   constraints : Boolean_constraints.t;
   left : Boolean_face_cdt.t option array;
   right : Boolean_face_cdt.t option array;
-  refined_left : int;
-  refined_right : int;
+
 }
 
 let operation = "boolean_refinement"
 let error code message = Error (Error.make ~operation ~code message)
 
-let left_face_count value = Array.length value.left
-let right_face_count value = Array.length value.right
 let left_face value face = value.left.(face)
 let right_face value face = value.right.(face)
-let refined_left_count value = value.refined_left
-let refined_right_count value = value.refined_right
 
 module Private = struct
   let constraints value = value.constraints
@@ -72,11 +67,11 @@ let build ?cancel ?coplanar ~grain constraints =
           ?coplanar left_count Boolean_constraints.left_constraint_range
           Boolean_coplanar.Private.left_pair_range with
       | Error failure -> Error failure
-      | Ok (left, refined_left) ->
+      | Ok (left, _refined_left) ->
           match build_side ?cancel ~grain constraints Boolean_face_arrangement.Right
               ?coplanar right_count Boolean_constraints.right_constraint_range
               Boolean_coplanar.Private.right_pair_range with
           | Error failure -> Error failure
-          | Ok (right, refined_right) ->
-              Ok { constraints; left; right; refined_left; refined_right }
+          | Ok (right, _refined_right) ->
+              Ok { constraints; left; right;  }
   with Cancel.Cancelled -> error "cancelled" "Boolean refinement was cancelled"

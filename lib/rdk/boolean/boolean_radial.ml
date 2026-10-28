@@ -8,7 +8,6 @@ type t = {
 let operation = "boolean_radial"
 let error code message = Error (Error.make ~operation ~code message)
 
-let edge_count value = Array.length value.offsets - 1
 let incident_range value edge = value.offsets.(edge), value.offsets.(edge + 1)
 let incident_facet value incident = value.facets.(incident)
 let incident_local value incident = Char.code (Bytes.unsafe_get value.locals incident)

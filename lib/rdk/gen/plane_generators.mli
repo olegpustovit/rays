@@ -33,13 +33,6 @@ val normalize_plane_axis :
   string ->
   string -> Rays_math.Vec3.t -> (Rays_math.Vec3.t, string) result
 
-val circle :
-  ?cancel:Rdk_core.Cancel.t -> ?grain:int -> ?arc:circle_arc ->
-  ?orientation:circle_orientation -> ?reverse:bool ->
-  ?center:Rays_math.Vec3.t -> ?radius_x:float -> ?radius_y:float ->
-  ?rotation:float -> ?uniform_scale:float -> ?segments:int ->
-  radius:float -> unit -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-
 val grid :
   ?cancel:Rdk_core.Cancel.t -> ?grain:int -> ?counts:grid_counts ->
   ?connectivity:grid_connectivity -> ?orientation:grid_orientation ->

@@ -3,7 +3,6 @@
 type t
 
 val build : ?cancel:Cancel.t -> Boolean_complex.t -> (t, Error.t) result
-val edge_count : t -> int
 val incident_range : t -> int -> int * int
 val incident_facet : t -> int -> int
 val incident_local : t -> int -> int

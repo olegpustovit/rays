@@ -378,53 +378,6 @@ let check_validation () =
   Cancel.cancel cancelled;
   expect_code "cancelled" (Ray.run ~cancel:cancelled ~source ~collision ())
 
-let check_parallel_exact () =
-  let collision = Plane_generators.grid ~columns:400 ~rows:250 ~size:20. () |> get_ok
-      |> Deform.noise_displace ~amplitude:0.8 ~frequency:0.31 ~seed:709 |> get_ok
-      |> Color_by_height.run ~low:(Rays_math.Color.to_floats (Rays_math.Color.hex_exn "#0ea5e9"))
-           ~high:(Rays_math.Color.to_floats (Rays_math.Color.hex_exn "#f97316")) |> get_ok in
-  let source = Plane_generators.grid ~columns:400 ~rows:250 ~size:20. () |> get_ok
-      |> translated 3. in
-  let run domains = Parallel.run ~domains (fun () ->
-    Ray.run ~grain:1024 ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
-      ~tolerance:1e-9
-      ~distance_attribute:"dist" ~primitive_attribute:"source_primitive"
-      ~source_vertex_numbers_attribute:"source_vertices"
-      ~source_vertex_weights_attribute:"source_weights"
-      ~normal_attribute:"hit_N" ~point_pattern:"Cd"
-      ~source ~collision () |> get_ok) in
-  let one = run 1 and many = run 4 in
-  check (equal_geometry one many)
-    "one-domain and four-domain Ray geometry differ";
-  check (Geometry.point_count one = 401 * 251
-      && Geometry.vertex_count one = Geometry.vertex_count source
-      && Geometry.primitive_count one = Geometry.primitive_count source)
-    "Ray scale fixture changed topology cardinality";
-  check (Array.for_all (fun distance -> distance >= 0.)
-      (point_float one "dist")) "Ray scale fixture unexpectedly missed"
-
-let check_parallel_multi_exact () =
-  let collision = Plane_generators.grid ~columns:160 ~rows:100 ~size:12. () |> get_ok
-      |> Deform.noise_displace ~amplitude:0.35 ~frequency:0.27 ~seed:801 |> get_ok
-      |> Color_by_height.run ~low:(Rays_math.Color.to_floats (Rays_math.Color.hex_exn "#10b981"))
-           ~high:(Rays_math.Color.to_floats (Rays_math.Color.hex_exn "#f59e0b")) |> get_ok in
-  let source = Plane_generators.grid ~columns:160 ~rows:100 ~size:11.5 () |> get_ok
-      |> translated 2. in
-  let run domains = Parallel.run ~domains (fun () ->
-    Ray.run ~grain:512 ~samples:7 ~jitter_scale:0.12 ~seed:997
-      ~combine:Ray.Ray_average
-      ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
-      ~distance_attribute:"dist" ~primitive_attribute:"source_primitive"
-      ~source_vertex_numbers_attribute:"source_vertices"
-      ~source_vertex_weights_attribute:"source_weights"
-      ~normal_attribute:"hit_N" ~point_pattern:"Cd"
-      ~source ~collision () |> get_ok) in
-  let one = run 1 and many = run 4 in
-  check (equal_geometry one many)
-    "one-domain and four-domain multi-sample Ray geometry differ";
-  check (Array.for_all (fun distance -> distance >= 0.)
-      (point_float one "dist")) "multi-sample Ray scale fixture unexpectedly missed"
-
 let run () =
   check_basic_projection ();
   check_direction_policies ();
@@ -432,6 +385,4 @@ let run () =
   check_selection_and_directions ();
   check_imports ();
   check_validation ();
-  check_parallel_exact ();
-  check_parallel_multi_exact ();
   print_endline "ray tests passed"

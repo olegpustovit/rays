@@ -30,7 +30,6 @@ val difference : t -> t -> (t, string) result
 val symmetric_difference : t -> t -> (t, string) result
 (* Invert membership while preserving topology affinity and clearing packed
    padding bits. *)
-val complement : t -> t
 val iter : (int -> unit) -> t -> unit
 
 val remap :
@@ -70,8 +69,4 @@ module Private : sig
   (** Trusted ownership-transfer boundary for kernels that prove the target
       unique-edge order without constructing a {!Topology_index.t}. *)
 
-  val rebind_appended_free_points :
-    source_topology:Topology.t -> target_topology:Topology.t -> t -> t
-  (** Rebind unchanged membership after only free points were appended. The
-      function verifies physical sharing of every edge-defining plane. *)
 end

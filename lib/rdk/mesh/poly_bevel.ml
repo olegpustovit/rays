@@ -1,4 +1,3 @@
-open Rays_math
 
 type shape =
   | Bevel_chamfer

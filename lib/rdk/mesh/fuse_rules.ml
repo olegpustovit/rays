@@ -1,4 +1,3 @@
-open Rays_math
 
 type default_attributes = Keep_first | Average_numeric
 

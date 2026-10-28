@@ -20,15 +20,12 @@ val build :
 
 val point_count : t -> int
 val constraint_count : t -> int
-val constraint_kind : t -> int -> constraint_kind
 val constraint_first : t -> int -> int
 val constraint_second : t -> int -> int
 val constraint_first_side : t -> int -> side
 val constraint_second_side : t -> int -> side
 val constraint_first_triangle : t -> int -> int
 val constraint_second_triangle : t -> int -> int
-val constraint_left_triangle : t -> int -> int
-val constraint_right_triangle : t -> int -> int
 
 val left_triangle_count : t -> int
 val right_triangle_count : t -> int
@@ -42,10 +39,7 @@ val coplanar_first_side : t -> int -> side
 val coplanar_second_side : t -> int -> side
 val coplanar_first_triangle : t -> int -> int
 val coplanar_second_triangle : t -> int -> int
-val coplanar_left_triangle : t -> int -> int
-val coplanar_right_triangle : t -> int -> int
 val degenerate_pair_count : t -> int
-val candidate_pair_count : t -> int
 
 module Private : sig
   val left_geometry : t -> Geometry.t

@@ -7,9 +7,7 @@ val build :
   ?cancel:Cancel.t -> Boolean_complex.t -> Boolean_radial.t ->
   (t, Error.t) result
 
-val half_facet_count : t -> int
 val half_facet : int -> side -> int
-val neighbor : t -> half_facet:int -> local_edge:int -> int
 
 val shell_count : t -> int
 val half_facet_shell : t -> int -> int

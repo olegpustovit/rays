@@ -1,4 +1,3 @@
-open Rays_math
 
 type using = Least_target_point | Closest_target_point
 type match_condition = Equal_attribute_values | Unequal_attribute_values
@@ -8,7 +7,6 @@ type targeting =
   | Specified_points of string
 
 exception Invalid of string
-
 
 let validate_group label owner_count = function
   | None -> ()

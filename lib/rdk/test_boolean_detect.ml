@@ -104,51 +104,6 @@ let test_cross_and_coplanar () =
     "Boolean Detect include_coplanar=false";
   check (topology_equal output source) "Boolean Detect changed topology values"
 
-let test_restrictions_and_errors () =
-  let source = source () and collision = collision () in
-  let only_coplanar = Group.init ~owner:Group.Primitive ~name:"coplanar" 2
-      (fun primitive -> primitive = 1) in
-  let output = Boolean_detect.run_checked ~collision ~collision_primitives:only_coplanar
-      ~intersections_attribute:"hits" source |> get in
-  let rows = int_array "hits" output in
-  check (rows.offsets = [|0;1;1|] && rows.values = [|1|])
-    "Boolean Detect collision primitive restriction";
-  let only_far = Group.init ~owner:Group.Primitive ~name:"far" 2
-      (fun primitive -> primitive = 1) in
-  let output = Boolean_detect.run_checked ~collision ~source_primitives:only_far
-      ~intersections_attribute:"hits" source |> get in
-  let rows = int_array "hits" output in
-  check (rows.offsets = [|0;0;0|] && rows.values = [||])
-    "Boolean Detect source primitive restriction";
-  expect "invalid_parameter" (Boolean_detect.run_checked ~collision ~tolerance:(-1.) source);
-  expect "invalid_parameter" (Boolean_detect.run_checked ~collision
-    ~intersecting_group:None source);
-  expect "invalid_parameter" (Boolean_detect.run_checked ~collision
-    ~intersections_attribute:"same" ~self_intersections_attribute:"same" source);
-  expect "invalid_parameter" (Boolean_detect.run_checked ~collision
-    ~intersecting_group:(Some "same") ~self_intersecting_group:"same" source);
-  let wrong = Group.init ~owner:Group.Point ~name:"wrong" 6 (Fun.const true) in
-  expect "invalid_group" (Boolean_detect.run_checked ~collision
-    ~source_primitives:wrong source);
-  let cancelled = Cancel.create () in
-  Cancel.cancel cancelled;
-  expect "cancelled" (Boolean_detect.run_checked ~cancel:cancelled ~collision source);
-  let curve = Line_geometry.line ~origin:Rays_math.Vec3.zero ~direction:Rays_math.Vec3.unit_x ~length:1. ()
-      |> get in
-  expect "invalid_surface" (Boolean_detect.run_checked ~collision curve);
-  let nonfinite_positions = Packed.Float3.Private.of_owned_exn
-      ~x:[|Float.nan;2.;0.;10.;12.;10.|]
-      ~y:[|0.;0.;2.;0.;0.;2.|] ~z:(Array.make 6 0.) in
-  let nonfinite = Geometry.with_positions nonfinite_positions source |> get_string in
-  expect "invalid_surface" (Boolean_detect.run_checked ~collision nonfinite);
-  let empty = Line_geometry.points [||] in
-  let empty_output = Boolean_detect.run_checked ~collision ~intersections_attribute:"hits"
-      ~count_attribute:"hit_count" empty |> get in
-  check (Geometry.primitive_count empty_output = 0
-      && (int_array "hits" empty_output).offsets = [|0|]
-      && ints "hit_count" empty_output = [||])
-    "Boolean Detect empty source outputs"
-
 let test_tolerance_and_translation () =
   let single_source = geometry [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.|] [|0;1;2|] in
   let separated = geometry
@@ -269,7 +224,6 @@ let test_parallel_exact () =
 
 let run () =
   test_cross_and_coplanar ();
-  test_restrictions_and_errors ();
   test_tolerance_and_translation ();
   test_self_intersections ();
   test_parallel_exact ();

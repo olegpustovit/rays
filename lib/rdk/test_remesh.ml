@@ -151,87 +151,6 @@ let test_input_points_only () =
     "Remesh input-points-only mode changed point cardinality";
   check_triangles output
 
-let test_fused_split_matches_composed_reference () =
-  let positions = Packed.Float3.Private.of_owned_exn
-      ~x:[|0.;2.;1.|] ~y:[|0.;0.;sqrt 3.|] ~z:[|0.;0.;0.|] in
-  let topology = Topology.polygons_owned ~point_count:3
-      ~vertex_points:[|0;1;2|] ~primitive_offsets:[|0;3|] |> get_string in
-  let index = Topology_index.create topology in
-  let all_edges = Edge_group.init ~topology ~index ~name:"authored_edges"
-      (fun _ -> true) in
-  let point_id = Attribute.create_owned ~owner:Attribute.Point ~name:"point_id"
-      (Attribute.Int [|10;20;30|]) |> get_string
-  and uv = Attribute.create_owned ~owner:Attribute.Vertex ~name:"uv"
-      (Attribute.Float2 (Packed.Float2.of_owned ~x:[|0.;1.;0.5|]
-        ~y:[|0.;0.;1.|] |> get_string)) |> get_string
-  and rows = Attribute.create_owned ~owner:Attribute.Vertex ~name:"rows"
-      (Attribute.Int_array (Packed.Int_array.create_owned
-        ~offsets:[|0;1;3;4|] ~values:[|7;8;9;10|] |> get_string)) |> get_string
-  and material = Attribute.create_owned ~owner:Attribute.Primitive ~name:"material"
-      (Attribute.Text [|"red"|]) |> get_string
-  and detail = Attribute.create_owned ~owner:Attribute.Detail ~name:"tag"
-      (Attribute.Text [|"split-reference"|]) |> get_string in
-  let point_group = Group.ordered ~owner:Group.Point ~name:"ordered_points"
-      ~length:3 [|2;0;1|] |> get_string
-  and vertex_group = Group.init ~owner:Group.Vertex ~name:"corners" 3
-      (fun vertex -> vertex <> 1)
-  and primitive_group = Group.init ~owner:Group.Primitive ~name:"face" 1
-      (fun _ -> true) in
-  let source = Geometry.create ~positions ~topology
-      ~attributes:[point_id;uv;rows;material;detail]
-      ~groups:[point_group;vertex_group;primitive_group]
-      ~edge_groups:[all_edges] () |> get_string in
-  let divided = Subdivide.edge_divide ~grain:1 ~edges:all_edges ~divisions:2
-      ~share_points:true source |> get in
-  let reference = Triangulate.run ~grain:1 divided |> get in
-  let fused = Remesh.run ~grain:1 ~iterations:1 ~smoothing:0. ~project:false
-      ~preserve_uv_seams:false ~recompute_point_normals:false
-      ~target_length:1.4 source |> get in
-  let rp = Packed.Float3.Private.view (Geometry.positions reference)
-  and fp = Packed.Float3.Private.view (Geometry.positions fused)
-  and ft = Topology.Private.view (Geometry.topology fused) in
-  check (rp.x = fp.x && rp.y = fp.y && rp.z = fp.z
-      && Geometry.point_count reference = Geometry.point_count fused
-      && Geometry.vertex_count reference = Geometry.vertex_count fused
-      && Geometry.primitive_count reference = Geometry.primitive_count fused)
-    "Remesh fused split changed composed cardinality or midpoint positions";
-  check (ft.vertex_points = [|0;3;5; 3;1;4; 5;4;2; 3;4;5|])
-    "Remesh fused all-edge split lost its deterministic four-triangle pattern";
-  let point_ids geometry = match Geometry.find_attribute
-      ~owner:Attribute.Point "point_id" geometry with
-    | Some attribute ->
-        (match Attribute.Private.storage attribute with
-         | Attribute.Int values -> values | _ -> assert false)
-    | None -> assert false in
-  check (point_ids reference = point_ids fused)
-    "Remesh fused split changed point payload interpolation";
-  let materials geometry = match Geometry.find_attribute
-      ~owner:Attribute.Primitive "material" geometry with
-    | Some attribute ->
-        (match Attribute.Private.storage attribute with
-         | Attribute.Text values -> values | _ -> assert false)
-    | None -> assert false in
-  check (materials reference = materials fused)
-    "Remesh fused split changed primitive ancestry";
-  let detail geometry = Geometry.find_attribute ~owner:Attribute.Detail "tag"
-      geometry |> Option.get in
-  check (Attribute.storage_id (detail reference) = Attribute.storage_id (detail fused))
-    "Remesh fused split copied detail payload";
-  let edge_group geometry = Geometry.find_edge_group "authored_edges" geometry
-      |> Option.get in
-  check (edge_pairs reference (edge_group reference)
-      = edge_pairs fused (edge_group fused))
-    "Remesh fused split changed native source-edge ancestry";
-  let point_group geometry = Geometry.find_group ~owner:Group.Point
-      "ordered_points" geometry |> Option.get in
-  check (Group.ordered_elements (point_group reference)
-      = Group.ordered_elements (point_group fused))
-    "Remesh fused split changed ordered point-group ancestry";
-  let vertex_group geometry = Geometry.find_group ~owner:Group.Vertex "corners"
-      geometry |> Option.get in
-  check (Group.cardinality (vertex_group fused) = 5)
-    "Remesh fused split violated endpoint-intersection vertex-group interpolation"
-
 (* A payload-rich fixture: split, collapse and flip all fire, attributes and
    groups of every owner ride along. The hashes were produced by the chained
    split/collapse/flip kernels before the local-edit structure replaced them;
@@ -382,7 +301,6 @@ let test_parallel_exact () =
 let run () =
   test_adaptive_hard_and_uv_seams ();
   test_input_points_only ();
-  test_fused_split_matches_composed_reference ();
   test_errors_and_cancellation ();
   test_parallel_exact ();
   test_local_edits_match_chained_kernels ();

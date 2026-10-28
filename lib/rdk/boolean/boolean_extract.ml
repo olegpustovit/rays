@@ -21,7 +21,7 @@ type ancestry = {
   geometry : Geometry.t;
   left_geometry : Geometry.t;
   right_geometry : Geometry.t;
-  point_complex_vertices : int array;
+
   complex_output_points : int array;
   corner_complex_vertices : int array;
   primitive_complex_facets : int array;
@@ -96,25 +96,10 @@ let primitive_side value primitive =
   if Bytes.unsafe_get value.primitive_sides primitive = '\000'
   then Boolean_complex.Left else Boolean_complex.Right
 let primitive_face value primitive = value.primitive_faces.(primitive)
-let primitive_triangle value primitive = value.primitive_triangles.(primitive)
 let primitive_refined_triangle value primitive =
   value.primitive_refined_triangles.(primitive)
 let primitive_winding value primitive =
   if Bytes.unsafe_get value.primitive_windings primitive = '\000' then 1 else -1
-let checked_corner operation local =
-  if local < 0 || local > 2 then
-    invalid_arg (operation ^ " corner must be 0, 1, or 2")
-let primitive_source_point value primitive local =
-  checked_corner "Boolean ancestry source" local;
-  value.primitive_source_points.((primitive * 3) + local)
-let primitive_source_vertex value primitive local =
-  checked_corner "Boolean ancestry source" local;
-  value.primitive_source_vertices.((primitive * 3) + local)
-let corner_barycentric value primitive local =
-  checked_corner "Boolean ancestry output" local;
-  let corner = (primitive * 3) + local in
-  (value.barycentric_a.(corner), value.barycentric_b.(corner),
-   value.barycentric_c.(corner))
 
 let piece_ids ~weiler ~ancestry ~source ~primitive_count =
   let complex = ancestry.complex in
@@ -471,7 +456,7 @@ let build_internal ?cancel ?(require_closed = true)
       if output >= 0 then point_map.(point) <- old_to_new.(output)
     done;
     point_count := Array.length x;
-    let point_complex_vertices = if with_ancestry
+    let _point_complex_vertices = if with_ancestry
       then materialized_complex_vertices else [||]
     and complex_output_points = if with_ancestry then Array.copy point_map else [||] in
     let constraints = Boolean_complex.Private.constraints complex in
@@ -770,7 +755,7 @@ let build_internal ?cancel ?(require_closed = true)
              complex;
              geometry;
              left_geometry; right_geometry;
-             point_complex_vertices; complex_output_points;
+              complex_output_points;
              corner_complex_vertices; primitive_complex_facets;
              primitive_sides; primitive_faces; primitive_triangles;
              primitive_refined_triangles; primitive_windings;
@@ -790,13 +775,6 @@ let build_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
   build_internal ?cancel ?require_closed ?defer_rounded_slivers
     ~with_ancestry:true ~with_corner_payload:corner_payload
     ~expression complex weiler cells
-
-let build ?cancel ~expression complex weiler cells =
-  match build_internal ?cancel ~with_ancestry:false
-      ~with_corner_payload:false
-      ~expression complex weiler cells with
-  | Ok value -> Ok value.geometry
-  | Error _ as error -> error
 
 let build_selected_with_ancestry ?cancel
     ?defer_rounded_slivers ?barycentric_cache ?(corner_payload = true)
@@ -931,7 +909,7 @@ let concatenate_ancestries ?cancel values =
         x.(output) <- px; y.(output) <- py; z.(output) <- pz
       end
     done;
-    let x, y, z, point_complex_vertices, old_to_new =
+    let x, y, z, _point_complex_vertices, old_to_new =
       coalesce_positions ~complex_vertices:materialized_complex_vertices ~x ~y ~z in
     for point = 0 to Array.length complex_to_output - 1 do
       let output = complex_to_output.(point) in
@@ -1010,7 +988,7 @@ let concatenate_ancestries ?cancel values =
              complex; geometry;
              left_geometry = first.left_geometry;
              right_geometry = first.right_geometry;
-             point_complex_vertices; complex_output_points;
+              complex_output_points;
              corner_complex_vertices; primitive_complex_facets;
              primitive_sides; primitive_faces; primitive_triangles;
              primitive_refined_triangles; primitive_windings;
@@ -1060,8 +1038,6 @@ module Private = struct
   let validate_closed_topology = validate_closed_topology
   let barycentric_cache ~capacity = barycentric_cache capacity
   let complex value = value.complex
-  let point_complex_vertex (value : ancestry) point =
-    value.point_complex_vertices.(point)
   let complex_output_point (value : ancestry) point =
     value.complex_output_points.(point)
   let primitive_complex_facet (value : ancestry) primitive =

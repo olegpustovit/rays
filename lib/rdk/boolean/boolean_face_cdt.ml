@@ -5,8 +5,7 @@ type t = {
   triangle_a : int array;
   triangle_b : int array;
   triangle_c : int array;
-  constraint_first : int array;
-  constraint_second : int array;
+
 }
 
 type workspace = Planar_cdt.Private.workspace
@@ -25,9 +24,6 @@ let triangle_point value triangle local = match local with
   | 1 -> value.triangle_b.(triangle)
   | 2 -> value.triangle_c.(triangle)
   | _ -> invalid_arg "Boolean face CDT local corner must be 0, 1, or 2"
-let constraint_count value = Array.length value.constraint_first
-let constraint_first value constraint_index = value.constraint_first.(constraint_index)
-let constraint_second value constraint_index = value.constraint_second.(constraint_index)
 
 module Private = struct
   let point value point = value.points.(point)
@@ -283,10 +279,7 @@ let build ?cancel ?workspace
             view.triangle_points.((triangle * 3) + 1));
           triangle_c = Array.init triangle_count (fun triangle ->
             view.triangle_points.((triangle * 3) + 2));
-          constraint_first = Array.init (Array.length view.constraint_points / 2)
-              (fun index -> view.constraint_points.(index * 2));
-          constraint_second = Array.init (Array.length view.constraint_points / 2)
-              (fun index -> view.constraint_points.((index * 2) + 1));
+
         }
   with
   | Cancel.Cancelled -> error "cancelled" "Boolean face CDT was cancelled"

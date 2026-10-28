@@ -18,9 +18,6 @@ val coincident : t -> Geometry.t
 (** Exact coincident-area facets, emitted once with their complex orientation. *)
 
 val curve_kind : t -> int -> kind
-val curve_edge_range : t -> int -> int * int
-val curve_edge : t -> int -> int
-(** Source complex-edge ancestry for each curve, stored as packed CSR. *)
 
 module Private : sig
   val complex : t -> Boolean_complex.t

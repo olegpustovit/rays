@@ -215,9 +215,6 @@ let[@inline] incircle_values ax ay bx by cx cy dx dy =
     if determinant < 0. then Negative else Positive
   else exact_incircle ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy
 
-let incircle ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy =
-  incircle_values ax ay bx by cx cy dx dy
-
 let[@inline] incircle_packed ~x ~y a b c d =
   incircle_values x.(a) y.(a) x.(b) y.(b) x.(c) y.(c) x.(d) y.(d)
 
@@ -437,24 +434,6 @@ let segment_triangle_code_packed ~x ~y ~z ~segment_start ~segment_end
       let location = triangle_location_code ab bc ca in
       if location < 0 then 0 else 17 + location
 
-let triangle_location_of_code = function
-  | 0 -> Face | 1 -> Edge_ab | 2 -> Edge_bc | 3 -> Edge_ca
-  | 4 -> Vertex_a | 5 -> Vertex_b | 6 -> Vertex_c
-  | _ -> invalid_arg "Rdk.Predicates: invalid triangle-location code"
-
-let segment_triangle_packed ~x ~y ~z ~segment_start ~segment_end
-    ~triangle_a ~triangle_b ~triangle_c =
-  match segment_triangle_code_packed ~x ~y ~z ~segment_start ~segment_end
-      ~triangle_a ~triangle_b ~triangle_c with
-  | 0 -> Segment_disjoint
-  | 1 -> Segment_coplanar
-  | 2 -> Segment_degenerate_triangle
-  | code when code < 10 ->
-      Segment_hit (Start, triangle_location_of_code (code - 3))
-  | code when code < 17 ->
-      Segment_hit (End, triangle_location_of_code (code - 10))
-  | code -> Segment_hit (Interior, triangle_location_of_code (code - 17))
-
 let triangle_degenerate_packed ~x ~y ~z a b c =
   orient2d_packed ~x ~y a b c = Zero
   && orient2d_packed ~x:y ~y:z a b c = Zero
@@ -549,25 +528,6 @@ let triangle_triangle_features_into ~x ~y ~z ~left_a ~left_b ~left_c
     end;
     !count
   end
-
-let triangle_feature_of_code code =
-  if code < 4 then Triangle_vertex code
-  else if code < 8 then Triangle_edge (code - 4)
-  else Triangle_face
-
-let triangle_triangle_packed ~x ~y ~z ~left_a ~left_b ~left_c
-    ~right_a ~right_b ~right_c =
-  let output = Array.make 4 0 in
-  match triangle_triangle_features_into ~x ~y ~z ~left_a ~left_b ~left_c
-      ~right_a ~right_b ~right_c output with
-  | -2 -> Triangle_degenerate
-  | -1 -> Triangle_coplanar
-  | 0 -> Triangle_disjoint
-  | 1 -> Triangle_point
-      (triangle_feature_of_code output.(0), triangle_feature_of_code output.(1))
-  | _ -> Triangle_segment
-      ((triangle_feature_of_code output.(0), triangle_feature_of_code output.(1)),
-       (triangle_feature_of_code output.(2), triangle_feature_of_code output.(3)))
 
 let[@inline always] projected_orient projection x y z a b c =
   if projection = 0 then orient2d_packed ~x ~y a b c

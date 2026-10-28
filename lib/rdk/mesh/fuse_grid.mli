@@ -41,19 +41,3 @@ val fuse :
   ?target:Rdk_core.Geometry.t ->
   Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 
-val snap_to_grid :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?selection:Rdk_core.Group.t ->
-  ?spacing:Rays_math.Vec3.t ->
-  ?offset:Rays_math.Vec3.t ->
-  ?rounding:grid_rounding ->
-  ?max_distance:float ->
-  ?fuse_points:bool ->
-  ?position:Fuse_reduce.position ->
-  ?weight_attribute:string ->
-  ?attributes:Fuse_reduce.attributes ->
-  ?attribute_rules:Fuse_reduce.attribute_rule list ->
-  ?group_rules:Fuse_reduce.group_rule list ->
-  ?snapped_group:string ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

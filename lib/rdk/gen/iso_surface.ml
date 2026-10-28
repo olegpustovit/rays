@@ -1,5 +1,4 @@
 open Rdk_core
-open Rays_math
 
 type sample = float array
 
@@ -11,7 +10,7 @@ module Field = struct
   let custom field = Custom field
 end
 
-type evaluator =  Dense of Field.t | Sampled of float array
+type evaluator =  Dense of Field.t
 
 let sample_scratch = Domain.DLS.new_key (fun () -> Array.make 3 0.)
 
@@ -54,14 +53,11 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
   | None, _ | _, None -> Error "Iso3.extract: resolution is too large"
   | Some plane_stride, Some slab_cell_count ->
   (match evaluator with
-   | Sampled samples ->
-       (match safe_product plane_stride (z_cells + 1) with
-        | Some count when count = Array.length samples -> ()
-        | _ -> invalid_arg "Iso3.extract_sampled: sample count must match the point lattice")
+
    | _ -> ());
   let exception Non_finite_field in
   let slabs_per_chunk = match evaluator with
-    | Sampled _ -> 1 + (grain - 1) / slab_cell_count
+
     | _ -> z_cells in
   let chunk_count = 1 + (z_cells - 1) / slabs_per_chunk in
   let split_slabs = chunk_count >= 2 in
@@ -81,7 +77,6 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
     Cancel.check_opt cancel;
     let pz = Float.fma (float_of_int z) z_step min.z in
     (match evaluator with
-     | Sampled samples -> Array.blit samples (z * plane_stride) values 0 plane_stride
 
      | Dense (Custom field) ->
          iter_plane (fun flat ->
@@ -432,10 +427,6 @@ let protect ?cancel evaluator finish ?grain ?smooth ~resolution ~min ~max ~iso (
 
 let extract_dense ~resolution ~min ~max ~iso ~field () =
   protect (Dense field) geometry_of_packed
-    ~resolution ~min ~max ~iso ()
-
-let extract_sampled ?cancel ?grain ?smooth ~resolution ~min ~max ~iso ~samples () =
-  protect ?cancel (Sampled samples) geometry_of_packed ?grain ?smooth
     ~resolution ~min ~max ~iso ()
 
 module Private = struct

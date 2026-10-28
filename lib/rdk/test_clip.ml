@@ -133,28 +133,6 @@ let check_distance () =
   check (equal_geometry offset translated)
     "Clip distance is not equivalent to translating along the normalized normal"
 
-let check_clipped_edge_group () =
-  let source = Box_generator.box ~connectivity:Box_generator.Box_quads ~consolidate_points:true
-      ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok
-      |> Group_mesh.group_edges ~name:"plane_edges" |> get_ok in
-  let output = Plane_clip.clip ~fill:true ~clipped_edge_group:"plane_edges"
-      ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
-  let group = Geometry.find_edge_group "plane_edges" output |> Option.get in
-  check (Edge_group.cardinality group = 4)
-    "clipped edge output did not replace the existing group with the cap boundary";
-  let index = Topology_index.create (Geometry.topology output)
-  and positions = Packed.Float3.Private.view (Geometry.positions output) in
-  Edge_group.iter (fun edge ->
-    let a, b = Topology_index.edge_points index edge in
-    check (near positions.x.(a) 0. && near positions.x.(b) 0.)
-      "clipped edge group contains an edge away from the clipping plane") group;
-  let unioned = Plane_clip.clip ~fill:true ~replace_existing_groups:false
-      ~clipped_edge_group:"plane_edges" ~origin:Rays_math.Vec3.zero
-      ~normal:Rays_math.Vec3.unit_x source |> get_ok in
-  let unioned = Geometry.find_edge_group "plane_edges" unioned |> Option.get in
-  check (Edge_group.cardinality unioned > Edge_group.cardinality group)
-    "Clip Replace Existing=false did not union native edge membership"
-
 let check_selection_isolation () =
   let source = shared_selection_fixture () in
   let selected = Group.init ~owner:Group.Primitive ~name:"selected" 2
@@ -310,42 +288,6 @@ let check_selected_caps_and_edge_output () =
    | Some group -> check (Edge_group.cardinality group = 1)
        "selected Clip included an unselected coplanar edge"
    | None -> fail "selected Clip edge output missing")
-
-let check_parallel_exact () =
-  let source = Plane_generators.grid ~connectivity:Plane_generators.Grid_alternating_triangles
-      ~columns:600 ~rows:400 ~size:20. () |> get_ok in
-  let positions = Packed.Float3.Private.view (Geometry.positions source) in
-  let field = Attribute.create_owned ~name:"field" ~owner:Attribute.Point
-      (Attribute.Float4 (Packed.Float4.of_owned
-        ~x:(Array.init (Geometry.point_count source) (fun point ->
-          positions.x.(point) +. (0.2 *. positions.z.(point))))
-        ~y:(Array.copy positions.y) ~z:(Array.copy positions.z)
-        ~w:(Array.init (Geometry.point_count source) float_of_int)
-        |> get_string_ok)) |> get_string_ok in
-  let source = Geometry.with_attribute field source |> get_string_ok
-      |> Group_mesh.group_edges ~name:"source_edges" |> get_ok in
-  let run domains = Parallel.run ~domains (fun () ->
-      Plane_clip.clip ~grain:2048 ~keep:Plane_clip.All ~split_connectivity:true
-        ~clip_attribute:"field" ~distance:0.137
-        ~clipped_edge_group:"clipped_edges" ~clipped_group:"clipped"
-        ~above_group:"above" ~below_group:"below" ~origin:Rays_math.Vec3.zero
-        ~normal:(Rays_math.Vec3.create 0.7 0.3 (-0.2)) source |> get_ok) in
-  let one = run 1 and four = run 4 in
-  check (equal_geometry one four)
-    "one-domain and four-domain Clip geometry differ";
-  check (Geometry.point_count one > 200_000)
-    "Clip scale fixture is unexpectedly small";
-  let selected = Group.init ~owner:Group.Primitive ~name:"selected"
-      (Geometry.primitive_count source) (fun primitive -> primitive mod 3 = 0) in
-  let run_selected domains = Parallel.run ~domains (fun () ->
-      Plane_clip.clip ~grain:2048 ~keep:Plane_clip.All ~split_connectivity:true
-        ~selection:(Transform_ops.Selected_primitives selected)
-        ~clip_attribute:"field" ~distance:0.137
-        ~clipped_edge_group:"clipped_edges" ~clipped_group:"clipped"
-        ~above_group:"above" ~below_group:"below" ~origin:Rays_math.Vec3.zero
-        ~normal:(Rays_math.Vec3.create 0.7 0.3 (-0.2)) source |> get_ok) in
-  check (equal_geometry (run_selected 1) (run_selected 4))
-    "one-domain and four-domain selected Clip geometry differ"
 
 let check_degenerate_fallback () =
   let positions = Packed.Float3.Private.of_owned_exn
@@ -675,12 +617,10 @@ let check_validation () =
 let run () =
   check_custom_clip_attribute ();
   check_distance ();
-  check_clipped_edge_group ();
   check_selection_isolation ();
   check_typed_selection_promotion ();
   check_selected_free_points ();
   check_selected_caps_and_edge_output ();
-  check_parallel_exact ();
   check_degenerate_fallback ();
   check_disconnected_concave_fragments ();
   check_nested_cap_contours ();

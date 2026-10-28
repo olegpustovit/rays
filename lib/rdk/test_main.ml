@@ -25,7 +25,6 @@ let tests = [
   "boolean", "test_boolean_solid", Test_boolean_solid.run;
   "boolean", "test_boolean_payload", Test_boolean_payload.run;
   "boolean", "test_boolean", Test_boolean.run;
-  "attrib", "test_attribute_generate", Test_attribute_generate.run;
   "attrib", "test_blend_shapes", Test_blend_shapes.run;
   "attrib", "test_attribute_composite", Test_attribute_composite.run;
   "attrib", "test_attribute_mirror", Test_attribute_mirror.run;

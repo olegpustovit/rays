@@ -24,8 +24,8 @@ description: Add a geometry node in Rays Lisp, including checked metadata, graph
 5. Add explicit Lisp fixture/case coverage and frozen geometry-byte digests
    under `lib/flow_sop/goldens/`. Include refusals and one-domain versus
    multiple-domain exactness. Expected values come from the accepted Lisp
-   body, never from a new native twin. Existing migration parity code is
-   removed after its complete golden coverage is captured.
+   body, never from a native twin: there is no OCaml SOP or rdk kernel to
+   compare against, so do not write one.
 6. Build `tools/check.exe` once; time focused checks through
    `_build/default/tools/check.exe`. Include `@lib/flow_sop/runtest`,
    `@lib/sop_catalog/runtest` and affected graph/language aliases.
@@ -36,5 +36,5 @@ description: Add a geometry node in Rays Lisp, including checked metadata, graph
 
 The stable Lisp key is the node identity. Use the existing lowercase
 underscore vocabulary and do not add operation-name aliases without a
-concrete compatibility requirement. Current migration progress is tracked
-in `specification/cleanup/status.md`.
+concrete compatibility requirement. Add an OCaml native node only for exact
+predicates, spatial indexes, solvers, wiring or carriers (see lib/sop_catalog/AGENTS.md).

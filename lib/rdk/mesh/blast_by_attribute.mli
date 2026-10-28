@@ -5,14 +5,3 @@ type mode =
   | Blast_width of { center : float; width : float; }
 type output = Blast_delete | Blast_group of string
 
-val blast :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?base:Rdk_core.Group.t ->
-  ?invert:bool ->
-  ?remove_unused_points:bool ->
-  owner:owner ->
-  attribute:string ->
-  mode:mode ->
-  output:output ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

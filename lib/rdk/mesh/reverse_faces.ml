@@ -1,4 +1,3 @@
-open Rays_math
 
 let remap_edge_groups_identity ?cancel ~source_topology ~target_topology
     ~point_count groups =

@@ -4,26 +4,10 @@
     [Ec], complex incidence [Ic], extracted surface edges [Es], surface
     incidence [Is], and complex facets [Fc]. Exact seam-facet adjacency
     restricts candidates; the threshold applies only to rounded length. *)
-val tiny_seam_edges :
-  ?cancel:Cancel.t -> grain:int -> threshold:float ->
-  Boolean_extract.ancestry -> Boolean_seam.t ->
-  (Edge_group.t, Error.t) result
-
-val safe_independent_edges :
-  ?cancel:Cancel.t -> grain:int -> ?keep_greatest:bool ->
-  Edge_group.t -> Geometry.t ->
-  (Edge_group.t, Error.t) result
-(** Select a stable shortest-first independent subset satisfying two-manifold
-    triangle incidence, the link condition, and a conservative exact
-    orientation certificate for least-ID endpoint contraction. *)
 
 (* O(F log F + K) time and O(F + K) auxiliary storage for [F] triangles and
     broad-phase candidate work [K]. Exact binary64 predicates distinguish
     ordinary shared topology from non-adjacent contact. *)
-val verify_surface :
-  ?cancel:Cancel.t -> grain:int -> require_closed:bool ->
-  ?allow_opposite_duplicates:bool -> Geometry.t ->
-  (unit, Error.t) result
 
 val verify_unchanged_extraction :
   ?cancel:Cancel.t -> grain:int -> require_closed:bool ->
@@ -35,24 +19,9 @@ val verify_unchanged_extraction :
 
 type cleanup
 val cleanup_geometry : cleanup -> Geometry.t
-val cleanup_candidate_count : cleanup -> int
-val cleanup_collapsed_count : cleanup -> int
-val cleanup_batch_count : cleanup -> int
-val cleanup_remaining_candidate_count : cleanup -> int
-val cleanup_rounding_repaired_count : cleanup -> int
 (* Number of rounded zero-area facets removed or ULP-scale contact edges
    contracted by the mandatory certified representability repair. *)
-val cleanup_point_source : cleanup -> int -> int
-val cleanup_vertex_source : cleanup -> int -> int
 val cleanup_primitive_source : cleanup -> int -> int
-val cleanup_seam_edges : cleanup -> Edge_group.t
-
-val collapse_tiny_seam_batch :
-  grain:int -> threshold:float -> require_closed:bool ->
-  Boolean_extract.ancestry -> Boolean_seam.t -> Geometry.t ->
-  (cleanup, Error.t) result
-(** Collapse one deterministic independent batch to the least endpoint, then
-    rerun seam and exact rounded-surface verification before publishing it. *)
 
 val collapse_tiny_seams :
   ?cancel:Cancel.t -> grain:int -> threshold:float -> require_closed:bool ->

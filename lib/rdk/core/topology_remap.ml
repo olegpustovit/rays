@@ -1,4 +1,3 @@
-open Rays_math
 
 (* [missing] is the value of a row whose source index is -1 (a created element); without it a
    negative index is out of bounds, as it always was. *)
