@@ -84,7 +84,7 @@ GPU. SOP payload resolution still cooks this CPU node, never a resident GPU
 readback, and preserves older immutable payloads across display updates and
 resize. No GPU handle enters a procedural payload or session cache.
 
-An explicit bridge converts geometry to `Rays.Mesh.t`, which `Scene3` lowers
+An explicit bridge converts geometry to `Rays.Mesh.t`, which `Scene.D3` lowers
 through the native OGPU/Metal path.
 A cook context may copy scalar facts from `Rays.Frame.t`, but
 it must not retain a canvas, renderer, texture, or backend handle.
@@ -1527,7 +1527,7 @@ of the targets: the same pscale/scale/orient/N/up/rot/trans/pivot/transform
 rules as the unpacked copy). Packed instances stay outside `Rdk.Geometry.t`:
 a node that consumes a packed result receives it materialized (the explicit
 boundary), memoized per packed output so downstream cache keys keep hitting.
-Renderers draw packed results as instances (`Scene3.instances_array`, the
+Renderers draw packed results as instances (`Scene.D3.instances_array`, the
 path tracer's instance structures), so editing target attributes re-uploads
 transforms, never multiplied topology.
 

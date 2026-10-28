@@ -9,6 +9,7 @@ type t = {device:B.device; queue:B.queue; pipelines : Pipelines.t; msl : Emit.ms
   mutable status_checked:bool;
   mutable generation : int; mutable table_ready:bool; domain : Domain.id;
   mutable last_epoch : int64}
+type scene = {accel:B.accel; vertices:B.buffer; spheres:B.buffer; sphere_count:int; instances:B.buffer option}
 type output = {owner : t; count : int; width : int; index : int; gpu_seconds : float option; generation : int; epoch : int64; check_status:bool}
 let diagnostic error = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
 let get = function Ok value -> value | Error error -> raise (Diagnostic.Error (diagnostic error))
@@ -104,6 +105,8 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
             if u>=Array.length values.tables then
               raise (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
             Bytes.set_int32_le t.uniforms offset (Int32.of_int (Array.length values.tables.(u)/width))
+        | ["scene";"spheres"] ->
+            Bytes.set_int32_le t.uniforms offset (Int32.of_int (match scene with Some s -> s.sphere_count | None -> 0))
         | ["frame";index;_] ->
             let index=int_of_string index in
             if index>=Array.length values.frame then
@@ -185,10 +188,12 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
         let index=index+Array.length gathers in
         Option.iter (fun (cell,out) -> get (B.set_buffer encoder ~index cell);
           get (B.set_buffer encoder ~index:(index+1) out)) counted;
-        Option.iter (fun (accel,vertices) ->
+        Option.iter (fun {accel;vertices;spheres;instances;_} ->
           let index=Option.get msl.scene in
           get (B.set_accel encoder ~index accel);
           get (B.set_buffer encoder ~index:(index+1) vertices);
+          get (B.set_buffer encoder ~index:(index+2) spheres);
+          Option.iter (fun table -> get (B.set_buffer encoder ~index:(index+3) table)) instances;
           get (B.compute_use_accels encoder [accel])) scene;
         get (B.dispatch_threads encoder ~threads:(values.count,1,1) ~threadgroup:(256,1,1))) in
     match commands with

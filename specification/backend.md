@@ -505,7 +505,7 @@ no render encoder and refuses it with the rest of rendering; conformance draws a
 device arguments and refuses a misaligned argument range. OGPU-Metal is the only layer that maps checked OGPU render values onto
 that generic surface.
 
-`Scene3.instances_array` lowers each instance batch to one indexed Metal draw.
+`Scene.D3.instances_array` lowers each instance batch to one indexed Metal draw.
 Rays keeps one mesh and one material/light uniform block, then appends 48
 float32 values per instance (model-view-projection, world, and normal matrices).
 The vertex shader indexes that table with Metal's instance ID. OGPU carries a
@@ -526,7 +526,7 @@ capped at 256 MiB. Small uniforms use these pages rather than inline
 Scene3 raster accepts indexed triangles, lines, and points. Lines use native
 Metal line draws; points use a point-topology pipeline with an explicit
 one-pixel point size. Line strips and loops become indexed line pairs once
-per immutable mesh. `Scene3.Wireframe` extracts unique edges from triangle
+per immutable mesh. `Scene.D3.Wireframe` extracts unique edges from triangle
 meshes, while callers with polygon topology can pass RDK's unique topology
 edges as `Mesh.Lines` to avoid triangulation diagonals. Scene3 packs the immutable
 float64 CPU mesh directly from its coordinate planes into two GPU streams:
@@ -652,7 +652,7 @@ rendered once into an offscreen execution the size of the window and later frame
 texture as a Canvas image, so a frame that only changes the UI does not shade the 3D view again.
 The window's drawable size is checked on every use; a different layer, a resize or any failure
 falls back to drawing the layer directly, and `destroy` releases the views before the device-lease
-check.  Scenes the engine does not cache (textured, `Scene3.Private.cacheable` false) never repeat
+check.  Scenes the engine does not cache (textured, `Scene.D3.Private.cacheable` false) never repeat
 an identity, so they are never retained.  `Scene` stays pure data; this is invisible to it.
 `test_retained_view_native` checks that direct, retained and camera-change frames agree.
 
@@ -1050,5 +1050,19 @@ the query per argument tuple and block. Metal emits `intersector<triangle_data>`
 `primitive_acceleration_structure` plus a triangle-vertex buffer (for the normal) bound after the count bindings
 (`Kernel_layout.scene_binding`; `Run.dispatch ~scene`). SPIR-V (1.4, `RayQueryKHR`, `SPV_KHR_ray_query`, Vulkan 1.2)
 issues an opaque-flag ray query against the same two bindings. Exact precision keeps the op on the CPU; the web
-targets refuse it (`E_WEB_SOURCE` for JS, `E_GPU_FORM` for WGSL). Instancing, motion, curves and procedural spheres
-are not yet part of the op.
+targets refuse it (`E_WEB_SOURCE` for JS, `E_GPU_FORM` for WGSL). Procedural spheres are an in-loop analytic test after the ray query on every target: a `float4` (centre, radius)
+buffer bound after the vertices and a sphere-count uniform; a sphere hit reports `prim = -2 - k`, `u = v = 0`, and the
+nearer of triangle and sphere wins. Instancing is a static scene fact: `Emit.kernel`/`Spirv.kernel ~instanced:true` (and `Kernel_layout.plan ~instanced`)
+bind a TLAS (`intersector<triangle_data, instancing>` / `OpRayQueryGetIntersectionInstanceIdKHR`) plus a table of 16
+floats per instance (first primitive of its prototype in the concatenated vertex buffer, the world-to-object 3x4
+row-major, three spare); the normal is the transpose of that matrix applied to the object normal, all in scalar
+registers. The record's ninth field `instance` is the TLAS instance index (0 for a flat scene's triangles, -1 for a
+sphere or a miss), and `prim` is the primitive within its prototype. `Flow_sop.Trace_scene.register_instances` is the
+CPU host. Motion and curves are not yet part of the op.
+
+## Film accumulation (P8.S2)
+
+A read-modify-write float film needs no new sink: a one-output kernel whose input 0 is `~bound` to the film buffer and
+whose output goes `~into` that same buffer reads and writes only its own pixel. A second kernel divides by the sample
+count and `Image_sink.convert` makes RGBA8 (ties to even). `lib/flow_gpu/test_film.ml` runs four accumulations and the
+resolve on Metal and checks every pixel exactly.

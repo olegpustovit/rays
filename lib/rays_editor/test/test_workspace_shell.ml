@@ -102,7 +102,7 @@ let editor ?camera ?presets text =
   E3.create ~ui_text_size:11 ?camera ?presets ~await:true ~workspace:(of_text text)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
   |> function Ok e -> e | Error m -> fail m
 
 let source e = fst (Flow.Lisp.print (E3.workspace e).Doc.source)
@@ -2160,7 +2160,7 @@ let run_atomic_frame () =
   let at = 200., 300. in
   let e = ref (E3.create ~ui_text_size:11 ~await:true
       ~workspace:(of_text "(workspace solo (graph g :context sop (sop/box)) (graph editor :context editor (ui/workspace (ui/graph))))")
-      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene3.empty) () |> Result.get_ok) and count = ref 0 in
+      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene.D3.empty) () |> Result.get_ok) and count = ref 0 in
   let step events = incr count; e := E3.update !e (frame at events !count) in
   for _ = 1 to 4 do step [] done;
   step [ Input.Pointer_moved at ];
@@ -2567,12 +2567,12 @@ let run_view_native () =
               Rdk_rays.Packed_pieces.mesh_for_explosion explosion pieces, None
           | `Mesh (mesh, transforms) -> mesh, transforms in
         vertices := Mesh.vertices mesh;
-        let shading = if Node.operation node = "box" then Scene3.Flat else Smooth in
+        let shading = if Node.operation node = "box" then Scene.D3.Flat else Smooth in
         let material = Material.create ~diffuse:(Rays_math.Color.hex_exn "#f2b36d") () in
         let drawing = match transforms with
-          | Some transforms -> Scene3.instances_array ~cull:Scene3.Cull_none ~shading ~material mesh transforms
-          | None -> Scene3.mesh ~cull:Scene3.Cull_none ~shading ~material mesh in
-        Scene3.create [drawing]) () |> Result.get_ok)
+          | Some transforms -> Scene.D3.instances_array ~cull:Scene.D3.Cull_none ~shading ~material mesh transforms
+          | None -> Scene.D3.mesh ~cull:Scene.D3.Cull_none ~shading ~material mesh in
+        Scene.D3.create [drawing]) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let e = if frame.input.frame = 28 then
           E3.edit e (E.Set_arg {node = ["shattered"; "@result"]; key = E.Kw "amount";
@@ -2658,7 +2658,7 @@ let run_renderers_native ?(authored = false) () =
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh
+      ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh
         ~material:(Material.unlit (Rays_math.Color.rgb 200 20 200)) mesh]) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let mode = if frame.input.frame < 10 || frame.input.frame >= 40 then Rays_editor.Renderer.Raster
@@ -2878,7 +2878,7 @@ let run_roots_native () =
       ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
+      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let c = frame.input.frame in
       let e = if c = 61 then edit e "max_spp" "4096"      (* the cap rises: the film goes on *)
@@ -3008,7 +3008,7 @@ let run_budget_native () =
       ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
+      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       E3.update e { frame with input = { frame.input with pointer = (450., 20.); buttons = []; keys = []; events = [] };
         mouse_delta = 0., 0. })

@@ -7,4 +7,4 @@ type t = private {
 }
 (** Binary SPIR-V compute emission from the shared kernel layout. *)
 
-val kernel : ?fast:bool -> Flow_ir.Packed.t -> (t, Diagnostic.t) result
+val kernel : ?fast:bool -> ?instanced:bool -> Flow_ir.Packed.t -> (t, Diagnostic.t) result

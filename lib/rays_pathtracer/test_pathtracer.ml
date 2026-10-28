@@ -46,6 +46,8 @@ let check_instance_residency floor =
 (* [frame name pixels] receives the two frames [exact_m1] below records, as
    they are rendered. *)
 let run ?(frame = fun _ _ -> ()) () =
+  assert (P.unavailable Ogpu.Caps.minimum_m1 <> None);
+  assert (P.unavailable { Ogpu.Caps.minimum_m1 with ray_tracing = true } = None);
   let initial_handles = live_handles () in
   let sphere = get (Result.map_error Rdk.Error.to_string
     (Rdk.Uv_sphere.run ~center:(Rays_math.Vec3.create 0. 1. 0.) ~segments:24 ~rings:12 ~radius:1. ())) in

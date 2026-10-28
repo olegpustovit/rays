@@ -222,19 +222,19 @@ let scene3 node preview =
     | Mesh mesh -> mesh in
   let primitive_mode = Mesh.mode mesh in
   let shading = match Node.operation node with
-    | "box" | "grid" | "platonic" -> Scene3.Flat
-    | _ -> Scene3.Smooth in
+    | "box" | "grid" | "platonic" -> Scene.D3.Flat
+    | _ -> Scene.D3.Smooth in
   let preview_material = match primitive_mode with
     | Mesh.Points | Lines | Line_strip | Line_loop ->
         Material.unlit (Rays_math.Color.hex_exn "#fbbf74")
     | Triangles | Triangle_strip | Triangle_fan -> material in
   let cull = match preview, primitive_mode with
     | Pieces _, (Mesh.Triangles | Triangle_strip | Triangle_fan) ->
-        Scene3.Cull_back
-    | _ -> Scene3.Cull_none in
-  let drawing = Scene3.mesh ~cull ~shading
+        Scene.D3.Cull_back
+    | _ -> Scene.D3.Cull_none in
+  let drawing = Scene.D3.mesh ~cull ~shading
       ~material:preview_material mesh in
-  Scene3.create ~samples:1 ~lights [drawing]
+  Scene.D3.create ~samples:1 ~lights [drawing]
 
 let overlay graph preview (frame : Frame.t) =
   let pieces = match preview with

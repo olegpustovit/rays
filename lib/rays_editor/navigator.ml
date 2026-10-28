@@ -370,142 +370,8 @@ let row_rects state p ~bounds:(x, y, w, _) =
   let t = tops ~rh rows in
   Array.mapi (fun i r -> r, (x, y +. search_height +. t.(i), w, t.(i + 1) -. t.(i))) rows
 
-let view state ui ~bounds:(x, y, w, h) p =
-  let theme = Ui.theme ui in
-  let rh = float (Ui.row_height ui) in
-  let x = float x and y = float y and w = float w and h = float h in
-  let muted = Pxui.Theme.muted theme in
-  (* the search field above the list *)
-  let was_typing = state.typing in
-  (* the wide sheet's field leaves room for the add button; the narrow one has no button *)
-  let field_w = if w >= 300. then w -. 40. else w -. 16. in
-  (* F2 puts the graph's name in this field instead of the search *)
-  let state, renamed = match state.rename with
-    | Some (graph, seen) ->
-        let text, open_ = Ui.value_field ui ~at:(x +. 8., y +. 6.) ~w:field_w ~h:20.
-            ~left:true ~edit:(not seen) ~valid:Flow.Symbol.valid_name "navigator-rename" graph in
-        if text <> graph then { state with rename = None }, [ Rename { graph; to_ = text } ]
-        else if open_ then { state with rename = Some (graph, true) }, []
-        else { state with rename = (if seen then None else state.rename) }, []
-    | None ->
-        let query, typing = Ui.value_field ui ~at:(x +. 8., y +. 6.) ~w:field_w ~h:20.
-            ~left:true ~valid:(fun _ -> true) "navigator-search" state.query in
-        { state with query; typing }, [] in
-  let query = state.query and typing = state.typing in
-  if query = "" && not typing && state.rename = None then
-    Ui.draw ui (Ui.box ui ~flags:Ui.clip ~w:(Ui.Px (field_w -. 4.)) ~h:(Ui.Px 20.) ~at:(x +. 10., y +. 6.) "navigator-placeholder")
-      (fun paint (px, py, pw, h) ->
-        let ty = Pxui_shell.Kit.text_y ui py h in
-        Ui.Paint.text paint ~at:(px, ty) ~color:muted "/";
-        Ui.Paint.text paint ~at:(px +. 12.5, ty) ~color:(Pxui.Theme.ink_3 theme)
-          (Ui.ellipsis ~width:(Ui.Paint.text_width paint) ~limit:(pw -. 12.5)
-             (if w >= 300. then "go to node, graph, function" else "go to")));
-  let rows = rows ~wide:(w >= 300.) state p in
-  let tops = tops ~rh rows in
-  let total = tops.(Array.length rows) in
-  let top = y +. search_height in
-  (* the wide sheet closes with a hairline and a 24-point bar of its keys and the graph count *)
-  let footer = if w >= 300. then rh +. 1. else 0. in
-  let body = Float.max rh (h -. search_height -. footer) in
-  let box = Ui.box ui ~flags:Ui.(clickable + scroll + clip + blocking)
-      ~w:(Ui.Px w) ~h:(Ui.Px body) ~at:(x, top) ~scroll_step:rh "navigator-list" in
-  let signal = Ui.signal ui box in
-  (* the painted position, elastic edge movement included: a click lands on the row it sees *)
-  let scroll = Ui.scroll_position ui box in
-  (* the rows paint in the child so the list's clip holds them: a box's own painter is not clipped *)
-  let content = Ui.within ui box (fun () ->
-    Ui.box ui ~w:(Ui.Px w) ~h:(Ui.Px (total +. rh)) "navigator-content") in
-  let row_at (_, py) =
-    let off = py -. top +. scroll in
-    if py < top || off >= total then None
-    else begin
-      let k = ref 0 in
-      while tops.(!k + 1) <= off do incr k done;
-      Some !k
-    end in
-  let intents = ref (List.rev renamed) in
-  let emit i = intents := i :: !intents in
-  (* the two sheets of the kit: a column under 300 points (the workspace) drops the details and
-     keeps 56 points for an input's label, a wide one (the outline sheet) shows them and keeps 112 *)
-  let wide = w >= 300. in
-  let label_w = if wide then 112. else 56. in
-  (* add an object, a graph, a node: the add menu *)
-  if w >= 300. && Pxui_shell.Kit.button ui ~key:"navigator-add" ~at:(x +. w -. 28., y +. 6.) ~w:20. ~centered:true "+" then emit Add;
-  let fold = ref false in
-  let toggle = ref None in
-  let begin_rename = ref None in
-  (* a material or a SOP graph is a source: pressed and moved 4 points it is carried, as the
-     Flow value that reads it *)
-  if signal.held then
-    (match Option.map (fun k -> rows.(k)) (row_at signal.press_point) with
-     | Some (Root_row { graph; _ }) ->
-         Ui.carry ui ~from:box ~kind:"scene" ~value:("(ref " ^ graph ^ ")") ()
-     | Some (Graph_row { graph; context = Some context; _ }) ->
-         Ui.carry ui ~from:box ~kind:(Flow.Context.name context)
-           ~value:("(ref " ^ graph ^ ")") ()
-     | _ -> ());
-  let put = match Ui.drop_target ui box with Some (Ui.Dropped _) -> true | _ -> false in
-  (if signal.clicked && not put then match Option.map (fun k -> rows.(k)) (row_at signal.release_point) with
-   | Some (Graph_row { graph; active; _ }) ->
-       (* the chevron of the open graph's row folds its node rows; the rest of the row opens it *)
-       if wide && active && p.scope <> None && fst signal.release_point < x +. 10. then toggle := Some graph
-       else emit (Open { graph; node = None })
-   | Some (Root_row { graph; _ }) ->
-       (* the chevron folds the scene's objects; the rest of the row opens the scene graph *)
-       if wide && fst signal.release_point < x +. 24. then fold := true else emit (Open { graph; node = None })
-   | Some (Node_row { graph; path; _ }) -> emit (Open { graph; node = Some path })
-   | Some (Link_row { graph; _ }) -> emit (Open { graph; node = None })
-   | Some (Macro_row (name, _)) -> emit (Macro name)
-   | Some (Object_row ({ home = Some (graph :: _ as path); _ } as o)) ->
-       (* a press on a flag toggles it in the text; anywhere else on the row opens the object *)
-       let px = fst signal.release_point in
-       let flag column = let fx = x +. w -. 12. -. 12. -. (float (1 - column) *. 20.) in px >= fx -. 4. && px < fx +. 16. in
-       (match o.visible, o.render with
-        | Some on, _ when flag 0 && not o.inert -> emit (Flag { node = path; name = "visible"; value = not on })
-        | _, Some on when flag 1 && not o.inert -> emit (Flag { node = path; name = "render"; value = not on })
-        | _ -> emit (Open { graph; node = Some path }))
-   | Some (Layout_row { index; _ }) -> emit (Layout index)
-   | _ -> ());
-  if (typing || was_typing) && Ui.key_pressed ui Input.Enter then
-    (match List.find_map (function
-       | Graph_row { graph; _ } -> Some (Open { graph; node = None })
-       | Node_row { graph; path; _ } -> Some (Open { graph; node = Some path })
-       | _ -> None) (Array.to_list rows) with
-     | Some intent -> emit intent | None -> ());
-  let hovered = if signal.hovered then row_at signal.pointer else None in
-  (* F2 renames and Delete removes the graph under the pointer (a refused removal says who reads it) *)
-  (match Option.map (fun k -> rows.(k)) hovered with
-   | Some (Graph_row { graph; _ } | Root_row { graph; _ }) when not (String.starts_with ~prefix:"def:" graph)
-       && not typing && state.rename = None ->
-       if Ui.key_pressed ui Input.F2 then begin_rename := Some (graph, false)
-       else if Ui.key_pressed ui Input.Delete then emit (Remove graph)
-   | _ -> ());
-  (* a right-click opens the context menu: New graph (a context each), and on a graph row Rename
-     and Delete.  The row's own graph is kept with the menu; a function row has neither. *)
-  let context = ref state.context in
-  if Ui.context_clicked signal then begin
-    let cx, cy = signal.release_point in
-    let graph = match Option.map (fun k -> rows.(k)) (row_at signal.release_point) with
-      | Some (Graph_row { graph; _ } | Root_row { graph; _ }) -> Some graph
-      | _ -> None in
-    context := Some (cx, cy, graph)
-  end;
-  (match !context with
-   | None -> ()
-   | Some (cx, cy, graph) ->
-       let editable = match graph with Some g -> not (String.starts_with ~prefix:"def:" g) | None -> false in
-       let items = [ "New graph", true; "Rename", editable; "Delete", editable ] in
-       let submenu = Ui.{ row = 0; rows = List.map (fun c -> c, true) new_graph_contexts; keys = []; current = None } in
-       (match Ui.context_menu ui ~at:(cx, cy) ~danger:[ 2 ] ~submenus:[ submenu ] "navigator-context" items with
-        | `Open -> ()
-        | `Dismiss -> context := None
-        | `Pick n ->
-            context := None;
-            (match n, graph with
-             | 1, Some g -> begin_rename := Some (g, false)
-             | 2, Some g -> emit (Remove g)
-             | n, _ when n >= 3 -> emit (New_graph (List.nth new_graph_contexts (n - 3)))
-             | _ -> ())));
+(* the list's rows, painted in the content child so the list's clip holds them *)
+let paint_rows ~rows ~state ~p ~label_w ~wide ~muted ~hovered ~rh ~tops ~(theme : Pxui.Theme.t) ~body ~w ~top ~x ~box ~content ui =
   Ui.draw ui content (fun paint _ ->
     let scroll = Ui.scroll_position ui box in
     Ui.Paint.fill paint ~x ~y:top ~w ~h:body theme.panel;
@@ -665,6 +531,145 @@ let view state ui ~bounds:(x, y, w, h) p =
             text (x +. 20. +. label_w, 0.) ~color:theme.foreground graph
         | Empty s -> text (x +. 12., 0.) ~color:ink_3 s
       end) rows);
+  ()
+
+let view state ui ~bounds:(x, y, w, h) p =
+  let theme = Ui.theme ui in
+  let rh = float (Ui.row_height ui) in
+  let x = float x and y = float y and w = float w and h = float h in
+  let muted = Pxui.Theme.muted theme in
+  (* the search field above the list *)
+  let was_typing = state.typing in
+  (* the wide sheet's field leaves room for the add button; the narrow one has no button *)
+  let field_w = if w >= 300. then w -. 40. else w -. 16. in
+  (* F2 puts the graph's name in this field instead of the search *)
+  let state, renamed = match state.rename with
+    | Some (graph, seen) ->
+        let text, open_ = Ui.value_field ui ~at:(x +. 8., y +. 6.) ~w:field_w ~h:20.
+            ~left:true ~edit:(not seen) ~valid:Flow.Symbol.valid_name "navigator-rename" graph in
+        if text <> graph then { state with rename = None }, [ Rename { graph; to_ = text } ]
+        else if open_ then { state with rename = Some (graph, true) }, []
+        else { state with rename = (if seen then None else state.rename) }, []
+    | None ->
+        let query, typing = Ui.value_field ui ~at:(x +. 8., y +. 6.) ~w:field_w ~h:20.
+            ~left:true ~valid:(fun _ -> true) "navigator-search" state.query in
+        { state with query; typing }, [] in
+  let query = state.query and typing = state.typing in
+  if query = "" && not typing && state.rename = None then
+    Ui.draw ui (Ui.box ui ~flags:Ui.clip ~w:(Ui.Px (field_w -. 4.)) ~h:(Ui.Px 20.) ~at:(x +. 10., y +. 6.) "navigator-placeholder")
+      (fun paint (px, py, pw, h) ->
+        let ty = Pxui_shell.Kit.text_y ui py h in
+        Ui.Paint.text paint ~at:(px, ty) ~color:muted "/";
+        Ui.Paint.text paint ~at:(px +. 12.5, ty) ~color:(Pxui.Theme.ink_3 theme)
+          (Ui.ellipsis ~width:(Ui.Paint.text_width paint) ~limit:(pw -. 12.5)
+             (if w >= 300. then "go to node, graph, function" else "go to")));
+  let rows = rows ~wide:(w >= 300.) state p in
+  let tops = tops ~rh rows in
+  let total = tops.(Array.length rows) in
+  let top = y +. search_height in
+  (* the wide sheet closes with a hairline and a 24-point bar of its keys and the graph count *)
+  let footer = if w >= 300. then rh +. 1. else 0. in
+  let body = Float.max rh (h -. search_height -. footer) in
+  let box = Ui.box ui ~flags:Ui.(clickable + scroll + clip + blocking)
+      ~w:(Ui.Px w) ~h:(Ui.Px body) ~at:(x, top) ~scroll_step:rh "navigator-list" in
+  let signal = Ui.signal ui box in
+  (* the painted position, elastic edge movement included: a click lands on the row it sees *)
+  let scroll = Ui.scroll_position ui box in
+  (* the rows paint in the child so the list's clip holds them: a box's own painter is not clipped *)
+  let content = Ui.within ui box (fun () ->
+    Ui.box ui ~w:(Ui.Px w) ~h:(Ui.Px (total +. rh)) "navigator-content") in
+  let row_at (_, py) =
+    let off = py -. top +. scroll in
+    if py < top || off >= total then None
+    else begin
+      let k = ref 0 in
+      while tops.(!k + 1) <= off do incr k done;
+      Some !k
+    end in
+  let intents = ref (List.rev renamed) in
+  let emit i = intents := i :: !intents in
+  (* the two sheets of the kit: a column under 300 points (the workspace) drops the details and
+     keeps 56 points for an input's label, a wide one (the outline sheet) shows them and keeps 112 *)
+  let wide = w >= 300. in
+  let label_w = if wide then 112. else 56. in
+  (* add an object, a graph, a node: the add menu *)
+  if w >= 300. && Pxui_shell.Kit.button ui ~key:"navigator-add" ~at:(x +. w -. 28., y +. 6.) ~w:20. ~centered:true "+" then emit Add;
+  let fold = ref false in
+  let toggle = ref None in
+  let begin_rename = ref None in
+  (* a material or a SOP graph is a source: pressed and moved 4 points it is carried, as the
+     Flow value that reads it *)
+  if signal.held then
+    (match Option.map (fun k -> rows.(k)) (row_at signal.press_point) with
+     | Some (Root_row { graph; _ }) ->
+         Ui.carry ui ~from:box ~kind:"scene" ~value:("(ref " ^ graph ^ ")") ()
+     | Some (Graph_row { graph; context = Some context; _ }) ->
+         Ui.carry ui ~from:box ~kind:(Flow.Context.name context)
+           ~value:("(ref " ^ graph ^ ")") ()
+     | _ -> ());
+  let put = match Ui.drop_target ui box with Some (Ui.Dropped _) -> true | _ -> false in
+  (if signal.clicked && not put then match Option.map (fun k -> rows.(k)) (row_at signal.release_point) with
+   | Some (Graph_row { graph; active; _ }) ->
+       (* the chevron of the open graph's row folds its node rows; the rest of the row opens it *)
+       if wide && active && p.scope <> None && fst signal.release_point < x +. 10. then toggle := Some graph
+       else emit (Open { graph; node = None })
+   | Some (Root_row { graph; _ }) ->
+       (* the chevron folds the scene's objects; the rest of the row opens the scene graph *)
+       if wide && fst signal.release_point < x +. 24. then fold := true else emit (Open { graph; node = None })
+   | Some (Node_row { graph; path; _ }) -> emit (Open { graph; node = Some path })
+   | Some (Link_row { graph; _ }) -> emit (Open { graph; node = None })
+   | Some (Macro_row (name, _)) -> emit (Macro name)
+   | Some (Object_row ({ home = Some (graph :: _ as path); _ } as o)) ->
+       (* a press on a flag toggles it in the text; anywhere else on the row opens the object *)
+       let px = fst signal.release_point in
+       let flag column = let fx = x +. w -. 12. -. 12. -. (float (1 - column) *. 20.) in px >= fx -. 4. && px < fx +. 16. in
+       (match o.visible, o.render with
+        | Some on, _ when flag 0 && not o.inert -> emit (Flag { node = path; name = "visible"; value = not on })
+        | _, Some on when flag 1 && not o.inert -> emit (Flag { node = path; name = "render"; value = not on })
+        | _ -> emit (Open { graph; node = Some path }))
+   | Some (Layout_row { index; _ }) -> emit (Layout index)
+   | _ -> ());
+  if (typing || was_typing) && Ui.key_pressed ui Input.Enter then
+    (match List.find_map (function
+       | Graph_row { graph; _ } -> Some (Open { graph; node = None })
+       | Node_row { graph; path; _ } -> Some (Open { graph; node = Some path })
+       | _ -> None) (Array.to_list rows) with
+     | Some intent -> emit intent | None -> ());
+  let hovered = if signal.hovered then row_at signal.pointer else None in
+  (* F2 renames and Delete removes the graph under the pointer (a refused removal says who reads it) *)
+  (match Option.map (fun k -> rows.(k)) hovered with
+   | Some (Graph_row { graph; _ } | Root_row { graph; _ }) when not (String.starts_with ~prefix:"def:" graph)
+       && not typing && state.rename = None ->
+       if Ui.key_pressed ui Input.F2 then begin_rename := Some (graph, false)
+       else if Ui.key_pressed ui Input.Delete then emit (Remove graph)
+   | _ -> ());
+  (* a right-click opens the context menu: New graph (a context each), and on a graph row Rename
+     and Delete.  The row's own graph is kept with the menu; a function row has neither. *)
+  let context = ref state.context in
+  if Ui.context_clicked signal then begin
+    let cx, cy = signal.release_point in
+    let graph = match Option.map (fun k -> rows.(k)) (row_at signal.release_point) with
+      | Some (Graph_row { graph; _ } | Root_row { graph; _ }) -> Some graph
+      | _ -> None in
+    context := Some (cx, cy, graph)
+  end;
+  (match !context with
+   | None -> ()
+   | Some (cx, cy, graph) ->
+       let editable = match graph with Some g -> not (String.starts_with ~prefix:"def:" g) | None -> false in
+       let items = [ "New graph", true; "Rename", editable; "Delete", editable ] in
+       let submenu = Ui.{ row = 0; rows = List.map (fun c -> c, true) new_graph_contexts; keys = []; current = None } in
+       (match Ui.context_menu ui ~at:(cx, cy) ~danger:[ 2 ] ~submenus:[ submenu ] "navigator-context" items with
+        | `Open -> ()
+        | `Dismiss -> context := None
+        | `Pick n ->
+            context := None;
+            (match n, graph with
+             | 1, Some g -> begin_rename := Some (g, false)
+             | 2, Some g -> emit (Remove g)
+             | n, _ when n >= 3 -> emit (New_graph (List.nth new_graph_contexts (n - 3)))
+             | _ -> ())));
+  paint_rows ~content ~box ~x ~top ~w ~body ~theme ~tops ~rh ~hovered ~muted ~wide ~label_w ~p ~state ~rows ui;
   if footer > 0. then
     Ui.draw ui (Ui.box ui ~w:(Ui.Px w) ~h:(Ui.Px footer) ~at:(x, y +. h -. footer) "navigator-footer")
       (fun paint (fx, fy, fw, _) ->

@@ -17,7 +17,7 @@ let run objects =
   let workspace = Rays_editor.Workspace.load (Buffer.contents source) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-owner-bench" "" in
   let e = ref (E.create ~workspace ~presets ~domains:1 ~await:true
-    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene3.empty) () |> Result.get_ok) in
+    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene.D3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     e := E.update !e (frame (450., 300.) [] 1);
     let x, y, w, _ = E.node_box !e [Printf.sprintf "g%d" (objects - 1); "box"] |> Option.get in

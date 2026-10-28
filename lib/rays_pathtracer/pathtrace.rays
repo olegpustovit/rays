@@ -1,0 +1,136 @@
+; trace_pixel of pathtrace.metal (P8.S3) for plain triangles, one rect light and the sky/ground environment:
+; camera and lens, the sample loop, NEE with MIS against BSDF sampling, GGX/diffuse BSDF sampling, Russian
+; roulette and the firefly clamp, in the same PCG draw order. Needs pathtrace_helpers.rays.
+; `u` carries the frame uniforms, `light` the rect light, `mat` the one material.
+(defn draw :context value [(s : int)]
+  (let* [a (pcg-next s)] {:v (unit-float a.value) :next a.next}))
+(defn smooth-unit :context value [(e0 : float) (e1 : float) (x : float)]
+  (let* [k (min 1. (max 0. (/ (- x e0) (- e1 e0))))] (* (* k k) (- 3. (* 2. k)))))
+(defn sky-ground :context value [(sky : vec3) (ground : vec3) (d : vec3)]
+  (+ ground (* (- sky ground) (smooth-unit -0.25 0.6 d.y))))
+; Dome panels: each is three vec3s (direction, colour * intensity, angular half-extents x y and softness z).
+(defn environment :context value [(sky : vec3) (ground : vec3) (pan : (array vec3)) (count : int) (d : vec3)]
+  (fold [c (sky-ground sky ground d)] [i (range count)]
+    (let* [n (array/nth pan (int/mul i 3)) col (array/nth pan (int/add (int/mul i 3) 1)) e (array/nth pan (int/add (int/mul i 3) 2))
+           z (dot d n)]
+      (if (<= z 0.)
+        c
+        (let* [bs (basis n) ax (atan2 (dot d bs.tan) z) ay (atan2 (dot d bs.b) z)
+               wx (- 1. (smooth-unit (- e.x e.z) (+ e.x e.z) (abs ax)))
+               wy (- 1. (smooth-unit (- e.y e.z) (+ e.y e.z) (abs ay)))]
+          (+ c (* col (* wx wy))))))))
+(defn panel-pdf :context value [(pan : (array vec3)) (count : int) (d : vec3)]
+  (if (<= count 0)
+    0.
+    (/ (fold [total 0.] [i (range count)]
+         (let* [n (array/nth pan (int/mul i 3)) e (array/nth pan (int/add (int/mul i 3) 2))
+                z (dot d n) bs (basis n) x (dot d bs.tan) y (dot d bs.b)
+                wx (+ e.x e.z) wy (+ e.y e.z)]
+           (if (or (<= z 0.) (or (>= (abs (atan2 x z)) wx) (>= (abs (atan2 y z)) wy)))
+             total
+             (+ total (/ z (* (* (* (+ (* x x) (* z z)) (+ (* y y) (* z z))) 4.) (* wx wy)))))))
+       (float count))))
+(defn sample-panel :context value [(pan : (array vec3)) (count : int) (r0 : float) (r1 : float) (r2 : float)]
+  (let* [i (min (int (* r0 (float count))) (int/sub count 1))
+         n (array/nth pan (int/mul i 3)) e (array/nth pan (int/add (int/mul i 3) 2))
+         bs (basis n)
+         ax (* (- (* 2. r1) 1.) (+ e.x e.z)) ay (* (- (* 2. r2) 1.) (+ e.y e.z))]
+    (normalize (+ (* bs.tan (tan ax)) (+ (* bs.b (tan ay)) n)))))
+(defn no-hit :context value [] {:t 0. :prim -1 :u 0. :v 0. :normal [0. 0. 0.] :hit false :instance -1})
+(defn bounce-step :context value [(st : {:rng int :o vec3 :d vec3 :thr vec3 :rad vec3 :last-pdf float :b int :alive bool}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int}) (light : {:lo vec3 :lu vec3 :lv vec3 :one-sided float :rad vec3 :area float}) (mat : {:albedo vec3 :rough float :emit vec3 :metal float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3))]
+  (let* [o st.o d st.d
+         hit (scene/trace 1 o d 0.0001 1000000000000. 0.)
+         tmax (if hit.hit hit.t 1000000000000.)
+         rh (rect-hit light.lo light.lu light.lv light.one-sided o d tmax)
+         seen (if (and (> st.b 0) (>= rh.t 0.))
+                (* (* st.thr light.rad)
+                   (power-weight st.last-pdf (/ (* rh.t rh.t) (* rh.cos (* light.area 1.)))))
+                [0. 0. 0.])
+         rad0 (+ st.rad seen)]
+    (if (not hit.hit)
+      {:rng st.rng :o o :d d :thr st.thr :last-pdf st.last-pdf :b (int/add st.b 1) :alive false
+       :rad (+ rad0 (* (* st.thr (environment u.sky u.ground pan u.panels d)) (if (> st.b 0) (/ st.last-pdf (+ st.last-pdf (panel-pdf pan u.panels d))) 1.)))}
+      (let* [hitp (+ o (* d hit.t)) v (- [0. 0. 0.] d)
+             base (int/mul hit.prim 3)
+             p0 (array/nth pos base) p1 (array/nth pos (int/add base 1)) p2 (array/nth pos (int/add base 2))
+             ng0 (normalize (cross (- p1 p0) (- p2 p0)))
+             n0 (array/nth nrm base) n1 (array/nth nrm (int/add base 1)) n2 (array/nth nrm (int/add base 2))
+             ns0 (normalize (+ (* n0 (- (- 1. hit.u) hit.v)) (+ (* n1 hit.u) (* n2 hit.v))))
+             flip (< (dot ng0 v) 0.)
+             ng (if flip (- [0. 0. 0.] ng0) ng0)
+             ns1 (if flip (- [0. 0. 0.] ns0) ns0)
+             ns (if (<= (dot ns1 v) 0.) ng ns1)
+             rad1 (+ rad0 (* st.thr mat.emit))
+             rough (max mat.rough 0.03) metal mat.metal
+             f0 (+ [0.04 0.04 0.04] (* (- mat.albedo [0.04 0.04 0.04]) metal))
+             diffuse (* mat.albedo (- 1. metal))
+             nov (max (dot ns v) 0.0001)
+             a (* rough rough) a2 (* a a)
+             ps (min 0.95 (max 0.05 (+ metal (* (- 1. metal) (+ 0.04 (* 0.96 (pow (- 1. nov) 5.)))))))
+             ; next-event estimation on the one light: three draws whether or not it contributes
+             n1d (draw st.rng) n2d (draw n1d.next) n3d (draw n2d.next)
+             ls (light-sample light.lo light.lu light.lv light.one-sided hitp n2d.v n3d.v)
+             cos-s (dot ns ls.wi)
+             ready (and (and (> cos-s 0.) (> (dot ng ls.wi) 0.)) (> ls.cosl 0.0001))
+             sr (if ready (scene/trace 1 (+ hitp (* ng 0.001)) ls.wi 0. (- ls.dist 0.002) 0.) (no-hit))
+             lit (and ready (not sr.hit))
+             pdf-l (/ ls.dist2 (* ls.cosl (* light.area 1.)))
+             nee (if lit
+                   (* (* (* (* st.thr light.rad) (eval-brdf ns v ls.wi diffuse f0 a2)) cos-s)
+                      (/ (power-weight pdf-l (bsdf-pdf ns v ls.wi a2 ps)) pdf-l))
+                   [0. 0. 0.])
+             rad2 (+ rad1 nee)
+             ; dome panels: three draws when there are any
+             q0 (draw n3d.next) q1 (draw q0.next) q2 (draw q1.next)
+             wp (sample-panel pan u.panels q0.v q1.v q2.v)
+             pl (panel-pdf pan u.panels wp) cos-p (dot ns wp)
+             ready-p (and (> u.panels 0) (and (and (> pl 0.) (> cos-p 0.)) (> (dot ng wp) 0.)))
+             sp (if ready-p (scene/trace 1 (+ hitp (* ng 0.001)) wp 0. 1000000000000. 0.) (no-hit))
+             lit-p (and ready-p (not sp.hit))
+             pan-nee (if lit-p
+                       (* (* (* (* st.thr (environment u.sky u.ground pan u.panels wp)) (eval-brdf ns v wp diffuse f0 a2)) cos-p)
+                          (/ (/ pl (+ pl (bsdf-pdf ns v wp a2 ps))) pl))
+                       [0. 0. 0.])
+             rad3 (+ rad2 pan-nee)
+             rng-b (if (> u.panels 0) q2.next n3d.next)
+             ; BSDF sample
+             s1 (draw rng-b) s2 (draw s1.next) s3 (draw s2.next)
+             bs (bsdf-sample ns v ps a2 s1.v s2.v s3.v)
+             nol (dot ns bs.l)
+             noh (max (dot ns bs.h) 0.) voh (max (dot v bs.h) 0.0001)
+             dg (d-ggx noh a2)
+             pdf (+ (* ps (/ (* dg noh) (* 4. voh))) (* (- 1. ps) (/ nol 3.14159265358979)))
+             ok (and (> nol 0.) (and (> (dot ng bs.l) 0.) (> pdf 0.000001)))
+             fr (fresnel f0 voh)
+             f (+ (/ (* diffuse (- [1. 1. 1.] fr)) 3.14159265358979) (* fr (* dg (v-smith nov nol a2))))
+             thr1 (/ (* (* st.thr f) nol) pdf)
+             ; Russian roulette from the fourth bounce
+             rr (draw s3.next)
+             q (min 0.95 (max thr1.x (max thr1.y thr1.z)))
+             roulette (>= st.b 3)
+             survive (or (not roulette) (<= rr.v q))
+             thr2 (if roulette (/ thr1 q) thr1)]
+        {:rng (if (and ok roulette) rr.next s3.next) :o (+ hitp (* ng 0.001)) :d bs.l :thr thr2 :last-pdf pdf
+         :b (int/add st.b 1) :alive (and ok survive) :rad rad3}))))
+(defn sample-step :context value [(acc : {:rng int :sum vec3}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int}) (light : {:lo vec3 :lu vec3 :lv vec3 :one-sided float :rad vec3 :area float}) (mat : {:albedo vec3 :rough float :emit vec3 :metal float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (gx : int) (gy : int)]
+  (let* [jx (draw acc.rng) jy (draw jx.next)
+         px (- (* (/ (+ (float gx) jx.v) (float u.width)) 2.) 1.)
+         py (- 1. (* (/ (+ (float gy) jy.v) (float u.height)) 2.))
+         lensed (> u.lens 0.)
+         l1 (draw jy.next) l2 (draw l1.next)
+         cam (camera-ray u.eye u.lens u.fwd u.rgt u.up u.tan-half u.aspect u.focus px py l1.v l2.v)
+         start (iterate u.bounces
+                 {:rng (if lensed l2.next jy.next) :o cam.o :d cam.d :thr [1. 1. 1.] :rad [0. 0. 0.]
+                  :last-pdf 0. :b 0 :alive true}
+                 (fn [st] (if st.alive (bounce-step st u light mat pos nrm pan) st))
+                 :until (fn [prev next] (not next.alive)))
+         lum (dot start.rad [0.2126 0.7152 0.0722])
+         clamped (if (> lum 8.) (* start.rad (/ 8. lum)) start.rad)]
+    {:rng start.rng :sum (+ acc.sum clamped)}))
+; The film sample of one pixel for one frame: the sum of spp radiance samples (the caller adds the accumulated
+; frames and divides by the sample count).
+(defn trace-pixel :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int}) (light : {:lo vec3 :lu vec3 :lv vec3 :one-sided float :rad vec3 :area float}) (mat : {:albedo vec3 :rough float :emit vec3 :metal float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (pixel : int)]
+  (let* [gx (int/mod pixel u.width) gy (int/div pixel u.width)
+         final (fold [acc {:rng (pixel-seed pixel u.frame) :sum [0. 0. 0.]}] [s (range u.spp)]
+                 (sample-step acc u light mat pos nrm pan gx gy))]
+    final.sum))

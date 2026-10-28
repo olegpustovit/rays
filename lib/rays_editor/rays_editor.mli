@@ -413,7 +413,7 @@ module Editor : sig
     workspace:Workspace_doc.t ->
     ?source:Source.t ->
     prepare:(Settings.t -> Sop.Session.output -> ('prepared, string) result) ->
-    draw:(Sop.Node.t -> 'prepared -> Rays.Scene3.t) ->
+    draw:(Sop.Node.t -> 'prepared -> Rays.Scene.D3.t) ->
     unit -> ('prepared t, string) result
   (** [factories] is the SOP catalog (default [Sop_catalog.Editor.factories]);
       passing a non-empty list replaces it (prepend custom SOPs to
@@ -613,7 +613,7 @@ module Editor : sig
     workspace:Workspace_doc.t ->
     ?source:Source.t ->
     prepare:(Settings.t -> Sop.Session.output -> ('prepared, string) result) ->
-    draw:(Sop.Node.t -> 'prepared -> Rays.Scene3.t) ->
+    draw:(Sop.Node.t -> 'prepared -> Rays.Scene.D3.t) ->
     unit -> (unit, Rays.Sketch.error) result
 end
 

@@ -1,3 +1,4 @@
+module D3 = Scene3
 type node type t=node list type blend=Replace|Alpha|Add|Multiply
 val empty:t  val group:t->node val clear:Rays_math.Color.t->node
 val point : at:(int*int) -> ?color:Rays_math.Color.t -> unit -> node

@@ -1,0 +1,94 @@
+; Path tracer helpers of pathtrace.metal as Rays Lisp defns (P8.S3): PCG, the GGX terms, Fresnel and the BSDF
+; mixture pdf. Inlined at lowering; the CPU walker is the oracle and the Metal kernel matches it
+; (lib/flow_gpu/test_helpers.ml). Integers are the fast tier's 63-bit ints with explicit 32-bit masks.
+(defn pcg-next :context value [(s : int)]
+  (let* [next (int/and (int/add (int/mul s 747796405) 2891336453) 4294967295)
+         word (int/and (int/mul (int/xor (int/shr s (int/add (int/shr s 28) 4)) s) 277803737) 4294967295)]
+    {:next next :value (int/xor (int/shr word 22) word)}))
+(defn unit-float :context value [(word : int)]
+  (/ (float (int/and word 16777215)) 16777216.))
+(defn d-ggx :context value [(noh : float) (a2 : float)]
+  (let* [d (+ (* (* noh noh) (- a2 1.)) 1.)]
+    (/ a2 (* (* 3.14159265358979 d) d))))
+(defn v-smith :context value [(nov : float) (nol : float) (a2 : float)]
+  (let* [gv (* nol (sqrt (+ (* (* nov nov) (- 1. a2)) a2)))
+         gl (* nov (sqrt (+ (* (* nol nol) (- 1. a2)) a2)))]
+    (/ 0.5 (max (+ gv gl) 0.000001))))
+(defn fresnel :context value [(f0 : vec3) (voh : float)]
+  (let* [f (pow (- 1. voh) 5.)]
+    (+ f0 (* (- [1. 1. 1.] f0) f))))
+(defn bsdf-pdf :context value [(ns : vec3) (v : vec3) (l : vec3) (a2 : float) (ps : float)]
+  (let* [h (normalize (+ l v))
+         nol (max (dot ns l) 0.)
+         noh (max (dot ns h) 0.)
+         voh (max (dot v h) 0.0001)]
+    (+ (* ps (/ (* (d-ggx noh a2) noh) (* 4. voh)))
+       (* (- 1. ps) (/ nol 3.14159265358979)))))
+(defn power-weight :context value [(a : float) (b : float)]
+  (let* [r (/ b a)] (/ 1. (+ 1. (* r r)))))
+(defn basis :context value [(n : vec3)]
+  (let* [s (if (>= n.z 0.) 1. -1.) a (/ -1. (+ s n.z)) c (* (* n.x n.y) a)]
+    {:tan [(+ 1. (* (* (* s n.x) n.x) a)) (* s c) (- 0. (* s n.x))]
+     :b [c (+ s (* (* n.y n.y) a)) (- 0. n.y)]}))
+(defn eval-brdf :context value [(ns : vec3) (v : vec3) (l : vec3) (diffuse : vec3) (f0 : vec3) (a2 : float)]
+  (let* [h (normalize (+ l v))
+         nol (max (dot ns l) 0.0001) nov (max (dot ns v) 0.0001)
+         noh (max (dot ns h) 0.) voh (max (dot v h) 0.0001)
+         f (fresnel f0 voh)]
+    (+ (/ (* diffuse (- [1. 1. 1.] f)) 3.14159265358979)
+       (* f (* (d-ggx noh a2) (v-smith nov nol a2))))))
+; distance to a rectangle light along a ray (-1 for a miss) and the emitter-side cosine
+(defn rect-hit :context value [(lo : vec3) (lu : vec3) (lv : vec3) (one-sided : float) (o : vec3) (d : vec3) (tmax : float)]
+  (let* [n (cross lu lv) dn (dot d n) nn (dot n n)
+         dist (/ (dot (- lo o) n) dn)
+         p (- (+ o (* d dist)) lo)
+         a (/ (dot (cross p lv) n) nn) b (/ (dot (cross lu p) n) nn)
+         c (/ (- 0. dn) (sqrt nn))
+         cosl (if (> one-sided 0.5) c (abs c))
+         ok (and (and (>= (abs dn) 0.000000000001) (> nn 0.))
+                 (and (and (> dist 0.0001) (< dist tmax))
+                      (and (and (>= a 0.) (<= a 1.)) (and (and (>= b 0.) (<= b 1.)) (> cosl 0.0001)))))]
+    {:t (if ok dist -1.) :cos cosl}))
+(defn world-uv :context value [(d : vec3)]
+  (let* [u (+ (/ (atan2 d.x (- 0. d.z)) 6.28318530717959) 0.5)]
+    {:u (if (>= u 1.) (- u 1.) u) :v (/ (acos (min 1. (max -1. d.y))) 3.14159265358979)}))
+(defn world-dir :context value [(u : float) (v : float)]
+  (let* [phi (* (- u 0.5) 6.28318530717959) theta (* v 3.14159265358979) s (sin theta)]
+    [(* s (sin phi)) (cos theta) (- 0. (* s (cos phi)))]))
+; The per-pixel PCG state of trace_pixel: (pixel + 1) * 0x9E3779B9 ^ (frame + 1) * 0x85EBCA6B, then two discarded draws.
+(defn pixel-seed :context value [(pixel : int) (frame : int)]
+  (let* [s (int/xor (int/and (int/mul (int/add pixel 1) 2654435769) 4294967295)
+                    (int/and (int/mul (int/add frame 1) 2246822507) 4294967295))
+         a (pcg-next s) b (pcg-next a.next)]
+    b.next))
+; Camera ray through NDC (px, py); with a lens, the sample starts on the lens disk (r1 radius, r2 angle) and aims at the focus point.
+(defn camera-ray :context value [(eye : vec3) (lens : float) (forward : vec3) (right : vec3) (up : vec3)
+                                 (tan-half : float) (aspect : float) (focus : float) (px : float) (py : float)
+                                 (r1 : float) (r2 : float)]
+  (let* [d (normalize (+ forward (+ (* right (* px (* tan-half aspect))) (* up (* py tan-half)))))
+         aim (+ eye (* d (/ focus (dot d forward))))
+         radius (* lens (sqrt r1)) angle (* 6.28318530717959 r2)
+         o (+ eye (+ (* right (* radius (cos angle))) (* up (* radius (sin angle)))))]
+    (if (> lens 0.)
+      {:o o :d (normalize (- aim o))}
+      {:o eye :d d})))
+; The BSDF direction of one bounce: GGX half-vector with probability ps (r3 < ps), else cosine hemisphere.
+(defn bsdf-sample :context value [(ns : vec3) (v : vec3) (ps : float) (a2 : float) (r1 : float) (r2 : float) (r3 : float)]
+  (let* [bs (basis ns) phi (* 6.28318530717959 r1)
+         cos-t (sqrt (/ (- 1. r2) (+ 1. (* (- a2 1.) r2))))
+         sin-t (sqrt (max 0. (- 1. (* cos-t cos-t))))
+         hg (normalize (+ (* bs.tan (* sin-t (cos phi))) (+ (* bs.b (* sin-t (sin phi))) (* ns cos-t))))
+         lg (- (* hg (* 2. (dot v hg))) v)
+         rr (sqrt r2)
+         ld (normalize (+ (* bs.tan (* rr (cos phi))) (+ (* bs.b (* rr (sin phi))) (* ns (sqrt (max 0. (- 1. r2)))))))]
+    (if (< r3 ps)
+      {:l lg :h hg}
+      {:l ld :h (normalize (+ ld v))})))
+; A point on a rectangle light seen from hitp: direction, distance and the emitter-side cosine.
+(defn light-sample :context value [(lo : vec3) (lu : vec3) (lv : vec3) (one-sided : float) (hitp : vec3) (ru : float) (rv : float)]
+  (let* [lp (+ lo (+ (* lu ru) (* lv rv)))
+         ln (normalize (cross lu lv))
+         wi (- lp hitp)
+         dist2 (max (dot wi wi) 0.00000001) dist (sqrt dist2)
+         w (/ wi dist) cl (dot ln w)]
+    {:wi w :dist dist :dist2 dist2 :cosl (if (> one-sided 0.5) (- 0. cl) (abs cl))}))

@@ -77,8 +77,8 @@ let scene3 ?explosion surface =
   let mesh = match surface.preview with
     | Mesh mesh -> mesh | Pieces pieces -> Packed_pieces.mesh_for_explosion explosion pieces in
   let draw material mesh = match surface.transforms with
-    | None -> Scene3.mesh ~material ~cull:Scene3.Cull_none mesh
-    | Some transforms -> Scene3.instances_array ~material ~cull:Scene3.Cull_none mesh transforms in
+    | None -> Scene.D3.mesh ~material ~cull:Scene.D3.Cull_none mesh
+    | Some transforms -> Scene.D3.instances_array ~material ~cull:Scene.D3.Cull_none mesh transforms in
   let drawings = match surface.batches with
     | [] -> [draw Material.default mesh]
     | batches ->
@@ -89,4 +89,4 @@ let scene3 ?explosion surface =
               ?normals:view.normals ?colors:view.colors ?tex_coords:view.tex_coords view.vertices
             |> Result.get_ok in
           draw material mesh) batches in
-  Scene3.create drawings
+  Scene.D3.create drawings

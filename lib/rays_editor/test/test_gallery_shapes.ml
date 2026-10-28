@@ -61,7 +61,7 @@ let bounds geometry = Rdk.Bound.Private.selected_bounds ~grain:16384
   ~operation:"gallery comparison" None geometry |> Result.get_ok
 let scene geometry =
   let mesh=Rdk_rays.Rays_mesh.to_mesh geometry |> Result.get_ok in
-  Scene3.create [Scene3.mesh ~cull:Cull_none ~material:(Material.unlit Rays_math.Color.white) mesh]
+  Scene.D3.create [Scene.D3.mesh ~cull:Cull_none ~material:(Material.unlit Rays_math.Color.white) mesh]
 let packed geometry =
   let camera=Camera.orthographic ~height:4. ~at:(Rays_math.Vec3.create 0. 0. 4.) ~target:Rays_math.Vec3.zero () in
   let staged=Scene.Private.stage_native ~width:128 ~height:128 [Scene.view3d ~camera (scene geometry)]

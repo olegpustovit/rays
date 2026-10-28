@@ -34,7 +34,7 @@ let editor () =
   E3.create ~ui_text_size:11 ~await:true ~workspace
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
   |> function Ok e -> e | Error m -> fail m
 
 let dump_line = Test_workspace_shell.dump_line

@@ -280,20 +280,24 @@ let color_operation ~primitive ~field ~branch ~emit ~ensure statements cache sou
 
 (* [draw] writes the program's statements in place of lowering one residual; only a residual
    reached through [value] forces [root], which then stands for the whole evaluation. *)
-let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) =
+module Lowerer (P : sig
+  val budget : int option val strict : bool val region_allowed : C.Region.t -> bool
+  val draw : (draw_context -> unit) option val root : E.residual Lazy.t
+end) = struct
+  open P
   let constants = ref [] and locals = ref [] and next_constant = ref 0
-  and next_local = ref 0 and next_statement = ref 0 in
-  let budget = ref (match budget with Some b->b|None->if draw = None then 2048 else 32768) and active = Hashtbl.create 8 in
-  let calls = Hashtbl.create 8 and next_call = ref 0 and next_function = ref (-1) in
-  let mixed_numeric = Hashtbl.create 8 in
-  let current=ref None in
-  let regions = ref [] and slots = ref [] and next_slot = ref 0 and plane = ref `Frame and geometry = ref false in
-  let new_identity () = let n= !next_function in decr next_function; n in
+  and next_local = ref 0 and next_statement = ref 0
+  let budget = ref (match budget with Some b->b|None->if draw = None then 2048 else 32768) and active = Hashtbl.create 8
+  let calls = Hashtbl.create 8 and next_call = ref 0 and next_function = ref (-1)
+  let mixed_numeric = Hashtbl.create 8
+  let current=ref None
+  let regions = ref [] and slots = ref [] and next_slot = ref 0 and plane = ref `Frame and geometry = ref false
+  let new_identity () = let n= !next_function in decr next_function; n
   let call_slot identity = match Hashtbl.find_opt calls identity with
-    | Some n -> n | None -> let n= !next_call in incr next_call; Hashtbl.add calls identity n; n in
-  let local ty = let n = !next_local in incr next_local; locals := ty :: !locals; n in
-  let number () = let n = !next_statement in incr next_statement; n in
-  let statement id source node : C.statement = {id;source;node} in
+    | Some n -> n | None -> let n= !next_call in incr next_call; Hashtbl.add calls identity n; n
+  let local ty = let n = !next_local in incr next_local; locals := ty :: !locals; n
+  let number () = let n = !next_statement in incr next_statement; n
+  let statement id source node : C.statement = {id;source;node}
   let emit statements source ty expression =
     let n = local ty in
     if ty=Flow.Ty.Float && (match expression with
@@ -301,7 +305,7 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
       | Local old -> Hashtbl.mem mixed_numeric old | _ -> false) then
       Hashtbl.add mixed_numeric n ();
     statements := statement (number ()) source (Assign (n,expression)) :: !statements;
-    Computed (n,ty) in
+    Computed (n,ty)
   let rec ensure statements cache source = function
     | Computed (n,_) -> n
     | Callable _ -> refuse "fn"
@@ -1510,8 +1514,8 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
                   (Numeric Mul) ["a",value;"b",reciprocal]) components in
                 emit body source Flow.Ty.Vec3 (Vec (List.map (ensure body cache source) values)))
           | _ -> assert false)
-      | _ -> refuse name in
-  try
+      | _ -> refuse name
+  let result = try
     let body = ref [] in
     let cache=Hashtbl.create 16 in
     let results = match draw with
@@ -1529,6 +1533,11 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
       body=List.rev !body;results;state_slots=Array.of_list (List.rev !slots);regions=Array.of_list !regions;call_slots= !next_call})
   with Unsupported name -> Error name
     | Diagnostic.Error _ | Not_found | Invalid_argument _ | Failure _ -> Error "constant"
+end
+
+let lower_with ?budget ~strict ~region_allowed ~draw root =
+  let module L = Lowerer (struct let budget = budget let strict = strict let region_allowed = region_allowed let draw = draw let root = root end) in
+  L.result
 
 let lower ?(strict=false) ?budget root = lower_with ?budget ~strict ~region_allowed:(fun _ -> true) ~draw:None (Lazy.from_val root)
 let lower_draw ?(region_allowed=fun _ -> true) ~root build = lower_with ~strict:false ~region_allowed ~draw:(Some build) root

@@ -25,7 +25,7 @@ let run () =
   let workspace = Ws_fixture.of_text ~factories:(factory :: Sop_catalog.Editor.factories) text in
   let draws = Atomic.make 0 in
   let current = ref (E.create ~ui_text_size:11 ~workspace ~factories:(factory :: Sop_catalog.Editor.factories)
-    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Atomic.incr draws; Scene3.empty) () |> Result.get_ok)
+    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Atomic.incr draws; Scene.D3.empty) () |> Result.get_ok)
   and count = ref 0 in
   Fun.protect ~finally:(fun () -> E.close !current) (fun () ->
     let step ?(mouse = (0., 0.)) ?(keys = []) ?(buttons = []) events =

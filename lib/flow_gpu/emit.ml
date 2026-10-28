@@ -33,20 +33,35 @@ float fbm(float3 p, int octaves, device const int* table) {
   return weights==0.0f?0.0f:sum/weights;
 }
 |}
-let trace_prelude = {|#include <metal_raytracing>
+let trace_prelude instanced =
+  let pick yes no = if instanced then yes else no in
+  {|#include <metal_raytracing>
 using namespace metal::raytracing;
-struct TraceHit { float t; float prim; float u; float v; float3 n; float hit; };
-TraceHit trace_scene(primitive_acceleration_structure scene, device const packed_float3* vertices,
-    float3 o, float3 d, float tmin, float tmax) {
-  intersector<triangle_data> query;
+struct TraceHit { float t; float prim; float u; float v; float3 n; float hit; float inst; };
+TraceHit trace_scene(|} ^ pick "instance_acceleration_structure" "primitive_acceleration_structure" ^ {| scene, device const packed_float3* vertices,
+    device const float4* spheres, uint sphere_count, |} ^ pick "device const float* instances, " "" ^ {|float3 o, float3 d, float tmin, float tmax) {
+  intersector<triangle_data|} ^ pick ", instancing" "" ^ {|> query;
   query.assume_geometry_type(geometry_type::triangle);
-  intersection_result<triangle_data> hit = query.intersect(ray(o, normalize(d), tmin, tmax), scene);
-  TraceHit h = {0.0f, -1.0f, 0.0f, 0.0f, float3(0.0f), 0.0f};
+  intersection_result<triangle_data|} ^ pick ", instancing" "" ^ {|> hit = query.intersect(ray(o, normalize(d), tmin, tmax), scene);
+  TraceHit h = {0.0f, -1.0f, 0.0f, 0.0f, float3(0.0f), 0.0f, -1.0f};
   if (hit.type == intersection_type::triangle) {
     uint p = hit.primitive_id;
-    float3 a = vertices[p*3], b = vertices[p*3+1], c = vertices[p*3+2];
+    |} ^ pick "uint k = hit.instance_id; device const float* m = instances + k*16; uint base = (uint(m[0]) + p)*3;" "uint base = p*3;" ^ {|
+    float3 a = vertices[base], b = vertices[base+1], c = vertices[base+2];
     h.t = hit.distance; h.prim = float(p); h.u = hit.triangle_barycentric_coord.x; h.v = hit.triangle_barycentric_coord.y;
     h.n = normalize(cross(b - a, c - a)); h.hit = 1.0f;
+    |} ^ pick "h.n = normalize(float3(m[1]*h.n.x + m[5]*h.n.y + m[9]*h.n.z, m[2]*h.n.x + m[6]*h.n.y + m[10]*h.n.z, m[3]*h.n.x + m[7]*h.n.y + m[11]*h.n.z)); h.inst = float(k);" "h.inst = 0.0f;" ^ {|
+  }
+  float3 dn = normalize(d);
+  for (uint k = 0; k < sphere_count; k++) {
+    float4 s = spheres[k]; float3 oc = o - s.xyz;
+    float b = dot(oc, dn); float3 q = oc - b*dn; float disc = s.w*s.w - dot(q, q);
+    if (disc >= 0.0f) {
+      float root = sqrt(disc), t = (-b - root >= tmin) ? -b - root : -b + root;
+      if (t >= tmin && t <= tmax && (h.hit == 0.0f || t < h.t)) {
+        h.t = t; h.prim = -2.0f - float(k); h.u = 0.0f; h.v = 0.0f; h.n = (oc + t*dn) / s.w; h.hit = 1.0f; h.inst = -1.0f;
+      }
+    }
   }
   return h;
 }
@@ -101,12 +116,12 @@ let integer operation a b = wrap_integer (match operation with
 let comparison operation a b =
   let op = match operation with Flow.Packed_ops.Ilt -> "<" | Ile -> "<=" | Igt -> ">" | Ige -> ">=" | Ieq -> "==" in
   "(" ^ a ^ op ^ b ^ "?1.0f:0.0f)"
-let kernel ?(fast=false) program = try
+let kernel ?(fast=false) ?(instanced=false) program = try
   (match P.gpu_refusals ~fused:true ~fast program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));
-  let layout = Flow_ir.Kernel_layout.plan ~fast program in
+  let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced program in
   let {Flow_ir.Kernel_layout.view; used; finite_checks; uniforms; frames; table_seeds;
        gathers; gather_lengths; input_used; uniform_layout; uniform_bytes; gather_base;
-       uniform_binding; status_binding; table_binding; count_base; counts; scene_binding} = layout in
+       uniform_binding; status_binding; table_binding; count_base; counts; scene_binding; scene_spheres; scene_instances} = layout in
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
   let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
   let integer_register slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
@@ -169,10 +184,10 @@ let kernel ?(fast=false) program = try
           let key = Array.to_list r in
           let hit = match Hashtbl.find_opt hits key with Some name -> name | None ->
             let name = Printf.sprintf "hit%d" slot and a k = float_of r.(k) in
-            Printf.bprintf body "  TraceHit %s=trace_scene(scene,scene_vertices,float3(%s,%s,%s),float3(%s,%s,%s),%s,%s);\n"
-              name (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) (a 8);
+            Printf.bprintf body "  TraceHit %s=trace_scene(scene,scene_vertices,scene_spheres,uniforms[%d],%sfloat3(%s,%s,%s),float3(%s,%s,%s),%s,%s);\n"
+              name (Option.get scene_spheres) (if scene_instances = None then "" else "scene_instances,") (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) (a 8);
             Hashtbl.add hits key name; name in
-          hit ^ [| ".t"; ".prim"; ".u"; ".v"; ".n.x"; ".n.y"; ".n.z"; ".hit" |].(field)
+          hit ^ [| ".t"; ".prim"; ".u"; ".v"; ".n.x"; ".n.y"; ".n.z"; ".hit"; ".inst" |].(field)
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
           (register x) (register y) (register z) octaves (table seed)
@@ -236,12 +251,14 @@ let kernel ?(fast=false) program = try
     @ (if counts=None then [] else [Printf.sprintf "device const uint* count_in [[buffer(%d)]]" count_base;
         Printf.sprintf "device uint* count_out [[buffer(%d)]]" (count_base+1)])
     @ (match scene_binding with None -> [] | Some b ->
-        [Printf.sprintf "primitive_acceleration_structure scene [[buffer(%d)]]" b;
-         Printf.sprintf "device const packed_float3* scene_vertices [[buffer(%d)]]" (b+1)])
+        [Printf.sprintf "%s scene [[buffer(%d)]]" (if scene_instances = None then "primitive_acceleration_structure" else "instance_acceleration_structure") b;
+         Printf.sprintf "device const packed_float3* scene_vertices [[buffer(%d)]]" (b+1);
+         Printf.sprintf "device const float4* scene_spheres [[buffer(%d)]]" (b+2)]
+        @ (if scene_instances = None then [] else [Printf.sprintf "device const float* scene_instances [[buffer(%d)]]" (b+3)]))
     @ ["uint i [[thread_position_in_grid]]"] in
   let prefix = "#include <metal_stdlib>\nusing namespace metal;\n" ^
     (if fast then "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n" else "") ^
-    (if scene_binding=None then "" else trace_prelude) ^ (if table_seeds=[||] then "" else perlin) in
+    (if scene_binding=None then "" else trace_prelude (scene_instances<>None)) ^ (if table_seeds=[||] then "" else perlin) in
   let signature = String.concat ",\n  " arguments in
   let guard = match counts with
     | None -> "  if(i>=uniforms[0]) return;\n"
@@ -257,7 +274,9 @@ let kernel ?(fast=false) program = try
     |>List.map(fun binding->S.{group=0;binding;kind=(if binding=uniform_binding then Uniform_buffer else Storage_buffer);visibility=[Compute]})in
   let interface = interface @ (match scene_binding with None -> [] | Some b ->
     [S.{group=0;binding=b;kind=Acceleration_structure;visibility=[Compute]};
-     S.{group=0;binding=b+1;kind=Storage_buffer;visibility=[Compute]}]) in
+     S.{group=0;binding=b+1;kind=Storage_buffer;visibility=[Compute]};
+     S.{group=0;binding=b+2;kind=Storage_buffer;visibility=[Compute]}]
+    @ (if scene_instances=None then [] else [S.{group=0;binding=b+3;kind=Storage_buffer;visibility=[Compute]}])) in
   Ok {source;entry;interface;uniform_layout;uniform_bytes;scene=scene_binding;
     table_seeds;output_widths=Array.map Array.length view.outputs;input_widths=view.widths;
     gathers=Array.of_list (List.map snd gathers);counts}
@@ -289,3 +308,19 @@ kernel void flow_compact_mask(device const float* mask [[buffer(0)]], device flo
    output_widths = [|1|]; input_widths = [|1|]; gathers = [||]; counts = None; scene = None;
    interface = List.map (fun binding -> S.{group = 0; binding;
      kind = (if binding = 3 then Uniform_buffer else Storage_buffer); visibility = [Compute]}) [0; 1; 2; 3; 4]}
+
+(* The image sink's RGBA8 packing kernel: all flow_gpu MSL lives in this printer. *)
+let image_rgba8_source = {|#include <metal_stdlib>
+using namespace metal;
+struct ImageSize { uint count; uint width; uint row_words; };
+uint rgba8_channel(float c) { return uint(rint(clamp(c,0.0f,1.0f)*255.0f)); }
+kernel void rays_flow_image_rgba8(device const float4 *colors [[buffer(0)]],
+    device uint *pixels [[buffer(1)]], constant ImageSize &size [[buffer(2)]],
+    uint i [[thread_position_in_grid]]) {
+  if (i>=size.count) return;
+  float4 c=colors[i];
+  uint rgba=rgba8_channel(c.x)|(rgba8_channel(c.y)<<8)
+    |(rgba8_channel(c.z)<<16)|(rgba8_channel(c.w)<<24);
+  pixels[(i/size.width)*size.row_words+i%size.width]=rgba;
+}
+|}

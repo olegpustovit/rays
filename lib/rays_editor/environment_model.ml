@@ -245,7 +245,7 @@ let compose value (update : (_, _) Core_model.update) ~baked ~baked_views ~scene
             Document.Int_map.add piece.id (graph, prepared, rendered,texture) drawn
         | Some _ | None ->
             let scene=value.draw piece.graph piece.prepared in
-            let scene=Option.fold ~none:scene ~some:(fun texture->Scene3.Private.with_texture(Scene3.textured texture)scene)texture in
+            let scene=Option.fold ~none:scene ~some:(fun texture->Scene.D3.Private.with_texture(Scene.D3.textured texture)scene)texture in
             Document.Int_map.add piece.id (piece.graph, piece.prepared, scene,texture) drawn)
         Document.Int_map.empty placed in
     let waiting = placed = [] && Core_list.geometry_objects update.core <> []

@@ -3193,501 +3193,8 @@ let scrubbed literal dx ~coarse =
       if !n > 0 && s.[!n - 1] = '.' then String.sub s 0 (!n + 1) else String.sub s 0 !n
   | None, None -> literal
 
-let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []) ?(spans = [])
-    ?reveal ?(reveal_nonce = 0) ?select ?(splice = []) ?language ?on_context ?on_scrub ?on_scrub_edit ?on_click ?on_caret
-    ?on_caret_move ?on_select ?on_drop ?(chips = []) label text =
-  (* a line of code is one and a half times its text, as code editors set it (17 points at 11,
-     20 at 13): the 24-point row is a control's, twice the text *)
-  let row = float (text_line_height ui) in
-  let body = box ui
-      ~flags:(clickable lor focusable lor blocking lor scroll lor clip
-              lor keep_tab)
-      ~at ~w:(Px w) ~h:(Px h) ~scroll_step:row label in
-  (* a [select] request takes the keyboard for the area *)
-  if select <> None then focus ui body;
-  let char_w = text_width ui "0" in
-  (* the sheet's code area: a 36-point gutter (wider only past 999 lines), the text at its edge,
-     6 points of padding above the first row *)
-  let gutter_of lines = 36. +. char_w *. float (max 0 (String.length (string_of_int lines) - 3)) in
-  let pad = 6. in
-  let columns_of count =
-    if not wrap then None
-    else
-      let gutter = gutter_of count in
-      Some (int_of_float (Float.floor (Float.max 1. (w -. gutter -. 16.) /. Float.max 1. char_w))) in
-  (* the gutter width follows the number of logical lines, the wrap width follows the gutter *)
-  let rows_of text =
-    let logical = 1 + String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 text in
-    text_rows ?cols:(columns_of logical) text in
-  let rows = rows_of text in
-  let count = Array.length rows in
-  (* a diagnostic's message is a row of its own under the last row of its line: [note_rows] are
-     (the display row it follows, the wrong span, the message), in order; a row's slot counts
-     the message rows above it *)
-  let note_rows rows = if messages = [] then [||] else begin
-    let found = List.filter_map (fun (line, span, message) ->
-      let last = ref (-1) in
-      Array.iteri (fun i (_, _, logical) -> if logical = line - 1 then last := i) rows;
-      if !last >= 0 then Some (!last, span, message) else None) messages in
-    Array.of_list (List.stable_sort (fun (a, _, _) (b, _, _) -> Int.compare a b) found)
-  end in
-  let slot_of notes i = Array.fold_left (fun n (after, _, _) -> if after < i then n + 1 else n) i notes in
-  let row_at_slot notes count k =
-    if notes = [||] then max 0 (min (count - 1) k) else begin
-      let i = ref 0 in
-      while !i + 1 < count && slot_of notes (!i + 1) <= k do incr i done; !i
-    end in
-  let logical_count rows = let _, _, l = rows.(Array.length rows - 1) in l + 1 in
-  let start_of rows i = let s, _, _ = rows.(i) in s in
-  let stop_of rows i = let _, e, _ = rows.(i) in e in
-  let row_text text rows i = String.sub text (start_of rows i) (stop_of rows i - start_of rows i) in
-  (* the content box scrolls; two empty boxes keep the completion popup's and the number
-     scrub's state between frames *)
-  let content, suggest, scrub = within ui body (fun () ->
-    let content = box ui ~w:(Px w)
-        ~h:(Px ((float (count + Array.length (note_rows rows)) *. row) +. pad)) (label ^ "-content") in
-    let suggest = box ui ~w:(Px 0.) ~h:(Px 0.) ~at:(0., 0.) (label ^ "-suggest") in
-    let scrub = box ui ~w:(Px 0.) ~h:(Px 0.) ~at:(0., 0.) (label ^ "-scrub") in
-    content, suggest, scrub) in
-  let signal_of = signal in
-  let signal = signal ui body in
-  (* the I-beam over text; a number under the pointer asks for the scrub
-     cursor further down, and the last request wins *)
-  if signal.hovered then request_cursor ui `Text;
-  let focused = focused ui body in
-  let gutter = gutter_of (logical_count rows) in
-  let bx, by, bw, bh = rect ui body in
-  let horizontal = ref (float (state ui body ~default:0)) in
-  (* the byte at a point; [strict] answers only over the row's glyphs *)
-  let point_in ?(strict = false) text rows (px, py) =
-    let count = Array.length rows in
-    let line = row_at_slot (note_rows rows) count
-      (int_of_float (Float.floor ((py -. by +. scroll_position ui body -. pad) /. row))) in
-    let x = px -. bx -. gutter +. !horizontal in
-    let line_text = row_text text rows line in
-    if strict && (x < 0. || x > text_width ui line_text || py < by || py > by +. bh) then None
-    else Some (start_of rows line + text_caret_at ui line_text (Float.max 0. x)) in
-  let point_at point = Option.get (point_in text rows point) in
-  (* a number is dragged by its underline: the lowest 9 points of its row, so a drag that selects
-     text from a number does not rewrite it *)
-  let on_handle (_, py) =
-    let y = py -. by +. scroll_position ui body -. pad in
-    y -. (row *. Float.floor (y /. row)) >= row -. 9. in
-  let edit = if focused then load_text_edit ui body.box_key text
-    else { text; caret = String.length text; anchor = String.length text } in
-  let moved = ref false and submitted = ref false in
-  (match on_context with
-   | Some f when context_clicked signal -> f signal.release_point
-   | _ -> ());
-  (* a press on a number arms a scrub (its state is the start + 1, negated once dragging); three
-     points sideways make it one, three points down a selection as before *)
-  let scrub_state = state ui scrub ~default:0 in
-  let scrubbing = ref None in
-  (match language with
-   | Some l when signal.pressed && signal.button = Some Input.LeftButton ->
-       (match (if on_handle signal.press_point then l.number_at text (point_at signal.press_point) else None) with
-        | Some (a, b) -> set_state ui scrub (a + 1); set_text_state ui scrub (Some (String.sub text a (b - a)))
-        | None -> set_state ui scrub 0)
-   | Some _ when scrub_state <> 0 && signal.held ->
-       let dx = fst signal.pointer -. fst signal.press_point
-       and dy = snd signal.pointer -. snd signal.press_point in
-       if scrub_state < 0 || (Float.abs dx >= 3. && Float.abs dx >= Float.abs dy) then begin
-         let start = abs scrub_state - 1 in
-         set_state ui scrub (- (start + 1));
-         scrubbing := Some (start, Option.value ~default:"" (text_state ui scrub), dx, scrub_state > 0)
-       end else if Float.abs dy >= 3. then set_state ui scrub 0
-   | _ when scrub_state <> 0 && not signal.held ->
-       set_state ui scrub 0;
-       if scrub_state < 0 then Option.iter (fun f -> f `Done) on_scrub
-   | _ -> ());
-  (* the completion popup: its state is (token start + 1) * 512 + 256 once an arrow has moved
-     the selection + the selected row; the rows are built before the keys so a click on one is
-     seen this frame *)
-  let open_ = if focused then state ui suggest ~default:0 else (set_state ui suggest 0; 0) in
-  let items = match language with
-    | Some l when open_ <> 0 -> Array.of_list (l.complete edit.text edit.caret)
-    | _ -> [||] in
-  let shown = min 8 (Array.length items) in
-  let selected = ref (min (open_ land 255) (max 0 (Array.length items - 1))) in
-  (* Enter takes the row only after Up or Down chose it; Tab takes it always *)
-  let chosen = ref (open_ land 256 <> 0) in
-  let first = max 0 (!selected - shown + 1) in
-  let closed = ref false in
-  let accept (c : completion) =
-    remember ui edit ~typing:false;
-    let a, b = c.replace in
-    let a = max 0 (min a (String.length edit.text)) and b = max 0 (min b (String.length edit.text)) in
-    edit.text <- String.sub edit.text 0 a ^ c.insert ^ String.sub edit.text b (String.length edit.text - b);
-    edit.caret <- a + String.length c.insert; edit.anchor <- edit.caret;
-    set_state ui suggest 0; closed := true in
-  let popup = if shown = 0 then None else begin
-    let doc = items.(!selected).doc in
-    let width = Array.fold_left (fun w (c : completion) ->
-      Float.max w (text_width ui c.label +. text_width ui c.detail +. 44.)) 220. items in
-    let width = Float.min width (Float.max 120. (ui.view_w -. 16.)) in
-    let height = (float (shown * ui.kit_row_height)) +. (if doc = "" then 4. else 22.) in
-    let container = overlay_box ui ~flags:blocking ~at:(0., 0.) ~w:width ~h:height (label ^ "-completions") in
-    let boxes = within ui container (fun () ->
-      List.init shown (fun i ->
-        kit_row ui ~flags:(clickable lor blocking lor keep_focus) (Printf.sprintf "row-%d" i))) in
-    List.iteri (fun i r -> if (signal_of ui r).clicked then accept items.(first + i)) boxes;
-    Some (container, boxes, width, height)
-  end in
-  if focused then begin
-    let caret0 = edit.caret in
-    (* a triple click takes the logical line with its break *)
-    let line_of at =
-      let s = line_start edit.text at and e = line_end edit.text at in
-      s, (if e < String.length edit.text then e + 1 else e) in
-    if signal.pressed && signal.button = Some Input.LeftButton then
-      begin
-        ui.edit_column <- -1.;
-        press_select ui edit ~shift:(press_shift ui body) ~clicks:signal.clicks ~line_of
-          (point_at signal.press_point);
-        (* a double click on true / false flips it, as dragging flips a number *)
-        if signal.clicks = 2 && language <> None then begin
-          let a, b = text_selection edit in
-          let flipped = match String.sub edit.text a (b - a) with
-            | "true" -> Some "false" | "false" -> Some "true" | _ -> None in
-          Option.iter (fun word ->
-            remember ui edit ~typing:false;
-            replace_text edit word; edit.anchor <- a; edit.caret <- a + String.length word) flipped
-        end
-      end
-    else if !scrubbing = None && scrub_state = 0
-        && (signal.dragging || (signal.held && signal.pointer <> signal.press_point)) then
-      drag_select ui edit ~line_of (point_at signal.pointer);
-    let typed = ref false and changed = ref false in
-    (* the host's replacements (one undo step, last first so the offsets hold), then its selection *)
-    if splice <> [] then begin
-      remember ui edit ~typing:false;
-      List.iter (fun (a, b, by) ->
-        if 0 <= a && a <= b && b <= String.length edit.text then
-          edit.text <- String.sub edit.text 0 a ^ by ^ String.sub edit.text b (String.length edit.text - b))
-        (List.sort (fun (a, _, _) (b, _, _) -> Int.compare b a) splice);
-      changed := true
-    end;
-    Option.iter (fun (a, b) ->
-      let n = String.length edit.text in
-      edit.anchor <- max 0 (min n a); edit.caret <- max 0 (min n b)) select;
-    let page = max 1 (int_of_float (bh /. row) - 1) in
-    List.iter (fun ((event : Input.event), modifiers) ->
-      let command = command_modifiers modifiers and shift = List.mem Input.Shift modifiers in
-      let rows = rows_of edit.text in
-      let count = Array.length rows in
-      let x_of line index = text_width ui
-        (String.sub edit.text (start_of rows line) (index - start_of rows line)) in
-      let line = row_at rows edit.caret in
-      let move target = edit.caret <- target; if not shift then edit.anchor <- target in
-      (* Up and Down keep the column they started from across shorter rows *)
-      let vertical step =
-        let target = line + step in
-        let x = if ui.edit_column >= 0. then ui.edit_column else x_of line edit.caret in
-        ui.edit_column <- x;
-        if target < 0 then move 0
-        else if target >= count then move (String.length edit.text)
-        else move (start_of rows target + text_caret_at ui (row_text edit.text rows target) x) in
-      (match event with
-       | Input.Key_pressed (Input.ArrowUp | ArrowDown) when not command -> ()
-       | Input.Key_pressed (Input.PageUp | PageDown | Shift | Ctrl | Alt | Meta) -> ()
-       | _ -> ui.edit_column <- -1.);
-      let listing = shown > 0 && not !closed in
-      let change () = changed := true; remember ui edit ~typing:false in
-      (match event with
-      | Input.Key_pressed Input.Enter when command -> submitted := true
-      (* the completion popup takes Up, Down, Tab, Enter and Escape while it is open *)
-      | Input.Key_pressed ((Input.ArrowUp | Input.ArrowDown) as key) when listing ->
-          let n = Array.length items in
-          chosen := true;
-          selected := (!selected + (if key = Input.ArrowUp then n - 1 else 1)) mod n
-      | Input.Key_pressed Input.Tab when listing && not command -> accept items.(!selected)
-      | Input.Key_pressed Input.Enter when listing && !chosen -> accept items.(!selected)
-      | Input.Key_pressed Input.Escape when open_ <> 0 && not !closed -> set_state ui suggest 0; closed := true
-      | Input.Key_pressed Input.Escape -> unfocus ui
-      | Input.Key_pressed Input.Enter ->
-          begin
-            let indent = match language with
-              | Some l -> l.indent edit.text (fst (text_selection edit)) | None -> "" in
-            change (); replace_text edit ("\n" ^ indent);
-            if open_ <> 0 then (set_state ui suggest 0; closed := true)
-          end
-      (* brackets come in pairs: an opener wraps the selection or inserts both, a closer typed
-         before itself steps over it, Backspace between an empty pair takes both *)
-      | Input.Text_input s when language <> None && String.length s = 1 && not command ->
-          let c = s.[0] and pairs = (Option.get language).pairs in
-          let start, stop = text_selection edit in
-          let next = if edit.caret < String.length edit.text then Some edit.text.[edit.caret] else None in
-          (* a bracket is a bracket only in code: in a string only a quote steps over its closing
-             quote, and a comment takes every character as typed; in code a quote before a quote
-             is the next string's opening one *)
-          let context = (Option.get language).context_at edit.text edit.caret in
-          let quote = List.mem (c, c) pairs in
-          let step_over = next = Some c && (match context with
-            | `Code -> List.exists (fun (_, close) -> close = c) pairs && not quote
-            | `String -> quote
-            | `Comment -> false) in
-          (match context, List.assoc_opt c pairs with
-           | `Code, Some close when start <> stop ->
-               change ();
-               replace_text edit (String.make 1 c ^ String.sub edit.text start (stop - start) ^ String.make 1 close);
-               edit.anchor <- start + 1; edit.caret <- stop + 1
-           | _ when step_over ->
-               edit.caret <- edit.caret + 1; edit.anchor <- edit.caret
-           | `Code, Some close ->
-               change ();
-               replace_text edit (String.make 1 c ^ String.make 1 close);
-               edit.caret <- edit.caret - 1; edit.anchor <- edit.caret
-           | _ -> changed := edit_text_event ~multiline:true ui edit ~accept:(fun _ -> true) ~modifiers event || !changed);
-          typed := true
-      | Input.Key_pressed Input.Backspace when language <> None && not command
-          && edit.caret = edit.anchor && edit.caret > 0 && edit.caret < String.length edit.text
-          && List.mem (edit.text.[edit.caret - 1], edit.text.[edit.caret]) (Option.get language).pairs ->
-          change (); edit.anchor <- edit.caret - 1; edit.caret <- edit.caret + 1; replace_text edit ""; typed := true
-      (* Command-X / C with no selection take the caret's whole logical line, newline included *)
-      | Input.Key_pressed (Input.KeyChar ('x' | 'X' | 'c' | 'C' as key)) when command && edit.caret = edit.anchor ->
-          let s = line_start edit.text edit.caret in
-          let e = min (String.length edit.text) (line_end edit.text edit.caret + 1) in
-          if Clipboard.set_text (String.sub edit.text s (e - s)) = Ok ()
-             && (key = 'x' || key = 'X') then begin
-            change (); edit.anchor <- s; edit.caret <- e; replace_text edit ""; typed := true
-          end
-      | Input.Key_pressed Input.Tab when not command && edit.caret <> edit.anchor ->
-          (* Tab and Shift-Tab with a selection indent and dedent every line it touches *)
-          let a, b = text_selection edit in
-          let first, stop = line_block edit.text a b in
-          let block = String.sub edit.text first (stop - first) in
-          let shifted = String.concat "\n" (List.map (fun l ->
-            if not shift then (if l = "" then l else "  " ^ l)
-            else if String.starts_with ~prefix:"  " l then String.sub l 2 (String.length l - 2)
-            else if String.starts_with ~prefix:" " l then String.sub l 1 (String.length l - 1) else l)
-            (String.split_on_char '\n' block)) in
-          if shifted <> block then begin
-            change (); replace_block edit first stop shifted;
-            keep_selection edit first (first + String.length shifted)
-          end
-      | Input.Key_pressed Input.Tab when not command ->
-          if not shift then (change (); replace_text edit "  ")
-          else begin
-            (* Shift-Tab: up to two spaces leave the start of the line *)
-            let line_start = line_start edit.text edit.caret in
-            let spaces = if line_start < String.length edit.text && edit.text.[line_start] = ' '
-              then (if line_start + 1 < String.length edit.text && edit.text.[line_start + 1] = ' ' then 2 else 1)
-              else 0 in
-            if spaces > 0 then begin
-              change ();
-              edit.text <- String.sub edit.text 0 line_start
-                ^ String.sub edit.text (line_start + spaces) (String.length edit.text - line_start - spaces);
-              edit.caret <- max line_start (edit.caret - spaces); edit.anchor <- edit.caret
-            end
-          end
-      (* line and form edits: Command-/ toggles comments, Option-Up and Down move the lines, with
-         Shift duplicate them, Command-Option-Up selects the enclosing form, Command-Shift-\\ jumps
-         to the matching bracket *)
-      | Input.Key_pressed (Input.KeyChar '/') when command && language <> None ->
-          let a, b = text_selection edit in
-          let first, stop = line_block edit.text a b in
-          let block = String.sub edit.text first (stop - first) in
-          let toggled = toggle_comment (Option.get language).comment block in
-          if toggled <> block then begin
-            change (); replace_block edit first stop toggled;
-            let last = first + String.length toggled in
-            if a = b then (edit.caret <- max first (a + last - stop); edit.anchor <- edit.caret)
-            else keep_selection edit first last
-          end
-      | Input.Key_pressed (Input.ArrowUp | Input.ArrowDown as key) when List.mem Input.Alt modifiers && not command ->
-          let a, b = text_selection edit in
-          let first, stop = line_block edit.text a b in
-          let n = String.length edit.text in
-          let block = String.sub edit.text first (stop - first) in
-          let up = key = Input.ArrowUp in
-          let shift_by d = edit.anchor <- edit.anchor + d; edit.caret <- edit.caret + d in
-          if shift then begin
-            (* a copy below keeps the selection on the copy, a copy above on the original *)
-            change ();
-            replace_block edit stop stop ("\n" ^ block);
-            if not up then shift_by (String.length block + 1)
-          end else if up && first > 0 then begin
-            let before = line_start edit.text (first - 1) in
-            change ();
-            replace_block edit before stop (block ^ "\n" ^ String.sub edit.text before (first - 1 - before));
-            shift_by (before - first)
-          end else if not up && stop < n then begin
-            let after = line_end edit.text (stop + 1) in
-            change ();
-            replace_block edit first after (String.sub edit.text (stop + 1) (after - stop - 1) ^ "\n" ^ block);
-            shift_by (after - stop)
-          end
-      | Input.Key_pressed Input.ArrowUp when command && List.mem Input.Alt modifiers ->
-          let a, b = text_selection edit in
-          (match language with
-           | Some l ->
-               Option.iter (fun (o, c) -> edit.anchor <- o; edit.caret <- c) (enclosing_pair (l.brackets edit.text) a b)
-           | None -> ())
-      | Input.Key_pressed (Input.KeyChar '\\') when command && shift && language <> None ->
-          Option.iter (fun at -> edit.caret <- at; edit.anchor <- at)
-            (bracket_jump ((Option.get language).brackets edit.text) edit.caret)
-      | Input.Key_pressed Input.ArrowUp when command -> move 0
-      | Input.Key_pressed Input.ArrowDown when command -> move (String.length edit.text)
-      | Input.Key_pressed Input.ArrowUp -> vertical (-1)
-      | Input.Key_pressed Input.ArrowDown -> vertical 1
-      | Input.Key_pressed Input.PageUp -> vertical (-page)
-      | Input.Key_pressed Input.PageDown -> vertical page
-      | Input.Key_pressed (Input.Home | Input.ArrowLeft) when command || event = Input.Key_pressed Input.Home ->
-          move (start_of rows line)
-      | Input.Key_pressed (Input.End | Input.ArrowRight) when command || event = Input.Key_pressed Input.End ->
-          move (stop_of rows line)
-      | event ->
-          if edit_text_event ~multiline:true ui edit ~accept:(fun _ -> true) ~modifiers event then begin
-            changed := true;
-            (match event with
-             | Input.Text_input _ | Input.Key_pressed (Input.Backspace | Input.Delete) -> typed := true
-             | _ -> ())
-          end))
-      (key_events ui body);
-    (* a dragged number: the literal at the press follows the pointer (the caret sits after it) *)
-    Option.iter (fun (start, literal, dx, first) ->
-      if start <= String.length edit.text && literal <> "" then begin
-        (* the whole drag is one step of the editor's undo *)
-        if first then remember ui edit ~typing:false;
-        let stop = ref start in
-        while !stop < String.length edit.text && numeric_character edit.text.[!stop] do incr stop done;
-        let coarse = match ui.input_frame with
-          | Some (frame : Frame.t) -> List.mem Input.Shift frame.input.keys | None -> false in
-        let next = scrubbed literal dx ~coarse in
-        Option.iter (fun f -> f (start, !stop) next) on_scrub_edit;
-        edit.text <- String.sub edit.text 0 start ^ next
-          ^ String.sub edit.text !stop (String.length edit.text - !stop);
-        edit.caret <- start + String.length next; edit.anchor <- edit.caret;
-        set_state ui suggest 0;
-        Option.iter (fun f -> f `Live) on_scrub
-      end) !scrubbing;
-    (* typing opens the popup on the token at the caret (the selection starts over); a popup
-       left open follows the caret and closes when the caret leaves its token *)
-    (match language with
-     | Some l when (!typed || (open_ <> 0 && not !closed)) ->
-         (match l.complete edit.text edit.caret with
-          | c :: _ when !typed -> set_state ui suggest ((fst c.replace + 1) * 512)
-          | c :: _ when fst c.replace = (open_ lsr 9) - 1 ->
-              set_state ui suggest ((open_ lsr 9) * 512 + (if !chosen then 256 else 0) + !selected)
-          | _ -> set_state ui suggest 0)
-     | _ -> ());
-    (* the language's rewrite (parinfer) after this frame's edits; the anchor maps like the caret *)
-    (match language with
-     | Some { rewrite = Some rewrite; _ } when !changed ->
-         let text', caret' = rewrite edit.text edit.caret in
-         let anchor' = if edit.anchor = edit.caret then caret' else snd (rewrite edit.text edit.anchor) in
-         edit.text <- text'; edit.caret <- caret'; edit.anchor <- anchor'
-     | _ -> ());
-    save_text_edit ui edit;
-    moved := edit.caret <> caret0 || edit.text != text || signal.pressed
-  end;
-  (* scrolling: the wheel, then whatever keeps the caret (or [reveal]) in view *)
-  let final = edit.text in
-  if focused then Option.iter (fun f -> f edit.caret) on_caret;
-  if focused then Option.iter (fun f -> f (text_selection edit)) on_select;
-  if focused && !moved && (signal.pressed || signal.dragging || key_events ui body <> []) then
-    Option.iter (fun f -> f edit.caret) on_caret_move;
-  (match on_click with
-   | Some f when signal.clicked && signal.button = Some Input.LeftButton && scrub_state >= 0 ->
-       Option.iter (fun byte -> f byte (command_modifiers (press_keys ui body)))
-         (point_in ~strict:true text rows signal.release_point)
-   | _ -> ());
-  (* a payload in flight over the area: the byte under the pointer, hovering or released *)
-  (match on_drop with
-   | Some f ->
-       Option.iter (fun drop -> Option.iter (fun byte -> f byte drop) (point_in text rows signal.pointer))
-         (drop_target ui body)
-   | None -> ());
-  let rows = if final == text then rows else rows_of final in
-  let count = Array.length rows in
-  let notes = note_rows rows in
-  (* [reveal] scrolls once per (offset, length, nonce): the content box remembers it, and forgets
-     it while there is nothing to reveal *)
-  let revealed = match reveal with
-    | Some index when bw > 0.
-        && state ui content ~default:0 <> (index * 1_000_003) + String.length final + 1 + (reveal_nonce * 1_000_000_007) ->
-        set_state ui content ((index * 1_000_003) + String.length final + 1 + (reveal_nonce * 1_000_000_007)); Some index
-    | None -> set_state ui content 0; None
-    | _ -> None in
-  let target = if !moved then Some edit.caret
-    else Option.map (fun index -> min (String.length final) index) revealed in
-  let longest = ref 0 in
-  Array.iteri (fun i _ -> longest := max !longest (stop_of rows i - start_of rows i)) rows;
-  let visible = Float.max 1. (bw -. gutter -. 16.) in
-  let max_x = if wrap then 0. else Float.max 0. (float !longest *. char_w -. visible) in
-  horizontal := Float.max 0. (Float.min max_x (!horizontal +. fst signal.scroll *. row));
-  let vertical = ref (Float.max 0. (Float.min (Float.max 0. ((float (count + Array.length notes) *. row) +. pad -. bh))
-    (scroll_offset ui body))) in
-  Option.iter (fun index ->
-    let line = row_at rows index in
-    let top = pad +. (float (slot_of notes line) *. row) in
-    if top < !vertical then vertical := top
-    else if top +. row > !vertical +. bh then vertical := top +. row -. bh;
-    let x = text_width ui (String.sub final (start_of rows line) (min index (stop_of rows line) - start_of rows line)) in
-    if x < !horizontal then horizontal := x
-    else if x -. !horizontal > visible then horizontal := x -. visible) target;
-  set_state ui body (int_of_float !horizontal);
-  if !vertical <> scroll_offset ui body then set_scroll_offset ui body !vertical;
-  (* painted where the shared elastic scroll puts the content, overshoot included *)
-  let offset = scroll_position ui body and horizontal = !horizontal in
-  let theme = ui.theme and composition = ui.composition in
-  (* the language's colours and the bracket pair at the caret, once per frame *)
-  let colors = match language with Some l -> l.colorize final | None -> [] in
-  let matched = match language with
-    | Some l when focused ->
-        let c = edit.caret in
-        List.find_opt (fun (o, k) -> o = c - 1 || k = c - 1 || o = c || k = c) (l.brackets final)
-    | _ -> None in
-  (* the pointer over a number invites a drag; over any other token it describes it after a rest *)
-  let under_pointer = match language with
-    | Some _ when signal.hovered && ui.active = None ->
-        point_in ~strict:true final rows signal.pointer
-    | _ -> None in
-  let hovered_number = match language, under_pointer, !scrubbing with
-    | _, _, Some (start, _, _, _) ->
-        let stop = ref start in
-        while !stop < String.length final && numeric_character final.[!stop] do incr stop done;
-        Some (start, !stop)
-    | Some l, Some byte, None when on_handle signal.pointer -> l.number_at final byte
-    | _ -> None in
-  if hovered_number <> None then request_cursor ui `Horizontal_resize;
-  (match language, under_pointer with
-   | Some l, Some byte when hovered_number = None && open_ = 0 ->
-       Option.iter (fun (start, _, doc) ->
-         if doc <> "" then tooltip ui ~key:(Printf.sprintf "%s#%d" label start) ~text:doc)
-         (l.describe final byte)
-   | _ -> ());
-  (* the completion popup sits under the caret's row (above it near the bottom of the view) *)
-  let text_x0 = bx +. gutter -. horizontal in
-  let x_at index =
-    let line = row_at rows index in
-    text_x0 +. text_width ui (String.sub final (start_of rows line) (index - start_of rows line)) in
-  Option.iter (fun (container, rows_boxes, width, height) ->
-    let caret_line = row_at rows edit.caret in
-    let anchor = x_at (fst items.(!selected).replace) in
-    let px = Float.max 8. (Float.min (anchor -. 8.) (ui.view_w -. width -. 8.)) in
-    let below = by -. offset +. pad +. (float (slot_of notes caret_line + 1) *. row) in
-    let py = if below +. height <= ui.view_h -. 8. then below
-      else Float.max 8. (by -. offset +. pad +. (float (slot_of notes caret_line) *. row) -. height) in
-    set_at ui container ~at:(px, py);
-    let selected = !selected in
-    draw ui container (fun paint (x, y, w, h) ->
-      Paint.fill paint ~x ~y ~w ~h theme.input;
-      Paint.frame paint ~x ~y ~w ~h (Theme.edge theme);
-      let doc = items.(selected).doc in
-      if doc <> "" then
-        Paint.text paint ~color:(Theme.muted theme)
-          ~at:(x +. 8., y +. h -. 18.) (display doc));
-    List.iteri (fun i r ->
-      let c = items.(first + i) and hovered = (signal_of ui r).hovered in
-      draw ui r (fun paint rect ->
-        let (rx, ry, rw, rh) as bounds = ints rect in
-        if first + i = selected then fill paint bounds theme.control
-        else if hovered then hover_row paint ui bounds;
-        kit_text paint ~color:theme.foreground (rx + side) (label_y ui ry rh) c.label;
-        let dw = int_of_float (text_width ui c.detail) in
-        kit_text paint ~color:(Theme.muted theme) (rx + rw - dw - side) (label_y ui ry rh) c.detail)) rows_boxes)
-    popup;
+(* the text area's painting: gutter, selection, runs, diagnostics, caret *)
+let paint_text_area ~colors ~composition ~messages ~chips ~hovered_number ~scrubbing ~matched ~spans ~errors ~slot_of ~notes ~char_w ~final ~stop_of ~start_of ~focused ~edit ~rows ~count ~notes ~row ~pad ~offset ~horizontal ~gutter ~(theme : Theme.t) ~body ui =
   draw ui body (fun paint (bx, by, bw, bh) ->
     let width text = Paint.text_width paint text in
     Paint.fill paint ~x:bx ~y:by ~w:bw ~h:bh theme.input;
@@ -3799,6 +3306,524 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
       Paint.fill paint ~x:(Float.round caret_x) ~y:(y +. 2.) ~w:1. ~h:(row -. 4.) theme.accent
     end else Paint.input_region paint ~x:bx ~y:by ~w:bw ~h:bh ~focused:false ();
     paint.clip_rect <- previous);
+  ()
+
+(* the completion popup, under the caret's row (above it near the bottom of the view) *)
+let paint_completions ~slot_of ~popup ~signal_of ~first ~row ~notes ~pad ~offset ~by ~selected ~items ~x_at ~edit ~rows ~(theme : Theme.t) ui =
+  Option.iter (fun (container, rows_boxes, width, height) ->
+    let caret_line = row_at rows edit.caret in
+    let anchor = x_at (fst items.(!selected).replace) in
+    let px = Float.max 8. (Float.min (anchor -. 8.) (ui.view_w -. width -. 8.)) in
+    let below = by -. offset +. pad +. (float (slot_of notes caret_line + 1) *. row) in
+    let py = if below +. height <= ui.view_h -. 8. then below
+      else Float.max 8. (by -. offset +. pad +. (float (slot_of notes caret_line) *. row) -. height) in
+    set_at ui container ~at:(px, py);
+    let selected = !selected in
+    draw ui container (fun paint (x, y, w, h) ->
+      Paint.fill paint ~x ~y ~w ~h theme.input;
+      Paint.frame paint ~x ~y ~w ~h (Theme.edge theme);
+      let doc = items.(selected).doc in
+      if doc <> "" then
+        Paint.text paint ~color:(Theme.muted theme)
+          ~at:(x +. 8., y +. h -. 18.) (display doc));
+    List.iteri (fun i r ->
+      let c = items.(first + i) and hovered = (signal_of ui r).hovered in
+      draw ui r (fun paint rect ->
+        let (rx, ry, rw, rh) as bounds = ints rect in
+        if first + i = selected then fill paint bounds theme.control
+        else if hovered then hover_row paint ui bounds;
+        kit_text paint ~color:theme.foreground (rx + side) (label_y ui ry rh) c.label;
+        let dw = int_of_float (text_width ui c.detail) in
+        kit_text paint ~color:(Theme.muted theme) (rx + rw - dw - side) (label_y ui ry rh) c.detail)) rows_boxes)
+    popup;
+  ()
+
+(* a dragged number: the literal at the press follows the pointer *)
+let apply_scrub ~scrubbing ~on_scrub ~suggest ~on_scrub_edit ~edit ui =
+  Option.iter (fun (start, literal, dx, first) ->
+    if start <= String.length edit.text && literal <> "" then begin
+      (* the whole drag is one step of the editor's undo *)
+      if first then remember ui edit ~typing:false;
+      let stop = ref start in
+      while !stop < String.length edit.text && numeric_character edit.text.[!stop] do incr stop done;
+      let coarse = match ui.input_frame with
+        | Some (frame : Frame.t) -> List.mem Input.Shift frame.input.keys | None -> false in
+      let next = scrubbed literal dx ~coarse in
+      Option.iter (fun f -> f (start, !stop) next) on_scrub_edit;
+      edit.text <- String.sub edit.text 0 start ^ next
+        ^ String.sub edit.text !stop (String.length edit.text - !stop);
+      edit.caret <- start + String.length next; edit.anchor <- edit.caret;
+      set_state ui suggest 0;
+      Option.iter (fun f -> f `Live) on_scrub
+    end) !scrubbing;
+  ()
+
+(* the keys of a focused text area: completion, pairs, indent, line edits, movement, typing *)
+let handle_keys ~body ~stop_of ~page ~typed ~language ~suggest ~open_ ~accept ~selected ~chosen ~items ~submitted ~changed ~closed ~shown ~row_text ~start_of ~edit ~rows_of ui =
+  List.iter (fun ((event : Input.event), modifiers) ->
+    let command = command_modifiers modifiers and shift = List.mem Input.Shift modifiers in
+    let rows = rows_of edit.text in
+    let count = Array.length rows in
+    let x_of line index = text_width ui
+      (String.sub edit.text (start_of rows line) (index - start_of rows line)) in
+    let line = row_at rows edit.caret in
+    let move target = edit.caret <- target; if not shift then edit.anchor <- target in
+    (* Up and Down keep the column they started from across shorter rows *)
+    let vertical step =
+      let target = line + step in
+      let x = if ui.edit_column >= 0. then ui.edit_column else x_of line edit.caret in
+      ui.edit_column <- x;
+      if target < 0 then move 0
+      else if target >= count then move (String.length edit.text)
+      else move (start_of rows target + text_caret_at ui (row_text edit.text rows target) x) in
+    (match event with
+     | Input.Key_pressed (Input.ArrowUp | ArrowDown) when not command -> ()
+     | Input.Key_pressed (Input.PageUp | PageDown | Shift | Ctrl | Alt | Meta) -> ()
+     | _ -> ui.edit_column <- -1.);
+    let listing = shown > 0 && not !closed in
+    let change () = changed := true; remember ui edit ~typing:false in
+    (match event with
+    | Input.Key_pressed Input.Enter when command -> submitted := true
+    (* the completion popup takes Up, Down, Tab, Enter and Escape while it is open *)
+    | Input.Key_pressed ((Input.ArrowUp | Input.ArrowDown) as key) when listing ->
+        let n = Array.length items in
+        chosen := true;
+        selected := (!selected + (if key = Input.ArrowUp then n - 1 else 1)) mod n
+    | Input.Key_pressed Input.Tab when listing && not command -> accept items.(!selected)
+    | Input.Key_pressed Input.Enter when listing && !chosen -> accept items.(!selected)
+    | Input.Key_pressed Input.Escape when open_ <> 0 && not !closed -> set_state ui suggest 0; closed := true
+    | Input.Key_pressed Input.Escape -> unfocus ui
+    | Input.Key_pressed Input.Enter ->
+        begin
+          let indent = match language with
+            | Some l -> l.indent edit.text (fst (text_selection edit)) | None -> "" in
+          change (); replace_text edit ("\n" ^ indent);
+          if open_ <> 0 then (set_state ui suggest 0; closed := true)
+        end
+    (* brackets come in pairs: an opener wraps the selection or inserts both, a closer typed
+       before itself steps over it, Backspace between an empty pair takes both *)
+    | Input.Text_input s when language <> None && String.length s = 1 && not command ->
+        let c = s.[0] and pairs = (Option.get language).pairs in
+        let start, stop = text_selection edit in
+        let next = if edit.caret < String.length edit.text then Some edit.text.[edit.caret] else None in
+        (* a bracket is a bracket only in code: in a string only a quote steps over its closing
+           quote, and a comment takes every character as typed; in code a quote before a quote
+           is the next string's opening one *)
+        let context = (Option.get language).context_at edit.text edit.caret in
+        let quote = List.mem (c, c) pairs in
+        let step_over = next = Some c && (match context with
+          | `Code -> List.exists (fun (_, close) -> close = c) pairs && not quote
+          | `String -> quote
+          | `Comment -> false) in
+        (match context, List.assoc_opt c pairs with
+         | `Code, Some close when start <> stop ->
+             change ();
+             replace_text edit (String.make 1 c ^ String.sub edit.text start (stop - start) ^ String.make 1 close);
+             edit.anchor <- start + 1; edit.caret <- stop + 1
+         | _ when step_over ->
+             edit.caret <- edit.caret + 1; edit.anchor <- edit.caret
+         | `Code, Some close ->
+             change ();
+             replace_text edit (String.make 1 c ^ String.make 1 close);
+             edit.caret <- edit.caret - 1; edit.anchor <- edit.caret
+         | _ -> changed := edit_text_event ~multiline:true ui edit ~accept:(fun _ -> true) ~modifiers event || !changed);
+        typed := true
+    | Input.Key_pressed Input.Backspace when language <> None && not command
+        && edit.caret = edit.anchor && edit.caret > 0 && edit.caret < String.length edit.text
+        && List.mem (edit.text.[edit.caret - 1], edit.text.[edit.caret]) (Option.get language).pairs ->
+        change (); edit.anchor <- edit.caret - 1; edit.caret <- edit.caret + 1; replace_text edit ""; typed := true
+    (* Command-X / C with no selection take the caret's whole logical line, newline included *)
+    | Input.Key_pressed (Input.KeyChar ('x' | 'X' | 'c' | 'C' as key)) when command && edit.caret = edit.anchor ->
+        let s = line_start edit.text edit.caret in
+        let e = min (String.length edit.text) (line_end edit.text edit.caret + 1) in
+        if Clipboard.set_text (String.sub edit.text s (e - s)) = Ok ()
+           && (key = 'x' || key = 'X') then begin
+          change (); edit.anchor <- s; edit.caret <- e; replace_text edit ""; typed := true
+        end
+    | Input.Key_pressed Input.Tab when not command && edit.caret <> edit.anchor ->
+        (* Tab and Shift-Tab with a selection indent and dedent every line it touches *)
+        let a, b = text_selection edit in
+        let first, stop = line_block edit.text a b in
+        let block = String.sub edit.text first (stop - first) in
+        let shifted = String.concat "\n" (List.map (fun l ->
+          if not shift then (if l = "" then l else "  " ^ l)
+          else if String.starts_with ~prefix:"  " l then String.sub l 2 (String.length l - 2)
+          else if String.starts_with ~prefix:" " l then String.sub l 1 (String.length l - 1) else l)
+          (String.split_on_char '\n' block)) in
+        if shifted <> block then begin
+          change (); replace_block edit first stop shifted;
+          keep_selection edit first (first + String.length shifted)
+        end
+    | Input.Key_pressed Input.Tab when not command ->
+        if not shift then (change (); replace_text edit "  ")
+        else begin
+          (* Shift-Tab: up to two spaces leave the start of the line *)
+          let line_start = line_start edit.text edit.caret in
+          let spaces = if line_start < String.length edit.text && edit.text.[line_start] = ' '
+            then (if line_start + 1 < String.length edit.text && edit.text.[line_start + 1] = ' ' then 2 else 1)
+            else 0 in
+          if spaces > 0 then begin
+            change ();
+            edit.text <- String.sub edit.text 0 line_start
+              ^ String.sub edit.text (line_start + spaces) (String.length edit.text - line_start - spaces);
+            edit.caret <- max line_start (edit.caret - spaces); edit.anchor <- edit.caret
+          end
+        end
+    (* line and form edits: Command-/ toggles comments, Option-Up and Down move the lines, with
+       Shift duplicate them, Command-Option-Up selects the enclosing form, Command-Shift-\\ jumps
+       to the matching bracket *)
+    | Input.Key_pressed (Input.KeyChar '/') when command && language <> None ->
+        let a, b = text_selection edit in
+        let first, stop = line_block edit.text a b in
+        let block = String.sub edit.text first (stop - first) in
+        let toggled = toggle_comment (Option.get language).comment block in
+        if toggled <> block then begin
+          change (); replace_block edit first stop toggled;
+          let last = first + String.length toggled in
+          if a = b then (edit.caret <- max first (a + last - stop); edit.anchor <- edit.caret)
+          else keep_selection edit first last
+        end
+    | Input.Key_pressed (Input.ArrowUp | Input.ArrowDown as key) when List.mem Input.Alt modifiers && not command ->
+        let a, b = text_selection edit in
+        let first, stop = line_block edit.text a b in
+        let n = String.length edit.text in
+        let block = String.sub edit.text first (stop - first) in
+        let up = key = Input.ArrowUp in
+        let shift_by d = edit.anchor <- edit.anchor + d; edit.caret <- edit.caret + d in
+        if shift then begin
+          (* a copy below keeps the selection on the copy, a copy above on the original *)
+          change ();
+          replace_block edit stop stop ("\n" ^ block);
+          if not up then shift_by (String.length block + 1)
+        end else if up && first > 0 then begin
+          let before = line_start edit.text (first - 1) in
+          change ();
+          replace_block edit before stop (block ^ "\n" ^ String.sub edit.text before (first - 1 - before));
+          shift_by (before - first)
+        end else if not up && stop < n then begin
+          let after = line_end edit.text (stop + 1) in
+          change ();
+          replace_block edit first after (String.sub edit.text (stop + 1) (after - stop - 1) ^ "\n" ^ block);
+          shift_by (after - stop)
+        end
+    | Input.Key_pressed Input.ArrowUp when command && List.mem Input.Alt modifiers ->
+        let a, b = text_selection edit in
+        (match language with
+         | Some l ->
+             Option.iter (fun (o, c) -> edit.anchor <- o; edit.caret <- c) (enclosing_pair (l.brackets edit.text) a b)
+         | None -> ())
+    | Input.Key_pressed (Input.KeyChar '\\') when command && shift && language <> None ->
+        Option.iter (fun at -> edit.caret <- at; edit.anchor <- at)
+          (bracket_jump ((Option.get language).brackets edit.text) edit.caret)
+    | Input.Key_pressed Input.ArrowUp when command -> move 0
+    | Input.Key_pressed Input.ArrowDown when command -> move (String.length edit.text)
+    | Input.Key_pressed Input.ArrowUp -> vertical (-1)
+    | Input.Key_pressed Input.ArrowDown -> vertical 1
+    | Input.Key_pressed Input.PageUp -> vertical (-page)
+    | Input.Key_pressed Input.PageDown -> vertical page
+    | Input.Key_pressed (Input.Home | Input.ArrowLeft) when command || event = Input.Key_pressed Input.Home ->
+        move (start_of rows line)
+    | Input.Key_pressed (Input.End | Input.ArrowRight) when command || event = Input.Key_pressed Input.End ->
+        move (stop_of rows line)
+    | event ->
+        if edit_text_event ~multiline:true ui edit ~accept:(fun _ -> true) ~modifiers event then begin
+          changed := true;
+          (match event with
+           | Input.Text_input _ | Input.Key_pressed (Input.Backspace | Input.Delete) -> typed := true
+           | _ -> ())
+        end))
+    (key_events ui body);
+  ()
+
+(* a press on a number arms a scrub; three points sideways make it one *)
+let arm_scrub ~scrubbing ~scrub_state ~on_scrub ~point_at ~text ~on_handle ~signal ~language ~scrub ui =
+  (* a press on a number arms a scrub (its state is the start + 1, negated once dragging); three
+     points sideways make it one, three points down a selection as before *)
+  (match language with
+   | Some l when signal.pressed && signal.button = Some Input.LeftButton ->
+       (match (if on_handle signal.press_point then l.number_at text (point_at signal.press_point) else None) with
+        | Some (a, b) -> set_state ui scrub (a + 1); set_text_state ui scrub (Some (String.sub text a (b - a)))
+        | None -> set_state ui scrub 0)
+   | Some _ when scrub_state <> 0 && signal.held ->
+       let dx = fst signal.pointer -. fst signal.press_point
+       and dy = snd signal.pointer -. snd signal.press_point in
+       if scrub_state < 0 || (Float.abs dx >= 3. && Float.abs dx >= Float.abs dy) then begin
+         let start = abs scrub_state - 1 in
+         set_state ui scrub (- (start + 1));
+         scrubbing := Some (start, Option.value ~default:"" (text_state ui scrub), dx, scrub_state > 0)
+       end else if Float.abs dy >= 3. then set_state ui scrub 0
+   | _ when scrub_state <> 0 && not signal.held ->
+       set_state ui scrub 0;
+       if scrub_state < 0 then Option.iter (fun f -> f `Done) on_scrub
+   | _ -> ());
+  ()
+
+let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []) ?(spans = [])
+    ?reveal ?(reveal_nonce = 0) ?select ?(splice = []) ?language ?on_context ?on_scrub ?on_scrub_edit ?on_click ?on_caret
+    ?on_caret_move ?on_select ?on_drop ?(chips = []) label text =
+  (* a line of code is one and a half times its text, as code editors set it (17 points at 11,
+     20 at 13): the 24-point row is a control's, twice the text *)
+  let row = float (text_line_height ui) in
+  let body = box ui
+      ~flags:(clickable lor focusable lor blocking lor scroll lor clip
+              lor keep_tab)
+      ~at ~w:(Px w) ~h:(Px h) ~scroll_step:row label in
+  (* a [select] request takes the keyboard for the area *)
+  if select <> None then focus ui body;
+  let char_w = text_width ui "0" in
+  (* the sheet's code area: a 36-point gutter (wider only past 999 lines), the text at its edge,
+     6 points of padding above the first row *)
+  let gutter_of lines = 36. +. char_w *. float (max 0 (String.length (string_of_int lines) - 3)) in
+  let pad = 6. in
+  let columns_of count =
+    if not wrap then None
+    else
+      let gutter = gutter_of count in
+      Some (int_of_float (Float.floor (Float.max 1. (w -. gutter -. 16.) /. Float.max 1. char_w))) in
+  (* the gutter width follows the number of logical lines, the wrap width follows the gutter *)
+  let rows_of text =
+    let logical = 1 + String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 text in
+    text_rows ?cols:(columns_of logical) text in
+  let rows = rows_of text in
+  let count = Array.length rows in
+  (* a diagnostic's message is a row of its own under the last row of its line: [note_rows] are
+     (the display row it follows, the wrong span, the message), in order; a row's slot counts
+     the message rows above it *)
+  let note_rows rows = if messages = [] then [||] else begin
+    let found = List.filter_map (fun (line, span, message) ->
+      let last = ref (-1) in
+      Array.iteri (fun i (_, _, logical) -> if logical = line - 1 then last := i) rows;
+      if !last >= 0 then Some (!last, span, message) else None) messages in
+    Array.of_list (List.stable_sort (fun (a, _, _) (b, _, _) -> Int.compare a b) found)
+  end in
+  let slot_of notes i = Array.fold_left (fun n (after, _, _) -> if after < i then n + 1 else n) i notes in
+  let row_at_slot notes count k =
+    if notes = [||] then max 0 (min (count - 1) k) else begin
+      let i = ref 0 in
+      while !i + 1 < count && slot_of notes (!i + 1) <= k do incr i done; !i
+    end in
+  let logical_count rows = let _, _, l = rows.(Array.length rows - 1) in l + 1 in
+  let start_of rows i = let s, _, _ = rows.(i) in s in
+  let stop_of rows i = let _, e, _ = rows.(i) in e in
+  let row_text text rows i = String.sub text (start_of rows i) (stop_of rows i - start_of rows i) in
+  (* the content box scrolls; two empty boxes keep the completion popup's and the number
+     scrub's state between frames *)
+  let content, suggest, scrub = within ui body (fun () ->
+    let content = box ui ~w:(Px w)
+        ~h:(Px ((float (count + Array.length (note_rows rows)) *. row) +. pad)) (label ^ "-content") in
+    let suggest = box ui ~w:(Px 0.) ~h:(Px 0.) ~at:(0., 0.) (label ^ "-suggest") in
+    let scrub = box ui ~w:(Px 0.) ~h:(Px 0.) ~at:(0., 0.) (label ^ "-scrub") in
+    content, suggest, scrub) in
+  let signal_of = signal in
+  let signal = signal ui body in
+  (* the I-beam over text; a number under the pointer asks for the scrub
+     cursor further down, and the last request wins *)
+  if signal.hovered then request_cursor ui `Text;
+  let focused = focused ui body in
+  let gutter = gutter_of (logical_count rows) in
+  let bx, by, bw, bh = rect ui body in
+  let horizontal = ref (float (state ui body ~default:0)) in
+  (* the byte at a point; [strict] answers only over the row's glyphs *)
+  let point_in ?(strict = false) text rows (px, py) =
+    let count = Array.length rows in
+    let line = row_at_slot (note_rows rows) count
+      (int_of_float (Float.floor ((py -. by +. scroll_position ui body -. pad) /. row))) in
+    let x = px -. bx -. gutter +. !horizontal in
+    let line_text = row_text text rows line in
+    if strict && (x < 0. || x > text_width ui line_text || py < by || py > by +. bh) then None
+    else Some (start_of rows line + text_caret_at ui line_text (Float.max 0. x)) in
+  let point_at point = Option.get (point_in text rows point) in
+  (* a number is dragged by its underline: the lowest 9 points of its row, so a drag that selects
+     text from a number does not rewrite it *)
+  let on_handle (_, py) =
+    let y = py -. by +. scroll_position ui body -. pad in
+    y -. (row *. Float.floor (y /. row)) >= row -. 9. in
+  let edit = if focused then load_text_edit ui body.box_key text
+    else { text; caret = String.length text; anchor = String.length text } in
+  let moved = ref false and submitted = ref false in
+  (match on_context with
+   | Some f when context_clicked signal -> f signal.release_point
+   | _ -> ());
+  let scrub_state = state ui scrub ~default:0 in
+  let scrubbing = ref None in
+  arm_scrub ~scrub ~language ~signal ~on_handle ~text ~point_at ~on_scrub ~scrub_state ~scrubbing ui;
+  (* the completion popup: its state is (token start + 1) * 512 + 256 once an arrow has moved
+     the selection + the selected row; the rows are built before the keys so a click on one is
+     seen this frame *)
+  let open_ = if focused then state ui suggest ~default:0 else (set_state ui suggest 0; 0) in
+  let items = match language with
+    | Some l when open_ <> 0 -> Array.of_list (l.complete edit.text edit.caret)
+    | _ -> [||] in
+  let shown = min 8 (Array.length items) in
+  let selected = ref (min (open_ land 255) (max 0 (Array.length items - 1))) in
+  (* Enter takes the row only after Up or Down chose it; Tab takes it always *)
+  let chosen = ref (open_ land 256 <> 0) in
+  let first = max 0 (!selected - shown + 1) in
+  let closed = ref false in
+  let accept (c : completion) =
+    remember ui edit ~typing:false;
+    let a, b = c.replace in
+    let a = max 0 (min a (String.length edit.text)) and b = max 0 (min b (String.length edit.text)) in
+    edit.text <- String.sub edit.text 0 a ^ c.insert ^ String.sub edit.text b (String.length edit.text - b);
+    edit.caret <- a + String.length c.insert; edit.anchor <- edit.caret;
+    set_state ui suggest 0; closed := true in
+  let popup = if shown = 0 then None else begin
+    let doc = items.(!selected).doc in
+    let width = Array.fold_left (fun w (c : completion) ->
+      Float.max w (text_width ui c.label +. text_width ui c.detail +. 44.)) 220. items in
+    let width = Float.min width (Float.max 120. (ui.view_w -. 16.)) in
+    let height = (float (shown * ui.kit_row_height)) +. (if doc = "" then 4. else 22.) in
+    let container = overlay_box ui ~flags:blocking ~at:(0., 0.) ~w:width ~h:height (label ^ "-completions") in
+    let boxes = within ui container (fun () ->
+      List.init shown (fun i ->
+        kit_row ui ~flags:(clickable lor blocking lor keep_focus) (Printf.sprintf "row-%d" i))) in
+    List.iteri (fun i r -> if (signal_of ui r).clicked then accept items.(first + i)) boxes;
+    Some (container, boxes, width, height)
+  end in
+  if focused then begin
+    let caret0 = edit.caret in
+    (* a triple click takes the logical line with its break *)
+    let line_of at =
+      let s = line_start edit.text at and e = line_end edit.text at in
+      s, (if e < String.length edit.text then e + 1 else e) in
+    if signal.pressed && signal.button = Some Input.LeftButton then
+      begin
+        ui.edit_column <- -1.;
+        press_select ui edit ~shift:(press_shift ui body) ~clicks:signal.clicks ~line_of
+          (point_at signal.press_point);
+        (* a double click on true / false flips it, as dragging flips a number *)
+        if signal.clicks = 2 && language <> None then begin
+          let a, b = text_selection edit in
+          let flipped = match String.sub edit.text a (b - a) with
+            | "true" -> Some "false" | "false" -> Some "true" | _ -> None in
+          Option.iter (fun word ->
+            remember ui edit ~typing:false;
+            replace_text edit word; edit.anchor <- a; edit.caret <- a + String.length word) flipped
+        end
+      end
+    else if !scrubbing = None && scrub_state = 0
+        && (signal.dragging || (signal.held && signal.pointer <> signal.press_point)) then
+      drag_select ui edit ~line_of (point_at signal.pointer);
+    let typed = ref false and changed = ref false in
+    (* the host's replacements (one undo step, last first so the offsets hold), then its selection *)
+    if splice <> [] then begin
+      remember ui edit ~typing:false;
+      List.iter (fun (a, b, by) ->
+        if 0 <= a && a <= b && b <= String.length edit.text then
+          edit.text <- String.sub edit.text 0 a ^ by ^ String.sub edit.text b (String.length edit.text - b))
+        (List.sort (fun (a, _, _) (b, _, _) -> Int.compare b a) splice);
+      changed := true
+    end;
+    Option.iter (fun (a, b) ->
+      let n = String.length edit.text in
+      edit.anchor <- max 0 (min n a); edit.caret <- max 0 (min n b)) select;
+    let page = max 1 (int_of_float (bh /. row) - 1) in
+    handle_keys ~rows_of ~edit ~start_of ~row_text ~shown ~closed ~changed ~submitted ~items ~chosen ~selected ~accept ~open_ ~suggest ~language ~typed ~page ~stop_of ~body ui;
+    (* a dragged number: the literal at the press follows the pointer (the caret sits after it) *)
+    apply_scrub ~edit ~on_scrub_edit ~suggest ~on_scrub ~scrubbing ui;
+    (* typing opens the popup on the token at the caret (the selection starts over); a popup
+       left open follows the caret and closes when the caret leaves its token *)
+    (match language with
+     | Some l when (!typed || (open_ <> 0 && not !closed)) ->
+         (match l.complete edit.text edit.caret with
+          | c :: _ when !typed -> set_state ui suggest ((fst c.replace + 1) * 512)
+          | c :: _ when fst c.replace = (open_ lsr 9) - 1 ->
+              set_state ui suggest ((open_ lsr 9) * 512 + (if !chosen then 256 else 0) + !selected)
+          | _ -> set_state ui suggest 0)
+     | _ -> ());
+    (* the language's rewrite (parinfer) after this frame's edits; the anchor maps like the caret *)
+    (match language with
+     | Some { rewrite = Some rewrite; _ } when !changed ->
+         let text', caret' = rewrite edit.text edit.caret in
+         let anchor' = if edit.anchor = edit.caret then caret' else snd (rewrite edit.text edit.anchor) in
+         edit.text <- text'; edit.caret <- caret'; edit.anchor <- anchor'
+     | _ -> ());
+    save_text_edit ui edit;
+    moved := edit.caret <> caret0 || edit.text != text || signal.pressed
+  end;
+  (* scrolling: the wheel, then whatever keeps the caret (or [reveal]) in view *)
+  let final = edit.text in
+  if focused then Option.iter (fun f -> f edit.caret) on_caret;
+  if focused then Option.iter (fun f -> f (text_selection edit)) on_select;
+  if focused && !moved && (signal.pressed || signal.dragging || key_events ui body <> []) then
+    Option.iter (fun f -> f edit.caret) on_caret_move;
+  (match on_click with
+   | Some f when signal.clicked && signal.button = Some Input.LeftButton && scrub_state >= 0 ->
+       Option.iter (fun byte -> f byte (command_modifiers (press_keys ui body)))
+         (point_in ~strict:true text rows signal.release_point)
+   | _ -> ());
+  (* a payload in flight over the area: the byte under the pointer, hovering or released *)
+  (match on_drop with
+   | Some f ->
+       Option.iter (fun drop -> Option.iter (fun byte -> f byte drop) (point_in text rows signal.pointer))
+         (drop_target ui body)
+   | None -> ());
+  let rows = if final == text then rows else rows_of final in
+  let count = Array.length rows in
+  let notes = note_rows rows in
+  (* [reveal] scrolls once per (offset, length, nonce): the content box remembers it, and forgets
+     it while there is nothing to reveal *)
+  let revealed = match reveal with
+    | Some index when bw > 0.
+        && state ui content ~default:0 <> (index * 1_000_003) + String.length final + 1 + (reveal_nonce * 1_000_000_007) ->
+        set_state ui content ((index * 1_000_003) + String.length final + 1 + (reveal_nonce * 1_000_000_007)); Some index
+    | None -> set_state ui content 0; None
+    | _ -> None in
+  let target = if !moved then Some edit.caret
+    else Option.map (fun index -> min (String.length final) index) revealed in
+  let longest = ref 0 in
+  Array.iteri (fun i _ -> longest := max !longest (stop_of rows i - start_of rows i)) rows;
+  let visible = Float.max 1. (bw -. gutter -. 16.) in
+  let max_x = if wrap then 0. else Float.max 0. (float !longest *. char_w -. visible) in
+  horizontal := Float.max 0. (Float.min max_x (!horizontal +. fst signal.scroll *. row));
+  let vertical = ref (Float.max 0. (Float.min (Float.max 0. ((float (count + Array.length notes) *. row) +. pad -. bh))
+    (scroll_offset ui body))) in
+  Option.iter (fun index ->
+    let line = row_at rows index in
+    let top = pad +. (float (slot_of notes line) *. row) in
+    if top < !vertical then vertical := top
+    else if top +. row > !vertical +. bh then vertical := top +. row -. bh;
+    let x = text_width ui (String.sub final (start_of rows line) (min index (stop_of rows line) - start_of rows line)) in
+    if x < !horizontal then horizontal := x
+    else if x -. !horizontal > visible then horizontal := x -. visible) target;
+  set_state ui body (int_of_float !horizontal);
+  if !vertical <> scroll_offset ui body then set_scroll_offset ui body !vertical;
+  (* painted where the shared elastic scroll puts the content, overshoot included *)
+  let offset = scroll_position ui body and horizontal = !horizontal in
+  let theme = ui.theme and composition = ui.composition in
+  (* the language's colours and the bracket pair at the caret, once per frame *)
+  let colors = match language with Some l -> l.colorize final | None -> [] in
+  let matched = match language with
+    | Some l when focused ->
+        let c = edit.caret in
+        List.find_opt (fun (o, k) -> o = c - 1 || k = c - 1 || o = c || k = c) (l.brackets final)
+    | _ -> None in
+  (* the pointer over a number invites a drag; over any other token it describes it after a rest *)
+  let under_pointer = match language with
+    | Some _ when signal.hovered && ui.active = None ->
+        point_in ~strict:true final rows signal.pointer
+    | _ -> None in
+  let hovered_number = match language, under_pointer, !scrubbing with
+    | _, _, Some (start, _, _, _) ->
+        let stop = ref start in
+        while !stop < String.length final && numeric_character final.[!stop] do incr stop done;
+        Some (start, !stop)
+    | Some l, Some byte, None when on_handle signal.pointer -> l.number_at final byte
+    | _ -> None in
+  if hovered_number <> None then request_cursor ui `Horizontal_resize;
+  (match language, under_pointer with
+   | Some l, Some byte when hovered_number = None && open_ = 0 ->
+       Option.iter (fun (start, _, doc) ->
+         if doc <> "" then tooltip ui ~key:(Printf.sprintf "%s#%d" label start) ~text:doc)
+         (l.describe final byte)
+   | _ -> ());
+  (* the completion popup sits under the caret's row (above it near the bottom of the view) *)
+  let text_x0 = bx +. gutter -. horizontal in
+  let x_at index =
+    let line = row_at rows index in
+    text_x0 +. text_width ui (String.sub final (start_of rows line) (index - start_of rows line)) in
+  paint_completions ~theme ~rows ~edit ~x_at ~items ~selected ~by ~offset ~pad ~notes ~row ~first ~signal_of ~popup ~slot_of ui;
+  paint_text_area ~body ~theme ~gutter ~horizontal ~offset ~pad ~row ~notes ~count ~rows ~edit ~focused ~start_of ~stop_of ~final ~char_w ~notes ~slot_of ~errors ~spans ~matched ~scrubbing ~hovered_number ~chips ~messages ~composition ~colors ui;
   final, !submitted
 
 type pick = [ `None | `Pick of int | `Delete of int | `Submit | `Back | `Cancel ]

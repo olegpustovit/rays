@@ -911,6 +911,61 @@ let find_button ui key right ?active name label at_y =
   let hit = Pxui_shell.Kit.button ui ~key:(key ^ name) ~at:(!right, at_y +. 4.) ~w ?active label in
   right := !right -. 4.; hit
 
+(* the find bar between the text and the footer: one row, two with the replace row *)
+let find_bar ~state ~emit ~theme ~find_row ~key ~width ~x ~current ~matches ~rule ~ay ui =
+  let module Ui = Pxui.Ui in
+  Option.iter (fun (f : find) ->
+    let ry = ay +. 1. in
+    rule "-find-rule" ay;
+    let f' = ref { f with grab = false } and reveal = ref false and closed = ref false in
+    let total = List.length matches in
+    let index = match current with
+      | Some m -> 1 + Option.value ~default:0 (List.find_index (( = ) m) matches) | None -> 0 in
+    let count = if f.query = "" then "" else if total = 0 then "No matches"
+      else Printf.sprintf "%d / %d" index total in
+    let right = ref (x +. width -. 12.) in
+    let button = find_button ui key right in
+    if button "-find-close" "Close" ry then closed := true;
+    if button ~active:f.replacing "-find-replace" "Replace" ry then f' := { !f' with replacing = not f.replacing };
+    if button ~active:f.case "-find-case" "Aa" ry then (f' := { !f' with case = not f.case }; reveal := true);
+    if button "-find-next" "Next" ry then (f' := find_step !f' matches `Next; reveal := true);
+    if button "-find-prev" "Prev" ry then (f' := find_step !f' matches `Previous; reveal := true);
+    let count_w = 76. in
+    Ui.draw ui (Ui.box ui ~w:(Ui.Px count_w) ~h:(Ui.Px find_row) ~at:(!right -. count_w, ry) (key ^ "-find-count"))
+      (fun paint (x, y, w, h) ->
+        Ui.Paint.text paint ~at:(x +. w -. Ui.Paint.text_width paint count, Pxui_shell.Kit.text_y ui y h)
+          ~color:(if total = 0 && f.query <> "" then Pxui.Theme.invalid else Pxui.Theme.ink_2 theme) count);
+    let query, step = Ui.line_field ui ~at:(x +. 12., ry +. 4.) ~w:(Float.max 60. (!right -. count_w -. 8. -. x -. 12.))
+        ~h:20. ~grab:f.grab ~placeholder:"Find" (key ^ "-find") f.query in
+    if query <> f.query then (f' := { !f' with query }; reveal := true);
+    (match step with
+     | `Next -> f' := find_step !f' matches `Next; reveal := true
+     | `Previous -> f' := find_step !f' matches `Previous; reveal := true
+     | `Close -> closed := true
+     | `None -> ());
+    if f.replacing then begin
+      let ry2 = ry +. find_row in
+      let right2 = ref (x +. width -. 12.) in
+      let button2 name label = find_button ui key right2 name label ry2 in
+      let replace_with ~all = match find_replace !f' matches ~all with
+        | Some (r, f2) -> emit (Request (Some r)); f' := f2; reveal := true
+        | None -> () in
+      if button2 "-replace-all" "All" then replace_with ~all:true;
+      if button2 "-replace-one" "Replace" then replace_with ~all:false;
+      let by, step = Ui.line_field ui ~at:(x +. 12., ry2 +. 4.) ~w:(Float.max 60. (!right2 -. 8. -. x -. 12.))
+          ~h:20. ~placeholder:"Replace with" (key ^ "-with") f.replace in
+      if by <> f.replace then f' := { !f' with replace = by };
+      (match step with
+       | `Next -> replace_with ~all:false
+       | `Close -> closed := true
+       | `Previous | `None -> ())
+    end;
+    if !closed then begin
+      emit (Find_set (None, false));
+      emit (Request (Some { select = (match current with Some m -> m | None -> (f.at, f.at)); splice = [] }))
+    end else if !f' <> f then emit (Find_set (Some !f', !reveal))) state.find;
+  ()
+
 let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state (shown : shown) =
   let module Ui = Pxui.Ui in
   let row = float (Ui.row_height ui) in
@@ -1059,56 +1114,7 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
           (Option.bind !caret (symbol_at text'))
       | Select _ -> ()) state.pending;
     if state.pending <> [] then emit Resolved;
-    Option.iter (fun (f : find) ->
-      let ry = ay +. 1. in
-      rule "-find-rule" ay;
-      let f' = ref { f with grab = false } and reveal = ref false and closed = ref false in
-      let total = List.length matches in
-      let index = match current with
-        | Some m -> 1 + Option.value ~default:0 (List.find_index (( = ) m) matches) | None -> 0 in
-      let count = if f.query = "" then "" else if total = 0 then "No matches"
-        else Printf.sprintf "%d / %d" index total in
-      let right = ref (x +. width -. 12.) in
-      let button = find_button ui key right in
-      if button "-find-close" "Close" ry then closed := true;
-      if button ~active:f.replacing "-find-replace" "Replace" ry then f' := { !f' with replacing = not f.replacing };
-      if button ~active:f.case "-find-case" "Aa" ry then (f' := { !f' with case = not f.case }; reveal := true);
-      if button "-find-next" "Next" ry then (f' := find_step !f' matches `Next; reveal := true);
-      if button "-find-prev" "Prev" ry then (f' := find_step !f' matches `Previous; reveal := true);
-      let count_w = 76. in
-      Ui.draw ui (Ui.box ui ~w:(Ui.Px count_w) ~h:(Ui.Px find_row) ~at:(!right -. count_w, ry) (key ^ "-find-count"))
-        (fun paint (x, y, w, h) ->
-          Ui.Paint.text paint ~at:(x +. w -. Ui.Paint.text_width paint count, Pxui_shell.Kit.text_y ui y h)
-            ~color:(if total = 0 && f.query <> "" then Pxui.Theme.invalid else Pxui.Theme.ink_2 theme) count);
-      let query, step = Ui.line_field ui ~at:(x +. 12., ry +. 4.) ~w:(Float.max 60. (!right -. count_w -. 8. -. x -. 12.))
-          ~h:20. ~grab:f.grab ~placeholder:"Find" (key ^ "-find") f.query in
-      if query <> f.query then (f' := { !f' with query }; reveal := true);
-      (match step with
-       | `Next -> f' := find_step !f' matches `Next; reveal := true
-       | `Previous -> f' := find_step !f' matches `Previous; reveal := true
-       | `Close -> closed := true
-       | `None -> ());
-      if f.replacing then begin
-        let ry2 = ry +. find_row in
-        let right2 = ref (x +. width -. 12.) in
-        let button2 name label = find_button ui key right2 name label ry2 in
-        let replace_with ~all = match find_replace !f' matches ~all with
-          | Some (r, f2) -> emit (Request (Some r)); f' := f2; reveal := true
-          | None -> () in
-        if button2 "-replace-all" "All" then replace_with ~all:true;
-        if button2 "-replace-one" "Replace" then replace_with ~all:false;
-        let by, step = Ui.line_field ui ~at:(x +. 12., ry2 +. 4.) ~w:(Float.max 60. (!right2 -. 8. -. x -. 12.))
-            ~h:20. ~placeholder:"Replace with" (key ^ "-with") f.replace in
-        if by <> f.replace then f' := { !f' with replace = by };
-        (match step with
-         | `Next -> replace_with ~all:false
-         | `Close -> closed := true
-         | `Previous | `None -> ())
-      end;
-      if !closed then begin
-        emit (Find_set (None, false));
-        emit (Request (Some { select = (match current with Some m -> m | None -> (f.at, f.at)); splice = [] }))
-      end else if !f' <> f then emit (Find_set (Some !f', !reveal))) state.find;
+    find_bar ~ay ~rule ~matches ~current ~x ~width ~key ~find_row ~theme ~emit ~state ui;
     (* Command-Enter in the area is the button: the one outlined button of the panel *)
     let hint = "\xe2\x8c\x98\xe2\x86\xb5" in
     (* the caret's line and column, 1-based, in the status row's label *)

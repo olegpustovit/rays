@@ -151,7 +151,7 @@ use locally owned mutation and packed storage without exposing mutable aliases.
   are independent ranges. No temporary storage scales with the number of
   selected attribute boundaries or incidence visits.
 - Packed procedural instances retain one SOP prototype plus exactly 16 floats
-  (128 payload bytes) per transform. `Scene3.instances_array` copies that array
+  (128 payload bytes) per transform. `Scene.D3.instances_array` copies that array
   once, and the renderer traverses one batch descriptor instead of constructing
   a drawing list per frame.
 - Orphan-point compaction scans topology once, builds stable old/new point

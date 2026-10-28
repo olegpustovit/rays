@@ -22,7 +22,8 @@ type state = {
   resident : resident option; mutable resident_on : bool;
 }
 type prepared = { program : C.program; body : state -> unit;
-  pool : E.value array option Atomic.t;  (* the locals of a large program, reused across calls: a fresh one is allocated on the major heap *)
+  pool : E.value array Atomic.t;  (* [||] when taken *)  (* the locals of a large or all-scalar program, reused across calls: a fresh large one is allocated on the major heap, a small one by a C call *)
+  pooled : bool;
   stateless : bool  (* no state slot and no region: a failure leaves the evaluation state untouched *) }
 exception Non_finite
 
@@ -650,7 +651,10 @@ let prepare ?(remember_loops=false) ?(approx=Flow.Workspace.Paths.empty) ?(fast=
          | Some group -> prepare_group group
              (Array.of_list (List.map (fun region -> Option.get individual.(region)) group.members)))) in
   {program; body=block program.body;
-   pool=Atomic.make None; stateless=Array.length program.state_slots=0 && Array.length program.regions=0}
+   pool=Atomic.make [||]; pooled=Array.length program.locals>256 || Array.for_all plain program.locals; stateless=Array.length program.state_slots=0 && Array.length program.regions=0}
+
+(* Array.make is a C call even for zero slots. *)
+let call_counters (program : C.program) = if program.call_slots=0 then [||] else Array.make program.call_slots 0
 
 let has_regions prepared = Array.length prepared.program.regions>0
 
@@ -660,19 +664,18 @@ let general root force resolve prepared live =
     | Error message -> Error (Diagnostic.error ~code:"E_FRAME" message)
     | Ok () ->
         let n=Array.length program.locals in
-        let pooled=n>256 in
-        let values=match (if pooled then Atomic.exchange prepared.pool None else None) with
-          | Some values -> values | None -> Array.make n E.No_geo in
-        let release () = if pooled then Atomic.set prepared.pool (Some values) in
+        let pooled=prepared.pooled in
+        let values=if not pooled then Array.make n E.No_geo else
+          (match Atomic.exchange prepared.pool [||] with [||] -> Array.make n E.No_geo | values -> values) in
         let st = {values;
-          builders=[||]; calls=Array.make program.call_slots 0;
+          builders=[||]; calls=call_counters program;
           live; root; force; resolve; marks=None; device=None; resident=None; resident_on=false} in
         let result = try prepared.body st;
           if Array.length program.results<>1 then V.fail "E_CORE" "Expected one core result.";
           Ok st.values.(program.results.(0))
         with Diagnostic.Error d -> Error d
           | Not_found | Invalid_argument _ | Failure _ -> Error (Diagnostic.error ~code:"E_CORE" "Invalid core program.") in
-        release (); result
+        if pooled then Atomic.set prepared.pool values; result
 
 let attempt ?root ?force ?resolve prepared ~live = general root force resolve prepared live
 
@@ -712,7 +715,7 @@ let draw ?root ?force ?resolve ?device ?resident ?image prepared ~live ~size ~bu
         | Ok resource -> resource
         | Error (d : Diagnostic.t) -> V.raise_diagnostic d) image) ~size buffers in
       let st = {values=Array.make (Array.length program.locals) E.No_geo;
-        builders=[||]; calls=Array.make program.call_slots 0; live; root; force; resolve; marks=Some sink; device;
+        builders=[||]; calls=call_counters program; live; root; force; resolve; marks=Some sink; device;
         resident; resident_on=false} in
       (try prepared.body st; Ok (Core_marks.finish sink)
        with Diagnostic.Error d -> Error d

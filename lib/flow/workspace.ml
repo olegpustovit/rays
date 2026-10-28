@@ -389,20 +389,23 @@ let skip_tuples (v : S.t) : int list list option =
       Some (List.map (fun t -> Option.get (tuple t)) items)
   | _ -> None
 
-let check ?(ops = []) ?(library = false) catalog forms =
-  Phase_timer.measure "check" (fun () ->
-  match Op.validate ops with Some error -> None, [error] | None ->
-  let find_op = Op.find ~extra:ops in
-  let diags = ref [] in
-  let live = ref Paths.empty and invariant = ref Paths.empty in
-  let roots = Hashtbl.create 32 and links = Hashtbl.create 64 and root_forms = Hashtbl.create 32 in
+(* The checker proper: the names, types, macro and defnode tables of one workspace check and the
+   mutually recursive inference over them (infer .. graph_info), then the form-level [driver]. *)
+module Checker (P : sig
+  val ops : Op.t list val library : bool val catalog : Check.catalog val forms : S.t list
+end) = struct
+  open P
+  let find_op = Op.find ~extra:ops
+  let diags = ref []
+  let live = ref Paths.empty and invariant = ref Paths.empty
+  let roots = Hashtbl.create 32 and links = Hashtbl.create 64 and root_forms = Hashtbl.create 32
   let link path producers = if not (Paths.is_empty producers) then
     Hashtbl.replace links path (Paths.union producers
-      (Option.value ~default:Paths.empty (Hashtbl.find_opt links path))) in
+      (Option.value ~default:Paths.empty (Hashtbl.find_opt links path)))
   let remember_root (form : S.t) path =
     let forms = Option.value ~default:[] (Hashtbl.find_opt root_forms form.id) in
     if not (List.exists (fun (old, owner) -> old == form && owner = path) forms) then
-      Hashtbl.replace root_forms form.id ((form, path) :: forms) in
+      Hashtbl.replace root_forms form.id ((form, path) :: forms)
   let root path (form : S.t) reasons =
     let candidate = if reasons = [] then Candidate (Paths.singleton path) else Refused reasons in
     let merged = match Hashtbl.find_opt roots path, candidate with
@@ -413,12 +416,12 @@ let check ?(ops = []) ?(library = false) catalog forms =
       | None, _ -> candidate in
     Hashtbl.replace roots path merged;
     remember_root form path;
-    link path (Paths.singleton path) in
-  let refusal (form : S.t) code message = Diagnostic.error ~span:form.span ~code message in
+    link path (Paths.singleton path)
+  let refusal (form : S.t) code message = Diagnostic.error ~span:form.span ~code message
   let source_refusal (term : term) = match term.ty with
     | Ty.Any | Array Any -> []
     | ty when packed_array ty -> []
-    | ty -> [refusal term.form "E_PACKED_TYPE" ("Packed source requires Array Float/Vec2/Vec3/Vec4, got " ^ show ty ^ ".")] in
+    | ty -> [refusal term.form "E_PACKED_TYPE" ("Packed source requires Array Float/Vec2/Vec3/Vec4, got " ^ show ty ^ ".")]
   let rec link_body producer (term : term) =
     let visit = link_body producer in
     let all = List.iter visit and fields fs = List.iter (fun (_, t) -> visit t) fs in
@@ -436,57 +439,57 @@ let check ?(ops = []) ?(library = false) catalog forms =
         | Cond (arms, d) -> List.iter (fun (a,b) -> all [a;b]) arms; visit d
         | Case (s, arms, d) -> visit s; fields arms; visit d
         | Call_fn {args; body; _} -> all args; Option.iter visit body
-        | _ -> () in
-  let steps = ref 0 and zones = ref 0 in
+        | _ -> ()
+  let steps = ref 0 and zones = ref 0
   (* The budget is per top-level definition: library node bodies are spliced into the
      workspace (all of them for the node manifest), so a fixed total grows too small. *)
   let max_steps =
     match forms with
     | [{ S.node = S.List (_ :: _ :: children); _ }] -> max_steps * max 1 (List.length children)
-    | _ -> max_steps in
+    | _ -> max_steps
   let add sev (x : S.t) code msg =
     let span = if x.span.start = 0 && x.span.finish = 0 then None else Some x.span in
     diags := (match sev with
       | Diagnostic.Error_severity -> Diagnostic.error ?span ~code msg
-      | Diagnostic.Warning -> Diagnostic.warning ?span ~code msg) :: !diags in
-  let err x code msg = add Diagnostic.Error_severity x code msg in
+      | Diagnostic.Warning -> Diagnostic.warning ?span ~code msg) :: !diags
+  let err x code msg = add Diagnostic.Error_severity x code msg
   let precision path (v : v) =
     if v.approx && Paths.is_empty v.approx_sources then
-      {v with approx_sources = Paths.singleton path} else v in
+      {v with approx_sources = Paths.singleton path} else v
   let exact_sink cx x sink (v : v) =
     let v = precision cx.path v in
     if not (Paths.is_empty v.approx_sources) then
       err x "E_APPROX_SINK" (Printf.sprintf
         "Approximate values require (exact x) before catalog calls, exports, state or cache keys. Producer: %s; sink: %s (%s)."
         (String.concat ", " (List.map path_text (Paths.elements v.approx_sources)))
-        (path_text cx.path) sink) in
-  let bad x code msg = err x code msg; (tm x Ty.Any Nil, poison) in
+        (path_text cx.path) sink)
+  let bad x code msg = err x code msg; (tm x Ty.Any Nil, poison)
   let skip_of (v : S.t) : int list list = match skip_tuples v with
     | Some tuples -> tuples
     | None ->
         err v "E_SKIP" ":skip is a list of iteration tuples of non-negative integers, for example :skip [[0 1] [2 0]].";
-        [] in
+        []
   let mark id (v : v) =
     if v.live then live := Paths.add id !live;
-    link id v.packed_producers in
+    link id v.packed_producers
   (* the path of a let*, zone or fn written inline: [~for], then [~for~1], ... under one path,
      so two of them in one expression never share compiled ids *)
-  let kind_fns = ref [] in
-  let inline_seen = Hashtbl.create 16 in
-  let input_paths = Hashtbl.create 16 in
+  let kind_fns = ref []
+  let inline_seen = Hashtbl.create 16
+  let input_paths = Hashtbl.create 16
   let inline cx segment =
     let key = cx.path @ [ segment ] in
     let n = Option.value ~default:0 (Hashtbl.find_opt inline_seen key) in
     Hashtbl.replace inline_seen key (n + 1);
-    if n = 0 then key else cx.path @ [ Printf.sprintf "%s~%d" segment n ] in
-  let names : (string, unit) Hashtbl.t = Hashtbl.create 16 in
-  let sigs : (string, signature) Hashtbl.t = Hashtbl.create 8 in
-  let gsigs : (string, signature) Hashtbl.t = Hashtbl.create 8 in
-  let macro_tbl : (string, S.t) Hashtbl.t = Hashtbl.create 8 in
-  let macro_forms = ref [] in
-  let node_sources : (string, Defnode.t) Hashtbl.t = Hashtbl.create 8 in
-  let node_terms = ref [] in
-  let kind_memo = Hashtbl.create 64 in
+    if n = 0 then key else cx.path @ [ Printf.sprintf "%s~%d" segment n ]
+  let names : (string, unit) Hashtbl.t = Hashtbl.create 16
+  let sigs : (string, signature) Hashtbl.t = Hashtbl.create 8
+  let gsigs : (string, signature) Hashtbl.t = Hashtbl.create 8
+  let macro_tbl : (string, S.t) Hashtbl.t = Hashtbl.create 8
+  let macro_forms = ref []
+  let node_sources : (string, Defnode.t) Hashtbl.t = Hashtbl.create 8
+  let node_terms = ref []
+  let kind_memo = Hashtbl.create 64
   let kind_of ctx head =
     let key = (context_name ctx, head) in
     match Hashtbl.find_opt kind_memo key with
@@ -494,27 +497,27 @@ let check ?(ops = []) ?(library = false) catalog forms =
     | None ->
         let kinds = Hashtbl.fold (fun _ (d:Defnode.t) kinds -> d.kind :: kinds) node_sources catalog.Check.kinds in
         let r = Check.resolve_kind {catalog with kinds} ctx head in
-        Hashtbl.add kind_memo key r; r in
+        Hashtbl.add kind_memo key r; r
   let resolve_head cx s = match Hashtbl.find_opt sigs s with
     | Some d -> `Def d
     | None -> (match Hashtbl.find_opt macro_tbl s with
         | Some m -> `Macro m
         | None -> (match find_op s cx.ctx with
             | Some o -> `Op o
-            | None -> (match kind_of cx.ctx s with Ok k -> `Kind k | Error e -> `Missing e))) in
+            | None -> (match kind_of cx.ctx s with Ok k -> `Kind k | Error e -> `Missing e)))
   let known ~head s = reserved s || List.mem s (type_names ()) || s = "fn" || Hashtbl.mem names s
     || ((head || not (Macro.valid_name s))
         && (List.exists (fun c -> find_op s c <> None) (Context.all ())
             || (match kind_of Context.sop s with
                 | Ok _ | Error (("E_WRONG_CONTEXT" | "E_AMBIGUOUS"), _) -> true
-                | Error _ -> false))) in
+                | Error _ -> false)))
   let no_fn x (t : Ty.t) what =
     if Ty.has_fn t then
-      err x "E_FN_ESCAPES" (Printf.sprintf "%s is a function; a function value cannot be stored or returned (E_FN_ESCAPES). Call it where it is bound." what) in
+      err x "E_FN_ESCAPES" (Printf.sprintf "%s is a function; a function value cannot be stored or returned (E_FN_ESCAPES). Call it where it is bound." what)
   let need (a : arg) what want =
     if Ty.fits a.av.ty want || (a.av.ty = Ty.Fn None && a.av.fn = None &&
       (match want with Ty.Fn _ -> true | _ -> false)) then true
-    else (err a.aform "E_TYPE" (Printf.sprintf "%s: expected %s, got %s." what (show want) (show a.av.ty)); false) in
+    else (err a.aform "E_TYPE" (Printf.sprintf "%s: expected %s, got %s." what (show want) (show a.av.ty)); false)
   let field x (v : v) f name =
     let derived ty =
       let fields = List.filter_map (function n :: path when n = f -> Some path | _ -> None) v.list_fields in
@@ -533,7 +536,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
              poison)
     | _ ->
         err x "E_FIELD" (Printf.sprintf "%s has no output %s. A vec3 has .x .y .z; a record has its fields." name f);
-        poison in
+        poison
   let check_pat cx (pat : S.t) seen what zone =
     let msg_shape p = if zone then Printf.sprintf "%s binds names; %s is not a name or pattern." what (pattern_key p)
       else Printf.sprintf "Invalid binding name %s. Bind a name, [a b] or {:keys [a b]}." (pattern_key p) in
@@ -558,7 +561,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
             | S.Sym n -> name_ok k n
             | _ -> ok := false; err k "E_PATTERN" (msg_shape k)) ks
       | _ -> ok := false; err p "E_PATTERN" (msg_shape p) in
-    go pat; !ok in
+    go pat; !ok
   (* bind [pat] to [v]; names get the path [pfx @ [marker ^ name]] *)
   let rec bind_parts (pat : S.t) (v : v) env pfx marker =
     match pat.node with
@@ -592,23 +595,23 @@ let check ?(ops = []) ?(library = false) catalog forms =
         List.fold_left (fun env (k : S.t) -> match k.node with
           | S.Sym n -> bind_parts k (field k v n pk) env pfx marker
           | _ -> env) env ks
-    | _ -> env in
+    | _ -> env
   let bind_pat (pat : S.t) v env pfx marker =
     (match pat.node with S.Sym _ -> () | _ -> mark (pfx @ [ marker ^ pattern_key pat ]) v);
-    bind_parts pat v env pfx marker in
+    bind_parts pat v env pfx marker
   let poison_names (pat : S.t) env =
-    List.fold_left (fun env n -> Smap.add n poison env) env (pat_names pat) in
-  let graph_terms : (string, graph) Hashtbl.t = Hashtbl.create 8 in
-  let def_terms : (string, graph) Hashtbl.t = Hashtbl.create 8 in
-  let ginfo : (string, v) Hashtbl.t = Hashtbl.create 8 in
-  let gstack = ref [] in
-  let def_defaults : (string * string, term * v) Hashtbl.t = Hashtbl.create 8 in
+    List.fold_left (fun env n -> Smap.add n poison env) env (pat_names pat)
+  let graph_terms : (string, graph) Hashtbl.t = Hashtbl.create 8
+  let def_terms : (string, graph) Hashtbl.t = Hashtbl.create 8
+  let ginfo : (string, v) Hashtbl.t = Hashtbl.create 8
+  let gstack = ref []
+  let def_defaults : (string * string, term * v) Hashtbl.t = Hashtbl.create 8
   let unbound cx x s =
     let bound = List.map fst (Smap.bindings cx.env) in
     let recent = List.drop (max 0 (List.length bound - 6)) bound in
     bad x "E_UNBOUND" (Printf.sprintf "%s is not bound in %s.%s%s" s cx.scope
       (if bound = [] then "" else " Bound here: " ^ String.concat ", " recent ^ ".")
-      (Check.suggestion s bound)) in
+      (Check.suggestion s bound))
   let rec infer cx (x : S.t) : term * v =
     incr steps;
     if !steps > max_steps then raise Budget;
@@ -1564,7 +1567,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
             Option.map snd (List.nth_opt (o.signature.pos @ o.signature.opt) i) in
       match ty with Some (Ty.Fn (Some signature)) -> instantiate_fn cx a signature
       | _ -> a) args in
-    if List.exists (fun prefix -> String.starts_with ~prefix o.name) ["sop/"; "settings/"; "scene/"] then begin
+    if o.name <> "scene/trace" && List.exists (fun prefix -> String.starts_with ~prefix o.name) ["sop/"; "settings/"; "scene/"] then begin
       (* The values of an attribute write enter the geometry through the SOP input sink, an
          implicit readback: the executor reads a GPU producer back once, so no (exact x). *)
       let values_slot = List.length o.signature.pos - 1 in
@@ -2011,8 +2014,8 @@ let check ?(ops = []) ?(library = false) catalog forms =
             state_dep = bv.state_dep } in
           Hashtbl.replace ginfo name v;
           v
-        end in
-  let items = ref [] in
+        end
+  let items = ref []
   let parse_sig head n (f : S.t) : signature option =
     let shape_error () =
       err f "E_SHAPE" (Printf.sprintf "Invalid shape for %s: expected (%s %s :context ctx [params] body)." n head n); None in
@@ -2058,7 +2061,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
                     | _ ->
                         err p "E_PARAM" (Printf.sprintf "Invalid parameter in %s. Each is (name : type default?)." n); None) ps in
                   Some { sname = n; sctx = ctx; sparams; sbody = b; sform = f }))
-    | _ -> shape_error () in
+    | _ -> shape_error ()
   let driver (ws : S.t) wname children =
     ignore wname;
     (* metadata is for expressions ([^:bypass]); the build's [^:allow-warnings] sits on the workspace *)
@@ -2146,7 +2149,14 @@ let check ?(ops = []) ?(library = false) catalog forms =
     List.iter (fun n -> ignore (graph_info (Hashtbl.find gsigs n).sform n)) graph_order;
     if not library && graph_order = [] && not (List.exists (fun (h, _, _) -> h = "graph") items) then
       err ws "E_NO_GRAPH" "A workspace needs at least one graph.";
-    (graph_order, def_order) in
+    (graph_order, def_order)
+end
+
+let check ?(ops = []) ?(library = false) catalog forms =
+  Phase_timer.measure "check" (fun () ->
+  match Op.validate ops with Some error -> None, [error] | None ->
+  let module K = Checker (struct let ops = ops let library = library let catalog = catalog let forms = forms end) in
+  let open K in
   let outcome =
     match forms with
     | [ ({ S.node = S.List ({ S.node = S.Sym "workspace"; _ } :: { S.node = S.Sym wname; _ } :: children); _ } as ws) ]

@@ -16,7 +16,7 @@ let step e n = E.update e (frame n)
 let create ?camera ?settings ?presets ?source ws = E.create ~ui_text_size:11 ?camera ?settings ?presets ?source ~await:true ~workspace:ws
   ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
     |> Result.map_error Rdk.Error.to_string)
-  ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok
+  ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh mesh]) () |> Result.get_ok
 
 let with_dir f =
   let dir = Filename.temp_dir "rays-consistency" "" in
@@ -429,7 +429,7 @@ let live_light_determinism () =
     let e = ref (E.create ~ui_text_size:11 ~workspace:ws ~presets ~await:true ~domains ~seed:42L
       ~prepare:(fun _ output -> incr prepares;
         Ok (Test_support.Workspace_cook.geometry_bytes (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))))
-      ~draw:(fun _ _ -> incr drawings; Scene3.empty) () |> Result.get_ok) in
+      ~draw:(fun _ _ -> incr drawings; Scene.D3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
       let samples = List.mapi (fun i dt ->
         let frame = frame (i + 1) in
@@ -552,7 +552,7 @@ let named_inspector () = with_dir (fun presets ->
     (graph editor :context editor
       (ui/workspace (ui/split-at "horizontal" 0.6 (ui/graph "g") (ui/inspector)))))|} in
   let e = ref (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
-    ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
+    ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     e := step !e 1;
     let x, y, w, _ = E.node_box !e ["g"; "a"] |> Option.get in
@@ -661,7 +661,7 @@ let stale_inspector_draft () = with_dir (fun presets ->
       (ui/split-at "horizontal" 0.6
         (ui/split-at "vertical" 0.5 (ui/graph "g") (ui/lisp)) (ui/inspector)))))|} in
   let e = ref (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
-    ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
+    ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
   let count = ref 0 in
   let update ?(keys = []) ?(buttons = []) p events =
     incr count; e := E.update !e (Test_editor_input.frame ~keys ~buttons p events !count) in
@@ -704,7 +704,7 @@ let failed_renderer_modes () = with_dir (fun presets ->
   let e = ref (E.create ~ui_text_size:11 ~await:true ~presets ~workspace:ws
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh (Mesh.with_mode Mesh.Lines mesh)]) () |> Result.get_ok) in
+    ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh (Mesh.with_mode Mesh.Lines mesh)]) () |> Result.get_ok) in
   let report () = E.crash_dump !e presets;
     In_channel.with_open_bin (Filename.concat presets "editor.txt") In_channel.input_all in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
@@ -747,8 +747,8 @@ let run_native () = with_dir (fun directory ->
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh ->
         let size = abs_float (Option.get (Mesh.vertex 0 mesh)).Rays_math.Vec3.x *. 2. in
-        if size > 2.5 then Scene3.create [Scene3.group []]
-        else Scene3.create [Scene3.mesh ~material:(Material.unlit (Rays_math.Color.rgb 200 30 20))
+        if size > 2.5 then Scene.D3.create [Scene.D3.group []]
+        else Scene.D3.create [Scene.D3.mesh ~material:(Material.unlit (Rays_math.Color.rgb 200 30 20))
           (if size > 1.5 then Mesh.with_mode Mesh.Lines mesh else mesh)]) () |> Result.get_ok)
     ~update:(fun e frame ->
       let e = if List.mem frame.input.frame [3; 10; 13] then

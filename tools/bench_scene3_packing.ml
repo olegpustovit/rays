@@ -15,7 +15,7 @@ let () =
     let vertices : Mesh.Private.vec3_view = {
       x = Array.copy coordinates; y = Array.copy coordinates; z = Array.make count 0. } in
     let mesh = Result.get_ok (Mesh.Private.create_packed_shared ~mode:Mesh.Points ~indices ~normals vertices) in
-    let scene = [Scene.view3d ~camera (Scene3.create [Scene3.mesh mesh])] in
+    let scene = [Scene.view3d ~camera (Scene.D3.create [Scene.D3.mesh mesh])] in
     Gc.full_major ();
     let allocated = Gc.allocated_bytes () and started = Unix.gettimeofday () in
     let staged = Result.get_ok (Scene.Private.stage_native ~width:800 ~height:600 scene) in

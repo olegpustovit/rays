@@ -416,6 +416,16 @@ let pipeline_for library pipelines shape =
       Ok (pipeline, table)
 
 (* Size-dependent storage: accumulation, two history frames, three output films. *)
+let unavailable caps =
+  if Ogpu.Caps.has caps Ray_tracing then None else Some "Path tracing is not available on this GPU."
+
+let available () =
+  match Renderer.acquire_gpu () with
+  | Error error -> Some (Format.asprintf "%a" Renderer.pp_error error)
+  | Ok lease ->
+      let reason = unavailable (B.capabilities (Renderer.gpu_device lease)) in
+      Renderer.release_gpu lease; reason
+
 let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsdf_only = false) ?(profile = false) ~width ~height (scene : scene) =
   if width <= 0 || height <= 0 then Error "path tracer size must be positive"
   else if spp <= 0 || bounces <= 0 then Error "path tracer spp and bounces must be positive"
