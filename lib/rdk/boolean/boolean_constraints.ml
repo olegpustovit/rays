@@ -286,7 +286,7 @@ let opposite_duplicate first_triangle second_triangle =
 
 let build ?cancel ?(resolve_left_self_intersections = false)
     ?(resolve_right_self_intersections = false)
-    ?(ignore_opposite_duplicate_self_pairs = false)
+    ?(skip_opposite_self_pairs = false)
     ~grain ~left ~right () =
   try
     if grain <= 0 then error "invalid_parameter" "grain must be positive"
@@ -383,7 +383,7 @@ let build ?cancel ?(resolve_left_self_intersections = false)
                   let self = Bytes.unsafe_get first_candidate_sides candidate
                       = Bytes.unsafe_get second_candidate_sides candidate in
                   let count = if self
-                      && ((ignore_opposite_duplicate_self_pairs
+                      && ((skip_opposite_self_pairs
                             && opposite_duplicate left_triangle right_triangle)
                           || ordinary_shared_edge_only ~x ~y ~z
                             left_triangle right_triangle)

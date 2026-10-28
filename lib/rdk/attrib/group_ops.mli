@@ -8,8 +8,8 @@ type promote_boundary_options = {
   promote_boundary_attributes : boundary_attribute list;
   promote_boundary_tolerance : float;
   promote_include_unshared_edges : bool;
-  promote_include_all_unshared_curve_edges : bool;
-  promote_include_all_primitives_sharing_boundary_points : bool;
+  promote_all_unshared_edges : bool;
+  promote_all_boundary_prims : bool;
 }
 and promote_operation =
     Promote_elements of promote_mode

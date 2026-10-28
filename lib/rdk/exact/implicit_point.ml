@@ -882,15 +882,15 @@ let source_segment_contains source ~projection ~first ~second point =
     invalid_arg "Rdk implicit point and source segment belong to different sources";
   let homogeneous = exact_homogeneous point in
   let orientation = match projection with
-    | XY -> Exact.Scratch.orient2d_explicit_explicit_homogeneous
+    | XY -> Exact.Scratch.orient2d_ee_homogeneous
         ~ax:source.x.(first) ~ay:source.y.(first)
         ~bx:source.x.(second) ~by:source.y.(second)
         ~cx:homogeneous.hx ~cy:homogeneous.hy ~cw:homogeneous.hw
-    | YZ -> Exact.Scratch.orient2d_explicit_explicit_homogeneous
+    | YZ -> Exact.Scratch.orient2d_ee_homogeneous
         ~ax:source.y.(first) ~ay:source.z.(first)
         ~bx:source.y.(second) ~by:source.z.(second)
         ~cx:homogeneous.hy ~cy:homogeneous.hz ~cw:homogeneous.hw
-    | ZX -> Exact.Scratch.orient2d_explicit_explicit_homogeneous
+    | ZX -> Exact.Scratch.orient2d_ee_homogeneous
         ~ax:source.z.(first) ~ay:source.x.(first)
         ~bx:source.z.(second) ~by:source.x.(second)
         ~cx:homogeneous.hz ~cy:homogeneous.hx ~cw:homogeneous.hw in
@@ -913,7 +913,7 @@ let barycentric_source_triangle source ~a ~b ~c point =
   if point.source != source then
     invalid_arg "Rdk implicit point and source triangle belong to different sources";
   let homogeneous = exact_homogeneous point in
-  Exact.Scratch.barycentric_explicit_triangle_homogeneous
+  Exact.Scratch.barycentric_tri_homogeneous
     ~ax:source.x.(a) ~ay:source.y.(a) ~az:source.z.(a)
     ~bx:source.x.(b) ~by:source.y.(b) ~bz:source.z.(b)
     ~cx:source.x.(c) ~cy:source.y.(c) ~cz:source.z.(c)
@@ -1045,7 +1045,7 @@ let symbolic_ray_source_triangle source ~a ~b ~c query =
   if query.source != source then
     invalid_arg "Rdk implicit point and symbolic source triangle belong to different sources";
   let query = exact_homogeneous query in
-  match Exact.Scratch.symbolic_ray_triangle_explicit_homogeneous
+  match Exact.Scratch.symbolic_ray_tri_homogeneous
       ~ax:source.x.(a) ~ay:source.y.(a) ~az:source.z.(a)
       ~bx:source.x.(b) ~by:source.y.(b) ~bz:source.z.(b)
       ~cx:source.x.(c) ~cy:source.y.(c) ~cz:source.z.(c)
@@ -1173,7 +1173,7 @@ let filtered_orient3_explicit_query source a b c query =
 
 let exact_axis_ray_source_triangle source ~a ~b ~c ~axis ~positive query =
   let query = exact_homogeneous query in
-  match Exact.Scratch.axis_ray_triangle_explicit_homogeneous
+  match Exact.Scratch.axis_ray_tri_homogeneous
       ~axis ~positive
       ~ax:source.x.(a) ~ay:source.y.(a) ~az:source.z.(a)
       ~bx:source.x.(b) ~by:source.y.(b) ~bz:source.z.(b)

@@ -1,5 +1,5 @@
-module Line_geometry = Rdk_gen.Line_geometry
-module Spiral = Rdk_gen.Spiral
+module Line_geometry = Rdk_attrib.Line_geometry
+module Spiral = Rdk_attrib.Spiral
 module Delaunay2 = Rdk_exact.Delaunay2
 module Planar_constraints = Rdk_exact.Planar_constraints
 module Planar_cdt = Rdk_exact.Planar_cdt
@@ -25,7 +25,7 @@ module Predicates = Rdk_exact.Predicates
 module Analysis = Rdk_core.Analysis
 module Curvature = Rdk_mesh.Curvature
 module Laplacian = Rdk_mesh.Laplacian
-module Scatter = Rdk_gen.Scatter
+module Scatter = Rdk_attrib.Scatter
 module Surface_index = Rdk_spatial.Surface_index
 module Attribute_ops = Rdk_attrib.Attribute_ops
 module Group_ops = Rdk_attrib.Group_ops

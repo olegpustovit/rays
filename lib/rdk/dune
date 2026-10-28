@@ -2,7 +2,7 @@
  (name rdk)
  (public_name rays.rdk)
  (modules rdk)
- (libraries rdk_core rdk_exact rdk_spatial rdk_attrib rdk_gen rdk_curve rdk_mesh rdk_boolean parallel))
+ (libraries rdk_core rdk_exact rdk_spatial rdk_attrib rdk_curve rdk_mesh rdk_boolean parallel))
 
 (executable
  (name test_main)

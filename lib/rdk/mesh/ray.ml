@@ -492,7 +492,7 @@ let run ?cancel { grain; selection; collision_primitives; method_; direction;
         |> Geometry.without_attribute ~owner:Attribute.Point "N"
         |> Geometry.without_attribute ~owner:Attribute.Vertex "N"
       else source in
-    let target = Geometry.View.with_merged_attributes_and_groups_owned
+    let target = Geometry.View.with_merged_owned
         ~positions ~attributes:(Array.of_list (List.rev !attributes)) ~groups target
         |> get_string in
     let output = if not needs_interpolation then target else begin

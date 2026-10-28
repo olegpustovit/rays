@@ -364,8 +364,7 @@ val interpolate : params -> unit -> (Geometry.t, Error.t) result
 (** Interpolate source attributes onto destination elements. The default
     driver uses destination integer [source_primitive] and float3 [source_uvw]
     attributes; [driver] also accepts corresponding CSR number/weight rows for
-    source points, vertices, or primitives. [driver] is mutually exclusive
-    with the two legacy driver-name arguments. Polygons use Houdini's
+    source points, vertices, or primitives. Polygons use Houdini's
     triangle, bilinear-quad, or polygon-fan parameterization; open and closed
     curves interpolate over their ordered segments. Numeric point/vertex
     fields are weighted, primitive/detail fields are constant, and integer or

@@ -4,7 +4,6 @@ type t
 
 val make :
   ?hints:string list -> operation:string -> code:string -> string -> t
-val of_string : operation:string -> code:string -> string -> t
 val guard : ?cancelled:string -> ?invalid_argument:string -> operation:string -> code:string -> (unit -> ('a, string) result) ->
   ('a, t) result
 exception Fail of string

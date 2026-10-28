@@ -655,7 +655,7 @@ let install ?cancel ~grain ?(extra = [||]) ?(groups = [||]) jobs target =
   | None ->
       let attributes = Array.append
           (Array.of_list (List.rev !attributes)) extra in
-      Geometry.View.with_merged_attributes_and_groups_owned
+      Geometry.View.with_merged_owned
         ?positions:!position ~attributes ~groups target
 
 let compute_primitive_weights ?cancel ?(grain = 16_384) ?selection ~unmatched

@@ -31,7 +31,7 @@ type rename_rule = Attribute_lifecycle.rename_rule = {
 let delete ?cancel ?reference ?delete_non_selected ?point_pattern
     ?vertex_pattern ?primitive_pattern ?detail_pattern geometry =
   try Result.map_error
-      (Error.of_string ~operation:"attribute_delete" ~code:"invalid_attribute")
+      (Error.make ~operation:"attribute_delete" ~code:"invalid_attribute")
       (Attribute_lifecycle.delete ?cancel ?reference ?delete_non_selected
          ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
          geometry)
@@ -40,7 +40,7 @@ let delete ?cancel ?reference ?delete_non_selected ?point_pattern
 
 let rename ?cancel ~rules geometry =
   try Result.map_error
-      (Error.of_string ~operation:"attribute_rename" ~code:"invalid_attribute")
+      (Error.make ~operation:"attribute_rename" ~code:"invalid_attribute")
       (Attribute_lifecycle.rename ?cancel ~rules geometry)
   with Cancel.Cancelled -> Error (Error.make ~operation:"attribute_rename"
       ~code:"cancelled" "attribute renaming was cancelled")
@@ -59,7 +59,7 @@ type swap_rule = Attribute_lifecycle.swap_rule = {
 
 let swap ?cancel ~rules geometry =
   try Result.map_error
-      (Error.of_string ~operation:"attribute_swap" ~code:"invalid_attribute")
+      (Error.make ~operation:"attribute_swap" ~code:"invalid_attribute")
       (Attribute_lifecycle.swap ?cancel ~rules geometry)
   with Cancel.Cancelled -> Error (Error.make ~operation:"attribute_swap"
       ~code:"cancelled" "attribute swap was cancelled")
@@ -259,7 +259,7 @@ let interpolate ({ cancel; grain; selection; driver; compute_weights; point_patt
   let driver = Option.value driver ~default:(Primitive_uvw {
     primitive_attribute = "source_primitive"; uvw_attribute = "source_uvw" }) in
   try Result.bind (Result.map_error
-      (Error.of_string ~operation:"attribute_interpolate"
+      (Error.make ~operation:"attribute_interpolate"
         ~code:"invalid_interpolate")
       (expand_interpolate_patterns ~match_groups ?point_pattern ?vertex_pattern
         ?primitive_pattern ?detail_pattern source)) (fun (expanded, groups) ->
@@ -268,10 +268,10 @@ let interpolate ({ cancel; grain; selection; driver; compute_weights; point_patt
       source_name = attribute.interpolate_source;
       target_name = attribute.interpolate_target }) (attributes @ expanded) in
     Result.bind (Result.map_error
-      (Error.of_string ~operation:"attribute_interpolate"
+      (Error.make ~operation:"attribute_interpolate"
         ~code:"invalid_interpolate") compute_result) (fun compute ->
     Result.map_error
-      (Error.of_string ~operation:"attribute_interpolate"
+      (Error.make ~operation:"attribute_interpolate"
         ~code:"invalid_interpolate")
       (match driver with
        | Primitive_uvw { primitive_attribute; uvw_attribute } ->

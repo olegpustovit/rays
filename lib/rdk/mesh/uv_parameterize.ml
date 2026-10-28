@@ -397,8 +397,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     let range_sum = Array.make range_count 0. in
     let parallel_dot left right =
       Array.fill range_sum 0 range_count 0.;
-      Support.run_ranges ~grain variable_count (fun ~first ~last ->
-        let range = first / grain in
+      Support.run_ranges ~grain variable_count (fun ~first ~last -> let range = first / grain in
         let sum = ref 0. in
         for variable = first to last - 1 do
           sum := !sum +. left.(variable) *. right.(variable)

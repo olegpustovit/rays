@@ -670,7 +670,7 @@ let overlapping_self_triangle_pairs ?cancel ~grain ~tolerance surface =
   triangle_pairs_of ?cancel ~self:true ~exact_plane_filter:false
     ~skip_shared_points:false ~grain ~tolerance surface surface
 
-let overlapping_self_triangle_pairs_disjoint_topology ?cancel ~grain ~tolerance
+let self_pairs_disjoint_topology ?cancel ~grain ~tolerance
     surface =
   let triangles = Array.length surface.primitives
   and primitive_count = Bytes.length surface.topology.primitive_kinds in
@@ -1666,6 +1666,6 @@ module View = struct
   let[@inline] triangle_primitive value triangle = value.primitives.(triangle)
   let overlapping_triangle_pairs = overlapping_triangle_pairs
   let overlapping_self_triangle_pairs = overlapping_self_triangle_pairs
-  let overlapping_self_triangle_pairs_disjoint_topology =
-    overlapping_self_triangle_pairs_disjoint_topology
+  let self_pairs_disjoint_topology =
+    self_pairs_disjoint_topology
 end
