@@ -37,12 +37,12 @@ let kinds value context =
 
 (* the open level's objects or layers (the scene's if the level is gone: every path resolves the
    level first); none inside a geometry object *)
-let objects value = match value.level with
+let objects value = match pane_level value with
   | Document.Scene -> scene value
   | Inside id -> Option.value ~default:Kind_graph.empty (Document.layers value.doc id)
 
 (* the SOP network of the open geometry object *)
-let network value = match value.level with
+let network value = match pane_level value with
   | Document.Inside id -> Document.network value.doc id
   | Scene -> None
 
@@ -53,7 +53,7 @@ let lists value id = match network value with
 
 (* the node the open level shows as its view: a geometry network's display node, the scene's first
    object, the World's top layer *)
-let displayed value = match value.level, network value with
+let displayed value = match pane_level value, network value with
   | Inside _, Some network -> network.displayed
   | Scene, _ -> Option.map (fun (node : Kind_graph.node) -> node.id) (List.nth_opt (objects value) 0)
   | Inside _, None -> Option.map (fun (node : Kind_graph.node) -> node.id) (List.nth_opt (Kind_graph.stack (objects value)) 0)
@@ -62,7 +62,7 @@ let viewed_path value (scope : Flow_graph.Projection.scope) =
   let valid (preview : preview) = match preview.path, scope.path with
     | graph :: _, root :: _ when graph = root -> Some preview.path
     | _ -> None in
-  let preview = match value.level with
+  let preview = match pane_level value with
     | Inside id when Document.object_graph value.doc id = Some (List.hd scope.path) ->
         Option.bind (Document.Int_map.find_opt id value.previews) valid
     | _ -> Document.Int_map.fold (fun _ preview found ->
@@ -81,7 +81,7 @@ let viewed_path value (scope : Flow_graph.Projection.scope) =
    compiled nodes belong to an object's network, independent of the list's level. *)
 let node_owner value node_id =
   let owns (network : Document.network) = Edit_graph.find network.graph.geometry ~node_id <> None in
-  match value.level with
+  match pane_level value with
   | Inside id when Option.fold ~none:false ~some:owns (Document.Int_map.find_opt id value.doc.networks) -> Some id
   | _ ->
       (* ponytail: scan owners on this fallback; add an ownership index if large scenes need it. *)
@@ -355,7 +355,7 @@ let arg_request ~source (n : Flow_graph.Projection.node) ~arg_row = function
    argument; an argument that is not a literal shows its expression and is
    locked.  Returns the graph requests and the probe moves. *)
 let spreadsheet_source value =
-  match value.scope_key, Pxui_graph.Scope.selected value.scope_view with
+  match pane_laid value, Pxui_graph.Scope.selected (pane_view value) with
   | Some {scope; records = Some records; _}, path :: _ ->
       let chains = Flow_graph.Probe.chains scope in
       Option.bind (compiled_at value chains records path) (fun node_id ->
@@ -430,13 +430,13 @@ Flow.Syntax.make (Flow.Syntax.Num (Flow.Lisp.float f)) in
   let edits = if rows = [] then [] else
     Pxui_shell.Inspector.flow_fields ui ~expanded ~width ~pins:true ~pin_click:true ~on_choice
       ~kind_label:(kind_label n.head)
-      ~chips:(match value.scope_key with
+      ~chips:(match pane_laid value with
         | Some { evaluated = Some ev; _ } -> Navigator.chips ev
         | _ -> []) rows
     |> List.filter_map (function
       | Pxui_shell.Inspector.Edited ("@layout", Param.Choice_value chosen) ->
           Option.bind layout_names (fun (names, _) ->
-            Option.map (fun index -> Syntax_edit (Flow_graph.Flow_edit.Set_layout { graph; index }))
+            Option.map (fun index -> Layout_edit (Layout_edit.Set_layout { graph; index }))
               (Array.find_index (( = ) chosen) names))
       | Pxui_shell.Inspector.Edited ("@size", Param.Choice_value chosen) ->
           Option.map (fun index ->
@@ -444,7 +444,7 @@ Flow.Syntax.make (Flow.Syntax.Num (Flow.Lisp.float f)) in
             (* a split that is not on screen has no sizes to keep: half, or 240 points *)
             let size = Option.value (resized n.path how) ~default:(match how with
               | `Ratio -> `Ratio 0.5 | `First -> `First 240 | `Second -> `Second 240) in
-            Syntax_edit (Flow_graph.Flow_edit.Set_layout_size { node = n.path; size }))
+            Layout_edit (Layout_edit.Set_layout_size { node = n.path; size }))
             (Array.find_index (( = ) chosen) size_names)
       | (Pxui_shell.Inspector.Edited (name, _) | Pxui_shell.Inspector.Expression (name, _) | Pxui_shell.Inspector.Follow name) as ev
         when String.starts_with ~prefix:arg_prefix name -> arg_request ~source:(value.doc.workspace.ws).source n ~arg_row ev
@@ -718,7 +718,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
   let module P = Flow_graph.Projection in
   let module Probe = Flow_graph.Probe in
   let module S = Flow.Syntax in
-  match value.scope_key, value.doc.Document.workspace with
+  match pane_laid value, value.doc.Document.workspace with
   | Some { scope; records = Some records; graph; _ }, _ ->
       (* [holder @ [":" ^ label]]: a row of a node that is an operator call (the pane's expression chip) *)
       let row_subject = match List.rev path with
@@ -937,7 +937,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
 (* The node of the graph pane that a lowered node of the open object was made by, at the iterations
    the selectors probe. *)
 let node_path value node_id =
-  match value.scope_key, value.doc.Document.workspace with
+  match pane_laid value, value.doc.Document.workspace with
   | Some { scope; records = Some records; _ }, _ ->
       let chains = Flow_graph.Probe.chains scope in
       let rec search (s : Flow_graph.Projection.scope) =

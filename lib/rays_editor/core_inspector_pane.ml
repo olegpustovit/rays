@@ -14,11 +14,11 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
   let ws = value.doc.Document.workspace.ws in
   let document = objects value in
   let selected_ids = Selection.selected_nodes selection in
-  let lowered_level = match value.level with
+  let lowered_level = match pane_level value with
     | Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
   (* a row of a geometry object's list selects its node in the pane: the inspector follows it *)
-  let scope_selected = if (match value.scope_key with Some k -> Some k.graph = graph_name value | None -> false)
-      || (lowered_level && value.scope_key <> None)
+  let scope_selected = if (match pane_laid value with Some k -> Some k.graph = graph_name value | None -> false)
+      || (lowered_level && (pane_laid value) <> None)
     then inspector_paths (Pxui_graph.Scope.selected scope_view) else [] in
   let window = List.exists (fun (l : Pxui_shell.Layout.leaf) -> l.floating && l.panel = Inspector && l.body = bounds) g.leaves in
   (* a window keeps its 1-point border on the left, right and bottom: its panel lies inside *)
@@ -56,7 +56,7 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
               (fun id -> Option.map (fun (node : Kind_graph.node) -> node.label) (Kind_graph.find document id)) in
         let display = Option.fold ~none:"none" ~some:(fun id ->
           Option.value ~default:("#" ^ string_of_int id) (label id)) (displayed value) in
-        let title, detail = match value.scope_key with
+        let title, detail = match pane_laid value with
           | Some k when scope_active && Some k.graph = graph_name value ->
               let rec count (s : Flow_graph.Projection.scope) = List.fold_left
                 (fun n (x : Flow_graph.Projection.node) ->
@@ -108,7 +108,7 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
       let fields, label, kind = match Kind_graph.find document node_id with
         | Some node -> Kind_graph.fields node, node.label, node.kind
         | None -> [], "#" ^ string_of_int node_id, "unknown" in
-      let preview = value.level = Document.Scene && Option.fold ~none:false
+      let preview = (pane_level value) = Document.Scene && Option.fold ~none:false
         ~some:(fun shell -> List.exists (fun (_, ids) -> List.mem node_id ids) shell.Document.views)
         value.doc.shell in
       let changes = inspector_panel ui bounds (fun () ->
@@ -126,7 +126,7 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
             if preview then Some "preview instance" else None ] in
           let head = Pxui.Ui.inspector_header ui
               ~key:"flow-inspector-header"
-              ~kind:(Printf.sprintf "%s/%s" (if value.level = Document.Scene then "scene" else "world") kind)
+              ~kind:(Printf.sprintf "%s/%s" (if (pane_level value) = Document.Scene then "scene" else "world") kind)
               ?badge:(if displayed value = Some node_id then Some "view" else None)
               ~index:(Printf.sprintf "NO. %04d" node_id)
               ?rename:(if preview then None else Some (fun text -> String.trim text <> ""))
@@ -183,7 +183,7 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
                  | Error message, _ -> Some (Declined message)
                  | Ok _, None -> None)
             | Follow path ->
-                let home = match value.level with
+                let home = match pane_level value with
                   | Document.Scene -> List.assoc_opt node_id value.doc.homes.objects
                   | Inside _ -> List.assoc_opt node_id value.doc.homes.layers in
                 Option.bind home (fun (home : Document.home) -> match home with

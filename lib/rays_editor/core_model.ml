@@ -123,6 +123,8 @@ type change =
   | Panel_state of Pxui_shell.Layout.path * Editor_core.Panels.state
   | Select_layout of string
   | Syntax_edit of Flow_graph.Flow_edit.op
+  | Layout_edit of Layout_edit.op
+      (** a gesture on the editor graph's panels and layouts, applied beside the text ones *)
   | Syntax_batch of string * Flow_graph.Flow_edit.op list
       (** several rewrites that make one gesture (a new SOP graph and its object): all or none,
           one history entry with this label *)
@@ -131,6 +133,9 @@ type change =
       (** the expression at [key] of the call at [home] is written in place: the call is bound to
           a name first, then the expression, and [make] gives the gesture on that name (several
           rewrites, one history entry) *)
+  | Layout_inline of { home : Document.home; key : Flow_graph.Flow_edit.arg_key;
+                       make : Flow.Workspace.path -> Layout_edit.op }
+      (** {!Syntax_inline} for a layout gesture *)
   | Object_arg of { node : int; key : string; sub : int list; expr : Flow.Syntax.t }
       (** an expression typed in a row of a scene object or World layer: written to the argument of
           the call that holds it (for a loop's copy, of the loop's template) *)
@@ -235,17 +240,16 @@ type 'prepared t = {
   doc : Document.t;  (* always the history's present *)
   gpu : Flow_ir.Gpu.config;  (* the workspace owner's immutable execution policy *)
   filed : Document.t;  (* the document as its source file has it: an external change may replace it *)
-  level : Document.level;
-  projections : projection Level_map.t;
+  panes : graph_pane Panel_map.t;
+  (* the graph panels' own canvas, level, selection, graph and route, by panel key; the one in use
+     is what the pane-in-use accessors below read *)
   text : Text_pane.state;  (* the workspace text pane: tab, drafts, errors (view state) *)
   map_view : bool;  (* in the World, the view pane shows the lat-long map *)
   live_cook : bool;  (* cook while a drag holds the pointer *)
   rows : (row_source * (int option * int option) * (Pxui_shell.Tree.row array * string list)) list;
   (* the rows of the lists drawn last frame, cached by network, display node and active camera *)
   factories : Edit_graph.factory list;  (* the SOP catalog *)
-  selection : Selection.t;
   menu : Pxui_graph.Node_menu.t option;  (* the node menu, while it is open *)
-  scope_view : Pxui_graph.Scope.t;  (* the workspace document's graph pane *)
   probes : int Layout_by_path.Path_map.t;  (* the iteration each zone shows: view state, not history *)
   previews : preview Document.Int_map.t;  (* viewport requests, outside the document and history *)
   viewed : (Flow_sop.Network.t * int) Document.Int_map.t;
@@ -253,12 +257,9 @@ type 'prepared t = {
   canvas_viewed : (Flow.Ty.t * int) option;  (* its plan node and type, resolved by [sync_views] *)
   view_key : (Flow_sop.Lower.t * int Layout_by_path.Path_map.t * preview Document.Int_map.t * preview option) option;
   lit : lit_cache option;  (* the highlight of the selected node at the probes, see {!lit_tags} *)
-  scope_key : scope_key option;
   edit_phases : Flow.Phase_timer.t;
   select_later : Flow.Workspace.path list;  (* nodes to select once the pane shows their graph *)
   open_import : string option;
-  pane_graph : string option;  (* a scene, world or settings graph the pane shows instead of the level's own *)
-  back : (Document.level * string option) list;  (* where [u] returns to: level and pane graph, latest first *)
   flow_catalog : Flow.Check.catalog option Lazy.t;
   lisp_vocab : Lisp_text.vocab Lazy.t;  (* what the text pane completes and describes *)
   tree : Pxui_shell.Tree.t;
@@ -284,11 +285,6 @@ type 'prepared t = {
   window_focus : int;  (* frames since the window became key again (capped), -1 while it is not *)
   timeline_frames : int;
   queued : Leader.action list;  (* picked in the palette, run next frame *)
-  graph_at : Pxui_shell.Layout.path option;  (* where [graph_pane]'s leaf was at the last frame *)
-  graph_pane : string list option;
-  (* the graph panel that [scope_view], [scope_key], [pane_graph], [back] and [projections] belong
-     to, by panel key: the focused one, else the last one focused *)
-  graph_panes : (string list * graph_pane) list;  (* the other graph panels' own, by panel key *)
   list_at : string list option;  (* the panel [tree] belongs to: a list panel, or a graph panel in list view *)
   text_at : string list option;  (* the panel [text] belongs to: a lisp panel, or a graph panel in text view *)
   outline_at : string list option;  (* the panel [outline] belongs to *)
@@ -306,6 +302,18 @@ type 'prepared t = {
   (* each traced viewport's header text (resolution, film step, samples), set by the host after
      it renders: view state, not history *)
 }
+
+(* The pane in use: the focused graph panel's own canvas, level and selection. *)
+let pane value = Panel_map.active value.panes
+let pane_view value = (pane value).view  (* the workspace document's graph pane *)
+let pane_laid value = (pane value).laid  (* what it was last laid out from *)
+let pane_shown value = (pane value).shown  (* a scene, world or settings graph shown instead of the level's own *)
+let pane_route value = (pane value).route  (* where [u] returns to: level and pane graph, latest first *)
+let pane_views value = (pane value).views
+let pane_level value = (pane value).at
+let pane_selection value = (pane value).picked
+let with_pane value f = { value with panes = Panel_map.update f value.panes }
+let with_selection value picked = with_pane value (fun pane -> { pane with picked })
 
 type ('prepared, 'panel) update = {
   core : 'prepared t;

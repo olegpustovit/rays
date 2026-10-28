@@ -265,6 +265,16 @@ let print t =
 
 let to_text t = fst (print t)
 
+(* a checked rewrite as the next document: the layout keys follow [remap], and are pruned
+   unless the edit changes no node.  The edits a scrub repeats every frame change a value, never
+   which nodes there are: projecting the graphs again for them costs 16 ms of a 44 ms edit at
+   2,001 nodes. *)
+let commit t ~remap ?(editor_gone = false) ~prune (source, checked) =
+  let layout = Layout_by_path.remap remap t.layout in
+  let layout = if editor_gone then { layout with editor = None } else layout in  (* the other editor graphs are gone *)
+  let layout = if prune then prune_keys checked layout else layout in
+  { t with source; checked; layout; literal = None }
+
 let edit_unchecked catalog t op =
   let key (change : Literal_edit.change) = change.path @ ["#:" ^ change.field] in
   match Literal_edit.patch catalog t.checked op with
@@ -280,42 +290,20 @@ let edit_unchecked catalog t op =
       let literal = Some {base; edits = Layout_by_path.Path_map.add (key change) change edits} in
       Ok {t with checked; source = checked.source; literal}
   | _ ->
-  Result.map (fun (source, checked) ->
-    let layout = Layout_by_path.remap (Flow_graph.Flow_edit.remap op) t.layout in
-    let layout = match op with
-      | Flow_graph.Flow_edit.Merge_layouts _ -> { layout with editor = None }  (* the other editor graphs are gone *)
-      | _ -> layout in
-    (* the edits a scrub repeats every frame change a value, never which nodes there are:
-       projecting the graphs again for them costs 16 ms of a 44 ms edit at 2,001 nodes *)
-    let layout = match op with
-      | Flow_graph.Flow_edit.Set_arg _ | Set_input_default _ | Set_note _ | Toggle_bypass _ | Set_layout_size _ -> layout
-      | _ -> prune_keys checked layout in
-    { t with source; checked; layout; literal = None })
+  Result.map (commit t ~remap:(Flow_graph.Flow_edit.remap op)
+    ~prune:(match op with
+      | Flow_graph.Flow_edit.Set_arg _ | Set_input_default _ | Set_note _ | Toggle_bypass _ -> false
+      | _ -> true))
     (Flow_graph.Flow_edit.apply_checked ~ops:t.checked.ops ~library:t.fragment
       ~checker:(Flow_sop.Catalog.check_workspace ~ops:t.checked.ops ~library:t.fragment)
       catalog t.source op)
 
-let edit catalog t op =
-  let open Flow_graph.Flow_edit in
-  let paths = match op with
-    | Set_arg {node; _} | Connect {node; _} | Disconnect {node; _} | Unfold {node; _}
-    | Add_arm {node; _} | Delete_arm {node; _}
-    | Fold_into {node} | Hoist {node} | Rename {node; _} | Inline_macro {node} | Inline_defn {node} | Move_binding {node; _} | Move_step {node; _}
-    | Toggle_bypass {node} | Set_note {node; _} | Add_item {node} | Move_item {node; _}
-    | Add_field {node; _} | Set_layout_size {node; _} | Split_panel {node; _}
-    | Close_panel {node} | Set_panel_kind {node; _} -> [node]
-    | Dock_panel {node; target; _} -> [node; target]
-    | Wrap {nodes; _} | Make_local_fn {nodes} | Make_defn {nodes; _} | Make_macro {nodes; _}
-    | Delete_nodes {nodes} | Duplicate {nodes} | Group_merge {nodes; _} -> nodes
-    | Add_node {scope; _} -> [scope]
-    | Set_input_default {form; _} -> [[form]]
-    | Set_graph {name; _} | Remove_graph {name} | Rename_graph {name; _} -> [[name]]
-    | Set_layout {graph; _} | Layout_new {graph} | Merge_layouts {graph}
-    | Layout_remove {graph} | Layout_window {graph; _} | Layout_float {graph; _} -> [[graph]] in
+(* [run] on a document whose imported forms the edit neither names nor rewrites *)
+let guarded t paths run =
   let refusal file = Error (diag "E_IMPORTED" ("Read-only imported form from " ^ file ^ ".")) in
   match List.find_map (imported_file t) paths with
   | Some file -> refusal file
-  | None -> Result.bind (edit_unchecked catalog t op) (fun next ->
+  | None -> Result.bind (run ()) (fun next ->
       (* Renaming a local graph can rewrite references in imported forms too. *)
       let children source = List.concat_map (fun f -> match S.children f with _ :: _ :: rest -> rest | _ -> []) source in
       let name f = match S.children f with _ :: {S.node = S.Sym name; _} :: _ -> Some name | _ -> None in
@@ -325,6 +313,30 @@ let edit catalog t op =
           let fresh = List.find_opt (fun f -> name f = name form) (children next.source) in
           (match old, fresh with Some a, Some b -> not (S.equal a b) | None, None -> false | _ -> true)) forms then Some file else None) t.imports in
       match changed with Some file -> refusal file | None -> Ok next)
+
+
+let edit catalog t op =
+  let open Flow_graph.Flow_edit in
+  let paths = match op with
+    | Set_arg {node; _} | Connect {node; _} | Disconnect {node; _} | Unfold {node; _}
+    | Add_arm {node; _} | Delete_arm {node; _}
+    | Fold_into {node} | Hoist {node} | Rename {node; _} | Inline_macro {node} | Inline_defn {node} | Move_binding {node; _} | Move_step {node; _}
+    | Toggle_bypass {node} | Set_note {node; _} | Add_item {node} | Move_item {node; _}
+    | Add_field {node; _} -> [node]
+    | Wrap {nodes; _} | Make_local_fn {nodes} | Make_defn {nodes; _} | Make_macro {nodes; _}
+    | Delete_nodes {nodes} | Duplicate {nodes} | Group_merge {nodes; _} -> nodes
+    | Add_node {scope; _} -> [scope]
+    | Set_input_default {form; _} -> [[form]]
+    | Set_graph {name; _} | Remove_graph {name} | Rename_graph {name; _} -> [[name]] in
+  guarded t paths (fun () -> edit_unchecked catalog t op)
+
+let edit_layout catalog t op =
+  guarded t (Layout_edit.paths op) (fun () ->
+    Result.map (commit t ~remap:(Layout_edit.remap op) ~editor_gone:(Layout_edit.merges op)
+      ~prune:(Layout_edit.changes_nodes op))
+      (Layout_edit.apply_checked ~ops:t.checked.ops ~library:t.fragment
+        ~checker:(Flow_sop.Catalog.check_workspace ~ops:t.checked.ops ~library:t.fragment)
+        catalog t.source op))
 
 (* Non-SOP fields are checked before their static context is materialized. *)
 let context_value ?(force = true) (workspace : t) (plan : Flow.Eval.plan) context =

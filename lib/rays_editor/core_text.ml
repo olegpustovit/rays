@@ -20,12 +20,12 @@ let parameter_gesture operation level id values =
    one history entry, the open level is re-resolved and the cook told about
    the new volatile nodes. *)
 let install value doc ~label ~merge =
-  let level = Document.resolve_level doc value.level in
-  let value' = { value with doc; level; lisp_vocab = vocabulary_for value doc;
+  let level = Document.resolve_level doc (pane_level value) in
+  let value' = { value with doc; lisp_vocab = vocabulary_for value doc;
     workspace = unrestore value.doc doc value.workspace } in
   Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (doc.workspace.lowered));
-  { value' with history = commit ~label ~merge doc value.history;
-    selection = if level = value.level then value.selection else Selection.empty }
+  with_pane { value' with history = commit ~label ~merge doc value.history } (fun pane ->
+    { pane with at = level; picked = if level = pane.at then pane.picked else Selection.empty })
 
 (* The text pane's applies: the whole workspace text, or one
    binding's expression; atomic, one history entry "Edit text". *)
@@ -69,15 +69,15 @@ let select_source value path = match path with
       let locals = List.map (fun (key, (local : local)) ->
         key, {local with code = {local.code with target = None}}) value.locals in
       let next = sync_scope (go {value with text = {value.text with target = None}; locals} graph) in
-      match next.scope_key with
+      match pane_laid next with
       | Some {scope; graph = current; _} when current = graph &&
           (Flow_graph.Projection.find scope path <> None
            || List.exists (fun (input : Flow_graph.Projection.input) -> input.path = path) scope.inputs) ->
-          if Pxui_graph.Scope.selected next.scope_view = [path] then next else
-          {next with select_later = [];
-            scope_view = fst (Pxui_graph.Scope.run_command (Pxui_graph.Scope.select [path] next.scope_view)
-              Pxui_graph.Scope.Frame_selection)}
-      | _ when List.length path = 1 -> {next with scope_view = Pxui_graph.Scope.select [] next.scope_view}
+          if Pxui_graph.Scope.selected (pane_view next) = [path] then next else
+          with_pane {next with select_later = []} (fun pane ->
+            { pane with view = fst (Pxui_graph.Scope.run_command (Pxui_graph.Scope.select [path] pane.view)
+              Pxui_graph.Scope.Frame_selection) })
+      | _ when List.length path = 1 -> with_pane next (fun pane -> { pane with view = Pxui_graph.Scope.select [] pane.view })
       | _ -> value
 
 let apply_text value intents =

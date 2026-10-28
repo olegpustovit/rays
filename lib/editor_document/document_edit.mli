@@ -12,6 +12,15 @@ val syntax_edit :
   (Document.t, string) result
 (** One gesture on the text. *)
 
+val layout_op_result :
+  factories:Sop.Edit_graph.factory list -> Document.t -> Layout_edit.op ->
+  (Document.t, Diagnostic.t) result
+
+val layout_op :
+  factories:Sop.Edit_graph.factory list -> Document.t -> Layout_edit.op ->
+  (Document.t, string) result
+(** One layout gesture ({!Layout_edit}) on the text. *)
+
 val syntax_batch :
   factories:Sop.Edit_graph.factory list -> Document.t -> Flow_graph.Flow_edit.op list ->
   (Document.t, string) result

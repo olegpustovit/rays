@@ -25,7 +25,7 @@ let add_target value =
         | Some g -> g.context | None -> Flow.Context.sop in
       Some (name, context)
   | None ->
-      (match value.level with
+      (match pane_level value with
        | Document.Scene -> Some ("scene", Flow.Context.scene)
        | Inside id when kind value id = Some "world" -> Some ("world", Flow.Context.world)
        | _ -> None)
@@ -143,7 +143,7 @@ let scope_add value key =
       [ Syntax_batch ("New material", [ snd (new_material value) ]) ]
   | Some (graph, context) when context = Flow.Context.scene && key = "merge" ->
       (* several selected objects move into a new merge; with none selected, an empty merge *)
-      (match Pxui_graph.Scope.selected value.scope_view with
+      (match Pxui_graph.Scope.selected (pane_view value) with
        | _ :: _ :: _ as nodes ->
            let ws = value.doc.Document.workspace.ws in
            [ Syntax_edit (Flow_graph.Flow_edit.Group_merge { nodes;
@@ -161,10 +161,10 @@ let scope_add value key =
       let arity = match kind with
         | Some d -> List.length d.slots - List.length d.keyword_inputs
         | None -> if material_of then 1 else 0 in
-      let selected = Pxui_graph.Scope.selected value.scope_view in
+      let selected = Pxui_graph.Scope.selected (pane_view value) in
       (* a nested node (a call written in another's input) has no name to read: it gets one first
          ([Rename] binds it), in the same undo step as the node added after it *)
-      let hoisted = match selected, value.scope_key with
+      let hoisted = match selected, (pane_laid value) with
         | [ path ], Some { scope; _ } when List.length path >= 2 && String.contains (List.hd (List.rev path)) '#' ->
             Option.map (fun (n : Flow_graph.Projection.node) ->
               path, Flow_graph.Flow_edit.fresh_name ws.source ~root:graph
@@ -186,13 +186,13 @@ let scope_add value key =
         | _ ->
             (* nothing selected: a kind with an input reads the graph's result, so the text
                still checks (a required input is never left open) *)
-            let result = match value.scope_key with
+            let result = match pane_laid value with
               | Some { scope = { Flow_graph.Projection.result = Link name; _ }; _ } -> Some name
               | _ -> None in
             [ graph ], (if arity > 0 then result else None) in
       let expr, base =
         if is_value then begin
-          let wire = match selected, value.scope_key with
+          let wire = match selected, (pane_laid value) with
             | [ path ], Some { scope; _ } when List.length path >= 2 ->
                 Option.bind (binding_name path) (fun name ->
                   Option.map (fun (n : Flow_graph.Projection.node) -> name, n.ty) (Flow_graph.Projection.find scope path))
@@ -238,7 +238,7 @@ let scope_add value key =
         | Some (node, to_) -> [ Flow_graph.Flow_edit.Rename { node; to_ } ]
         | None -> [] in
       (* a wire pulled off an existing wire: the new node goes between its source and its sink *)
-      let insert = match selected, input, Pxui_graph.Scope.selected_wire value.scope_view, value.scope_key with
+      let insert = match selected, input, Pxui_graph.Scope.selected_wire (pane_view value), (pane_laid value) with
         | [ path ], Some from, Some (target, key), Some { scope = pane; _ }
           when reads from expr && (match Flow_graph.Projection.find pane target with
             | Some n -> List.exists (fun (r : Flow_graph.Projection.row) ->

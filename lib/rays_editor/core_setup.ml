@@ -75,14 +75,16 @@ let create ?gpu ?settings
         | Error _ -> true in
       let state_name = Contexts.sha256 state_key in
       let value = { preferences; text_size = ui_text_size; guide; hud = None; presets; state_name; name; prompt = None; notice = None; notice_at = 0.;
-        doc; gpu; filed = doc; level;
-        projections = Level_map.empty; text = Text_pane.initial; map_view = false;
+        doc; gpu; filed = doc;
+        panes = Panel_map.make { view = Pxui_graph.Scope.create (); laid = None; shown = None; route = [];
+                                 views = Level_map.empty; at = level; picked = Selection.empty };
+        text = Text_pane.initial; map_view = false;
         rows = []; live_cook = true;
         factories;
-        selection = Selection.empty; menu = None;
-        scope_view = Pxui_graph.Scope.create (); probes = Layout_by_path.Path_map.empty; lit = None;
+        menu = None;
+        probes = Layout_by_path.Path_map.empty; lit = None;
         previews = Document.Int_map.empty; viewed = Document.Int_map.empty; canvas_preview = None; canvas_viewed = None; view_key = None;
-        scope_key = None; edit_phases = Flow.Phase_timer.empty; select_later = []; open_import = None; pane_graph = None; back = [];
+        edit_phases = Flow.Phase_timer.empty; select_later = []; open_import = None;
         flow_catalog = lazy (Result.to_option (Editor_document.Kinds.catalog
           ~version:Flow_sop.Manifest.version factories));
         lisp_vocab = vocabulary factories doc;
@@ -94,7 +96,6 @@ let create ?gpu ?settings
         history = Editor_core.History.create doc;
         focus = Editor_core.Panels.main; focus_path = None; pane_keys = []; leader = Leader.Idle;
         timeline_frames = 240; queued = [];
-        graph_at = None; graph_pane = None; graph_panes = [];
         list_at = None; text_at = None; outline_at = None; locals = [];
         started = { on = None; views = []; tabs = [] };
         framing = None; carry = None; carry_budget; clock; traces = []; view_tools = None; gates = []; selected_box = None;
@@ -105,7 +106,7 @@ let create ?gpu ?settings
       let on = match Option.bind doc.Document.shell (fun s -> s.start.focus) with
         | Some path -> Some path | None -> None in
       let value = follow_graph value ~focus:(if on = None then value.focus else Pxui_shell.Layout.Graph) ~focus_path:on in
-      let value = { value with projections = Option.fold ~none:Level_map.empty ~some:(start_views doc level) (graph_path value) } in
+      let value = with_pane value (fun pane -> { pane with views = Option.fold ~none:Level_map.empty ~some:(start_views doc level) (graph_path value) }) in
       let value = follow_hosts value ~focus_path:on (panel_hosts value) in
       follow_start value)
     (Cook.create ~prepare ~seed ~grain ?domains ?await ~max_entries

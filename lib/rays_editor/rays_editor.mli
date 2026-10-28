@@ -475,6 +475,9 @@ module Editor : sig
       the scene's objects, recook, and record one history entry named by the
       op. An error changes nothing. *)
 
+  val edit_layout : 'prepared t -> Editor_document.Layout_edit.op -> ('prepared t, string) result
+  (** {!edit} for a layout gesture ({!Editor_document.Layout_edit}). *)
+
   val edit_phases : 'prepared t -> Flow.Phase_timer.t
   (** Phase durations and invocation counts of the last document edit. *)
 

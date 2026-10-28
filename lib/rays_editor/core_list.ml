@@ -14,13 +14,13 @@ let enterable value id = match kind value id with
 
 (* Switch the open level: nothing is selected there, and the list starts again. *)
 let open_level value level =
-  if level = value.level then value else
+  if level = (pane_level value) then value else
   let () = Pxui.Ui.unfocus value.ui in
   let world = match level with
     | Document.Inside id -> kind value id = Some "world"
     | Scene -> false in
-  { value with level; pane_graph = None; selection = Selection.empty; map_view = world;
-    tree = Pxui_shell.Tree.create () }
+  with_pane { value with map_view = world; tree = Pxui_shell.Tree.create () } (fun pane ->
+    { pane with at = level; shown = None; picked = Selection.empty })
 
 (* The geometry objects to cook: visible ones, each with its network. *)
 let geometry_objects value =
@@ -41,7 +41,7 @@ let geometry_objects value =
 
 (* The object the sketch-facing single-object accessors describe: the open
    one, else the first visible geometry object. *)
-let focus_object value = match value.level with
+let focus_object value = match pane_level value with
   | Inside id when kind value id = Some "geometry" -> Some id
   | Inside _ | Scene ->
       Option.map (fun (id, _, _) -> id) (List.nth_opt (geometry_objects value) 0)
@@ -71,16 +71,16 @@ let settings value = value.doc.Document.settings
 let timeline value = value.timeline
 let selected_node value = match scope_node value with
   | Some (_, node) -> Some (of_sop node)
-  | None -> Option.bind (Selection.selected value.selection)
+  | None -> Option.bind (Selection.selected (pane_selection value))
       (fun id -> Option.map of_object (Kind_graph.find (objects value) id))
 (* Scoped SOP handles use their owning object's transform. Navigation
    selection uses the open object or the scene object's parent chain. *)
 let space value = match Option.bind (scope_node value) (fun (_, node) -> node_owner value (Node.id node)) with
   | Some owner -> Objects.world (scene value) owner
-  | None -> match value.level with
+  | None -> match pane_level value with
   | Inside id when kind value id = Some "geometry" -> Objects.world (scene value) id
   | Inside _ -> Rays_math.Mat4.identity
-  | Scene -> (match Selection.selected value.selection with
+  | Scene -> (match Selection.selected (pane_selection value) with
     | Some id -> Objects.parent_world (scene value) id
     | None -> Rays_math.Mat4.identity)
 
@@ -170,7 +170,7 @@ let trunk_rows (network : Flow_sop.Network.t) ~viewed ~flags =
     (trunk network)
 
 (* The open level's list: what it is made from, and its rows and flag columns when asked. *)
-let rows value = match value.level, network value with
+let rows value = match pane_level value, network value with
   | Document.Scene, _ -> Objects (scene value), lazy (scene_rows ?active:value.doc.active_camera (scene value), ["v"; "r"])
   | Inside _, Some network ->
       Network network.graph, lazy (trunk_rows network.graph ~viewed:network.displayed ~flags:(fun node_id node ->
@@ -236,13 +236,13 @@ let reparented document rows intent =
    ([tree_edit]). *)
 let apply_tree value (document, selection, tree, opened, label, rows) intent =
   let module T = Pxui_shell.Tree in
-  let in_text = Editor_document.Scene_sync.in_text value.doc value.level in
+  let in_text = Editor_document.Scene_sync.in_text value.doc (pane_level value) in
   let hosted = List.filter (fun id -> not (in_text id)) in
-  let world = match value.level with
+  let world = match pane_level value with
     | Document.Inside id -> kind value id = Some "world"
     | Scene -> false in
   (* the nodes of a geometry object are the lowering of its graph: its list only selects *)
-  let geometry = match value.level with
+  let geometry = match pane_level value with
     | Document.Inside id -> kind value id = Some "geometry"
     | Scene -> false in
   let document, selection, tree, opened, label, rows = match intent with
@@ -264,11 +264,11 @@ let apply_tree value (document, selection, tree, opened, label, rows) intent =
            (if List.for_all in_text order then document else restack document order),
            selection, tree, opened, Some "Reorder layers", rows
        | None -> document, selection, tree, opened, label, rows)
-  | (Move _ | Indent _) when value.level = Document.Scene ->
+  | (Move _ | Indent _) when (pane_level value) = Document.Scene ->
       (match reparented document rows intent with
        | Some (ids, parent) -> Objects.reparent document (hosted ids) parent, selection, tree, opened, Some "Reparent", rows
        | None -> document, selection, tree, opened, label, rows)
-  | Outdent ids when value.level = Document.Scene ->
+  | Outdent ids when (pane_level value) = Document.Scene ->
       Objects.outdent document (hosted ids), selection, tree, opened, Some "Reparent", rows
   | Rename (id, _) when in_text id -> document, selection, tree, opened, Some "Rename", rows
   | Rename (id, name) when not geometry ->
@@ -289,11 +289,11 @@ let apply_tree value (document, selection, tree, opened, label, rows) intent =
 (* A list intent as an edit of the text, for the objects the text has ([Scene_sync.write]). *)
 let tree_edit value rows intent : Editor_document.Scene_sync.edit option =
   let module T = Pxui_shell.Tree in
-  let in_text = Editor_document.Scene_sync.in_text value.doc value.level in
+  let in_text = Editor_document.Scene_sync.in_text value.doc (pane_level value) in
   let some ids (make : int list -> Editor_document.Scene_sync.edit) =
     match List.filter in_text ids with [] -> None | ids -> Some (make ids) in
-  let world = match value.level with Document.Inside id -> kind value id = Some "world" | Scene -> false in
-  let lowered = match value.level with Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
+  let world = match pane_level value with Document.Inside id -> kind value id = Some "world" | Scene -> false in
+  let lowered = match pane_level value with Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
   let graph = objects value in
   let edit = if lowered then None else match intent with
     | T.Flag { ids; column; value = on } ->
@@ -306,8 +306,8 @@ let tree_edit value rows intent : Editor_document.Scene_sync.edit option =
     | Move _ | Reorder _ when world ->
         Option.bind (restacked rows intent) (fun order ->
           if List.for_all in_text order then Some (Editor_document.Scene_sync.Restack order) else None)
-    | Move _ | Indent _ when value.level = Document.Scene ->
+    | Move _ | Indent _ when (pane_level value) = Document.Scene ->
         Option.bind (reparented graph rows intent) (fun (ids, parent) -> some ids (fun ids -> Reparent (ids, parent)))
-    | Outdent ids when value.level = Document.Scene -> some ids (fun ids -> Outdent ids)
+    | Outdent ids when (pane_level value) = Document.Scene -> some ids (fun ids -> Outdent ids)
     | _ -> None in
   edit

@@ -21,6 +21,7 @@ let step dt particles = Array.map (fun p ->
   {x; y; vx = (if x < 0. || x >= 800. then -.p.vx else p.vx);
          vy = (if y < 0. || y >= 600. then -.p.vy else p.vy)}) particles
 let edited source op = fst (ok (F.apply_checked catalog source op))
+let edited_layout source op = fst (ok (Editor_document.Layout_edit.apply_checked catalog source op))
 let checked source = match Flow.Workspace.check catalog source with
   | Some w, _ -> w | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 
@@ -136,7 +137,7 @@ let pure workspace =
   let n = Option.get (P.find (P.of_graph catalog w "picture") ["picture"; "elapsed"]) in
   assert ((Option.get n.zone).kind = P.State);
   let panel_source = ok (Flow.Syntax.parse "(workspace canvas (graph g :context draw (draw/merge)) (graph editor :context editor (let* [pane (ui/lisp)] (ui/workspace pane))))") in
-  let panel_source = edited panel_source (F.Set_panel_kind {node = ["editor"; "pane"];
+  let panel_source = edited_layout panel_source (Editor_document.Layout_edit.Set_panel_kind {node = ["editor"; "pane"];
     panel = Result.get_ok (Editor_document.Panel_kinds.expr panel_source "canvas")}) in
   let panel_workspace = doc (fst (Flow.Lisp.print panel_source)) in
   let panel_document = ok (Editor_document.Contexts.of_workspace ~factories:Sop.Nodes.factories panel_workspace) in

@@ -119,16 +119,16 @@ let graph_leaves value =
     if p = Pxui_shell.Layout.Graph then Some (panel_key value.doc path, path) else None)
     (Editor_core.Panels.leaves (shell_tree value value.workspace))
 
-(* The leaf of the pane in use: where [graph_pane] was last seen when that is still its leaf (no
+(* The leaf of the pane in use: where its panel was last seen when that is still its leaf (no
    walk: this is read many times a frame), else found again, else the first graph leaf. *)
 let graph_path value =
-  match value.graph_pane, value.graph_at with
+  match Panel_map.key value.panes, Panel_map.leaf value.panes with
   | Some key, Some path when Editor_core.Panels.at path (shell_tree value value.workspace)
                              = Some (Editor_core.Panels.Leaf Pxui_shell.Layout.Graph)
                              && panel_key value.doc path = key -> Some path
   | _ ->
       let leaves = graph_leaves value in
-      (match Option.bind value.graph_pane (fun key -> List.assoc_opt key leaves), leaves with
+      (match Option.bind (Panel_map.key value.panes) (fun key -> List.assoc_opt key leaves), leaves with
        | Some path, _ -> Some path
        | None, (_, path) :: _ -> Some path
        | None, [] -> None)
@@ -144,22 +144,20 @@ let start_views (doc : Document.t) level path =
        | Some _ -> Level_map.singleton level Graph_view
        | None -> if List.mem_assoc path s.named then Level_map.singleton level Graph_view else Level_map.empty)
 
-let stash value = { view = value.scope_view; laid = value.scope_key; shown = value.pane_graph;
-                    route = value.back; views = value.projections; at = value.level; picked = value.selection }
-
-(* The editor as the graph panel [key] at [path] has it: its own pane when it is not the one in use.
-   The document may have changed under a pane that waited (an undo from another panel): its level
-   is resolved again, and a level that is gone takes its selection with it. *)
+(* The editor as the graph panel [key] at [path] has it: its own pane is the one in use.  A pane
+   made now starts at the level of the one it replaces.  The document may have changed under a pane
+   that waited (an undo from another panel): its level is resolved again, and a level that is
+   gone takes its selection with it. *)
 let as_pane value (key, path) =
-  if value.graph_pane = Some key then value else
-  let pane = match List.assoc_opt key value.graph_panes with
-    | Some pane -> pane
-    | None -> { view = Pxui_graph.Scope.create (); laid = None; shown = None; route = [];
-                views = start_views value.doc value.level path; at = value.level; picked = Selection.empty } in
-  let level = Document.resolve_level value.doc pane.at in
-  { value with graph_pane = Some key; graph_at = Some path; scope_view = pane.view; scope_key = pane.laid;
-               pane_graph = pane.shown; back = pane.route; projections = pane.views;
-               level; selection = if level = pane.at then pane.picked else Selection.empty }
+  if Panel_map.key value.panes = Some key then value else
+  let create () = { view = Pxui_graph.Scope.create (); laid = None; shown = None; route = [];
+                    views = start_views value.doc (pane_level value) path; at = pane_level value;
+                    picked = Selection.empty } in
+  let panes = Panel_map.activate key ~create value.panes |> Panel_map.set_leaf (Some path)
+    |> Panel_map.update (fun (pane : graph_pane) ->
+      let at = Document.resolve_level value.doc pane.at in
+      { pane with at; picked = if at = pane.at then pane.picked else Selection.empty }) in
+  { value with panes }
 
 (* The graph leaf an inspector, list or lisp leaf is tied to by [:of]. *)
 let tied value path =
@@ -171,26 +169,26 @@ let tied value path =
    one open.  The pane left keeps its canvas, selection, graph and route. *)
 let follow_graph value ~focus ~focus_path =
   let all = graph_leaves value in
-  let value = { value with graph_at = Option.bind value.graph_pane (fun key -> List.assoc_opt key all) } in
+  let value = { value with panes = Panel_map.set_leaf
+    (Option.bind (Panel_map.key value.panes) (fun key -> List.assoc_opt key all)) value.panes } in
   let leaves = List.filter (fun (_, path) -> not (panel_state value path).collapsed) all in
   (* the focused graph leaf, or the one the focused leaf is tied to: its edits land there *)
   let focused = Option.bind focus_path (fun path ->
     let path = if focus = Pxui_shell.Layout.Graph then Some path else Option.map snd (tied value path) in
     Option.bind path (fun path -> List.find_opt (fun (_, p) -> p = path) leaves)) in
-  let target = match focused, value.graph_pane with
+  let target = match focused, Panel_map.key value.panes with
     | Some leaf, _ -> Some leaf
     | None, Some key when List.mem_assoc key leaves -> None
     | None, _ -> List.nth_opt leaves 0 in
-  match target, value.graph_pane with
+  match target, Panel_map.key value.panes with
   | None, _ -> value
   | Some (key, _), Some current when key = current -> value
   | Some (key, path), None ->  (* the first pane: the state so far is its *)
-      { value with graph_pane = Some key; graph_at = Some path }
-  | Some leaf, Some current ->
-      let left = (current, stash value) :: List.remove_assoc current value.graph_panes in
-      let value = as_pane { value with graph_pane = None; graph_panes = left } leaf in
-      { value with graph_panes = List.filter (fun (key, _) -> List.mem_assoc key all
-                                                              && Some key <> value.graph_pane) left }
+      { value with panes = Panel_map.adopt key value.panes |> Panel_map.set_leaf (Some path) }
+  | Some leaf, Some _ ->
+      (* the pane left keeps its canvas, selection, graph and route in the map *)
+      let value = as_pane value leaf in
+      { value with panes = Panel_map.retain (fun key -> List.mem_assoc key all) value.panes }
 
 (* The inspector column's kit panel. *)
 (* A window is the input sheet: its panes paint their ground with the theme's panel colour, so

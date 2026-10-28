@@ -59,7 +59,8 @@ turns the result and the frame's actions into the next model. Never set a ref or
 **Edits.**
 - A gesture on the text is a `Flow_graph.Flow_edit.op`: `Syntax_edit` (one op) or `Syntax_batch`
   (several, all or none). `Document_edit.syntax_edit` rewrites, checks and lowers atomically. Add syntax
-  edits to `Flow_edit`, never to `Core`.
+  edits to `Flow_edit`, never to `Core`. The editor graph's panel and layout gestures are
+  `Editor_document.Layout_edit.op`: `Layout_edit` / `Layout_inline`, applied by `Document_edit.layout_op`.
 - A frame's gestures land together: the first one refused leaves none applied.
 - The fields of a scene object or World layer the text declares are written text first
   (`Scene_sync.set_fields`: inspector rows, viewport handles, World drags), and so are the list's
@@ -84,9 +85,9 @@ text focus only while the pane is drawn; a pane that is not drawn is `Scope.susp
 `Document.shell`; a document without one uses the host's `?layout` until its first panel edit
 writes it. Never store layout anywhere else. Every leaf is an instance with its own PXUI state
 (keys seeded by its pane root) and its own model state in `locals`, by `Core.panel_key`. The pane
-in use (`graph_pane`) follows the focus; the others wait in `graph_panes` and are read with
-`Core.as_pane`, which resolves their level again. Never reduce a panel's intents against a pane
-that is not in use, and never add a "first leaf of a kind" path. Layout gestures are `Flow_edit`
+in use is the key of `Core.t.panes` (a `Panel_map`, the graph panels' own canvas, level and selection);
+it follows the focus, and `Core_shell.as_pane` points at another, resolving its level again. Never reduce a panel's intents against a pane
+that is not in use, and never add a "first leaf of a kind" path. Layout gestures are `Layout_edit`
 ops on the editor graph; disclosure and window bounds are `Layout_by_path.panels`.
 
 **Files.** Command-S writes the source file only while its digest is the remembered one, else a

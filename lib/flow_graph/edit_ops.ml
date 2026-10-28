@@ -1,11 +1,5 @@
 open Edit_base
-open Edit_layout
-
-(* a split ratio clamped to [0.1, 0.9] with four decimals, trailing zeros trimmed *)
-let ratio_text r =
-  let rec trim t = if String.ends_with ~suffix:"0" t && not (String.ends_with ~suffix:".0" t)
-    then trim (String.sub t 0 (String.length t - 1)) else t in
-  trim (Printf.sprintf "%.4f" (Float.max 0.1 (Float.min 0.9 r)))
+open Edit_unfold
 
 (* a binding used once is inlined into its use *)
 let fold_into src node =
@@ -502,67 +496,6 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
           | None -> body in
         reorder body))
 
-  | Set_layout_size { node; size } -> one (fun () ->
-      let sp, leaf = split_node node in
-      edit_scope src sp (fun s ->
-        let e = get_node s leaf in
-        let axis, a, b = match head_sym e, e.node with
-          | Some ("ui/split" | "ui/split-at"), S.List (_ :: args) ->
-              (match positional args, layout_kids e with
-               | axis :: _, [ a; b ] -> axis, a, b
-               | _ -> fail "That panel is not a split.")
-          | _ -> fail "That panel is not a split." in
-        (* one side fixed in whole points, or a ratio with four decimals *)
-        let fixed key n = call "ui/split" [ axis; a; b; kwf key; num (max 1 n) ] in
-        set_node s leaf (keep_notes e (match size with
-          | `First n -> fixed "first_size" n
-          | `Second n -> fixed "second_size" n
-          | `Ratio r ->
-              call "ui/split-at" [ axis; mk (S.Num (ratio_text r)); a; b ]))))
-  | Split_panel { node; axis; ratio; panel } -> one (fun () ->
-      let sp, leaf = split_node node in
-      let used = root_used src (List.hd sp) in
-      edit_scope src sp (fun s ->
-        let sc = match scope_of s with
-          | Some sc -> sc
-          | None -> fail "This editor graph is a single expression. Edit it in Lisp." in
-        let j = first_pair_index sc leaf in
-        let a = fresh used (leaf ^ "_a") in
-        let b = fresh used (leaf ^ "_b") in
-        let p, orig = List.nth sc.ps j in
-        let ratio = ratio_text ratio in
-        let split = call "ui/split-at"
-          [ mk (S.Str (if axis = `H then "horizontal" else "vertical")); mk (S.Num ratio);
-            sym a; sym b ] in
-        let before = List.take j sc.ps
-        and after = List.drop (j + 1) sc.ps in
-        reorder (rebuild sc (before @ [ sym a, orig; sym b, panel; p, split ] @ after) sc.res)))
-  | Close_panel { node } -> one (fun () ->
-      let sp, leaf = split_node node in
-      edit_scope src sp (fun s ->
-        let sc = match scope_of s with
-          | Some sc -> sc
-          | None -> fail "This editor graph is a single expression. Edit it in Lisp." in
-        ignore (get_node s leaf);
-        let ps, res, _ = strip_panel ~keep:false sc leaf in
-        reorder (rebuild sc ps res)))
-  | Dock_panel { node; target; side } -> one (fun () ->
-      let sp, leaf = split_node node and tp, target = split_node target in
-      if sp <> tp || leaf = target then fail "Dock two different panels of the same layout.";
-      let used = root_used src (List.hd sp) in
-      edit_scope src sp (fun s ->
-        let sc = ensure s in
-        ignore (get_node s leaf);
-        ignore (get_node s target);
-        let ps, res, removed = strip_panel ~keep:true sc leaf in
-        if List.mem target removed then fail "A panel cannot dock inside its own group.";
-        let group = fresh used (target ^ "_dock") in
-        let first = side = `Left || side = `Top in
-        let split = call "ui/split-at" [mk (S.Str (if side = `Top || side = `Bottom then "vertical" else "horizontal"));
-          mk (S.Num "0.5"); sym (if first then leaf else target); sym (if first then target else leaf)] in
-        let ps = List.map (fun (p, e) -> p,
-          (if pat_key p = target then e else rename_place target group e)) ps in
-        reorder (rebuild sc (ps @ [sym group, split]) (rename_place target group res))))
   | Duplicate { nodes } -> one (fun () ->
       let sp, names = duplicate_plan src nodes in
       edit_scope src sp (fun s ->
@@ -627,110 +560,6 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
       map_items src (fun items ->
         if exists then List.map (fun i -> if root_name i = Some name then form else i) items
         else items @ [ form ]))
-  | Set_panel_kind { node; panel } -> one (fun () ->
-      let sp, leaf = split_node node in
-      edit_scope src sp (fun s -> set_node s leaf panel))
-  | Set_layout { graph; index } -> one (fun () ->
-      edit_scope src [ graph ] (fun s ->
-        let sc = editor_scope s in
-        match switch_place sc with
-        | None -> fail "This workspace has one layout and no switch."
-        | Some (place, sw) ->
-            if index < 0 || index >= List.length (positional (List.tl (S.children sw))) then
-              fail "There is no layout %d." index;
-            set_switch sc sc.ps place (arg_set sw (Kw "active") (Some (num index)))))
-  | Layout_new { graph } -> one (fun () ->
-      let used = root_used src graph in
-      edit_scope src [ graph ] (fun s ->
-        let sc = editor_scope s in
-        (* a workspace without a switch gets one around its tree *)
-        let sc, place, sw = match switch_place sc with
-          | Some (place, sw) -> sc, place, sw
-          | None ->
-              let tree = workspace_arg sc in
-              let ps, kid = match tree.node with
-                | S.Sym _ -> sc.ps, tree
-                | _ -> let n = fresh used "layout" in sc.ps @ [ sym n, tree ], sym n in
-              let name = fresh used "switch" and sw = call "ui/switch" [ kid ] in
-              set_workspace sc (ps @ [ sym name, sw ]) (sym name), Some name, sw in
-        let args = List.tl (S.children sw) in
-        let n = List.length (positional args) in
-        if n >= 10 then fail "Ten layouts is the limit of the digit keys.";
-        let copy = solid sc.ps (active_layout args) in
-        let name = fresh used "layout" in
-        let sw = arg_set (arg_set sw (Pos n) (Some (sym name))) (Kw "active") (Some (num n)) in
-        reorder (set_switch sc (sc.ps @ [ sym name, copy ]) place sw)))
-  | Merge_layouts { graph } -> one (fun () ->
-      (* an older file: the other [:context editor] graphs become layouts of a switch in [graph]; each
-         brings its bindings, renamed [graph_name] so they cannot clash, and then goes *)
-      let editor_graph (i : S.t) = match i.node with
-        | S.List ({ S.node = S.Sym "graph"; _ } :: { S.node = S.Sym _; _ } :: rest) ->
-            let rec has = function
-              | { S.node = S.Kw "context"; _ } :: { S.node = S.Sym "editor"; _ } :: _ -> true
-              | _ :: rest -> has rest
-              | [] -> false in
-            has rest
-        | _ -> false in
-      let others = List.filter_map (fun i -> match root_name i with
-        | Some n when n <> graph && editor_graph i -> Some (n, i) | _ -> None) (snd (workspace_parts src)) in
-      if others = [] then fail "There is one editor graph and nothing to merge.";
-      let used = root_used src graph in
-      let merged = edit_scope src [ graph ] (fun s ->
-        let sc = editor_scope s in
-        let sc, place, sw = match switch_place sc with
-          | Some (place, sw) -> sc, place, sw
-          | None ->
-              let tree = workspace_arg sc in
-              let ps, kid = match tree.node with
-                | S.Sym _ -> sc.ps, tree
-                | _ -> let n = fresh used "layout" in sc.ps @ [ sym n, tree ], sym n in
-              let name = fresh used "switch" and sw = call "ui/switch" [ kid ] in
-              set_workspace sc (ps @ [ sym name, sw ]) (sym name), Some name, sw in
-        let ps, sw = List.fold_left (fun (ps, sw) (name, item) ->
-          let theirs = editor_scope (last_child item) in
-          let names = List.map (fun (p, _) -> pat_key p, fresh used (name ^ "_" ^ pat_key p)) theirs.ps in
-          let rename e = List.fold_left (fun e (old, nw) -> rename_ref old nw e) e names in
-          let own = List.map (fun (p, e) -> sym (List.assoc (pat_key p) names), rename e) theirs.ps in
-          let tree = rename (workspace_arg theirs) in
-          let ps, kid = match tree.node with
-            | S.Sym _ -> ps @ own, tree
-            | _ -> let n = fresh used name in ps @ own @ [ sym n, tree ], sym n in
-          if List.length (positional (List.tl (S.children sw))) >= 10 then
-            fail "Ten layouts is the limit of the digit keys.";
-          ps, arg_set sw (Pos (List.length (positional (List.tl (S.children sw))))) (Some kid)) (sc.ps, sw) others in
-        reorder (set_switch sc ps place sw)) in
-      map_items merged (List.filter (fun i -> match root_name i with
-        | Some n -> not (List.mem_assoc n others) | None -> true)))
-  | Layout_remove { graph } -> one (fun () ->
-      edit_scope src [ graph ] (fun s ->
-        let sc = editor_scope s in
-        match switch_place sc with
-        | None -> fail "This workspace has one layout and no switch."
-        | Some (place, sw) ->
-            let args = List.tl (S.children sw) in
-            let n = List.length (positional args) and a = active_of args in
-            if n < 2 then fail "A switch keeps its last layout.";
-            let gone = active_layout args in
-            let sw = arg_set (arg_set sw (Pos a) None) (Kw "active") (Some (num (min a (n - 2)))) in
-            prune (set_switch sc sc.ps place sw) (reach sc.ps gone)))
-  | Layout_window { graph; panel } -> one (fun () ->
-      edit_layout src graph (fun _ layout ->
-        call "ui/split-at" [ mk (S.Str "horizontal"); mk (S.Num "0.5"); layout; call "ui/floating" [ panel ] ]))
-  | Layout_float { graph; at } -> one (fun () ->
-      edit_layout src graph (fun ps layout ->
-        let tree = solid ps layout in
-        let up = match List.rev at with _ :: up -> List.rev up | [] -> [] in
-        if up <> [] && head_sym (node_at up tree) = Some "ui/floating" then
-          (* a window docks beside the rest *)
-          match take up tree with
-          | Some rest, window ->
-              call "ui/split-at" [ mk (S.Str "horizontal"); mk (S.Num "0.7"); rest; List.hd (layout_kids window) ]
-          | None, window -> List.hd (layout_kids window)
-        else match take at tree with
-          | Some rest, panel when has_docked rest ->
-              call "ui/split-at" [ mk (S.Str "horizontal"); mk (S.Num "0.5"); rest; call "ui/floating" [ panel ] ]
-          | _ -> fail "A layout keeps one docked panel."))
-
 (* ---- the public functions ---- *)
 
 let label = function
@@ -746,16 +575,11 @@ let label = function
   | Toggle_bypass _ -> "Bypass" | Set_note _ -> "Note" | Add_item _ -> "Add item"
   | Move_item _ -> "Move item" | Add_field _ -> "Add field" | Add_node _ -> "Add node"
   | Delete_nodes _ -> "Delete"
-  | Set_layout_size _ -> "Resize panel" | Split_panel _ -> "Split panel"
-  | Close_panel _ -> "Close panel" | Set_panel_kind _ -> "Retype panel"
-  | Dock_panel _ -> "Dock panel"
   | Set_graph _ -> "Edit graph"
   | Duplicate _ -> "Duplicate"
   | Remove_graph _ -> "Remove graph"
   | Rename_graph _ -> "Rename graph"
   | Group_merge _ -> "Group"
-  | Set_layout _ -> "Layout" | Merge_layouts _ -> "Merge layouts" | Layout_new _ -> "New layout" | Layout_remove _ -> "Remove layout"
-  | Layout_window _ -> "New window" | Layout_float _ -> "Float panel"
 
 let key_text = function
   | Whole -> "" | Pos i -> string_of_int i | Kw k | Field k -> k | Bv (i, j) -> Printf.sprintf "%d.%d" i j
@@ -766,7 +590,6 @@ let gesture = function
       Some (Printf.sprintf "scrub:%s:%s:%s" (String.concat "/" node) (key_text key)
         (String.concat "." (List.map string_of_int sub)))
   | Set_note { node; _ } -> Some ("note:" ^ String.concat "/" node)
-  | Set_layout _ -> Some "layout"
   | Set_input_default { form; input; _ } -> Some (Printf.sprintf "scrub:input:%s:%s" form input)
   | _ -> None
 
@@ -861,11 +684,13 @@ let apply_checked ?ops ?library ?checker catalog src op =
                  | Error d -> first (if err = None then Some d else err) rest)) in
       first None candidates
 
-let apply catalog src op = Result.map fst (apply_checked catalog src op)
+(* one rewrite of the source, refused when it raises and checked when it does not *)
+let apply_rewrite ?ops ?library ?checker catalog (attempt : unit -> S.t list) =
+  match attempt () with
+  | exception e -> Error (refusal e)
+  | forms -> check ?ops ?library ?checker catalog forms
 
-let has_prefix ~prefix p =
-  let n = List.length prefix in
-  List.length p >= n && List.take n p = prefix
+let apply catalog src op = Result.map fst (apply_checked catalog src op)
 
 (* the leaf of [p] at the depth of [node]'s, when [p] is [node], a node nested in it, or below either *)
 let under node p =
@@ -909,7 +734,6 @@ let remap op p = match op with
       let k = List.length node - 2 in
       Some (List.filteri (fun i _ -> i <> k) p)
   | Delete_nodes { nodes } when List.exists (fun n -> has_prefix ~prefix:n p) nodes -> None
-  | Close_panel { node } when has_prefix ~prefix:node p -> None
   | _ -> Some p
 
 let arg_of = arg_get

@@ -82,6 +82,9 @@ val edit : Flow.Check.catalog -> t -> Flow_graph.Flow_edit.op -> (t, Diagnostic.
     keys follow {!Flow_graph.Flow_edit.remap} and are pruned as in {!of_text}, and on an error
     nothing changes. *)
 
+val edit_layout : Flow.Check.catalog -> t -> Layout_edit.op -> (t, Diagnostic.t) result
+(** One layout gesture, atomically, as {!edit}: layout keys follow {!Layout_edit.remap}. *)
+
 val context_value : ?force:bool -> t -> Flow.Eval.plan -> Flow.Context.t -> (Flow.Eval.value option, Diagnostic.t) result
 (** The value of a context's default instance in an evaluated plan (forced at [t = 0] unless
     [~force:false]); none when the workspace has no graph of that context. *)

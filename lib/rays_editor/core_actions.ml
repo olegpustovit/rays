@@ -49,21 +49,23 @@ let intent_label = function
   | Panel_state (_, state) -> Some (if state.Editor_core.Panels.collapsed then "Collapse panel" else "Arrange panel")
   | Select_layout _ -> Some "Switch layout"
   | Syntax_edit op -> Some (Flow_graph.Flow_edit.label op)
+  | Layout_edit op -> Some (Layout_edit.label op)
   | Syntax_batch (label, _) -> Some label
   | Syntax_inline { make; _ } -> Some (Flow_graph.Flow_edit.label (make []))
+  | Layout_inline { make; _ } -> Some (Layout_edit.label (make []))
   | Set_parameter { path; _ } -> Some ("Set " ^ path)
   | Object_arg _ -> Some "Edit expression"
   | Rename _ -> Some "Rename node"
   | Pin_row { pin; _ } -> Some (if pin = Some false then "Unpin row from card" else "Pin row to card")
   | Follow_source _ | Notice _ | Declined _ -> None
 
-let in_world value = match value.level with
+let in_world value = match pane_level value with
   | Document.Inside id -> kind value id = Some "world"
   | Scene -> false
 
 (* World keys: edit the selected layer, or the World node in the scene. *)
 let world_keys value (doc : Document.t) selection actions =
-  let world_id = match value.level with Inside id -> Some id
+  let world_id = match pane_level value with Inside id -> Some id
     | Scene -> None in
   let module Sync = Editor_document.Scene_sync in
   (* what a key asks, as an edit of the text at a level *)

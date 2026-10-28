@@ -9,6 +9,7 @@ let fail message = failwith ("test_workspace_edit: " ^ message)
 let check condition message = if not condition then fail message
 let read path = In_channel.with_open_bin path In_channel.input_all
 let cases = "../specification/workspace/cases"
+module L = Editor_document.Layout_edit
 let catalog = Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
 
 let parse text = match S.parse text with
@@ -364,11 +365,11 @@ let part11 () = (* atomic: a refused edit changes nothing; labels *)
   (* an [:active] outside the switch's layouts is refused by name, not by the last resort *)
   List.iter (fun active ->
     let text = Printf.sprintf "(workspace w\n  (graph editor :context editor\n    (let* [a (ui/graph) b (ui/lisp)] (ui/workspace (ui/switch a b :active %s)))))" active in
-    List.iter (fun op -> match E.apply catalog (parse text) op with
-      | Error d -> check (has d.message "not one of the switch's layouts") (E.label op ^ " :active " ^ active ^ ": " ^ d.message)
-      | Ok _ -> fail (E.label op ^ " accepted :active " ^ active))
-      [ E.Layout_remove { graph = "editor" }; E.Layout_new { graph = "editor" };
-        E.Layout_window { graph = "editor"; panel = List.hd (Result.get_ok (Flow.Syntax.parse "(ui/inspector)")) } ]) [ "5"; "-1" ];
+    List.iter (fun op -> match Result.map fst (L.apply_checked catalog (parse text) op) with
+      | Error d -> check (has d.message "not one of the switch's layouts") (L.label op ^ " :active " ^ active ^ ": " ^ d.message)
+      | Ok _ -> fail (L.label op ^ " accepted :active " ^ active))
+      [ L.Layout_remove { graph = "editor" }; L.Layout_new { graph = "editor" };
+        L.Layout_window { graph = "editor"; panel = List.hd (Result.get_ok (Flow.Syntax.parse "(ui/inspector)")) } ]) [ "5"; "-1" ];
   List.iter (fun (op, label) -> check (E.label op = label) ("label " ^ label))
     [ E.Wrap { nodes = []; loop = For }, "Repeat"; E.Wrap { nodes = []; loop = Fold }, "Iterate";
       E.Unfold { node = []; key = Whole; sub = [] }, "Unfold";

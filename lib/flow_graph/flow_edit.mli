@@ -89,21 +89,6 @@ type op =
   | Add_node of { scope : path; name : string; expr : Flow.Syntax.t }
       (** [scope] is a scope path, [["g"]] for the graph body *)
   | Delete_nodes of { nodes : path list }
-  | Set_layout_size of { node : path; size : [ `Ratio of float | `First of int | `Second of int ] }
-      (** the binding [node] of an editor graph is a [ui/split] or [ui/split-at]; it becomes
-          [ui/split-at] with this ratio (clamped to 0.1-0.9, four decimals), or a [ui/split] with
-          [:first_size] or [:second_size] in whole points (1 or more) *)
-  | Split_panel of { node : path; axis : [ `H | `V ]; ratio : float; panel : Flow.Syntax.t }
-      (** the panel [node] becomes the first half, [ratio] of the extent (clamped to 0.1-0.9), of a new
-          [ui/split-at]; the second is [panel] *)
-  | Close_panel of { node : path }
-      (** the split holding panel [node] becomes the other half; a panel outside a split
-          does not close *)
-  | Dock_panel of { node : path; target : path; side : [ `Left | `Right | `Top | `Bottom ] }
-      (** Move a panel beside another in the same scope; collapse the split/tile it leaves. *)
-  | Set_panel_kind of { node : path; panel : Flow.Syntax.t }
-      (** the binding [node] becomes [panel].  The panel forms are the editor's
-          ([Editor_document.Panel_kinds]): this library knows no panel kind. *)
   | Set_graph of { name : string; form : Flow.Syntax.t }
       (** the whole [(graph name ...)] form, replacing the graph or appended; the scene and World
           graphs written from the editor's own objects *)
@@ -118,27 +103,8 @@ type op =
   | Group_merge of { nodes : path list; name : string }
       (** scene objects of one scope leave their [scene/merge] for a new merge bound to [name],
           which takes the place of the first of them *)
-  | Set_layout of { graph : string; index : int }
-      (** the editor graph [graph] has a [(ui/switch ...)] at the root of its workspace: its
-          [:active] becomes [index].  One history entry: repeats merge ({!gesture}). *)
-  | Layout_new of { graph : string }
-      (** a copy of the active layout (its splits, tiles and floats copied, its panels shared) joins
-          the switch and becomes active; a workspace without a switch gets one around its tree first.
-          Ten layouts at most. *)
-  | Merge_layouts of { graph : string }
-      (** an older file with several [:context editor] graphs: the others join [graph]'s switch (made
-          around its tree when it has none) as layouts, their bindings renamed [other_name], and are
-          removed. Ten layouts at most. *)
-  | Layout_remove of { graph : string }
-      (** the active layout leaves the switch (and the bindings only it read); the last stays *)
-  | Layout_window of { graph : string; panel : Flow.Syntax.t }
-      (** [panel] in a new [(ui/floating ...)] window of the active layout *)
-  | Layout_float of { graph : string; at : int list }
-      (** the docked panel at tree path [at] of the active layout becomes a floating window, and a
-          floating one docks beside the rest *)
-(** ponytail: one variant and one [apply]; no command objects.  The four panel
-    operations address a binding of an editor graph by its path, as every other
-    op does; panels made by a loop have no binding, so they are edited on the loop. *)
+(** ponytail: one variant and one [apply]; no command objects.  The editor graph's layout
+    edits are [Editor_document.Layout_edit]. *)
 
 val positional : Flow.Syntax.t list -> Flow.Syntax.t list
 (** The positional arguments of a call, in written order: [:keyword value] pairs may stand anywhere
