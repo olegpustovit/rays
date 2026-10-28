@@ -54,7 +54,7 @@ let point_selection ?cancel ~grain geometry selection =
       let index = Some (Topology_index.create ?cancel topology) in
       Some (Group.init ~grain ~owner:Group.Point ~name:"__ray_selection"
         (Geometry.point_count geometry) (fun point ->
-          if point land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel point 4095;
           Deform.point_selected selection index point))
 
 let direction_planes ?cancel ~grain source = function
@@ -265,7 +265,7 @@ let run ?cancel { grain; selection; collision_primitives; method_; direction;
       let first = range * grain and last = min point_count ((range + 1) * grain) in
       let normal = Array.make 3 0. in
       for point = first to last - 1 do
-        if point land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 4095;
         let triangle = triangles.(point) in
         if triangle >= 0 then begin
           let va = Surface_index.View.triangle_vertex surface triangle 0
@@ -439,7 +439,7 @@ let run ?cancel { grain; selection; collision_primitives; method_; direction;
       let average_drivers = samples > 1 && combine = Ray_average in
       let offsets = Array.make (point_count + 1) 0 in
       for point = 0 to point_count - 1 do
-        if point land 16_383 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 16_383;
         let hits = if average_drivers then hit_counts.(point)
           else if triangles.(point) >= 0 then 1 else 0 in
         if hits > Sys.max_array_length / 3

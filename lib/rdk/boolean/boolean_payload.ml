@@ -510,7 +510,7 @@ let assert_no_promotion_collisions point_conflict point_attributes vertex_attrib
 let copy_edge_group ?cancel ~grain view topology index pair =
   let output_index = Topology_index.View.view index in
   let member edge =
-    if edge land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel edge 4095;
     let first = output_index.edge_offsets.(edge)
     and last = output_index.edge_offsets.(edge + 1)
     and incident = ref 0 and found = ref false in
@@ -730,7 +730,7 @@ let copy_primitives ?cancel ~grain ancestry =
       let groups = Array.map (fun pair ->
         let group = Group.init ~grain ~owner:Group.Primitive ~name:pair.group_name primitive_count
           (fun primitive ->
-            if primitive land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel primitive 4095;
             let source, index = selected_primitive ancestry pair.left_group pair.right_group primitive in
             match source with None -> false | Some group -> Group.mem index group) in
         let ordered =

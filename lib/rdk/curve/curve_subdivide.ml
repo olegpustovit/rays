@@ -12,7 +12,7 @@ let run ?(grain = 16_384) ?cancel count operation =
   if grain <= 0 then invalid_arg "Rdk_curve.Curve_subdivide.subdivide: grain must be positive";
   if count > 0 then
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1) (fun index ->
-      if index land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel index 4095;
       operation index)
 
 type plan = {
@@ -42,7 +42,7 @@ let validate ?cancel geometry =
   if topology.point_count = 0 || Bytes.length topology.primitive_kinds = 0 then
     fail "polygon-curve input must contain at least one primitive";
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-    if primitive land 1023 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 1023;
     let kind = Char.code (Bytes.get topology.primitive_kinds primitive) in
     if kind = 0 then fail "curve refinement received a polygon primitive"
     else if kind <> 1 && kind <> 2 then
@@ -368,7 +368,7 @@ let remap_group ?cancel ?grain plan group =
     | Group.Vertex -> Array.length plan.vertex_left
     | Group.Primitive -> Array.length plan.primitive_source in
   let target = Group.init ?grain ~owner ~name:(Group.name group) count (fun output ->
-    if output land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel output 4095;
     match owner with
     | Group.Point ->
         if Bytes.get plan.point_old output <> '\000' then
@@ -407,7 +407,7 @@ let remap_edge_group ?cancel plan group =
   let builder = Edge_group.Builder.create ~topology:plan.output_topology
       ~index:output_index ~name:(Edge_group.name group) in
   for vertex = 0 to Array.length plan.source_edge_of_output_vertex - 1 do
-    if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel vertex 16_383;
     let source_edge = plan.source_edge_of_output_vertex.(vertex) in
     if source_edge >= 0 && Edge_group.mem source_edge group then begin
       let output_edge = output_view.edge_of_vertex.(vertex) in

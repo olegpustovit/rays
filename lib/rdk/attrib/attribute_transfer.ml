@@ -246,7 +246,7 @@ let primitive_barycenters ?cancel ~grain geometry =
   and z = Array.make count 0. in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(count - 1) (fun primitive ->
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         let first = topology.primitive_offsets.(primitive)
         and last = topology.primitive_offsets.(primitive + 1) in
         let sx = ref 0. and sy = ref 0. and sz = ref 0. in
@@ -327,7 +327,7 @@ let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
     | Ok index ->
         let target_view = Packed.Float3.View.view target_positions in
         for element = 0 to target_count - 1 do
-          if element land 16_383 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel element 16_383;
           if (match target_elements with None -> true
               | Some group -> Group.mem element group)
              && not (Float.is_finite target_view.x.(element)
@@ -350,7 +350,7 @@ let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
             let values = Array.make target_count 0. in
             if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                 ~finish:(target_count - 1) (fun target_element ->
-                  if target_element land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel target_element 4095;
                   if neighbor_counts.(target_element) > 0 then
                     values.(target_element) <- transfer_influence ~falloff
                       ~threshold_squared ~blend_width
@@ -362,7 +362,7 @@ let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
               let weights = distances in
               if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                   ~finish:(target_count - 1) (fun target_element ->
-                    if target_element land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel target_element 4095;
                     let count = neighbor_counts.(target_element) in
                     if count > 0 then begin
                       let offset = target_element * neighbor_capacity
@@ -395,7 +395,7 @@ let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
               let weights = distances in
               if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                   ~finish:(target_count - 1) (fun target_element ->
-                    if target_element land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel target_element 4095;
                     let count = neighbor_counts.(target_element) in
                     if count > 0 then begin
                       let offset = target_element * neighbor_capacity in
@@ -431,7 +431,7 @@ let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
         let transfer_plane source_values output =
           if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
               ~finish:(target_count - 1) (fun target_element ->
-                if target_element land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel target_element 4095;
                 let count = neighbor_counts.(target_element) in
                 if count > 0 then begin
                   let offset = target_element * neighbor_capacity in
@@ -454,7 +454,7 @@ let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
         let transfer_discrete source_values output =
           if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
               ~finish:(target_count - 1) (fun target_element ->
-                if target_element land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel target_element 4095;
                 if neighbor_counts.(target_element) > 0
                     && (match influence with None -> true
                         | Some values -> values.(target_element) >= 0.5) then
@@ -732,7 +732,7 @@ let transfer_surface ?cancel ?(grain = 16_384) ?max_distance
       let transfer_numeric owner source_values output =
         if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
             ~finish:(target_count - 1) (fun point ->
-              if point land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel point 4095;
               let primitive = primitives.(point) in
               if primitive >= 0 then
                 let sampled = if owner = Attribute.Primitive then source_values.(primitive)
@@ -750,7 +750,7 @@ let transfer_surface ?cancel ?(grain = 16_384) ?max_distance
       let transfer_discrete owner source_values output =
         if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
             ~finish:(target_count - 1) (fun point ->
-              if point land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel point 4095;
               let primitive = primitives.(point) in
               if primitive >= 0
                   && (match influence with None -> true

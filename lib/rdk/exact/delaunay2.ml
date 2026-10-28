@@ -342,7 +342,7 @@ let build ?cancel ?(seed = 0L) ~x ~y () =
         end;
         !generation in
       for insertion = 0 to point_count - 1 do
-        if insertion land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel insertion 255;
         let point = insertion_order.(insertion) in
         ensure_marks ();
         let current = ref !walk_start and steps = ref 0 and located = ref false in

@@ -124,7 +124,7 @@ let simplify ?cancel ~tolerance ~affected ~closed positions topology corners =
       let value = ((ux *. vx) +. (uy *. vy) +. (uz *. vz)) /. (ul *. vl) in
       value >= cosine -. (64. *. Float.epsilon) in
     while !queued_count > 0 && !active > minimum do
-      if !head land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !head 4095;
       let index = queue.(!head) in
       head := (!head + 1) mod count; decr queued_count;
       Bytes.set queued index '\000';
@@ -236,7 +236,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(operation = Dissolve_selected)
     and affected_points = Bytes.make topology.point_count '\000'
     and selected_count = ref 0 in
     for edge = 0 to edge_count - 1 do
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       let requested = match edges, operation with
         | None, Dissolve_selected -> false
         | None, Dissolve_non_selected -> true
@@ -378,7 +378,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(operation = Dissolve_selected)
             result := trace vertex :: !result) vertices;
         List.rev !result in
       for primitive = 0 to primitive_count - 1 do
-        if primitive land 1023 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 1023;
         let root = parent.(primitive) in
         if Bytes.get component_selected root = '\000' then begin
           let first = topology.primitive_offsets.(primitive)

@@ -18,7 +18,7 @@ let polygon_area_vector ?cancel ~grain ~need_inverse ~first_failure ?primitives
     let first_primitive = range * grain
     and last_primitive = min count ((range + 1) * grain) in
     for primitive = first_primitive to last_primitive - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       if (match primitives with None -> true | Some group -> Group.mem primitive group)
          && Bytes.get source.primitive_kinds primitive = '\000' then begin
         let first = source.primitive_offsets.(primitive)
@@ -80,7 +80,7 @@ let compute ?cancel ?(grain = 16_384) ?primitives ~operation geometry =
         if primitive_count > 0 then
           Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(primitive_count - 1)
             (fun primitive ->
-              if primitive land 16_383 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel primitive 16_383;
               if selected primitives primitive then begin
                 if Topology.primitive_kind topology primitive <> Topology.Polygon then
                   Atomic.set invalid true
@@ -92,7 +92,7 @@ let compute ?cancel ?(grain = 16_384) ?primitives ~operation geometry =
                   and ay = positions.y.(first_point)
                   and az = positions.z.(first_point) in
                   for vertex = first + 1 to last - 2 do
-                    if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel vertex 16_383;
                     let b = topology_view.vertex_points.(vertex)
                     and c = topology_view.vertex_points.(vertex + 1) in
                     let ux = positions.x.(b) -. ax

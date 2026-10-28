@@ -481,7 +481,7 @@ let array_offsets ?cancel ~operation ~source_offsets ~existing_offsets choices =
   and source_count = Array.length source_offsets - 1 in
   let offsets = Array.make (count + 1) 0 in
   for destination = 0 to count - 1 do
-    if destination land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel destination 4095;
     let choice = choices.(destination) in
     let length = if choice >= 0 then begin
         if choice >= source_count then invalid_arg
@@ -507,7 +507,7 @@ let materialize_int_array ?cancel ~grain source existing choices =
   let count = Array.length choices and values = Array.make offsets.(Array.length choices) 0 in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
       (fun destination ->
-        if destination land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel destination 4095;
         let choice = choices.(destination) in
         if choice >= 0 then
           Array.blit source.values source.offsets.(choice) values
@@ -532,7 +532,7 @@ let materialize_float_array ?cancel ~grain source existing choices =
   and values = Array.make offsets.(Array.length choices) 0. in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
       (fun destination ->
-        if destination land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel destination 4095;
         let choice = choices.(destination) in
         if choice >= 0 then
           Array.blit source.values source.offsets.(choice) values
@@ -591,7 +591,7 @@ let interpolate_primitive_groups ?cancel ?(grain = 16_384) ?selection
     let byte_count = (target_count + 7) / 8 in
     if byte_count > 0 then Parallel.for_ ~chunk_size:(max 1 (grain / 8))
         ~start:0 ~finish:(byte_count - 1) (fun byte ->
-          if byte land 511 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel byte 511;
           let first_destination = byte lsl 3 in
           let last_destination = min target_count (first_destination + 8) in
           for destination = first_destination to last_destination - 1 do
@@ -716,11 +716,11 @@ let compute_primitive_weights ?cancel ?(grain = 16_384) ?selection ~unmatched
     let lengths = Array.make target_count 0 in
     if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(target_count - 1) (fun destination ->
-          if destination land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel destination 4095;
           lengths.(destination) <- row_length destination);
     let offsets = Array.make (target_count + 1) 0 in
     for destination = 0 to target_count - 1 do
-      if destination land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel destination 4095;
       if lengths.(destination) > max_int - offsets.(destination) then
         invalid_arg "Attribute Interpolate: computed weight cardinality overflow";
       offsets.(destination + 1) <- offsets.(destination) + lengths.(destination)
@@ -729,7 +729,7 @@ let compute_primitive_weights ?cancel ?(grain = 16_384) ?selection ~unmatched
     and weights = Array.make offsets.(target_count) 0. in
     if target_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(target_count - 1) (fun destination ->
-          if destination land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel destination 4095;
           let primitive = primitive_numbers.(destination)
           and output_first = offsets.(destination) in
           if preserve destination primitive then match existing with
@@ -835,7 +835,7 @@ let interpolate_primitive ?cancel ?(grain = 16_384) ?selection ?compute
                  || selected_count = 0 then Ok target
              else begin
                for rank = 0 to selected_count - 1 do
-                 if rank land 4095 = 0 then Cancel.check_opt cancel;
+                 Cancel.poll cancel rank 4095;
                  let element = selected_element rank in
                  if not (Float.is_finite uvw.x.(element)
                      && Float.is_finite uvw.y.(element)
@@ -863,7 +863,7 @@ let interpolate_primitive ?cancel ?(grain = 16_384) ?selection ?compute
                  [|point_numeric; vertex_numeric; primitive_numeric; detail_numeric|];
                Parallel.for_ ~chunk_size:grain ~start:0
                  ~finish:(selected_count - 1) (fun rank ->
-                   if rank land 4095 = 0 then Cancel.check_opt cancel;
+                   Cancel.poll cancel rank 4095;
                    let destination = selected_element rank
                    and primitive = primitive_numbers.(selected_element rank) in
                    if primitive < 0 || primitive >= primitive_count then begin
@@ -975,7 +975,7 @@ let interpolate_weighted_groups ?cancel ?(grain = 16_384) ?selection
     let byte_count = (target_count + 7) / 8 in
     if byte_count > 0 then Parallel.for_ ~chunk_size:(max 1 (grain / 8))
         ~start:0 ~finish:(byte_count - 1) (fun byte ->
-          if byte land 511 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel byte 511;
           let first_destination = byte lsl 3 in
           let last_destination = min target_count (first_destination + 8) in
           for destination = first_destination to last_destination - 1 do
@@ -1090,7 +1090,7 @@ let interpolate_weighted ?cancel ?(grain = 16_384) ?selection
                let source_count = weighted_source_count source weighted_owner
                and invalid = ref None in
                for rank = 0 to selected_count - 1 do
-                 if rank land 4095 = 0 then Cancel.check_opt cancel;
+                 Cancel.poll cancel rank 4095;
                  let destination = selected_element rank in
                  let first = numbers.offsets.(destination)
                  and last = numbers.offsets.(destination + 1) in
@@ -1148,7 +1148,7 @@ let interpolate_weighted ?cancel ?(grain = 16_384) ?selection
                      | _ -> assert false in
                    Parallel.for_ ~chunk_size:grain ~start:0
                      ~finish:(selected_count - 1) (fun rank ->
-                       if rank land 4095 = 0 then Cancel.check_opt cancel;
+                       Cancel.poll cancel rank 4095;
                        let destination = selected_element rank
                        and first = numbers.offsets.(selected_element rank)
                        and last = numbers.offsets.(selected_element rank + 1) in

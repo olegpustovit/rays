@@ -103,7 +103,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
       loop (Atomic.get target) in
     Parallel.for_ ~chunk_size:(max 1 (grain / 3)) ~start:0
       ~finish:(point_count - 1) (fun point ->
-        if point land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 4095;
         if not (Float.is_finite positions.x.(point) && Float.is_finite positions.y.(point)
             && Float.is_finite positions.z.(point)) then record_min first_non_finite point);
     if Atomic.get first_non_finite <> max_int then raise (Error.Fail
@@ -124,7 +124,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
     Bytes.fill face_valid 0 primitive_count '\000';
     Parallel.for_ ~chunk_size:(max 1 (grain / 3)) ~start:0
       ~finish:(primitive_count - 1) (fun primitive ->
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         let first = topology_view.primitive_offsets.(primitive) in
         let p0 = topology_view.vertex_points.(first)
         and p1 = topology_view.vertex_points.(first + 1)
@@ -163,7 +163,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
       [q00;q01;q02;q03;q11;q12;q13;q22;q23;q33];
     Parallel.for_ ~chunk_size:(max 1 (grain / 6)) ~start:0
       ~finish:(point_count - 1) (fun point ->
-        if point land 2047 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 2047;
         for slot = index.point_offsets.(point)
             to index.point_offsets.(point + 1) - 1 do
           let vertex = index.point_vertices.(slot) in
@@ -228,7 +228,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
           !ok in
     Parallel.for_ ~chunk_size:(max 1 grain) ~start:0 ~finish:(edge_count - 1)
       (fun edge ->
-        if edge land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel edge 4095;
         let a = index.edge_a.(edge) and b = index.edge_b.(edge) in
         let count = index.edge_offsets.(edge + 1) - index.edge_offsets.(edge) in
         incidence.(edge) <- count;
@@ -357,7 +357,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
       done in
     let ordinal = ref 0 in
     while !ordinal < edge_count && !removed < primitive_budget do
-      if !ordinal land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !ordinal 4095;
       let edge = order.(!ordinal) in
       let a = index.edge_a.(edge) and b = index.edge_b.(edge)
       and reduction = incidence.(edge) in

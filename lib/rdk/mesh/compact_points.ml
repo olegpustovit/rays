@@ -7,11 +7,11 @@ let compact_points ?cancel ?(grain = 16_384) geometry =
   let source_topology = Topology.View.view source_topology_value in
   let used = Array.make point_count false in
   Array.iteri (fun vertex point ->
-    if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel vertex 16_383;
     used.(point) <- true) source_topology.vertex_points;
   let old_to_new = Array.make point_count (-1) and retained = ref 0 in
   for point = 0 to point_count - 1 do
-    if point land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel point 16_383;
     if used.(point) then begin
       old_to_new.(point) <- !retained;
       incr retained
@@ -32,7 +32,7 @@ let compact_points ?cancel ?(grain = 16_384) geometry =
     if Array.length vertex_points > 0 then
       Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(Array.length vertex_points - 1) (fun vertex ->
-          if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel vertex 16_383;
           vertex_points.(vertex) <- old_to_new.(source_topology.vertex_points.(vertex)));
     let topology = Topology.View.create_validated_owned ~point_count:!retained
         ~vertex_points ~primitive_offsets:(Array.copy source_topology.primitive_offsets)

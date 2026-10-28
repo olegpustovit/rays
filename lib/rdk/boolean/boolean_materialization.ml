@@ -109,7 +109,7 @@ let safe_independent_edges ?cancel ~grain ?(keep_greatest = false)
     and used_primitives = Bytes.make ((primitive_count + 7) / 8) '\000'
     and neighbor_stamps = Array.make point_count (-1) in
     Array.iteri (fun stamp edge ->
-      if stamp land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel stamp 4095;
       let incidence_first = index.edge_offsets.(edge)
       and incidence_last = index.edge_offsets.(edge + 1) in
       if incidence_last - incidence_first = 2 then begin
@@ -226,7 +226,7 @@ let surface_seam_edges ?cancel ~grain ancestry seam =
     let builder = Edge_group.Builder.create ~topology ~index
         ~name:"__rdk_boolean_exact_seam" in
     for complex_edge = 0 to Boolean_complex.edge_count complex - 1 do
-      if complex_edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel complex_edge 4095;
       if Boolean_seam.View.is_seam_edge seam complex_edge then begin
         let a = Boolean_extract.View.complex_output_point ancestry
             (Boolean_complex.edge_first complex complex_edge)
@@ -355,7 +355,7 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
         and last = min candidate_count ((range + 1) * grain) in
         let candidate = ref first in
         while failures.(range) < 0 && !candidate < last do
-          if !candidate land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel !candidate 4095;
           let left = first_candidates.(!candidate)
           and right = second_candidates.(!candidate) in
           let left_a = Surface_index.View.triangle_point surface left 0
@@ -467,7 +467,7 @@ let verify_extracted_orientations ?cancel ~grain ancestry geometry =
       let first = range * grain and last = min primitives ((range + 1) * grain) in
       let primitive = ref first in
       while failures.(range) < 0 && !primitive < last do
-        if !primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel !primitive 4095;
         let offset = !primitive * 3 in
         let a = topology.vertex_points.(offset)
         and b = topology.vertex_points.(offset + 1)
@@ -672,7 +672,7 @@ let rounded_sliver_edges ?cancel ~grain geometry =
     and bits = Bytes.make ((Topology_index.edge_count index_value + 7) / 8) '\000'
     and degenerate_count = ref 0 in
     for primitive = 0 to Geometry.primitive_count geometry - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       if rounded_triangle_degenerate positions topology primitive then begin
         incr degenerate_count;
         let first = topology.primitive_offsets.(primitive) in
@@ -754,7 +754,7 @@ let rounded_self_contact_edges ?cancel ~grain geometry =
               done
             end in
           for contact = 0 to contact_count - 1 do
-            if contact land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel contact 4095;
             mark (Boolean_constraints.constraint_first_triangle constraints contact);
             mark (Boolean_constraints.constraint_second_triangle constraints contact)
           done;
@@ -792,7 +792,7 @@ let paired_rounded_slivers ?cancel ~grain geometry =
     let keyed = Array.make !degenerate_count ((0, 0, 0), 0)
     and cursor = ref 0 in
     for primitive = 0 to Geometry.primitive_count geometry - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       if rounded_triangle_degenerate positions topology primitive then begin
         keyed.(!cursor) <- sorted_triangle_points topology primitive, primitive;
         incr cursor
@@ -833,7 +833,7 @@ let closed_rounded_slivers ?cancel ~grain geometry =
     let selected = Bytes.make ((primitive_count + 7) / 8) '\000'
     and selected_count = ref 0 in
     for primitive = 0 to primitive_count - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       if rounded_triangle_degenerate positions topology primitive then begin
         Support.Bits.set selected primitive;
         incr selected_count
@@ -1158,7 +1158,7 @@ let tiny_cleanup_edges ?cancel ~grain ~threshold ancestry seam cleanup =
     let geometry = cleanup.cleanup_geometry
     and seam_facets = Bytes.make (Boolean_complex.facet_count complex) '\000' in
     for complex_edge = 0 to Boolean_complex.edge_count complex - 1 do
-      if complex_edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel complex_edge 4095;
       if Boolean_seam.View.is_seam_edge seam complex_edge then begin
         let first, last = Boolean_complex.edge_incident_range complex complex_edge in
         for incident = first to last - 1 do
@@ -1173,7 +1173,7 @@ let tiny_cleanup_edges ?cancel ~grain ~threshold ancestry seam cleanup =
     and positions = Packed.Float3.View.view (Geometry.positions geometry) in
     Ok (Edge_group.init ~grain ~topology ~index:index_value
       ~name:"__rdk_boolean_tiny_seam_continuation" (fun edge ->
-        if edge land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel edge 4095;
         let first = index.edge_offsets.(edge)
         and last = index.edge_offsets.(edge + 1)
         and adjacent = ref false in
@@ -1329,7 +1329,7 @@ let split_seam_points ?cancel ~grain cleanup =
         end
       end in
     for edge = 0 to Array.length index.edge_a - 1 do
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       if not (Edge_group.mem edge cleanup.cleanup_seam_edges) then begin
         let first = index.edge_offsets.(edge)
         and last = index.edge_offsets.(edge + 1) in
@@ -1355,7 +1355,7 @@ let split_seam_points ?cancel ~grain cleanup =
     let component_stamps = Array.make !component_count (-1)
     and point_offsets = Array.make (point_count + 1) 0 in
     for point = 0 to point_count - 1 do
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
       let first = index.point_offsets.(point)
       and last = index.point_offsets.(point + 1)
       and count = ref 0 in
@@ -1406,7 +1406,7 @@ let split_seam_points ?cancel ~grain cleanup =
         ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
     let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let select source = Parallel.init_array ~grain output_points (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel output 4095;
         source.(point_map.(output))) in
     let positions = Packed.Float3.View.of_owned_exn
         ~x:(select source_positions.x) ~y:(select source_positions.y)
@@ -1492,7 +1492,7 @@ let detriangulate ?cancel ~grain ~assume_flat ~mode ancestry cleanup =
         a b c d = Predicates.Zero in
     let selected = Edge_group.init ~grain ~topology:topology_value
         ~index:index_value ~name:"__rdk_boolean_detriangulate" (fun edge ->
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       let first = index.edge_offsets.(edge)
       and last = index.edge_offsets.(edge + 1) in
       if last - first <> 2 || Edge_group.mem edge cleanup.cleanup_seam_edges then false

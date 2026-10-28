@@ -26,7 +26,7 @@ let create ?cancel ~min_x:item_min_x ~min_y:item_min_y
   if items > Sys.max_array_length / 2 then
     invalid_arg "Bounds2_index: item cardinality exceeds array limits";
   for item = 0 to items - 1 do
-    if item land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel item 16_383;
     if Float.is_nan item_min_x.(item) || Float.is_nan item_min_y.(item)
         || Float.is_nan item_max_x.(item) || Float.is_nan item_max_y.(item)
         || item_min_x.(item) > item_max_x.(item)
@@ -104,7 +104,7 @@ let query ?cancel tree ~min_x ~min_y ~max_x ~max_y visit =
   let visited = ref 0 in
   let rec node index =
     incr visited;
-    if !visited land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel !visited 4095;
     if node_overlap tree index ~min_x ~min_y ~max_x ~max_y then
       if tree.left.(index) < 0 then begin
         let last = tree.first.(index) + tree.count.(index) in
@@ -134,7 +134,7 @@ let candidate_pairs ?cancel tree visit =
   let visited_nodes = ref 0 in
   let rec pairs left right =
     incr visited_nodes;
-    if !visited_nodes land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel !visited_nodes 4095;
     if not (node_pair_overlap tree left right) then ()
     else if left = right then
       if tree.left.(left) < 0 then begin

@@ -148,7 +148,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
               and last = min candidate_count ((range + 1) * chunk)
               and retained = ref 0 in
               for selected_index = first to last - 1 do
-                if selected_index land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel selected_index 4095;
                 let primitive = selected_primitives.(selected_index) in
                 let vertex = ref topology.primitive_offsets.(primitive)
                 and vertex_last = topology.primitive_offsets.(primitive + 1)
@@ -175,7 +175,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
               and last = min candidate_count ((range + 1) * chunk)
               and next = ref range_offsets.(range) in
               for selected_index = first to last - 1 do
-                if selected_index land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel selected_index 4095;
                 if Bytes.unsafe_get keep selected_index <> '\000' then begin
                   output.(!next) <- selected_primitives.(selected_index);
                   incr next
@@ -189,7 +189,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
       let offsets = Array.make (selected_count + 1) 0 in
       for selected = 0 to selected_count - 1 do
         let primitive = selected_primitives.(selected) in
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         if Bytes.get topology.primitive_kinds primitive <> '\000' then
           fail (Printf.sprintf "primitive %d is a curve, not a polygon" primitive);
         let size = topology.primitive_offsets.(primitive + 1)
@@ -226,7 +226,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
         and last_selected = min selected_count ((range + 1) * primitive_chunk) in
         let scratch = Polygon_triangulation.create_scratch () in
         for selected = first_selected to last_selected - 1 do
-          if selected land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel selected 4095;
           if triangulation_errors.(range) = None then begin
             let primitive = selected_primitives.(selected)
             and offset = triangle_offsets.(selected) in
@@ -260,7 +260,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
               and last = min triangles ((range + 1) * grain)
               and retained = ref 0 in
               for triangle = first to last - 1 do
-                if triangle land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel triangle 4095;
                 let a = selected selected_vertex_bits vertex_a.(triangle)
                 and b = selected selected_vertex_bits vertex_b.(triangle)
                 and c = selected selected_vertex_bits vertex_c.(triangle) in
@@ -289,7 +289,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
               and last = min triangles ((range + 1) * grain)
               and output = ref range_offsets.(range) in
               for triangle = first to last - 1 do
-                if triangle land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel triangle 4095;
                 if Bytes.unsafe_get keep triangle <> '\000' then begin
                   output_primitives.(!output) <- primitives.(triangle);
                   output_a.(!output) <- vertex_a.(triangle);
@@ -315,7 +315,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
       ~finish:(triangle_ranges - 1) (fun range ->
     let first_slot = range * grain and last_slot = min triangles ((range + 1) * grain) in
     for slot = first_slot to last_slot - 1 do
-    if slot land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel slot 4095;
     if triangle_errors.(range) = None then begin
     let primitive = primitives.(slot) in
     let a = topology.vertex_points.(vertex_a.(slot))
@@ -603,7 +603,7 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
           let first = range * range_size
           and last = min left_count ((range + 1) * range_size) in
           for triangle = first to last - 1 do
-            if triangle land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel triangle 4095;
             ignore (scan node_stack left_bounds triangle None None 0 (Some output))
           done);
       let offsets = Array.make (range_count + 1) 0 in
@@ -630,7 +630,7 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
         let first = range * range_size
         and last = min left_count ((range + 1) * range_size) in
         for triangle = first to last - 1 do
-          if triangle land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel triangle 4095;
           counts.(triangle) <- scan node_stack left_bounds
               triangle None None 0 None
         done);
@@ -650,7 +650,7 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
         let first = range * range_size
         and last = min left_count ((range + 1) * range_size) in
         for triangle = first to last - 1 do
-          if triangle land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel triangle 4095;
           let written = scan node_stack left_bounds triangle
               (Some left_output) (Some right_output) offsets.(triangle) None in
           if written <> counts.(triangle) then invalid_arg
@@ -926,7 +926,7 @@ let closest_many_into ?cancel ?selection ?position_indices ~grain value ~queries
     let scratch = Array.make 8 0. and best_primitive = [|-1|]
     and best_triangle = [|-1|] in
     for query = first to last - 1 do
-      if query land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel query 4095;
       if (match selection with None -> true
           | Some group -> Group.mem query group) then begin
         let point = match position_indices with None -> query
@@ -984,7 +984,7 @@ let closest_distances_many_into ?cancel ?selection ~grain value
     let first = range * grain and last = min query_count ((range + 1) * grain) in
     let scratch = Array.make 8 0. in
     for query = first to last - 1 do
-      if query land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel query 4095;
       if match selection with None -> true | Some group -> Group.mem query group
       then begin
         let qx = queries.x.(query) and qy = queries.y.(query)
@@ -1375,7 +1375,7 @@ let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
     and combined_distances = Array.make 2 Float.infinity
     and combined_selected = Array.make 2 (-1) in
     for query = first to last - 1 do
-      if query land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel query 4095;
       primitives.(query) <- -1; triangles.(query) <- -1;
       barycentric_a.(query) <- 0.; barycentric_b.(query) <- 0.;
       barycentric_c.(query) <- 0.; distances.(query) <- Float.infinity;
@@ -1398,7 +1398,7 @@ let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
                 if side = 0 then 1. else -1. in
           let base = side * samples in
           for sample = 0 to samples - 1 do
-            if sample land 63 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel sample 63;
             jittered_direction seed query sample jitter_scale
               (sign *. dx) (sign *. dy) (sign *. dz) direction;
             ray_query_once value ox oy oz direction.(0) direction.(1) direction.(2)
@@ -1479,7 +1479,7 @@ let raycast_average_drivers_into ?cancel ?selection ~grain value ~queries
     and integer_results = Array.make 2 (-1)
     and float_results = Array.make 4 0. and direction = Array.make 3 0. in
     for query = first to last - 1 do
-      if query land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel query 4095;
       if direction_signs.(query) <> 0
           && (match selection with None -> true | Some group -> Group.mem query group)
       then begin
@@ -1491,7 +1491,7 @@ let raycast_average_drivers_into ?cancel ?selection ~grain value ~queries
         and scale = 1. /. float_of_int hit_counts.(query) in
         let at = ref offsets.(query) in
         for sample = 0 to samples - 1 do
-          if sample land 63 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel sample 63;
           jittered_direction seed query sample jitter_scale
             (sign *. dx) (sign *. dy) (sign *. dz) direction;
           ray_query_once value ox oy oz direction.(0) direction.(1) direction.(2)
@@ -1554,7 +1554,7 @@ let raycast_many_into ?cancel ?selection ~grain value ~queries ~directions
     and integer_results = Array.make 4 (-1)
     and float_results = Array.make 8 0. in
     for query = first to last - 1 do
-      if query land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel query 4095;
       primitives.(query) <- -1; triangles.(query) <- -1;
       barycentric_a.(query) <- 0.; barycentric_b.(query) <- 0.;
       barycentric_c.(query) <- 0.; distances.(query) <- Float.infinity;

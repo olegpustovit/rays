@@ -204,7 +204,7 @@ let run_default ?cancel ?(grain = 1_024) ~distance geometry =
         let failures = Array.make source_primitives None in
         if source_primitives > 0 then Parallel.for_ ~chunk_size:grain ~start:0
             ~finish:(source_primitives - 1) (fun primitive ->
-              if primitive land 255 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel primitive 255;
               let first, last = Topology.primitive_vertex_range topology primitive in
               let count = last - first and nx = ref 0. and ny = ref 0. and nz = ref 0. in
               for local = 0 to count - 1 do
@@ -364,7 +364,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
           if selected.(primitive) then primitive else -1) in
         let non_manifold = ref (-1) in
         for edge = 0 to Topology_index.edge_count index - 1 do
-          if edge land 16_383 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel edge 16_383;
           let first = index_view.edge_offsets.(edge)
           and last = index_view.edge_offsets.(edge + 1) in
           let selected_incidence = ref 0 in
@@ -408,7 +408,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
         end in
   let selected_vertices = ref 0 in
   for primitive = 0 to source_primitives - 1 do
-    if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4_095;
     if selected.(primitive) then
       selected_vertices := !selected_vertices
         + topology_view.primitive_offsets.(primitive + 1)
@@ -417,7 +417,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   let boundary_vertices_full = Array.make !selected_vertices 0
   and boundary_count = ref 0 in
   for primitive = 0 to source_primitives - 1 do
-    if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4_095;
     if selected.(primitive) then begin
       let first = topology_view.primitive_offsets.(primitive)
       and last = topology_view.primitive_offsets.(primitive + 1) in
@@ -457,7 +457,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
           (max 16 (source_points + component_count)) in
       let table = Pair_table.create expected and sources = Int_builder.create expected in
       for primitive = 0 to source_primitives - 1 do
-        if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4_095;
         if selected.(primitive) then begin
           let component = primitive_component.(primitive)
           and first = topology_view.primitive_offsets.(primitive)
@@ -477,7 +477,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   and direction_z = Array.make association_count 0. in
   let* () = if not need_new_points then Ok () else begin
     for primitive = 0 to source_primitives - 1 do
-      if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4_095;
       if selected.(primitive) then begin
         let component = primitive_component.(primitive)
         and first = topology_view.primitive_offsets.(primitive)
@@ -494,7 +494,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
     let invalid_direction = Atomic.make false in
     if association_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(association_count - 1) (fun association ->
-          if association land 16_383 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel association 16_383;
           let x = direction_x.(association) and y = direction_y.(association)
           and z = direction_z.(association) in
           let scale = max (abs_float x) (max (abs_float y) (abs_float z)) in
@@ -514,7 +514,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   and front_index = Array.make source_primitives (-1) in
   let base_primitives = ref 0 and base_vertices = ref 0 in
   for primitive = 0 to source_primitives - 1 do
-    if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4_095;
     if not selected.(primitive) || output_back then begin
       base_index.(primitive) <- !base_primitives;
       incr base_primitives;
@@ -554,7 +554,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   let new_point_count = output_points - source_points in
   if new_point_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(new_point_count - 1) (fun local ->
-        if local land 16_383 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel local 16_383;
         let association = local / divisions and layer = local mod divisions + 1 in
         let point = association_sources.(association)
         and t = float_of_int layer /. float_of_int divisions in
@@ -576,7 +576,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   and side_membership = Bytes.make output_primitives '\000' in
   let primitive_cursor = ref 0 and vertex_cursor = ref 0 in
   for primitive = 0 to source_primitives - 1 do
-    if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4_095;
     if base_index.(primitive) >= 0 then begin
       let output = !primitive_cursor in
       base_index.(primitive) <- output;
@@ -593,7 +593,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   done;
   if output_front then
     for primitive = 0 to source_primitives - 1 do
-      if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4_095;
       if selected.(primitive) then begin
         let output = !primitive_cursor in
         front_index.(primitive) <- output;
@@ -622,7 +622,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   primitive_offsets.(output_primitives) <- output_vertices;
   if source_primitives > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(source_primitives - 1) (fun primitive ->
-        if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4_095;
         let first = topology_view.primitive_offsets.(primitive)
         and last = topology_view.primitive_offsets.(primitive + 1) in
         let base = base_index.(primitive) in
@@ -652,7 +652,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   if output_side && !boundary_count > 0 then
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(!boundary_count - 1)
       (fun boundary ->
-        if boundary land 4_095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel boundary 4_095;
         let vertex = boundary_vertices.(boundary)
         and next = index_view.next_vertex.(boundary_vertices.(boundary)) in
         let primitive = index_view.primitive_of_vertex.(vertex) in
@@ -720,7 +720,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
     let map_edge_group source_group =
       let bits = make_bits () in
       Edge_group.iter (fun edge ->
-        if edge land 16_383 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel edge 16_383;
         let a, b = Topology_index.edge_points source_edge_index edge in
         add_edge bits a b;
         if need_new_points then begin
@@ -750,7 +750,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
       | Some name ->
           let bits = make_bits () in
           Array.iteri (fun boundary vertex ->
-            if boundary land 4_095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel boundary 4_095;
             let next = index_view.next_vertex.(vertex)
             and primitive = index_view.primitive_of_vertex.(vertex) in
             let component = primitive_component.(primitive)

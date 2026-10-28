@@ -265,7 +265,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
     and classified_distance = Array.make point_count 0. in
     if point_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(point_count - 1) (fun point ->
-          if point land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel point 4095;
           let x = positions.x.(point) and y = positions.y.(point)
           and z = positions.z.(point) in
           if not (finite x && finite y && finite z) then
@@ -302,7 +302,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
           and shared = Bytes.make point_count '\000' in
           if point_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
               ~finish:(point_count - 1) (fun point ->
-                if point land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel point 4095;
                 let has_selected = ref false and has_unselected = ref false
                 and at = ref index_view.point_offsets.(point) in
                 let last = index_view.point_offsets.(point + 1) in
@@ -438,7 +438,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
         if candidate_count > 0 then Parallel.for_
             ~chunk_size:(max 1 (grain / 8)) ~start:0
             ~finish:(candidate_count - 1) (fun candidate ->
-              if candidate land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel candidate 4095;
               let primitive = candidate / slots in
               let side = match keep with
                 | Above -> 0 | Below -> 1 | All -> candidate mod 2 in
@@ -860,7 +860,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
              ~finish:(candidate_count - 1) (fun candidate ->
                let encoded = candidate_output.(candidate) in
                if encoded > 0 then begin
-                 if candidate land 4095 = 0 then Cancel.check_opt cancel;
+                 Cancel.poll cancel candidate 4095;
                  let output = encoded - 1 and primitive = candidate / slots in
                  let first = topology_view.primitive_offsets.(primitive)
                  and last = topology_view.primitive_offsets.(primitive + 1) in
@@ -953,7 +953,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
                end)
      | None ->
          for primitive = 0 to Geometry.primitive_count geometry - 1 do
-           if primitive land 1023 = 0 then Cancel.check_opt cancel;
+           Cancel.poll cancel primitive 1023;
            if not (primitive_selected primitive) then process_passthrough primitive
            else begin
              let kind = Bytes.get topology_view.primitive_kinds primitive in
@@ -982,13 +982,13 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
     let trace_caps side =
       let side_segment_count = ref 0 in
       for segment = 0 to segments.segment_count - 1 do
-        if segment land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel segment 4095;
         if segments.segment_side.(segment) = side then incr side_segment_count
       done;
       let outgoing = Array.make geometry_token_count (-1)
       and incoming = Array.make geometry_token_count (-1) in
       for segment = 0 to segments.segment_count - 1 do
-        if segment land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel segment 4095;
         if segments.segment_side.(segment) = side then begin
           let a = segments.segment_a.(segment) and b = segments.segment_b.(segment) in
           if outgoing.(a) >= 0 || incoming.(b) >= 0 then
@@ -1001,7 +1001,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
       let visited = Array.make geometry_token_count false and loops = ref []
       and scratch = Array.make (max 1 !side_segment_count) 0 in
       for start = 0 to geometry_token_count - 1 do
-        if start land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel start 4095;
         if (outgoing.(start) >= 0) <> (incoming.(start) >= 0) then
           raise (Error.Fail "Rdk.Plane_clip.clip: cap boundary is open or inconsistently wound")
         else if outgoing.(start) >= 0 && not visited.(start) then begin
@@ -1134,7 +1134,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
           if compared <> 0 then compared else Int.compare left right) edge_order;
       let active = Array.make edge_count 0 and active_count = ref 0 in
       for ordered = 0 to edge_count - 1 do
-        if ordered land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel ordered 4095;
         let edge = edge_order.(ordered) and retained = ref 0 in
         for slot = 0 to !active_count - 1 do
           let candidate = active.(slot) in
@@ -1166,7 +1166,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
         incr active_count
       done;
       let loop_orientation = Array.mapi (fun loop_index loop ->
-          if loop_index land 255 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel loop_index 255;
           let anchor_x, anchor_y, anchor_z =
             position_of_geometry_token loop.(0) in
           let coordinate_scale = ref 0. in
@@ -1202,7 +1202,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
           !orientation) loops in
       let parent = Array.make loop_count (-1) in
       for child = 0 to loop_count - 1 do
-        if child land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel child 255;
         let x = projected_x loops.(child).(0)
         and y = projected_y loops.(child).(0) in
         for candidate = 0 to loop_count - 1 do
@@ -1228,7 +1228,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
       done;
       let depth = Array.make loop_count 0 in
       for loop = 0 to loop_count - 1 do
-        if loop land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel loop 255;
         let current = ref parent.(loop) and value = ref 0 in
         while !current >= 0 do
           incr value;
@@ -1296,7 +1296,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
         ignore (finish_primitive builder ~start ~kind:'\000' ~source:(-1)
           ~side ~clipped:true ~cap:true ~minimum:3) in
       for outer = 0 to loop_count - 1 do
-        if outer land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel outer 255;
         if depth.(outer) land 1 = 0 then begin
           if Array.length child_holes.(outer) = 0 then emit_loop outer
           else begin
@@ -1342,7 +1342,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
     and pz = Array.make !output_point_count 0. in
     if !output_point_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(!output_point_count - 1) (fun output ->
-          if output land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel output 4095;
           let value = point_token.(output) in
           if is_passthrough_token value then begin
             let point = passthrough_point value in
@@ -1396,7 +1396,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
       let count = Array.length mapping_a and output = Array.make (Array.length mapping_a) 0. in
       if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
           (fun index ->
-            if index land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel index 4095;
             let a = mapping_a.(index) and b = mapping_b.(index) in
             if a >= 0 then output.(index) <- source.(a)
                 +. ((source.(b) -. source.(a)) *. mapping_t.(index)));
@@ -1415,7 +1415,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
             let output = Array.make builder.primitive_count 0. in
             if builder.primitive_count > 0 then Parallel.for_ ~chunk_size:grain
                 ~start:0 ~finish:(builder.primitive_count - 1) (fun index ->
-                  if index land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel index 4095;
                   let input = primitive_source.(index) in
                   if input >= 0 then output.(index) <- source.(input));
             output
@@ -1423,7 +1423,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
             let output = Array.make builder.primitive_count 0 in
             if builder.primitive_count > 0 then Parallel.for_ ~chunk_size:grain
                 ~start:0 ~finish:(builder.primitive_count - 1) (fun index ->
-                  if index land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel index 4095;
                   let input = primitive_source.(index) in
                   if input >= 0 then output.(index) <- source.(input));
             output
@@ -1431,7 +1431,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
             let output = Array.make builder.primitive_count "" in
             if builder.primitive_count > 0 then Parallel.for_ ~chunk_size:grain
                 ~start:0 ~finish:(builder.primitive_count - 1) (fun index ->
-                  if index land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel index 4095;
                   let input = primitive_source.(index) in
                   if input >= 0 then output.(index) <- source.(input));
             output in
@@ -1474,7 +1474,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
                 let output = Array.make count 0 in
                 if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                     ~finish:(count - 1) (fun index ->
-                      if index land 4095 = 0 then Cancel.check_opt cancel;
+                      Cancel.poll cancel index 4095;
                       let source = nearest_index index in
                       if source >= 0 then output.(index) <- values.(source));
                 Attribute.Int output
@@ -1486,7 +1486,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
                 let output = Array.make count "" in
                 if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                     ~finish:(count - 1) (fun index ->
-                      if index land 4095 = 0 then Cancel.check_opt cancel;
+                      Cancel.poll cancel index 4095;
                       let source = nearest_index index in
                       if source >= 0 then output.(index) <- values.(source));
                 Attribute.Text output
@@ -1578,7 +1578,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
           if builder.primitive_count > 0 then Parallel.for_
               ~chunk_size:(max 1 (grain / 8)) ~start:0
               ~finish:(builder.primitive_count - 1) (fun primitive ->
-                if primitive land 1023 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel primitive 1023;
                 if Bytes.get output_kinds primitive = '\000' then begin
                   let first = output_offsets.(primitive)
                   and last = output_offsets.(primitive + 1) in
@@ -1610,7 +1610,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
           | Group.Point ->
               Group.init ~grain ~owner:Group.Point ~name !output_point_count
                 (fun output ->
-                  if output land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel output 4095;
                   let a = point_source_a.(output) and b = point_source_b.(output) in
                   Group.mem a group || Group.mem b group),
               (fun () -> Array.init !output_point_count (fun output ->
@@ -1619,7 +1619,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
           | Group.Vertex ->
               Group.init ~grain ~owner:Group.Vertex ~name builder.corner_count
                 (fun output ->
-                  if output land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel output 4095;
                   let a = corner_a.(output) and b = corner_b.(output) in
                   a >= 0 && (Group.mem a group || Group.mem b group)),
               (fun () -> Array.init builder.corner_count (fun output ->
@@ -1628,7 +1628,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
           | Group.Primitive ->
               Group.init ~grain ~owner:Group.Primitive ~name
                 builder.primitive_count (fun output ->
-                  if output land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel output 4095;
                   let source = primitive_source.(output) in
                   source >= 0 && Group.mem source group),
               (fun () -> primitive_source) in
@@ -1661,7 +1661,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
             List.map (fun source_group ->
               Edge_group.init ~grain ~topology:output_topology ~index:target_index
                 ~name:(Edge_group.name source_group) (fun edge ->
-                  if edge land 16_383 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel edge 16_383;
                   match source_edge_of_output_edge edge with
                   | None -> false
                   | Some source_edge -> Edge_group.mem source_edge source_group))
@@ -1676,7 +1676,7 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
                 let target_view = Topology_index.View.view target_index in
                 let generated = Edge_group.init ~grain ~topology:output_topology
                     ~index:target_index ~name (fun edge ->
-                      if edge land 16_383 = 0 then Cancel.check_opt cancel;
+                      Cancel.poll cancel edge 16_383;
                       let a = target_view.edge_a.(edge)
                       and b = target_view.edge_b.(edge) in
                       token_on_plane point_token.(a)

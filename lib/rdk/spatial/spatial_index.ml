@@ -30,7 +30,7 @@ let create ?cancel ?(grain = 16_384) ?points:selection packed =
   and min_z = ref Float.infinity and max_x = ref Float.neg_infinity
   and max_y = ref Float.neg_infinity and max_z = ref Float.neg_infinity in
   for slot = 0 to Array.length order - 1 do
-    if slot land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel slot 16_383;
     let point = order.(slot) in
     if not (finite positions.x.(point) && finite positions.y.(point)
         && finite positions.z.(point)) then
@@ -165,7 +165,7 @@ let nearest_k_many_into ?cancel ?points ~grain value ~queries ~max_distance_squa
     distances = distances_squared; capacity } in
   if query_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(query_count - 1) (fun query ->
-        if query land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel query 4095;
         if (match points with None -> true | Some group -> Group.mem query group) then
           counts.(query) <- if length value = 0 then 0 else
             visit context query (query * capacity) 0 (length value - 1) 0 0)
@@ -225,7 +225,7 @@ let nearest_distances_many_into ?cancel ?points ~grain value ~queries
     distance_output = distances_squared } in
   if query_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(query_count - 1) (fun query ->
-        if query land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel query 4095;
         if match points with None -> true | Some group -> Group.mem query group
         then begin
           distances_squared.(query) <- Float.infinity;

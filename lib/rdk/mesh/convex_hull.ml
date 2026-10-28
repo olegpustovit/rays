@@ -182,14 +182,14 @@ let selected_unique_points ?cancel ~grain selection geometry =
     | Some group -> Group.mem point group in
   let selected_count = ref 0 in
   for point = 0 to point_count - 1 do
-    if point land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel point 4095;
     if selected point then incr selected_count
   done;
   if !selected_count = 0 then Error (operation ^ ": selection contains no points")
   else begin
     let first_invalid = Atomic.make max_int in
     let validate point =
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
       if selected point && not (Float.is_finite positions.x.(point)
           && Float.is_finite positions.y.(point)
           && Float.is_finite positions.z.(point)) then begin
@@ -210,7 +210,7 @@ let selected_unique_points ?cancel ~grain selection geometry =
       let table = Array.make table_size 0 and mask = table_size - 1 in
       let unique = Array.make !selected_count 0 and count = ref 0 in
       for point = 0 to point_count - 1 do
-        if point land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 4095;
         if selected point then begin
           let slot = ref (hash_position positions.x positions.y positions.z point mask)
           and found = ref false in
@@ -380,7 +380,7 @@ let assign_points ?cancel ~grain ?point_count (positions : positions) faces
       if visible positions faces face point then face
       else first_visible point (candidate_face + 1) in
   let assign index =
-    if index land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel index 4095;
     assignments.(index) <- first_visible points.(index) 0 in
   if point_count > grain then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(point_count - 1) assign
@@ -543,7 +543,7 @@ let remap_output ?cancel ~grain ~preserve_point_payload ?source_point_attribute
     let output = Array.make (Array.length point_map) 0. in
     if Array.length point_map > 0 then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(Array.length point_map - 1) (fun point ->
-          if point land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel point 4095;
           output.(point) <- source.(point_map.(point)));
     output in
   let positions = Packed.Float3.View.of_owned_exn
@@ -645,7 +645,7 @@ let materialize ?cancel ~grain ~preserve_point_payload ?source_point_attribute
       and primitive_offsets = Array.make (primitive_count + 1) 0
       and primitive_kinds = Bytes.make primitive_count '\000' in
       let fill primitive =
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         let source = triangle_order.(primitive) and vertex = primitive * 3 in
         let a = triangle_a.(source) and b = triangle_b.(source)
         and c = triangle_c.(source) in

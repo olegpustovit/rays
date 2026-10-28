@@ -140,12 +140,12 @@ let merge_plain ?cancel ?(grain = 16_384) ?(pad_groups = true) geometries =
           and primitive_offset = !primitive_at in
           if vertices_here > 0 then Parallel.for_ ~chunk_size:grain ~start:0
               ~finish:(vertices_here - 1) (fun index ->
-                if index land 16383 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel index 16383;
                 vertex_points.(vertex_offset + index) <-
                   topology.vertex_points.(index) + point_offset);
           if primitives_here > 0 then Parallel.for_ ~chunk_size:grain ~start:1
               ~finish:primitives_here (fun index ->
-                if index land 16383 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel index 16383;
                 primitive_offsets.(primitive_offset + index) <-
                   topology.primitive_offsets.(index) + vertex_offset);
           Bytes.blit topology.primitive_kinds 0 primitive_kinds !primitive_at primitives_here;

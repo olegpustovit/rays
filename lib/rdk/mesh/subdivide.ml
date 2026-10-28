@@ -45,7 +45,7 @@ let run ?(grain = 16_384) ?cancel count operation =
   if grain <= 0 then invalid_arg "Rdk_mesh.Subdivide.subdivide: grain must be positive";
   if count > 0 then
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1) (fun index ->
-      if index land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel index 4095;
       operation index)
 
 type plan = {
@@ -254,7 +254,7 @@ let apply_crease_input ?cancel ?grain ?selection ?override source creases =
         done)
     end else
       for primitive = 0 to Bytes.length crease_topology.primitive_kinds - 1 do
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         if selected primitive then begin
           let first = crease_topology.primitive_offsets.(primitive)
           and last = crease_topology.primitive_offsets.(primitive + 1) in
@@ -410,7 +410,7 @@ let validate ?cancel scheme geometry topology index =
     fail "input must contain polygon geometry";
   let point_marks = Array.make topology.point_count (-1) in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-    if primitive land 1023 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 1023;
     if Bytes.get topology.primitive_kinds primitive <> '\000' then
       fail "only polygon primitives are supported";
     let first = topology.primitive_offsets.(primitive)
@@ -443,7 +443,7 @@ let validate ?cancel scheme geometry topology index =
   let face_marks = Array.make (Bytes.length topology.primitive_kinds) (-1)
   and fan_stack = Array.make (Array.length topology.vertex_points) 0 in
   for point = 0 to topology.point_count - 1 do
-    if point land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel point 4095;
     let edge_first = index.point_edge_offsets.(point)
     and edge_last = index.point_edge_offsets.(point + 1) in
     let boundary = ref 0 in
@@ -1595,7 +1595,7 @@ let output_edge_plan ?cancel plan =
   let next_ordinal = ref 0 in
   let topology = Topology.View.view plan.topology in
   for vertex = 0 to Array.length topology.vertex_points - 1 do
-    if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel vertex 16_383;
       let source_edge = plan.vertex_edge_source.(vertex) in
       let key = if source_edge >= 0 then begin
       output_child_slot plan vertex source_edge
@@ -1632,7 +1632,7 @@ let set_edge_bit bits edge =
 let edge_group_from_source ?cancel plan edge_plan ~name selected =
   let bits = Bytes.make ((edge_plan.output_edge_count + 7) / 8) '\000' in
   for edge = 0 to plan.edge_count - 1 do
-    if edge land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel edge 16_383;
     if selected edge then begin
       let left = edge_plan.child_edges.(edge * 2)
       and right = edge_plan.child_edges.((edge * 2) + 1) in
@@ -1647,7 +1647,7 @@ let resulting_crease_group ?cancel ~name plan edge_plan child_sharpness =
   let bits = Bytes.make ((edge_plan.output_edge_count + 7) / 8) '\000' in
   Option.iter (fun sharpness ->
     for child = 0 to Array.length sharpness - 1 do
-      if child land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel child 16_383;
       if sharpness.(child) > 0. then begin
         let output_edge = edge_plan.child_edges.(child) in
         if output_edge >= 0 then set_edge_bit bits output_edge
@@ -1663,7 +1663,7 @@ let remap_group ?cancel ?grain plan group =
     | Group.Primitive -> Array.length plan.primitive_source in
   let target = Group.init ?grain ~owner ~name:(Group.name group) count
       (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel output 4095;
         match owner with
         | Group.Point ->
             if output < plan.source_points then Group.mem output group
@@ -1878,7 +1878,7 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
                 if Array.length source.offsets <> count + 1 then
                   fail "integer-array attribute cardinality mismatch";
                 for row = 0 to count - 1 do
-                  if row land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel row 4095;
                   offsets.(!row_at + row + 1) <- !value_at + source.offsets.(row + 1)
                 done;
                 Array.blit source.values 0 values !value_at (Array.length source.values);
@@ -1934,7 +1934,7 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
                 if Array.length source.offsets <> count + 1 then
                   fail "float-array attribute cardinality mismatch";
                 for row = 0 to count - 1 do
-                  if row land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel row 4095;
                   offsets.(!row_at + row + 1) <- !value_at + source.offsets.(row + 1)
                 done;
                 Array.blit source.values 0 values !value_at (Array.length source.values);
@@ -2471,7 +2471,7 @@ let split_disconnected_point_fans ?cancel ?grain geometry =
     let parents = Array.init vertex_count Fun.id
     and ranks = Array.make vertex_count 0 in
     for edge = 0 to Array.length index.edge_a - 1 do
-      if edge land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 16_383;
       let first = index.edge_offsets.(edge) and last = index.edge_offsets.(edge + 1) in
       if last - first >= 2 then begin
         let reference = index.edge_vertices.(first) in
@@ -2496,7 +2496,7 @@ let split_disconnected_point_fans ?cancel ?grain geometry =
     let root_target = Array.make vertex_count (-1)
     and root_source = Array.make vertex_count (-1) and extra = ref 0 in
     for point = 0 to topology.point_count - 1 do
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
       let first = index.point_offsets.(point) and last = index.point_offsets.(point + 1) in
       let first_component = ref true in
       for at = first to last - 1 do
@@ -2545,7 +2545,7 @@ let split_disconnected_point_fans ?cancel ?grain geometry =
         else begin
           let target = Group.init ?grain ~owner:Group.Point ~name:(Group.name group)
               output_points (fun point ->
-                if point land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel point 4095;
                 Group.mem point_source.(point) group) in
           Group.View.remap_order ~source:group ~source_of_target:point_source target
         end) in
@@ -2603,7 +2603,7 @@ let annotate_pull_interfaces ?cancel primitives geometry =
   and unselected_primitive_of_edge = Array.make (Array.length index.edge_a) (-1)
   and interface_count = ref 0 in
   for edge = 0 to Array.length index.edge_a - 1 do
-    if edge land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel edge 16_383;
     let selected_count = ref 0 and unselected_count = ref 0
     and non_polygon = ref false in
     for at = index.edge_offsets.(edge) to index.edge_offsets.(edge + 1) - 1 do
@@ -2633,7 +2633,7 @@ let annotate_pull_interfaces ?cancel primitives geometry =
     let ancestry = Array.make (Array.length topology.vertex_points) (-1)
     and selected_edge_start = Array.make (Array.length index.edge_a) (-1) in
     for vertex = 0 to Array.length ancestry - 1 do
-      if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 16_383;
       let edge = index.edge_of_vertex.(vertex) in
       if edge >= 0 && Bytes.get interface_edges edge <> '\000' then begin
         ancestry.(vertex) <- edge;
@@ -2647,7 +2647,7 @@ let annotate_pull_interfaces ?cancel primitives geometry =
     let annotated = Geometry.with_attribute attribute geometry |> get_ok in
     let unselected_used_points = Bytes.make topology.point_count '\000' in
     for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       if not (Group.mem primitive primitives) then
         for vertex = topology.primitive_offsets.(primitive)
             to topology.primitive_offsets.(primitive + 1) - 1 do
@@ -2698,7 +2698,7 @@ let interface_chains ?cancel plan refined =
   let source_edges = Array.length source_index.edge_a in
   let counts = Array.make source_edges 0 in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     for vertex = topology.primitive_offsets.(primitive)
         to topology.primitive_offsets.(primitive + 1) - 1 do
       let edge = ancestry.(vertex) in
@@ -2747,7 +2747,7 @@ let interface_chains ?cancel plan refined =
     let first = record_offsets.(edge) and last = record_offsets.(edge + 1) in
     let count = last - first in
     if count > 0 then begin
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       for at = first to last - 1 do
         let start = starts.(at) and finish = ends.(at) in
         if next_point.(start) >= 0 || Bytes.get incoming finish <> '\000' then
@@ -2962,7 +2962,7 @@ let divide_unselected_edges ?cancel ?grain plan (chains : interface_chains)
     if plan.unselected_primitive_of_source.(primitive) >= 0 then
       for vertex = topology.primitive_offsets.(primitive)
           to topology.primitive_offsets.(primitive + 1) - 1 do
-        if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel vertex 16_383;
         let output = vertex_output.(vertex) in
         let source_point = topology.vertex_points.(vertex) in
         let output_point = plan.unselected_point_of_source.(source_point) in
@@ -3135,7 +3135,7 @@ let triangulate_divided_boundary ?cancel ?grain ?pull_bias
   done;
   let output_vertices = ref 0 and output_primitives = ref 0 in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-    if primitive land 1023 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 1023;
     let corners = topology.primitive_offsets.(primitive + 1)
         - topology.primitive_offsets.(primitive) in
     if Bytes.get boundary primitive = '\000' then begin
@@ -3212,7 +3212,7 @@ let triangulate_divided_boundary ?cancel ?grain ?pull_bias
         Packed.Float3.View.{ x; y; z }
     | None | Some _ -> source_positions in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-    if primitive land 255 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 255;
     if Bytes.get boundary primitive = '\000' then begin
       let first = topology.primitive_offsets.(primitive)
       and last = topology.primitive_offsets.(primitive + 1) in
@@ -3327,7 +3327,7 @@ let pull_boundary_no_edge_division ?cancel ?grain plan geometry =
       end
     end in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     let first = topology.primitive_offsets.(primitive)
     and last = topology.primitive_offsets.(primitive + 1) in
     for vertex = first to last - 1 do
@@ -3374,7 +3374,7 @@ let stitch_boundary_no_edge_division ?cancel plan ~unselected
   let source_edges = Array.length source_index.edge_a in
   let counts = Array.make source_edges 0 in
   for primitive = 0 to Bytes.length refined_topology.primitive_kinds - 1 do
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     for vertex = refined_topology.primitive_offsets.(primitive)
         to refined_topology.primitive_offsets.(primitive + 1) - 1 do
       let edge = ancestry.(vertex) in
@@ -3445,7 +3445,7 @@ let stitch_boundary_no_edge_division ?cancel plan ~unselected
     let first = offsets.(edge) and last = offsets.(edge + 1) in
     let count = last - first in
     if count > 0 then begin
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       for at = first to last - 1 do
         let start = starts.(at) and finish = ends.(at) in
         if next_point.(start) >= 0 || Bytes.get incoming finish <> '\000' then
@@ -3582,7 +3582,7 @@ let stitch_boundary_divide_edges ?cancel ~consistent_topology plan
     let first = chains.edge_offsets.(edge)
     and last = chains.edge_offsets.(edge + 1) in
     if last > first then begin
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       let source_primitive = plan.unselected_primitive_of_edge.(edge) in
       if source_primitive < 0 then fail "divided stitch edge has no coarse primitive";
       let primitive_source = divided.source_primitive_to_output.(source_primitive) in
@@ -3630,7 +3630,7 @@ let make_boundary_weld ?cancel ~bias ~only_equal
     && coarse_positions.z.(coarse) = refined_positions.z.(refined) in
   let source_edges = Array.length chains.edge_offsets - 1 in
   for edge = 0 to source_edges - 1 do
-    if edge land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel edge 4095;
     let first = chains.edge_offsets.(edge)
     and last = chains.edge_offsets.(edge + 1) in
     for at = first to last - 1 do
@@ -3700,7 +3700,7 @@ let free_point_part ?cancel ?grain geometry =
   let topology = Topology.View.view (Geometry.topology geometry) in
   let used = Bytes.make topology.point_count '\000' in
   Array.iteri (fun vertex point ->
-    if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel vertex 16_383;
     Bytes.set used point '\001') topology.vertex_points;
   let free_count = ref 0 in
   for point = 0 to topology.point_count - 1 do
@@ -3789,7 +3789,7 @@ let automatic_boundary_holes ?cancel ?grain geometry =
       and last = topology.primitive_offsets.(primitive + 1) in
       let vertex = ref first and boundary = ref false in
       while !vertex < last && not !boundary do
-        if !vertex land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel !vertex 4095;
         let point = topology.vertex_points.(!vertex) in
         if Char.code (Bytes.get boundary_points (point lsr 3))
             land (1 lsl (point land 7)) <> 0 then boundary := true;

@@ -31,7 +31,7 @@ let build_side ?cancel ?coplanar ~grain constraints side face_count range
     let first_face = work_range * range_size
     and last_face = min face_count ((work_range + 1) * range_size) in
     for face = first_face to last_face - 1 do
-      if face land 255 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel face 255;
       let first, last = range constraints face in
       let coplanar_first, coplanar_last = match coplanar with
         | None -> 0, 0

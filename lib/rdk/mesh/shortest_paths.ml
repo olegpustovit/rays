@@ -49,12 +49,12 @@ let search ?cancel ?(radius = infinity) ~point_edge_offsets ~point_edges
     if !heap_size > 0 then sift_down 0 heap_points.(!heap_size);
     point in
   Array.iteri (fun index point ->
-    if index land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel index 16_383;
     distances.(point) <- 0.;
     enqueue_or_decrease point) roots;
   let visits = ref 0 in
   while !heap_size > 0 do
-    if !visits land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel !visits 16_383;
     incr visits;
     let point = pop () in
     let distance = distances.(point) in
@@ -100,7 +100,7 @@ let hop_search ?(blocked_point = fun _ -> false)
       && (target < 0 || depths.(target) < 0
           || depths.(queue.(!head)) < depths.(target)) do
     let element = queue.(!head) in
-    if !head land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel !head 4095;
     incr head;
     for slot = point_edge_offsets.(element) to point_edge_offsets.(element + 1) - 1 do
       let edge = point_edges.(slot) in
@@ -199,7 +199,7 @@ let forest_search ~valid_edge ~capacity
   let visits = ref 0 in
   let drain_heap () =
     while !heap_size > 0 do
-      if !visits land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !visits 4095;
       incr visits;
       let point = pop () in
       order.(!order_count) <- point; incr order_count;

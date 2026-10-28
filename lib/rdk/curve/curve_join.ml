@@ -90,7 +90,7 @@ let endpoint_tree ?cancel endpoint_x endpoint_y endpoint_z =
     swap pivot_index last;
     let store = ref first in
     for index = first to last - 1 do
-      if index land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel index 16_383;
       if compare axis endpoint_ids.(index) pivot < 0 then begin
         swap index !store;
         incr store
@@ -121,7 +121,7 @@ let endpoint_tree ?cancel endpoint_x endpoint_y endpoint_z =
     min_z.(depth) <- endpoint_z.(endpoint);
     max_z.(depth) <- endpoint_z.(endpoint);
     for index = first + 1 to last - 1 do
-      if index land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel index 16_383;
       let endpoint = endpoint_ids.(index) in
       let x = endpoint_x.(endpoint) and y = endpoint_y.(endpoint)
       and z = endpoint_z.(endpoint) in
@@ -180,7 +180,7 @@ let endpoint_tree_nearest ?cancel tree query_endpoint =
   let rec visit node =
     if node >= 0 && tree.active_count.(node) > 0 then begin
       incr visited;
-      if !visited land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !visited 16_383;
       let endpoint = tree.endpoint_ids.(node)
       and axis = Char.code (Bytes.get tree.axis node) in
       let delta = if axis = 0 then qx -. tree.endpoint_x.(endpoint)
@@ -297,7 +297,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
             | Join_curve_end -> index > 0 && not subgroup in
         if only_connected then
           for index = 0 to selected_count - 1 do
-            if index land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel index 4095;
             let subgroup = starts_subgroup index
             and reverse = picked_reverse index in
             if reverse then Bytes.set reversed index '\001';
@@ -351,7 +351,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
         and endpoint_z = Array.make endpoint_count 0. in
         Support.run_ranges ?grain endpoint_count (fun ~first ~last ->
           for endpoint_slot = first to last - 1 do
-            if endpoint_slot land 16_383 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel endpoint_slot 16_383;
             let primitive = input_primitives.(endpoint_slot lsr 1) in
             let point = endpoint primitive false (endpoint_slot land 1 = 1) in
             let x = positions.x.(point) and y = positions.y.(point)
@@ -379,7 +379,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
         remove 0;
         let current_endpoint = ref 1 and next_root = ref 1 in
         for index = 1 to selected_count - 1 do
-          if index land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel index 4095;
           endpoint_tree_nearest ?cancel tree !current_endpoint;
           let nearest = tree.nearest_endpoint
           and nearest_distance = tree.nearest_distance in
@@ -639,7 +639,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
                   Bytes.set bits byte
                     (Char.chr (Char.code (Bytes.get bits byte) lor mask)) in
                 for primitive = 0 to output_primitive_count - 1 do
-                  if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel primitive 4095;
                   let edges = target_edge_offsets.(primitive + 1)
                       - target_edge_offsets.(primitive)
                   and first = primitive_offsets.(primitive) in
@@ -663,7 +663,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
                 let builder = Edge_group.Builder.create ~topology:output_topology
                     ~index:target_index ~name:(Edge_group.name source_group) in
                 for vertex = 0 to output_vertex_count - 1 do
-                  if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel vertex 16_383;
                   let source_corner = edge_source_corner.(vertex) in
                   if source_corner >= 0 then begin
                     let source_edge = Topology_index.edge_of_vertex source_index

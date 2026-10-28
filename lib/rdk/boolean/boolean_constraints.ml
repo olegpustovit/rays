@@ -369,7 +369,7 @@ let build ?cancel ?(resolve_left_self_intersections = false)
                 let first = range * chunk
                 and last = min candidate_count ((range + 1) * chunk) in
                 for candidate = first to last - 1 do
-                  if candidate land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel candidate 4095;
                   let first_points = if Bytes.unsafe_get first_candidate_sides
                       candidate = '\000' then left_triangle_points
                     else right_triangle_points
@@ -428,7 +428,7 @@ let build ?cancel ?(resolve_left_self_intersections = false)
                  benchmarks slower under concurrent minor heaps; candidate
                  classification above remains parallel and zero-allocation. *)
               for candidate = 0 to candidate_count - 1 do
-                if candidate land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel candidate 4095;
                 let count = counts.(candidate) in
                 if count > 0 then begin
                   let first_points = if Bytes.unsafe_get first_candidate_sides

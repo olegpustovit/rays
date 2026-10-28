@@ -23,7 +23,7 @@ let owner_name = function
   | Attribute.Detail -> "detail"
 
 let check_cancel cancel index =
-  if index land 1023 = 0 then Cancel.check_opt cancel
+  Cancel.poll cancel index 1023
 
 let compile_optional label = function
   | None -> Ok None

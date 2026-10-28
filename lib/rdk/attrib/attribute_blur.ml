@@ -75,7 +75,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
         Array.iteri (fun plane values ->
           let point = ref 0 in
           while !point < point_count && !failure = None do
-            if !point land 16_383 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel !point 16_383;
             if not (Float.is_finite values.(!point)) then
               failure := Some (Printf.sprintf
                   "Rdk.Attribute_ops.blur_points: plane %d contains a non-finite value at point %d"
@@ -101,7 +101,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
               and last_point = min point_count ((range + 1) * grain) in
               let sum = ref 0. and total = ref 0. in
               for point = first_point to last_point - 1 do
-                if point land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel point 4095;
                 let update = (match selection with
                       | None -> true | Some group -> Group.mem point group)
                     in

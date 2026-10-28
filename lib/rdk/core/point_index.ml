@@ -12,10 +12,10 @@ let create_uncached ?cancel topology =
   let primitive_of_vertex = Array.make vertex_count (-1)
   and point_offsets = Array.make (point_count + 1) 0 in
   for primitive = 0 to primitive_count - 1 do
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     for vertex = source.primitive_offsets.(primitive)
         to source.primitive_offsets.(primitive + 1) - 1 do
-      if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 16_383;
       primitive_of_vertex.(vertex) <- primitive;
       let point = source.vertex_points.(vertex) in
       point_offsets.(point + 1) <- point_offsets.(point + 1) + 1
@@ -27,7 +27,7 @@ let create_uncached ?cancel topology =
   let point_vertices = Array.make vertex_count 0
   and point_cursor = Array.copy point_offsets in
   for vertex = 0 to vertex_count - 1 do
-    if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel vertex 16_383;
     let point = source.vertex_points.(vertex) in
     let output = point_cursor.(point) in
     point_vertices.(output) <- vertex;

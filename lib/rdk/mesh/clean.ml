@@ -73,7 +73,7 @@ let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
     if Topology.all_triangles topology_value then
       Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(primitive_count - 1)
         (fun primitive ->
-          if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel primitive 4_095;
           let first = topology.primitive_offsets.(primitive) in
           if (match primitives with None -> true
                 | Some group -> Group.mem primitive group)
@@ -89,7 +89,7 @@ let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
       and scratch_d = Array.make primitive_count 0. in
       Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(primitive_count - 1)
       (fun primitive ->
-        if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4_095;
         let first = topology.primitive_offsets.(primitive)
         and last = topology.primitive_offsets.(primitive + 1)
         and kind = Bytes.unsafe_get topology.primitive_kinds primitive in
@@ -199,7 +199,7 @@ let delete_nan_points ?cancel ~grain geometry =
     let flags = Bytes.make point_count '\000' in
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(point_count - 1)
       (fun point ->
-        if point land 16_383 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 16_383;
         if positions.x.(point) <> positions.x.(point)
             || positions.y.(point) <> positions.y.(point)
             || positions.z.(point) <> positions.z.(point)
@@ -267,7 +267,7 @@ let delete_overlaps_general ?cancel ~grain ~delete_pairs geometry =
   else begin
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(primitive_count - 1)
       (fun primitive ->
-        if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4_095;
         if Bytes.get topology.primitive_kinds primitive = '\000' then begin
           let first = topology.primitive_offsets.(primitive)
           and size = topology.primitive_offsets.(primitive + 1)
@@ -322,7 +322,7 @@ let delete_overlaps_general ?cancel ~grain ~delete_pairs geometry =
       end in
     let slot = ref 0 and found = ref (-1) and searching = ref true in
     for primitive = 0 to primitive_count - 1 do
-      if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4_095;
       if sizes.(primitive) > 0 then begin
         slot := hashes.(primitive) land mask;
         found := -1;
@@ -365,7 +365,7 @@ let delete_triangle_overlaps ?cancel ~grain ~delete_pairs geometry =
     and hashes = Array.make primitive_count 0 in
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(primitive_count - 1)
       (fun primitive ->
-        if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4_095;
         let first = topology.primitive_offsets.(primitive) in
         let p0 = topology.vertex_points.(first)
         and p1 = topology.vertex_points.(first + 1)
@@ -385,7 +385,7 @@ let delete_triangle_overlaps ?cancel ~grain ~delete_pairs geometry =
     and flags = Bytes.make primitive_count '\000' in
     let slot = ref 0 and found = ref (-1) and searching = ref true in
     for primitive = 0 to primitive_count - 1 do
-      if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4_095;
       slot := hashes.(primitive) land mask;
       found := -1;
       searching := true;

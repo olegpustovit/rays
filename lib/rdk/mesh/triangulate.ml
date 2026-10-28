@@ -83,7 +83,7 @@ let run ?cancel ?(grain = 16_384) ?primitives geometry =
   let primitive_grain = max 1 (grain / average_size) in
   Parallel.for_ ~chunk_size:primitive_grain ~start:0
     ~finish:(primitive_count - 1) (fun primitive ->
-      if primitive land 1023 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 1023;
       let size = topology_view.primitive_offsets.(primitive + 1)
           - topology_view.primitive_offsets.(primitive) in
       if not (selected primitive) then vertex_bases.(primitive + 1) <- size
@@ -108,7 +108,7 @@ let run ?cancel ?(grain = 16_384) ?primitives geometry =
   else begin
     let cardinality_error = ref None in
     for primitive = 0 to primitive_count - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       let next_primitives = primitive_bases.(primitive + 1) in
       let next_vertices = if full_selection then next_primitives * 3
         else vertex_bases.(primitive + 1) in
@@ -164,7 +164,7 @@ let run ?cancel ?(grain = 16_384) ?primitives geometry =
         and last_primitive = min (primitive_count - 1)
             (((block + 1) * primitive_grain) - 1) in
         for primitive = first_primitive to last_primitive do
-          if primitive land 1023 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel primitive 1023;
           let source_first = topology_view.primitive_offsets.(primitive)
           and source_last = topology_view.primitive_offsets.(primitive + 1)
           and output_primitive = primitive_bases.(primitive)

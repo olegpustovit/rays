@@ -59,7 +59,7 @@ let plan_boundaries ?cancel ~grain ?boundary geometry =
   and incoming = Array.make source.point_count (-1)
   and point_bad = Bytes.make source.point_count '\000' in
   for edge = 0 to edge_count - 1 do
-    if edge land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel edge 16_383;
     if reverse.edge_offsets.(edge + 1) - reverse.edge_offsets.(edge) = 1 then begin
       let vertex = reverse.edge_vertices.(reverse.edge_offsets.(edge)) in
       let primitive = reverse.primitive_of_vertex.(vertex) in
@@ -81,7 +81,7 @@ let plan_boundaries ?cancel ~grain ?boundary geometry =
       operation !invalid_selected)
   else begin
     for edge = 0 to edge_count - 1 do
-      if edge land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 16_383;
       if Bytes.get candidates edge <> '\000' then begin
         let a = reverse.edge_a.(edge) and b = reverse.edge_b.(edge) in
         let attach point =
@@ -96,7 +96,7 @@ let plan_boundaries ?cancel ~grain ?boundary geometry =
       if parent.(edge) >= 0 then parent.(edge) <- find_root parent edge
     done;
     for edge = 0 to edge_count - 1 do
-      if edge land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 16_383;
       if Bytes.get candidates edge <> '\000' then begin
         let vertex = reverse.edge_vertices.(reverse.edge_offsets.(edge)) in
         let next = reverse.next_vertex.(vertex) in
@@ -126,7 +126,7 @@ let plan_boundaries ?cancel ~grain ?boundary geometry =
       end
     done;
     for point = 0 to source.point_count - 1 do
-      if point land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 16_383;
       let edge = first_at_point.(point) in
       if edge >= 0 then begin
         let root = find_root parent edge in
@@ -172,7 +172,7 @@ let plan_boundaries ?cancel ~grain ?boundary geometry =
             and start_edge = loop_roots.(loop) in
             let current = ref start_edge in
             for at = first to last - 1 do
-              if at land 16_383 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel at 16_383;
               let edge = !current in
               let vertex = reverse.edge_vertices.(reverse.edge_offsets.(edge)) in
               let next = reverse.next_vertex.(vertex) in
@@ -373,7 +373,7 @@ let map_array ?cancel ~grain mapping source =
   let count = Array.length mapping in
   if count = 0 then [||]
   else Parallel.init_array ~grain count (fun index ->
-    if index land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel index 16_383;
     source.(mapping.(index)))
 
 type center_map =
@@ -498,7 +498,7 @@ let target_edge_count ~cancel ~mode ~unique_points ~plan ~triangle_local =
     | Fill_triangles ->
         let added = ref 0 in
         for loop = 0 to loop_count - 1 do
-          if loop land 4_095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel loop 4_095;
           let first = plan.loop_offsets.(loop)
           and size = plan.loop_offsets.(loop + 1) - plan.loop_offsets.(loop) in
           let triangle_base = (first - (2 * loop)) * 3 in

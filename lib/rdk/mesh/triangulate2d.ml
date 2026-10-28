@@ -112,7 +112,7 @@ let constraint_endpoint_selection ?cancel ~points ?constraint_edges
     let index = Topology_index.create ?cancel topology_value in
     let view = Topology_index.View.view index in
     Edge_group.iter (fun edge ->
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       retain view.edge_a.(edge); retain view.edge_b.(edge)) group) constraint_edges;
   Option.iter (fun group ->
     if Group.owner group <> Group.Primitive then
@@ -120,7 +120,7 @@ let constraint_endpoint_selection ?cancel ~points ?constraint_edges
     if Group.length group <> Geometry.primitive_count geometry then
       invalid_arg (operation ^ ": constraint primitive group length is invalid");
     Group.iter_ordered (fun primitive ->
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       for vertex = topology.primitive_offsets.(primitive)
           to topology.primitive_offsets.(primitive + 1) - 1 do
         retain topology.vertex_points.(vertex)
@@ -181,7 +181,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
     let index = Topology_index.create ?cancel topology_value in
     let view = Topology_index.View.view index in
     Edge_group.iter (fun edge ->
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       add ~weight:0 view.edge_a.(edge) view.edge_b.(edge)) group) constraint_edges;
   Option.iter (fun group ->
     if Group.owner group <> Group.Primitive then
@@ -189,7 +189,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
     if Group.length group <> Geometry.primitive_count geometry then
       invalid_arg (operation ^ ": constraint primitive group length is invalid");
     Group.iter_ordered (fun primitive ->
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       let first = topology.primitive_offsets.(primitive)
       and last = topology.primitive_offsets.(primitive + 1) in
       let size = last - first
@@ -206,7 +206,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
     and vertex_count = Geometry.vertex_count geometry in
     let projected_vertex_points = Array.make vertex_count (-1) in
     let map_vertex vertex =
-      if vertex land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 4095;
       let source_point = topology.vertex_points.(vertex) in
       let local = local_of_point.(source_point) in
       if local >= 0 then begin
@@ -220,7 +220,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
     let signs = Array.make primitive_count Predicates.Zero
     and selected_polygons = Bytes.make primitive_count '\000' in
     for primitive = 0 to primitive_count - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       if Char.code (Bytes.unsafe_get topology.primitive_kinds primitive) = 0 then begin
         let first = topology.primitive_offsets.(primitive)
         and last = topology.primitive_offsets.(primitive + 1) in
@@ -235,7 +235,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
       end
     done;
     let classify primitive =
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       if Bytes.unsafe_get selected_polygons primitive = '\001' then begin
         let first = topology.primitive_offsets.(primitive) in
         signs.(primitive) <- Predicates.polygon_area_sign_packed ~x ~y
@@ -253,7 +253,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
     let edge_count = Array.length view.edge_a
     and edge_winding = Array.make (Array.length view.edge_a) 0 in
     let classify_edge edge =
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       let first = view.edge_offsets.(edge)
       and last = view.edge_offsets.(edge + 1) and weight = ref 0 in
       for incidence = first to last - 1 do
@@ -279,7 +279,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
         ~finish:(edge_count - 1) classify_edge
     else for edge = 0 to edge_count - 1 do classify_edge edge done;
     for edge = 0 to edge_count - 1 do
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       let weight = edge_winding.(edge) in
       if weight <> 0 then begin
         let source_a = view.edge_a.(edge) and source_b = view.edge_b.(edge) in
@@ -314,7 +314,7 @@ let planes_from_positions ?cancel ~grain positions points =
   if count = 0 then invalid_arg (operation ^ ": selection contains no points");
   let maximum = ref 0. in
   for index = 0 to count - 1 do
-    if index land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel index 4095;
     let point = points.(index) in
     if not (finite3 source.x.(point) source.y.(point) source.z.(point)) then
       invalid_arg (Printf.sprintf "%s: point %d has a non-finite position"
@@ -345,7 +345,7 @@ let planes_from_positions ?cancel ~grain positions points =
   let output_x = Array.make count 0. and output_y = Array.make count 0. in
   let ux,uy,uz = u and vx,vy,vz = v in
   let project index =
-    if index land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel index 4095;
     let point = points.(index) in
     let x = (source.x.(point) /. scale) -. !mx
     and y = (source.y.(point) /. scale) -. !my
@@ -368,7 +368,7 @@ let project ?cancel ~grain projection geometry points =
   let fill coordinate_x coordinate_y =
     let x = Array.make count 0. and y = Array.make count 0. in
     let one index =
-      if index land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel index 4095;
       let point = points.(index) in
       let px = coordinate_x point and py = coordinate_y point in
       if not (Float.is_finite px && Float.is_finite py) then
@@ -573,7 +573,7 @@ let materialization ?cancel ~grain ~restore_original_point_positions
     if Array.length local_x <> local_count || Array.length local_y <> local_count then
       invalid_arg (operation ^ ": projected point materialization is malformed");
     let fill local =
-      if local land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel local 4095;
       let output = local_to_output local in
       let px,py,pz = embed local_x.(local) local_y.(local) in
       if not (finite3 px py pz) then
@@ -590,7 +590,7 @@ let materialization ?cancel ~grain ~restore_original_point_positions
     let source = Packed.Float3.View.view (Geometry.positions geometry) in
     let x = evaluate source.x and y = evaluate source.y and z = evaluate source.z in
     for output = source_point_count to output_point_count - 1 do
-      if output land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel output 4095;
       if not (finite3 x.(output) y.(output) z.(output)) then
         invalid_arg (Printf.sprintf
           "%s: generated point %d has a non-finite 3D interpolation"
@@ -609,14 +609,14 @@ let interpolate_point_attribute ?cancel ~grain plan attribute =
     Array.blit source 0 values 0 plan.source_point_count;
     for point = plan.source_point_count
         to plan.source_point_count + plan.split_count - 1 do
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
       values.(point) <- weighted_value values
           plan.parent_first.(point) plan.parent_second.(point)
           plan.parent_third.(point) plan.weight_first.(point)
           plan.weight_second.(point) plan.weight_third.(point)
     done;
     for point = count to plan.value_count - 1 do
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
       values.(point) <- weighted_value values
           plan.parent_first.(point) plan.parent_second.(point)
           plan.parent_third.(point) plan.weight_first.(point)
@@ -670,7 +670,7 @@ let mapped_array ?cancel ~grain ~default mapping source =
   let count = Array.length mapping in
   let output = Array.make count default in
   let fill target =
-    if target land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel target 4095;
     let source_index = mapping.(target) in
     if source_index >= 0 then output.(target) <- source.(source_index) in
   if count > grain then Parallel.for_ ~chunk_size:grain ~start:0
@@ -716,7 +716,7 @@ let defaulted_attribute ?cancel ~grain mapping attribute =
 let defaulted_group ?cancel ~grain mapping group =
   let output = Group.init ~grain ~owner:(Group.owner group)
       ~name:(Group.name group) (Array.length mapping) (fun target ->
-        if target land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel target 4095;
         let source = mapping.(target) in source >= 0 && Group.mem source group) in
   Group.View.remap_order ~source:group ~source_of_target:mapping output
 
@@ -735,7 +735,7 @@ let output_topology ?cancel ~grain ~keep_primitives ~constraint_primitives
     let vertex_count = Array.length triangle_points in
     let vertex_points = Array.make vertex_count 0 in
     let fill vertex =
-      if vertex land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 4095;
       vertex_points.(vertex) <- local_to_output triangle_points.(vertex) in
     if vertex_count > grain then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(vertex_count - 1) fill
@@ -760,7 +760,7 @@ let output_topology ?cancel ~grain ~keep_primitives ~constraint_primitives
     and source_to_output = Array.make source_primitive_count (-1) in
     let kept_primitive_count = ref 0 in
     for primitive = 0 to source_primitive_count - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       let retained = match constraint_primitives with
         | None -> true | Some group -> not (Group.mem primitive group) in
       kept_vertex_offsets.(primitive + 1) <- kept_vertex_offsets.(primitive);
@@ -786,7 +786,7 @@ let output_topology ?cancel ~grain ~keep_primitives ~constraint_primitives
     let output_point_of_source = if Array.length source_point_output = 0 then
         Fun.id else fun point -> source_point_output.(point) in
     let fill_source primitive =
-      if primitive land 1023 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 1023;
       let output = source_to_output.(primitive) in
       if output >= 0 then begin
         let source_first = source.primitive_offsets.(primitive)
@@ -811,7 +811,7 @@ let output_topology ?cancel ~grain ~keep_primitives ~constraint_primitives
       fill_source primitive
     done;
     let fill_triangle triangle =
-      if triangle land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel triangle 4095;
       let primitive = !kept_primitive_count + triangle
       and vertex = kept_vertex_count + (triangle * 3) in
       primitive_offsets.(primitive) <- vertex;
@@ -870,7 +870,7 @@ let constraint_only_seed ?cancel ~grain ~seed ~points ~x ~y ~constraints
     and target_of_source = Array.make count (-1) in
     let target = ref 0 in
     for source = 0 to count - 1 do
-      if source land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel source 4095;
       if Bytes.unsafe_get used source <> '\000' then begin
         target_of_source.(source) <- !target;
         output_points.(!target) <- points.(source);
@@ -880,7 +880,7 @@ let constraint_only_seed ?cancel ~grain ~seed ~points ~x ~y ~constraints
     done;
     let output_constraints = Array.make (Array.length constraints) 0 in
     let remap index =
-      if index land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel index 4095;
       let target = target_of_source.(constraints.(index)) in
       if target < 0 then
         invalid_arg (operation ^ ": internal constraint endpoint was not retained");
@@ -1092,7 +1092,7 @@ let run ?cancel { grain; selection; constraint_edges; constraint_primitives;
               Array.init (Geometry.point_count geometry) Fun.id else [||] in
           if keep_primitives && remove_duplicate_points then
             for local = 0 to Array.length points - 1 do
-              if local land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel local 4095;
               let representative = Delaunay2.unique_source triangulation
                   (Delaunay2.source_unique triangulation local) in
               source_point_output.(points.(local)) <- points.(representative)
@@ -1183,7 +1183,7 @@ let run ?cancel { grain; selection; constraint_edges; constraint_primitives;
               let duplicate = Bytes.make output_point_count '\000'
               and duplicate_count = ref 0 in
               for local = 0 to Array.length points - 1 do
-                if local land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel local 4095;
                 let unique = Delaunay2.source_unique triangulation local in
                 if Delaunay2.unique_source triangulation unique <> local then begin
                   let point = points.(local) in

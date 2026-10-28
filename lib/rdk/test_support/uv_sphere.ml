@@ -174,13 +174,13 @@ let run
         and phi_sine = Array.make segments 0.
         and phi_cosine = Array.make segments 0. in
         Parallel.for_ ~chunk_size:grain ~start:0 ~finish:rings (fun ring ->
-          if ring land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel ring 4095;
           let theta = Float.pi *. float_of_int ring /. float_of_int rings in
           theta_sine.(ring) <- sin theta;
           theta_cosine.(ring) <- cos theta);
         Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(segments - 1)
           (fun segment ->
-            if segment land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel segment 4095;
             let phi = Float.pi *. 2. *. float_of_int segment
                 /. float_of_int segments in
             phi_sine.(segment) <- sin phi;
@@ -287,7 +287,7 @@ let run
             let first = range * grain
             and last = min point_count ((range + 1) * grain) in
             for point = first to last - 1 do
-              if point land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel point 4095;
               let ring, segment = if not include_poles then
                   1 + (point / segments), point mod segments
                 else if point < top_count then 0,
@@ -338,7 +338,7 @@ let run
                 let row_vertex_count = row_count * segments in
                 Parallel.for_ ~chunk_size:(max 1 (grain / (rings + segments)))
                   ~start:0 ~finish:(primitive_count - 1) (fun primitive ->
-                    if primitive land 1023 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel primitive 1023;
                     if primitive < row_count then begin
                       let ring = primitive + 1 and at = primitive * segments in
                       for segment = 0 to segments - 1 do
@@ -357,7 +357,7 @@ let run
                     end);
                 Parallel.for_ ~chunk_size:grain ~start:0 ~finish:primitive_count
                   (fun primitive ->
-                    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel primitive 4095;
                     primitive_offsets.(primitive) <- if primitive <= row_count
                       then primitive * segments
                       else row_vertex_count
@@ -382,7 +382,7 @@ let run
                       + ((primitive - bottom_first) * 3) in
                 Parallel.for_ ~chunk_size:(max 1 (grain / 6)) ~start:0
                   ~finish:(primitive_count - 1) (fun primitive ->
-                    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel primitive 4095;
                     let at = vertex_offset primitive in
                     if primitive < segments then begin
                       let segment = primitive and next = primitive + 1 in
@@ -485,7 +485,7 @@ let run
                     end);
                 Parallel.for_ ~chunk_size:grain ~start:0 ~finish:primitive_count
                   (fun primitive ->
-                    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel primitive 4095;
                     primitive_offsets.(primitive) <- vertex_offset primitive);
                 Topology.View.create_validated_owned ~point_count
                   ~vertex_points ~primitive_offsets ~primitive_kinds in

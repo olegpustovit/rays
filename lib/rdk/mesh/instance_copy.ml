@@ -76,7 +76,7 @@ let repeat_group ?cancel ?grain copies group =
   let target = Group.init ?grain ~owner:(Group.owner group)
       ~name:(Group.name group) (copies * source_count)
       (fun index ->
-        if index land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel index 4095;
         Group.mem (index mod source_count) group) in
   match Group.View.order_view group with
   | None -> target
@@ -84,7 +84,7 @@ let repeat_group ?cancel ?grain copies group =
       let order = Array.make (copies * Array.length source_order) 0
       and output = ref 0 in
       for copy = 0 to copies - 1 do
-        if copy land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel copy 255;
         Array.iter (fun source_element ->
           order.(!output) <- (copy * source_count) + source_element;
           incr output

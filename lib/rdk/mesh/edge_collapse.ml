@@ -102,7 +102,7 @@ let raw ?cancel ?(grain = 16_384) ?edges
           end in
         let merged = ref 0 and selected_self_edge = ref false in
         for edge = 0 to edge_count - 1 do
-          if edge land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel edge 4095;
           if selected edge then begin
             let a = index.edge_a.(edge) and b = index.edge_b.(edge) in
             if a = b then selected_self_edge := true

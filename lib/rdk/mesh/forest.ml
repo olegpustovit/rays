@@ -19,7 +19,7 @@ let scan ?selected ~selected_count parents =
         let needs_normalization = Atomic.make false in
         Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(point_count - 1)
           (fun point ->
-            if point land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel point 4095;
             let parent = parents.(point) in
             if parent < 0 || parent >= point_count then
               Atomic.set needs_normalization true);
@@ -37,7 +37,7 @@ let scan ?selected ~selected_count parents =
         let normalized = Array.make point_count (-1) in
         Parallel.for_ ~chunk_size:grain ~start:0
           ~finish:(point_count - 1) (fun point ->
-            if point land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel point 4095;
             if selected point then begin
               let parent = parents.(point) in
               normalized.(point) <- if parent < 0 || parent >= point_count

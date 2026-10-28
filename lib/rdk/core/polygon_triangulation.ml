@@ -68,7 +68,7 @@ let primitive ?cancel ~(positions : Packed.Float3.View.view)
     Array.fill sums 0 (Array.length sums) 0.;
     sums.(4) <- 1.;
     for local = 0 to size - 1 do
-      if local land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel local 4095;
       let next = (local + 1) mod size in
       let pi = topology.vertex_points.(first + local)
       and pj = topology.vertex_points.(first + next) in

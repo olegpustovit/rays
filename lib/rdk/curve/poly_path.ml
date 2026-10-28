@@ -71,7 +71,7 @@ let trace_paths ~cancel ~point_count ~graph_count ~graph_a ~graph_b =
     done;
     path_offsets.(path + 1) <- !edge_at in
   for point = 0 to point_count - 1 do
-    if point land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel point 16_383;
     if degree point <> 2 then
       for incidence = point_offsets.(point) to point_offsets.(point + 1) - 1 do
         let edge = point_edges.(incidence) in
@@ -79,7 +79,7 @@ let trace_paths ~cancel ~point_count ~graph_count ~graph_a ~graph_b =
       done
   done;
   for edge = 0 to graph_count - 1 do
-    if edge land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel edge 16_383;
     if Bytes.get visited edge = '\000' then trace ~isolated:true graph_a.(edge) edge
   done;
   if !edge_at <> graph_count then

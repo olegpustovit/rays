@@ -41,7 +41,7 @@ let validate_positions ?cancel geometry =
   let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let invalid = ref (-1) and point = ref 0 in
   while !point < Array.length positions.x && !invalid < 0 do
-    if !point land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel !point 4095;
     if not (Float.is_finite positions.x.(!point) && Float.is_finite positions.y.(!point)
         && Float.is_finite positions.z.(!point)) then invalid := !point;
     incr point
@@ -61,7 +61,7 @@ let target_values ?cancel name geometry = match name with
              | Attribute.Float values ->
                  let invalid = ref (-1) and point = ref 0 in
                  while !point < Array.length values && !invalid < 0 do
-                   if !point land 4095 = 0 then Cancel.check_opt cancel;
+                   Cancel.poll cancel !point 4095;
                    if not (Float.is_finite values.(!point)) || values.(!point) <= 0. then
                      invalid := !point;
                    incr point
@@ -140,7 +140,7 @@ let install_feature_groups ?cancel ~grain ~hard_points ~hard_edges
   Result.bind uv (fun uv_equal ->
     let feature_edges = Edge_group.init ~grain ~topology:topology_value
         ~index:index_value ~name:edge_name (fun edge ->
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       let explicit = match hard_edges with
         | None -> false | Some group -> Edge_group.mem edge group in
       if explicit then true
@@ -418,7 +418,7 @@ let local_of_geometry ?cancel ~grain ~target_size_attribute geometry =
   let topology = Topology.View.view topology_value in
   let tris = Bytes.length topology.primitive_kinds in
   for primitive = 0 to tris - 1 do
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     if not (primitive_is_triangle topology primitive) then
       invalid_arg (Printf.sprintf "%s: primitive %d is not a triangle"
         operation primitive)
@@ -481,7 +481,7 @@ let local_of_geometry ?cancel ~grain ~target_size_attribute geometry =
     scratch = Array.make 64 0; scratch_count = 0;
   } in
   for corner = 0 to corners - 1 do
-    if corner land 16383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel corner 16383;
     let point = l.c_point.(corner) in
     attach_point l corner point;
     Bytes.unsafe_set l.p_used point '\001';
@@ -511,7 +511,7 @@ let rank ?(incidence = true) l =
   let order = Array.make l.tris 0 and count = ref 0 in
   let emit tri = order.(!count) <- tri; incr count in
   for tri = 0 to l.source_tris - 1 do
-    if tri land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel tri 4095;
     if Bytes.unsafe_get l.t_alive tri <> '\000' then emit tri
     else begin
       let first = l.t_children.(tri) in
@@ -582,7 +582,7 @@ let[@inline] local_target l target_length a b =
 let select_long l ~target_length =
   let selected = Bytes.make l.edges '\000' and count = ref 0 in
   for edge = 0 to l.edges - 1 do
-    if edge land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel edge 4095;
     let a = l.e_a.(edge) and b = l.e_b.(edge) in
     if local_length l a b > (4. /. 3.) *. local_target l target_length a b
     then begin Bytes.unsafe_set selected edge '\001'; incr count end
@@ -605,7 +605,7 @@ let relink l =
   Array.fill l.e_first 0 l.edges (-1);
   Array.fill l.e_incidence 0 l.edges 0;
   for tri = 0 to l.tris - 1 do
-    if tri land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel tri 4095;
     if Bytes.unsafe_get l.t_alive tri <> '\000' then
       for corner = tri * 3 to tri * 3 + 2 do
         let point = l.c_point.(corner) and edge = l.c_edge.(corner) in
@@ -633,7 +633,7 @@ let split l selected count =
   and half_low = Array.make start_edges (-1)
   and half_high = Array.make start_edges (-1) in
   for edge = 0 to start_edges - 1 do
-    if edge land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel edge 4095;
     if Bytes.unsafe_get selected edge <> '\000' then begin
       let point = l.points in
       l.points <- point + 1;
@@ -684,7 +684,7 @@ let split l selected count =
   let first_child = l.tris in
   let additions = ref 0 in
   for tri = 0 to l.source_tris - 1 do
-    if tri land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel tri 4095;
     let first = tri * 3 in
     let mask = ref 0 in
     for local = 0 to 2 do
@@ -757,7 +757,7 @@ let split l selected count =
     [| [|1;4;0|]; [|4;5;0|]; [|4;2;5|] |];
     [| [|0;3;5|]; [|3;1;4|]; [|5;4;2|]; [|3;4;5|] |] |] in
   for tri = 0 to l.source_tris - 1 do
-    if tri land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel tri 4095;
     let first = tri * 3 in
     let mask = ref 0 in
     for local = 0 to 2 do
@@ -979,7 +979,7 @@ let select_short l ranking ~target_length ~hard ~feature =
   and keys = Array.make ranking.edge_count 0 in
   let count = ref 0 in
   for rank = 0 to ranking.edge_count - 1 do
-    if rank land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel rank 4095;
     let edge = ranking.e_order.(rank) in
     let a = l.e_a.(edge) and b = l.e_b.(edge) in
     if l.e_incidence.(edge) = 2
@@ -1003,7 +1003,7 @@ let select_short l ranking ~target_length ~hard ~feature =
   and edge_stamps = Array.make l.edges (-1)
   and chosen_count = ref 0 in
   for stamp = 0 to !count - 1 do
-    if stamp land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel stamp 4095;
     let edge = ranking.e_order.(keys.(stamp)) in
     let a = l.e_a.(edge) and b = l.e_b.(edge) in
     let v0, v1 = sided_corners l ranking edge in
@@ -1046,7 +1046,7 @@ let[@inline] average_pair a b =
    kernel's edge-group remap does. *)
 let collapse l chosen =
   for edge = 0 to l.edges - 1 do
-    if edge land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel edge 4095;
     if Bytes.unsafe_get chosen edge <> '\000' then begin
       let a = l.e_a.(edge) and b = l.e_b.(edge) in
       l.x.(a) <- average_pair l.x.(a) l.x.(b);
@@ -1183,7 +1183,7 @@ let select_flip l ranking ~hard ~feature =
   let penalty point degree = abs (degree - ideal point) in
   let eligible = Bytes.make l.edges '\000' in
   for rank = 0 to ranking.edge_count - 1 do
-    if rank land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel rank 4095;
     let edge = ranking.e_order.(rank) in
     if l.e_incidence.(edge) = 2
         && not (match features with
@@ -1314,7 +1314,7 @@ let materialize l =
   done;
   let p_map = Array.make l.points (-1) and point_count = ref 0 in
   for point = 0 to l.points - 1 do
-    if point land 16383 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel point 16383;
     if Bytes.unsafe_get l.p_alive point <> '\000'
         && (Bytes.unsafe_get used_after point <> '\000'
             || Bytes.unsafe_get l.p_used point = '\000') then begin
@@ -1342,7 +1342,7 @@ let materialize l =
   and vertex_weight = Array.make corner_count 0.
   and primitive_source = Array.make ranking.tri_count 0 in
   for rank = 0 to ranking.tri_count - 1 do
-    if rank land 4095 = 0 then Cancel.check_opt l.cancel;
+    Cancel.poll l.cancel rank 4095;
     let tri = ranking.order.(rank) in
     primitive_source.(rank) <- l.t_source.(tri);
     for local = 0 to 2 do
@@ -1490,7 +1490,7 @@ let project_to_reference ?cancel ~grain ~surface ~scratch reference geometry =
       and z = Array.copy current.z in
       if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
           (fun point ->
-        if point land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 4095;
         if Group.mem point used then begin
           let triangle = triangles.(point) in
           let vertex0 = Surface_index.View.triangle_vertex surface triangle 0
@@ -1548,7 +1548,7 @@ let install_outputs ?cancel ~grain ~target_length ~target_size_attribute
         let positions = Packed.Float3.View.view (Geometry.positions geometry) in
         let primitive_count = Geometry.primitive_count geometry in
         let quality = Parallel.init_array ~grain primitive_count (fun primitive ->
-          if primitive land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel primitive 4095;
           if not (primitive_is_triangle topology primitive) then 0.
           else
             let first = topology.primitive_offsets.(primitive) in

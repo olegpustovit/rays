@@ -102,7 +102,7 @@ let event_pass ?cancel ~grain ~self ~tolerance ~include_coplanar source_index
       let first = range * chunk
       and last = min candidate_count ((range + 1) * chunk) in
       for candidate = first to last - 1 do
-        if candidate land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel candidate 4095;
         let count = narrow scratch point_info events source_pieces.(candidate)
             collision_pieces.(candidate) in
         write candidate events count
@@ -110,7 +110,7 @@ let event_pass ?cancel ~grain ~self ~tolerance ~include_coplanar source_index
   visit_ranges (fun candidate _ count -> counts.(candidate) <- count);
   let offsets = Array.make (candidate_count + 1) 0 in
   for candidate = 0 to candidate_count - 1 do
-    if candidate land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel candidate 4095;
     if counts.(candidate) > Sys.max_array_length - offsets.(candidate) then
       invalid_arg "Intersection Analysis event cardinality exceeds array limits";
     offsets.(candidate + 1) <- offsets.(candidate) + counts.(candidate)
@@ -229,7 +229,7 @@ let build_provenance ?cancel ~self ~source_index ~collision_index clusters raw =
     let key = if input = 0 then canonical else source_count + canonical in
     if seen.(key) <> point then begin seen.(key) <- point; counts.(point) <- counts.(point) + 1 end in
   for event = 0 to Array.length raw.x - 1 do
-    if event land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel event 4095;
     let point = of_event.(event) in
     visit_record point 0 raw.source_piece.(event) source_index raw.au.(event);
     visit_record point (if self then 0 else 1) raw.collision_piece.(event)
@@ -263,7 +263,7 @@ let build_provenance ?cancel ~self ~source_index ~collision_index clusters raw =
       uvw.((output * 3) + 2) <- w
     end in
   for event = 0 to Array.length raw.x - 1 do
-    if event land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel event 4095;
     let point = of_event.(event) in
     emit point 0 raw.source_piece.(event) source_index
       raw.au.(event) raw.av.(event) raw.aw.(event);

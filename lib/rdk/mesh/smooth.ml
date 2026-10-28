@@ -33,7 +33,7 @@ let make_update_selection ?cancel ~grain ~boundary ~index
     let index = Topology_index.View.view index in
     Some (Group.init ~grain ~owner:Group.Point ~name:"__smooth_update"
     point_count (fun point ->
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
         let constrained = match constrained_points with
           | None -> false
           | Some group -> Group.mem point group in

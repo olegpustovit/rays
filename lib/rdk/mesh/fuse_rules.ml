@@ -53,7 +53,7 @@ let get_ok = function Ok value -> value | Error message -> fail "%s" message
 let run ?cancel ~grain count operation =
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(count - 1) (fun index ->
-        if index land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel index 4095;
         operation index)
 
 let compile_attribute_rules rules = Array.of_list (List.map (fun rule ->

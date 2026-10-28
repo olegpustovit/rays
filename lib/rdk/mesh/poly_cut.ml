@@ -153,7 +153,7 @@ let remap_edge_groups ?cancel ~grain ~source_index ~target_topology
       let source_of_target = Array.make (Topology_index.edge_count target_index) (-1) in
       let conflict = ref None in
       for vertex = 0 to Array.length source_edge_of_vertex - 1 do
-        if vertex land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel vertex 4095;
         let source_edge = Array.unsafe_get source_edge_of_vertex vertex
         and target_edge = Array.unsafe_get target.edge_of_vertex vertex in
         if source_edge >= 0 && target_edge >= 0 then begin
@@ -177,7 +177,7 @@ let remap_edge_groups ?cancel ~grain ~source_index ~target_topology
         if Bytes.length bytes > 0 then Parallel.for_
             ~chunk_size:(max 1 (grain / 8)) ~start:0
             ~finish:(Bytes.length bytes - 1) (fun byte ->
-          if byte land 511 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel byte 511;
           let value = ref 0 and first = byte lsl 3 in
           for bit = 0 to 7 do
             let edge = first + bit in
@@ -201,7 +201,7 @@ let edge_remove_fast ?cancel ~grain ~keep_closed ~topology_value ~topology
   if primitive_count > 0 then Parallel.for_
       ~chunk_size:(max 1 (grain / 256)) ~start:0 ~finish:(primitive_count - 1)
       (fun primitive ->
-        if primitive land 1023 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 1023;
         let first = Array.unsafe_get topology.primitive_offsets primitive
         and last = Array.unsafe_get topology.primitive_offsets (primitive + 1) in
         let size = last - first in
@@ -249,7 +249,7 @@ let edge_remove_fast ?cancel ~grain ~keep_closed ~topology_value ~topology
   if primitive_count > 0 then Parallel.for_
       ~chunk_size:(max 1 (grain / 256)) ~start:0 ~finish:(primitive_count - 1)
       (fun primitive ->
-        if primitive land 1023 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 1023;
         let target_base = Array.unsafe_get primitive_bases primitive
         and first = Array.unsafe_get topology.primitive_offsets primitive
         and last = Array.unsafe_get topology.primitive_offsets (primitive + 1) in
@@ -318,7 +318,7 @@ let edge_remove_fast ?cancel ~grain ~keep_closed ~topology_value ~topology
   if output_primitive_count > 0 then Parallel.for_
       ~chunk_size:(max 1 (grain / 8)) ~start:0
       ~finish:(output_primitive_count - 1) (fun target ->
-    if target land 1023 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel target 1023;
     let primitive = Array.unsafe_get primitive_map target
     and output = Array.unsafe_get primitive_offsets target
     and source_first = Array.unsafe_get topology.primitive_offsets
@@ -432,7 +432,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
         let first, last = block_bounds vertex_count grain block in
         let first_error = ref (-1) and first_kind = ref 0 in
         for vertex = first to last - 1 do
-          if vertex land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel vertex 4095;
           let next = Array.unsafe_get index.next_vertex vertex in
           if next >= 0 then begin
             let primitive = Array.unsafe_get index.primitive_of_vertex vertex
@@ -535,7 +535,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
     let vertex_break = Bytes.make vertex_count '\000' in
     if vertex_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(vertex_count - 1) (fun vertex ->
-      if vertex land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 4095;
       let next = Array.unsafe_get index.next_vertex vertex in
       if next >= 0 || Array.unsafe_get index.previous_vertex vertex >= 0 then begin
         match element with
@@ -560,7 +560,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
     if element = Poly_cut_points then begin
       if vertex_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
           ~finish:(vertex_count - 1) (fun vertex ->
-        if vertex land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel vertex 4095;
         let next = Array.unsafe_get index.next_vertex vertex in
         if next >= 0 then Array.unsafe_set edge_parts vertex
           (match strategy with
@@ -573,7 +573,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
     let primitive_action = Bytes.make primitive_count '\000' in
     if primitive_count > 0 then Parallel.for_ ~chunk_size:(max 1 (grain / 256))
         ~start:0 ~finish:(primitive_count - 1) (fun primitive ->
-      if primitive land 1023 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 1023;
       if selected primitives primitive then begin
         let first = Array.unsafe_get topology.primitive_offsets primitive
         and last = Array.unsafe_get topology.primitive_offsets (primitive + 1) in
@@ -624,7 +624,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
       if primitive_count > 0 then Parallel.for_
           ~chunk_size:(max 1 (grain / 256)) ~start:0
           ~finish:(primitive_count - 1) (fun primitive ->
-        if primitive land 1023 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 1023;
         let first = Array.unsafe_get topology.primitive_offsets primitive
         and last = Array.unsafe_get topology.primitive_offsets (primitive + 1)
         and output = ref (Array.unsafe_get primitive_segment_offsets primitive) in
@@ -653,7 +653,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
       if primitive_count > 0 then Parallel.for_
           ~chunk_size:(max 1 (grain / 256)) ~start:0
           ~finish:(primitive_count - 1) (fun primitive ->
-        if primitive land 1023 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 1023;
         let source_size = Array.unsafe_get topology.primitive_offsets (primitive + 1)
             - Array.unsafe_get topology.primitive_offsets primitive in
         if Bytes.unsafe_get primitive_action primitive = '\000' then begin
@@ -695,7 +695,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
       if primitive_count > 0 then Parallel.for_
           ~chunk_size:(max 1 (grain / 256)) ~start:0
           ~finish:(primitive_count - 1) (fun primitive ->
-        if primitive land 1023 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 1023;
         let target_base = Array.unsafe_get primitive_bases primitive
         and source_size = Array.unsafe_get topology.primitive_offsets (primitive + 1)
             - Array.unsafe_get topology.primitive_offsets primitive in
@@ -797,7 +797,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
       if output_primitive_count > 0 then Parallel.for_
           ~chunk_size:(max 1 (grain / 8)) ~start:0
           ~finish:(output_primitive_count - 1) (fun target ->
-        if target land 1023 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel target 1023;
         let primitive = Array.unsafe_get primitive_map target
         and output_first = Array.unsafe_get primitive_offsets target in
         if Array.unsafe_get fragment_first target < 0 then begin
@@ -878,7 +878,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
       let output_point_count = !base_point_count + !generated_count in
       if output_vertex_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
           ~finish:(output_vertex_count - 1) (fun vertex ->
-        if vertex land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel vertex 4095;
         if Bytes.unsafe_get generated vertex <> '\000' then
           Array.unsafe_set vertex_points vertex
             (!base_point_count + Array.unsafe_get vertex_points vertex)
@@ -896,7 +896,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
       done;
       if output_vertex_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
           ~finish:(output_vertex_count - 1) (fun vertex ->
-        if vertex land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel vertex 4095;
         if Bytes.unsafe_get generated vertex <> '\000' then begin
           let output = Array.unsafe_get vertex_points vertex in
           Array.unsafe_set output_point_left output (Array.unsafe_get point_left vertex);

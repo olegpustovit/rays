@@ -349,7 +349,7 @@ module Stable_bounds_bvh = struct
         end
       end;
       incr visited;
-      if !visited land 1023 = 0 then Cancel.check_opt cancel
+      Cancel.poll cancel !visited 1023
     done;
     !output_count
 end
@@ -623,7 +623,7 @@ let segment_pair_candidates ?cancel segment_first segment_second segment_count
       end in
     let event = ref 0 in
     while !event < segment_count && not !dense do
-      if !event land 1023 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !event 1023;
       let current = order.(!event) and retained = ref 0 in
       for slot = 0 to !active_count - 1 do
         let candidate = active.(slot) in
@@ -683,7 +683,7 @@ let point_segment_candidates ?cancel segment_first segment_second segment_count
       end in
     let event_slot = ref 0 in
     while !event_slot < event_count && not !dense do
-      if !event_slot land 1023 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !event_slot 1023;
       let event = events.(!event_slot) in
       if event < segment_count then begin
         let segment = event and retained = ref 0 in
@@ -1035,7 +1035,7 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
         end in
       let scan_segment_pairs () =
         for left = 0 to !raw_segment_count - 1 do
-          if left land 255 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel left 255;
           for right = left + 1 to !raw_segment_count - 1 do
             process_segment_pair left right
           done
@@ -1050,7 +1050,7 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
         let stack = Array.make index.Stable_bounds_bvh.node_count 0
         and candidates = Array.make !raw_segment_count 0 in
         for left = 0 to !raw_segment_count - 1 do
-          if left land 255 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel left 255;
           let count = Stable_bounds_bvh.query ?cancel index stack candidates
               ~after:left ~u_min:u_min.(left) ~u_max:u_max.(left)
               ~v_min:v_min.(left) ~v_max:v_max.(left) in
@@ -1064,7 +1064,7 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
       | Dense -> indexed_segment_pairs ()
       | Candidates candidates ->
           for slot = 0 to candidates.candidate_count - 1 do
-            if slot land 1023 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel slot 1023;
             let candidate = candidates.candidate_order.(slot) in
             process_segment_pair candidates.candidate_first.(candidate)
               candidates.candidate_second.(candidate)
@@ -1083,7 +1083,7 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
         end in
       let scan_point_segments () =
         for segment = 0 to !raw_segment_count - 1 do
-          if segment land 255 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel segment 255;
           for point_id = 0 to !point_count - 1 do
             process_point_segment segment point_id
           done
@@ -1109,7 +1109,7 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
         let stack = Array.make index.Stable_bounds_bvh.node_count 0
         and candidates = Array.make !point_count 0 in
         for segment = 0 to !raw_segment_count - 1 do
-          if segment land 255 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel segment 255;
           let count = Stable_bounds_bvh.query ?cancel index stack candidates
               ~after:(-1) ~u_min:segment_u_min.(segment)
               ~u_max:segment_u_max.(segment) ~v_min:segment_v_min.(segment)
@@ -1124,7 +1124,7 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
       | Dense -> indexed_point_segments ()
       | Candidates candidates ->
           for slot = 0 to candidates.candidate_count - 1 do
-            if slot land 1023 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel slot 1023;
             let candidate = candidates.candidate_order.(slot) in
             process_point_segment candidates.candidate_first.(candidate)
               candidates.candidate_second.(candidate)

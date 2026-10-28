@@ -21,11 +21,11 @@ let sort_range ?cancel values first last =
     end in
   let count = last - first in
   for root = (count / 2) - 1 downto 0 do
-    if root land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel root 4095;
     sift root count
   done;
   for remaining = count - 1 downto 1 do
-    if remaining land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel remaining 4095;
     swap first (first + remaining); sift 0 remaining
   done
 
@@ -34,17 +34,17 @@ let install_outputs ?cancel ~grain ~intersecting_group ~intersections_attribute
   let primitive_count = Geometry.primitive_count geometry in
   let raw_offsets = Array.make (primitive_count + 1) 0 in
   for primitive = 0 to primitive_count - 1 do
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     raw_offsets.(primitive + 1) <- raw_offsets.(primitive) + raw_counts.(primitive)
   done;
   if primitive_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(primitive_count - 1) (fun primitive ->
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     sort_range ?cancel raw_values raw_offsets.(primitive) raw_offsets.(primitive + 1));
   let unique_counts = Array.make primitive_count 0 in
   if primitive_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(primitive_count - 1) (fun primitive ->
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     let first = raw_offsets.(primitive) and last = raw_offsets.(primitive + 1) in
     if first < last then begin
       unique_counts.(primitive) <- 1;
@@ -56,13 +56,13 @@ let install_outputs ?cancel ~grain ~intersecting_group ~intersections_attribute
   );
   let offsets = Array.make (primitive_count + 1) 0 in
   for primitive = 0 to primitive_count - 1 do
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     offsets.(primitive + 1) <- offsets.(primitive) + unique_counts.(primitive)
   done;
   let values = Array.make offsets.(primitive_count) 0 in
   if primitive_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(primitive_count - 1) (fun primitive ->
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     let first = raw_offsets.(primitive) and last = raw_offsets.(primitive + 1)
     and output = ref offsets.(primitive) in
     for slot = first to last - 1 do
@@ -76,7 +76,7 @@ let install_outputs ?cancel ~grain ~intersecting_group ~intersections_attribute
     | Some name -> Geometry.with_group
         (Group.init ~grain ~owner:Group.Primitive ~name primitive_count
           (fun primitive ->
-            if primitive land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel primitive 4095;
             unique_counts.(primitive) > 0)) geometry in
   Result.bind with_group (fun geometry ->
   let with_intersections = match intersections_attribute with
@@ -119,7 +119,7 @@ let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
       let first = byte * 8 in
       let last = min candidates (first + 8) and bits = ref 0 in
       for candidate = first to last - 1 do
-        if candidate land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel candidate 4095;
         if Triangle_intersection.events_into ~scratch ~point_info ~events ~self
             ~tolerance ~include_coplanar source_narrow source_triangles.(candidate)
             collision_narrow collision_triangles.(candidate) > 0 then
@@ -130,7 +130,7 @@ let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
   let primitive_count = Geometry.primitive_count source_geometry in
   let raw_counts = Array.make primitive_count 0 and exact = ref 0 in
   for candidate = 0 to candidates - 1 do
-    if candidate land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel candidate 4095;
     if Support.Bits.mem keep candidate then begin
       let source_primitive = Surface_index.View.triangle_primitive
           source_surface source_triangles.(candidate) in
@@ -145,7 +145,7 @@ let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
   done;
   let raw_offsets = Array.make (primitive_count + 1) 0 in
   for primitive = 0 to primitive_count - 1 do
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     if raw_counts.(primitive) > Sys.max_array_length - raw_offsets.(primitive) then
       invalid_arg "Boolean Detect intersection cardinality exceeds array limits";
     raw_offsets.(primitive + 1) <- raw_offsets.(primitive) + raw_counts.(primitive)
@@ -156,7 +156,7 @@ let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
   let entry_count = !exact * multiplicity in
   let raw_values = Array.make entry_count 0 and cursors = Array.copy raw_offsets in
   for candidate = 0 to candidates - 1 do
-    if candidate land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel candidate 4095;
     if Support.Bits.mem keep candidate then begin
       let source_primitive = Surface_index.View.triangle_primitive
           source_surface source_triangles.(candidate)

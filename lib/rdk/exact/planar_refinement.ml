@@ -293,7 +293,7 @@ let constraint_index ?cancel points constraints =
   let min_x = Array.make count 0. and min_y = Array.make count 0.
   and max_x = Array.make count 0. and max_y = Array.make count 0. in
   for segment = 0 to count - 1 do
-    if segment land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel segment 16_383;
     let first = points.(constraints.(segment * 2))
     and second = points.(constraints.((segment * 2) + 1)) in
     let (first_x_lower,first_x_upper),(first_y_lower,first_y_upper),_ =
@@ -375,7 +375,7 @@ let mesh_index ?cancel ~point_count ~triangles ~constraints () =
     if first < second then begin edge_a.(edge) <- first; edge_b.(edge) <- second end
     else begin edge_a.(edge) <- second; edge_b.(edge) <- first end in
   for triangle = 0 to triangle_count - 1 do
-    if triangle land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel triangle 4095;
     let a = triangles.(triangle * 3) and b = triangles.((triangle * 3) + 1)
     and c = triangles.((triangle * 3) + 2) in
     write (triangle * 3) a b; write ((triangle * 3) + 1) b c;
@@ -535,7 +535,7 @@ let build ?cancel ~grain ~initial_points ~initial_triangle_points
       let triangle_count = Array.length !triangles / 3 in
       let bad = Bytes.make triangle_count '\000' in
       let classify triangle =
-        if triangle land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel triangle 4095;
         let a = (!triangles).(triangle * 3)
         and b = (!triangles).((triangle * 3) + 1)
         and c = (!triangles).((triangle * 3) + 2) in
@@ -571,7 +571,7 @@ let build ?cancel ~grain ~initial_points ~initial_triangle_points
         let constraint_tree = if segment_count = 0 then None
           else Some (constraint_index ?cancel points !constraints) in
         let construct candidate =
-          if candidate land 1023 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel candidate 1023;
           let a = candidate_a.(candidate) and b = candidate_b.(candidate)
           and c = candidate_c.(candidate) in
           let centroid = rounded_centroid points x y a b c in
@@ -724,7 +724,7 @@ let build ?cancel ~grain ~initial_points ~initial_triangle_points
         and target_x = Array.sub x 0 !point_count
         and target_y = Array.sub y 0 !point_count in
         let prepare point =
-          if point land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel point 4095;
           let first = index.neighbor_offsets.(point)
           and last = index.neighbor_offsets.(point + 1) in
           if first < last && Bytes.unsafe_get index.fixed point = '\000'
@@ -781,7 +781,7 @@ let build ?cancel ~grain ~initial_points ~initial_triangle_points
           let triangle_count = Array.length !triangles / 3 in
           let valid = Bytes.make triangle_count '\000' in
           let validate triangle =
-            if triangle land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel triangle 4095;
             let a = (!triangles).(triangle * 3)
             and b = (!triangles).((triangle * 3) + 1)
             and c = (!triangles).((triangle * 3) + 2) in

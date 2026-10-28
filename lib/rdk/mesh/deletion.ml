@@ -71,7 +71,7 @@ let build_plan ?cancel ~selected:delete_selected ~compact_points ~policy
   and retained_primitives = ref 0 and retained_vertices = ref 0
   and healed = ref false in
   for primitive = 0 to primitive_count - 1 do
-    if primitive land 1023 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 1023;
     let count = primitive_retained_count owner selection delete_selected policy
         topology primitive in
     let source_count = topology.primitive_offsets.(primitive + 1)
@@ -90,7 +90,7 @@ let build_plan ?cancel ~selected:delete_selected ~compact_points ~policy
   and primitive_kinds = Bytes.make !retained_primitives '\000' in
   let vertex_at = ref 0 and primitive_at = ref 0 in
   for primitive = 0 to primitive_count - 1 do
-    if primitive land 1023 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 1023;
     let count = retained_counts.(primitive) in
     if count > 0 then begin
       let first = topology.primitive_offsets.(primitive)
@@ -115,7 +115,7 @@ let build_plan ?cancel ~selected:delete_selected ~compact_points ~policy
   let used = if compact_points then Some (Array.make source_points false) else None in
   Option.iter (fun used ->
     Array.iteri (fun index vertex ->
-      if index land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel index 16_383;
       used.(topology.vertex_points.(vertex)) <- true) vertex_map) used;
   let retain_point point =
     let survives_selection = owner <> Group.Point
@@ -123,7 +123,7 @@ let build_plan ?cancel ~selected:delete_selected ~compact_points ~policy
     survives_selection && match used with None -> true | Some used -> used.(point) in
   let retained_points = ref 0 and old_to_new_point = Array.make source_points (-1) in
   for point = 0 to source_points - 1 do
-    if point land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel point 16_383;
     if retain_point point then begin
       old_to_new_point.(point) <- !retained_points; incr retained_points
     end
@@ -136,7 +136,7 @@ let build_plan ?cancel ~selected:delete_selected ~compact_points ~policy
   done;
   let vertex_points = Array.make !retained_vertices 0 in
   for vertex = 0 to !retained_vertices - 1 do
-    if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel vertex 16_383;
     let old_point = topology.vertex_points.(vertex_map.(vertex)) in
     let point = old_to_new_point.(old_point) in
     if point < 0 then fail "retained topology references a deleted point";
@@ -237,7 +237,7 @@ let primitive_partitions ~piece_count
   let primitive_counts = Array.make piece_count 0
   and vertex_counts = Array.make piece_count 0 in
   Array.iteri (fun primitive piece ->
-    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4095;
     check_piece "primitive" primitive piece;
     if valid_piece piece then begin
       primitive_counts.(piece) <- primitive_counts.(piece) + 1;
@@ -266,7 +266,7 @@ let primitive_partitions ~piece_count
     | Some pieces ->
         let counts = Array.make piece_count 0 in
         Array.iteri (fun point piece ->
-          if point land 16383 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel point 16383;
           check_piece "point" point piece;
           if valid_piece piece then counts.(piece) <- counts.(piece) + 1)
           pieces;

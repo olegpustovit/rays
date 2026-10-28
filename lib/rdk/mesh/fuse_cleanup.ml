@@ -6,7 +6,7 @@ let get_ok = function Ok value -> value | Error message -> fail message
 let run ?cancel ~grain count operation =
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(count - 1) (fun index ->
-        if index land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel index 4095;
         operation index)
 
 let minimum_vertices kind = if kind = '\001' then 2 else 3
@@ -99,7 +99,7 @@ let apply_with_mapping ?cancel ~grain ~remove_degenerate_primitives
       and output_vertex_first = Array.make source_primitives 0
       and output_primitives = ref 0 and output_vertices = ref 0 in
       for primitive = 0 to source_primitives - 1 do
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         let count = retained_counts.(primitive) in
         if count > 0 then begin
           if !output_vertices > max_int - count then
@@ -149,7 +149,7 @@ let apply_with_mapping ?cancel ~grain ~remove_degenerate_primitives
             end in
           let retained = ref 0 and old_to_new = Array.make source_points (-1) in
           for point = 0 to source_points - 1 do
-            if point land 16383 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel point 16383;
             let keep = if remove_all_unused_points then
                 Bytes.unsafe_get used_after point <> '\000'
               else Bytes.unsafe_get used_after point <> '\000'

@@ -105,7 +105,7 @@ let validate_finite_positions ?cancel ~grain ~operation geometry =
   let count = Array.length positions.x and first_invalid = Atomic.make max_int in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
       (fun point ->
-        if point land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 4095;
         if not (Float.is_finite positions.x.(point) && Float.is_finite positions.y.(point)
             && Float.is_finite positions.z.(point)) then begin
           let rec lower observed =
@@ -132,7 +132,7 @@ let soft_radius_weights ?cancel ~grain ~radius ~falloff selected geometry =
     let weights = Array.make count 0. in
     if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
         (fun point ->
-          if point land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel point 4095;
           if counts.(point) <> 0 then
             weights.(point) <- soft_transform_weight falloff
                 (sqrt distances.(point)) radius);
@@ -157,7 +157,7 @@ let soft_edge_distances ?cancel ~radius selected geometry =
     sqrt (dx*.dx +. dy*.dy +. dz*.dz)) in
   let roots = Array.make source_count 0 and filled = ref 0 in
   for point = 0 to count - 1 do
-    if point land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel point 16_383;
     if match selected with None -> true | Some group -> Group.mem point group
     then begin roots.(!filled) <- point; incr filled end
   done;
@@ -264,7 +264,7 @@ let distance_from_geometry ?cancel ?(grain = 16_384) ?affected
           | Distance_maximum ->
               let maximum = ref 0. in
               for point = 0 to point_count - 1 do
-                if point land 16_383 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel point 16_383;
                 let squared = distances_squared.(point) in
                 if affected_point point && Float.is_finite squared then begin
                   let distance = sqrt squared in
@@ -284,7 +284,7 @@ let distance_from_geometry ?cancel ?(grain = 16_384) ?affected
         Result.bind mask_values (fun mask_values ->
           if point_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
               ~finish:(point_count - 1) (fun point ->
-                if point land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel point 4095;
                 if affected_point point then begin
                   let squared = distances_squared.(point) in
                   let distance = if Float.is_finite squared then sqrt squared
@@ -333,7 +333,7 @@ let soft_attribute_weights ?cancel ~grain ~radius ~falloff ~apply_rolloff
           else begin
             if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                 ~finish:(count - 1) (fun point ->
-                  if point land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel point 4095;
                   let value = values.(point) in
                   if not (Float.is_finite value) then begin
                     let rec lower observed =
@@ -394,7 +394,7 @@ let soft_transform ?cancel ?(grain = 16_384) ?selection
               let weights = Array.make count 0. in
               if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                   ~finish:(count - 1) (fun point ->
-                    if point land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel point 4095;
                     weights.(point) <- soft_transform_weight falloff
                         distances.(point) radius);
               Ok weights
@@ -410,7 +410,7 @@ let soft_transform ?cancel ?(grain = 16_384) ?selection
               (m20,m21,m22,m23), (m30,m31,m32,m33) = Rays_math.Mat4.to_rows matrix in
           if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
               ~finish:(count - 1) (fun point ->
-                if point land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel point 4095;
                 let weight = weights.(point) in
                 if moves_positions && weight <> 0. then begin
                   Atomic.set changed true;

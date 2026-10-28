@@ -94,7 +94,7 @@ module Parallel = Parallel
 let parallel_for ?cancel ~grain count work =
   if count > 0 then Parallel.for_ ~chunk_size:(max 1 grain) ~start:0 ~finish:(count - 1)
     (fun element ->
-      if element land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel element 4095;
       work element)
 
 let run_ranges ?(grain = 16_384) count operation =

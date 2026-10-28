@@ -27,7 +27,7 @@ let of_links ?cancel ~operation destinations =
       if left <> right then
         if left < right then parent.(right) <- left else parent.(left) <- right in
     for point = 0 to count - 1 do
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
       let destination = destinations.(point) in
       if destination < -1 || destination >= count then invalid_arg
           (Printf.sprintf "%s target point %d at query %d is out of range"
@@ -99,7 +99,7 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
       and max_y = ref neg_infinity and max_z = ref neg_infinity
       and non_finite = ref (-1) in
       for point = 0 to count - 1 do
-        if point land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel point 4095;
         let x = positions.x.(point) and y = positions.y.(point)
         and z = positions.z.(point) in
         if not (Float.is_finite x && Float.is_finite y && Float.is_finite z) then non_finite := point
@@ -139,7 +139,7 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
             if exact then Point_grid.float_cell value
             else int_of_float (floor (scaled_delta minimum value)) in
           for point = 0 to count - 1 do
-            if point land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel point 4095;
             if match selection with None -> true
                 | Some group -> Group.mem point group then begin
               let x = positions.x.(point) and y = positions.y.(point)

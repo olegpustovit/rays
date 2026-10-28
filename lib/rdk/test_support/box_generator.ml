@@ -295,7 +295,7 @@ let box ?(grain = 16_384) ?(connectivity = Box_triangles)
                  let first = range * grain
                  and last = min point_count ((range + 1) * grain) in
                  for point = first to last - 1 do
-                   if point land 4095 = 0 then Cancel.check_opt cancel;
+                   Cancel.poll cancel point 4095;
                    let x = point mod nxp in
                    let yz = point / nxp in
                    let y = yz mod nyp and z = yz / nyp in
@@ -311,7 +311,7 @@ let box ?(grain = 16_384) ?(connectivity = Box_triangles)
                  let first = range * grain
                  and last = min point_count ((range + 1) * grain) in
                  for point = first to last - 1 do
-                   if point land 4095 = 0 then Cancel.check_opt cancel;
+                   Cancel.poll cancel point 4095;
                    let valid =
                      if point < plane then
                        write_boundary point (point mod nxp) (point / nxp) 0
@@ -351,7 +351,7 @@ let box ?(grain = 16_384) ?(connectivity = Box_triangles)
                    for row = first_row to last_row - 1 do
                      for column = 0 to u_div do
                        let point = face_point_index face row column in
-                       if point land 4095 = 0 then Cancel.check_opt cancel;
+                       Cancel.poll cancel point 4095;
                        let valid = match face with
                          | 0 -> write_grid_position point x_divisions column row
                          | 1 -> write_grid_position point 0 column
@@ -412,7 +412,7 @@ let box ?(grain = 16_384) ?(connectivity = Box_triangles)
                   | None -> () in
                 Parallel.for_ ~chunk_size:(max 1 (grain / slots)) ~start:0
                   ~finish:(cell_count - 1) (fun local_cell ->
-                    if local_cell land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel local_cell 4095;
                     let row = local_cell / u_div and column = local_cell mod u_div in
                     let a = face_point_index face row column
                     and b = face_point_index face row (column + 1)
@@ -435,7 +435,7 @@ let box ?(grain = 16_384) ?(connectivity = Box_triangles)
               done;
               Parallel.for_ ~chunk_size:grain ~start:0 ~finish:primitive_count
                 (fun primitive ->
-                  if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel primitive 4095;
                   primitive_offsets.(primitive) <- primitive
                     * (slots / primitive_per_cell));
               Topology.View.create_validated_owned ~point_count
@@ -476,7 +476,7 @@ let box ?(grain = 16_384) ?(connectivity = Box_triangles)
                   let builder = Group.Builder.create ~owner:Group.Primitive
                       ~name:(prefix ^ "__" ^ names.(face)) primitive_count in
                   for primitive = first to last - 1 do
-                    if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel primitive 4095;
                     Group.Builder.set builder primitive true
                   done;
                   Group.Builder.freeze builder)) in

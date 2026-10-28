@@ -106,7 +106,7 @@ let point_vectors_from_vertices ?cancel ~grain topology source =
   let x = Array.make point_count 0. and y = Array.make point_count 0.
   and z = Array.make point_count 0. and incidence = Array.make point_count 0 in
   for vertex = 0 to Array.length topology_view.vertex_points - 1 do
-    if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel vertex 16_383;
     let point = topology_view.vertex_points.(vertex) in
     x.(point) <- x.(point) +. source.x.(vertex);
     y.(point) <- y.(point) +. source.y.(vertex);
@@ -115,7 +115,7 @@ let point_vectors_from_vertices ?cancel ~grain topology source =
   done;
   Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(point_count - 1)
     (fun point ->
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
       let count = incidence.(point) in
       if count > 1 then begin
         let inverse = 1. /. float_of_int count in
@@ -134,7 +134,7 @@ let geometric_point_vectors ?cancel ~grain geometry =
     and z = Array.make point_count 0. in
     let primitive = ref 0 in
     for vertex = 0 to Array.length topology_view.vertex_points - 1 do
-      if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 16_383;
       while vertex >= topology_view.primitive_offsets.(!primitive + 1) do
         incr primitive
       done;

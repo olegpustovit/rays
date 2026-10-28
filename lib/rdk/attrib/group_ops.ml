@@ -352,7 +352,7 @@ let copied_selection ?cancel ~grain owner mapping source_group target =
   | Some group_owner ->
       let target_group = Group.init ~grain ~owner:group_owner
           ~name:"__copied" count (fun element ->
-            if element land 16_383 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel element 16_383;
             member element) in
       let target_group = match source_group with
         | Native_edges _ -> target_group
@@ -397,7 +397,7 @@ let copied_selection ?cancel ~grain owner mapping source_group target =
       let index = Topology_index.create ?cancel topology in
       Native_edges (Edge_group.init ~grain ~topology ~index ~name:"__copied"
         (fun edge ->
-          if edge land 16_383 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel edge 16_383;
           member edge))
 
 let unique_suffix store owner base =

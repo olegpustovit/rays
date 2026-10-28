@@ -54,7 +54,7 @@ let create ?cancel ?(grain = 16_384) ?primitives geometry =
   let selected_count = Array.length selected in
   let piece_offsets = Array.make (selected_count + 1) 0 in
   for slot = 0 to selected_count - 1 do
-    if slot land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel slot 4095;
     let primitive = selected.(slot) in
     let first = topology.primitive_offsets.(primitive)
     and last = topology.primitive_offsets.(primitive + 1) in
@@ -92,7 +92,7 @@ let create ?cancel ?(grain = 16_384) ?primitives geometry =
     let first_selected = range * chunk
     and last_selected = min selected_count ((range + 1) * chunk) in
     for slot = first_selected to last_selected - 1 do
-      if slot land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel slot 4095;
       let primitive = selected.(slot) and output = piece_offsets.(slot) in
       let first = topology.primitive_offsets.(primitive)
       and last = topology.primitive_offsets.(primitive + 1) in
@@ -133,7 +133,7 @@ let create ?cancel ?(grain = 16_384) ?primitives geometry =
     let first_piece = range * grain
     and last_piece = min piece_count ((range + 1) * grain) in
     for piece = first_piece to last_piece - 1 do
-      if piece land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel piece 4095;
       if errors.(range) = None then begin
         let primitive = primitive_of_piece.(piece) in
         let pa = topology.vertex_points.(vertex_a.(piece))
@@ -271,7 +271,7 @@ let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
       let stack = Array.make 65 0 in
       let first = range * chunk and last = min left_count ((range + 1) * chunk) in
       for piece = first to last - 1 do
-        if piece land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel piece 4095;
         counts.(piece) <- scan stack piece None None 0
       done);
     let offsets = Array.make (left_count + 1) 0 in
@@ -286,7 +286,7 @@ let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
       let stack = Array.make 65 0 in
       let first = range * chunk and last = min left_count ((range + 1) * chunk) in
       for piece = first to last - 1 do
-        if piece land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel piece 4095;
         let written = scan stack piece (Some left_output) (Some right_output)
             offsets.(piece) in
         if written <> counts.(piece) then invalid_arg
@@ -310,13 +310,13 @@ let self_pair_of ?cancel ~grain ~tolerance index predicate =
       and last_piece = min pieces ((range + 1) * grain)
       and left_piece = ref (range * grain) in
       while found_left.(range) < 0 && !left_piece < last_piece do
-        if !left_piece land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel !left_piece 4095;
         let top = ref 1 and best_right = ref (-1) in
         stack.(0) <- 0;
         while !top > 0 do
           decr top;
           let node = stack.(!top) in
-          if node land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel node 4095;
           if bounds_overlap tolerance index index node !left_piece then
             if index.count.(node) > 0 then begin
               let last = index.first.(node) + index.count.(node) in

@@ -83,7 +83,7 @@ let compatible condition tolerance views query target =
 let validate_positions ?cancel label geometry =
   let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   for point = 0 to Geometry.point_count geometry - 1 do
-    if point land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel point 4095;
     if not (Float.is_finite positions.x.(point) && Float.is_finite positions.y.(point)
         && Float.is_finite positions.z.(point)) then raise (Error.Fail (Printf.sprintf
         "%s point %d has a non-finite position" label point))
@@ -108,7 +108,7 @@ let specified ?cancel ~grain ?queries ?targets attribute_name ~source ~target =
   let output = Array.make source_count (-1) in
   if source_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(source_count - 1) (fun query ->
-        if query land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel query 4095;
         if (match queries with None -> true | Some group -> Group.mem query group) then
           let destination = values.(query) in
           if destination >= 0 && destination < target_count
@@ -188,7 +188,7 @@ let near ?cancel ~grain ?queries ?targets ~using ~tolerance ~metric ~inclusive
     let neighbor_delta = if exact then 0 else 1 in
     if source_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(source_count - 1) (fun query ->
-          if query land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel query 4095;
           if match queries with None -> true | Some group -> Group.mem query group
           then begin
             let qx = query_positions.x.(query) and qy = query_positions.y.(query)

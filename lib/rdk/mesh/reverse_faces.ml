@@ -65,7 +65,7 @@ let run ?cancel
   let primitive_grain = max 1 (grain / average_primitive_size) in
   Parallel.for_ ~chunk_size:primitive_grain ~start:0
     ~finish:(primitive_count - 1) (fun primitive ->
-      if primitive land 1023 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 1023;
       if selected primitive then begin
         let first = source.primitive_offsets.(primitive)
         and last = source.primitive_offsets.(primitive + 1) in

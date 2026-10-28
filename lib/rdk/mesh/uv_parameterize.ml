@@ -94,7 +94,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     let edge_count = Topology_index.edge_count index in
     let edge_is_seam = Bytes.make edge_count '\000' in
     for edge = 0 to edge_count - 1 do
-      if edge land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 16_383;
       let incidence = Topology_index.edge_incidence_count index edge in
       if incidence > 2 then fail "UV parameterization rejects non-manifold edges";
       let selected = (match edge_seams with
@@ -110,7 +110,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     let corner_parent = Array.init vertex_count Fun.id
     and corner_rank = Bytes.make vertex_count '\000' in
     for edge = 0 to edge_count - 1 do
-      if edge land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 16_383;
       if Topology_index.edge_incidence_count index edge = 2
           && Bytes.get edge_is_seam edge = '\000' then begin
         let left_a, left_b = edge_endpoint_corners topology_view index_view edge 0
@@ -369,7 +369,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     if Atomic.get invalid_triangle then
       fail "UV parameterization rejects zero-area or numerically degenerate triangles";
     for primitive = 0 to primitive_count - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       let first = topology_view.primitive_offsets.(primitive) in
       for local = 0 to 2 do
         let corner = first + local

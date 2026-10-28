@@ -37,7 +37,7 @@ let apply_primitives ?cancel ?(grain = 16_384) permutation geometry =
   and kinds = Bytes.make primitive_count '\000' in
   if primitive_count > 0 then Parallel.for_ ~chunk_size:(max 1 (grain / 8))
       ~start:0 ~finish:(primitive_count - 1) (fun primitive ->
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         let source_primitive = permutation.(primitive)
         and output_first = offsets.(primitive) in
         let source_first = source.primitive_offsets.(source_primitive)

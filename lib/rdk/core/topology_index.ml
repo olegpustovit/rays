@@ -43,7 +43,7 @@ let create_from_point_index ?cancel point_index topology =
   and opposite_vertex = Array.make vertex_count (-1) in
   let outgoing_count = ref 0 in
   for primitive = 0 to primitive_count - 1 do
-    if primitive land 1023 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 1023;
     let first = source.primitive_offsets.(primitive)
     and last = source.primitive_offsets.(primitive + 1) in
     let cyclic = Bytes.get source.primitive_kinds primitive <> '\001' in
@@ -82,7 +82,7 @@ let create_from_point_index ?cancel point_index topology =
     end
   in
   for vertex = 0 to vertex_count - 1 do
-    if vertex land 16383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel vertex 16383;
     let next = next_vertex.(vertex) in
     if next >= 0 then begin
       let edge = find_or_add source.vertex_points.(vertex)

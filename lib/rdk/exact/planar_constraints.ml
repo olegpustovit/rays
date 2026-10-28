@@ -173,7 +173,7 @@ let build ?cancel ?(grain = 16_384) ~split_crossings ~x ~y ~segment_points
     let classified_pairs = ref 0 in
     let classify left right =
       incr classified_pairs;
-      if !classified_pairs land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !classified_pairs 4095;
       let a = first.(left) and b = second.(left)
       and c = first.(right) and d = second.(right) in
       let ab_c = Predicates.orient2d_packed ~x ~y a b c
@@ -217,7 +217,7 @@ let build ?cancel ?(grain = 16_384) ~split_crossings ~x ~y ~segment_points
               visit segment) in
       let counts = Array.make embedded_count 0 in
       let count index =
-        if index land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel index 4095;
         let value = ref 0 in
         query embedded_points.(index) (fun _ ->
           if !value = max_int then
@@ -237,7 +237,7 @@ let build ?cancel ?(grain = 16_384) ~split_crossings ~x ~y ~segment_points
       done;
       let incidences = Array.make offsets.(embedded_count) 0 in
       let fill index =
-        if index land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel index 4095;
         let at = ref offsets.(index) in
         query embedded_points.(index) (fun segment ->
           incidences.(!at) <- segment; incr at);

@@ -165,7 +165,7 @@ let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
                    and at = row * u_points in
                    for column = 0 to u_points - 1 do
                      let point = at + column in
-                     if point land 4095 = 0 then Cancel.check_opt cancel;
+                     Cancel.poll cancel point 4095;
                      let u = if u_points = 1 then 0.5
                        else float_of_int column /. float_of_int u_divisions in
                      let du = (u -. 0.5) *. width in
@@ -206,7 +206,7 @@ let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
                    done in
                  Parallel.for_ ~chunk_size:primitive_grain ~start:0
                    ~finish:(primitive_count - 1) (fun primitive ->
-                     if primitive land 1023 = 0 then Cancel.check_opt cancel;
+                     Cancel.poll cancel primitive 1023;
                      match mode with
                      | `Rows ->
                          let at = primitive * u_points in
@@ -246,7 +246,7 @@ let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
                  let cell_count = u_divisions * v_divisions in
                  Parallel.for_ ~chunk_size:(max 1 (grain / slots)) ~start:0
                    ~finish:(cell_count - 1) (fun cell ->
-                     if cell land 4095 = 0 then Cancel.check_opt cancel;
+                     Cancel.poll cancel cell 4095;
                      let row = cell / u_divisions
                      and column = cell mod u_divisions in
                      let a = (row * u_points) + column in
@@ -270,7 +270,7 @@ let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
                  let primitive_size = if slots = 4 then 4 else 3 in
                  Parallel.for_ ~chunk_size:grain ~start:0 ~finish:primitive_count
                    (fun primitive ->
-                     if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                     Cancel.poll cancel primitive 4095;
                      primitive_offsets.(primitive) <- primitive * primitive_size);
                  Topology.View.create_validated_owned ~point_count
                    ~vertex_points ~primitive_offsets ~primitive_kinds in

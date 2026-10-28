@@ -53,7 +53,7 @@ let build ?cancel complex radial =
         invalid_arg "radial cycle assigned two neighbors to one half-edge";
       neighbors.(slot) <- neighbor in
     for edge = 0 to Boolean_complex.edge_count complex - 1 do
-      if edge land 255 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 255;
       let first, last = Boolean_radial.incident_range radial edge in
       let count = last - first in
       if count = 0 then invalid_arg "complex edge has no radial chart";

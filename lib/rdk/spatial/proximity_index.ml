@@ -45,7 +45,7 @@ let primitive_features ?cancel ?(grain = 16_384) geometry =
     let entity_count = Geometry.primitive_count geometry in
     let offsets = Array.make (entity_count + 1) 0 in
     for primitive = 0 to entity_count - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       let corners = topology.primitive_offsets.(primitive + 1)
           - topology.primitive_offsets.(primitive) in
       let count = match Char.code (Bytes.unsafe_get topology.primitive_kinds primitive) with
@@ -66,7 +66,7 @@ let primitive_features ?cancel ?(grain = 16_384) geometry =
           and last_primitive = min entity_count ((range + 1) * grain) in
           let scratch = Polygon_triangulation.create_scratch () in
           for primitive = first_primitive to last_primitive - 1 do
-            if primitive land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel primitive 4095;
             if failures.(range) = None then begin
               let first = topology.primitive_offsets.(primitive)
               and last = topology.primitive_offsets.(primitive + 1)
@@ -106,7 +106,7 @@ let primitive_features ?cancel ?(grain = 16_384) geometry =
       | None, None | Some _, _ -> ()) failures;
     Option.iter (fun message -> raise (Error.Fail message)) !failure;
     for feature = 0 to total - 1 do
-      if feature land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel feature 4095;
       validate_point positions a.(feature) "primitive";
       validate_point positions b.(feature) "primitive";
       if Bytes.unsafe_get kinds feature = triangle then begin
@@ -145,7 +145,7 @@ let edge_features ?cancel ?(grain = 16_384) geometry =
     and a = Array.copy reverse.edge_a and b = Array.copy reverse.edge_b
     and c = Array.make entity_count (-1) in
     for edge = 0 to entity_count - 1 do
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       validate_point positions a.(edge) "edge";
       validate_point positions b.(edge) "edge"
     done;
@@ -167,7 +167,7 @@ let create ?cancel ?(grain = 16_384) features =
     and fmax_x = Array.make total 0. and fmax_y = Array.make total 0.
     and fmax_z = Array.make total 0. in
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(total - 1) (fun feature ->
-      if feature land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel feature 4095;
       let point_a = features.a.(feature) and point_b = features.b.(feature) in
       let ax = features.positions.x.(point_a)
       and ay = features.positions.y.(point_a)
@@ -468,7 +468,7 @@ let nearest_entities_with_distances ?cancel ?(grain = 16_384) ~max_distance
           let best_distance = [|maximum|] and best_ids = [|-1; -1|]
           and stack = Array.make 128 0 and bounds = Array.make 6 0. in
           for entity = first_entity to last_entity - 1 do
-            if entity land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel entity 4095;
             best_distance.(0) <- maximum;
             best_ids.(0) <- -1; best_ids.(1) <- -1;
             for feature = queries.offsets.(entity) to

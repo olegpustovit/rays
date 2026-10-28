@@ -67,14 +67,14 @@ let select_array ?cancel ~grain mapping source =
   else begin
     let output = Array.make count source.(mapping.(0)) in
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1) (fun index ->
-      if index land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel index 16_383;
       output.(index) <- source.(mapping.(index)));
     output
   end
 
 let interpolate_float ?cancel ~grain left right weights source =
   Parallel.init_array ~grain (Array.length weights) (fun index ->
-    if index land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel index 16_383;
     let t = weights.(index) in
     source.(left.(index))
       +. ((source.(right.(index)) -. source.(left.(index))) *. t))
@@ -247,7 +247,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
       (Char.chr (Char.code (Bytes.get candidate_faces byte) lor mask)) in
   let candidate_count = ref 0 in
   for edge = 0 to edge_count - 1 do
-    if edge land 16_383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel edge 16_383;
     if requested edge && index.edge_offsets.(edge + 1) - index.edge_offsets.(edge) = 2
     then begin
       let first = index.edge_offsets.(edge) in
@@ -319,7 +319,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
     and move_to_next = Array.make vertex_count 0. in
     let touched_count = ref 0 in
     for vertex = 0 to vertex_count - 1 do
-      if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 16_383;
       let primitive = index.primitive_of_vertex.(vertex) in
       if Bytes.get topology_view.primitive_kinds primitive = '\000' then begin
         let previous = index.previous_vertex.(vertex) in
@@ -352,7 +352,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
        limiting is deterministic and does not require relaxation passes. *)
     if clamp_overlap then
       for vertex = 0 to vertex_count - 1 do
-        if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel vertex 16_383;
         let primitive = index.primitive_of_vertex.(vertex) in
         if Bytes.get topology_view.primitive_kinds primitive = '\000' then begin
           let next = index.next_vertex.(vertex) in
@@ -525,7 +525,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
       if !touched_count > 0 then
         Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(vertex_count - 1)
           (fun vertex ->
-            if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel vertex 16_383;
             let output = corner_storage.(vertex) in
             if output >= 0 then begin
               let point = topology_view.vertex_points.(vertex)
@@ -626,7 +626,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
         if divisions > 1 && !selected_count > 0 then
           Parallel.for_ ~chunk_size:(max 1 (grain / max 1 (2 * (divisions - 1))))
             ~start:0 ~finish:(edge_count - 1) (fun edge ->
-              if edge land 4_095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel edge 4_095;
               if edge_selected edge then
                 for endpoint = 0 to 1 do
                   for layer = 1 to divisions - 1 do
@@ -689,7 +689,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
         and insert_weight0 = Array.make vertex_count 0.
         and insert_weight1 = Array.make vertex_count 0. in
         for vertex = 0 to vertex_count - 1 do
-          if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel vertex 16_383;
           let primitive = index.primitive_of_vertex.(vertex) in
           if Bytes.get topology_view.primitive_kinds primitive = '\000' then begin
             let edge = index.edge_of_vertex.(vertex) in
@@ -794,7 +794,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
         if primitive_count > 0 then
           Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(primitive_count - 1)
             (fun primitive ->
-              if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel primitive 4_095;
               let first = topology_view.primitive_offsets.(primitive)
               and last = topology_view.primitive_offsets.(primitive + 1) in
               let output = ref base_offsets.(primitive) in
@@ -995,7 +995,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
         let source_edge_groups = Geometry.edge_groups geometry in
         let edge_groups = List.map (fun source_group ->
           let bits = edge_bits (fun edge ->
-              if edge land 16_383 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel edge 16_383;
               let target_a, target_b =
                 Topology_edge_lookup.endpoints target_edges edge in
               let a = point_map.(target_a) and b = point_map.(target_b) in

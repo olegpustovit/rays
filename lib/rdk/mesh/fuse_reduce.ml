@@ -258,7 +258,7 @@ let apply ?cancel ~grain ~position ?weight_attribute ~attributes
         let vertex_points = Array.make (Geometry.vertex_count geometry) 0 in
         if Array.length vertex_points > 0 then Parallel.for_ ~chunk_size:grain
             ~start:0 ~finish:(Array.length vertex_points - 1) (fun vertex ->
-              if vertex land 16383 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel vertex 16383;
               vertex_points.(vertex) <- point_map.(source_topology.vertex_points.(vertex)));
         Topology.View.create_validated_owned
           ~point_count:(if compact then clusters.count else source_count)

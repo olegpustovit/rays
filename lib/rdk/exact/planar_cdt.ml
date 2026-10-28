@@ -755,7 +755,7 @@ let build ?cancel ?workspace ~point_count ~orient ~incircle
             end
       done in
     Array.iteri (fun insertion point ->
-      if insertion land 255 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel insertion 255;
       let containing,edge = locate point in
       let inserted_triangles = match edge with
        | None ->
@@ -1206,7 +1206,7 @@ let build ?cancel ?workspace ~point_count ~orient ~incircle
       done in
     let recover_constraints values =
       for constraint_index = 0 to Array.length values / 2 - 1 do
-        if constraint_index land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel constraint_index 255;
         let a = values.(constraint_index * 2)
         and b = values.((constraint_index * 2) + 1) in
         let key = edge_key a b in
@@ -1232,7 +1232,7 @@ let build ?cancel ?workspace ~point_count ~orient ~incircle
     while !continue do match Key_heap.pop queue with
       | None -> continue := false
       | Some key ->
-          if !flips land 255 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel !flips 255;
           let slot = Edge_table.find table key in
           if slot >= 0 && table.Edge_table.second_triangles.(slot) >= 0
               && Bytes.unsafe_get table.Edge_table.constrained slot = '\000' then begin
@@ -1285,7 +1285,7 @@ let build ?cancel ?workspace ~point_count ~orient ~incircle
               mark table.Edge_table.first_triangles.(slot)
           done;
           while !read < !write do
-            if !read land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel !read 4095;
             let triangle = queue.(!read) in incr read;
             let visit a b =
               let slot = Edge_table.find table (edge_key a b) in
@@ -1344,7 +1344,7 @@ let build ?cancel ?workspace ~point_count ~orient ~incircle
             end
           done;
           while !winding_read < !winding_write do
-            if !winding_read land 4095 = 0 then Cancel.check_opt cancel;
+            Cancel.poll cancel !winding_read 4095;
             let triangle = winding_queue.(!winding_read) in
             incr winding_read;
             let visit u v opposite =

@@ -292,7 +292,7 @@ let fuse ({ cancel; grain; selection; target_selection; targeting; using; tolera
               and z = Array.copy source.z in
               if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                   ~finish:(count - 1) (fun point ->
-                    if point land 4095 = 0 then Cancel.check_opt cancel;
+                    Cancel.poll cancel point 4095;
                     let destination = destinations.(point) in
                     if destination >= 0 then begin
                       x.(point) <- target_positions.x.(destination);
