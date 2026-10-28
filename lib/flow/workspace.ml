@@ -259,6 +259,7 @@ let rec packed_body ~ops (term : term) =
        | Some Exact -> (match args with [_, t] -> body t | _ -> false)
        | Some (Fma | Checked_fma) -> List.length args = 3 && List.for_all (fun (_, t) -> body t) args
        | Some Trace -> List.length args = 6 && List.for_all (fun (_, t) -> body t) args
+       | Some Stage -> List.for_all (fun (_, t) -> body t) args
        | Some Checked_mul -> List.length args = 2 && List.for_all (fun (_, t) -> body t) args
        | Some Gather -> (match args with
            | [_,array;_,index] -> (array.ty=Ty.Array Ty.Text || Option.is_some(Packed_ops.array_width array.ty)) && body index

@@ -63,3 +63,5 @@ val unify : t -> t -> t option
 
 val elem : t -> t option
 (** Element type of a list. *)
+val numeric_record : t -> bool
+(** A nonempty record whose leaves are numbers, booleans or vectors (nested records allowed). *)

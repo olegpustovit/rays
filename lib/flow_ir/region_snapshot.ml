@@ -16,6 +16,7 @@ let rec instruction : P.instruction -> string = function
       | Sin -> "Sin" | Cos -> "Cos" | Sqrt -> "Sqrt" | Abs -> "Abs" | Not -> "Not"
       |Tan->"Tan"|Asin->"Asin"|Acos->"Acos"|Exp->"Exp"|Log->"Log"|Sign->"Sign")) a
   | Noise3 (x, y, z, seed, octaves, lacunarity, gain) -> Printf.sprintf "Noise3 %d %d %d seed=%d octaves=%d%s" x y z seed octaves (if lacunarity = 2. && gain = 0.5 then "" else Printf.sprintf " lacunarity=%h gain=%h" lacunarity gain)
+  | Stage (_, r) -> "Stage" ^ String.concat "" (List.map (Printf.sprintf " %d") (Array.to_list r))
   | Trace (field, r) -> Printf.sprintf "Trace %d%s" field (String.concat "" (List.map (Printf.sprintf " %d") (Array.to_list r)))
   | Fma (a,b,c) -> Printf.sprintf "Fma %d %d %d" a b c
   | Checked_mul(p,a,b) -> Printf.sprintf "Checked_mul %s %d %d" (match p with Value->"value"|Valid->"valid") a b

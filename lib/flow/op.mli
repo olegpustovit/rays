@@ -8,7 +8,7 @@ type arithmetic = { apply : 'f 'r. ('f, 'r) Value.t -> ('f, 'r) Value.t -> ('f, 
 type packed_kind = Binary of Packed_ops.binary | Unary of Packed_ops.unary
   | Integer of Packed_ops.integer | Integer_compare of Packed_ops.comparison
   | Convert of Packed_ops.conversion
-  | Noise3 | Fma | Checked_mul | Checked_fma | Rand_at | Trace | Length | Dot | Cross | Normalize | Exact | Gather | Frame | Constant_only
+  | Noise3 | Fma | Checked_mul | Checked_fma | Rand_at | Trace | Stage | Length | Dot | Cross | Normalize | Exact | Gather | Frame | Constant_only
 type t = {
   name : string; ctx : Context.t; signature : signature;
   out : Ty.t list -> Ty.t;

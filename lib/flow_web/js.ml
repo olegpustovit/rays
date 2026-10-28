@@ -186,6 +186,7 @@ let region ?(fast=false) program =
           (register array)(register array)(index i)width width component
       | Int_gather(array,i) -> Printf.sprintf "%s[row(%s, %s, 1)]" (register array)(register array)(index i)
       | Trace _ -> raise (Diagnostic.Error (Diagnostic.error ~code:"E_WEB_SOURCE" "scene/trace needs a native ray-query host; it is outside the 2D web target."))
+      | Stage _ -> raise (Diagnostic.Error (Diagnostic.error ~code:"E_WEB_SOURCE" "A raster-stage intrinsic runs only in a native fragment stage."))
       | Text_const value -> Text_literal.quote value
       | Text_input input -> Printf.sprintf "text(in%d[j%d])" input input
       | Text_uniform input -> Printf.sprintf "text(uniforms[%d])" input

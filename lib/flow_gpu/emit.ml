@@ -173,6 +173,11 @@ float trace_occluded(|} ^ parameters ^ {|) {
   return 0.0f;
 }
 |}
+(* A raster-stage intrinsic (Flow_ir.Core.Region.stage); texture t is sampled with sampler t + 1. *)
+let stage_intrinsic stage operands = match stage with
+  | Flow_ir.Core.Region.Fwidth -> "fwidth(" ^ operands.(0) ^ ")"
+  | Sample (t, c) -> Printf.sprintf "texture%d.sample(sampler%d,float2(%s,%s)).%c" t (t + 1) operands.(0) operands.(1) "xyzw".[c]
+  | Texture_size (t, c) -> Printf.sprintf "float(texture%d.get_%s())" t (if c = 0 then "width" else "height")
 let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
 let register index = "r" ^ string_of_int index
 let rec guarded guards = function
@@ -259,7 +264,13 @@ let narrow_integer operation a b =
 let comparison operation a b =
   let op = match operation with Flow.Packed_ops.Ilt -> "<" | Ile -> "<=" | Igt -> ">" | Ige -> ">=" | Ieq -> "==" in
   "(" ^ a ^ op ^ b ^ "?1.0f:0.0f)"
-let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = try
+(* A raster placement (Raster): elements are vertex ids or interpolated fragment inputs, gathers read the
+   renderer's bound buffers, and outputs are stage results; the stage function around the body is Raster's. *)
+type raster = { input : int -> int -> string; int_input : int -> string; buffer : int -> string;
+  output : int -> int -> string -> string }
+let rec kernel ?fast ?instanced ?motion ?curves program = generate ?fast ?instanced ?motion ?curves program
+and stage_body ~raster program = Result.map (fun msl -> msl.source) (generate ~fast:true ~raster program)
+and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster program = try
   (match P.gpu_refusals ~fused:true ~fast program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));
   let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves:(curves <> None) program in
   let native = curves = Some `Native && layout.scene_strands <> None in
@@ -289,7 +300,10 @@ let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = tr
           if not (prefix (defined_in.(r), !blocks)) then local.(r) <- false
         end;
         register r in
-  let inline slot instruction = not !counting && references.(slot) = 1 && not named.(slot) && not finite_checks.(slot)
+  (* a raster stage reads an interpolated input where it is used: an Apple GPU interpolates on read, so a
+     glyph fragment never pays for a rectangle's varyings *)
+  let inline slot instruction = not !counting && raster <> None && not named.(slot) && (match instruction with P.Input _ -> true | _ -> false)
+    || not !counting && references.(slot) = 1 && not named.(slot) && not finite_checks.(slot)
     && (match instruction with P.Trace _ | Int_binary ((Idiv | Imod | Ishl | Ishr), _, _) -> false | _ -> true)
     && fst defined.(slot) = fst referenced.(slot) && prefix (defined_in.(slot), read_in.(slot)) in
   let narrow = layout.narrow in
@@ -310,9 +324,11 @@ let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = tr
     | _ -> None in
   let float_of r = if integer_register r then "float(" ^ register r ^ ")" else register r in
   let element prepared index width component =
-    let k = gather_index prepared in
-    Printf.sprintf "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])"
-      k (if narrow.(index) then register index else int_of index) gather_lengths.(k) width component in
+    let k = gather_index prepared and index = if narrow.(index) then register index else int_of index in
+    match raster with
+    | Some r -> Printf.sprintf "%s[%s*%d+%d]" (r.buffer (fst (snd (List.nth gathers k)))) index width component
+    | None -> Printf.sprintf "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])"
+      k index gather_lengths.(k) width component in
   let hits = Hashtbl.create 4 in
   (* a ray whose only read field is [hit] is an occlusion test: any intersection answers it *)
   let fields = Hashtbl.create 4 in
@@ -349,6 +365,7 @@ let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = tr
     else match instruction with
       | P.Const value ->
           Printf.sprintf "as_type<float>(0x%lxu)" (Int32.bits_of_float value)
+      | Input (input,_,component) when raster <> None -> (Option.get raster).input input component
       | Input (input,width,component) -> Printf.sprintf "input%d[i*%d+%d]" input width component
       | Uniform (index,component) -> Printf.sprintf "as_type<float>(uniforms[%d])" (uniforms.(index)+component)
       | Frame _ -> Printf.sprintf "as_type<float>(uniforms[%d])" frames.(slot)
@@ -365,6 +382,7 @@ let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = tr
       | Int_gather (prepared,index) -> "long(" ^ element prepared index 1 0 ^ ")"
       | Array_prepare _ -> assert false
       | Int_const n -> Printf.sprintf "long(%dL)" n
+      | Int_input input when raster <> None -> (Option.get raster).int_input input
       | Int_input input -> Printf.sprintf "long(input%d[i])" input
       | Int_uniform index -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" uniforms.(index)
       | Int_frame _ -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" frames.(slot)
@@ -372,6 +390,12 @@ let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = tr
       | Int_compare (op,a,b) -> comparison op (int_of a) (int_of b)
       | Int_abs a -> wrap_integer("abs(" ^ int_of a ^ ")")
       | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (int_of yes) (int_of no)
+      (* a raster stage rounds a float to a whole float in float arithmetic, never through 64 bits *)
+      | Convert (To_float,a) when raster <> None && (match snd (guarded [] view.code.(a)) with
+          | P.Convert ((Floor|Ceil|Round|Truncate),x) -> not (integer_register x) | _ -> false) ->
+          (match snd (guarded [] view.code.(a)) with
+           | P.Convert (op,x) -> (match op with P.Floor -> "floor(" | Ceil -> "ceil(" | Round -> "round(" | _ -> "trunc(") ^ float_of x ^ ")"
+           | _ -> assert false)
       | Convert (To_float,a) -> float_of a
       | Convert ((Truncate|Coerce_int|Integer_result _),a) -> int_of a
       | Convert (Floor,a) -> "long(floor(" ^ float_of a ^ "))"
@@ -395,6 +419,8 @@ let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = tr
             Hashtbl.add hits key name; name in
           if occlusion then hit else hit ^ [| ".t"; ".prim"; ".u"; ".v"; ".n.x"; ".n.y"; ".n.z"; ".hit"; ".inst" |].(field)
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
+      | Stage (stage,r) when raster <> None -> stage_intrinsic stage (Array.map float_of r)
+      | Stage _ -> fail "A raster-stage intrinsic runs only in a fragment stage."
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
           (register x) (register y) (register z) octaves (table seed)
       | Loop_result (loop,component,_) -> register (loop+1+component)
@@ -407,7 +433,7 @@ let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = tr
       Printf.bprintf current.Scope.decls "  %s r%d=%s;\n" ty slot zero;
       Printf.bprintf body "%sr%d=%s;\n" indentation slot expression
     end;
-    if finite_checks.(slot) && not (integer_register slot) then
+    if finite_checks.(slot) && not (integer_register slot) && raster = None then
       Printf.bprintf body "%ssb|=!isfinite(r%d);\n" indentation slot;
     (match instruction with
      | P.Int_binary (operation, _, b) ->
@@ -458,16 +484,22 @@ let kernel ?(fast=false) ?(instanced=false) ?(motion=false) ?curves program = tr
   let body = Buffer.create 4096 in
   Buffer.add_string body (declarations root.Scope.decls);
   Buffer.add_buffer body root.Scope.code;
+  (match raster with
+   | Some r -> Array.iteri (fun k registers -> Array.iteri (fun component slot ->
+       Printf.bprintf body "  %s\n" (r.output k component (float_of slot))) registers) view.outputs
+   | None ->
   if layout.output_checks then Array.iter (Array.iter (fun slot -> if not (integer_register slot) then
     Printf.bprintf body "  sb|=!isfinite(r%d);\n" slot)) view.outputs;
   Printf.bprintf body "  %s\n" flush_status;
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     Printf.bprintf body "  %s[i*%d+%d]=%s;\n"
-      (output_name k) (Array.length registers) component (float_of slot)) registers) view.outputs;
+      (output_name k) (Array.length registers) component (float_of slot)) registers) view.outputs);
   body in
   ignore (print ());
   counting := false;
   let body = print () in
+  if raster <> None then Ok {source="  uint sb=0u;\n" ^ Buffer.contents body;entry="";interface=[];uniform_layout=[];
+    uniform_bytes=0;table_seeds=[||];output_widths=[||];input_widths=[||];gathers=[||];counts=None;scene=None} else
   let count = Array.length view.widths in
   (* fast: the element count may come from a device cell (another kernel's, times mul over div,
      when use is set) and is written to this kernel's own count record {n, 6n, 1, 0, 0, 0}: a

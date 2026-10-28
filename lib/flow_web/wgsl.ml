@@ -145,6 +145,7 @@ let kernel ?(image = false) program = try
       | Unary (op,a) -> unary op (register a)
       | Checked_mul _ | Checked_fma _ -> fail "Checked arithmetic requires binary64 overflow status."
       | Trace _ -> fail "scene/trace needs a native ray-query host."
+      | Stage _ -> fail "A raster-stage intrinsic runs only in a fragment stage."
       | Array_prepare _ | Gather _ | Int_gather _ -> fail "Indexed array reads stay on the CPU."
       | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> fail "Text kernels stay on the CPU."
       | Select (condition,yes,no) -> Printf.sprintf "select(%s, %s, %s != 0.0)" (register no) (register yes) (register condition)
@@ -344,6 +345,7 @@ let kernel_fast program = try
       | Fma (a,b,c) -> Printf.sprintf "fma(%s, %s, %s)" (register a) (register b) (register c)
       | Checked_mul _ | Checked_fma _ -> fail "Checked arithmetic requires binary64 overflow status."
       | Trace _ -> fail "scene/trace needs a native ray-query host."
+      | Stage _ -> fail "A raster-stage intrinsic runs only in a fragment stage."
       | Gather (prepared,index,width,component) -> element prepared index width component
       | Int_gather (prepared,index) -> "i64_from_f(" ^ element prepared index 1 0 ^ ")"
       | Array_prepare _ -> assert false

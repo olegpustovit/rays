@@ -255,6 +255,14 @@ val hash : float list -> float
 val show : value -> string
 (** [str] formatting; a residual shows as [?]. *)
 
+val map_kernel : ?site:(int * Workspace.path * int list) -> ?path:Workspace.path ->
+  signature:Ty.fn_signature -> fn -> value list -> (value, Diagnostic.t) result
+(** {!Private.map_function}: a function mapped over packed columns, a residual for compilation (a raster
+    stage's elements, Flow_gpu.Raster). *)
+
+val bind_captures : (value -> value) -> fn -> fn
+(** {!Private.map_function_bindings}: the function with its captures replaced (a raster stage's buffers). *)
+
 module Private : sig
   val static_with_requests :
     ?budget:int ->

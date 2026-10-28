@@ -47,7 +47,7 @@ let check (o : Op.t) args =
   with Diagnostic.Error d -> failwith (o.name ^ ": " ^ d.code ^ ": " ^ d.message)
 
 let () =
-  assert (List.length Op.all = 171);
+  assert (List.length Op.all = 174);
   for id = 0 to 9 do Ray_host.register id (fun _ -> Ray_host.miss) done;
   let repr=Option.get(Op.find "text/repr" Context.value) in
   List.iter(fun text -> assert(check repr ["text",Text text]=Text(Printf.sprintf "%S" text)))
@@ -81,7 +81,14 @@ let () =
      | None -> ()
      | Some binary -> List.iter (fun (a,b) ->
          assert (binary.apply a b = check o ["a",a; "b",b]))
-         [Int 2,Int 3; Float 1.5,Int 2; Vec3 (1.,2.,3.),Float 2.; Float 2.,Vec3 (1.,2.,3.)])) Op.all;
+         [Int 2,Int 3; Float 1.5,Int 2; Vec3 (1.,2.,3.),Float 2.; Float 2.,Vec3 (1.,2.,3.)]))
+    (List.filter (fun (o : Op.t) -> not (String.starts_with ~prefix:"gpu/" o.name)) Op.all);
+  (* raster-stage intrinsics have no CPU value: every evaluation refuses them *)
+  List.iter (fun name -> let o = Option.get (Op.find name Context.value) in
+    match o.body ~live:(Input.at_time 0.) ~node:(fun _ _ -> assert false)
+      (List.map (fun (n, t) -> n, sample n t) o.signature.pos) with
+    | exception Diagnostic.Error d -> assert (d.code = "E_GPU_STAGE")
+    | _ -> assert false) ["gpu/fwidth"; "gpu/sample"; "gpu/texture-size"];
   List.iter (fun ctx ->
     List.iter (fun (o : Op.t) -> assert (o.ctx = ctx || o.ctx = Context.value)) (Op.of_context ctx)) (Context.all ());
   assert ((Option.get (Op.find "rand" Context.scene)).name = "value/rand");
