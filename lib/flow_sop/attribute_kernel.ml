@@ -1432,11 +1432,16 @@ let delete_after deletes cancel geometry =
     (Ok geometry) deletes
 
 let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?gpu ?selection
-    ?default ?guard ?(owner = A.Point) ?(kind = "vec3") ?(deletes = []) ~source ~name ~values
-    ~sources inputs =
+    ?default ?guard ?(prior = []) ?(owner = A.Point) ?(kind = "vec3") ?(deletes = []) ~source ~name
+    ~values ~sources inputs =
   let selected = selection <> None || default <> None in
+  if selected && prior <> [] then invalid_arg "Attribute_kernel.node: a selected write with prior";
   let data =
-    if not selected then values
+    if prior <> [] then
+      (* a fused chain's writes, one record program: the earlier ones, then this one *)
+      E.Record
+        (List.mapi (fun i (_, _, v) -> ("w" ^ string_of_int i, v)) prior @ [ ("values", values) ])
+    else if not selected then values
     else
       E.Record
         ([ ("values", values) ]
@@ -1461,6 +1466,8 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
   in
   let parameters =
     source ^ ";" ^ owner_name owner ^ ";" ^ kind ^ ";" ^ name ^ ";"
+    ^ String.concat "," (List.map (fun (n, k, _) -> n ^ ":" ^ k) prior)
+    ^ ";"
     ^ String.concat "," (List.map (fun (o, p) -> o ^ ":" ^ p) deletes)
     ^ ";"
     ^ Flow.Value.key_of ~residual:E.Residual.residual_id data
@@ -1502,6 +1509,25 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
           else
             Result.bind guarded @@ fun guarded ->
             if not guarded then Ok geometries.(0)
+            else if prior <> [] then
+              Result.bind program (fun program ->
+                  Result.bind
+                    (Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve program
+                       ~live:(Sop.Context.input context))
+                    (function
+                      | E.Record fields ->
+                          let grain = Sop.Context.grain context in
+                          List.fold_left
+                            (fun geometry (i, (name, kind, _)) ->
+                              Result.bind geometry
+                                (write_storage ~owned_fields:[] ~grain ~owner ~kind name
+                                   (List.assoc ("w" ^ string_of_int i) fields)))
+                            (Ok geometries.(0))
+                            (List.mapi (fun i e -> (i, e)) prior)
+                          |> Fun.flip Result.bind
+                               (write_storage ~owned_fields ~grain ~owner ~kind name
+                                  (List.assoc "values" fields))
+                      | _ -> error "E_ATTR_TYPE" "A fused write's data must be a record."))
             else
               Result.bind program (fun program ->
                   let live = Sop.Context.input context in
@@ -1602,6 +1628,8 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
       elementwise = (match owner with A.Point -> N.Points | Primitive -> Primitives | _ -> None);
       topology = N.Preserved;
       reads = (if selected then List.sort_uniq String.compare (name :: reads data) else reads data);
-      writes = List.sort_uniq String.compare (name :: List.map snd deletes);
+      writes =
+        List.sort_uniq String.compare
+          ((name :: List.map (fun (n, _, _) -> n) prior) @ List.map snd deletes);
     }
     node

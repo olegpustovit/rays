@@ -198,3 +198,48 @@ let () =
   print_endline
     "Lisp fusion: four noise_displace cards over a cooked input fold into one region, as the \
      unfolded bytes; an intermediate card cooks as itself"
+
+(* writes of different attributes fuse: one record program writes Cd, then P (over a transform
+   card), with the unfolded bytes *)
+let () =
+  let text =
+    Printf.sprintf
+      "(workspace mixed (graph g :context sop (let* [g (sop/soft_transform %s) c \
+       (sop/color_by_height g) d (sop/noise_displace c :amplitude 0.3 :frequency 0.7) tr \
+       (sop/transform d :translate [0.5 0 0] :rotate [0 0.3 0])] tr)))"
+      grid
+  in
+  let cook_root ?(reference = false) domains =
+    profiles := [];
+    let l =
+      L.workspace ~reference
+        ~on_profile:(fun p -> profiles := p :: !profiles)
+        (Flow.Syntax.parse text |> flow_ok)
+      |> flow_ok
+    in
+    let session =
+      Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok
+    in
+    let root = compiled l in
+    let bytes = Session.cook session ~context:(context ~domains) root |> geometry in
+    Session.close session;
+    (* the writes the root cooks: Cd, P and P fold into one, before the two guarded N writes *)
+    let writes =
+      List.length
+        (List.filter
+           (fun (n : Sop.Node.info) -> n.operation = "flow.with_attr")
+           (Sop.Node.inspect root))
+    in
+    (geometry_bytes bytes, writes)
+  in
+  let expected, unfolded = cook_root ~reference:true 1 in
+  List.iter
+    (fun domains ->
+      let bytes, writes = cook_root domains in
+      assert (bytes = expected);
+      if writes <> 3 then
+        failwith (Printf.sprintf "mixed chain: %d writes cooked, %d unfolded" writes unfolded))
+    [ 1; 4 ];
+  print_endline
+    "Lisp fusion: color_by_height > noise_displace > transform write Cd and P in one region, as \
+     the unfolded bytes"

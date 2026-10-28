@@ -364,15 +364,22 @@ cached; a card with a live argument keys on the source. A network is unchanged f
 only when every node's key is.
 
 Writes fuse across cards (`Lower.fold_writes`, outside the reference lowering): a point write
-whose geometry is, through card markers and literal deletions of other attributes, a write of the
-same attribute that nothing else reads writes over that write's input instead. Its reads of the
-attribute become the earlier values, its other attribute reads and counts of the chain read the
-input, and the chain's deletions run after it in the same node (they commute with the write). The
-earlier write is not cooked, so a chain of point deformers is one region: four `noise_displace`
-cards over a cooked million-point grid cook in 0.13-0.17 s against 0.24 s unfolded, with the
-unfolded bytes. The intermediate cards are unchanged and cook as themselves when displayed or
-probed. Writes of different attributes, selected writes, and chains through a structural card (a
-body whose geometry follows cooked data) do not fold yet.
+whose geometry is, through card markers and literal deletions of other attributes, a point write
+that nothing else reads writes over that write's input instead. Its reads of an attribute the
+chain writes become the values written, its other attribute reads and counts of the chain read the
+input, the chain's earlier writes run first in the same node (one record program over every
+written attribute, `$writes`) and its deletions after them (they commute with writes of other
+attributes). The earlier writes are not cooked, so a chain of point deformers is one region: four
+`noise_displace` cards over a cooked million-point grid cook in 0.13-0.17 s against 0.24 s
+unfolded, and `color_by_height > noise_displace > transform` writes Cd and P in one node, with the
+unfolded bytes. A count of a geometry that only writes or deletes attributes is its input's count,
+so a reader of counts keeps no chain alive. The fused node keys on every card it folds (`$chain`)
+and its copied residuals take deterministic ids, so an edit elsewhere keeps it cached (edit to
+recook 0.018 s, as nested). The intermediate cards are unchanged and cook as themselves when
+displayed or probed. Selected and guarded writes and chains through a structural card (a body
+whose geometry follows cooked data) do not fold. A read of the chain inside a lazy term (a map over
+`(sop/attr in0 :P)` written in the map, not bound by `let*`) captures the geometry itself and
+stops the fold; bodies bind the read (`sop/transform` does).
 
 A body stays one program when its structure is decided statically: a cooked test that only
 guards a write is `sop/with_attr :when` (decided as the write cooks), `and`/`or` short-circuit on

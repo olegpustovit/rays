@@ -60,21 +60,31 @@
   (let* [resolved (transform_resolve mode matrix order rotation_order translate rotate scale shear
                     uniform_scale pivot pivot_rotation invert)]
     resolved.ok))
+(defn transform_normal :context value
+  [(normal_matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4}) (preserve : bool) (n : vec3)]
+  (let* [o [(fma normal_matrix.r0.z n.z (fma normal_matrix.r0.y n.y (* normal_matrix.r0.x n.x)))
+            (fma normal_matrix.r1.z n.z (fma normal_matrix.r1.y n.y (* normal_matrix.r1.x n.x)))
+            (fma normal_matrix.r2.z n.z (fma normal_matrix.r2.y n.y (* normal_matrix.r2.x n.x)))]
+         length (sqrt (fused_dot o o))
+         target (if preserve (sqrt (fused_dot n n)) 1.0)]
+    (if (> length 1e-20) (* o (/ target length)) [0.0 0.0 0.0])))
+; all: every point is selected, so the map reads no mask (nor the input's count)
 (defn transform_selected_normals :context sop
   [(geo : geometry) (owner : text) (normal_matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4})
-   (selected : (array int)) (preserve : bool)]
-  ; :when, not if: the cooked test guards the write, so the card stays one program
-  (sop/with_attr geo "N"
-    (exact (map (fn [(n : vec3) (chosen : int)]
-      (if (int/eq chosen 0) n
-        (let* [o [(fma normal_matrix.r0.z n.z (fma normal_matrix.r0.y n.y (* normal_matrix.r0.x n.x)))
-                  (fma normal_matrix.r1.z n.z (fma normal_matrix.r1.y n.y (* normal_matrix.r1.x n.x)))
-                  (fma normal_matrix.r2.z n.z (fma normal_matrix.r2.y n.y (* normal_matrix.r2.x n.x)))]
-               length (sqrt (fused_dot o o))
-               target (if preserve (sqrt (fused_dot n n)) 1.0)]
-          (if (> length 1e-20) (* o (/ target length)) [0.0 0.0 0.0]))))
-      (sop/attr geo "N" :owner owner :type vec3) selected))
-    :owner owner :type vec3 :when (sop/has_attr geo "N" :owner owner :type vec3)))
+   (all : bool) (selected : (array int)) (preserve : bool)]
+  ; :when, not if: the cooked test guards the write, so the card stays one program. The static
+  ; branch is outside the maps: a map captures what its term names, taken or not.
+  (let* [present (sop/has_attr geo "N" :owner owner :type vec3)]
+    (if all
+      (sop/with_attr geo "N"
+        (exact (map (fn [(n : vec3)] (transform_normal normal_matrix preserve n))
+          (sop/attr geo "N" :owner owner :type vec3)))
+        :owner owner :type vec3 :when present)
+      (sop/with_attr geo "N"
+        (exact (map (fn [(n : vec3) (chosen : int)]
+          (if (int/eq chosen 0) n (transform_normal normal_matrix preserve n)))
+          (sop/attr geo "N" :owner owner :type vec3) selected))
+        :owner owner :type vec3 :when present))))
 (defnode sop/transform :label "Transform" :category "Modify"
   :facts {:elementwise points :reads ["P" "N"] :writes ["P" "N"] :topology preserved :exact false}
   :validate (transform_valid mode {:r0 [m00 m01 m02 m03] :r1 [m10 m11 m12 m13] :r2 [m20 m21 m22 m23] :r3 [m30 m31 m32 m33]}
@@ -144,10 +154,16 @@
         ; with nothing selected the write keeps every value, so only the branches that would not
         ; test the cooked count (it would make the card's structure follow cooked data)
         (if identity in0
-          (let* [moved (sop/with_attr in0 :P
-                         (exact (map (fn [(p : vec3) (chosen : int)]
-                                  (if (int/eq chosen 0) p (transform_point_fused matrix p)))
-                                (sop/attr in0 :P) selection)))
+          ; positions is bound, not read inside the map, so the write folds over an earlier one
+          (let* [all (text/blank? group_name)
+                 positions (sop/attr in0 :P)
+                 moved (if all
+                         (sop/with_attr in0 :P
+                           (exact (map (fn [(p : vec3)] (transform_point_fused matrix p)) positions)))
+                         (sop/with_attr in0 :P
+                           (exact (map (fn [(p : vec3) (chosen : int)]
+                                         (if (int/eq chosen 0) p (transform_point_fused matrix p)))
+                                       positions selection))))
                  inverse (mat4_inverse matrix)]
             (cond
               recompute_normals
@@ -163,5 +179,5 @@
                 (let* [normal_matrix (mat4_transpose (nth inverse 0))
                        topo (sop/topology moved)]
                   (transform_selected_normals
-                    (transform_selected_normals moved "point" normal_matrix selection preserve_normal_length)
-                    "vertex" normal_matrix (int_gather selection topo.vertex_points) preserve_normal_length)))))))))
+                    (transform_selected_normals moved "point" normal_matrix all selection preserve_normal_length)
+                    "vertex" normal_matrix all (int_gather selection topo.vertex_points) preserve_normal_length)))))))))

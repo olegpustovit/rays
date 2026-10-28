@@ -2644,7 +2644,7 @@ module Host = struct
   (* [f] replaces a value outright; otherwise captures are rewritten through closures, residuals and
      aggregates. Residuals are shared: each is rewritten once, or the copy is exponential in the
      depth of the sharing. *)
-  let rewriter f =
+  let rewriter ?(fresh = fun () -> Atomic.fetch_and_add bulk_ids (-1)) f =
     let module Seen = Hashtbl.Make (struct
       type t = residual
 
@@ -2665,7 +2665,7 @@ module Host = struct
                   let copy =
                     {
                       r with
-                      rid = Atomic.fetch_and_add bulk_ids (-1);
+                      rid = fresh ();
                       renv = Smap.map value r.renv;
                       live = None;
                       dep_frame = 0;
@@ -2687,7 +2687,7 @@ module Host = struct
     in
     (value, function_value)
 
-  let rewrite f = fst (rewriter f)
+  let rewrite ?fresh f = fst (rewriter ?fresh f)
 
   let remap_function_geometry ~sources fn =
     if sources = [] then fn

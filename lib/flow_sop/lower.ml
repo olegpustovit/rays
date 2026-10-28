@@ -547,14 +547,15 @@ let attribute_options args =
 let group_data args =
   E.Record (List.filter (fun (name, _) -> name = "values" || name = "order") args)
 
+(* the arguments [Lower.fold_writes] adds to a write it fuses *)
+let fused_deletes = "$deletes"
+and fused_writes = "$writes"
+and fused_chain = "$chain"
+
 let attribute_data args =
-  if not (List.exists (fun k -> List.mem_assoc k args) [ "selection"; "default"; "when" ]) then
-    List.assoc "values" args
-  else
-    E.Record
-      (List.filter
-         (fun (name, _) -> List.mem name [ "values"; "selection"; "default"; "when" ])
-         args)
+  let data = [ "selection"; "default"; "when"; fused_writes ] in
+  if not (List.exists (fun k -> List.mem_assoc k args) data) then List.assoc "values" args
+  else E.Record (List.filter (fun (name, _) -> name = "values" || List.mem name data) args)
 
 let kernel_data (n : E.node) =
   match Operators.lowering n.kind with
@@ -567,11 +568,12 @@ let is_resource (n : E.node) =
   Operators.lowering n.kind = Some Operators.Resource && (n.kind <> "exact" || n.ty = Ty.image)
 
 let attribute_node ?(check = true) ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source
-    ?state ?elems ?selection ?default ?guard ?(owner = Rdk.Attribute.Point) ?(kind = "vec3")
-    ?deletes ~name ~values ~sources inputs =
+    ?state ?elems ?selection ?default ?guard ?(prior = []) ?(owner = Rdk.Attribute.Point)
+    ?(kind = "vec3") ?deletes ~name ~values ~sources inputs =
   let data =
     E.Record
       ([ ("values", values) ]
+      @ List.mapi (fun i (_, _, v) -> ("prior" ^ string_of_int i, v)) prior
       @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
       @ Option.to_list (Option.map (fun v -> ("default", v)) default)
       @ Option.to_list (Option.map (fun v -> ("when", v)) guard))
@@ -580,12 +582,13 @@ let attribute_node ?(check = true) ~strict_body ~reference ~profile ~approx ~gpu
   let values = specialize values
   and selection = Option.map specialize selection
   and default = Option.map specialize default
-  and guard = Option.map specialize guard in
+  and guard = Option.map specialize guard
+  and prior = List.map (fun (name, kind, v) -> (name, kind, specialize v)) prior in
   if strict_body && check then
     ignore (ok (Attribute_kernel.prepare ~strict:true ~sources inputs values));
-  Attribute_kernel.node ?state ?elems ?selection ?default ?guard ~gpu ~strict:strict_body ~reference
-    ~profile ~approx ~owner ~kind ?deletes ~source:(Lazy.force kernel_source) ~name ~values ~sources
-    inputs
+  Attribute_kernel.node ?state ?elems ?selection ?default ?guard ~prior ~gpu ~strict:strict_body
+    ~reference ~profile ~approx ~owner ~kind ?deletes ~source:(Lazy.force kernel_source) ~name
+    ~values ~sources inputs
 
 let group_node ?(check = true) ~strict_body ~reference ~profile ~approx ~kernel_source ?state ?elems
     ~args ~sources inputs =
@@ -1181,32 +1184,38 @@ let cooked_sources value =
 let is_volatile lowered id = Network.Int_map.mem id lowered.volatile
 
 (* Fusion across cards (single-program design, E4). A point write whose geometry is, through card
-   markers and deletions of other attributes, a write of the same attribute that nothing else reads
-   is rewritten to write over that write's input: its reads of the attribute become the earlier
-   values, its other attribute reads and counts of the chain read the input, and the chain's
-   deletions run after it ([fused_deletes]; they commute with the write). The earlier write is no
-   longer cooked, so the two maps are one region; folding left to right chains any number of
+   markers and deletions of other attributes, a point write that nothing else reads is rewritten to
+   write over that write's input: its reads of an attribute the chain writes become the values
+   written, its other attribute reads and counts of the chain read the input, the earlier writes
+   run first in the same node ([fused_writes], one record program) and the chain's deletions run
+   after them ([fused_deletes]; they commute with writes of other attributes). The earlier write is
+   no longer cooked, so the maps are one region; folding left to right chains any number of
    writes. The intermediate cards are unchanged, for display and probes. *)
-let fused_deletes = "$deletes"
-
 let literal_pattern pattern =
   not
     (String.exists
        (function '*' | '?' | '[' | '\\' | '^' | ' ' | '\t' | '\n' | '\r' -> true | _ -> false)
        pattern)
 
+let fused_entry ~name ~kind values =
+  E.Record [ ("attribute", E.Text name); ("type", E.Text kind); ("values", values) ]
+
+let fused_entries args =
+  match List.assoc_opt fused_writes args with
+  | Some (E.List entries) ->
+      Array.to_list entries
+      |> List.map (function
+        | E.Record [ ("attribute", E.Text name); ("type", E.Text kind); ("values", values) ] ->
+            (name, kind, values)
+        | _ -> fail "E_LOWER" "A fused write's earlier writes are attribute/type/values records")
+  | _ -> []
+
 let fold_writes (plan : E.plan) =
   let nodes = Array.copy plan.nodes in
   let count = Array.length nodes in
   let uses = Array.make count 0 and templ = Array.make count false in
-  let note values =
-    List.iter
-      (fun id -> if id >= 0 && id < count then uses.(id) <- uses.(id) + 1)
-      (List.sort_uniq Int.compare (List.concat_map Attribute_kernel.sources values))
-  in
   Array.iter
     (fun (n : E.node) ->
-      note (List.map snd n.args);
       if is_zone n.kind then
         match (List.assoc_opt "lo" n.args, List.assoc_opt "hi" n.args) with
         | Some (E.Int lo), Some (E.Int hi) ->
@@ -1215,30 +1224,102 @@ let fold_writes (plan : E.plan) =
             done
         | _ -> ())
     nodes;
+  (* the copies' residual ids are cache keys: deterministic per plan, outside the evaluator's *)
+  let next = ref 0 in
+  let fresh () =
+    incr next;
+    -(1 lsl 50) - !next
+  in
+  (* A count of a geometry that only writes or deletes attributes (or a card over one) is its
+     input's count: counting the input instead, a read of counts alone keeps no chain alive. *)
+  let rec root id =
+    if id < 0 || id >= count || templ.(id) then id
+    else
+      let n = nodes.(id) in
+      let input key =
+        match List.assoc_opt key n.args with
+        | Some (E.Deferred (ty, x)) when Flow.Ty.is_geometry ty && x < id -> root x
+        | _ -> id
+      in
+      if n.kind = E.card_kind then input "value"
+      else if List.mem n.kind [ "sop/with_attr"; "sop/delete_attr"; "sop/with_group" ] then
+        input "geometry"
+      else id
+  in
+  let recount = function
+    | (E.Source ("sop/count", ty, fields) | E.Struct ("sop/count", ty, fields)) as read -> (
+        match List.assoc_opt "geometry" fields with
+        | Some (E.Deferred (gty, x)) when root x <> x ->
+            let fields =
+              List.map
+                (fun (k, v) -> if k = "geometry" then (k, E.Deferred (gty, root x)) else (k, v))
+                fields
+            in
+            Some
+              (match read with
+              | E.Source _ -> E.Source ("sop/count", ty, fields)
+              | _ -> E.Struct ("sop/count", ty, fields))
+        | _ -> None)
+    | _ -> None
+  in
+  let rec recounts = function
+    | (E.Source _ | E.Struct _) as v when recount v <> None -> true
+    | E.Residual r -> List.exists (fun (_, v) -> recounts v) (E.Residual.residual_view r).bindings
+    | E.Fn f -> List.exists (fun (_, v) -> recounts v) (E.Residual.function_bindings f)
+    | E.List vs -> Array.exists recounts vs
+    | E.Record fs | E.Struct (_, _, fs) | E.Source (_, _, fs) ->
+        List.exists (fun (_, v) -> recounts v) fs
+    | _ -> false
+  in
+  Array.iteri
+    (fun id (n : E.node) ->
+      if (not templ.(id)) && List.exists (fun (_, v) -> recounts v) n.args then
+        nodes.(id) <-
+          { n with args = List.map (fun (k, v) -> (k, E.Host.rewrite ~fresh recount v)) n.args })
+    nodes;
+  let note values =
+    List.iter
+      (fun id -> if id >= 0 && id < count then uses.(id) <- uses.(id) + 1)
+      (List.sort_uniq Int.compare (List.concat_map Attribute_kernel.sources values))
+  in
+  Array.iter (fun (n : E.node) -> note (List.map snd n.args)) nodes;
   Array.iter (fun (i : E.instance) -> note (i.result :: List.map snd i.inputs)) plan.instances;
   let text (n : E.node) k =
     match List.assoc_opt k n.args with Some (E.Text t) -> Some t | _ -> None
   in
+  let kind_of n = Option.value ~default:"vec3" (text n "type") in
   let point_write (n : E.node) =
     n.kind = "sop/with_attr"
     && (not templ.(n.id))
     && List.for_all
          (fun (k, _) ->
-           List.mem k [ "geometry"; "attribute"; "values"; "owner"; "type"; fused_deletes ])
+           List.mem k
+             [
+               "geometry";
+               "attribute";
+               "values";
+               "owner";
+               "type";
+               fused_deletes;
+               fused_writes;
+               fused_chain;
+             ])
          n.args
     && Option.fold ~none:true ~some:(( = ) "point") (text n "owner")
+    && text n "attribute" <> None
   in
   let deletes (n : E.node) =
     match List.assoc_opt fused_deletes n.args with Some (E.List ds) -> Array.to_list ds | _ -> []
   in
-  (* back from a write's geometry to the earlier write of [name]: the ids passed and the deletions *)
-  let rec back name w id chain dels =
+  let pattern = function E.Record [ _; ("pattern", E.Text p) ] -> Some p | _ -> None in
+  (* back from a write's geometry to the earlier write: the ids passed and the deletions *)
+  let rec back name id chain dels =
     if id < 0 || id >= count || uses.(id) <> 1 || templ.(id) then None
     else
       let u = nodes.(id) in
       if u.kind = E.card_kind then
         match List.assoc_opt "value" u.args with
-        | Some (E.Deferred (_, x)) -> back name w x (id :: chain) dels
+        | Some (E.Deferred (_, x)) -> back name x (id :: chain) dels
         | _ -> None
       else if u.kind = "sop/delete_attr" then
         match (List.assoc_opt "geometry" u.args, text u "attribute") with
@@ -1248,10 +1329,10 @@ let fold_writes (plan : E.plan) =
                     (fun (k, _) -> List.mem k [ "geometry"; "attribute"; "owner" ])
                     u.args ->
             let owner = Option.value ~default:"point" (text u "owner") in
-            back name w x (id :: chain)
+            back name x (id :: chain)
               (E.Record [ ("owner", E.Text owner); ("pattern", E.Text pattern) ] :: dels)
         | _ -> None
-      else if point_write u && text u "attribute" = Some name && text u "type" = text w "type" then
+      else if point_write u && not (List.mem (Some name) (List.map pattern (deletes u))) then
         match List.assoc_opt "geometry" u.args with
         | Some (E.Deferred (_, base)) -> Some (u, base, id :: chain, deletes u @ dels)
         | _ -> None
@@ -1260,22 +1341,25 @@ let fold_writes (plan : E.plan) =
   let fold id (w : E.node) =
     match (List.assoc_opt "geometry" w.args, text w "attribute") with
     | Some (E.Deferred (_, g)), Some name when point_write w -> (
-        match back name w g [] [] with
+        match back name g [] [] with
         | None -> ()
         | Some (u, base, chain, dels) ->
-            let deleted =
-              List.filter_map
-                (function E.Record [ _; ("pattern", E.Text p) ] -> Some p | _ -> None)
-                dels
+            let deleted = List.filter_map pattern dels
             and reads = Attribute_kernel.reads (List.assoc "values" w.args) in
             if not (List.mem "*" reads || List.exists (fun p -> List.mem p reads) deleted) then begin
-              let earlier = List.assoc "values" u.args and fits = ref true in
+              (* what the chain writes, in order, over [base] *)
+              let entries =
+                fused_entries u.args
+                @ [ (Option.get (text u "attribute"), kind_of u, List.assoc "values" u.args) ]
+              in
+              let written a = List.find_opt (fun (n, _, _) -> n = a) (List.rev entries) in
+              let fits = ref true in
               let on_base fields =
                 ("geometry", E.Deferred (Flow.Ty.geometry, base))
                 :: List.remove_assoc "geometry" fields
               in
               let values =
-                E.Host.rewrite
+                E.Host.rewrite ~fresh
                   (function
                     | (E.Struct (op, ty, fields) | E.Source (op, ty, fields)) as read -> (
                         let chained =
@@ -1290,19 +1374,22 @@ let fold_writes (plan : E.plan) =
                         in
                         match (chained, op, List.assoc_opt "attribute" fields) with
                         | false, _, _ -> None
-                        | true, "sop/attr", Some (E.Text a) when a <> name ->
-                            Some (rebuilt (on_base fields))
-                        | true, "sop/attr", Some (E.Text _)
-                          when List.for_all
-                                 (fun (k, v) ->
-                                   match k with
-                                   | "geometry" | "attribute" -> true
-                                   | "owner" -> v = E.Text "point"
-                                   | "type" ->
-                                       Option.map (fun t -> E.Text t) (text u "type") = Some v
-                                   | _ -> false)
-                                 fields ->
-                            Some (E.Host.rewrite (fun _ -> None) earlier)
+                        | true, "sop/attr", Some (E.Text a) -> (
+                            match written a with
+                            | None -> Some (rebuilt (on_base fields))
+                            | Some (_, kind, earlier)
+                              when List.for_all
+                                     (fun (k, v) ->
+                                       match k with
+                                       | "geometry" | "attribute" -> true
+                                       | "owner" -> v = E.Text "point"
+                                       | "type" -> v = E.Text kind
+                                       | _ -> false)
+                                     fields ->
+                                Some (E.Host.rewrite ~fresh (fun _ -> None) earlier)
+                            | Some _ ->
+                                fits := false;
+                                Some read)
                         | true, "sop/count", _ -> Some (rebuilt (on_base fields))
                         | true, _, _ ->
                             fits := false;
@@ -1313,6 +1400,23 @@ let fold_writes (plan : E.plan) =
                     | _ -> None)
                   (List.assoc "values" w.args)
               in
+              (* an attribute's last write wins; this write supersedes the chain's of [name] *)
+              let rec last = function
+                | [] -> []
+                | ((n, _, _) as e) :: rest ->
+                    if n = name || List.exists (fun (m, _, _) -> m = n) rest then last rest
+                    else e :: last rest
+              in
+              let earlier =
+                List.map (fun (name, kind, values) -> fused_entry ~name ~kind values) (last entries)
+              in
+              (* the folded writes, whose cards key this one's kernels with its own *)
+              let chain_ids =
+                (match List.assoc_opt fused_chain u.args with
+                  | Some (E.List ids) -> Array.to_list ids
+                  | _ -> [])
+                @ [ E.Int u.id ]
+              in
               if !fits then
                 nodes.(id) <-
                   {
@@ -1322,9 +1426,13 @@ let fold_writes (plan : E.plan) =
                          (fun (k, v) ->
                            if k = "geometry" then Some (k, E.Deferred (Flow.Ty.geometry, base))
                            else if k = "values" then Some (k, values)
-                           else if k = fused_deletes then None
+                           else if k = fused_deletes || k = fused_writes || k = fused_chain then
+                             None
                            else Some (k, v))
                          w.args
+                      @ [ (fused_chain, E.List (Array.of_list chain_ids)) ]
+                      @ (if earlier = [] then []
+                         else [ (fused_writes, E.List (Array.of_list earlier)) ])
                       @ if dels = [] then [] else [ (fused_deletes, E.List (Array.of_list dels)) ]);
                   }
             end)
@@ -1502,7 +1610,23 @@ struct
          evaluated.plan.nodes;
        table)
 
-  let kernel_source_of = function
+  let rec kernel_source_of = function
+    | Some (n : E.node) when List.mem_assoc fused_chain n.args ->
+        (* a fused write keys on every card it folds *)
+        let chain =
+          match List.assoc fused_chain n.args with
+          | E.List ids ->
+              Array.to_list ids
+              |> List.filter_map (function E.Int id -> Some evaluated.plan.nodes.(id) | _ -> None)
+          | _ -> []
+        in
+        let own = kernel_source_of (Some { n with args = List.remove_assoc fused_chain n.args }) in
+        lazy
+          (Digest.to_hex
+             (Digest.string
+                (String.concat ";"
+                   (List.map (fun u -> Lazy.force (kernel_source_of (Some u))) chain
+                   @ [ Lazy.force own ]))))
     | Some (n : E.node) when inlined (Some n) || n.kind = E.card_kind -> (
         (* the innermost card: the site up to its last node: segment *)
         let rec prefixes acc best = function
@@ -2136,13 +2260,16 @@ struct
     in
     Sop.Node.Build.with_facts { (Sop.Node.facts node) with reads = [ "*" ]; writes = [ "*" ] } node
 
-  let attribute_node ?node ?state ?elems ?selection ?default ?guard ?(owner = Rdk.Attribute.Point)
-      ?(kind = "vec3") ?(deletes = []) ~name ~values ~sources inputs =
+  let attribute_node ?node ?state ?elems ?selection ?default ?guard ?(prior = [])
+      ?(owner = Rdk.Attribute.Point) ?(kind = "vec3") ?(deletes = []) ~name ~values ~sources inputs
+      =
     reuse ?node ?state ?elems
-      (Printf.sprintf "attribute %d %s %s %s" (Hashtbl.hash owner) kind name
-         (String.concat "," (List.map (fun (o, p) -> o ^ ":" ^ p) deletes)))
+      (Printf.sprintf "attribute %d %s %s %s %s" (Hashtbl.hash owner) kind name
+         (String.concat "," (List.map (fun (o, p) -> o ^ ":" ^ p) deletes))
+         (String.concat "," (List.map (fun (n, k, _) -> n ^ ":" ^ k) prior)))
       (E.Record
          ([ ("values", values) ]
+         @ List.map (fun (_, _, v) -> ("prior", v)) prior
          @ Option.to_list (Option.map (fun v -> ("when", v)) guard)
          @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
          @ Option.to_list (Option.map (fun v -> ("default", v)) default)))
@@ -2151,7 +2278,7 @@ struct
     attribute_node ~check:strict_body
       ~strict_body:(strict_body || inlined node)
       ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source:(kernel_source_of node) ?state
-      ?elems ?selection ?default ?guard ~owner ~kind ~deletes ~name ~values ~sources inputs
+      ?elems ?selection ?default ?guard ~prior ~owner ~kind ~deletes ~name ~values ~sources inputs
 
   let group_data = group_data
   and attribute_data = attribute_data
@@ -3132,7 +3259,12 @@ struct
                 | _ -> fail "E_LOWER" "A fused write's deletions are owner/pattern records")
           | _ -> []
         in
-        let args = List.remove_assoc fused_deletes args in
+        let prior = fused_entries args in
+        let args =
+          List.filter
+            (fun (k, _) -> not (List.mem k [ fused_writes; fused_deletes; fused_chain ]))
+            args
+        in
         let owner, kind = attribute_options args in
         let name =
           match List.assoc "attribute" args with
@@ -3149,7 +3281,7 @@ struct
             (Fun.compose Result.ok
                (attribute_node ~node ?selection:(List.assoc_opt "selection" args)
                   ?default:(List.assoc_opt "default" args) ?guard:(List.assoc_opt "when" args)
-                  ~owner ~kind ~deletes ~name ~values ~sources))
+                  ~prior ~owner ~kind ~deletes ~name ~values ~sources))
         in
         {
           cid;
