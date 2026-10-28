@@ -11,7 +11,7 @@
       (equal? source_name index_name)
         (error "E_PARAM" "sop/point_generate_origin: metadata names must be distinct")
       :else true))
-  (defnode sop/points :label "Point Generate" :operation "point_generate" :version 1
+  (defnode sop/points :label "Point Generate" :version 1
     :category ["Create" "Point"]
     :validate (points_origin_validate points source_point_attribute source_index_attribute)
     [(points : int 50 :label "Points" :min 1 :max 50 :hard_min 1 :hard_max 50)

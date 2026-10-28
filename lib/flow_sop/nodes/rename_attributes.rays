@@ -25,7 +25,7 @@
   (let* [message (text/glob_rewrite_error pattern replacement)]
     (if (equal? message "") true (error "E_PARAM" (str "sop/rename_attributes: " message)))))
 
-(defnode sop/rename_attributes :label "Rename Attributes" :operation "attribute_rename_pattern"
+(defnode sop/rename_attributes :label "Rename Attributes"
   :category ["Attribute" "Manage"]
   :validate (reduce (fn [valid row]
     (rename_attributes_rewrite_validate (nth row 1) (nth row 2))) true (text/table_decode rules))

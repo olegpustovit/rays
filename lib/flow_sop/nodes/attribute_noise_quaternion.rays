@@ -79,7 +79,7 @@
                 (and (<= bounds.low.z bounds.high.z) (<= bounds.low.w bounds.high.w))))))))))))))
         (noise_quaternion_refuse "range bounds must be finite and ordered")
       :else true)))
-(defnode sop/attribute_noise_quaternion :label "Attribute Noise (Quaternion)" :operation "attribute_noise" :category ["Attribute" "Noise"]
+(defnode sop/attribute_noise_quaternion :label "Attribute Noise (Quaternion)" :category ["Attribute" "Noise"]
   :facts {:elementwise points :reads ["P" "$name" "$location~attribute:"] :writes ["$name"] :topology preserved :exact false}
   :validate (noise_quaternion_validate group owner name location range frequency_x frequency_y frequency_z octaves)
   [(in0 : geometry)

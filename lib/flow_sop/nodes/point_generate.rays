@@ -39,7 +39,7 @@
     :edges {:offsets (array/range (int/add edges 1) :type int)
             :values (array/range edges :type int)}))
 
-(defnode sop/point_generate :label "Point Generate" :operation "point_generate" :version 1
+(defnode sop/point_generate :label "Point Generate" :version 1
   :category ["Create" "Points"]
   :validate (and (and (and (int/le total (array/max_length :type int))
                            (<= points_per_point 18014398509481984.0))

@@ -1,6 +1,6 @@
 (flow_manifest
   (version 202609)
-  (digest "08a77dfa083cb7711056c0b7619d727c")
+  (digest "be68d282f201886f4fcdf022477d205c")
   (kinds
     (kind "sop/switch"
       (key "switch")
@@ -283,7 +283,7 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/boolean_fracture"
       (key "boolean_fracture")
-      (operation "boolean")
+      (operation "boolean_fracture")
       (label "Boolean Fracture")
       (category "Boolean")
       (slots (slot "source" required) (slot "cutters" required))
@@ -991,7 +991,7 @@
       (calls))
     (kind "sop/attribute_noise_quaternion"
       (key "attribute_noise_quaternion")
-      (operation "attribute_noise")
+      (operation "attribute_noise_quaternion")
       (label "Attribute Noise (Quaternion)")
       (category "Attribute" "Noise")
       (slots (slot "in0" required))
@@ -1415,7 +1415,7 @@
       (calls))
     (kind "sop/delete_attributes"
       (key "delete_attributes")
-      (operation "attribute_delete_pattern")
+      (operation "delete_attributes")
       (label "Delete Attributes")
       (category "Attribute" "Manage")
       (slots (slot "input" required) (slot "reference" optional))
@@ -2617,7 +2617,7 @@
       (calls))
     (kind "sop/points"
       (key "points")
-      (operation "point_generate")
+      (operation "points")
       (label "Point Generate")
       (category "Create" "Point")
       (slots)
@@ -2750,7 +2750,7 @@
       (calls))
     (kind "sop/promote_attributes"
       (key "promote_attributes")
-      (operation "attribute_promote_pattern")
+      (operation "promote_attributes")
       (label "Promote Attributes")
       (category "Attribute" "Promote")
       (slots (slot "in0" required))
@@ -2768,7 +2768,7 @@
       (calls))
     (kind "sop/rename_attributes"
       (key "rename_attributes")
-      (operation "attribute_rename_pattern")
+      (operation "rename_attributes")
       (label "Rename Attributes")
       (category "Attribute" "Manage")
       (slots (slot "in0" required))
@@ -3194,7 +3194,7 @@
       (calls "sop/normals" "sop/subdivide_cracks"))
     (kind "sop/swap_attributes"
       (key "swap_attributes")
-      (operation "attribute_swap")
+      (operation "swap_attributes")
       (label "Swap Attributes")
       (category "Attribute" "Manage")
       (slots (slot "in0" required))
