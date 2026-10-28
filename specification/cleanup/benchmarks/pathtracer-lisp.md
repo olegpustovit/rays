@@ -188,6 +188,47 @@ Lisp front end still costs ~80 ms per process and shape: the check (49 ms), the 
 and emission (16 ms) and its library from source (~20 ms, the Metal cache hit included), where the cached
 pathtrace.metal pipeline costs nothing at the first frame. Not met warm.
 
+### The check, second pass (2026-10-28)
+
+`tools/bench_check.exe N pt ptlib FILE.rays` checks in process: `pt` is pathtracer.rays's accumulation set
+(`Rays_pathtracer.Private.check_sketch`), `ptlib` the declarations whole, a file as the editor opens it.
+Median CPU of the "check" phase, allocation of the whole call, and instructions retired per check
+(`/usr/bin/time -l`, 11 runs minus 1, /10), M1, load 7-12, interleaved with HEAD:
+
+| | check ms before -> after | alloc MB | Minstr |
+|---|---|---|---|
+| pt (first-frame gate) | 45.5-46.4 -> 16.3-16.4 | 86.6 -> 33.1 | 603 -> 224 |
+| ptlib | 160-162 -> 52 | 305 -> 108 | 2,007 -> 650 |
+| sop_gallery.rays | 715-716 -> 215 | 1,279 -> 437 | 9,377 -> 2,964 |
+| shattered_studio.rays | 91 -> 40-41 | 191 -> 109 | 1,696 -> 1,038 |
+
+Causes (macOS `sample`; the List/compare frames lose their callers, so a temporary callstack-sampling shadow
+of `List.mem`/`assoc_opt`/`Hashtbl` weighted by comparisons named the sites): half of the samples were
+`compare_val` under polymorphic `List.mem`/`List.assoc_opt` on strings, each call a C call. The largest:
+`Op.packed_kind` scanned the packed-op name tables on every operator application (now memoized per
+builtin), `Syntax.attribute_args` scanned five name lists per call head (now a prefix test first),
+`reserved`/`known` re-listed the type names per symbol, eager `Printf` messages for type errors that did
+not happen, `called_names` hashing whole terms structurally (now the form id), `derive` sorting empty
+`vary`/`groups` unions. Then the algorithmic one: a `defn` body was checked again at every call site even
+with equal argument values; `apply_def` now shares the first check's body term for equal inputs (name,
+call stack, depth, argument values, no function values), about two thirds of the calls in `pt`. The tracer's films
+are byte-identical (render_workspace digests, `test_pathtracer_exact_m1`), as are all goldens.
+
+Tracer creation to the first 4-spp flush (`render_workspace --benchmark sketches/pathtracer.rays OUT 4`,
+`pathtracer_first_frame_ms`), warm Metal cache, 12 interleaved pairs HEAD/now, load 6.9-9.3: on a quiet
+GPU 275-280 -> 256-260 ms; every pair faster, median 30 ms (pairs 279.8/258.6, 278.9/276.0, 274.9/259.7,
+299.4/257.0, 385.8/348.4, 382.4/357.8, 378.9/352.4, 419.9/348.1, 424.5/390.8, 443.7/256.4, 450.9/373.1,
+458.3/378.5; the 350-450 runs share the GPU with other processes). The Lisp front end of that frame is now
+33 ms: parse 2, check 16, the trace kernel's template 6 and emission 8; `create_library` plus the pipeline
+take 0.3 ms with the Metal cache warm (the earlier ~20 ms estimate was not the library). The rest (tracer
+creation ~50 ms, World bake ~25 ms, the 4-spp GPU frame ~120 ms) is shared with pathtrace.metal, so 200-218
+is not reachable from the front end alone under today's load; the 200-218 rows were not re-measured
+(feb9966b not rebuilt). Cold not re-measured: the Metal cache is per user, shared with every process on the
+machine; the CPU side is the same cold. Still not met warm.
+
+The golden replay (`REPLAY_JOBS=4 replay.exe data`, 819 rows): 84 -> 68-71 user-s, 29-30 -> 24-27 s wall;
+it is now mostly `Flow_ir.Packed`/`Core_region` lowering and stop-the-world minor GCs, not the check.
+
 GPU (render_workspace --benchmark, 16 spp, round 5 band sums, interleaved, Lisp then pathtrace.metal):
 pathtracer.rays 492.5 vs 495.4 ms (medians, load 8.7-10.9; pairs 496.1/496.6, 494.6/494.7, 492.5/495.4,
 491.7/497.2, 492.1/497.2). shattered_studio at 800 x 800 (the cook is the same each run): 7,823.7 vs 8,661.1 ms (-9.7%; load 6.5-65; pairs 7857/8554, 7740/8750, 7824/8775, 7814/8644, 7878/8661).

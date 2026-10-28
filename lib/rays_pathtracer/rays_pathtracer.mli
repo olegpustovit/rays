@@ -223,4 +223,6 @@ module Private : sig
   (** A Lisp kernel of the current scene shape ("trace", "preview", ...): its pipeline's thread limit and its MSL. *)
   val check_library : unit -> (unit, string) result
   (** Checks pathtrace.rays and its helpers whole; the tracer types them only where its kernels call them. *)
+  val check_sketch : unit -> (unit, string) result
+  (** Checks the accumulation kernel set of sketches/pathtracer.rays's scene shape (tools/bench_check). *)
 end

@@ -82,7 +82,7 @@ let field_name = function
 
 let rec of_syntax (x : Syntax.t) = match x.node with
   | Sym name ->
-      (match List.assoc_opt name (names ()) with
+      (match List.find_map (fun (n, t) -> if String.equal n name then Some t else None) (names ()) with
        | Some (Any | Color) | None -> None
        | some -> some)
   | Map items ->
@@ -120,12 +120,12 @@ let rec fits have want =
   || (num have && (num want || want = Bool))
   || (have = Bool && num want)
   || (want = Color && (have = Text || have = Vec3 || have = List Float || have = List Int))
-  || (List.mem want [Vec2; Vec3; Vec4] && num have)
+  || ((match want with Vec2 | Vec3 | Vec4 -> true | _ -> false) && num have)
   || (match have, want with
       | List h, List w -> fits h w
       | Array h, Array w -> h = w || h = Any || w = Any
       | Record hs, Record ws ->
-          List.for_all (fun (n, w) -> match List.assoc_opt n hs with
+          List.for_all (fun (n, w) -> match List.find_map (fun (m, h) -> if String.equal m n then Some h else None) hs with
             | Some h -> fits h w | None -> false) ws
       | Fn _, Fn None -> true
       | Fn (Some h), Fn (Some w) -> h.params = w.params && fits h.result w.result

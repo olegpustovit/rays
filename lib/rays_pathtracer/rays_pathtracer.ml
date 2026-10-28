@@ -1009,4 +1009,5 @@ module Private = struct
     let* source = Lisp_kernel.source kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
     Ok (threads, source)
   let check_library = Lisp_kernel.check_library
+  let check_sketch = Lisp_kernel.check_sketch
 end

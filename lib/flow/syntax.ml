@@ -184,10 +184,13 @@ let renumber first x =
   let x = go x in (x, !next)
 (* Data selectors are positional text, including their keyword spelling. *)
 let attribute_args head args =
-  let attribute=List.mem head ["sop/attr";"sop/attr_checked";"sop/with_attr";"sop/has_attr";"sop/attr_type";"sop/attr_names";"sop/attr_entries";"attr";"attr_checked";"with_attr";"has_attr"] in
-  let group=List.mem head ["sop/group";"sop/group_names";"sop/group_order";"sop/with_group"] in
-  let attribute_metadata=List.mem head ["sop/rename_attr";"sop/swap_attr"] in
-  let group_metadata=List.mem head ["sop/rename_group";"sop/delete_group"] in
+  (* every head below starts with sop/ or array/, or ends with attr or attr_checked *)
+  if not (String.starts_with ~prefix:"sop/" head || String.starts_with ~prefix:"array/" head
+          || String.ends_with ~suffix:"attr" head || String.ends_with ~suffix:"attr_checked" head) then args else
+  let attribute=List.exists (String.equal head) ["sop/attr";"sop/attr_checked";"sop/with_attr";"sop/has_attr";"sop/attr_type";"sop/attr_names";"sop/attr_entries";"attr";"attr_checked";"with_attr";"has_attr"] in
+  let group=List.exists (String.equal head) ["sop/group";"sop/group_names";"sop/group_order";"sop/with_group"] in
+  let attribute_metadata=List.exists (String.equal head) ["sop/rename_attr";"sop/swap_attr"] in
+  let group_metadata=List.exists (String.equal head) ["sop/rename_group";"sop/delete_group"] in
   let positional=attribute || head="sop/count" in
   if not positional && not group && not attribute_metadata && not group_metadata
       && head<>"array/range" && head<>"array/max_length" then args else
