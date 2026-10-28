@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **213 / 248 accepted (85.9%)**. This counts individual
+Finding coverage: **217 / 248 accepted (87.5%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- Editor items blocked on decisions: UI18 (merging the Kind_graph scene/World inspector into workspace_inspector changes visible rows and edit semantics pinned by test_scene_tree), UI25 (the prepared type parameter is instantiated with about 6 types across about 85 test sites), UI29 (Navigator on Pxui_shell.Tree needs Tree hooks for custom trailing widgets). Partial: UI21 (4 of about 85 Private re-exports removed; the rest need tests moved to their owners), UI27 (Scope_frame.update about 110 lines, but steps still emit through a ref), UI13 (the World drag is world_drag_frame over Ui events, modifiers as a value). P5.G2: Eval.Residual and the sop test shim are explicit; the rdk_test_support includes remain.
 
 - P9 (b3e5bf63..d4c9d8b3): the marks and UI pipelines come from lib/renderer/shaders/{marks,ui}.rays and are generated as MSL and SPIR-V. ui_parity is exact; the million_marks PNGs are byte-identical; ws_layout, procedural_modeling and ws_orrery match outside the status bar. GPU min ms at 2x: million_marks 27.3–27.8 handwritten vs 21.4–24.8 Lisp; ws_layout UI 3.68–3.74 vs 3.78–3.83 (still about 0.1 ms slower). A Scene3 port is parked at scratchpad p9-scene3-wip.patch: with the bindings renumbered, [[front_facing]] reads false on front faces even with the handwritten shaders. Not yet ported: Scene3 and its variants, Scene3_world, sun depth, Scene2 argument buffer and the image sink.
 - SP10 skipped: the PPX output is shared with flow_sop and the editor tests, where Sop is the real library, so lib/sop keeps its 4-line shim. P1.G1: lib/ is 254.5k lines.

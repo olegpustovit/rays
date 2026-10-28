@@ -653,7 +653,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **XC26** (P7, low, duplication, effort S). Location at baseline: 27 identical `ok` unwrappers, 22 `contains`, 150 `let fail`, 103 `let check`. Test helpers are copied file to file. Action: One small test-util library per layer (flow, rdk already has one), opened by the tests.
 
-- [ ] **XC27** (P5, low, global-state, effort M). Location at baseline: Unix.gettimeofday in sop (async_cook, session), 4 rays_editor files, pxui, flow_sop, editor_document. The wall clock is read directly; `flow/phase_timer.ml` already injects its clock. Action: Take time from `Frame.t` or an injected clock.
+- [x] **XC27** (P5, low, global-state, effort M). Location at baseline: Unix.gettimeofday in sop (async_cook, session), 4 rays_editor files, pxui, flow_sop, editor_document. The wall clock is read directly; `flow/phase_timer.ml` already injects its clock. Action: Take time from `Frame.t` or an injected clock. Evidence: Session.clock (set_clock, now), Cook.create ?clock, Workspace_gpu.create ?clock and Lower ?clock; Unix.gettimeofday remains only as the default at the edges.
 
 - [x] **XC28** (P4, low, naming, effort M). Location at baseline: Scene3 (215 refs), Shadow3, scene3_native_lowering, Shape2. Dimension-suffixed module names sit next to unsuffixed ones. Action: Fold them under `Scene`, or rename to `Scene_3d`, once Shadow3 is deleted. Evidence: Scene3 is Scene.D3 (a private module aliased under Scene, about 60 callers rewritten). Shape2 is Scene_command geometry below rays, used by flow_ir and flow_web, so it stays there as data.
 
@@ -929,7 +929,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI2** (P5, high, god-module, effort L). Location at baseline: rays_editor/core.ml:11 update_frame (1,256). Contains a whole second node inspector inline (774-870). Action: Split per pane builder. Evidence: Core.update_frame (744 at the split) builds each pane in its own function and is under 300 lines (fbb3db7e); the inline second inspector is gone.
 
-- [ ] **UI3** (P5, high, god-module, effort L). Location at baseline: rays_editor/core_reduce.ml:9 reduce (677, 22 labelled arguments, 5 local refs). A single reducer with refs threaded through it. Action: A `frame_input` record and per-intent reducers that return values.
+- [x] **UI3** (P5, high, god-module, effort L). Location at baseline: rays_editor/core_reduce.ml:9 reduce (677, 22 labelled arguments, 5 local refs). A single reducer with refs threaded through it. Action: A `frame_input` record and per-intent reducers that return values. Evidence: Editor_reduce.reduce takes a Frame_input.t record instead of about 22 labelled arguments, and write_gestures threads an immutable gesture_log; no refs remain in the changed code.
 
 - [x] **UI4** (P5, high, layering, effort M). Location at baseline: rays_editor/{drawing,marks_scene,workspace_gpu,workspace_images,workspace_resources,workspace_host,live_frame}.ml. The Flow native draw runtime lives inside the editor; none of these touches Core or Pxui. Action: New `flow_native` library.
 
@@ -979,7 +979,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI27** (P5, med, god-module, effort M). Location at baseline: pxui_graph/scope_pane.ml:111 update (938). One gesture function for everything. Action: Gesture handlers that return a change list.
 
-- [ ] **UI28** (P5, low, god-module, effort M). Location at baseline: environment.ml:8 (306) · text_pane view (323) · navigator view (352). Long view functions. Action: Split them after UI1–UI3.
+- [x] **UI28** (P5, low, god-module, effort M). Location at baseline: environment.ml:8 (306) · text_pane view (323) · navigator view (352). Long view functions. Action: Split them after UI1–UI3. Evidence: update_with is 146 lines (was 246), Text_pane.view about 95 (was 275), Navigator.view about 145 (was 195).
 
 - [ ] **UI29** (P5, med, duplication, effort M). Location at baseline: pxui_shell/tree.ml (431) · rays_editor/navigator.ml (726). Two tree widgets with their own chevrons and indents. Action: Build Navigator on Tree rows.
 
@@ -989,7 +989,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI32** (P0, low, doc-rot, effort S). Location at baseline: navigator.ml:2, text_pane.ml:5 (prototype e4.js) · 'v4', 'V4', 'G13' · 'DepartureMono' comments. Dead prototype references, version tags, and a font that is no longer shipped. Action: Remove them; drop the glyph substitutions if Pragmasevka has those glyphs.
 
-- [ ] **UI33** (P5, low, vibe-code, effort S). Location at baseline: workspace_host/images/gpu/resources.ml (36–54% golfed lines; List.length capacity checks). A minified style that differs from the rest of the editor. Action: Reformat them when moving them into flow_native.
+- [x] **UI33** (P5, low, vibe-code, effort S). Location at baseline: workspace_host/images/gpu/resources.ml (36–54% golfed lines; List.length capacity checks). A minified style that differs from the rest of the editor. Action: Reformat them when moving them into flow_native. Evidence: no line over 140 columns in non-test flow_native or rays_editor files.
 
 - [x] **UI34** (P5, low, correctness-risk, effort S). Location at baseline: rays_editor/core.ml:720-725 drops ref. A ref set inside Ui.frame, against the editor's AGENTS rule. Action: Return the choice from workspace_inspector. Evidence: core.ml sets no ref inside Ui.frame.
 
