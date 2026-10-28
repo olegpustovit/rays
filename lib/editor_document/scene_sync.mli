@@ -3,7 +3,7 @@
     The scene list, the inspector, the handles and the World keys edit a document's derived
     objects; the text is the truth, so every such edit goes through {!reconcile}. *)
 
-val reconcile : factories:Sop.Edit_graph.factory list -> ?adopt:bool ->
+val reconcile : ?factories:Sop.Edit_graph.factory list -> ?adopt:bool ->
   Document.t -> Document.t -> (Document.t, string) result
 (** [reconcile ~factories before after]: [after] is [before] with objects only the host made
     edited, added or deleted (its camera and lights), or with the fields of an object
@@ -20,7 +20,7 @@ val in_text : Document.t -> Document.level -> int -> bool
 (** The scene object (at the scene level) or World layer (inside the World) with this id has text
     of its own that an edit can be written to. *)
 
-val set_fields : factories:Sop.Edit_graph.factory list -> Document.t -> Document.level ->
+val set_fields : ?factories:Sop.Edit_graph.factory list -> Document.t -> Document.level ->
   node:int -> (string * Param.value) list ->
   ((Document.t * Param.effects * Document.home) option, string) result
 (** Field values of one object written to its text and lowered again, the derived object never
@@ -57,7 +57,7 @@ type edit =
 val writes : Document.t -> Document.level -> edit -> bool
 (** Every object the edit names has text of its own, so {!write} takes it. *)
 
-val write : factories:Sop.Edit_graph.factory list -> Document.t -> Document.level -> edit ->
+val write : ?factories:Sop.Edit_graph.factory list -> Document.t -> Document.level -> edit ->
   ((Document.t * string option) option, string) result
 (** The edit written to the text and lowered again, the derived document never edited in between,
     with what it did to a loop's copies for the status line; the same text as {!reconcile} writes
@@ -71,12 +71,12 @@ val value_syntax : Param.field_view list -> Flow.Syntax.t
 (** The text of a parameter's current value: a number, flag or text, or a vector of numbers
     for the three fields of a vec3. *)
 
-val adopt : factories:Sop.Edit_graph.factory list -> Document.t ->
+val adopt : ?factories:Sop.Edit_graph.factory list -> Document.t ->
   (Document.t, string) result
 (** The scene graph of a document that has none, written from the objects the host made (an
     empty one when there are none). *)
 
-val bind_home : factories:Sop.Edit_graph.factory list -> Document.t -> Document.home ->
+val bind_home : ?factories:Sop.Edit_graph.factory list -> Document.t -> Document.home ->
   (Document.t * Flow.Workspace.path, string) result
 (** The binding that holds a home, made by unfolding what is written in place (several rewrites,
     one new document); an error when a loop or an expression made it. *)

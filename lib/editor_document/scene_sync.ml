@@ -634,7 +634,7 @@ let write_edit st (doc : Document.t) level = function
       None
 
 (* [None] when {!writes} says the edit is not the text's to take. *)
-let write ~factories (doc : Document.t) level edit =
+let write ?(factories = Sop.Nodes.factories) (doc : Document.t) level edit =
   if not (writes doc level edit) then Ok None else
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
@@ -665,7 +665,7 @@ let write ~factories (doc : Document.t) level edit =
    again: the node only says what the values are once its ranges have had their say, and which
    effects they have.  [None]: the object has no text (the caller edits the derived object and
    {!reconcile} adopts it). *)
-let set_fields ~factories (doc : Document.t) level ~node values =
+let set_fields ?(factories = Sop.Nodes.factories) (doc : Document.t) level ~node values =
   match field_home doc level node, Option.bind (graph_at doc level) (fun g -> G.find g node) with
   | Some home, Some was ->
       Result.bind (G.apply was values) (fun (_, effects) ->
@@ -693,12 +693,12 @@ let run ~factories ~adopt (before : Document.t) (after : Document.t) =
            |> Result.map_error Diagnostic.to_string
     with Stop message -> Error message
 
-let reconcile ~factories ?(adopt = true) before after = run ~factories ~adopt before after
+let reconcile ?(factories = Sop.Nodes.factories) ?(adopt = true) before after = run ~factories ~adopt before after
 
 
 (* The scene graph of a document that has none: the objects the host made are written, so that
    an object can be added to it. *)
-let adopt ~factories (doc : Document.t) =
+let adopt ?(factories = Sop.Nodes.factories) (doc : Document.t) =
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
       (Lazy.force doc.workspace.catalog) in
@@ -710,7 +710,7 @@ let adopt ~factories (doc : Document.t) =
 
 (* The binding of a home, unfolding what is written in place: the document with that edit and
    the binding's path (panels of the editor graph are edited through it). *)
-let bind_home ~factories (doc : Document.t) home =
+let bind_home ?(factories = Sop.Nodes.factories) (doc : Document.t) home =
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
       (Lazy.force doc.workspace.catalog) in

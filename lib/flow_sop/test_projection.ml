@@ -32,7 +32,7 @@ let () =
   let value = Flow.Eval.run ~time:7. edited.checked |> Result.get_ok in
   check (match List.assoc "g" value.results with Flow.Eval.Float x -> x >= 0. && x <= 1. | _ -> false)
     "noise3 row edit did not evaluate";
-  ignore (Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories document.source |> Result.get_ok);
+  ignore (Flow_sop.Lower.workspace document.source |> Result.get_ok);
   let reloaded = Editor_document.Workspace_doc.of_text catalog
     (Editor_document.Workspace_doc.to_text edited) |> Result.get_ok in
   check (Flow.Eval.run ~time:7. reloaded.checked = Ok value) "noise3 was lost on document reload"

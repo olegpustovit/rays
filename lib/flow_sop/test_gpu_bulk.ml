@@ -12,7 +12,7 @@ let text = Printf.sprintf "(workspace g (graph g :context sop (sop/grid :counts 
 let positions backend =
   let forms = Flow.Syntax.parse text |> flow_ok in
   let gpu=Option.fold backend ~none:Flow_ir.Gpu.default ~some:(fun backend->{Flow_ir.Gpu.default with backend=Some backend}) in
-  let lowered = L.workspace ~gpu ~factories:Sop.Nodes.factories forms |> flow_ok in
+  let lowered = L.workspace ~gpu forms |> flow_ok in
   let graph = List.hd lowered.graphs in
   let node = Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root) |> get_string_ok in
   let session = Session.create ~max_entries:4 ~max_payload_bytes:(1 lsl 30) |> get_string_ok in

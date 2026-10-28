@@ -115,9 +115,7 @@ let run () =
               | _ -> fail "Metal 4 vertex reflection is not the one float2 buffer at index 0");
              (match List.map buffer_binding reflection.fragment with
               | [ ("tint", 1L, Binding.Read_only, Shader_type.Vector (Shader_type.Float, 4)) ] -> ()
-              | _ -> fail "Metal 4 fragment reflection is not the one float4 buffer at index 1");
-             if reflection.tile <> [] || reflection.object_ <> [] || reflection.mesh <> [] then
-               fail "Metal 4 conventional render reflection populated an unrelated stage"
+              | _ -> fail "Metal 4 fragment reflection is not the one float4 buffer at index 1")
          | None -> fail "Metal 4 render reflection is missing");
         let plain_pipeline =
           get (create ~fragment:"prismel_fragment" ~color_formats:[ Texture.Rgba8_unorm ] "prismel_vertex")

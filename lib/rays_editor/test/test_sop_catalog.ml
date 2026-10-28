@@ -103,7 +103,7 @@ let test_morph_sketch () =
     | Ok forms ->
         match Flow_sop.Lower.workspace
             ~extra:Editor_document.Kinds.descriptors
-            ~factories:Sop.Nodes.factories forms with
+            forms with
         | Ok lowered -> lowered
         | Error d -> fail (Diagnostic.to_string d) in
   let cook_graph ~domains name =

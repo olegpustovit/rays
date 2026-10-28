@@ -4,9 +4,6 @@
     (https://www.w3.org/TR/webgpu/ section 3.6.2 "Limits", table of supported limits):
     [maxStorageBuffersPerShaderStage] is 8 and [maxComputeWorkgroupsPerDimension] is 65,535. *)
 
-val max_storage_buffers : int
-(** 8. Inputs, outputs, the status word and a noise table all count; the uniform block does not. *)
-
 val max_elements : int
 (** 64 * 65,535 = 4,194,240: dispatch is one-dimensional with [@workgroup_size(64)]. *)
 

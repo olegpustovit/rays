@@ -220,7 +220,7 @@ let ()=
 
 let ()=
   let doc=workspace "(image/load \"unused.png\")"in
-  let lowered=ok(Flow_sop.Lower.of_checked ~factories:Sop.Nodes.factories doc.checked)in
+  let lowered=ok(Flow_sop.Lower.of_checked doc.checked)in
   let graph=List.hd lowered.graphs in
   let lane=Flow_sop.Value_lane.create()in
   assert(match Flow_sop.Value_lane.resolve lane ~time:0. graph.network with
@@ -264,7 +264,7 @@ let () =
       (sop/attr_from_image (sop/grid :rows 2 :columns 2 :uv_attribute "uv") (ref image)))
     (graph picture :context draw (draw/image (ref image)))
     (graph scene :context scene (scene/geometry (ref grid) :texture (ref image))))|}) in
-  Workspace_parity.check ~commands:true ~factories:Sop.Nodes.factories
+  Workspace_parity.check ~commands:true
     ~name:"image_oracle" document;
   if String.starts_with ~prefix:"(image/noise" producer then begin
     let owner = editor document in

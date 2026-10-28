@@ -5,7 +5,7 @@ let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 let text = Printf.sprintf "(workspace g (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns %d :rows %d :size 3.0 :rotation 0.3)))" side side
 let positions run =
   let start = Unix.gettimeofday () in
-  let lowered = run (fun gpu -> Flow_sop.Lower.workspace ~gpu ~factories:Sop.Nodes.factories
+  let lowered = run (fun gpu -> Flow_sop.Lower.workspace ~gpu
     (Flow.Syntax.parse text |> ok) |> ok) in
   let lowering = Unix.gettimeofday () -. start in
   let graph = List.hd lowered.Flow_sop.Lower.graphs in

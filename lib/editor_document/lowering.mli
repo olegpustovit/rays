@@ -34,7 +34,7 @@ val document_window : Document.t -> (window, Diagnostic.t) result
 
 val has_settings : Workspace_doc.t -> bool
 
-val of_workspace : factories:Sop.Edit_graph.factory list -> ?gpu:Flow_ir.Gpu.config -> ?previous:Document.t ->
+val of_workspace : ?factories:Sop.Edit_graph.factory list -> ?gpu:Flow_ir.Gpu.config -> ?previous:Document.t ->
   Workspace_doc.t -> (Document.t, Diagnostic.t) result
 (** The document of a workspace: the objects of its scene graph as nodes of the
     scene network (each geometry object owning the lowered network of its sop

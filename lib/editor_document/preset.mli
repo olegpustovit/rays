@@ -39,13 +39,13 @@ val list : directory:string -> (string * float) list
 val delete : directory:string -> name:string -> (unit, string) result
 
 val load :
-  ?gpu:Flow_ir.Gpu.config -> path:string -> factories:Sop.Edit_graph.factory list ->
+  ?gpu:Flow_ir.Gpu.config -> path:string -> ?factories:Sop.Edit_graph.factory list ->
   settings:Settings.t -> unit -> (loaded, string) result
 (** Parse, check and lower the file; [settings] is the sketch's settings
     value the saved fields apply to.  An unreadable, unchecked or unlowerable
     file is an [Error] carrying the diagnostic text; nothing else is touched. *)
 
 val load_with_ops :
-  ?gpu:Flow_ir.Gpu.config -> ops:Flow.Op.t list -> path:string -> factories:Sop.Edit_graph.factory list ->
+  ?gpu:Flow_ir.Gpu.config -> ops:Flow.Op.t list -> path:string -> ?factories:Sop.Edit_graph.factory list ->
   settings:Settings.t -> unit -> (loaded, string) result
 (** {!load} with the host's immutable operator extensions. *)

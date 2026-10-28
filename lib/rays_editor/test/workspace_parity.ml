@@ -166,7 +166,7 @@ let core_coverage ~name evaluated =
     (List.fold_left (fun acc (_, n) -> acc + n) 0 forms)
     (String.concat "" (List.map (fun (form, n) -> Printf.sprintf ", %s %d" form n) forms))
 
-let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_document.Workspace_doc.t) =
+let check ?directory ?(commands = false) ?(factories = Sop.Nodes.factories) ~name (workspace : Editor_document.Workspace_doc.t) =
   let evaluated = E.static ~record:true ~inputs:workspace.inputs workspace.checked |> ok in
   if Sys.getenv_opt "RAYS_CORE_COVERAGE" <> None then core_coverage ~name evaluated;
   let checked, qualified = qualify ~name workspace in

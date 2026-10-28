@@ -601,11 +601,6 @@ NS_RETURNS_RETAINED id<MTLResource> resource_of_handle(value raw,
   return (__bridge id<MTLResource>)handle->object;
 }
 
-API_AVAILABLE(macos(26.0))
-NS_RETURNS_RETAINED RaysMetal4ArgumentTableState *argument_table4_state_of_handle(value raw) {
-  return object_of_handle(raw, Handle_kind::Argument_table4);
-}
-
 std::vector<id<MTLFunction>> functions_of_array(value raw_array) {
   const mlsize_t count = Wosize_val(raw_array);
   std::vector<id<MTLFunction>> functions;
@@ -2679,218 +2674,7 @@ extern "C" CAMLprim value caml_rays_metal_compiler_create(
 }
 
 API_AVAILABLE(macos(26.0))
-RaysMetalCheckedComputeRequest *checked_compute_request(
-    value raw_descriptor, id<MTL4Compiler> compiler,
-    NSString *__autoreleasing *failure) {
-  id<MTLLibrary> library =
-      object_of_handle(Field(raw_descriptor, 1), Handle_kind::Library);
-  if (library.device.registryID != compiler.device.registryID) {
-    *failure = @"Metal 4 compute library is incompatible with the compiler";
-    return nil;
-  }
-  NSString *expected_label = nil;
-  value raw_label = Field(raw_descriptor, 0);
-  if (Is_block(raw_label)) {
-    expected_label = string_from_ocaml(Field(raw_label, 0));
-    if (expected_label == nil) {
-      *failure = @"Metal 4 compute-pipeline label is not valid UTF-8";
-      return nil;
-    }
-  }
-  NSString *function_name = string_from_ocaml(Field(raw_descriptor, 2));
-  if (function_name == nil || function_name.length == 0) {
-    *failure = @"Metal 4 compute function name is not valid nonempty UTF-8";
-    return nil;
-  }
-  if (![library.functionNames containsObject:function_name]) {
-    *failure = @"Metal 4 compute function is absent from the source library";
-    return nil;
-  }
-  NSUInteger max_total_threads = 0;
-  NSUInteger required_width = 0;
-  NSUInteger required_height = 0;
-  NSUInteger required_depth = 0;
-  NSUInteger max_call_stack_depth = 0;
-  if (!nsuinteger_from_ocaml_int64(Field(raw_descriptor, 5),
-                                   &max_total_threads) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 6),
-                                   &required_width) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 7),
-                                   &required_height) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 8),
-                                   &required_depth) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 12),
-                                   &max_call_stack_depth)) {
-    *failure = @"Metal 4 compute descriptor contains an invalid cardinality";
-    return nil;
-  }
-  const bool no_required_threads = required_width == 0 &&
-                                   required_height == 0 &&
-                                   required_depth == 0;
-  if (!no_required_threads &&
-      (required_width == 0 || required_height == 0 || required_depth == 0 ||
-       required_width > NSUIntegerMax / required_height ||
-       required_width * required_height > NSUIntegerMax / required_depth ||
-       (max_total_threads != 0 &&
-        required_width * required_height * required_depth !=
-            max_total_threads))) {
-    *failure = @"Metal 4 required threadgroup dimensions are invalid";
-    return nil;
-  }
-  std::vector<id<MTLDynamicLibrary>> preloaded_libraries =
-      dynamic_libraries_of_array(Field(raw_descriptor, 11));
-  NSMutableArray<id<MTLDynamicLibrary>> *preloaded_array =
-      [NSMutableArray arrayWithCapacity:preloaded_libraries.size()];
-  NSMutableSet<NSString *> *install_names = [NSMutableSet set];
-  for (id<MTLDynamicLibrary> dynamic_library : preloaded_libraries) {
-    if (!compiler.device.supportsDynamicLibraries ||
-        dynamic_library.device.registryID != compiler.device.registryID ||
-        dynamic_library.installName == nil ||
-        [install_names containsObject:dynamic_library.installName]) {
-      *failure =
-          @"Metal 4 preloaded dynamic library is incompatible or duplicated";
-      return nil;
-    }
-    [install_names addObject:dynamic_library.installName];
-    [preloaded_array addObject:dynamic_library];
-  }
-  std::vector<id<MTL4BinaryFunction>> binary_functions =
-      binary_functions_of_array(Field(raw_descriptor, 14));
-  NSMutableArray<id<MTL4BinaryFunction>> *binary_function_array =
-      [NSMutableArray arrayWithCapacity:binary_functions.size()];
-  NSMutableSet<id<MTL4BinaryFunction>> *binary_function_set =
-      [NSMutableSet set];
-  for (id<MTL4BinaryFunction> function : binary_functions) {
-    if (!compiler.device.supportsFunctionPointers ||
-        [binary_function_set containsObject:function]) {
-      *failure =
-          @"Metal 4 binary linked function is incompatible or duplicated";
-      return nil;
-    }
-    [binary_function_set addObject:function];
-    [binary_function_array addObject:function];
-  }
-  if ((preloaded_array.count != 0 || binary_function_array.count != 0) &&
-      max_call_stack_depth == 0) {
-    *failure = @"Metal 4 dynamic linking requires a positive call-stack depth";
-    return nil;
-  }
-  MTL4LibraryFunctionDescriptor *function_descriptor =
-      [[MTL4LibraryFunctionDescriptor alloc] init];
-  function_descriptor.name = function_name;
-  function_descriptor.library = library;
-  MTL4ComputePipelineDescriptor *descriptor =
-      [[MTL4ComputePipelineDescriptor alloc] init];
-  value raw_static_linking = Field(raw_descriptor, 15);
-  NSString *static_linking_failure = nil;
-  MTL4StaticLinkingDescriptor *static_linking =
-      checked_static_linking_descriptor(
-          raw_static_linking, compiler.device,
-          compiler.device.supportsFunctionPointers, &static_linking_failure);
-  if (Is_block(raw_static_linking) && static_linking == nil) {
-    *failure = static_linking_failure;
-    return nil;
-  }
-  if (expected_label != nil) {
-    descriptor.label = expected_label;
-  }
-  descriptor.computeFunctionDescriptor = function_descriptor;
-  descriptor.staticLinkingDescriptor = static_linking;
-  const bool threadgroup_size_multiple = Bool_val(Field(raw_descriptor, 4));
-  const bool support_binary_linking = Bool_val(Field(raw_descriptor, 9));
-  const auto indirect_command_support =
-      Bool_val(Field(raw_descriptor, 10))
-          ? MTL4IndirectCommandBufferSupportStateEnabled
-          : MTL4IndirectCommandBufferSupportStateDisabled;
-  descriptor.threadGroupSizeIsMultipleOfThreadExecutionWidth =
-      threadgroup_size_multiple;
-  descriptor.maxTotalThreadsPerThreadgroup = max_total_threads;
-  descriptor.requiredThreadsPerThreadgroup =
-      MTLSizeMake(required_width, required_height, required_depth);
-  descriptor.supportBinaryLinking = support_binary_linking;
-  descriptor.supportIndirectCommandBuffers = indirect_command_support;
-  const bool reflection_requested = Bool_val(Field(raw_descriptor, 3));
-  const MTL4ShaderReflection expected_reflection =
-      MTL4ShaderReflectionBindingInfo | MTL4ShaderReflectionBufferTypeInfo;
-  if (reflection_requested) {
-    MTL4PipelineOptions *options = [[MTL4PipelineOptions alloc] init];
-    options.shaderReflection = expected_reflection;
-    descriptor.options = options;
-  }
-  MTL4PipelineStageDynamicLinkingDescriptor *dynamic_linking = nil;
-  if (preloaded_array.count != 0 || binary_function_array.count != 0 ||
-      max_call_stack_depth != 0) {
-    dynamic_linking =
-        [[MTL4PipelineStageDynamicLinkingDescriptor alloc] init];
-    dynamic_linking.maxCallStackDepth = max_call_stack_depth;
-    dynamic_linking.binaryLinkedFunctions = binary_function_array;
-    dynamic_linking.preloadedLibraries = preloaded_array;
-  }
-  NSString *task_options_failure = nil;
-  MTL4CompilerTaskOptions *task_options =
-      checked_pipeline_task_options(Field(raw_descriptor, 13), @"compute",
-                                    &task_options_failure);
-  if (task_options_failure != nil) {
-    *failure = task_options_failure;
-    return nil;
-  }
-  MTL4FunctionDescriptor *stored_function = descriptor.computeFunctionDescriptor;
-  if (![stored_function isKindOfClass:[MTL4LibraryFunctionDescriptor class]]) {
-    *failure = @"Metal changed the Metal 4 compute function descriptor type";
-    return nil;
-  }
-  MTL4LibraryFunctionDescriptor *stored_library_function =
-      static_cast<MTL4LibraryFunctionDescriptor *>(stored_function);
-  if (stored_library_function.library != library ||
-      ![stored_library_function.name isEqualToString:function_name] ||
-      ((expected_label == nil) != (descriptor.label == nil)) ||
-      (expected_label != nil &&
-       ![descriptor.label isEqualToString:expected_label]) ||
-      descriptor.threadGroupSizeIsMultipleOfThreadExecutionWidth !=
-          threadgroup_size_multiple ||
-      descriptor.maxTotalThreadsPerThreadgroup != max_total_threads ||
-      descriptor.requiredThreadsPerThreadgroup.width != required_width ||
-      descriptor.requiredThreadsPerThreadgroup.height != required_height ||
-      descriptor.requiredThreadsPerThreadgroup.depth != required_depth ||
-      descriptor.supportBinaryLinking != support_binary_linking ||
-      descriptor.supportIndirectCommandBuffers != indirect_command_support ||
-      (static_linking == nil && descriptor.staticLinkingDescriptor != nil &&
-       (descriptor.staticLinkingDescriptor.functionDescriptors.count != 0 ||
-        descriptor.staticLinkingDescriptor.privateFunctionDescriptors.count !=
-            0 ||
-        descriptor.staticLinkingDescriptor.groups.count != 0)) ||
-      (static_linking != nil &&
-       (descriptor.staticLinkingDescriptor == nil ||
-        descriptor.staticLinkingDescriptor.functionDescriptors.count !=
-            static_linking.functionDescriptors.count ||
-        descriptor.staticLinkingDescriptor.privateFunctionDescriptors.count !=
-            static_linking.privateFunctionDescriptors.count ||
-        descriptor.staticLinkingDescriptor.groups.count !=
-            static_linking.groups.count)) ||
-      (reflection_requested &&
-       (descriptor.options == nil ||
-        descriptor.options.shaderReflection != expected_reflection)) ||
-      (!reflection_requested && descriptor.options != nil) ||
-      (dynamic_linking != nil &&
-       (dynamic_linking.maxCallStackDepth != max_call_stack_depth ||
-        dynamic_linking.binaryLinkedFunctions.count !=
-            binary_function_array.count ||
-        dynamic_linking.preloadedLibraries.count != preloaded_array.count))) {
-    *failure = @"Metal changed checked Metal 4 compute descriptor properties";
-    return nil;
-  }
-  RaysMetalCheckedComputeRequest *request =
-      [[RaysMetalCheckedComputeRequest alloc] init];
-  request.descriptor = descriptor;
-  request.dynamicLinking = dynamic_linking;
-  request.taskOptions = task_options;
-  request.label = expected_label;
-  request.reflectionRequested = reflection_requested;
-  return request;
-}
-
-API_AVAILABLE(macos(26.0))
-MTL4LibraryFunctionDescriptor *checked_pipeline_function_descriptor(
+static MTL4LibraryFunctionDescriptor *checked_pipeline_function_descriptor(
     id<MTLLibrary> library, NSString *name,
     std::initializer_list<MTLFunctionType> expected_types, NSString *stage,
     NSString *__autoreleasing *failure) {
@@ -2930,7 +2714,7 @@ MTL4LibraryFunctionDescriptor *checked_pipeline_function_descriptor(
 }
 
 API_AVAILABLE(macos(26.0))
-bool checked_stored_render_function(
+static bool checked_stored_render_function(
     MTL4FunctionDescriptor *stored,
     MTL4LibraryFunctionDescriptor *expected, id<MTLLibrary> library,
     NSString *name, NSString *stage,
@@ -3032,7 +2816,7 @@ static NSUInteger checked_vertex_format_size(intnat format) {
 }
 
 API_AVAILABLE(macos(26.0))
-bool configure_render_vertex_descriptor(
+static bool configure_render_vertex_descriptor(
     MTL4RenderPipelineDescriptor *pipeline, value raw_vertex_descriptor,
     NSString *__autoreleasing *failure) {
   if (!Is_block(raw_vertex_descriptor)) {
@@ -3175,7 +2959,7 @@ bool configure_render_vertex_descriptor(
 }
 
 API_AVAILABLE(macos(26.0))
-bool configure_render_color_attachments(
+static bool configure_render_color_attachments(
     MTL4RenderPipelineColorAttachmentDescriptorArray *attachments,
     value raw_attachments, bool rasterization_enabled,
     NSString *__autoreleasing *failure) {
@@ -3265,78 +3049,7 @@ bool configure_render_color_attachments(
 }
 
 API_AVAILABLE(macos(26.0))
-bool configure_tile_color_attachments(
-    MTLTileRenderPipelineColorAttachmentDescriptorArray *attachments,
-    value raw_formats, NSString *__autoreleasing *failure) {
-  const mlsize_t format_count = Wosize_val(raw_formats);
-  if (format_count > 8) {
-    *failure = @"Metal 4 tile color-attachment count is invalid";
-    return false;
-  }
-  for (mlsize_t index = 0; index < format_count; ++index) {
-    const intnat code = Long_val(Field(raw_formats, index));
-    if (code <= static_cast<intnat>(MTLPixelFormatInvalid)) {
-      *failure = @"Metal 4 tile color format is invalid";
-      return false;
-    }
-    MTLTileRenderPipelineColorAttachmentDescriptor *attachment =
-        [[MTLTileRenderPipelineColorAttachmentDescriptor alloc] init];
-    attachment.pixelFormat = static_cast<MTLPixelFormat>(code);
-    [attachments setObject:attachment atIndexedSubscript:index];
-  }
-  for (mlsize_t index = 0; index < format_count; ++index) {
-    const MTLTileRenderPipelineColorAttachmentDescriptor *attachment =
-        [attachments objectAtIndexedSubscript:index];
-    if (attachment.pixelFormat !=
-        static_cast<MTLPixelFormat>(Long_val(Field(raw_formats, index)))) {
-      *failure = @"Metal changed checked tile color-attachment properties";
-      return false;
-    }
-  }
-  return true;
-}
-
-bool checked_threadgroup_size(value raw_width, value raw_height,
-                              value raw_depth, NSUInteger maximum,
-                              NSString *stage, MTLSize *result,
-                              NSString *__autoreleasing *failure) {
-  NSUInteger width = 0;
-  NSUInteger height = 0;
-  NSUInteger depth = 0;
-  if (!nsuinteger_from_ocaml_int64(raw_width, &width) ||
-      !nsuinteger_from_ocaml_int64(raw_height, &height) ||
-      !nsuinteger_from_ocaml_int64(raw_depth, &depth)) {
-    *failure = [NSString
-        stringWithFormat:@"Metal 4 %@ threadgroup size is out of range", stage];
-    return false;
-  }
-  const bool disabled = width == 0 && height == 0 && depth == 0;
-  if (!disabled && (width == 0 || height == 0 || depth == 0)) {
-    *failure = [NSString
-        stringWithFormat:@"Metal 4 %@ threadgroup size is incomplete", stage];
-    return false;
-  }
-  if (!disabled) {
-    if (width > std::numeric_limits<NSUInteger>::max() / height ||
-        width * height > std::numeric_limits<NSUInteger>::max() / depth) {
-      *failure = [NSString
-          stringWithFormat:@"Metal 4 %@ threadgroup size overflows", stage];
-      return false;
-    }
-    const NSUInteger cardinality = width * height * depth;
-    if (maximum != 0 && cardinality != maximum) {
-      *failure = [NSString
-          stringWithFormat:@"Metal 4 %@ threadgroup size disagrees with its maximum",
-                           stage];
-      return false;
-    }
-  }
-  *result = MTLSizeMake(width, height, depth);
-  return true;
-}
-
-API_AVAILABLE(macos(26.0))
-bool configure_render_stage_dynamic_linking(
+static bool configure_render_stage_dynamic_linking(
     MTL4PipelineStageDynamicLinkingDescriptor *descriptor,
     value raw_linking, id<MTLDevice> device, bool support_binary_linking,
     NSString *stage, NSString *__autoreleasing *failure) {
@@ -3439,7 +3152,7 @@ new_checked_render_dynamic_linking_descriptor(
 }
 
 API_AVAILABLE(macos(26.0))
-bool poison_checked_render_attachment_copy(
+static bool poison_checked_render_attachment_copy(
     MTL4RenderPipelineColorAttachmentDescriptorArray *attachments,
     NSString *__autoreleasing *failure) {
   MTL4RenderPipelineColorAttachmentDescriptor *source =
@@ -3476,7 +3189,7 @@ bool poison_checked_render_attachment_copy(
 }
 
 API_AVAILABLE(macos(26.0))
-bool checked_reset_render_attachment_defaults(
+static bool checked_reset_render_attachment_defaults(
     MTL4RenderPipelineColorAttachmentDescriptorArray *attachments,
     NSString *pipeline_kind, NSString *__autoreleasing *failure) {
   MTL4RenderPipelineColorAttachmentDescriptor *attachment =
@@ -3499,7 +3212,7 @@ bool checked_reset_render_attachment_defaults(
 }
 
 API_AVAILABLE(macos(26.0))
-bool reset_checked_render_pipeline_descriptor(
+static bool reset_checked_render_pipeline_descriptor(
     MTL4RenderPipelineDescriptor *descriptor,
     MTL4LibraryFunctionDescriptor *poison_function, id<MTLDevice> device,
     NSString *__autoreleasing *failure) {
@@ -3580,122 +3293,7 @@ bool reset_checked_render_pipeline_descriptor(
 }
 
 API_AVAILABLE(macos(26.0))
-bool reset_checked_mesh_pipeline_descriptor(
-    MTL4MeshRenderPipelineDescriptor *descriptor,
-    MTL4LibraryFunctionDescriptor *poison_function, id<MTLDevice> device,
-    NSString *__autoreleasing *failure) {
-  descriptor.label = @"rays-mesh-reset-poison";
-  descriptor.options = [[MTL4PipelineOptions alloc] init];
-  descriptor.objectFunctionDescriptor = poison_function;
-  descriptor.meshFunctionDescriptor = poison_function;
-  descriptor.fragmentFunctionDescriptor = poison_function;
-  descriptor.maxTotalThreadsPerObjectThreadgroup = 1;
-  descriptor.maxTotalThreadsPerMeshThreadgroup = 1;
-  descriptor.requiredThreadsPerObjectThreadgroup = MTLSizeMake(1, 1, 1);
-  descriptor.requiredThreadsPerMeshThreadgroup = MTLSizeMake(1, 1, 1);
-  descriptor.objectThreadgroupSizeIsMultipleOfThreadExecutionWidth = YES;
-  descriptor.meshThreadgroupSizeIsMultipleOfThreadExecutionWidth = YES;
-  descriptor.payloadMemoryLength = 1;
-  descriptor.maxTotalThreadgroupsPerMeshGrid = 1;
-  descriptor.rasterSampleCount =
-      [device supportsTextureSampleCount:2] ? 2 : 1;
-  descriptor.alphaToCoverageState = MTL4AlphaToCoverageStateEnabled;
-  descriptor.alphaToOneState = MTL4AlphaToOneStateEnabled;
-  descriptor.rasterizationEnabled = NO;
-  descriptor.maxVertexAmplificationCount =
-      [device supportsVertexAmplificationCount:2] ? 2 : 1;
-  descriptor.supportObjectBinaryLinking = YES;
-  descriptor.supportMeshBinaryLinking = YES;
-  descriptor.supportFragmentBinaryLinking = YES;
-  descriptor.colorAttachmentMappingState =
-      MTL4LogicalToPhysicalColorAttachmentMappingStateInherited;
-  if (!poison_checked_render_attachment_copy(descriptor.colorAttachments,
-                                             failure)) {
-    return false;
-  }
-  [descriptor reset];
-  const MTLSize reset_object_threads =
-      descriptor.requiredThreadsPerObjectThreadgroup;
-  const MTLSize reset_mesh_threads =
-      descriptor.requiredThreadsPerMeshThreadgroup;
-  if (descriptor.label != nil || descriptor.options != nil ||
-      descriptor.objectFunctionDescriptor != nil ||
-      descriptor.meshFunctionDescriptor != nil ||
-      descriptor.fragmentFunctionDescriptor != nil ||
-      descriptor.maxTotalThreadsPerObjectThreadgroup != 0 ||
-      descriptor.maxTotalThreadsPerMeshThreadgroup != 0 ||
-      reset_object_threads.width != 0 || reset_object_threads.height != 0 ||
-      reset_object_threads.depth != 0 || reset_mesh_threads.width != 0 ||
-      reset_mesh_threads.height != 0 || reset_mesh_threads.depth != 0 ||
-      descriptor.objectThreadgroupSizeIsMultipleOfThreadExecutionWidth ||
-      descriptor.meshThreadgroupSizeIsMultipleOfThreadExecutionWidth ||
-      descriptor.payloadMemoryLength != 0 ||
-      descriptor.maxTotalThreadgroupsPerMeshGrid != 0 ||
-      descriptor.rasterSampleCount != 1 ||
-      descriptor.alphaToCoverageState != MTL4AlphaToCoverageStateDisabled ||
-      descriptor.alphaToOneState != MTL4AlphaToOneStateDisabled ||
-      !descriptor.isRasterizationEnabled ||
-      descriptor.maxVertexAmplificationCount != 1 ||
-      descriptor.supportObjectBinaryLinking ||
-      descriptor.supportMeshBinaryLinking ||
-      descriptor.supportFragmentBinaryLinking ||
-      descriptor.colorAttachmentMappingState !=
-          MTL4LogicalToPhysicalColorAttachmentMappingStateIdentity ||
-      !checked_reset_render_attachment_defaults(
-          descriptor.colorAttachments, @"mesh", failure)) {
-    if (*failure == nil) {
-      *failure = @"Metal changed Metal 4 mesh-pipeline reset defaults";
-    }
-    return false;
-  }
-  return true;
-}
-
-API_AVAILABLE(macos(26.0))
-bool reset_checked_tile_pipeline_descriptor(
-    MTL4TileRenderPipelineDescriptor *descriptor,
-    MTL4LibraryFunctionDescriptor *poison_function, id<MTLDevice> device,
-    NSString *__autoreleasing *failure) {
-  descriptor.label = @"rays-tile-reset-poison";
-  descriptor.options = [[MTL4PipelineOptions alloc] init];
-  descriptor.tileFunctionDescriptor = poison_function;
-  descriptor.rasterSampleCount =
-      [device supportsTextureSampleCount:2] ? 2 : 1;
-  MTLTileRenderPipelineColorAttachmentDescriptor *source =
-      [[MTLTileRenderPipelineColorAttachmentDescriptor alloc] init];
-  source.pixelFormat = MTLPixelFormatRGBA8Unorm;
-  [descriptor.colorAttachments setObject:source atIndexedSubscript:0];
-  source.pixelFormat = MTLPixelFormatBGRA8Unorm;
-  MTLTileRenderPipelineColorAttachmentDescriptor *stored =
-      [descriptor.colorAttachments objectAtIndexedSubscript:0];
-  if (stored == nil || stored.pixelFormat != MTLPixelFormatRGBA8Unorm) {
-    *failure = @"Metal changed Metal 4 tile color-attachment copy semantics";
-    return false;
-  }
-  descriptor.threadgroupSizeMatchesTileSize = YES;
-  descriptor.maxTotalThreadsPerThreadgroup = 1;
-  descriptor.requiredThreadsPerThreadgroup = MTLSizeMake(1, 1, 1);
-  descriptor.supportBinaryLinking = YES;
-  [descriptor reset];
-  const MTLSize reset_threads = descriptor.requiredThreadsPerThreadgroup;
-  MTLTileRenderPipelineColorAttachmentDescriptor *reset_attachment =
-      [descriptor.colorAttachments objectAtIndexedSubscript:0];
-  if (descriptor.label != nil || descriptor.options != nil ||
-      descriptor.tileFunctionDescriptor != nil ||
-      descriptor.rasterSampleCount != 1 || reset_attachment == nil ||
-      reset_attachment.pixelFormat != MTLPixelFormatInvalid ||
-      descriptor.threadgroupSizeMatchesTileSize ||
-      descriptor.maxTotalThreadsPerThreadgroup != 0 ||
-      reset_threads.width != 0 || reset_threads.height != 0 ||
-      reset_threads.depth != 0 || descriptor.supportBinaryLinking) {
-    *failure = @"Metal changed Metal 4 tile-pipeline reset defaults";
-    return false;
-  }
-  return true;
-}
-
-API_AVAILABLE(macos(26.0))
-RaysMetalCheckedRenderRequest *checked_render_request(
+static RaysMetalCheckedRenderRequest *checked_render_request(
     value raw_descriptor, id<MTL4Compiler> compiler,
     NSString *__autoreleasing *failure) {
   id<MTLLibrary> library =
@@ -3933,487 +3531,7 @@ RaysMetalCheckedRenderRequest *checked_render_request(
 }
 
 API_AVAILABLE(macos(26.0))
-RaysMetalCheckedRenderRequest *checked_mesh_request(
-    value raw_descriptor, id<MTL4Compiler> compiler,
-    NSString *__autoreleasing *failure) {
-  id<MTLLibrary> library =
-      object_of_handle(Field(raw_descriptor, 1), Handle_kind::Library);
-  if (library.device.registryID != compiler.device.registryID) {
-    *failure = @"Metal 4 mesh library is incompatible with the compiler";
-    return nil;
-  }
-  NSString *expected_label = nil;
-  value raw_label = Field(raw_descriptor, 0);
-  if (Is_block(raw_label)) {
-    expected_label = string_from_ocaml(Field(raw_label, 0));
-    if (expected_label == nil) {
-      *failure = @"Metal 4 mesh-pipeline label is not valid UTF-8";
-      return nil;
-    }
-  }
-  NSString *object_name = nil;
-  MTL4LibraryFunctionDescriptor *object = nil;
-  value raw_object = Field(raw_descriptor, 2);
-  if (Is_block(raw_object)) {
-    object_name = string_from_ocaml(Field(raw_object, 0));
-    object = checked_pipeline_function_descriptor(
-        library, object_name, {MTLFunctionTypeObject}, @"object", failure);
-    if (object == nil) {
-      return nil;
-    }
-  }
-  NSString *mesh_name = string_from_ocaml(Field(raw_descriptor, 3));
-  MTL4LibraryFunctionDescriptor *mesh = checked_pipeline_function_descriptor(
-      library, mesh_name, {MTLFunctionTypeMesh}, @"mesh", failure);
-  if (mesh == nil) {
-    return nil;
-  }
-  NSString *fragment_name = nil;
-  MTL4LibraryFunctionDescriptor *fragment = nil;
-  value raw_fragment = Field(raw_descriptor, 4);
-  if (Is_block(raw_fragment)) {
-    fragment_name = string_from_ocaml(Field(raw_fragment, 0));
-    fragment = checked_pipeline_function_descriptor(
-        library, fragment_name, {MTLFunctionTypeFragment}, @"fragment",
-        failure);
-    if (fragment == nil) {
-      return nil;
-    }
-  }
-  const bool rasterization_enabled = Bool_val(Field(raw_descriptor, 20));
-  if (rasterization_enabled != (fragment != nil)) {
-    *failure =
-        @"Metal 4 mesh rasterization and fragment-function configuration disagree";
-    return nil;
-  }
-  NSUInteger max_object = 0;
-  NSUInteger max_mesh = 0;
-  NSUInteger payload_length = 0;
-  NSUInteger max_mesh_grid = 0;
-  NSUInteger sample_count = 0;
-  if (!nsuinteger_from_ocaml_int64(Field(raw_descriptor, 6), &max_object) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 7), &max_mesh) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 16),
-                                   &payload_length) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 17),
-                                   &max_mesh_grid) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 18),
-                                   &sample_count) ||
-      payload_length > 16'384 || sample_count == 0 ||
-      ![compiler.device supportsTextureSampleCount:sample_count]) {
-    *failure = @"Metal 4 mesh numeric descriptor property is invalid";
-    return nil;
-  }
-  const intnat alpha_to_coverage_code =
-      Long_val(Field(raw_descriptor, 32));
-  const intnat alpha_to_one_code = Long_val(Field(raw_descriptor, 33));
-  const intnat color_attachment_mapping_code =
-      Long_val(Field(raw_descriptor, 35));
-  NSUInteger max_vertex_amplification_count = 0;
-  if (alpha_to_coverage_code < 0 || alpha_to_coverage_code > 1 ||
-      alpha_to_one_code < 0 || alpha_to_one_code > 1 ||
-      color_attachment_mapping_code < 0 ||
-      color_attachment_mapping_code > 1 ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 34),
-                                   &max_vertex_amplification_count) ||
-      max_vertex_amplification_count == 0 ||
-      ![compiler.device supportsVertexAmplificationCount:
-                            max_vertex_amplification_count]) {
-    *failure = @"Metal 4 mesh raster state is invalid or unsupported";
-    return nil;
-  }
-  const auto alpha_to_coverage =
-      static_cast<MTL4AlphaToCoverageState>(alpha_to_coverage_code);
-  const auto alpha_to_one =
-      static_cast<MTL4AlphaToOneState>(alpha_to_one_code);
-  const auto color_attachment_mapping =
-      static_cast<MTL4LogicalToPhysicalColorAttachmentMappingState>(
-          color_attachment_mapping_code);
-  MTLSize required_object = {};
-  MTLSize required_mesh = {};
-  if (!checked_threadgroup_size(
-          Field(raw_descriptor, 8), Field(raw_descriptor, 9),
-          Field(raw_descriptor, 10), max_object, @"object", &required_object,
-          failure) ||
-      !checked_threadgroup_size(
-          Field(raw_descriptor, 11), Field(raw_descriptor, 12),
-          Field(raw_descriptor, 13), max_mesh, @"mesh", &required_mesh,
-          failure)) {
-    return nil;
-  }
-  const bool object_multiple = Bool_val(Field(raw_descriptor, 14));
-  const bool mesh_multiple = Bool_val(Field(raw_descriptor, 15));
-  if (object == nil &&
-      (max_object != 0 || required_object.width != 0 || object_multiple ||
-       payload_length != 0 || max_mesh_grid != 0)) {
-    *failure = @"Metal 4 object configuration has no object function";
-    return nil;
-  }
-  const bool indirect_requested = Bool_val(Field(raw_descriptor, 21));
-  if (indirect_requested &&
-      ![compiler.device supportsFamily:MTLGPUFamilyApple9]) {
-    *failure = @"Metal 4 indirect mesh draws require Apple9 or newer";
-    return nil;
-  }
-  const bool support_object_binary_linking =
-      Bool_val(Field(raw_descriptor, 23));
-  const bool support_mesh_binary_linking =
-      Bool_val(Field(raw_descriptor, 24));
-  const bool support_fragment_binary_linking =
-      Bool_val(Field(raw_descriptor, 25));
-  value raw_object_static_linking = Field(raw_descriptor, 29);
-  value raw_mesh_static_linking = Field(raw_descriptor, 30);
-  value raw_fragment_static_linking = Field(raw_descriptor, 31);
-  if ((object == nil &&
-       (support_object_binary_linking ||
-        Is_block(Field(raw_descriptor, 26)) ||
-        Is_block(raw_object_static_linking))) ||
-      (fragment == nil &&
-       (support_fragment_binary_linking ||
-        Is_block(Field(raw_descriptor, 28)) ||
-        Is_block(raw_fragment_static_linking)))) {
-    *failure = @"Metal 4 mesh linking targets an absent pipeline stage";
-    return nil;
-  }
-  if ((support_object_binary_linking || support_mesh_binary_linking) &&
-      ![compiler.device supportsFamily:MTLGPUFamilyApple9]) {
-    *failure =
-        @"Metal 4 object/mesh binary linking requires Apple9 or newer";
-    return nil;
-  }
-  if ((support_object_binary_linking || support_mesh_binary_linking ||
-       support_fragment_binary_linking) &&
-      !compiler.device.supportsFunctionPointersFromRender) {
-    *failure = @"Metal 4 mesh binary linking requires function pointers";
-    return nil;
-  }
-  NSString *static_linking_failure = nil;
-  MTL4StaticLinkingDescriptor *object_static_linking =
-      checked_render_static_linking_descriptor(
-          raw_object_static_linking, compiler.device, &static_linking_failure);
-  if (Is_block(raw_object_static_linking) && object_static_linking == nil) {
-    *failure = static_linking_failure;
-    return nil;
-  }
-  MTL4StaticLinkingDescriptor *mesh_static_linking =
-      checked_render_static_linking_descriptor(
-          raw_mesh_static_linking, compiler.device, &static_linking_failure);
-  if (Is_block(raw_mesh_static_linking) && mesh_static_linking == nil) {
-    *failure = static_linking_failure;
-    return nil;
-  }
-  MTL4StaticLinkingDescriptor *fragment_static_linking =
-      checked_render_static_linking_descriptor(
-          raw_fragment_static_linking, compiler.device,
-          &static_linking_failure);
-  if (Is_block(raw_fragment_static_linking) &&
-      fragment_static_linking == nil) {
-    *failure = static_linking_failure;
-    return nil;
-  }
-  MTL4MeshRenderPipelineDescriptor *descriptor =
-      [[MTL4MeshRenderPipelineDescriptor alloc] init];
-  if (!reset_checked_mesh_pipeline_descriptor(
-          descriptor, mesh, compiler.device, failure)) {
-    return nil;
-  }
-  descriptor.label = expected_label;
-  descriptor.objectFunctionDescriptor = object;
-  descriptor.meshFunctionDescriptor = mesh;
-  descriptor.fragmentFunctionDescriptor = fragment;
-  descriptor.maxTotalThreadsPerObjectThreadgroup = max_object;
-  descriptor.maxTotalThreadsPerMeshThreadgroup = max_mesh;
-  descriptor.requiredThreadsPerObjectThreadgroup = required_object;
-  descriptor.requiredThreadsPerMeshThreadgroup = required_mesh;
-  descriptor.objectThreadgroupSizeIsMultipleOfThreadExecutionWidth =
-      object_multiple;
-  descriptor.meshThreadgroupSizeIsMultipleOfThreadExecutionWidth =
-      mesh_multiple;
-  descriptor.payloadMemoryLength = payload_length;
-  descriptor.maxTotalThreadgroupsPerMeshGrid = max_mesh_grid;
-  descriptor.rasterSampleCount = sample_count;
-  descriptor.alphaToCoverageState = alpha_to_coverage;
-  descriptor.alphaToOneState = alpha_to_one;
-  descriptor.rasterizationEnabled = rasterization_enabled;
-  descriptor.maxVertexAmplificationCount = max_vertex_amplification_count;
-  descriptor.colorAttachmentMappingState = color_attachment_mapping;
-  const auto indirect_support = indirect_requested
-      ? MTL4IndirectCommandBufferSupportStateEnabled
-      : MTL4IndirectCommandBufferSupportStateDisabled;
-  descriptor.supportIndirectCommandBuffers = indirect_support;
-  descriptor.supportObjectBinaryLinking = support_object_binary_linking;
-  descriptor.supportMeshBinaryLinking = support_mesh_binary_linking;
-  descriptor.supportFragmentBinaryLinking = support_fragment_binary_linking;
-  descriptor.objectStaticLinkingDescriptor = object_static_linking;
-  descriptor.meshStaticLinkingDescriptor = mesh_static_linking;
-  descriptor.fragmentStaticLinkingDescriptor = fragment_static_linking;
-  if (!checked_stored_static_linking_descriptor(
-          descriptor.objectStaticLinkingDescriptor, object_static_linking,
-          @"object", failure) ||
-      !checked_stored_static_linking_descriptor(
-          descriptor.meshStaticLinkingDescriptor, mesh_static_linking, @"mesh",
-          failure) ||
-      !checked_stored_static_linking_descriptor(
-          descriptor.fragmentStaticLinkingDescriptor,
-          fragment_static_linking, @"fragment", failure)) {
-    return nil;
-  }
-  MTL4RenderPipelineDynamicLinkingDescriptor *dynamic_linking = nil;
-  if (Is_block(Field(raw_descriptor, 26)) ||
-      Is_block(Field(raw_descriptor, 27)) ||
-      Is_block(Field(raw_descriptor, 28))) {
-    dynamic_linking =
-        new_checked_render_dynamic_linking_descriptor(failure);
-    if (dynamic_linking == nil ||
-        !configure_render_stage_dynamic_linking(
-            dynamic_linking.objectLinkingDescriptor,
-            Field(raw_descriptor, 26), compiler.device,
-            support_object_binary_linking, @"object", failure) ||
-        !configure_render_stage_dynamic_linking(
-            dynamic_linking.meshLinkingDescriptor, Field(raw_descriptor, 27),
-            compiler.device, support_mesh_binary_linking, @"mesh", failure) ||
-        !configure_render_stage_dynamic_linking(
-            dynamic_linking.fragmentLinkingDescriptor,
-            Field(raw_descriptor, 28), compiler.device,
-            support_fragment_binary_linking, @"fragment", failure)) {
-      return nil;
-    }
-  }
-  value raw_attachments = Field(raw_descriptor, 19);
-  if (!configure_render_color_attachments(descriptor.colorAttachments,
-                                          raw_attachments,
-                                          rasterization_enabled, failure)) {
-    return nil;
-  }
-  const bool reflection_requested = Bool_val(Field(raw_descriptor, 5));
-  const MTL4ShaderReflection expected_reflection =
-      MTL4ShaderReflectionBindingInfo | MTL4ShaderReflectionBufferTypeInfo;
-  if (reflection_requested) {
-    MTL4PipelineOptions *options = [[MTL4PipelineOptions alloc] init];
-    options.shaderReflection = expected_reflection;
-    descriptor.options = options;
-  }
-  NSString *task_options_failure = nil;
-  MTL4CompilerTaskOptions *task_options =
-      checked_pipeline_task_options(Field(raw_descriptor, 22), @"mesh",
-                                    &task_options_failure);
-  if (task_options_failure != nil) {
-    *failure = task_options_failure;
-    return nil;
-  }
-  if (((expected_label == nil) != (descriptor.label == nil)) ||
-      (expected_label != nil &&
-       ![descriptor.label isEqualToString:expected_label]) ||
-      descriptor.maxTotalThreadsPerObjectThreadgroup != max_object ||
-      descriptor.maxTotalThreadsPerMeshThreadgroup != max_mesh ||
-      descriptor.requiredThreadsPerObjectThreadgroup.width !=
-          required_object.width ||
-      descriptor.requiredThreadsPerObjectThreadgroup.height !=
-          required_object.height ||
-      descriptor.requiredThreadsPerObjectThreadgroup.depth !=
-          required_object.depth ||
-      descriptor.requiredThreadsPerMeshThreadgroup.width !=
-          required_mesh.width ||
-      descriptor.requiredThreadsPerMeshThreadgroup.height !=
-          required_mesh.height ||
-      descriptor.requiredThreadsPerMeshThreadgroup.depth !=
-          required_mesh.depth ||
-      descriptor.objectThreadgroupSizeIsMultipleOfThreadExecutionWidth !=
-          object_multiple ||
-      descriptor.meshThreadgroupSizeIsMultipleOfThreadExecutionWidth !=
-          mesh_multiple ||
-      descriptor.payloadMemoryLength != payload_length ||
-      descriptor.maxTotalThreadgroupsPerMeshGrid != max_mesh_grid ||
-      descriptor.rasterSampleCount != sample_count ||
-      descriptor.alphaToCoverageState != alpha_to_coverage ||
-      descriptor.alphaToOneState != alpha_to_one ||
-      descriptor.isRasterizationEnabled != rasterization_enabled ||
-      descriptor.maxVertexAmplificationCount !=
-          max_vertex_amplification_count ||
-      descriptor.colorAttachmentMappingState != color_attachment_mapping ||
-      descriptor.supportIndirectCommandBuffers != indirect_support ||
-      descriptor.supportObjectBinaryLinking !=
-          support_object_binary_linking ||
-      descriptor.supportMeshBinaryLinking != support_mesh_binary_linking ||
-      descriptor.supportFragmentBinaryLinking !=
-          support_fragment_binary_linking ||
-      (reflection_requested &&
-       (descriptor.options == nil ||
-        descriptor.options.shaderReflection != expected_reflection)) ||
-      (!reflection_requested && descriptor.options != nil)) {
-    *failure = @"Metal changed checked Metal 4 mesh descriptor properties";
-    return nil;
-  }
-  if (!checked_stored_render_function(
-          descriptor.objectFunctionDescriptor, object, library, object_name,
-          @"object", failure) ||
-      !checked_stored_render_function(
-          descriptor.meshFunctionDescriptor, mesh, library, mesh_name, @"mesh",
-          failure) ||
-      !checked_stored_render_function(
-          descriptor.fragmentFunctionDescriptor, fragment, library,
-          fragment_name, @"fragment", failure)) {
-    return nil;
-  }
-  RaysMetalCheckedRenderRequest *request =
-      [[RaysMetalCheckedRenderRequest alloc] init];
-  request.descriptor = descriptor;
-  request.dynamicLinking = dynamic_linking;
-  request.taskOptions = task_options;
-  request.label = expected_label;
-  request.reflectionRequested = reflection_requested;
-  return request;
-}
-
-API_AVAILABLE(macos(26.0))
-RaysMetalCheckedRenderRequest *checked_tile_request(
-    value raw_descriptor, id<MTL4Compiler> compiler,
-    NSString *__autoreleasing *failure) {
-  id<MTLLibrary> library =
-      object_of_handle(Field(raw_descriptor, 1), Handle_kind::Library);
-  if (library.device.registryID != compiler.device.registryID) {
-    *failure = @"Metal 4 tile library is incompatible with the compiler";
-    return nil;
-  }
-  if (![compiler.device supportsFamily:MTLGPUFamilyApple4]) {
-    *failure = @"Metal 4 tile shaders require Apple4 or newer";
-    return nil;
-  }
-  NSString *expected_label = nil;
-  value raw_label = Field(raw_descriptor, 0);
-  if (Is_block(raw_label)) {
-    expected_label = string_from_ocaml(Field(raw_label, 0));
-    if (expected_label == nil) {
-      *failure = @"Metal 4 tile-pipeline label is not valid UTF-8";
-      return nil;
-    }
-  }
-  NSString *tile_name = string_from_ocaml(Field(raw_descriptor, 2));
-  MTL4LibraryFunctionDescriptor *tile =
-      checked_pipeline_function_descriptor(
-          library, tile_name,
-          {MTLFunctionTypeKernel, MTLFunctionTypeFragment}, @"tile", failure);
-  if (tile == nil) {
-    return nil;
-  }
-  NSUInteger sample_count = 0;
-  NSUInteger max_total_threads = 0;
-  if (!nsuinteger_from_ocaml_int64(Field(raw_descriptor, 4), &sample_count) ||
-      !nsuinteger_from_ocaml_int64(Field(raw_descriptor, 7),
-                                   &max_total_threads) ||
-      sample_count == 0 ||
-      ![compiler.device supportsTextureSampleCount:sample_count]) {
-    *failure = @"Metal 4 tile numeric descriptor property is invalid";
-    return nil;
-  }
-  MTLSize required_threads = {};
-  if (!checked_threadgroup_size(
-          Field(raw_descriptor, 8), Field(raw_descriptor, 9),
-          Field(raw_descriptor, 10), max_total_threads, @"tile",
-          &required_threads, failure)) {
-    return nil;
-  }
-  const bool support_binary_linking = Bool_val(Field(raw_descriptor, 11));
-  if (support_binary_linking &&
-      !compiler.device.supportsFunctionPointersFromRender) {
-    *failure = @"Metal 4 tile binary linking requires function pointers";
-    return nil;
-  }
-  value raw_static_linking = Field(raw_descriptor, 12);
-  NSString *static_linking_failure = nil;
-  MTL4StaticLinkingDescriptor *static_linking =
-      checked_render_static_linking_descriptor(
-          raw_static_linking, compiler.device, &static_linking_failure);
-  if (Is_block(raw_static_linking) && static_linking == nil) {
-    *failure = static_linking_failure;
-    return nil;
-  }
-  MTL4TileRenderPipelineDescriptor *descriptor =
-      [[MTL4TileRenderPipelineDescriptor alloc] init];
-  if (!reset_checked_tile_pipeline_descriptor(
-          descriptor, tile, compiler.device, failure)) {
-    return nil;
-  }
-  descriptor.label = expected_label;
-  descriptor.tileFunctionDescriptor = tile;
-  descriptor.rasterSampleCount = sample_count;
-  const bool matches_tile_size = Bool_val(Field(raw_descriptor, 6));
-  descriptor.threadgroupSizeMatchesTileSize = matches_tile_size;
-  descriptor.maxTotalThreadsPerThreadgroup = max_total_threads;
-  descriptor.requiredThreadsPerThreadgroup = required_threads;
-  descriptor.supportBinaryLinking = support_binary_linking;
-  descriptor.staticLinkingDescriptor = static_linking;
-  if (!checked_stored_static_linking_descriptor(
-          descriptor.staticLinkingDescriptor, static_linking, @"tile",
-          failure)) {
-    return nil;
-  }
-  MTL4RenderPipelineDynamicLinkingDescriptor *dynamic_linking = nil;
-  if (Is_block(Field(raw_descriptor, 14))) {
-    dynamic_linking =
-        new_checked_render_dynamic_linking_descriptor(failure);
-    if (dynamic_linking == nil ||
-        !configure_render_stage_dynamic_linking(
-            dynamic_linking.tileLinkingDescriptor, Field(raw_descriptor, 14),
-            compiler.device, support_binary_linking, @"tile", failure)) {
-      return nil;
-    }
-  }
-  if (!configure_tile_color_attachments(
-          descriptor.colorAttachments, Field(raw_descriptor, 5), failure)) {
-    return nil;
-  }
-  const bool reflection_requested = Bool_val(Field(raw_descriptor, 3));
-  const MTL4ShaderReflection expected_reflection =
-      MTL4ShaderReflectionBindingInfo | MTL4ShaderReflectionBufferTypeInfo;
-  if (reflection_requested) {
-    MTL4PipelineOptions *options = [[MTL4PipelineOptions alloc] init];
-    options.shaderReflection = expected_reflection;
-    descriptor.options = options;
-  }
-  NSString *task_options_failure = nil;
-  MTL4CompilerTaskOptions *task_options =
-      checked_pipeline_task_options(Field(raw_descriptor, 13), @"tile",
-                                    &task_options_failure);
-  if (task_options_failure != nil) {
-    *failure = task_options_failure;
-    return nil;
-  }
-  if (((expected_label == nil) != (descriptor.label == nil)) ||
-      (expected_label != nil &&
-       ![descriptor.label isEqualToString:expected_label]) ||
-      descriptor.rasterSampleCount != sample_count ||
-      descriptor.threadgroupSizeMatchesTileSize != matches_tile_size ||
-      descriptor.maxTotalThreadsPerThreadgroup != max_total_threads ||
-      descriptor.requiredThreadsPerThreadgroup.width != required_threads.width ||
-      descriptor.requiredThreadsPerThreadgroup.height !=
-          required_threads.height ||
-      descriptor.requiredThreadsPerThreadgroup.depth != required_threads.depth ||
-      descriptor.supportBinaryLinking != support_binary_linking ||
-      (reflection_requested &&
-       (descriptor.options == nil ||
-        descriptor.options.shaderReflection != expected_reflection)) ||
-      (!reflection_requested && descriptor.options != nil)) {
-    *failure = @"Metal changed checked Metal 4 tile descriptor properties";
-    return nil;
-  }
-  if (!checked_stored_render_function(
-          descriptor.tileFunctionDescriptor, tile, library, tile_name, @"tile",
-          failure)) {
-    return nil;
-  }
-  RaysMetalCheckedRenderRequest *request =
-      [[RaysMetalCheckedRenderRequest alloc] init];
-  request.descriptor = descriptor;
-  request.dynamicLinking = dynamic_linking;
-  request.taskOptions = task_options;
-  request.label = expected_label;
-  request.reflectionRequested = reflection_requested;
-  return request;
-}
-
-API_AVAILABLE(macos(26.0))
-bool checked_render_pipeline_result(
+static bool checked_render_pipeline_result(
     id<MTLRenderPipelineState> pipeline, id<MTL4Compiler> compiler,
     NSString *expected_label, bool reflection_requested,
     NSString *__autoreleasing *failure) {
@@ -4436,7 +3554,7 @@ bool checked_render_pipeline_result(
 }
 
 API_AVAILABLE(macos(26.0))
-id<MTLRenderPipelineState> compile_checked_render_pipeline(
+static id<MTLRenderPipelineState> compile_checked_render_pipeline(
     id<MTL4Compiler> compiler, RaysMetalCheckedRenderRequest *request,
     NSString *__autoreleasing *failure) {
   NSError *error = nil;
@@ -4677,21 +3795,6 @@ caml_rays_metal_compute_pipeline_create_descriptor(
   CAMLreturn(result_ok(pair));
 }
 
-bool checked_metal4_store_action(value raw_action,
-                                 MTLStoreAction *store_action) {
-  if (!Is_long(raw_action)) {
-    return false;
-  }
-  const intnat code = Long_val(raw_action);
-  if (code != MTLStoreActionDontCare && code != MTLStoreActionStore &&
-      code != MTLStoreActionMultisampleResolve &&
-      code != MTLStoreActionStoreAndMultisampleResolve) {
-    return false;
-  }
-  *store_action = static_cast<MTLStoreAction>(code);
-  return true;
-}
-
 API_AVAILABLE(macos(26.0))
 MTLLogicalToPhysicalColorAttachmentMap *
 new_checked_color_attachment_map(
@@ -4744,29 +3847,6 @@ new_checked_color_attachment_map(
   return mapping;
 }
 
-API_AVAILABLE(macos(26.0))
-bool retain_metal4_render_argument_tables(
-    value raw_tables, RaysMetal4CommandBufferState *command_buffer,
-    NSString *__autoreleasing *failure) {
-  const mlsize_t table_count = Wosize_val(raw_tables);
-  if (table_count > 5) {
-    *failure = @"Metal 4 render command has too many argument tables";
-    return false;
-  }
-  for (mlsize_t index = 0; index < table_count; ++index) {
-    RaysMetal4ArgumentTableState *table =
-        argument_table4_state_of_handle(Field(raw_tables, index));
-    if (table.argumentTable.device.registryID !=
-        command_buffer.commandBuffer.device.registryID) {
-      *failure = @"Metal 4 render argument table belongs to another device";
-      return false;
-    }
-    [command_buffer retainEncodedObject:table];
-    [table retainBoundObjectsInCommandBuffer:command_buffer];
-  }
-  return true;
-}
-
 struct RaysMetal4IndexedDraw {
   MTLPrimitiveType primitive;
   NSUInteger index_count;
@@ -4774,51 +3854,6 @@ struct RaysMetal4IndexedDraw {
   MTLGPUAddress index_address;
   NSUInteger index_length;
 };
-
-API_AVAILABLE(macos(26.0))
-bool rays_metal4_indexed_draw(
-    value raw_draw, id<MTLBuffer> index_buffer,
-    RaysMetal4CommandBufferState *command_buffer,
-    RaysMetal4IndexedDraw *draw, NSString *__autoreleasing *failure) {
-  const intnat primitive = Long_val(Field(raw_draw, 0));
-  const intnat index_count = Long_val(Field(raw_draw, 1));
-  const intnat index_type = Long_val(Field(raw_draw, 2));
-  const std::int64_t signed_offset = Int64_val(Field(raw_draw, 3));
-  if (index_buffer.device.registryID !=
-          command_buffer.commandBuffer.device.registryID ||
-      primitive < 0 || primitive > 4 || index_count <= 0 || index_type < 0 ||
-      index_type > 1 || signed_offset < 0) {
-    *failure = @"Metal 4 indexed-draw arguments are invalid";
-    return false;
-  }
-  const NSUInteger stride = index_type == 0 ? 2 : 4;
-  const std::uint64_t unsigned_offset =
-      static_cast<std::uint64_t>(signed_offset);
-  if (unsigned_offset > index_buffer.length || unsigned_offset % stride != 0 ||
-      static_cast<NSUInteger>(index_count) >
-          std::numeric_limits<NSUInteger>::max() / stride) {
-    *failure = @"Metal 4 indexed-draw arguments are invalid";
-    return false;
-  }
-  const NSUInteger offset = static_cast<NSUInteger>(unsigned_offset);
-  const NSUInteger required_length =
-      static_cast<NSUInteger>(index_count) * stride;
-  const MTLGPUAddress base_address = index_buffer.gpuAddress;
-  const NSUInteger available_length = index_buffer.length - offset;
-  if (required_length > available_length || base_address == 0 ||
-      static_cast<MTLGPUAddress>(offset) >
-          std::numeric_limits<MTLGPUAddress>::max() - base_address) {
-    *failure = @"Metal 4 indexed draw exceeds its checked buffer range";
-    return false;
-  }
-  draw->primitive = static_cast<MTLPrimitiveType>(primitive);
-  draw->index_count = static_cast<NSUInteger>(index_count);
-  draw->index_type = static_cast<MTLIndexType>(index_type);
-  draw->index_address =
-      base_address + static_cast<MTLGPUAddress>(offset);
-  draw->index_length = available_length - (available_length % stride);
-  return true;
-}
 
 struct RaysMetal4BufferRange {
   MTLGPUAddress address;
@@ -4841,41 +3876,6 @@ static_assert(
     offsetof(MTLDrawIndexedPrimitivesIndirectArguments, baseVertex) == 12);
 static_assert(
     offsetof(MTLDrawIndexedPrimitivesIndirectArguments, baseInstance) == 16);
-
-API_AVAILABLE(macos(26.0))
-bool rays_metal4_explicit_buffer_range(
-    id<MTLBuffer> buffer, RaysMetal4CommandBufferState *command_buffer,
-    std::int64_t signed_offset, std::int64_t signed_length,
-    NSUInteger alignment, RaysMetal4BufferRange *range,
-    NSString *__autoreleasing *failure) {
-  if (buffer.device.registryID !=
-          command_buffer.commandBuffer.device.registryID ||
-      signed_offset < 0 || signed_length <= 0) {
-    *failure = @"Metal 4 GPU-address buffer range is invalid";
-    return false;
-  }
-  const std::uint64_t unsigned_offset =
-      static_cast<std::uint64_t>(signed_offset);
-  const std::uint64_t unsigned_length =
-      static_cast<std::uint64_t>(signed_length);
-  if (alignment == 0 || unsigned_offset % alignment != 0 ||
-      unsigned_length % alignment != 0 || unsigned_offset > buffer.length ||
-      unsigned_length > buffer.length - unsigned_offset) {
-    *failure = @"Metal 4 GPU-address buffer range is misaligned or out of bounds";
-    return false;
-  }
-  const MTLGPUAddress base_address = buffer.gpuAddress;
-  if (base_address == 0 ||
-      static_cast<MTLGPUAddress>(unsigned_offset) >
-          std::numeric_limits<MTLGPUAddress>::max() - base_address) {
-    *failure = @"Metal 4 GPU-address buffer range overflows";
-    return false;
-  }
-  range->address =
-      base_address + static_cast<MTLGPUAddress>(unsigned_offset);
-  range->length = static_cast<NSUInteger>(unsigned_length);
-  return true;
-}
 
 static_assert(sizeof(MTLAccelerationStructureInstanceDescriptor) == 64);
 static_assert(offsetof(MTLAccelerationStructureInstanceDescriptor, options) == 48);
@@ -4913,8 +3913,6 @@ extern "C" CAMLprim value caml_rays_metal_layer_configure(value rl,value rw,valu
     l.drawableSize=CGSizeMake(w,h);l.pixelFormat=(MTLPixelFormat)format;l.framebufferOnly=Bool_val(Field(rflags,0));l.maximumDrawableCount=Long_val(Field(rflags,1));l.allowsNextDrawableTimeout=Bool_val(Field(rflags,2));l.displaySyncEnabled=Bool_val(Field(rflags,3));l.presentsWithTransaction=Bool_val(Field(rflags,4));
     CAMLreturn(result_unit()); } @catch(NSException*x){CAMLreturn(result_error(x.reason));}}
 
-
-
 extern "C" CAMLprim value caml_rays_metal_drawable_texture(value rd){CAMLparam1(rd);CAMLlocal3(raw,metadata,result);@autoreleasepool{@try{id<CAMetalDrawable>d=object_of_handle(rd,Handle_kind::Metal_drawable);id<MTLTexture>texture=d.texture;if(!texture)CAMLreturn(result_error_text("drawable has no texture"));raw=allocate_handle(texture,Handle_kind::Texture);metadata=caml_alloc_tuple(4);Store_field(metadata,0,raw);Store_field(metadata,1,Val_long(texture.width));Store_field(metadata,2,Val_long(texture.height));Store_field(metadata,3,Val_long(texture.pixelFormat));result=result_ok(metadata);CAMLreturn(result);}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}}
 
 extern "C" CAMLprim value caml_rays_metal_presentation_command_snapshot(value raw){CAMLparam1(raw); Autorelease_pool pool;CAMLlocal2(tuple,result);@try{id<MTLCommandBuffer>c=object_of_handle(raw,Handle_kind::Command_buffer);tuple=caml_alloc_tuple(8);Store_field(tuple,0,caml_copy_int64(c.commandQueue.device.registryID));Store_field(tuple,1,caml_copy_int64(c.device.registryID));Store_field(tuple,2,caml_copy_int64(c.errorOptions));Store_field(tuple,3,caml_copy_double(c.GPUStartTime));Store_field(tuple,4,caml_copy_double(c.GPUEndTime));Store_field(tuple,5,caml_copy_double(c.kernelStartTime));Store_field(tuple,6,caml_copy_double(c.kernelEndTime));Store_field(tuple,7,Val_bool(c.retainedReferences));result=result_ok(tuple);CAMLreturn(result);}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}
@@ -4925,7 +3923,6 @@ struct PresentationCallbackToken { std::shared_ptr<PresentationCallbackState> st
 extern "C" CAMLprim value caml_rays_metal_command_buffer_cancel_handler(value raw_token){CAMLparam1(raw_token); Autorelease_pool pool;auto *token=(PresentationCallbackToken*)Nativeint_val(raw_token);if(token){int expected=0;if(token->state->state.compare_exchange_strong(expected,2)){caml_remove_generational_global_root(token->state->root);free(token->state->root);token->state->root=nullptr;}delete token;}CAMLreturn(Val_unit);}
 
 extern "C" CAMLprim value caml_rays_metal_render_pass_descriptor_set_sizes(value rp,value rw,value rh,value ra,value rs){CAMLparam5(rp,rw,rh,ra,rs); Autorelease_pool pool;MTLRenderPassDescriptor*p=object_of_handle(rp,Handle_kind::Render_pass_descriptor);intnat w=Long_val(rw),h=Long_val(rh),a=Long_val(ra),s=Long_val(rs);if(w<=0||h<=0||a<=0||s<=0)CAMLreturn(result_error_text("invalid render pass sizes"));p.renderTargetWidth=w;p.renderTargetHeight=h;p.renderTargetArrayLength=a;p.defaultRasterSampleCount=s;CAMLreturn(result_unit());}
-
 
 extern "C" CAMLprim value caml_rays_metal_render_pass_resolve_texture(
     value raw,value replacement,value set_raw){
@@ -5416,16 +4413,12 @@ extern "C" CAMLprim value caml_rays_metal_command_buffer_error(value raw) {
 
 #pragma clang diagnostic pop
 
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-
-
 enum class RaysRenderStage:intnat{Vertex=0,Fragment=1,Tile=2,Object=3,Mesh=4};
 template<class T>static std::vector<T> rays_render_handles(value a,Handle_kind kind){mlsize_t n=Wosize_val(a);std::vector<T>v;v.reserve(n);for(mlsize_t i=0;i<n;i++)v.push_back(Is_none(Field(a,i))?nil:object_of_handle(Field(Field(a,i),0),kind));return v;}
-
 
 #pragma clang diagnostic pop
 
@@ -5506,7 +4499,6 @@ extern value rays_mesh_tile_error(NSString *);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-
 /* Corrected Command-support121 handwritten callable shard (18/103 split).
    Callback capture/event notification, function-log enumeration and complex
    blit copies remain blocked until their roots and full range schemas exist. */
@@ -5559,7 +4551,6 @@ extern "C" NSUInteger rays_mtl_mesh_tile_mechanical_id_count(void) { return 48; 
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
-
 
 /* Exact synchronous Mesh/tile105 descriptor compilation selectors:
    method:-[MTLDevice newRenderPipelineStateWithMeshDescriptor:options:reflection:error:]
@@ -5646,8 +4637,6 @@ extern "C" CAMLprim value caml_rays_metal_acceleration_encoder_write_type(value 
 
 /* mode 0 is commandBufferWithUnretainedReferences; mode 1 materializes the
    exact command-buffer descriptor tuple (retainedReferences,errorOptions,log). */
-
-
 
 /* IndirectCommand14 residual shard. expected_device is the authoritative ICB
    owner registry ID retained by the safe parent; all resource edges are fully
@@ -5860,7 +4849,6 @@ C35_ENTRY(caml_rays_metal_compute35_accelerations)(value re,value ra){CAMLparam2
 
 #pragma clang diagnostic pop
 #pragma clang diagnostic pop
-
 
 #pragma clang diagnostic pop
 

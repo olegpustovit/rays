@@ -162,18 +162,18 @@ val changes : Port.parameter -> Flow.Eval.value -> ((string * Param.value) list,
     lowering ([Editor_document.Lowering]) reads its structs through it. *)
 
 val workspace :
-  factories:Sop.Edit_graph.factory list -> ?extra:Catalog.descriptor list ->
+  ?factories:Sop.Edit_graph.factory list -> ?extra:Catalog.descriptor list ->
   ?reference:bool -> ?gpu:Flow_ir.Gpu.config -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
   ?compiled_ids:int Path_map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   Flow.Syntax.t list -> (t, Diagnostic.t) result
-(** [factories] is the SOP catalog ([Sop.Nodes.factories]). [ops]
+(** [factories] is the SOP catalog (default [Sop.Nodes.factories]). [ops]
     defaults to {!Operators.all}; an explicit list replaces those extensions.
     Errors:
     the checker's first error, the evaluator's, or [E_LOWER]. *)
 
 val of_checked :
-  factories:Sop.Edit_graph.factory list ->
+  ?factories:Sop.Edit_graph.factory list ->
   ?provenance_tags:bool ->
   ?reference:bool ->
   ?gpu:Flow_ir.Gpu.config -> ?on_profile:(Flow_ir.Profile.t -> unit) ->

@@ -27,7 +27,7 @@ let () =
   let gpu = Flow_native.Workspace_gpu.create () in
   Flow_native.Workspace_gpu.qualification gpu;
   let gpu_config=Flow_native.Workspace_gpu.config gpu in
-  let lowered = Flow.Syntax.parse source |> ok |> L.workspace ~gpu:gpu_config ~factories:Sop.Nodes.factories |> ok in
+  let lowered = Flow.Syntax.parse source |> ok |> L.workspace ~gpu:gpu_config |> ok in
   let value = List.assoc "picture" lowered.evaluated.results in
   let prepared = Flow_native.Drawing.prepare ~gpu:gpu_config ~approx:lowered.approx ~states:lowered.states lowered.plan value |> ok in
   let canvas = Rays.Canvas.create_exn ~width:160 ~height:96 in

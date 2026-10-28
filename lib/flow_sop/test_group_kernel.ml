@@ -223,7 +223,7 @@ let () =
         (if (int/eq (int/mod counter 2) 1) value 0)) (array/int (sop/count geo :points) 1)))
         :name "selected"))))|} |>flow_ok in
   List.iter(fun domains->
-    let lowered=Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories forms |>flow_ok in
+    let lowered=Flow_sop.Lower.workspace forms |>flow_ok in
     let graph=List.hd lowered.graphs and lane=Flow_sop.Value_lane.create() in
     let session=create_session() in
     Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->

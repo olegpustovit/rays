@@ -19,7 +19,7 @@ let declaration ?(hook=normalizer) ?(default=" POINTS ") ?(operation="test_encod
 let source ?hook ?default ?operation ?version ?(argument="") ()=
   "(workspace encoded "^declaration ?hook ?default ?operation ?version ()^
   " (graph g :context sop (let* [card (sop/test_encoded (sop/line :points 3) "^argument^")] card)))"
-let lower forms=flow_ok(Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories forms)
+let lower forms=flow_ok(Flow_sop.Lower.workspace forms)
 let root lowered=
   let graph=List.find(fun(g:Flow_sop.Lower.graph)->g.default)lowered.Flow_sop.Lower.graphs in
   ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
@@ -93,7 +93,7 @@ let ()=
     (Set_arg{node=card.path;key=Kw "rules";sub=[];value=S.make(Str text)}) in
   let authored,changed=flow_ok(edit " DETAIL ") in
   assert(String.contains(Flow.Lisp.flat(List.hd authored)) 'D');
-  let changed_node=root(flow_ok(Flow_sop.Lower.of_checked ~factories:Sop.Nodes.factories changed)) in
+  let changed_node=root(flow_ok(Flow_sop.Lower.of_checked changed)) in
   assert((field changed_node).current=Param.Text_value "detail");
   assert(Result.is_error(edit "bad"));
   assert((field node).current=Param.Text_value "point");
@@ -203,7 +203,7 @@ let () =
   assert(version rechecked=2);
   let restored=check(parse(Flow.Lisp.flat(List.hd saved))) in
   assert(version restored=2);
-  let edited=root(flow_ok(Flow_sop.Lower.of_checked ~factories:Sop.Nodes.factories restored)) in
+  let edited=root(flow_ok(Flow_sop.Lower.of_checked restored)) in
   assert(Sop.Node.version edited=2 && (field edited).current=Param.Text_value "detail");
   let header version=flow_ok(Flow.Defnode.parse(List.hd(parse(declaration ~version ())))) in
   let manifest version=fst(flow_ok(Flow_sop.Manifest.generate ~nodes:[header version] Sop.Nodes.factories)) in

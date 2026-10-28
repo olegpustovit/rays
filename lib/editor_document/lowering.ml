@@ -519,7 +519,7 @@ let same_settings a b =
 let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
   a.fast = b.fast && a.policy = b.policy && a.backend == b.backend
 
-let of_workspace ~factories ?gpu ?previous (workspace : Workspace_doc.t) =
+let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?previous (workspace : Workspace_doc.t) =
   let gpu = Option.value gpu ~default:(match previous with
     | Some (doc : Document.t) -> (doc.Document.workspace.lowered).gpu
     | None -> Flow_ir.Gpu.default) in

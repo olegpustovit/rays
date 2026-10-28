@@ -1618,11 +1618,11 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
     Ok L.result
   with Diagnostic.Error diagnostic -> Error diagnostic)
 
-let of_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked =
+let of_checked ?(factories = Sop.Nodes.factories) ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked =
   Result.bind (Encoded_parameters.checked checked)
     (lower_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs)
 
-let workspace ~factories ?extra ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs source =
+let workspace ?(factories = Sop.Nodes.factories) ?extra ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs source =
   Result.bind (Flow_catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
     match Flow_catalog.check_workspace ~ops:Operators.all catalog source with
     | Some checked, _ -> of_checked ~factories ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked

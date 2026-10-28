@@ -8,8 +8,6 @@ type network = {
   graph : Flow_sop.Network.t;
   displayed : int option;
 }
-val of_geometry :
-  context:Flow.Context.t -> Sop.Edit_graph.t -> int option -> network
 type home =
     Bound_at of Flow.Workspace.path
   | Inline_in of home * Flow_graph.Flow_edit.arg_key
