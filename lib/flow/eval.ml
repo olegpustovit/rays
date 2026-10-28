@@ -204,7 +204,9 @@ and st = {
   defs : (string, W.graph) Hashtbl.t;
   kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
   node_defs :
-    (string, W.node_definition * ((string * value) list -> (string * value) list) Lazy.t) Hashtbl.t;
+    ( string,
+      W.node_definition * ((string * value) list -> (string * value) list option) Lazy.t )
+    Hashtbl.t;
       (* Lisp nodes whose bodies evaluate inline in the calling program, with the host's
          canonicalization of their call parameters *)
   ops : Op.t list;
@@ -780,8 +782,10 @@ and ev_raw c env (x : W.term) : value =
       in
       let call vals = catalog_call c ~authored:x.form.id kind ctx vals in
       match Hashtbl.find_opt c.st.node_defs kind with
-      | Some (d, canonical) when not (List.exists (fun (_, v) -> is_live v) vals) ->
-          inline_node c d (Lazy.force canonical) ~call vals
+      | Some (d, canonical) when not (List.exists (fun (_, v) -> is_live v) vals) -> (
+          match Lazy.force canonical vals with
+          | Some parameters -> inline_node c d parameters ~call vals
+          | None -> call vals)
       | _ -> call vals)
   | W.Op { op = "scene/merge"; args; skip = _ :: _ as skip } ->
       (* register L16: the arguments at skipped tuples are not evaluated *)
@@ -1072,12 +1076,12 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
 (* A card's body runs in the caller. Its parameters take the host's path (ranges, choices,
    encoded text) and its validations refuse the program, as a node build would; an error in the
    body itself is that card's cook error: the body's nodes are dropped and the card lowers as a node
-   that fails with the diagnostic when cooked. Each body has its own step budget, as before. *)
-and inline_node c (d : W.node_definition) canonical ~call vals =
+   that fails with the diagnostic when cooked. Each body has its own step budget, as before. A
+   call with live arguments, or one the host keeps as its own node, lowers as before. *)
+and inline_node c (d : W.node_definition) parameters ~call vals =
   if c.depth > max_depth then fail "E_DEPTH" "Call depth exceeds 64.";
   let base = [ "node:" ^ d.kind.qualified ] in
   let c' = { c with prefix = site c; base; route = []; depth = c.depth + 1 } in
-  let parameters = canonical vals in
   let rec flat = function
     | List xs -> List.concat_map flat (Array.to_list xs)
     | No_geo -> []
@@ -1104,6 +1108,11 @@ and inline_node c (d : W.node_definition) canonical ~call vals =
   in
   let st = c.st in
   let steps = st.steps and nodes = st.nodes and authored = st.authored and nnodes = st.nnodes in
+  let drop () =
+    st.nodes <- nodes;
+    st.authored <- authored;
+    st.nnodes <- nnodes
+  in
   st.steps <- 0;
   match
     let env = List.fold_left bind Smap.empty d.body.inputs in
@@ -1125,9 +1134,7 @@ and inline_node c (d : W.node_definition) canonical ~call vals =
       raise (Diagnostic.Error e)
   | exception Diagnostic.Error e when e.code <> "cancelled" && e.code <> "E_CANCELLED" ->
       st.steps <- steps;
-      st.nodes <- nodes;
-      st.authored <- authored;
-      st.nnodes <- nnodes;
+      drop ();
       (* ponytail: the diagnostic rides as marshalled text in a reserved argument *)
       call (vals @ [ (node_error, Text (Marshal.to_string e [])) ])
   | exception x ->
@@ -1823,43 +1830,14 @@ and graph_value ?(rec_ = true) c name over =
 (* ---- entry points ---- *)
 
 let diagnostic code msg span = Diagnostic.error ?span ~code msg
-
-(* ponytail: step A of the single-program design; a node with validators, normalizers or
-   callable slots still lowers as its own nested workspace. *)
-let reads_context defs (t : W.term) =
-  let seen = Hashtbl.create 8 in
-  let rec scan (t : W.term) =
-    (match t.node with
-    | W.Op { op; _ } when List.mem op W.body_context_ops -> raise Exit
-    | W.Call_fn { fn; body; _ } -> (
-        Option.iter scan body;
-        match Hashtbl.find_opt defs fn with
-        | Some (g : W.graph) when not (Hashtbl.mem seen fn) ->
-            Hashtbl.add seen fn ();
-            scan g.body;
-            List.iter (fun (_, _, df) -> Option.iter scan df) g.inputs
-        | _ -> ())
-    | _ -> ());
-    ignore
-      (W.map_children
-         (fun t ->
-           scan t;
-           t)
-         t)
-  in
-  match scan t with () -> false | exception Exit -> true
-
 let inline_nodes = Atomic.make false
-let inline_parameters = Atomic.make (fun _ _ vals -> vals)
+let inline_parameters = Atomic.make (fun _ _ vals -> Some vals)
 
-let inline_simple defs (d : W.node_definition) =
-  (not (reads_context defs d.body.body))
-  && List.for_all
-       (fun (_, _, df) -> not (Option.fold ~none:false ~some:(reads_context defs) df))
-       d.body.inputs
-  && List.for_all
-       (fun (s : Catalog.slot) -> match s.ty with Some (Ty.Fn _) -> false | _ -> true)
-       d.slots
+(* ponytail: a node with callable slots still lowers as its own nested workspace *)
+let inline_simple (d : W.node_definition) =
+  List.for_all
+    (fun (s : Catalog.slot) -> match s.ty with Some (Ty.Fn _) -> false | _ -> true)
+    d.slots
 
 let new_state ?(budget = max_steps) ~record ws =
   let graphs = Hashtbl.create 8 and defs = Hashtbl.create 8 in
@@ -1893,7 +1871,7 @@ let new_state ?(budget = max_steps) ~record ws =
        if Atomic.get inline_nodes then
          List.iter
            (fun (d : W.node_definition) ->
-             if inline_simple defs d then
+             if inline_simple d then
                Hashtbl.replace t d.kind.qualified (d, lazy (Atomic.get inline_parameters ws d)))
            ws.W.nodes;
        t);

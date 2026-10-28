@@ -66,7 +66,7 @@ let () =
 (* Step B: an inlined card keeps the node's boundaries. A body error is that card's cook error, a
    refused parameter (validation, normalizer) refuses the lowering, as a node build did; canonical
    parameters (hard ranges, encoded text, rest slots) give the same bytes. *)
-let outcome inline text =
+let outcome ?(seed = 0L) inline text =
   Atomic.set Flow.Eval.inline_nodes inline;
   let result =
     match L.workspace (Flow.Syntax.parse text |> flow_ok) with
@@ -79,7 +79,9 @@ let outcome inline text =
         let session =
           Session.create ~max_entries:8 ~max_payload_bytes:(1 lsl 24) |> get_string_ok
         in
-        let context = Sop.Context.create ~domains:1 () |> get_string_ok in
+        let context =
+          Sop.Context.create ~seed ~frame:3L ~time:0.125 ~domains:1 () |> get_string_ok
+        in
         let output = Session.cook session ~context compiled in
         Session.close session;
         match output with
@@ -123,3 +125,27 @@ let () =
     ];
   print_endline
     "inline cards: body errors cook, refusals lower, ranges/encoded text/rest slots as the node"
+
+(* Step C: a body that reaches its cook context lowers as its own node, specialized per context
+   (seeds from the card's label and the cook seed, frame, time, provenance base); the same card
+   with the context branch untaken inlines. *)
+let () =
+  List.iter
+    (fun (call, inlines) ->
+      let text = Printf.sprintf "(workspace c (graph g :context sop %s))" call in
+      let nested = outcome ~seed:2026L false text in
+      let before = Atomic.get L.Private.nested_lowerings in
+      let inline = outcome ~seed:2026L true text in
+      let lowered = Atomic.get L.Private.nested_lowerings - before in
+      if nested <> inline then failwith ("step C: inline differs from nested for " ^ call);
+      if Result.is_error nested then failwith ("step C: " ^ call ^ " did not cook");
+      if lowered = 0 <> inlines then failwith ("step C: " ^ call ^ " inlined wrongly"))
+    [
+      ("(sop/noise_displace (sop/line :points 9) :context_seed true :amplitude 0.5)", false);
+      ("(sop/noise_displace (sop/line :points 9) :seed 4 :amplitude 0.5)", true);
+      ("(sop/mountain (sop/line :points 9) :seed_mode \"Auto\")", false);
+      ("(sop/mountain (sop/line :points 9))", true);
+      ("(sop/attribute_fade (sop/line :points 9))", false);
+      ("(sop/merge (sop/line :points 2) (sop/line :points 3))", false);
+    ];
+  print_endline "inline cards: context-reaching bodies lower per context, the rest inline"

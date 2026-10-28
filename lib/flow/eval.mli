@@ -219,16 +219,20 @@ type t = {
 }
 
 val inline_nodes : bool Atomic.t
-(** Switch of the single-program design (default off): a Lisp node with no context operators or
-    callable slots, called with static arguments, evaluates its body in the calling program instead
-    of lowering as its own workspace. *)
+(** Switch of the single-program design (default off): a Lisp node without callable slots, called
+    with static arguments, evaluates its body in the calling program instead of lowering as its own
+    workspace, unless {!inline_parameters} keeps it a node. *)
 
 val inline_parameters :
-  (Workspace.t -> Workspace.node_definition -> (string * value) list -> (string * value) list)
+  (Workspace.t ->
+  Workspace.node_definition ->
+  (string * value) list ->
+  (string * value) list option)
   Atomic.t
 (** The host's canonical parameters of an inlined call (ranges, choices, encoded text), raising the
-    diagnostic a node build would refuse with. Applied once per workspace and definition, then per
-    call; the default is the identity. *)
+    diagnostic a node build would refuse with; [None] keeps the call a node of its own (its body
+    reaches its cook context, say). Applied once per workspace and definition, then per call; the
+    default inlines every call with its arguments. *)
 
 val node_error : string
 (** The reserved argument of a card whose inlined body failed: its diagnostic, marshalled. The host

@@ -185,9 +185,12 @@ let changes parameter value =
 
 (* An inlined Lisp call's parameters take the node path: the call's changes over the schema
    defaults (ranges, choices, encoded text through the declared normalizers), then the node's
-   arguments. A refusal is the lowering error the node's construction raised. *)
+   arguments. A refusal is the lowering error the node's construction raised. A body that reaches
+   its cook context (seed, frame, time, provenance base) with these parameters stays a node,
+   specialized per context.
+   ponytail: context values as cook-time sources of the one program would inline those too. *)
 let () =
-  Atomic.set E.inline_parameters (fun checked (d : Workspace.node_definition) ->
+  Atomic.set E.inline_parameters (fun (checked : Workspace.t) (d : Workspace.node_definition) ->
       let schema =
         lazy (Lisp_node.schema "parameters" d.fields (Encoded_parameters.for_node checked d))
       and parameters = lazy (ok (Port.parameters d.fields)) in
@@ -206,8 +209,11 @@ let () =
             (Param.apply_all schema (Param.default schema) changes)
             (fun (values, _) -> Lisp_node.arguments d.fields values)
         with
-        | Ok arguments -> arguments
-        | Error message -> fail "E_LOWER" message)
+        | Error message -> fail "E_LOWER" message
+        | Ok arguments ->
+            if Context_kernel.context_ops_reached ~inputs:arguments ~defs:checked.defs d.body = []
+            then Some arguments
+            else None)
 
 let at_zero value = if E.is_live value then ok (E.force value ~live:(Input.at_time 0.)) else value
 let is_zone kind = Operators.lowering kind = Some Operators.Zone
