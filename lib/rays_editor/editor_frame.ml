@@ -857,7 +857,8 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
         changes = command_changes; tree_intents = list_intents;
         text_intents = []; open_graph;
         settings_changes = []; handle_changes = None; bar_action = None; view_pick = None; drops = [] } in
-  reduce ?gpu ?pump ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~leader ~frame ~hud ~actions ~guide ~copied ~steady ~status_fps ~status_fps_at ~timeline ~timeline_changes ~graph_shown ~text ~text_shown ~row_sets ~rows value result
+  reduce ?gpu ?pump Editor_reduce.Frame_input.{ carry_changed; all_ui_visible; view_state; carrying; held_keys; leader; frame; hud; actions; guide; copied;
+    steady; status_fps; status_fps_at; timeline; timeline_changes; graph_shown; text; text_shown; row_sets; rows } value result
 let update ?gpu ?(image=fun _->None) ?(host_events=[]) ?pump value ~all_ui_visible ~text_focus ~camera_panel ~view_handles ~render_status
     ~error_status ~view_state (frame : Frame.t) =
   let update, phases = Flow.Phase_timer.sample ~clock:value.clock (fun () ->
