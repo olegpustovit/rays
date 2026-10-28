@@ -920,12 +920,15 @@ let resident_count e (layout : Flow_ir.Kernel_layout.t) index buffers =
   | None, None -> n
   | _ -> assert false
 
-let kernel ?(fast = false) ?(instanced = false) program =
+let kernel ?(fast = false) ?(instanced = false) ?(motion = false) program =
   try
     (match P.gpu_refusals ~fused:true ~fast program with
     | [] -> ()
     | diagnostic :: _ -> raise (Diagnostic.Error diagnostic));
-    let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced program in
+    let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion program in
+    (* SPV_NV_ray_tracing_motion_blur moves only trace-rays pipelines, not ray queries *)
+    if layout.scene_motion then
+      fail "scene/trace motion has no SPIR-V ray-query form; build the scene at the shutter midpoint (Run.build_scene without Ray_tracing_motion).";
     let words = Words.create () in
     let void = Words.declare words 19 []
     and boolean = Words.declare words 20 []

@@ -42,5 +42,13 @@ let () =
   (match Flow_web.Js.region program with
    | _ -> assert false
    | exception Diagnostic.Error d -> assert (d.code = "E_WEB_SOURCE"));
+  (* vertex motion with an unmoved end keyframe intersects directly: the same prim, t and uv *)
+  (match Flow_sop.Trace_scene.register ~ending:quad 9 quad with Ok () -> () | Error e -> failwith e);
+  List.iter (fun i ->
+    let q = [| x i; y i; 5.; 0.; 0.; -1.; 0.; 100.; 0.3 |] in
+    let a = Flow.Ray_host.query id q and b = Flow.Ray_host.query 9 q in
+    assert (a.hit = b.hit && a.prim = b.prim && Float.abs (a.t -. b.t) < 1e-12 && Float.abs (a.u -. b.u) < 1e-12
+            && Float.abs (a.v -. b.v) < 1e-12 && a.nz = b.nz)) (List.init count Fun.id);
+  Flow_sop.Trace_scene.unregister 9;
   Flow_sop.Trace_scene.unregister id;
   Printf.printf "scene/trace CPU: %d of %d rays hit; Packed = walker at 1 and 8 domains; t and prim = Surface_index.raycast\n" !hits count

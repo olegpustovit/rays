@@ -1061,7 +1061,23 @@ floats per instance (first primitive of its prototype in the concatenated vertex
 row-major, three spare); the normal is the transpose of that matrix applied to the object normal, all in scalar
 registers. The record's ninth field `instance` is the TLAS instance index (0 for a flat scene's triangles, -1 for a
 sphere or a miss), and `prim` is the primitive within its prototype. `Flow_sop.Trace_scene.register_instances` is the
-CPU host. Motion and curves are not yet part of the op.
+CPU host.
+
+Motion (WN10) is a third static fact, `~motion` on `Emit.kernel`/`Kernel_layout.plan`, and makes `time` meaningful:
+keyframes sit at times 0 and 1 and clamp outside them (Metal's `Clamp` borders). A flat moving scene is vertex
+motion: `intersector<triangle_data, primitive_motion>` over an `acceleration_structure<primitive_motion>`, with the
+shutter-end vertices bound after the spheres and the normal taken from the interpolated corners. An instanced moving
+scene is instance motion: `intersector<triangle_data, instancing, instance_motion>`, and the instance table grows to
+32 floats (first primitive, start and end object-to-world 3x4, seven spare); the normal is the inverse transpose of
+the interpolated matrix (its cofactor columns, signed by the determinant). Moving prototypes inside an instanced scene
+are not supported. `Run.build_scene` builds either kind through the OGPU acceleration API (`Motion_blas` /
+`Motion_instances`) when the device has `Ray_tracing_motion`; without it the scene is built at the shutter midpoint
+(the mean of the keyframes, as `Mesh_data.shutter_midpoint`) and reports `motion = false`, so its kernel is the static
+one. SPIR-V refuses a moving kernel (`E_GPU_FORM`): `SPV_NV_ray_tracing_motion_blur` moves trace-rays pipelines only,
+not ray queries, so a Vulkan host builds at the midpoint. The CPU host (`Trace_scene.register ~ending`,
+`register_instances ~motion`) interpolates vertices (intersected directly) or transforms at the query's time.
+`lib/flow_gpu/test_trace.ml` checks both kinds against the CPU at several times, and the midpoint fallback against
+the CPU at 0.5. Static kernels print byte-identical source.
 
 ## Film accumulation (P8.S2)
 

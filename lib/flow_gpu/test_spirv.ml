@@ -122,6 +122,10 @@ let () =
         (Digest.to_hex (Digest.bytes emitted.bytes)))
     (List.map (fun (name, program) -> (name, false, program)) (cases ())
     @ List.map (fun (name, program) -> (name, true, program)) (fast_cases ()));
+  (* a moving scene has no SPIR-V ray-query form: a typed refusal, never a static kernel *)
+  (match Flow_gpu.Spirv.kernel ~fast:true ~motion:true (List.assoc "fast_trace" (fast_cases ())) with
+   | Error d -> assert (d.code = "E_GPU_FORM")
+   | Ok _ -> assert false);
   let expected = "goldens/spirv.sexp" in
   if writing then
     Out_channel.with_open_bin expected (fun out -> output_string out (Buffer.contents golden))
