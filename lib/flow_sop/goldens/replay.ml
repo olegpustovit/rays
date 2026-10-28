@@ -75,7 +75,7 @@ let external_input name node =
     | Some image -> "lisp_sop_image_ext_" ^ image
     | None -> "ext_" ^ name in
   let factory = Sop.Edit_graph.factory ~key ~label:("Ext " ^ name)
-      ~category:["Test"] ~arity:0 (fun _ -> node) in
+      ~category:["Test"] ~arity:0 (fun _ -> Ok node) in
   factory, Option.map (fun image ->
     let prototype = Option.get (Flow.Op.find "image/noise" Flow.Context.value) in
     { prototype with Flow.Op.name = "image/ext_" ^ image;

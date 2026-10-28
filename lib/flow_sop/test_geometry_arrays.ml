@@ -50,7 +50,7 @@ let rebuild={|(let* [topology (sop/topology geo)]
   (sop/mesh :points (sop/attr geo :P) :vertex_points topology.vertex_points
     :primitive_offsets topology.primitive_offsets :kinds topology.kinds))|}
 let lower ?(reference=false) source input=
-  let factory=Edit.factory ~key:"ext_src" ~label:"Source" ~category:["Test"] ~arity:0(fun _->input)in
+  let factory=Edit.factory ~key:"ext_src" ~label:"Source" ~category:["Test"] ~arity:0(fun _->Ok input)in
   L.workspace ~reference ~factories:(factory::factories)(parse source) |>flow
 let ()=
   List.iter(fun expected->let input=fields expected and before=geometry_bytes expected in

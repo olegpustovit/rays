@@ -36,7 +36,7 @@ let () =
         (error "E_UNTAKEN" "Untaken cooked branch")))
     (graph g :context sop (sop/select_write (sop/ext_src))))|} in
   let factory=Sop.Edit_graph.factory ~key:"ext_src" ~label:"Source" ~category:["Test"] ~arity:0
-    (fun _->Lisp_sop.snapshot geometry) in
+    (fun _->Ok (Lisp_sop.snapshot geometry)) in
   let compile reference=match Flow_sop.Lower.workspace ~reference
       ~factories:(factory::Sop.Nodes.factories)(parse source) with
     |Error d->failwith(Diagnostic.to_string d)
@@ -200,7 +200,7 @@ let () =
     List.iter (fun count ->
       let geometry=Rdk.Line_geometry.points (Array.make count (0.,0.,0.)) in
       let factory=Sop.Edit_graph.factory ~key:"handle_source" ~label:"Source" ~category:["Test"] ~arity:0
-        (fun _->Lisp_sop.snapshot geometry) in
+        (fun _->Ok (Lisp_sop.snapshot geometry)) in
       let factories=factory::Sop.Nodes.factories in
       let catalog=match Flow_sop.Catalog.of_factories ~version:1 factories with
         |Ok catalog->catalog|Error d->failwith(Diagnostic.to_string d) in
@@ -725,7 +725,7 @@ let ()=
   let child_error={ (Diagnostic.error ~cause:"\255 raw 日本😀" ~hints:["retained hint"]
     ~code:"E_CHILD" "child cook failed") with trace=retained }in
   let factory=Sop.Edit_graph.factory ~key:"failing_child" ~label:"Failing child" ~category:["Test"] ~arity:1
-    (fun inputs->Sop.Node.Private.make ~operation:"native.failing_child" ~version:1 ~parameters:""
+    (fun inputs->Result.ok @@ Sop.Node.Private.make ~operation:"native.failing_child" ~version:1 ~parameters:""
       ~cook_mode:Sop.Node.Generic ~inputs:(Array.of_list inputs) ~dependencies:Sop.Context.Dependencies.static
       (fun ~node_id:_ _context _inputs->incr calls;Error child_error))in
   let source= {|(workspace boundary

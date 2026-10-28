@@ -34,7 +34,7 @@ let c () = grid 1 4 |> with_float "h" Attribute.Point 2 |> with_vec3 "v" 1 |> wi
 let mismatched = [ "float-vs-vec3", (fun () -> grid 2 2 |> with_float "h" Attribute.Point 0), (fun () -> grid 2 2 |> with_vec3 "h" 0);
   "missing-attribute", (fun () -> grid 2 2 |> with_float "h" Attribute.Point 0), (fun () -> grid 2 2);
   "detail", (fun () -> grid 2 2 |> with_float "d" Attribute.Detail 0), (fun () -> grid 2 2 |> with_float "d" Attribute.Detail 1) ]
-let factory key geometry = Edit.factory ~key ~label:key ~category:["Test"] ~arity:0 (fun _->Lisp_sop.snapshot geometry)
+let factory key geometry = Edit.factory ~key ~label:key ~category:["Test"] ~arity:0 (fun _->Ok (Lisp_sop.snapshot geometry))
 let cook ?(reference=false) ?(domains=1) ?(grain=97) names extra=
   let geometries = List.map (fun (k,g)->k,g) names in
   let factories = List.map (fun (k,g)->factory k g) geometries @ Sop.Nodes.factories in

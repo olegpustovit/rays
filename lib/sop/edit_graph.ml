@@ -14,7 +14,7 @@ type factory = {
   slots : string array;
   input_types : string list;
   keyword_inputs : string list;
-  build : Node.t option list -> Node.t;
+  build : Node.t option list -> (Node.t, string) result;
   facts : Node.facts Lazy.t;
 }
 
@@ -155,11 +155,11 @@ let rebuild (entry : entry) compiled_inputs =
   | _ when Array.for_all Option.is_some entry.inputs
       && wired_to entry.node compiled_inputs -> Ok entry.node
   | Some factory when has_optional factory ->
-      let node = factory.build (Array.to_list compiled_inputs) in
+      Result.bind (factory.build (Array.to_list compiled_inputs)) (fun node ->
       let changes = Node.parameter_fields entry.node
           |> List.map (fun field -> field.Param.name, field.current) in
       Result.map (fun (node, _) -> Node.Private.adopt_identity ~source:entry.node node)
-        (Node.apply_parameters node changes)
+        (Node.apply_parameters node changes))
   | _ -> Ok (Node.Private.rebuild_with_inputs entry.node
                (Array.map Option.get compiled_inputs))
 
@@ -409,7 +409,9 @@ let default_facts requirements build = lazy (
   let inputs = Array.to_list (Array.map (function
     | Required | Rest -> Some (Lazy.force empty_geometry)
     | Optional | Optional_rest -> None) requirements) in
-  Node.facts (build inputs))
+  match build inputs with
+  | Ok node -> Node.facts node
+  | Error message -> invalid_arg ("Edit_graph factory defaults: " ^ message))
 
 let factory ?operation ?slots ?input_types ?(keyword_inputs = []) ?(fields = [])
     ~key ~label ~category ~arity build =
@@ -468,9 +470,7 @@ let instantiate (value : factory) inputs =
   if not (arity_ok value (List.length inputs)) then Error (Printf.sprintf
       "%s expects %d input%s" value.label arity
       (if arity = 1 then "" else "s"))
-  else try Ok (value.build (List.map Option.some inputs)) with
-    | Invalid_argument message -> Error message
-    | Failure message -> Error message
+  else value.build (List.map Option.some inputs)
 
 let disconnected_placeholder () =
   Node.Private.make_geometry ~label:"disconnected input"
@@ -490,6 +490,4 @@ let instantiate_optional (value : factory) inputs =
       | _, Some node -> Some node
       | (Optional | Rest | Optional_rest), None -> None
       | Required, None -> Some (Lazy.force placeholder)) inputs in
-    try Ok (value.build inputs) with
-    | Invalid_argument message -> Error message
-    | Failure message -> Error message
+    value.build inputs

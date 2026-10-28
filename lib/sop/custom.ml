@@ -19,8 +19,8 @@ let node ?label ~operation ~schema ~values inputs operator =
   if String.trim operation = "" then
     invalid_arg "Custom.node: operation must not be blank";
   let rec build ~label ~inputs values =
-    operator ~label ~inputs ~parameters:values
-    |> Node.parameterize ~schema ~values ~rebuild:build
+    Result.bind (operator ~label ~inputs ~parameters:values)
+      (Node.parameterize ~schema ~values ~rebuild:build)
   in
   build ~label:(resolved_label operation label) ~inputs values
 
@@ -28,7 +28,7 @@ let create ?label ?(version = 1) ?(cook_mode = Node.Generic)
     ?(dependencies = Context.Dependencies.static) ~operation ~schema ~values
     inputs cook =
   node ?label ~operation ~schema ~values inputs
-    (fun ~label ~inputs ~parameters ->
+    (fun ~label ~inputs ~parameters -> Result.ok @@
       plain ~label ~version ~parameters:(Param.key schema parameters)
         ~cook_mode ~dependencies ~operation inputs
         (fun ~context geometries -> cook ~parameters ~context geometries))

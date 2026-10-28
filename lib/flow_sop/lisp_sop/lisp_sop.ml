@@ -39,7 +39,7 @@ let workspace_node_result ?(with_ = []) source =
   let external_factories = List.map (fun (name, _) ->
     let marker = marker name in
     Sop.Edit_graph.factory ~key:(factory_key name) ~label:("Ext " ^ name)
-      ~category:["Test"] ~arity:0 (fun _ -> marker)) with_ in
+      ~category:["Test"] ~arity:0 (fun _ -> Ok marker)) with_ in
   let image_ops = List.filter_map (fun (name, _) -> Option.map (fun image_name ->
     let prototype = Option.get (Flow.Op.find "image/noise" Flow.Context.value) in
     { prototype with Flow.Op.name = "image/ext_" ^ image_name;

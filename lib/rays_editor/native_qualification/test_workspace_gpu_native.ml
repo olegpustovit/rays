@@ -349,7 +349,7 @@ let ()=if Array.mem "--capture-budget" Sys.argv then begin
   assert(Rdk.Geometry.payload_bytes large>64*1024*1024);
   let lower geometry=
     let factory=P.Edit_graph.factory ~key:"capture_budget" ~label:"Capture budget" ~category:["Test"]
-      ~arity:0(function []->P.Node.Private.make ~operation:"capture_budget" ~version:1 ~parameters:""
+      ~arity:0(function []->Result.ok @@ P.Node.Private.make ~operation:"capture_budget" ~version:1 ~parameters:""
         ~cook_mode:Generator ~dependencies:P.Context.Dependencies.static ~inputs:[||]
         (fun ~node_id:_ _ _->Ok{P.Node.Private.payload=P.Payload.Geometry geometry;instances=None})
         |_->assert false)in

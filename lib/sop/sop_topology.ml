@@ -376,12 +376,12 @@ module Remesh = struct
   } [@@sop.node_key "remesh"] [@@sop.node_label "Remesh"]
     [@@sop.node_category "Topology/Remesh"] [@@sop.node_inputs 1]
     [@@sop.validate fun parameters ->
-      if parameters.target_length <= 0. then
-        invalid_arg "sop/remesh: target length must be finite and positive";
-      if parameters.smoothing < 0. || parameters.smoothing > 1. then
-        invalid_arg "sop/remesh: smoothing must be finite and within [0,1]";
+      let* () = if parameters.target_length <= 0. then
+        Error "sop/remesh: target length must be finite and positive" else Ok () in
+      let* () = if parameters.smoothing < 0. || parameters.smoothing > 1. then
+        Error "sop/remesh: smoothing must be finite and within [0,1]" else Ok () in
       if parameters.preserve_uv_seams && String.trim parameters.uv_attribute = "" then
-        invalid_arg "sop/remesh: empty UV attribute name"]
+        Error "sop/remesh: empty UV attribute name" else Ok ()]
 
     [@@deriving sop_params, sop_node]
 
@@ -443,7 +443,7 @@ module Convex_hull = struct
   } [@@sop.node_key "convex_hull"] [@@sop.node_label "Convex Hull"]
     [@@sop.validate fun parameters ->
       if String.trim parameters.source_point_attribute = "P" then
-        invalid_arg "sop/convex_hull: source point attribute must not be P"]
+        Error "sop/convex_hull: source point attribute must not be P" else Ok ()]
     [@@sop.node_category "Topology"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -526,13 +526,13 @@ module Clean = struct
       [@sop.folder "Delete groups"];
   } [@@sop.node_key "clean"] [@@sop.node_label "Clean"]
     [@@sop.validate fun parameters ->
-      if not (Float.is_finite parameters.epsilon) || parameters.epsilon < 0.
+      let* () = if not (Float.is_finite parameters.epsilon) || parameters.epsilon < 0.
           || not (Float.is_finite parameters.consolidate_distance)
           || parameters.consolidate_distance < 0. then
-        invalid_arg "sop/clean: epsilon and consolidate distance must be finite and nonnegative";
-      List.iter (fun pattern -> if String.trim pattern <> "" then
+        Error "sop/clean: epsilon and consolidate distance must be finite and nonnegative" else Ok () in
+      each (fun pattern -> if String.trim pattern = "" then Ok () else
         match Rdk.Attribute_pattern.compile pattern with
-        | Ok _ -> () | Error message -> invalid_arg ("sop/clean: " ^ message))
+        | Ok _ -> Ok () | Error message -> Error ("sop/clean: " ^ message))
         [parameters.point_attributes; parameters.vertex_attributes;
          parameters.primitive_attributes; parameters.detail_attributes;
          parameters.point_groups; parameters.vertex_groups;
@@ -605,14 +605,15 @@ module Join_curves = struct
     wrap : bool [@sop.default false] [@sop.label "Wrap"];
   } [@@sop.node_key "join_curves"] [@@sop.node_label "Join Curves"]
     [@@sop.validate fun parameters ->
-      if parameters.group_size < 1 then invalid_arg "sop/join_curves: group size must be positive";
-      if not (Float.is_finite parameters.tolerance) || parameters.tolerance < 0. then
-        invalid_arg "sop/join_curves: tolerance must be finite and nonnegative";
-      match decode_curve_join_picks parameters.picked_ends with
-      | None -> ()
+      let* () = if parameters.group_size < 1 then Error "sop/join_curves: group size must be positive" else Ok () in
+      let* () = if not (Float.is_finite parameters.tolerance) || parameters.tolerance < 0. then
+        Error "sop/join_curves: tolerance must be finite and nonnegative" else Ok () in
+      let* picks = decode_curve_join_picks parameters.picked_ends in
+      match picks with
+      | None -> Ok ()
       | Some _ ->
           if String.trim parameters.group <> "" || parameters.connect_closest_ends then
-            invalid_arg "sop/join_curves: picked ends are mutually exclusive with group and closest ordering"]
+            Error "sop/join_curves: picked ends are mutually exclusive with group and closest ordering" else Ok ()]
     [@@sop.node_category "Topology/Curve"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -630,7 +631,7 @@ module Join_curves = struct
     let tolerance = parameters.tolerance in
     let wrap = parameters.wrap in
     let group = optional_text group in
-    let picked_ends = decode_curve_join_picks picked_ends in
+    let picked_ends = validated (decode_curve_join_picks picked_ends) in
     let group_size = if use_group_size then Some group_size else None in
     Node.Private.make_geometry ?label ~operation:"join_curves" ~version:4
       ~parameters:""
@@ -702,13 +703,13 @@ module Facet = struct
   } [@@sop.node_key "facet"] [@@sop.node_label "Facet"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/facet: " ^ message) in
-      if not (List.for_all Float.is_finite [parameters.consolidate_distance;
+      let refuse message = Error ("sop/facet: " ^ message) in
+      let* () = if not (List.for_all Float.is_finite [parameters.consolidate_distance;
           parameters.consolidate_normals_distance;parameters.inline_distance;parameters.cusp_angle]) then
-        refuse "distance and angle controls must be finite";
-      if parameters.consolidate_distance < 0. || parameters.consolidate_normals_distance < 0.
-          || parameters.inline_distance < 0. then refuse "distances must be nonnegative";
-      if parameters.cusp_angle < 0. || parameters.cusp_angle > Float.pi then refuse "cusp angle must be within [0, pi]"]
+        refuse "distance and angle controls must be finite" else Ok () in
+      let* () = if parameters.consolidate_distance < 0. || parameters.consolidate_normals_distance < 0.
+          || parameters.inline_distance < 0. then refuse "distances must be nonnegative" else Ok () in
+      if parameters.cusp_angle < 0. || parameters.cusp_angle > Float.pi then refuse "cusp angle must be within [0, pi]" else Ok ()]
     [@@sop.node_category "Topology/Cleanup"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -791,13 +792,13 @@ module Poly_cut = struct
   } [@@sop.node_key "poly_cut"] [@@sop.node_label "Poly Cut"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/poly_cut: " ^ message) in
-      if not (Float.is_finite parameters.value && Float.is_finite parameters.threshold) then refuse "detection controls must be finite";
-      if parameters.threshold < 0. then refuse "threshold must be nonnegative";
-      if parameters.detection <> Cut_all && String.trim parameters.attribute = "" then refuse "attribute must be nonblank";
-      if parameters.detection = Cut_crossing && parameters.attribute = "P" then refuse "crossing requires scalar storage";
+      let refuse message = Error ("sop/poly_cut: " ^ message) in
+      let* () = if not (Float.is_finite parameters.value && Float.is_finite parameters.threshold) then refuse "detection controls must be finite" else Ok () in
+      let* () = if parameters.threshold < 0. then refuse "threshold must be nonnegative" else Ok () in
+      let* () = if parameters.detection <> Cut_all && String.trim parameters.attribute = "" then refuse "attribute must be nonblank" else Ok () in
+      let* () = if parameters.detection = Cut_crossing && parameters.attribute = "P" then refuse "crossing requires scalar storage" else Ok () in
       if parameters.detection = Cut_change && parameters.strategy = Rdk.Poly_cut.Poly_cut_cut && parameters.threshold = 0. then
-        refuse "cut-at-change requires a positive threshold"]
+        refuse "cut-at-change requires a positive threshold" else Ok ()]
     [@@sop.node_category "Topology/Curve"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -887,14 +888,14 @@ module Poly_reduce = struct
   } [@@sop.node_key "poly_reduce"] [@@sop.node_label "PolyReduce"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/poly_reduce: " ^ message) in
-      if not (Float.is_finite parameters.ratio && Float.is_finite parameters.equalize_lengths
-          && Float.is_finite parameters.max_normal_deviation) then refuse "controls must be finite";
-      if parameters.ratio < 0. || parameters.ratio > 1. then refuse "ratio must be in [0, 1]";
-      if parameters.primitive_count < 0 then refuse "primitive count must be nonnegative";
-      if parameters.equalize_lengths < 0. then refuse "equalize lengths must be nonnegative";
+      let refuse message = Error ("sop/poly_reduce: " ^ message) in
+      let* () = if not (Float.is_finite parameters.ratio && Float.is_finite parameters.equalize_lengths
+          && Float.is_finite parameters.max_normal_deviation) then refuse "controls must be finite" else Ok () in
+      let* () = if parameters.ratio < 0. || parameters.ratio > 1. then refuse "ratio must be in [0, 1]" else Ok () in
+      let* () = if parameters.primitive_count < 0 then refuse "primitive count must be nonnegative" else Ok () in
+      let* () = if parameters.equalize_lengths < 0. then refuse "equalize lengths must be nonnegative" else Ok () in
       if parameters.max_normal_deviation < 0. || parameters.max_normal_deviation > Float.pi then
-        refuse "normal deviation must be in [0, pi]"]
+        refuse "normal deviation must be in [0, pi]" else Ok ()]
     [@@sop.node_category "Topology/Remesh"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -1002,7 +1003,7 @@ module Boolean_seam = struct
         | Coincident_patches -> [parameters.coincident_group] in
       let names = List.filter_map optional_text names in
       if List.length names <> List.length (List.sort_uniq String.compare names) then
-        invalid_arg "sop/boolean_seam: output group names must be distinct"]
+        Error "sop/boolean_seam: output group names must be distinct" else Ok ()]
     [@@sop.node_category "Boolean/Analysis"] [@@sop.node_inputs 2] [@@sop.node_slots "left, right"]
 
     [@@deriving sop_params, sop_node]
@@ -1069,13 +1070,13 @@ module Poly_bevel = struct
   } [@@sop.node_key "poly_bevel"] [@@sop.node_label "Poly Bevel"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/poly_bevel: " ^ message) in
-      if not (List.for_all Float.is_finite [parameters.convexity;parameters.distance;parameters.ignore_flat_angle]) then
-        refuse "numeric controls must be finite";
-      if parameters.distance < 0. then refuse "distance must be nonnegative";
-      if parameters.divisions < 1 then refuse "divisions must be positive";
-      if parameters.convexity < -1. || parameters.convexity > 1. then refuse "convexity must be in [-1, 1]";
-      if parameters.ignore_flat_angle < 0. || parameters.ignore_flat_angle > Float.pi then refuse "flatness angle must be in [0, pi]"]
+      let refuse message = Error ("sop/poly_bevel: " ^ message) in
+      let* () = if not (List.for_all Float.is_finite [parameters.convexity;parameters.distance;parameters.ignore_flat_angle]) then
+        refuse "numeric controls must be finite" else Ok () in
+      let* () = if parameters.distance < 0. then refuse "distance must be nonnegative" else Ok () in
+      let* () = if parameters.divisions < 1 then refuse "divisions must be positive" else Ok () in
+      let* () = if parameters.convexity < -1. || parameters.convexity > 1. then refuse "convexity must be in [-1, 1]" else Ok () in
+      if parameters.ignore_flat_angle < 0. || parameters.ignore_flat_angle > Float.pi then refuse "flatness angle must be in [0, pi]" else Ok ()]
     [@@sop.node_category "Topology/Polygon"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -1164,11 +1165,11 @@ module Boolean_fracture = struct
   } [@@sop.node_key "boolean_fracture"] [@@sop.node_label "Boolean Fracture"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/boolean_fracture: " ^ message) in
-      if not (Float.is_finite parameters.point_tolerance && Float.is_finite parameters.tiny_seam_threshold)
-          || parameters.point_tolerance < 0. || parameters.tiny_seam_threshold < 0. then refuse "tolerances must be finite and nonnegative";
-      if parameters.cleanup_max_batches < 1 then refuse "cleanup batches must be positive";
-      if String.trim parameters.piece_attribute = "" then refuse "piece attribute must be nonblank"]
+      let refuse message = Error ("sop/boolean_fracture: " ^ message) in
+      let* () = if not (Float.is_finite parameters.point_tolerance && Float.is_finite parameters.tiny_seam_threshold)
+          || parameters.point_tolerance < 0. || parameters.tiny_seam_threshold < 0. then refuse "tolerances must be finite and nonnegative" else Ok () in
+      let* () = if parameters.cleanup_max_batches < 1 then refuse "cleanup batches must be positive" else Ok () in
+      if String.trim parameters.piece_attribute = "" then refuse "piece attribute must be nonblank" else Ok ()]
     [@@sop.node_category "Boolean"] [@@sop.node_inputs 2] [@@sop.node_slots "source, cutters"]
 
     [@@deriving sop_params, sop_node]
@@ -1225,12 +1226,12 @@ module Intersection_analysis = struct
     [@@sop.node_label "Intersection Analysis"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/intersection_analysis: " ^ message) in
-      if not (Float.is_finite parameters.tolerance) || parameters.tolerance < 0. then refuse "tolerance must be finite and nonnegative";
+      let refuse message = Error ("sop/intersection_analysis: " ^ message) in
+      let* () = if not (Float.is_finite parameters.tolerance) || parameters.tolerance < 0. then refuse "tolerance must be finite and nonnegative" else Ok () in
       let names = List.filter_map optional_text [parameters.input_attribute;parameters.primitive_attribute;
         parameters.primitive_uvw_attribute;parameters.point_attribute] in
-      if List.mem "P" names then refuse "output attributes must not replace P";
-      if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "output attribute names must be distinct"]
+      let* () = if List.mem "P" names then refuse "output attributes must not replace P" else Ok () in
+      if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "output attribute names must be distinct" else Ok ()]
     [@@sop.node_category "Boolean/Analysis"] [@@sop.node_inputs 2] [@@sop.node_slots "input, collision"]
     [@@sop.node_optional "1"]
     [@@deriving sop_params, sop_node]
@@ -1374,31 +1375,32 @@ module Fuse = struct
       [@sop.label "Remove newly unused points"] [@sop.folder "Cleanup"];
     remove_all_unused_points : bool [@sop.default false]
       [@sop.label "Remove all unused points"] [@sop.folder "Cleanup"];
-  } [@@sop.node_key "fuse"] [@@sop.node_label "Fuse"]
+  } [@@sop.node_key "fuse"] [@@sop.node_fallible] [@@sop.node_label "Fuse"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/fuse: " ^ message) in
-      if not (Float.is_finite parameters.tolerance && Float.is_finite parameters.match_tolerance)
-          || parameters.tolerance < 0. || parameters.match_tolerance < 0. then refuse "tolerances must be finite and nonnegative";
-      if parameters.targeting = Fuse_specified_points && String.trim parameters.target_attribute = "" then refuse "specified targets require an attribute name";
-      if String.trim parameters.match_attribute = "" && (parameters.match_condition <> Rdk.Point_snap.Equal_attribute_values
-          || parameters.match_tolerance <> 0.) then refuse "match condition and tolerance require a match attribute";
-      if parameters.targeting = Fuse_specified_points && (String.trim parameters.radius_attribute <> ""
-          || String.trim parameters.match_attribute <> "") then refuse "specified targets do not accept radius or match attributes";
-      if parameters.keep_fused_points && not parameters.fuse_points then refuse "keeping fused points requires fusing points";
-      (match parameters.position with
+      let refuse message = Error ("sop/fuse: " ^ message) in
+      let* () = if not (Float.is_finite parameters.tolerance && Float.is_finite parameters.match_tolerance)
+          || parameters.tolerance < 0. || parameters.match_tolerance < 0. then refuse "tolerances must be finite and nonnegative" else Ok () in
+      let* () = if parameters.targeting = Fuse_specified_points && String.trim parameters.target_attribute = "" then refuse "specified targets require an attribute name" else Ok () in
+      let* () = if String.trim parameters.match_attribute = "" && (parameters.match_condition <> Rdk.Point_snap.Equal_attribute_values
+          || parameters.match_tolerance <> 0.) then refuse "match condition and tolerance require a match attribute" else Ok () in
+      let* () = if parameters.targeting = Fuse_specified_points && (String.trim parameters.radius_attribute <> ""
+          || String.trim parameters.match_attribute <> "") then refuse "specified targets do not accept radius or match attributes" else Ok () in
+      let* () = if parameters.keep_fused_points && not parameters.fuse_points then refuse "keeping fused points requires fusing points" else Ok () in
+      let* () = (match parameters.position with
         | Rdk.Fuse_reduce.Weighted_average_position | Weighted_sum_position | Minimum_weight_position | Maximum_weight_position
           when String.trim parameters.weight_attribute = "" -> refuse "weighted position reduction requires a weight attribute"
-        | _ -> ());
-      ignore (decode_fuse_attribute_rules "sop/fuse" parameters.attribute_rules);
-      ignore (decode_fuse_group_rules "sop/fuse" parameters.group_rules)]
+        | _ -> Ok ()) in
+      let* _ = decode_fuse_attribute_rules "sop/fuse" parameters.attribute_rules in
+      Result.map ignore (decode_fuse_group_rules "sop/fuse" parameters.group_rules)]
     [@@sop.node_category "Topology/Cleanup"] [@@sop.node_inputs 2] [@@sop.node_slots "input, target"]
     [@@sop.node_optional "1"]
     [@@deriving sop_params, sop_node]
 
   let build = parameters_build (fun ~label parameters input target ->
     if parameters.modify_target && Option.is_some target then
-      invalid_arg "sop/fuse: modify target requires a disconnected target input";
+      Error "sop/fuse: modify target requires a disconnected target input"
+    else Ok (
     let label = Some label in
     let group = parameters.group in
     let target_group = parameters.target_group in
@@ -1432,8 +1434,8 @@ module Fuse = struct
     and weight_attribute = optional_text weight_attribute and radius_attribute = optional_text radius_attribute
     and match_attribute = optional_text match_attribute and snapped_group = optional_text snapped_group
     and snapped_destination_attribute = optional_text snapped_destination_attribute in
-    let attribute_rules = decode_fuse_attribute_rules "sop/fuse" attribute_rules
-    and group_rules = decode_fuse_group_rules "sop/fuse" group_rules in
+    let attribute_rules = validated (decode_fuse_attribute_rules "sop/fuse" attribute_rules)
+    and group_rules = validated (decode_fuse_group_rules "sop/fuse" group_rules) in
     let inputs = match target with None -> [|input|] | Some node -> [|input;node|] in
     Node.Private.make_geometry ?label ~operation:"fuse" ~version:6
       ~parameters:""
@@ -1464,7 +1466,7 @@ module Fuse = struct
                       remove_unused_points_from_degenerate_primitives;
                       remove_all_unused_points; target } inputs.(0) with
                  | Ok geometry -> cooked geometry
-                 | Error error -> structured_rdk_error error)))
+                 | Error error -> structured_rdk_error error))))
   )
   let factory = parameters_factory build
 end
@@ -1562,22 +1564,23 @@ module Subdivide_cracks = struct
       [@sop.label "Treat curves independently"];
     recompute_point_normals : bool [@sop.default false]
       [@sop.label "Recompute point normals"];
-  } [@@sop.node_key "subdivide_cracks"] [@@sop.node_label "Subdivide Cracks"]
+  } [@@sop.node_key "subdivide_cracks"] [@@sop.node_fallible] [@@sop.node_label "Subdivide Cracks"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/subdivide_cracks: " ^ message) in
-      if parameters.iterations < 1 then refuse "iterations must be positive";
-      if not (Float.is_finite parameters.crack_bias) || parameters.crack_bias < 0. || parameters.crack_bias > 1. then refuse "crack bias must be finite and in [0, 1]";
-      if not (Float.is_finite parameters.crease_weight) || parameters.crease_weight < 0. then refuse "crease weight must be finite and nonnegative";
+      let refuse message = Error ("sop/subdivide_cracks: " ^ message) in
+      let* () = if parameters.iterations < 1 then refuse "iterations must be positive" else Ok () in
+      let* () = if not (Float.is_finite parameters.crack_bias) || parameters.crack_bias < 0. || parameters.crack_bias > 1. then refuse "crack bias must be finite and in [0, 1]" else Ok () in
+      let* () = if not (Float.is_finite parameters.crease_weight) || parameters.crease_weight < 0. then refuse "crease weight must be finite and nonnegative" else Ok () in
       if not parameters.generate_resulting_creases && String.trim parameters.resulting_crease_group <> "" then
-        refuse "resulting crease group requires generated creases"]
+        refuse "resulting crease group requires generated creases" else Ok ()]
     [@@sop.node_category "Topology"] [@@sop.node_inputs 2] [@@sop.node_slots "input, creases"]
     [@@sop.node_optional "1"]
     [@@deriving sop_params, sop_node]
 
   let build = parameters_build (fun ~label parameters input creases ->
     if Option.is_none creases && String.trim parameters.crease_group <> "" then
-      invalid_arg "sop/subdivide_cracks: crease group requires a crease input";
+      Error "sop/subdivide_cracks: crease group requires a crease input"
+    else Ok (
     let label = Some label in
     let group = parameters.group in
     let scheme = parameters.scheme in
@@ -1656,7 +1659,7 @@ module Subdivide_cracks = struct
                 geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
-  )
+  ))
   let factory = parameters_factory build
 end
 
@@ -1744,15 +1747,15 @@ module Boolean = struct
   } [@@sop.node_key "boolean"] [@@sop.node_label "Boolean"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/boolean: " ^ message) in
-      if not (Float.is_finite parameters.point_tolerance && Float.is_finite parameters.tiny_seam_threshold)
-          || parameters.point_tolerance < 0. || parameters.tiny_seam_threshold < 0. then refuse "tolerances must be finite and nonnegative";
-      if parameters.cleanup_max_batches < 1 then refuse "cleanup batches must be positive";
+      let refuse message = Error ("sop/boolean: " ^ message) in
+      let* () = if not (Float.is_finite parameters.point_tolerance && Float.is_finite parameters.tiny_seam_threshold)
+          || parameters.point_tolerance < 0. || parameters.tiny_seam_threshold < 0. then refuse "tolerances must be finite and nonnegative" else Ok () in
+      let* () = if parameters.cleanup_max_batches < 1 then refuse "cleanup batches must be positive" else Ok () in
       if parameters.operation = Rdk.Boolean_solid.Shatter then (
-        if parameters.left_treatment <> Rdk.Boolean_solid.Solid || parameters.right_treatment <> Rdk.Boolean_solid.Solid then
-          refuse "shatter requires two solid operands";
+        let* () = if parameters.left_treatment <> Rdk.Boolean_solid.Solid || parameters.right_treatment <> Rdk.Boolean_solid.Solid then
+          refuse "shatter requires two solid operands" else Ok () in
         let names = List.filter_map optional_text [parameters.left_piece_group;parameters.overlap_piece_group;parameters.right_piece_group] in
-        if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "shatter group names must be distinct")]
+        if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "shatter group names must be distinct" else Ok ()) else Ok ()]
     [@@sop.node_category "Boolean"] [@@sop.node_inputs 2] [@@sop.node_slots "left, right"]
 
     [@@deriving sop_params, sop_node]
@@ -1821,11 +1824,11 @@ module Boolean_detect = struct
       [@sop.label "Self intersections attribute"] [@sop.folder "Self outputs"];
     self_count_attribute : string [@sop.default ""]
       [@sop.label "Self count attribute"] [@sop.folder "Self outputs"];
-  } [@@sop.node_key "boolean_detect"] [@@sop.node_label "Boolean Detect"]
+  } [@@sop.node_key "boolean_detect"] [@@sop.node_fallible] [@@sop.node_label "Boolean Detect"]
 
     [@@sop.validate fun parameters ->
       if not (Float.is_finite parameters.tolerance) || parameters.tolerance < 0. then
-        invalid_arg "sop/boolean_detect: tolerance must be finite and nonnegative"]
+        Error "sop/boolean_detect: tolerance must be finite and nonnegative" else Ok ()]
     [@@sop.node_category "Boolean/Analysis"] [@@sop.node_inputs 2] [@@sop.node_slots "input, collision"]
     [@@sop.node_optional "1"]
     [@@deriving sop_params, sop_node]
@@ -1849,15 +1852,15 @@ module Boolean_detect = struct
     let self_intersecting_group = optional_text self_intersecting_group
     and self_intersections_attribute = optional_text self_intersections_attribute and self_count_attribute = optional_text self_count_attribute in
 
-    let refuse message = invalid_arg ("sop/boolean_detect: " ^ message) in
+    let refuse message = Error ("sop/boolean_detect: " ^ message) in
     let attributes = List.filter_map Fun.id [intersections_attribute;count_attribute;self_intersections_attribute;self_count_attribute]
     and groups = List.filter_map Fun.id [intersecting_group;self_intersecting_group] in
-    if attributes = [] && groups = [] then refuse "at least one output must be requested";
-    if List.length attributes <> List.length (List.sort_uniq String.compare attributes) then refuse "attribute outputs must have distinct names";
-    if List.length groups <> List.length (List.sort_uniq String.compare groups) then refuse "group outputs must have distinct names";
+    if attributes = [] && groups = [] then refuse "at least one output must be requested" else
+    if List.length attributes <> List.length (List.sort_uniq String.compare attributes) then refuse "attribute outputs must have distinct names" else
+    if List.length groups <> List.length (List.sort_uniq String.compare groups) then refuse "group outputs must have distinct names" else
     let inputs = match collision with None -> [|input|]
       | Some collision -> [|input; collision|] in
-    Node.Private.make_geometry ?label ~operation:"boolean_detect" ~version:1
+    Ok (Node.Private.make_geometry ?label ~operation:"boolean_detect" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs (fun ~node_id:_ context inputs ->
@@ -1881,7 +1884,7 @@ module Boolean_detect = struct
                      ~collision:collision_geometry inputs.(0) with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
-  )
+  ))
   let factory = parameters_factory build
 end
 
@@ -1978,17 +1981,17 @@ module Triangulate_2d = struct
   } [@@sop.node_key "triangulate_2d"] [@@sop.node_label "Triangulate 2D"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/triangulate_2d: " ^ message) in
-      if not (List.for_all Float.is_finite [parameters.plane_origin_x;parameters.plane_origin_y;parameters.plane_origin_z;
+      let refuse message = Error ("sop/triangulate_2d: " ^ message) in
+      let* () = if not (List.for_all Float.is_finite [parameters.plane_origin_x;parameters.plane_origin_y;parameters.plane_origin_z;
         parameters.plane_normal_x;parameters.plane_normal_y;parameters.plane_normal_z;parameters.minimum_angle;parameters.maximum_area;
-        parameters.target_edge_length;parameters.minimum_edge_length]) then refuse "numeric values must be finite";
-      if parameters.minimum_angle < 0. || parameters.minimum_edge_length < 0. || parameters.maximum_area < 0. || parameters.target_edge_length < 0.
-        || parameters.maximum_new_points < 0 || parameters.maximum_new_points >= Sys.max_array_length || parameters.regularization_steps < 0 then refuse "refinement bounds must be nonnegative";
-      if parameters.refine && (parameters.minimum_angle <= 0. || parameters.minimum_angle >= Float.pi /. 3.) then refuse "minimum angle must lie between zero and pi/3";
-      if parameters.use_maximum_area && parameters.maximum_area <= 0. then refuse "maximum area must be positive";
-      if parameters.use_target_edge_length && parameters.target_edge_length <= 0. then refuse "target edge length must be positive";
-      if parameters.projection = Triangulate_plane && parameters.plane_normal_x = 0. && parameters.plane_normal_y = 0. && parameters.plane_normal_z = 0. then refuse "plane normal must be nonzero";
-      if parameters.projection = Triangulate_attribute && String.trim parameters.point_attribute = "" then refuse "point attribute must be nonblank"]
+        parameters.target_edge_length;parameters.minimum_edge_length]) then refuse "numeric values must be finite" else Ok () in
+      let* () = if parameters.minimum_angle < 0. || parameters.minimum_edge_length < 0. || parameters.maximum_area < 0. || parameters.target_edge_length < 0.
+        || parameters.maximum_new_points < 0 || parameters.maximum_new_points >= Sys.max_array_length || parameters.regularization_steps < 0 then refuse "refinement bounds must be nonnegative" else Ok () in
+      let* () = if parameters.refine && (parameters.minimum_angle <= 0. || parameters.minimum_angle >= Float.pi /. 3.) then refuse "minimum angle must lie between zero and pi/3" else Ok () in
+      let* () = if parameters.use_maximum_area && parameters.maximum_area <= 0. then refuse "maximum area must be positive" else Ok () in
+      let* () = if parameters.use_target_edge_length && parameters.target_edge_length <= 0. then refuse "target edge length must be positive" else Ok () in
+      let* () = if parameters.projection = Triangulate_plane && parameters.plane_normal_x = 0. && parameters.plane_normal_y = 0. && parameters.plane_normal_z = 0. then refuse "plane normal must be nonzero" else Ok () in
+      if parameters.projection = Triangulate_attribute && String.trim parameters.point_attribute = "" then refuse "point attribute must be nonblank" else Ok ()]
     [@@sop.node_category "Topology/Triangulate"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]

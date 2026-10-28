@@ -1112,7 +1112,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     let input=Sop.Node.Private.make_geometry ~operation:"core_fixture.groups" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
       (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry;instances=None}) in
-    let factory=Sop.Edit_graph.factory ~key:"fixture" ~label:"Fixture" ~category:["Test"] ~arity:0 (fun _->input) in
+    let factory=Sop.Edit_graph.factory ~key:"fixture" ~label:"Fixture" ~category:["Test"] ~arity:0 (fun _->Ok input) in
     let geometry_op={base with Flow.Op.name="sop/fixture";
       signature={pos=[];opt=[];rest=None;kw=[]};out_args=None;choices=[];check=(fun _->());
       body=(fun ~live:_ ~node _->node "sop/fixture" [])} in
@@ -1403,7 +1403,7 @@ let remap source target fields =
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry;instances=None}) in
   let factory key geometry=Sop.Edit_graph.factory ~key ~label:key ~category:["Test"] ~arity:0
-    (fun _->snapshot geometry) in
+    (fun _->Ok (snapshot geometry)) in
   let text=Printf.sprintf {|(workspace fixture_remap (graph g :context sop
     [(points : (array int) (array/int 0)) (vertices : (array int) (array/int 0))
      (primitives : (array int) (array/int 0)) (positions : text "target")

@@ -59,7 +59,7 @@ let target copies source =
     ~primitive_kinds:(Array.init(copies*primitives)(fun _->Topology.Polygon)) |>get_string_ok in
   Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x:(Array.make(copies*points)3.)
     ~y:(Array.make(copies*points)(-0.)) ~z:(Array.make(copies*points)7.)) ~topology () |>get_string_ok
-let factory key geometry=Edit.factory ~key ~label:key ~category:["Test"] ~arity:0(fun _->Lisp_sop.snapshot geometry)
+let factory key geometry=Edit.factory ~key ~label:key ~category:["Test"] ~arity:0(fun _->Ok (Lisp_sop.snapshot geometry))
 let source_text ?(edge=true) body=Printf.sprintf {|(workspace remap_test
   (graph g :context sop [(points : (array int) (array/int 0))
     (vertices : (array int) (array/int 0)) (primitives : (array int) (array/int 0))

@@ -256,8 +256,12 @@ cache identity is the schema's `Param.cook_key`, and `Node.parameters`
 reads as `Param.cook_text` (`name=value;...`) unless the cook retains
 legacy diagnostic text; that text does not replace the schema cache key.
 Checks involving several fields or encoded values use
-`[@@sop.validate fun parameters -> ...]` on the record. The generated builder
-runs that pure check before constructing the operator, for factory rebuilds. Invalid editor writes return an error and retain the
+`[@@sop.validate fun parameters -> ...]` on the record: a pure check returning
+`(unit, string) result`. The generated builder runs it before constructing the
+operator and returns its `Error`; a factory `build` is `Node.t option list ->
+(Node.t, string) result`, so no caller catches `Invalid_argument` or `Failure`.
+An operator that refuses by wiring (a missing optional input) is marked
+`[@@sop.node_fallible]` and returns a result too. Invalid editor writes return an error and retain the
 existing node. Extract Centroid, Ordered Group and Group by Normal use this
 for reserved names, negative indices and non-zero directions respectively.
 Delete Attributes takes its input and optional reference positionally. Curves

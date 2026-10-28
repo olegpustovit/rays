@@ -129,7 +129,7 @@ let optional_rest () =
   let factory=Edit.factory_slots ~key:"rest_fixture" ~operation:"merge" ~label:"Rest fixture"
     ~category:["Test"] ~slots:["base";"fixed";"extras"]
     ~inputs:[Required;Optional;Optional_rest]
-    (fun inputs -> merge (List.filter_map Fun.id inputs)) in
+    (fun inputs -> Ok (merge (List.filter_map Fun.id inputs))) in
   let factories=factory::factories in
   let catalog=Catalog.of_factories ~version:1 factories |> Result.get_ok in
   let manifest,_=Manifest.generate factories |> Result.get_ok in

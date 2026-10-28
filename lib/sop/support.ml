@@ -5,6 +5,10 @@
 
 open Rays_math
 
+let ( let* ) = Result.bind
+(* the first refusal of [f] over [items], or [Ok ()] *)
+let each f items = List.fold_left (fun result item -> Result.bind result (fun () -> f item)) (Ok ()) items
+
 type group_invert_owner = Any | Owner of Rdk.Group_ops.owner
 type reverse_operation = Reverse | Shift
 type sort_key = Sort_x | Sort_y | Sort_z | Sort_distance | Sort_vector
@@ -28,28 +32,18 @@ let numeric_value kind x y z w = match kind with
   | Numeric_vec4 -> Rdk.Attribute_generate.Vec4 (x, y, z, w)
 type remap_range = Remap_automatic | Remap_explicit
 
-let decode_parameter_ramp ?(allow_single = false) name text =
-  if String.trim text = "" then [] else
-  let knots = String.split_on_char ',' text |> List.map (fun token ->
-    match String.split_on_char ':' token with
-    | [position; value] ->
-        (match float_of_string_opt (String.trim position), float_of_string_opt (String.trim value) with
-         | Some position, Some value when Float.is_finite position && Float.is_finite value
-             && position >= 0. && position <= 1. -> position, value
-         | _ -> invalid_arg (name ^ ": ramp needs finite values and positions in [0, 1]"))
-    | _ -> invalid_arg (name ^ ": ramp needs comma-separated position:value knots")) in
-  let rec validate previous = function
-    | [] -> if previous <> 1. then invalid_arg (name ^ ": ramp must end at 1")
-    | (position, _) :: rest ->
-        if position <= previous then invalid_arg (name ^ ": ramp positions must increase");
-        validate position rest in
-  match knots with
-  | [_] when allow_single -> knots
-  | (position, _) :: _ when position = 0. -> validate (-1.) knots; knots
-  | _ -> invalid_arg (name ^ ": ramp must start at 0")
-let validate_transport_options name operation integrate_constant scale_by_edge_length =
-  if (integrate_constant || scale_by_edge_length) && operation <> Rdk.Edge_transport.Transport_total then
-    invalid_arg ("sop/" ^ name ^ ": constant integration and edge-length scaling require Total")
+(* Decoders and checks return [Error message] for text a user can write. A
+   node's validator runs them first, so [validated] at construction only
+   unwraps a result that was already accepted. *)
+let validated = function Ok value -> value | Error message -> invalid_arg message
+
+(* [f] over [items] left to right; the first [Error] wins. *)
+let map_rows f items =
+  let rec go done_ = function
+    | [] -> Ok (List.rev done_)
+    | item :: rest -> (match f item with Ok value -> go (value :: done_) rest | Error _ as error -> error) in
+  go [] items
+
 type connectivity_output = Integer | Text
 type enumerate_storage = Enumerate_integer | Enumerate_text
 type smoothing_mode = Laplacian | Custom
@@ -200,66 +194,61 @@ let fuse_group_methods =
    "union", Group_union; "intersection", Group_intersection; "most_common", Group_most_common]
 
 let parameter_table_rows name text = match decode_table (if String.trim text = "" then "" else text) with
-  | Ok rows -> rows | Error message -> invalid_arg (name ^ ": " ^ message)
-
-let decode_parameter_weights name text = parameter_table_rows name text
-  |> List.map (function
-    | [text] -> (match float_of_string_opt (String.trim text) with
-        | Some value when Float.is_finite value -> value
-        | _ -> invalid_arg (name ^ ": weights must be finite"))
-    | _ -> invalid_arg (name ^ ": weights need one column per row"))
+  | Ok rows -> Ok rows | Error message -> Error (name ^ ": " ^ message)
 
 let fuse_rule_method name choices token = match List.assoc_opt token choices with
-  | Some method_ -> method_
-  | None -> invalid_arg (name ^ ": unknown reduction method " ^ token)
+  | Some method_ -> Ok method_
+  | None -> Error (name ^ ": unknown reduction method " ^ token)
 
 let validate_parameter_pattern name pattern = match Rdk.Attribute_pattern.compile pattern with
-  | Ok _ -> () | Error message -> invalid_arg (name ^ ": " ^ message)
+  | Ok _ -> Ok () | Error message -> Error (name ^ ": " ^ message)
 
-let decode_fuse_attribute_rules name text = List.map (function
+let decode_fuse_attribute_rules name text =
+  let* rows = parameter_table_rows name text in
+  map_rows (function
   | [pattern; method_; weight] ->
-      validate_parameter_pattern name pattern;
-      let method_ = fuse_rule_method name fuse_attribute_methods method_ in
+      let* () = validate_parameter_pattern name pattern in
+      let* method_ = fuse_rule_method name fuse_attribute_methods method_ in
       let weight_attribute = optional_text weight in
       let needs_weight = match method_ with
         | Rdk.Fuse_rules.Attribute_weighted_average | Attribute_weighted_sum
         | Attribute_minimum_weight | Attribute_maximum_weight | Attribute_concatenate_weight_order -> true
         | _ -> false in
       if needs_weight && weight_attribute = None then
-        invalid_arg (name ^ ": weighted reduction requires a weight attribute");
-      { Rdk.Fuse_rules.pattern; method_; weight_attribute }
-  | _ -> invalid_arg (name ^ ": attribute rule needs pattern, method and weight columns"))
-    (parameter_table_rows name text)
+        Error (name ^ ": weighted reduction requires a weight attribute")
+      else Ok { Rdk.Fuse_rules.pattern; method_; weight_attribute }
+  | _ -> Error (name ^ ": attribute rule needs pattern, method and weight columns")) rows
 
-let decode_fuse_group_rules name text = List.map (function
+let decode_fuse_group_rules name text =
+  let* rows = parameter_table_rows name text in
+  map_rows (function
   | [group_pattern; method_] ->
-      validate_parameter_pattern name group_pattern;
-      let group_method = fuse_rule_method name fuse_group_methods method_ in
-      { Rdk.Fuse_rules.group_pattern; group_method }
-  | _ -> invalid_arg (name ^ ": group rule needs pattern and method columns"))
-    (parameter_table_rows name text)
+      let* () = validate_parameter_pattern name group_pattern in
+      let* group_method = fuse_rule_method name fuse_group_methods method_ in
+      Ok { Rdk.Fuse_rules.group_pattern; group_method }
+  | _ -> Error (name ^ ": group rule needs pattern and method columns")) rows
 
 let decode_curve_join_picks text =
-  if String.trim text = "" then None else
-  if String.trim text = "[]" then Some [||] else
+  if String.trim text = "" then Ok None else
+  if String.trim text = "[]" then Ok (Some [||]) else
   let seen = Hashtbl.create 16 in
-  let picks = String.split_on_char ',' text |> List.map (fun token ->
+  let* picks = map_rows (fun token ->
     match String.split_on_char ':' (String.trim token) with
     | [primitive; end_] ->
-        let primitive = match int_of_string_opt (String.trim primitive) with
-          | Some value when value >= 0 -> value
-          | _ -> invalid_arg "sop/join_curves: picked primitive must be nonnegative" in
-        if Hashtbl.mem seen primitive then
-          invalid_arg "sop/join_curves: duplicate picked primitive";
+        let* primitive = match int_of_string_opt (String.trim primitive) with
+          | Some value when value >= 0 -> Ok value
+          | _ -> Error "sop/join_curves: picked primitive must be nonnegative" in
+        let* () = if Hashtbl.mem seen primitive then
+          Error "sop/join_curves: duplicate picked primitive" else Ok () in
         Hashtbl.add seen primitive ();
-        let end_ = match String.trim end_ with
-          | "start" -> Rdk.Curve_join.Join_curve_start
-          | "end" -> Rdk.Curve_join.Join_curve_end
-          | _ -> invalid_arg "sop/join_curves: picked end must be start or end" in
-        { Rdk.Curve_join.primitive; end_ }
-    | _ -> invalid_arg "sop/join_curves: picks must be comma-separated primitive:start/end pairs")
-      |> Array.of_list in
-  Some picks
+        let* end_ = match String.trim end_ with
+          | "start" -> Ok Rdk.Curve_join.Join_curve_start
+          | "end" -> Ok Rdk.Curve_join.Join_curve_end
+          | _ -> Error "sop/join_curves: picked end must be start or end" in
+        Ok { Rdk.Curve_join.primitive; end_ }
+    | _ -> Error "sop/join_curves: picks must be comma-separated primitive:start/end pairs")
+    (String.split_on_char ',' text) in
+  Ok (Some (Array.of_list picks))
 
 
 let element_attribute_owner_parameter = Param.choice ~equal:( = ) [
@@ -510,18 +499,6 @@ type spiral_divisions_mode = Spiral_per_curve | Spiral_per_turn
 
 type circle_arc = Circle_closed | Circle_open | Circle_chord | Circle_sliced
 type plane_orientation = Plane_xy | Plane_xz | Plane_yz | Plane_axes
-let validate_plane_axes operation horizontal vertical =
-  let normalize value =
-    let scale = Float.max (Float.abs value.Rays_math.Vec3.x) (Float.max (Float.abs value.y) (Float.abs value.z)) in
-    if scale = 0. then invalid_arg (operation ^ ": custom axes must be nonzero and independent");
-    let x = value.x /. scale and y = value.y /. scale and z = value.z /. scale in
-    let length = sqrt (x *. x +. y *. y +. z *. z) in
-    Rays_math.Vec3.create (x /. length) (y /. length) (z /. length) in
-  let horizontal = normalize horizontal and vertical = normalize vertical in
-  let projection = Rays_math.Vec3.dot vertical horizontal in
-  ignore (normalize (Rays_math.Vec3.create (vertical.x -. projection *. horizontal.x)
-    (vertical.y -. projection *. horizontal.y) (vertical.z -. projection *. horizontal.z)))
-
 type blast_attribute_mode = Blast_below | Blast_range | Blast_width
 type blast_attribute_output = Blast_delete | Blast_group
 
@@ -573,18 +550,19 @@ type soft_transform_metric = Soft_radius | Soft_edge | Soft_attribute
 let exact_or_pattern exact pattern = match optional_text pattern with
   | Some pattern -> None, Some pattern | None -> optional_text exact, None
 
-let decode_surface_attributes text = List.map (function
+let decode_surface_attributes text =
+  let* rows = parameter_table_rows "sop/attribute_transfer_surface" text in
+  map_rows (function
   | [owner; source_name; target_name] ->
-      let source_owner = match attribute_owner_of_token (String.lowercase_ascii (String.trim owner)) with
-        | Ok owner -> owner | Error message -> invalid_arg ("sop/attribute_transfer_surface: " ^ message) in
-      if source_owner = Rdk.Attribute.Detail then invalid_arg "sop/attribute_transfer_surface: detail source is not spatial";
-      if String.trim source_name = "" || String.trim target_name = "" then
-        invalid_arg "sop/attribute_transfer_surface: attribute names must be nonblank";
-      if source_owner = Rdk.Attribute.Point && source_name = "P" then
-        invalid_arg "sop/attribute_transfer_surface: source P is not an ordinary attribute";
-      { Rdk.Attribute_transfer.source_owner; source_name; target_name }
-  | _ -> invalid_arg "sop/attribute_transfer_surface: attributes need owner, source and target columns")
-    (parameter_table_rows "sop/attribute_transfer_surface" text)
+      let* source_owner = match attribute_owner_of_token (String.lowercase_ascii (String.trim owner)) with
+        | Ok owner -> Ok owner | Error message -> Error ("sop/attribute_transfer_surface: " ^ message) in
+      if source_owner = Rdk.Attribute.Detail then Error "sop/attribute_transfer_surface: detail source is not spatial"
+      else if String.trim source_name = "" || String.trim target_name = "" then
+        Error "sop/attribute_transfer_surface: attribute names must be nonblank"
+      else if source_owner = Rdk.Attribute.Point && source_name = "P" then
+        Error "sop/attribute_transfer_surface: source P is not an ordinary attribute"
+      else Ok { Rdk.Attribute_transfer.source_owner; source_name; target_name }
+  | _ -> Error "sop/attribute_transfer_surface: attributes need owner, source and target columns") rows
 
 let group_length owner geometry = match owner with
   | Rdk.Group.Point -> Rdk.Geometry.point_count geometry
@@ -592,11 +570,11 @@ let group_length owner geometry = match owner with
   | Rdk.Group.Primitive -> Rdk.Geometry.primitive_count geometry
 
 let compile_transfer_group_pattern operation label = function
-  | None -> None
+  | None -> Ok None
   | Some pattern ->
       match Rdk.Attribute_pattern.compile pattern with
-      | Ok compiled -> Some compiled
-      | Error message -> invalid_arg
+      | Ok compiled -> Ok (Some compiled)
+      | Error message -> Error
           (Printf.sprintf "sop/%s: invalid %s group pattern: %s"
              operation label message)
 
@@ -630,22 +608,6 @@ let resolve_transfer_group ~operation ~owner ~owner_name ~exact ~pattern
       |> Result.map Option.some
 
 type copy_match = Copy_cyclic | Copy_by_values | Copy_to_element
-let decode_copy_rules text =
-  let rules = List.map (function
-    | [owner; copy_pattern; into] ->
-        let copy_owner = match attribute_owner_of_token (String.lowercase_ascii (String.trim owner)) with
-          | Ok owner -> owner | Error message -> invalid_arg ("sop/attribute_copy: " ^ message) in
-        let copy_into = optional_text into in
-        (match copy_into with
-         | None -> validate_parameter_pattern "sop/attribute_copy" copy_pattern
-         | Some replacement -> match Rdk.Attribute_pattern.compile_rewrite ~pattern:copy_pattern ~replacement with
-             | Ok _ -> () | Error message -> invalid_arg ("sop/attribute_copy: " ^ message));
-        {Rdk.Attribute_copy.copy_owner;copy_pattern;copy_into}
-    | _ -> invalid_arg "sop/attribute_copy: rules need owner, pattern and destination columns")
-      (parameter_table_rows "sop/attribute_copy" text) in
-  if rules = [] then invalid_arg "sop/attribute_copy: at least one copy rule is required";
-  rules
-
 type ray_direction = Direction_vector | Direction_normal | Direction_attribute
 
 type poly_bevel_shape = Poly_chamfer | Poly_round
@@ -727,98 +689,6 @@ type random_distribution =
   | Random_normal | Random_exponential | Random_log_normal | Random_cauchy
   | Random_direction | Random_inside_sphere | Random_inside_sphere_cone
   | Random_custom_ramp | Random_custom_discrete | Random_custom_discrete_text
-
-let random_distribution_value ~distribution ~kind ~a ~a_w ~b ~b_w ~step ~step_w
-    ~probability_b ~cone_angle ~dimensions ~ramp ~entries ~text_entries =
-  let number value w = numeric_value kind value.Rays_math.Vec3.x value.y value.z w in
-  let a = number a a_w and b = number b b_w and step = number step step_w in
-  let finite text = match float_of_string_opt text with
-    | Some value when Float.is_finite value -> value
-    | _ -> invalid_arg "sop/attribute_randomize: table values must be finite numbers" in
-  let rows text = match decode_table text with
-    | Ok rows -> rows | Error message -> invalid_arg ("sop/attribute_randomize: " ^ message) in
-  match distribution with
-  | Random_constant -> Rdk.Attribute_generate.Random_constant a
-  | Random_two_values -> Random_two_values {a;b;probability_b}
-  | Random_uniform -> Random_uniform {min=a;max=b}
-  | Random_uniform_discrete -> Random_uniform_discrete {min=a;max=b;step}
-  | Random_normal -> Random_normal {middle=a;scale=b}
-  | Random_exponential -> Random_exponential {median=a}
-  | Random_log_normal -> Random_log_normal {median=a;stddev=b}
-  | Random_cauchy -> Random_cauchy {median=a;scale=b}
-  | Random_direction -> Random_direction {direction=a;cone_angle}
-  | Random_inside_sphere -> Random_inside_sphere {dimensions}
-  | Random_inside_sphere_cone -> Random_inside_sphere_cone {direction=a;cone_angle}
-  | Random_custom_ramp -> Random_custom_ramp {
-      ramp=decode_parameter_ramp "sop/attribute_randomize" ramp;fit_min=a;fit_max=b}
-  | Random_custom_discrete -> Random_custom_discrete (rows entries |> List.map (fun row ->
-      match List.rev row with
-      | weight :: components ->
-          let components = List.rev components |> List.map finite in
-          let value = match kind,components with
-            | Numeric_scalar,[x] -> Rdk.Attribute_generate.Scalar x
-            | Numeric_vec2,[x;y] -> Vec2 (Rays_math.Vec2.create x y)
-            | Numeric_vec3,[x;y;z] -> Vec3 (Rays_math.Vec3.create x y z)
-            | Numeric_vec4,[x;y;z;w] -> Vec4 (x,y,z,w)
-            | _ -> invalid_arg "sop/attribute_randomize: table dimension does not match value type" in
-          value,finite weight
-      | _ -> invalid_arg "sop/attribute_randomize: each table row needs values and weight"))
-  | Random_custom_discrete_text -> Random_custom_discrete_text (rows text_entries |> List.map (function
-      | [text;weight] -> text,finite weight
-      | _ -> invalid_arg "sop/attribute_randomize: text table rows need text and weight"))
-
-let validate_random_distribution ~direction_bias distribution =
-  let refuse message = invalid_arg ("sop/attribute_randomize: " ^ message) in
-  let components = function
-    | Rdk.Attribute_generate.Scalar x -> [x]
-    | Vec2 v -> [v.Rays_math.Vec2.x;v.y]
-    | Vec3 v -> [v.Rays_math.Vec3.x;v.y;v.z]
-    | Vec4 (x,y,z,w) -> [x;y;z;w] in
-  let all predicate value = List.for_all predicate (components value) in
-  let positive value = all (fun x -> x > 0.) value
-  and nonnegative value = all (fun x -> x >= 0.) value in
-  let ordered a b = List.for_all2 ( <= ) (components a) (components b) in
-  let direction ~orientation direction cone_angle =
-    let values = components direction in
-    let dimension = List.length values in
-    if dimension < 2 || List.for_all (( = ) 0.) values then refuse "direction requires a nonzero vector";
-    let maximum = if orientation && dimension = 4 then 2. *. Float.pi else Float.pi in
-    if cone_angle < 0. || cone_angle > maximum then refuse "cone angle is outside its valid range" in
-  let weights entries =
-    if entries = [] then refuse "custom entries must not be empty";
-    let total = List.fold_left (fun total (_,weight) ->
-      if not (Float.is_finite weight) || weight < 0. then refuse "weights must be finite and nonnegative";
-      total +. weight) 0. entries in
-    if not (Float.is_finite total) || total <= 0. then refuse "weight sum must be finite and positive" in
-  if direction_bias <= -1. then refuse "direction bias must be greater than -1";
-  (match distribution with
-   | Rdk.Attribute_generate.Random_direction _ | Random_inside_sphere_cone _ -> ()
-   | _ -> if direction_bias <> 0. then refuse "direction bias requires Direction or Inside sphere cone");
-  match distribution with
-  | Rdk.Attribute_generate.Random_constant _ -> ()
-  | Random_two_values {probability_b;_} ->
-      if probability_b < 0. || probability_b > 1. then refuse "probability must be in [0,1]"
-  | Random_uniform {min;max} -> if not (ordered min max) then refuse "bounds must be ordered"
-  | Random_uniform_discrete {min;max;step} ->
-      if not (ordered min max && positive step) then refuse "bounds must be ordered and steps positive"
-  | Random_normal {scale;_} -> if not (nonnegative scale) then refuse "scale must be nonnegative"
-  | Random_exponential {median} -> if not (positive median) then refuse "median must be positive"
-  | Random_log_normal {median;stddev} ->
-      if not (positive median && nonnegative stddev) then refuse "median must be positive and deviation nonnegative";
-      if not (List.for_all2 (fun median deviation ->
-        let ratio = deviation *. deviation /. (median *. median) in
-        Float.is_finite (if deviation = 0. then 0. else sqrt (log (0.5 *. (1. +. sqrt (1. +. 4. *. ratio))))))
-        (components median) (components stddev)) then refuse "log-normal scale overflowed"
-  | Random_cauchy {scale;_} ->
-      if not (nonnegative scale) then refuse "scale must be nonnegative";
-      let values = components scale in
-      if List.exists (fun value -> value <> List.hd values) values then refuse "multidimensional Cauchy scale must be isotropic"
-  | Random_direction {direction=axis;cone_angle} -> direction ~orientation:true axis cone_angle
-  | Random_inside_sphere {dimensions} -> if dimensions < 2 || dimensions > 4 then refuse "sphere dimensions must be in [2,4]"
-  | Random_inside_sphere_cone {direction=axis;cone_angle} -> direction ~orientation:false axis cone_angle
-  | Random_custom_ramp {ramp;_} -> if List.length ramp < 2 then refuse "ramp needs at least two knots"
-  | Random_custom_discrete entries -> weights entries
-  | Random_custom_discrete_text entries -> weights entries
 
 type interpolate_driver = Interpolate_primitive_uvw | Interpolate_point_weights
   | Interpolate_vertex_weights | Interpolate_primitive_weights

@@ -51,8 +51,8 @@ let arguments fields values =
   let fields = List.map (fun (f : Param.field_view) ->
     {f with current = List.assoc f.name values}) fields in
   match Port.parameters fields with
-  | Error d -> invalid_arg (Diagnostic.to_string d)
-  | Ok ports -> List.map (fun (p : Port.parameter) -> p.path,
+  | Error d -> Error (Diagnostic.to_string d)
+  | Ok ports -> Ok (List.map (fun (p : Port.parameter) -> p.path,
       match Port.literal p with
       | Vector (x, y, z) -> E.Vec3 (x, y, z)
       | Scalar (Param.Bool_value v) -> E.Bool v
@@ -60,7 +60,7 @@ let arguments fields values =
       | Scalar (Float_value v) -> E.Float v
       | Scalar (Text_value v | Choice_value v) -> E.Text v) ports
       @ List.filter_map (fun (f : Param.field_view) ->
-          if f.vec3=None then None else Some (f.name, scalar f.current)) fields
+          if f.vec3=None then None else Some (f.name, scalar f.current)) fields)
 
 (* Lowering instantiates a node and then edits it to its authored parameters; building the body
    at the defaults first (a 48 x 24 sphere, say) costs far more than the edit. The pending
@@ -86,15 +86,15 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
   Sop.Custom.node ~label ~operation ~schema ~values inputs
     (fun ~label ~inputs ~parameters ->
       if unbound_function then
-        N.Private.make ~label ~operation ~version ~parameters:source
+        Ok (N.Private.make ~label ~operation ~version ~parameters:source
           ~cook_mode:N.Generic ~dependencies:Sop.Context.Dependencies.static
           ~inputs:(Array.of_list inputs) (fun ~node_id:_ _ _ ->
             Error (Diagnostic.error ~code:"disconnected_input"
-              "A Lisp function input needs its checked callable before cooking"))
+              "A Lisp function input needs its checked callable before cooking")))
       else
-      let arguments = arguments fields parameters in
+      Result.bind (arguments fields parameters) (fun arguments ->
       let context = Result.get_ok (Sop.Context.create ()) in
-      let body, dependencies, facts = build ~label ~context inputs arguments in
+      Result.map (fun (body, dependencies, facts) ->
       let prepared = Atomic.make ((Sop.Context.seed context, Sop.Context.frame context, Sop.Context.time context), body) in
       let context_seeded = Sop.Context.Dependencies.mem Seed dependencies in
       let framed = Sop.Context.Dependencies.mem Frame dependencies in
@@ -110,9 +110,13 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
           let (seed, frame, time), previous_body = Atomic.get prepared in
           let body = if (not context_seeded || seed=Sop.Context.seed context)
               && (not framed || frame=Sop.Context.frame context)
-              && (not timed || Int64.equal (Int64.bits_of_float time) (Int64.bits_of_float (Sop.Context.time context))) then previous_body
-            else let body,_,_ = build ~label ~context inputs arguments in
-              Atomic.set prepared ((Sop.Context.seed context, Sop.Context.frame context, Sop.Context.time context),body); body in
+              && (not timed || Int64.equal (Int64.bits_of_float time) (Int64.bits_of_float (Sop.Context.time context))) then Ok previous_body
+            else Result.map (fun (body,_,_) ->
+              Atomic.set prepared ((Sop.Context.seed context, Sop.Context.frame context, Sop.Context.time context),body); body)
+              (build ~label ~context inputs arguments) in
+          match body with
+          | Error message -> Error (Diagnostic.error ~code:"E_PARAM" message)
+          | Ok body ->
           let previous = Domain.DLS.get cooked_inputs in
           Domain.DLS.set cooked_inputs (Array.to_list (Array.mapi (fun i payload -> i,payload) payloads));
           Fun.protect ~finally:(fun () -> Domain.DLS.set cooked_inputs previous) (fun () ->
@@ -132,4 +136,4 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
                   (Result.map (fun (output : Sop.Session.output) ->
                     N.Private.{payload=output.payload;instances=output.instances})
                     (Sop.Session.cook session ~context body))))))
-      |> N.Private.with_facts facts)
+      |> N.Private.with_facts facts) (build ~label ~context inputs arguments)))

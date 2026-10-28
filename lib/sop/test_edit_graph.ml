@@ -19,9 +19,9 @@ let run () =
   let fields = [metadata; signed; text] in
   let factories = [
     Edit_graph.factory ~fields ~key:"metadata" ~label:"Metadata"
-      ~category:["Test"] ~arity:0 (fun _ -> source);
+      ~category:["Test"] ~arity:0 (fun _ -> Ok source);
     Edit_graph.factory_slots ~fields ~key:"metadata_slots" ~label:"Metadata slots"
-      ~category:["Test"] ~inputs:[Edit_graph.Required] (fun _ -> source);
+      ~category:["Test"] ~inputs:[Edit_graph.Required] (fun _ -> Ok source);
   ] in
   List.iter (fun factory -> match Edit_graph.factory_fields factory with
     | [value; signed; text] ->
@@ -83,14 +83,14 @@ let run () =
     "editable graph node deletion did not leave an explicit disconnected slot";
   let box_factory = Edit_graph.factory ~key:"box" ~label:"Box"
       ~category:["Create"] ~arity:0 (function
-        | [] -> Lisp_sop.node {|(sop/box :normals "Auto" :connectivity "Triangles" :size [1.0 1.0 1.0])|}
+        | [] -> Ok (Lisp_sop.node {|(sop/box :normals "Auto" :connectivity "Triangles" :size [1.0 1.0 1.0])|})
         | _ -> assert false) in
   check (Edit_graph.factory_arity box_factory = 0
       && Result.is_ok (Edit_graph.instantiate box_factory []))
     "editable graph factory did not instantiate its declared arity";
   let null_factory = Edit_graph.factory ~key:"null" ~label:"Null"
       ~category:["Utility"] ~arity:1 (function
-        | [input] -> Lisp_sop.node ~with_:["input", (input)] {|(sop/null (sop/ext_input))|} | _ -> assert false) in
+        | [input] -> Ok (Lisp_sop.node ~with_:["input", (input)] {|(sop/null (sop/ext_input))|}) | _ -> assert false) in
   check (Edit_graph.factory_slot_names null_factory = ["in0"])
     "unnamed factory inputs did not use canonical port names";
   let loose_null = Edit_graph.instantiate_optional null_factory [None] |> get in
@@ -103,16 +103,16 @@ let run () =
       ~slots:["input"; "target"]
       ~label:"Match Size" ~category:["Modify"]
       ~inputs:[Edit_graph.Required; Optional] (function
-        | [Some input; None] -> Lisp_sop.node ~with_:["input", input] {|(sop/match_size (sop/ext_input))|}
+        | [Some input; None] -> Ok (Lisp_sop.node ~with_:["input", input] {|(sop/match_size (sop/ext_input))|})
         | [Some input; Some target] ->
-          Lisp_sop.node ~with_:["input", input; "target", target]
-            {|(sop/match_size (sop/ext_input) (sop/ext_target))|}
+          Ok (Lisp_sop.node ~with_:["input", input; "target", target]
+            {|(sop/match_size (sop/ext_input) (sop/ext_target))|})
         | _ -> invalid_arg "Match Size requires its geometry input") in
   check (Edit_graph.factory_slot_names match_size_factory = ["input"; "target"])
     "optional factory did not retain named input slots";
   List.iter (fun slots ->
     match Edit_graph.factory ~slots ~key:"invalid" ~label:"Invalid"
-        ~category:["Test"] ~arity:1 (fun _ -> source) with
+        ~category:["Test"] ~arity:1 (fun _ -> Ok source) with
     | _ -> fail "factory accepted missing or blank slot names"
     | exception Invalid_argument _ -> ()) [[]; [""]; ["a"; "a"]];
   let loose_match = Edit_graph.instantiate_optional match_size_factory
@@ -147,11 +147,11 @@ let run () =
   (* a rest slot grows by connecting one past its last input *)
   let rest_factory = Edit_graph.factory_slots ~key:"merge" ~label:"Merge"
       ~slots:["input"] ~category:["Test"] ~inputs:[Edit_graph.Rest]
-      (fun inputs -> merge_of (List.filter_map Fun.id inputs)) in
+      (fun inputs -> Ok (merge_of (List.filter_map Fun.id inputs))) in
   check (Result.is_error (Edit_graph.instantiate_optional rest_factory [])
       && Result.is_ok (Edit_graph.instantiate_optional rest_factory [Some source; None; Some middle])
       && (try ignore (Edit_graph.factory_slots ~key:"bad" ~label:"Bad" ~category:["T"]
-            ~inputs:[Edit_graph.Rest; Required] (fun _ -> source)); false
+            ~inputs:[Edit_graph.Rest; Required] (fun _ -> Ok source)); false
           with Invalid_argument _ -> true))
     "rest slot arity or position was not validated";
   let rest_node = Edit_graph.instantiate_optional rest_factory [Some source] |> get in
@@ -178,7 +178,7 @@ let run () =
   let optional_rest_factory = Edit_graph.factory_slots ~key:"optional_rest" ~label:"Optional rest"
     ~slots:["base";"fixed";"extras"] ~category:["Test"]
     ~inputs:[Required;Optional;Optional_rest]
-    (fun inputs -> merge_of (List.filter_map Fun.id inputs)) in
+    (fun inputs -> Ok (merge_of (List.filter_map Fun.id inputs))) in
   check (Result.is_error (Edit_graph.instantiate_optional optional_rest_factory [Some source])
     && Result.is_ok (Edit_graph.instantiate_optional optional_rest_factory [Some source;None])
     && Result.is_ok (Edit_graph.instantiate_optional optional_rest_factory [Some source;None;None]))

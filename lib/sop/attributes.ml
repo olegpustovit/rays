@@ -172,12 +172,12 @@ module Distance_from_geometry = struct
       [@sop.folder "Output"];
   } [@@sop.node_key "distance_from_geometry"]
     [@@sop.validate fun parameters ->
-      if not (Float.is_finite parameters.radius) || parameters.radius < 0.
+      let* () = if not (Float.is_finite parameters.radius) || parameters.radius < 0.
           || (parameters.radius_mode = Radius_fixed && parameters.radius = 0.) then
-        invalid_arg "sop/distance_from_geometry: fixed radius must be positive and finite";
+        Error "sop/distance_from_geometry: fixed radius must be positive and finite" else Ok () in
       let names = List.filter_map optional_text [parameters.distance_attribute; parameters.mask_attribute] in
       if names = [] || List.mem "P" names || List.length names <> List.length (List.sort_uniq String.compare names) then
-        invalid_arg "sop/distance_from_geometry: output names must be present, distinct and cannot be P"]
+        Error "sop/distance_from_geometry: output names must be present, distinct and cannot be P" else Ok ()]
     [@@sop.node_label "Distance from Geometry"]
     [@@sop.node_category "Attribute/Distance"] [@@sop.node_inputs 2] [@@sop.node_slots "source, reference"]
 
@@ -302,41 +302,41 @@ module Attribute_mirror = struct
   } [@@sop.node_key "attribute_mirror"] [@@sop.node_label "Attribute Mirror"]
     [@@sop.validate fun parameters ->
       let finite value = if not (Float.is_finite value) then
-        invalid_arg "sop/attribute_mirror: controls must be finite" in
-      List.iter finite [parameters.origin_x; parameters.origin_y; parameters.origin_z;
+        Error "sop/attribute_mirror: controls must be finite" else Ok () in
+      let* () = each finite [parameters.origin_x; parameters.origin_y; parameters.origin_z;
         parameters.normal_x; parameters.normal_y; parameters.normal_z;
         parameters.distance; parameters.tolerance; parameters.uv_origin_u;
-        parameters.uv_origin_v; parameters.uv_direction_u; parameters.uv_direction_v];
-      if parameters.distance < 0. || parameters.tolerance < 0.
+        parameters.uv_origin_v; parameters.uv_direction_u; parameters.uv_direction_v] in
+      let* () = if parameters.distance < 0. || parameters.tolerance < 0.
           || parameters.tolerance > sqrt Float.max_float then
-        invalid_arg "sop/attribute_mirror: invalid distance or tolerance";
-      if parameters.replace_strings && parameters.string_search = "" then
-        invalid_arg "sop/attribute_mirror: empty string search";
-      (match optional_text parameters.source_group, optional_text parameters.destination_group with
+        Error "sop/attribute_mirror: invalid distance or tolerance" else Ok () in
+      let* () = if parameters.replace_strings && parameters.string_search = "" then
+        Error "sop/attribute_mirror: empty string search" else Ok () in
+      let* () = (match optional_text parameters.source_group, optional_text parameters.destination_group with
        | Some source, Some destination when source = destination ->
-           invalid_arg "sop/attribute_mirror: source and destination groups must differ"
-       | _ -> ());
-      if parameters.transform = Mirror_uv
+           Error "sop/attribute_mirror: source and destination groups must differ"
+       | _ -> Ok ()) in
+      let* () = if parameters.transform = Mirror_uv
           && parameters.uv_direction_u = 0. && parameters.uv_direction_v = 0. then
-        invalid_arg "sop/attribute_mirror: UV direction must be non-zero";
-      validate_parameter_pattern "sop/attribute_mirror: attributes" parameters.attributes;
+        Error "sop/attribute_mirror: UV direction must be non-zero" else Ok () in
+      let* () = validate_parameter_pattern "sop/attribute_mirror: attributes" parameters.attributes in
       match parameters.method_ with
       | Mirror_mapping ->
-          if String.trim parameters.mapping_attribute = "" then
-            invalid_arg "sop/attribute_mirror: empty mapping attribute";
-          if String.trim parameters.mapping_destination_group = "" then
-            invalid_arg "sop/attribute_mirror: empty mapping destination group";
+          let* () = if String.trim parameters.mapping_attribute = "" then
+            Error "sop/attribute_mirror: empty mapping attribute" else Ok () in
+          let* () = if String.trim parameters.mapping_destination_group = "" then
+            Error "sop/attribute_mirror: empty mapping destination group" else Ok () in
           if parameters.transform = Mirror_vector || parameters.transform = Mirror_point then
-            invalid_arg "sop/attribute_mirror: vector/point transforms require a plane"
+            Error "sop/attribute_mirror: vector/point transforms require a plane" else Ok ()
       | Mirror_plane ->
-          if parameters.owner = Rdk.Attribute.Vertex then
-            invalid_arg "sop/attribute_mirror: vertex owner requires mapping";
+          let* () = if parameters.owner = Rdk.Attribute.Vertex then
+            Error "sop/attribute_mirror: vertex owner requires mapping" else Ok () in
           let nx = parameters.normal_x and ny = parameters.normal_y and nz = parameters.normal_z in
           let scale = Float.max (Float.abs nx) (Float.max (Float.abs ny) (Float.abs nz)) in
-          if scale = 0. then invalid_arg "sop/attribute_mirror: normal must be non-zero";
+          let* () = if scale = 0. then Error "sop/attribute_mirror: normal must be non-zero" else Ok () in
           let x = nx /. scale and y = ny /. scale and z = nz /. scale in
           let length = sqrt (x *. x +. y *. y +. z *. z) in
-          List.iter finite [parameters.origin_x +. parameters.distance *. (x /. length);
+          each finite [parameters.origin_x +. parameters.distance *. (x /. length);
             parameters.origin_y +. parameters.distance *. (y /. length);
             parameters.origin_z +. parameters.distance *. (z /. length)]]
     [@@sop.node_category "Attribute/Transform"] [@@sop.node_inputs 1]
@@ -462,22 +462,22 @@ module Attribute_transfer_all = struct
     [@@sop.node_label "Attribute Transfer All"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/attribute_transfer_all: " ^ message) in
+      let refuse message = Error ("sop/attribute_transfer_all: " ^ message) in
       let patterns = [parameters.point_pattern;parameters.vertex_pattern;parameters.primitive_pattern;parameters.detail_pattern] in
-      if List.for_all (fun text -> String.trim text = "") patterns then refuse "at least one owner pattern is required";
-      List.iter (fun text -> if String.trim text <> "" then validate_parameter_pattern "sop/attribute_transfer_all" text) patterns;
-      if parameters.neighbors < 1 then refuse "neighbors must be positive";
-      if not (List.for_all Float.is_finite [parameters.power;parameters.kernel_radius;
-          parameters.max_distance;parameters.blend_width;parameters.uniform_bias]) then refuse "sampling controls must be finite";
-      if parameters.power < 0. || (parameters.mode = Transfer_inverse && parameters.power = 0.) then refuse "invalid inverse power";
-      if parameters.kernel_radius < 0. || parameters.kernel_radius > sqrt Float.max_float
+      let* () = if List.for_all (fun text -> String.trim text = "") patterns then refuse "at least one owner pattern is required" else Ok () in
+      let* () = each (fun text -> if String.trim text <> "" then validate_parameter_pattern "sop/attribute_transfer_all" text else Ok ()) patterns in
+      let* () = if parameters.neighbors < 1 then refuse "neighbors must be positive" else Ok () in
+      let* () = if not (List.for_all Float.is_finite [parameters.power;parameters.kernel_radius;
+          parameters.max_distance;parameters.blend_width;parameters.uniform_bias]) then refuse "sampling controls must be finite" else Ok () in
+      let* () = if parameters.power < 0. || (parameters.mode = Transfer_inverse && parameters.power = 0.) then refuse "invalid inverse power" else Ok () in
+      let* () = if parameters.kernel_radius < 0. || parameters.kernel_radius > sqrt Float.max_float
           || parameters.max_distance < 0. || parameters.max_distance > sqrt Float.max_float
-          || parameters.blend_width < 0. then refuse "distances must be nonnegative and safely squarable";
-      if parameters.uniform_bias < 0. || parameters.uniform_bias > 1. then refuse "uniform bias must be within [0, 1]";
-      if parameters.distance_mode = Kernel_auto && parameters.blend_width > 0. then refuse "blend width requires an explicit maximum distance";
+          || parameters.blend_width < 0. then refuse "distances must be nonnegative and safely squarable" else Ok () in
+      let* () = if parameters.uniform_bias < 0. || parameters.uniform_bias > 1. then refuse "uniform bias must be within [0, 1]" else Ok () in
+      let* () = if parameters.distance_mode = Kernel_auto && parameters.blend_width > 0. then refuse "blend width requires an explicit maximum distance" else Ok () in
       if parameters.distance_mode = Kernel_explicit &&
           parameters.max_distance +. parameters.blend_width > sqrt Float.max_float then
-        refuse "distance plus blend width must be safely squarable"]
+        refuse "distance plus blend width must be safely squarable" else Ok ()]
     [@@sop.node_category "Attribute/Transfer"] [@@sop.node_inputs 2] [@@sop.node_slots "source, target"]
 
     [@@deriving sop_params, sop_node]
@@ -503,18 +503,6 @@ module Attribute_transfer_all = struct
     let mode = Support.transfer_mode mode neighbors power kernel_radius in
     let falloff = Support.transfer_falloff falloff uniform_bias in
     let max_distance = match distance_mode with Kernel_explicit -> Some max_distance | Kernel_auto -> None in
-    if point_pattern = None && vertex_pattern = None
-        && primitive_pattern = None && detail_pattern = None then
-      invalid_arg "sop/attribute_transfer_all: at least one owner pattern is required";
-    List.iter (fun (owner, pattern) -> match pattern with
-      | None -> ()
-      | Some pattern ->
-          (match Rdk.Attribute_pattern.compile pattern with
-           | Ok _ -> ()
-           | Error message -> invalid_arg (Printf.sprintf
-               "sop/attribute_transfer_all: invalid %s pattern: %s" owner message)))
-      ["point", point_pattern; "vertex", vertex_pattern;
-       "primitive", primitive_pattern; "detail", detail_pattern];
     Node.Private.make_geometry ?label ~operation:"attribute_transfer_all" ~version:1
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
@@ -582,23 +570,23 @@ module Attribute_transfer_surface = struct
     [@@sop.node_label "Attribute Transfer Surface"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/attribute_transfer_surface: " ^ message) in
-      if parameters.target_owner = Rdk.Attribute.Detail then refuse "detail target is not spatial";
-      let attributes = decode_surface_attributes parameters.attributes in
+      let refuse message = Error ("sop/attribute_transfer_surface: " ^ message) in
+      let* () = if parameters.target_owner = Rdk.Attribute.Detail then refuse "detail target is not spatial" else Ok () in
+      let* attributes = decode_surface_attributes parameters.attributes in
       let names = List.map (fun (attribute : Rdk.Attribute_transfer.surface_attribute) -> attribute.target_name) attributes in
-      if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "target attribute names must be distinct";
-      if parameters.target_owner = Rdk.Attribute.Point && List.mem "P" names then refuse "target P is not an ordinary attribute";
+      let* () = if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "target attribute names must be distinct" else Ok () in
+      let* () = if parameters.target_owner = Rdk.Attribute.Point && List.mem "P" names then refuse "target P is not an ordinary attribute" else Ok () in
       let distance = optional_text parameters.distance_attribute in
-      if (parameters.target_owner = Rdk.Attribute.Point && distance = Some "P")
-          || Option.fold ~none:false ~some:(fun name -> List.mem name names) distance then refuse "distance output conflicts with attributes";
-      if not (Float.is_finite parameters.max_distance && Float.is_finite parameters.blend_width && Float.is_finite parameters.uniform_bias) then
-        refuse "distance controls must be finite";
-      if parameters.max_distance < 0. || parameters.max_distance > sqrt Float.max_float || parameters.blend_width < 0.
-          || parameters.uniform_bias < 0. || parameters.uniform_bias > 1. then refuse "distance controls are out of range";
-      if parameters.distance_mode = Kernel_auto && parameters.blend_width > 0. then refuse "blend width requires an explicit maximum distance";
-      if parameters.distance_mode = Kernel_explicit && parameters.max_distance +. parameters.blend_width > sqrt Float.max_float then
-        refuse "distance window exceeds the squared-distance range";
-      List.iter (fun pattern -> if String.trim pattern <> "" then validate_parameter_pattern "attribute_transfer_surface" pattern)
+      let* () = if (parameters.target_owner = Rdk.Attribute.Point && distance = Some "P")
+          || Option.fold ~none:false ~some:(fun name -> List.mem name names) distance then refuse "distance output conflicts with attributes" else Ok () in
+      let* () = if not (Float.is_finite parameters.max_distance && Float.is_finite parameters.blend_width && Float.is_finite parameters.uniform_bias) then
+        refuse "distance controls must be finite" else Ok () in
+      let* () = if parameters.max_distance < 0. || parameters.max_distance > sqrt Float.max_float || parameters.blend_width < 0.
+          || parameters.uniform_bias < 0. || parameters.uniform_bias > 1. then refuse "distance controls are out of range" else Ok () in
+      let* () = if parameters.distance_mode = Kernel_auto && parameters.blend_width > 0. then refuse "blend width requires an explicit maximum distance" else Ok () in
+      let* () = if parameters.distance_mode = Kernel_explicit && parameters.max_distance +. parameters.blend_width > sqrt Float.max_float then
+        refuse "distance window exceeds the squared-distance range" else Ok () in
+      each (fun pattern -> if String.trim pattern <> "" then validate_parameter_pattern "attribute_transfer_surface" pattern else Ok ())
         [parameters.source_group_pattern;parameters.source_vertex_group_pattern;parameters.target_group_pattern]]
     [@@sop.node_category "Attribute/Transfer"] [@@sop.node_inputs 2] [@@sop.node_slots "source, target"]
 
@@ -622,18 +610,18 @@ module Attribute_transfer_surface = struct
     let source_vertex_selection = parameters.source_vertex_selection in
     let target_group = parameters.target_group in
     let target_group_pattern = parameters.target_group_pattern in
-    let attributes = decode_surface_attributes attributes in
+    let attributes = validated (decode_surface_attributes attributes) in
     let max_distance = if distance_mode = Kernel_auto then None else Some max_distance in
     let falloff = transfer_falloff falloff uniform_bias and distance_attribute = optional_text distance_attribute in
     let source_group,source_group_pattern = exact_or_pattern source_group source_group_pattern
     and source_vertex_group,source_vertex_group_pattern = exact_or_pattern source_vertex_group source_vertex_group_pattern
     and target_group,target_group_pattern = exact_or_pattern target_group target_group_pattern in
-    let source_group_pattern_compiled = compile_transfer_group_pattern
-        "attribute_transfer_surface" "source" source_group_pattern
-    and target_group_pattern_compiled = compile_transfer_group_pattern
-        "attribute_transfer_surface" "target" target_group_pattern
-    and source_vertex_group_pattern_compiled = compile_transfer_group_pattern
-        "attribute_transfer_surface" "source vertex" source_vertex_group_pattern in
+    let source_group_pattern_compiled = validated (compile_transfer_group_pattern
+        "attribute_transfer_surface" "source" source_group_pattern)
+    and target_group_pattern_compiled = validated (compile_transfer_group_pattern
+        "attribute_transfer_surface" "target" target_group_pattern)
+    and source_vertex_group_pattern_compiled = validated (compile_transfer_group_pattern
+        "attribute_transfer_surface" "source vertex" source_vertex_group_pattern) in
     Node.Private.make_geometry ?label ~operation:"attribute_transfer_surface" ~version:5
       ~parameters:"" ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|source; target|]
@@ -688,9 +676,10 @@ module Attribute_transfer = struct
       "All triangle vertices", Rdk.Surface_index.All_triangle_vertices;
       "Any triangle vertex", Rdk.Surface_index.Any_triangle_vertex;
     ]
-  let decode_names text = parameter_table_rows "sop/attribute_transfer" text
-    |> List.map (function [name] -> name | _ ->
-      invalid_arg "sop/attribute_transfer: exact names need one column per row")
+  let decode_names text =
+    let* rows = parameter_table_rows "sop/attribute_transfer" text in
+    map_rows (function [name] -> Ok name | _ ->
+      Error "sop/attribute_transfer: exact names need one column per row") rows
   type parameters = {
     owner : Rdk.Attribute.owner [@sop.default Rdk.Attribute.Point]
       [@sop.label "Owner"] [@sop.kind attribute_owner_parameter];
@@ -746,45 +735,45 @@ module Attribute_transfer = struct
     [@@sop.node_category "Attribute/Transfer"] [@@sop.node_inputs 2] [@@sop.node_slots "source, target"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/attribute_transfer: " ^ message) in
-      if parameters.use_names then begin
-        let names = decode_names parameters.names in
-        List.iter (fun name ->
-          if String.trim name = "" then refuse "empty attribute name";
+      let refuse message = Error ("sop/attribute_transfer: " ^ message) in
+      let* () = if parameters.use_names then begin
+        let* names = decode_names parameters.names in
+        let* () = each (fun name ->
+          if String.trim name = "" then refuse "empty attribute name" else
           if parameters.owner = Rdk.Attribute.Point && name = "P" then
-            refuse "canonical P cannot be transferred as an ordinary attribute") names;
+            refuse "canonical P cannot be transferred as an ordinary attribute" else Ok ()) names in
         if List.length (List.sort_uniq String.compare names) <> List.length names then
-          refuse "duplicate attribute name"
-      end else validate_parameter_pattern "sop/attribute_transfer" parameters.pattern;
-      if parameters.neighbors < 1 then refuse "neighbors must be positive";
-      if parameters.power < 0. || (parameters.mode = Transfer_inverse && parameters.power = 0.) then
-        refuse "invalid inverse power";
-      if parameters.kernel_radius < 0. || parameters.kernel_radius > sqrt Float.max_float
+          refuse "duplicate attribute name" else Ok ()
+      end else validate_parameter_pattern "sop/attribute_transfer" parameters.pattern in
+      let* () = if parameters.neighbors < 1 then refuse "neighbors must be positive" else Ok () in
+      let* () = if parameters.power < 0. || (parameters.mode = Transfer_inverse && parameters.power = 0.) then
+        refuse "invalid inverse power" else Ok () in
+      let* () = if parameters.kernel_radius < 0. || parameters.kernel_radius > sqrt Float.max_float
           || parameters.max_distance < 0. || parameters.max_distance > sqrt Float.max_float
-          || parameters.blend_width < 0. then refuse "distances must be nonnegative and safely squarable";
-      if parameters.uniform_bias < 0. || parameters.uniform_bias > 1. then refuse "uniform bias must be within [0,1]";
-      if parameters.distance_mode = Kernel_auto && parameters.blend_width > 0. then
-        refuse "blend width requires an explicit maximum distance";
-      if parameters.distance_mode = Kernel_explicit &&
+          || parameters.blend_width < 0. then refuse "distances must be nonnegative and safely squarable" else Ok () in
+      let* () = if parameters.uniform_bias < 0. || parameters.uniform_bias > 1. then refuse "uniform bias must be within [0,1]" else Ok () in
+      let* () = if parameters.distance_mode = Kernel_auto && parameters.blend_width > 0. then
+        refuse "blend width requires an explicit maximum distance" else Ok () in
+      let* () = if parameters.distance_mode = Kernel_explicit &&
           parameters.max_distance +. parameters.blend_width > sqrt Float.max_float then
-        refuse "distance plus blend width must be safely squarable";
+        refuse "distance plus blend width must be safely squarable" else Ok () in
       let source_group,source_pattern=exact_or_pattern parameters.source_group parameters.source_group_pattern
       and vertex_group,vertex_pattern=exact_or_pattern parameters.source_vertex_group parameters.source_vertex_group_pattern
       and target_group,target_pattern=exact_or_pattern parameters.target_group parameters.target_group_pattern in
-      List.iter (fun (name,pattern) -> ignore (compile_transfer_group_pattern "attribute_transfer" name pattern))
-        ["source",source_pattern;"source vertex",vertex_pattern;"target",target_pattern];
-      if parameters.owner <> Rdk.Attribute.Vertex && (vertex_group <> None || vertex_pattern <> None) then
-        refuse "source vertex groups require vertex ownership";
-      if parameters.owner = Rdk.Attribute.Detail &&
+      let* () = each (fun (name,pattern) -> Result.map ignore (compile_transfer_group_pattern "attribute_transfer" name pattern))
+        ["source",source_pattern;"source vertex",vertex_pattern;"target",target_pattern] in
+      let* () = if parameters.owner <> Rdk.Attribute.Vertex && (vertex_group <> None || vertex_pattern <> None) then
+        refuse "source vertex groups require vertex ownership" else Ok () in
+      let* () = if parameters.owner = Rdk.Attribute.Detail &&
           (source_group <> None || source_pattern <> None || target_group <> None || target_pattern <> None
            || parameters.distance_mode <> Kernel_auto || parameters.blend_width <> 0.) then
-        refuse "detail transfer does not accept spatial options";
+        refuse "detail transfer does not accept spatial options" else Ok () in
       if (parameters.owner = Rdk.Attribute.Detail || parameters.owner = Rdk.Attribute.Vertex)
-          && parameters.mode <> Transfer_nearest then refuse "this owner supports nearest mode only"]
+          && parameters.mode <> Transfer_nearest then refuse "this owner supports nearest mode only" else Ok ()]
     [@@deriving sop_params, sop_node]
   let build = parameters_build (fun ~label parameters source target ->
     let owner=parameters.owner and source_vertex_selection=parameters.source_vertex_selection in
-    let names,pattern = if parameters.use_names then Some (decode_names parameters.names),None
+    let names,pattern = if parameters.use_names then Some (validated (decode_names parameters.names)),None
       else None,Some parameters.pattern in
     let mode=transfer_mode parameters.mode parameters.neighbors parameters.power parameters.kernel_radius
     and falloff=transfer_falloff parameters.falloff parameters.uniform_bias
@@ -793,9 +782,9 @@ module Attribute_transfer = struct
     let source_group,source_group_pattern=exact_or_pattern parameters.source_group parameters.source_group_pattern
     and source_vertex_group,source_vertex_group_pattern=exact_or_pattern parameters.source_vertex_group parameters.source_vertex_group_pattern
     and target_group,target_group_pattern=exact_or_pattern parameters.target_group parameters.target_group_pattern in
-    let source_group_pattern_compiled=compile_transfer_group_pattern "attribute_transfer" "source" source_group_pattern
-    and source_vertex_group_pattern_compiled=compile_transfer_group_pattern "attribute_transfer" "source vertex" source_vertex_group_pattern
-    and target_group_pattern_compiled=compile_transfer_group_pattern "attribute_transfer" "target" target_group_pattern in
+    let source_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "source" source_group_pattern)
+    and source_vertex_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "source vertex" source_vertex_group_pattern)
+    and target_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "target" target_group_pattern) in
     Node.Private.make_geometry ~label ~operation:"attribute_transfer" ~version:6
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|source;target|]
