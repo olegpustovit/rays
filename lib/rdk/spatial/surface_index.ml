@@ -50,7 +50,6 @@ type ray_direction_mode =
 
 type ray_surface_hit = Ray_first_surface | Ray_last_surface
 
-
 type pair_builder = {
   mutable pair_first : int array;
   mutable pair_second : int array;
@@ -81,7 +80,6 @@ let pair_builder_add builder first second =
 
 let fail_code code message = Error.fail_with ~operation:"surface_index" ~code message
 let fail = fail_code "invalid_surface"
-let leaf_size = 8
 
 let diagonal_count = 4
 

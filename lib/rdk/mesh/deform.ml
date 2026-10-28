@@ -11,15 +11,6 @@ type planes = {
   z : float array;
 }
 
-let finite_vec3 value =
-  Float.is_finite value.Rays_math.Vec3.x && Float.is_finite value.y
-  && Float.is_finite value.z
-
-let[@inline] max_abs3 x y z =
-  let x = abs_float x and y = abs_float y and z = abs_float z in
-  let value = if x > y then x else y in
-  if value > z then value else z
-
 let validate_selection topology = function
   | None -> Ok ()
   | Some (Selected_points group) ->
@@ -82,16 +73,6 @@ let[@inline] point_selected selection index point = match selection with
         incr local
       done;
       !found
-
-let point_float_attribute operation name geometry =
-  match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-  | None -> Error (Printf.sprintf "%s: missing point float attribute %s"
-      operation name)
-  | Some attribute ->
-      (match Attribute.View.storage attribute with
-       | Attribute.Float values -> Ok values
-       | _ -> Error (Printf.sprintf
-           "%s: point attribute %s must have float storage" operation name))
 
 let point_vector_attribute operation name geometry =
   if String.equal name "P" then

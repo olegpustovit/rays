@@ -2,7 +2,6 @@
    chain run one deformer at a time. *)
 open Rdk
 open Rdk_test_support
-module E = Flow.Eval
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
 module Session = Sop.Session

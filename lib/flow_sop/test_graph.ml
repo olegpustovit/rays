@@ -5,7 +5,6 @@ module G = Rdk.Geometry
 module T = Rdk.Topology
 let ok = function Ok value -> value | Error message -> failwith message
 let flow_ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
-let ok_error = function Ok value -> value | Error e -> failwith (Rdk.Error.to_string e)
 let ints a = E.Int_array (Array.copy a)
 
 let fixtures () =

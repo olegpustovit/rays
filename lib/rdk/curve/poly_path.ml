@@ -2,57 +2,6 @@ open Rays_math
 
 let fail message = raise (Error.Fail message)
 
-let next_power_of_two value =
-  let result = ref 8 in
-  while !result < value do
-    if !result > Sys.max_array_length / 2 then
-      fail "PolyPath edge table exceeds OCaml array limits";
-    result := !result lsl 1
-  done;
-  !result
-
-let[@inline always] hash_pair a b =
-  let value = Hash.mix a (b * 31_337) in
-  (value lxor (value lsr 16)) land max_int
-
-let remap_attribute ?cancel ?grain mapping attribute =
-  Topology_remap.attribute ?cancel ~grain:(Option.value ~default:16_384 grain)
-    mapping attribute
-
-let set_bit bits index =
-  let byte = index lsr 3 and mask = 1 lsl (index land 7) in
-  Bytes.set bits byte (Char.chr (Char.code (Bytes.get bits byte) lor mask))
-
-let source_degrees ?edges index_view point_count =
-  let degrees = Array.make point_count 0 in
-  for edge = 0 to Array.length index_view.Topology_index.View.edge_a - 1 do
-    let a = index_view.edge_a.(edge) and b = index_view.edge_b.(edge) in
-    if (match edges with None -> true | Some group -> Edge_group.mem edge group)
-        && a <> b then begin
-      degrees.(a) <- degrees.(a) + 1;
-      degrees.(b) <- degrees.(b) + 1
-    end
-  done;
-  degrees
-
-let endpoint_point_map ?cancel ?edges ~only_end_points ~maximum_distance
-    geometry source_view =
-  let point_count = Geometry.point_count geometry in
-  let degrees = source_degrees ?edges source_view point_count in
-  let compatible left right =
-    if only_end_points then degrees.(left) = 1 && degrees.(right) = 1
-    else degrees.(left) = 1 || degrees.(right) = 1 in
-  match Point_clusters.create ?cancel ~operation:"PolyPath endpoint connection"
-      ~tolerance:maximum_distance ~compatible ~transitive:true geometry with
-  | Error message -> fail message
-  | Ok Point_clusters.Identity -> None
-  | Ok (Point_clusters.Clusters clusters) ->
-      let mapping = Array.make point_count 0 in
-      for point = 0 to point_count - 1 do
-        mapping.(point) <- clusters.representatives.(clusters.of_point.(point))
-      done;
-      Some mapping
-
 type traced = {
   path_count : int;
   edge_order : int array;

@@ -1,8 +1,4 @@
 
-let run ?(grain = 16_384) count operation =
-  if grain <= 0 then invalid_arg "Kernel: grain must be positive";
-  if count > 0 then
-    Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1) operation
 
 let geometry_of_positions positions =
   let topology = Topology.empty ~point_count:(Packed.Float3.length positions) in
