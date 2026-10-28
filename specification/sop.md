@@ -445,17 +445,31 @@ remembered by identity (`Flow.Value.remember`, weak): a static grid's point plan
 interleaved or checked read, the copies a write adopts, a large array's finite check; a large float
 fill is remembered by its value (`Flow.Op.constant_array`, 8 slots); and a region that only
 forwards its one source (a branch chosen by constants) is that source
-(`Packed.Host.prepare_values`). `test_chain_gpu_native` fails if a recook uploads an input. Measured (M1, loaded
-machine, load 8-9, 2026-10-28, `test_chain_gpu_native.exe`, medians of 5): `grid 1000x1000 >
-attribute_noise > transform` cooks in 0.009-0.027 s with the device (before: 0.088 s) against
-0.13-0.19 s on the CPU, first cook 0.051-0.072 s (before: 0.19 s), one dispatch, largest difference
-3.4e-7; a recook uploads nothing. A light map
-(transform alone) costs about its transfer on the CPU blocks and stays there. Any device failure (a
-form refusal, a status, a readback) leaves the record to the CPU, which reports its own errors. Not
-yet: device-resident geometry between consecutive fused nodes and a display that binds it without
-readback (an attribute that materialises on the CPU only when read, the rule that matters most over
-PCIe), grid planes generated on the device from the thread index instead of uploaded, fills bound as
-uniforms, and one command buffer per cook across fused nodes.
+(`Packed.Host.prepare_values`). `test_chain_gpu_native` fails if a recook uploads an input. Measured
+(M1, loaded machine, load 5-11, 2026-10-28, `test_chain_gpu_native.exe`, medians of 5): `grid
+1000x1000 > attribute_noise > transform` recooks in 0.007-0.010 s with the device and nothing read
+back (eager readback before: 0.009-0.027 s, of which 7-10 ms converted all seven planes), 0.005 s
+when the previous results have been collected and their buffers recycled, against 0.11-0.15 s on
+the CPU; about 2 ms of a recook is the kernel itself, waited for its status check, and 3 ms a fresh
+28 MB of output buffers while the previous geometries are still uncollected. First cook
+0.043-0.050 s, of which 0.035-0.038 s is emitting and compiling the kernel's pipeline: uploads are
+not what bounds it. One dispatch, largest difference 3.4e-7. A light map (transform alone) costs
+about its transfer on the CPU blocks and stays there. Any device failure (a form refusal, a status)
+leaves the record to the CPU, which reports its own errors.
+
+Not yet, in order of value: (1) a later fused write binding a resident attribute as its input
+without materialising it: `Attribute_kernel.read` would return, for a resident storage and only
+for `Packed.Host.prepare` on the device path, a placeholder the GPU host maps by physical identity
+to the held buffer (as the resident fold's placeholders are, `Flow_gpu.Host.resident`), passed as
+`Run.dispatch ~bound`; the held buffer is interleaved float32 of the kernel's input layout, and the
+CPU fallback must re-resolve sources so a placeholder never reaches a CPU kernel; (2) a display
+binding a resident P as its vertex buffer (`Workspace_gpu.marks`/`Renderer` already bind device
+buffers for marks; SOP display converts through `rdk_rays` meshes and reads P); (3) a persistent
+pipeline cache (Metal binary archive) for the first cook, then grid planes and `array/range`
+generated from the thread index (a new element-index instruction across the CPU blocks, MSL,
+SPIR-V and WGSL, and the grid's point map fused into the write); (4) the status check deferred to
+the cook's end and one command buffer per cook across consecutive fused nodes (no wait between
+them); fills bound as uniforms.
 
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's
