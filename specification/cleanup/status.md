@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **183 / 248 accepted (73.8%)**. This counts individual
+Finding coverage: **185 / 248 accepted (74.6%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,9 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P6.G1: rdk is 85.9k lines (product 60.7k, tests 22.6k, test support 2.6k), against a target under 80k. The fixture-generator tests (test_box, test_uv_sphere, test_torus, test_grid, about 1.2k) now test only test support. The native-vs-Lisp oracles and their tests are gone (f5438269).
+- P5.S7/FL28: flow_graph knows no panel kind (Editor_document.Panel_kinds builds the forms), but the layout-rewrite gestures still live in flow_graph. UI18: geometry-object inspection goes through workspace_inspector; the scene-object/World-layer sheet is still separate. XC27: the editor clock is injected, while sop async_cook/session and flow_sop lower still read it.
 
 - P5.S5/UI13: converting the World drag and viewport grab to Ui.box capture was tried and reverted. A press reaches only the topmost hit box, so a drag box under the viewport leaf never receives it, and Ui has no way to capture on behalf of a descendant. That design decision is open. A guard test (test_editor_commands world_drag: Shift-drag rotates the World as one undo step) is in place. rays_editor declares 19 libraries, each used directly.
 
