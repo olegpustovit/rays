@@ -1403,7 +1403,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
   match Option.bind replay (fun entry -> replay_inline c entry (inline_inputs parameters vals)) with
   | Some v ->
       st.steps <- steps;
-      card c ~form d parameters v
+      card c ~form d parameters ~vals v
   | None -> (
       let inlined0 = st.inlined in
       st.inlined <- d.kind.qualified :: st.inlined;
@@ -1493,7 +1493,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
                   if Hashtbl.length inline_memo >= 256 then Hashtbl.reset inline_memo;
                   Hashtbl.replace inline_memo key entry)
           | _ -> ());
-          card c ~form d parameters v
+          card c ~form d parameters ~vals v
       | exception Needs_t ->
           (* a validation that reads a live argument *)
           st.steps <- steps;
@@ -1515,7 +1515,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
    parameters), what the host keys per-card ids, display, probes, provenance, facts and caching by;
    the call's value is the marker. A body whose geometry is decided by cooked data (a residual)
    cooks behind it, one card's structure as before; otherwise it passes the body's result through. *)
-and card c ~form (d : W.node_definition) parameters v =
+and card c ~form (d : W.node_definition) parameters ~vals v =
   let marker () =
     let st = c.st in
     let n =
@@ -1526,7 +1526,10 @@ and card c ~form (d : W.node_definition) parameters v =
         iter = c.iter;
         kind = card_kind;
         ty = Ty.geometry;
-        args = [ ("value", v); ("kind", Text d.kind.qualified); ("parameters", Record parameters) ];
+        args =
+          [ ("value", v); ("kind", Text d.kind.qualified); ("parameters", Record parameters) ]
+          (* the call's functions, which the host's field probes sample *)
+          @ List.filter (fun (_, v) -> match v with Fn _ -> true | _ -> false) vals;
       }
     in
     st.nodes <- n :: st.nodes;
@@ -2238,12 +2241,6 @@ let inline_parameters =
   Atomic.make (fun _ (d : W.node_definition) ->
       (d, lazy (Digest.string (Marshal.to_string d [])), fun vals -> Some vals))
 
-(* ponytail: a node with callable slots still lowers as its own nested workspace *)
-let inline_simple (d : W.node_definition) =
-  List.for_all
-    (fun (s : Catalog.slot) -> match s.ty with Some (Ty.Fn _) -> false | _ -> true)
-    d.slots
-
 let new_state ?(budget = max_steps) ~record ws =
   let graphs = Hashtbl.create 8 and defs = Hashtbl.create 8 in
   List.iter (fun (g : W.graph) -> Hashtbl.replace graphs g.name g) ws.W.graphs;
@@ -2276,8 +2273,7 @@ let new_state ?(budget = max_steps) ~record ws =
        if Atomic.get inline_nodes then
          List.iter
            (fun (d : W.node_definition) ->
-             if inline_simple d then
-               Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
+             Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
            ws.W.nodes;
        t);
     ops = ws.ops;

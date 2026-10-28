@@ -3616,8 +3616,8 @@ let field_calls ?state ~live ~resolve lowered =
       lowered.factories
     |> Option.value ~default:[]
   in
-  let vector (node : E.node) name =
-    match List.assoc_opt name node.args with
+  let vector args name =
+    match List.assoc_opt name args with
     | Some value -> (
         match E.Host.force_reference ?state ~resolve value ~live with
         | Ok (E.Vec3 (x, y, z)) -> Some (x, y, z)
@@ -3638,55 +3638,67 @@ let field_calls ?state ~live ~resolve lowered =
     let offset = ref 0 in
     Array.to_list lowered.plan.nodes
     |> List.filter_map (fun (node : E.node) ->
-        if node.kind <> "sop/iso_surface" then None
-        else
-          match List.assoc_opt "field" node.args with
-          | Some (E.Fn fn) when E.Host.function_scope fn = Some (zone, outer) -> (
-              match (vector node "resolution", vector node "min", vector node "max") with
-              | Some (rx, ry, rz), Some (lx, ly, lz), Some (hx, hy, hz) ->
-                  let valid n =
-                    Float.is_finite n && n >= 1.
-                    && Float.floor n = n
-                    && n < float (Sys.max_array_length / 3)
-                  in
-                  if not (valid rx && valid ry && valid rz) then None
-                  else
-                    let nx = int_of_float rx + 1
-                    and ny = int_of_float ry + 1
-                    and nz = int_of_float rz + 1 in
-                    let limit = Sys.max_array_length / 3 in
-                    if nx > limit / ny || nx * ny > limit / nz then None
+        let args =
+          if node.kind = "sop/iso_surface" then Some node.args
+          else if
+            node.kind = E.card_kind
+            && List.assoc_opt "kind" node.args = Some (E.Text "sop/iso_surface")
+          then
+            match List.assoc_opt "parameters" node.args with
+            | Some (E.Record parameters) -> Some (node.args @ parameters)
+            | _ -> None
+          else None
+        in
+        match args with
+        | None -> None
+        | Some args -> (
+            match List.assoc_opt "field" args with
+            | Some (E.Fn fn) when E.Host.function_scope fn = Some (zone, outer) -> (
+                match (vector args "resolution", vector args "min", vector args "max") with
+                | Some (rx, ry, rz), Some (lx, ly, lz), Some (hx, hy, hz) ->
+                    let valid n =
+                      Float.is_finite n && n >= 1.
+                      && Float.floor n = n
+                      && n < float (Sys.max_array_length / 3)
+                    in
+                    if not (valid rx && valid ry && valid rz) then None
                     else
-                      let count = nx * ny * nz and start = !offset in
-                      if count > max_int - start then None
-                      else begin
-                        offset := start + count;
-                        let at k =
-                          if k < 0 || k >= count then
-                            Error
-                              (Diagnostic.error ~code:"E_LIST_RANGE"
-                                 "Probe index is outside the field grid.")
-                          else
-                            let p =
-                              [|
-                                Float.fma (float (k mod nx)) ((hx -. lx) /. rx) lx;
-                                Float.fma (float (k / nx mod ny)) ((hy -. ly) /. ry) ly;
-                                Float.fma (float (k / (nx * ny))) ((hz -. lz) /. rz) lz;
-                              |]
-                            in
-                            Result.bind
-                              (E.Host.map_function
-                                 ~signature:Flow.Ty.{ params = [ Vec3 ]; result = Float }
-                                 fn [ E.Vec3_array p ])
-                              (function
-                                | E.Residual residual ->
-                                    Result.bind
-                                      (E.Host.map_probe ?state ~resolve ~offset:(start + k) residual
-                                         ~live)
-                                      (fun (_, at) -> at 0)
-                                | _ -> assert false)
-                        in
-                        Some (start, count, at)
-                      end
-              | _ -> None)
-          | _ -> None)
+                      let nx = int_of_float rx + 1
+                      and ny = int_of_float ry + 1
+                      and nz = int_of_float rz + 1 in
+                      let limit = Sys.max_array_length / 3 in
+                      if nx > limit / ny || nx * ny > limit / nz then None
+                      else
+                        let count = nx * ny * nz and start = !offset in
+                        if count > max_int - start then None
+                        else begin
+                          offset := start + count;
+                          let at k =
+                            if k < 0 || k >= count then
+                              Error
+                                (Diagnostic.error ~code:"E_LIST_RANGE"
+                                   "Probe index is outside the field grid.")
+                            else
+                              let p =
+                                [|
+                                  Float.fma (float (k mod nx)) ((hx -. lx) /. rx) lx;
+                                  Float.fma (float (k / nx mod ny)) ((hy -. ly) /. ry) ly;
+                                  Float.fma (float (k / (nx * ny))) ((hz -. lz) /. rz) lz;
+                                |]
+                              in
+                              Result.bind
+                                (E.Host.map_function
+                                   ~signature:Flow.Ty.{ params = [ Vec3 ]; result = Float }
+                                   fn [ E.Vec3_array p ])
+                                (function
+                                  | E.Residual residual ->
+                                      Result.bind
+                                        (E.Host.map_probe ?state ~resolve ~offset:(start + k)
+                                           residual ~live)
+                                        (fun (_, at) -> at 0)
+                                  | _ -> assert false)
+                          in
+                          Some (start, count, at)
+                        end
+                | _ -> None)
+            | _ -> None))

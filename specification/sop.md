@@ -341,7 +341,7 @@ invalidates its consumers. Supplied
 function slots retain the whole-source key until their closure identities can
 be narrowed without losing capture or body invalidation.
 
-A SOP graph is one program. A call of a Lisp node without callable slots evaluates its body in
+A SOP graph is one program. A call of a Lisp node evaluates its body in
 the calling program (`Flow.Eval`, the host's `inline_parameters`), so the region passes see
 across cards; only the native OCaml SOPs are node boundaries. The call keeps the node's
 boundaries: its arguments take the node path (schema changes over the defaults, hard ranges,
@@ -352,7 +352,9 @@ body has its own step budget. Nodes the body makes sit under the card's `node:ki
 compile strictly, as a nested body did; their refusals cook as errors.
 
 Each card is a marker plan node (`Flow.Eval.card_kind`) at the call's site carrying the body's
-value, the kind and the canonical parameters; the call's value is the marker. It lowers to a
+value, the kind, the canonical parameters and the call's function arguments (an iso surface's
+`:field`, which the field probes sample); the call's value is the marker. A supplied function is a
+value of the calling program, so its captures (geometry included) are ordinary inputs there. It lowers to a
 pass-through node (`flow.card`, labelled with the kind key), or, when the body's geometry is
 decided by cooked data, to that body's structural node; either carries the card's schema, so
 the inspector, handles, display, probes, provenance and compiled ids address the card. An edit

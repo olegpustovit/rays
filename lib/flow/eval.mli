@@ -219,9 +219,9 @@ type t = {
 }
 
 val inline_nodes : bool Atomic.t
-(** Switch of the single-program design (default off): a Lisp node without callable slots, called
-    with static arguments, evaluates its body in the calling program instead of lowering as its own
-    workspace, unless {!inline_parameters} keeps it a node. *)
+(** Switch of the single-program design (default on): a Lisp node call evaluates its body in the
+    calling program instead of lowering as its own workspace, unless {!inline_parameters} keeps it a
+    node. *)
 
 val inline_parameters :
   (Workspace.t ->
@@ -243,7 +243,8 @@ val context_label : string
 
 val card_kind : string
 (** The kind of an inlined card's marker node: [value] is the body's geometry (a cooked node, or a
-    residual the host cooks behind the marker), [kind] the card's qualified kind. The marker sits at
+    residual the host cooks behind the marker), [kind] the card's qualified kind, [parameters] its
+    canonical parameters, and each function argument of the call under its name. The marker sits at
     the call's site. *)
 
 val node_error : string
