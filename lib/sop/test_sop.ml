@@ -5,7 +5,12 @@ open Rdk_test_support
 (* Rays Lisp is the contract: text the lowering refuses raises [Invalid_argument] here, so a test
    that expects a refused node says so with the same handler it always used. *)
 module Lisp_sop = struct
-  include Lisp_sop
+  let node_result = Lisp_sop.node_result
+  let workspace_node = Lisp_sop.workspace_node
+  let snapshot = Lisp_sop.snapshot
+  let float = Lisp_sop.float
+  let vec3 = Lisp_sop.vec3
+  let curve_points = Lisp_sop.curve_points
   let node ?with_ text = match node_result ?with_ text with
     | Ok node -> node
     | Error message -> invalid_arg message

@@ -1449,7 +1449,12 @@ module Host = struct
 end
 
 module Residual = struct
-  include Residual_effect
+  type _ Effect.t +=
+    | Observe_kernel = Residual_effect.Observe_kernel
+    | Kernel_value = Residual_effect.Kernel_value
+    | Bulk_static = Residual_effect.Bulk_static
+    | Bulk_approx = Residual_effect.Bulk_approx
+  let handle = Residual_effect.handle
 
   let free_names term = Names.elements (free_names term)
   let with_bindings r ~term bindings =
