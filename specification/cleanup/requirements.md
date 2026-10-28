@@ -175,13 +175,13 @@ The editor is composed from libraries with honest boundaries. It does not host t
 - [x] P5.S3: Split `update_frame` per pane, `reduce` into per-intent reducers that return values, and `scope_pane.update` into gesture handlers. Use one `Panel_map` instead of active and parked pane copies. Evidence: update_frame and reduce are split under 300 lines into per-pane and per-intent functions, scope_pane's gestures live in Scope_frame handlers, and one Panel_map replaces the pane copies (UI26).
 - [x] P5.S4: pxui: split into Ui (engine), Ui_text and Ui_kit. One kit for shell, graph and inspector. Move Camera_controls into the viewport. Delete Kit and num_field. Evidence: see UI11 and UI9; Camera_controls moved into the viewport (UI12); Kit.number and the num_field duplicate are gone.
 - [ ] P5.S5: One input path: World drag, viewport grab and graph hints become `Ui.box`/`capture`, with key edges taken from the Router.
-- [ ] P5.S6: editor_document: split Contexts into Kinds, Lowering and Shell_eval; drop digestif; make the workspace a record instead of a tuple; pass caches explicitly; add `.mli` files. Scene, world and settings kinds stop being SOP nodes.
+- [x] P5.S6: editor_document: split Contexts into Kinds, Lowering and Shell_eval; drop digestif; make the workspace a record instead of a tuple; pass caches explicitly; add `.mli` files. Scene, world and settings kinds stop being SOP nodes. Evidence: Kinds, Lowering and Shell_eval are split out of Contexts, the workspace is a record, caches are explicit, and all 16 editor_document modules have an .mli. digestif stays because Lowering.sha256 is the only SHA-256.
 - [x] P5.S7: Move the panel kinds and layout gestures out of flow_graph and into editor_document. Route the derived-node inspector through workspace_inspector. Evidence: see FL28; flow_graph knows no panel kinds (Editor_document.Panel_kinds) and no layout ops.
 
 Exit gates:
 
-- [ ] P5.G1: rays_editor direct dependencies go from 22 to about 15, with no rdk, flow_gpu or scene_command
-- [ ] P5.G2: no file in lib/ includes a sibling to extend it
+- [x] P5.G1: rays_editor direct dependencies go from 22 to about 15, with no rdk, flow_gpu or scene_command Evidence: rays_editor declares 17 libraries (from 25), none of them rdk, flow_gpu or scene_command. Probe forcing moved to Flow_native.Probe_run and the GPU policy to Workspace_gpu.policy.
+- [x] P5.G2: no file in lib/ includes a sibling to extend it Evidence: no lib file includes a sibling to extend it. The rdk_test_support and test shims open their module and export only their extras (X_front). What remains are re-export facades of disjoint modules (pxui/ui.ml, subdivide.ml, Flow_edit, Scope_pane, Metal_raw) and Edit_tree, whose .mli restricts its surface.
 - [x] P5.G3: no `copy_files` of lib sources. Evidence: actual helper ownership replaces the product copies; existing IR fixture modules form a private test-only library. The dependency gate rejects library source copies and production dependencies on that test support, with negative fixtures.
 - [x] P5.G4: no function over 300 lines in rays_editor, pxui or pxui_graph Evidence: no function in rays_editor, pxui or pxui_graph, product or test, is over 300 lines; the last four test rows are removed and @tools/codemod/function-lengths is clean.
 - [x] P5.G5: ui_parity goldens are pixel-identical. Evidence at the P5.S1 checkpoint: `@lib/pxui/test_ui_parity` reports exact overlays, zones, table and kit-panel parity; subsequent UI refactors must retain this proof.
@@ -959,7 +959,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI17** (P5, med, api-bloat, effort M). Location at baseline: editor_document/document.ml:112 `workspace : Workspace_doc.t * Lower.t`. A tuple read through fst/snd about 98 times. Action: Make it a record. Evidence: ee7e426e makes Document.workspace a record {ws; lowered; fast} and rewrites about 132 fst/snd reads; @check and @all build.
 
-- [ ] **UI18** (P5, med, duplication, effort M). Location at baseline: core_model.ml:124-125 Set_parameter/Rename by Sop int id · core.ml:774-870 vs core_inspect.ml:344. A second edit route and a second inspector beside text-first Syntax_edit. Action: Route through `workspace_inspector`; keep Set_parameter only for host objects.
+- [x] **UI18** (P5, med, duplication, effort M). Location at baseline: core_model.ml:124-125 Set_parameter/Rename by Sop int id · core.ml:774-870 vs core_inspect.ml:344. A second edit route and a second inspector beside text-first Syntax_edit. Action: Route through `workspace_inspector`; keep Set_parameter only for host objects. Evidence: e9e3f4e3: scene objects and World layers that the text binds by name are inspected by workspace_inspector over a graph projection; Editor_scope.scene_target builds one when the pane shows another graph. test_scene_tree changed only in slider position and undo label. Host-made objects and loop copies keep the derived-node sheet.
 
 - [x] **UI19** (P0, med, dead-code, effort S). Location at baseline: leader.ml:199 keymap3 · core_setup.ml:48 ?keymap · core_model.ml:264. Two keymaps, only one used. Action: One `Leader.keymap`; drop the parameter.
 
@@ -967,7 +967,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI21** (P5, med, api-bloat, effort M). Location at baseline: rays_editor.mli:66-348 Private (~13 modules, ~69 vals) + Editor.Private (16). Re-exported only so tests in test/ can reach them. Action: Most of it goes away after UI4, UI6, UI16 and UI22; test the rest in the libraries that own it. Evidence: rays_editor.mli's Private re-export (about 70 values) is deleted; tests and tools reach private modules through dune's library alias (Rays_editor__.X), and Editor.Private keeps 16 values.
 
-- [ ] **UI22** (P5, low, layering, effort M). Location at baseline: rays_editor/lisp_text.ml (789). Parinfer, completion and description of Lisp, pure except for one adapter. Action: Move the pure part next to Flow.Lisp (with XC16).
+- [x] **UI22** (P5, low, layering, effort M). Location at baseline: rays_editor/lisp_text.ml (789). Parinfer, completion and description of Lisp, pure except for one adapter. Action: Move the pure part next to Flow.Lisp (with XC16). Evidence: the pure part of lisp_text.ml (tokens, bracket pairs, indent, context around a byte) is Flow.Lisp_scan with an .mli; theme colouring, completion vocab and the lex cache stay in the editor.
 
 - [x] **UI23** (P0, med, dead-code, effort S). Location at baseline: Editor.take_export, set_render_status, ?status, ?overlay, ?lights, ?background · Renderer.of_env. No callers, or leftovers from the OCaml-sketch API. Action: Delete them.
 
