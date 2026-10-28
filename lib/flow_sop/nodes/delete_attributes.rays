@@ -10,7 +10,7 @@
       (error "invalid_attribute" "attribute_delete could not produce valid geometry"
         :cause (str "attribute_delete [invalid_attribute]: Attribute Delete " owner " pattern: " message)))))
 
-(defnode sop/delete_attributes :label "Delete Attributes" :operation "attribute_delete_pattern"
+(defnode sop/delete_attributes :label "Delete Attributes"
   :category ["Attribute" "Manage"]
   :validate (and (and (metadata_delete_validate point_pattern) (metadata_delete_validate vertex_pattern))
     (and (metadata_delete_validate primitive_pattern) (metadata_delete_validate detail_pattern)))

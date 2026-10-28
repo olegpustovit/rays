@@ -62,7 +62,7 @@ let compare_float32 runtime id mesh scene =
     Bytes.set_int32_le uniforms (82 * 4) 0l;
     let attributes_key = fst (Option.get entry.vertex_attributes) in
     {entry with vertex_attributes = None; draw = {
-      mesh = {entry.draw.mesh with key = entry.draw.mesh.key ^ ":f64-oracle:" ^ attributes_key; vertices};
+      mesh = {entry.draw.mesh with key = Host (Scene_execution.mesh_key_string entry.draw.mesh.key ^ ":f64-oracle:" ^ attributes_key); vertices};
       state = {entry.draw.state with transform_uniforms = Some uniforms}}}) current in
   let render entries =
     let draws=List.map(fun (entry:Renderer.Scene_execution.sampled_draw)->

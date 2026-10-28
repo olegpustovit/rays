@@ -1169,7 +1169,6 @@ module Boolean_fracture = struct
           || parameters.point_tolerance < 0. || parameters.tiny_seam_threshold < 0. then refuse "tolerances must be finite and nonnegative";
       if parameters.cleanup_max_batches < 1 then refuse "cleanup batches must be positive";
       if String.trim parameters.piece_attribute = "" then refuse "piece attribute must be nonblank"]
-    [@@sop.node_operation "boolean"]
     [@@sop.node_category "Boolean"] [@@sop.node_inputs 2] [@@sop.node_slots "source, cutters"]
 
     [@@deriving sop_params, sop_node]
@@ -1186,7 +1185,7 @@ module Boolean_fracture = struct
     let assume_flat = parameters.assume_flat in
     let require_closed = parameters.require_closed in
     let piece_attribute = parameters.piece_attribute in
-    Node.Private.make_geometry ?label ~operation:"boolean" ~version:1 ~parameters:""
+    Node.Private.make_geometry ?label ~operation:"boolean_fracture" ~version:1 ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|source;cutters|]
       (fun ~node_id:_ context inputs ->
         match Rdk.Boolean.run { cancel = Some (Context.cancel_token context); grain = (Context.grain context);

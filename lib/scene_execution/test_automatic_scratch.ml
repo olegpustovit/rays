@@ -17,7 +17,7 @@ let state:Scene_execution.state={viewport=(0,0,64,64);scissor=(0,0,64,64);
 let mesh index:Scene_execution.mesh=
   let vertices=Bytes.make 48 '\000'and indices=Bytes.make 12 '\000'in
   Bytes.set_int32_le indices 4 1l;Bytes.set_int32_le indices 8 2l;
-  {key=Printf.sprintf"scratch-%03d"index;vertices;vertex_count=3;
+  {key=Host(Printf.sprintf"scratch-%03d"index);vertices;vertex_count=3;
    indices;index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
 
 let draws count=List.init count(fun index->

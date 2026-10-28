@@ -74,7 +74,7 @@ let mesh scenario index =
     |Scene3_builtin->[(1.,1.);(1.,-1.);(-1.,-1.)],0x4080BFFFl
     |Pxui_like->[(-1.,-1.);(3.,-1.);(-1.,3.)],0x4080BFFFl in
   List.iteri(fun vertex position->put_vertex vertices vertex position color)positions;
-  { Scene_execution.key = Printf.sprintf "%s-%d" (name scenario) index;
+  { Scene_execution.key = Host (Printf.sprintf "%s-%d" (name scenario) index);
     vertices; vertex_count = 3; indices; index_count = 3; primitive=Ogpu.Render_pass.Triangle_list }
 
 let draws scenario extent =

@@ -89,7 +89,7 @@ let marks_draw ?drawn gpu_vertices_owner device a n =
   let buffers = List.map2 upload ["position"; "extent"; "fill"; "stroke"; "width"; "params"]
     [floats a.position; floats a.extent; a.fill; a.stroke; floats a.width; words (Array.map Int32.of_int a.params)] in
   incr counter;
-  let key = Printf.sprintf "gpu:vertices:marks-native-%d" !counter in
+  let key = Printf.sprintf "marks-native-%d" !counter in
   (* [drawn]: a count record as a fast kernel writes it, {n, 6n, 1, 0, 0, 0}, the draw's from byte 4 *)
   let record = Option.map (fun drawn -> upload "count" (words (Array.map Int32.of_int [| drawn; 6 * drawn; 1; 0; 0; 0 |]))) drawn in
   let buffers = buffers @ Option.to_list record in
@@ -101,7 +101,7 @@ let marks_draw ?drawn gpu_vertices_owner device a n =
   let state : Scene_execution.state = { viewport = (0, 0, width, height); scissor = (0, 0, width, height);
     cull = Cull_none; depth_compare = Always; depth_write = false; depth_load = Load; depth_clear = 1.;
     transform_uniforms = Some affine;  } in
-  let mesh : Scene_execution.mesh = { key; vertices = Bytes.empty; vertex_count = 4 * n;
+  let mesh : Scene_execution.mesh = { key = Gpu_vertices key; vertices = Bytes.empty; vertex_count = 4 * n;
     indices = quad_indices n; index_count = 6 * n; primitive = Triangle_list } in
   let draw = Renderer.prepared_draw ~family:Marks ~blend:Alpha { mesh; state } in
   draw, (fun () -> Scene_execution.Private.unregister_gpu_vertices source;

@@ -17,10 +17,8 @@ let compiled ?(require_arguments=true) body=
   |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
  let value=List.assoc "g"(ok(E.static checked)).results in
  let residual=match value with E.Residual r->r|_->failwith "Expected live region frame"in
- let refused=ref [] and previous= !(I.Packed.Host.trace) in
- let lowered=Fun.protect ~finally:(fun()->I.Packed.Host.trace:=previous)(fun()->
-  I.Packed.Host.trace:=(function Ok _->()|Error ds->refused:=ds @ !refused);
-  I.Core_lower.lower ~strict:true residual)in
+ let refused=ref [] in
+ let lowered=I.Core_lower.lower ~trace:(function Ok _->()|Error ds->refused:=ds @ !refused) ~strict:true residual in
  let program=match lowered with Ok p->p|Error reason->
   failwith("Core argument case "^body^": "^reason^"; "^
    String.concat "; "(List.map Diagnostic.to_string(List.rev !refused)))in

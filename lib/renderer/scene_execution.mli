@@ -6,8 +6,11 @@ val queue : t -> Ogpu.Backend.queue
 (** The owned RGBA8 texture every submission renders into; a shared-device
     renderer's callers may sample it directly between completed submissions. *)
 val target : t -> Ogpu.Backend.texture
+type mesh_key = Host of string | Gpu_vertices of string
+(** [Gpu_vertices name]: a stream borrowed through [register_gpu_vertices ~key:name]. *)
+val mesh_key_string : mesh_key -> string
 type mesh = {
-  key : string;
+  key : mesh_key;
   vertices : bytes;
   vertex_count : int;
   indices : bytes;
@@ -118,8 +121,8 @@ module Private : sig
   val create_gpu_vertices_owner : unit -> gpu_vertices_owner
   val gpu_vertices_owner : t -> gpu_vertices_owner
 
-  (** Borrow a producer-owned 64-byte UI instance stream under a reserved
-      [gpu:vertices:] mesh key. [vertex_count] is four per instance. A source with [extra]
+  (** Borrow a producer-owned 64-byte UI instance stream under a
+      [Gpu_vertices] mesh key. [vertex_count] is four per instance. A source with [extra]
       buffers (a Marks mark set: [buffer] at binding 0, [extra] at 1, 2, ...; exactly five
       for [Marks], none for [Ui]) is not size-checked against the 64-byte layout. The
       producer must close registrations before destroying/reusing buffers;

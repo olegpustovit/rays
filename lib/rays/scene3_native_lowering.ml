@@ -222,7 +222,7 @@ let background_mesh:Renderer.Scene_execution.mesh=
     put 0 x;put 4 y;put 8 0.5;put 20 1.)
     [-1.,-1.;3.,-1.;-1.,3.];
   let indices=Bytes.make 12 '\000' in Bytes.set_int32_le indices 4 1l;Bytes.set_int32_le indices 8 2l;
-  {key="world:background";vertices;vertex_count=3;indices;index_count=3;primitive=Triangle_list}
+  {key=Host "world:background";vertices;vertex_count=3;indices;index_count=3;primitive=Triangle_list}
 let background_attributes=
   let bytes=Bytes.make 36 '\000'in
   for i=0 to 2 do Bytes.set_int32_le bytes(i*12)Int32.minus_one done;
@@ -519,7 +519,7 @@ let prepare ~resources ~camera ~viewport:(x,y,width,height as viewport) scene =
         let texture=match drawing.texture with None->Ok None|Some value->Result.map Option.some(resources.texture value) in
         (match texture with Error error->failure:=Some error
         |Ok texture->
-          let mesh:Renderer.Scene_execution.mesh={key=packed.key;vertices=packed.vertices;vertex_count=packed.vertex_count;indices=packed.indices;index_count=packed.index_count;primitive=packed.primitive} in
+          let mesh:Renderer.Scene_execution.mesh={key=Host packed.key;vertices=packed.vertices;vertex_count=packed.vertex_count;indices=packed.indices;index_count=packed.index_count;primitive=packed.primitive} in
           let family=match packed.primitive,texture with
             |Ogpu.Render_pass.Point_list,None->Renderer.Scene_execution.Scene3_points
             |_,Some _->Scene3_textured|_,None->Scene3 in

@@ -260,7 +260,7 @@ module Executor = struct
     let equal (a, strict_a) (b, strict_b) = a == b && strict_a = strict_b
     let hash (residual, strict) = Hashtbl.hash (E.Residual.residual_id residual, strict)
   end)
-  let direct_region ?(readback = false) ~count_source value =
+  let direct_region ?trace ?(readback = false) ~count_source value =
     let rec find seen residual (term : W.term) =
       if List.exists (fun (seen_residual, seen_term) ->
           seen_residual == residual && seen_term == term) seen then None else
@@ -271,7 +271,7 @@ module Executor = struct
       | Op {op = "exact"; args = ["value", value]} when readback ->
           Option.map (fun (packed, _) -> packed, true) (find seen residual value)
       | Hof ((`Map | `Reduce), _) | Loop _ | Op {op = "array/sum"; _} ->
-          Option.map (fun packed -> packed, false) (Packed.compile ~count_source residual term)
+          Option.map (fun packed -> packed, false) (Packed.compile ?trace ~count_source residual term)
       | _ -> None in
     match value with
     | E.Residual residual -> find [] residual (E.Residual.residual_view residual).term
@@ -280,14 +280,15 @@ module Executor = struct
     candidates : candidate Candidate_key.t; candidates_lock : Mutex.t;
     root_core : (bool * Core_exec.prepared) option Atomic.t;
     packed_region : Packed.t option; packed_root : (Packed.t * bool) option;
+    trace : ((Packed.t, Diagnostic.t list) result -> unit) option;
     count_source : Packed.count_source; profile : Profile.t option; approx:W.Paths.t;
     sink:sink option;mutable gpu_kernel:(Gpu.backend*bool*Packed.t*Gpu.kernel)option }
-  let compile ?profile ?(strict = false) ?(approx=W.Paths.empty) ?sink ?(count_source = fun _ _ -> None) v =
+  let compile ?trace ?profile ?(strict = false) ?(approx=W.Paths.empty) ?sink ?(count_source = fun _ _ -> None) v =
     let rec unsupported_source residual (term : W.term) =
       let children terms = List.find_map (unsupported_source residual) terms in
       match term.node with
       | Hof ((`Map | `Reduce), _) | Loop _ | Op {op = "array/sum"; _} ->
-          (match Packed.compile_result ~count_source residual term with
+          (match Packed.compile_result ?trace ~count_source residual term with
            | Error _ -> Some term.form.span
            | Ok packed -> unsupported_packed_source packed)
       | Ref_binding (name, fields) ->
@@ -332,7 +333,7 @@ module Executor = struct
             && String.starts_with ~prefix:"$elem:" name -> true
         | _ -> false in
       if view.previous || element_capture || E.state_dependent (E.Residual residual) then Ok ()
-      else match Core_lower.lower ~strict:true residual with
+      else match Core_lower.lower ?trace ~strict:true residual with
         | Ok core when Array.find_map unsupported_packed_source core.Core.regions = None -> Ok ()
         | Ok _ -> Error (Diagnostic.error ~span:view.term.form.span ~code:"E_KERNEL_FORM"
             "Numeric node bodies must compile to packed kernels.")
@@ -353,12 +354,12 @@ module Executor = struct
       | (_, value) :: rest -> Result.bind (validate_value value) (fun () -> validate_fields rest) in
     let checked = if strict then validate_value v else Ok () in
     Result.map (fun () ->
-      let packed_region = Option.map fst (direct_region ~count_source v) in
+      let packed_region = Option.map fst (direct_region ?trace ~count_source v) in
       let packed_root = match packed_region with
         | Some packed -> Some (packed, false)
-        | None -> direct_region ~readback:true ~count_source v in
+        | None -> direct_region ?trace ~readback:true ~count_source v in
       {value = v; candidates = Candidate_key.create 32; candidates_lock = Mutex.create ();
-       root_core = Atomic.make None; packed_region; packed_root; count_source; profile; approx;sink;gpu_kernel=None}) checked
+       root_core = Atomic.make None; packed_region; packed_root; trace; count_source; profile; approx;sink;gpu_kernel=None}) checked
   let packed_region p = p.packed_region
   let root_packed p = p.packed_root
   let packed_root p = Option.map fst (root_packed p)
@@ -366,7 +367,7 @@ module Executor = struct
   let fresh_csr_fields p = match p.value with
     | E.Record fields -> List.filter_map (fun (name, value) ->
         if List.mem name ["offsets"; "values"] then
-          Option.bind (direct_region ~readback:true ~count_source:p.count_source value)
+          Option.bind (direct_region ?trace:p.trace ~readback:true ~count_source:p.count_source value)
             (fun (packed, _) -> if Packed.elementwise packed then Some name else None)
         else None) fields
     | _ -> []
@@ -442,20 +443,20 @@ module Executor = struct
               Option.iter (fun count -> incr count) lower_counter;
               let candidate =
                 try
-                  match Core_lower.lower ~strict r with
+                  match Core_lower.lower ?trace:program.trace ~strict r with
                   | Ok core ->
                       (* Placement declines before execution, while state is untouched. *)
                       let declined = not strict && Array.exists (fun (region : Core.Region.t) ->
                         Option.fold ~none:false ~some:(fun count -> Cost.packed ~count <> Cpu_kernel)
                           region.count) core.Core.regions in
                       if declined then
-                        (match Packed.compile_template ~count_source:program.count_source r
+                        (match Packed.compile_template ?trace:program.trace ~count_source:program.count_source r
                             (E.Residual.residual_view r).term with
                          | Some packed -> Packed packed
                          | None -> Reference)
                       else Core (Core_exec.prepare core)
                   | Error _ ->
-                      (match Packed.compile_template ~count_source:program.count_source r
+                      (match Packed.compile_template ?trace:program.trace ~count_source:program.count_source r
                           (E.Residual.residual_view r).term with
                        | Some packed -> Packed packed
                        | None -> Reference)

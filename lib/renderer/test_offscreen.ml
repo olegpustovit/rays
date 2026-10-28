@@ -23,7 +23,7 @@ let scene3_draw key red=
     putf vertices(offset+44)0.;putf vertices(offset+52)0.;
     putf vertices(offset+60)0.)[-1.,1.;1.,1.;-1.,-1.];
   List.iteri(fun index value->Bytes.set_int32_le indices(index*4)value)[0l;1l;2l];
-  let mesh:Scene_execution.mesh={key;vertices;vertex_count=3;indices;index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
+  let mesh:Scene_execution.mesh={key=Host key;vertices;vertex_count=3;indices;index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
   and state:Scene_execution.state={viewport=(0,0,5,4);scissor=(0,0,5,4);
     cull=Ogpu.Render_pass.Cull_none;depth_compare=Ogpu.Render_pass.Always;
     depth_write=false;depth_load=Ogpu.Render_pass.Clear;depth_clear=1.;

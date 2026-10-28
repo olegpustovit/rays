@@ -409,7 +409,7 @@
                        :keep (array/concat st.keep (array/int 1 (if (and filter_noop (equal? name into)) 0 1)))
                        :bad (or st.bad (or bad_into bad_idx))})))
 
-(defnode sop/promote_attributes :label "Promote Attributes" :operation "attribute_promote_pattern" :category ["Attribute" "Promote"]
+(defnode sop/promote_attributes :label "Promote Attributes" :category ["Attribute" "Promote"]
   :validate (pa_valid method_ pattern into_pattern index_pattern)
   :code "E_PARAM" :message "sop/promote_attributes: invalid pattern, rewrite or index request"
   [(in0 : geometry)

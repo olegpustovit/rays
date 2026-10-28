@@ -71,7 +71,7 @@ end
 
 module Executor : sig
   type program
-val compile : ?profile:Profile.t -> ?strict:bool -> ?approx:Flow.Workspace.Paths.t -> ?sink:sink ->
+val compile : ?trace:((Packed.t, Diagnostic.t list) result -> unit) -> ?profile:Profile.t -> ?strict:bool -> ?approx:Flow.Workspace.Paths.t -> ?sink:sink ->
     ?count_source:Packed.count_source -> Flow.Eval.value -> (program, Diagnostic.t) result
   val packed_region : program -> Packed.t option
   (** The root's packed region, when the compiled value is one. *)

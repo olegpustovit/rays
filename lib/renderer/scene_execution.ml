@@ -7,14 +7,13 @@ type gpu_vertices={gpu_owner:gpu_vertices_owner;gpu_key:string;gpu_device:Ogpu.B
 and gpu_vertices_owner={gpu_vertex_registry:(string,gpu_vertices)Hashtbl.t}
 let create_gpu_vertices_owner()={gpu_vertex_registry=Hashtbl.create 16}
 let gpu_vertex_capacity=128
-let gpu_vertex_key key=String.starts_with~prefix:"gpu:vertices:" key
 (* The ids that identify a source's buffers in signatures and fingerprints. *)
 let gpu_identity source=source.gpu_key,Ogpu.Backend.buffer_id source.gpu_buffer,
   List.map Ogpu.Backend.buffer_id(source.gpu_extra@Option.to_list(Option.map fst source.gpu_indirect))
 let gpu_vertices_valid value=value.gpu_active&&value.gpu_domain=Domain.self()&&value.gpu_valid()
 let register_gpu_vertices owner ?(extra=[]) ?indirect ~key ~device ~buffer ~vertex_count ~valid () =
   let operation="Scene_execution.register_gpu_vertices" in
-  if not(gpu_vertex_key key)||vertex_count<=0||vertex_count>4_000_000||
+  if key=""||vertex_count<=0||vertex_count>4_000_000||
     (extra=[]&&Ogpu.Backend.buffer_size buffer<Int64.of_int(vertex_count*16))||
     List.exists(fun b->Ogpu.Backend.buffer_size b<=0L)(buffer::extra)||
     (match indirect with Some(b,offset)->offset<0L||Int64.add offset 20L>Ogpu.Backend.buffer_size b|None->false)||
@@ -28,7 +27,10 @@ let register_gpu_vertices owner ?(extra=[]) ?indirect ~key ~device ~buffer ~vert
 let unregister_gpu_vertices value=
   if value.gpu_domain<>Domain.self()then invalid_arg"GPU vertices closed on another domain";
   if value.gpu_active then(value.gpu_active<-false;Hashtbl.remove value.gpu_owner.gpu_vertex_registry value.gpu_key)
-type mesh={key:string;vertices:bytes;vertex_count:int;indices:bytes;index_count:int;primitive:Ogpu.Render_pass.primitive}
+(* A borrowed GPU vertex stream is named apart from every host-owned mesh. *)
+type mesh_key=Host of string|Gpu_vertices of string
+let mesh_key_string=function Host k->k|Gpu_vertices k->"gpu:vertices:"^k
+type mesh={key:mesh_key;vertices:bytes;vertex_count:int;indices:bytes;index_count:int;primitive:Ogpu.Render_pass.primitive}
 type state={viewport:int*int*int*int;scissor:int*int*int*int;cull:Ogpu.Render_pass.cull;depth_compare:Ogpu.Render_pass.comparison;depth_write:bool;depth_load:Ogpu.Render_pass.load;depth_clear:float;transform_uniforms:bytes option}
 type geometry_draw={mesh:mesh;state:state}
 type pipeline_family=Scene2|Scene2_textured|Scene3|Scene3_points|Scene3_textured|Scene3_world|Ui|Marks
@@ -183,8 +185,8 @@ let target value=value.target
 let error op kind text=Error(Ogpu.Error.make op kind text)
 let resolve_gpu_vertices value (entry:sampled_draw)=
   let mesh=entry.draw.mesh in
-  if not(gpu_vertex_key mesh.key)then Ok None else
-  match Hashtbl.find_opt value.gpu_vertices.gpu_vertex_registry mesh.key with
+  match mesh.key with Host _->Ok None|Gpu_vertices name->
+  match Hashtbl.find_opt value.gpu_vertices.gpu_vertex_registry name with
   |Some source when gpu_vertices_valid source->
       if source.gpu_device!=value.device then
         error"Renderer.submit"Ogpu.Error.Cross_device"GPU vertices belong to another device"
@@ -222,7 +224,7 @@ let prepare_scene3 ~clear ~clear_depth entries =
     |_->false in
   let valid_entry (entry:scene3_entry)=
     entry.samples>0&&List.mem entry.samples[1;4;9;16]&&valid_family entry&&
-    entry.draw.mesh.key<>""&&entry.draw.mesh.vertex_count>=0&&
+    mesh_key_string entry.draw.mesh.key<>""&&entry.draw.mesh.vertex_count>=0&&
     entry.draw.mesh.index_count>=0&&
     ((entry.draw.mesh.primitive=Ogpu.Render_pass.Point_list)
       =(entry.family=Scene3_points))&&
@@ -312,7 +314,7 @@ let prepare value ~reserved ~uniforms ?(vertex_stable=false) ~nonindexed ~canoni
         if not(Float.is_finite(Int64.float_of_bits(Bytes.get_int64_le bytes(index*8))))then valid:=false
       done;!valid
     else (Bytes.length bytes=24||Bytes.length bytes=208||Bytes.length bytes=5456)&&let valid=ref true in for index=0 to Bytes.length bytes/4-1 do if not(Float.is_finite(Int32.float_of_bits(Bytes.get_int32_le bytes(index*4))))then valid:=false done;let lights=if Bytes.length bytes=5456 then Int32.float_of_bits(Bytes.get_int32_le bytes(73*4))else 0. in !valid&&lights>=0.&&lights<=64.&&Float.is_integer lights)uniforms in
-  let key=mesh.key^(if canonical_plain then ":canonical-scene2" else if nonindexed then ":nonindexed" else "")in
+  let key=mesh_key_string mesh.key^(if canonical_plain then ":canonical-scene2" else if nonindexed then ":nonindexed" else "")in
   let upload existing=
   let vertex_stride=if mesh.vertex_count=0 then 0 else Bytes.length mesh.vertices/mesh.vertex_count in
   let index_at index=Int32.to_int(Bytes.get_int32_le mesh.indices(index*4))in
@@ -348,7 +350,7 @@ let prepare value ~reserved ~uniforms ?(vertex_stable=false) ~nonindexed ~canoni
       expanded,Bytes.empty,mesh.index_count,0
     else let expanded=Bytes.create(mesh.index_count*vertex_stride)in for index=0 to mesh.index_count-1 do let source=index_at index in Bytes.blit mesh.vertices(source*vertex_stride)expanded(index*vertex_stride)vertex_stride done;expanded,Bytes.empty,mesh.index_count,0 in
   let total=Bytes.length vertices+Bytes.length indices+Bytes.length uniform_bytes in
-  if mesh.key=""||vertex_count<=0||(not nonindexed&&index_count<=0)||total=0||not valid_uniforms then error"Scene_execution.prepare"Ogpu.Error.Invalid_argument"mesh payload or transform uniforms are malformed"else
+  if mesh_key_string mesh.key=""||vertex_count<=0||(not nonindexed&&index_count<=0)||total=0||not valid_uniforms then error"Scene_execution.prepare"Ogpu.Error.Invalid_argument"mesh payload or transform uniforms are malformed"else
   let payload_hash=if vertex_stable then "" else content_hash mesh uniform_bytes in
   let uniform_offset=if uniforms=None then None else Some(Int64.of_int(Bytes.length vertices+Bytes.length indices))in
   let uniform_copy=if Bytes.length uniform_bytes=0 then Bytes.empty else Bytes.copy uniform_bytes in
@@ -368,7 +370,7 @@ let prepare value ~reserved ~uniforms ?(vertex_stable=false) ~nonindexed ~canoni
   match reusable with
   |Some item->rewrite item
   |None->
-  let descriptor:Ogpu.Types.buffer_descriptor={label=Some("scene-mesh-"^mesh.key);size=Int64.of_int total;usage=[Vertex;Index;Storage;Copy_dst]}in
+  let descriptor:Ogpu.Types.buffer_descriptor={label=Some("scene-mesh-"^mesh_key_string mesh.key);size=Int64.of_int total;usage=[Vertex;Index;Storage;Copy_dst]}in
   match Ogpu.Backend.create_buffer value.device descriptor with Error _ as e->e|Ok buffer->
     let offset=Int64.of_int(Bytes.length vertices)in
     (* Indices and uniforms are written apart: joining them first copied every index. *)
@@ -650,7 +652,7 @@ let u32_le bytes offset =
           (Int32.shift_left (Int32.of_int (Char.code (Bytes.get bytes (offset + 2)))) 16)
           (Int32.shift_left (Int32.of_int (Char.code (Bytes.get bytes (offset + 3)))) 24)))
 let mesh_identity (mesh : mesh) =
-  mesh.key ^ ":" ^ (match mesh.primitive with Point_list->"P"|Line_list->"L"|Triangle_list->"T"|Triangle_strip->"S") ^ ":" ^ Digest.to_hex (Digest.bytes mesh.vertices) ^ ":" ^
+  mesh_key_string mesh.key ^ ":" ^ (match mesh.primitive with Point_list->"P"|Line_list->"L"|Triangle_list->"T"|Triangle_strip->"S") ^ ":" ^ Digest.to_hex (Digest.bytes mesh.vertices) ^ ":" ^
   Digest.to_hex (Digest.bytes mesh.indices)
 let combine_meshes meshes =
   let operation = "Scene_execution.combine_meshes" in
@@ -696,7 +698,7 @@ let combine_meshes meshes =
       in
       copy 0 0 0 meshes;
       let identity = Digest.to_hex (Digest.string (String.concat "|" identities)) in
-      Ok { key = "batch:" ^ identity; vertices; vertex_count; indices; index_count;
+      Ok { key = Host ("batch:" ^ identity); vertices; vertex_count; indices; index_count;
         primitive=(List.hd meshes).primitive }
 let same_optional_resource a b =
   match a, b with None, None -> true | Some a, Some b -> a == b | _ -> false
@@ -705,7 +707,7 @@ let coalesce_draws draws =
     if mesh.vertex_count = 0 then 0 else Bytes.length mesh.vertices / mesh.vertex_count
   in
   let compatible (first:sampled_draw) (next:sampled_draw) =
-    not(gpu_vertex_key first.draw.mesh.key)&&not(gpu_vertex_key next.draw.mesh.key)&&
+    (match first.draw.mesh.key,next.draw.mesh.key with Host _,Host _->true|_->false)&&
     first.family=next.family&&first.blend=next.blend&&
     first.samples=next.samples&&first.draw.state=next.draw.state&&
     first.draw.mesh.primitive=next.draw.mesh.primitive&&
@@ -1381,7 +1383,7 @@ let submit ?prepared ?(after_prepare=Fun.id) ?(clear=(0.,0.,0.,0.)) value draws=
      skip it instead of failing the whole frame. *)
   let draws=List.filter(fun(entry:sampled_draw)->
     entry.draw.mesh.vertex_count>0&&entry.draw.mesh.index_count>0)draws in
-  let valid_mesh(mesh:mesh)=mesh.key<>""&&mesh.vertex_count>0&&mesh.index_count>0&&valid_index_length mesh&&Bytes.length mesh.vertices+Bytes.length mesh.indices>0 in
+  let valid_mesh(mesh:mesh)=mesh_key_string mesh.key<>""&&mesh.vertex_count>0&&mesh.index_count>0&&valid_index_length mesh&&Bytes.length mesh.vertices+Bytes.length mesh.indices>0 in
   let supported=List.for_all(fun(entry:sampled_draw)->
     Option.is_some(find_pipeline value entry.family entry.blend entry.samples))draws in
   let valid=List.for_all(fun(entry:sampled_draw)->List.mem entry.samples[1;4;9;16]&&
@@ -1441,7 +1443,7 @@ let submit ?prepared ?(after_prepare=Fun.id) ?(clear=(0.,0.,0.,0.)) value draws=
     |Error _ as result->result
     |Ok gpu_vertices->
     let cpu_mesh=match gpu_vertices with None->draw.mesh|Some _->
-      {draw.mesh with key="gpu:indices:"^string_of_int draw.mesh.vertex_count}in
+      {draw.mesh with key=Host("gpu:indices:"^string_of_int draw.mesh.vertex_count)}in
     match prepare value~reserved:(scratch_mem_mesh scratch)
       ~uniforms:(if scene2||affine||scene3_transform then None
         else draw.state.transform_uniforms)

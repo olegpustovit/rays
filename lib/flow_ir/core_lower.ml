@@ -281,6 +281,7 @@ let color_operation ~primitive ~field ~branch ~emit ~ensure statements cache sou
 (* [draw] writes the program's statements in place of lowering one residual; only a residual
    reached through [value] forces [root], which then stands for the whole evaluation. *)
 module Lowerer (P : sig
+  val trace : (((Packed.t, Diagnostic.t list) result) -> unit) option
   val budget : int option val strict : bool val region_allowed : C.Region.t -> bool
   val draw : (draw_context -> unit) option val root : E.residual Lazy.t
 end) = struct
@@ -526,7 +527,7 @@ end) = struct
       try
         let bindings=List.filter_map(fun name -> Option.map(fun v->name,capture v)(Names.find_opt name env)) names in
         let r=E.Residual.with_bindings parent ~term:x bindings in
-        Option.bind (Packed.compile r x) (fun p->
+        Option.bind (Packed.compile ?trace r x) (fun p->
           let region=p in
           if region_allowed region then Some(r,region,!arguments) else None)
       with Unsupported _ -> None) in
@@ -797,7 +798,7 @@ end) = struct
       | _ -> None in
     match sources with
     | Some sources when packed view.term.ty || List.exists (fun (s : W.term) -> packed s.ty) sources ->
-        (try Option.bind (Packed.compile r view.term) (fun packed ->
+        (try Option.bind (Packed.compile ?trace r view.term) (fun packed ->
            let region=packed in if region_allowed region then Some region else None) with
          | Diagnostic.Error _ | Invalid_argument _ | Not_found | Failure _ -> None)
     | _ -> None
@@ -1535,9 +1536,9 @@ end) = struct
     | Diagnostic.Error _ | Not_found | Invalid_argument _ | Failure _ -> Error "constant"
 end
 
-let lower_with ?budget ~strict ~region_allowed ~draw root =
-  let module L = Lowerer (struct let budget = budget let strict = strict let region_allowed = region_allowed let draw = draw let root = root end) in
+let lower_with ?trace ?budget ~strict ~region_allowed ~draw root =
+  let module L = Lowerer (struct let trace = trace let budget = budget let strict = strict let region_allowed = region_allowed let draw = draw let root = root end) in
   L.result
 
-let lower ?(strict=false) ?budget root = lower_with ?budget ~strict ~region_allowed:(fun _ -> true) ~draw:None (Lazy.from_val root)
+let lower ?trace ?(strict=false) ?budget root = lower_with ?trace ?budget ~strict ~region_allowed:(fun _ -> true) ~draw:None (Lazy.from_val root)
 let lower_draw ?(region_allowed=fun _ -> true) ~root build = lower_with ~strict:false ~region_allowed ~draw:(Some build) root

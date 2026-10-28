@@ -31,7 +31,7 @@ let draws extent =
       Bytes.set_int32_le vertices (offset + 8) 0x4080BFFFl)
     [ (-1., 1.); (1., 1.); (-1., -1.) ];
   [ { Scene_execution.mesh =
-        { key = "autorelease"; vertices; vertex_count = 3; indices; index_count = 3;
+        { key = Host "autorelease"; vertices; vertex_count = 3; indices; index_count = 3;
           primitive = Ogpu.Render_pass.Triangle_list };
       state =
         { viewport = (0, 0, extent, extent); scissor = (0, 0, extent, extent);

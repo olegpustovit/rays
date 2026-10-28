@@ -33,7 +33,7 @@ let reference (l : L.t) node =
     id :: List.filter ((<>) id) (Flow_sop.Attribute_kernel.sources values) | _ -> assert false in
   Flow_sop.Attribute_kernel.node ~reference:true ~source:"reference"
     ~name:"P" ~values ~sources (Sop.Node.inputs node)
-let stages program = Option.fold ~none:0 ~some:Flow_ir.Packed.stage_count
+let stages program = Option.fold ~none:0 ~some:(fun (r : Flow_ir.Core.Region.t) -> List.length r.stages)
   (Flow_ir.Executor.packed_root program)
 
 let () =

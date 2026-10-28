@@ -462,7 +462,7 @@ let () =
   print_endline "Group promotion output count origins and optional-target graph set/disconnect gestures preserve source owner"
 
 let () =
-  let stages program=Option.fold ~none:0 ~some:Flow_ir.Packed.stage_count
+  let stages program=Option.fold ~none:0 ~some:(fun (r : Flow_ir.Core.Region.t) -> List.length r.stages)
     (Flow_ir.Executor.packed_root program)in
   let geometry=promotion_fixture 7 and catalog=Flow.Catalog.{version=1;kinds=[]} in
   let forms=Flow.Syntax.parse {|(workspace origins (graph g :context value

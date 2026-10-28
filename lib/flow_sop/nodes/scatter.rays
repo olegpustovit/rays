@@ -612,7 +612,7 @@
          ]
     b5))
 
-(defnode sop/scatter :label "Scatter" :operation "scatter" :version 2 :category ["Create" "Points"]
+(defnode sop/scatter :label "Scatter" :version 2 :category ["Create" "Points"]
   :validate (and (and (and (int/le count (array/max_length :type int))
                            (or (not use_density)
                                (and (not (text/blank? (text/trim density_attribute))) (not (equal? density_attribute "P")))))

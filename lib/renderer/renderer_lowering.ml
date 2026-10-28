@@ -35,7 +35,7 @@ let mesh_of_geometry number transform ~viewport clip (geometry:Command.geometry)
   let indices=Bytes.create(Array.length geometry.indices*4) in
   Array.iteri(fun index value->Bytes.set_int32_le indices(index*4)(Int32.of_int value))geometry.indices;
   let vx,vy,vw,vh=viewport and sx,sy,sw,sh=clip in
-  {Scene_execution.family=Scene2;blend=Alpha;texture=None;auxiliary=None;vertex_attributes=None;samples=1; draw={Scene_execution.mesh={key=Printf.sprintf "ir-%Ld-%d" 0L number;
+  {Scene_execution.family=Scene2;blend=Alpha;texture=None;auxiliary=None;vertex_attributes=None;samples=1; draw={Scene_execution.mesh={key=Host(Printf.sprintf "ir-%Ld-%d" 0L number);
       vertices;vertex_count=count;indices;index_count=Array.length geometry.indices;primitive=Triangle_list};
       state={(default_state (vx,vy,vw,vh) (sx,sy,sw,sh))with
         transform_uniforms=(if identity_transform transform then None else Some(affine_uniforms transform))}} }
@@ -68,7 +68,7 @@ let mesh_of_geometry_run number transform ~viewport clip commands first stop =
     |_->assert false
   done;
   {Scene_execution.family=Scene2;blend=Alpha;texture=None;auxiliary=None;vertex_attributes=None;samples=1;
-   draw={Scene_execution.mesh={key=Printf.sprintf "ir-run-%d" number;
+   draw={Scene_execution.mesh={key=Host(Printf.sprintf "ir-run-%d" number);
      vertices;vertex_count= !vertex_count;indices;index_count= !index_count;primitive=Triangle_list};
      state={(default_state viewport clip) with
        transform_uniforms=(if identity_transform transform then None
@@ -208,7 +208,7 @@ let lower_scene2 state ~(facts:Runtime.presentation_facts) ~density ~snapshot ~r
       {payload_mesh_key=mesh_key;payload_vertices=vertices;payload_indices=indices};
     vertices,indices,mesh_key in
     let draw={Scene_execution.family=Scene2_textured;blend=Alpha;texture=Some texture;auxiliary=None;vertex_attributes=None;samples=1;
-      draw={Scene_execution.mesh={key=mesh_key;vertices;vertex_count=4;indices;index_count=6;primitive=Triangle_list};state=default_state framebuffer clip}}in
+      draw={Scene_execution.mesh={key=Host mesh_key;vertices;vertex_count=4;indices;index_count=6;primitive=Triangle_list};state=default_state framebuffer clip}}in
     if sampled_texture_bytes texture<=snapshot_cache_entry_byte_capacity then
       Quad_table.add state.quad_cache quad_key draw;
     draw in
@@ -259,7 +259,7 @@ let lower_scene2 state ~(facts:Runtime.presentation_facts) ~density ~snapshot ~r
           let family=if gpu_key=None then Ui else Marks in
           emit {family;blend= !blend;texture=(if family=Marks then None else Some ui_white_texture);
             auxiliary=None;vertex_attributes=None;samples=1;
-            draw={Scene_execution.mesh={key=(match gpu_key with Some key->key|None->"shapes:"^string_of_int slot_key);
+            draw={Scene_execution.mesh={key=(match gpu_key with Some key->Gpu_vertices key|None->Host("shapes:"^string_of_int slot_key));
               vertices=(match gpu_key with None->slot.ui_vertices|Some _->Bytes.empty);
               vertex_count=4*count;indices=slot.ui_indices;
               index_count=6*count;primitive=Triangle_list};

@@ -45,7 +45,7 @@ let create_gpu_owner()={scene_vertices=Scene_execution.Private.create_gpu_vertic
 let valid_gpu_marks value=not value.marks_closed&&not value.marks_gpu.gpu_released&&
   value.marks_domain=Domain.self()&&List.for_all(fun(source,input)->
     match source()with Some current->current==input|None->false)value.marks_device
-let gpu_marks_key value=Printf.sprintf"gpu:vertices:marks:%d:%Ld"value.marks_id value.marks_stamp
+let gpu_marks_key value=Printf.sprintf"marks:%d:%Ld"value.marks_id value.marks_stamp
 let unregister_marks value=
   Option.iter Scene_execution.Private.unregister_gpu_vertices value.marks_registration;
   value.marks_registration<-None
@@ -665,7 +665,7 @@ let lower_ui submission ~density ~resource ui=
                 (int_of_float(Float.ceil(clip.y+.clip.height)))in
             x,y,max 0(right-x),max 0(bottom-y)in
       {Scene_execution.family=Ui;blend=Alpha;texture=Some texture;auxiliary=None;vertex_attributes=None;samples=1;
-       draw={Scene_execution.mesh={key="ui:"^string_of_int slot_key;
+       draw={Scene_execution.mesh={key=Host("ui:"^string_of_int slot_key);
          vertices=slot.ui_vertices;vertex_count=4*batch.count;
          indices=slot.ui_indices;index_count=6*batch.count;
          primitive=Ogpu.Render_pass.Triangle_list};

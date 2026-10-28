@@ -3,7 +3,7 @@
     ordered record fields, text/display/equality, bounded lists, higher-order
     forms and structured product/accumulator loops.
     Unsupported forms/operators are named; no opaque operation survives. *)
-val lower : ?strict:bool -> ?budget:int -> Flow.Eval.residual -> (Core.program, string) result
+val lower : ?trace:((Packed.t, Diagnostic.t list) result -> unit) -> ?strict:bool -> ?budget:int -> Flow.Eval.residual -> (Core.program, string) result
 (* [budget] is the lowered-term limit (default 2048; cook-time interpreted geometry folds raise it).
    [strict] requires every packed numeric subterm to qualify as a region;
    structured scalar control and bounded list work remain compiled core. *)

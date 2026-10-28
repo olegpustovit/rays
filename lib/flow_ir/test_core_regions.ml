@@ -170,7 +170,7 @@ let () =
   let fused=List.filter(fun(name,_)->String.starts_with ~prefix:"iterate-fused-" name)
     (Test_program.carried_fixtures 65)in
   List.iter(fun(name,program)->
-    if I.Packed.stage_count program<>2 then failwith(name^": expected two fused stages");
+    if List.length program.I.Core.Region.stages<>2 then failwith(name^": expected two fused stages");
     List.iter(fun time->
       let live=Input.at_time time in
       let expected=I.Packed.reference program ~live in
@@ -188,7 +188,7 @@ let () =
   let text=Test_program.compile
     "(map (fn [s] (if (> t 0.) s \"other\"))
       (map (fn [x] (iterate 2 \"old\" (fn [s] (if (> x t) \"next\" s)))) (array/range 7)))"in
-  assert(I.Packed.stage_count text=2);
+  assert(List.length text.I.Core.Region.stages=2);
   let independent=Test_program.compile
     "(map (fn [x] [(fold [a t] [i (range 2)] (+ a x))
                    (fold [a t] [i (range 2)] (+ a x))]) (array/range 7))"in
@@ -198,7 +198,7 @@ let () =
   let reduction=Test_program.compile
     "(fold [total 1.] [x (map (fn [x] (iterate 3 (+ x t) (fn [a] (+ a 1.))))
       (array/range 7))] (+ (* total 0.5) x))"in
-  assert(I.Packed.stage_count reduction=2);
+  assert(List.length reduction.I.Core.Region.stages=2);
   List.iter(fun program->List.iter(fun time->
     let live=Input.at_time time in
     assert(same_result(I.Packed.force ~strict:true program ~live)(I.Packed.reference program ~live)))
@@ -212,7 +212,7 @@ let () =
     "(map (fn [x y] (+ x y))
       (map (fn [x] (iterate 1 t (fn [a] (if (> x 1.)
         (error \"E_TAIL\" \"producer tail\") a)))) (array/range 3)) (array/float 1))"in
-  assert(I.Packed.stage_count shortened=1);
+  assert(List.length shortened.I.Core.Region.stages=1);
   assert(same_result(I.Packed.force ~strict:true shortened ~live)(I.Packed.reference shortened ~live));
   print_endline "Loop fusion: producer/consumer scopes, guards, integer/text aliases and sibling outputs agree"
 
