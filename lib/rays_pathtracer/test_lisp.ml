@@ -2,15 +2,14 @@
    one material with round corners, a rect light, no lens) lit by the sky/ground environment with a dome panel
    or by a baked World (camera and lighting maps, CDF, sun, a World rect light). Both accumulate the same frames
    with the same PCG draws; the RGBA8 films are compared as RMSE of (byte difference / 255). Then the trace
-   kernel's static shape and register pressure. PT_BENCH=1 prints each frame's GPU time; PT_INSTANCED=1 traces
-   the plane as a one-object scene_mesh (an instance structure), as the editor does. *)
+   kernel's static shape and register pressure. PT_BENCH=1 prints each frame's GPU time. The dome scene also
+   runs as a one-object scene_mesh (an instance structure), as the editor traces it. *)
 module P = Rays_pathtracer
 module W = Rays.World
 let get = function Ok v -> v | Error m -> failwith m
 let env name default = match Sys.getenv_opt name with Some v -> int_of_string v | None -> default
 let width = env "PT_W" 16 and height = env "PT_H" 12 and frames = env "PT_FRAMES" 4
 let bench = Sys.getenv_opt "PT_BENCH" <> None
-let instanced = Sys.getenv_opt "PT_INSTANCED" <> None
 let color r g b = Rays_math.Color.Linear.rgb r g b
 let has fragment line = let n = String.length fragment in
   let rec at i = i + n <= String.length line && (String.sub line i n = fragment || at (i + 1)) in at 0
@@ -60,7 +59,7 @@ let () =
     done;
     !best)
 
-let scenario label world =
+let scenario ?(instanced = false) label world =
   let scene = { P.objects = [ (mesh, material) ]; spheres = []; strands = []; environment; lights = [ light ] } in
   let t = get (P.create ~spp:2 ~bounces:4 ~profile:bench ~width ~height scene) in
   get (P.set_world t world);
@@ -99,14 +98,17 @@ let scenario label world =
   let source = String.split_on_char '\n' source in
   assert (List.length (List.filter (has "atomic_fetch_or_explicit(") source) = 1);
   let rec loops = function [] -> [] | line :: rest -> if has "for(r" line then line :: rest else loops rest in
-  assert (instanced || List.for_all (fun line -> not (has "ulong(" line) || has "bool over" line) (loops source));
+  assert (List.for_all (fun line -> not (has "ulong(" line) || has "bool over" line) (loops source));
   assert (List.length source <= 2 * handwritten_lines);
   Printf.printf "pathtrace.rays %s: trace kernel %d lines, maxTotalThreadsPerThreadgroup %d (pathtrace.metal 384)\n%!"
     label (List.length source) threads;
-  assert (instanced || threads >= 448);  (* the recorded flat limit (bound materials and bands); a drop is a regression *)
+  (* the recorded limits (bound materials and bands): 448 flat, 384 instanced; a drop is a regression *)
+  assert (threads >= if instanced then 384 else 448);
   P.destroy t
 
 let () =
+  (* the tracer types its declarations only at their call sites: here they are checked whole *)
+  get (P.Private.check_library ());
   let only = Sys.getenv_opt "PT_SCENE" in
-  if only <> Some "world" then scenario "dome" None;
+  if only <> Some "world" then (scenario "dome" None; scenario ~instanced:true "dome, instanced" None);
   if only <> Some "dome" then scenario "world" (Some (Lazy.force baked))

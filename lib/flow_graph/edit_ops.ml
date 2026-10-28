@@ -634,7 +634,7 @@ let check ?ops ?library ?checker catalog forms =
   match S.parse text with
   | Error d -> Error d
   | Ok forms ->
-      (match (Option.value checker ~default:(W.check ?ops ?library)) catalog forms with
+      (match (Option.value checker ~default:(fun catalog forms -> W.check ?ops ?library catalog forms)) catalog forms with
        | Some ws, _ -> Ok (forms, ws)
        | None, ds ->
            Error (match List.find_opt (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds with
@@ -666,7 +666,7 @@ let apply_checked ?ops ?library ?checker catalog src op =
         | W.Fn {body; _} -> [body]
         | _ -> W.children term in
       List.find_map find children in
-    match (Option.value checker ~default:(W.check ?ops ?library)) catalog src with
+    match (Option.value checker ~default:(fun catalog forms -> W.check ?ops ?library catalog forms)) catalog src with
     | Some ws, _ -> Option.bind (List.find_map (fun (g : W.graph) -> find g.body) (ws.graphs @ ws.defs))
         branch_default
     | _ -> None) in

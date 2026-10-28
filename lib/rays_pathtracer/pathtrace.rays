@@ -170,7 +170,8 @@
              ; the triangles' ids); an instance's triangles start at its table row's first triangle
              sphere (int/lt hit.prim 0) strand (int/eq hit.instance -2) analytic (or sphere strand)
              row (int/mul (max hit.instance 0) u.inst-rows) ib (array/nth inst row)
-             tri (max (if u.instanced (int/add hit.prim (int ib.x)) hit.prim) 0)
+             ; an analytic hit reads triangle 0 (unused): a select, not a max, so the index math stays 32-bit
+             tri (if analytic 0 (if u.instanced (int/add hit.prim (int ib.x)) hit.prim))
              mid (if sphere (int/sub (int/sub u.sphere-base 2) hit.prim)
                    (if strand (array/nth ids (int/add u.strand-base hit.prim))
                      (if (and u.instanced (>= ib.y 0.)) (int ib.y) (array/nth ids tri))))

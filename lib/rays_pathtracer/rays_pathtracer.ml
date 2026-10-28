@@ -1008,4 +1008,5 @@ module Private = struct
     let* threads = Lisp_kernel.max_total_threads kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
     let* source = Lisp_kernel.source kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
     Ok (threads, source)
+  let check_library = Lisp_kernel.check_library
 end
