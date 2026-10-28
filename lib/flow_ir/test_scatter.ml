@@ -70,14 +70,12 @@ let () =
   List.iter
     (fun count ->
       let indices = Array.init count (fun i -> i mod size) in
+      let table =
+        [| 1e16; 1.; -1e16; -0.; 0.; Int64.float_of_bits 1L; -.Int64.float_of_bits 1L |]
+      in
       List.iter
         (fun width ->
-          let data =
-            Array.init (count * width) (fun i ->
-                [| 1e16; 1.; -1e16; -0.; 0.; Int64.float_of_bits 1L; -.Int64.float_of_bits 1L |].(i
-                                                                                                  mod 
-                                                                                                  7))
-          in
+          let data = Array.init (count * width) (fun i -> table.(i mod 7)) in
           let wrap =
             match width with
             | 1 -> fun a -> E.Float_array a

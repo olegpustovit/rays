@@ -4250,13 +4250,11 @@ module Command_buffer = struct
     let label = None in
     create_owned ~finalize:true queue ?label ()
 
-  module Private = struct
-    (* Scoped callers must arrange [destroy] on every exit.  In particular a
+  (* Scoped callers must arrange [destroy] on every exit.  In particular a
        submitted buffer must first be brought to a terminal state with
        [wait_until_completed].  Omitting the finalizer prevents a blocking
        synchronous submission from depending on a later major collection. *)
-  
-  end
+  module Private = struct end
 
   let device (value : t) = value.queue.device
   let destroyed (value : t) = is_destroyed value.lifetime

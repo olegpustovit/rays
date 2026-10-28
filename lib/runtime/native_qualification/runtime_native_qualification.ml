@@ -150,7 +150,8 @@ let run scenario =
   in
   let live_stats = get (Renderer.stats runtime) in
   get (Renderer.destroy runtime);
-  if Result.is_ok (Renderer.stats runtime) then failwith "native qualification: a destroyed renderer still reports stats";
+  if Result.is_ok (Renderer.stats runtime) then
+    failwith "native qualification: a destroyed renderer still reports stats";
   let handles_after_destroy = live_handles () in
   let expected extent =
     match frozen_software_hash scenario ~extent with
