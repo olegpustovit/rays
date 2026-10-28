@@ -641,7 +641,7 @@
                                     (and (and (text/blank? (text/trim source_vertex_numbers_attribute))
                                               (text/blank? (text/trim point_pattern)))
                                          (and (and (text/blank? (text/trim vertex_pattern)) (text/blank? (text/trim primitive_pattern)))
-                                              (text/blank? (text/trim detail_pattern))))))))) 
+                                              (text/blank? (text/trim detail_pattern)))))))))
   :code "E_PARAM" :message "sop/scatter: invalid parameters"
   [(in0 : geometry)
    (count : int 100 :label "Count" :min 1 :max 100000 :hard_min 0)
