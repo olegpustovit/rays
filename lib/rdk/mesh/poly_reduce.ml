@@ -457,7 +457,7 @@ let run ?cancel ?(grain = 16_384) ?(target = Reduce_ratio 0.5)
             let name = unique_edge_name "__rdk_poly_reduce_hard_edges" geometry in
             Geometry.with_edge_group (Edge_group.with_name name group) geometry
               |> Support.get_ok, Some name in
-      Result.bind (Error.unguard (Triangulate.run ?cancel ~grain geometry))
+      Result.bind (Ok (Error.get (Triangulate.run ?cancel ~grain geometry)))
         (fun triangulated ->
         let working_count = Geometry.primitive_count triangulated in
         let working_index = Topology_index.create ?cancel

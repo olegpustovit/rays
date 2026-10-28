@@ -11,14 +11,17 @@ let make ?(hints = []) ~operation ~code message =
   { operation; code; message; hints }
 
 let of_string ~operation ~code message = make ~operation ~code message
+exception Fail of string
+let fail message = raise (Fail message)
 let guard ~operation ~code work =
   try Result.map_error (of_string ~operation ~code) (work ()) with
+  | Fail message -> Error (make ~operation ~code message)
   | Cancel.Cancelled -> Error (make ~operation ~code:"cancelled"
       "geometry operation was cancelled")
-let unguard = function
-  | Ok value -> Ok value
+let get = function
+  | Ok value -> value
   | Error value when value.code = "cancelled" -> raise Cancel.Cancelled
-  | Error value -> Error value.message
+  | Error value -> raise (Fail value.message)
 let operation value = value.operation
 let code value = value.code
 let message value = value.message
