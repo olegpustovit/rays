@@ -1,8 +1,7 @@
+open Rdk_test_support
 open Rays
 open Rdk
 
-let fail message = prerr_endline message; exit 1
-let check condition message = if not condition then fail message
 let get = function Ok value -> value | Error error -> fail (Error.to_string error)
 
 let attribute owner name storage =
