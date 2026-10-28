@@ -976,14 +976,9 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
           let byte_count = (target_edge_count + 7) / 8 in
           let bits = Bytes.make byte_count '\000' in
           let bytes_per_range = max 1 (grain / 8) in
-          let range_count = if byte_count = 0 then 0
-            else ((byte_count - 1) / bytes_per_range) + 1 in
-          if range_count > 0 then
-            Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-              (fun range ->
+          Support.run_indexed_ranges ~grain:bytes_per_range byte_count (fun ~range:range ~first:first ~last:last ->
                 Cancel.check_opt cancel;
-                let first = range * bytes_per_range
-                and last = min byte_count ((range + 1) * bytes_per_range) in
+                
                 for byte = first to last - 1 do
                   let base = byte * 8 and value = ref 0 in
                   for bit = 0 to min 7 (target_edge_count - base - 1) do

@@ -40,7 +40,6 @@ let event_pass ?cancel ~grain ~self ~tolerance ~include_coplanar source_index
         source_index collision_index in
   let candidate_count = Array.length source_pieces in
   let chunk = max 1 grain and counts = Array.make candidate_count 0 in
-  let range_count = Support.ceiling_div candidate_count chunk in
   let source_positions = Linear_piece_index.View.positions source_index
   and collision_positions = Linear_piece_index.View.positions collision_index in
   let narrow scratch point_info events source_piece collision_piece =
@@ -93,14 +92,12 @@ let event_pass ?cancel ~grain ~self ~tolerance ~include_coplanar source_index
           ~triangle_b:(Linear_piece_index.View.point source_index source_piece 1)
           ~triangle_c:(Linear_piece_index.View.point source_index source_piece 2) in
   let visit_ranges write =
-    if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-        ~finish:(range_count - 1) (fun range ->
+    Support.run_indexed_ranges ~grain:chunk candidate_count (fun ~range:range ~first:first ~last:last ->
       let scratch = Array.make 26 0. and point_info = Array.make 10 0
       and events = Array.make
           (Triangle_intersection.max_events * Triangle_intersection.event_stride)
           0. in
-      let first = range * chunk
-      and last = min candidate_count ((range + 1) * chunk) in
+      
       for candidate = first to last - 1 do
         Cancel.poll cancel candidate 4095;
         let count = narrow scratch point_info events source_pieces.(candidate)

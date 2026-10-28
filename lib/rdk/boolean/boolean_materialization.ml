@@ -348,11 +348,9 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
       let candidate_count = Array.length first_candidates in
       let ranges = (candidate_count + grain - 1) / grain in
       let failures = Array.make ranges (-1) and failure_kinds = Bytes.make ranges '\000' in
-      if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-          ~finish:(ranges - 1) (fun range ->
+      Support.run_indexed_ranges ~grain:grain candidate_count (fun ~range:range ~first:first ~last:last ->
         let scratch = Array.make 4 0 in
-        let first = range * grain
-        and last = min candidate_count ((range + 1) * grain) in
+        
         let candidate = ref first in
         while failures.(range) < 0 && !candidate < last do
           Cancel.poll cancel !candidate 4095;
@@ -461,10 +459,7 @@ let verify_extracted_orientations ?cancel ~grain ancestry geometry =
     let source = Boolean_constraints.View.source constraints in
     let ranges = (primitives + grain - 1) / grain in
     let failures = Array.make ranges (-1) in
-    if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-        ~finish:(ranges - 1)
-        (fun range ->
-      let first = range * grain and last = min primitives ((range + 1) * grain) in
+    Support.run_indexed_ranges ~grain primitives (fun ~range ~first:first ~last:last ->
       let primitive = ref first in
       while failures.(range) < 0 && !primitive < last do
         Cancel.poll cancel !primitive 4095;

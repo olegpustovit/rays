@@ -86,11 +86,8 @@ let create ?cancel ?(grain = 16_384) ?primitives geometry =
   let average = if selected_count = 0 then 1
     else max 1 (Support.ceiling_div piece_count selected_count) in
   let chunk = max 1 (grain / average) in
-  let ranges = Support.ceiling_div selected_count chunk in
-  if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1)
-      (fun range ->
-    let first_selected = range * chunk
-    and last_selected = min selected_count ((range + 1) * chunk) in
+  Support.run_indexed_ranges ~grain:chunk selected_count (fun ~range:range ~first:first_selected ~last:last_selected ->
+    
     for slot = first_selected to last_selected - 1 do
       Cancel.poll cancel slot 4095;
       let primitive = selected.(slot) and output = piece_offsets.(slot) in
@@ -232,7 +229,7 @@ let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
   let left_count = piece_count left_index in
   if left_count = 0 || piece_count right_index = 0 then [||], [||]
   else begin
-    let chunk = max 1 grain and ranges = Support.ceiling_div left_count (max 1 grain) in
+    let chunk = max 1 grain in
     let counts = Array.make left_count 0 in
     let scan stack left_piece output_left output_right output_at =
       let top = ref 1 and found = ref 0 in
@@ -264,9 +261,9 @@ let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
           end
       done;
       !found in
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
+    Support.run_indexed_ranges ~grain:chunk left_count (fun ~range:range ~first:first ~last:last ->
       let stack = Array.make 65 0 in
-      let first = range * chunk and last = min left_count ((range + 1) * chunk) in
+      
       for piece = first to last - 1 do
         Cancel.poll cancel piece 4095;
         counts.(piece) <- scan stack piece None None 0
@@ -279,9 +276,9 @@ let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
     done;
     let total = offsets.(left_count) in
     let left_output = Array.make total 0 and right_output = Array.make total 0 in
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
+    Support.run_indexed_ranges ~grain:chunk left_count (fun ~range:range ~first:first ~last:last ->
       let stack = Array.make 65 0 in
-      let first = range * chunk and last = min left_count ((range + 1) * chunk) in
+      
       for piece = first to last - 1 do
         Cancel.poll cancel piece 4095;
         let written = scan stack piece (Some left_output) (Some right_output)

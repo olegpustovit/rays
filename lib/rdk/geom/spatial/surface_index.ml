@@ -578,13 +578,11 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
       !found in
     if single_pass then begin
       let builders = Array.init range_count (fun _ -> pair_builder ()) in
-      Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-        (fun range ->
+      Support.run_indexed_ranges ~grain:range_size left_count (fun ~range:range ~first:first ~last:last ->
           let node_stack = Array.make 65 0
           and left_bounds = Array.make 15 0.
           and output = builders.(range) in
-          let first = range * range_size
-          and last = min left_count ((range + 1) * range_size) in
+          
           for triangle = first to last - 1 do
             Cancel.poll cancel triangle 4095;
             ignore (scan node_stack left_bounds triangle None None 0 (Some output))
@@ -606,12 +604,10 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
       first_output, second_output
     end else begin
     let counts = Array.make left_count 0 in
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-      (fun range ->
+    Support.run_indexed_ranges ~grain:range_size left_count (fun ~range:range ~first:first ~last:last ->
         let node_stack = Array.make 65 0 in
         let left_bounds = Array.make 15 0. in
-        let first = range * range_size
-        and last = min left_count ((range + 1) * range_size) in
+        
         for triangle = first to last - 1 do
           Cancel.poll cancel triangle 4095;
           counts.(triangle) <- scan node_stack left_bounds
@@ -626,12 +622,10 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
     let pair_count = offsets.(left_count) in
     let left_output = Array.make pair_count 0
     and right_output = Array.make pair_count 0 in
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-      (fun range ->
+    Support.run_indexed_ranges ~grain:range_size left_count (fun ~range:range ~first:first ~last:last ->
         let node_stack = Array.make 65 0 in
         let left_bounds = Array.make 15 0. in
-        let first = range * range_size
-        and last = min left_count ((range + 1) * range_size) in
+        
         for triangle = first to last - 1 do
           Cancel.poll cancel triangle 4095;
           let written = scan node_stack left_bounds triangle

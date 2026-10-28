@@ -94,11 +94,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
             | Laplacian step -> step
             | Custom_steps { odd; even } ->
                 if iteration land 1 = 0 then odd else even in
-          let range_count = (point_count + grain - 1) / grain in
-          Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-            (fun range ->
-              let first_point = range * grain
-              and last_point = min point_count ((range + 1) * grain) in
+          Support.run_indexed_ranges ~grain point_count (fun ~range ~first:first_point ~last:last_point ->
               let sum = ref 0. and total = ref 0. in
               for point = first_point to last_point - 1 do
                 Cancel.poll cancel point 4095;

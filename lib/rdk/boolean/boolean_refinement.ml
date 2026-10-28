@@ -24,12 +24,9 @@ let build_side ?cancel ?coplanar ~grain constraints side face_count range
      amortize its edge/topology planes while retaining many coarse tasks on
      the small, high-intersection fracture inputs that use grain one or two. *)
   let range_size = max 8 grain in
-  let range_count = (face_count + range_size - 1) / range_size in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(range_count - 1) (fun work_range ->
+  Support.run_indexed_ranges ~grain:range_size face_count (fun ~range:work_range ~first:first_face ~last:last_face ->
     let workspace = Boolean_face_cdt.create_workspace () in
-    let first_face = work_range * range_size
-    and last_face = min face_count ((work_range + 1) * range_size) in
+    
     for face = first_face to last_face - 1 do
       Cancel.poll cancel face 255;
       let first, last = range constraints face in

@@ -361,13 +361,10 @@ let build ?cancel ?(resolve_left_self_intersections = false)
               and feature2 = Array.make candidate_count 0
               and feature3 = Array.make candidate_count 0 in
               let chunk = max 1 grain in
-              let ranges = (candidate_count + chunk - 1) / chunk in
-              if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-                  ~finish:(ranges - 1) (fun range ->
+              Support.run_indexed_ranges ~grain:chunk candidate_count (fun ~range:range ~first:first ~last:last ->
                 let scratch = Array.make 4 0 and left_triangle = Array.make 3 0
                 and right_triangle = Array.make 3 0 in
-                let first = range * chunk
-                and last = min candidate_count ((range + 1) * chunk) in
+                
                 for candidate = first to last - 1 do
                   Cancel.poll cancel candidate 4095;
                   let first_points = if Bytes.unsafe_get first_candidate_sides
