@@ -283,3 +283,37 @@ render_workspace digest 54d9d203..., `test_pathtracer_exact_m1` both M1 digests,
 After merging dev (trace helpers, `~spheres`; d0ffef08), same loop, load 4.9-6.7: old 198.5 200.1 200.2 202.3
 202.5 206.9; cache warm 208.3 209.0 209.2 213.5 218.1 243.4; cache emptied 256.1-273.5. The cache key now
 also holds the scene facts: the curve and sphere facts reach the emitter outside the kernel text.
+
+### The first frame, warm, fourth pass (2026-10-28)
+
+Same span and loop (`render_workspace --benchmark sketches/pathtracer.rays OUT 4`, now 480 x 840; old =
+pathtrace.metal from feb9966b, `RAYS_PATHTRACER_KERNEL=metal`), per-phase wall ticks and `Gc.quick_stat`
+in a throwaway build. Old against head before this pass, load 11.9-13.3: create 46-53 / 50-56 ms, World bake
+15.4-15.8 / 25.4-26.9, `set_world` 5.5-6.1 / 8.3-9.2, first render 1.4-3.1 / 2.7-2.8, flush 130-131 / 119-125.
+The Lisp kernels are 6-10 ms faster on the GPU; the CPU side before the flush was 10-15 ms slower.
+
+- `World.bake`: `specular` (the GGX chain) and `sh9` (with the 128 x 64 box level both come from) are now
+  `Lazy.t`, forced by the raster lowering; the path tracer reads neither. Bake 25.4-26.9 -> 16.7-17.5 ms; box
+  and SH9 a further ~1.1 ms.
+- `set_world`: `world_bytes` converted with `Float.Array.iteri`, a boxed float per texel (1.75 M minor words,
+  seven minor collections inside the span), then copied the CDF out with `Bytes.sub`. Now plain loops into two
+  buffers: `wmap` holds the two maps only (the old kernel's CDF tail is gone), `cdf` its own. 8.3-9.2 ->
+  3.7-3.8 ms, no minor words.
+- Not kept: the film's three index writes in one tiled pass needs three staging buffers instead of one; the
+  extra 400 K major words moved the pending major slice into it, `allocate_film` 5.9 -> 9.7 ms. Closure-free
+  loops over the one buffer: 5.9 -> 5.8 ms (fill 1.8 + 1.7 + 0.9 ms, uploads 0.1 ms each), not worth the
+  diff. An `Image.blank` without the blank copy: no measurable change. The film stays ~2 ms over the old
+  kernel's single identity pass; the cost is the per-element float32 store, not the passes.
+
+In-span allocation is now 0.5 M minor and 2.4 M major words (old: 2.5 M / 2.6 M). Interleaved pairs,
+warm Metal and kernel caches, first-frame ms (sorted):
+
+| | load | old (pathtrace.metal) | Lisp kernels | median |
+|---|---|---|---|---|
+| 12 pairs | 5.1-5.8 | 203.0 204.4 206.2 207.0 207.7 209.1 210.1 216.1 217.5 223.4 228.0 265.6 | 195.9 198.6 200.4 203.3 203.4 205.3 206.3 220.7 222.5 224.0 237.9 244.3 | 209.6 / 205.8 |
+| 8 pairs, Lisp first | 6.5-8.6 | 199.5 208.1 212.2 212.8 219.2 223.9 237.0 333.1 | 202.5 207.6 208.9 210.3 211.5 212.7 222.2 241.7 | 216.0 / 211.0 |
+| 10 pairs, `specular` only lazy | 4.6-5.3 | 198.9 199.3 199.7 203.6 204.9 204.9 205.1 206.7 207.6 214.0 | 198.6 199.3 199.4 199.7 200.6 204.4 204.8 209.5 209.9 211.6 | 204.9 / 202.5 |
+
+The Lisp side won 8 of 12 pairs (head before this pass: 215 median, 208-218, in the same loop). Met warm:
+the Lisp kernels' first frame is at or under pathtrace.metal's. Output unchanged: render_workspace digest
+54d9d203..., `test_pathtracer_exact_m1` both M1 digests, `test_lisp` 0 of 576 channels against the CPU walker.

@@ -140,14 +140,15 @@ type baked = {
   camera : map;  (** Everything, sun disc included: what the eye sees. *)
   lighting : map;  (** [camera] minus the [Light] emitters and the sun disc. *)
   cdf : cdf;
-  sh9 : rgb array;
+  sh9 : rgb array Lazy.t;
       (** Irradiance-ready SH: the lighting map's coefficients on the real basis
           [0.282095; 0.488603 y; 0.488603 z; 0.488603 x; 1.092548 xy; 1.092548 yz; 0.315392 (3z^2 -
            1); 1.092548 xz; 0.546274 (x^2 - y^2)], already multiplied by the cosine-lobe factors pi,
           2pi/3, pi/4 (Ramamoorthi-Hanrahan). *)
-  specular : map array;
+  specular : map array Lazy.t;
       (** 6 GGX-prefiltered lighting mips for roughness 0, 0.2, .., 1: 128x64, 64x32, .., 4x2. Mip 0
-          is a box downsample. *)
+          is a box downsample. [sh9] and [specular] are computed when first forced, on one domain at
+          a time. *)
   lights : light list;
   sun : sun option;
   background : background;

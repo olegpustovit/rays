@@ -337,8 +337,20 @@ let light_bytes ?(world_lights = []) lights =
   if lights = [] && world_lights = [] then Stdlib.Buffer.add_bytes builder (Bytes.make 64 '\000');
   Stdlib.Buffer.to_bytes builder
 
-(* The baked World as one float32 buffer: camera map, lighting map, CDF
-   marginal, CDF conditional rows (see pathtrace.rays). *)
+(* The baked World as two float32 buffers: the camera then the lighting map, and the CDF marginal then its
+   conditional rows (see pathtrace.rays). *)
+let float32_bytes parts =
+  let bytes = Bytes.create (4 * List.fold_left (fun n a -> n + Float.Array.length a) 0 parts) in
+  ignore
+    (List.fold_left
+       (fun offset array ->
+         for i = 0 to Float.Array.length array - 1 do
+           put_f32 bytes (offset + (4 * i)) (Float.Array.unsafe_get array i)
+         done;
+         offset + (4 * Float.Array.length array))
+       0 parts);
+  bytes
+
 let world_bytes (baked : Rays.World.baked) =
   let { Rays.World.width; height; _ } = baked.camera in
   let cdf = baked.cdf in
@@ -350,15 +362,9 @@ let world_bytes (baked : Rays.World.baked) =
     || Float.Array.length cdf.conditional <> height * (width + 1)
   then Error "path tracer World maps and CDF do not match in size"
   else
-    let parts = [ baked.camera.pixels; baked.lighting.pixels; cdf.marginal; cdf.conditional ] in
-    let bytes = Bytes.create (4 * List.fold_left (fun n a -> n + Float.Array.length a) 0 parts) in
-    ignore
-      (List.fold_left
-         (fun offset array ->
-           Float.Array.iteri (fun i value -> put_f32 bytes (offset + (4 * i)) value) array;
-           offset + (4 * Float.Array.length array))
-         0 parts);
-    Ok bytes
+    Ok
+      ( float32_bytes [ baked.camera.pixels; baked.lighting.pixels ],
+        float32_bytes [ cdf.marginal; cdf.conditional ] )
 
 (* Resource helpers on the leased OGPU device. Scene geometry lives in shared
    memory (Apple silicon is unified); accumulation, history, and build scratch
@@ -1062,19 +1068,14 @@ let set_world t baked =
   | Some current, Some next when current == next -> Ok ()
   | None, None -> Ok ()
   | _ ->
-      let* bytes =
-        match baked with None -> Ok (Bytes.make 16 '\000') | Some baked -> world_bytes baked
+      let* maps, cdf =
+        match baked with
+        | None -> Ok (Bytes.make 16 '\000', Bytes.make 16 '\000')
+        | Some baked -> world_bytes baked
       in
       let* () =
-        swap_buffer t ~label:"pathtracer-world" bytes t.world_buffer (fun world ->
+        swap_buffer t ~label:"pathtracer-world" maps t.world_buffer (fun world ->
             t.world_buffer <- world)
-      in
-      let cdf =
-        match baked with
-        | None -> Bytes.make 16 '\000'
-        | Some baked ->
-            let w, h = (baked.camera.width, baked.camera.height) in
-            Bytes.sub bytes (24 * w * h) (Bytes.length bytes - (24 * w * h))
       in
       let* () =
         swap_buffer t ~label:"pathtracer-cdf" cdf t.cdf_buffer (fun buffer ->

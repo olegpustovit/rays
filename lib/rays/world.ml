@@ -76,8 +76,8 @@ type baked = {
   camera : map;
   lighting : map;
   cdf : cdf;
-  sh9 : rgb array;
-  specular : map array;
+  sh9 : rgb array Lazy.t;
+  specular : map array Lazy.t;
   lights : light list;
   sun : sun option;
   background : background;
@@ -893,10 +893,12 @@ let bake ?domains ?(light_radius = 10.) ~width ~height (world : t) =
       let lighting = { width; height; pixels = lighting } in
       (* ponytail: SH9 is projected from the 128x64 box level, not the full
        map; exact enough for 9 coefficients. *)
-      let box = resample lighting 128 64 in
       let cdf = build_cdf lighting in
-      let sh9 = project_sh box in
-      let specular = specular_chain box in
+      (* ponytail: the raster products are forced on one domain at a time (the raster lowering); the path
+         tracer never reads them *)
+      let box = lazy (resample lighting 128 64) in
+      let sh9 = lazy (Parallel.run ?domains (fun () -> project_sh (Lazy.force box))) in
+      let specular = lazy (Parallel.run ?domains (fun () -> specular_chain (Lazy.force box))) in
       {
         camera = { width; height; pixels = camera };
         lighting;
