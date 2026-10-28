@@ -123,14 +123,16 @@ let run () =
     check (rotation () = -120.) (name ^ ": a large negative World drag did not wrap rotation");
     step ~keys:[Input.Meta] [char 'z'];
     still original "large negative World drag did not undo in one entry";
-    step ~mouse:(140., 300.) [key Input.Shift;
+    (* a press and release is one gesture per frame (the capture signal holds one); two frames *)
+    step ~mouse:(120., 300.) [key Input.Shift;
       Input.Pointer_pressed (Input.LeftButton, (100., 300.));
-      Input.Pointer_released (Input.LeftButton, (120., 300.));
+      Input.Pointer_released (Input.LeftButton, (120., 300.))];
+    step ~keys:[Input.Shift] ~mouse:(140., 300.) [key Input.Shift;
       Input.Pointer_pressed (Input.LeftButton, (100., 300.));
       Input.Pointer_released (Input.LeftButton, (140., 300.)); Input.Key_released Input.Shift];
-    check (rotation () = 30.) (name ^ ": batched World gestures lost an operation");
+    check (rotation () = 30.) (name ^ ": consecutive World gestures lost an operation");
     step ~keys:[Input.Meta] [char 'z'];
-    check (rotation () = 10.) (name ^ ": batched World gestures merged in history");
+    check (rotation () = 10.) (name ^ ": consecutive World gestures merged in history");
     step ~keys:[Input.Meta] [char 'z'];
     still original "batched World gesture undo did not restore the original";
     step ~keys:[Input.Shift] [];

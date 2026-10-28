@@ -147,6 +147,10 @@ val tab_stop_marked : flags
 val scroll : flags
 val clip : flags
 val blocking : flags
+val capture_unclaimed : flags
+(** A press whose topmost hit box is not clickable is captured by the nearest ancestor with this
+    flag (a normal capture: [held], [dragging], [drag], [released], {!press_keys}); a press a
+    descendant consumes never reaches it. *)
 val ( + ) : flags -> flags -> flags
 
 val box :
@@ -167,6 +171,9 @@ val scope : t -> string -> (unit -> 'a) -> 'a
 (** Mix a label into the keys of boxes built inside, without a box. *)
 
 val key : box -> int
+
+val box_of_key : t -> int -> box option
+(** The box a {!key} named, once it has been laid out (its signal and {!press_keys} read as usual). *)
 
 val rect : t -> box -> float * float * float * float
 (** The box's screen rectangle from the previous frame. *)

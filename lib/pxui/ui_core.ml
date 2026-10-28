@@ -118,12 +118,14 @@ let keep_tab = 64
 let keep_focus = 128
 (* a scrolling box whose thumb is drawn over its content (an inspector body): no gutter *)
 let over_thumb = 4096
+(* an ancestor captures a press that no box under it took (the topmost hit box is not clickable) *)
+let capture_unclaimed = 8192
 (* the control marks its own keyboard focus (a button's accent line, a field's accent underline):
    the engine strokes no ring round it *)
 let focus_mark = 256
 let tab_stop_marked = tab_stop lor focus_mark
 let add = Stdlib.( + )
-let hit_flags = clickable lor focusable lor scroll lor blocking
+let hit_flags = clickable lor focusable lor scroll lor blocking lor capture_unclaimed
 
 type rect = float * float * float * float
 
@@ -846,7 +848,14 @@ let route ui (frame : Frame.t) =
           | (_, event, delta) :: rest -> (-1, event, delta) :: rest | [] -> [])
     | Input.Pointer_pressed (button, point) ->
         set_pointer point;
-        let target = owner in
+        let target =
+          if owner = 0 || flags_of_key ui owner land clickable <> 0 then owner
+          else begin
+            let found = ref None in
+            hit_ancestors ui owner (fun key ->
+              if !found = None && flags_of_key ui key land capture_unclaimed <> 0 then found := Some key);
+            Option.value !found ~default:owner
+          end in
         hit_ancestors ui target (fun key ->
           (accumulator ui key).subtree_press <- Some event_index);
         let flags = flags_of_key ui target in
@@ -859,7 +868,7 @@ let route ui (frame : Frame.t) =
           ui.focus <- focus;
           ui.keyboard_focus <- false
         end;
-        if (target = 0 || flags land clickable <> 0) && ui.active = None then begin
+        if (target = 0 || flags land (clickable lor capture_unclaimed) <> 0) && ui.active = None then begin
           ui.active <- Some target; ui.active_button <- button;
           ui.active_press <- ui.pointer;
           ui.active_keys <- !modifiers;
@@ -1051,6 +1060,10 @@ let input ?(owner = 0) ui =
 type box = { index : int; box_key : int; box_slot : int }
 
 let key box = box.box_key
+
+let box_of_key ui key =
+  let slot = Table.find ui.table key in
+  if slot < 0 then None else Some { index = -1; box_key = key; box_slot = slot }
 
 let ensure_box_capacity ui size =
   if size > Array.length ui.b_key then begin

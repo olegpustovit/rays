@@ -342,7 +342,7 @@ let on_doc ~previous core camera =
       && core.Editor_model.doc.active_camera = previous.Editor_model.doc.active_camera
   then core else sync_cameras ~mode:`Amend core camera
 
-let navigate ~area control camera extra core ~(raw_frame : Frame.t) ~(input : Frame.t) =
+let navigate ~area ~grab:(pressed, released) control camera extra core ~(raw_frame : Frame.t) ~(input : Frame.t) =
   let active = active_node core in
   (* A fixed render camera owns the view while look-through is enabled. *)
   if look_through extra && active <> None
@@ -353,14 +353,7 @@ let navigate ~area control camera extra core ~(raw_frame : Frame.t) ~(input : Fr
           { raw_frame with input = input.input; mouse_delta = input.mouse_delta } in
         camera, { extra with fly = Some speed }
     | None ->
-        let (vx, vy, vw, vh) = area in
-        let inside = Pxui.Ui.contains (float vx, float vy, float vw, float vh) in
-        let pressed = List.exists (function
-          | Input.Pointer_pressed (_, pt) -> inside pt
-          | _ -> false) input.input.events in
-        let released = List.exists (function
-          | Input.Pointer_released _ | Input.Focus_lost -> true
-          | _ -> false) input.input.events in
+        let released = released || List.mem Input.Focus_lost input.input.events in
         let grabbing = if pressed then true else if released || input.input.buttons = [] then false else extra.relative_grab in
         if grabbing <> extra.relative_grab then set_relative grabbing;
         let camera = CC.navigate ~control_area:area camera input in
