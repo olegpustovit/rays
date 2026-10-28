@@ -43,20 +43,22 @@ let width = function Flow.Ty.Array Vec4 -> 4 | Array Vec3 -> 3 | _ -> 1
 type facts = {
   spp : int; bounces : int; round_samples : int; panels : int; lights : int;
   world : bool; background : int; map_w : int; map_h : int; sun : bool; bsdf_only : bool;
-  instanced : bool }
+  instanced : bool; classes : bool * bool * bool }
 
 let num x = let s = Printf.sprintf "%.17g" x in
   if String.exists (fun c -> c = '.' || c = 'e' || c = 'n') s then s else s ^ "."
 
 let text f =
+  let metallic, emissive, round = f.classes in
   let u ~preview = Printf.sprintf
     "{:eye eye :lens %s :fwd fwd :rgt rgt :up up :tan-half tanhalf :aspect aspect :focus focus :width width \
      :height height :spp %d :bounces %d :frame frame :sky sky :ground ground :panels %d :lights %d :world %d \
      :background %d :map-w %d :map-h %d :bg bg :sun-dir sundir :sun-cos suncos :sun-rad sunrad :sun-pdf %s \
-     :round-samples %d :preview %b :bsdf-only %b :instanced %b :sphere-base spherebase}"
+     :round-samples %d :preview %b :bsdf-only %b :instanced %b :sphere-base spherebase \
+     :metallic %b :emissive %b :round %b}"
     (if preview then "0." else "lens") (if preview then 1 else f.spp)
     (if preview then 1 else f.bounces) f.panels f.lights (Bool.to_int f.world) f.background f.map_w f.map_h
-    (if f.sun then "sunpdf" else "0.") (if preview then 1 else f.round_samples) preview f.bsdf_only f.instanced in
+    (if f.sun then "sunpdf" else "0.") (if preview then 1 else f.round_samples) preview f.bsdf_only f.instanced metallic emissive round in
   let args = "lights mats ids inst nrm pan wmap cdf" and clear = f.world && f.background = 2 in
   (* the records are built inside each kernel, whose captures are then the placeholders themselves *)
   let kernel name body = Printf.sprintf "%s (fn [(pixel : int)] (let* [u %s v %s \

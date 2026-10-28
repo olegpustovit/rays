@@ -667,7 +667,7 @@ let move_async t (moved : mesh) =
         let* instance_buffer = keep (shared t.device ~label:"pathtracer-instances" packed) in
         let* transforms = keep (shared t.device ~label:"pathtracer-transforms" instances.shader_bytes) in
         let* scratch = keep (buffer ~memory:Ogpu.Types.Device_local t.device ~label:"pathtracer-scratch" 1024) in
-        let* tables = upload_tables t.device moved in
+        let* tables = upload_tables ~material_data:(material_bytes moved.mesh_materials) t.device moved in
         owned := tables.ids :: tables.inst :: tables.spheres :: Option.to_list tables.trace_instances @ !owned;
         let build =
           { gpu = { t.gpu with instance_buffer = Some instance_buffer; transforms = Some transforms; owns_prototype = false
@@ -873,7 +873,8 @@ let lisp_facts t =
     background = (match t.world with Some { background = Color _; _ } -> 1 | Some { background = Transparent; _ } -> 2 | _ -> 0);
     map_w = map (fun m -> m.width); map_h = map (fun m -> m.height);
     sun = (match t.world with Some { sun = Some sun; _ } -> sun.angular_radius > 0. | _ -> false);
-    bsdf_only = t.bsdf_only; instanced = t.gpu.shape.instanced }
+    bsdf_only = t.bsdf_only; instanced = t.gpu.shape.instanced;
+    classes = (match t.gpu.tables with Some tables -> tables.classes | None -> (true, true, true)) }
 
 (* ponytail: four specializations kept, the oldest closed once no frame reads it; an LRU would keep the
    shapes an editor toggles between. *)

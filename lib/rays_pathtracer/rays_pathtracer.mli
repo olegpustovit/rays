@@ -220,4 +220,8 @@ val destroy : t -> unit
 module Private : sig
   val max_total_threads : t -> (int, string) result
   (** The current mesh shape's pathtrace pipeline thread limit (the Lisp kernel's register-pressure reference). *)
+  val use_metal : t -> bool -> unit
+  (** Trace with pathtrace.metal even where the Lisp kernels could (the A/B reference); restarts accumulation. *)
+  val lisp_kernel : t -> string -> (int * string, string) result
+  (** A Lisp kernel of the current scene shape ("trace", "preview", ...): its pipeline's thread limit and its MSL. *)
 end

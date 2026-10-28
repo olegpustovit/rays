@@ -12,7 +12,8 @@ type shape = { instanced : bool; motion : bool; spheres : bool; curves : bool; s
    (first triangle, world-to-object rows), and the analytic spheres as (centre, radius). *)
 type tables = {
   ids : B.buffer; inst : B.buffer; trace_instances : B.buffer option; spheres : B.buffer;
-  id_count : int; instance_count : int; sphere_count : int }
+  id_count : int; instance_count : int; sphere_count : int;
+  classes : bool * bool * bool  (* some material is metallic, emissive, round: the kernel folds what none is *) }
 
 type gpu_mesh = {
   positions : B.buffer;
@@ -146,7 +147,11 @@ let floats values =
   Array.iteri (fun i v -> put_f32 bytes (4 * i) v) values;
   bytes
 
-let upload_tables device mesh =
+let upload_tables ~material_data device mesh =
+  let some k = let found = ref false in
+    for m = 0 to (Bytes.length material_data / 48) - 1 do
+      List.iter (fun c -> if Int32.float_of_bits (Bytes.get_int32_le material_data (48 * m + 4 * c)) <> 0. then found := true) k
+    done; !found in
   let f32 bytes offset = Int32.float_of_bits (Bytes.get_int32_le bytes offset) in
   let records, shader = match mesh.instances with Some i -> i.records, i.shader_bytes | None -> [||], Bytes.empty in
   let n = Array.length records in
@@ -171,7 +176,8 @@ let upload_tables device mesh =
     let* spheres_buffer = upload "pathtracer-lisp-spheres" (if spheres = [||] then Array.make 4 0. else spheres) in
     let* trace_instances = if n = 0 then Ok None else Result.map Option.some (upload "pathtracer-lisp-trace" trace) in
     Ok { ids = ids_buffer; inst = inst_buffer; trace_instances; spheres = spheres_buffer; id_count = Array.length ids
-       ; instance_count = max 1 n; sphere_count = mesh.extras.sphere_count } in
+       ; instance_count = max 1 n; sphere_count = mesh.extras.sphere_count
+       ; classes = (some [ 7 ], some [ 4; 5; 6 ], some [ 8 ]) } in
   (match made with Ok _ -> () | Error _ -> List.iter (fun b -> ignore (B.destroy_buffer b)) !owned);
   made
 
@@ -328,7 +334,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
     let* tables =
       if not (lisp_shape shape) then Ok None
       else
-        let* tables = upload_tables device mesh in
+        let* tables = upload_tables ~material_data device mesh in
         buffers := tables.ids :: tables.inst :: tables.spheres :: Option.to_list tables.trace_instances @ !buffers;
         Ok (Some tables)
     in

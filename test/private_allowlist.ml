@@ -83,6 +83,7 @@ let entries = [
   "tools", "Flow.Op.Private";
   "tools", "Flow.Value.Private";
   "tools", "Flow_ir.Packed.Private";
+  "tools", "P.Private";
   "tools", "Rays.Image.Private";
   "tools", "Scene.D3.Private";
   "tools", "Sop.Image.Private";
