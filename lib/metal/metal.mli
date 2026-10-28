@@ -645,11 +645,6 @@ end
 module Render_pipeline : sig
   type t
 
-  type kind =
-    | Render
-    | Tile
-    | Mesh
-
   type primitive_topology =
     | Point
     | Line
@@ -722,9 +717,6 @@ module Render_pipeline : sig
   type reflection =
     { vertex : Binding.t list
     ; fragment : Binding.t list
-    ; tile : Binding.t list
-    ; object_ : Binding.t list
-    ; mesh : Binding.t list
     }
 
   val supports_indirect_command_buffers : t -> (bool,error) result
@@ -753,16 +745,6 @@ module Compiler : sig
     ?support_indirect_command_buffers:bool ->
     t -> library:Library.t ->
     vertex:string -> (Render_pipeline.t, error) result
-
-  (* Compiles a Metal 4 mesh pipeline, optionally with an object stage.
-      Object-stage limits and payload configuration require [object_function].
-      Rasterization and color-format rules match [create_render_pipeline].
-      Mesh shading requires an Apple7-or-newer or Mac2 GPU. Optional stage
-      linking uses the same checked [stage_linking] values as conventional
-      rendering. Binary functions in object or mesh stages require Apple9/M3;
-      static linking and dynamic-library preloads remain independently gated.
-      Alpha, amplification, and color-mapping defaults match conventional
-      render pipelines. *)
 
   val destroy : t -> (unit, error) result
 end
@@ -900,7 +882,7 @@ module Render_encoder : sig
 
   type cull_mode = No_cull | Cull_front | Cull_back
   type winding = Clockwise | Counter_clockwise
-  type stage = Vertex | Fragment | Tile | Object | Mesh
+  type stage = Vertex | Fragment
   type resource_usage = Read | Write | Sample
   type resource = Buffer_resource of Buffer.t | Texture_resource of Texture.t
   type primitive = Point | Line | Line_strip | Triangle | Triangle_strip

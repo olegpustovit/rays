@@ -513,7 +513,6 @@ type intersection_function_table = {
   visible_tables : visible_function_table option array;
 }
 
-type render_pipeline_kind = Render | Tile | Mesh
 type render_color_attachment_mapping = Identity | Inherited
 type render_blend_state = Blend_disabled | Blend_enabled
 
@@ -562,16 +561,12 @@ type render_color_attachment = {
 type render_pipeline_reflection = {
   vertex_bindings : shader_binding array;
   fragment_bindings : shader_binding array;
-  tile_bindings : shader_binding array;
-  object_bindings : shader_binding array;
-  mesh_bindings : shader_binding array;
 }
 
 type render_pipeline = {
   raw : Metal_raw.handle;
   lifetime : lifetime;
   device : device;
-  kind : render_pipeline_kind;
   raster_sample_count : int;
 
   color_formats : pixel_format list;
@@ -3762,7 +3757,6 @@ end
 
 module Render_pipeline = struct
   type t = render_pipeline
-  type kind = render_pipeline_kind = Render | Tile | Mesh
   type primitive_topology = Point | Line | Triangle
   type color_attachment_mapping = render_color_attachment_mapping = Identity | Inherited
   type blend_state = render_blend_state = Blend_disabled | Blend_enabled
@@ -3812,9 +3806,6 @@ module Render_pipeline = struct
   type reflection = {
     vertex : Binding.t list;
     fragment : Binding.t list;
-    tile : Binding.t list;
-    object_ : Binding.t list;
-    mesh : Binding.t list;
   }
 
   let color_attachment ?(blending = Blend_disabled) ?(source_rgb = Blend_one)
@@ -3891,7 +3882,7 @@ module Render_pipeline = struct
 
   let make ?mesh_constraints:_ ?tile_constraints:_ ?color_attachments:_ ?vertex_descriptor:_
       ?alpha_to_coverage:_ ?alpha_to_one:_ ?max_vertex_amplification_count:_
-      ?color_attachment_mapping:_ device ~kind ~raster_sample_count ~color_formats
+      ?color_attachment_mapping:_ device ~raster_sample_count ~color_formats
       ~reflection raw (raw_reflection : Metal_raw.render_pipeline_reflection) =
     let map values = Array.map Binding.of_raw values in
     let reflection =
@@ -3900,9 +3891,6 @@ module Render_pipeline = struct
           {
             vertex_bindings = map raw_reflection.vertex_bindings;
             fragment_bindings = map raw_reflection.fragment_bindings;
-            tile_bindings = map raw_reflection.tile_bindings;
-            object_bindings = map raw_reflection.object_bindings;
-            mesh_bindings = map raw_reflection.mesh_bindings;
           }
       else None
     in
@@ -3911,7 +3899,6 @@ module Render_pipeline = struct
         raw;
         lifetime = lifetime ();
         device;
-        kind;
         raster_sample_count;
 
         color_formats;
@@ -3940,9 +3927,6 @@ module Render_pipeline = struct
         {
           vertex = Array.to_list reflection.vertex_bindings;
           fragment = Array.to_list reflection.fragment_bindings;
-          tile = Array.to_list reflection.tile_bindings;
-          object_ = Array.to_list reflection.object_bindings;
-          mesh = Array.to_list reflection.mesh_bindings;
         })
       value.reflection
 
@@ -4095,7 +4079,7 @@ module Compiler = struct
           native_result operation (Metal_raw.compiler_create_render_pipeline value.raw descriptor)
         in
         Ok
-          (Render_pipeline.make value.device ~kind:Render_pipeline.Render ~raster_sample_count
+          (Render_pipeline.make value.device ~raster_sample_count
              ~alpha_to_coverage:false ~alpha_to_one:false ~max_vertex_amplification_count:1
              ~color_attachment_mapping:Render_pipeline.Identity ~color_formats ~color_attachments
              ~reflection raw raw_reflection))
@@ -4816,7 +4800,7 @@ module Render_encoder = struct
   type cull_mode = No_cull | Cull_front | Cull_back
   type winding = Clockwise | Counter_clockwise
 
-  type stage = Vertex | Fragment | Tile | Object | Mesh
+  type stage = Vertex | Fragment
   type resource_usage = Read | Write | Sample
   type resource = Buffer_resource of Buffer.t | Texture_resource of Texture.t
   type primitive = Point | Line | Line_strip | Triangle | Triangle_strip
@@ -4834,7 +4818,7 @@ module Render_encoder = struct
   type scissor = { x : int; y : int; width : int; height : int }
 
   let bits code values = List.fold_left (fun mask value -> mask lor code value) 0 values
-  let stage_code = function Vertex -> 1 | Fragment -> 2 | Tile -> 4 | Object -> 8 | Mesh -> 16
+  let stage_code = function Vertex -> 1 | Fragment -> 2
   let usage_code = function Read -> 1 | Write -> 2 | Sample -> 4
 
   let depth_attachment_formats = [Texture.Depth32_float]
@@ -5050,9 +5034,6 @@ module Render_encoder = struct
         in
         let validate_draw draw =
           let* () = ensure_live operation draw.prepared_pipeline.lifetime in
-          if draw.prepared_pipeline.kind <> Render then
-            error operation Invalid_argument "pipeline is not renderable"
-          else
             let* () = ensure_same_device operation device draw.prepared_pipeline.device in
             let rec bindings index =
               if index = Array.length draw.prepared_bindings then Ok ()
@@ -5242,9 +5223,7 @@ module Render_encoder = struct
     let* () = ensure_live operation value.lifetime in
     let* () = ensure_live operation pipeline.lifetime in
     let* () = ensure_same_device operation value.command_buffer.queue.device pipeline.device in
-    if pipeline.kind = Render && false then
-      error operation Invalid_argument "classic render encoder requires a render pipeline"
-    else if pipeline.raster_sample_count <> value.target.descriptor.sample_count then
+    if pipeline.raster_sample_count <> value.target.descriptor.sample_count then
       error operation Invalid_argument "pipeline sample count differs from the render target"
     else if
       pipeline.color_formats = []
@@ -5642,10 +5621,6 @@ module Render_encoder = struct
              (Int64.of_int first) (Int64.of_int count) (Int64.of_int instances))
       in
       Ok ()
-
-  (* Classic mesh dispatch: the bound pipeline must be a mesh pipeline, an
-     object threadgroup is given exactly when it has an object stage, and any
-     required threadgroup sizes compiled into it must match. *)
 
   let draw_triangles (value : t) ~first ~count () =
     let instances = (1) in let operation = "Metal.Render_encoder.draw_triangles" in
