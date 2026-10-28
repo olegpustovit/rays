@@ -40,10 +40,10 @@ module Scratch : sig
   val compare_products : t -> t -> t -> t -> int
   val compare_homogeneous_float :
     numerator:t -> denominator:t -> value:float -> int
-  val orient2d_explicit_explicit_homogeneous :
+  val orient2d_ee_homogeneous :
     ax:float -> ay:float -> bx:float -> by:float ->
     cx:t -> cy:t -> cw:t -> int
-  val barycentric_explicit_triangle_homogeneous :
+  val barycentric_tri_homogeneous :
     ax:float -> ay:float -> az:float ->
     bx:float -> by:float -> bz:float ->
     cx:float -> cy:float -> cz:float ->
@@ -67,7 +67,7 @@ module Scratch : sig
     fx:t -> fy:t -> fz:t -> fw:t ->
     sx:t -> sy:t -> sz:t -> sw:t ->
     tx:t -> ty:t -> tz:t -> tw:t -> int
-  val axis_ray_triangle_explicit_homogeneous :
+  val axis_ray_tri_homogeneous :
     axis:int -> positive:bool ->
     ax:float -> ay:float -> az:float ->
     bx:float -> by:float -> bz:float ->
@@ -75,7 +75,7 @@ module Scratch : sig
     qx:t -> qy:t -> qz:t -> qw:t -> int
   (* Codes: 0 miss, 1 negative-oriented hit, 2 positive-oriented hit,
      3 boundary-degenerate ray, 4 parallel carrier. *)
-  val symbolic_ray_triangle_explicit_homogeneous :
+  val symbolic_ray_tri_homogeneous :
     ax:float -> ay:float -> az:float ->
     bx:float -> by:float -> bz:float ->
     cx:float -> cy:float -> cz:float ->

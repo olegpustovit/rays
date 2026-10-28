@@ -23,20 +23,6 @@ let equal_group left right =
   && Array.for_all (fun index -> Group.mem index left = Group.mem index right)
        (Array.init (Group.length left) Fun.id)
 
-let equal_geometry left right =
-  topology_points left = topology_points right
-  && List.equal (fun left right -> Attribute.owner left = Attribute.owner right
-       && String.equal (Attribute.name left) (Attribute.name right)
-       && equal_storage left right)
-       (Geometry.attributes left) (Geometry.attributes right)
-  && List.equal equal_group (Geometry.groups left) (Geometry.groups right)
-  && List.for_all2 (fun left right ->
-       String.equal (Edge_group.name left) (Edge_group.name right)
-       && Edge_group.length left = Edge_group.length right
-       && Array.for_all (fun edge -> Edge_group.mem edge left = Edge_group.mem edge right)
-            (Array.init (Edge_group.length left) Fun.id))
-       (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let group owner name geometry =
   Geometry.find_group ~owner name geometry |> Option.get
 

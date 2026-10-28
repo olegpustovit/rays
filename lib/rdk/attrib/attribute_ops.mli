@@ -243,8 +243,6 @@ type interpolate_computed = {
     coordinates. The resulting pair can drive a later weighted interpolation
     with equivalent coefficients. *)
 
-type enumeration_storage = Integer | Text of { prefix : string }
-type enumeration_mode = Enumerate_piece_elements | Enumerate_pieces
 type blur_method = Uniform | Edge_length
 type blur_mode = Laplacian of float | Custom_steps of { odd : float; even : float }
 type numeric_value =
@@ -309,38 +307,6 @@ type random_distribution =
     immutable strings. Multidimensional [Random_cauchy] is the rotationally
     symmetric multivariate distribution and requires equal scale components. *)
 
-val enumerate :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?selection:Group.t ->
-  ?start:int ->
-  ?step:int ->
-  ?storage:enumeration_storage ->
-  ?piece_attribute:string ->
-  ?mode:enumeration_mode ->
-  owner:Attribute.owner ->
-  name:string ->
-  Geometry.t ->
-  (Geometry.t, Error.t) result
-(** Assign stable sequential values to selected point, vertex, or primitive
-    elements in increasing element order. Unselected existing same-kind values
-    are preserved; a newly created attribute uses zero/empty defaults outside
-    the selection. Integer output is allocation-tight. Text output necessarily
-    allocates one formatted string per selected element.
-
-    A same-owner integer or text [piece_attribute] enables SideFX-compatible
-    piece modes. [Enumerate_piece_elements] restarts the sequence at zero for
-    each distinct piece; [Enumerate_pieces] assigns one dense number to each
-    piece. Piece identity follows first selected element occurrence, and local
-    order follows increasing element number.
-
-    Work is expected O(elements) with O(chunks + output + pieces) storage.
-    Restricted global selection uses a parallel count, stable sequential
-    chunk-prefix scan, and parallel disjoint fill. Piece lookup/rank planning
-    is stable sequential work with a specialized integer table or string table;
-    output materialization remains parallel. Results are exact for every
-    domain count. *)
-
 val blur_points :
   ?cancel:Cancel.t ->
   ?grain:int ->
@@ -398,8 +364,7 @@ val interpolate : params -> unit -> (Geometry.t, Error.t) result
 (** Interpolate source attributes onto destination elements. The default
     driver uses destination integer [source_primitive] and float3 [source_uvw]
     attributes; [driver] also accepts corresponding CSR number/weight rows for
-    source points, vertices, or primitives. [driver] is mutually exclusive
-    with the two legacy driver-name arguments. Polygons use Houdini's
+    source points, vertices, or primitives. Polygons use Houdini's
     triangle, bilinear-quad, or polygon-fan parameterization; open and closed
     curves interpolate over their ordered segments. Numeric point/vertex
     fields are weighted, primitive/detail fields are constant, and integer or

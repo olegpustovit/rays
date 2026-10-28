@@ -10,35 +10,6 @@ let float3_attribute geometry owner name =
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
-let equal_geometry left right =
-  let lp = positions left and rp = positions right
-  and lt = Topology.View.view (Geometry.topology left)
-  and rt = Topology.View.view (Geometry.topology right) in
-  lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
-  && lt.point_count = rt.point_count
-  && lt.vertex_points = rt.vertex_points
-  && lt.primitive_offsets = rt.primitive_offsets
-  && Bytes.equal lt.primitive_kinds rt.primitive_kinds
-  && List.equal (fun left right ->
-       Attribute.owner left = Attribute.owner right
-       && String.equal (Attribute.name left) (Attribute.name right)
-       && String.equal (Attribute.kind_name left) (Attribute.kind_name right)
-       && equal_storage left right) (Geometry.attributes left)
-       (Geometry.attributes right)
-  && List.equal (fun left right ->
-       Group.owner left = Group.owner right
-       && String.equal (Group.name left) (Group.name right)
-       && Group.length left = Group.length right
-       && begin
-         let equal = ref true in
-         for element = 0 to Group.length left - 1 do
-           if Group.mem element left <> Group.mem element right then equal := false
-         done;
-         !equal
-       end
-       && Group.ordered_elements left = Group.ordered_elements right)
-       (Geometry.groups left) (Geometry.groups right)
-
 let check_outward_and_regular name radius geometry =
   let point = positions geometry and topology = Geometry.topology geometry in
   let edge_length = ref None in

@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let geometry_owned positions edges values =
   let positions = Array.of_list positions and edge_count = Array.length edges in
@@ -15,13 +14,13 @@ let geometry_owned positions edges values =
     vertex_points.(edge * 2) <- a; vertex_points.(edge * 2 + 1) <- b) edges;
   let topology = Topology.create_owned ~point_count ~vertex_points
       ~primitive_offsets:(Array.init (edge_count + 1) (fun edge -> edge * 2))
-      ~primitive_kinds:(Array.make edge_count Topology.Open_polyline) |> get_ok in
+      ~primitive_kinds:(Array.make edge_count Topology.Open_polyline) |> get in
   let attributes = match values with
     | None -> []
     | Some values -> [Attribute.create_owned ~owner:Attribute.Point ~name:"value"
-        (Attribute.Float values) |> get_ok] in
+        (Attribute.Float values) |> get] in
   Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
-    ~topology ~attributes () |> get_ok
+    ~topology ~attributes () |> get
 
 let fixture () = geometry_owned
     [0.,0.,0.;1.,0.,0.;0.,2.,0.;2.,0.,0.;1.,3.,0.;10.,0.,0.;14.,0.,0.]
@@ -36,8 +35,8 @@ let values name geometry = match Geometry.find_attribute
 
 let with_parent parents geometry =
   let attribute = Attribute.create_owned ~owner:Attribute.Point ~name:"parent"
-      (Attribute.Int parents) |> get_ok in
-  Geometry.with_attribute attribute geometry |> get_ok
+      (Attribute.Int parents) |> get in
+  Geometry.with_attribute attribute geometry |> get
 
 let close_array left right = Array.length left = Array.length right
   && Array.for_all2 (fun a b -> abs_float (a -. b) < 1e-9) left right
@@ -49,10 +48,6 @@ let expect_code code = function
   | Error error -> fail (Printf.sprintf "expected %s, got %s: %s"
       code (Error.code error) (Error.to_string error))
   | Ok _ -> fail ("expected error " ^ code)
-
-let equal_geometry left right =
-  let lv = values "distance" left and rv = values "distance" right in
-  lv = rv && Geometry.point_count left = Geometry.point_count right
 
 let long_curve point_count =
   let positions = Array.init point_count (fun point ->
@@ -69,15 +64,15 @@ let curve_geometry positions vertex_points primitive_offsets primitive_kinds
   and y = Array.map (fun (_,y,_) -> y) positions
   and z = Array.map (fun (_,_,z) -> z) positions in
   let topology = Topology.create_owned ~point_count ~vertex_points
-      ~primitive_offsets ~primitive_kinds |> get_ok in
+      ~primitive_offsets ~primitive_kinds |> get in
   Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
-    ~topology ~attributes () |> get_ok
+    ~topology ~attributes () |> get
 
 let curve_fixture () =
   let point_values = Attribute.create_owned ~owner:Attribute.Point ~name:"value"
-      (Attribute.Float [|10.;2.;5.;20.;3.;7.|]) |> get_ok
+      (Attribute.Float [|10.;2.;5.;20.;3.;7.|]) |> get
   and vertex_values = Attribute.create_owned ~owner:Attribute.Vertex
-      ~name:"vertex_value" (Attribute.Float [|5.;2.;10.;20.;3.;7.|]) |> get_ok in
+      ~name:"vertex_value" (Attribute.Float [|5.;2.;10.;20.;3.;7.|]) |> get in
   curve_geometry
     [0.,0.,0.;1.,0.,0.;3.,0.,0.;0.,2.,0.;2.,2.,0.;5.,2.,0.]
     [|2;1;0;3;4;5|] [|0;3;6|]

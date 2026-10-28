@@ -47,22 +47,6 @@ let equal_attribute left right =
   && String.equal (Attribute.kind_name left) (Attribute.kind_name right)
   && equal_storage left right
 
-let equal_geometry left right =
-  let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.View.view (Geometry.topology left)
-  and right_topology = Topology.View.view (Geometry.topology right) in
-  left_positions.x = right_positions.x
-  && left_positions.y = right_positions.y
-  && left_positions.z = right_positions.z
-  && left_topology.point_count = right_topology.point_count
-  && left_topology.vertex_points = right_topology.vertex_points
-  && left_topology.primitive_offsets = right_topology.primitive_offsets
-  && Bytes.equal left_topology.primitive_kinds right_topology.primitive_kinds
-  && List.equal equal_attribute (Geometry.attributes left) (Geometry.attributes right)
-  && List.equal equal_group (Geometry.groups left) (Geometry.groups right)
-  && List.equal equal_edge_group (Geometry.edge_groups left)
-       (Geometry.edge_groups right)
-
 let with_group group geometry = Geometry.with_group group geometry |> Result.get_ok
 
 let run () =

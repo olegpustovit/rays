@@ -7,7 +7,6 @@ type selection =
 type planes = { x : float array; y : float array; z : float array; }
 val validate_selection :
   Rdk_core.Topology.t -> selection option -> (unit, string) result
-val selection_needs_index : selection option -> bool
 val point_selected :
   selection option -> Rdk_core.Topology_index.t option -> int -> bool
 val point_vector_attribute :

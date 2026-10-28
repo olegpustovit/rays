@@ -27,24 +27,7 @@ type torus_rotation_order =
   | Torus_zyx
 
 val torus :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
   ?connectivity:torus_connectivity ->
-  ?normals:torus_normals ->
-  ?orientation:torus_orientation ->
-  ?center:Rays_math.Vec3.t ->
-  ?rotation:Rays_math.Vec3.t ->
-  ?rotation_order:torus_rotation_order ->
-  ?uniform_scale:float ->
-  ?u_start:float ->
-  ?u_end:float ->
-  ?v_start:float ->
-  ?v_end:float ->
-  ?u_wrap:bool ->
-  ?v_wrap:bool ->
-  ?u_end_caps:bool ->
-  ?v_end_cap:bool ->
-  ?uv_attribute:string ->
   ?rows:int ->
   ?columns:int ->
   major_radius:float ->

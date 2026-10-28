@@ -217,7 +217,7 @@ module View = struct
         (validate value.positions value.topology output value.groups
            value.edge_groups)
 
-  let with_merged_attributes_and_groups_owned ?positions ~attributes ~groups
+  let with_merged_owned ?positions ~attributes ~groups
       value =
     if positions = None && Array.length attributes = 0
         && Array.length groups = 0 then Ok value

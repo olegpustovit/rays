@@ -88,14 +88,6 @@ let run () =
     fail "packed group difference";
   let geometry = Geometry.create ~positions ~topology ~groups:[selected] () |> get_ok in
   if Group.cardinality selected <> 2 then fail "packed group cardinality";
-  (match Attribute_ops.enumerate ~selection:selected ~owner:Attribute.Vertex
-      ~name:"bad" geometry with
-   | Error error when Error.code error = "invalid_enumeration" -> ()
-   | _ -> fail "enumerate accepted a mismatched group owner");
-  (match Attribute_ops.enumerate ~start:max_int ~step:1 ~owner:Attribute.Point
-      ~name:"overflow" geometry with
-   | Error error when Error.code error = "invalid_enumeration" -> ()
-   | _ -> fail "enumerate accepted an overflowing integer sequence");
   let quad_mesh = Rdk_rays.Rays_mesh.to_mesh geometry |> get_ok in
   if Mesh.index_count quad_mesh <> 6 then fail "quad bridge triangulation";
   let extruded = Poly_extrude.run ~distance:2. geometry |> get_ok in

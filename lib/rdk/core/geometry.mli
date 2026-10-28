@@ -61,7 +61,7 @@ module View : sig
       duplicate replacements win. Ownership of the array transfers to the
     call, and callers must not mutate or retain it after success. *)
 
-  val with_merged_attributes_and_groups_owned :
+  val with_merged_owned :
     ?positions:Packed.Float3.t ->
     attributes:Attribute.t array ->
     groups:Group.t array ->

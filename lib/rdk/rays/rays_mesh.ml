@@ -190,7 +190,7 @@ let rec to_mesh_raw_impl geometry =
               ~indices:view.vertex_points ?normals ?colors ?tex_coords positions
 
 let protected operation work =
-  Result.map_error (Error.of_string ~operation ~code:"mesh_conversion") (work ())
+  Result.map_error (Error.make ~operation ~code:"mesh_conversion") (work ())
 
 let to_trace_mesh geometry =
   protected "to_trace_mesh" (fun () ->

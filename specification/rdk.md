@@ -12,8 +12,8 @@ builders and kernels use locally owned mutation over packed storage.
 ```text
 sop / examples ──> rdk ──> rdk_boolean ──> rdk_mesh
                                   rdk_rays ──> rdk_mesh + rays
-                                  rdk_mesh ──> rdk_attrib / rdk_gen / rdk_curve
-                                  rdk_attrib / rdk_gen / rdk_curve
+                                  rdk_mesh ──> rdk_attrib / rdk_curve
+                                  rdk_attrib / rdk_curve
                                     ──> rdk_spatial / rdk_exact ──> rdk_core ──> rays_math
 rays ──> rays_math
 ```
@@ -25,8 +25,8 @@ stack. `Rdk.Color_by_height` accepts normalized RGBA float tuples;
 the procedural SOP converts public `Rays_math.Color.t` inputs at its boundary.
 `rdk_core` owns packed storage, topology, groups, and geometry; `rdk_exact`
 owns exact planar algorithms; `rdk_spatial` owns indices and intersection
-queries; `rdk_attrib` owns attribute and group operations. Generators and
-curve operations live in `rdk_gen` and `rdk_curve`, while mesh operations and
+queries; `rdk_attrib` owns attribute, group and point-generator operations. Curve
+operations live in `rdk_curve`, while mesh operations and
 Boolean stages live in `rdk_mesh` and `rdk_boolean`. `Rdk` retains the public
 module paths. `Ops` keeps public aliases for extracted mesh kernels:
 `Triangulate` owns the deterministic polygon-to-triangle plan and installs its
@@ -1183,7 +1183,7 @@ parallel path. Divided boxes compute all six face cardinalities before
 allocation and fill disjoint face-local position, normal, triangle, and winding
 ranges. Bounding spheres start from the selected AABB diagonal, then apply
 asymmetric padding as center/radius changes to the shared UV-sphere generator.
-That generator lives in `rdk_gen/Uv_sphere` with a direct `Rdk.Uv_sphere.run`
+That generator lives in the `Uv_sphere` test generator with a direct `Rdk.Uv_sphere.run`
 entry point; `Rdk.Uv_sphere` retains its typed-error boundary. It allocates
 exact packed position, normal, and topology arrays
 and fills points/triangles directly, with no per-triangle point tuples. Optional

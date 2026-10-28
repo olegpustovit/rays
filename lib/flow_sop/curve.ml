@@ -44,10 +44,10 @@ let polyline ~closed ~filled points =
       let count = Array.length points in
       match Rdk.Topology.polygons_owned ~point_count:count
           ~vertex_points:(Array.init count Fun.id) ~primitive_offsets:[|0; count|] with
-      | Error message -> Error (Rdk.Error.of_string ~operation:"polyline"
+      | Error message -> Error (Rdk.Error.make ~operation:"polyline"
           ~code:"invalid_parameter" message)
       | Ok topology ->
-          Result.map_error (Rdk.Error.of_string ~operation:"polyline" ~code:"invalid_parameter")
+          Result.map_error (Rdk.Error.make ~operation:"polyline" ~code:"invalid_parameter")
             (Rdk.Geometry.create ~positions:(Rdk.Geometry.positions line) ~topology ()))
 
 let parameter_key {points; closed; filled} =

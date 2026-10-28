@@ -27,15 +27,6 @@ let union_roots parent rank left right =
     end
   end
 
-let run_ranges ~grain count operation =
-  let range_count = (count + grain - 1) / grain in
-  if range_count > 0 then
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-      (fun range ->
-        let first = range * grain and last = min count ((range + 1) * grain) in
-        operation range first last);
-  range_count
-
 let selected_seam group index_view edge =
   let first = index_view.Topology_index.View.edge_offsets.(edge)
   and last = index_view.edge_offsets.(edge + 1) in
@@ -92,11 +83,11 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     Cancel.check_opt cancel;
     let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let invalid_position = Atomic.make false in
-    run_ranges ~grain point_count (fun _ first last ->
+    Support.run_ranges ~grain point_count (fun ~first ~last ->
       for point = first to last - 1 do
         if not (finite positions.x.(point) && finite positions.y.(point)
             && finite positions.z.(point)) then Atomic.set invalid_position true
-      done) |> ignore;
+      done);
     if Atomic.get invalid_position then
       fail "UV parameterization requires finite point positions";
 
@@ -345,7 +336,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     and cursor = Array.copy adjacency_offsets
     and corner_tangent = Array.make vertex_count 0. in
     let invalid_triangle = Atomic.make false in
-    run_ranges ~grain primitive_count (fun _ first last ->
+    Support.run_ranges ~grain primitive_count (fun ~first ~last ->
       for primitive = first to last - 1 do
         let first_corner = topology_view.primitive_offsets.(primitive) in
         for local = 0 to 2 do
@@ -374,7 +365,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
               || denominator <= 0. then Atomic.set invalid_triangle true
           else corner_tangent.(corner) <- cross /. denominator
         done
-      done) |> ignore;
+      done);
     if Atomic.get invalid_triangle then
       fail "UV parameterization rejects zero-area or numerically degenerate triangles";
     for primitive = 0 to primitive_count - 1 do
@@ -406,17 +397,17 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     let range_sum = Array.make range_count 0. in
     let parallel_dot left right =
       Array.fill range_sum 0 range_count 0.;
-      run_ranges ~grain variable_count (fun range first last ->
+      Support.run_ranges ~grain variable_count (fun ~first ~last -> let range = first / grain in
         let sum = ref 0. in
         for variable = first to last - 1 do
           sum := !sum +. left.(variable) *. right.(variable)
         done;
-        range_sum.(range) <- !sum) |> ignore;
+        range_sum.(range) <- !sum);
       let sum = ref 0. in
       Array.iter (fun value -> sum := !sum +. value) range_sum;
       !sum in
     let diagonal = Array.make variable_count 1. in
-    run_ranges ~grain variable_count (fun _ first last ->
+    Support.run_ranges ~grain variable_count (fun ~first ~last ->
       for variable = first to last - 1 do
         if Bytes.get boundary_degree variable = '\000' then begin
           let sum = ref 0. in
@@ -428,9 +419,9 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
             fail "UV parameterization encountered an isolated chart vertex";
           diagonal.(variable) <- !sum
         end
-      done) |> ignore;
+      done);
     let apply source output =
-      run_ranges ~grain variable_count (fun _ first last ->
+      Support.run_ranges ~grain variable_count (fun ~first ~last ->
         for variable = first to last - 1 do
           if Bytes.get boundary_degree variable <> '\000' then
             output.(variable) <- source.(variable)
@@ -444,7 +435,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
             done;
             output.(variable) <- !value
           end
-        done) |> ignore in
+        done) in
     let solve_coordinate fixed =
       let solution = Array.copy fixed
       and rhs = Array.make variable_count 0.
@@ -452,7 +443,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
       and direction = Array.make variable_count 0.
       and preconditioned = Array.make variable_count 0.
       and applied = Array.make variable_count 0. in
-      run_ranges ~grain variable_count (fun _ first last ->
+      Support.run_ranges ~grain variable_count (fun ~first ~last ->
         for variable = first to last - 1 do
           if Bytes.get boundary_degree variable <> '\000' then
             solution.(variable) <- 0.
@@ -466,15 +457,15 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
             done;
             rhs.(variable) <- !value
           end
-        done) |> ignore;
+        done);
       apply solution applied;
-      run_ranges ~grain variable_count (fun _ first last ->
+      Support.run_ranges ~grain variable_count (fun ~first ~last ->
         for variable = first to last - 1 do
           let value = rhs.(variable) -. applied.(variable) in
           residual.(variable) <- value;
           preconditioned.(variable) <- value /. diagonal.(variable);
           direction.(variable) <- preconditioned.(variable)
-        done) |> ignore;
+        done);
       let rhs_norm = sqrt (parallel_dot rhs rhs) in
       let threshold = tolerance *. max 1. rhs_norm in
       let residual_norm = ref (sqrt (parallel_dot residual residual)) in
@@ -487,7 +478,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
         if not (finite denominator) || denominator <= 0. then
           fail "UV parameterization solver lost positive definiteness";
         let alpha = !rz /. denominator in
-        run_ranges ~grain variable_count (fun _ first last ->
+        Support.run_ranges ~grain variable_count (fun ~first ~last ->
           for variable = first to last - 1 do
             solution.(variable) <- solution.(variable)
               +. alpha *. direction.(variable);
@@ -495,16 +486,16 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
               -. alpha *. applied.(variable);
             preconditioned.(variable) <- residual.(variable)
               /. diagonal.(variable)
-          done) |> ignore;
+          done);
         residual_norm := sqrt (parallel_dot residual residual);
         if !residual_norm > threshold then begin
           let next_rz = parallel_dot residual preconditioned in
           let beta = next_rz /. !rz in
-          run_ranges ~grain variable_count (fun _ first last ->
+          Support.run_ranges ~grain variable_count (fun ~first ~last ->
             for variable = first to last - 1 do
               direction.(variable) <- preconditioned.(variable)
                 +. beta *. direction.(variable)
-            done) |> ignore;
+            done);
           rz := next_rz
         end;
         incr iteration
@@ -538,12 +529,12 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     done;
     let result_u = Array.make vertex_count 0.
     and result_v = Array.make vertex_count 0. in
-    run_ranges ~grain vertex_count (fun _ first last ->
+    Support.run_ranges ~grain vertex_count (fun ~first ~last ->
       for corner = first to last - 1 do
         let variable = corner_to_variable.(corner) in
         result_u.(corner) <- solved_u.(variable);
         result_v.(corner) <- solved_v.(variable)
-      done) |> ignore;
+      done);
     let values = Packed.Float2.of_owned ~x:result_u ~y:result_v
         |> Result.get_ok in
     let attribute = Attribute.create_key_owned

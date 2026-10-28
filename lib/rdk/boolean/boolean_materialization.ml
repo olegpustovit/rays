@@ -343,7 +343,7 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
   | Error _ as failure -> failure
   | Ok surface ->
       let first_candidates, second_candidates =
-        Surface_index.View.overlapping_self_triangle_pairs_disjoint_topology
+        Surface_index.View.self_pairs_disjoint_topology
           ?cancel ~grain ~tolerance:0. surface in
       let candidate_count = Array.length first_candidates in
       let ranges = (candidate_count + grain - 1) / grain in
@@ -569,7 +569,7 @@ let verify_surface ?cancel ~grain ~require_closed
           | Ok () ->
               match Boolean_constraints.build ?cancel
                   ~resolve_left_self_intersections:true ~grain
-                  ~ignore_opposite_duplicate_self_pairs:allow_opposite_duplicates
+                  ~skip_opposite_self_pairs:allow_opposite_duplicates
                   ~left:geometry ~right:(empty_geometry ()) () with
               | Error _ as failure -> failure
               | Ok constraints ->

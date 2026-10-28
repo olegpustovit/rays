@@ -537,7 +537,7 @@ let run ?cancel ?(grain = 16_384) ?group
     if not changed && positions = None && Array.length attributes = 0
         && output_mapping = None && !groups = [] then Ok geometry
     else begin
-      let output = Geometry.View.with_merged_attributes_and_groups_owned
+      let output = Geometry.View.with_merged_owned
           ?positions ~attributes:(Array.of_list (List.rev !generated))
           ~groups:(Array.of_list (List.rev !groups)) geometry
         |> function Ok output -> output | Error message -> fail message in

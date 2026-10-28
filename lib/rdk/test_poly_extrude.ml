@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let attribute_storage_equal left right =
   match Attribute.View.storage left, Attribute.View.storage right with
@@ -59,7 +58,7 @@ let geometry_equal left right =
          !equal) (Geometry.edge_groups left) (Geometry.edge_groups right)
 
 let add_attribute attribute geometry =
-  Geometry.with_attribute attribute geometry |> get_ok
+  Geometry.with_attribute attribute geometry |> get
 
 let group_cardinality owner name geometry =
   match Geometry.find_group ~owner name geometry with
@@ -79,12 +78,12 @@ let run () =
       ~vertex_points:[|0; 1; 3; 0; 3; 2; 4; 5|]
       ~primitive_offsets:[|0; 3; 6; 8|]
       ~primitive_kinds:[|Topology.Polygon; Topology.Polygon;
-        Topology.Open_polyline|] |> get_ok in
+        Topology.Open_polyline|] |> get in
   let mixed = Geometry.create ~positions:mixed_positions ~topology:mixed_topology ()
-      |> get_ok in
+      |> get in
   let polygon_selection = Group.init ~owner:Group.Primitive ~name:"polygons"
       (Geometry.primitive_count mixed) (fun primitive -> primitive < 2) in
-  let mixed = Geometry.with_group polygon_selection mixed |> get_ok in
+  let mixed = Geometry.with_group polygon_selection mixed |> get in
   let mixed_output = Poly_extrude.run ~primitives:polygon_selection
       ~divide:Poly_extrude.Extrude_connected_components ~distance:1. mixed |> get_rdk in
   check (Geometry.primitive_count mixed_output = 9
@@ -106,9 +105,9 @@ let run () =
       ~z:[|0.; 0.; 0.; 0.; 1.|] in
   let non_manifold_topology = Topology.polygons_owned ~point_count:5
       ~vertex_points:[|0;1;2; 1;0;3; 0;1;4|]
-      ~primitive_offsets:[|0;3;6;9|] |> get_ok in
+      ~primitive_offsets:[|0;3;6;9|] |> get in
   let non_manifold = Geometry.create ~positions:non_manifold_positions
-      ~topology:non_manifold_topology () |> get_ok in
+      ~topology:non_manifold_topology () |> get in
   (match Poly_extrude.run ~divide:Poly_extrude.Extrude_connected_components
       ~distance:1. non_manifold with
    | Error error -> check (Error.code error = "invalid_geometry")

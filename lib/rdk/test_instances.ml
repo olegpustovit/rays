@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let equal_storage left right =
   match Attribute.View.storage left, Attribute.View.storage right with
@@ -59,7 +58,7 @@ let geometry_equal left right =
          !equal) (Geometry.edge_groups left) (Geometry.edge_groups right)
 
 let add_attribute attribute geometry =
-  Geometry.with_attribute attribute geometry |> get_ok
+  Geometry.with_attribute attribute geometry |> get
 
 let transforms count = Array.init count (fun instance ->
   let angle = float_of_int instance *. 0.17 in

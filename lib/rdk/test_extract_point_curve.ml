@@ -61,16 +61,6 @@ let expect code work message = match work () with
   | Error error -> check (Error.code error = code) message
   | Ok _ -> fail (message ^ ": unexpectedly accepted")
 
-let equal_geometry left right =
-  let lp = positions left and rp = positions right in
-  lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
-  && List.map (fun attribute -> Attribute.name attribute,
-      Attribute.owner attribute, Attribute.storage attribute)
-      (Geometry.attributes left)
-     = List.map (fun attribute -> Attribute.name attribute,
-         Attribute.owner attribute, Attribute.storage attribute)
-         (Geometry.attributes right)
-
 let large_fixture count =
   let points = count * 2 in
   let positions = Packed.Float3.View.of_owned_exn

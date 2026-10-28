@@ -61,14 +61,10 @@ let torus_frame orientation rotation_order (rotation : Rays_math.Vec3.t) =
       Rays_math.Mat4.transform_direction matrix pole,
       Rays_math.Mat4.transform_direction matrix tangent) oriented
 
-let torus ?cancel ?(grain = 16_384) ?(connectivity = Torus_triangles)
-    ?normals ?(orientation = Torus_y) ?(center = Rays_math.Vec3.zero)
-    ?(rotation = Rays_math.Vec3.zero) ?(rotation_order = Torus_xyz)
-    ?(uniform_scale = 1.) ?(u_start = 0.) ?(u_end = 2. *. Float.pi)
-    ?(v_start = 0.) ?(v_end = 2. *. Float.pi) ?(u_wrap = true)
-    ?(v_wrap = true) ?(u_end_caps = false) ?(v_end_cap = false)
-    ?uv_attribute ?(rows = 48) ?(columns = 24) ~major_radius ~minor_radius () =
-  Error.guard ~operation:"torus" ~code:"invalid_parameter" @@ fun () ->
+let torus ?(connectivity = Torus_triangles)
+
+    ?(rows = 48) ?(columns = 24) ~major_radius ~minor_radius () =
+  let cancel = None in let center = (Rays_math.Vec3.zero) in let grain = (16_384) in let normals = None in let orientation = (Torus_y) in let rotation = (Rays_math.Vec3.zero) in let rotation_order = (Torus_xyz) in let u_end = (2. *. Float.pi) in let u_end_caps = (false) in let u_start = (0.) in let u_wrap = (true) in let uniform_scale = (1.) in let uv_attribute = None in let v_end = (2. *. Float.pi) in let v_end_cap = (false) in let v_start = (0.) in let v_wrap = (true) in Error.guard ~operation:"torus" ~code:"invalid_parameter" @@ fun () ->
   let point_mode = connectivity = Torus_points in
   let polygon_mode = match connectivity with
     | Torus_triangles | Torus_alternating_triangles | Torus_quads -> true

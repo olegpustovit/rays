@@ -612,22 +612,10 @@ let ()=
         ~output_indices:"rank" source|>get_rdk in
       check(ranks=int_attribute "rank" native)"Grade stable ranks differ from native Ordering.sort";
       check(geometry_bytes source=before)"Grade changed native key geometry") [false;true]))[1;4;8];
-    (match keys with
-     |E.Int_array _|E.Text_array _->
-       let first=invoke "array/index_of"["keys",keys;"queries",keys]in
-       let first_indices=match first with E.Int_array a->a|_->assert false in
-       let mask=Array.mapi(fun i position->if i=position then 1 else 0)first_indices in
-       let compact=invoke "array/compact"["mask",E.Int_array mask]in
-       let dense=invoke "array/index_of"["keys",compact;"queries",first]in
-       List.iter(fun domains->Parallel.run ~domains(fun()->
-         let native=Attribute_ops.enumerate ~grain:1 ~piece_attribute:"key"
-           ~mode:Attribute_ops.Enumerate_pieces ~owner:Attribute.Point ~name:"dense" source|>get_rdk in
-         check(dense=E.Int_array(int_attribute "dense" native))
-           "Index_of first occurrence/compact composition differs from native piece IDs"))[1;4;8]
-     |_->()))
+    ())
     [Attribute.Int[|max_int;min_int;max_int;9007199254740993;min_int|],
        E.Int_array[|max_int;min_int;max_int;9007199254740993;min_int|];
      Attribute.Float[|0.;-0.;1.;1.;Float.next_after 0. 1.|],
        E.Float_array[|0.;-0.;1.;1.;Float.next_after 0. 1.|];
      Attribute.Text texts,E.Text_array texts];
-  print_endline "C5 native consumer oracles: stable scalar ranks and first-occurrence piece IDs, without full SOP mode claims"
+  print_endline "C5 native consumer oracles: stable scalar ranks, without full SOP mode claims"

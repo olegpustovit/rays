@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let owner_count geometry = function
   | Attribute.Point -> Geometry.point_count geometry
@@ -14,12 +13,12 @@ let add_float owner name seed geometry =
   let count = owner_count geometry owner in
   let attribute = Attribute.create_owned ~name ~owner
       (Attribute.Float (Array.init count (fun index ->
-        seed +. float_of_int index))) |> get_ok in
-  Geometry.with_attribute attribute geometry |> get_ok
+        seed +. float_of_int index))) |> get in
+  Geometry.with_attribute attribute geometry |> get
 
 let add_storage owner name storage geometry =
-  let attribute = Attribute.create_owned ~name ~owner storage |> get_ok in
-  Geometry.with_attribute attribute geometry |> get_ok
+  let attribute = Attribute.create_owned ~name ~owner storage |> get in
+  Geometry.with_attribute attribute geometry |> get
 
 let has owner name geometry =
   Geometry.find_attribute ~owner name geometry <> None
@@ -47,7 +46,7 @@ let names geometry =
   |> List.map (fun value -> Attribute.owner value, Attribute.name value)
 
 let run () =
-  let applied = Attribute_pattern.compile "^bar score" |> get_ok in
+  let applied = Attribute_pattern.compile "^bar score" |> get in
   check (not (Attribute_pattern.apply ~selected:true applied "bar"))
     "pattern apply did not subtract an implicit selection";
   check (Attribute_pattern.apply ~selected:false applied "score")
@@ -258,19 +257,19 @@ let run () =
       |> add_storage Attribute.Detail "left_int" (Attribute.Int [|7|])
       |> add_storage Attribute.Detail "left_int_array"
            (Attribute.Int_array (Packed.Int_array.create_owned
-              ~offsets:[|0; 2|] ~values:[|2; 5|] |> get_ok))
+              ~offsets:[|0; 2|] ~values:[|2; 5|] |> get))
       |> add_storage Attribute.Detail "left_float_array"
            (Attribute.Float_array (Packed.Float_array.create_owned
-              ~offsets:[|0; 2|] ~values:[|2.5; 5.5|] |> get_ok))
+              ~offsets:[|0; 2|] ~values:[|2.5; 5.5|] |> get))
       |> add_storage Attribute.Detail "left_float2"
            (Attribute.Float2 (Packed.Float2.of_owned
-              ~x:[|2.|] ~y:[|3.|] |> get_ok))
+              ~x:[|2.|] ~y:[|3.|] |> get))
       |> add_storage Attribute.Detail "left_float3"
            (Attribute.Float3 (Packed.Float3.of_owned
-              ~x:[|2.|] ~y:[|3.|] ~z:[|4.|] |> get_ok))
+              ~x:[|2.|] ~y:[|3.|] ~z:[|4.|] |> get))
       |> add_storage Attribute.Detail "left_float4"
            (Attribute.Float4 (Packed.Float4.of_owned
-              ~x:[|2.|] ~y:[|3.|] ~z:[|4.|] ~w:[|5.|] |> get_ok))
+              ~x:[|2.|] ~y:[|3.|] ~z:[|4.|] ~w:[|5.|] |> get))
       |> add_storage Attribute.Detail "left_text" (Attribute.Text [|"payload"|])
   in
   let left_weight = attribute Attribute.Point "left_weight" swap_source
@@ -368,7 +367,7 @@ let run () =
          "Attribute Copy P did not share packed positions"
    | _ -> fail "Attribute Copy P emitted non-float3 storage");
   let alternate = Packed.Float3.of_owned ~x:[|9.; 8.|] ~y:[|7.; 6.|]
-      ~z:[|5.; 4.|] |> get_ok in
+      ~z:[|5.; 4.|] |> get in
   let with_rest = swap_source
       |> add_storage Attribute.Point "rest" (Attribute.Float3 alternate) in
   let position_swapped = Attribute_ops.swap ~rules:[{
@@ -469,10 +468,10 @@ let run () =
         ~name:(Printf.sprintf "%s_%05d"
           (if index land 1 = 0 then "temporary" else "keep") index)
         ~owner:Attribute.Detail (Attribute.Float [|float_of_int index|])
-      |> get_ok) in
+      |> get) in
   let dense = Geometry.create ~positions:(Geometry.positions dense_base)
       ~topology:(Geometry.topology dense_base)
-      ~attributes:(Array.to_list dense_attributes) () |> get_ok in
+      ~attributes:(Array.to_list dense_attributes) () |> get in
   let run domains = Parallel.run ~domains (fun () ->
       dense
       |> Attribute_ops.rename ~rules:[{

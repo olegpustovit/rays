@@ -934,11 +934,9 @@ let () =
       sqrt ((sq x +. sq y) +. sq z) -. (1. +. time)) in
     let reference = Flow_ir.Executor.force ~reference:true program ~live |> flow_ok in
     assert (reference = E.Float_array expected);
-    let dense = Iso_surface.extract_dense ~resolution:(24,24,24)
-        ~min:(Rays_math.Vec3.create (-2.1) (-2.) (-2.)) ~max:(Rays_math.Vec3.create 2. 2. 2.)
-        ~iso:0. ~field:(Iso_surface.Field.custom (fun p ->
-          sqrt ((sq p.(0) +. sq p.(1)) +. sq p.(2)) -. (1. +. time))) ()
-      |> get_ok |> geometry_bytes in
+    let dense = let cook_session = session () in
+      Fun.protect ~finally:(fun () -> Session.close cook_session) (fun () ->
+        geometry_bytes (cook cook_session ~domains:1 ~time (compiled lowered) |> geometry)) in
     List.iter (fun domains ->
       let actual = Parallel.run ~domains (fun () ->
         Flow_ir.Packed.force packed ~live |> flow_ok) in

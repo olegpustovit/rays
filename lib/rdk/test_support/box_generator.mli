@@ -15,11 +15,10 @@ type box_rotation_order =
   | Box_zyx
 
 val box :
-  ?cancel:Rdk_core.Cancel.t -> ?grain:int ->
+  ?grain:int ->
   ?connectivity:box_connectivity -> ?consolidate_points:bool ->
   ?normals:box_normals -> ?center:Rays_math.Vec3.t ->
-  ?rotation:Rays_math.Vec3.t -> ?rotation_order:box_rotation_order ->
-  ?uniform_scale:float -> ?x_divisions:int -> ?y_divisions:int ->
+  ?rotation:Rays_math.Vec3.t -> ?x_divisions:int -> ?y_divisions:int ->
   ?z_divisions:int -> ?uv_attribute:String.t -> ?face_groups:string ->
   size:Rays_math.Vec3.t -> unit ->
   (Rdk_core.Geometry.t, Rdk_core.Error.t) result

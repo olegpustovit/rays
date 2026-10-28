@@ -74,9 +74,9 @@ let grid_frame orientation rotation =
 
 let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
     ?(connectivity = Grid_triangles) ?(orientation = Grid_xz)
-    ?(center = Rays_math.Vec3.zero) ?width ?height ?(rotation = 0.) ?uv_attribute
+    ?uv_attribute
     ~columns ~rows ~size () =
-  Error.guard ~operation:"grid" ~code:"invalid_parameter" @@ fun () ->
+  let center = (Rays_math.Vec3.zero) in let height = None in let rotation = (0.) in let width = None in Error.guard ~operation:"grid" ~code:"invalid_parameter" @@ fun () ->
   let width = Option.value ~default:size width
   and height = Option.value ~default:size height in
   let minimum_columns, minimum_rows = match counts, connectivity with

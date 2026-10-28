@@ -2,10 +2,9 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let attribute owner name storage =
-  Attribute.create_owned ~owner ~name storage |> get_ok
+  Attribute.create_owned ~owner ~name storage |> get
 
 let edge_group_of_pairs topology name pairs =
   let index = Topology_index.create topology in
@@ -23,9 +22,9 @@ let geometry_owned positions vertex_points primitive_offsets =
   and y = Array.map (fun (_, y, _) -> y) positions
   and z = Array.map (fun (_, _, z) -> z) positions in
   let topology = Topology.polygons_owned ~point_count ~vertex_points
-      ~primitive_offsets |> get_ok in
+      ~primitive_offsets |> get in
   Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
-    ~topology () |> get_ok
+    ~topology () |> get
 
 let vertex_points geometry =
   (Topology.View.view (Geometry.topology geometry)).vertex_points
@@ -78,22 +77,6 @@ let equal_edge_group left right =
      done;
      !equal
 
-let equal_geometry left right =
-  let lp = Packed.Float3.View.view (Geometry.positions left)
-  and rp = Packed.Float3.View.view (Geometry.positions right)
-  and lt = Topology.View.view (Geometry.topology left)
-  and rt = Topology.View.view (Geometry.topology right) in
-  lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
-  && lt.point_count = rt.point_count
-  && lt.vertex_points = rt.vertex_points
-  && lt.primitive_offsets = rt.primitive_offsets
-  && Bytes.equal lt.primitive_kinds rt.primitive_kinds
-  && List.equal equal_attribute (Geometry.attributes left)
-       (Geometry.attributes right)
-  && List.equal equal_group (Geometry.groups left) (Geometry.groups right)
-  && List.equal equal_edge_group (Geometry.edge_groups left)
-       (Geometry.edge_groups right)
-
 let expect_code code = function
   | Error error when Error.code error = code -> ()
   | Error error -> fail (Printf.sprintf "expected %s, received %s: %s"
@@ -108,7 +91,7 @@ let decorated_patch () =
   let cusp = edge_group_of_pairs topology "cusp" [|0,2;2,3|]
   and diagonal = edge_group_of_pairs topology "diagonal" [|0,2|] in
   let marked = Group.ordered ~owner:Group.Point ~name:"marked"
-      ~length:4 [|2;0|] |> get_ok in
+      ~length:4 [|2;0|] |> get in
   Geometry.create ~positions:(Geometry.positions base) ~topology
     ~attributes:[
       attribute Attribute.Point "id" (Attribute.Int [|10;11;12;13|]);
@@ -123,7 +106,7 @@ let decorated_patch () =
           ~z:[|0.;0.;0.;0.;0.;0.|]));
       attribute Attribute.Primitive "material" (Attribute.Text [|"a";"b"|]);
       attribute Attribute.Detail "meta" (Attribute.Int [|42|]);
-    ] ~groups:[marked] ~edge_groups:[cusp;diagonal] () |> get_ok
+    ] ~groups:[marked] ~edge_groups:[cusp;diagonal] () |> get
 
 let disconnected_patches count =
   let points = count * 4 and vertices = count * 6 in
@@ -143,9 +126,9 @@ let disconnected_patches count =
   done;
   let topology = Topology.polygons_owned ~point_count:points ~vertex_points
       ~primitive_offsets:(Array.init (count * 2 + 1) (fun face -> face * 3))
-      |> get_ok in
+      |> get in
   let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
-  let geometry = Geometry.create ~positions ~topology () |> get_ok in
+  let geometry = Geometry.create ~positions ~topology () |> get in
   let index = Topology_index.create topology in
   let cusp = Edge_group.init ~grain:127 ~topology ~index ~name:"cusp"
       (fun edge ->

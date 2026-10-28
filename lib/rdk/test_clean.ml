@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let equal_storage left right =
   match Attribute.View.storage left, Attribute.View.storage right with
@@ -61,8 +60,8 @@ let geometry_equal left right =
 let make_geometry ~x ~y ~z ~vertex_points ~primitive_offsets ~primitive_kinds =
   let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.create_owned ~point_count:(Array.length x)
-      ~vertex_points ~primitive_offsets ~primitive_kinds |> get_ok in
-  Geometry.create ~positions ~topology () |> get_ok
+      ~vertex_points ~primitive_offsets ~primitive_kinds |> get in
+  Geometry.create ~positions ~topology () |> get
 
 let run () =
   let tolerance_source = make_geometry
@@ -92,8 +91,8 @@ let run () =
       ~primitive_kinds:[|Topology.Polygon; Topology.Polygon; Topology.Polygon;
         Topology.Polygon; Topology.Open_polyline|] in
   let primitive_id = Attribute.create_owned ~name:"primitive_id"
-      ~owner:Attribute.Primitive (Attribute.Int [|10;20;30;40;50|]) |> get_ok in
-  let overlap_source = Geometry.with_attribute primitive_id overlap_source |> get_ok in
+      ~owner:Attribute.Primitive (Attribute.Int [|10;20;30;40;50|]) |> get in
+  let overlap_source = Geometry.with_attribute primitive_id overlap_source |> get in
   let overlap_bytes = geometry_bytes overlap_source in
   let overlap_at domains policy = Parallel.run ~domains (fun () -> Clean.run ~grain:1
       ~remove_degenerate:false ~overlaps:policy overlap_source |> get_rdk) in
@@ -129,15 +128,15 @@ let run () =
       ~primitive_offsets:[|0;3|] ~primitive_kinds:[|Topology.Polygon|] in
   let attributes = [
     Attribute.create_owned ~name:"temp_point" ~owner:Attribute.Point
-      (Attribute.Int [|0;1;2|]) |> get_ok;
+      (Attribute.Int [|0;1;2|]) |> get;
     Attribute.create_owned ~name:"keep_vertex" ~owner:Attribute.Vertex
-      (Attribute.Int [|0;1;2|]) |> get_ok;
+      (Attribute.Int [|0;1;2|]) |> get;
     Attribute.create_owned ~name:"temp_vertex" ~owner:Attribute.Vertex
-      (Attribute.Float [|1.;2.;3.|]) |> get_ok;
+      (Attribute.Float [|1.;2.;3.|]) |> get;
     Attribute.create_owned ~name:"temp_primitive" ~owner:Attribute.Primitive
-      (Attribute.Int [|4|]) |> get_ok;
+      (Attribute.Int [|4|]) |> get;
     Attribute.create_owned ~name:"temp_detail" ~owner:Attribute.Detail
-      (Attribute.Text [|"drop"|]) |> get_ok;
+      (Attribute.Text [|"drop"|]) |> get;
   ] in
   let groups = [
     Group.init ~owner:Group.Point ~name:"drop_points" 3 (fun p -> p = 0);
@@ -145,7 +144,7 @@ let run () =
     Group.init ~owner:Group.Primitive ~name:"keep_faces" 1 (fun _ -> true);
   ] in
   let metadata_source = Geometry.create ~positions:(Geometry.positions metadata_source)
-      ~topology:(Geometry.topology metadata_source) ~attributes ~groups () |> get_ok in
+      ~topology:(Geometry.topology metadata_source) ~attributes ~groups () |> get in
   let cleaned_metadata = Clean.run ~remove_degenerate:false ~reverse_winding:true
       ~delete_unused_groups:true ~point_attributes:"temp*"
       ~vertex_attributes:"temp*" ~primitive_attributes:"temp*"
@@ -197,13 +196,13 @@ let run () =
   done;
   let dense_topology = Topology.create_owned
       ~point_count:(Geometry.point_count base) ~vertex_points
-      ~primitive_offsets:offsets ~primitive_kinds:kinds |> get_ok in
+      ~primitive_offsets:offsets ~primitive_kinds:kinds |> get in
   let dense_id = Attribute.create_owned ~name:"source_id"
       ~owner:Attribute.Primitive (Attribute.Int
         (Array.init (base_primitives * copies) (fun primitive -> primitive / copies)))
-      |> get_ok in
+      |> get in
   let dense = Geometry.create ~positions:(Geometry.positions base)
-      ~topology:dense_topology ~attributes:[dense_id] () |> get_ok in
+      ~topology:dense_topology ~attributes:[dense_id] () |> get in
   let run domains = Parallel.run ~domains (fun () ->
       Clean.run ~grain:257 ~remove_degenerate:false
         ~overlaps:Clean.Keep_first_overlap dense |> get_rdk) in

@@ -186,8 +186,7 @@ The RDK split currently puts packed identity, storage, topology, groups, and
 geometry in `rdk_core`; exact predicates, planar constraints, Delaunay, and
 Voronoi live in `rdk_exact`. Spatial and surface indices, proximity queries,
 and point clustering live in `rdk_spatial`. Attribute and group operations
-live in `rdk_attrib`; packed generators and isosurface extraction live in
-`rdk_gen`, while curve sampling and topology live in `rdk_curve`. These are
+live in `rdk_attrib`; point generators live there too, while curve sampling and topology live in `rdk_curve`. These are
 branches above the core/exact/spatial layers. Modeling operations are in
 `rdk_mesh`; Boolean stages are in `rdk_boolean`.
 `Rdk` keeps the public module paths stable, and
