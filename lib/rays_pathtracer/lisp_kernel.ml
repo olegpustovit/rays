@@ -95,9 +95,6 @@ type t = {
   mutable fns : (string * E.fn) list;
   values : (string * (Flow.Ty.t * E.value)) list;
   pixels : E.value;
-  instanced : bool;
-  motion : bool;
-  curves : [ `Loop | `Native ] option;
   mutable kernels : (string * kernel) list;
 }
 
@@ -122,7 +119,7 @@ let functions f ~preview =
 let compile f =
   let* fns = functions f ~preview:false in
   Ok { facts = f; fns; values = List.map (fun (name, ty) -> name, (ty, placeholder ty)) (uniforms @ tables);
-       pixels = E.Int_array [| 0 |]; instanced = f.instanced; motion = f.motion; curves = f.curves; kernels = [] }
+       pixels = E.Int_array [| 0 |]; kernels = [] }
 
 let fn t name =
   let* () = if List.mem_assoc name t.fns then Ok ()
@@ -151,7 +148,7 @@ let kernel t ~lease ~pipelines name =
         | Error d -> Error (name ^ ": " ^ Diagnostic.to_string d) in
       let* template = Option.to_result ~none:("path tracer kernel " ^ name ^ " has no device template")
           (Packed.compile_template residual (E.Residual.residual_view residual).term) in
-      let* msl = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_gpu.Emit.kernel ~fast:true ~instanced:t.instanced ~motion:t.motion ?curves:t.curves template) in
+      let* msl = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_gpu.Emit.kernel ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion ?curves:t.facts.curves template) in
       let* base = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_ir.Packed.Host.prepare ~fast:true template ~live:(Input.at_time 0.)) in
       let slots = Array.map (function
         | Flow_ir.Packed.Host.Value v ->

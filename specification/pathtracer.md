@@ -151,11 +151,14 @@ file-backed HDRIs (a baked `Rays.World` is the environment; see World path).
    pixel indices to one vec4 written into a tracer buffer; the tracing ones
    run over the pixels in 16 x 16 tiles of 8 x 4 SIMD groups (the films hold
    pixel p at `order[p]`), which keeps rays coherent like the handwritten
-   kernel's 16 x 16 threadgroups. Four shapes stay compiled (newest first).
+   kernel's 16 x 16 threadgroups. Four shapes stay compiled (newest first). A shape checks its
+   accumulation set (trace, geometry, resolve) when first rendered and its preview set on the first camera
+   move, each with `Flow.Workspace.check ~call_sites`: a declaration is typed only where a kernel calls it;
+   `test_lisp` checks the declarations whole (`Private.check_library`).
    Flow's RGBA8 converter (`Emit.image_rgba8_source`) packs the resolve into
    the output texture. `test_lisp` checks the device film against the CPU
-   walker (byte-identical at 16 x 12), the trace kernel's static shape and its
-   thread limit.
+   walker (byte-identical at 16 x 12; flat and instanced dome, World), the trace kernel's static shape (no
+   64-bit integer arithmetic in its loops, instanced included) and its thread limit.
 3. `render` polls the previous submission and returns if it remains busy.
    Once complete, it publishes the completed GPU texture behind the borrowed
    image's stable identity without a CPU transfer or Scene re-upload. It then

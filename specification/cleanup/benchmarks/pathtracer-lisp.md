@@ -128,3 +128,73 @@ pathtrace.metal (three runs each, load 20+). Of the Lisp side, `Flow.Workspace.c
 emission 15 ms, then the Metal compile of the geometry and trace pipelines about 0.5 s. A shape change (light
 count, World on/off, material classes) compiles again; four shapes stay cached per tracer. Next: check the
 declarations once per process and reuse them across shapes.
+
+## G3: shattered_studio's film difference is floating-point chaos, not a semantic difference (2026-10-28)
+
+Method: `tools/render_workspace` built from feb9966b (the last commit with both kernels), patched to render the
+Lisp kernels, then `Private.use_metal` and pathtrace.metal, then the Lisp kernels again, in one process over one
+cooked fracture (so the cook's run-to-run noise is out), dumping each RGBA8 film. Per-pixel diffs, and
+pathtrace.metal instrumented to write one sample's hit, normals, NEE and shadow results beside a chosen pixel.
+
+| comparison (shattered_studio) | RMSE | channels differ |
+|---|---|---|
+| Lisp vs pathtrace.metal, 1600², 8 spp, in-process | 2.70e-3 | 2,635 of 7.68M (1,124 pixels, spread evenly) |
+| Lisp vs Lisp, same process | 0 | 0 |
+| pathtrace.metal vs pathtrace.metal with one product reassociated in the camera ray (`px * (tan_half * aspect)`, as pathtrace.rays writes it), 1600², 8 spp | 2.12e-3 | 1,522 (622 pixels) |
+| Lisp vs pathtrace.metal with Lisp's `normalize` (v * (1 / sqrt dot)) and that camera ray | 1.94e-3 | 1,399 |
+| pinhole, 1 spp, 1 bounce: Lisp vs pathtrace.metal | 9.4e-4 | 41 (4 pixels > 2 levels) |
+| Lisp vs pathtrace.metal, 400², 8 / 64 / 512 spp | 2.07e-3 / 1.03e-3 / 4.78e-4 | 170 / 816 / 2,406 of 480,000 |
+| pathtrace.metal vs its camera-reassociated self, 400², 512 spp (two processes) | 3.76e-4 | 1,350 |
+| Lisp vs Lisp, two processes (cook noise), 400², 512 spp | 6.0e-5 | 48 |
+
+Root cause: shattered_studio is a hundred-thousand-triangle fracture with gaps, glossy shards and a 0.33 lens; a
+one-ulp change to a ray direction moves a sample's hit across an edge or a gap, after which the two kernels
+trace different (equally valid) paths with the same PCG stream, and at 8 spp a firefly-clamped sample is
+1/8 of a pixel. pathtrace.metal against itself with one multiplication reassociated differs by 2.1e-3 — the
+same size as against the Lisp kernel. The Lisp port computes `normalize`, `dot` and `cross` as scalar IR
+(`v * (1 / sqrt (x*x + y*y + z*z))`, fma for cross) where MSL uses the `normalize`/`dot` builtins, and
+associates some products differently, so no ulp-exact port exists short of emitting the same builtins in
+the same order. Sample-level evidence: pixel (1273, 117), pinhole, 1 spp, 1 bounce: pathtrace.metal's camera
+ray hits prim 27,324 of instance 1 at t = 8.23 with an unoccluded NEE sample (cos 0.53, radiance 3.8);
+the Lisp kernel's sample there is black (its ray met a different surface). The differences fall as spp
+grows (no plateau, so no bias) and at 512 spp sit at the 8-bit quantization floor (most differing channels
+by one level). The gate's 1e-4 is below pathtrace.metal's own reproducibility on this scene at any
+affordable spp: it is met on pathtracer.rays (6.9e-5 at 64 spp) and must be read against the
+self-perturbation row above for shattered_studio.
+
+Semantic differences found while reading both kernels, none in this scene: (1) an instance's geometric normal
+is the normal matrix times the object normal (signed by the determinant for motion), where pathtrace.metal
+crossed the transformed corners; for a mirrored instance (negative determinant) pathtrace.metal's flip then
+pointed the shading normal away and replaced it with the geometric one (flat shading); pathtrace.rays keeps the
+interpolated normal, which is the intended behaviour. (2) Round-corner probes also meet analytic spheres. Rect
+lights stay invisible to camera rays without a World in both.
+
+## G2: compile time (2026-10-28)
+
+`Flow.Workspace.check ~call_sites` types a `defn` body only where it is called (it is checked again at each
+call site anyway); the tracer's declarations are checked whole once in `test_lisp`. A scene shape now checks
+its accumulation set (trace, geometry, resolve) when first rendered and its preview set on the first camera
+move. Check of the accumulation set: 96 ms (six kernels, full) -> 49 ms. Tracer creation to the first
+4-spp frame's flush, pathtracer.rays, M1, interleaved (load 6-22):
+
+| | warm Metal cache (6 runs) | cold Metal cache (3 runs) |
+|---|---|---|
+| pathtrace.metal (feb9966b) | 200-218 ms | 1,414-1,506 ms |
+| Lisp kernels before (feb9966b) | 505-578 ms | - |
+| Lisp kernels now | 275-333 ms | 518-550 ms |
+
+Cold, the Lisp kernels compile 2.7x faster than pathtrace.metal (its MSL is the larger compile). Warm, the
+Lisp front end still costs ~80 ms per process and shape: the check (49 ms), the trace kernel's template
+and emission (16 ms) and its library from source (~20 ms, the Metal cache hit included), where the cached
+pathtrace.metal pipeline costs nothing at the first frame. Not met warm.
+
+GPU (render_workspace --benchmark, 16 spp, round 5 band sums, interleaved, Lisp then pathtrace.metal):
+pathtracer.rays 492.5 vs 495.4 ms (medians, load 8.7-10.9; pairs 496.1/496.6, 494.6/494.7, 492.5/495.4,
+491.7/497.2, 492.1/497.2). shattered_studio at 800 x 800 (the cook is the same each run): 7,823.7 vs 8,661.1 ms (-9.7%; load 6.5-65; pairs 7857/8554, 7740/8750, 7824/8775, 7814/8644, 7878/8661).
+
+Instanced kernels: an analytic hit's triangle is now a select (`(if analytic 0 ...)`) instead of
+`(max ... 0)`, whose signed compare forced the instance's first-triangle-plus-prim sum into 64 bits; the
+"no 64-bit arithmetic in loops" gate in `test_lisp` covers the instanced dome scene too (thread limit 384).
+
+Bound materials stay bound: folding material values as literals would recompile the kernels on every
+material edit in the editor; the classes (metallic, emissive, round) already fold.
