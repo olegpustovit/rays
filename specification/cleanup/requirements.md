@@ -171,7 +171,7 @@ Findings: PL5 PL7–PL15 PL17 PL18 PL22 PL23 PL25 PL27 PL31 PL32 PL34 WN1 WN2 WN
 The editor is composed from libraries with honest boundaries. It does not host the Flow runtime or SOP glue, and it is not one 6k-line include chain.
 
 - [x] P5.S1: Move non-editor code out: `flow_native` (Drawing, Marks_scene, Workspace_*, Live_frame) and `rdk_rays` (Surface, Packed_pieces). Doc goes to `editor_document.Document_edit`, Gate to `input`, and the pure part of lisp_text next to Flow.Syntax (one tolerant lexer). All `copy_files` go away. Evidence: the actual implementations and callers use these owners, Flow_native has no UI dependency, and the copy/production-test-support guards pass. Parser/text-pane, probe/document/editor consistency, native draw snapshots and exact PXUI parity checks pass. The material carry fixture keeps cooked document and real gesture checks while avoiding redundant scene rebuilding and sleep-based simulation (6.1 s total; carry 1.56 s).
-- [ ] P5.S2: Break the `core_*` include chain into explicit modules over `Core_model.t`: Panes, Inspect, List_view, Text, Status, Reduce, Frame. Fold in Environment_*. Rename Core, Environment, Leader and Contexts.
+- [x] P5.S2: Break the `core_*` include chain into explicit modules over `Core_model.t`: Panes, Inspect, List_view, Text, Status, Reduce, Frame. Fold in Environment_*. Rename Core, Environment, Leader and Contexts. Evidence: no include chain; modules open what they use over the editor model, and the god modules are renamed (Editor_frame, Editor_loop, Editor_commands, Lowering) with Loop_model, Loop_source and Loop_view.
 - [x] P5.S3: Split `update_frame` per pane, `reduce` into per-intent reducers that return values, and `scope_pane.update` into gesture handlers. Use one `Panel_map` instead of active and parked pane copies. Evidence: update_frame and reduce are split under 300 lines into per-pane and per-intent functions, scope_pane's gestures live in Scope_frame handlers, and one Panel_map replaces the pane copies (UI26).
 - [x] P5.S4: pxui: split into Ui (engine), Ui_text and Ui_kit. One kit for shell, graph and inspector. Move Camera_controls into the viewport. Delete Kit and num_field. Evidence: see UI11 and UI9; Camera_controls moved into the viewport (UI12); Kit.number and the num_field duplicate are gone.
 - [ ] P5.S5: One input path: World drag, viewport grab and graph hints become `Ui.box`/`capture`, with key edges taken from the Router.
@@ -721,7 +721,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL31** (P4, low, vibe-code, effort S). Location at baseline: ogpu_metal/impl.ml. A diagnostics-only `live_handles` closure that can `failwith`, returned as a tuple element, so every caller writes `driver, _`. Action: Expose it as `Ogpu_metal.live_handles`. Evidence: 1040322d: Ogpu.Impl.create_driver returns only the driver; live_handles is its own function.
 
-- [ ] **PL32** (P4, low, perf-risk, effort S). Location at baseline: rays_execution.ml:51,59,175 · scene_execution.ml:8-9. Polymorphic `(=)`/`Hashtbl.hash` keys, and a magic string prefix `"gpu:vertices:"` used for routing. Action: Use typed variant keys.
+- [x] **PL32** (P4, low, perf-risk, effort S). Location at baseline: rays_execution.ml:51,59,175 · scene_execution.ml:8-9. Polymorphic `(=)`/`Hashtbl.hash` keys, and a magic string prefix `"gpu:vertices:"` used for routing. Action: Use typed variant keys. Evidence: 116678a0: Scene_execution.mesh_key = Host | Gpu_vertices replaces the 'gpu:vertices:' prefix check; cache and fingerprint strings are unchanged.
 
 - [x] **PL33** (P0, low, doc-rot, effort S). Location at baseline: lib/runtime/AGENTS.md:23,31,86,90 · lib/ogpu/AGENTS.md ('since G4'). Says rays and runtime submit through ogpu_metal_native, which the gate now forbids. A rule is stated twice. HTTP and DOM policy text remains. Action: Update both files.
 
@@ -809,7 +809,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP8** (P3, high, god-module, effort L). Location at baseline: flow_sop/lower.ml:166-1468 lower_checked. One ~1,300-line function with 6 optional flags and ~50 hard-coded kind strings. Action: Per-kind lowerings dispatched from the Operators table. Evidence: lower_checked is split under 300 lines, and Operators.lowering tags the natively lowered kinds; lower.ml's natives table is keyed by that tag, with the kind strings in operators.ml beside their builders.
 
-- [ ] **SP9** (P3, med, parallel-system, effort M). Location at baseline: Edit_graph.factory · Flow_sop.Catalog.descriptor · Flow.Defnode.t · Flow.Catalog.kind. Four shapes of node metadata. Each node has three names (qualified, key, operation), and 7 nodes have key ≠ operation. Action: One descriptor with `operation = key`; rename the 7.
+- [x] **SP9** (P3, med, parallel-system, effort M). Location at baseline: Edit_graph.factory · Flow_sop.Catalog.descriptor · Flow.Defnode.t · Flow.Catalog.kind. Four shapes of node metadata. Each node has three names (qualified, key, operation), and 7 nodes have key ≠ operation. Action: One descriptor with `operation = key`; rename the 7. Evidence: f12bbecc: node keys equal their operations; six defnode :operation overrides are removed, and attribute_noise_quaternion and boolean_fracture have their own operations. The manifest diff is only the renamed operations, and the Lisp goldens pass unchanged.
 
 - [ ] **SP10** (P1, med, vibe-code, effort S). Location at baseline: ppx_rays.ml:612,618,623 · support.ml:65-72 (+4 re-imports). The PPX hard-codes `Sop.Parameter`/`Sop.Edit_graph`, which forces a fake `module Sop = struct … end` shim. Action: Have the PPX emit `Param.*` and drop the shim.
 
@@ -995,7 +995,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI35** (P7, low, test-sprawl, effort S). Location at baseline: test/dune:100. Compiles lib/pxui_graph/test_pxui_graph.ml a second time. Action: Move the probe test into pxui_graph. Evidence: the pxui_graph probe test is compiled once.
 
-- [ ] **UI36** (P5, low, naming, effort S). Location at baseline: Core, Environment, Leader, Contexts, `core_*` prefix. Names that don't say what the module is. Action: Rename them while doing UI1 and UI14.
+- [x] **UI36** (P5, low, naming, effort S). Location at baseline: Core, Environment, Leader, Contexts, `core_*` prefix. Names that don't say what the module is. Action: Rename them while doing UI1 and UI14. Evidence: the core_* modules are editor_* (e2ee5828), and Core, Environment, Leader and Contexts are Editor_frame, Editor_loop, Editor_commands and Lowering.
 
 - [x] **UI37** (P7, low, api-bloat, effort S). Location at baseline: editor_document document/layers/objects/literal_edit (1,302 lines). No `.mli` and not private. Action: Add `.mli` files or mark them private. Evidence: document, document_edit, literal_edit, objects and layers have .mli files trimmed to what the repo uses.
 

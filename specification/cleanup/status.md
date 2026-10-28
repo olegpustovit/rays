@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **207 / 248 accepted (83.5%)**. This counts individual
+Finding coverage: **210 / 248 accepted (84.7%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- Skipped with reasons (latest round): PL34 (vertex_attributes=None is the live 2D/UI/Marks path, not legacy; it moves with P9), XC17 (the Flow reader parses dune %{…} as a map), XC26 (the helpers are one-line locals; sharing needs a new library across about 10 directories), FL17 (closure-free capture resolution is a separate design change). FL21 is partial: the global trace is now ?trace and stage_count is gone, while Packed.reference stays the oracle. P5.G2: pxui/ui.ml, Flow_edit, Scope_pane and Metal_raw are re-export facades of disjoint modules; eval.ml's Residual include and rdk_test_support/sop test shims still extend a module. digestif stays because nothing else provides SHA-256. rays_editor declares 18 libraries.
 
 - P6 skipped with reasons: RK7 (one Cancel.poll would add a non-inlined cross-module call to about 450 hot-loop checks and change cadence), XC24 (the doubling sites are packed int/float arrays; Dynarray is not a drop-in), XC22 (the catches wrap factory closures; validating first changes the sop factory contract), RK29 (the type re-exports are what let facades expose private types), RK11, RK19, RK20 and RK27 (large or exactness-sensitive moves). rdk is 79.1k lines.
 
