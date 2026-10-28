@@ -1112,7 +1112,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     let input=Sop.Node.Private.make_geometry ~operation:"core_fixture.groups" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
       (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry;instances=None}) in
-    let factory=Sop.Edit_graph.factory ~key:"fixture" ~label:"Fixture" ~category:["Test"] ~arity:0 (fun _->input) in
+    let factory=Sop.Edit_graph.factory ~key:"fixture" ~label:"Fixture" ~category:["Test"] ~arity:0 (fun _->Ok input) in
     let geometry_op={base with Flow.Op.name="sop/fixture";
       signature={pos=[];opt=[];rest=None;kw=[]};out_args=None;choices=[];check=(fun _->());
       body=(fun ~live:_ ~node _->node "sop/fixture" [])} in
@@ -1264,7 +1264,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
         (metadata_result "sop/rename_attr" ["pattern",E.Text pattern;"replacement",E.Text replacement;"owner",E.Text owner;"conflict",E.Text conflict]
           (fun()->Rdk.Attribute_ops.rename ~rules:[{rename_attribute_owner=selected;rename_attribute_pattern=pattern;
             rename_attribute_replacement=replacement;rename_attribute_conflict=policy}] metadata_geometry)))
-      ["skip",Rdk.Attribute_ops.Attribute_rename_skip;"error",Attribute_rename_error;"overwrite",Attribute_rename_overwrite])
+      ["skip",Rdk.Attribute_lifecycle.Attribute_rename_skip;"error",Attribute_rename_error;"overwrite",Attribute_rename_overwrite])
       ["N","Cd";"mask_*","new_*";"mask_?","new_?";"mask_[1-2]","new_[1-2]";
        "missing","new";"N","P";"a\\*","literal";"*?","?*";"N Cd","x";"*","x";"[","x"];
     Option.iter(fun selected->List.iter(fun(source,destination)->List.iter(fun(method_,method_enum)->
@@ -1272,7 +1272,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
         (metadata_result "sop/swap_attr" ["source",E.Text source;"destination",E.Text destination;"owner",E.Text owner;"method",E.Text method_]
           (fun()->Rdk.Attribute_ops.swap ~rules:[{swap_attribute_owner=selected;swap_attribute_source=source;
             swap_attribute_destination=destination;swap_attribute_method=method_enum}] metadata_geometry)))
-      ["swap",Rdk.Attribute_ops.Attribute_swap;"move",Attribute_move;"copy",Attribute_copy])
+      ["swap",Rdk.Attribute_lifecycle.Attribute_swap;"move",Attribute_move;"copy",Attribute_copy])
       ["N","Cd";"N","new";"missing","Cd";"missing","absent";"P","new";"N","P";
        "mask_*","copy_*";"N","N";"[","x"]) selected) owners;
   List.iter(fun reference->List.iter(fun inverse->List.iter(fun point->
@@ -1403,7 +1403,7 @@ let remap source target fields =
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry;instances=None}) in
   let factory key geometry=Sop.Edit_graph.factory ~key ~label:key ~category:["Test"] ~arity:0
-    (fun _->snapshot geometry) in
+    (fun _->Ok (snapshot geometry)) in
   let text=Printf.sprintf {|(workspace fixture_remap (graph g :context sop
     [(points : (array int) (array/int 0)) (vertices : (array int) (array/int 0))
      (primitives : (array int) (array/int 0)) (positions : text "target")

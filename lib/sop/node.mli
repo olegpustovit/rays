@@ -63,9 +63,9 @@ val relabel : string -> t -> t
 val parameterize :
   schema:'parameters Param.schema ->
   values:'parameters ->
-  rebuild:(label:string -> inputs:t list -> 'parameters -> t) ->
+  rebuild:(label:string -> inputs:t list -> 'parameters -> (t, string) result) ->
   t ->
-  t
+  (t, string) result
 
 (** Apply inspector writes to this node only. Cook-affecting changes rebuild
     its operator closure while preserving the logical node id; view/export
@@ -122,7 +122,8 @@ module Private : sig
 
   val parameterize_with_key :
     ?parameter_key:string -> schema:'parameters Param.schema -> values:'parameters ->
-    rebuild:(label:string -> inputs:t list -> 'parameters -> t) -> t -> t
+    rebuild:(label:string -> inputs:t list -> 'parameters -> (t, string) result) ->
+    t -> (t, string) result
   (** Attach typed parameter values while supplying their exact opaque key.
       Use when a stable binary key avoids serializing an already-typed payload. *)
 

@@ -49,8 +49,8 @@ let test_identical_facet_ownership () =
     "identical facets were not merged in the two-complex";
   let first, last = Complex.facet_member_range value 0 in
   check (last - first = 2) "identical facet lost an owner";
-  check (Complex.member_side value first = Complex.Left
-      && Complex.member_side value (first + 1) = Complex.Right
+  check (Complex.member_side value first = Constraints.Left
+      && Complex.member_side value (first + 1) = Constraints.Right
       && Complex.member_winding value first = 1
       && Complex.member_winding value (first + 1) = -1)
     "identical facet winding vector is wrong"

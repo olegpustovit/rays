@@ -1,6 +1,5 @@
 (** View conforming two-complex assembled from refined Boolean faces. *)
 
-type side = Boolean_constraints.side = Left | Right
 type t
 
 val build :
@@ -13,7 +12,7 @@ val approximate_vertex : t -> int -> float * float * float
 val facet_count : t -> int
 val facet_vertex : t -> int -> int -> int
 val facet_member_range : t -> int -> int * int
-val member_side : t -> int -> side
+val member_side : t -> int -> Boolean_constraints.side
 val member_face : t -> int -> int
 val member_triangle : t -> int -> int
 val member_winding : t -> int -> int

@@ -19,12 +19,12 @@ let blur ~grid =
         (Attribute.Float values) |> get_ok in
     Geometry.with_attribute attribute geometry |> get_ok in
   let uniform_blur = Attribute_ops.blur_points ~iterations:1
-      ~mode:(Attribute_ops.Laplacian 1.) ~pattern:"value"
+      ~mode:(Attribute_blur.Laplacian 1.) ~pattern:"value"
       (blur_curve [|0.; 10.; 0.|]) |> get_ok in
   if float_values "value" uniform_blur <> [|10.; 0.; 10.|] then
     fail "uniform Attribute Blur";
   let custom = Attribute_ops.blur_points ~iterations:2
-      ~mode:(Attribute_ops.Custom_steps { odd = 1.; even = 0. })
+      ~mode:(Attribute_blur.Custom_steps { odd = 1.; even = 0. })
       ~pattern:"value" (blur_curve [|0.; 10.; 0.|]) |> get_ok in
   if float_values "value" custom <> [|10.; 0.; 10.|] then
     fail "Attribute Blur custom odd/even steps";
@@ -39,7 +39,7 @@ let blur ~grid =
   let tuple_source = tuple_source |> Geometry.with_attribute uv |> get_ok
       |> Geometry.with_attribute color |> get_ok in
   let tuple_blur = Attribute_ops.blur_points
-      ~mode:(Attribute_ops.Laplacian 1.) ~pattern:"f_*" tuple_source |> get_ok in
+      ~mode:(Attribute_blur.Laplacian 1.) ~pattern:"f_*" tuple_source |> get_ok in
   (match Geometry.find_attribute ~owner:Attribute.Point "f_uv" tuple_blur,
       Geometry.find_attribute ~owner:Attribute.Point "f_color" tuple_blur with
    | Some uv, Some color ->
@@ -54,7 +54,7 @@ let blur ~grid =
        then fail "Attribute Blur tuple planes"
    | _ -> fail "Attribute Blur dropped tuple attributes");
   let smoothed_grid = Attribute_ops.blur_points ~iterations:1
-      ~mode:(Attribute_ops.Laplacian 0.25) ~pattern:"P" grid |> get_ok in
+      ~mode:(Attribute_blur.Laplacian 0.25) ~pattern:"P" grid |> get_ok in
   if Geometry.find_attribute ~owner:Attribute.Point "N" smoothed_grid <> None
       || Geometry.find_attribute ~owner:Attribute.Vertex "N" smoothed_grid <> None
   then fail "position Attribute Blur retained stale normals";

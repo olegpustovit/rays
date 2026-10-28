@@ -39,6 +39,10 @@ let node_slots_attribute = type_expression_attribute "sop.node_slots"
 let node_types_attribute = type_expression_attribute "sop.node_types"
 let node_keywords_attribute = type_expression_attribute "sop.node_keywords"
 let record_validate_attribute = type_expression_attribute "sop.validate"
+(* The operator returns [(Node.t, string) result]: it refuses by wiring (which
+   optional inputs are connected), which a parameter validator cannot see. *)
+let node_fallible_attribute =
+  Attribute.declare_flag "sop.node_fallible" Attribute.Context.type_declaration
 let located_lident ~loc value = { loc; txt = Longident.Lident value }
 
 let longident_of_list = function
@@ -404,25 +408,22 @@ let node_metadata declaration =
    constructed node, evaluating the operator once per build.
    Optional slots rebuild from the physical input list using the presence
    captured when the node was built, so sparse connections keep their slot. *)
-let build_expression ~loc ~validate ~facts ~rest type_name label inputs optional =
+let build_expression ~loc ~validate ~fallible ~facts ~rest type_name label inputs optional =
   let var name = evar ~loc name and pvar name = ppat_var ~loc { loc; txt = name } in
   let slot index = Printf.sprintf "input%d" index in
   let slots = List.init inputs Fun.id in
   let plural = if inputs = 1 then "" else "s" in
-  let fail message = apply ~loc (ident ~loc ["Stdlib"; "invalid_arg"])
-      [Nolabel, estring ~loc message] in
+  let fail message = pexp_construct ~loc (located_lident ~loc "Error")
+      (Some (estring ~loc message)) in
   let fun_ label pattern body = pexp_fun ~loc label None pattern body in
-  let operator_call = apply ~loc (var "operator")
+  let raw_call = apply ~loc (var "operator")
       ((Labelled "label", var "label") :: (Nolabel, var "parameters")
        :: List.map (fun index -> Nolabel,
            if Some index = rest && optional <> [] then
              apply ~loc (ident ~loc ["Stdlib"; "List"; "filter_map"])
                [Nolabel, ident ~loc ["Stdlib"; "Fun"; "id"]; Nolabel, var (slot index)]
            else var (slot index)) slots) in
-  let operator_call = match validate with
-    | None -> operator_call
-    | Some validate -> pexp_sequence ~loc
-        (apply ~loc validate [Nolabel, var "parameters"]) operator_call in
+  let operator_call = if fallible then var "operator_node" else raw_call in
   let operator_call = match facts with
     | None -> operator_call
     | Some expression ->
@@ -449,9 +450,21 @@ let build_expression ~loc ~validate ~facts ~rest type_name label inputs optional
     let body = apply ~loc (ident ~loc ["Sop"; "Node"; "parameterize"])
       [Labelled "schema",schema;Labelled "values",var "parameters";
        Labelled "rebuild",rebuild;Nolabel,node] in
-    if dynamic_schema then pexp_let ~loc Nonrecursive
+    let body = if dynamic_schema then pexp_let ~loc Nonrecursive
       [Ast_builder.Default.value_binding ~loc ~pat:(pvar "node") ~expr:operator_call] body
     else body in
+    let body = if not fallible then body else pexp_match ~loc raw_call
+      [ case ~lhs:(ppat_construct ~loc (located_lident ~loc "Ok") (Some (pvar "operator_node")))
+          ~guard:None ~rhs:body;
+        case ~lhs:(ppat_construct ~loc (located_lident ~loc "Error") (Some (pvar "message")))
+          ~guard:None ~rhs:(pexp_construct ~loc (located_lident ~loc "Error") (Some (var "message"))) ] in
+    match validate with
+    | None -> body
+    | Some validate -> pexp_match ~loc (apply ~loc validate [Nolabel, var "parameters"])
+        [ case ~lhs:(ppat_construct ~loc (located_lident ~loc "Ok") (Some (ppat_any ~loc)))
+            ~guard:None ~rhs:body;
+          case ~lhs:(ppat_construct ~loc (located_lident ~loc "Error") (Some (pvar "message")))
+            ~guard:None ~rhs:(pexp_construct ~loc (located_lident ~loc "Error") (Some (var "message"))) ] in
   (* Emit distinct branches so ordinary rebuild closures do not retain an
      unused schema callback. The operator is evaluated once in either branch. *)
   let make_body dynamic_schema =
@@ -500,15 +513,14 @@ let build_expression ~loc ~validate ~facts ~rest type_name label inputs optional
           [Nolabel, var (slot index)]) optional) in
       let lost = fail (Printf.sprintf
         "%s lost a connected input while rebuilding" label) in
+      let some e = pexp_construct ~loc (located_lident ~loc "Some") (Some e) in
       let take = pexp_match ~loc (var "rest")
           [ case ~lhs:(ppat_construct ~loc (located_lident ~loc "::")
                 (Some (ppat_tuple ~loc [pvar "input"; pvar "rest"])))
               ~guard:None
-              ~rhs:(pexp_tuple ~loc [pexp_construct ~loc
-                (located_lident ~loc "Some") (Some (var "input"));
-                var "rest"]);
+              ~rhs:(some (pexp_tuple ~loc [some (var "input"); var "rest"]));
             case ~lhs:(ppat_construct ~loc (located_lident ~loc "[]") None)
-              ~guard:None ~rhs:lost ] in
+              ~guard:None ~rhs:(pexp_construct ~loc (located_lident ~loc "None") None) ] in
       let fixed_inputs = elist ~loc (List.map (fun index -> var (slot index)) fixed_slots) in
       let rebuild_inputs = match rest with
         | None -> fixed_inputs
@@ -526,12 +538,15 @@ let build_expression ~loc ~validate ~facts ~rest type_name label inputs optional
       let decode = List.fold_right (fun index body ->
         let value = if is_optional index then
             pexp_ifthenelse ~loc (var (present index)) take
-              (Some (pexp_tuple ~loc [pexp_construct ~loc
-                (located_lident ~loc "None") None; var "rest"]))
+              (Some (some (pexp_tuple ~loc [pexp_construct ~loc
+                (located_lident ~loc "None") None; var "rest"])))
           else take in
-        pexp_let ~loc Nonrecursive [Ast_builder.Default.value_binding ~loc
-          ~pat:(ppat_tuple ~loc [pvar (slot index); pvar "rest"]) ~expr:value]
-          body) fixed_slots finish in
+        pexp_match ~loc value
+          [ case ~lhs:(ppat_construct ~loc (located_lident ~loc "Some")
+              (Some (ppat_tuple ~loc [pvar (slot index); pvar "rest"])))
+              ~guard:None ~rhs:body;
+            case ~lhs:(ppat_construct ~loc (located_lident ~loc "None") None)
+              ~guard:None ~rhs:lost ]) fixed_slots finish in
       let rebuild_fun = List.fold_right (fun index body ->
         fun_ Nolabel (pvar (present index)) body) optional
         (build_fun (pexp_let ~loc Nonrecursive
@@ -628,6 +643,7 @@ let generate_node_type declaration =
        (ppat_var ~loc { loc; txt = "build" }) factory);
    value_binding ~loc (declaration.ptype_name.txt ^ "_build")
     (build_expression ~loc ~validate:(Attribute.get record_validate_attribute declaration)
+       ~fallible:(Attribute.has_flag node_fallible_attribute declaration)
        ~facts:(Attribute.get node_facts_attribute declaration) ~rest
        declaration.ptype_name.txt label inputs optional)]
 
@@ -644,6 +660,7 @@ let attributes = List.map (fun attribute -> Attribute.T attribute)
 let node_attributes = List.map (fun attribute -> Attribute.T attribute)
     [node_key_attribute; node_operation_attribute; node_label_attribute; node_category_attribute; node_facts_attribute;
      node_inputs_attribute; node_optional_attribute; node_slots_attribute; node_types_attribute; node_keywords_attribute; node_rest_attribute]
+  @ [Attribute.T node_fallible_attribute]
   @ List.map (fun attribute -> Attribute.T attribute)
     [hard_min_attribute;
      hard_max_attribute; vec3_attribute]

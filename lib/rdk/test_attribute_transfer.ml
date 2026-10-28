@@ -98,11 +98,11 @@ let test_source_kernels () =
       |> add_float ~owner:Attribute.Point ~name:"weight" [|100.|]
       |> add_int ~owner:Attribute.Point ~name:"id" [|99|] in
   let sample kernel = Attribute_ops.transfer_points ~grain:1
-      ~mode:(Attribute_ops.Kernel { neighbors=3; radius=2.; kernel })
+      ~mode:(Attribute_transfer.Kernel { neighbors=3; radius=2.; kernel })
       ~source ~target () |> get_ok in
-  let links = sample Attribute_ops.Links
-  and renderman = sample Attribute_ops.RenderMan
-  and hart = sample Attribute_ops.Hart in
+  let links = sample Attribute_transfer.Links
+  and renderman = sample Attribute_transfer.RenderMan
+  and hart = sample Attribute_transfer.Hart in
   if not (near (float_values ~owner:Attribute.Point ~name:"weight" links).(0)
       (64. /. 11.))
       || not (near
@@ -116,8 +116,8 @@ let test_source_kernels () =
       || int_values ~owner:Attribute.Point ~name:"id" hart <> [|3|] then
     fail "kernel transfer changed stable closest discrete source";
   let fallback radius = Attribute_ops.transfer_points ~grain:1
-      ~mode:(Attribute_ops.Kernel {
-        neighbors=3; radius; kernel=Attribute_ops.Hart })
+      ~mode:(Attribute_transfer.Kernel {
+        neighbors=3; radius; kernel=Attribute_transfer.Hart })
       ~source ~target () |> get_ok in
   if float_values ~owner:Attribute.Point ~name:"weight" (fallback 0.) <> [|0.|]
       || float_values ~owner:Attribute.Point ~name:"weight" (fallback 0.1)
@@ -128,8 +128,8 @@ let test_source_kernels () =
       float_of_int (point mod 2001) /. 1000., 0., 0.)) in
   let run domains = Parallel.run ~domains (fun () ->
     Attribute_ops.transfer_points ~grain:257
-      ~mode:(Attribute_ops.Kernel {
-        neighbors=3; radius=2.; kernel=Attribute_ops.RenderMan })
+      ~mode:(Attribute_transfer.Kernel {
+        neighbors=3; radius=2.; kernel=Attribute_transfer.RenderMan })
       ~source ~target:large_target () |> get_ok) in
   let one = run 1 and four = run 4 in
   if float_values ~owner:Attribute.Point ~name:"weight" one
@@ -141,12 +141,12 @@ let test_source_kernels () =
     match Attribute_ops.transfer_points ~mode ~source ~target () with
     | Error error when Error.code error = "invalid_transfer" -> ()
     | _ -> fail "kernel transfer accepted invalid sample controls") [
-      Attribute_ops.Kernel {
-        neighbors=0; radius=1.; kernel=Attribute_ops.Links };
-      Attribute_ops.Kernel {
-        neighbors=1; radius=Float.nan; kernel=Attribute_ops.RenderMan };
-      Attribute_ops.Kernel {
-        neighbors=1; radius=max_float; kernel=Attribute_ops.Hart }]
+      Attribute_transfer.Kernel {
+        neighbors=0; radius=1.; kernel=Attribute_transfer.Links };
+      Attribute_transfer.Kernel {
+        neighbors=1; radius=Float.nan; kernel=Attribute_transfer.RenderMan };
+      Attribute_transfer.Kernel {
+        neighbors=1; radius=max_float; kernel=Attribute_transfer.Hart }]
 
 let test_blend_falloff () =
   let source = Line_geometry.points [|(0., 0., 0.)|]
@@ -160,25 +160,25 @@ let test_blend_falloff () =
       |> add_float3 ~owner:Attribute.Point ~name:"N"
            ~x:[|0.; 0.|] ~y:[|2.; 2.|] ~z:[|0.; 0.|] in
   let linear = Attribute_ops.transfer_points ~grain:1 ~max_distance:1.
-      ~blend_width:1. ~falloff:Attribute_ops.Linear ~source ~target () |> get_ok in
+      ~blend_width:1. ~falloff:Attribute_transfer.Linear ~source ~target () |> get_ok in
   if float_values ~owner:Attribute.Point ~name:"weight" linear <> [|6.; 2.|]
       || int_values ~owner:Attribute.Point ~name:"id" linear <> [|7; 3|] then
     fail "linear point-transfer blend band";
   let uniform = Attribute_ops.transfer_points ~grain:1 ~max_distance:1.
-      ~blend_width:1. ~falloff:(Attribute_ops.Uniform 0.25)
+      ~blend_width:1. ~falloff:(Attribute_transfer.Uniform 0.25)
       ~source ~target () |> get_ok in
   if float_values ~owner:Attribute.Point ~name:"weight" uniform <> [|4.; 2.|]
       || int_values ~owner:Attribute.Point ~name:"id" uniform <> [|3; 3|] then
     fail "uniform point-transfer blend/discrete threshold";
   let zero_influence = Attribute_ops.transfer_points ~grain:1 ~names:["N"]
-      ~max_distance:1. ~blend_width:1. ~falloff:(Attribute_ops.Uniform 0.)
+      ~max_distance:1. ~blend_width:1. ~falloff:(Attribute_transfer.Uniform 0.)
       ~source ~target () |> get_ok in
   let normal = float3_values ~owner:Attribute.Point ~name:"N" zero_influence in
   if normal.x <> [|0.; 0.|] || normal.y <> [|2.; 2.|]
       || normal.z <> [|0.; 0.|] then
     fail "zero transfer influence changed or normalized target N";
   (match Attribute_ops.transfer_points ~max_distance:1. ~blend_width:1.
-      ~falloff:(Attribute_ops.Uniform Float.nan) ~source ~target () with
+      ~falloff:(Attribute_transfer.Uniform Float.nan) ~source ~target () with
    | Error error when Error.code error = "invalid_transfer" -> ()
    | _ -> fail "point transfer accepted a non-finite uniform bias");
   (match Attribute_ops.transfer_points ~blend_width:1. ~source ~target () with
@@ -191,19 +191,19 @@ let test_multi_owner_exactness () =
     Attribute_ops.transfer_all ~grain:1 ~point_pattern:"point_*"
       ~primitive_pattern:"primitive_*" ~vertex_pattern:"vertex_*"
       ~detail_pattern:"detail_*" ~max_distance:1. ~blend_width:1.
-      ~falloff:Attribute_ops.Linear ~source ~target () |> get_ok) in
+      ~falloff:Attribute_transfer.Linear ~source ~target () |> get_ok) in
   let one = transfer 1 and four = transfer 4 in
   compare_transferred one four;
   let sequential =
     Attribute_ops.transfer_points ~grain:1 ~pattern:"point_*"
-      ~max_distance:1. ~blend_width:1. ~falloff:Attribute_ops.Linear
+      ~max_distance:1. ~blend_width:1. ~falloff:Attribute_transfer.Linear
       ~source ~target () |> get_ok
     |> fun target -> Attribute_ops.transfer_primitives ~grain:1
         ~pattern:"primitive_*" ~max_distance:1. ~blend_width:1.
-        ~falloff:Attribute_ops.Linear ~source ~target () |> get_ok
+        ~falloff:Attribute_transfer.Linear ~source ~target () |> get_ok
     |> fun target -> Attribute_ops.transfer_vertices ~grain:1
         ~pattern:"vertex_*" ~max_distance:1. ~blend_width:1.
-        ~falloff:Attribute_ops.Linear ~source ~target () |> get_ok
+        ~falloff:Attribute_transfer.Linear ~source ~target () |> get_ok
     |> fun target -> Attribute_ops.transfer_detail ~pattern:"detail_*"
         ~source ~target () |> get_ok in
   compare_transferred one sequential;
@@ -230,7 +230,7 @@ let test_empty_surface_selection () =
   let empty = Group.init ~owner:Group.Primitive ~name:"empty" 1
       (fun _ -> false) in
   let transferred = Attribute_ops.transfer_vertices ~grain:1
-      ~pattern:"vertex_*" ~unmatched:Attribute_ops.Default_value
+      ~pattern:"vertex_*" ~unmatched:Attribute_transfer.Default_value
       ~source_primitives:empty ~source ~target () |> get_ok in
   if float_values ~owner:Attribute.Vertex ~name:"vertex_value" transferred
       <> [|0.; 0.; 0.|] then
@@ -240,7 +240,7 @@ let test_source_vertex_surface_selection () =
   let source = two_triangle_source () in
   let target = Line_geometry.points [|(0.25, 0.25, 0.2); (10.25, 0.25, 0.2)|]
       |> add_float ~owner:Attribute.Point ~name:"sampled" [|9.; 9.|] in
-  let spec = { Attribute_ops.source_owner = Attribute.Vertex;
+  let spec = { Attribute_transfer.source_owner = Attribute.Vertex;
     source_name = "corner_value"; target_name = "sampled" } in
   let first_triangle = Group.init ~grain:1 ~owner:Group.Vertex
       ~name:"first_triangle" 6 (fun vertex -> vertex < 3) in
@@ -258,7 +258,7 @@ let test_source_vertex_surface_selection () =
     fail "restricted surface index lost the original primitive identity";
   let run domains = Parallel.run ~domains (fun () ->
     Attribute_ops.transfer_surface ~grain:1 ~max_distance:0.5
-      ~unmatched:Attribute_ops.Default_value ~source_vertices:first_triangle
+      ~unmatched:Attribute_transfer.Default_value ~source_vertices:first_triangle
       ~attributes:[spec] ~source ~target () |> get_ok) in
   let one = run 1 and four = run 4 in
   let one_values = float_values ~owner:Attribute.Point ~name:"sampled" one in
@@ -268,21 +268,21 @@ let test_source_vertex_surface_selection () =
   let one_corner = Group.init ~grain:1 ~owner:Group.Vertex ~name:"one_corner" 6
       (fun vertex -> vertex = 3) in
   let any = Attribute_ops.transfer_surface ~grain:1 ~max_distance:0.5
-      ~unmatched:Attribute_ops.Default_value ~source_vertices:one_corner
-      ~source_vertex_selection:Attribute_ops.Any_triangle_vertex
+      ~unmatched:Attribute_transfer.Default_value ~source_vertices:one_corner
+      ~source_vertex_selection:Surface_index.Any_triangle_vertex
       ~attributes:[spec] ~source ~target () |> get_ok in
   if float_values ~owner:Attribute.Point ~name:"sampled" any <> [|0.; 107.5|] then
     fail "source vertex any-corner transfer";
   let none = Attribute_ops.transfer_surface ~grain:1 ~max_distance:0.5
-      ~unmatched:Attribute_ops.Default_value ~source_vertices:one_corner
-      ~source_vertex_selection:Attribute_ops.All_triangle_vertices
+      ~unmatched:Attribute_transfer.Default_value ~source_vertices:one_corner
+      ~source_vertex_selection:Surface_index.All_triangle_vertices
       ~attributes:[spec] ~source ~target () |> get_ok in
   if float_values ~owner:Attribute.Point ~name:"sampled" none <> [|0.; 0.|] then
     fail "source vertex all-corners empty surface";
   let second_primitive = Group.init ~grain:1 ~owner:Group.Primitive
       ~name:"second_primitive" 2 (fun primitive -> primitive = 1) in
   let disjoint = Attribute_ops.transfer_surface ~grain:1 ~max_distance:0.5
-      ~unmatched:Attribute_ops.Default_value ~source_primitives:second_primitive
+      ~unmatched:Attribute_transfer.Default_value ~source_primitives:second_primitive
       ~source_vertices:first_triangle ~attributes:[spec] ~source ~target ()
       |> get_ok in
   if float_values ~owner:Attribute.Point ~name:"sampled" disjoint <> [|0.; 0.|] then

@@ -12,12 +12,15 @@ val node :
   schema:'parameters Param.schema ->
   values:'parameters ->
   Node.t list ->
-  (label:string -> inputs:Node.t list -> parameters:'parameters -> Node.t) ->
-  Node.t
+  (label:string -> inputs:Node.t list -> parameters:'parameters ->
+   (Node.t, string) result) ->
+  (Node.t, string) result
 (** Attach node-owned parameters to any existing SOP composition without
-    writing the recursive [Node.parameterize] reconstruction boilerplate. The
-    callback must build the unparameterized local operator from its supplied
-    label, current graph inputs, and immutable parameter record. *)
+    writing the recursive [Node.parameterize] reconstruction boilerplate;
+    values the schema refuses are an [Error]. The
+    callback builds the unparameterized local operator from its supplied
+    label, current graph inputs, and immutable parameter record, or refuses
+    them. *)
 
 val plain :
   ?label:string ->

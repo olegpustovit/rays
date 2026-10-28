@@ -1,29 +1,23 @@
 (** Exact treatment-aware polygon Boolean products. *)
 
-type operation = Boolean_solid.operation =
-  | Union | Intersection | Difference | Reverse_difference | Xor | Shatter
-type treatment = Boolean_solid.treatment = Solid | Surface
-type point_conflict = Boolean_payload.point_conflict = Reject | Promote_to_vertex
 type seam_points = Shared_seam_points | Split_seam_points
-type detriangulation = Boolean_materialization.detriangulation =
-  | Triangles | All_polygons | Unchanged_polygons
 type seam_output = Seam_curves | Coincident_patches
 
 type params = {
   cancel : Cancel.t option;
   grain : int;
-  operation : operation;
-  left_treatment : treatment;
-  right_treatment : treatment;
+  operation : Boolean_solid.operation;
+  left_treatment : Boolean_solid.treatment;
+  right_treatment : Boolean_solid.treatment;
   resolve_left_self_intersections : bool;
   resolve_right_self_intersections : bool;
-  point_conflict : point_conflict;
+  point_conflict : Boolean_payload.point_conflict;
   point_tolerance : float;
   tiny_seam_threshold : float;
   cleanup_max_batches : int;
   strict_cleanup : bool;
   seam_points : seam_points;
-  detriangulation : detriangulation;
+  detriangulation : Boolean_materialization.detriangulation;
   assume_flat : bool;
   require_closed : bool option;
   piece_attribute : string option;
@@ -82,7 +76,7 @@ val run : params -> Geometry.t -> (Geometry.t, Error.t) result
 val seam :
   ?cancel:Cancel.t -> ?grain:int ->
   ?output:seam_output ->
-  ?left_treatment:treatment -> ?right_treatment:treatment ->
+  ?left_treatment:Boolean_solid.treatment -> ?right_treatment:Boolean_solid.treatment ->
   ?resolve_left_self_intersections:bool ->
   ?resolve_right_self_intersections:bool ->
   ?left_self_group:string option -> ?between_group:string option ->

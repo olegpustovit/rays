@@ -4,9 +4,9 @@ open Rdk_test_support
 
 (* Rule records with the removed constructors' arguments. *)
 let fuse_attribute_rule ?weight_attribute ~pattern method_ =
-  { Fuse_reduce.pattern; method_; weight_attribute }
+  { Fuse_rules.pattern; method_; weight_attribute }
 let fuse_group_rule ~pattern method_ =
-  { Fuse_reduce.group_pattern = pattern; group_method = method_ }
+  { Fuse_rules.group_pattern = pattern; group_method = method_ }
 
 let near left right = abs_float (left -. right) <= 1e-12
 
@@ -117,7 +117,7 @@ let check_target_policies () =
       ~target ~using ~tolerance:1. ~fuse_points:false
       ~snapped_group:"snapped" ~snapped_destination_attribute:"destination"
       source |> get_ok in
-  let least = run Fuse_grid.Least_target_point and closest = run Fuse_grid.Closest_target_point in
+  let least = run Point_snap.Least_target_point and closest = run Point_snap.Closest_target_point in
   let lp = positions least and cp = positions closest in
   check (lp.x = [|0.;0.;1.;5.|]) "least-target Fuse positions";
   check (point_int least "destination" = [|0;0;1;-1|])
@@ -127,7 +127,7 @@ let check_target_policies () =
   check (point_int closest "destination" = [|0;1;1;-1|])
     "closest-target destination output";
   let fused = Fuse_grid.fuse ~selection:queries ~target_selection:targets ~target
-      ~using:Fuse_grid.Closest_target_point ~tolerance:1.
+      ~using:Point_snap.Closest_target_point ~tolerance:1.
       ~snapped_group:"snapped" ~snapped_destination_attribute:"destination"
       source |> get_ok in
   check (Geometry.point_count fused = 3 && (positions fused).x = [|0.;1.;5.|])
@@ -143,14 +143,14 @@ let check_specified_targets () =
   let targets = Group.init ~owner:Group.Point ~name:"targets" 3
       (fun point -> point <> 1) in
   let output = Fuse_grid.fuse ~target ~target_selection:targets
-      ~targeting:(Fuse_grid.Specified_points "target_point") ~fuse_points:false
+      ~targeting:(Point_snap.Specified_points "target_point") ~fuse_points:false
       ~snapped_destination_attribute:"destination" source |> get_ok in
   check ((positions output).x = [|3.;0.;2.;5.|])
     "specified-target Fuse positions";
   check (point_int output "destination" = [|2;0;-1;-1|])
     "specified-target validity/group filtering";
   expect_code "invalid_geometry" (Fuse_grid.fuse ~target
-      ~targeting:(Fuse_grid.Specified_points "missing") source)
+      ~targeting:(Point_snap.Specified_points "missing") source)
 
 let check_radius_and_match () =
   let source = Line_geometry.points [|(1.9,0.,0.); (0.9,0.,0.); (0.1,0.,0.)|]
@@ -160,16 +160,16 @@ let check_radius_and_match () =
       |> add_point_float "radius" [|0.;0.;0.5|]
       |> add_point_int "piece" [|1;2;3|] in
   let radius = Fuse_grid.fuse ~target ~tolerance:0. ~radius_attribute:"radius"
-      ~using:Fuse_grid.Closest_target_point ~fuse_points:false source |> get_ok in
+      ~using:Point_snap.Closest_target_point ~fuse_points:false source |> get_ok in
   check ((positions radius).x = [|3.;0.9;0.1|])
     "radius-expanded Fuse threshold";
   let equal = Fuse_grid.fuse ~target ~tolerance:2. ~match_attribute:"piece"
-      ~using:Fuse_grid.Closest_target_point ~fuse_points:false source |> get_ok in
+      ~using:Point_snap.Closest_target_point ~fuse_points:false source |> get_ok in
   check ((positions equal).x = [|3.;1.;0.|])
     "equal match-attribute Fuse filter";
   let unequal = Fuse_grid.fuse ~target ~tolerance:2. ~match_attribute:"piece"
-      ~match_condition:Fuse_grid.Unequal_attribute_values
-      ~using:Fuse_grid.Closest_target_point ~fuse_points:false source |> get_ok in
+      ~match_condition:Point_snap.Unequal_attribute_values
+      ~using:Point_snap.Closest_target_point ~fuse_points:false source |> get_ok in
   check ((positions unequal).x = [|1.;0.;1.|])
     "unequal match-attribute Fuse filter";
   let float_source = Line_geometry.points [|(0.,0.,0.)|]
@@ -200,7 +200,7 @@ let check_target_scale_and_validation () =
   let source = Line_geometry.points [|(center +. scale, center, center)|]
   and target = Line_geometry.points [|(center, center, center)|] in
   let output = Fuse_grid.fuse ~target ~tolerance:(2. *. scale)
-      ~using:Fuse_grid.Closest_target_point ~fuse_points:false source |> get_ok in
+      ~using:Point_snap.Closest_target_point ~fuse_points:false source |> get_ok in
   check ((positions output).x = [|center|])
     "large finite target Fuse normalization";
   let invalid_radius = Line_geometry.points [|(0.,0.,0.)|]
@@ -210,9 +210,9 @@ let check_target_scale_and_validation () =
   expect_code "invalid_geometry" (Fuse_grid.fuse ~target:valid_radius
       ~radius_attribute:"radius" invalid_radius);
   expect_code "invalid_geometry" (Fuse_grid.fuse ~target
-      ~match_condition:Fuse_grid.Unequal_attribute_values source);
+      ~match_condition:Point_snap.Unequal_attribute_values source);
   expect_code "invalid_geometry" (Fuse_grid.fuse ~target
-      ~targeting:(Fuse_grid.Specified_points "destination")
+      ~targeting:(Point_snap.Specified_points "destination")
       ~radius_attribute:"radius" source);
   let wrong_target_group = Group.init ~owner:Group.Point ~name:"wrong" 2
       (fun _ -> true) in
@@ -220,18 +220,18 @@ let check_target_scale_and_validation () =
       ~target_selection:wrong_target_group source);
   let nonfinite = Line_geometry.points [|(Float.infinity,0.,0.)|] in
   expect_code "invalid_geometry" (Fuse_grid.fuse ~target:nonfinite
-      ~using:Fuse_grid.Closest_target_point source);
+      ~using:Point_snap.Closest_target_point source);
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
   expect_code "cancelled" (Fuse_grid.fuse ~cancel:cancelled ~target
-      ~using:Fuse_grid.Closest_target_point source)
+      ~using:Point_snap.Closest_target_point source)
 
 let check_target_parallel_exact () =
   let target = Plane_generators.grid ~columns:420 ~rows:320 ~size:30. () |> get_ok in
   let source = target
       |> Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 0.013 (-0.017) 0.009)) in
   let run domains = Parallel.run ~domains (fun () ->
-    Fuse_grid.fuse ~grain:1024 ~target ~using:Fuse_grid.Closest_target_point
+    Fuse_grid.fuse ~grain:1024 ~target ~using:Point_snap.Closest_target_point
       ~tolerance:0.05 ~fuse_points:false ~snapped_group:"snapped"
       ~snapped_destination_attribute:"destination" source |> get_ok) in
   let one = run 1 and four = run 4 in
@@ -260,16 +260,16 @@ let check_target_parallel_exact () =
       (fun point -> point >= half) in
   let rules_run domains = Parallel.run ~domains (fun () -> Fuse_grid.fuse ~grain:257
       ~selection:queries ~target_selection:targets ~modify_target:true
-      ~using:Fuse_grid.Closest_target_point ~tolerance:0.05
+      ~using:Point_snap.Closest_target_point ~tolerance:0.05
       ~attribute_rules:[
         fuse_attribute_rule ~pattern:"rule_value"
-          ~weight_attribute:"rule_weight" Fuse_reduce.Attribute_weighted_average;
-        fuse_attribute_rule ~pattern:"rule_id" Fuse_reduce.Attribute_mode;
+          ~weight_attribute:"rule_weight" Fuse_rules.Attribute_weighted_average;
+        fuse_attribute_rule ~pattern:"rule_id" Fuse_rules.Attribute_mode;
         fuse_attribute_rule ~pattern:"rule_text"
           ~weight_attribute:"rule_weight"
-          Fuse_reduce.Attribute_concatenate_weight_order]
+          Fuse_rules.Attribute_concatenate_weight_order]
       ~group_rules:[fuse_group_rule ~pattern:"rule_group"
-        Fuse_reduce.Group_most_common] linked |> get_ok) in
+        Fuse_rules.Group_most_common] linked |> get_ok) in
   let rules_one = rules_run 1 and rules_four = rules_run 4 in
   let one_topology = Topology.View.view (Geometry.topology rules_one)
   and four_topology = Topology.View.view (Geometry.topology rules_four) in

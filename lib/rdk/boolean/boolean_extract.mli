@@ -17,7 +17,7 @@ val xor : expression
 type ancestry
 
 val geometry : ancestry -> Geometry.t
-val primitive_side : ancestry -> int -> Boolean_complex.side
+val primitive_side : ancestry -> int -> Boolean_constraints.side
 val primitive_face : ancestry -> int -> int
 val primitive_refined_triangle : ancestry -> int -> int
 val primitive_winding : ancestry -> int -> int
@@ -79,7 +79,7 @@ module View : sig
     ?barycentric_cache:barycentric_cache ->
     ?corner_payload:bool ->
     selection:bytes ->
-    side:Boolean_complex.side -> Boolean_complex.t -> Boolean_weiler.t ->
+    side:Boolean_constraints.side -> Boolean_complex.t -> Boolean_weiler.t ->
     Boolean_cells.t -> (ancestry, Error.t) result
   val reverse_ancestry :
     ?cancel:Cancel.t -> ancestry -> (ancestry, Error.t) result

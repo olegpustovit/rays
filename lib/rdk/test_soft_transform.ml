@@ -38,7 +38,7 @@ let test_radius_and_edge () =
   let seed = point_group "seed" 5 (fun point -> point = 0) in
   let matrix = Rays_math.Mat4.translation (Rays_math.Vec3.create 0. 2. 0.) in
   let radius = Transform_ops.soft_transform ~grain:1
-      ~selection:(Transform_ops.Selected_points seed) ~metric:Transform_ops.Soft_radius
+      ~selection:(Element_selection.Selected_points seed) ~metric:Transform_ops.Soft_radius
       ~falloff:Transform_ops.Soft_linear ~radius:2. ~falloff_attribute:"falloff"
       matrix source |> get_ok in
   let y = y_positions radius and weights = float_attribute "falloff" radius in
@@ -49,7 +49,7 @@ let test_radius_and_edge () =
       && close weights.(2) 0.95 && close weights.(3) 0.)
     "Soft Transform radius weights";
   let edge = Transform_ops.soft_transform ~grain:1
-      ~selection:(Transform_ops.Selected_points seed) ~metric:Transform_ops.Soft_edge
+      ~selection:(Element_selection.Selected_points seed) ~metric:Transform_ops.Soft_edge
       ~falloff:Transform_ops.Soft_linear ~radius:3.5 ~falloff_attribute:"falloff"
       matrix source |> get_ok in
   let y = y_positions edge and weights = float_attribute "falloff" edge in
@@ -58,12 +58,12 @@ let test_radius_and_edge () =
       && close weights.(3) (1. -. 3. /. 3.5) && close weights.(4) 0.)
     "Soft Transform edge connectivity/distance";
   let quadratic = Transform_ops.soft_transform ~grain:1
-      ~selection:(Transform_ops.Selected_points seed) ~metric:Transform_ops.Soft_radius
+      ~selection:(Element_selection.Selected_points seed) ~metric:Transform_ops.Soft_radius
       ~falloff:Transform_ops.Soft_quadratic ~radius:2. matrix source |> get_ok in
   check (close (y_positions quadratic).(1) 1.5)
     "Soft Transform quadratic falloff";
   let cubic = Transform_ops.soft_transform ~grain:1
-      ~selection:(Transform_ops.Selected_points seed) ~metric:Transform_ops.Soft_radius
+      ~selection:(Element_selection.Selected_points seed) ~metric:Transform_ops.Soft_radius
       ~falloff:Transform_ops.Soft_cubic ~radius:2. matrix source |> get_ok in
   check (close (y_positions cubic).(1) 1.)
     "Soft Transform cubic falloff"
@@ -75,7 +75,7 @@ let test_attribute () =
   let affected = point_group "affected" 5 (fun point -> point = 1 || point = 2) in
   let matrix = Rays_math.Mat4.translation (Rays_math.Vec3.create 0. 2. 0.) in
   let direct = Transform_ops.soft_transform ~grain:1
-      ~selection:(Transform_ops.Selected_points affected)
+      ~selection:(Element_selection.Selected_points affected)
       ~metric:(Transform_ops.Soft_attribute { attribute = "weight";
         apply_rolloff = false }) ~falloff_attribute:"used_weight"
       matrix source |> get_ok in
@@ -95,24 +95,24 @@ let test_attribute () =
   let seed = point_group "seed" (Geometry.point_count no_normals)
       (fun point -> point = 4) in
   let deformed = Transform_ops.soft_transform ~grain:1
-      ~selection:(Transform_ops.Selected_points seed) ~radius:2.
+      ~selection:(Element_selection.Selected_points seed) ~radius:2.
       ~recompute_normals:false matrix no_normals |> get_ok in
   check (Geometry.find_attribute ~owner:Attribute.Point "N" deformed = None)
     "Soft Transform stale-normal invalidation";
   let repaired = Transform_ops.soft_transform ~grain:1
-      ~selection:(Transform_ops.Selected_points seed) ~radius:2. matrix no_normals
+      ~selection:(Element_selection.Selected_points seed) ~radius:2. matrix no_normals
       |> get_ok in
   check (Geometry.find_attribute ~owner:Attribute.Point "N" repaired <> None)
     "Soft Transform normal recomputation";
   let empty = point_group "empty" 5 (fun _ -> false) in
   let unchanged = Transform_ops.soft_transform ~grain:1
-      ~selection:(Transform_ops.Selected_points empty) ~radius:2. matrix source |> get_ok in
+      ~selection:(Element_selection.Selected_points empty) ~radius:2. matrix source |> get_ok in
   check (unchanged == source) "Soft Transform empty influence sharing"
 
 let test_errors_and_parallel () =
   let source = line_with_free_point () in
   let seed = point_group "seed" 5 (fun point -> point = 0) in
-  (match Transform_ops.soft_transform ~radius:0. ~selection:(Transform_ops.Selected_points seed)
+  (match Transform_ops.soft_transform ~radius:0. ~selection:(Element_selection.Selected_points seed)
       Rays_math.Mat4.identity source with
    | Error error -> check (Error.code error = "invalid_transform")
        "Soft Transform zero radius code"
@@ -142,7 +142,7 @@ let test_errors_and_parallel () =
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
   (match Transform_ops.soft_transform ~cancel:cancelled
-      ~selection:(Transform_ops.Selected_points seed) (Rays_math.Mat4.translation Rays_math.Vec3.unit_y)
+      ~selection:(Element_selection.Selected_points seed) (Rays_math.Mat4.translation Rays_math.Vec3.unit_y)
       source with
    | Error error -> check (Error.code error = "cancelled")
        "Soft Transform cancellation code"
@@ -152,7 +152,7 @@ let test_errors_and_parallel () =
   let seed = point_group "seed" count (fun point ->
       point = (120 * width) + 200) in
   let run metric domains = Parallel.run ~domains (fun () ->
-      Transform_ops.soft_transform ~grain:257 ~selection:(Transform_ops.Selected_points seed)
+      Transform_ops.soft_transform ~grain:257 ~selection:(Element_selection.Selected_points seed)
         ~metric ~falloff:Transform_ops.Soft_cubic ~radius:4.
         ~falloff_attribute:"falloff" (Rays_math.Mat4.translation (Rays_math.Vec3.create 0. 1. 0.))
         dense |> get_ok) in

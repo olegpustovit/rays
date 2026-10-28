@@ -147,12 +147,12 @@ let run () =
       rename_attribute_owner = Some Attribute.Point;
       rename_attribute_pattern = "temporary_*";
       rename_attribute_replacement = "stage_*";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_error;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
     }; {
       rename_attribute_owner = None;
       rename_attribute_pattern = "stage_*";
       rename_attribute_replacement = "final_*";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_error;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
     }] source |> get_rdk in
   check (has Attribute.Point "final_point" renamed
       && has Attribute.Point "final_keep" renamed
@@ -173,13 +173,13 @@ let run () =
       rename_attribute_owner = None;
       rename_attribute_pattern = "missing_*";
       rename_attribute_replacement = "still_missing_*";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_error;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
     }] source |> get_rdk in
   let rename_same = Attribute_ops.rename ~rules:[{
       rename_attribute_owner = Some Attribute.Point;
       rename_attribute_pattern = "keep_point";
       rename_attribute_replacement = "keep_point";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_error;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
     }] source |> get_rdk in
   check (Geometry.data_id rename_none = source_id
       && Geometry.data_id rename_missing = source_id
@@ -190,7 +190,7 @@ let run () =
       rename_attribute_owner = Some Attribute.Point;
       rename_attribute_pattern = "temporary_point";
       rename_attribute_replacement = "target";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_skip;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_skip;
     }] source |> get_rdk in
   check (Geometry.data_id skipped = source_id
       && has Attribute.Point "temporary_point" skipped
@@ -200,7 +200,7 @@ let run () =
       rename_attribute_owner = Some Attribute.Point;
       rename_attribute_pattern = "temporary_point";
       rename_attribute_replacement = "target";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_error;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
     }] source with
    | Error error -> check (Error.code error = "invalid_attribute"
        && Geometry.data_id source = source_id)
@@ -210,7 +210,7 @@ let run () =
       rename_attribute_owner = Some Attribute.Point;
       rename_attribute_pattern = "temporary_point";
       rename_attribute_replacement = "target";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_overwrite;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_overwrite;
     }] source |> get_rdk in
   check (not (has Attribute.Point "temporary_point" overwritten)
       && Attribute.storage_id (attribute Attribute.Point "target" overwritten)
@@ -222,7 +222,7 @@ let run () =
       rename_attribute_owner = Some Attribute.Point;
       rename_attribute_pattern = "temporary_point";
       rename_attribute_replacement = "P";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_overwrite;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_overwrite;
     }] source with
    | Error error -> check (Error.code error = "invalid_attribute")
        "Attribute Rename canonical P diagnostic"
@@ -231,7 +231,7 @@ let run () =
       rename_attribute_owner = None;
       rename_attribute_pattern = "temporary_*";
       rename_attribute_replacement = "fixed";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_error;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
     }] source with
    | Error error -> check (Error.code error = "invalid_attribute")
        "Attribute Rename malformed rewrite diagnostic"
@@ -242,7 +242,7 @@ let run () =
       rename_attribute_owner = None;
       rename_attribute_pattern = "temporary_*";
       rename_attribute_replacement = "cancelled_*";
-      rename_attribute_conflict = Attribute_ops.Attribute_rename_error;
+      rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
     }] source with
    | Error error -> check (Error.code error = "cancelled")
        "Attribute Rename cancellation diagnostic"
@@ -278,7 +278,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "left_*";
       swap_attribute_destination = "right_*";
-      swap_attribute_method = Attribute_ops.Attribute_swap;
+      swap_attribute_method = Attribute_lifecycle.Attribute_swap;
     }] swap_source |> get_rdk in
   check (Attribute.storage_id (attribute Attribute.Point "left_weight" swapped)
       = Attribute.storage_id right_weight
@@ -294,15 +294,15 @@ let run () =
       { swap_attribute_owner = Attribute.Vertex;
         swap_attribute_source = "left_*";
         swap_attribute_destination = "copied_*";
-        swap_attribute_method = Attribute_ops.Attribute_copy };
+        swap_attribute_method = Attribute_lifecycle.Attribute_copy };
       { swap_attribute_owner = Attribute.Primitive;
         swap_attribute_source = "left_*";
         swap_attribute_destination = "copied_*";
-        swap_attribute_method = Attribute_ops.Attribute_copy };
+        swap_attribute_method = Attribute_lifecycle.Attribute_copy };
       { swap_attribute_owner = Attribute.Detail;
         swap_attribute_source = "left_*";
         swap_attribute_destination = "copied_*";
-        swap_attribute_method = Attribute_ops.Attribute_copy }]
+        swap_attribute_method = Attribute_lifecycle.Attribute_copy }]
       swap_source |> get_rdk in
   List.iter (fun suffix ->
     let source = attribute Attribute.Detail ("left_" ^ suffix) copied
@@ -321,7 +321,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "left_weight";
       swap_attribute_destination = "right_weight";
-      swap_attribute_method = Attribute_ops.Attribute_move;
+      swap_attribute_method = Attribute_lifecycle.Attribute_move;
     }] swap_source |> get_rdk in
   check (not (has Attribute.Point "left_weight" moved)
       && Attribute.storage_id (attribute Attribute.Point "right_weight" moved)
@@ -334,7 +334,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "left_weight";
       swap_attribute_destination = "new_weight";
-      swap_attribute_method = Attribute_ops.Attribute_swap;
+      swap_attribute_method = Attribute_lifecycle.Attribute_swap;
     }] swap_source |> get_rdk in
   check (has Attribute.Point "left_weight" swap_missing_destination
       && Attribute.storage_id
@@ -345,7 +345,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "new_weight";
       swap_attribute_destination = "left_weight";
-      swap_attribute_method = Attribute_ops.Attribute_swap;
+      swap_attribute_method = Attribute_lifecycle.Attribute_swap;
     }] swap_source |> get_rdk in
   check (has Attribute.Point "left_weight" swap_missing_source
       && Attribute.storage_id
@@ -357,7 +357,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "P";
       swap_attribute_destination = "rest";
-      swap_attribute_method = Attribute_ops.Attribute_copy;
+      swap_attribute_method = Attribute_lifecycle.Attribute_copy;
     }] swap_source |> get_rdk in
   let rest = attribute Attribute.Point "rest" position_copy in
   (match Attribute.View.storage rest with
@@ -374,7 +374,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "P";
       swap_attribute_destination = "rest";
-      swap_attribute_method = Attribute_ops.Attribute_swap;
+      swap_attribute_method = Attribute_lifecycle.Attribute_swap;
     }] with_rest |> get_rdk in
   check (Packed.Float3.get (Geometry.positions position_swapped) 0 = (9., 7., 5.))
     "Attribute Swap did not install rest into P";
@@ -387,7 +387,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "rest";
       swap_attribute_destination = "P";
-      swap_attribute_method = Attribute_ops.Attribute_move;
+      swap_attribute_method = Attribute_lifecycle.Attribute_move;
     }] with_rest |> get_rdk in
   check (not (has Attribute.Point "rest" position_moved)
       && Packed.Float3.get (Geometry.positions position_moved) 1 = (8., 6., 4.))
@@ -396,7 +396,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "P";
       swap_attribute_destination = "rest";
-      swap_attribute_method = Attribute_ops.Attribute_move;
+      swap_attribute_method = Attribute_lifecycle.Attribute_move;
     }] swap_source |> get_rdk in
   check (has Attribute.Point "rest" p_move_is_copy
       && Geometry.point_count p_move_is_copy = 2)
@@ -406,11 +406,11 @@ let run () =
       { swap_attribute_owner = Attribute.Point;
         swap_attribute_source = "left_weight";
         swap_attribute_destination = "stage_weight";
-        swap_attribute_method = Attribute_ops.Attribute_move };
+        swap_attribute_method = Attribute_lifecycle.Attribute_move };
       { swap_attribute_owner = Attribute.Point;
         swap_attribute_source = "stage_*";
         swap_attribute_destination = "final_*";
-        swap_attribute_method = Attribute_ops.Attribute_copy }]
+        swap_attribute_method = Attribute_lifecycle.Attribute_copy }]
       swap_source |> get_rdk in
   check (not (has Attribute.Point "left_weight" ordered)
       && has Attribute.Point "stage_weight" ordered
@@ -422,7 +422,7 @@ let run () =
       swap_attribute_owner = Attribute.Detail;
       swap_attribute_source = "absent";
       swap_attribute_destination = "also_absent";
-      swap_attribute_method = Attribute_ops.Attribute_copy;
+      swap_attribute_method = Attribute_lifecycle.Attribute_copy;
     }] swap_source |> get_rdk in
   check (Geometry.data_id swap_none = Geometry.data_id swap_source
       && Geometry.data_id swap_missing = Geometry.data_id swap_source)
@@ -431,7 +431,7 @@ let run () =
       swap_attribute_owner = Attribute.Point;
       swap_attribute_source = "left_*";
       swap_attribute_destination = "fixed";
-      swap_attribute_method = Attribute_ops.Attribute_copy;
+      swap_attribute_method = Attribute_lifecycle.Attribute_copy;
     }] swap_source with
    | Error error -> check (Error.code error = "invalid_attribute")
        "Attribute Swap malformed rewrite diagnostic"
@@ -440,11 +440,11 @@ let run () =
       { swap_attribute_owner = Attribute.Point;
         swap_attribute_source = "left_weight";
         swap_attribute_destination = "temporary_copy";
-        swap_attribute_method = Attribute_ops.Attribute_copy };
+        swap_attribute_method = Attribute_lifecycle.Attribute_copy };
       { swap_attribute_owner = Attribute.Point;
         swap_attribute_source = "left_weight";
         swap_attribute_destination = "P";
-        swap_attribute_method = Attribute_ops.Attribute_copy }]
+        swap_attribute_method = Attribute_lifecycle.Attribute_copy }]
       swap_source with
    | Error error -> check (Error.code error = "invalid_attribute"
          && not (has Attribute.Point "temporary_copy" swap_source))
@@ -456,7 +456,7 @@ let run () =
       swap_attribute_owner = Attribute.Detail;
       swap_attribute_source = "left_*";
       swap_attribute_destination = "cancelled_*";
-      swap_attribute_method = Attribute_ops.Attribute_copy;
+      swap_attribute_method = Attribute_lifecycle.Attribute_copy;
     }] swap_source with
    | Error error -> check (Error.code error = "cancelled")
        "Attribute Swap cancellation diagnostic"
@@ -478,7 +478,7 @@ let run () =
           rename_attribute_owner = Some Attribute.Detail;
           rename_attribute_pattern = "temporary_*";
           rename_attribute_replacement = "final_*";
-          rename_attribute_conflict = Attribute_ops.Attribute_rename_error;
+          rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
         }] |> get_rdk
       |> Attribute_ops.delete ~detail_pattern:"keep_*" |> get_rdk) in
   let one = run 1 and many = run 4 in
@@ -496,7 +496,7 @@ let run () =
         swap_attribute_owner = Attribute.Detail;
         swap_attribute_source = "temporary_*";
         swap_attribute_destination = "copy_*";
-        swap_attribute_method = Attribute_ops.Attribute_copy;
+        swap_attribute_method = Attribute_lifecycle.Attribute_copy;
       }] dense |> get_rdk) in
   let swap_one = run_swap 1 and swap_many = run_swap 4 in
   check (names swap_one = names swap_many

@@ -69,7 +69,7 @@ let run () =
       (Attribute.Float [|0.; 6.; 0.; 0.; 8.; 0.|]) |> get_string_ok in
   let curves = add_attribute heat curves in
   let smooth = Smooth.run ~iterations:1
-      ~mode:(Attribute_ops.Laplacian 1.) ~attributes:"P heat" curves |> get_ok in
+      ~mode:(Attribute_blur.Laplacian 1.) ~attributes:"P heat" curves |> get_ok in
   let p = positions smooth and heat = point_float "heat" smooth in
   check (p.y = [|3.; 0.; 3.; 4.; 0.; 4.|])
     "uniform Smooth did not average curve neighbors";
@@ -79,15 +79,15 @@ let run () =
   let constrained = Group.init ~owner:Group.Point ~name:"locked" 6
       (fun point -> point = 1 || point = 4) in
   let locked = Smooth.run ~constrained_points:constrained ~iterations:3
-      ~mode:(Attribute_ops.Laplacian 0.5) ~attributes:"P" curves |> get_ok in
+      ~mode:(Attribute_blur.Laplacian 0.5) ~attributes:"P" curves |> get_ok in
   check ((positions locked).y.(1) = 3. && (positions locked).y.(4) = 4.)
     "constrained points moved";
 
   let grid = perturbed_grid () in
-  let free = Smooth.run ~iterations:1 ~mode:(Attribute_ops.Laplacian 1.)
+  let free = Smooth.run ~iterations:1 ~mode:(Attribute_blur.Laplacian 1.)
       ~attributes:"P" grid |> get_ok in
   let pinned = Smooth.run ~boundary:Smooth.Smooth_unshared ~iterations:1
-      ~mode:(Attribute_ops.Laplacian 1.) ~attributes:"P" grid |> get_ok in
+      ~mode:(Attribute_blur.Laplacian 1.) ~attributes:"P" grid |> get_ok in
   let source = positions grid and free = positions free and pinned = positions pinned in
   check (pinned.y.(4) < source.y.(4)) "interior point was not smoothed";
   for point = 0 to 8 do
@@ -103,11 +103,11 @@ let run () =
 
   let with_normals = Normal_ops.run grid |> get_ok in
   let recomputed = Smooth.run ~boundary:Smooth.Smooth_unshared ~iterations:1
-      ~mode:(Attribute_ops.Laplacian 0.5) ~attributes:"P" with_normals |> get_ok in
+      ~mode:(Attribute_blur.Laplacian 0.5) ~attributes:"P" with_normals |> get_ok in
   check (Geometry.find_attribute ~owner:Attribute.Point "N" recomputed <> None)
     "Smooth did not recompute existing normals";
   let invalidated = Smooth.run ~recompute_normals:false ~iterations:1
-      ~mode:(Attribute_ops.Laplacian 0.5) ~attributes:"P" with_normals |> get_ok in
+      ~mode:(Attribute_blur.Laplacian 0.5) ~attributes:"P" with_normals |> get_ok in
   check (Geometry.find_attribute ~owner:Attribute.Point "N" invalidated = None
       && Geometry.find_attribute ~owner:Attribute.Vertex "N" invalidated = None)
     "Smooth retained stale normals";
@@ -117,7 +117,7 @@ let run () =
   let authored_n = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
       (Attribute.Float3 authored_n) |> get_string_ok in
   let smoothed_n = curves |> add_attribute authored_n
-      |> Smooth.run ~iterations:1 ~mode:(Attribute_ops.Laplacian 1.)
+      |> Smooth.run ~iterations:1 ~mode:(Attribute_blur.Laplacian 1.)
            ~attributes:"P N" |> get_ok in
   (match Geometry.find_attribute ~owner:Attribute.Point "N" smoothed_n with
    | Some attribute ->
@@ -147,7 +147,7 @@ let run () =
   let scale = add_attribute weight scale in
   let run domains = Parallel.run ~domains (fun () ->
     Smooth.run ~grain:1024 ~iterations:8
-      ~mode:(Attribute_ops.Custom_steps { odd = 0.43; even = -0.45 })
+      ~mode:(Attribute_blur.Custom_steps { odd = 0.43; even = -0.45 })
       ~boundary:Smooth.Smooth_unshared
       ~attributes:"P weight" scale |> get_ok) in
   let one = run 1 and many = run 4 in

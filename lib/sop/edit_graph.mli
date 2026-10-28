@@ -94,7 +94,7 @@ val factory :
   label:string ->
   category:string list ->
   arity:int ->
-  (Node.t list -> Node.t) ->
+  (Node.t list -> (Node.t, string) result) ->
   factory
 val factory_slots :
   ?operation:string ->
@@ -106,7 +106,7 @@ val factory_slots :
   label:string ->
   category:string list ->
   inputs:input_requirement list ->
-  (Node.t option list -> Node.t) ->
+  (Node.t option list -> (Node.t, string) result) ->
   factory
 val factory_key : factory -> string
 val factory_operation : factory -> string

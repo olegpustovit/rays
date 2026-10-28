@@ -63,7 +63,7 @@ let () =
   let node = Lisp_sop.node {|(-> (sop/box) (sop/null))|} in
   assert (List.for_all2 ( == ) (Sop.Node.inputs (Sop.Edit_graph.instantiate Field.factory [node; node] |> Result.get_ok)) [node; node]);
   let bad = Edit.factory ~key:"bad" ~label:"Bad" ~category:["Test"] ~arity:1
-      ~slots:["field"] ~keyword_inputs:["field"] ~input_types:["fn(vec3,)->float"] (fun _ -> node) in
+      ~slots:["field"] ~keyword_inputs:["field"] ~input_types:["fn(vec3,)->float"] (fun _ -> Ok node) in
   assert (Result.is_error (Flow_sop.Catalog.of_factories ~version:1 [bad]))
 
 let () =

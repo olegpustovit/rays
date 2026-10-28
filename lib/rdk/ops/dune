@@ -5,4 +5,4 @@
  (public_name rays.rdk.ops)
  (libraries rdk_core rdk_geom rays_math parallel)
  (flags (:standard -open Rdk_core -open Rdk_geom))
- (private_modules attribute_blur attribute_copy attribute_generate attribute_image attribute_interpolate attribute_transfer clean convex_hull crease curvature deform duplicate edge_ops edge_transport extract_point_curve facet fuse_cleanup fuse_rules fuse_target_rules group_path laplacian poly_bevel poly_cut poly_extrude remesh reverse_faces revolve smooth subdivide_refine subdivide_stitch subdivide triangulate2d uv_ops uv_parameterize))
+ (private_modules attribute_image attribute_interpolate clean convex_hull crease curvature duplicate edge_ops edge_transport extract_point_curve facet fuse_cleanup fuse_target_rules group_path laplacian poly_bevel poly_cut poly_extrude remesh reverse_faces revolve smooth subdivide_refine subdivide_stitch subdivide triangulate2d uv_ops uv_parameterize))

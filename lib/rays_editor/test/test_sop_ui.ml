@@ -22,9 +22,9 @@ type parameters = {
 } [@@deriving sop_params]
 
 let inspectable_node values =
-  Custom.node ~label:"Selected shape" ~operation:"selected-shape"
+  Result.get_ok @@ Custom.node ~label:"Selected shape" ~operation:"selected-shape"
     ~schema:parameters_schema ~values []
-    (fun ~label:_ ~inputs:_ ~parameters -> match parameters.mode with
+    (fun ~label:_ ~inputs:_ ~parameters -> Result.ok @@ match parameters.mode with
       | Cube -> Lisp_sop.node (Printf.sprintf {|(sop/box :normals "Auto" :connectivity "Triangles" :x_divisions %d)|} (parameters.count))
       | Sphere -> Lisp_sop.node (Printf.sprintf {|(sop/uv_sphere
    :radius_x_mode "Auto"

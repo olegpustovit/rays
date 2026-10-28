@@ -492,7 +492,6 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
         end
     |_->Error(error "Expected an image value.")
     with Diagnostic.Error d -> Error d
-      |Invalid_argument message|Failure message->Error(error message)
       |Not_found->Error(error "Image source is not bound to a compiled input."))in
   let result=match value with E.Deferred(_,id)->with_active request plan id run|_->run()in
   if display && Result.is_error result then (match value with

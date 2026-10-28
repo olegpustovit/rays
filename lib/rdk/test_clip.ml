@@ -120,7 +120,7 @@ let check_selection_isolation () =
   let selected = Group.init ~owner:Group.Primitive ~name:"selected" 2
       (fun primitive -> primitive = 0) in
   let output = Plane_clip.clip ~grain:1 ~snapping_tolerance:0.001
-      ~selection:(Transform_ops.Selected_primitives selected) ~clipped_group:"clipped"
+      ~selection:(Element_selection.Selected_primitives selected) ~clipped_group:"clipped"
       ~above_group:"above" ~clipped_edge_group:"clip_edges"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   let ids = int_attribute ~owner:Attribute.Primitive "primitive_id" output in
@@ -154,7 +154,7 @@ let check_selection_isolation () =
       (fun primitive -> primitive = 1) in
   let source_with_existing = Geometry.with_group existing source |> get_string_ok in
   let unioned = Plane_clip.clip ~grain:1 ~snapping_tolerance:0.001
-      ~selection:(Transform_ops.Selected_primitives selected)
+      ~selection:(Element_selection.Selected_primitives selected)
       ~replace_existing_groups:false ~clipped_group:"clipped"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source_with_existing |> get_ok in
   (match Geometry.find_group ~owner:Group.Primitive "clipped" unioned with
@@ -162,7 +162,7 @@ let check_selection_isolation () =
        "Clip Replace Existing=false did not union primitive membership"
    | None -> fail "unioned Clip primitive group missing");
   let split = Plane_clip.clip ~grain:1 ~keep:Plane_clip.All ~split_connectivity:true
-      ~snapping_tolerance:0.001 ~selection:(Transform_ops.Selected_primitives selected)
+      ~snapping_tolerance:0.001 ~selection:(Element_selection.Selected_primitives selected)
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   let split_ids = int_attribute ~owner:Attribute.Primitive "primitive_id" split
   and split_topology = Topology.View.view (Geometry.topology split) in
@@ -191,13 +191,13 @@ let check_typed_selection_promotion () =
       |> get_ok in
   let points = Group.init ~owner:Group.Point ~name:"shared_point" 4
       (fun point -> point = 1) in
-  let point_output = Plane_clip.clip ~selection:(Transform_ops.Selected_points points)
+  let point_output = Plane_clip.clip ~selection:(Element_selection.Selected_points points)
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (equal_geometry unrestricted point_output)
     "point-selected Clip did not promote to every incident primitive";
   let vertices = Group.init ~owner:Group.Vertex ~name:"first_corner" 6
       (fun vertex -> vertex = 0) in
-  check (clipped_count (Transform_ops.Selected_vertices vertices) source = 1)
+  check (clipped_count (Element_selection.Selected_vertices vertices) source = 1)
     "vertex-selected Clip did not promote to its incident primitive";
   let index = Topology_index.create (Geometry.topology source) in
   let shared_edge = Topology_index.find_edge_index index ~a:1 ~b:2
@@ -206,9 +206,9 @@ let check_typed_selection_promotion () =
       ~name:"shared" (fun edge -> edge = shared_edge)
   and boundary = Edge_group.init ~topology:(Geometry.topology source) ~index
       ~name:"boundary" (fun edge -> edge = boundary_edge) in
-  check (clipped_count (Transform_ops.Selected_edges shared) source = 2)
+  check (clipped_count (Element_selection.Selected_edges shared) source = 2)
     "shared-edge Clip did not promote both incident primitives";
-  check (clipped_count (Transform_ops.Selected_edges boundary) source = 1)
+  check (clipped_count (Element_selection.Selected_edges boundary) source = 1)
     "boundary-edge Clip did not promote its incident primitive";
   let foreign = Box_generator.box ~connectivity:Box_generator.Box_quads ~consolidate_points:true
       ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok in
@@ -216,7 +216,7 @@ let check_typed_selection_promotion () =
   let foreign_edges = Edge_group.init ~topology:(Geometry.topology foreign)
       ~index:foreign_index ~name:"foreign" (fun edge -> edge = 0) in
   expect_code "invalid_geometry" (Plane_clip.clip
-      ~selection:(Transform_ops.Selected_edges foreign_edges) ~origin:Rays_math.Vec3.zero
+      ~selection:(Element_selection.Selected_edges foreign_edges) ~origin:Rays_math.Vec3.zero
       ~normal:Rays_math.Vec3.unit_x source)
 
 let check_selected_free_points () =
@@ -224,7 +224,7 @@ let check_selected_free_points () =
       |> with_attribute "id" (Attribute.Int [|10; 20; 30|]) in
   let selected = Group.init ~owner:Group.Point ~name:"selected_free" 3
       (fun point -> point = 0) in
-  let output = Plane_clip.clip ~selection:(Transform_ops.Selected_points selected)
+  let output = Plane_clip.clip ~selection:(Element_selection.Selected_points selected)
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (Geometry.point_count output = 2
       && int_attribute ~owner:Attribute.Point "id" output = [|20; 30|])
@@ -241,7 +241,7 @@ let check_selected_caps_and_edge_output () =
       (fun primitive -> primitive < first_primitives) in
   let run domains = Parallel.run ~domains (fun () ->
       Plane_clip.clip ~grain:1 ~fill:true
-        ~selection:(Transform_ops.Selected_primitives selected) ~cap_group:"caps"
+        ~selection:(Element_selection.Selected_primitives selected) ~cap_group:"caps"
         ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_y source |> get_ok) in
   let one = run 1 and four = run 4 in
   check (equal_geometry one four)
@@ -263,7 +263,7 @@ let check_selected_caps_and_edge_output () =
       ~topology:(Rdk_test_support.Tb.freeze topology) () |> get_string_ok in
   let selected = Group.init ~owner:Group.Primitive ~name:"first" 2
       (fun primitive -> primitive = 0) in
-  let output = Plane_clip.clip ~selection:(Transform_ops.Selected_primitives selected)
+  let output = Plane_clip.clip ~selection:(Element_selection.Selected_primitives selected)
       ~clipped_edge_group:"plane_edges" ~origin:Rays_math.Vec3.zero
       ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   (match Geometry.find_edge_group "plane_edges" output with

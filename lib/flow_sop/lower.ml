@@ -154,7 +154,7 @@ let metadata_factory ~operation ~args sources =
       | _ -> fail "E_LOWER" ("No metadata lowering for " ^ operation))
     | [] -> invalid_arg "Metadata operations require geometry" in
   Edit.factory ~key:operation ~label:operation ~category:["Flow"; "Metadata"]
-    ~arity:(List.length sources) build
+    ~arity:(List.length sources) (fun inputs -> Ok (build inputs))
 
 let is_geometry_arrays kind = Operators.lowering kind = Some Operators.Geometry_arrays
 let geometry_arrays_key = function
@@ -337,7 +337,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
     let make_capture_factories aliases = List.mapi (fun index input ->
       let key = "lisp_capture_" ^ string_of_int index in
       let factory = Edit.factory ~key ~label:key ~category:["Flow"] ~arity:0
-        (fun _ -> Sop.Node.Private.make ~operation:key ~version:1
+        (fun _ -> Result.ok @@ Sop.Node.Private.make ~operation:key ~version:1
           ~parameters:(string_of_int (Sop.Node.id input)) ~cook_mode:Sop.Node.Generator
           ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
           (fun ~node_id:_ _ _ -> Result.map (fun payload ->
@@ -374,7 +374,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
       Attribute_kernel.sources (E.Fn fn) |> List.map (fun source ->
         let key = Printf.sprintf "lisp_capture_geometry_%d_%d" index source in
         let factory = Edit.factory ~key ~label:key ~category:["Flow"] ~arity:0
-          (fun _ -> Sop.Node.Private.make_geometry ~operation:key ~version:1
+          (fun _ -> Result.ok @@ Sop.Node.Private.make_geometry ~operation:key ~version:1
             ~parameters:(string_of_int (Sop.Node.id (List.nth inputs index)))
             ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static
             ~inputs:[||] (fun ~node_id:_ _ _ ->
@@ -407,19 +407,25 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
       List.filter (fun (name, _) -> List.exists (fun (input,_,_) -> input=name) g.inputs)
         (parameters @ functions))
       nested.graphs in
-    let invalid_parameter code message=invalid_arg
+    let invalid_parameter code message=Error
       (if code="E_PARAM" then message else code^": "^message) in
-    let validated = match E.static ~inputs:(List.tl overrides) {nested with graphs=validations} with
-      |Ok validated->validated
-      |Error d->invalid_parameter d.code d.message in
-    List.iteri (fun index (_, code, message) ->
-      match List.assoc ("lisp_validate_" ^ string_of_int index) validated.results with
-      | E.Bool true -> ()
-      | E.Bool false -> invalid_parameter code message
-      | _ -> invalid_arg "A Lisp node validation must return bool") definition.validations;
+    let refused = match E.static ~inputs:(List.tl overrides) {nested with graphs=validations} with
+      |Error d->invalid_parameter d.code d.message
+      |Ok validated->
+          let rec first index = function
+            | [] -> Ok ()
+            | (_, code, message) :: rest ->
+                (match List.assoc ("lisp_validate_" ^ string_of_int index) validated.results with
+                 | E.Bool true -> first (index + 1) rest
+                 | E.Bool false -> invalid_parameter code message
+                 | _ -> invalid_arg "A Lisp node validation must return bool") in
+          first 0 definition.validations in
+    match refused with
+    | Error _ as refused -> refused
+    | Ok () ->
     (* Header validation is a constructor contract; evaluated body errors
        belong to cooking. Strict compiler refusals remain construction errors. *)
-    try
+    Ok (try
       let body_overrides, kernel_bindings, aliases = if forwarded=[] then List.hd overrides, [], [] else
         let forwarded_evaluation = match E.static ~inputs:[List.hd overrides] {nested with graphs=[body]} with
           |Ok evaluated->evaluated|Error diagnostic->raise(Diagnostic.Error diagnostic) in
@@ -526,7 +532,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
       let exact=Option.fold ~none:true ~some:(fun (facts:Flow.Catalog.kernel_facts)->facts.exact)
         definition.kind.facts in
       let facts=Sop.Node.{cook_mode;elementwise=None;reads=["*"];writes=["*"];topology=Changed;exact} in
-      (fun _ -> Error diagnostic), dependencies, facts)
+      (fun _ -> Error diagnostic), dependencies, facts))
 module Build_cache = Lru.Make (String)
 (* 512 Lisp node body builds (the 16 lowerings of a 30-node workspace fit); every access under the lock. *)
 let build_cache = Build_cache.create 512
@@ -696,7 +702,7 @@ end) = struct
                 let key="lisp_host_capture_"^string_of_int(List.length !factories) in
                 (* Editable zero-input factories must return zero-input nodes:
                    compiling a borrowed source directly would disconnect it. *)
-                let factory=Edit.factory ~key ~label:key ~category:["Lisp"] ~arity:0(fun _->
+                let factory=Edit.factory ~key ~label:key ~category:["Lisp"] ~arity:0(fun _-> Result.ok @@
                   Sop.Node.Private.make ~operation:key ~version:1 ~parameters:(string_of_int id)
                     ~cook_mode:Sop.Node.Generator ~inputs:[||] ~dependencies:Sop.Context.Dependencies.static
                     (fun ~node_id:_ _context _inputs->
@@ -1315,7 +1321,7 @@ end) = struct
 let operation = node.kind in
                 let sources=deps node in
                 let factory=Edit.factory ~key:(geometry_arrays_key operation) ~label:(geometry_arrays_label operation) ~category:["Flow";"Topology"]
-                  ~arity:(List.length sources)(geometry_arrays_node ~operation ~args ~sources)in
+                  ~arity:(List.length sources)(fun inputs -> Ok (geometry_arrays_node ~operation ~args ~sources inputs))in
                 {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi(fun index source->index,source)sources});
   reg Metadata (fun (node : E.node) args cid ->
@@ -1327,12 +1333,12 @@ let operation = node.kind in
   reg Group_write (fun (node : E.node) args cid ->
                 let sources=deps node in
                 let factory=Edit.factory ~key:"flow.with_group" ~label:"Write group"
-                  ~category:["Flow"] ~arity:(List.length sources) (group_node ~args ~sources) in
+                  ~category:["Flow"] ~arity:(List.length sources) (Fun.compose Result.ok (group_node ~args ~sources)) in
                 {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi(fun i source->i,source)sources});
   reg Resource (fun (node : E.node) args cid ->
                 let factory=Edit.factory ~key:node.kind ~label:node.kind ~category:["Image"] ~arity:0
-                  (fun _->resource_image node.kind (Error(Diagnostic.error ~code:"E_IMAGE"
+                  (fun _->Result.ok @@ resource_image node.kind (Error(Diagnostic.error ~code:"E_IMAGE"
                     "This image needs an initial-domain image resolver.")))in
                 {cid;factory;slots=[];arity=0;changes=[];dynamic=[];zone=None;kernels=[]});
   reg Attribute_write (fun (node : E.node) args cid ->
@@ -1344,8 +1350,8 @@ let operation = node.kind in
                   | E.No_geo -> -1 :: deps node | _ -> deps node in
                 let factory = Edit.factory ~key:"flow.with_attr" ~label:"Write attribute"
                   ~category:["Flow"] ~arity:(List.length sources)
-                  (attribute_node ?selection:(List.assoc_opt "selection" args) ?default:(List.assoc_opt "default" args)
-                    ~owner ~kind ~name ~values ~sources) in
+                  (Fun.compose Result.ok (attribute_node ?selection:(List.assoc_opt "selection" args) ?default:(List.assoc_opt "default" args)
+                    ~owner ~kind ~name ~values ~sources)) in
                 {cid; factory; arity = List.length sources; changes = []; dynamic = []; zone = None; kernels = [];
                   slots = List.filter_map (fun (i, source) -> if source < 0 then None else Some (i, source))
                     (List.mapi (fun i source -> i, source) sources)});
@@ -1358,8 +1364,8 @@ let operation = node.kind in
                 let sources = geo_of args in
                 let factory = Edit.factory ~key:"flow.delete_attr" ~label:"Delete attribute"
                   ~category:["Flow"] ~arity:1
-                  (function [input] -> Attribute_metadata.delete ~owner ~pattern:name input
-                    | _ -> invalid_arg "Attribute deletion needs one geometry") in
+                  (function [input] -> Ok (Attribute_metadata.delete ~owner ~pattern:name input)
+                    | _ -> Error "Attribute deletion needs one geometry") in
                 {cid;factory;arity=1;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi (fun i source -> i,source) sources});
   reg Curve (fun (node : E.node) args cid ->
@@ -1393,7 +1399,7 @@ let dynamic = ref [] in
                           positions = z.positions} :: !zones;
                 let factory = Edit.factory_slots ~key:"zone" ~label:"Loop over geometry"
                   ~slots:["input"] ~category:["Copy"] ~inputs:[Edit.Rest]
-                  (fun nodes -> make_zone ~outer:[] z (Array.of_list (List.filter_map Fun.id nodes))) in
+                  (fun nodes -> Result.ok @@ make_zone ~outer:[] z (Array.of_list (List.filter_map Fun.id nodes))) in
                 {cid; factory; arity = List.length sources; changes = []; dynamic = []; kernels = [];
                  zone = Some z; slots = List.mapi (fun i s -> i, s) sources});
     ()

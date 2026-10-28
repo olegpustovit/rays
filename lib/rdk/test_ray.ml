@@ -139,17 +139,17 @@ let check_basic_projection () =
 let check_direction_policies () =
   let source = source_points [|(0., 0., 0.)|] in
   let collision = Mesh_merge.run [plane 1.; plane 3.; plane (-2.)] |> get_ok in
-  let project ?(mode = Ray.Ray_forward) ?(surface = Ray.Ray_first_surface) () =
+  let project ?(mode = Surface_index.Ray_forward) ?(surface = Surface_index.Ray_first_surface) () =
     ray ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y) ~direction_mode:mode
       ~surface_hit:surface ~source ~collision () |> get_ok |> positions in
   check (near (project ()).y.(0) 1.) "Ray first forward surface";
-  check (near (project ~surface:Ray.Ray_last_surface ()).y.(0) 3.)
+  check (near (project ~surface:Surface_index.Ray_last_surface ()).y.(0) 3.)
     "Ray last forward surface";
-  check (near (project ~mode:Ray.Ray_reverse ()).y.(0) (-2.))
+  check (near (project ~mode:Surface_index.Ray_reverse ()).y.(0) (-2.))
     "Ray reverse direction";
-  check (near (project ~mode:Ray.Ray_bidirectional_closest ()).y.(0) 1.)
+  check (near (project ~mode:Surface_index.Ray_bidirectional_closest ()).y.(0) 1.)
     "Ray bidirectional closest";
-  check (near (project ~mode:Ray.Ray_bidirectional_farthest ()).y.(0) (-2.))
+  check (near (project ~mode:Surface_index.Ray_bidirectional_farthest ()).y.(0) (-2.))
     "Ray bidirectional farthest";
   let limited = ray ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y)
       ~min_distance:1.5 ~max_distance:2.5 ~source ~collision () |> get_ok in
@@ -244,7 +244,7 @@ let check_selection_and_directions () =
   let source = source_points [|(-1.,2.,0.); (0.,2.,0.); (1.,2.,0.)|] in
   let selection = Group.init ~owner:Group.Point ~name:"middle" 3
       (fun point -> point = 1) in
-  let selected = ray ~selection:(Transform_ops.Selected_points selection)
+  let selected = ray ~selection:(Element_selection.Selected_points selection)
       ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source ~collision:(plane 0.) () |> get_ok |> positions in
   check (selected.y = [|2.; 0.; 2.|]) "Ray point restriction";
@@ -259,7 +259,7 @@ let check_selection_and_directions () =
   let normal_source = Plane_generators.grid ~columns:2 ~rows:2 ~size:1. () |> get_ok
       |> translated 2. in
   let normal_projected = ray ~direction:Ray.Ray_normal
-      ~direction_mode:Ray.Ray_reverse ~source:normal_source
+      ~direction_mode:Surface_index.Ray_reverse ~source:normal_source
       ~collision:(plane 0.) () |> get_ok in
   check (Array.for_all (fun y -> near y 0.) (positions normal_projected).y)
     "Ray authored/computed normal direction"

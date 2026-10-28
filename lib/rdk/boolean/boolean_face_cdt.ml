@@ -32,9 +32,9 @@ module View = struct
 end
 
 let face_triangle_point constraints side triangle local = match side with
-  | Boolean_face_arrangement.Left ->
+  | Boolean_constraints.Left ->
       Boolean_constraints.View.left_triangle_point constraints triangle local
-  | Boolean_face_arrangement.Right ->
+  | Boolean_constraints.Right ->
       Boolean_constraints.View.right_triangle_point constraints triangle local
 
 let face_triangle_implicit constraints side triangle local =
@@ -261,8 +261,8 @@ let build ?cancel ?workspace
         ~constraint_points () with
     | Error message -> error "invalid_constraints" (Printf.sprintf
           "%s (side=%s source_triangle=%d points=%d constraints=%d)" message
-          (match side with Boolean_face_arrangement.Left -> "left"
-           | Boolean_face_arrangement.Right -> "right")
+          (match side with Boolean_constraints.Left -> "left"
+           | Boolean_constraints.Right -> "right")
           triangle (Array.length points) constraint_count)
     | Ok triangulation ->
         let view = Planar_cdt.View.view triangulation in

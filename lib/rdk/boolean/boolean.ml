@@ -1,10 +1,4 @@
-type operation = Boolean_solid.operation =
-  | Union | Intersection | Difference | Reverse_difference | Xor | Shatter
-type treatment = Boolean_solid.treatment = Solid | Surface
-type point_conflict = Boolean_payload.point_conflict = Reject | Promote_to_vertex
 type seam_points = Shared_seam_points | Split_seam_points
-type detriangulation = Boolean_materialization.detriangulation =
-  | Triangles | All_polygons | Unchanged_polygons
 type seam_output = Seam_curves | Coincident_patches
 
 let error code message = Error (Error.make ~operation:"boolean" ~code message)
@@ -26,18 +20,18 @@ let has_corner_payload geometry =
 type params = {
   cancel : Cancel.t option;
   grain : int;
-  operation : operation;
-  left_treatment : treatment;
-  right_treatment : treatment;
+  operation : Boolean_solid.operation;
+  left_treatment : Boolean_solid.treatment;
+  right_treatment : Boolean_solid.treatment;
   resolve_left_self_intersections : bool;
   resolve_right_self_intersections : bool;
-  point_conflict : point_conflict;
+  point_conflict : Boolean_payload.point_conflict;
   point_tolerance : float;
   tiny_seam_threshold : float;
   cleanup_max_batches : int;
   strict_cleanup : bool;
   seam_points : seam_points;
-  detriangulation : detriangulation;
+  detriangulation : Boolean_materialization.detriangulation;
   assume_flat : bool;
   require_closed : bool option;
   piece_attribute : string option;
@@ -69,7 +63,7 @@ let run ({ cancel; grain; operation; left_treatment; right_treatment;
       error "invalid_parameter" "piece attribute name must not be empty"
     else let group_names = List.filter_map Fun.id
         [left_piece_group; overlap_piece_group; right_piece_group] in
-    if operation = Shatter
+    if operation = Boolean_solid.Shatter
         && List.exists (fun name -> String.trim name = "") group_names then
       error "invalid_parameter" "shatter group names must not be empty"
     else let ordered = List.sort String.compare group_names in
@@ -77,7 +71,7 @@ let run ({ cancel; grain; operation; left_treatment; right_treatment;
       | first :: (second :: _ as rest) ->
           String.equal first second || duplicate rest
       | [] | [_] -> false in
-    if operation = Shatter && duplicate ordered then
+    if operation = Boolean_solid.Shatter && duplicate ordered then
       error "invalid_parameter" "shatter group names must be distinct"
     else begin
     let left_kind = left_treatment
@@ -88,20 +82,20 @@ let run ({ cancel; grain; operation; left_treatment; right_treatment;
       | None -> left_kind = Boolean_solid.Solid
           && right_kind = Boolean_solid.Solid in
     let allow_opposite_duplicates =
-      (operation = Difference && left_kind = Boolean_solid.Solid
+      (operation = Boolean_solid.Difference && left_kind = Boolean_solid.Solid
          && right_kind = Boolean_solid.Surface)
-      || (operation = Reverse_difference && left_kind = Boolean_solid.Surface
+      || (operation = Boolean_solid.Reverse_difference && left_kind = Boolean_solid.Surface
           && right_kind = Boolean_solid.Solid)
-      || (operation = Xor && left_kind <> right_kind)
-      || operation = Shatter in
-    if operation = Shatter && (left_kind <> Boolean_solid.Solid
+      || (operation = Boolean_solid.Xor && left_kind <> right_kind)
+      || operation = Boolean_solid.Shatter in
+    if operation = Boolean_solid.Shatter && (left_kind <> Boolean_solid.Solid
         || right_kind <> Boolean_solid.Solid) then
       error "invalid_parameter" "shatter currently requires two solid operands"
     else bind (Boolean_solid.prepare ?cancel ~grain ~left ~right
         ~left_treatment:left_kind ~right_treatment:right_kind
         ~resolve_left_self_intersections ~resolve_right_self_intersections ())
       (fun prepared ->
-        let extracted = if operation = Shatter then
+        let extracted = if operation = Boolean_solid.Shatter then
             bind (Boolean_solid.shatter_with_ancestry ?cancel
                 ~require_closed:false ~defer_rounded_slivers:true
                 ~corner_payload prepared) (fun pieces ->
@@ -168,8 +162,8 @@ let run ({ cancel; grain; operation; left_treatment; right_treatment;
                                   (fun value -> value >= first_right) geometry))) in
                     let finish_cleanup cleanup =
                       let detriangulated = match detriangulation with
-                        | Triangles -> Ok cleanup
-                        | Unchanged_polygons | All_polygons ->
+                        | Boolean_materialization.Triangles -> Ok cleanup
+                        | Boolean_materialization.Unchanged_polygons | Boolean_materialization.All_polygons ->
                             Boolean_materialization.detriangulate ?cancel
                               ~grain ~assume_flat
                               ~mode:detriangulation
@@ -194,7 +188,7 @@ let run ({ cancel; grain; operation; left_treatment; right_treatment;
                             ~strict:strict_cleanup ancestry seams payload)
                           finish_cleanup) in
                     if tiny_seam_threshold = 0.
-                        && detriangulation = Triangles
+                        && detriangulation = Boolean_materialization.Triangles
                         && seam_points = Shared_seam_points then
                       bind (Boolean_materialization.verify_unchanged_extraction
                           ?cancel ~grain ~require_closed ~allow_opposite_duplicates
@@ -205,7 +199,7 @@ let run ({ cancel; grain; operation; left_treatment; right_treatment;
   end
 
 let seam ?cancel ?(grain = 16_384) ?(output = Seam_curves)
-    ?(left_treatment = Solid) ?(right_treatment = Solid)
+    ?(left_treatment = Boolean_solid.Solid) ?(right_treatment = Boolean_solid.Solid)
     ?(resolve_left_self_intersections = false)
     ?(resolve_right_self_intersections = false)
     ?(left_self_group = Some "boolean_left_self_seam")

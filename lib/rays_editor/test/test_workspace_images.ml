@@ -18,7 +18,7 @@ let ()=
       let point=Int64.to_float(P.Context.seed context)/.256.,float(P.Context.grain context)/.1024.,0. in
       P.Node.Private.cook(Lisp_sop.snapshot(Rdk.Line_geometry.points[|point|]))context[||])in
   let factory=P.Edit_graph.factory ~key:"image_context" ~label:"Image context" ~category:["Test"]
-    ~arity:0(function []->source()|_->assert false)in
+    ~arity:0(function []->Ok(source())|_->assert false)in
   let factories=factory::Sop.Nodes.factories in
   let doc=match Rays_editor.Workspace.load ~factories {|(workspace context
     (graph mesh :context sop (let* [geo (sop/image_context)

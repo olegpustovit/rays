@@ -84,10 +84,10 @@ let node curve =
     Sop.Node.Private.parameterize_with_key ~parameter_key:(parameter_key parameters)
       ~schema ~values:parameters ~rebuild:build node
   in
-  build ~label:"Curve" ~inputs:[] curve
+  Result.get_ok (build ~label:"Curve" ~inputs:[] curve)
 
 let replace_points ~source ~closed ~filled points =
   Sop.Node.Private.adopt_identity ~source (node {points; closed; filled})
 
 let factory = Edit.factory ~key ~label:"Curve" ~category:["Flow"] ~arity:0
-  ~fields:(Sop.Node.parameter_fields (node default)) (fun _ -> node default)
+  ~fields:(Sop.Node.parameter_fields (node default)) (fun _ -> Ok (node default))

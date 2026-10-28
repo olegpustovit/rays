@@ -5,7 +5,7 @@ val run :
   ?constrained_points:Rdk_core.Group.t ->
   ?boundary:boundary ->
   ?iterations:int ->
-  ?mode:Attribute_ops.blur_mode ->
+  ?mode:Attribute_blur.mode ->
   ?recompute_normals:bool ->
   attributes:string ->
   Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

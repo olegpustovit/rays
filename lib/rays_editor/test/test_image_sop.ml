@@ -24,10 +24,10 @@ let () =
   assert (List.map fst kind.slots = ["geometry";"image"]);
   List.iter (fun input_types ->
     assert (try ignore (Edit_graph.factory ~key:"typed" ~label:"Typed" ~category:["Test"]
-      ~input_types ~arity:1 (fun inputs -> List.hd inputs)); false with Invalid_argument _ -> true))
+      ~input_types ~arity:1 (fun inputs -> Ok (List.hd inputs))); false with Invalid_argument _ -> true))
     [[]; ["image";"image"]; ["bad type"]];
   let bad = Edit_graph.factory ~key:"bad_typed" ~label:"Bad Typed" ~category:["Test"]
-    ~input_types:["missing_type"] ~arity:1 (fun inputs -> List.hd inputs) in
+    ~input_types:["missing_type"] ~arity:1 (fun inputs -> Ok (List.hd inputs)) in
   assert (Result.is_error (Flow_sop.Catalog.of_factories ~version:1 [bad]));
   let manifest, _ = ok (Flow_sop.Manifest.generate ~extra:Editor_document.Kinds.descriptors factories) in
   let parsed, _ = ok (Flow.Catalog.catalog_of_manifest manifest) in

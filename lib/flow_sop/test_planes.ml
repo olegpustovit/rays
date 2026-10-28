@@ -21,7 +21,7 @@ let make () =
       |> add "nf" (Attribute.Float (Array.init n (fun i->if i = 0 then Float.nan else 1.)))) g
     [Attribute.Point; Vertex; Primitive; Detail]
 let src = lazy (make ())
-let factory key geometry = Edit.factory ~key ~label:key ~category:["Test"] ~arity:0 (fun _->Lisp_sop.snapshot geometry)
+let factory key geometry = Edit.factory ~key ~label:key ~category:["Test"] ~arity:0 (fun _->Ok (Lisp_sop.snapshot geometry))
 let cook ?(reference=false) ?(domains=1) ?(grain=97) body =
   let text = Printf.sprintf "(workspace planes_test (graph g :context sop (let* [src (sop/src)] %s)))" body in
   let lowered = L.workspace ~reference ~factories:(factory "src" (Lazy.force src) :: Sop.Nodes.factories)

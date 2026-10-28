@@ -3,15 +3,6 @@ open Fuse_reduce
 let finite value = Float.is_finite value
 
 type fuse_metric = Euclidean | Componentwise
-type fuse_using = Point_snap.using =
-  | Least_target_point
-  | Closest_target_point
-type fuse_match_condition = Point_snap.match_condition =
-  | Equal_attribute_values
-  | Unequal_attribute_values
-type fuse_targeting = Point_snap.targeting =
-  | Near_points
-  | Specified_points of string
 
 type fuse_attribute_view =
   | Fuse_float of float array
@@ -24,7 +15,7 @@ type fuse_attribute_view =
   | Fuse_text of string array
 
 let fuse_clusters ?cancel ?(grain = 16_384) ?selection ?(tolerance = 1e-6)
-    ?(position = Average_position) ?weight_attribute ?(attributes = Keep_first)
+    ?(position = Average_position) ?weight_attribute ?(attributes = Fuse_rules.Keep_first)
     ?(attribute_rules = []) ?(group_rules = [])
     ?(metric = Euclidean) ?(inclusive = true) ?(match_attributes = false)
     ?(keep_fused_points = false) geometry =
@@ -116,20 +107,20 @@ type params = {
   grain : int;
   selection : Rdk_core.Group.t option;
   target_selection : Rdk_core.Group.t option;
-  targeting : fuse_targeting;
-  using : fuse_using;
+  targeting : Point_snap.targeting;
+  using : Point_snap.using;
   tolerance : float;
   position : Fuse_reduce.position;
   weight_attribute : string option;
-  attributes : Fuse_reduce.attributes;
-  attribute_rules : Fuse_reduce.attribute_rule list;
-  group_rules : Fuse_reduce.group_rule list;
+  attributes : Fuse_rules.default_attributes;
+  attribute_rules : Fuse_rules.attribute_rule list;
+  group_rules : Fuse_rules.group_rule list;
   metric : fuse_metric;
   inclusive : bool;
   match_attributes : bool;
   radius_attribute : string option;
   match_attribute : string option;
-  match_condition : fuse_match_condition;
+  match_condition : Point_snap.match_condition;
   match_tolerance : float;
   modify_target : bool;
   fuse_points : bool;
@@ -148,9 +139,9 @@ let fuse ({ cancel; grain; selection; target_selection; targeting; using; tolera
   | Error message -> Error message
   | Ok () ->
   let advanced = target <> None || target_selection <> None
-      || targeting <> Near_points || using <> Least_target_point
+      || targeting <> Point_snap.Near_points || using <> Point_snap.Least_target_point
       || radius_attribute <> None || match_attribute <> None
-      || match_condition <> Equal_attribute_values || match_tolerance <> 0.
+      || match_condition <> Point_snap.Equal_attribute_values || match_tolerance <> 0.
       || modify_target || not fuse_points || snapped_group <> None
       || snapped_destination_attribute <> None in
   let cleanup result = Result.bind result (Fuse_cleanup.apply ?cancel ~grain
@@ -328,11 +319,11 @@ let fuse ({ cancel; grain; selection; target_selection; targeting; using; tolera
   end)
 
 let weld ?cancel ~grain ?selection ~tolerance geometry =
-  fuse { cancel; grain; selection; target_selection = None; targeting = Near_points;
-    using = Least_target_point; tolerance; position = Average_position; weight_attribute = None;
-    attributes = Keep_first; attribute_rules = []; group_rules = []; metric = Euclidean;
+  fuse { cancel; grain; selection; target_selection = None; targeting = Point_snap.Near_points;
+    using = Point_snap.Least_target_point; tolerance; position = Average_position; weight_attribute = None;
+    attributes = Fuse_rules.Keep_first; attribute_rules = []; group_rules = []; metric = Euclidean;
     inclusive = true; match_attributes = false; radius_attribute = None; match_attribute = None;
-    match_condition = Equal_attribute_values; match_tolerance = 0.; modify_target = false;
+    match_condition = Point_snap.Equal_attribute_values; match_tolerance = 0.; modify_target = false;
     fuse_points = true; keep_fused_points = false; snapped_group = None;
     snapped_destination_attribute = None; remove_degenerate_primitives = false;
     remove_unused_points_from_degenerate_primitives = false; remove_all_unused_points = false;

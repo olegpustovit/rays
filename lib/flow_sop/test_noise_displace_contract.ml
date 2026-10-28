@@ -16,7 +16,7 @@ let geometry () =
 
 let node input keywords =
   let factory = Sop.Edit_graph.factory ~key:"contract_input" ~label:"Contract input"
-      ~category:["Test"] ~arity:0 (fun _ -> input) in
+      ~category:["Test"] ~arity:0 (fun _ -> Ok input) in
   let factories = factory :: List.filter
       (fun factory -> Sop.Edit_graph.factory_key factory <> "noise_displace")
       Sop.Nodes.factories in

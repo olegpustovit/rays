@@ -26,10 +26,10 @@ let x geometry =
 let run () =
   let input = Lisp_sop.snapshot (Rdk.Line_geometry.points [|0., 0., 0.|]) in
   let dependencies = Context.Dependencies.one Context.Dependencies.Time in
-  let node = Custom.node ~label:"animated wrangle" ~operation:"animated_translate"
+  let node = Result.get_ok @@ Custom.node ~label:"animated wrangle" ~operation:"animated_translate"
       ~schema:controls_schema ~values:{ translate_x = 1.; time_scale = 2. } [input]
       (fun ~label ~inputs ~parameters ->
-        Custom.plain ~label ~version:2 ~parameters:(Param.key controls_schema parameters)
+        Result.ok @@ Custom.plain ~label ~version:2 ~parameters:(Param.key controls_schema parameters)
           ~cook_mode:(Node.Duplicate_input 0) ~dependencies
           ~operation:"animated_translate" inputs
           (fun ~context geometries ->
@@ -64,7 +64,7 @@ let run () =
   Session.close session;
   let custom_factories =
     Edit_graph.factory ~key:"my_custom_sop" ~label:"My Custom SOP" ~category:[ "Custom" ]
-      ~arity:0 (function [] -> Lisp_sop.snapshot (Rdk.Line_geometry.points [| 0., 0., 0. |]) | _ -> invalid_arg "none")
+      ~arity:0 (function [] -> Ok (Lisp_sop.snapshot (Rdk.Line_geometry.points [| 0., 0., 0. |])) | _ -> Error "none")
     :: Sop.Nodes.factories in
   let text = {|(workspace test_custom
     (graph scene :context scene

@@ -122,7 +122,7 @@ let validate left right ancestry output =
       (Geometry.find_group ~owner:Group.Primitive "ordered" output) in
   for primitive = 0 to Geometry.primitive_count output - 1 do
     let face = Extract.primitive_face ancestry primitive in
-    let is_left = Extract.primitive_side ancestry primitive = Rdk_boolean.Boolean_complex.Left in
+    let is_left = Extract.primitive_side ancestry primitive = Rdk_boolean.Boolean_constraints.Left in
     let base = if is_left then 10. else 20. in
     check (weight.(primitive) = base +. float_of_int face)
       "primitive float ancestry is wrong";
@@ -151,7 +151,7 @@ let validate left right ancestry output =
   let order = Option.get (Group.ordered_elements ordered) in
   let source_order = Array.map (fun primitive ->
       (match Extract.primitive_side ancestry primitive with
-       | Rdk_boolean.Boolean_complex.Left -> 0 | Rdk_boolean.Boolean_complex.Right -> 1),
+       | Rdk_boolean.Boolean_constraints.Left -> 0 | Rdk_boolean.Boolean_constraints.Right -> 1),
       Extract.primitive_face ancestry primitive) order in
   check (source_order = [|0,3; 0,1; 1,2; 1,0|])
     "ordered primitive group ancestry did not preserve left/right source order";
@@ -302,10 +302,10 @@ let test_surface_cut_payload () =
       let sheet_count = ref 0 in
       for primitive = 0 to Geometry.primitive_count output - 1 do
         match Extract.primitive_side ancestry primitive with
-        | Rdk_boolean.Boolean_complex.Left ->
+        | Rdk_boolean.Boolean_constraints.Left ->
             check (ids.(primitive) = 0 && not (Group.mem primitive group))
               "solid side inherited surface-only cut payload"
-        | Rdk_boolean.Boolean_complex.Right ->
+        | Rdk_boolean.Boolean_constraints.Right ->
             incr sheet_count;
             check ((ids.(primitive) = 42 || ids.(primitive) = 43)
                 && Group.mem primitive group)

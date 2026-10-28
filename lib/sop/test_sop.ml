@@ -152,7 +152,7 @@ Lisp_sop.node ~with_:["input", (input)] (Printf.sprintf {|(sop/transform (sop/ex
 
 let test_node_owned_parameters_and_graph_edit () =
   let source = Lisp_sop.snapshot (Rdk.Line_geometry.points [|0., 0., 0.|]) in
-  let editable = inspectable_transform ~label:"move" source inspectable_default in
+  let editable = Result.get_ok (inspectable_transform ~label:"move" source inspectable_default) in
   let graph = Lisp_sop.node ~with_:["editable", editable]
       "(sop/merge (sop/ext_editable) (sop/ext_editable))" in
   let evaluator = session () in

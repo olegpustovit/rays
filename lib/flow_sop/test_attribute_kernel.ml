@@ -89,7 +89,7 @@ let () =
                   ") (graph g :context sop (sop/selected_writer (sop/ext_source))))"
                   else "(workspace selected_writer (graph g :context sop (let* [geo (sop/ext_source)] "^expression^")))" in
                 let input=Lisp_sop.snapshot original in
-                let factory=Edit.factory ~key:"ext_source" ~label:"Source" ~category:["Test"] ~arity:0(fun _->input) in
+                let factory=Edit.factory ~key:"ext_source" ~label:"Source" ~category:["Test"] ~arity:0(fun _->Ok input) in
                 let node=L.workspace ~reference ~factories:(factory::factories)(Flow.Syntax.parse text|>flow_ok)|>flow_ok|>compiled in
                 let session=session() in
                 Fun.protect ~finally:(fun()->Session.close session)(fun()->
@@ -122,8 +122,8 @@ let () =
           (sop/group mask_geo :name "chosen"))) :default (+ 0.25 (* t 0.125))))
     (graph g :context sop (sop/live_selected (sop/ext_input) (sop/ext_mask))))|} in
   let input=Lisp_sop.snapshot original and mask=Lisp_sop.snapshot mask_geometry in
-  let factories=Edit.factory ~key:"ext_input" ~label:"Input" ~category:["Test"] ~arity:0(fun _->input)::
-    Edit.factory ~key:"ext_mask" ~label:"Mask" ~category:["Test"] ~arity:0(fun _->mask)::factories in
+  let factories=Edit.factory ~key:"ext_input" ~label:"Input" ~category:["Test"] ~arity:0(fun _->Ok input)::
+    Edit.factory ~key:"ext_mask" ~label:"Mask" ~category:["Test"] ~arity:0(fun _->Ok mask)::factories in
   List.iter(fun reference->
     let node=L.workspace ~reference ~factories(Flow.Syntax.parse text|>flow_ok)|>flow_ok|>compiled in
     let session=session() in
@@ -157,7 +157,7 @@ let () =
   x.(0)<- -0.;y.(0)<-0.5;z.(0)<-Float.min_float;
   let expected=Geometry.with_positions(Packed.Float3.View.of_owned_exn ~x ~y ~z)original|>get_string_ok|>geometry_bytes in
   let input=Lisp_sop.snapshot original in
-  let factories=Edit.factory ~key:"ext_raw_positions" ~label:"Raw positions" ~category:["Test"] ~arity:0(fun _->input)::factories in
+  let factories=Edit.factory ~key:"ext_raw_positions" ~label:"Raw positions" ~category:["Test"] ~arity:0(fun _->Ok input)::factories in
   let forms=Flow.Syntax.parse{|(workspace selected_positions
     (defnode sop/selected_positions [(geo : geometry)]
       (sop/with_attr geo :P (array/vec3 (sop/count geo :points) [-0.0 0.5 2.2250738585072014e-308])
@@ -175,7 +175,7 @@ let () =
   let original=Line_geometry.points(Array.init count(fun i->float i,0.,0.)) in
   let original=Geometry.with_group(Group.init ~owner:Point ~name:"chosen" count(fun i->i mod 2=0))original|>get_string_ok in
   let input=Lisp_sop.snapshot original in
-  let factories=Edit.factory ~key:"ext_selected_allocation" ~label:"Selected input" ~category:["Test"] ~arity:0(fun _->input)::factories in
+  let factories=Edit.factory ~key:"ext_selected_allocation" ~label:"Selected input" ~category:["Test"] ~arity:0(fun _->Ok input)::factories in
   let forms=Flow.Syntax.parse{|(workspace selected_host
     (defnode sop/selected_host [(geo : geometry)]
       (if (> (array/count (sop/group_names geo "")) 0)
@@ -266,7 +266,7 @@ let () =
             (let* [data %s cleaned (sop/with_attr geo :cleaned (exact (map (fn [x] x) data.values)) :owner %s :type %s)]
               (sop/with_attr cleaned :valid (exact (map (fn [(x : int)] x) data.valid)) :owner %s :type int)))
           (graph g :context sop (sop/checked_write (sop/ext_source))))|}query owner_name kind owner_name in
-        let factory=Edit.factory ~key:"ext_source" ~label:"Source" ~category:["Test"] ~arity:0(fun _->input) in
+        let factory=Edit.factory ~key:"ext_source" ~label:"Source" ~category:["Test"] ~arity:0(fun _->Ok input) in
         List.iter(fun reference->
           let l=L.workspace ~reference ~factories:(factory::factories)(Flow.Syntax.parse body |>flow_ok)|>flow_ok in
           let node=compiled l in
@@ -363,7 +363,7 @@ let () =
             (sop/with_attr geo :csr {:offsets offsets :values data} :type %s)))
         (graph g :context sop (sop/csr_owned (sop/ext_csr_input))))|} row kind in
       let make reference=
-        let factory=Edit.factory ~key:"ext_csr_input" ~label:"CSR input" ~category:["Test"] ~arity:0(fun _->input) in
+        let factory=Edit.factory ~key:"ext_csr_input" ~label:"CSR input" ~category:["Test"] ~arity:0(fun _->Ok input) in
         L.workspace ~reference ~factories:(factory::factories)(Flow.Syntax.parse text |>flow_ok)
         |>flow_ok |>compiled in
       let authored=make false and reference=make true in
@@ -1507,7 +1507,7 @@ let ()=
   let source=Sop.Node.Private.make_geometry ~operation:"test.planar_source" ~version:1 ~parameters:""
     ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _ _->incr cooks;Ok Sop.Node.Private.{geometry=original;instances=None}) in
-  let factory=Edit.factory ~key:"ext_planar" ~label:"Planar" ~category:["Test"] ~arity:0(fun _->source) in
+  let factory=Edit.factory ~key:"ext_planar" ~label:"Planar" ~category:["Test"] ~arity:0(fun _->Ok source) in
   let source_text={|(workspace planar_sources
     (defnode sop/planar_sources [(geo : geometry)]
       (let* [make (fn [(xs : (array float))]
@@ -1607,7 +1607,7 @@ let ()=
       (Attribute.create_owned ~owner ~name:([|"px";"py";"pz";"pw"|].(c))(Float data.(c))|>get_string_ok)geo|>get_string_ok)grid [0;1;2;3] in
     let before=geometry_bytes original in
     let input=Lisp_sop.snapshot original in
-    let factory=Edit.factory ~key:"ext_planes" ~label:"Planes" ~category:["Test"] ~arity:0(fun _->input)in
+    let factory=Edit.factory ~key:"ext_planes" ~label:"Planes" ~category:["Test"] ~arity:0(fun _->Ok input)in
     List.iter(fun(kind,width)->
       let fields=String.concat" "(List.init width(fun c->Printf.sprintf ":%s (sop/attr geo :%s :owner %s :type float)"
         [|"x";"y";"z";"w"|].(c)[|"px";"py";"pz";"pw"|].(c)owner_name))in
@@ -1669,7 +1669,7 @@ let ()=
     assert((Session.stats s).misses=stats.misses && (Session.stats s).hits=stats.hits+2);
     let expected=planar_oracle ~owner:Point ~kind:"vec3" "planes"[|[|-0.;0.25|];[|1.;2.|];[|3.;4.|]|]changed in
     assert(geometry_bytes output=geometry_bytes expected));
-  let factory=Edit.factory ~key:"ext_state_planes" ~label:"State planes" ~category:["Test"] ~arity:0(fun _->Lisp_sop.snapshot original)in
+  let factory=Edit.factory ~key:"ext_state_planes" ~label:"State planes" ~category:["Test"] ~arity:0(fun _->Ok (Lisp_sop.snapshot original))in
   let text={|(workspace planar_state
     (graph g :context sop
       (let* [geo (sop/ext_state_planes) tick (state [previous 0.0] (+ previous 0.5))
@@ -1694,7 +1694,7 @@ let ()=
 let ()=
   let original=Line_geometry.points[|0.,0.,0.;1.,0.,0.|]in
   let input=Lisp_sop.snapshot original in
-  let factory=Edit.factory ~key:"ext_planar_error" ~label:"Planar error" ~category:["Test"] ~arity:0(fun _->input)in
+  let factory=Edit.factory ~key:"ext_planar_error" ~label:"Planar error" ~category:["Test"] ~arity:0(fun _->Ok input)in
   List.iter(fun reference->List.iter(fun(body,code,message)->
     let text=Printf.sprintf {|(workspace planar_error
       (defnode sop/planar_error [(geo : geometry)]
@@ -1722,7 +1722,7 @@ let ()=
      itself, including options that must beat deferred Record hydration. *)
   let original=Line_geometry.points[|0.,0.,0.|]in
   let factory=Edit.factory ~key:"ext_planar_mixed" ~label:"Planar mixed" ~category:["Test"] ~arity:0
-    (fun _->Lisp_sop.snapshot original)in
+    (fun _->Ok (Lisp_sop.snapshot original))in
   let factories=factory::factories in
   let catalog=Flow_sop.Catalog.of_factories ~version:1 factories|>flow_ok in
   let source owner=Printf.sprintf {|(workspace planar_mixed

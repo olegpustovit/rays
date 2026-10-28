@@ -53,7 +53,7 @@ and parameterization = Parameters : {
   cache_parameters : string;
   schema : 'parameters Param.schema;
   values : 'parameters;
-  rebuild : label:string -> inputs:t array -> 'parameters -> t;
+  rebuild : label:string -> inputs:t array -> 'parameters -> (t, string) result;
 } -> parameterization
 
 let next_id = Atomic.make 1
@@ -82,17 +82,15 @@ let relabel label value =
   if String.trim label = "" then value else { value with label = String.trim label }
 
 let parameterize_with_key ?parameter_key ~schema ~values ~rebuild value =
-  let values = match Param.normalize schema values with
-    | Ok values -> values
-    | Error message -> invalid_arg ("Node.parameterize: " ^ message)
-  in
+  Result.bind (Result.map_error (fun message -> "Node.parameterize: " ^ message)
+    (Param.normalize schema values)) @@ fun values ->
   let rebuild ~label ~inputs values =
     rebuild ~label ~inputs:(Array.to_list inputs) values
   in
   (* an operator with no hand key of its own reads as the schema's text *)
   let parameters = if value.parameters = "" then Param.cook_text schema values
     else value.parameters in
-  { value with parameters; parameter_key = (match parameter_key with
+  Ok { value with parameters; parameter_key = (match parameter_key with
       | Some key -> key | None -> Param.cook_key schema values);
                parameterization = Some (Parameters { cache_parameters = value.parameters; schema; values; rebuild }) }
 
@@ -105,15 +103,14 @@ let apply_parameters value changes = match value.parameterization with
   | Some (Parameters parameterization) ->
       Result.bind (Param.apply_all parameterization.schema parameterization.values changes)
         (fun (values, effects) ->
-        try Ok (if not (Param.has_effects effects) then value, effects
+        if not (Param.has_effects effects) then Ok (value, effects)
         else if effects.cook then
-          let rebuilt = parameterization.rebuild ~label:value.label
-              ~inputs:(Array.copy value.inputs) values in
-          { rebuilt with id = value.id }, effects
+          Result.map (fun rebuilt -> { rebuilt with id = value.id }, effects)
+            (parameterization.rebuild ~label:value.label
+              ~inputs:(Array.copy value.inputs) values)
         else
-          { value with parameterization = Some (Parameters {
-              parameterization with values }) }, effects)
-        with Invalid_argument message -> Error message)
+          Ok ({ value with parameterization = Some (Parameters {
+              parameterization with values }) }, effects))
 
 module Private = struct
   type input_policy = Private_types.input_policy = All | Only of int
@@ -205,9 +202,10 @@ module Private = struct
     match value.parameterization with
     | None -> with_inputs value inputs
     | Some (Parameters parameterization) ->
-        let rebuilt = parameterization.rebuild ~label:value.label
-            ~inputs parameterization.values in
-        { rebuilt with id = value.id }
+        (match parameterization.rebuild ~label:value.label
+            ~inputs parameterization.values with
+         | Ok rebuilt -> { rebuilt with id = value.id }
+         | Error message -> invalid_arg message)
   let adopt_identity ~source value =
     { value with id = source.id; label = source.label }
   let cook value context inputs = value.cook ~node_id:value.id context inputs

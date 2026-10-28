@@ -6,15 +6,7 @@ type direction =
   | Ray_normal
   | Ray_attribute of string
 
-type direction_mode = Surface_index.ray_direction_mode =
-  | Ray_forward
-  | Ray_reverse
-  | Ray_bidirectional_closest
-  | Ray_bidirectional_farthest
 
-type surface_hit = Surface_index.ray_surface_hit =
-  | Ray_first_surface
-  | Ray_last_surface
 
 type combine =
   | Ray_average
@@ -49,7 +41,7 @@ let point_selection ?cancel ~grain geometry selection =
    | Error message -> fail "invalid_selection" message);
   match selection with
   | None -> None
-  | Some (Deform.Selected_points group) -> Some group
+  | Some (Element_selection.Selected_points group) -> Some group
   | Some _ ->
       let index = Some (Topology_index.create ?cancel topology) in
       Some (Group.init ~grain ~owner:Group.Point ~name:"__ray_selection"
@@ -268,13 +260,13 @@ let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
         let vx, vy, vz = Surface_index.View.direction_at directions query in
         let dx, dy, dz = Surface_index.View.normalized_direction vx vy vz in
         let directions_to_query = match direction_mode with
-          | Ray_forward | Ray_reverse -> 1
-          | Ray_bidirectional_closest | Ray_bidirectional_farthest -> 2 in
+          | Surface_index.Ray_forward | Surface_index.Ray_reverse -> 1
+          | Surface_index.Ray_bidirectional_closest | Surface_index.Ray_bidirectional_farthest -> 2 in
         for side = 0 to directions_to_query - 1 do
           let sign = match direction_mode with
-            | Ray_reverse -> -1.
-            | Ray_forward -> 1.
-            | Ray_bidirectional_closest | Ray_bidirectional_farthest ->
+            | Surface_index.Ray_reverse -> -1.
+            | Surface_index.Ray_forward -> 1.
+            | Surface_index.Ray_bidirectional_closest | Surface_index.Ray_bidirectional_farthest ->
                 if side = 0 then 1. else -1. in
           let base = side * samples in
           for sample = 0 to samples - 1 do
@@ -293,11 +285,11 @@ let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
           else if combined_counts.(0) = 0 then 1
           else if combined_counts.(1) = 0 then 0
           else match direction_mode with
-            | Ray_bidirectional_closest ->
+            | Surface_index.Ray_bidirectional_closest ->
                 if combined_distances.(1) < combined_distances.(0) then 1 else 0
-            | Ray_bidirectional_farthest ->
+            | Surface_index.Ray_bidirectional_farthest ->
                 if combined_distances.(1) > combined_distances.(0) then 1 else 0
-            | Ray_forward | Ray_reverse -> assert false in
+            | Surface_index.Ray_forward | Surface_index.Ray_reverse -> assert false in
         let selected = combined_selected.(chosen) in
         if selected >= 0 then begin
           let integer = selected * 2 and floating = selected * 4 in
@@ -309,8 +301,8 @@ let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
           distances.(query) <- combined_distances.(chosen);
           hit_counts.(query) <- combined_counts.(chosen);
           direction_signs.(query) <- (match direction_mode with
-            | Ray_reverse -> -1 | Ray_forward -> 1
-            | Ray_bidirectional_closest | Ray_bidirectional_farthest ->
+            | Surface_index.Ray_reverse -> -1 | Surface_index.Ray_forward -> 1
+            | Surface_index.Ray_bidirectional_closest | Surface_index.Ray_bidirectional_farthest ->
                 if chosen = 0 then 1 else -1);
           if requested_normals then begin
             let nx = ref 0. and ny = ref 0. and nz = ref 0. in
@@ -424,12 +416,12 @@ let existing_point_float3 name count geometry =
 
 type params = {
   grain : int;
-  selection : Deform.selection option;
+  selection : Element_selection.t option;
   collision_primitives : Group.t option;
   method_ : method_;
   direction : direction;
-  direction_mode : direction_mode;
-  surface_hit : surface_hit;
+  direction_mode : Surface_index.ray_direction_mode;
+  surface_hit : Surface_index.ray_surface_hit;
   samples : int;
   jitter_scale : float;
   seed : int;

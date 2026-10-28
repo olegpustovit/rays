@@ -93,7 +93,7 @@ let coalesce_positions ~complex_vertices ~x ~y ~z =
 let geometry value = value.geometry
 let primitive_side value primitive =
   if Bytes.unsafe_get value.primitive_sides primitive = '\000'
-  then Boolean_complex.Left else Boolean_complex.Right
+  then Boolean_constraints.Left else Boolean_constraints.Right
 let primitive_face value primitive = value.primitive_faces.(primitive)
 let primitive_refined_triangle value primitive =
   value.primitive_refined_triangles.(primitive)
@@ -580,28 +580,28 @@ let build_internal ?cancel ?(require_closed = true)
         if !preferred < 0 then
           invalid_arg "selected Boolean facet has no member on its requested side";
         let member = !preferred in
-        if Boolean_complex.member_side complex member = Boolean_complex.Right then
+        if Boolean_complex.member_side complex member = Boolean_constraints.Right then
           Bytes.unsafe_set primitive_sides !output '\001';
         let source_triangle = Boolean_complex.member_face complex member in
         let surface = match Boolean_complex.member_side complex member with
-          | Boolean_complex.Left -> Boolean_constraints.View.left_surface constraints
-          | Boolean_complex.Right -> Boolean_constraints.View.right_surface constraints in
+          | Boolean_constraints.Left -> Boolean_constraints.View.left_surface constraints
+          | Boolean_constraints.Right -> Boolean_constraints.View.right_surface constraints in
         primitive_faces.(!output) <-
           Surface_index.View.triangle_primitive surface source_triangle;
         primitive_triangles.(!output) <- source_triangle;
         primitive_refined_triangles.(!output) <-
           Boolean_complex.member_triangle complex member;
         let triangle_point = match Boolean_complex.member_side complex member with
-          | Boolean_complex.Left -> Boolean_constraints.View.left_triangle_point
-          | Boolean_complex.Right -> Boolean_constraints.View.right_triangle_point in
+          | Boolean_constraints.Left -> Boolean_constraints.View.left_triangle_point
+          | Boolean_constraints.Right -> Boolean_constraints.View.right_triangle_point in
         let source = Boolean_constraints.View.source constraints in
         let source_a = triangle_point constraints source_triangle 0
         and source_b = triangle_point constraints source_triangle 1
         and source_c = triangle_point constraints source_triangle 2 in
         let triangle_key = source_triangle +
           (match Boolean_complex.member_side complex member with
-           | Boolean_complex.Left -> 0
-           | Boolean_complex.Right ->
+           | Boolean_constraints.Left -> 0
+           | Boolean_constraints.Right ->
                Boolean_constraints.left_triangle_count constraints) in
         if with_corner_payload then begin
           for local = 0 to 2 do
@@ -636,10 +636,10 @@ let build_internal ?cancel ?(require_closed = true)
           while !candidate < last_member do
             let side = Boolean_complex.member_side complex !candidate in
             Bytes.unsafe_set edge_side_scratch !relative
-              (if side = Boolean_complex.Left then '\000' else '\001');
+              (if side = Boolean_constraints.Left then '\000' else '\001');
             let index = match side with
-              | Boolean_complex.Left -> left_edge_index
-              | Boolean_complex.Right -> right_edge_index in
+              | Boolean_constraints.Left -> left_edge_index
+              | Boolean_constraints.Right -> right_edge_index in
             (match index with
              | None ->
                  edge_source_scratch.(!relative * 3) <- -1;
@@ -648,10 +648,10 @@ let build_internal ?cancel ?(require_closed = true)
              | Some index ->
                  let triangle = Boolean_complex.member_face complex !candidate in
                  let candidate_surface, candidate_triangle_point = match side with
-                   | Boolean_complex.Left ->
+                   | Boolean_constraints.Left ->
                        Boolean_constraints.View.left_surface constraints,
                        Boolean_constraints.View.left_triangle_point
-                   | Boolean_complex.Right ->
+                   | Boolean_constraints.Right ->
                        Boolean_constraints.View.right_surface constraints,
                        Boolean_constraints.View.right_triangle_point in
                  let primitive = Surface_index.View.triangle_primitive

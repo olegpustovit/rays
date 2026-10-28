@@ -7,8 +7,6 @@ and kernel = Links | RenderMan | Hart
 type unmatched = Keep_target | Default_value
 type falloff = Linear | Smoothstep | Uniform of float
 type surface_falloff = falloff
-type surface_vertex_selection = Surface_index.vertex_selection =
-  | All_triangle_vertices | Any_triangle_vertex
 
 type surface_attribute = {
   source_owner : Attribute.owner;
@@ -69,7 +67,7 @@ val transfer_surface :
   ?distance_attribute:string ->
   ?source_primitives:Group.t ->
   ?source_vertices:Group.t ->
-  ?source_vertex_selection:surface_vertex_selection ->
+  ?source_vertex_selection:Surface_index.vertex_selection ->
   ?target_elements:Group.t ->
   attributes:surface_attribute list ->
   source:Geometry.t ->
@@ -88,7 +86,7 @@ val transfer_vertices :
   ?unmatched:unmatched ->
   ?source_primitives:Group.t ->
   ?source_vertices:Group.t ->
-  ?source_vertex_selection:surface_vertex_selection ->
+  ?source_vertex_selection:Surface_index.vertex_selection ->
   ?target_vertices:Group.t ->
   source:Geometry.t ->
   target:Geometry.t ->

@@ -35,7 +35,7 @@ module Switch = struct
     input : int [@sop.default 0] [@sop.label "Source"]
       [@sop.description "Input branch displayed and cooked by this Switch SOP"]
       [@sop.min 0] [@sop.max 9999] [@sop.hard_min 0];
-  } [@@sop.node_key "switch"] [@@sop.node_label "Switch"]
+  } [@@sop.node_key "switch"] [@@sop.node_fallible] [@@sop.node_label "Switch"]
     [@@sop.node_category "Utility"] [@@sop.node_inputs 3]
     [@@sop.node_slots "a, b, inputs"] [@@sop.node_optional "2"]
     [@@sop.node_rest 2]
@@ -56,11 +56,11 @@ module Switch = struct
   let build = parameters_build ~schema (fun ~label parameters a b inputs ->
     let inputs = Array.of_list (a :: b :: inputs) and index = parameters.input in
     if index < 0 || index >= Array.length inputs then
-      invalid_arg "sop/switch: input is outside the connected branches";
-    Node.Private.make_geometry ~label ~operation:"switch" ~version:1 ~parameters:""
+      Error "sop/switch: input is outside the connected branches" else
+    Ok (Node.Private.make_geometry ~label ~operation:"switch" ~version:1 ~parameters:""
       ~cook_mode:(Node.Passthrough index)
       ~dependencies:Context.Dependencies.static ~input_policy:(Node.Private.Only index)
-      ~inputs (fun ~node_id:_ _context selected -> cooked selected.(0)))
+      ~inputs (fun ~node_id:_ _context selected -> cooked selected.(0))))
 
   let factory = parameters_factory build
 end
@@ -118,18 +118,18 @@ module Clip = struct
       [@sop.label "Replace existing groups"] [@sop.folder "Output groups"];
   } [@@sop.node_key "clip"] [@@sop.node_label "Clip"]
     [@@sop.validate fun parameters ->
-      if not (List.for_all Float.is_finite [parameters.origin_x; parameters.origin_y; parameters.origin_z;
+      let* () = if not (List.for_all Float.is_finite [parameters.origin_x; parameters.origin_y; parameters.origin_z;
           parameters.normal_x; parameters.normal_y; parameters.normal_z; parameters.distance;
-          parameters.snapping_tolerance]) then invalid_arg "sop/clip: plane and tolerance must be finite";
-      if parameters.snapping_tolerance < 0. then invalid_arg "sop/clip: snapping tolerance must be non-negative";
-      if parameters.split_connectivity && parameters.keep <> Rdk.Plane_clip.All then
-        invalid_arg "sop/clip: split connectivity requires keep=All";
-      if parameters.normal_x = 0. && parameters.normal_y = 0. && parameters.normal_z = 0. then
-        invalid_arg "sop/clip: normal must be non-zero";
+          parameters.snapping_tolerance]) then Error "sop/clip: plane and tolerance must be finite" else Ok () in
+      let* () = if parameters.snapping_tolerance < 0. then Error "sop/clip: snapping tolerance must be non-negative" else Ok () in
+      let* () = if parameters.split_connectivity && parameters.keep <> Rdk.Plane_clip.All then
+        Error "sop/clip: split connectivity requires keep=All" else Ok () in
+      let* () = if parameters.normal_x = 0. && parameters.normal_y = 0. && parameters.normal_z = 0. then
+        Error "sop/clip: normal must be non-zero" else Ok () in
       let names = [parameters.cap_group; parameters.clipped_group;
         parameters.above_group; parameters.below_group] |> List.filter_map optional_text in
       if List.length (List.sort_uniq String.compare names) <> List.length names then
-        invalid_arg "sop/clip: output primitive group names must be distinct"]
+        Error "sop/clip: output primitive group names must be distinct" else Ok ()]
     [@@sop.node_category "Modify"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -209,12 +209,12 @@ module Exploded_view = struct
       [@sop.impact "view"];
   } [@@sop.node_key "exploded_view"] [@@sop.node_label "Exploded View"]
     [@@sop.validate fun parameters ->
-      if not (List.for_all Float.is_finite [parameters.amount; parameters.scale_x;
+      let* () = if not (List.for_all Float.is_finite [parameters.amount; parameters.scale_x;
           parameters.scale_y; parameters.scale_z; parameters.noise_amount; parameters.noise_frequency])
           || parameters.noise_frequency < 0. then
-        invalid_arg "sop/exploded_view: controls must be finite and noise frequency nonnegative";
+        Error "sop/exploded_view: controls must be finite and noise frequency nonnegative" else Ok () in
       if String.trim parameters.piece_attribute = "" then
-        invalid_arg "sop/exploded_view: piece attribute must be nonblank"]
+        Error "sop/exploded_view: piece attribute must be nonblank" else Ok ()]
     [@@sop.node_category "Visualize"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -366,15 +366,15 @@ module Soft_transform = struct
       topology = Node.Preserved; exact = false}]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/soft_transform_trs: " ^ message) in
-      if not (Float.is_finite parameters.radius) || parameters.radius < 0. then refuse "radius must be finite and nonnegative";
-      if parameters.radius = 0. && (parameters.metric <> Soft_attribute || parameters.apply_rolloff) then
-        refuse "rolloff radius must be positive";
-      if parameters.metric = Soft_attribute && String.trim parameters.metric_attribute = "" then
-        refuse "metric attribute must be nonblank";
-      if parameters.metric = Soft_attribute && parameters.metric_attribute = "P" then
-        refuse "metric attribute requires scalar storage";
-      if String.trim parameters.falloff_attribute = "P" then refuse "falloff output must not replace P";
+      let refuse message = Error ("sop/soft_transform_trs: " ^ message) in
+      let* () = if not (Float.is_finite parameters.radius) || parameters.radius < 0. then refuse "radius must be finite and nonnegative" else Ok () in
+      let* () = if parameters.radius = 0. && (parameters.metric <> Soft_attribute || parameters.apply_rolloff) then
+        refuse "rolloff radius must be positive" else Ok () in
+      let* () = if parameters.metric = Soft_attribute && String.trim parameters.metric_attribute = "" then
+        refuse "metric attribute must be nonblank" else Ok () in
+      let* () = if parameters.metric = Soft_attribute && parameters.metric_attribute = "P" then
+        refuse "metric attribute requires scalar storage" else Ok () in
+      let* () = if String.trim parameters.falloff_attribute = "P" then refuse "falloff output must not replace P" else Ok () in
       match Rdk.Transform_ops.compose_transform ~order:parameters.order ~rotation_order:parameters.rotation_order
         ~translate:(Rays_math.Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z)
         ~rotate:(Rays_math.Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z)
@@ -386,10 +386,10 @@ module Soft_transform = struct
         ~invert:parameters.invert () with
       | Error error -> refuse (Rdk.Error.to_string error)
       | Ok matrix ->
-          for index = 0 to 15 do
-            if not (Float.is_finite (Rays_math.Mat4.get matrix ~row:(index / 4) ~column:(index mod 4))) then
-              refuse "composed transform must be finite"
-          done]
+          if List.for_all (fun index ->
+            Float.is_finite (Rays_math.Mat4.get matrix ~row:(index / 4) ~column:(index mod 4)))
+            (List.init 16 Fun.id) then Ok ()
+          else refuse "composed transform must be finite"]
     [@@sop.node_category "Deform"] [@@sop.node_inputs 1]
 
     [@@deriving sop_params, sop_node]
@@ -454,13 +454,13 @@ module Ray = struct
       "Attribute", Direction_attribute;
     ]
   let direction_mode_parameter = Param.choice ~equal:( = ) [
-      "Forward", Rdk.Ray.Ray_forward; "Reverse", Rdk.Ray.Ray_reverse;
-      "Bidirectional closest", Rdk.Ray.Ray_bidirectional_closest;
-      "Bidirectional farthest", Rdk.Ray.Ray_bidirectional_farthest;
+      "Forward", Rdk.Surface_index.Ray_forward; "Reverse", Rdk.Surface_index.Ray_reverse;
+      "Bidirectional closest", Rdk.Surface_index.Ray_bidirectional_closest;
+      "Bidirectional farthest", Rdk.Surface_index.Ray_bidirectional_farthest;
     ]
   let surface_parameter = Param.choice ~equal:( = ) [
-      "First surface", Rdk.Ray.Ray_first_surface;
-      "Last surface", Rdk.Ray.Ray_last_surface;
+      "First surface", Rdk.Surface_index.Ray_first_surface;
+      "Last surface", Rdk.Surface_index.Ray_last_surface;
     ]
   let combine_parameter = Param.choice ~equal:( = ) [
       "Average", Rdk.Ray.Ray_average; "Median", Rdk.Ray.Ray_median;
@@ -486,12 +486,12 @@ module Ray = struct
       [@sop.folder "Ray/Vector"] [@sop.min (-1.)] [@sop.max 1.]; [@sop.vec3 "direction_vector"]
     direction_attribute : string [@sop.default "N"]
       [@sop.label "Direction attribute"] [@sop.folder "Ray"];
-    direction_mode : Rdk.Ray.direction_mode
-      [@sop.default Rdk.Ray.Ray_forward]
+    direction_mode : Rdk.Surface_index.ray_direction_mode
+      [@sop.default Rdk.Surface_index.Ray_forward]
       [@sop.label "Direction mode"] [@sop.folder "Ray"]
       [@sop.kind direction_mode_parameter];
-    surface_hit : Rdk.Ray.surface_hit
-      [@sop.default Rdk.Ray.Ray_first_surface]
+    surface_hit : Rdk.Surface_index.ray_surface_hit
+      [@sop.default Rdk.Surface_index.Ray_first_surface]
       [@sop.label "Surface hit"] [@sop.folder "Ray"]
       [@sop.kind surface_parameter];
     samples : int [@sop.default 1] [@sop.label "Samples"]
@@ -545,32 +545,32 @@ module Ray = struct
   } [@@sop.node_key "ray"] [@@sop.node_label "Ray"]
 
     [@@sop.validate fun parameters ->
-      let refuse message = invalid_arg ("sop/ray: " ^ message) in
-      if not (List.for_all Float.is_finite [parameters.direction_x;parameters.direction_y;parameters.direction_z;
+      let refuse message = Error ("sop/ray: " ^ message) in
+      let* () = if not (List.for_all Float.is_finite [parameters.direction_x;parameters.direction_y;parameters.direction_z;
           parameters.jitter_scale;parameters.min_distance;parameters.max_distance;parameters.tolerance;parameters.scale;parameters.lift]) then
-        refuse "numeric controls must be finite";
-      if parameters.samples < 1 || parameters.samples > 1024 then refuse "samples must be in [1, 1024]";
-      if parameters.method_ = Rdk.Ray.Ray_minimum_distance && parameters.samples <> 1 then refuse "multiple samples require projection";
-      if parameters.jitter_scale < 0. || parameters.min_distance < 0. || parameters.max_distance < 0.
-          || parameters.tolerance < 0. || parameters.tolerance > sqrt Float.max_float then refuse "distance and jitter controls are out of range";
-      if parameters.limit_max_distance && parameters.max_distance < parameters.min_distance then refuse "maximum must be at least minimum distance";
-      if parameters.limit_max_distance && parameters.method_ = Rdk.Ray.Ray_minimum_distance
-          && parameters.max_distance > sqrt Float.max_float then refuse "closest distance must be safely squarable";
-      if parameters.method_ = Rdk.Ray.Ray_project then (match parameters.direction with
+        refuse "numeric controls must be finite" else Ok () in
+      let* () = if parameters.samples < 1 || parameters.samples > 1024 then refuse "samples must be in [1, 1024]" else Ok () in
+      let* () = if parameters.method_ = Rdk.Ray.Ray_minimum_distance && parameters.samples <> 1 then refuse "multiple samples require projection" else Ok () in
+      let* () = if parameters.jitter_scale < 0. || parameters.min_distance < 0. || parameters.max_distance < 0.
+          || parameters.tolerance < 0. || parameters.tolerance > sqrt Float.max_float then refuse "distance and jitter controls are out of range" else Ok () in
+      let* () = if parameters.limit_max_distance && parameters.max_distance < parameters.min_distance then refuse "maximum must be at least minimum distance" else Ok () in
+      let* () = if parameters.limit_max_distance && parameters.method_ = Rdk.Ray.Ray_minimum_distance
+          && parameters.max_distance > sqrt Float.max_float then refuse "closest distance must be safely squarable" else Ok () in
+      let* () = if parameters.method_ = Rdk.Ray.Ray_project then (match parameters.direction with
         | Direction_vector when parameters.direction_x = 0. && parameters.direction_y = 0. && parameters.direction_z = 0. -> refuse "direction must be nonzero"
         | Direction_attribute when String.trim parameters.direction_attribute = "" -> refuse "direction attribute must be nonblank"
-        | _ -> ());
+        | _ -> Ok ()) else Ok () in
       let numbers = optional_text parameters.source_vertex_numbers_attribute
       and weights = optional_text parameters.source_vertex_weights_attribute in
-      if Option.is_some numbers <> Option.is_some weights then refuse "vertex numbers and weights must be requested together";
+      let* () = if Option.is_some numbers <> Option.is_some weights then refuse "vertex numbers and weights must be requested together" else Ok () in
       let names = List.filter_map optional_text [parameters.distance_attribute;parameters.primitive_attribute;
           parameters.source_vertex_numbers_attribute;parameters.source_vertex_weights_attribute;parameters.normal_attribute] in
-      if List.mem "P" names then refuse "output must not replace P";
-      if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "output names must be distinct";
+      let* () = if List.mem "P" names then refuse "output must not replace P" else Ok () in
+      let* () = if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "output names must be distinct" else Ok () in
       let patterns = [parameters.point_pattern;parameters.vertex_pattern;parameters.primitive_pattern;parameters.detail_pattern] in
-      List.iter (fun pattern -> if String.trim pattern <> "" then validate_parameter_pattern "sop/ray" pattern) patterns;
+      let* () = each (fun pattern -> if String.trim pattern <> "" then validate_parameter_pattern "sop/ray" pattern else Ok ()) patterns in
       if parameters.match_groups && List.for_all (fun pattern -> String.trim pattern = "")
-          [parameters.point_pattern;parameters.vertex_pattern;parameters.primitive_pattern] then refuse "group interpolation requires a pattern"]
+          [parameters.point_pattern;parameters.vertex_pattern;parameters.primitive_pattern] then refuse "group interpolation requires a pattern" else Ok ()]
     [@@sop.node_category "Modify/Project"] [@@sop.node_inputs 2] [@@sop.node_slots "source, collision"]
 
     [@@deriving sop_params, sop_node]

@@ -3,7 +3,7 @@ val delete : owner:string -> pattern:string -> Sop.Node.t -> Sop.Node.t
 
 val attribute_owner : string -> (Rdk.Attribute.owner option, Diagnostic.t) result
 val group_owner : string -> (Rdk.Group_ops.owner option, Diagnostic.t) result
-val attr_conflict : string -> (Rdk.Attribute_ops.rename_conflict, Diagnostic.t) result
+val attr_conflict : string -> (Rdk.Attribute_lifecycle.rename_conflict, Diagnostic.t) result
 val group_conflict : string -> (Rdk.Group_ops.rename_conflict, Diagnostic.t) result
 val rename : owner:string -> pattern:string -> replacement:string -> conflict:string -> Sop.Node.t -> Sop.Node.t
 val swap : owner:string -> source:string -> destination:string -> method_:string -> Sop.Node.t -> Sop.Node.t

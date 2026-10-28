@@ -16,43 +16,10 @@ type position =
   | Minimum_weight_position
   | Maximum_weight_position
 
-type attributes = Fuse_rules.default_attributes = Keep_first | Average_numeric
 
-type attribute_method = Fuse_rules.attribute_method =
-  | Attribute_average
-  | Attribute_least_point
-  | Attribute_greatest_point
-  | Attribute_maximum
-  | Attribute_minimum
-  | Attribute_mode
-  | Attribute_median
-  | Attribute_sum
-  | Attribute_sum_squares
-  | Attribute_root_mean_square
-  | Attribute_concatenate
-  | Attribute_weighted_average
-  | Attribute_weighted_sum
-  | Attribute_minimum_weight
-  | Attribute_maximum_weight
-  | Attribute_concatenate_weight_order
 
-type attribute_rule = Fuse_rules.attribute_rule = {
-  pattern : string;
-  method_ : attribute_method;
-  weight_attribute : string option;
-}
 
-type group_method = Fuse_rules.group_method =
-  | Group_least_point
-  | Group_greatest_point
-  | Group_union
-  | Group_intersection
-  | Group_most_common
 
-type group_rule = Fuse_rules.group_rule = {
-  group_pattern : string;
-  group_method : group_method;
-}
 
 
 let get_ok = function Ok value -> value | Error message -> raise (Error.Fail message)

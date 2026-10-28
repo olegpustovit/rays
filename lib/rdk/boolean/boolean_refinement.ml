@@ -63,12 +63,12 @@ let build ?cancel ?coplanar ~grain constraints =
     else
       let left_count = Boolean_constraints.left_triangle_count constraints
       and right_count = Boolean_constraints.right_triangle_count constraints in
-      match build_side ?cancel ~grain constraints Boolean_face_arrangement.Left
+      match build_side ?cancel ~grain constraints Boolean_constraints.Left
           ?coplanar left_count Boolean_constraints.left_constraint_range
           Boolean_coplanar.View.left_pair_range with
       | Error failure -> Error failure
       | Ok (left, _refined_left) ->
-          match build_side ?cancel ~grain constraints Boolean_face_arrangement.Right
+          match build_side ?cancel ~grain constraints Boolean_constraints.Right
               ?coplanar right_count Boolean_constraints.right_constraint_range
               Boolean_coplanar.View.right_pair_range with
           | Error failure -> Error failure

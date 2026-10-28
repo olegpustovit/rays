@@ -1,4 +1,3 @@
-type side = Boolean_constraints.side = Left | Right
 
 type t = {
   points : Implicit_point.t array;
@@ -21,25 +20,25 @@ module View = struct
 end
 
 let face_constraint_range constraints side triangle = match side with
-  | Left -> Boolean_constraints.left_constraint_range constraints triangle
-  | Right -> Boolean_constraints.right_constraint_range constraints triangle
+  | Boolean_constraints.Left -> Boolean_constraints.left_constraint_range constraints triangle
+  | Boolean_constraints.Right -> Boolean_constraints.right_constraint_range constraints triangle
 
 let face_constraint constraints side slot = match side with
-  | Left -> Boolean_constraints.left_constraint constraints slot
-  | Right -> Boolean_constraints.right_constraint constraints slot
+  | Boolean_constraints.Left -> Boolean_constraints.left_constraint constraints slot
+  | Boolean_constraints.Right -> Boolean_constraints.right_constraint constraints slot
 
 let face_coplanar_range coplanar side triangle = match side with
-  | Left -> Boolean_coplanar.View.left_pair_range coplanar triangle
-  | Right -> Boolean_coplanar.View.right_pair_range coplanar triangle
+  | Boolean_constraints.Left -> Boolean_coplanar.View.left_pair_range coplanar triangle
+  | Boolean_constraints.Right -> Boolean_coplanar.View.right_pair_range coplanar triangle
 
 let face_coplanar_pair coplanar side slot = match side with
-  | Left -> Boolean_coplanar.View.left_pair coplanar slot
-  | Right -> Boolean_coplanar.View.right_pair coplanar slot
+  | Boolean_constraints.Left -> Boolean_coplanar.View.left_pair coplanar slot
+  | Boolean_constraints.Right -> Boolean_coplanar.View.right_pair coplanar slot
 
 let face_triangle_point constraints side triangle local = match side with
-  | Left -> Boolean_constraints.View.left_triangle_point
+  | Boolean_constraints.Left -> Boolean_constraints.View.left_triangle_point
       constraints triangle local
-  | Right -> Boolean_constraints.View.right_triangle_point
+  | Boolean_constraints.Right -> Boolean_constraints.View.right_triangle_point
       constraints triangle local
 
 let opponent constraints side triangle constraint_index =

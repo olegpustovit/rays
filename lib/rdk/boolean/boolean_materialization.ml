@@ -1466,8 +1466,8 @@ let detriangulate ?cancel ~grain ~assume_flat ~mode ancestry cleanup =
       if Boolean_extract.primitive_refined_triangle ancestry primitive >= 0 then begin
         let face = Boolean_extract.primitive_face ancestry primitive in
         match Boolean_extract.primitive_side ancestry primitive with
-        | Boolean_complex.Left -> Bytes.unsafe_set left_cut face '\001'
-        | Boolean_complex.Right -> Bytes.unsafe_set right_cut face '\001'
+        | Boolean_constraints.Left -> Bytes.unsafe_set left_cut face '\001'
+        | Boolean_constraints.Right -> Bytes.unsafe_set right_cut face '\001'
       end
     done;
     let source primitive =
@@ -1477,8 +1477,8 @@ let detriangulate ?cancel ~grain ~assume_flat ~mode ancestry cleanup =
       Boolean_extract.primitive_side ancestry extraction,
       Boolean_extract.primitive_face ancestry extraction in
     let unchanged side face = match side with
-      | Boolean_complex.Left -> Bytes.unsafe_get left_cut face = '\000'
-      | Boolean_complex.Right -> Bytes.unsafe_get right_cut face = '\000' in
+      | Boolean_constraints.Left -> Bytes.unsafe_get left_cut face = '\000'
+      | Boolean_constraints.Right -> Bytes.unsafe_get right_cut face = '\000' in
     let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let coplanar edge =
       let first = index.edge_offsets.(edge) in
