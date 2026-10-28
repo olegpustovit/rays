@@ -53,7 +53,7 @@ Remove what is plainly dead or wrong before touching structure, and make sure ev
 
 Exit gates:
 
-- [ ] P0.G1: `check.exe --ship` is green
+- [x] P0.G1: `check.exe --ship` is green Evidence: check.exe --ship (@all, @runtest, @smoke, history-comments) passes in 2:43 wall on 2026-10-28 after the format pass; git diff --check is clean, dune build @fmt is clean, @smoke-all and native qualification pass.
 - [x] P0.G2: every test executable and group is reachable from a lane (gate check). Evidence: `@test/dependency_gate` passes after the alias split, with negative fixtures for orphan executables, unselected/duplicate groups and coupled aliases.
 - [x] P0.G3: markdown down by about 13k lines
 - [x] P0.G4: no `Shadow3`, `stencil`, `bypass` or `.pending` remain in lib/ Evidence: no Shadow3, stencil or .pending file/glob in lib. The remaining 'bypass' is the live Lisp bypass meta in flow_graph, not Edit_graph's dead flag.

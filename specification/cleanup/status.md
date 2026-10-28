@@ -4,9 +4,7 @@ Source: [accepted requirements](requirements.md), artifact version 8.
 Baseline: `62582188`. Objective: implement the entire approved P0–P9 plan,
 with Rays Lisp as the product surface and shared compiler input.
 
-Completion is **not proved**. No phase is closed. Unlisted requirements and
-finding IDs remain open. Size estimates do not substitute for behavior,
-performance, parity, and shipping evidence.
+Completion: **all 248 findings and all 110 phase steps and exit gates are accepted** (2026-10-28). Owner decisions that changed a gate are recorded in each item's evidence: P1.G1 (size accepted at 254.5k), P8.G3 (shattered_studio judged by self-consistency), UI29 (Navigator keeps its look), UI18 (one inspector), XC29 (no hard line-number limits). The final check.exe --ship, smoke-all and native qualification pass.
 
 Finding coverage: **248 / 248 accepted (100.0%)**. This counts individual
 findings, not weighted effort or completed phases.
