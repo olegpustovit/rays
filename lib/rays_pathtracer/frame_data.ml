@@ -50,25 +50,23 @@ let allocate_film device ~width ~height =
   let* output0 = texture 0 in
   let* output1 = texture 1 in
   let* output2 = texture 2 in
-  (* a threadgroup of 256 traces a 16 x 16 block, each SIMD group of 32 an 8 x 4 tile of it *)
+  (* a threadgroup of 256 traces a 16 x 16 block, each SIMD group of 32 an 8 x 4 tile of it; one staging
+     buffer is filled and uploaded three times: the tiled indices, their inverse, the identity *)
   let n = width * height in
-  let tiled = Bytes.create (4 * n) and order = Bytes.create (4 * n) and linear = Bytes.create (4 * n) and t = ref 0 in
-  let tiles w h x0 y0 x1 y1 f =
-    for ty = 0 to (y1 - y0 - 1) / h do for tx = 0 to (x1 - x0 - 1) / w do
-      f (x0 + w * tx) (y0 + h * ty) (min x1 (x0 + w * tx + w)) (min y1 (y0 + h * ty + h))
-    done done in
-  tiles 16 16 0 0 width height (fun x0 y0 x1 y1 -> tiles 8 4 x0 y0 x1 y1 (fun x0 y0 x1 y1 ->
-    for y = y0 to y1 - 1 do for x = x0 to x1 - 1 do
-      put_f32 tiled (4 * !t) (float (y * width + x));
-      put_f32 order (4 * (y * width + x)) (float !t);
-      incr t
-    done done));
-  for i = 0 to n - 1 do put_f32 linear (4 * i) (float i) done;
-  let upload label bytes = let* b = buffer device ~label (Bytes.length bytes) in
+  let bytes = Bytes.create (4 * n) in
+  let tiled f = let t = ref 0 in
+    let tiles w h x0 y0 x1 y1 f =
+      for ty = 0 to (y1 - y0 - 1) / h do for tx = 0 to (x1 - x0 - 1) / w do
+        f (x0 + w * tx) (y0 + h * ty) (min x1 (x0 + w * tx + w)) (min y1 (y0 + h * ty + h))
+      done done in
+    tiles 16 16 0 0 width height (fun x0 y0 x1 y1 -> tiles 8 4 x0 y0 x1 y1 (fun x0 y0 x1 y1 ->
+      for y = y0 to y1 - 1 do for x = x0 to x1 - 1 do f !t (y * width + x); incr t done done)) in
+  let upload label fill = fill ();
+    let* b = buffer device ~label (Bytes.length bytes) in
     let* () = gpu (B.write_buffer b ~offset:0L bytes) in Ok b in
-  let* pixels = upload "pathtracer-pixels" tiled in
-  let* linear = upload "pathtracer-linear" linear in
-  let* order = upload "pathtracer-order" order in
+  let* pixels = upload "pathtracer-pixels" (fun () -> tiled (fun t p -> put_f32 bytes (4 * t) (float p))) in
+  let* order = upload "pathtracer-order" (fun () -> tiled (fun t p -> put_f32 bytes (4 * p) (float t))) in
+  let* linear = upload "pathtracer-linear" (fun () -> for i = 0 to n - 1 do put_f32 bytes (4 * i) (float i) done) in
   let* resolved = history "pathtracer-resolved" in
   Ok { accum; history_color = [| color0; color1 |];
        history_geometry = [| geometry0; geometry1 |]; outputs = [| output0; output1; output2 |];
