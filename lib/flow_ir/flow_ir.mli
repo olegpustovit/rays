@@ -79,6 +79,10 @@ module Cost : sig
 
   val packed : count:int -> tier
   (** The same measured CPU decision used at placement and force time. *)
+
+  val sop_device : Gpu.policy -> Core.Region.t -> count:int -> bool
+  (** A fused SOP write's region goes to the device: [Qualification], or [count] of at least 2^18
+      elements and noise in its code. *)
 end
 
 type sink = Display of string | Sop_input
@@ -162,6 +166,17 @@ module Executor : sig
       live:Flow.Eval.live ->
       (Flow.Eval.value, Diagnostic.t) result * int * int
   end
+
+  val record_on_device :
+    ?state:Flow.Eval.state ->
+    ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
+    ?gpu:Gpu.config ->
+    program ->
+    live:Flow.Eval.live ->
+    ((string * Flow.Eval.value) list option, Diagnostic.t) result
+  (** The elementwise fields of a record program (a fused SOP write's) as one region on the device,
+      in fast precision when {!Cost.sop_device} places it: one dispatch, read back once per output,
+      by field name. [None] keeps the record on the CPU, also when the device fails. *)
 
   val force_into :
     ?state:Flow.Eval.state ->

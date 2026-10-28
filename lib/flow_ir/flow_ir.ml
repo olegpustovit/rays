@@ -79,6 +79,23 @@ module Cost = struct
           first rest
 
   let packed ~count = cheapest ~legal:[ Interp; Cpu_kernel ] ~count
+
+  (* A fused SOP write on the device (fast precision; specification/sop.md, "Device placement"):
+     a region of at least 2^18 elements that samples noise. Upload, dispatch and readback cost about
+     what a light arithmetic map costs on the CPU blocks, so only noise (about 0.1 microseconds an
+     element and octave on the CPU) pays for the trip. [Qualification] places every legal region. *)
+  let sop_device policy (region : Core.Region.t) ~count =
+    policy = Gpu.Qualification
+    || count >= 1 lsl 18
+       && Array.exists
+            (fun instruction ->
+              let rec noise = function
+                | Core.Region.Noise3 _ -> true
+                | Guarded (_, body) -> noise body
+                | _ -> false
+              in
+              noise instruction)
+            region.code
 end
 
 (* A static packed map of more than 4,096 elements runs as the kernel it would be at frame rate
@@ -451,7 +468,7 @@ module Executor = struct
     let hash (residual, strict) = Hashtbl.hash (E.Residual.residual_id residual, strict)
   end)
 
-  let direct_region ?trace ?(readback = false) ~count_source value =
+  let direct_region ?trace ?through_exact ?(readback = false) ~count_source value =
     let rec find seen residual (term : W.term) =
       if
         List.exists
@@ -468,7 +485,7 @@ module Executor = struct
         | Hof ((`Map | `Reduce), _) | Loop _ | Op { op = "array/sum"; _ } ->
             Option.map
               (fun packed -> (packed, false))
-              (Packed.compile ?trace ~count_source residual term)
+              (Packed.compile ?trace ?through_exact ~count_source residual term)
         | _ -> None
     in
     match value with
@@ -488,6 +505,7 @@ module Executor = struct
     approx : W.Paths.t;
     sink : sink option;
     mutable gpu_kernel : (Gpu.backend * bool * Packed.t * Gpu.kernel) option;
+    record_region : (string list * Packed.t) option Lazy.t;
   }
 
   let compile ?trace ?profile ?(strict = false) ?(approx = W.Paths.empty) ?sink
@@ -605,6 +623,25 @@ module Executor = struct
           approx;
           sink;
           gpu_kernel = None;
+          record_region =
+            lazy
+              (match v with
+              | E.Record fields ->
+                  let regions =
+                    List.filter_map
+                      (fun (name, value) ->
+                        Option.bind
+                          (direct_region ?trace ~through_exact:true ~readback:true ~count_source
+                             value) (fun (packed, _) ->
+                            if Packed.elementwise packed then Some (name, packed) else None))
+                      fields
+                  in
+                  if List.length regions <> List.length fields then None
+                  else
+                    Option.map
+                      (fun merged -> (List.map fst regions, merged))
+                      (Core_fuse.merge (List.map snd regions))
+              | _ -> None);
         })
       checked
 
@@ -1232,6 +1269,43 @@ module Executor = struct
             end
         | Ok _ | Error _ -> cpu ())
     | _ -> cpu ()
+
+  (* A fused SOP write's record ({!Cost.sop_device}): its elementwise fields over one count are one
+     region, one dispatch and a readback per output, by field name. [None] leaves the record to
+     the CPU: the device declines or fails, or the cost model keeps it there. *)
+  let record_on_device ?state ?resolve ?(gpu = Gpu.default) program ~live =
+    match (gpu.backend, Lazy.force program.record_region) with
+    | Some backend, Some (names, merged)
+      when gpu.fast && Packed.gpu_refusals ~fused:true ~fast:true merged = [] -> (
+        let ( let* ) = Result.bind in
+        let device =
+          let* inputs = Packed.Host.prepare ~fast:true ?state ?resolve merged ~live in
+          if not (Cost.sop_device gpu.policy merged ~count:inputs.count) then Ok None
+          else
+            let* kernel =
+              match program.gpu_kernel with
+              | Some (b, true, p, kernel) when b == backend && p == merged -> Ok kernel
+              | _ ->
+                  Result.map
+                    (fun kernel ->
+                      program.gpu_kernel <- Some (backend, true, merged, kernel);
+                      kernel)
+                    (backend.prepare ~fast:true merged)
+            in
+            let* output = kernel.run inputs in
+            let rec read i = function
+              | [] -> Ok []
+              | name :: rest ->
+                  let* value =
+                    kernel.readback
+                      { output with output = i; width = Array.length merged.outputs.(i) }
+                  in
+                  Result.map (fun values -> (name, value) :: values) (read (i + 1) rest)
+            in
+            Result.map Option.some (read 0 names)
+        in
+        match device with Ok _ as placed -> placed | Error _ -> Ok None)
+    | _ -> Ok None
 
   let force_display ?state ?(reference = false) ?(gpu = Gpu.default) program ~live =
     Result.bind (try_display ?state ~reference ~gpu program ~live) (function

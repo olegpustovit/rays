@@ -150,21 +150,28 @@ let builder () =
   in
   { emit; append_source; append_uniforms; append_code; finish }
 
-let rec source_region ~dynamic ~count_source ((residual : E.residual), (term : W.term)) =
+let rec source_region ~through_exact ~dynamic ~count_source
+    ((residual : E.residual), (term : W.term)) =
   match term.node with
   | W.Ref_binding (name, []) -> (
       match List.assoc_opt name (E.Residual.residual_view residual).bindings with
       | Some (E.Residual r) ->
-          source_region ~dynamic ~count_source (r, (E.Residual.residual_view r).term)
+          source_region ~through_exact ~dynamic ~count_source (r, (E.Residual.residual_view r).term)
       | _ -> None)
+  | W.Op { op = "exact"; args = [ (_, value) ]; _ } when through_exact ->
+      source_region ~through_exact ~dynamic ~count_source (residual, value)
   | _ ->
-      Core_region.lower ~dynamic ~count_source residual term |> Result.to_option |> Option.map fuse
+      Core_region.lower ~dynamic ~count_source residual term
+      |> Result.to_option
+      |> Option.map (fuse ~through_exact)
 
-and fuse (t : Core.Region.t) : Core.Region.t =
+and fuse ?(through_exact = false) (t : Core.Region.t) : Core.Region.t =
   if t.skip <> [||] || (t.iteration = Product && Array.length t.sources <> 1) then t
   else
     let children =
-      Array.map (source_region ~dynamic:t.dynamic ~count_source:t.count_source) t.sources
+      Array.map
+        (source_region ~through_exact ~dynamic:t.dynamic ~count_source:t.count_source)
+        t.sources
     in
     let origins =
       Array.mapi

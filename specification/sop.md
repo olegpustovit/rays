@@ -408,6 +408,27 @@ while lowering (0.17 s for 1M points), not while cooking. A write of planes (`{:
 not fold: a read of the attribute could not take it as its values. Ext-port goldens are unchanged,
 since a port decides nothing.
 
+**Device placement.** A fused write (a node with earlier writes, `$writes`) may cook on the GPU
+(`Flow_ir.Executor.record_on_device`): when every field of its record program is an elementwise
+region, the fields merge into one region (`Core_fuse.merge`, one output each), fused through the
+`(exact x)` boundaries inside it (`Core_fuse.fuse ~through_exact`: the sink reads the whole region
+back), so the chain is one dispatch, one upload of its sources and one readback per output. Its
+count must match by origin: a fill of one value per point (`array/int (sop/count g :points) v`), a
+map over arrays that share an origin and a card marker's input all count the points of the
+geometry they come from (`Attribute_kernel.prepare`'s count source). Placement: the workspace
+precision is fast (the editor lowers with the precision its settings read, `Lowering.of_workspace`;
+exact work stays on the CPU, bit for bit), the backend is present, the region passes the GPU form
+checks, and `Flow_ir.Cost.sop_device`: at least 2^18 elements and noise in its code (Qualification
+places every legal region). Measured (M-series, loaded machine, 2026-10-28,
+`test_chain_gpu_native.exe`): `grid 1000x1000 > attribute_noise > transform` cooks in 0.23-0.25 s
+with the device against 0.29-0.33 s on the CPU in the same process, one dispatch, largest
+difference 3.4e-7 (float32); of the device's 0.13 s, preparing the sources takes 0.03-0.06 s,
+upload and dispatch 0.05-0.07 s and readback 0.02-0.03 s. A light map (transform alone) costs about
+its transfer on the CPU blocks and stays there. Any device failure (a form refusal, a status, a
+readback) leaves the record to the CPU, which reports its own errors. Not yet: device-resident
+geometry between consecutive fused nodes (each node uploads its sources), fills bound as uniforms
+instead of uploaded arrays, and one upload of a source two fields read.
+
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's
 cook label (its kind key; helpers read it from the evaluation), is a cook-time source that

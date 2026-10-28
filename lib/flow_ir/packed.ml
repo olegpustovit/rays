@@ -291,10 +291,10 @@ let gpu_refusals ?(fused = false) ?(fast = false) (t : t) =
   if !bad_constant then refuse "Nonfinite float32 shader constants require reference evaluation.";
   List.rev !reasons
 
-let compile_impl ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) residual term
-    =
+let compile_impl ?through_exact ?(fusion = true) ?(dynamic = false)
+    ?(count_source = fun _ _ -> None) residual term =
   Result.map
-    (fun region -> if fusion then Core_fuse.fuse region else region)
+    (fun region -> if fusion then Core_fuse.fuse ?through_exact region else region)
     (Core_region.lower ~fusion ~dynamic ~count_source residual term)
 
 let static_count (t : t) = t.count
@@ -304,11 +304,11 @@ let traced trace result =
   Option.iter (fun f -> f result) trace;
   result
 
-let compile_result ?trace ?fusion ?count_source r term =
-  traced trace (compile_impl ?fusion ?count_source r term)
+let compile_result ?trace ?through_exact ?fusion ?count_source r term =
+  traced trace (compile_impl ?through_exact ?fusion ?count_source r term)
 
-let compile ?trace ?fusion ?count_source r term =
-  compile_result ?trace ?fusion ?count_source r term |> Result.to_option
+let compile ?trace ?through_exact ?fusion ?count_source r term =
+  compile_result ?trace ?through_exact ?fusion ?count_source r term |> Result.to_option
 
 let compile_template ?trace ?count_source r term =
   traced trace (compile_impl ~dynamic:true ?count_source r term) |> Result.to_option

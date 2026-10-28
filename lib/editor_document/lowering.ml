@@ -732,6 +732,14 @@ let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?previous (workspace : 
         | Some (doc : Document.t) -> doc.Document.workspace.lowered.gpu
         | None -> Flow_ir.Gpu.default)
   in
+  (* A device's SOP writes follow the workspace precision (fast unless the settings say exact):
+     the previous document's, or fast; a first lowering that reads exact is lowered again. *)
+  let gpu =
+    match (gpu.backend, previous) with
+    | None, _ -> gpu
+    | Some _, Some doc -> { gpu with fast = fast doc }
+    | Some _, None -> { gpu with fast = true }
+  in
   let compiled_ids, sites =
     match previous with
     | Some (doc : Document.t) ->
@@ -762,8 +770,15 @@ let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?previous (workspace : 
     match previous_literal with
     | Some result -> result
     | None ->
-        Flow_sop.Lower.of_checked ~factories ~gpu ?compiled_ids ?sites ~inputs:workspace.inputs
-          workspace.checked
+        let lower gpu =
+          Flow_sop.Lower.of_checked ~factories ~gpu ?compiled_ids ?sites ~inputs:workspace.inputs
+            workspace.checked
+        in
+        Result.bind (lower gpu) (fun lowered ->
+            match (gpu.backend, plan_window workspace lowered.plan) with
+            | Some _, Ok window when window.fast <> gpu.fast ->
+                lower { gpu with fast = window.fast }
+            | _ -> Ok lowered)
   in
   let workspace =
     if

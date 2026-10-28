@@ -1,22 +1,22 @@
-(* On the real device: the fused four-deformer chain over a 1,000,000-point grid is cooked on the CPU,
-   then from a worker domain (as Async_cook does) with the interface domain serving the device. The
-   positions agree within float32 tolerance; the cook times are printed. *)
+(* On the real device: grid 1000 x 1000 Points > attribute_noise > transform, the fused write of noise,
+   P and N, cooked on the CPU and with the workspace GPU in fast precision (Executor.record_on_device).
+   The device cook takes at most two dispatches, its noise and P agree with the CPU within float32
+   tolerance and N exactly (a translation keeps it); CPU and GPU cook times are printed, median of 5. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
-let stages = [ (0.3, 0.7, 0); (-0.2, 1.3, 3); (0.15, 2.1, 5); (0.05, 0.4, 7) ]
 
 let text =
   Printf.sprintf
-    "(workspace fused (graph g :context sop (let* [g (sop/grid :counts \"Point counts\" \
-     :connectivity \"Points\" :columns %d :rows %d) %s] d4)))"
+    "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
+     \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7) (sop/transform \
+     :translate [0.0 1.0 0.0]))))"
     side side
-    (String.concat " "
-       (List.mapi
-          (fun i (amplitude, frequency, seed) ->
-            Printf.sprintf "d%d (sop/noise_displace %s :amplitude %g :frequency %g :seed %d)" (i + 1)
-              (if i = 0 then "g" else Printf.sprintf "d%d" i)
-              amplitude frequency seed)
-          stages))
+
+let node ?gpu () =
+  let lowered = Flow_sop.Lower.workspace ?gpu (Flow.Syntax.parse text |> ok) |> ok in
+  let graph = List.hd lowered.graphs in
+  Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)
+  |> Result.get_ok
 
 let cook node =
   let session = Sop.Session.create ~max_entries:4 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok in
@@ -25,89 +25,93 @@ let cook node =
     (fun () ->
       let start = Unix.gettimeofday () in
       match
-        Sop.Session.cook session
-          ~context:(Sop.Context.create ~domains:4 ~time:0. () |> Result.get_ok)
-          node
+        Sop.Session.cook session ~context:(Sop.Context.create ~time:0. () |> Result.get_ok) node
       with
       | Ok output ->
-          ( Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload)),
-            Unix.gettimeofday () -. start )
+          (Result.get_ok (Sop.Payload.geometry output.payload), Unix.gettimeofday () -. start)
       | Error d -> failwith (Diagnostic.error_to_string d))
 
+let median f =
+  let runs = List.init 5 (fun _ -> f ()) in
+  (List.nth (List.sort compare (List.map snd runs)) 2, fst (List.hd runs))
+
+let noise geometry =
+  match Rdk.Geometry.find_attribute ~owner:Point "noise" geometry with
+  | Some attribute -> (
+      match Rdk.Attribute.View.storage attribute with
+      | Rdk.Attribute.Float data -> data
+      | _ -> failwith "noise is not float storage")
+  | None -> failwith "no noise attribute"
+
+let normals geometry =
+  match Rdk.Geometry.find_attribute ~owner:Point "N" geometry with
+  | Some attribute -> (
+      match Rdk.Attribute.View.storage attribute with
+      | Rdk.Attribute.Float3 data -> data
+      | _ -> failwith "N is not vec3 storage")
+  | None -> failwith "no N attribute"
+
 let () =
-  let lowered = Flow_sop.Lower.workspace (Flow.Syntax.parse text |> ok) |> ok in
-  let graph = List.hd lowered.graphs in
-  let node =
-    Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)
-    |> Result.get_ok
-  in
   let count = side * side in
-  let median f =
-    let runs = List.init 5 (fun _ -> f ()) in
-    (List.nth (List.sort compare (List.map snd runs)) 2, fst (List.hd runs))
-  in
-  let cpu_seconds, cpu = median (fun () -> cook node) in
-  let base_text =
-    Printf.sprintf
-      "(workspace b (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \
-       \"Points\" :columns %d :rows %d)))"
-      side side
-  in
-  let base = Flow_sop.Lower.workspace (Flow.Syntax.parse base_text |> ok) |> ok in
-  let base_graph = List.hd base.graphs in
-  let grid_seconds, _ =
-    median (fun () ->
-        cook
-          (Sop.Edit_graph.compile_node base_graph.network.geometry
-             ~node_id:(Option.get base_graph.root)
-          |> Result.get_ok))
-  in
-  Printf.printf "grid alone cooks in %.3f s on the CPU\n%!" grid_seconds;
-  let reads gpu =
-    let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
-    host.readback_bytes
-  in
-  let run name force =
-    let gpu = Flow_native.Workspace_gpu.create () in
-    if force then Flow_native.Workspace_gpu.qualification gpu;
-    Fun.protect
-      ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu)
-      (fun () ->
-        let worker () =
-          Flow_native.Workspace_gpu.with_backend gpu (fun _gpu ->
-              let finished = Atomic.make false in
-              let domain =
-                Domain.spawn (fun () ->
-                    Fun.protect
-                      ~finally:(fun () ->
-                        Atomic.set finished true;
-                        Parallel.release_current_domain_pools ())
-                      (fun () -> cook node))
-              in
-              while not (Atomic.get finished) do
-                Flow_native.Workspace_gpu.pump gpu;
-                Domain.cpu_relax ()
-              done;
-              Domain.join domain)
-        in
-        ignore (worker ());
-        let before = reads gpu in
-        let seconds, placed = median worker in
-        let bytes = reads gpu - before in
-        let worst = ref 0. in
-        for i = 0 to count - 1 do
-          let x, y, z = Rdk.Packed.Float3.get cpu i
-          and gx, gy, gz = Rdk.Packed.Float3.get placed i in
-          List.iter
-            (fun (a, b) -> worst := Float.max !worst (Float.abs (a -. b)))
-            [ (x, gx); (y, gy); (z, gz) ]
-        done;
-        assert (!worst <= 1e-3);
-        Printf.printf
-          "%-9s cook %.3f s (cpu %.3f s), readback %d bytes (%s), largest difference %.2e\n%!" name
-          seconds cpu_seconds bytes
-          (if bytes > 0 then "GPU" else "CPU")
-          !worst)
-  in
-  run "measured" false;
-  run "forced" true
+  let unplaced = node () in
+  let cpu_seconds, cpu = median (fun () -> cook unplaced) in
+  let gpu = Flow_native.Workspace_gpu.create () in
+  Fun.protect
+    ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu)
+    (fun () ->
+      Flow_native.Workspace_gpu.with_backend ~fast:true gpu (fun config ->
+          let dispatches = ref 0 in
+          let backend = Option.get config.Flow_ir.Gpu.backend in
+          let counted : Flow_ir.Gpu.config =
+            {
+              config with
+              backend =
+                Some
+                  {
+                    backend with
+                    prepare =
+                      (fun ~fast packed ->
+                        Result.map
+                          (fun (kernel : Flow_ir.Gpu.kernel) ->
+                            {
+                              kernel with
+                              run =
+                                (fun inputs ->
+                                  incr dispatches;
+                                  kernel.run inputs);
+                            })
+                          (backend.prepare ~fast packed));
+                  };
+            }
+          in
+          let placed = node ~gpu:counted () in
+          ignore (cook placed);
+          dispatches := 0;
+          let device, _ = cook placed in
+          let per_cook = !dispatches in
+          let gpu_seconds, _ = median (fun () -> cook placed) in
+          if per_cook < 1 || per_cook > 2 then
+            failwith (Printf.sprintf "the chain took %d dispatches, not 1 or 2" per_cook);
+          let worst = ref 0. in
+          let close a b = worst := Float.max !worst (Float.abs (a -. b)) in
+          let p = Rdk.Geometry.positions cpu and q = Rdk.Geometry.positions device in
+          let n = noise cpu and m = noise device in
+          for i = 0 to count - 1 do
+            let x, y, z = Rdk.Packed.Float3.get p i and gx, gy, gz = Rdk.Packed.Float3.get q i in
+            close x gx;
+            close y gy;
+            close z gz;
+            close n.(i) m.(i)
+          done;
+          (* float32 rounding of positions within [-0.5, 1.5] and of noise in [0, 1] *)
+          if !worst > 1e-5 then failwith (Printf.sprintf "GPU differs from CPU by %.3e" !worst);
+          let normals_cpu = normals cpu and normals_gpu = normals device in
+          for i = 0 to count - 1 do
+            if Rdk.Packed.Float3.get normals_cpu i <> Rdk.Packed.Float3.get normals_gpu i then
+              failwith "GPU N differs from CPU"
+          done;
+          Printf.printf
+            "grid > attribute_noise > transform, %d points: CPU cook %.3f s, GPU cook %.3f s, %d \
+             dispatch(es), largest difference %.2e\n\
+             %!"
+            count cpu_seconds gpu_seconds per_cook !worst))

@@ -1075,9 +1075,12 @@ let source_origins ~sources inputs =
             | N.Duplicate_input i | In_place i | Instance_input i | Passthrough i -> Some i
             | _ -> None
           in
+          (* a pass-through (a card marker) has its input's elements *)
+          let passthrough = match facts.cook_mode with N.Passthrough _ -> true | _ -> false in
           let origin =
             match (facts.topology, facts.elementwise, input) with
-            | N.Preserved, (N.Points | Primitives), Some i ->
+            | (N.Preserved, (N.Points | Primitives), Some i | N.Preserved, N.None, Some i)
+              when passthrough || facts.elementwise <> N.None ->
                 let inputs = N.Build.input_array node in
                 if i >= 0 && i < Array.length inputs then point_origin inputs.(i) else N.id node
             | _ -> N.id node
@@ -1110,7 +1113,7 @@ let rec captured bindings (term : Flow.Workspace.term) =
 
 let prepare ?profile ?strict ?approx ?sink ~sources inputs values =
   Result.bind (source_origins ~sources inputs) (fun by_source ->
-      let count_source residual (term : Flow.Workspace.term) =
+      let rec count_source residual (term : Flow.Workspace.term) =
         let bindings = (E.Residual.residual_view residual).bindings in
         let topology_component =
           match term.node with
@@ -1129,8 +1132,46 @@ let prepare ?profile ?strict ?approx ?sink ~sources inputs values =
                   | _ -> None)
               | _ -> None)
         in
-        match topology_component with
-        | Some (component, args) ->
+        (* a fill of one value per point ([array/int (sop/count g :points) v]) counts g's points *)
+        let rec filled residual (term : Flow.Workspace.term) =
+          let bindings = (E.Residual.residual_view residual).bindings in
+          match term.node with
+          | Op
+              {
+                op = "array/int" | "array/float" | "array/vec2" | "array/vec3" | "array/vec4";
+                args;
+                _;
+              } -> (
+              match Option.bind (List.assoc_opt "count" args) (captured bindings) with
+              | Some (E.Source ("sop/count", _, counted) | E.Struct ("sop/count", _, counted)) -> (
+                  match (List.assoc_opt "geometry" counted, List.assoc_opt "element" counted) with
+                  | Some (E.Deferred (ty, id)), Some (E.Text "points") when Flow.Ty.is_geometry ty
+                    ->
+                      Option.map
+                        (fun origin ->
+                          ([ "@sop-owner"; owner_name A.Point; string_of_int origin ], []))
+                        (List.assoc_opt id by_source)
+                  | _ -> None)
+              | _ -> None)
+          | Expanded { body; _ } -> filled residual body
+          | Op { op = "exact"; args = [ (_, body) ]; _ } -> count_source residual body
+          | Hof (`Map, _ :: (first :: _ as arrays)) -> (
+              (* a map zips its arrays: when they share an origin it has it *)
+              match count_source residual first with
+              | Some origin
+                when List.for_all (fun a -> count_source residual a = Some origin) arrays ->
+                  Some origin
+              | _ -> None)
+          | Ref_binding _ | Get _ -> (
+              match captured bindings term with
+              | Some (E.Residual r) -> count_source r (E.Residual.residual_view r).term
+              | _ -> None)
+          | _ -> None
+        in
+        let filled = filled residual term in
+        match (filled, topology_component) with
+        | Some _, _ -> filled
+        | None, Some (component, args) ->
             Option.bind (List.assoc_opt "geometry" args) (function
               | E.Deferred (ty, id) when Flow.Ty.is_geometry ty ->
                   Option.bind (List.assoc_opt id by_source) (fun origin ->
@@ -1141,7 +1182,7 @@ let prepare ?profile ?strict ?approx ?sink ~sources inputs values =
                       | "primitive_offsets" -> Some ([ "@sop-csr-offsets"; "primitive"; origin ], [])
                       | _ -> None)
               | _ -> None)
-        | None ->
+        | None, None ->
             let promoted args =
               match List.assoc_opt "as_owner" args with
               | None -> args
@@ -1511,9 +1552,17 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
             if not guarded then Ok geometries.(0)
             else if prior <> [] then
               Result.bind program (fun program ->
+                  let live = Sop.Context.input context in
+                  let device =
+                    if reference || elems <> None then Ok None
+                    else Flow_ir.Executor.record_on_device ?state ~resolve ?gpu program ~live
+                  in
                   Result.bind
-                    (Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve program
-                       ~live:(Sop.Context.input context))
+                    (Result.bind device (function
+                      | Some fields -> Ok (E.Record fields)
+                      | None ->
+                          Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve program
+                            ~live))
                     (function
                       | E.Record fields ->
                           let grain = Sop.Context.grain context in

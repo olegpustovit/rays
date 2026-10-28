@@ -105,6 +105,7 @@ type count_source = Flow.Eval.residual -> Flow.Workspace.term -> origin option
 
 val compile_result :
   ?trace:((t, Diagnostic.t list) Stdlib.result -> unit) ->
+  ?through_exact:bool ->
   ?fusion:bool ->
   ?count_source:count_source ->
   Flow.Eval.residual ->
@@ -116,6 +117,7 @@ val compile_result :
 
 val compile :
   ?trace:((t, Diagnostic.t list) Stdlib.result -> unit) ->
+  ?through_exact:bool ->
   ?fusion:bool ->
   ?count_source:count_source ->
   Flow.Eval.residual ->
