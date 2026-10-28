@@ -20,7 +20,7 @@ let geometry points triangles =
       ~vertex_points:triangles
       ~primitive_offsets:(Array.init ((Array.length triangles / 3) + 1)
         (fun primitive -> primitive * 3)) |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let polygon_geometry points vertex_points primitive_offsets =
@@ -30,7 +30,7 @@ let polygon_geometry points vertex_points primitive_offsets =
   and z = Array.init count (fun point -> let _, _, z = points.(point) in z) in
   let topology = Topology.polygons_owned ~point_count:count ~vertex_points
       ~primitive_offsets |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let tetra ~origin:(ox, oy, oz) size = geometry
@@ -96,8 +96,8 @@ let merge_geometry geometries =
   and offsets = Array.make (primitive_count + 1) 0 in
   let point_base = ref 0 and vertex_base = ref 0 and primitive_base = ref 0 in
   Array.iter (fun source ->
-    let positions = Packed.Float3.Private.view (Geometry.positions source)
-    and topology = Topology.Private.view (Geometry.topology source) in
+    let positions = Packed.Float3.View.view (Geometry.positions source)
+    and topology = Topology.View.view (Geometry.topology source) in
     Array.blit positions.x 0 x !point_base (Array.length positions.x);
     Array.blit positions.y 0 y !point_base (Array.length positions.y);
     Array.blit positions.z 0 z !point_base (Array.length positions.z);
@@ -114,18 +114,18 @@ let merge_geometry geometries =
   offsets.(primitive_count) <- vertex_count;
   let topology = Topology.polygons_owned ~point_count ~vertex_points:vertices
       ~primitive_offsets:offsets |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let signature geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   Array.copy positions.x, Array.copy positions.y, Array.copy positions.z,
   Array.copy topology.vertex_points, Array.copy topology.primitive_offsets
 
 let signed_volume geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry)
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry)
   and volume = ref 0. in
   for triangle = 0 to Geometry.primitive_count geometry - 1 do
     let offset = topology.primitive_offsets.(triangle) in
@@ -143,8 +143,8 @@ let signed_volume geometry =
   !volume
 
 let surface_area geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry)
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry)
   and area = ref 0. in
   for triangle = 0 to Geometry.primitive_count geometry - 1 do
     let offset = topology.primitive_offsets.(triangle) in

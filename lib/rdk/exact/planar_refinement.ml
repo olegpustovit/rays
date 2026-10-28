@@ -44,7 +44,7 @@ let provenance_parent_weights value node =
   value.provenance_weight_first.(node),value.provenance_weight_second.(node),
   value.provenance_weight_third.(node)
 
-module Private = struct
+module View = struct
 
   let approximate_x value = value.x
   let approximate_y value = value.y
@@ -510,7 +510,7 @@ let build ?cancel ~grain ~initial_points ~initial_triangle_points
         Array.make (Array.length constraint_points / 2) 0
       else Array.copy constraint_winding)
     and triangles = ref (Array.copy initial_triangle_points) in
-    let cdt_workspace = Planar_cdt.Private.create_workspace
+    let cdt_workspace = Planar_cdt.View.create_workspace
         ~point_capacity:capacity
         ~triangle_capacity:(max 1 (Array.length initial_triangle_points / 3)) () in
     let buckets = Coordinate_buckets.create (Array.length initial_points) in
@@ -710,7 +710,7 @@ let build ?cancel ~grain ~initial_points ~initial_triangle_points
           (match rebuilt with
            | Error message -> invalid_arg ("Planar refinement: " ^ message)
            | Ok rebuilt ->
-               triangles := (Planar_cdt.Private.view rebuilt).triangle_points;
+               triangles := (Planar_cdt.View.view rebuilt).triangle_points;
                refine ())
         end
       end in
@@ -846,7 +846,7 @@ let build ?cancel ~grain ~initial_points ~initial_triangle_points
             (match rebuilt with
              | Error message -> invalid_arg ("Planar regularization: " ^ message)
              | Ok rebuilt ->
-                 triangles := (Planar_cdt.Private.view rebuilt).triangle_points);
+                 triangles := (Planar_cdt.View.view rebuilt).triangle_points);
             incr step
           end
         end

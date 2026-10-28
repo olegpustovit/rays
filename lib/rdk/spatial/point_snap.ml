@@ -18,7 +18,7 @@ let scalar_attribute label name geometry =
   | None -> raise (Error.Fail (Printf.sprintf "%s point attribute %S is missing"
       label name))
   | Some attribute ->
-      match Attribute.Private.storage attribute with
+      match Attribute.View.storage attribute with
       | Attribute.Float values -> `Float values
       | Attribute.Int values -> `Int values
       | Attribute.Text values -> `Text values
@@ -80,28 +80,8 @@ let compatible condition tolerance views query target =
   | Equal_attribute_values -> equal
   | Unequal_attribute_values -> not equal
 
-let next_power_of_two value =
-  let result = ref 8 in
-  while !result < value do
-    if !result > Sys.max_array_length / 2 then
-      raise (Error.Fail "target point count exceeds spatial-table limits");
-    result := !result lsl 1
-  done;
-  !result
-
-let[@inline always] integer_hash x y z =
-  let value = (x * 73_856_093) lxor (y * 19_349_663)
-      lxor (z * 83_492_791) in
-  (value lxor (value lsr 16)) land max_int
-
-let[@inline always] float_cell value =
-  if value = 0. then 0
-  else
-    let bits = Int64.bits_of_float value in
-    Int64.to_int (Int64.logxor bits (Int64.shift_right_logical bits 32))
-
 let validate_positions ?cancel label geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   for point = 0 to Geometry.point_count geometry - 1 do
     if point land 4095 = 0 then Cancel.check_opt cancel;
     if not (Float.is_finite positions.x.(point) && Float.is_finite positions.y.(point)
@@ -117,7 +97,7 @@ let specified ?cancel ~grain ?queries ?targets attribute_name ~source ~target =
   ignore (validate_positions ?cancel "target" target);
   let values = match Geometry.find_attribute ~owner:Attribute.Point attribute_name source with
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values -> values
          | _ -> raise (Error.Fail (Printf.sprintf
              "specified target attribute %S must be a point integer"
@@ -191,39 +171,16 @@ let near ?cancel ~grain ?queries ?targets ~using ~tolerance ~metric ~inclusive
       if not (Float.is_finite largest) || largest > float_of_int (max_int / 4) then
         raise (Error.Fail "snap distance is too small for the target geometry extent")
     end;
-    let capacity = next_power_of_two (max 8 (target_slots * 2)) in
-    let cell_x = Array.make target_slots 0 and cell_y = Array.make target_slots 0
-    and cell_z = Array.make target_slots 0 and cell_head = Array.make target_slots (-1)
-    and table = Array.make capacity (-1) and point_next = Array.make target_count (-1) in
-    let mask = capacity - 1 and cell_count = ref 0 in
-    let find_cell x y z =
-      let slot = ref (integer_hash x y z land mask) in
-      while table.(!slot) >= 0
-          && (let cell = table.(!slot) in cell_x.(cell) <> x
-              || cell_y.(cell) <> y || cell_z.(cell) <> z) do
-        slot := (!slot + 1) land mask
-      done;
-      if table.(!slot) < 0 then -1 else table.(!slot) in
-    let find_or_add_cell x y z =
-      let slot = ref (integer_hash x y z land mask) in
-      while table.(!slot) >= 0
-          && (let cell = table.(!slot) in cell_x.(cell) <> x
-              || cell_y.(cell) <> y || cell_z.(cell) <> z) do
-        slot := (!slot + 1) land mask
-      done;
-      if table.(!slot) >= 0 then table.(!slot)
-      else begin
-        let cell = !cell_count in incr cell_count; table.(!slot) <- cell;
-        cell_x.(cell) <- x; cell_y.(cell) <- y; cell_z.(cell) <- z; cell
-      end in
-    let cell_coord value minimum = if exact then float_cell value
+    let grid = Point_grid.create ~cells:target_slots ~points:target_count in
+    let { Point_grid.cell_head; point_next; _ } = grid in
+    let find_cell = Point_grid.find grid in
+    let cell_coord value minimum = if exact then Point_grid.float_cell value
       else int_of_float (floor (scaled_delta minimum value)) in
     let insert_target point =
       let cx = cell_coord target_positions.x.(point) !min_x
       and cy = cell_coord target_positions.y.(point) !min_y
       and cz = cell_coord target_positions.z.(point) !min_z in
-      let cell = find_or_add_cell cx cy cz in
-      point_next.(point) <- cell_head.(cell); cell_head.(cell) <- point in
+      Point_grid.insert grid cx cy cz point in
     (match targets with
      | None -> for point = 0 to target_count - 1 do insert_target point done
      | Some group -> Group.iter insert_target group);

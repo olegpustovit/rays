@@ -52,7 +52,7 @@ let apply_with_mapping ?cancel ~grain ~remove_degenerate_primitives
   try
     Cancel.check_opt cancel;
     let source_topology_value = Geometry.topology geometry in
-    let source = Topology.Private.view source_topology_value in
+    let source = Topology.View.view source_topology_value in
     let source_points = source.point_count
     and source_vertices = Array.length source.vertex_points
     and source_primitives = Bytes.length source.primitive_kinds in
@@ -176,14 +176,14 @@ let apply_with_mapping ?cancel ~grain ~remove_degenerate_primitives
               let point = old_to_new.(vertex_points.(vertex)) in
               if point < 0 then fail "cleanup retained a deleted point";
               vertex_points.(vertex) <- point);
-        let output_topology = Topology.Private.create_validated_owned
+        let output_topology = Topology.View.create_validated_owned
             ~point_count:(Array.length point_map) ~vertex_points
             ~primitive_offsets ~primitive_kinds in
         let positions = if point_identity then Geometry.positions geometry
           else
-            let source_positions = Packed.Float3.Private.view
+            let source_positions = Packed.Float3.View.view
                 (Geometry.positions geometry) in
-            Packed.Float3.Private.of_owned_exn
+            Packed.Float3.View.of_owned_exn
               ~x:(Topology_remap.select ?cancel ~grain point_map source_positions.x)
               ~y:(Topology_remap.select ?cancel ~grain point_map source_positions.y)
               ~z:(Topology_remap.select ?cancel ~grain point_map source_positions.z) in

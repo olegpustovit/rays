@@ -26,7 +26,7 @@ let set_bit bits index =
 
 let source_degrees ?edges index_view point_count =
   let degrees = Array.make point_count 0 in
-  for edge = 0 to Array.length index_view.Topology_index.Private.edge_a - 1 do
+  for edge = 0 to Array.length index_view.Topology_index.View.edge_a - 1 do
     let a = index_view.edge_a.(edge) and b = index_view.edge_b.(edge) in
     if (match edges with None -> true | Some group -> Edge_group.mem edge group)
         && a <> b then begin
@@ -188,9 +188,9 @@ let run ?cancel ?grain ?edges ?(preserve_source_payload = true)
       fail "PolyPath maximum distance must be finite and non-negative";
     Cancel.check_opt cancel;
     let source_topology = Geometry.topology geometry in
-    let source = Topology.Private.view source_topology in
+    let source = Topology.View.view source_topology in
     let source_index = Topology_index.create ?cancel source_topology in
-    let index = Topology_index.Private.view source_index in
+    let index = Topology_index.View.view source_index in
     let point_count = source.point_count
     and source_edge_count = Topology_index.edge_count source_index in
     (match edges with
@@ -440,7 +440,7 @@ let run ?cancel ?grain ?edges ?(preserve_source_payload = true)
           let target = Group.init ?grain ~owner:Group.Vertex
               ~name:(Group.name group) output_vertex_count (fun vertex ->
                 Group.mem vertex_map.(vertex) group) in
-          Group.Private.remap_order ~source:group
+          Group.View.remap_order ~source:group
             ~source_of_target:vertex_map target
       | Group.Primitive ->
           let bits = Bytes.make ((path_count + 7) / 8) '\000' in
@@ -458,9 +458,9 @@ let run ?cancel ?grain ?edges ?(preserve_source_payload = true)
               if !member then set_bit bits graph_path.(graph_edge)
             end
           done;
-          let target = Group.Private.of_owned_bits ~owner:Group.Primitive
+          let target = Group.View.of_owned_bits ~owner:Group.Primitive
               ~name:(Group.name group) ~length:path_count bits in
-          Group.Private.remap_order ~source:group
+          Group.View.remap_order ~source:group
             ~source_of_target:path_primitive target) source_groups in
     let edge_groups = List.map (fun source_group ->
       let bits = Bytes.make ((graph_count + 7) / 8) '\000' in
@@ -470,7 +470,7 @@ let run ?cancel ?grain ?edges ?(preserve_source_payload = true)
         if graph_edge >= 0 && Edge_group.mem source_edge source_group then
           set_bit bits graph_target_edge.(graph_edge)
       done;
-      Edge_group.Private.of_owned_bits ~topology:output_topology
+      Edge_group.View.of_owned_bits ~topology:output_topology
         ~edge_count:graph_count ~name:(Edge_group.name source_group) bits)
       source_edge_groups in
     Geometry.create ~positions:(Geometry.positions geometry)

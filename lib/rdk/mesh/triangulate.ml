@@ -14,8 +14,8 @@ let run ?cancel ?(grain = 16_384) ?primitives geometry =
        invalid_arg
          "Rdk_mesh.Triangulate.triangulate: selection length does not match primitive count"
    | None | Some _ -> ());
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
-  let topology_view = Topology.Private.view topology in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
+  let topology_view = Topology.View.view topology in
   let selected primitive = match primitives with
     | None -> true
     | Some group -> Group.mem primitive group in
@@ -207,7 +207,7 @@ let run ?cancel ?(grain = 16_384) ?primitives geometry =
          | Ok () -> Error (Printf.sprintf
              "Rdk_mesh.Triangulate.triangulate: primitive %d failed triangulation" failure))
       else begin
-        let output_topology = Topology.Private.create_validated_owned
+        let output_topology = Topology.View.create_validated_owned
             ~point_count:(Geometry.point_count geometry)
             ~vertex_points:output_vertices ~primitive_offsets:output_offsets
             ~primitive_kinds:output_kinds in

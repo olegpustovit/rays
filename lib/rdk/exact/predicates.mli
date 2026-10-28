@@ -61,7 +61,7 @@ val segment_segment_packed :
     segments are rejected through exact coplanarity before a stable exact 2D
     projection. Degenerate zero-length inputs are reported explicitly. *)
 
-module Private : sig
+module View : sig
   val exact_orient2d_arena :
     ax:float -> ay:float -> bx:float -> by:float -> cx:float -> cy:float -> sign
   val exact_orient3d_arena :

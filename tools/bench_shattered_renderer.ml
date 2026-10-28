@@ -204,7 +204,7 @@ let prepare output =
   match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive "piece"
       (Result.get_ok (Sop.Payload.geometry output.Session.payload)) with
   | Some attribute ->
-      (match Rdk.Attribute.Private.storage attribute with
+      (match Rdk.Attribute.View.storage attribute with
        | Rdk.Attribute.Int _ | Text _ ->
            Rdk_rays.Packed_pieces.of_geometry ~piece_attribute:"piece"
              (Result.get_ok (Sop.Payload.geometry output.payload))

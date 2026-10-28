@@ -12,7 +12,7 @@ let[@inline] clean_length dx dy dz =
 
 let[@inline] clean_point_distance positions a b =
   let scale = Float.max
-      (Float.max (abs_float positions.Packed.Float3.Private.x.(a))
+      (Float.max (abs_float positions.Packed.Float3.View.x.(a))
          (abs_float positions.x.(b)))
       (Float.max
          (Float.max (abs_float positions.y.(a)) (abs_float positions.y.(b)))
@@ -25,7 +25,7 @@ let[@inline] clean_point_distance positions a b =
       ((positions.z.(b) /. scale) -. (positions.z.(a) /. scale)) *. scale
 
 let[@inline] clean_triangle_is_degenerate ~epsilon positions a b c =
-  let ax = positions.Packed.Float3.Private.x.(a)
+  let ax = positions.Packed.Float3.View.x.(a)
   and ay = positions.y.(a) and az = positions.z.(a)
   and bx = positions.x.(b) and by = positions.y.(b) and bz = positions.z.(b)
   and cx = positions.x.(c) and cy = positions.y.(c) and cz = positions.z.(c) in
@@ -66,10 +66,10 @@ let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
   then Error "Facet selection must be a matching primitive group"
   else if primitive_count = 0 then Ok geometry
   else
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry)
+    let positions = Packed.Float3.View.view (Geometry.positions geometry)
     and topology_value = Geometry.topology geometry
     and flags = Bytes.make primitive_count '\000' in
-    let topology = Topology.Private.view topology_value in
+    let topology = Topology.View.view topology_value in
     if Topology.all_triangles topology_value then
       Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(primitive_count - 1)
         (fun primitive ->
@@ -192,7 +192,7 @@ let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
       Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
 
 let delete_nan_points ?cancel ~grain geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let point_count = Geometry.point_count geometry in
   if point_count = 0 then Ok geometry
   else
@@ -215,7 +215,7 @@ let delete_nan_points ?cancel ~grain geometry =
 
 let[@inline] clean_cycle_point topology first size start direction offset =
   let local = (start + (direction * offset)) mod size in
-  topology.Topology.Private.vertex_points.
+  topology.Topology.View.vertex_points.
     (first + if local < 0 then local + size else local)
 
 let clean_minimal_rotation_into topology first size direction primitive
@@ -247,7 +247,7 @@ let clean_minimal_rotation_into topology first size direction primitive
   min work_left.(primitive) work_right.(primitive) mod size
 
 let delete_overlaps_general ?cancel ~grain ~delete_pairs geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let primitive_count = Geometry.primitive_count geometry in
   let sizes = Array.make primitive_count 0 and starts = Array.make primitive_count 0
   and directions = Array.make primitive_count 1
@@ -353,7 +353,7 @@ let delete_overlaps_general ?cancel ~grain ~delete_pairs geometry =
   end
 
 let delete_triangle_overlaps ?cancel ~grain ~delete_pairs geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let primitive_count = Geometry.primitive_count geometry in
   if primitive_count = 0 then Ok geometry
   else if primitive_count > Sys.max_array_length / 4 then

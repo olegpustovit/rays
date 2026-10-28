@@ -41,7 +41,7 @@ let exact_point value point =
         value.explicit_cache.(point) <- Some result;
         result
 
-module Private = struct
+module View = struct
   type view = {
     x : float array;
     y : float array;

@@ -1,4 +1,4 @@
-(** Private compact source-to-destination incidence representation. *)
+(** View compact source-to-destination incidence representation. *)
 type t =
   | Identity of int
   | Constant_zero of int

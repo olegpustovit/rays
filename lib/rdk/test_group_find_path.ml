@@ -3,7 +3,7 @@ open Rdk
 open Rdk_test_support
 
 let geometry positions curves =
-  let packed = Packed.Float3.Private.of_owned_exn
+  let packed = Packed.Float3.View.of_owned_exn
       ~x:(Array.map (fun (x, _, _) -> x) positions)
       ~y:(Array.map (fun (_, y, _) -> y) positions)
       ~z:(Array.map (fun (_, _, z) -> z) positions) in
@@ -27,7 +27,7 @@ let order group =
   | None -> fail ("group " ^ Group.name group ^ " is not ordered")
 
 let primitive_fan () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; -1.; 1.; 1.; -1.|]
       ~y:[|0.; 0.; 0.; 0.; 0.|]
       ~z:[|0.; -1.; -1.; 1.; 1.|] in

@@ -33,7 +33,7 @@ let repeat_array ?cancel ?(grain = 16_384) copies source =
 let repeat_attribute ?cancel ?(grain = 16_384) copies attribute =
   if Attribute.owner attribute = Attribute.Detail then Ok attribute
   else
-    let storage = match Attribute.Private.storage attribute with
+    let storage = match Attribute.View.storage attribute with
       | Attribute.Float values ->
           Attribute.Float (repeat_array ?cancel ~grain copies values)
       | Attribute.Int values ->
@@ -41,18 +41,18 @@ let repeat_attribute ?cancel ?(grain = 16_384) copies attribute =
       | Attribute.Text values ->
           Attribute.Text (repeat_array ?cancel ~grain copies values)
       | Attribute.Float2 values ->
-          let view = Packed.Float2.Private.view values in
+          let view = Packed.Float2.View.view values in
           Attribute.Float2 (Packed.Float2.of_owned
             ~x:(repeat_array ?cancel ~grain copies view.x)
             ~y:(repeat_array ?cancel ~grain copies view.y) |> Support.get_ok)
       | Attribute.Float3 values ->
-          let view = Packed.Float3.Private.view values in
-          Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+          let view = Packed.Float3.View.view values in
+          Attribute.Float3 (Packed.Float3.View.of_owned_exn
             ~x:(repeat_array ?cancel ~grain copies view.x)
             ~y:(repeat_array ?cancel ~grain copies view.y)
             ~z:(repeat_array ?cancel ~grain copies view.z))
       | Attribute.Float4 values ->
-          let view = Packed.Float4.Private.view values in
+          let view = Packed.Float4.View.view values in
           Attribute.Float4 (Packed.Float4.of_owned
             ~x:(repeat_array ?cancel ~grain copies view.x)
             ~y:(repeat_array ?cancel ~grain copies view.y)
@@ -78,7 +78,7 @@ let repeat_group ?cancel ?grain copies group =
       (fun index ->
         if index land 4095 = 0 then Cancel.check_opt cancel;
         Group.mem (index mod source_count) group) in
-  match Group.Private.order_view group with
+  match Group.View.order_view group with
   | None -> target
   | Some source_order ->
       let order = Array.make (copies * Array.length source_order) 0
@@ -90,10 +90,10 @@ let repeat_group ?cancel ?grain copies group =
           incr output
         ) source_order
       done;
-      Group.Private.with_owned_order order target
+      Group.View.with_owned_order order target
 
 let transform_single_instance ?cancel ~grain matrix geometry =
-  let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let source = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = Array.length source.x in
   let x = Array.make count 0. and y = Array.make count 0.
   and z = Array.make count 0. in
@@ -114,7 +114,7 @@ let transform_single_instance ?cancel ~grain matrix geometry =
         z.(point) <- oz /. ow
       end
     done);
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let output = Geometry.with_positions positions geometry |> Support.get_ok in
   match Rays_math.Mat4.inverse matrix with
   | None ->
@@ -135,7 +135,7 @@ let transform_single_instance ?cancel ~grain matrix geometry =
             (match Attribute.get (Attribute.normal ~owner) attribute with
              | None -> output
              | Some source ->
-                 let source = Packed.Float3.Private.view source in
+                 let source = Packed.Float3.View.view source in
                  let count = Array.length source.x in
                  let x = Array.make count 0. and y = Array.make count 0.
                  and z = Array.make count 0. in
@@ -154,7 +154,7 @@ let transform_single_instance ?cancel ~grain matrix geometry =
                          z.(index) <- oz/.length
                        end
                      done);
-                 let value = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+                 let value = Packed.Float3.View.of_owned_exn ~x ~y ~z in
                  let attribute = Attribute.create_key_owned
                      (Attribute.normal ~owner) value |> Support.get_ok in
                  Geometry.with_attribute attribute output |> Support.get_ok))
@@ -199,7 +199,7 @@ let materialize ?cancel ?(grain = 16_384) ~transforms geometry =
     if output_primitives = Sys.max_array_length then
       Error "Rdk.Instance_copy.materialize_instances: primitive-offset output exceeds array limits"
     else begin
-      let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+      let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
       let x, y, z =
           let rows = Array.map Rays_math.Mat4.to_rows matrices in
           let x = Array.make output_points 0. and y = Array.make output_points 0.
@@ -233,7 +233,7 @@ let materialize ?cancel ?(grain = 16_384) ~transforms geometry =
               output_at := !output_at + count
             done);
           x, y, z in
-      let source_topology = Topology.Private.view (Geometry.topology geometry) in
+      let source_topology = Topology.View.view (Geometry.topology geometry) in
       let vertex_points = Array.make output_vertices 0
       and primitive_offsets = Array.make (output_primitives + 1) 0
       and primitive_kinds = Bytes.make output_primitives '\000' in
@@ -269,7 +269,7 @@ let materialize ?cancel ?(grain = 16_384) ~transforms geometry =
             output_at := !output_at + count
           done);
       primitive_offsets.(output_primitives) <- output_vertices;
-      let topology = Topology.Private.create_validated_owned ~point_count:output_points
+      let topology = Topology.View.create_validated_owned ~point_count:output_points
           ~vertex_points ~primitive_offsets ~primitive_kinds in
       let typed_normal attribute =
         let owner = Attribute.owner attribute in
@@ -293,7 +293,7 @@ let materialize ?cancel ?(grain = 16_384) ~transforms geometry =
           done;
           if !valid then Some output else None in
       let transform_normals owner source normal_matrices =
-        let source = Packed.Float3.Private.view source in
+        let source = Packed.Float3.View.view source in
         let source_count = Array.length source.x in
         let nx = Array.make (total * source_count) 0.
         and ny = Array.make (total * source_count) 0.
@@ -324,7 +324,7 @@ let materialize ?cancel ?(grain = 16_384) ~transforms geometry =
             done;
             output_at := !output_at + count
           done);
-        let value = Packed.Float3.Private.of_owned_exn ~x:nx ~y:ny ~z:nz in
+        let value = Packed.Float3.View.of_owned_exn ~x:nx ~y:ny ~z:nz in
         Attribute.create_key_owned (Attribute.normal ~owner) value |> Support.get_ok in
       let rec attributes output = function
         | [] -> Ok (List.rev output)
@@ -339,7 +339,7 @@ let materialize ?cancel ?(grain = 16_384) ~transforms geometry =
                  Result.bind (repeat_attribute ?cancel ~grain total attribute)
                    (fun attribute -> attributes (attribute :: output) rest)) in
       Result.bind (attributes [] (Geometry.attributes geometry)) (fun attributes ->
-        let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+        let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
         let edge_groups = match Geometry.edge_groups geometry with
           | [] -> []
           | source_groups ->

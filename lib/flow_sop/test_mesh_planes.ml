@@ -17,7 +17,7 @@ let stage points =
   | Diagnostic.Error d -> Error d
 let expected count fields =
   let plane name=match List.assoc name fields with E.Float_array xs->xs|_->assert false in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn
     ~x:(Array.copy(plane "x")) ~y:(Array.copy(plane "y")) ~z:(Array.copy(plane "z")))
     ~topology:(Topology.empty ~point_count:count) () |>get_string_ok |>geometry_bytes
 let diagnostic code message=Diagnostic.error ~code message
@@ -34,7 +34,7 @@ let checks () =
       let actual=Flow_sop.Topology_kernel.mesh(args points)|>function
         |Ok geometry->geometry |Error d->fail(Diagnostic.to_string d) in
       check(geometry_bytes actual=bytes)"mesh-plane stage exact payload/domain bytes";
-      let output=Packed.Float3.Private.view(Geometry.positions actual) in
+      let output=Packed.Float3.View.view(Geometry.positions actual) in
       List.iter(fun(name,values)->match values with E.Float_array values->
         let copied=match name with "x"->output.x|"y"->output.y|_->output.z in
         (* Empty arrays can share the canonical atom and have no mutable cells. *)

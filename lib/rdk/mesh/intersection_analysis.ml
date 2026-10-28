@@ -34,64 +34,64 @@ type raw = {
 let event_pass ?cancel ~grain ~self ~tolerance ~include_coplanar source_index
     collision_index =
   let source_pieces, collision_pieces = if self then
-      Linear_piece_index.Private.overlapping_self_pairs ?cancel ~grain
+      Linear_piece_index.View.overlapping_self_pairs ?cancel ~grain
         ~tolerance source_index
-    else Linear_piece_index.Private.overlapping_pairs ?cancel ~grain ~tolerance
+    else Linear_piece_index.View.overlapping_pairs ?cancel ~grain ~tolerance
         source_index collision_index in
   let candidate_count = Array.length source_pieces in
   let chunk = max 1 grain and counts = Array.make candidate_count 0 in
   let range_count = Support.ceiling_div candidate_count chunk in
-  let source_positions = Linear_piece_index.Private.positions source_index
-  and collision_positions = Linear_piece_index.Private.positions collision_index in
+  let source_positions = Linear_piece_index.View.positions source_index
+  and collision_positions = Linear_piece_index.View.positions collision_index in
   let narrow scratch point_info events source_piece collision_piece =
-    match Linear_piece_index.Private.kind source_index source_piece,
-        Linear_piece_index.Private.kind collision_index collision_piece with
+    match Linear_piece_index.View.kind source_index source_piece,
+        Linear_piece_index.View.kind collision_index collision_piece with
     | Linear_piece_index.Triangle, Linear_piece_index.Triangle ->
         Triangle_intersection.events_points_into ~scratch ~point_info ~events
           ~self ~tolerance ~include_coplanar ~left_positions:source_positions
-          ~left_a:(Linear_piece_index.Private.point source_index source_piece 0)
-          ~left_b:(Linear_piece_index.Private.point source_index source_piece 1)
-          ~left_c:(Linear_piece_index.Private.point source_index source_piece 2)
+          ~left_a:(Linear_piece_index.View.point source_index source_piece 0)
+          ~left_b:(Linear_piece_index.View.point source_index source_piece 1)
+          ~left_c:(Linear_piece_index.View.point source_index source_piece 2)
           ~right_positions:collision_positions
-          ~right_a:(Linear_piece_index.Private.point collision_index collision_piece 0)
-          ~right_b:(Linear_piece_index.Private.point collision_index collision_piece 1)
-          ~right_c:(Linear_piece_index.Private.point collision_index collision_piece 2)
+          ~right_a:(Linear_piece_index.View.point collision_index collision_piece 0)
+          ~right_b:(Linear_piece_index.View.point collision_index collision_piece 1)
+          ~right_c:(Linear_piece_index.View.point collision_index collision_piece 2)
     | Linear_piece_index.Segment, Linear_piece_index.Segment ->
         Curve_intersection.segment_segment_events_into ~scratch ~events ~self
           ~tolerance ~left_positions:source_positions
-          ~left_a:(Linear_piece_index.Private.point source_index source_piece 0)
-          ~left_b:(Linear_piece_index.Private.point source_index source_piece 1)
-          ~left_u0:(Linear_piece_index.Private.curve_u source_index source_piece 0)
-          ~left_u1:(Linear_piece_index.Private.curve_u source_index source_piece 1)
+          ~left_a:(Linear_piece_index.View.point source_index source_piece 0)
+          ~left_b:(Linear_piece_index.View.point source_index source_piece 1)
+          ~left_u0:(Linear_piece_index.View.curve_u source_index source_piece 0)
+          ~left_u1:(Linear_piece_index.View.curve_u source_index source_piece 1)
           ~right_positions:collision_positions
-          ~right_a:(Linear_piece_index.Private.point collision_index collision_piece 0)
-          ~right_b:(Linear_piece_index.Private.point collision_index collision_piece 1)
-          ~right_u0:(Linear_piece_index.Private.curve_u collision_index collision_piece 0)
-          ~right_u1:(Linear_piece_index.Private.curve_u collision_index collision_piece 1)
+          ~right_a:(Linear_piece_index.View.point collision_index collision_piece 0)
+          ~right_b:(Linear_piece_index.View.point collision_index collision_piece 1)
+          ~right_u0:(Linear_piece_index.View.curve_u collision_index collision_piece 0)
+          ~right_u1:(Linear_piece_index.View.curve_u collision_index collision_piece 1)
     | Linear_piece_index.Segment, Linear_piece_index.Triangle ->
         Curve_intersection.segment_triangle_events_into ~scratch ~events ~self
           ~tolerance ~include_coplanar ~segment_first:true
           ~segment_positions:source_positions
-          ~segment_a:(Linear_piece_index.Private.point source_index source_piece 0)
-          ~segment_b:(Linear_piece_index.Private.point source_index source_piece 1)
-          ~segment_u0:(Linear_piece_index.Private.curve_u source_index source_piece 0)
-          ~segment_u1:(Linear_piece_index.Private.curve_u source_index source_piece 1)
+          ~segment_a:(Linear_piece_index.View.point source_index source_piece 0)
+          ~segment_b:(Linear_piece_index.View.point source_index source_piece 1)
+          ~segment_u0:(Linear_piece_index.View.curve_u source_index source_piece 0)
+          ~segment_u1:(Linear_piece_index.View.curve_u source_index source_piece 1)
           ~triangle_positions:collision_positions
-          ~triangle_a:(Linear_piece_index.Private.point collision_index collision_piece 0)
-          ~triangle_b:(Linear_piece_index.Private.point collision_index collision_piece 1)
-          ~triangle_c:(Linear_piece_index.Private.point collision_index collision_piece 2)
+          ~triangle_a:(Linear_piece_index.View.point collision_index collision_piece 0)
+          ~triangle_b:(Linear_piece_index.View.point collision_index collision_piece 1)
+          ~triangle_c:(Linear_piece_index.View.point collision_index collision_piece 2)
     | Linear_piece_index.Triangle, Linear_piece_index.Segment ->
         Curve_intersection.segment_triangle_events_into ~scratch ~events ~self
           ~tolerance ~include_coplanar ~segment_first:false
           ~segment_positions:collision_positions
-          ~segment_a:(Linear_piece_index.Private.point collision_index collision_piece 0)
-          ~segment_b:(Linear_piece_index.Private.point collision_index collision_piece 1)
-          ~segment_u0:(Linear_piece_index.Private.curve_u collision_index collision_piece 0)
-          ~segment_u1:(Linear_piece_index.Private.curve_u collision_index collision_piece 1)
+          ~segment_a:(Linear_piece_index.View.point collision_index collision_piece 0)
+          ~segment_b:(Linear_piece_index.View.point collision_index collision_piece 1)
+          ~segment_u0:(Linear_piece_index.View.curve_u collision_index collision_piece 0)
+          ~segment_u1:(Linear_piece_index.View.curve_u collision_index collision_piece 1)
           ~triangle_positions:source_positions
-          ~triangle_a:(Linear_piece_index.Private.point source_index source_piece 0)
-          ~triangle_b:(Linear_piece_index.Private.point source_index source_piece 1)
-          ~triangle_c:(Linear_piece_index.Private.point source_index source_piece 2) in
+          ~triangle_a:(Linear_piece_index.View.point source_index source_piece 0)
+          ~triangle_b:(Linear_piece_index.View.point source_index source_piece 1)
+          ~triangle_c:(Linear_piece_index.View.point source_index source_piece 2) in
   let visit_ranges write =
     if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
         ~finish:(range_count - 1) (fun range ->
@@ -169,7 +169,7 @@ let numerical_weld_tolerance requested raw =
     (256. *. Float.epsilon *. Float.max 1. !extent))
 
 let cluster_events ?cancel tolerance raw =
-  let positions = Packed.Float3.Private.of_shared_exn
+  let positions = Packed.Float3.View.of_shared_exn
       ~x:raw.x ~y:raw.y ~z:raw.z in
   let temporary = match Geometry.create ~positions
       ~topology:(Topology.empty ~point_count:(Array.length raw.x)) () with
@@ -189,29 +189,29 @@ let representative_data clusters raw = match clusters with
 
 let point_of_piece_vertex index piece u v w =
   let epsilon = 512. *. Float.epsilon in
-  match Linear_piece_index.Private.kind index piece with
+  match Linear_piece_index.View.kind index piece with
   | Linear_piece_index.Triangle ->
       let local = if u >= 1. -. epsilon && v <= epsilon && w <= epsilon then 0
         else if v >= 1. -. epsilon && u <= epsilon && w <= epsilon then 1
         else if w >= 1. -. epsilon && u <= epsilon && v <= epsilon then 2
         else -1 in
-      if local < 0 then -1 else Linear_piece_index.Private.point index piece local
+      if local < 0 then -1 else Linear_piece_index.View.point index piece local
   | Linear_piece_index.Segment ->
-      let u0 = Linear_piece_index.Private.curve_u index piece 0
-      and u1 = Linear_piece_index.Private.curve_u index piece 1 in
+      let u0 = Linear_piece_index.View.curve_u index piece 0
+      and u1 = Linear_piece_index.View.curve_u index piece 1 in
       if Float.abs (u -. u0) <= epsilon then
-        Linear_piece_index.Private.point index piece 0
+        Linear_piece_index.View.point index piece 0
       else if Float.abs (u -. u1) <= epsilon then
-        Linear_piece_index.Private.point index piece 1
+        Linear_piece_index.View.point index piece 1
       else -1
 
 let provenance_piece index piece u =
-  match Linear_piece_index.Private.kind index piece with
+  match Linear_piece_index.View.kind index piece with
   | Linear_piece_index.Triangle -> piece
   | Linear_piece_index.Segment ->
       let epsilon = 512. *. Float.epsilon
-      and u0 = Linear_piece_index.Private.curve_u index piece 0 in
-      if Linear_piece_index.Private.local index piece > 0
+      and u0 = Linear_piece_index.View.curve_u index piece 0 in
+      if Linear_piece_index.View.local index piece > 0
           && Float.abs (u -. u0) <= epsilon
       then piece - 1 else piece
 
@@ -256,7 +256,7 @@ let build_provenance ?cancel ~self ~source_index ~collision_index clusters raw =
       let output = cursors.(point) in
       cursors.(point) <- output + 1;
       inputs.(output) <- input;
-      primitives.(output) <- Linear_piece_index.Private.primitive index piece;
+      primitives.(output) <- Linear_piece_index.View.primitive index piece;
       point_numbers.(output) <- point_of_piece_vertex index piece u v w;
       uvw.(output * 3) <- u;
       uvw.((output * 3) + 1) <- v;
@@ -313,7 +313,7 @@ let create_output ~input_attribute ~primitive_attribute ~primitive_uvw_attribute
          | Ok attribute -> attribute | Error message -> invalid_arg message in
        attributes := attribute :: !attributes);
   add_int_array point_attribute point_numbers;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   match Geometry.create ~positions ~topology:(Topology.empty ~point_count)
       ~attributes:(List.rev !attributes) () with
   | Ok geometry -> geometry

@@ -12,7 +12,7 @@ let incident_range value edge = value.offsets.(edge), value.offsets.(edge + 1)
 let incident_facet value incident = value.facets.(incident)
 let incident_local value incident = Char.code (Bytes.unsafe_get value.locals incident)
 
-module Private = struct
+module View = struct
   let complex value = value.complex
 end
 
@@ -50,21 +50,21 @@ let build ?cancel complex =
         done
       else begin
         let order = Array.init count Fun.id in
-        let edge_start = Boolean_complex.Private.vertex complex
+        let edge_start = Boolean_complex.View.vertex complex
             (Boolean_complex.edge_first complex edge)
-        and edge_end = Boolean_complex.Private.vertex complex
+        and edge_end = Boolean_complex.View.vertex complex
             (Boolean_complex.edge_second complex edge) in
         let reference_incident = first in
         let reference_facet = Boolean_complex.edge_incident_facet
             complex reference_incident
         and reference_local = Boolean_complex.edge_incident_local
             complex reference_incident in
-        let reference = Boolean_complex.Private.vertex complex
+        let reference = Boolean_complex.View.vertex complex
             (opposite_vertex complex reference_facet reference_local) in
         let point incident =
           let facet = Boolean_complex.edge_incident_facet complex incident
           and local = Boolean_complex.edge_incident_local complex incident in
-          Boolean_complex.Private.vertex complex
+          Boolean_complex.View.vertex complex
             (opposite_vertex complex facet local) in
         let points = Array.init count (fun index -> point (first + index)) in
         let same_source_face left right =

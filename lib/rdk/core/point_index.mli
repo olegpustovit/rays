@@ -3,7 +3,7 @@ type t
 val create : ?cancel:Cancel.t -> Topology.t -> t
 
 type index = t
-module Private : sig
+module View : sig
   type view = {
     primitive_of_vertex : int array;
     point_offsets : int array;

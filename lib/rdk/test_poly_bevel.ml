@@ -1,34 +1,33 @@
+open Rdk_test_support
 open Rays
 open Rdk
 
-let fail message = prerr_endline message; exit 1
-let check condition message = if not condition then fail message
 let get_rdk = function Ok value -> value | Error error -> fail (Error.to_string error)
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | _ -> false
@@ -54,10 +53,10 @@ let equal_edge_group left right =
      !same
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -132,7 +131,7 @@ let validate_closed_manifold geometry =
       let owners = Array.init incidence (fun local ->
         Topology_index.edge_vertex index ~edge ~local
         |> Topology_index.primitive_of_vertex index) in
-      let view = Topology.Private.view topology in
+      let view = Topology.View.view topology in
       Array.iter (fun primitive ->
         Printf.eprintf "edge-owner %d:" primitive;
         for vertex = view.primitive_offsets.(primitive)
@@ -147,7 +146,7 @@ let validate_closed_manifold geometry =
     end
   done;
   let used = Bytes.make (Geometry.point_count geometry) '\000' in
-  let view = Topology.Private.view topology in
+  let view = Topology.View.view topology in
   Array.iter (fun point -> Bytes.set used point '\001') view.vertex_points;
   for point = 0 to Geometry.point_count geometry - 1 do
     check (Bytes.get used point <> '\000') "PolyBevel left an unused point"
@@ -197,7 +196,7 @@ let test_all_edges_and_profiles () =
       && Edge_group.cardinality (Geometry.find_edge_group "source_edges" round
         |> Option.get) = 48)
     "PolyBevel divided group ancestry";
-  let positions = Packed.Float3.Private.view (Geometry.positions round) in
+  let positions = Packed.Float3.View.view (Geometry.positions round) in
   for point = 0 to Geometry.point_count round - 1 do
     check (Float.is_finite positions.x.(point)
         && Float.is_finite positions.y.(point)
@@ -217,7 +216,7 @@ let test_partial_network_and_clamping () =
   validate_closed_manifold one;
   let huge = Poly_bevel.run ~grain:1 ~edges:selected ~distance:1e200 source
       |> get_rdk in
-  let positions = Packed.Float3.Private.view (Geometry.positions huge) in
+  let positions = Packed.Float3.View.view (Geometry.positions huge) in
   for point = 0 to Geometry.point_count huge - 1 do
     check (Float.is_finite positions.x.(point)
         && Float.is_finite positions.y.(point)

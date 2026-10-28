@@ -50,8 +50,8 @@ let duplicate_cloud count =
   Array.make count (0.25, -0.5, 0.75)
 
 let hash geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry)
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry)
   and value = ref 17 in
   let mix item = value := ((!value * 65_599) lxor item) land max_int in
   Array.iter (fun item -> mix (Int64.to_int (Int64.bits_of_float item))) positions.x;

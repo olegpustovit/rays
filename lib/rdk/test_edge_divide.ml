@@ -2,41 +2,41 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_geometry left right =
-  let left_positions = Packed.Float3.Private.view (Geometry.positions left)
-  and right_positions = Packed.Float3.Private.view (Geometry.positions right)
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  let left_positions = Packed.Float3.View.view (Geometry.positions left)
+  and right_positions = Packed.Float3.View.view (Geometry.positions right)
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -65,7 +65,7 @@ let edge_group_of_pairs topology name pairs =
     Array.mem edge selected)
 
 let two_quads () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 2.; 0.; 1.; 2.|]
       ~y:[|0.; 0.; 0.; 1.; 1.; 1.|]
       ~z:[|0.; 0.; 0.; 0.; 0.; 0.|] in
@@ -106,13 +106,13 @@ let two_quads () =
 
 let float_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry |> Option.get
-      |> Attribute.Private.storage with
+      |> Attribute.View.storage with
   | Attribute.Float values -> values
   | _ -> fail (name ^ " is not float")
 
 let int_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry |> Option.get
-      |> Attribute.Private.storage with
+      |> Attribute.View.storage with
   | Attribute.Int values -> values
   | _ -> fail (name ^ " is not integer")
 

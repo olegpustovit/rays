@@ -42,10 +42,10 @@ val raycast :
     prefer the forward direction. Equal-distance triangle ties select lower
     source primitive and internal triangle numbers. *)
 
-module Private : sig
+module View : sig
   type ray_directions =
     | Constant_direction of { x : float; y : float; z : float }
-    | Per_query_directions of Packed.Float3.Private.view
+    | Per_query_directions of Packed.Float3.View.view
 
   type sample_combine =
     | Sample_average

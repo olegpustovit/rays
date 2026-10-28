@@ -1,4 +1,4 @@
-(** Private build-once exact solid Boolean arrangement. *)
+(** View build-once exact solid Boolean arrangement. *)
 
 type t
 type treatment = Solid | Surface
@@ -40,6 +40,6 @@ val shatter_with_ancestry :
     one prepared arrangement. Shared walls are intentionally duplicated
     between products. *)
 
-module Private : sig
+module View : sig
   val weiler : t -> Boolean_weiler.t
 end

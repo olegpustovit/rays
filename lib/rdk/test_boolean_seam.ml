@@ -21,7 +21,7 @@ let geometry points triangles =
       ~vertex_points:triangles
       ~primitive_offsets:(Array.init ((Array.length triangles / 3) + 1)
         (fun primitive -> primitive * 3)) |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let triangle points = geometry points [|0;1;2|]
@@ -41,7 +41,7 @@ let curve_geometry points primitives kinds =
     primitives;
   let topology = Topology.create_owned ~point_count:count ~vertex_points:vertices
       ~primitive_offsets:offsets ~primitive_kinds:kinds |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let pipeline ?(resolve_left_self_intersections = false)
@@ -126,8 +126,8 @@ let tetra ~origin:(ox, oy, oz) size = geometry
     [|0;2;1; 0;1;3; 1;2;3; 2;0;3|]
 
 let geometry_signature geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   Array.copy positions.x, Array.copy positions.y, Array.copy positions.z,
   Array.copy topology.vertex_points, Array.copy topology.primitive_offsets,
   Bytes.copy topology.primitive_kinds
@@ -162,17 +162,17 @@ let test_edge_classification_retention () =
       (triangle [|10.,0.,0.; 12.,0.,0.; 10.,2.,0.|]) in
   let value = Seam.build complex |> get in
   for edge = 0 to Complex.edge_count complex - 1 do
-    check (not (Seam.Private.is_seam_edge value edge))
+    check (not (Seam.View.is_seam_edge value edge))
       "disjoint source boundary was retained as a Boolean seam edge"
   done;
   let rejected edge =
-    try ignore (Seam.Private.is_seam_edge value edge); false
+    try ignore (Seam.View.is_seam_edge value edge); false
     with Invalid_argument _ -> true in
   check (rejected (-1) && rejected (Complex.edge_count complex))
     "Boolean seam edge classification accepted an invalid edge index"
 
 let test_post_rounding_verification () =
-  let verify ?cancel geometry = Seam.Private.verify_curves ?cancel ~grain:1 geometry in
+  let verify ?cancel geometry = Seam.View.verify_curves ?cancel ~grain:1 geometry in
   let crossing = curve_geometry
       [|-1.,0.,0.; 1.,0.,0.; 0.,-1.,0.; 0.,1.,0.|]
       [|[|0;1|];[|2;3|]|]
@@ -242,7 +242,7 @@ let test_verification_scale () =
   and kinds = Array.make count Topology.Open_polyline in
   let curves = curve_geometry points primitives kinds in
   let run domains = Parallel.run ~domains (fun () ->
-      Seam.Private.verify_curves ~grain:256 curves) in
+      Seam.View.verify_curves ~grain:256 curves) in
   check (run 1 = Ok () && run 4 = Ok ())
     "scale seam verification failed or differs across domain counts"
 

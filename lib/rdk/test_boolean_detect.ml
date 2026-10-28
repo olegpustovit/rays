@@ -13,7 +13,7 @@ let geometry points triangles =
       ~vertex_points:triangles
       ~primitive_offsets:(Array.init ((Array.length triangles / 3) + 1)
         (fun primitive -> primitive * 3)) |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let source () = geometry
@@ -28,15 +28,15 @@ let collision () = geometry
 let int_array name geometry =
   match Geometry.find_attribute ~owner:Attribute.Primitive name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Int_array values -> Packed.Int_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Int_array values -> Packed.Int_array.View.view values
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)
 
 let ints name geometry =
   match Geometry.find_attribute ~owner:Attribute.Primitive name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)
 
@@ -44,8 +44,8 @@ let group name geometry = Geometry.find_group ~owner:Group.Primitive name geomet
     |> Option.get
 
 let topology_equal left right =
-  let left = Topology.Private.view (Geometry.topology left)
-  and right = Topology.Private.view (Geometry.topology right) in
+  let left = Topology.View.view (Geometry.topology left)
+  and right = Topology.View.view (Geometry.topology right) in
   left.point_count = right.point_count
   && left.vertex_points = right.vertex_points
   && left.primitive_offsets = right.primitive_offsets

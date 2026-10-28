@@ -1,4 +1,4 @@
-(** Private exact-axis shell winding classification for a Weiler complex. *)
+(** View exact-axis shell winding classification for a Weiler complex. *)
 
 type t
 
@@ -17,6 +17,6 @@ val right_winding : t -> int -> int
 (** Signed generalized winding values. Non-zero means inside for the default
     solid interpretation; signs preserve source orientation diagnostics. *)
 
-module Private : sig
+module View : sig
   val weiler : t -> Boolean_weiler.t
 end

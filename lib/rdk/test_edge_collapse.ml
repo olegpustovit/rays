@@ -2,41 +2,41 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_geometry left right =
-  let left_positions = Packed.Float3.Private.view (Geometry.positions left)
-  and right_positions = Packed.Float3.Private.view (Geometry.positions right)
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  let left_positions = Packed.Float3.View.view (Geometry.positions left)
+  and right_positions = Packed.Float3.View.view (Geometry.positions right)
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -65,7 +65,7 @@ let edge_group_of_pairs topology name pairs =
     Array.mem edge selected)
 
 let quad () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.|] ~y:[|0.;0.;2.;2.|] ~z:[|0.;0.;0.;0.|] in
   let topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get_ok in
@@ -87,7 +87,7 @@ let quad () =
       attribute Attribute.Point "__rdk_edge_collapse_target"
         (Attribute.Int [|9;8;7;6|]);
       attribute Attribute.Point "N" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|1.;1.;1.;1.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|1.;1.;1.;1.|]
           ~y:[|0.;0.;0.;0.|] ~z:[|0.;0.;0.;0.|]));
       attribute Attribute.Vertex "corner"
         (Attribute.Float [|10.;20.;30.;40.|]);
@@ -97,19 +97,19 @@ let quad () =
 
 let point_float name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry
-      |> Option.get |> Attribute.Private.storage with
+      |> Option.get |> Attribute.View.storage with
   | Attribute.Float values -> values
   | _ -> fail (name ^ " is not point float")
 
 let point_int name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry
-      |> Option.get |> Attribute.Private.storage with
+      |> Option.get |> Attribute.View.storage with
   | Attribute.Int values -> values
   | _ -> fail (name ^ " is not point integer")
 
 let vertex_float name geometry =
   match Geometry.find_attribute ~owner:Attribute.Vertex name geometry
-      |> Option.get |> Attribute.Private.storage with
+      |> Option.get |> Attribute.View.storage with
   | Attribute.Float values -> values
   | _ -> fail (name ^ " is not vertex float")
 
@@ -126,8 +126,8 @@ let run () =
   let source = quad () in
   let collapse = Geometry.find_edge_group "collapse" source |> Option.get in
   let output = Edge_collapse.run ~grain:1 ~edges:collapse source |> get_rdk in
-  let positions = Packed.Float3.Private.view (Geometry.positions output)
-  and topology = Topology.Private.view (Geometry.topology output) in
+  let positions = Packed.Float3.View.view (Geometry.positions output)
+  and topology = Topology.View.view (Geometry.topology output) in
   check (Geometry.point_count output = 3 && Geometry.vertex_count output = 3
       && Geometry.primitive_count output = 1)
     "Edge Collapse cardinality";
@@ -151,9 +151,9 @@ let run () =
   check (Group.ordered_elements ordered = Some [|0;1|])
     "Edge Collapse ordered point-group ancestry";
   (match Geometry.find_attribute ~owner:Attribute.Point "N" output
-      |> Option.get |> Attribute.Private.storage with
+      |> Option.get |> Attribute.View.storage with
    | Attribute.Float3 values ->
-       let values = Packed.Float3.Private.view values in
+       let values = Packed.Float3.View.view values in
        check (values.x = [|0.;0.;0.|] && values.y = [|0.;0.;0.|]
            && values.z = [|1.;1.;1.|])
          "Edge Collapse point-normal recomputation"
@@ -163,7 +163,7 @@ let run () =
       [|0,1;1,2|] in
   let separated = Edge_collapse.run ~grain:1 ~edges:path
       ~connectivity_attribute:"piece" source |> get_rdk in
-  let separated_positions = Packed.Float3.Private.view
+  let separated_positions = Packed.Float3.View.view
       (Geometry.positions separated) in
   check (Geometry.point_count separated = 3
       && separated_positions.x = [|1.;2.;0.|]
@@ -176,7 +176,7 @@ let run () =
   let no_cleanup = Edge_collapse.run ~grain:1 ~edges:collapse
       ~remove_degenerate_primitives:false ~recompute_point_normals:false source
       |> get_rdk in
-  let no_cleanup_topology = Topology.Private.view
+  let no_cleanup_topology = Topology.View.view
       (Geometry.topology no_cleanup) in
   check (Geometry.point_count no_cleanup = 3
       && Geometry.vertex_count no_cleanup = 4
@@ -214,7 +214,7 @@ let run () =
       ~vertex_points:[|0;1|] ~primitive_offsets:[|0;2|]
       ~primitive_kinds:[|Topology.Open_polyline|] |> get_ok in
   let non_finite = Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn
+      ~positions:(Packed.Float3.View.of_owned_exn
         ~x:[|nan;1.|] ~y:[|0.;0.|] ~z:[|0.;0.|])
       ~topology:non_finite_topology () |> get_ok in
   expect_code "invalid_topology" (Edge_collapse.run non_finite);

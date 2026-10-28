@@ -2,8 +2,8 @@
 type kind = Triangle | Segment
 
 type t = {
-  positions : Packed.Float3.Private.view;
-  topology : Topology.Private.view;
+  positions : Packed.Float3.View.view;
+  topology : Topology.View.view;
   kinds : bytes;
   primitives : int array;
   locals : int array;
@@ -38,8 +38,8 @@ let create ?cancel ?(grain = 16_384) ?primitives geometry =
     ~cancelled:"linear-piece index construction was cancelled" @@ fun () ->
   if grain <= 0 then invalid_arg "Linear_piece_index: grain must be positive";
   Cancel.check_opt cancel;
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   let primitive_count = Bytes.length topology.primitive_kinds in
   let selected = match primitives with
     | None -> Array.init primitive_count Fun.id
@@ -347,7 +347,7 @@ let self_pair_of ?cancel ~grain ~tolerance index predicate =
     else Some (found_left.(!range), found_right.(!range))
   end
 
-module Private = struct
+module View = struct
   let[@inline always] kind value piece =
     if Bytes.unsafe_get value.kinds piece = '\000' then Triangle else Segment
   let[@inline always] primitive value piece = value.primitives.(piece)

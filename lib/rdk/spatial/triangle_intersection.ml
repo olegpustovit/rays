@@ -1,13 +1,13 @@
 type surface = {
   index : Surface_index.t;
-  positions : Packed.Float3.Private.view;
-  topology : Topology.Private.view;
+  positions : Packed.Float3.View.view;
+  topology : Topology.View.view;
 }
 
 let surface index geometry = {
   index;
-  positions = Packed.Float3.Private.view (Geometry.positions geometry);
-  topology = Topology.Private.view (Geometry.topology geometry);
+  positions = Packed.Float3.View.view (Geometry.positions geometry);
+  topology = Topology.View.view (Geometry.topology geometry);
 }
 
 let max_events = 12
@@ -216,8 +216,8 @@ let[@inline always] add_vertex_if_inside scratch point_info events count ~self
   else count
 
 let[@inline always] prepare_points scratch point_info ~self ~tolerance
-    (left_positions : Packed.Float3.Private.view) a0 a1 a2
-    (right_positions : Packed.Float3.Private.view) b0 b1 b2 =
+    (left_positions : Packed.Float3.View.view) a0 a1 a2
+    (right_positions : Packed.Float3.View.view) b0 b1 b2 =
   point_info.(0) <- a0; point_info.(1) <- a1; point_info.(2) <- a2;
   point_info.(3) <- b0; point_info.(4) <- b1; point_info.(5) <- b2;
   point_info.(6) <- 0;
@@ -239,10 +239,10 @@ let[@inline always] prepare_points scratch point_info ~self ~tolerance
         end
       end
     done;
-  let origin_x = left_positions.Packed.Float3.Private.x.(a0)
+  let origin_x = left_positions.Packed.Float3.View.x.(a0)
   and origin_y = left_positions.y.(a0) and origin_z = left_positions.z.(a0) in
   scratch.(0) <- 0.; scratch.(1) <- 0.; scratch.(2) <- 0.;
-  scratch.(3) <- left_positions.Packed.Float3.Private.x.(a1) -. origin_x;
+  scratch.(3) <- left_positions.Packed.Float3.View.x.(a1) -. origin_x;
   scratch.(4) <- left_positions.y.(a1) -. origin_y;
   scratch.(5) <- left_positions.z.(a1) -. origin_z;
   scratch.(6) <- left_positions.x.(a2) -. origin_x;
@@ -363,20 +363,20 @@ let[@inline always] events_points_into ~scratch ~point_info ~events ~self
 
 let[@inline always] events_into ~scratch ~point_info ~events ~self ~tolerance
     ~include_coplanar left left_triangle right right_triangle =
-  let left_vertices = left.topology.Topology.Private.vertex_points
-  and right_vertices = right.topology.Topology.Private.vertex_points in
+  let left_vertices = left.topology.Topology.View.vertex_points
+  and right_vertices = right.topology.Topology.View.vertex_points in
   events_points_into ~scratch ~point_info ~events ~self ~tolerance
     ~include_coplanar ~left_positions:left.positions
-    ~left_a:left_vertices.(Surface_index.Private.triangle_vertex
+    ~left_a:left_vertices.(Surface_index.View.triangle_vertex
       left.index left_triangle 0)
-    ~left_b:left_vertices.(Surface_index.Private.triangle_vertex
+    ~left_b:left_vertices.(Surface_index.View.triangle_vertex
       left.index left_triangle 1)
-    ~left_c:left_vertices.(Surface_index.Private.triangle_vertex
+    ~left_c:left_vertices.(Surface_index.View.triangle_vertex
       left.index left_triangle 2)
     ~right_positions:right.positions
-    ~right_a:right_vertices.(Surface_index.Private.triangle_vertex
+    ~right_a:right_vertices.(Surface_index.View.triangle_vertex
       right.index right_triangle 0)
-    ~right_b:right_vertices.(Surface_index.Private.triangle_vertex
+    ~right_b:right_vertices.(Surface_index.View.triangle_vertex
       right.index right_triangle 1)
-    ~right_c:right_vertices.(Surface_index.Private.triangle_vertex
+    ~right_c:right_vertices.(Surface_index.View.triangle_vertex
       right.index right_triangle 2)

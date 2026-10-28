@@ -29,7 +29,7 @@ val segment_count : t -> int
 val segment_first : t -> int -> int
 val segment_second : t -> int -> int
 
-module Private : sig
+module View : sig
   val point : t -> int -> Implicit_point.t
   val point_handle : t -> int -> int
 end

@@ -51,8 +51,8 @@ let run ?(grain = 16_384) ?cancel count operation =
 type plan = {
   scheme : scheme;
   source : Geometry.t;
-  source_topology : Topology.Private.view;
-  index : Topology_index.Private.view;
+  source_topology : Topology.View.view;
+  index : Topology_index.View.view;
   source_points : int;
   source_vertices : int;
   source_primitives : int;
@@ -101,7 +101,7 @@ let float_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | None -> None
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> Some values
        | _ -> fail (Printf.sprintf "%s %s must use float storage"
            (match owner with Attribute.Point -> "point" | Attribute.Vertex -> "vertex"
@@ -113,7 +113,7 @@ let validate_sharpness name values =
       fail (name ^ " values must be finite and non-negative")) values
 
 let crease_data ?edge_override geometry topology index =
-  let edge_count = Array.length index.Topology_index.Private.edge_a in
+  let edge_count = Array.length index.Topology_index.View.edge_a in
   let vertex_weights = float_attribute Attribute.Vertex "creaseweight" geometry
   and primitive_weights = float_attribute Attribute.Primitive "creaseweight" geometry
   and corner_weights = float_attribute Attribute.Point "cornerweight" geometry in
@@ -133,14 +133,14 @@ let crease_data ?edge_override geometry topology index =
           let edge_sharpness = Array.make edge_count 0. in
           Option.iter (fun values ->
             for vertex = 0
-                to Array.length topology.Topology.Private.vertex_points - 1 do
+                to Array.length topology.Topology.View.vertex_points - 1 do
               let edge = index.edge_of_vertex.(vertex) in
               if edge >= 0 then edge_sharpness.(edge) <-
                   max edge_sharpness.(edge) values.(vertex)
             done) vertex_weights;
           Option.iter (fun values ->
             for primitive = 0
-                to Bytes.length topology.Topology.Private.primitive_kinds - 1 do
+                to Bytes.length topology.Topology.View.primitive_kinds - 1 do
               let weight = values.(primitive) in
               for vertex = topology.primitive_offsets.(primitive)
                   to topology.primitive_offsets.(primitive + 1) - 1 do
@@ -160,7 +160,7 @@ let crease_data ?edge_override geometry topology index =
   end
 
 let same_topology left right =
-  left.Topology.Private.point_count = right.Topology.Private.point_count
+  left.Topology.View.point_count = right.Topology.View.point_count
   && left.vertex_points = right.vertex_points
   && left.primitive_offsets = right.primitive_offsets
   && Bytes.equal left.primitive_kinds right.primitive_kinds
@@ -188,8 +188,8 @@ let apply_crease_input ?cancel ?grain ?selection ?override source creases =
     if not (Float.is_finite value) || value < 0. then
       fail "crease override must be finite and non-negative") override;
   Option.iter (fun selection -> validate_crease_selection selection creases) selection;
-  let source_topology = Topology.Private.view (Geometry.topology source)
-  and crease_topology = Topology.Private.view (Geometry.topology creases) in
+  let source_topology = Topology.View.view (Geometry.topology source)
+  and crease_topology = Topology.View.view (Geometry.topology creases) in
   let topology_identical = same_topology source_topology crease_topology in
   let crease_vertex_weights = float_attribute Attribute.Vertex
       "creaseweight" creases
@@ -211,8 +211,8 @@ let apply_crease_input ?cancel ?grain ?selection ?override source creases =
         (Geometry.topology source) in
     let crease_index_value = if topology_identical then source_index_value
       else Topology_index.create ?cancel (Geometry.topology creases) in
-    let source_index = Topology_index.Private.view source_index_value
-    and crease_index = Topology_index.Private.view crease_index_value in
+    let source_index = Topology_index.View.view source_index_value
+    and crease_index = Topology_index.View.view crease_index_value in
     let source_edge_count = Array.length source_index.edge_a in
     let edge_sharpness = match crease_data source source_topology source_index with
       | Some (values, _, _, _) -> Array.copy values
@@ -309,7 +309,7 @@ let build_child_edge_sharpness ?cancel ?grain method_ index point_count
     edge_sharpness =
   let child = Array.make (Array.length edge_sharpness * 2) 0. in
   run ?grain ?cancel point_count (fun point ->
-    let first = index.Topology_index.Private.point_edge_offsets.(point)
+    let first = index.Topology_index.View.point_edge_offsets.(point)
     and last = index.point_edge_offsets.(point + 1) in
     let sharp_sum = ref 0. and sharp_count = ref 0 in
     if method_ = Subdivide_creasing_chaikin then
@@ -332,7 +332,7 @@ let build_child_edge_sharpness ?cancel ?grain method_ index point_count
               let others = (!sharp_sum -. parent)
                   /. float_of_int (!sharp_count - 1) in
               max 0. (((0.75 *. parent) +. (0.25 *. others)) -. 1.) in
-      let side = if index.Topology_index.Private.edge_a.(edge) = point then 0 else 1 in
+      let side = if index.Topology_index.View.edge_a.(edge) = point then 0 else 1 in
       child.((edge * 2) + side) <- value
     done);
   child
@@ -348,10 +348,10 @@ let build_vertex_sharp_plan ?cancel ?grain method_ index edge_sharpness
   and child_a = Array.init point_count Fun.id
   and child_b = Array.init point_count Fun.id in
   let child_weight point edge =
-    let side = if index.Topology_index.Private.edge_a.(edge) = point then 0 else 1 in
+    let side = if index.Topology_index.View.edge_a.(edge) = point then 0 else 1 in
     child_edge_sharpness.((edge * 2) + side) in
   run ?grain ?cancel point_count (fun point ->
-    let first = index.Topology_index.Private.point_edge_offsets.(point)
+    let first = index.Topology_index.View.point_edge_offsets.(point)
     and last = index.point_edge_offsets.(point + 1) in
     let classify ~child =
       let count = ref 0 and a = ref point and b = ref point in
@@ -399,13 +399,13 @@ let build_vertex_sharp_plan ?cancel ?grain method_ index edge_sharpness
     child_a; child_b }
 
 let primitive_size topology primitive =
-  topology.Topology.Private.primitive_offsets.(primitive + 1)
+  topology.Topology.View.primitive_offsets.(primitive + 1)
   - topology.primitive_offsets.(primitive)
 
 let not_finite value = not (Float.is_finite value)
 
 let validate ?cancel scheme geometry topology index =
-  if topology.Topology.Private.point_count = 0
+  if topology.Topology.View.point_count = 0
      || Bytes.length topology.primitive_kinds = 0 then
     fail "input must contain polygon geometry";
   let point_marks = Array.make topology.point_count (-1) in
@@ -431,11 +431,11 @@ let validate ?cancel scheme geometry topology index =
       point_marks.(point) <- primitive
     done
   done;
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   if Array.exists not_finite positions.x || Array.exists not_finite positions.y
      || Array.exists not_finite positions.z then
     fail "positions must be finite";
-  let edge_offsets = index.Topology_index.Private.edge_offsets in
+  let edge_offsets = index.Topology_index.View.edge_offsets in
   for edge = 0 to Array.length index.edge_a - 1 do
     let incidence = edge_offsets.(edge + 1) - edge_offsets.(edge) in
     if incidence > 2 then fail "non-manifold edges are not supported"
@@ -493,7 +493,7 @@ let validate ?cancel scheme geometry topology index =
   done
 
 let boundary_neighbors index point =
-  let first = index.Topology_index.Private.point_edge_offsets.(point)
+  let first = index.Topology_index.View.point_edge_offsets.(point)
   and last = index.point_edge_offsets.(point + 1) in
   let a = ref (-1) and b = ref (-1) and count = ref 0 in
   for at = first to last - 1 do
@@ -509,7 +509,7 @@ let boundary_neighbors index point =
 
 let boundary_corner boundary_interpolation index point =
   boundary_interpolation = Subdivide_boundary_edge_and_corner
-  && index.Topology_index.Private.point_offsets.(point + 1)
+  && index.Topology_index.View.point_offsets.(point + 1)
      - index.point_offsets.(point) = 1
 
 let point_term_count boundary_interpolation scheme topology index
@@ -523,7 +523,7 @@ let point_term_count boundary_interpolation scheme topology index
         if boundary = 2 then
           if boundary_corner boundary_interpolation index point then 1 else 3
         else checked_add "Loop stencil size" 1
-          (index.Topology_index.Private.point_edge_offsets.(point + 1)
+          (index.Topology_index.View.point_edge_offsets.(point + 1)
            - index.point_edge_offsets.(point))
     | Catmull_clark ->
         let _, _, boundary = boundary_neighbors index point in
@@ -620,7 +620,7 @@ let fill_point_stencil boundary_interpolation triangle_subdivision scheme topolo
             for at = face_first to face_last - 1 do
               let vertex = index.point_vertices.(at) in
               let primitive = index.primitive_of_vertex.(vertex) in
-              let first = topology.Topology.Private.primitive_offsets.(primitive)
+              let first = topology.Topology.View.primitive_offsets.(primitive)
               and last = topology.primitive_offsets.(primitive + 1) in
               let weight = 1. /. (nf *. face_count *. float_of_int (last - first)) in
               for corner = first to last - 1 do
@@ -662,7 +662,7 @@ let fill_point_stencil boundary_interpolation triangle_subdivision scheme topolo
           for at = index.edge_offsets.(edge) to index.edge_offsets.(edge + 1) - 1 do
             let vertex = index.edge_vertices.(at) in
             let primitive = index.primitive_of_vertex.(vertex) in
-            let first = topology.Topology.Private.primitive_offsets.(primitive)
+            let first = topology.Topology.View.primitive_offsets.(primitive)
             and last = topology.primitive_offsets.(primitive + 1) in
             let weight = face_weight /. float_of_int (last - first) in
             for corner = first to last - 1 do
@@ -672,7 +672,7 @@ let fill_point_stencil boundary_interpolation triangle_subdivision scheme topolo
         end else begin add a 0.5; add b 0.5 end
   end else begin
     let primitive = output - source_points - edge_count in
-    let first = topology.Topology.Private.primitive_offsets.(primitive)
+    let first = topology.Topology.View.primitive_offsets.(primitive)
     and last = topology.primitive_offsets.(primitive + 1) in
     let weight = 1. /. float_of_int (last - first) in
     representatives.(output) <- topology.vertex_points.(first);
@@ -681,7 +681,7 @@ let fill_point_stencil boundary_interpolation triangle_subdivision scheme topolo
   if !cursor <> offsets.(output + 1) then fail "internal stencil cardinality mismatch"
 
 let make_topology ?cancel ?grain ?holes scheme
-    (topology : Topology.Private.view) (index : Topology_index.Private.view)
+    (topology : Topology.View.view) (index : Topology_index.View.view)
     source_points edge_count face_offset =
   let visible primitive = match holes with
     | None -> true
@@ -701,7 +701,7 @@ let make_topology ?cancel ?grain ?holes scheme
             done;
             Some offsets in
       let output_primitives = match visible_offsets with
-        | None -> Array.length topology.Topology.Private.vertex_points
+        | None -> Array.length topology.Topology.View.vertex_points
         | Some offsets -> offsets.(source_primitive_count) in
       let output_vertices = checked_mul "output vertex count" output_primitives 4 in
       let vertex_points = Array.make output_vertices 0
@@ -714,7 +714,7 @@ let make_topology ?cancel ?grain ?holes scheme
       and vertex_edge_source = Array.make output_vertices (-1)
       and primitive_source = Array.make output_primitives 0 in
       run ?grain ?cancel (Array.length topology.vertex_points) (fun vertex ->
-        let primitive = index.Topology_index.Private.primitive_of_vertex.(vertex)
+        let primitive = index.Topology_index.View.primitive_of_vertex.(vertex)
         and previous = index.previous_vertex.(vertex)
         and next = index.next_vertex.(vertex) in
         if visible primitive then begin
@@ -743,12 +743,12 @@ let make_topology ?cancel ?grain ?holes scheme
       );
       vertex_kind, vertex_a, vertex_b, vertex_primitive, vertex_edge_source,
       primitive_source,
-      Topology.Private.create_validated_owned
+      Topology.View.create_validated_owned
         ~point_count:(checked_add "output point count" face_offset
           (Bytes.length topology.primitive_kinds))
         ~vertex_points ~primitive_offsets ~primitive_kinds
   | Loop ->
-      let source_primitives = Bytes.length topology.Topology.Private.primitive_kinds in
+      let source_primitives = Bytes.length topology.Topology.View.primitive_kinds in
       let visible_offsets = match holes with
         | None -> None
         | Some _ ->
@@ -814,14 +814,14 @@ let make_topology ?cancel ?grain ?holes scheme
       );
       vertex_kind, vertex_a, vertex_b, vertex_primitive, vertex_edge_source,
       primitive_source,
-      Topology.Private.create_validated_owned ~point_count:(source_points + edge_count)
+      Topology.View.create_validated_owned ~point_count:(source_points + edge_count)
         ~vertex_points ~primitive_offsets ~primitive_kinds
 
 let make_plan ?cancel ?grain ?edge_ancestry_attribute ?edge_crease_override ?holes
     boundary_interpolation triangle_subdivision creasing_method scheme source =
-  let topology = Topology.Private.view (Geometry.topology source) in
+  let topology = Topology.View.view (Geometry.topology source) in
   let topology_index = Topology_index.create ?cancel (Geometry.topology source) in
-  let index = Topology_index.Private.view topology_index in
+  let index = Topology_index.View.view topology_index in
   validate ?cancel scheme source topology index;
   let source_points = topology.point_count
   and source_vertices = Array.length topology.vertex_points
@@ -932,7 +932,7 @@ type fvar_point_plan = {
   fvar_point_offsets : int array;
   fvar_point_sources : int array;
   fvar_point_weights : float array;
-  fvar_index : Topology_index.Private.view;
+  fvar_index : Topology_index.View.view;
   fvar_creases : crease_plan option;
 }
 
@@ -991,7 +991,7 @@ let fvar_refinement ?cancel ?grain mode plan equal =
       source_vertex_of_point = continuous_source;
       pinned_points;
       output_point_of_vertex =
-        (Topology.Private.view plan.topology).vertex_points;
+        (Topology.View.view plan.topology).vertex_points;
     }
   end else begin
   let parents = Array.init vertex_count Fun.id and ranks = Bytes.make vertex_count '\000' in
@@ -1107,12 +1107,12 @@ let fvar_refinement ?cancel ?grain mode plan equal =
       Isolated_fvar { geometry_refinement = plan; corner_sharpness }
     end
   end else begin
-  let fvar_topology = Topology.Private.create_validated_owned
+  let fvar_topology = Topology.View.create_validated_owned
       ~point_count:fvar_point_count ~vertex_points:fvar_vertex_points
       ~primitive_offsets:topology.primitive_offsets
       ~primitive_kinds:topology.primitive_kinds in
   let fvar_index_value = Topology_index.create ?cancel fvar_topology in
-  let fvar_index = Topology_index.Private.view fvar_index_value in
+  let fvar_index = Topology_index.View.view fvar_index_value in
   let corner_weights = Array.make fvar_point_count 0. in
   (match float_attribute Attribute.Point "cornerweight" plan.source with
    | None -> ()
@@ -1230,11 +1230,11 @@ let fvar_refinement ?cancel ?grain mode plan equal =
     attributes := attribute :: !attributes
   end;
   let zeros = Array.make fvar_point_count 0. in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:zeros ~y:zeros ~z:zeros in
   let geometry = Geometry.create ~positions ~topology:fvar_topology
       ~attributes:!attributes () |> get_ok in
-  let fvar_topology_view = Topology.Private.view fvar_topology in
+  let fvar_topology_view = Topology.View.view fvar_topology in
   let edge_count = Array.length fvar_index.edge_a in
   let face_offset = checked_add "face-varying output point count"
       fvar_point_count edge_count in
@@ -1444,7 +1444,7 @@ let remap_attribute ?cancel ?grain ?(generate_resulting_creases = true)
   if owner = Attribute.Vertex
      && plan.edge_ancestry_attribute = Some (Attribute.name attribute)
   then begin
-    let values = match Attribute.Private.storage attribute with
+    let values = match Attribute.View.storage attribute with
       | Attribute.Int values -> values
       | _ -> fail "internal edge ancestry must use integer storage" in
     Some (Attribute.create_owned ~name:(Attribute.name attribute)
@@ -1455,7 +1455,7 @@ let remap_attribute ?cancel ?grain ?(generate_resulting_creases = true)
      && (owner = Attribute.Vertex || owner = Attribute.Primitive) then None
   else if String.equal (Attribute.name attribute) "cornerweight"
           && owner = Attribute.Point then begin
-    let values = match Attribute.Private.storage attribute with
+    let values = match Attribute.View.storage attribute with
       | Attribute.Float values -> values
       | _ -> assert false in
     if not generate_resulting_creases
@@ -1468,7 +1468,7 @@ let remap_attribute ?cancel ?grain ?(generate_resulting_creases = true)
         (Attribute.Float output) |> get_ok)
     end
   end else
-    let storage = match Attribute.Private.storage attribute with
+    let storage = match Attribute.View.storage attribute with
       | Attribute.Float values ->
           let values = if owner = Attribute.Vertex
               && face_varying_interpolation <> Subdivide_fvar_all
@@ -1491,7 +1491,7 @@ let remap_attribute ?cancel ?grain ?(generate_resulting_creases = true)
           Attribute.Float_array
             (Ragged_ops.remap_float ?cancel ?grain mapping values)
       | Attribute.Float2 values ->
-          let view = Packed.Float2.Private.view values in
+          let view = Packed.Float2.View.view values in
           let fvar = if owner = Attribute.Vertex
               && face_varying_interpolation <> Subdivide_fvar_all
               && plan.scheme <> Bilinear then
@@ -1506,7 +1506,7 @@ let remap_attribute ?cancel ?grain ?(generate_resulting_creases = true)
           Attribute.Float2 (Packed.Float2.of_owned
             ~x:(map view.x) ~y:(map view.y) |> get_ok)
       | Attribute.Float3 values ->
-          let view = Packed.Float3.Private.view values in
+          let view = Packed.Float3.View.view values in
           let fvar = if owner = Attribute.Vertex
               && face_varying_interpolation <> Subdivide_fvar_all
               && plan.scheme <> Bilinear then
@@ -1519,10 +1519,10 @@ let remap_attribute ?cancel ?grain ?(generate_resulting_creases = true)
           let map values = match fvar with
             | None -> numeric_map ?cancel ?grain plan owner values
             | Some fvar -> fvar_float ?cancel ?grain fvar values in
-          Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+          Attribute.Float3 (Packed.Float3.View.of_owned_exn
             ~x:(map view.x) ~y:(map view.y) ~z:(map view.z))
       | Attribute.Float4 values ->
-          let view = Packed.Float4.Private.view values in
+          let view = Packed.Float4.View.view values in
           let fvar = if owner = Attribute.Vertex
               && face_varying_interpolation <> Subdivide_fvar_all
               && plan.scheme <> Bilinear then
@@ -1550,7 +1550,7 @@ let child_crease_sharpness plan =
       then Some creases.child_edge_sharpness else None
 
 let output_child_slot plan vertex source_edge =
-  let topology = Topology.Private.view plan.topology in
+  let topology = Topology.View.view plan.topology in
   let primitive = match plan.scheme with
     | Catmull_clark | Bilinear -> vertex / 4
     | Loop -> vertex / 3 in
@@ -1593,7 +1593,7 @@ let output_edge_plan ?cancel plan =
   let logical_count = checked_add "subdivision edge count" child_count internal_count in
   let ordinal_of_key = Array.make logical_count (-1) in
   let next_ordinal = ref 0 in
-  let topology = Topology.Private.view plan.topology in
+  let topology = Topology.View.view plan.topology in
   for vertex = 0 to Array.length topology.vertex_points - 1 do
     if vertex land 16_383 = 0 then Cancel.check_opt cancel;
       let source_edge = plan.vertex_edge_source.(vertex) in
@@ -1640,7 +1640,7 @@ let edge_group_from_source ?cancel plan edge_plan ~name selected =
       if right >= 0 then set_edge_bit bits right
     end
   done;
-  Edge_group.Private.of_owned_bits ~topology:plan.topology
+  Edge_group.View.of_owned_bits ~topology:plan.topology
     ~edge_count:edge_plan.output_edge_count ~name bits
 
 let resulting_crease_group ?cancel ~name plan edge_plan child_sharpness =
@@ -1653,7 +1653,7 @@ let resulting_crease_group ?cancel ~name plan edge_plan child_sharpness =
         if output_edge >= 0 then set_edge_bit bits output_edge
       end
     done) child_sharpness;
-  Edge_group.Private.of_owned_bits ~topology:plan.topology
+  Edge_group.View.of_owned_bits ~topology:plan.topology
     ~edge_count:edge_plan.output_edge_count ~name bits
 
 let remap_group ?cancel ?grain plan group =
@@ -1706,7 +1706,7 @@ let remap_group ?cancel ?grain plan group =
       | Group.Vertex -> Array.init count (fun output ->
           if Bytes.get plan.vertex_kind output = '\000'
           then plan.vertex_a.(output) else -1) in
-    Group.Private.remap_order ~source:group ~source_of_target target
+    Group.View.remap_order ~source:group ~source_of_target target
 
 let owner_count geometry = function
   | Attribute.Point -> Geometry.point_count geometry
@@ -1758,13 +1758,13 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
         if source < 0 || source >= base_total then
           fail "combined attribute ancestry is out of range";
         output.(base_total + extra) <- output.(source)) extra_sources in
-    let storage = match Attribute.Private.storage template with
+    let storage = match Attribute.View.storage template with
       | Attribute.Float _ ->
           let output = Array.make total 0. in
           with_parts (fun offset count -> function
             | None -> ()
             | Some attribute ->
-                let values = match Attribute.Private.storage attribute with
+                let values = match Attribute.View.storage attribute with
                   | Attribute.Float values -> values | _ -> assert false in
                 if Array.length values <> count then fail "float attribute cardinality mismatch";
                 Array.blit values 0 output offset count);
@@ -1775,7 +1775,7 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
           with_parts (fun offset count -> function
             | None -> ()
             | Some attribute ->
-                let values = match Attribute.Private.storage attribute with
+                let values = match Attribute.View.storage attribute with
                   | Attribute.Int values -> values | _ -> assert false in
                 if Array.length values <> count then fail "integer attribute cardinality mismatch";
                 Array.blit values 0 output offset count);
@@ -1786,7 +1786,7 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
           with_parts (fun offset count -> function
             | None -> ()
             | Some attribute ->
-                let values = match Attribute.Private.storage attribute with
+                let values = match Attribute.View.storage attribute with
                   | Attribute.Text values -> values | _ -> assert false in
                 if Array.length values <> count then fail "text attribute cardinality mismatch";
                 Array.blit values 0 output offset count);
@@ -1797,8 +1797,8 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
           with_parts (fun offset count -> function
             | None -> ()
             | Some attribute ->
-                let values = match Attribute.Private.storage attribute with
-                  | Attribute.Float2 values -> Packed.Float2.Private.view values
+                let values = match Attribute.View.storage attribute with
+                  | Attribute.Float2 values -> Packed.Float2.View.view values
                   | _ -> assert false in
                 if Array.length values.x <> count then fail "float2 attribute cardinality mismatch";
                 Array.blit values.x 0 x offset count;
@@ -1811,23 +1811,23 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
           with_parts (fun offset count -> function
             | None -> ()
             | Some attribute ->
-                let values = match Attribute.Private.storage attribute with
-                  | Attribute.Float3 values -> Packed.Float3.Private.view values
+                let values = match Attribute.View.storage attribute with
+                  | Attribute.Float3 values -> Packed.Float3.View.view values
                   | _ -> assert false in
                 if Array.length values.x <> count then fail "float3 attribute cardinality mismatch";
                 Array.blit values.x 0 x offset count;
                 Array.blit values.y 0 y offset count;
                 Array.blit values.z 0 z offset count);
           copy_extras x; copy_extras y; copy_extras z;
-          Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+          Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x ~y ~z)
       | Attribute.Float4 _ ->
           let x = Array.make total 0. and y = Array.make total 0.
           and z = Array.make total 0. and w = Array.make total 0. in
           with_parts (fun offset count -> function
             | None -> ()
             | Some attribute ->
-                let values = match Attribute.Private.storage attribute with
-                  | Attribute.Float4 values -> Packed.Float4.Private.view values
+                let values = match Attribute.View.storage attribute with
+                  | Attribute.Float4 values -> Packed.Float4.View.view values
                   | _ -> assert false in
                 if Array.length values.x <> count then fail "float4 attribute cardinality mismatch";
                 Array.blit values.x 0 x offset count;
@@ -1839,7 +1839,7 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
       | Attribute.Int_array _ ->
           let value_total = checked_total "combined integer-array payload"
               (List.map (function None -> 0 | Some attribute ->
-                match Attribute.Private.storage attribute with
+                match Attribute.View.storage attribute with
                 | Attribute.Int_array values -> Packed.Int_array.value_count values
                 | _ -> assert false) attributes) in
           let extra_values = Array.fold_left (fun total source ->
@@ -1849,9 +1849,9 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
                 | count :: counts, attribute :: attributes ->
                     if source < offset + count then
                       (match attribute with None -> 0 | Some attribute ->
-                        let values = match Attribute.Private.storage attribute with
+                        let values = match Attribute.View.storage attribute with
                           | Attribute.Int_array values ->
-                              Packed.Int_array.Private.view values
+                              Packed.Int_array.View.view values
                           | _ -> assert false in
                         values.offsets.(source - offset + 1)
                         - values.offsets.(source - offset))
@@ -1872,8 +1872,8 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
                 done;
                 row_at := !row_at + count
             | Some attribute ->
-                let source = match Attribute.Private.storage attribute with
-                  | Attribute.Int_array values -> Packed.Int_array.Private.view values
+                let source = match Attribute.View.storage attribute with
+                  | Attribute.Int_array values -> Packed.Int_array.View.view values
                   | _ -> assert false in
                 if Array.length source.offsets <> count + 1 then
                   fail "integer-array attribute cardinality mismatch";
@@ -1891,11 +1891,11 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
             value_at := !value_at + length;
             offsets.(base_total + extra + 1) <- !value_at) extra_sources;
           Attribute.Int_array
-            (Packed.Int_array.Private.create_validated_owned ~offsets ~values)
+            (Packed.Int_array.View.create_validated_owned ~offsets ~values)
       | Attribute.Float_array _ ->
           let value_total = checked_total "combined float-array payload"
               (List.map (function None -> 0 | Some attribute ->
-                match Attribute.Private.storage attribute with
+                match Attribute.View.storage attribute with
                 | Attribute.Float_array values -> Packed.Float_array.value_count values
                 | _ -> assert false) attributes) in
           let extra_values = Array.fold_left (fun total source ->
@@ -1905,9 +1905,9 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
                 | count :: counts, attribute :: attributes ->
                     if source < offset + count then
                       (match attribute with None -> 0 | Some attribute ->
-                        let values = match Attribute.Private.storage attribute with
+                        let values = match Attribute.View.storage attribute with
                           | Attribute.Float_array values ->
-                              Packed.Float_array.Private.view values
+                              Packed.Float_array.View.view values
                           | _ -> assert false in
                         values.offsets.(source - offset + 1)
                         - values.offsets.(source - offset))
@@ -1928,8 +1928,8 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
                 done;
                 row_at := !row_at + count
             | Some attribute ->
-                let source = match Attribute.Private.storage attribute with
-                  | Attribute.Float_array values -> Packed.Float_array.Private.view values
+                let source = match Attribute.View.storage attribute with
+                  | Attribute.Float_array values -> Packed.Float_array.View.view values
                   | _ -> assert false in
                 if Array.length source.offsets <> count + 1 then
                   fail "float-array attribute cardinality mismatch";
@@ -1947,7 +1947,7 @@ let concatenate_part_attribute ?cancel ?(extra_sources = [||]) template parts =
             value_at := !value_at + length;
             offsets.(base_total + extra + 1) <- !value_at) extra_sources;
           Attribute.Float_array
-            (Packed.Float_array.Private.create_validated_owned ~offsets ~values)
+            (Packed.Float_array.View.create_validated_owned ~offsets ~values)
     in
     Some (Attribute.create_owned ~name:(Attribute.name template) ~owner storage
       |> get_ok)
@@ -2021,102 +2021,102 @@ let concatenate_welded_point_attribute ?cancel ?grain template parts
       match attributes.(part) with
       | None -> None
       | Some attribute -> Some (local, storage attribute)) mapping in
-  let storage = match Attribute.Private.storage template with
+  let storage = match Attribute.View.storage template with
     | Attribute.Float _ ->
         let sources = Array.map (Option.map (fun attribute ->
-          match Attribute.Private.storage attribute with
+          match Attribute.View.storage attribute with
           | Attribute.Float values -> values | _ -> assert false)) attributes in
         Attribute.Float (welded_float_plane ?cancel ?grain weld point_offsets sources)
     | Attribute.Int _ ->
         let rows = representative_rows (fun attribute ->
-          match Attribute.Private.storage attribute with
+          match Attribute.View.storage attribute with
           | Attribute.Int values -> values | _ -> assert false) in
         Attribute.Int (Array.map (function None -> 0
           | Some (local, values) -> values.(local)) rows)
     | Attribute.Text _ ->
         let rows = representative_rows (fun attribute ->
-          match Attribute.Private.storage attribute with
+          match Attribute.View.storage attribute with
           | Attribute.Text values -> values | _ -> assert false) in
         Attribute.Text (Array.map (function None -> ""
           | Some (local, values) -> values.(local)) rows)
     | Attribute.Float2 _ ->
         let plane select = Array.map (Option.map (fun attribute ->
-          match Attribute.Private.storage attribute with
-          | Attribute.Float2 values -> select (Packed.Float2.Private.view values)
+          match Attribute.View.storage attribute with
+          | Attribute.Float2 values -> select (Packed.Float2.View.view values)
           | _ -> assert false)) attributes in
         Attribute.Float2 (Packed.Float2.of_owned
           ~x:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float2.Private.x)))
+            (plane (fun values -> values.Packed.Float2.View.x)))
           ~y:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float2.Private.y))) |> get_ok)
+            (plane (fun values -> values.Packed.Float2.View.y))) |> get_ok)
     | Attribute.Float3 _ ->
         let plane select = Array.map (Option.map (fun attribute ->
-          match Attribute.Private.storage attribute with
-          | Attribute.Float3 values -> select (Packed.Float3.Private.view values)
+          match Attribute.View.storage attribute with
+          | Attribute.Float3 values -> select (Packed.Float3.View.view values)
           | _ -> assert false)) attributes in
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float3.Private.x)))
+            (plane (fun values -> values.Packed.Float3.View.x)))
           ~y:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float3.Private.y)))
+            (plane (fun values -> values.Packed.Float3.View.y)))
           ~z:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float3.Private.z))))
+            (plane (fun values -> values.Packed.Float3.View.z))))
     | Attribute.Float4 _ ->
         let plane select = Array.map (Option.map (fun attribute ->
-          match Attribute.Private.storage attribute with
-          | Attribute.Float4 values -> select (Packed.Float4.Private.view values)
+          match Attribute.View.storage attribute with
+          | Attribute.Float4 values -> select (Packed.Float4.View.view values)
           | _ -> assert false)) attributes in
         Attribute.Float4 (Packed.Float4.of_owned
           ~x:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float4.Private.x)))
+            (plane (fun values -> values.Packed.Float4.View.x)))
           ~y:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float4.Private.y)))
+            (plane (fun values -> values.Packed.Float4.View.y)))
           ~z:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float4.Private.z)))
+            (plane (fun values -> values.Packed.Float4.View.z)))
           ~w:(welded_float_plane ?cancel ?grain weld point_offsets
-            (plane (fun values -> values.Packed.Float4.Private.w))) |> get_ok)
+            (plane (fun values -> values.Packed.Float4.View.w))) |> get_ok)
     | Attribute.Int_array _ ->
-        let rows : (int * Packed.Int_array.Private.view) option array =
+        let rows : (int * Packed.Int_array.View.view) option array =
           representative_rows (fun attribute ->
-          match Attribute.Private.storage attribute with
-          | Attribute.Int_array values -> Packed.Int_array.Private.view values
+          match Attribute.View.storage attribute with
+          | Attribute.Int_array values -> Packed.Int_array.View.view values
           | _ -> assert false) in
         let offsets = Array.make (Array.length rows + 1) 0 in
         Array.iteri (fun row -> function
           | None -> offsets.(row + 1) <- offsets.(row)
-          | Some (local, (values : Packed.Int_array.Private.view)) ->
+          | Some (local, (values : Packed.Int_array.View.view)) ->
               offsets.(row + 1) <- checked_add "combined integer-array payload"
                   offsets.(row) (values.offsets.(local + 1) - values.offsets.(local))) rows;
         let values = Array.make offsets.(Array.length rows) 0 in
         Array.iteri (fun row -> function
           | None -> ()
-          | Some (local, (source : Packed.Int_array.Private.view)) ->
+          | Some (local, (source : Packed.Int_array.View.view)) ->
               let first = source.offsets.(local) in
               Array.blit source.values first values offsets.(row)
                 (source.offsets.(local + 1) - first)) rows;
         Attribute.Int_array
-          (Packed.Int_array.Private.create_validated_owned ~offsets ~values)
+          (Packed.Int_array.View.create_validated_owned ~offsets ~values)
     | Attribute.Float_array _ ->
-        let rows : (int * Packed.Float_array.Private.view) option array =
+        let rows : (int * Packed.Float_array.View.view) option array =
           representative_rows (fun attribute ->
-          match Attribute.Private.storage attribute with
-          | Attribute.Float_array values -> Packed.Float_array.Private.view values
+          match Attribute.View.storage attribute with
+          | Attribute.Float_array values -> Packed.Float_array.View.view values
           | _ -> assert false) in
         let offsets = Array.make (Array.length rows + 1) 0 in
         Array.iteri (fun row -> function
           | None -> offsets.(row + 1) <- offsets.(row)
-          | Some (local, (values : Packed.Float_array.Private.view)) ->
+          | Some (local, (values : Packed.Float_array.View.view)) ->
               offsets.(row + 1) <- checked_add "combined float-array payload"
                   offsets.(row) (values.offsets.(local + 1) - values.offsets.(local))) rows;
         let values = Array.make offsets.(Array.length rows) 0. in
         Array.iteri (fun row -> function
           | None -> ()
-          | Some (local, (source : Packed.Float_array.Private.view)) ->
+          | Some (local, (source : Packed.Float_array.View.view)) ->
               let first = source.offsets.(local) in
               Array.blit source.values first values offsets.(row)
                 (source.offsets.(local + 1) - first)) rows;
         Attribute.Float_array
-          (Packed.Float_array.Private.create_validated_owned ~offsets ~values) in
+          (Packed.Float_array.View.create_validated_owned ~offsets ~values) in
   Attribute.create_owned ~name:(Attribute.name template) ~owner:Attribute.Point
     storage |> get_ok
 
@@ -2162,8 +2162,8 @@ let combine_parts ?cancel ?grain ?append ?weld ~source parts =
   let point_at = ref 0 and vertex_at = ref 0 and primitive_at = ref 0 in
   List.iter (fun geometry ->
     Cancel.check_opt cancel;
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-    and topology = Topology.Private.view (Geometry.topology geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry)
+    and topology = Topology.View.view (Geometry.topology geometry) in
     let points = Geometry.point_count geometry
     and vertices = Geometry.vertex_count geometry
     and primitives = Geometry.primitive_count geometry in
@@ -2200,16 +2200,16 @@ let combine_parts ?cancel ?grain ?append ?weld ~source parts =
    | None -> ()
    | Some weld ->
        let position_sources = Array.map (fun geometry ->
-         let values = Packed.Float3.Private.view (Geometry.positions geometry) in
+         let values = Packed.Float3.View.view (Geometry.positions geometry) in
          Some values) parts_array in
        let plane select = Array.map (Option.map select) position_sources in
        Array.blit (welded_float_plane ?cancel ?grain weld point_offsets
-           (plane (fun values -> values.Packed.Float3.Private.x))) 0 px 0 point_count;
+           (plane (fun values -> values.Packed.Float3.View.x))) 0 px 0 point_count;
        Array.blit (welded_float_plane ?cancel ?grain weld point_offsets
-           (plane (fun values -> values.Packed.Float3.Private.y))) 0 py 0 point_count;
+           (plane (fun values -> values.Packed.Float3.View.y))) 0 py 0 point_count;
        Array.blit (welded_float_plane ?cancel ?grain weld point_offsets
-           (plane (fun values -> values.Packed.Float3.Private.z))) 0 pz 0 point_count);
-  let topology = Topology.Private.create_validated_owned ~point_count
+           (plane (fun values -> values.Packed.Float3.View.z))) 0 pz 0 point_count);
+  let topology = Topology.View.create_validated_owned ~point_count
       ~vertex_points ~primitive_offsets ~primitive_kinds in
   let keep_template _attribute = true in
   let source_templates = List.filter keep_template (Geometry.attributes source) in
@@ -2300,8 +2300,8 @@ let combine_parts ?cancel ?grain ?append ?weld ~source parts =
         List.iter (fun (offset, group) ->
           Group.iter_ordered (fun element ->
             order.(!at) <- offset + element; incr at) group) sources;
-        Group.Private.with_owned_order order base_target in
-      Group.Private.remap_order ~source:base_ordered
+        Group.View.with_owned_order order base_target in
+      Group.View.remap_order ~source:base_ordered
         ~source_of_target:ancestry target
     end) (Geometry.groups source) in
   let edge_groups = match Geometry.edge_groups source with
@@ -2331,7 +2331,7 @@ let combine_parts ?cancel ?grain ?append ?weld ~source parts =
               | Some target -> Edge_group.Builder.set builder target true) group;
             point_offset := !point_offset + Geometry.point_count geometry) parts;
           Edge_group.Builder.freeze builder) templates in
-  let positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
+  let positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
   Geometry.create ~positions ~topology ~attributes ~groups ~edge_groups () |> get_ok
 
 let once ?cancel ?grain ?edge_ancestry_attribute ?edge_crease_override
@@ -2347,8 +2347,8 @@ let once ?cancel ?grain ?edge_ancestry_attribute ?edge_crease_override
   let plan = make_plan ?cancel ?grain ?edge_ancestry_attribute
       ?edge_crease_override ?holes
       boundary_interpolation triangle_subdivision creasing_method scheme geometry in
-  let positions_source = Packed.Float3.Private.view (Geometry.positions geometry) in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions_source = Packed.Float3.View.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(point_float ?cancel ?grain plan positions_source.x)
       ~y:(point_float ?cancel ?grain plan positions_source.y)
       ~z:(point_float ?cancel ?grain plan positions_source.z) in
@@ -2428,7 +2428,7 @@ let select_point_array ?cancel ?grain mapping source =
 
 let duplicate_point_attribute ?cancel ?grain point_source attribute =
   if Attribute.owner attribute <> Attribute.Point then attribute
-  else let storage = match Attribute.Private.storage attribute with
+  else let storage = match Attribute.View.storage attribute with
     | Attribute.Float values ->
         Attribute.Float (select_point_array ?cancel ?grain point_source values)
     | Attribute.Int values ->
@@ -2436,18 +2436,18 @@ let duplicate_point_attribute ?cancel ?grain point_source attribute =
     | Attribute.Text values ->
         Attribute.Text (select_point_array ?cancel ?grain point_source values)
     | Attribute.Float2 values ->
-        let values = Packed.Float2.Private.view values in
+        let values = Packed.Float2.View.view values in
         Attribute.Float2 (Packed.Float2.of_owned
           ~x:(select_point_array ?cancel ?grain point_source values.x)
           ~y:(select_point_array ?cancel ?grain point_source values.y) |> get_ok)
     | Attribute.Float3 values ->
-        let values = Packed.Float3.Private.view values in
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        let values = Packed.Float3.View.view values in
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:(select_point_array ?cancel ?grain point_source values.x)
           ~y:(select_point_array ?cancel ?grain point_source values.y)
           ~z:(select_point_array ?cancel ?grain point_source values.z))
     | Attribute.Float4 values ->
-        let values = Packed.Float4.Private.view values in
+        let values = Packed.Float4.View.view values in
         Attribute.Float4 (Packed.Float4.of_owned
           ~x:(select_point_array ?cancel ?grain point_source values.x)
           ~y:(select_point_array ?cancel ?grain point_source values.y)
@@ -2462,12 +2462,12 @@ let duplicate_point_attribute ?cancel ?grain point_source attribute =
 
 let split_disconnected_point_fans ?cancel ?grain geometry =
   let topology_value = Geometry.topology geometry in
-  let topology = Topology.Private.view topology_value in
+  let topology = Topology.View.view topology_value in
   let vertex_count = Array.length topology.vertex_points in
   if vertex_count = 0 then geometry
   else begin
     let topology_index = Topology_index.create ?cancel topology_value in
-    let index = Topology_index.Private.view topology_index in
+    let index = Topology_index.View.view topology_index in
     let parents = Array.init vertex_count Fun.id
     and ranks = Array.make vertex_count 0 in
     for edge = 0 to Array.length index.edge_a - 1 do
@@ -2529,12 +2529,12 @@ let split_disconnected_point_fans ?cancel ?grain geometry =
         let target = root_target.(root) in
         if target < 0 then fail "split-fan corner has no component";
         vertex_points.(vertex) <- target);
-      let output_topology = Topology.Private.create_validated_owned
+      let output_topology = Topology.View.create_validated_owned
           ~point_count:output_points ~vertex_points
           ~primitive_offsets:(Array.copy topology.primitive_offsets)
           ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
-      let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
-      let positions = Packed.Float3.Private.of_owned_exn
+      let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
+      let positions = Packed.Float3.View.of_owned_exn
           ~x:(select_point_array ?cancel ?grain point_source source_positions.x)
           ~y:(select_point_array ?cancel ?grain point_source source_positions.y)
           ~z:(select_point_array ?cancel ?grain point_source source_positions.z) in
@@ -2547,7 +2547,7 @@ let split_disconnected_point_fans ?cancel ?grain geometry =
               output_points (fun point ->
                 if point land 4095 = 0 then Cancel.check_opt cancel;
                 Group.mem point_source.(point) group) in
-          Group.Private.remap_order ~source:group ~source_of_target:point_source target
+          Group.View.remap_order ~source:group ~source_of_target:point_source target
         end) in
       let edge_groups = match Geometry.edge_groups geometry with
         | [] -> []
@@ -2596,9 +2596,9 @@ let fresh_edge_ancestry_name geometry =
 
 let annotate_pull_interfaces ?cancel primitives geometry =
   let topology_value = Geometry.topology geometry in
-  let topology = Topology.Private.view topology_value in
+  let topology = Topology.View.view topology_value in
   let topology_index = Topology_index.create ?cancel topology_value in
-  let index = Topology_index.Private.view topology_index in
+  let index = Topology_index.View.view topology_index in
   let interface_edges = Bytes.make (Array.length index.edge_a) '\000'
   and unselected_primitive_of_edge = Array.make (Array.length index.edge_a) (-1)
   and interface_count = ref 0 in
@@ -2687,14 +2687,14 @@ let interface_chains ?cancel plan refined =
   let ancestry = match Geometry.find_attribute ~owner:Attribute.Vertex
       plan.ancestry_attribute refined with
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values -> values
          | _ -> fail "internal edge ancestry changed storage")
     | None -> fail "local subdivision dropped internal edge ancestry" in
-  let topology = Topology.Private.view (Geometry.topology refined) in
+  let topology = Topology.View.view (Geometry.topology refined) in
   if Array.length ancestry <> Array.length topology.vertex_points then
     fail "internal edge ancestry cardinality mismatch";
-  let source_index = Topology_index.Private.view plan.source_index in
+  let source_index = Topology_index.View.view plan.source_index in
   let source_edges = Array.length source_index.edge_a in
   let counts = Array.make source_edges 0 in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
@@ -2819,7 +2819,7 @@ let interpolate_owned_attribute ?cancel ?grain ~point_left ~point_right
           Array.make (Array.length primitive_source) 0.
       | Attribute.Detail -> assert false in
     let representatives () = representative_map left right weight in
-    let storage = match Attribute.Private.storage attribute with
+    let storage = match Attribute.View.storage attribute with
       | Attribute.Float values ->
           Attribute.Float (interpolate_array ?cancel ?grain left right weight values)
       | Attribute.Int values ->
@@ -2829,19 +2829,19 @@ let interpolate_owned_attribute ?cancel ?grain ~point_left ~point_right
           Attribute.Text (select_point_array ?cancel ?grain
             (representatives ()) values)
       | Attribute.Float2 values ->
-          let values = Packed.Float2.Private.view values in
+          let values = Packed.Float2.View.view values in
           Attribute.Float2 (Packed.Float2.of_owned
             ~x:(interpolate_array ?cancel ?grain left right weight values.x)
             ~y:(interpolate_array ?cancel ?grain left right weight values.y)
             |> get_ok)
       | Attribute.Float3 values ->
-          let values = Packed.Float3.Private.view values in
-          Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+          let values = Packed.Float3.View.view values in
+          Attribute.Float3 (Packed.Float3.View.of_owned_exn
             ~x:(interpolate_array ?cancel ?grain left right weight values.x)
             ~y:(interpolate_array ?cancel ?grain left right weight values.y)
             ~z:(interpolate_array ?cancel ?grain left right weight values.z))
       | Attribute.Float4 values ->
-          let values = Packed.Float4.Private.view values in
+          let values = Packed.Float4.View.view values in
           Attribute.Float4 (Packed.Float4.of_owned
             ~x:(interpolate_array ?cancel ?grain left right weight values.x)
             ~y:(interpolate_array ?cancel ?grain left right weight values.y)
@@ -2867,8 +2867,8 @@ type divided_boundary = {
 
 let divide_unselected_edges ?cancel ?grain plan (chains : interface_chains)
     source : divided_boundary =
-  let topology = Topology.Private.view plan.source_topology
-  and source_index = Topology_index.Private.view plan.source_index in
+  let topology = Topology.View.view plan.source_topology
+  and source_index = Topology_index.View.view plan.source_index in
   let source_edges = Array.length source_index.edge_a in
   let edge_segments edge =
     let length = chains.edge_offsets.(edge + 1) - chains.edge_offsets.(edge) in
@@ -3003,15 +3003,15 @@ let divide_unselected_edges ?cancel ?grain plan (chains : interface_chains)
   done;
   Array.iter (fun vertex -> if vertex < 0 then
       fail "divided boundary chain has no coarse face-varying corner") chain_vertices;
-  let source_positions = Packed.Float3.Private.view (Geometry.positions source) in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let source_positions = Packed.Float3.View.view (Geometry.positions source) in
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(interpolate_array ?cancel ?grain point_left point_right point_weight
         source_positions.x)
       ~y:(interpolate_array ?cancel ?grain point_left point_right point_weight
         source_positions.y)
       ~z:(interpolate_array ?cancel ?grain point_left point_right point_weight
         source_positions.z) in
-  let output_topology = Topology.Private.create_validated_owned ~point_count
+  let output_topology = Topology.View.create_validated_owned ~point_count
       ~vertex_points ~primitive_offsets ~primitive_kinds in
   let attributes = Geometry.attributes source |> List.map
       (interpolate_owned_attribute ?cancel ?grain ~point_left ~point_right
@@ -3030,7 +3030,7 @@ let divide_unselected_edges ?cancel ?grain plan (chains : interface_chains)
     let source_of_target = Array.mapi (fun output source ->
         if weight.(output) = 0. && source = right.(output) then source else -1) left in
     if Group.is_ordered group then
-      Group.Private.remap_order ~source:group ~source_of_target target
+      Group.View.remap_order ~source:group ~source_of_target target
     else target) in
   let target_index = Topology_index.create ?cancel output_topology in
   let edge_groups = Geometry.edge_groups source |> List.map (fun group ->
@@ -3070,7 +3070,7 @@ let remap_divided_attribute ?cancel ?grain vertex_map primitive_map attribute =
   match mapping with
   | None -> attribute
   | Some mapping ->
-      let storage = match Attribute.Private.storage attribute with
+      let storage = match Attribute.View.storage attribute with
         | Attribute.Float values ->
             Attribute.Float (select_point_array ?cancel ?grain mapping values)
         | Attribute.Int values ->
@@ -3078,18 +3078,18 @@ let remap_divided_attribute ?cancel ?grain vertex_map primitive_map attribute =
         | Attribute.Text values ->
             Attribute.Text (select_point_array ?cancel ?grain mapping values)
         | Attribute.Float2 values ->
-            let values = Packed.Float2.Private.view values in
+            let values = Packed.Float2.View.view values in
             Attribute.Float2 (Packed.Float2.of_owned
               ~x:(select_point_array ?cancel ?grain mapping values.x)
               ~y:(select_point_array ?cancel ?grain mapping values.y) |> get_ok)
         | Attribute.Float3 values ->
-            let values = Packed.Float3.Private.view values in
-            Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+            let values = Packed.Float3.View.view values in
+            Attribute.Float3 (Packed.Float3.View.of_owned_exn
               ~x:(select_point_array ?cancel ?grain mapping values.x)
               ~y:(select_point_array ?cancel ?grain mapping values.y)
               ~z:(select_point_array ?cancel ?grain mapping values.z))
         | Attribute.Float4 values ->
-            let values = Packed.Float4.Private.view values in
+            let values = Packed.Float4.View.view values in
             Attribute.Float4 (Packed.Float4.of_owned
               ~x:(select_point_array ?cancel ?grain mapping values.x)
               ~y:(select_point_array ?cancel ?grain mapping values.y)
@@ -3115,7 +3115,7 @@ let remap_divided_group ?grain vertex_map primitive_map group =
           ~name:(Group.name group) (Array.length mapping)
           (fun output -> Group.mem mapping.(output) group) in
       if Group.is_ordered group then
-        Group.Private.remap_order ~source:group ~source_of_target:mapping target
+        Group.View.remap_order ~source:group ~source_of_target:mapping target
       else target
 
 let triangulate_divided_boundary ?cancel ?grain ?pull_bias
@@ -3123,7 +3123,7 @@ let triangulate_divided_boundary ?cancel ?grain ?pull_bias
     (chains : interface_chains) (divided : divided_boundary) ~refined =
   let geometry = divided.geometry in
   let topology_value = Geometry.topology geometry in
-  let topology = Topology.Private.view topology_value in
+  let topology = Topology.View.view topology_value in
   let boundary = Bytes.make (Bytes.length topology.primitive_kinds) '\000' in
   for edge = 0 to Array.length chains.edge_offsets - 2 do
     if chains.edge_offsets.(edge + 1) > chains.edge_offsets.(edge) then begin
@@ -3180,10 +3180,10 @@ let triangulate_divided_boundary ?cancel ?grain ?pull_bias
     emit_vertex a; emit_vertex b; emit_vertex c;
     end_primitive () in
   let scratch = Polygon_triangulation.create_scratch () in
-  let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let positions = match pull_bias with
     | Some bias when not consistent_topology ->
-        let refined_positions = Packed.Float3.Private.view
+        let refined_positions = Packed.Float3.View.view
             (Geometry.positions refined) in
         let x = Array.copy source_positions.x and y = Array.copy source_positions.y
         and z = Array.copy source_positions.z
@@ -3209,7 +3209,7 @@ let triangulate_divided_boundary ?cancel ?grain ?pull_bias
                 +. (bias *. sz.(point) *. inverse)
           end
         done;
-        Packed.Float3.Private.{ x; y; z }
+        Packed.Float3.View.{ x; y; z }
     | None | Some _ -> source_positions in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
     if primitive land 255 = 0 then Cancel.check_opt cancel;
@@ -3234,7 +3234,7 @@ let triangulate_divided_boundary ?cancel ?grain ?pull_bias
   done;
   if !vertex_at <> !output_vertices || !primitive_at <> !output_primitives then
     fail "boundary triangulation output cardinality mismatch";
-  let output_topology = Topology.Private.create_validated_owned
+  let output_topology = Topology.View.create_validated_owned
       ~point_count:topology.point_count ~vertex_points ~primitive_offsets
       ~primitive_kinds in
   let attributes = Geometry.attributes geometry |> List.map
@@ -3259,7 +3259,7 @@ let triangulate_divided_boundary ?cancel ?grain ?pull_bias
   { divided with geometry; vertices; source_primitive_to_output }
 
 let shared_edge_endpoint index left right =
-  let left_a = index.Topology_index.Private.edge_a.(left)
+  let left_a = index.Topology_index.View.edge_a.(left)
   and left_b = index.edge_b.(left)
   and right_a = index.edge_a.(right)
   and right_b = index.edge_b.(right) in
@@ -3268,9 +3268,9 @@ let shared_edge_endpoint index left right =
   else -1
 
 let project_to_source_edge source_positions index edge x y z =
-  let a = index.Topology_index.Private.edge_a.(edge)
+  let a = index.Topology_index.View.edge_a.(edge)
   and b = index.edge_b.(edge) in
-  let ax = source_positions.Packed.Float3.Private.x.(a)
+  let ax = source_positions.Packed.Float3.View.x.(a)
   and ay = source_positions.y.(a) and az = source_positions.z.(a)
   and bx = source_positions.x.(b) and by = source_positions.y.(b)
   and bz = source_positions.z.(b) in
@@ -3298,14 +3298,14 @@ let pull_boundary_no_edge_division ?cancel ?grain plan geometry =
   let ancestry = match Geometry.find_attribute ~owner:Attribute.Vertex
       plan.ancestry_attribute geometry with
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values -> values
          | _ -> fail "internal edge ancestry changed storage")
     | None -> fail "local subdivision dropped internal edge ancestry" in
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   if Array.length ancestry <> Array.length topology.vertex_points then
     fail "internal edge ancestry cardinality mismatch";
-  let source_index = Topology_index.Private.view plan.source_index in
+  let source_index = Topology_index.View.view plan.source_index in
   let first_edge = Array.make topology.point_count (-1)
   and common_endpoint = Array.make topology.point_count (-1) in
   let add_constraint point edge =
@@ -3339,8 +3339,8 @@ let pull_boundary_no_edge_division ?cancel ?grain plan geometry =
       end
     done
   done;
-  let source_positions = Packed.Float3.Private.view plan.source_positions
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let source_positions = Packed.Float3.View.view plan.source_positions
+  and positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let x = Array.copy positions.x and y = Array.copy positions.y
   and z = Array.copy positions.z in
   run ?grain ?cancel topology.point_count (fun point ->
@@ -3354,7 +3354,7 @@ let pull_boundary_no_edge_division ?cancel ?grain plan geometry =
         fail "Pull Closed generated a non-finite boundary position";
       x.(point) <- px; y.(point) <- py; z.(point) <- pz
     end);
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   Geometry.with_positions positions geometry |> get_ok
   |> Geometry.without_attribute ~owner:Attribute.Vertex plan.ancestry_attribute
 
@@ -3363,14 +3363,14 @@ let stitch_boundary_no_edge_division ?cancel plan ~unselected
   let ancestry = match Geometry.find_attribute ~owner:Attribute.Vertex
       plan.ancestry_attribute refined with
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values -> values
          | _ -> fail "internal edge ancestry changed storage")
     | None -> fail "local subdivision dropped internal edge ancestry" in
-  let refined_topology = Topology.Private.view (Geometry.topology refined) in
+  let refined_topology = Topology.View.view (Geometry.topology refined) in
   if Array.length ancestry <> Array.length refined_topology.vertex_points then
     fail "internal edge ancestry cardinality mismatch";
-  let source_index = Topology_index.Private.view plan.source_index in
+  let source_index = Topology_index.View.view plan.source_index in
   let source_edges = Array.length source_index.edge_a in
   let counts = Array.make source_edges 0 in
   for primitive = 0 to Bytes.length refined_topology.primitive_kinds - 1 do
@@ -3423,10 +3423,10 @@ let stitch_boundary_no_edge_division ?cancel plan ~unselected
   let refined_point_offset = checked_add "stitch refined point offset"
       (Geometry.point_count unselected) free_points
   and refined_vertex_offset = Geometry.vertex_count unselected in
-  let unselected_topology = Topology.Private.view (Geometry.topology unselected) in
+  let unselected_topology = Topology.View.view (Geometry.topology unselected) in
   let unselected_index_value = Topology_index.create ?cancel
       (Geometry.topology unselected) in
-  let unselected_index = Topology_index.Private.view unselected_index_value in
+  let unselected_index = Topology_index.View.view unselected_index_value in
   let next_point = Array.make refined_topology.point_count (-1)
   and record_of_start = Array.make refined_topology.point_count (-1)
   and incoming = Bytes.make refined_topology.point_count '\000'
@@ -3532,9 +3532,9 @@ let stitch_boundary_divide_edges ?cancel ~consistent_topology plan
     (divided : divided_boundary) ~free_points
     ~free_vertices refined =
   let source_edges = Array.length chains.edge_offsets - 1 in
-  let coarse_positions = Packed.Float3.Private.view
+  let coarse_positions = Packed.Float3.View.view
       (Geometry.positions divided.geometry)
-  and refined_positions = Packed.Float3.Private.view
+  and refined_positions = Packed.Float3.View.view
       (Geometry.positions refined) in
   let coincident at =
     if consistent_topology then false else
@@ -3620,9 +3620,9 @@ let make_boundary_weld ?cancel ~bias ~only_equal
     fail "boundary weld part cardinality is inconsistent";
   let representative = Array.init total_points Fun.id
   and removed = Bytes.make total_points '\000' in
-  let coarse_positions = Packed.Float3.Private.view
+  let coarse_positions = Packed.Float3.View.view
       (Geometry.positions divided.geometry)
-  and refined_positions = Packed.Float3.Private.view
+  and refined_positions = Packed.Float3.View.view
       (Geometry.positions refined) in
   let coincident coarse refined =
     coarse_positions.x.(coarse) = refined_positions.x.(refined)
@@ -3697,7 +3697,7 @@ let extract_primitive_part ?cancel ?grain ~selected primitives geometry =
   else geometry
 
 let free_point_part ?cancel ?grain geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let used = Bytes.make topology.point_count '\000' in
   Array.iteri (fun vertex point ->
     if vertex land 16_383 = 0 then Cancel.check_opt cancel;
@@ -3755,9 +3755,9 @@ let without_resulting_creases geometry =
 
 let automatic_boundary_holes ?cancel ?grain geometry =
   let topology_value = Geometry.topology geometry in
-  let topology = Topology.Private.view topology_value in
+  let topology = Topology.View.view topology_value in
   let index_value = Topology_index.create ?cancel topology_value in
-  let index = Topology_index.Private.view index_value in
+  let index = Topology_index.View.view index_value in
   let point_byte_count = (topology.point_count lsr 3)
       + if topology.point_count land 7 = 0 then 0 else 1 in
   let boundary_points = Bytes.make point_byte_count '\000' in
@@ -3798,7 +3798,7 @@ let automatic_boundary_holes ?cancel ?grain geometry =
       if !boundary then value := !value lor (1 lsl bit)
     done;
     Bytes.set hole_bits byte (Char.chr !value));
-  let holes = Group.Private.of_owned_bits ~owner:Group.Primitive
+  let holes = Group.View.of_owned_bits ~owner:Group.Primitive
       ~name:"subdivision_hole" ~length:primitive_count hole_bits in
   if Group.cardinality holes = 0 then None else Some holes
 
@@ -3826,7 +3826,7 @@ let detail_overrides geometry =
           osd_fvarlinearinterpolation := Some attribute
       | "osd_creasingmethod" -> osd_creasingmethod := Some attribute
       | "osd_trianglesubdiv" -> osd_trianglesubdiv := Some attribute
-      | _ -> ()) (Geometry.Private.attributes geometry);
+      | _ -> ()) (Geometry.View.attributes geometry);
   { osd_scheme = !osd_scheme;
     osd_vtxboundaryinterpolation = !osd_vtxboundaryinterpolation;
     osd_fvarlinearinterpolation = !osd_fvarlinearinterpolation;
@@ -3834,7 +3834,7 @@ let detail_overrides geometry =
     osd_trianglesubdiv = !osd_trianglesubdiv }
 
 let detail_int name attribute =
-  match Attribute.Private.storage attribute with
+  match Attribute.View.storage attribute with
   | Attribute.Int [|value|] -> value
   | Attribute.Int _ ->
       fail (Printf.sprintf "detail attribute %s must contain exactly one value" name)
@@ -3845,7 +3845,7 @@ let detail_int name attribute =
 let resolve_scheme default = function
   | None -> default
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int [|0|] -> Catmull_clark
        | Attribute.Int [|1|] -> Loop
        | Attribute.Int [|2|] -> Bilinear
@@ -4125,7 +4125,7 @@ let subdivide_polygons ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1
   | Error.Fail message -> Error message
 
 let primitive_kind_counts geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let polygons = ref 0 and curves = ref 0 in
   Bytes.iter (fun kind ->
     if kind = '\000' then incr polygons else incr curves) topology.primitive_kinds;
@@ -4139,7 +4139,7 @@ let internal_attribute_name geometry base =
   choose 0
 
 let primitive_kind_group ?grain ~polygon geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   Group.init ?grain ~owner:Group.Primitive
     ~name:"__rdk_subdivide_primitive_kind"
     (Bytes.length topology.primitive_kinds) (fun primitive ->
@@ -4154,7 +4154,7 @@ let selection_for_kind ?grain ~polygon selection geometry =
   match selection with
   | None -> None
   | Some selection ->
-      let topology = Topology.Private.view (Geometry.topology geometry) in
+      let topology = Topology.View.view (Geometry.topology geometry) in
       let count = ref 0 in
       Bytes.iter (fun kind ->
         if (kind = '\000') = polygon then incr count) topology.primitive_kinds;
@@ -4250,7 +4250,7 @@ let subdivide ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1)
       let selected_curve_count = match primitives with
         | None -> curve_count
         | Some selection ->
-            let topology = Topology.Private.view (Geometry.topology geometry) in
+            let topology = Topology.View.view (Geometry.topology geometry) in
             let count = ref 0 in
             for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
               if Bytes.get topology.primitive_kinds primitive <> '\000'

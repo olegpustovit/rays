@@ -16,7 +16,7 @@ val build :
 val unique_source : t -> int -> int
 val source_unique : t -> int -> int
 
-module Private : sig
+module View : sig
   type view = {
 
     unique_source : int array;

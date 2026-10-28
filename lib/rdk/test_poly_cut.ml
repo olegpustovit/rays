@@ -15,8 +15,8 @@ let with_int name values geometry =
 let open_curve count = Line_geometry.polyline (Array.init count (fun point ->
     float_of_int point, 0., 0.)) |> get_ok
 
-let topology_view geometry = Topology.Private.view (Geometry.topology geometry)
-let position_view geometry = Packed.Float3.Private.view (Geometry.positions geometry)
+let topology_view geometry = Topology.View.view (Geometry.topology geometry)
+let position_view geometry = Packed.Float3.View.view (Geometry.positions geometry)
 
 let primitive_points geometry primitive =
   let topology = topology_view geometry in
@@ -27,7 +27,7 @@ let primitive_points geometry primitive =
 let float_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " is not float"))
   | None -> fail (name ^ " is missing")
@@ -35,7 +35,7 @@ let float_values owner name geometry =
 let int_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " is not integer"))
   | None -> fail (name ^ " is missing")
@@ -133,7 +133,7 @@ let test_discrete_ragged_payload_and_ordered_groups () =
       ~detection:(Poly_cut.Poly_cut_crossing {attribute="signal"; value=0.})
       source |> get_ok in
   let text owner name = match Geometry.find_attribute ~owner name output with
-    | Some attribute -> (match Attribute.Private.storage attribute with
+    | Some attribute -> (match Attribute.View.storage attribute with
         | Attribute.Text values -> values | _ -> fail (name ^ " storage"))
     | None -> fail (name ^ " missing") in
   check (text Attribute.Point "label" = [|"a";"b";"c";"b";"b"|])
@@ -142,11 +142,11 @@ let test_discrete_ragged_payload_and_ordered_groups () =
       = [|"va";"vb";"vb";"vb";"vc"|])
     "PolyCut nearest vertex text interpolation";
   let rows = match Geometry.find_attribute ~owner:Attribute.Point "rows" output with
-    | Some attribute -> (match Attribute.Private.storage attribute with
+    | Some attribute -> (match Attribute.View.storage attribute with
         | Attribute.Float_array values -> values | _ -> fail "rows storage")
     | None -> fail "rows missing"
   and links = match Geometry.find_attribute ~owner:Attribute.Vertex "links" output with
-    | Some attribute -> (match Attribute.Private.storage attribute with
+    | Some attribute -> (match Attribute.View.storage attribute with
         | Attribute.Int_array values -> values | _ -> fail "links storage")
     | None -> fail "links missing" in
   check (Packed.Float_array.get rows 3 = [|2.;3.|]
@@ -315,7 +315,7 @@ let test_validation_and_cancellation () =
   let bad_position_source = open_curve 2
       |> with_float "signal" [|-1.;1.|] in
   let bad_position_source = Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn
+      ~positions:(Packed.Float3.View.of_owned_exn
         ~x:[|Float.nan;1.|] ~y:[|0.;0.|] ~z:[|0.;0.|])
       ~topology:(Geometry.topology bad_position_source)
       ~attributes:(Geometry.attributes bad_position_source) () |> Result.get_ok in
@@ -331,7 +331,7 @@ let test_validation_and_cancellation () =
    | Ok _ -> fail "cancelled PolyCut published geometry")
 
 let equal_float2 left right =
-  let left = Packed.Float2.Private.view left and right = Packed.Float2.Private.view right in
+  let left = Packed.Float2.View.view left and right = Packed.Float2.View.view right in
   left.x = right.x && left.y = right.y
 
 let equal_storage left right = match left, right with
@@ -339,25 +339,25 @@ let equal_storage left right = match left, right with
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right -> equal_float2 left right
   | Attribute.Float3 left, Attribute.Float3 right ->
-      Packed.Float3.Private.view left = Packed.Float3.Private.view right
+      Packed.Float3.View.view left = Packed.Float3.View.view right
   | Attribute.Float4 left, Attribute.Float4 right ->
-      Packed.Float4.Private.view left = Packed.Float4.Private.view right
+      Packed.Float4.View.view left = Packed.Float4.View.view right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Int_array left, Attribute.Int_array right ->
-      Packed.Int_array.Private.view left = Packed.Int_array.Private.view right
+      Packed.Int_array.View.view left = Packed.Int_array.View.view right
   | Attribute.Float_array left, Attribute.Float_array right ->
-      Packed.Float_array.Private.view left = Packed.Float_array.Private.view right
+      Packed.Float_array.View.view left = Packed.Float_array.View.view right
   | _ -> false
 
 let equal_geometry left right =
-  Packed.Float3.Private.view (Geometry.positions left)
-    = Packed.Float3.Private.view (Geometry.positions right)
-  && Topology.Private.view (Geometry.topology left)
-    = Topology.Private.view (Geometry.topology right)
+  Packed.Float3.View.view (Geometry.positions left)
+    = Packed.Float3.View.view (Geometry.positions right)
+  && Topology.View.view (Geometry.topology left)
+    = Topology.View.view (Geometry.topology right)
   && List.equal (fun left right -> Attribute.owner left = Attribute.owner right
       && Attribute.name left = Attribute.name right
-      && equal_storage (Attribute.Private.storage left)
-           (Attribute.Private.storage right))
+      && equal_storage (Attribute.View.storage left)
+           (Attribute.View.storage right))
       (Geometry.attributes left) (Geometry.attributes right)
   && List.equal (fun left right ->
       let values group =

@@ -8,7 +8,7 @@ type bounds = {
 
 let bounds ?cancel geometry =
   Cancel.check_opt cancel;
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = Array.length positions.x in
   if count = 0 then None
   else begin
@@ -77,10 +77,10 @@ let measurement_anchor ?cancel measure geometry = match measure with
        | Some bounds -> bounds.center.x, bounds.center.y, bounds.center.z)
 
 let triangle_measure measure anchor positions topology a_vertex b_vertex c_vertex =
-  let a = topology.Topology.Private.vertex_points.(a_vertex)
+  let a = topology.Topology.View.vertex_points.(a_vertex)
   and b = topology.vertex_points.(b_vertex)
   and c = topology.vertex_points.(c_vertex) in
-  let ax = positions.Packed.Float3.Private.x.(a)
+  let ax = positions.Packed.Float3.View.x.(a)
   and ay = positions.y.(a) and az = positions.z.(a)
   and bx = positions.x.(b) and by = positions.y.(b) and bz = positions.z.(b)
   and cx = positions.x.(c) and cy = positions.y.(c) and cz = positions.z.(c) in
@@ -110,7 +110,7 @@ let triangle_measure measure anchor positions topology a_vertex b_vertex c_verte
         value
 
 let perimeter_measure positions topology primitive =
-  let first = topology.Topology.Private.primitive_offsets.(primitive)
+  let first = topology.Topology.View.primitive_offsets.(primitive)
   and last = topology.primitive_offsets.(primitive + 1) in
   let size = last - first in
   let closed = Bytes.get topology.primitive_kinds primitive <> '\001' in
@@ -121,7 +121,7 @@ let perimeter_measure positions topology primitive =
       let next = if local + 1 = size then 0 else local + 1 in
       let a = topology.vertex_points.(first + local)
       and b = topology.vertex_points.(first + next) in
-      let ax = positions.Packed.Float3.Private.x.(a)
+      let ax = positions.Packed.Float3.View.x.(a)
       and ay = positions.y.(a) and az = positions.z.(a)
       and bx = positions.x.(b) and by = positions.y.(b) and bz = positions.z.(b) in
       let dx = bx -. ax and dy = by -. ay and dz = bz -. az in
@@ -134,8 +134,8 @@ let perimeter_measure positions topology primitive =
 
 let primitive_measure_selected ?cancel ~grain selected measure geometry =
   if grain <= 0 then invalid_arg "Rdk.Analysis.measure: grain must be positive";
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-    and topology = Topology.Private.view (Geometry.topology geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry)
+    and topology = Topology.View.view (Geometry.topology geometry) in
     let primitive_count = Geometry.primitive_count geometry
     and selected_count = selection_count selected in
     let values = Array.make primitive_count 0. in
@@ -310,16 +310,16 @@ let require_connectivity_group label owner count = function
       "Connectivity: %s length does not match geometry" label)
   | Some _ -> Ok ()
 
-type uv_view = Uv2 of Packed.Float2.Private.view | Uv3 of Packed.Float3.Private.view
+type uv_view = Uv2 of Packed.Float2.View.view | Uv3 of Packed.Float3.View.view
 
 let uv_view name geometry =
   match Geometry.find_attribute ~owner:Attribute.Vertex name geometry with
   | None -> Error (Printf.sprintf
       "Connectivity: missing vertex UV attribute %S" name)
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Ok (Uv2 (Packed.Float2.Private.view values))
-       | Attribute.Float3 values -> Ok (Uv3 (Packed.Float3.Private.view values))
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Ok (Uv2 (Packed.Float2.View.view values))
+       | Attribute.Float3 values -> Ok (Uv3 (Packed.Float3.View.view values))
        | Attribute.Float _ | Attribute.Int _ | Attribute.Int_array _
        | Attribute.Float_array _ | Attribute.Float4 _ | Attribute.Text _ ->
            Error (Printf.sprintf
@@ -333,11 +333,11 @@ let uv_vertex_equal view left right = match view with
       && values.z.(left) = values.z.(right)
 
 let edge_uv_equal topology reverse view left right =
-  let left_next = reverse.Topology_index.Private.next_vertex.(left)
+  let left_next = reverse.Topology_index.View.next_vertex.(left)
   and right_next = reverse.next_vertex.(right) in
   if left_next < 0 || right_next < 0 then false
   else
-    let left_point = topology.Topology.Private.vertex_points.(left)
+    let left_point = topology.Topology.View.vertex_points.(left)
     and right_point = topology.vertex_points.(right) in
     if left_point = right_point then
       uv_vertex_equal view left right
@@ -377,7 +377,7 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
         Error "Connectivity: seam group belongs to a different topology"
     | None | Some _ ->
         Cancel.check_opt cancel;
-        let topology = Topology.Private.view topology_value in
+        let topology = Topology.View.view topology_value in
         let primitive_allowed primitive = match primitives with
           | None -> true | Some group -> Group.mem primitive group in
         let point_allowed point = match points with
@@ -386,7 +386,7 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
         | Connectivity_points ->
             let set = disjoint_set point_count point_allowed in
             let index_value = Topology_index.create ?cancel topology_value in
-            let reverse = Topology_index.Private.view index_value in
+            let reverse = Topology_index.View.view index_value in
             let edge_validation = match seams with
               | Some group when Edge_group.length group
                   <> Topology_index.edge_count index_value ->
@@ -429,7 +429,7 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
                 Ok (component_classes set)
             | seam_group, uv_name ->
                 let index = Topology_index.create ?cancel topology_value in
-                let reverse = Topology_index.Private.view index in
+                let reverse = Topology_index.View.view index in
                 let edge_validation = match seam_group with
                   | Some group when Edge_group.length group
                       <> Topology_index.edge_count index ->

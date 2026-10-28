@@ -15,7 +15,7 @@ let geometry_owned ?(attributes = []) ?(groups = []) ?(edge_groups = [])
   and z = Array.map (fun (_, _, z) -> z) points in
   let topology = Topology.create_owned ~point_count ~vertex_points
       ~primitive_offsets ~primitive_kinds:kinds |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology ~attributes ~groups ~edge_groups () |> get_string
 
 let edge_group_of_pairs topology name pairs =
@@ -50,7 +50,7 @@ let closed_loops count vertices_per_loop =
         (fun primitive -> primitive * vertices_per_loop))
       ~primitive_kinds:(Array.make count Topology.Closed_polyline)
       |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let equal_attribute left right =
@@ -73,8 +73,8 @@ let equal_edge_group left right =
 
 let equal_geometry left right =
   let lp = positions left and rp = positions right
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points

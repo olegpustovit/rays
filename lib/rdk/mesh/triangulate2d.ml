@@ -95,7 +95,7 @@ let constraint_endpoint_selection ?cancel ~points ?constraint_edges
     ?constraint_primitives geometry =
   let point_count = Geometry.point_count geometry
   and topology_value = Geometry.topology geometry in
-  let topology = Topology.Private.view topology_value in
+  let topology = Topology.View.view topology_value in
   let selected = Bytes.make point_count '\000' in
   Array.iter (fun point -> Bytes.unsafe_set selected point '\001') points;
   let retained = Bytes.make point_count '\000' and retained_count = ref 0 in
@@ -110,7 +110,7 @@ let constraint_endpoint_selection ?cancel ~points ?constraint_edges
     if Edge_group.topology_data_id group <> Topology.data_id topology_value then
       invalid_arg (operation ^ ": constraint edge group belongs to different topology");
     let index = Topology_index.create ?cancel topology_value in
-    let view = Topology_index.Private.view index in
+    let view = Topology_index.View.view index in
     Edge_group.iter (fun edge ->
       if edge land 4095 = 0 then Cancel.check_opt cancel;
       retain view.edge_a.(edge); retain view.edge_b.(edge)) group) constraint_edges;
@@ -139,7 +139,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
     ~silhouette_winding ~x ~y ?constraint_edges ?constraint_primitives
     geometry local_of_point triangulation =
   let topology_value = Geometry.topology geometry
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  and topology = Topology.View.view (Geometry.topology geometry) in
   let source = ref (Array.make 32 0) and winding = ref (Array.make 16 0)
   and length = ref 0 in
   let add_local ~weight a b =
@@ -179,7 +179,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
     if Edge_group.topology_data_id group <> Topology.data_id topology_value then
       invalid_arg (operation ^ ": constraint edge group belongs to different topology");
     let index = Topology_index.create ?cancel topology_value in
-    let view = Topology_index.Private.view index in
+    let view = Topology_index.View.view index in
     Edge_group.iter (fun edge ->
       if edge land 4095 = 0 then Cancel.check_opt cancel;
       add ~weight:0 view.edge_a.(edge) view.edge_b.(edge)) group) constraint_edges;
@@ -249,7 +249,7 @@ let constraint_segments ?cancel ~grain ~polygon_winding ~silhouette
         Predicates.Positive
       else Predicates.Negative in
     let index = Topology_index.create ?cancel topology_value in
-    let view = Topology_index.Private.view index in
+    let view = Topology_index.View.view index in
     let edge_count = Array.length view.edge_a
     and edge_winding = Array.make (Array.length view.edge_a) 0 in
     let classify_edge edge =
@@ -310,7 +310,7 @@ type projected_points = {
 }
 
 let planes_from_positions ?cancel ~grain positions points =
-  let source = Packed.Float3.Private.view positions and count = Array.length points in
+  let source = Packed.Float3.View.view positions and count = Array.length points in
   if count = 0 then invalid_arg (operation ^ ": selection contains no points");
   let maximum = ref 0. in
   for index = 0 to count - 1 do
@@ -363,7 +363,7 @@ let planes_from_positions ?cancel ~grain positions points =
   { x = output_x; y = output_y; embed }
 
 let project ?cancel ~grain projection geometry points =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
   and count = Array.length points in
   let fill coordinate_x coordinate_y =
     let x = Array.make count 0. and y = Array.make count 0. in
@@ -418,14 +418,14 @@ let project ?cancel ~grain projection geometry points =
       | None -> invalid_arg (Printf.sprintf "%s: missing point attribute %S"
           operation name)
       | Some attribute ->
-          (match Attribute.Private.storage attribute with
+          (match Attribute.View.storage attribute with
            | Attribute.Float2 values ->
-               let values = Packed.Float2.Private.view values in
+               let values = Packed.Float2.View.view values in
                let x,y = fill (fun point -> values.x.(point))
                    (fun point -> values.y.(point)) in
                { x; y; embed = (fun x y -> x,y,0.) }
            | Attribute.Float3 values ->
-               let values = Packed.Float3.Private.view values in
+               let values = Packed.Float3.View.view values in
                let x,y = fill (fun point -> values.x.(point))
                    (fun point -> values.y.(point)) in
                { x; y; embed = (fun x y -> x,y,0.) }
@@ -557,17 +557,17 @@ let materialization ?cancel ~grain ~restore_original_point_positions
     done;
     Array.sub values 0 output_point_count in
   let positions = if not restore_original_point_positions then begin
-    let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source = Packed.Float3.View.view (Geometry.positions geometry) in
     let x = Array.make output_point_count 0. and y = Array.make output_point_count 0.
     and z = Array.make output_point_count 0. in
     Array.blit source.x 0 x 0 source_point_count;
     Array.blit source.y 0 y 0 source_point_count;
     Array.blit source.z 0 z 0 source_point_count;
     let local_x,local_y = match refinement,arrangement with
-      | Some refinement,_ -> Planar_refinement.Private.approximate_x refinement,
-          Planar_refinement.Private.approximate_y refinement
+      | Some refinement,_ -> Planar_refinement.View.approximate_x refinement,
+          Planar_refinement.View.approximate_y refinement
       | None,Some arrangement ->
-          let view = Planar_constraints.Private.view arrangement in view.x,view.y
+          let view = Planar_constraints.View.view arrangement in view.x,view.y
       | None,None -> projected_x,projected_y in
     let local_count = initial_local_count + refinement_count in
     if Array.length local_x <> local_count || Array.length local_y <> local_count then
@@ -583,11 +583,11 @@ let materialization ?cancel ~grain ~restore_original_point_positions
     if local_count > grain then Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(local_count - 1) fill
     else for local = 0 to local_count - 1 do fill local done;
-    Packed.Float3.Private.of_owned_exn ~x ~y ~z
+    Packed.Float3.View.of_owned_exn ~x ~y ~z
   end else if split_count + refinement_count = 0 then
     Geometry.positions geometry
   else begin
-    let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source = Packed.Float3.View.view (Geometry.positions geometry) in
     let x = evaluate source.x and y = evaluate source.y and z = evaluate source.z in
     for output = source_point_count to output_point_count - 1 do
       if output land 4095 = 0 then Cancel.check_opt cancel;
@@ -596,7 +596,7 @@ let materialization ?cancel ~grain ~restore_original_point_positions
           "%s: generated point %d has a non-finite 3D interpolation"
           operation output)
     done;
-    Packed.Float3.Private.of_owned_exn ~x ~y ~z
+    Packed.Float3.View.of_owned_exn ~x ~y ~z
   end in
   { positions; representative; roots; parent_first; parent_second; parent_third;
     weight_first; weight_second; weight_third; value_count; source_point_count;
@@ -628,7 +628,7 @@ let interpolate_point_attribute ?cancel ~grain plan attribute =
     done;
     output in
   let discrete source = Array.init count (fun point -> source.(plan.representative.(point))) in
-  let storage = match Attribute.Private.storage attribute with
+  let storage = match Attribute.View.storage attribute with
     | Attribute.Float values -> Attribute.Float (numeric values)
     | Attribute.Int values -> Attribute.Int (discrete values)
     | Attribute.Int_array values ->
@@ -637,11 +637,11 @@ let interpolate_point_attribute ?cancel ~grain plan attribute =
         Attribute.Float_array (Ragged_ops.remap_float ?cancel ~grain plan.representative values)
     | Attribute.Text values -> Attribute.Text (discrete values)
     | Attribute.Float2 values ->
-        let values = Packed.Float2.Private.view values in
+        let values = Packed.Float2.View.view values in
         Attribute.Float2 (Packed.Float2.of_owned ~x:(numeric values.x)
           ~y:(numeric values.y) |> Result.get_ok)
     | Attribute.Float3 values ->
-        let values = Packed.Float3.Private.view values in
+        let values = Packed.Float3.View.view values in
         let x = numeric values.x and y = numeric values.y and z = numeric values.z in
         if Attribute.name attribute = "N" then
           for point = 0 to count - 1 do
@@ -652,9 +652,9 @@ let interpolate_point_attribute ?cancel ~grain plan attribute =
               z.(point) <- z.(point) /. length
             end
           done;
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x ~y ~z)
     | Attribute.Float4 values ->
-        let values = Packed.Float4.Private.view values in
+        let values = Packed.Float4.View.view values in
         Attribute.Float4 (Packed.Float4.of_owned ~x:(numeric values.x)
           ~y:(numeric values.y) ~z:(numeric values.z) ~w:(numeric values.w)
           |> Result.get_ok) in
@@ -679,7 +679,7 @@ let mapped_array ?cancel ~grain ~default mapping source =
   output
 
 let defaulted_attribute ?cancel ~grain mapping attribute =
-  let storage = match Attribute.Private.storage attribute with
+  let storage = match Attribute.View.storage attribute with
     | Attribute.Float values ->
         Attribute.Float (mapped_array ?cancel ~grain ~default:0. mapping values)
     | Attribute.Int values ->
@@ -691,19 +691,19 @@ let defaulted_attribute ?cancel ~grain mapping attribute =
     | Attribute.Float_array values ->
         Attribute.Float_array (Ragged_ops.remap_float ?cancel ~grain mapping values)
     | Attribute.Float2 values ->
-        let values = Packed.Float2.Private.view values in
+        let values = Packed.Float2.View.view values in
         Attribute.Float2 (Packed.Float2.of_owned
           ~x:(mapped_array ?cancel ~grain ~default:0. mapping values.x)
           ~y:(mapped_array ?cancel ~grain ~default:0. mapping values.y)
           |> Result.get_ok)
     | Attribute.Float3 values ->
-        let values = Packed.Float3.Private.view values in
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        let values = Packed.Float3.View.view values in
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:(mapped_array ?cancel ~grain ~default:0. mapping values.x)
           ~y:(mapped_array ?cancel ~grain ~default:0. mapping values.y)
           ~z:(mapped_array ?cancel ~grain ~default:0. mapping values.z))
     | Attribute.Float4 values ->
-        let values = Packed.Float4.Private.view values in
+        let values = Packed.Float4.View.view values in
         Attribute.Float4 (Packed.Float4.of_owned
           ~x:(mapped_array ?cancel ~grain ~default:0. mapping values.x)
           ~y:(mapped_array ?cancel ~grain ~default:0. mapping values.y)
@@ -718,7 +718,7 @@ let defaulted_group ?cancel ~grain mapping group =
       ~name:(Group.name group) (Array.length mapping) (fun target ->
         if target land 4095 = 0 then Cancel.check_opt cancel;
         let source = mapping.(target) in source >= 0 && Group.mem source group) in
-  Group.Private.remap_order ~source:group ~source_of_target:mapping output
+  Group.View.remap_order ~source:group ~source_of_target:mapping output
 
 type output_topology_plan = {
   topology : Topology.t;
@@ -748,7 +748,7 @@ let output_topology ?cancel ~grain ~keep_primitives ~constraint_primitives
       kept_primitive_count = 0 }
   end else begin
     let source_topology_value = Geometry.topology geometry in
-    let source = Topology.Private.view source_topology_value in
+    let source = Topology.View.view source_topology_value in
     let source_primitive_count = Geometry.primitive_count geometry in
     Option.iter (fun group ->
       if Group.owner group <> Group.Primitive
@@ -824,7 +824,7 @@ let output_topology ?cancel ~grain ~keep_primitives ~constraint_primitives
         ~finish:(triangle_count - 1) fill_triangle
     else for triangle = 0 to triangle_count - 1 do fill_triangle triangle done;
     primitive_offsets.(output_primitive_count) <- output_vertex_count;
-    { topology = Topology.Private.create_validated_owned
+    { topology = Topology.View.create_validated_owned
           ~point_count:output_point_count ~vertex_points ~primitive_offsets
           ~primitive_kinds;
       vertex_source; primitive_source;
@@ -896,30 +896,56 @@ let constraint_only_seed ?cancel ~grain ~seed ~points ~x ~y ~constraints
 
 let exact_points x y arrangement = match arrangement with
   | Some arrangement -> Array.init (Planar_constraints.point_count arrangement)
-      (Planar_constraints.Private.point arrangement)
+      (Planar_constraints.View.point arrangement)
   | None ->
       let source = Implicit_point.source ~x ~y ~z:(Array.make (Array.length x) 0.)
           |> Result.get_ok in
       Array.init (Array.length x) (fun point ->
         Implicit_point.explicit source point |> Result.get_ok)
 
-let run ?cancel ?(grain = 16_384) ?selection ?constraint_edges
-    ?constraint_primitives ?(projection = Best_fit) ?(seed = 0L)
-    ?(split_crossing_constraints = false) ?(flood_from_hull_boundary = false)
-    ?(remove_outside_constraint_polygons = false)
-    ?(silhouette_constraints = false) ?(remove_outside_silhouette = false)
-    ?(ignore_non_constraint_points = false)
-    ?(remove_duplicate_points = false)
-    ?(refine = false) ?(allow_constraint_splitting = true)
-    ?(minimum_angle = Float.pi /. 9.) ?maximum_area ?target_edge_length
-    ?(minimum_edge_length = 0.) ?(maximum_new_points = 100_000)
-    ?(regularization_steps = 0)
-    ?(allow_movement_of_interior_input_points = false)
-    ?(preserve_point_payload = true)
-    ?(restore_original_point_positions = true) ?(keep_primitives = false)
-    ?split_point_group ?refinement_point_group ?triangle_group
-    ?constraint_group
-    ?(remove_unused_points = false) ?(recompute_point_normals = false) geometry =
+type params = {
+  grain : int;
+  selection : Element_selection.t option;
+  constraint_edges : Edge_group.t option;
+  constraint_primitives : Group.t option;
+  projection : projection;
+  seed : int64;
+  split_crossing_constraints : bool;
+  flood_from_hull_boundary : bool;
+  remove_outside_constraint_polygons : bool;
+  silhouette_constraints : bool;
+  remove_outside_silhouette : bool;
+  ignore_non_constraint_points : bool;
+  remove_duplicate_points : bool;
+  refine : bool;
+  allow_constraint_splitting : bool;
+  minimum_angle : float;
+  maximum_area : float option;
+  target_edge_length : float option;
+  minimum_edge_length : float;
+  maximum_new_points : int;
+  regularization_steps : int;
+  allow_movement_of_interior_input_points : bool;
+  preserve_point_payload : bool;
+  restore_original_point_positions : bool;
+  keep_primitives : bool;
+  split_point_group : string option;
+  refinement_point_group : string option;
+  triangle_group : string option;
+  constraint_group : string option;
+  remove_unused_points : bool;
+  recompute_point_normals : bool;
+}
+let run ?cancel { grain; selection; constraint_edges; constraint_primitives;
+    projection; seed; split_crossing_constraints; flood_from_hull_boundary;
+    remove_outside_constraint_polygons; silhouette_constraints;
+    remove_outside_silhouette; ignore_non_constraint_points;
+    remove_duplicate_points; refine; allow_constraint_splitting; minimum_angle;
+    maximum_area; target_edge_length; minimum_edge_length; maximum_new_points;
+    regularization_steps; allow_movement_of_interior_input_points;
+    preserve_point_payload; restore_original_point_positions; keep_primitives;
+    split_point_group; refinement_point_group; triangle_group; constraint_group;
+    remove_unused_points; recompute_point_normals } geometry =
   Error.guard ~operation:"triangulate_2d" ~code:"invalid_triangulation" @@ fun () ->
   let finish output =
     Result.bind (if remove_unused_points then
@@ -974,7 +1000,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?constraint_edges
             else Ok (points,x,y,triangulation,constraints,constraint_winding) in
           Result.bind prepared (fun
               (points,x,y,triangulation,constraints,constraint_winding) ->
-          let seed_view = Delaunay2.Private.view triangulation in
+          let seed_view = Delaunay2.View.view triangulation in
           let arrangement = if Array.length constraints = 0 then Ok None
             else Result.map Option.some (Planar_constraints.build ?cancel ~grain
                 ~split_crossings:split_crossing_constraints ~x ~y
@@ -988,7 +1014,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?constraint_edges
                 && not remove_outside_silhouette ->
                 Ok (seed_view.triangle_points,[||])
             | None -> Result.map (fun value ->
-                let view = Planar_cdt.Private.view value in
+                let view = Planar_cdt.View.view value in
                 view.triangle_points,view.constraint_points)
               (Planar_cdt.build ?cancel ~point_count:(Array.length points)
                 ~orient:(fun a b c -> Predicates.orient2d_packed ~x ~y a b c)
@@ -1001,14 +1027,14 @@ let run ?cancel ?(grain = 16_384) ?selection ?constraint_edges
                   (remove_outside_constraint_polygons || remove_outside_silhouette)
                 ())
             | Some arrangement ->
-              let arrangement_view = Planar_constraints.Private.view arrangement in
+              let arrangement_view = Planar_constraints.View.view arrangement in
               Result.map (fun value ->
-                let view = Planar_cdt.Private.view value in
+                let view = Planar_cdt.View.view value in
                 view.triangle_points,view.constraint_points)
               (Planar_cdt.build ?cancel
                 ~point_count:(Planar_constraints.point_count arrangement)
-                ~orient:(Planar_constraints.Private.orient2d arrangement)
-                ~incircle:(Planar_constraints.Private.incircle arrangement)
+                ~orient:(Planar_constraints.View.orient2d arrangement)
+                ~incircle:(Planar_constraints.View.incircle arrangement)
                 ~bounds_overlap:(fun a b u v ->
                   let x = arrangement_view.x and y = arrangement_view.y in
                   max (min x.(a) x.(b)) (min x.(u) x.(v))
@@ -1037,7 +1063,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?constraint_edges
                 match arrangement with
                 | None -> initial_constraints,[||]
                 | Some arrangement ->
-                    let view = Planar_constraints.Private.view arrangement in
+                    let view = Planar_constraints.View.view arrangement in
                     view.constraint_points,view.constraint_winding in
               Result.map (fun refinement ->
                 Planar_refinement.triangle_points refinement,

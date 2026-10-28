@@ -73,7 +73,7 @@ let columns owner geometry =
     if A.owner attribute <> owner then [] else
     let name = A.name attribute and length = A.length attribute in
     let guard cell row = if row < length then cell row else "" in
-    let columns = match Attribute.Private.storage attribute with
+    let columns = match Attribute.View.storage attribute with
       | Float values -> [name, fun row -> number values.(row)]
       | Int values -> [name, fun row -> string_of_int values.(row)]
       | Text values -> [name, fun row -> values.(row)]
@@ -98,7 +98,7 @@ let columns owner geometry =
 
 let tags ~attribute geometry =
   Option.bind (G.find_attribute ~owner:A.Primitive attribute geometry) (fun a ->
-    match Attribute.Private.storage a with A.Int values -> Some values | _ -> None)
+    match Attribute.View.storage a with A.Int values -> Some values | _ -> None)
 
 let surface geometry = Result.to_option (Rdk_spatial.Surface_index.create geometry)
 
@@ -135,10 +135,10 @@ let tint ~attribute ~accent:(ar, ag, ab) ~lit geometry =
       let topology = G.topology geometry in
       let corners = Rdk_core.Topology.vertex_count topology in
       let base = match G.find_attribute ~owner:A.Vertex "Cd" geometry, G.find_attribute ~owner:A.Point "Cd" geometry with
-        | Some a, _ -> (match Attribute.Private.storage a with
-            | A.Float4 c -> Some (`Vertex (Packed.Float4.Private.view c)) | _ -> None)
-        | None, Some a -> (match Attribute.Private.storage a with
-            | A.Float4 c -> Some (`Point (Packed.Float4.Private.view c)) | _ -> None)
+        | Some a, _ -> (match Attribute.View.storage a with
+            | A.Float4 c -> Some (`Vertex (Packed.Float4.View.view c)) | _ -> None)
+        | None, Some a -> (match Attribute.View.storage a with
+            | A.Float4 c -> Some (`Point (Packed.Float4.View.view c)) | _ -> None)
         | None, None -> None in
       let r = Array.make corners 1. and g = Array.make corners 1.
       and b = Array.make corners 1. and w = Array.make corners 1. in

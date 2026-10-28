@@ -21,7 +21,7 @@ val point_count : t -> int
 val triangle_count : t -> int
 val triangle_point : t -> int -> int -> int
 
-module Private : sig
+module View : sig
   val point : t -> int -> Implicit_point.t
   val global_point_token : t -> int -> int
   val source_winding : t -> int

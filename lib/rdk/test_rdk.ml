@@ -22,7 +22,7 @@ let check_topology_validation () =
         check (vertices = vertices_before && offsets = offsets_before)
           "topology validation must not mutate owned input planes";
         Result.map (fun topology ->
-          let view = Topology.Private.view topology in
+          let view = Topology.View.view topology in
           check (view.vertex_points == vertices && view.primitive_offsets == offsets)
             "topology constructors retain ownership-transfer planes";
           view.point_count, Array.copy view.vertex_points,
@@ -128,8 +128,8 @@ let run () =
     Ordering.sort ~grain:1 ~selection:selected ~descending:true
       ~owner:Ordering.Points ~key:Ordering.X sortable_points |> get_ok) in
   let sorted_points = sorted 1 and sorted_many = sorted 4 in
-  let sorted_positions = Packed.Float3.Private.view (Geometry.positions sorted_points)
-  and sorted_topology = Topology.Private.view (Geometry.topology sorted_points) in
+  let sorted_positions = Packed.Float3.View.view (Geometry.positions sorted_points)
+  and sorted_topology = Topology.View.view (Geometry.topology sorted_points) in
   check (geometry_bytes sorted_points = geometry_bytes sorted_many
       && geometry_bytes sortable_points = sortable_bytes
       && sorted_positions.x = [|1.;1.;0.;0.|]

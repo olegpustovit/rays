@@ -44,7 +44,7 @@ val without_edge_group : string -> t -> t
 val rename_edge_group :
   from:string -> into:string -> t -> (t, string) result
 
-module Private : sig
+module View : sig
   val attributes : t -> Attribute.t array
   (** Borrowed zero-copy metadata view for audited RDK kernels. The array must
       never be mutated or retained beyond the immutable geometry's lifetime. *)

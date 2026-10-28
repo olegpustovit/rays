@@ -3,7 +3,7 @@ open Rdk
 open Rdk_test_support
 
 let geometry positions add_primitives =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.map (fun (x, _, _) -> x) positions)
       ~y:(Array.map (fun (_, y, _) -> y) positions)
       ~z:(Array.map (fun (_, _, z) -> z) positions) in

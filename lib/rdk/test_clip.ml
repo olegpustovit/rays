@@ -3,29 +3,29 @@ open Rdk
 open Rdk_test_support
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | _ -> false
@@ -39,14 +39,14 @@ let equal_group left right =
   Group.owner left = Group.owner right
   && String.equal (Group.name left) (Group.name right)
   && Group.length left = Group.length right
-  && Bytes.equal (Group.Private.bits_view left) (Group.Private.bits_view right)
-  && Group.Private.order_view left = Group.Private.order_view right
+  && Bytes.equal (Group.View.bits_view left) (Group.View.bits_view right)
+  && Group.View.order_view left = Group.View.order_view right
 
 let equal_geometry left right =
-  let left_positions = Packed.Float3.Private.view (Geometry.positions left)
-  and right_positions = Packed.Float3.Private.view (Geometry.positions right)
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  let left_positions = Packed.Float3.View.view (Geometry.positions left)
+  and right_positions = Packed.Float3.View.view (Geometry.positions right)
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -61,7 +61,7 @@ let equal_geometry left right =
        (Geometry.edge_groups right)
 
 let triangle () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|(-10.); 0.; 10.|] ~y:[|0.; 4.; 0.|] ~z:[|0.; 0.; 0.|] in
   let topology = Rdk_test_support.Tb.create ~point_count:3 () in
   Rdk_test_support.Tb.add_triangle topology 0 1 2;
@@ -76,13 +76,13 @@ let with_attribute name storage geometry =
 let int_attribute ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let shared_selection_fixture () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|(-1.); 0.0005; 1.; (-1.)|]
       ~y:[|0.; 0.; 1.; 1.|] ~z:[|0.; 0.; 0.; 0.|] in
   let topology = Rdk_test_support.Tb.create ~point_count:4 () in
@@ -107,7 +107,7 @@ let check_custom_clip_attribute () =
            ~normal:Rays_math.Vec3.unit_x |> get_ok in
   let float2 = clip (Attribute.Float2 (Packed.Float2.of_owned
       ~x:[|(-1.); 1.; 1.|] ~y:[|0.; 0.; 0.|] |> get_string_ok))
-  and float3 = clip (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+  and float3 = clip (Attribute.Float3 (Packed.Float3.View.of_owned_exn
       ~x:[|(-1.); 1.; 1.|] ~y:[|0.; 0.; 0.|] ~z:[|0.; 0.; 0.|]))
   and float4_a = clip (Attribute.Float4 (Packed.Float4.of_owned
       ~x:[|(-1.); 1.; 1.|] ~y:[|0.; 0.; 0.|] ~z:[|0.; 0.; 0.|]
@@ -117,8 +117,8 @@ let check_custom_clip_attribute () =
       ~w:[|1.; 2.; 3.|] |> get_string_ok))
   and integer = clip (Attribute.Int [|(-1); 1; 1|]) in
   let same_positions left right =
-    let left = Packed.Float3.Private.view (Geometry.positions left)
-    and right = Packed.Float3.Private.view (Geometry.positions right) in
+    let left = Packed.Float3.View.view (Geometry.positions left)
+    and right = Packed.Float3.View.view (Geometry.positions right) in
     left.x = right.x && left.y = right.y && left.z = right.z in
   List.iter (fun output -> check (same_positions clipped output)
       "Clip Attribute numeric tuple zero-fill/first-three behavior differs")
@@ -145,8 +145,8 @@ let check_selection_isolation () =
   let unselected = ref (-1) in
   Array.iteri (fun primitive id -> if id = 20 then unselected := primitive) ids;
   check (!unselected >= 0) "selected Clip deleted the unselected primitive";
-  let topology = Topology.Private.view (Geometry.topology output)
-  and positions = Packed.Float3.Private.view (Geometry.positions output) in
+  let topology = Topology.View.view (Geometry.topology output)
+  and positions = Packed.Float3.View.view (Geometry.positions output) in
   let first = topology.primitive_offsets.(!unselected)
   and last = topology.primitive_offsets.(!unselected + 1) in
   check (last - first = 3) "selected Clip changed unselected primitive arity";
@@ -183,7 +183,7 @@ let check_selection_isolation () =
       ~snapping_tolerance:0.001 ~selection:(Transform_ops.Selected_primitives selected)
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   let split_ids = int_attribute ~owner:Attribute.Primitive "primitive_id" split
-  and split_topology = Topology.Private.view (Geometry.topology split) in
+  and split_topology = Topology.View.view (Geometry.topology split) in
   let selected_points = Array.make (Geometry.point_count split) false
   and unselected_points = Array.make (Geometry.point_count split) false in
   Array.iteri (fun primitive id ->
@@ -271,7 +271,7 @@ let check_selected_caps_and_edge_output () =
    | Some group -> check (Group.cardinality group = 1)
        "selected filled Clip cap count"
    | None -> fail "selected filled Clip cap group missing");
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|(-1.); 1.; 1.; 0.; 0.; 0.|]
       ~y:[|0.; 0.; 1.; 2.; 3.; 2.|] ~z:[|0.; 0.; 0.; 0.; 0.; 1.|] in
   let topology = Rdk_test_support.Tb.create ~point_count:6 () in
@@ -290,7 +290,7 @@ let check_selected_caps_and_edge_output () =
    | None -> fail "selected Clip edge output missing")
 
 let check_degenerate_fallback () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 1.; 0.|] ~y:[|0.; 0.; 1.; 1.|]
       ~z:[|0.; 0.; 0.; 0.|] in
   let topology = Topology.create_owned ~point_count:4
@@ -302,7 +302,7 @@ let check_degenerate_fallback () =
   check (Geometry.primitive_count output = 1
       && Geometry.vertex_count output = 4)
     "adjacent repeated-corner polygon did not retain duplicate suppression";
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|1.; (-1.); 1.|] ~y:[|0.; 0.; 1.|] ~z:[|0.; 0.; 0.|] in
   let topology = Topology.create_owned ~point_count:3
       ~vertex_points:[|0; 1; 0; 2|] ~primitive_offsets:[|0; 4|]
@@ -317,7 +317,7 @@ let check_disconnected_concave_fragments () =
   (* The positive-X half of this simple C polygon has two disconnected
      rectangular components. A one-ring half-plane pass must not join them by
      artificial plane edges or require callers to triangulate first. *)
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|(-2.); 2.; 2.; (-1.); (-1.); 2.; 2.; (-2.)|]
       ~y:[|(-2.); (-2.); (-1.); (-1.); 1.; 1.; 2.; 2.|]
       ~z:(Array.make 8 0.) in
@@ -341,8 +341,8 @@ let check_disconnected_concave_fragments () =
   check (int_attribute ~owner:Attribute.Primitive "source_primitive" one
       = [|17; 17|])
     "concave Clip did not preserve primitive payload ancestry";
-  let topology = Topology.Private.view (Geometry.topology one)
-  and positions = Packed.Float3.Private.view (Geometry.positions one) in
+  let topology = Topology.View.view (Geometry.topology one)
+  and positions = Packed.Float3.View.view (Geometry.positions one) in
   for primitive = 0 to Geometry.primitive_count one - 1 do
     check (topology.primitive_offsets.(primitive + 1)
         - topology.primitive_offsets.(primitive) = 4)
@@ -365,7 +365,7 @@ let check_disconnected_concave_fragments () =
       ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (Geometry.primitive_count both = 3)
     "keep-all concave Clip did not emit two above and one below fragment";
-  let quad_positions = Packed.Float3.Private.of_owned_exn
+  let quad_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 2.; 1.; 2.|] ~y:[|1.; 0.; 1.; 2.|]
       ~z:(Array.make 4 0.) in
   let quad_topology = Rdk_test_support.Tb.create ~point_count:4 () in
@@ -413,7 +413,7 @@ let hollow_square_prism () =
     Rdk_test_support.Tb.add_polygon topology
       [|4 + corner; 4 + next; 12 + next; 12 + corner|]
   done;
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology:(Rdk_test_support.Tb.freeze topology) () |> get_string_ok
 
 let check_nested_cap_contours () =
@@ -432,12 +432,12 @@ let check_nested_cap_contours () =
   let cap_edges = Geometry.find_edge_group "annulus_edges" one |> Option.get in
   check (Edge_group.cardinality cap_edges = 16)
     "square-annulus Clip did not materialize boundary and internal plane edges";
-  let topology = Topology.Private.view (Geometry.topology one)
-  and positions = Packed.Float3.Private.view (Geometry.positions one) in
+  let topology = Topology.View.view (Geometry.topology one)
+  and positions = Packed.Float3.View.view (Geometry.positions one) in
   let normals = match Geometry.find_attribute ~owner:Attribute.Vertex "N" one with
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
-         | Attribute.Float3 values -> Packed.Float3.Private.view values
+        (match Attribute.View.storage attribute with
+         | Attribute.Float3 values -> Packed.Float3.View.view values
          | _ -> fail "nested Clip cap N has unexpected storage")
     | None -> fail "nested Clip cap did not create hard vertex N" in
   let area = ref 0. in
@@ -493,8 +493,8 @@ let check_nested_cap_contours () =
     "parallel independent nested cap component cardinality"
 
 let cap_area_yz geometry group =
-  let topology = Topology.Private.view (Geometry.topology geometry)
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry)
+  let topology = Topology.View.view (Geometry.topology geometry)
+  and positions = Packed.Float3.View.view (Geometry.positions geometry)
   and total = ref 0. in
   Group.iter (fun primitive ->
     let first = topology.primitive_offsets.(primitive)
@@ -558,7 +558,7 @@ let check_multiple_nested_cap_contours () =
   check (Group.cardinality solid_caps = 2
       && near (cap_area_yz nested_solids solid_caps) 40.)
     "same-winding nested solids were incorrectly interpreted as a cavity";
-  let concave_positions = Packed.Float3.Private.of_owned_exn
+  let concave_positions = Packed.Float3.View.of_owned_exn
       ~x:[|(-2.); 2.; 2.; (-1.); (-1.); 2.; 2.; (-2.)|]
       ~y:[|(-2.); (-2.); (-1.); (-1.); 1.; 1.; 2.; 2.|]
       ~z:(Array.make 8 0.) in

@@ -80,7 +80,7 @@ widgets, camera policy, or render lifecycle into `sop` or `rdk`.
 - Shared topology structures must be packed integer arrays/bytes with explicit
   ownership and O(points + vertices + primitives + edges) storage. Public
   immutable wrappers may expose safe queries; audited kernels may borrow
-  read-only planes through a narrow `Private` view.
+  read-only planes through a narrow `View` module.
 - Robust operations separate combinatorial decisions from approximate metric
   calculations. Use adaptive/exact predicates for orientation, incircle, and
   intersection signs where floating-point ambiguity can change topology;

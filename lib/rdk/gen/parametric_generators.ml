@@ -342,7 +342,7 @@ let torus ?cancel ?(grain = 16_384) ?(connectivity = Torus_triangles)
                         then primitive * rows
                         else row_vertex_count
                           + ((primitive - row_primitive_count) * columns));
-                  Topology.Private.create_validated_owned ~point_count
+                  Topology.View.create_validated_owned ~point_count
                     ~vertex_points ~primitive_offsets ~primitive_kinds
               | Torus_triangles | Torus_alternating_triangles | Torus_quads ->
                   let triangle_mode = connectivity <> Torus_quads in
@@ -510,20 +510,20 @@ let torus ?cancel ?(grain = 16_384) ?(connectivity = Torus_triangles)
                     primitive_offsets.(fixed_primitive_count + 2) <-
                       fixed_vertex_count + (2 * columns)
                   end;
-                  Topology.Private.create_validated_owned ~point_count
+                  Topology.View.create_validated_owned ~point_count
                     ~vertex_points ~primitive_offsets ~primitive_kinds in
-            let positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
+            let positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
             let attributes = ref [] in
             (match point_normals with
              | Some (x, y, z) ->
-                 let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+                 let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
                  attributes := (Attribute.create_key_owned
                      (Attribute.normal ~owner:Attribute.Point) values |> Support.get_ok)
                    :: !attributes
              | None -> ());
             (match vertex_normals with
              | Some (x, y, z) ->
-                 let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+                 let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
                  attributes := (Attribute.create_key_owned
                      (Attribute.normal ~owner:Attribute.Vertex) values |> Support.get_ok)
                    :: !attributes

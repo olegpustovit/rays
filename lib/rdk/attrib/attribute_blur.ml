@@ -10,7 +10,7 @@ type blur_target =
   | Blur_float4 of Attribute.t * int
 
 let blur_edge_lengths ?cancel ~grain positions topology =
-  let edge_count = Array.length topology.Topology_index.Private.edge_a in
+  let edge_count = Array.length topology.Topology_index.View.edge_a in
   let lengths = Array.make edge_count 0. in
   let range_count = if edge_count = 0 then 0 else
       (edge_count + grain - 1) / grain in
@@ -20,7 +20,7 @@ let blur_edge_lengths ?cancel ~grain positions topology =
     for edge = first to last - 1 do
       if edge land 16_383 = 0 then Cancel.check_opt cancel;
       let a = topology.edge_a.(edge) and b = topology.edge_b.(edge) in
-      let dx = positions.Packed.Float3.Private.x.(b) -. positions.x.(a)
+      let dx = positions.Packed.Float3.View.x.(b) -. positions.x.(a)
       and dy = positions.y.(b) -. positions.y.(a)
       and dz = positions.z.(b) -. positions.z.(a) in
       let length = Float.hypot dx (Float.hypot dy dz) in
@@ -73,26 +73,26 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
         plane_count := first + List.length arrays;
         List.iter (fun values -> planes := values :: !planes) arrays;
         targets := make first :: !targets in
-      let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+      let positions = Packed.Float3.View.view (Geometry.positions geometry) in
       if Attribute_pattern.matches compiled "P" then
         add_target (fun first -> Blur_position first)
           [positions.x; positions.y; positions.z];
       List.iter (fun attribute ->
         if Attribute.owner attribute = Attribute.Point
             && Attribute_pattern.matches compiled (Attribute.name attribute) then
-          match Attribute.Private.storage attribute with
+          match Attribute.View.storage attribute with
           | Attribute.Float values ->
               add_target (fun first -> Blur_float (attribute, first)) [values]
           | Attribute.Float2 values ->
-              let values = Packed.Float2.Private.view values in
+              let values = Packed.Float2.View.view values in
               add_target (fun first -> Blur_float2 (attribute, first))
                 [values.x; values.y]
           | Attribute.Float3 values ->
-              let values = Packed.Float3.Private.view values in
+              let values = Packed.Float3.View.view values in
               add_target (fun first -> Blur_float3 (attribute, first))
                 [values.x; values.y; values.z]
           | Attribute.Float4 values ->
-              let values = Packed.Float4.Private.view values in
+              let values = Packed.Float4.View.view values in
               add_target (fun first -> Blur_float4 (attribute, first))
                 [values.x; values.y; values.z; values.w]
           | Attribute.Int _ | Attribute.Text _ | Attribute.Int_array _
@@ -122,7 +122,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
                | None -> Error (Printf.sprintf
                    "Rdk.Attribute_ops.blur_points: missing point float attribute %s" name)
                | Some attribute ->
-                   (match Attribute.Private.storage attribute with
+                   (match Attribute.View.storage attribute with
                     | Attribute.Float values -> Ok (Some values)
                     | Attribute.Int _ | Attribute.Float2 _ | Attribute.Float3 _
                     | Attribute.Float4 _ | Attribute.Text _
@@ -150,7 +150,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
         let topology_index = Topology_index.create ?cancel (Geometry.topology geometry)
         and current = ref (Array.map Array.copy original)
         and next = ref (Array.map Array.copy original) in
-        let topology = Topology_index.Private.view topology_index in
+        let topology = Topology_index.View.view topology_index in
         let edge_lengths = match method_ with
           | Uniform -> None
           | Edge_length -> Some (blur_edge_lengths ?cancel ~grain positions topology) in
@@ -273,7 +273,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
               | Blur_float _ | Blur_float2 _ | Blur_float3 _ | Blur_float4 _ -> ())
               targets;
             let result = if !positions_changed then
-                Geometry.with_positions (Packed.Float3.Private.of_owned_exn
+                Geometry.with_positions (Packed.Float3.View.of_owned_exn
                   ~x:output.(0) ~y:output.(1) ~z:output.(2)) geometry
               else Ok geometry in
             Result.bind result (fun geometry ->
@@ -300,7 +300,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
                           (Geometry.with_attribute attribute geometry)
                           (fun geometry -> install geometry (target + 1))))
                   | Blur_float3 (source, first) ->
-                      let values = Packed.Float3.Private.of_owned_exn
+                      let values = Packed.Float3.View.of_owned_exn
                           ~x:output.(first) ~y:output.(first + 1)
                           ~z:output.(first + 2) in
                       Result.bind (Attribute.create_owned ~name:(Attribute.name source)

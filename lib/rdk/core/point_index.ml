@@ -5,7 +5,7 @@ type t = {
 }
 
 let create_uncached ?cancel topology =
-  let source = Topology.Private.view topology in
+  let source = Topology.View.view topology in
   let point_count = source.point_count
   and vertex_count = Array.length source.vertex_points
   and primitive_count = Bytes.length source.primitive_kinds in
@@ -46,7 +46,7 @@ let create ?cancel topology =
 
 type index = t
 
-module Private = struct
+module View = struct
   type view = {
     primitive_of_vertex : int array;
     point_offsets : int array;

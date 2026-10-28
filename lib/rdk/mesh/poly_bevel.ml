@@ -26,7 +26,7 @@ let[@inline always] length3 x y z =
     scale *. sqrt (x *. x +. y *. y +. z *. z)
 
 let[@inline always] unit_between positions source destination =
-  let dx = positions.Packed.Float3.Private.x.(destination)
+  let dx = positions.Packed.Float3.View.x.(destination)
       -. positions.x.(source)
   and dy = positions.y.(destination) -. positions.y.(source)
   and dz = positions.z.(destination) -. positions.z.(source) in
@@ -91,7 +91,7 @@ let interpolate_attribute ?cancel ~grain ~point_map ~vertex_left ~vertex_right
         Ok (Some (Topology_remap.attribute ?cancel ~grain mapping attribute))
     | Attribute.Vertex ->
         let nearest = lazy (nearest_mapping vertex_left vertex_right vertex_weight) in
-        let storage = match Attribute.Private.storage attribute with
+        let storage = match Attribute.View.storage attribute with
           | Attribute.Float values -> Attribute.Float
               (interpolate_float ?cancel ~grain vertex_left vertex_right
                  vertex_weight values)
@@ -104,15 +104,15 @@ let interpolate_attribute ?cancel ~grain ~point_map ~vertex_left ~vertex_right
           | Attribute.Float_array values -> Attribute.Float_array
               (Ragged_ops.remap_float ?cancel ~grain (Lazy.force nearest) values)
           | Attribute.Float2 values ->
-              let values = Packed.Float2.Private.view values in
+              let values = Packed.Float2.View.view values in
               Attribute.Float2 (Packed.Float2.of_owned
                 ~x:(interpolate_float ?cancel ~grain vertex_left vertex_right
                       vertex_weight values.x)
                 ~y:(interpolate_float ?cancel ~grain vertex_left vertex_right
                       vertex_weight values.y) |> Result.get_ok)
           | Attribute.Float3 values ->
-              let values = Packed.Float3.Private.view values in
-              Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+              let values = Packed.Float3.View.view values in
+              Attribute.Float3 (Packed.Float3.View.of_owned_exn
                 ~x:(interpolate_float ?cancel ~grain vertex_left vertex_right
                       vertex_weight values.x)
                 ~y:(interpolate_float ?cancel ~grain vertex_left vertex_right
@@ -120,7 +120,7 @@ let interpolate_attribute ?cancel ~grain ~point_map ~vertex_left ~vertex_right
                 ~z:(interpolate_float ?cancel ~grain vertex_left vertex_right
                       vertex_weight values.z))
           | Attribute.Float4 values ->
-              let values = Packed.Float4.Private.view values in
+              let values = Packed.Float4.View.view values in
               Attribute.Float4 (Packed.Float4.of_owned
                 ~x:(interpolate_float ?cancel ~grain vertex_left vertex_right
                       vertex_weight values.x)
@@ -192,9 +192,9 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
   let* () = validate_name "corner fillet" corner_group in
   let* () = validate_name "offset edge" offset_group in
   let topology = Geometry.topology geometry in
-  let topology_view = Topology.Private.view topology in
+  let topology_view = Topology.View.view topology in
   let index_value = Topology_index.create ?cancel topology in
-  let index = Topology_index.Private.view index_value in
+  let index = Topology_index.View.view index_value in
   let edge_count = Array.length index.edge_a
   and point_count = topology_view.point_count
   and vertex_count = Array.length topology_view.vertex_points
@@ -215,7 +215,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
          | None -> Error (Printf.sprintf
              "Rdk_mesh.Poly_bevel.poly_bevel: point float scale attribute %S is missing" name)
          | Some attribute ->
-             (match Attribute.Private.storage attribute with
+             (match Attribute.View.storage attribute with
               | Attribute.Float values -> Ok (Some values)
               | _ -> Error (Printf.sprintf
                   "Rdk_mesh.Poly_bevel.poly_bevel: point scale attribute %S must use float storage"
@@ -235,7 +235,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
         if !invalid < 0 then Ok () else Error (Printf.sprintf
           "Rdk_mesh.Poly_bevel.poly_bevel: point scale at point %d must produce a finite non-negative distance"
           !invalid) in
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let requested edge = match edges with
     | None -> true
     | Some group -> Edge_group.mem edge group in
@@ -945,8 +945,8 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
               vertex_points.(vertex) <- point_compact_map.(point)) vertex_points;
             compact_x, compact_y, compact_z, compact_source
           end in
-        let output_positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
-        let output_topology = Topology.Private.create_validated_owned
+        let output_positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
+        let output_topology = Topology.View.create_validated_owned
             ~point_count:!retained_points ~vertex_points ~primitive_offsets
             ~primitive_kinds in
         let rec map_attributes result = function
@@ -970,7 +970,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
               (Group.init ~grain ~owner:Group.Primitive ~name output_primitives
                 (fun primitive -> Bytes.get corner_membership primitive <> '\000')) groups in
         let target_edges = Topology_edge_lookup.create ?cancel
-            (Topology.Private.view output_topology) in
+            (Topology.View.view output_topology) in
         let target_edge_count = Topology_edge_lookup.count target_edges in
         let edge_bits predicate =
           let byte_count = (target_edge_count + 7) / 8 in
@@ -1002,7 +1002,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
               if a = b then false
               else let source_edge = Topology_index.find_edge_index index_value ~a ~b in
                 source_edge >= 0 && Edge_group.mem source_edge source_group) in
-          Edge_group.Private.of_owned_bits ~topology:output_topology
+          Edge_group.View.of_owned_bits ~topology:output_topology
             ~edge_count:target_edge_count ~name:(Edge_group.name source_group) bits)
           source_edge_groups in
         let* edge_groups = match offset_group with
@@ -1023,7 +1023,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
                   done
                 end
               done;
-              merge_edge_group (Edge_group.Private.of_owned_bits
+              merge_edge_group (Edge_group.View.of_owned_bits
                 ~topology:output_topology ~edge_count:target_edge_count ~name bits)
                 edge_groups in
         let* output = Geometry.create ~positions:output_positions

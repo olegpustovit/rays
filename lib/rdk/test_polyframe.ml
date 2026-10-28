@@ -7,16 +7,16 @@ let near ?(epsilon = 1e-9) left right = abs_float (left -. right) <= epsilon
 let float3_attribute ~owner geometry name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -32,20 +32,20 @@ let equal_geometry left right =
   && List.equal equal_edge_group
        (Geometry.edge_groups left) (Geometry.edge_groups right)
 
-let norm (values : Packed.Float3.Private.view) index =
+let norm (values : Packed.Float3.View.view) index =
   sqrt ((values.x.(index) *. values.x.(index))
     +. (values.y.(index) *. values.y.(index))
     +. (values.z.(index) *. values.z.(index)))
 
-let dot (left : Packed.Float3.Private.view)
-    (right : Packed.Float3.Private.view) index =
+let dot (left : Packed.Float3.View.view)
+    (right : Packed.Float3.View.view) index =
   (left.x.(index) *. right.x.(index))
     +. (left.y.(index) *. right.y.(index))
     +. (left.z.(index) *. right.z.(index))
 
-let frame_orientation (normal : Packed.Float3.Private.view)
-    (tangent : Packed.Float3.Private.view)
-    (bitangent : Packed.Float3.Private.view) index =
+let frame_orientation (normal : Packed.Float3.View.view)
+    (tangent : Packed.Float3.View.view)
+    (bitangent : Packed.Float3.View.view) index =
   let cx = (tangent.y.(index) *. bitangent.z.(index))
       -. (tangent.z.(index) *. bitangent.y.(index))
   and cy = (tangent.z.(index) *. bitangent.x.(index))

@@ -33,8 +33,8 @@ let hash_pair a b =
   (value lxor (value lsr 16)) land max_int
 
 let create_from_point_index ?cancel point_index topology =
-  let source = Topology.Private.view topology in
-  let point_view = Point_index.Private.view point_index in
+  let source = Topology.View.view topology in
+  let point_view = Point_index.View.view point_index in
   let point_count = source.point_count
   and vertex_count = Array.length source.vertex_points
   and primitive_count = Bytes.length source.primitive_kinds in
@@ -221,7 +221,7 @@ let non_manifold_edge_count value = value.non_manifold_edge_count
 
 type index = t
 
-module Private = struct
+module View = struct
   type view = {
     primitive_of_vertex : int array;
     next_vertex : int array;

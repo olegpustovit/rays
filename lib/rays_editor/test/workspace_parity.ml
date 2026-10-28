@@ -89,7 +89,7 @@ let compare_float32 runtime id mesh scene =
 let picture ?compare ?texture (output : S.output) =
   let geometry = Result.get_ok (Sop.Payload.geometry output.payload) in
   let mesh = Rdk_rays.Rays_mesh.to_mesh geometry |> Result.map_error Rdk.Error.to_string |> string_ok in
-  let positions = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions geometry) in
+  let positions = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry) in
   let lo = Array.make 3 infinity and hi = Array.make 3 neg_infinity in
   Array.iteri (fun axis values -> Array.iter (fun v -> lo.(axis) <- min lo.(axis) v; hi.(axis) <- max hi.(axis) v) values)
     [|positions.x; positions.y; positions.z|];

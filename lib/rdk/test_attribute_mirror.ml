@@ -1,14 +1,11 @@
+open Rdk_test_support
 open Rdk
 
-let fail message = prerr_endline message; exit 1
-let check condition message = if not condition then fail message
-let get_ok = function Ok value -> value | Error error ->
-  fail (Error.to_string error)
 
 let points xs =
   let count = Array.length xs in
   Geometry.create
-    ~positions:(Packed.Float3.Private.of_owned_exn ~x:(Array.copy xs)
+    ~positions:(Packed.Float3.View.of_owned_exn ~x:(Array.copy xs)
       ~y:(Array.make count 0.) ~z:(Array.make count 0.))
     ~topology:(Topology.empty ~point_count:count) () |> Result.get_ok
 
@@ -23,19 +20,19 @@ let group owner name length members =
 
 let scalar owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Float values -> values | _ -> fail ("wrong scalar " ^ name))
   | None -> fail ("missing scalar " ^ name)
 
 let integer owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Int values -> values | _ -> fail ("wrong integer " ^ name))
   | None -> fail ("missing integer " ^ name)
 
 let text owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Text values -> values | _ -> fail ("wrong text " ^ name))
   | None -> fail ("missing text " ^ name)
 
@@ -78,15 +75,15 @@ let test_explicit_mapping_all_storage () =
         = [|"left_A";"left_B";"right_B";"right_A"|])
     "Attribute Mirror explicit scalar/discrete mapping";
   let uv = Geometry.find_attribute ~owner:Attribute.Point "uv" output
-      |> Option.get |> Attribute.Private.storage |> function
-    | Attribute.Float2 values -> Packed.Float2.Private.view values
+      |> Option.get |> Attribute.View.storage |> function
+    | Attribute.Float2 values -> Packed.Float2.View.view values
     | _ -> assert false in
   check (uv.x = [|-0.2;-0.4;0.4;0.2|]
       && uv.y = [|0.1;0.2;0.2;0.1|])
     "Attribute Mirror UV reflection";
   let rows = Geometry.find_attribute ~owner:Attribute.Point "rows" output
-      |> Option.get |> Attribute.Private.storage |> function
-    | Attribute.Int_array values -> Packed.Int_array.Private.view values
+      |> Option.get |> Attribute.View.storage |> function
+    | Attribute.Int_array values -> Packed.Int_array.View.view values
     | _ -> assert false in
   check (rows.offsets = [|0;1;3;5;6|] && rows.values = [|7;8;9;8;9;7|])
     "Attribute Mirror ragged remap";
@@ -108,10 +105,10 @@ let test_plane_points_and_transforms () =
       |> add ~owner:Attribute.Point ~name:"value"
         (Attribute.Float [|10.;20.;0.;0.|])
       |> add ~owner:Attribute.Point ~name:"N" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|1.;2.;0.;0.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|1.;2.;0.;0.|]
           ~y:[|0.;0.;0.;0.|] ~z:[|0.;0.;0.;0.|]))
       |> add ~owner:Attribute.Point ~name:"rest" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|-2.;-1.;0.;0.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|-2.;-1.;0.;0.|]
           ~y:[|1.;2.;0.;0.|] ~z:[|0.;0.;0.;0.|])) in
   let method_ = Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
     normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = 0.11 } in
@@ -122,18 +119,18 @@ let test_plane_points_and_transforms () =
   let vector = Attribute_mirror.run ~owner:Attribute_mirror.Mirror_point_attributes ~method_
       ~attributes:"N" ~transform:Attribute_mirror.Mirror_vector geometry |> get_ok in
   let normal = Geometry.find_attribute ~owner:Attribute.Point "N" vector
-      |> Option.get |> Attribute.Private.storage |> function
-    | Attribute.Float3 values -> Packed.Float3.Private.view values
+      |> Option.get |> Attribute.View.storage |> function
+    | Attribute.Float3 values -> Packed.Float3.View.view values
     | _ -> assert false in
   check (normal.x = [|1.;2.;-2.;-1.|])
     "Attribute Mirror vector transformation";
   let points_output = Attribute_mirror.run ~owner:Attribute_mirror.Mirror_point_attributes
       ~method_ ~attributes:"P rest" ~transform:Attribute_mirror.Mirror_point geometry
     |> get_ok in
-  let positions = Packed.Float3.Private.view (Geometry.positions points_output)
+  let positions = Packed.Float3.View.view (Geometry.positions points_output)
   and rest = Geometry.find_attribute ~owner:Attribute.Point "rest" points_output
-      |> Option.get |> Attribute.Private.storage |> function
-    | Attribute.Float3 values -> Packed.Float3.Private.view values
+      |> Option.get |> Attribute.View.storage |> function
+    | Attribute.Float3 values -> Packed.Float3.View.view values
     | _ -> assert false in
   check (positions.x = [|-2.;-1.;1.;2.|]
       && rest.x = [|-2.;-1.;1.;2.|])
@@ -144,7 +141,7 @@ let paired_triangles () =
   Rdk_test_support.Tb.add_triangle topology 0 1 2;
   Rdk_test_support.Tb.add_triangle topology 3 4 5;
   let geometry = Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn
+      ~positions:(Packed.Float3.View.of_owned_exn
         ~x:[|-2.;-1.;-1.;1.;1.;2.|]
         ~y:[|0.;-1.;1.;-1.;1.;0.|] ~z:[|0.;0.;0.;0.;0.;0.|])
       ~topology:(Rdk_test_support.Tb.freeze topology) () |> Result.get_ok in
@@ -292,8 +289,8 @@ let test_parallel_scale () =
       ~output_mapping:"pair" geometry |> get_ok) in
   let one = run 1 and four = run 4 in
   let color geometry = Geometry.find_attribute ~owner:Attribute.Point "Cd" geometry
-      |> Option.get |> Attribute.Private.storage |> function
-    | Attribute.Float4 values -> Packed.Float4.Private.view values
+      |> Option.get |> Attribute.View.storage |> function
+    | Attribute.Float4 values -> Packed.Float4.View.view values
     | _ -> assert false in
   check (color one = color four
       && integer Attribute.Point "pair" one = integer Attribute.Point "pair" four)

@@ -46,7 +46,7 @@ let smooth_step (lo_hi : (int * int) array) a =
   Array.mapi (fun i _ -> let lo, hi = lo_hi.(i) in 0.5 *. (a.(lo) +. a.(hi))) a
 
 let line_positions geometry =
-  let view = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions geometry) in
+  let view = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry) in
   view.x, view.y, view.z
 
 let () =
@@ -58,7 +58,7 @@ let () =
       else go (k - 1) (smooth_step lo_hi x, smooth_step lo_hi y, smooth_step lo_hi z) in
     let x, y, z = go passes (x0, y0, z0) in
     Rdk_test_support.geometry_bytes
-      (ok (Rdk.Geometry.with_positions (Rdk.Packed.Float3.Private.of_owned_exn ~x ~y ~z) base)) in
+      (ok (Rdk.Geometry.with_positions (Rdk.Packed.Float3.View.of_owned_exn ~x ~y ~z) base)) in
   List.iter (fun passes ->
     let want = expected passes in
     List.iter (fun reference -> List.iter (fun domains ->

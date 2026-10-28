@@ -152,7 +152,7 @@ let () =
     check(Rdk.Geometry.point_count geometry=Rdk.Geometry.point_count expected)
       "Materialized write lost source instance cardinality";
     let storage name=Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point name geometry|>Option.get
-      |>Rdk.Attribute.Private.storage in
+      |>Rdk.Attribute.View.storage in
     (match storage "copied" with Rdk.Attribute.Float3 data->
       check(data!=Rdk.Geometry.positions geometry) "Computed write borrowed its input storage";
       for i=0 to Rdk.Geometry.point_count geometry-1 do
@@ -160,7 +160,7 @@ let () =
         check(Rdk.Packed.Float3.get data i=(x+.0.5,y+.(-0.),z+.0.)) "Computed write changed numeric values"
       done |_->failwith "Materialized write lost tuple storage");
     (match storage "rows" with Rdk.Attribute.Float_array data->
-      let data=Rdk.Packed.Float_array.Private.view data in
+      let data=Rdk.Packed.Float_array.View.view data in
       check(data.offsets=Array.init 5 Fun.id && data.values=Array.make 4 0.25)
         "Materialized CSR write changed row layout"|_->failwith "Materialized write lost CSR storage");
     List.iter(fun(body,code)->match Sop.Session.cook session ~context(node body) with

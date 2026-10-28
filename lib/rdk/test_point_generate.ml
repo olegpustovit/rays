@@ -1,15 +1,14 @@
+open Rdk_test_support
 open Rays
 open Rdk
 
-let fail message = prerr_endline message; exit 1
-let check condition message = if not condition then fail message
 let get = function Ok value -> value | Error error -> fail (Error.to_string error)
 
 let attribute owner name storage =
   Attribute.create_owned ~owner ~name storage |> Result.get_ok
 
 let source () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|1.;2.;3.;9.|] ~y:[|0.;1.;2.;9.|] ~z:[|0.;0.;0.;9.|] in
   let topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2|] ~primitive_offsets:[|0;3|]
@@ -20,7 +19,7 @@ let source () =
       ~values:[|10;20;21;30;31|] |> Result.get_ok in
   let float_rows = Packed.Float_array.create_owned ~offsets:[|0;2;3;3;5|]
       ~values:[|0.1;0.2;1.1;3.1;3.2|] |> Result.get_ok
-  and direction = Packed.Float3.Private.of_owned_exn
+  and direction = Packed.Float3.View.of_owned_exn
       ~x:[|1.;2.;3.;4.|] ~y:[|5.;6.;7.;8.|] ~z:[|9.;10.;11.;12.|]
   and rgba = Packed.Float4.of_owned ~x:[|0.;1.;2.;3.|]
       ~y:[|4.;5.;6.;7.|] ~z:[|8.;9.;10.;11.|] ~w:[|1.;0.8;0.6;0.4|]
@@ -50,28 +49,28 @@ let source () =
 let int_attr name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values | _ -> fail (name ^ " is not integer"))
   | None -> fail ("missing point attribute " ^ name)
 
 let float_attr name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values | _ -> fail (name ^ " is not float"))
   | None -> fail ("missing point attribute " ^ name)
 
 let text_attr name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Text values -> values | _ -> fail (name ^ " is not text"))
   | None -> fail ("missing point attribute " ^ name)
 
 let geometry_hash geometry =
   let hash = ref 17 in
   let add value = hash := Rays_math.Hash.mix !hash value in
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   Array.iter (fun value -> add (Hashtbl.hash value)) positions.x;
   Array.iter (fun value -> add (Hashtbl.hash value)) positions.y;
   Array.iter (fun value -> add (Hashtbl.hash value)) positions.z;

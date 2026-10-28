@@ -29,7 +29,7 @@ let cook session domains node=match Sop.Session.cook session
   |Ok output->Result.get_ok(Sop.Payload.geometry output.payload)
   |Error d->failwith(Diagnostic.error_to_string d)
 let tag geometry=match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "tag" geometry with
-  |Some attr->(match Rdk.Attribute.Private.storage attr with Text values->values|_->assert false)
+  |Some attr->(match Rdk.Attribute.View.storage attr with Text values->values|_->assert false)
   |None->assert false
 let refused code text=match checker catalog(parse text) with
   |None,ds when List.exists(fun(d:Diagnostic.t)->d.code=code)ds->()

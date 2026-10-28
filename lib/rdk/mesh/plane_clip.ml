@@ -217,7 +217,7 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
     let nx = scaled_nx /. normal_length and ny = scaled_ny /. normal_length
     and nz = scaled_nz /. normal_length in
     let point_count = Geometry.point_count geometry in
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let clip_x, clip_y, clip_z =
       if String.equal clip_attribute "P" then
         positions.x, Some positions.y, Some positions.z
@@ -225,19 +225,19 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
       | None -> raise (Error.Fail (Printf.sprintf
           "Rdk.Plane_clip.clip: point clip attribute %S does not exist" clip_attribute))
       | Some attribute ->
-          match Attribute.Private.storage attribute with
+          match Attribute.View.storage attribute with
           | Attribute.Float values ->
               values, None, None
           | Attribute.Int values ->
               Array.map float_of_int values, None, None
           | Attribute.Float2 values ->
-              let values = Packed.Float2.Private.view values in
+              let values = Packed.Float2.View.view values in
               values.x, Some values.y, None
           | Attribute.Float3 values ->
-              let values = Packed.Float3.Private.view values in
+              let values = Packed.Float3.View.view values in
               values.x, Some values.y, Some values.z
           | Attribute.Float4 values ->
-              let values = Packed.Float4.Private.view values in
+              let values = Packed.Float4.View.view values in
               values.x, Some values.y, Some values.z
           | Attribute.Int_array _ | Attribute.Float_array _ | Attribute.Text _ ->
               raise (Error.Fail (Printf.sprintf
@@ -267,9 +267,9 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
           classified_distance.(point) <- if abs_float value <= snapping_tolerance then 0.
             else value);
     let topology = Geometry.topology geometry in
-    let topology_view = Topology.Private.view topology in
+    let topology_view = Topology.View.view topology in
     let topology_index = Topology_index.create ?cancel topology in
-    let index_view = Topology_index.Private.view topology_index in
+    let index_view = Topology_index.View.view topology_index in
     let primitive_selection = match selection with
       | None -> None
       | Some selection -> Some (Element_selection.promote ?cancel ~grain
@@ -1371,7 +1371,7 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
           corner_cap_side.(corner) <- primitive_side.(primitive)
         done
     done;
-    let output_topology = Topology.Private.create_validated_owned
+    let output_topology = Topology.View.create_validated_owned
         ~point_count:!output_point_count ~vertex_points:output_vertex_points
         ~primitive_offsets:output_offsets ~primitive_kinds:output_kinds in
     let interpolate_float source mapping_a mapping_b mapping_t =
@@ -1417,7 +1417,7 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
                   let input = primitive_source.(index) in
                   if input >= 0 then output.(index) <- source.(input));
             output in
-          let storage = match Attribute.Private.storage attribute with
+          let storage = match Attribute.View.storage attribute with
             | Attribute.Float values -> Attribute.Float (nearest_float values)
             | Attribute.Int values -> Attribute.Int (nearest_int values)
             | Attribute.Int_array values -> Attribute.Int_array
@@ -1426,16 +1426,16 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
                 (Ragged_ops.remap_float ?cancel ~grain primitive_source values)
             | Attribute.Text values -> Attribute.Text (nearest_text values)
             | Attribute.Float2 values ->
-                let values = Packed.Float2.Private.view values in
+                let values = Packed.Float2.View.view values in
                 Attribute.Float2 (Packed.Float2.of_owned
                   ~x:(nearest_float values.x) ~y:(nearest_float values.y) |> get_ok)
             | Attribute.Float3 values ->
-                let values = Packed.Float3.Private.view values in
-                Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+                let values = Packed.Float3.View.view values in
+                Attribute.Float3 (Packed.Float3.View.of_owned_exn
                   ~x:(nearest_float values.x) ~y:(nearest_float values.y)
                   ~z:(nearest_float values.z))
             | Attribute.Float4 values ->
-                let values = Packed.Float4.Private.view values in
+                let values = Packed.Float4.View.view values in
                 Attribute.Float4 (Packed.Float4.of_owned
                   ~x:(nearest_float values.x) ~y:(nearest_float values.y)
                   ~z:(nearest_float values.z) ~w:(nearest_float values.w) |> get_ok) in
@@ -1450,7 +1450,7 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
           let is_normal = String.equal (Attribute.name attribute) "N" in
           let float_plane source = interpolate_float source
               mapping_a mapping_b mapping_t in
-          let storage = match Attribute.Private.storage attribute with
+          let storage = match Attribute.View.storage attribute with
             | Attribute.Float values -> Attribute.Float (float_plane values)
             | Attribute.Int values ->
                 let output = Array.make count 0 in
@@ -1473,11 +1473,11 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
                       if source >= 0 then output.(index) <- values.(source));
                 Attribute.Text output
             | Attribute.Float2 values ->
-                let values = Packed.Float2.Private.view values in
+                let values = Packed.Float2.View.view values in
                 Attribute.Float2 (Packed.Float2.of_owned ~x:(float_plane values.x)
                   ~y:(float_plane values.y) |> get_ok)
             | Attribute.Float3 values ->
-                let values = Packed.Float3.Private.view values in
+                let values = Packed.Float3.View.view values in
                 let x = float_plane values.x and y = float_plane values.y
                 and z = float_plane values.z in
                 if is_normal && count > 0 then Parallel.for_ ~chunk_size:grain
@@ -1494,9 +1494,9 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
                         if length > 1e-20 then begin x.(index) <- x.(index) /. length;
                           y.(index) <- y.(index) /. length; z.(index) <- z.(index) /. length end
                       end);
-                Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+                Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x ~y ~z)
             | Attribute.Float4 values ->
-                let values = Packed.Float4.Private.view values in
+                let values = Packed.Float4.View.view values in
                 Attribute.Float4 (Packed.Float4.of_owned ~x:(float_plane values.x)
                   ~y:(float_plane values.y) ~z:(float_plane values.z)
                   ~w:(float_plane values.w) |> get_ok) in
@@ -1516,21 +1516,21 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
       let source_vertex_normal = match Geometry.find_attribute
           ~owner:Attribute.Vertex "N" geometry with
         | Some attribute ->
-            (match Attribute.Private.storage attribute with
+            (match Attribute.View.storage attribute with
              | Attribute.Float3 _ -> true | _ -> false)
         | None -> false in
       let output_point_normal = match List.find_opt (fun attribute ->
           Attribute.owner attribute = Attribute.Point
           && String.equal (Attribute.name attribute) "N") attributes with
         | Some attribute ->
-            (match Attribute.Private.storage attribute with
+            (match Attribute.View.storage attribute with
              | Attribute.Float3 values -> Some values | _ -> None)
         | None -> None in
       let attributes =
         if source_vertex_normal || not !has_polygon then attributes
         else match output_point_normal with
         | Some point_normals when !has_cap ->
-            let point_normals = Packed.Float3.Private.view point_normals in
+            let point_normals = Packed.Float3.View.view point_normals in
             let vx = Array.make builder.corner_count 0.
             and vy = Array.make builder.corner_count 0.
             and vz = Array.make builder.corner_count 0. in
@@ -1550,7 +1550,7 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
                   end);
             let normal = Attribute.create_key_owned
                 (Attribute.normal ~owner:Attribute.Vertex)
-                (Packed.Float3.Private.of_owned_exn ~x:vx ~y:vy ~z:vz) |> get_ok in
+                (Packed.Float3.View.of_owned_exn ~x:vx ~y:vy ~z:vz) |> get_ok in
             attributes @ [normal]
         | Some _ -> attributes
         | None ->
@@ -1583,7 +1583,7 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
                 end);
           let normal = Attribute.create_key_owned
               (Attribute.normal ~owner:Attribute.Vertex)
-              (Packed.Float3.Private.of_owned_exn ~x:vx ~y:vy ~z:vz) |> get_ok in
+              (Packed.Float3.View.of_owned_exn ~x:vx ~y:vy ~z:vz) |> get_ok in
           attributes @ [normal]
       in
       let remap_group group =
@@ -1615,7 +1615,7 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
                   source >= 0 && Group.mem source group),
               (fun () -> primitive_source) in
         if not (Group.is_ordered group) then target
-        else Group.Private.remap_order ~source:group
+        else Group.View.remap_order ~source:group
             ~source_of_target:(source_of_target ()) target in
       let groups = List.map remap_group (Geometry.groups geometry) in
       let source_edge_groups = Geometry.edge_groups geometry in
@@ -1625,7 +1625,7 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
       let edge_groups = match source_edge_groups, target_index with
         | [], _ -> []
         | source_groups, Some target_index ->
-            let target_view = Topology_index.Private.view target_index in
+            let target_view = Topology_index.View.view target_index in
             let source_edge_of_output_edge edge =
               let a = target_view.edge_a.(edge) and b = target_view.edge_b.(edge) in
               let aa = point_source_a.(a) and ab = point_source_b.(a)
@@ -1650,12 +1650,12 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
               source_groups
         | _ -> assert false in
       Result.bind (Geometry.create
-        ~positions:(Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz)
+        ~positions:(Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz)
         ~topology:output_topology ~attributes ~groups ~edge_groups ()) (fun output ->
           let install_clipped_edges output = match clipped_edge_group, target_index with
             | None, _ -> Ok output
             | Some name, Some target_index ->
-                let target_view = Topology_index.Private.view target_index in
+                let target_view = Topology_index.View.view target_index in
                 let generated = Edge_group.init ~grain ~topology:output_topology
                     ~index:target_index ~name (fun edge ->
                       if edge land 16_383 = 0 then Cancel.check_opt cancel;

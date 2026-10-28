@@ -3,13 +3,13 @@ let error code message = Error (Error.make ~operation ~code message)
 
 let edge_length positions a b =
   Float.hypot
-    (positions.Packed.Float3.Private.x.(a) -. positions.x.(b))
+    (positions.Packed.Float3.View.x.(a) -. positions.x.(b))
     (Float.hypot
        (positions.y.(a) -. positions.y.(b))
        (positions.z.(a) -. positions.z.(b)))
 
 let primitive_min_edge_length positions topology primitive =
-  let first = topology.Topology.Private.primitive_offsets.(primitive)
+  let first = topology.Topology.View.primitive_offsets.(primitive)
   and last = topology.primitive_offsets.(primitive + 1) in
   let minimum = ref infinity in
   for vertex = first to last - 1 do
@@ -20,16 +20,16 @@ let primitive_min_edge_length positions topology primitive =
   !minimum
 
 let primitive_is_triangle topology primitive =
-  Bytes.unsafe_get topology.Topology.Private.primitive_kinds primitive = '\000'
+  Bytes.unsafe_get topology.Topology.View.primitive_kinds primitive = '\000'
   && topology.primitive_offsets.(primitive + 1)
      - topology.primitive_offsets.(primitive) = 3
 
 let link_condition index topology stamps stamp edge a b =
-  let first = index.Topology_index.Private.edge_offsets.(edge) in
+  let first = index.Topology_index.View.edge_offsets.(edge) in
   let v0 = index.edge_vertices.(first) and v1 = index.edge_vertices.(first + 1) in
   let opposite vertex =
     let next = index.next_vertex.(vertex) in
-    topology.Topology.Private.vertex_points.(index.next_vertex.(next)) in
+    topology.Topology.View.vertex_points.(index.next_vertex.(next)) in
   let c = opposite v0 and d = opposite v1 in
   let first_a = index.point_edge_offsets.(a)
   and last_a = index.point_edge_offsets.(a + 1) in
@@ -57,7 +57,7 @@ let same_or_zero first second =
   first = Predicates.Zero || second = Predicates.Zero || first = second
 
 let contraction_preserves_orientation positions topology primitive keep remove =
-  let first = topology.Topology.Private.primitive_offsets.(primitive) in
+  let first = topology.Topology.View.primitive_offsets.(primitive) in
   let original local = topology.vertex_points.(first + local) in
   let contracted local =
     let point = original local in if point = remove then keep else point in
@@ -65,7 +65,7 @@ let contraction_preserves_orientation positions topology primitive keep remove =
   and na = contracted 0 and nb = contracted 1 and nc = contracted 2 in
   if na = nb || nb = nc || nc = na then false
   else
-    let x = positions.Packed.Float3.Private.x and y = positions.y
+    let x = positions.Packed.Float3.View.x and y = positions.y
     and z = positions.z in
     let oxy = Predicates.orient2d_packed ~x ~y oa ob oc
     and nxy = Predicates.orient2d_packed ~x ~y na nb nc
@@ -85,9 +85,9 @@ let safe_independent_edges ?cancel ~grain ?(keep_greatest = false)
     Cancel.check_opt cancel;
     let topology_value = Geometry.topology geometry in
     let index_value = Topology_index.create ?cancel topology_value in
-    let index = Topology_index.Private.view index_value
-    and topology = Topology.Private.view topology_value
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let index = Topology_index.View.view index_value
+    and topology = Topology.View.view topology_value
+    and positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let edge_count = Array.length index.edge_a
     and point_count = Geometry.point_count geometry
     and primitive_count = Geometry.primitive_count geometry in
@@ -154,7 +154,7 @@ let safe_independent_edges ?cancel ~grain ?(keep_greatest = false)
           end
         end
       end) ordered;
-    Ok (Edge_group.Private.of_owned_bits ~topology:topology_value ~edge_count
+    Ok (Edge_group.View.of_owned_bits ~topology:topology_value ~edge_count
       ~name:"__rdk_boolean_safe_tiny_seam" chosen)
   with
   | Cancel.Cancelled -> error "cancelled" "Boolean contraction planning was cancelled"
@@ -166,8 +166,8 @@ let speculative_independent_edges ?cancel ~grain candidates geometry =
     Cancel.check_opt cancel;
     let topology = Geometry.topology geometry in
     let index_value = Topology_index.create ?cancel topology in
-    let index = Topology_index.Private.view index_value
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let index = Topology_index.View.view index_value
+    and positions = Packed.Float3.View.view (Geometry.positions geometry) in
     if Edge_group.topology_data_id candidates <> Topology.data_id topology
         || Edge_group.length candidates <> Array.length index.edge_a then
       invalid_arg "Boolean speculative candidates belong to a different topology";
@@ -205,7 +205,7 @@ let speculative_independent_edges ?cancel ~grain candidates geometry =
           done in
         reserve a; reserve b
       end) ordered;
-    Ok (Edge_group.Private.of_owned_bits ~topology
+    Ok (Edge_group.View.of_owned_bits ~topology
       ~edge_count:(Array.length index.edge_a)
       ~name:"__rdk_boolean_speculative_independent" chosen)
   with
@@ -217,8 +217,8 @@ let surface_seam_edges ?cancel ~grain ancestry seam =
   if grain <= 0 then error "invalid_parameter" "grain must be positive"
   else try
     Cancel.check_opt cancel;
-    let complex = Boolean_extract.Private.complex ancestry in
-    if Boolean_seam.Private.complex seam != complex then
+    let complex = Boolean_extract.View.complex ancestry in
+    if Boolean_seam.View.complex seam != complex then
       invalid_arg "Boolean seam and extraction belong to different exact complexes";
     let geometry = Boolean_extract.geometry ancestry in
     let topology = Geometry.topology geometry in
@@ -227,10 +227,10 @@ let surface_seam_edges ?cancel ~grain ancestry seam =
         ~name:"__rdk_boolean_exact_seam" in
     for complex_edge = 0 to Boolean_complex.edge_count complex - 1 do
       if complex_edge land 4095 = 0 then Cancel.check_opt cancel;
-      if Boolean_seam.Private.is_seam_edge seam complex_edge then begin
-        let a = Boolean_extract.Private.complex_output_point ancestry
+      if Boolean_seam.View.is_seam_edge seam complex_edge then begin
+        let a = Boolean_extract.View.complex_output_point ancestry
             (Boolean_complex.edge_first complex complex_edge)
-        and b = Boolean_extract.Private.complex_output_point ancestry
+        and b = Boolean_extract.View.complex_output_point ancestry
             (Boolean_complex.edge_second complex complex_edge) in
         if a >= 0 && b >= 0 then begin
           let edge = Topology_index.find_edge_index index ~a ~b in
@@ -245,14 +245,14 @@ let surface_seam_edges ?cancel ~grain ancestry seam =
 
 let empty_geometry () =
   match Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn
+      ~positions:(Packed.Float3.View.of_owned_exn
         ~x:[||] ~y:[||] ~z:[||])
       ~topology:(Topology.empty ~point_count:0) () with
   | Ok geometry -> geometry
   | Error message -> invalid_arg message
 
 let opposite_duplicate topology first second =
-  let first_offset = topology.Topology.Private.primitive_offsets.(first)
+  let first_offset = topology.Topology.View.primitive_offsets.(first)
   and second_offset = topology.primitive_offsets.(second) in
   if topology.primitive_offsets.(first + 1) - first_offset <> 3
       || topology.primitive_offsets.(second + 1) - second_offset <> 3 then false
@@ -268,7 +268,7 @@ let opposite_duplicate topology first second =
     || (a = z && b = y && c = x)
 
 let triangle_point_key topology primitive =
-  let first = topology.Topology.Private.primitive_offsets.(primitive) in
+  let first = topology.Topology.View.primitive_offsets.(primitive) in
   let a = topology.vertex_points.(first)
   and b = topology.vertex_points.(first + 1)
   and c = topology.vertex_points.(first + 2) in
@@ -300,7 +300,7 @@ let stable_counting_pass ~key_count keys values scratch counts =
   Array.blit scratch 0 values 0 (Array.length values)
 
 let verify_duplicate_triangles ~allow_opposite_duplicates topology =
-  let primitives = Bytes.length topology.Topology.Private.primitive_kinds in
+  let primitives = Bytes.length topology.Topology.View.primitive_kinds in
   let key_a = Array.make primitives 0 and key_b = Array.make primitives 0
   and key_c = Array.make primitives 0 in
   for primitive = 0 to primitives - 1 do
@@ -339,11 +339,11 @@ let verify_duplicate_triangles ~allow_opposite_duplicates topology =
       first second)
 
 let verify_extracted_contacts ?cancel ~grain positions topology geometry =
-  match Surface_index.Private.create_validated_triangles ?cancel ~grain geometry with
+  match Surface_index.View.create_validated_triangles ?cancel ~grain geometry with
   | Error _ as failure -> failure
   | Ok surface ->
       let first_candidates, second_candidates =
-        Surface_index.Private.overlapping_self_triangle_pairs_disjoint_topology
+        Surface_index.View.overlapping_self_triangle_pairs_disjoint_topology
           ?cancel ~grain ~tolerance:0. surface in
       let candidate_count = Array.length first_candidates in
       let ranges = (candidate_count + grain - 1) / grain in
@@ -358,14 +358,14 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
           if !candidate land 4095 = 0 then Cancel.check_opt cancel;
           let left = first_candidates.(!candidate)
           and right = second_candidates.(!candidate) in
-          let left_a = Surface_index.Private.triangle_point surface left 0
-          and left_b = Surface_index.Private.triangle_point surface left 1
-          and left_c = Surface_index.Private.triangle_point surface left 2
-          and right_a = Surface_index.Private.triangle_point surface right 0
-          and right_b = Surface_index.Private.triangle_point surface right 1
-          and right_c = Surface_index.Private.triangle_point surface right 2 in
-          let count = Predicates.Private.triangle_triangle_features_into
-              ~x:positions.Packed.Float3.Private.x ~y:positions.y ~z:positions.z
+          let left_a = Surface_index.View.triangle_point surface left 0
+          and left_b = Surface_index.View.triangle_point surface left 1
+          and left_c = Surface_index.View.triangle_point surface left 2
+          and right_a = Surface_index.View.triangle_point surface right 0
+          and right_b = Surface_index.View.triangle_point surface right 1
+          and right_c = Surface_index.View.triangle_point surface right 2 in
+          let count = Predicates.View.triangle_triangle_features_into
+              ~x:positions.Packed.Float3.View.x ~y:positions.y ~z:positions.z
               ~left_a ~left_b ~left_c ~right_a ~right_b ~right_c scratch in
           if count = -2 then begin
             failures.(range) <- !candidate;
@@ -374,7 +374,7 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
             failures.(range) <- !candidate;
             Bytes.unsafe_set failure_kinds range '\002'
           end else if count = -1
-              && Predicates.Private.coplanar_triangles_contact_packed
+              && Predicates.View.coplanar_triangles_contact_packed
                    ~x:positions.x ~y:positions.y ~z:positions.z
                    ~left_a ~left_b ~left_c ~right_a ~right_b ~right_c then begin
             failures.(range) <- !candidate;
@@ -392,8 +392,8 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
         let candidate = failures.(!failure_range) in
         let first_triangle = first_candidates.(candidate)
         and second_triangle = second_candidates.(candidate) in
-        let first = Surface_index.Private.triangle_primitive surface first_triangle
-        and second = Surface_index.Private.triangle_primitive surface second_triangle in
+        let first = Surface_index.View.triangle_primitive surface first_triangle
+        and second = Surface_index.View.triangle_primitive surface second_triangle in
         match Bytes.unsafe_get failure_kinds !failure_range with
         | '\001' -> error "rounding_degenerate"
             "rounded Boolean surface contains a degenerate triangle pair"
@@ -446,10 +446,10 @@ let verify_constraint_contacts ?cancel ~grain ~allow_opposite_duplicates
             first second)
 
 let verify_extracted_orientations ?cancel ~grain ancestry geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry)
-  and view = Boolean_extract.Private.ancestry_view ancestry
-  and complex = Boolean_extract.Private.complex ancestry in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry)
+  and view = Boolean_extract.View.ancestry_view ancestry
+  and complex = Boolean_extract.View.complex ancestry in
   let primitives = Geometry.primitive_count geometry in
   if Array.length view.corner_complex_vertices <> primitives * 3
       || Bytes.length view.primitive_sides <> primitives
@@ -457,8 +457,8 @@ let verify_extracted_orientations ?cancel ~grain ancestry geometry =
     error "geometry_mismatch"
       "Boolean extraction corner ancestry has the wrong cardinality"
   else begin
-    let constraints = Boolean_complex.Private.constraints complex in
-    let source = Boolean_constraints.Private.source constraints in
+    let constraints = Boolean_complex.View.constraints complex in
+    let source = Boolean_constraints.View.source constraints in
     let ranges = (primitives + grain - 1) / grain in
     let failures = Array.make ranges (-1) in
     if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
@@ -472,17 +472,17 @@ let verify_extracted_orientations ?cancel ~grain ancestry geometry =
         let a = topology.vertex_points.(offset)
         and b = topology.vertex_points.(offset + 1)
         and c = topology.vertex_points.(offset + 2)
-        and ea = Boolean_complex.Private.vertex complex
+        and ea = Boolean_complex.View.vertex complex
             view.corner_complex_vertices.(offset)
-        and eb = Boolean_complex.Private.vertex complex
+        and eb = Boolean_complex.View.vertex complex
             view.corner_complex_vertices.(offset + 1)
-        and ec = Boolean_complex.Private.vertex complex
+        and ec = Boolean_complex.View.vertex complex
             view.corner_complex_vertices.(offset + 2) in
         let triangle = view.primitive_triangles.(!primitive) in
         let triangle_point =
           if Bytes.unsafe_get view.primitive_sides !primitive = '\000'
-          then Boolean_constraints.Private.left_triangle_point
-          else Boolean_constraints.Private.right_triangle_point in
+          then Boolean_constraints.View.left_triangle_point
+          else Boolean_constraints.View.right_triangle_point in
         let sa = triangle_point constraints triangle 0
         and sb = triangle_point constraints triangle 1
         and sc = triangle_point constraints triangle 2 in
@@ -520,17 +520,17 @@ let verify_extracted_surface ?cancel ~grain ~require_closed
       "fast Boolean verification requires unchanged extraction geometry"
   else try
     Cancel.check_opt cancel;
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry)
+    let positions = Packed.Float3.View.view (Geometry.positions geometry)
     and topology_value = Geometry.topology geometry in
-    let topology = Topology.Private.view topology_value in
-    match Boolean_extract.Private.validate_materialized
+    let topology = Topology.View.view topology_value in
+    match Boolean_extract.View.validate_materialized
         ~x:positions.x ~y:positions.y ~z:positions.z
         ~vertex_points:topology.vertex_points () with
     | Error failure -> error (Error.code failure)
         ("rounded surface verification failed: " ^ Error.to_string failure)
     | Ok () ->
         (match if require_closed
-            then Boolean_extract.Private.validate_closed_topology topology_value
+            then Boolean_extract.View.validate_closed_topology topology_value
             else Ok () with
          | Error _ as failure -> failure
          | Ok () ->
@@ -553,17 +553,17 @@ let verify_surface ?cancel ~grain ~require_closed
   if grain <= 0 then error "invalid_parameter" "grain must be positive"
   else try
     Cancel.check_opt cancel;
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry)
+    let positions = Packed.Float3.View.view (Geometry.positions geometry)
     and topology = Geometry.topology geometry in
-    let view = Topology.Private.view topology in
-    (match Boolean_extract.Private.validate_materialized
+    let view = Topology.View.view topology in
+    (match Boolean_extract.View.validate_materialized
         ~x:positions.x ~y:positions.y ~z:positions.z
         ~vertex_points:view.vertex_points () with
      | Error failure -> error (Error.code failure)
          ("rounded surface verification failed: " ^ Error.to_string failure)
      | Ok () ->
          (match if require_closed
-             then Boolean_extract.Private.validate_closed_topology topology
+             then Boolean_extract.View.validate_closed_topology topology
              else Ok () with
           | Error _ as failure -> failure
           | Ok () ->
@@ -597,8 +597,8 @@ let cleanup_geometry value = value.cleanup_geometry
 let cleanup_primitive_source value primitive = value.cleanup_primitive_sources.(primitive)
 
 let verify_materialized_seam_curves ?cancel ~grain seam =
-  if Boolean_seam.Private.curves_materialized seam then
-    Boolean_seam.Private.verify_curves ?cancel ~grain (Boolean_seam.curves seam)
+  if Boolean_seam.View.curves_materialized seam then
+    Boolean_seam.View.verify_curves ?cancel ~grain (Boolean_seam.curves seam)
   else Ok ()
 
 let fresh_attribute_name geometry base =
@@ -634,7 +634,7 @@ let install_source_ids geometry name =
 let source_ids owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> invalid_arg "Boolean source-ID scratch has the wrong storage")
   | None -> invalid_arg "Boolean source-ID scratch was lost"
@@ -648,12 +648,12 @@ let remove_source_ids name geometry =
 let rounded_triangle_degenerate positions topology primitive =
   if not (primitive_is_triangle topology primitive) then false
   else
-    let first = topology.Topology.Private.primitive_offsets.(primitive) in
+    let first = topology.Topology.View.primitive_offsets.(primitive) in
     let a = topology.vertex_points.(first)
     and b = topology.vertex_points.(first + 1)
     and c = topology.vertex_points.(first + 2) in
     a = b || b = c || c = a
-    || (Predicates.orient2d_packed ~x:positions.Packed.Float3.Private.x
+    || (Predicates.orient2d_packed ~x:positions.Packed.Float3.View.x
           ~y:positions.y a b c = Predicates.Zero
         && Predicates.orient2d_packed ~x:positions.y ~y:positions.z a b c
            = Predicates.Zero
@@ -665,10 +665,10 @@ let rounded_sliver_edges ?cancel ~grain geometry =
   else try
     Cancel.check_opt cancel;
     let topology_value = Geometry.topology geometry in
-    let topology = Topology.Private.view topology_value
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry)
+    let topology = Topology.View.view topology_value
+    and positions = Packed.Float3.View.view (Geometry.positions geometry)
     and index_value = Topology_index.create ?cancel topology_value in
-    let index = Topology_index.Private.view index_value
+    let index = Topology_index.View.view index_value
     and bits = Bytes.make ((Topology_index.edge_count index_value + 7) / 8) '\000'
     and degenerate_count = ref 0 in
     for primitive = 0 to Geometry.primitive_count geometry - 1 do
@@ -683,7 +683,7 @@ let rounded_sliver_edges ?cancel ~grain geometry =
       end
     done;
     Ok (!degenerate_count,
-      Edge_group.Private.of_owned_bits ~topology:topology_value
+      Edge_group.View.of_owned_bits ~topology:topology_value
         ~edge_count:(Topology_index.edge_count index_value)
         ~name:"__rdk_boolean_rounded_sliver" bits)
   with
@@ -709,12 +709,12 @@ let coordinate_ulp value =
       (abs_float (value -. Float.next_after value neg_infinity))
 
 let primitive_ulp_scale positions topology primitive =
-  let first = topology.Topology.Private.primitive_offsets.(primitive)
+  let first = topology.Topology.View.primitive_offsets.(primitive)
   and last = topology.primitive_offsets.(primitive + 1)
   and scale = ref 0. in
   for vertex = first to last - 1 do
     let point = topology.vertex_points.(vertex) in
-    scale := max !scale (coordinate_ulp positions.Packed.Float3.Private.x.(point));
+    scale := max !scale (coordinate_ulp positions.Packed.Float3.View.x.(point));
     scale := max !scale (coordinate_ulp positions.y.(point));
     scale := max !scale (coordinate_ulp positions.z.(point))
   done;
@@ -731,15 +731,15 @@ let rounded_self_contact_edges ?cancel ~grain geometry =
         try
           let contact_count = Boolean_constraints.constraint_count constraints in
           let topology_value = Geometry.topology geometry in
-          let topology = Topology.Private.view topology_value
-          and positions = Packed.Float3.Private.view (Geometry.positions geometry)
+          let topology = Topology.View.view topology_value
+          and positions = Packed.Float3.View.view (Geometry.positions geometry)
           and index_value = Topology_index.create ?cancel topology_value in
-          let index = Topology_index.Private.view index_value
-          and surface = Boolean_constraints.Private.left_surface constraints
+          let index = Topology_index.View.view index_value
+          and surface = Boolean_constraints.View.left_surface constraints
           and bits = Bytes.make ((Topology_index.edge_count index_value + 7) / 8) '\000'
           and repairable = ref 0 in
           let mark triangle =
-            let primitive = Surface_index.Private.triangle_primitive surface triangle in
+            let primitive = Surface_index.View.triangle_primitive surface triangle in
             let minimum = primitive_min_edge_length positions topology primitive
             and ulp = primitive_ulp_scale positions topology primitive in
             if minimum <= 8. *. ulp then begin
@@ -759,7 +759,7 @@ let rounded_self_contact_edges ?cancel ~grain geometry =
             mark (Boolean_constraints.constraint_second_triangle constraints contact)
           done;
           Ok (contact_count, !repairable,
-            Edge_group.Private.of_owned_bits ~topology:topology_value
+            Edge_group.View.of_owned_bits ~topology:topology_value
               ~edge_count:(Topology_index.edge_count index_value)
               ~name:"__rdk_boolean_rounded_self_contact" bits)
         with
@@ -768,7 +768,7 @@ let rounded_self_contact_edges ?cancel ~grain geometry =
         | Invalid_argument message -> error "invalid_output" message
 
 let sorted_triangle_points topology primitive =
-  let first = topology.Topology.Private.primitive_offsets.(primitive) in
+  let first = topology.Topology.View.primitive_offsets.(primitive) in
   let a = topology.vertex_points.(first)
   and b = topology.vertex_points.(first + 1)
   and c = topology.vertex_points.(first + 2) in
@@ -782,8 +782,8 @@ let paired_rounded_slivers ?cancel ~grain geometry =
   if grain <= 0 then error "invalid_parameter" "grain must be positive"
   else try
     Cancel.check_opt cancel;
-    let topology = Topology.Private.view (Geometry.topology geometry)
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let topology = Topology.View.view (Geometry.topology geometry)
+    and positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let degenerate_count = ref 0 in
     for primitive = 0 to Geometry.primitive_count geometry - 1 do
       if rounded_triangle_degenerate positions topology primitive then
@@ -812,7 +812,7 @@ let paired_rounded_slivers ?cancel ~grain geometry =
       done;
       first := !last
     done;
-    Ok (!removed, Group.Private.of_owned_bits ~owner:Group.Primitive
+    Ok (!removed, Group.View.of_owned_bits ~owner:Group.Primitive
       ~name:"__rdk_boolean_paired_rounded_sliver"
       ~length:(Geometry.primitive_count geometry) bits)
   with
@@ -825,10 +825,10 @@ let closed_rounded_slivers ?cancel ~grain geometry =
   else try
     Cancel.check_opt cancel;
     let topology_value = Geometry.topology geometry in
-    let topology = Topology.Private.view topology_value
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry)
+    let topology = Topology.View.view topology_value
+    and positions = Packed.Float3.View.view (Geometry.positions geometry)
     and index_value = Topology_index.create ?cancel topology_value in
-    let index = Topology_index.Private.view index_value
+    let index = Topology_index.View.view index_value
     and primitive_count = Geometry.primitive_count geometry in
     let selected = Bytes.make ((primitive_count + 7) / 8) '\000'
     and selected_count = ref 0 in
@@ -852,7 +852,7 @@ let closed_rounded_slivers ?cancel ~grain geometry =
         valid := false;
       incr edge
     done;
-    let group = Group.Private.of_owned_bits ~owner:Group.Primitive
+    let group = Group.View.of_owned_bits ~owner:Group.Primitive
         ~name:"__rdk_boolean_closed_rounded_sliver"
         ~length:primitive_count selected in
     Ok (!valid, !selected_count, group)
@@ -1022,7 +1022,7 @@ let repair_rounded_slivers ?cancel ~grain ~require_closed
                             | Ok _ ->
                            let topology = Geometry.topology cleanup.cleanup_geometry in
                            let index = Topology_index.create ?cancel topology in
-                           let positions = Packed.Float3.Private.view
+                           let positions = Packed.Float3.View.view
                                (Geometry.positions cleanup.cleanup_geometry) in
                            let ordered = Array.make (Edge_group.cardinality candidates) 0
                            and cursor = ref 0 in
@@ -1051,7 +1051,7 @@ let repair_rounded_slivers ?cancel ~grain ~require_closed
                                let bits = Bytes.make
                                    ((Topology_index.edge_count index + 7) / 8) '\000' in
                                Support.Bits.set bits edge;
-                               let selected = Edge_group.Private.of_owned_bits
+                               let selected = Edge_group.View.of_owned_bits
                                    ~topology ~edge_count:(Topology_index.edge_count index)
                                    ~name:"__rdk_boolean_speculative_rounding_contact"
                                    bits in
@@ -1150,8 +1150,8 @@ let tiny_cleanup_edges ?cancel ~grain ~threshold ancestry seam cleanup =
     error "invalid_parameter" "threshold must be finite and non-negative"
   else try
     Cancel.check_opt cancel;
-    let complex = Boolean_extract.Private.complex ancestry in
-    if Boolean_seam.Private.complex seam != complex then
+    let complex = Boolean_extract.View.complex ancestry in
+    if Boolean_seam.View.complex seam != complex then
       invalid_arg "Boolean seam and extraction belong to different exact complexes";
     let extraction_primitives = Geometry.primitive_count
         (Boolean_extract.geometry ancestry) in
@@ -1159,7 +1159,7 @@ let tiny_cleanup_edges ?cancel ~grain ~threshold ancestry seam cleanup =
     and seam_facets = Bytes.make (Boolean_complex.facet_count complex) '\000' in
     for complex_edge = 0 to Boolean_complex.edge_count complex - 1 do
       if complex_edge land 4095 = 0 then Cancel.check_opt cancel;
-      if Boolean_seam.Private.is_seam_edge seam complex_edge then begin
+      if Boolean_seam.View.is_seam_edge seam complex_edge then begin
         let first, last = Boolean_complex.edge_incident_range complex complex_edge in
         for incident = first to last - 1 do
           Bytes.unsafe_set seam_facets
@@ -1169,8 +1169,8 @@ let tiny_cleanup_edges ?cancel ~grain ~threshold ancestry seam cleanup =
     done;
     let topology = Geometry.topology geometry in
     let index_value = Topology_index.create ?cancel topology in
-    let index = Topology_index.Private.view index_value
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let index = Topology_index.View.view index_value
+    and positions = Packed.Float3.View.view (Geometry.positions geometry) in
     Ok (Edge_group.init ~grain ~topology ~index:index_value
       ~name:"__rdk_boolean_tiny_seam_continuation" (fun edge ->
         if edge land 4095 = 0 then Cancel.check_opt cancel;
@@ -1183,7 +1183,7 @@ let tiny_cleanup_edges ?cancel ~grain ~threshold ancestry seam cleanup =
           let extraction = cleanup.cleanup_primitive_sources.(primitive) in
           if extraction < 0 || extraction >= extraction_primitives then
             invalid_arg "Boolean cleanup primitive ancestry is out of range";
-          let facet = Boolean_extract.Private.primitive_complex_facet
+          let facet = Boolean_extract.View.primitive_complex_facet
               ancestry extraction in
           adjacent := Bytes.unsafe_get seam_facets facet <> '\000';
           incr incident
@@ -1295,9 +1295,9 @@ let split_seam_points ?cancel ~grain cleanup =
     Cancel.check_opt cancel;
     let geometry = cleanup.cleanup_geometry in
     let topology_value = Geometry.topology geometry in
-    let topology = Topology.Private.view topology_value in
+    let topology = Topology.View.view topology_value in
     let index_value = Topology_index.create ?cancel topology_value in
-    let index = Topology_index.Private.view index_value in
+    let index = Topology_index.View.view index_value in
     let primitive_count = Geometry.primitive_count geometry
     and point_count = Geometry.point_count geometry
     and vertex_count = Geometry.vertex_count geometry in
@@ -1400,15 +1400,15 @@ let split_seam_points ?cancel ~grain cleanup =
       if !next <> point_offsets.(point + 1) then
         invalid_arg "Boolean seam point plan did not match its prefix"
     done;
-    let target_topology = Topology.Private.create_validated_owned
+    let target_topology = Topology.View.create_validated_owned
         ~point_count:output_points ~vertex_points
         ~primitive_offsets:(Array.copy topology.primitive_offsets)
         ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
-    let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let select source = Parallel.init_array ~grain output_points (fun output ->
         if output land 4095 = 0 then Cancel.check_opt cancel;
         source.(point_map.(output))) in
-    let positions = Packed.Float3.Private.of_owned_exn
+    let positions = Packed.Float3.View.of_owned_exn
         ~x:(select source_positions.x) ~y:(select source_positions.y)
         ~z:(select source_positions.z) in
     let identity_vertices = Array.init vertex_count Fun.id
@@ -1448,18 +1448,18 @@ let detriangulate ?cancel ~grain ~assume_flat ~mode ancestry cleanup =
     Cancel.check_opt cancel;
     let geometry = cleanup.cleanup_geometry in
     let topology_value = Geometry.topology geometry in
-    let topology = Topology.Private.view topology_value in
+    let topology = Topology.View.view topology_value in
     let index_value = Topology_index.create ?cancel topology_value in
-    let index = Topology_index.Private.view index_value in
+    let index = Topology_index.View.view index_value in
     let primitive_count = Geometry.primitive_count geometry in
     if Array.length cleanup.cleanup_primitive_sources <> primitive_count then
       invalid_arg "Boolean detriangulation primitive ancestry is inconsistent";
     let extraction_primitives = Geometry.primitive_count
         (Boolean_extract.geometry ancestry) in
     let left_count = Geometry.primitive_count
-        (Boolean_extract.Private.left_geometry ancestry)
+        (Boolean_extract.View.left_geometry ancestry)
     and right_count = Geometry.primitive_count
-        (Boolean_extract.Private.right_geometry ancestry) in
+        (Boolean_extract.View.right_geometry ancestry) in
     let left_cut = Bytes.make left_count '\000'
     and right_cut = Bytes.make right_count '\000' in
     for primitive = 0 to extraction_primitives - 1 do
@@ -1479,7 +1479,7 @@ let detriangulate ?cancel ~grain ~assume_flat ~mode ancestry cleanup =
     let unchanged side face = match side with
       | Boolean_complex.Left -> Bytes.unsafe_get left_cut face = '\000'
       | Boolean_complex.Right -> Bytes.unsafe_get right_cut face = '\000' in
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let coplanar edge =
       let first = index.edge_offsets.(edge) in
       let first_vertex = index.edge_vertices.(first)

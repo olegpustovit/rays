@@ -5,16 +5,16 @@ open Rdk_test_support
 let float2_attribute geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Packed.Float2.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let float3_attribute geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
@@ -32,8 +32,8 @@ let equal_group left right =
 
 let equal_geometry left right =
   let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -48,7 +48,7 @@ let equal_geometry left right =
 let check_vertex_normal_winding geometry message =
   let point = positions geometry
   and normal = float3_attribute geometry Attribute.Vertex "N"
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  and topology = Topology.View.view (Geometry.topology geometry) in
   for primitive = 0 to Geometry.primitive_count geometry - 1 do
     let first = topology.primitive_offsets.(primitive)
     and last = topology.primitive_offsets.(primitive + 1) in

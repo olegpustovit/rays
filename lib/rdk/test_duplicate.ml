@@ -1,22 +1,21 @@
+open Rdk_test_support
 open Rays
 open Rdk
 
-let fail message = prerr_endline ("test_duplicate: " ^ message); exit 1
-let check condition message = if not condition then fail message
 let get = function Ok value -> value | Error error -> fail (Error.to_string error)
 let attribute owner name storage =
   Attribute.create_owned ~owner ~name storage |> Result.get_ok
 
 let int_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some value -> (match Attribute.Private.storage value with
+  | Some value -> (match Attribute.View.storage value with
       | Attribute.Int values -> values
       | _ -> fail (name ^ " storage"))
   | None -> fail ("missing " ^ name)
 
 let text_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some value -> (match Attribute.Private.storage value with
+  | Some value -> (match Attribute.View.storage value with
       | Attribute.Text values -> values
       | _ -> fail (name ^ " storage"))
   | None -> fail ("missing " ^ name)
@@ -25,10 +24,10 @@ let group owner name geometry =
   Geometry.find_group ~owner name geometry |> Option.get
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.vertex_points = rt.vertex_points
   && lt.primitive_offsets = rt.primitive_offsets

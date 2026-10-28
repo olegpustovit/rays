@@ -77,7 +77,7 @@ let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
       && Option.is_none face_groups then begin
     Cancel.check_opt cancel;
     let hx = sx *. 0.5 and hy = sy *. 0.5 and hz = sz *. 0.5 in
-    let positions = Packed.Float3.Private.of_owned_exn
+    let positions = Packed.Float3.View.of_owned_exn
         ~x:[|hx;hx;hx;hx; -.hx;-.hx;-.hx;-.hx;
              -.hx;-.hx;hx;hx; -.hx;-.hx;hx;hx;
              -.hx;hx;hx;-.hx; hx;-.hx;-.hx;hx|]
@@ -87,7 +87,7 @@ let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
         ~z:[|-.hz;-.hz;hz;hz; hz;hz;-.hz;-.hz;
              -.hz;hz;hz;-.hz; hz;-.hz;-.hz;hz;
              hz;hz;hz;hz; -.hz;-.hz;-.hz;-.hz|] in
-    let normals = Packed.Float3.Private.of_owned_exn
+    let normals = Packed.Float3.View.of_owned_exn
         ~x:[|1.;1.;1.;1.; -1.;-1.;-1.;-1.;
              0.;0.;0.;0.; 0.;0.;0.;0.; 0.;0.;0.;0.; 0.;0.;0.;0.|]
         ~y:[|0.;0.;0.;0.; 0.;0.;0.;0.;
@@ -99,7 +99,7 @@ let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
       let face = vertex / 6 and local = vertex mod 6 in
       (face * 4) + (match local with
         | 0 | 3 -> 0 | 1 -> 1 | 2 | 4 -> 2 | _ -> 3)) in
-    let topology = Topology.Private.create_validated_owned ~point_count:24
+    let topology = Topology.View.create_validated_owned ~point_count:24
         ~vertex_points ~primitive_offsets:(Array.init 13 (fun index -> index * 3))
         ~primitive_kinds:(Bytes.make 12 '\000') in
     let normal = Attribute.create_key_owned
@@ -376,7 +376,7 @@ let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
         if !invalid_point >= 0 then Error (Printf.sprintf
             "Rdk.Box_generator.box: generated point %d is not finite" !invalid_point)
         else
-          let positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
+          let positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
           let topology, vertex_normals, uv = if not polygon_mode then
               Topology.empty ~point_count, None, None
             else
@@ -438,20 +438,20 @@ let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
                   if primitive land 4095 = 0 then Cancel.check_opt cancel;
                   primitive_offsets.(primitive) <- primitive
                     * (slots / primitive_per_cell));
-              Topology.Private.create_validated_owned ~point_count
+              Topology.View.create_validated_owned ~point_count
                 ~vertex_points ~primitive_offsets ~primitive_kinds,
               vertex_normals, uv in
           let attributes = ref [] in
           (match point_normals with
            | Some (x, y, z) ->
-               let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+               let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
                attributes := (Attribute.create_key_owned
                    (Attribute.normal ~owner:Attribute.Point) values |> Support.get_ok)
                  :: !attributes
            | None -> ());
           (match vertex_normals with
            | Some (x, y, z) ->
-               let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+               let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
                attributes := (Attribute.create_key_owned
                    (Attribute.normal ~owner:Attribute.Vertex) values |> Support.get_ok)
                  :: !attributes

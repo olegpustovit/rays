@@ -24,24 +24,24 @@ type plane =
   | Text_plane of { source : string array; output : string array;
       existing : string array option;
     }
-  | Float2_plane of { source : Rdk_core.Packed.Float2.Private.view;
-      output : Rdk_core.Packed.Float2.Private.view;
-      existing : Rdk_core.Packed.Float2.Private.view option;
+  | Float2_plane of { source : Rdk_core.Packed.Float2.View.view;
+      output : Rdk_core.Packed.Float2.View.view;
+      existing : Rdk_core.Packed.Float2.View.view option;
     }
-  | Float3_plane of { source : Rdk_core.Packed.Float3.Private.view;
-      output : Rdk_core.Packed.Float3.Private.view;
-      existing : Rdk_core.Packed.Float3.Private.view option;
+  | Float3_plane of { source : Rdk_core.Packed.Float3.View.view;
+      output : Rdk_core.Packed.Float3.View.view;
+      existing : Rdk_core.Packed.Float3.View.view option;
     }
-  | Float4_plane of { source : Rdk_core.Packed.Float4.Private.view;
-      output : Rdk_core.Packed.Float4.Private.view;
-      existing : Rdk_core.Packed.Float4.Private.view option;
+  | Float4_plane of { source : Rdk_core.Packed.Float4.View.view;
+      output : Rdk_core.Packed.Float4.View.view;
+      existing : Rdk_core.Packed.Float4.View.view option;
     }
-  | Int_array_plane of { source : Rdk_core.Packed.Int_array.Private.view;
-      existing : Rdk_core.Packed.Int_array.Private.view option;
+  | Int_array_plane of { source : Rdk_core.Packed.Int_array.View.view;
+      existing : Rdk_core.Packed.Int_array.View.view option;
       choices : int array;
     }
-  | Float_array_plane of { source : Rdk_core.Packed.Float_array.Private.view;
-      existing : Rdk_core.Packed.Float_array.Private.view option;
+  | Float_array_plane of { source : Rdk_core.Packed.Float_array.View.view;
+      existing : Rdk_core.Packed.Float_array.View.view option;
       choices : int array;
     }
 type job = {

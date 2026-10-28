@@ -39,16 +39,16 @@ let promote ?cancel ~grain ?(name = "__element_selection") ~destination
     | Group.Primitive, Selected_primitives group ->
         Ok (Group.with_name name group)
     | _ ->
-    let topology = Topology.Private.view topology_value in
+    let topology = Topology.View.view topology_value in
     let needs_point_index = match destination, selection with
       | Group.Point, (Selected_vertices _ | Selected_primitives _)
       | Group.Vertex, Selected_primitives _ -> true
       | (Group.Point | Group.Vertex | Group.Primitive), _ -> false in
     let point_index = if needs_point_index then
-        Some (Point_index.Private.view (Point_index.create ?cancel topology_value))
+        Some (Point_index.View.view (Point_index.create ?cancel topology_value))
       else None in
     let edge_index = match selection with
-      | Selected_edges _ -> Some (Topology_index.Private.view
+      | Selected_edges _ -> Some (Topology_index.View.view
           (Topology_index.create ?cancel topology_value))
       | Selected_points _ | Selected_vertices _ | Selected_primitives _ -> None in
     let point_reverse () = Option.get point_index

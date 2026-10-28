@@ -5,7 +5,7 @@ open Rdk_test_support
 let close left right = abs_float (left -. right) <= 1e-10
 
 let point geometry index =
-  let values = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let values = Packed.Float3.View.view (Geometry.positions geometry) in
   values.x.(index), values.y.(index), values.z.(index)
 
 let check_point geometry index (x, y, z) message =
@@ -17,12 +17,12 @@ let normal owner geometry =
   | None -> fail "missing normal"
   | Some attribute ->
       (match Attribute.get (Attribute.normal ~owner) attribute with
-       | Some value -> Packed.Float3.Private.view value
+       | Some value -> Packed.Float3.View.view value
        | None -> fail "invalid normal storage")
 
 let same_float3 left right =
-  let left = Packed.Float3.Private.view left
-  and right = Packed.Float3.Private.view right in
+  let left = Packed.Float3.View.view left
+  and right = Packed.Float3.View.view right in
   same_float_array left.x right.x && same_float_array left.y right.y
   && same_float_array left.z right.z
 
@@ -101,14 +101,14 @@ let test_composition () =
    | Ok _ -> fail "Transform accepted singular inversion")
 
 let two_triangles () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.|] ~y:[|0.;0.;1.;1.|] ~z:(Array.make 4 0.) in
   let topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2; 0;2;3|] ~primitive_offsets:[|0;3;6|]
       |> Result.get_ok in
-  let point_n = Packed.Float3.Private.of_owned_exn
+  let point_n = Packed.Float3.View.of_owned_exn
       ~x:(Array.make 4 2.) ~y:(Array.make 4 2.) ~z:(Array.make 4 0.) in
-  let vertex_n = Packed.Float3.Private.of_owned_exn
+  let vertex_n = Packed.Float3.View.of_owned_exn
       ~x:(Array.make 6 0.) ~y:(Array.make 6 0.) ~z:(Array.make 6 2.) in
   let point_n = Attribute.create_key_owned (Attribute.normal ~owner:Attribute.Point)
       point_n |> Result.get_ok

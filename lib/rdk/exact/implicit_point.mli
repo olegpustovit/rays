@@ -1,4 +1,4 @@
-(** Private exact homogeneous points used by mesh-arrangement kernels. *)
+(** View exact homogeneous points used by mesh-arrangement kernels. *)
 
 type source
 

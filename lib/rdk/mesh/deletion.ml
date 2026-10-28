@@ -35,12 +35,12 @@ let validate_selection selection geometry =
 
 let corner_deleted owner selection delete_selected topology vertex =
   match owner with
-  | Group.Point -> selected selection delete_selected topology.Topology.Private.vertex_points.(vertex)
+  | Group.Point -> selected selection delete_selected topology.Topology.View.vertex_points.(vertex)
   | Group.Vertex -> selected selection delete_selected vertex
   | Group.Primitive -> false
 
 let primitive_retained_count owner selection delete_selected policy topology primitive =
-  let first = topology.Topology.Private.primitive_offsets.(primitive)
+  let first = topology.Topology.View.primitive_offsets.(primitive)
   and last = topology.primitive_offsets.(primitive + 1) in
   if owner = Group.Primitive then
     if selected selection delete_selected primitive then 0 else last - first
@@ -65,7 +65,7 @@ let primitive_retained_count owner selection delete_selected policy topology pri
 
 let build_plan ?cancel ~selected:delete_selected ~compact_points ~policy
     selection source =
-  let topology = Topology.Private.view (Geometry.topology source) in
+  let topology = Topology.View.view (Geometry.topology source) in
   let owner = Group.owner selection in
   let primitive_count = Bytes.length topology.primitive_kinds in
   let retained_counts = Array.make primitive_count 0
@@ -143,7 +143,7 @@ let build_plan ?cancel ~selected:delete_selected ~compact_points ~policy
     if point < 0 then fail "retained topology references a deleted point";
     vertex_points.(vertex) <- point
   done;
-  let output_topology = Topology.Private.create_validated_owned
+  let output_topology = Topology.View.create_validated_owned
       ~point_count:!retained_points ~vertex_points ~primitive_offsets
       ~primitive_kinds in
   let point_identity = Array.length point_map = source_points in
@@ -183,10 +183,10 @@ let materialize_plan ?cancel ?grain ?(remap_edges = true) plan geometry =
   else begin
     let positions = if plan.point_identity then Geometry.positions geometry
       else begin
-        let source_positions = Packed.Float3.Private.view
+        let source_positions = Packed.Float3.View.view
             (Geometry.positions geometry)
         and grain = Option.value ~default:16_384 grain in
-        Packed.Float3.Private.of_owned_exn
+        Packed.Float3.View.of_owned_exn
           ~x:(Topology_remap.select ?cancel ~grain plan.point_map source_positions.x)
           ~y:(Topology_remap.select ?cancel ~grain plan.point_map source_positions.y)
           ~z:(Topology_remap.select ?cancel ~grain plan.point_map source_positions.z)
@@ -221,7 +221,7 @@ let primitive_partitions ?cancel ?grain ~piece_count ?point_pieces
     ~primitive_pieces geometry =
   if piece_count < 0 then invalid_arg
       "Rdk.Deletion.primitive_partitions: negative piece count";
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let source_points = topology.point_count
   and source_primitives = Bytes.length topology.primitive_kinds in
   if Array.length primitive_pieces <> source_primitives then invalid_arg
@@ -316,7 +316,7 @@ let primitive_partitions ?cancel ?grain ~piece_count ?point_pieces
       if point >= Array.length point_map || point_map.(point) <> source_point then
         fail "piece primitive references a point outside its point partition";
       vertex_points.(output) <- point) vertex_map;
-    let output_topology = Topology.Private.create_validated_owned
+    let output_topology = Topology.View.create_validated_owned
         ~point_count:(Array.length point_map) ~vertex_points ~primitive_offsets
         ~primitive_kinds in
     let point_identity = Array.length point_map = source_points in

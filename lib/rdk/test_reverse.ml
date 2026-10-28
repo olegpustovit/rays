@@ -6,7 +6,7 @@ let attribute owner name storage =
   Attribute.create_owned ~owner ~name storage |> get_string
 
 let topology_points geometry =
-  (Topology.Private.view (Geometry.topology geometry)).vertex_points
+  (Topology.View.view (Geometry.topology geometry)).vertex_points
 
 let int_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with

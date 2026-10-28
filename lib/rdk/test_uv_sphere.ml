@@ -5,16 +5,16 @@ open Rdk_test_support
 let float2_attribute geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Packed.Float2.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let float3_attribute geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
@@ -32,8 +32,8 @@ let equal_group left right =
 
 let equal_geometry left right =
   let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -48,7 +48,7 @@ let equal_geometry left right =
 let check_default_compatibility () =
   let geometry = Uv_sphere.run ~segments:4 ~rings:2 ~radius:2. () |> get_ok in
   let point = positions geometry
-  and topology = Topology.Private.view (Geometry.topology geometry)
+  and topology = Topology.View.view (Geometry.topology geometry)
   and normal = float3_attribute geometry Attribute.Point "N" in
   check (Geometry.point_count geometry = 6
       && Geometry.vertex_count geometry = 24
@@ -94,8 +94,8 @@ let check_connectivity_and_poles () =
   check (Geometry.vertex_count degenerate_quads = 128
       && Geometry.primitive_count degenerate_quads = 32)
     "logical-quad pole cardinality";
-  let shared_topology = Topology.Private.view (Geometry.topology degenerate_quads)
-  and unique_topology = Topology.Private.view (Geometry.topology unique_quads) in
+  let shared_topology = Topology.View.view (Geometry.topology degenerate_quads)
+  and unique_topology = Topology.View.view (Geometry.topology unique_quads) in
   check (Array.sub shared_topology.vertex_points 0 4 = [|0; 0; 2; 1|]
       && Geometry.point_count unique_quads = 40
       && Array.sub unique_topology.vertex_points 0 4 = [|0; 1; 9; 8|])
@@ -120,8 +120,8 @@ let check_connectivity_and_poles () =
         = Topology.Open_polyline)
       "row/column sphere emitted a closed curve"
   done;
-  let regular_topology = Topology.Private.view (Geometry.topology triangles)
-  and alternating_topology = Topology.Private.view (Geometry.topology alternating) in
+  let regular_topology = Topology.View.view (Geometry.topology triangles)
+  and alternating_topology = Topology.View.view (Geometry.topology alternating) in
   check (regular_topology.vertex_points <> alternating_topology.vertex_points)
     "alternating UV Sphere collapsed to regular triangulation"
 
@@ -137,7 +137,7 @@ let check_uv_normals_and_winding () =
   let uv = float2_attribute geometry Attribute.Vertex "uv"
   and normal = float3_attribute geometry Attribute.Vertex "N"
   and point = positions geometry
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  and topology = Topology.View.view (Geometry.topology geometry) in
   let rendered = Rdk_rays.Rays_mesh.to_mesh geometry |> get_ok in
   check (Mesh.index_count rendered = 16 * ((2 * (8 - 2)) + 2) * 3
       && Option.fold ~none:false ~some:(fun a -> Array.length a = Mesh.vertex_count rendered)

@@ -19,7 +19,7 @@ let cook session context node = match Session.cook session ~context node with
   | Error error -> fail (Diagnostic.error_to_string error)
 
 let x geometry =
-  let positions = Rdk.Packed.Float3.Private.view
+  let positions = Rdk.Packed.Float3.View.view
       (Rdk.Geometry.positions geometry) in
   positions.x.(0)
 

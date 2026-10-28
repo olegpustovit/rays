@@ -30,12 +30,12 @@ val build :
 val point_count : t -> int
 val split_point_count : t -> int
 (* Public packed accessors below return defensive copies. Exact predicates
-   must use [Private]; approximate coordinates never decide topology. *)
+   must use [View]; approximate coordinates never decide topology. *)
 val split_source_first : t -> int -> int
 val split_source_second : t -> int -> int
 val split_source_parameter : t -> int -> float
 
-module Private : sig
+module View : sig
   type view = {
     x : float array;
     y : float array;

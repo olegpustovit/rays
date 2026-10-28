@@ -18,7 +18,7 @@ let half_facet_shell value half_facet = value.shells.(half_facet)
 let facet_left_winding value facet = value.left_winding.(facet)
 let facet_right_winding value facet = value.right_winding.(facet)
 
-module Private = struct
+module View = struct
   let complex value = value.complex
 end
 
@@ -39,7 +39,7 @@ let unite parent left right =
 let build ?cancel complex radial =
   try
     Cancel.check_opt cancel;
-    if Boolean_radial.Private.complex radial != complex then
+    if Boolean_radial.View.complex radial != complex then
       invalid_arg "radial order belongs to a different Boolean complex";
     let facets = Boolean_complex.facet_count complex in
     if facets > Sys.max_array_length / 6 then

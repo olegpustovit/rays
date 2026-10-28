@@ -1,12 +1,9 @@
+open Rdk_test_support
 open Rdk
 
-let fail message = prerr_endline message; exit 1
-let check condition message = if not condition then fail message
-let get_ok = function Ok value -> value | Error error ->
-  fail (Error.to_string error)
 
 let positions geometry =
-  Packed.Float3.Private.view (Geometry.positions geometry)
+  Packed.Float3.View.view (Geometry.positions geometry)
 
 let close left right = abs_float (left -. right) <= 1e-12
 let array_close left right =
@@ -21,7 +18,7 @@ let attribute owner name storage geometry =
 
 let points xs =
   let count = Array.length xs in
-  let positions = Packed.Float3.Private.of_owned_exn ~x:(Array.copy xs)
+  let positions = Packed.Float3.View.of_owned_exn ~x:(Array.copy xs)
       ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
   Geometry.create ~positions ~topology:(Topology.empty ~point_count:count) ()
   |> function Ok value -> value | Error message -> fail message
@@ -38,7 +35,7 @@ let primitive_group name count =
 let point_float name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail ("wrong storage for " ^ name))
   | None -> fail ("missing attribute " ^ name)

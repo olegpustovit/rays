@@ -84,7 +84,7 @@ let piece_ranks ?cancel ~selection ~mode ~owner ~name count geometry =
   let source = match Geometry.find_attribute ~owner name geometry with
     | None -> Error (Printf.sprintf "piece attribute %s does not exist" name)
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values -> Ok (`Int values)
          | Attribute.Text values -> Ok (`Text values)
          | Attribute.Float _ | Attribute.Int_array _ | Attribute.Float_array _
@@ -231,7 +231,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(start = 0) ?(step = 1)
                  | Integer ->
                      let values = match existing with
                        | Some attribute ->
-                           (match Attribute.Private.storage attribute with
+                           (match Attribute.View.storage attribute with
                             | Attribute.Int values -> Array.copy values
                             | _ -> assert false)
                        | None -> Array.make count 0 in
@@ -240,7 +240,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?(start = 0) ?(step = 1)
                  | Text { prefix } ->
                      let values = match existing with
                        | Some attribute ->
-                           (match Attribute.Private.storage attribute with
+                           (match Attribute.View.storage attribute with
                             | Attribute.Text values -> Array.copy values
                             | _ -> assert false)
                        | None -> Array.make count "" in

@@ -7,7 +7,7 @@ let raw ?cancel ?(grain = 16_384) ?edges
   if grain <= 0 then invalid_arg "Rdk.Edge_collapse.edge_collapse: grain must be positive";
   let topology_value = Geometry.topology geometry in
   let index_value = Topology_index.create ?cancel topology_value in
-  let index = Topology_index.Private.view index_value in
+  let index = Topology_index.View.view index_value in
   let edge_count = Array.length index.edge_a
   and point_count = Geometry.point_count geometry in
   let selected edge = match edges with
@@ -51,30 +51,30 @@ let raw ?cancel ?(grain = 16_384) ?edges
         let same_connectivity = match connectivity with
           | None -> fun _ _ -> true
           | Some attribute ->
-              (match Attribute.Private.storage attribute with
+              (match Attribute.View.storage attribute with
                | Attribute.Float values -> fun a b -> values.(a) = values.(b)
                | Attribute.Int values -> fun a b -> values.(a) = values.(b)
                | Attribute.Text values -> fun a b -> String.equal values.(a) values.(b)
                | Attribute.Float2 values ->
-                   let values = Packed.Float2.Private.view values in
+                   let values = Packed.Float2.View.view values in
                    fun a b -> values.x.(a) = values.x.(b)
                      && values.y.(a) = values.y.(b)
                | Attribute.Float3 values ->
-                   let values = Packed.Float3.Private.view values in
+                   let values = Packed.Float3.View.view values in
                    fun a b -> values.x.(a) = values.x.(b)
                      && values.y.(a) = values.y.(b)
                      && values.z.(a) = values.z.(b)
                | Attribute.Float4 values ->
-                   let values = Packed.Float4.Private.view values in
+                   let values = Packed.Float4.View.view values in
                    fun a b -> values.x.(a) = values.x.(b)
                      && values.y.(a) = values.y.(b)
                      && values.z.(a) = values.z.(b)
                      && values.w.(a) = values.w.(b)
                | Attribute.Int_array values ->
-                   let values = Packed.Int_array.Private.view values in
+                   let values = Packed.Int_array.View.view values in
                    fun a b -> same_ragged values.offsets values.values ( = ) a b
                | Attribute.Float_array values ->
-                   let values = Packed.Float_array.Private.view values in
+                   let values = Packed.Float_array.View.view values in
                    fun a b -> same_ragged values.offsets values.values ( = ) a b) in
         let parent = Array.init point_count Fun.id
         and rank = Bytes.make point_count '\000' in

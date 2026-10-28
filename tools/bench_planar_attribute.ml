@@ -9,7 +9,7 @@ let flow_ok=function Ok x->x|Error d->fail(Diagnostic.to_string d)
 let names=[|"x";"y";"z";"w"|]
 let storage planes=match Array.length planes with
   |2->Attribute.Float2(Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)|>get_string_ok)
-  |3->Float3(Packed.Float3.Private.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
+  |3->Float3(Packed.Float3.View.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
   |4->Float4(Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1) ~z:planes.(2) ~w:planes.(3)|>get_string_ok)
   |_->assert false
 let install name storage geometry=if name="P" then match storage with
@@ -17,7 +17,7 @@ let install name storage geometry=if name="P" then match storage with
   |_->assert false
   else Geometry.with_attribute(Attribute.create_owned ~owner:Attribute.Point ~name storage|>get_string_ok)geometry|>get_string_ok
 let base ()=
-  let positions=Packed.Float3.Private.of_owned_exn ~x:(Array.init count(fun i->float(i mod 97)*.0.125))
+  let positions=Packed.Float3.View.of_owned_exn ~x:(Array.init count(fun i->float(i mod 97)*.0.125))
     ~y:(Array.make count(-0.)) ~z:(Array.make count 0.) in
   let geometry=Geometry.create ~positions ~topology:(Topology.empty ~point_count:count)()|>get_string_ok in
   let attributes=[Attribute.create_owned ~owner:Detail ~name:"raw"
@@ -87,11 +87,11 @@ let csr_fixture integer=
       error "offset-order" "E_ATTR_COUNT"(write(E.Record["offsets",E.Int_array bad;"values",values]))] in
     if integer then errors else let invalid=Array.copy floats in invalid.(Array.length invalid-1)<-infinity;
       error "csr-nonfinite" "E_NONFINITE"(write(E.Record["offsets",E.Int_array offsets;"values",E.Float_array invalid]))::errors in
-  let verify geometry=let storage=Geometry.find_attribute ~owner:Attribute.Point "csr" geometry|>Option.get|>Attribute.Private.storage in
+  let verify geometry=let storage=Geometry.find_attribute ~owner:Attribute.Point "csr" geometry|>Option.get|>Attribute.View.storage in
     match storage with
-    |Attribute.Int_array array->let view=Packed.Int_array.Private.view array in
+    |Attribute.Int_array array->let view=Packed.Int_array.View.view array in
         check(view.offsets!=offsets && view.values!=ints)"CSR integer writer retained mutable input arrays"
-    |Float_array array->let view=Packed.Float_array.Private.view array in
+    |Float_array array->let view=Packed.Float_array.View.view array in
         check(view.offsets!=offsets && view.values!=floats)"CSR floating writer retained mutable input arrays"
     |_->assert false in
   {key="retained-csr-"^kind;original;run=(fun()->write data);native;errors;new_plane=false;verify}
@@ -99,11 +99,11 @@ let plane_fixture canonical width=
   let original=base() and planes=source_planes width in
   let kind="vec"^string_of_int width and name=if canonical then "P"else "target" in
   let verify geometry=let output=if canonical then Attribute.Float3(Geometry.positions geometry)else
-      Geometry.find_attribute ~owner:Attribute.Point name geometry|>Option.get|>Attribute.Private.storage in
+      Geometry.find_attribute ~owner:Attribute.Point name geometry|>Option.get|>Attribute.View.storage in
     let output=match output with
-      |Attribute.Float2 p->let p=Packed.Float2.Private.view p in[|p.x;p.y|]
-      |Float3 p->let p=Packed.Float3.Private.view p in[|p.x;p.y;p.z|]
-      |Float4 p->let p=Packed.Float4.Private.view p in[|p.x;p.y;p.z;p.w|]
+      |Attribute.Float2 p->let p=Packed.Float2.View.view p in[|p.x;p.y|]
+      |Float3 p->let p=Packed.Float3.View.view p in[|p.x;p.y;p.z|]
+      |Float4 p->let p=Packed.Float4.View.view p in[|p.x;p.y;p.z;p.w|]
       |_->assert false in
     Array.iteri(fun c data->check(data!=planes.(c))"Planar writer retained a mutable source plane")output in
   {key="new-plane-"^kind^(if canonical then "-P"else "-attribute");original;

@@ -12,7 +12,7 @@ let geometry points vertex_points primitive_offsets =
   and z = Array.init count (fun point -> let _, _, z = points.(point) in z) in
   let topology = Topology.polygons_owned ~point_count:count ~vertex_points
       ~primitive_offsets |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let triangles points indices =
@@ -47,8 +47,8 @@ let cube_quads ~origin:(ox, oy, oz) size = geometry
     [|0;4;8;12;16;20;24|]
 
 let signature geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   Array.copy positions.x, Array.copy positions.y, Array.copy positions.z,
   Array.copy topology.vertex_points, Array.copy topology.primitive_offsets,
   Bytes.copy topology.primitive_kinds
@@ -115,7 +115,7 @@ let test_normal_payload_orientation () =
   let sequential_normals = normal_storage output
   and parallel_normals = normal_storage parallel in
   let normal_view = function
-    | Attribute.Float3 values -> Packed.Float3.Private.view values
+    | Attribute.Float3 values -> Packed.Float3.View.view values
     | _ -> fail "Boolean vertex normal payload is not float3" in
   let a = normal_view sequential_normals and b = normal_view parallel_normals in
   if a.x <> b.x || a.y <> b.y || a.z <> b.z then begin
@@ -133,10 +133,10 @@ let test_normal_payload_orientation () =
   end;
   let normals = normal_storage output in
   let normals = match normals with
-    | Attribute.Float3 values -> Packed.Float3.Private.view values
+    | Attribute.Float3 values -> Packed.Float3.View.view values
     | _ -> fail "Boolean vertex normal payload is not float3" in
-  let positions = Packed.Float3.Private.view (Geometry.positions output)
-  and topology = Topology.Private.view (Geometry.topology output) in
+  let positions = Packed.Float3.View.view (Geometry.positions output)
+  and topology = Topology.View.view (Geometry.topology output) in
   for primitive = 0 to Geometry.primitive_count output - 1 do
     let first = topology.primitive_offsets.(primitive)
     and last = topology.primitive_offsets.(primitive + 1) in
@@ -179,7 +179,7 @@ let test_surface_fracture_pieces () =
     | _ -> fail "public Boolean fracture piece plane is not integer-valued" in
   check (Array.fold_left Int.max (-1) values = 1)
     "one surface cutter did not produce exactly two Boolean-cell pieces";
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   for piece = 0 to 1 do
     let edges = Hashtbl.create 32 and primitives = ref 0 in
     for primitive = 0 to Geometry.primitive_count output - 1 do

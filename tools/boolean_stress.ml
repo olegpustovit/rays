@@ -58,12 +58,12 @@ let geometry positions vertex_points primitive_offsets =
       x.(point) <- px; y.(point) <- py; z.(point) <- pz) positions;
   let topology = Topology.polygons_owned ~point_count ~vertex_points
       ~primitive_offsets |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let reverse_winding source =
   let positions = Geometry.positions source
-  and view = Topology.Private.view (Geometry.topology source) in
+  and view = Topology.View.view (Geometry.topology source) in
   let vertices = Array.copy view.vertex_points in
   for primitive = 0 to Array.length view.primitive_offsets - 2 do
     let first = view.primitive_offsets.(primitive)
@@ -207,8 +207,8 @@ let merge geometries =
   and offsets = Array.make (primitive_count + 1) 0 in
   let point_base = ref 0 and vertex_base = ref 0 and primitive_base = ref 0 in
   Array.iter (fun source ->
-      let positions = Packed.Float3.Private.view (Geometry.positions source)
-      and topology = Topology.Private.view (Geometry.topology source) in
+      let positions = Packed.Float3.View.view (Geometry.positions source)
+      and topology = Topology.View.view (Geometry.topology source) in
       Array.blit positions.x 0 x !point_base (Array.length positions.x);
       Array.blit positions.y 0 y !point_base (Array.length positions.y);
       Array.blit positions.z 0 z !point_base (Array.length positions.z);
@@ -225,7 +225,7 @@ let merge geometries =
   offsets.(primitive_count) <- vertex_count;
   let topology = Topology.polygons_owned ~point_count ~vertex_points:vertices
       ~primitive_offsets:offsets |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let recipes level =
@@ -275,8 +275,8 @@ let recipes level =
   |]
 
 let signature geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   { x = Array.copy positions.x; y = Array.copy positions.y; z = Array.copy positions.z;
     vertices = Array.copy topology.vertex_points;
     offsets = Array.copy topology.primitive_offsets;
@@ -288,7 +288,7 @@ let equal_signature a b =
   && Bytes.equal a.kinds b.kinds
 
 let validate_finite name geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   for point = 0 to Array.length positions.x - 1 do
     if not (Float.is_finite positions.x.(point) && Float.is_finite positions.y.(point)
         && Float.is_finite positions.z.(point)) then
@@ -343,8 +343,8 @@ let validate_volume name expected actual =
 let write_obj path geometry =
   let channel = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
-      let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-      and topology = Topology.Private.view (Geometry.topology geometry) in
+      let positions = Packed.Float3.View.view (Geometry.positions geometry)
+      and topology = Topology.View.view (Geometry.topology geometry) in
       for point = 0 to Array.length positions.x - 1 do
         Printf.fprintf channel "v %.17g %.17g %.17g\n" positions.x.(point)
           positions.y.(point) positions.z.(point)

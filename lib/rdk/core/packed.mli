@@ -9,7 +9,7 @@ module Int_array : sig
   val get : t -> int -> int array
   val create_owned : offsets:int array -> values:int array -> (t, string) result
 
-  module Private : sig
+  module View : sig
     type view = { offsets : int array; values : int array }
     val view : t -> view
     val create_validated_owned : offsets:int array -> values:int array -> t
@@ -17,7 +17,7 @@ module Int_array : sig
 end
 (** Immutable CSR integer arrays. [offsets] has [length + 1] entries, begins
     at zero, is monotone, and ends at [value_count]. [get] returns a copy;
-    audited kernels use the borrowed [Private.view]. *)
+    audited kernels use the borrowed [View.view]. *)
 
 module Float_array : sig
   type t
@@ -28,7 +28,7 @@ module Float_array : sig
   val create_owned :
     offsets:int array -> values:float array -> (t, string) result
 
-  module Private : sig
+  module View : sig
     type view = { offsets : int array; values : float array }
     val view : t -> view
     val create_validated_owned : offsets:int array -> values:float array -> t
@@ -44,7 +44,7 @@ module Float2 : sig
   val get : t -> int -> float * float
   val of_owned : x:float array -> y:float array -> (t, string) result
 
-  module Private : sig
+  module View : sig
     type view = { x : float array; y : float array }
     val view : t -> view
   end
@@ -67,7 +67,7 @@ module Float3 : sig
     val freeze : t -> buffer
   end
 
-  module Private : sig
+  module View : sig
     type view = { x : float array; y : float array; z : float array }
     val view : t -> view
     val of_owned_exn : x:float array -> y:float array -> z:float array -> t
@@ -84,7 +84,7 @@ module Float4 : sig
     x:float array -> y:float array -> z:float array -> w:float array ->
     (t, string) result
 
-  module Private : sig
+  module View : sig
     type view = {
       x : float array;
       y : float array;

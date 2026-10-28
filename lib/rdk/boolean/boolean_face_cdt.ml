@@ -8,10 +8,10 @@ type t = {
 
 }
 
-type workspace = Planar_cdt.Private.workspace
+type workspace = Planar_cdt.View.workspace
 
 let create_workspace () =
-  Planar_cdt.Private.create_workspace ~point_capacity:16
+  Planar_cdt.View.create_workspace ~point_capacity:16
     ~triangle_capacity:16 ()
 
 let operation = "boolean_face_cdt"
@@ -25,7 +25,7 @@ let triangle_point value triangle local = match local with
   | 2 -> value.triangle_c.(triangle)
   | _ -> invalid_arg "Boolean face CDT local corner must be 0, 1, or 2"
 
-module Private = struct
+module View = struct
   let point value point = value.points.(point)
   let global_point_token value point = value.global_point_tokens.(point)
   let source_winding value = value.source_winding
@@ -33,12 +33,12 @@ end
 
 let face_triangle_point constraints side triangle local = match side with
   | Boolean_face_arrangement.Left ->
-      Boolean_constraints.Private.left_triangle_point constraints triangle local
+      Boolean_constraints.View.left_triangle_point constraints triangle local
   | Boolean_face_arrangement.Right ->
-      Boolean_constraints.Private.right_triangle_point constraints triangle local
+      Boolean_constraints.View.right_triangle_point constraints triangle local
 
 let face_triangle_implicit constraints side triangle local =
-  Boolean_constraints.Private.source_point constraints
+  Boolean_constraints.View.source_point constraints
     (face_triangle_point constraints side triangle local)
 
 let projection points =
@@ -159,9 +159,9 @@ let global_point_tokens constraints arrangement arrangement_to_point
   for local = 0 to 2 do
     tokens.(local) <- face_triangle_point constraints side triangle local
   done;
-  let source_count = Boolean_constraints.Private.source_point_count constraints in
+  let source_count = Boolean_constraints.View.source_point_count constraints in
   for arrangement_point = 0 to Array.length arrangement_to_point - 1 do
-    let handle = Boolean_face_arrangement.Private.point_handle
+    let handle = Boolean_face_arrangement.View.point_handle
         arrangement arrangement_point in
     if handle >= 0 then begin
       let point = arrangement_to_point.(arrangement_point) in
@@ -188,7 +188,7 @@ let build ?cancel ?workspace
     let arrangement_to_point = Array.make arrangement_count 0
     and actual_point_count = ref 3 in
     for arrangement_point = 0 to arrangement_count - 1 do
-      let point = Boolean_face_arrangement.Private.point arrangement arrangement_point in
+      let point = Boolean_face_arrangement.View.point arrangement arrangement_point in
       let found = ref (-1) and candidate = ref 0 in
       while !found < 0 && !candidate < 3 do
         if Implicit_point.equal points.(!candidate) point then found := !candidate;
@@ -265,7 +265,7 @@ let build ?cancel ?workspace
            | Boolean_face_arrangement.Right -> "right")
           triangle (Array.length points) constraint_count)
     | Ok triangulation ->
-        let view = Planar_cdt.Private.view triangulation in
+        let view = Planar_cdt.View.view triangulation in
         let triangle_count = Array.length view.triangle_points / 3 in
         Ok {
           points;

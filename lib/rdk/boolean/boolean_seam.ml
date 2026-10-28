@@ -32,7 +32,7 @@ let facet_mask complex facet =
   done;
   !mask lor if last - first > 1 then 4 else 0
 
-let native_edge (view : Topology_index.Private.view) primitive first second =
+let native_edge (view : Topology_index.View.view) primitive first second =
   if view.primitive_of_vertex.(first) = primitive
       && view.next_vertex.(first) = second then view.edge_of_vertex.(first)
   else if view.primitive_of_vertex.(second) = primitive
@@ -42,18 +42,18 @@ let native_edge (view : Topology_index.Private.view) primitive first second =
 let source_native_edge constraints index side triangle first second =
   let surface, triangle_point = match side with
     | Boolean_complex.Left ->
-        Boolean_constraints.Private.left_surface constraints,
-        Boolean_constraints.Private.left_triangle_point
+        Boolean_constraints.View.left_surface constraints,
+        Boolean_constraints.View.left_triangle_point
     | Boolean_complex.Right ->
-        Boolean_constraints.Private.right_surface constraints,
-        Boolean_constraints.Private.right_triangle_point in
-  let source = Boolean_constraints.Private.source constraints in
+        Boolean_constraints.View.right_surface constraints,
+        Boolean_constraints.View.right_triangle_point in
+  let source = Boolean_constraints.View.source constraints in
   let first_id = triangle_point constraints triangle 0
   and second_id = triangle_point constraints triangle 1
   and third_id = triangle_point constraints triangle 2 in
   let projection = Implicit_point.source_triangle_projection source
       first_id second_id third_id in
-  let primitive = Surface_index.Private.triangle_primitive surface triangle in
+  let primitive = Surface_index.View.triangle_primitive surface triangle in
   let result = ref (-1) and local = ref 0 in
   while !result < 0 && !local < 3 do
     let next = (!local + 1) mod 3 in
@@ -64,16 +64,16 @@ let source_native_edge constraints index side triangle first second =
         && Implicit_point.source_segment_contains source ~projection
           ~first:source_first ~second:source_second second then
       result := native_edge index primitive
-          (Surface_index.Private.triangle_vertex surface triangle !local)
-          (Surface_index.Private.triangle_vertex surface triangle next);
+          (Surface_index.View.triangle_vertex surface triangle !local)
+          (Surface_index.View.triangle_vertex surface triangle next);
     incr local
   done;
   !result
 
 let is_self_edge complex constraints index side edge =
-  let first_point = Boolean_complex.Private.vertex complex
+  let first_point = Boolean_complex.View.vertex complex
       (Boolean_complex.edge_first complex edge)
-  and second_point = Boolean_complex.Private.vertex complex
+  and second_point = Boolean_complex.View.vertex complex
       (Boolean_complex.edge_second complex edge) in
   let first_incident, last_incident = Boolean_complex.edge_incident_range complex edge in
   let common = ref (-2) and self = ref false in
@@ -111,7 +111,7 @@ let coordinates complex used =
       complex_vertices.(output) <- point
     end
   done;
-  let x, y, z, _, old_to_new = Boolean_extract.Private.coalesce_positions
+  let x, y, z, _, old_to_new = Boolean_extract.View.coalesce_positions
       ~complex_vertices ~x ~y ~z in
   for point = 0 to Array.length map - 1 do
     let output = map.(point) in
@@ -121,7 +121,7 @@ let coordinates complex used =
 
 let geometry ~x ~y ~z topology =
   match Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z) ~topology () with
+      ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z) ~topology () with
   | Ok geometry -> geometry
   | Error message -> invalid_arg message
 
@@ -157,12 +157,12 @@ let verify_curves ?cancel ~grain curves =
           ~hints:[Error.to_string failure]
           "Boolean seam curves could not be indexed for verification")
     | Ok index ->
-        let positions = Linear_piece_index.Private.positions index in
+        let positions = Linear_piece_index.View.positions index in
         let invalid_pair left right =
-          let left_a = Linear_piece_index.Private.point index left 0
-          and left_b = Linear_piece_index.Private.point index left 1
-          and right_a = Linear_piece_index.Private.point index right 0
-          and right_b = Linear_piece_index.Private.point index right 1 in
+          let left_a = Linear_piece_index.View.point index left 0
+          and left_b = Linear_piece_index.View.point index left 1
+          and right_a = Linear_piece_index.View.point index right 0
+          and right_b = Linear_piece_index.View.point index right 1 in
           let shared = left_a = right_a || left_a = right_b
               || left_b = right_a || left_b = right_b in
           match Predicates.segment_segment_packed
@@ -172,14 +172,14 @@ let verify_curves ?cancel ~grain curves =
           | Predicates.Segments_point -> not shared
           | Predicates.Segments_overlap
           | Predicates.Segments_degenerate -> true in
-        (match Linear_piece_index.Private.find_overlapping_self_pair
+        (match Linear_piece_index.View.find_overlapping_self_pair
             ?cancel ~grain ~tolerance:0. index invalid_pair with
          | None -> Ok ()
          | Some (left, right) ->
-             let left_primitive = Linear_piece_index.Private.primitive index left
-             and right_primitive = Linear_piece_index.Private.primitive index right
-             and left_local = Linear_piece_index.Private.local index left
-             and right_local = Linear_piece_index.Private.local index right in
+             let left_primitive = Linear_piece_index.View.primitive index left
+             and right_primitive = Linear_piece_index.View.primitive index right
+             and left_local = Linear_piece_index.View.local index left
+             and right_local = Linear_piece_index.View.local index right in
              Error (Error.make ~operation ~code:"seam_self_intersection"
                ~hints:["reduce the cleanup tolerance or inspect the reported curve segments"]
                (Printf.sprintf
@@ -243,7 +243,7 @@ let materialize_coincident ?cancel complex facet_masks =
       incr output
     end
   done;
-  (match Boolean_extract.Private.validate_materialized ~x ~y ~z
+  (match Boolean_extract.View.validate_materialized ~x ~y ~z
       ~vertex_points:vertices () with
    | Ok () -> () | Error failure -> raise (Error.Rdk failure));
   let topology = Topology.polygons_owned ~point_count:(Array.length x)
@@ -298,7 +298,7 @@ let materialize_curves ?cancel complex edge_kinds =
       end
     end
   done;
-  (match Boolean_extract.Private.validate_positions ~x ~y ~z with
+  (match Boolean_extract.View.validate_positions ~x ~y ~z with
    | Ok () -> () | Error failure -> raise (Error.Rdk failure));
   let vertices = Array.make (!materialized_selected * 2) 0
   and primitive_offsets = Array.make (!materialized_selected + 1) 0
@@ -380,7 +380,7 @@ let materialize_curves ?cancel complex edge_kinds =
   and primitive_kinds = Bytes.sub primitive_kinds 0 !curve_output
   and curve_kinds = Bytes.sub curve_kinds 0 !curve_output
   and curve_edge_offsets = Array.sub curve_edge_offsets 0 (!curve_output + 1) in
-  let topology = Topology.Private.create_validated_owned
+  let topology = Topology.View.create_validated_owned
       ~point_count:(Array.length x) ~vertex_points:vertices
       ~primitive_offsets ~primitive_kinds in
   geometry ~x ~y ~z topology, curve_kinds, curve_edge_offsets, curve_edges,
@@ -400,18 +400,18 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
     let facet_masks =
       if facets < parallel_cutoff then Array.init facets (facet_mask complex)
       else Parallel.init_array ~grain facets (facet_mask complex) in
-    let constraints = Boolean_complex.Private.constraints complex in
+    let constraints = Boolean_complex.View.constraints complex in
     let left_index =
-      if Boolean_constraints.Private.resolve_left_self_intersections constraints then
-        Some (Boolean_constraints.Private.left_geometry constraints
+      if Boolean_constraints.View.resolve_left_self_intersections constraints then
+        Some (Boolean_constraints.View.left_geometry constraints
           |> Geometry.topology |> Topology_index.create ?cancel
-          |> Topology_index.Private.view)
+          |> Topology_index.View.view)
       else None
     and right_index =
-      if Boolean_constraints.Private.resolve_right_self_intersections constraints then
-        Some (Boolean_constraints.Private.right_geometry constraints
+      if Boolean_constraints.View.resolve_right_self_intersections constraints then
+        Some (Boolean_constraints.View.right_geometry constraints
           |> Geometry.topology |> Topology_index.create ?cancel
-          |> Topology_index.Private.view)
+          |> Topology_index.View.view)
       else None in
     let edge_count = Boolean_complex.edge_count complex in
     let edge_kinds = Bytes.make edge_count '\255' in
@@ -477,7 +477,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
   | Error.Rdk failure -> Error failure
   | Invalid_argument message -> error "invalid_output" message
 
-module Private = struct
+module View = struct
   let complex value = value.complex
   let curves_materialized value = value.curves_materialized
   let is_seam_edge value edge =

@@ -1,8 +1,8 @@
 
 type t = {
   geometry : Geometry.t;
-  positions : Packed.Float3.Private.view;
-  topology : Topology.Private.view;
+  positions : Packed.Float3.View.view;
+  topology : Topology.View.view;
   primitives : int array;
   vertex_a : int array;
   vertex_b : int array;
@@ -116,8 +116,8 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   if grain <= 0 then invalid_arg "Surface_index: grain must be positive";
   if validated_triangles && (Option.is_some selection || Option.is_some vertices) then invalid_arg "Surface_index: validated triangle construction cannot select elements";
   Cancel.check_opt cancel;
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   let primitive_count = Bytes.length topology.primitive_kinds in
   (match vertices with
    | Some group when Group.owner group <> Group.Vertex ->
@@ -138,7 +138,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   let selected_primitives = match vertices with
     | None -> selected_primitives
     | Some vertices ->
-        let vertex_bits = Group.Private.bits_view vertices in
+        let vertex_bits = Group.View.bits_view vertices in
         let candidate_count = Array.length selected_primitives
         and chunk = max 1 grain in
         let range_count = Support.ceiling_div candidate_count chunk in
@@ -252,7 +252,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   let triangles, primitives, vertex_a, vertex_b, vertex_c = match vertices with
     | None -> triangles, primitives, vertex_a, vertex_b, vertex_c
     | Some selected_vertices ->
-        let selected_vertex_bits = Group.Private.bits_view selected_vertices in
+        let selected_vertex_bits = Group.View.bits_view selected_vertices in
         let range_count = Support.ceiling_div triangles grain in
         let keep = Bytes.make triangles '\000'
         and range_counts = Array.make range_count 0 in
@@ -368,101 +368,51 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
     | None, Some message -> triangle_failure := Some message
     | None, None | Some _, _ -> ()) triangle_errors;
   Option.iter fail !triangle_failure;
-  let subtree_nodes = Array.make (triangles + 1) 0 in
-  for count = 1 to triangles do
-    subtree_nodes.(count) <- if count <= leaf_size then 1
-      else
-        let left_count = count / 2 in
-        1 + subtree_nodes.(left_count) + subtree_nodes.(count - left_count)
-  done;
-  let capacity = subtree_nodes.(triangles) in
-  let min_x = Array.make capacity 0. and min_y = Array.make capacity 0.
-  and min_z = Array.make capacity 0. and max_x = Array.make capacity 0.
-  and max_y = Array.make capacity 0. and max_z = Array.make capacity 0.
-  and min_d = Array.init diagonal_count (fun _ -> Array.make capacity 0.)
-  and max_d = Array.init diagonal_count (fun _ -> Array.make capacity 0.)
-  and left = Array.make capacity (-1) and right = Array.make capacity (-1)
-  and first = Array.make capacity 0 and count = Array.make capacity 0
-  and common_a = Array.make capacity (-1)
-  and common_b = Array.make capacity (-1)
-  and common_c = Array.make capacity (-1)
-  and order = Array.init triangles Fun.id in
-  let build_parallel_cutoff = max 4_096 grain in
-  let rec build node range_first range_last =
-    Cancel.check_opt cancel;
-    min_x.(node) <- Float.infinity;
-    min_y.(node) <- Float.infinity;
-    min_z.(node) <- Float.infinity;
-    max_x.(node) <- Float.neg_infinity;
-    max_y.(node) <- Float.neg_infinity;
-    max_z.(node) <- Float.neg_infinity;
-    for axis = 0 to diagonal_count - 1 do
-      min_d.(axis).(node) <- Float.infinity;
-      max_d.(axis).(node) <- Float.neg_infinity
-    done;
-    let first_triangle = order.(range_first) in
-    let common0 = ref topology.vertex_points.(vertex_a.(first_triangle))
-    and common1 = ref topology.vertex_points.(vertex_b.(first_triangle))
-    and common2 = ref topology.vertex_points.(vertex_c.(first_triangle)) in
-    for at = range_first to range_last do
-      let triangle = order.(at) in
-      let a = topology.vertex_points.(vertex_a.(triangle))
-      and b = topology.vertex_points.(vertex_b.(triangle))
-      and c = topology.vertex_points.(vertex_c.(triangle)) in
-      let retain point = point < 0 || point = a || point = b || point = c in
-      if not (retain !common0) then common0 := -1;
-      if not (retain !common1) then common1 := -1;
-      if not (retain !common2) then common2 := -1;
-      if triangle_min_x.(triangle) < min_x.(node) then
-        min_x.(node) <- triangle_min_x.(triangle);
-      if triangle_min_y.(triangle) < min_y.(node) then
-        min_y.(node) <- triangle_min_y.(triangle);
-      if triangle_min_z.(triangle) < min_z.(node) then
-        min_z.(node) <- triangle_min_z.(triangle);
-      if triangle_max_x.(triangle) > max_x.(node) then
-        max_x.(node) <- triangle_max_x.(triangle);
-      if triangle_max_y.(triangle) > max_y.(node) then
-        max_y.(node) <- triangle_max_y.(triangle);
-      if triangle_max_z.(triangle) > max_z.(node) then
-        max_z.(node) <- triangle_max_z.(triangle);
+  let common_a = ref [||] and common_b = ref [||] and common_c = ref [||]
+  and min_d = ref [||] and max_d = ref [||] in
+  let extend capacity =
+    common_a := Array.make capacity (-1); common_b := Array.make capacity (-1);
+    common_c := Array.make capacity (-1);
+    min_d := Array.init diagonal_count (fun _ -> Array.make capacity 0.);
+    max_d := Array.init diagonal_count (fun _ -> Array.make capacity 0.);
+    let common_a = !common_a and common_b = !common_b and common_c = !common_c
+    and min_d = !min_d and max_d = !max_d in
+    fun node order range_first range_last ->
       for axis = 0 to diagonal_count - 1 do
-        if triangle_min_d.(axis).(triangle) < min_d.(axis).(node) then
-          min_d.(axis).(node) <- triangle_min_d.(axis).(triangle);
-        if triangle_max_d.(axis).(triangle) > max_d.(axis).(node) then
-          max_d.(axis).(node) <- triangle_max_d.(axis).(triangle)
-      done
-    done;
-    common_a.(node) <- !common0;
-    common_b.(node) <- !common1;
-    common_c.(node) <- !common2;
-    let range_count = range_last - range_first + 1 in
-    if range_count <= leaf_size then begin
-      first.(node) <- range_first;
-      count.(node) <- range_count
-    end else begin
-      let ex = max_x.(node) -. min_x.(node)
-      and ey = max_y.(node) -. min_y.(node)
-      and ez = max_z.(node) -. min_z.(node) in
-      let axis = if ex >= ey && ex >= ez then 0 else if ey >= ez then 1 else 2 in
-      let middle = range_first + (range_count / 2) in
-      Support.select
-        (if axis = 0 then centroid_x else if axis = 1 then centroid_y else centroid_z)
-        order range_first range_last middle;
-      let left_count = middle - range_first in
-      let left_node = node + 1
-      and right_node = node + 1 + subtree_nodes.(left_count) in
-      left.(node) <- left_node;
-      right.(node) <- right_node;
-      if range_count / 2 >= build_parallel_cutoff then
-        ignore (Parallel.both
-          (fun () -> build left_node range_first (middle - 1))
-          (fun () -> build right_node middle range_last))
-      else begin
-        build left_node range_first (middle - 1);
-        build right_node middle range_last
-      end
-    end in
-  if triangles > 0 then build 0 0 (triangles - 1);
+        min_d.(axis).(node) <- Float.infinity;
+        max_d.(axis).(node) <- Float.neg_infinity
+      done;
+      let first_triangle = order.(range_first) in
+      let common0 = ref topology.vertex_points.(vertex_a.(first_triangle))
+      and common1 = ref topology.vertex_points.(vertex_b.(first_triangle))
+      and common2 = ref topology.vertex_points.(vertex_c.(first_triangle)) in
+      for at = range_first to range_last do
+        let triangle = order.(at) in
+        let a = topology.vertex_points.(vertex_a.(triangle))
+        and b = topology.vertex_points.(vertex_b.(triangle))
+        and c = topology.vertex_points.(vertex_c.(triangle)) in
+        let retain point = point < 0 || point = a || point = b || point = c in
+        if not (retain !common0) then common0 := -1;
+        if not (retain !common1) then common1 := -1;
+        if not (retain !common2) then common2 := -1;
+        for axis = 0 to diagonal_count - 1 do
+          if triangle_min_d.(axis).(triangle) < min_d.(axis).(node) then
+            min_d.(axis).(node) <- triangle_min_d.(axis).(triangle);
+          if triangle_max_d.(axis).(triangle) > max_d.(axis).(node) then
+            max_d.(axis).(node) <- triangle_max_d.(axis).(triangle)
+        done
+      done;
+      common_a.(node) <- !common0; common_b.(node) <- !common1;
+      common_c.(node) <- !common2 in
+  let { Bounds3_index.order; min_x; min_y; min_z; max_x; max_y; max_z;
+        left; right; first; count } =
+    Bounds3_index.create ?cancel ~grain:(max 4_096 grain) ~extend
+      ~centroid_x ~centroid_y ~centroid_z
+      ~item_min_x:triangle_min_x ~item_min_y:triangle_min_y ~item_min_z:triangle_min_z
+      ~item_max_x:triangle_max_x ~item_max_y:triangle_max_y ~item_max_z:triangle_max_z () in
+  let capacity = Array.length left
+  and common_a = !common_a and common_b = !common_b and common_c = !common_c
+  and min_d = !min_d and max_d = !max_d in
   { geometry; positions; topology; primitives; vertex_a; vertex_b; vertex_c; order;
     triangle_min_x; triangle_min_y; triangle_min_z;
     triangle_max_x; triangle_max_y; triangle_max_z;
@@ -563,13 +513,13 @@ let exact_plane_overlap left_surface left_triangle right_surface right_triangle 
 
 let triangle_has_point surface triangle point =
   if point < 0 then false else
-  let points = surface.topology.Topology.Private.vertex_points in
+  let points = surface.topology.Topology.View.vertex_points in
   point = points.(surface.vertex_a.(triangle))
   || point = points.(surface.vertex_b.(triangle))
   || point = points.(surface.vertex_c.(triangle))
 
 let triangles_share_point left_surface left_triangle right_surface right_triangle =
-  let points = left_surface.topology.Topology.Private.vertex_points in
+  let points = left_surface.topology.Topology.View.vertex_points in
   triangle_has_point right_surface right_triangle
     points.(left_surface.vertex_a.(left_triangle))
   || triangle_has_point right_surface right_triangle
@@ -588,8 +538,8 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
   if left_count = 0 || Array.length right_surface.primitives = 0 then [||], [||]
   else begin
     let shared_topology =
-      left_surface.topology.Topology.Private.vertex_points
-      == right_surface.topology.Topology.Private.vertex_points in
+      left_surface.topology.Topology.View.vertex_points
+      == right_surface.topology.Topology.View.vertex_points in
     (* One-pass collection owns a builder per stable range. A lower bound keeps
        empty/disjoint workloads O(F / 128) in builder metadata even when the
        caller requests grain one; output order remains triangle-major and is
@@ -770,7 +720,7 @@ let overlapping_self_triangle_pairs_disjoint_topology ?cancel ~grain ~tolerance
           (Char.chr (Char.code (Bytes.unsafe_get bits slot) lor mask))
       end
     done;
-    let group = Group.Private.of_owned_bits ~owner:Group.Primitive
+    let group = Group.View.of_owned_bits ~owner:Group.Primitive
         ~name:"__rdk_surface_disjoint_partition" ~length:primitive_count bits in
     Error.get (create_with ?cancel ~grain ~primitives:group indexed.geometry) in
   let rec gather indexed =
@@ -839,7 +789,7 @@ let[@inline] aabb_distance_squared value node qx qy qz =
   (dx *. dx) +. (dy *. dy) +. (dz *. dz)
 
 let[@inline] closest_triangle_into value triangle qx qy qz scratch =
-  let a = value.topology.Topology.Private.vertex_points.(value.vertex_a.(triangle))
+  let a = value.topology.Topology.View.vertex_points.(value.vertex_a.(triangle))
   and b = value.topology.vertex_points.(value.vertex_b.(triangle))
   and c = value.topology.vertex_points.(value.vertex_c.(triangle)) in
   let ax = value.positions.x.(a) and ay = value.positions.y.(a)
@@ -970,7 +920,7 @@ let closest_many_into ?cancel ?selection ?position_indices ~grain value ~queries
      || Array.length barycentric_c < query_count
      || Array.length distances_squared < query_count then
     invalid_arg "Surface_index: output arrays are too short";
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = (query_count + grain - 1) / grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1029,7 +979,7 @@ let closest_distances_many_into ?cancel ?selection ~grain value
    | None | Some _ -> ());
   if Array.length distances_squared < query_count then
     invalid_arg "Surface_index: output array is too short";
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = (query_count + grain - 1) / grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1090,7 +1040,7 @@ let[@inline] ray_aabb_intersects value node ox oy oz dx dy dz minimum maximum
 
 let[@inline] ray_triangle_into value triangle ox oy oz dx dy dz minimum maximum
     tolerance scratch =
-  let a = value.topology.Topology.Private.vertex_points.(value.vertex_a.(triangle))
+  let a = value.topology.Topology.View.vertex_points.(value.vertex_a.(triangle))
   and b = value.topology.vertex_points.(value.vertex_b.(triangle))
   and c = value.topology.vertex_points.(value.vertex_c.(triangle)) in
   let ax = value.positions.x.(a) and ay = value.positions.y.(a)
@@ -1199,7 +1149,7 @@ let ray_query_once value ox oy oz dx dy dz minimum maximum tolerance surface_hit
 
 type ray_directions =
   | Constant_direction of { x : float; y : float; z : float }
-  | Per_query_directions of Packed.Float3.Private.view
+  | Per_query_directions of Packed.Float3.View.view
 
 type sample_combine =
   | Sample_average
@@ -1338,7 +1288,7 @@ let combine_samples combine integer_results float_results first samples order
   end
 
 let geometric_normal_into value triangle output =
-  let a = value.topology.Topology.Private.vertex_points.(value.vertex_a.(triangle))
+  let a = value.topology.Topology.View.vertex_points.(value.vertex_a.(triangle))
   and b = value.topology.vertex_points.(value.vertex_b.(triangle))
   and c = value.topology.vertex_points.(value.vertex_c.(triangle)) in
   let ax = value.positions.x.(a) and ay = value.positions.y.(a)
@@ -1412,7 +1362,7 @@ let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
           invalid_arg "Surface_index: sampled ray normal arrays are too short";
         true
     | _ -> invalid_arg "Surface_index: sampled ray normal arrays must be supplied together" in
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1522,7 +1472,7 @@ let raycast_average_drivers_into ?cancel ?selection ~grain value ~queries
       || Array.length vertex_numbers < offsets.(query_count)
       || Array.length vertex_weights < offsets.(query_count) then
     invalid_arg "Surface_index: average ray driver arrays are inconsistent";
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1596,7 +1546,7 @@ let raycast_many_into ?cancel ?selection ~grain value ~queries ~directions
       || Array.length barycentric_c < query_count
       || Array.length distances < query_count then
     invalid_arg "Surface_index: ray output arrays are too short";
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1675,7 +1625,7 @@ let raycast_many_into ?cancel ?selection ~grain value ~queries ~directions
 
 let raycast value ~origin ~direction =
   try
-    let queries = Packed.Float3.Private.of_owned_exn ~x:[|origin.Rays_math.Vec3.x|]
+    let queries = Packed.Float3.View.of_owned_exn ~x:[|origin.Rays_math.Vec3.x|]
         ~y:[|origin.y|] ~z:[|origin.z|]
     in
     let primitive = [|-1|] and triangle = [|-1|]
@@ -1693,10 +1643,10 @@ let raycast value ~origin ~direction =
   with Invalid_argument message -> Error (Error.make ~operation:"surface_index"
       ~code:"invalid_ray" message)
 
-module Private = struct
+module View = struct
   type nonrec ray_directions = ray_directions =
     | Constant_direction of { x : float; y : float; z : float }
-    | Per_query_directions of Packed.Float3.Private.view
+    | Per_query_directions of Packed.Float3.View.view
   type nonrec sample_combine = sample_combine =
     | Sample_average
     | Sample_median

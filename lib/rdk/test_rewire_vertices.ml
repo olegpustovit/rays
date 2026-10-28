@@ -23,7 +23,7 @@ let source ?(free_point = false) () =
         let a, b = Topology_index.edge_points hard_index edge in
         a = 0 && b = 1) in
   let geometry = Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn
+      ~positions:(Packed.Float3.View.of_owned_exn
         ~x:(Array.init point_count float_of_int)
         ~y:(Array.make point_count 0.) ~z:(Array.make point_count 0.))
       ~topology ~edge_groups:[hard] () |> Result.get_ok in
@@ -44,23 +44,23 @@ let source ?(free_point = false) () =
          ~values:(Array.init point_count (fun point -> 100 + point))
          |> Result.get_ok))
   |> add ~owner:Attribute.Point ~name:"N"
-       (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+       (Attribute.Float3 (Packed.Float3.View.of_owned_exn
          ~x:(Array.make point_count 0.) ~y:(Array.make point_count 1.)
          ~z:(Array.make point_count 0.)))
   |> add ~owner:Attribute.Vertex ~name:"N"
-       (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+       (Attribute.Float3 (Packed.Float3.View.of_owned_exn
          ~x:(Array.make 9 0.) ~y:(Array.make 9 1.) ~z:(Array.make 9 0.)))
   |> Geometry.with_group (group Group.Point "marked" point_count
        (if free_point then [0;7] else [0]))
        |> Result.get_ok
 
 let vertex_points geometry =
-  (Topology.Private.view (Geometry.topology geometry)).vertex_points
+  (Topology.View.view (Geometry.topology geometry)).vertex_points
 
 let int_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing attribute " ^ name)
@@ -73,7 +73,7 @@ let scale_source count =
       ~primitive_offsets:(Array.init (primitive_count + 1) (fun primitive ->
         primitive * 3)) |> Result.get_ok in
   Geometry.create
-    ~positions:(Packed.Float3.Private.of_owned_exn
+    ~positions:(Packed.Float3.View.of_owned_exn
       ~x:(Array.init count float_of_int) ~y:(Array.make count 0.)
       ~z:(Array.make count 0.)) ~topology () |> Result.get_ok
   |> add ~owner:Attribute.Point ~name:"target"

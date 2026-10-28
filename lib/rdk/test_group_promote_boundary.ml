@@ -42,13 +42,13 @@ let edge_group name geometry = match Geometry.find_edge_group name geometry with
 let int_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail ("non-integer attribute " ^ name))
   | None -> fail ("missing attribute " ^ name)
 
 let same_group left right =
-  Bytes.equal (Group.Private.bits_view left) (Group.Private.bits_view right)
+  Bytes.equal (Group.View.bits_view left) (Group.View.bits_view right)
 
 let same_edge_group left right =
   Edge_group.length left = Edge_group.length right

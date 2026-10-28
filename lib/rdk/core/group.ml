@@ -240,7 +240,7 @@ module Builder = struct
       bits = value.bits; order = None; data_id = Data_id.fresh () }
 end
 
-module Private = struct
+module View = struct
   let bits_view value = value.bits
 
   let with_owner owner value =
@@ -249,12 +249,12 @@ module Private = struct
   let of_owned_bits ~owner ~name ~length bits =
     require_name name;
     if length < 0 || Bytes.length bits <> byte_count length then
-      invalid_arg "Group.Private.of_owned_bits: invalid packed length";
+      invalid_arg "Group.View.of_owned_bits: invalid packed length";
     if length land 7 <> 0 && Bytes.length bits > 0 then begin
       let valid_mask = (1 lsl (length land 7)) - 1 in
       let last = Bytes.length bits - 1 in
       if Char.code (Bytes.get bits last) land lnot valid_mask <> 0 then
-        invalid_arg "Group.Private.of_owned_bits: set padding bits"
+        invalid_arg "Group.View.of_owned_bits: set padding bits"
     end;
     { owner; name; length; bits; order = None; data_id = Data_id.fresh () }
 
@@ -263,15 +263,15 @@ module Private = struct
   let with_owned_order order value =
     let count = Array.length order in
     if count <> cardinality value then
-      invalid_arg "Group.Private.with_owned_order: order does not match membership";
+      invalid_arg "Group.View.with_owned_order: order does not match membership";
     let seen = Bytes.make (byte_count value.length) '\000' in
     Array.iter (fun element ->
       if element < 0 || element >= value.length || not (mem element value) then
-        invalid_arg "Group.Private.with_owned_order: invalid element";
+        invalid_arg "Group.View.with_owned_order: invalid element";
       let byte = element lsr 3 and mask = 1 lsl (element land 7) in
       let current = Char.code (Bytes.unsafe_get seen byte) in
       if current land mask <> 0 then
-        invalid_arg "Group.Private.with_owned_order: duplicate element";
+        invalid_arg "Group.View.with_owned_order: duplicate element";
       Bytes.unsafe_set seen byte (Char.chr (current lor mask))) order;
     { value with order = Some order; data_id = Data_id.fresh () }
 
@@ -280,16 +280,16 @@ module Private = struct
     | None -> target
     | Some source_order ->
         if source.owner <> target.owner then
-          invalid_arg "Group.Private.remap_order: owners do not match";
+          invalid_arg "Group.View.remap_order: owners do not match";
         if Array.length source_of_target <> target.length then
-          invalid_arg "Group.Private.remap_order: mapping length does not match target";
+          invalid_arg "Group.View.remap_order: mapping length does not match target";
         let rank = Array.make source.length (-1) in
         Array.iteri (fun index element -> rank.(element) <- index) source_order;
         let counts = Array.make (Array.length source_order) 0 in
         for target_element = 0 to target.length - 1 do
           let source_element = source_of_target.(target_element) in
           if source_element < -1 || source_element >= source.length then
-            invalid_arg "Group.Private.remap_order: source index out of bounds";
+            invalid_arg "Group.View.remap_order: source index out of bounds";
           if mem target_element target && source_element >= 0 then begin
             let source_rank = rank.(source_element) in
             if source_rank >= 0 then counts.(source_rank) <- counts.(source_rank) + 1

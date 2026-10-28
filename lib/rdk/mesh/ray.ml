@@ -63,30 +63,30 @@ let direction_planes ?cancel ~grain source = function
         fail "invalid_direction" "ray direction vector must be finite";
       if value.x = 0. && value.y = 0. && value.z = 0. then
         fail "invalid_direction" "ray direction vector must be non-zero";
-      Surface_index.Private.Constant_direction {
+      Surface_index.View.Constant_direction {
         x = value.x; y = value.y; z = value.z }
   | Ray_attribute name ->
       if String.trim name = "" then
         fail "invalid_direction" "ray direction attribute name must not be empty";
       let values = match Deform.point_vector_attribute "Rdk.Ray.ray" name source with
         | Ok values -> values | Error message -> fail "invalid_direction" message in
-      let packed = Packed.Float3.Private.of_shared_exn
+      let packed = Packed.Float3.View.of_shared_exn
           ~x:values.x ~y:values.y ~z:values.z in
-      Surface_index.Private.Per_query_directions
-        (Packed.Float3.Private.view packed)
+      Surface_index.View.Per_query_directions
+        (Packed.Float3.View.view packed)
   | Ray_normal ->
       let values = match Deform.resolve_directions ?cancel ~grain source with
         | Ok values -> values | Error message -> fail "invalid_direction" message in
-      let packed = Packed.Float3.Private.of_shared_exn
+      let packed = Packed.Float3.View.of_shared_exn
           ~x:values.x ~y:values.y ~z:values.z in
-      Surface_index.Private.Per_query_directions
-        (Packed.Float3.Private.view packed)
+      Surface_index.View.Per_query_directions
+        (Packed.Float3.View.view packed)
 
 let existing_point_float name count geometry default =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | None -> Array.make count default
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> Array.copy values
        | _ -> fail "invalid_output" (Printf.sprintf
            "point output attribute %S must have float storage" name))
@@ -95,7 +95,7 @@ let existing_point_int name count geometry default =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | None -> Array.make count default
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> Array.copy values
        | _ -> fail "invalid_output" (Printf.sprintf
            "point output attribute %S must have integer storage" name))
@@ -104,23 +104,48 @@ let existing_point_float3 name count geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | None -> Array.make count 0., Array.make count 0., Array.make count 0.
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float3 values ->
-           let values = Packed.Float3.Private.view values in
+           let values = Packed.Float3.View.view values in
            Array.copy values.x, Array.copy values.y, Array.copy values.z
        | _ -> fail "invalid_output" (Printf.sprintf
            "point output attribute %S must have float3 storage" name))
 
-let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
-    ?(method_ = Ray_project) ?(direction = Ray_normal)
-    ?(direction_mode = Ray_forward) ?(surface_hit = Ray_first_surface)
-    ?(samples = 1) ?(jitter_scale = 1.) ?(seed = 0)
-    ?(combine = Ray_average)
-    ?(min_distance = 0.) ?max_distance ?(tolerance = 0.) ?(scale = 1.)
-    ?(lift = 0.) ?distance_attribute ?primitive_attribute
-    ?source_vertex_numbers_attribute ?source_vertex_weights_attribute
-    ?hit_group ?normal_attribute ?point_pattern ?vertex_pattern
-    ?primitive_pattern ?detail_pattern ?(match_groups = false)
+type params = {
+  grain : int;
+  selection : Deform.selection option;
+  collision_primitives : Group.t option;
+  method_ : method_;
+  direction : direction;
+  direction_mode : direction_mode;
+  surface_hit : surface_hit;
+  samples : int;
+  jitter_scale : float;
+  seed : int;
+  combine : combine;
+  min_distance : float;
+  max_distance : float option;
+  tolerance : float;
+  scale : float;
+  lift : float;
+  distance_attribute : string option;
+  primitive_attribute : string option;
+  source_vertex_numbers_attribute : string option;
+  source_vertex_weights_attribute : string option;
+  hit_group : string option;
+  normal_attribute : string option;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+  match_groups : bool;
+}
+let run ?cancel { grain; selection; collision_primitives; method_; direction;
+    direction_mode; surface_hit; samples; jitter_scale; seed; combine;
+    min_distance; max_distance; tolerance; scale; lift; distance_attribute;
+    primitive_attribute; source_vertex_numbers_attribute;
+    source_vertex_weights_attribute; hit_group; normal_attribute; point_pattern;
+    vertex_pattern; primitive_pattern; detail_pattern; match_groups }
     ~source ~collision () =
   try
     if grain <= 0 then fail "invalid_parameter" "grain must be positive";
@@ -196,7 +221,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
      | Ray_minimum_distance ->
          let maximum_squared = if maximum = Float.infinity then Float.infinity
            else maximum *. maximum in
-         Surface_index.Private.closest_many_into ?cancel ?selection ~grain surface
+         Surface_index.View.closest_many_into ?cancel ?selection ~grain surface
            ~queries:(Geometry.positions source) ~max_distance_squared:maximum_squared
            ~primitives ~triangles ~barycentric_a ~barycentric_b ~barycentric_c
            ~distances_squared:distances;
@@ -206,30 +231,30 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
      | Ray_project ->
          let directions = Option.get directions in
          if samples = 1 then
-           Surface_index.Private.raycast_many_into ?cancel ?selection ~grain surface
+           Surface_index.View.raycast_many_into ?cancel ?selection ~grain surface
              ~queries:(Geometry.positions source) ~directions
              ~min_distance ~max_distance:maximum ~tolerance ~direction_mode
              ~surface_hit ~primitives ~triangles ~barycentric_a ~barycentric_b
              ~barycentric_c ~distances
          else
            let combine = match combine with
-             | Ray_average -> Surface_index.Private.Sample_average
-             | Ray_median -> Surface_index.Private.Sample_median
-             | Ray_shortest -> Surface_index.Private.Sample_shortest
-             | Ray_longest -> Surface_index.Private.Sample_longest in
+             | Ray_average -> Surface_index.View.Sample_average
+             | Ray_median -> Surface_index.View.Sample_median
+             | Ray_shortest -> Surface_index.View.Sample_shortest
+             | Ray_longest -> Surface_index.View.Sample_longest in
            let normal_x, normal_y, normal_z = match normal_planes with
              | None -> None, None, None
              | Some (x, y, z) -> Some x, Some y, Some z in
-           Surface_index.Private.raycast_samples_into ?cancel ?selection ~grain
+           Surface_index.View.raycast_samples_into ?cancel ?selection ~grain
              surface ~queries:(Geometry.positions source) ~directions
              ~min_distance ~max_distance:maximum ~tolerance ~direction_mode
              ~surface_hit ~samples ~jitter_scale ~seed ~combine ~primitives
              ~triangles ~barycentric_a ~barycentric_b ~barycentric_c ~distances
              ~direction_signs ~hit_counts ~normal_x ~normal_y ~normal_z);
-    let source_positions = Packed.Float3.Private.view (Geometry.positions source)
-    and collision_positions = Packed.Float3.Private.view
+    let source_positions = Packed.Float3.View.view (Geometry.positions source)
+    and collision_positions = Packed.Float3.View.view
         (Geometry.positions collision)
-    and collision_topology = Topology.Private.view (Geometry.topology collision) in
+    and collision_topology = Topology.View.view (Geometry.topology collision) in
     let px = Array.copy source_positions.x and py = Array.copy source_positions.y
     and pz = Array.copy source_positions.z in
     let range_count = if point_count = 0 then 0 else
@@ -243,9 +268,9 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
         if point land 4095 = 0 then Cancel.check_opt cancel;
         let triangle = triangles.(point) in
         if triangle >= 0 then begin
-          let va = Surface_index.Private.triangle_vertex surface triangle 0
-          and vb = Surface_index.Private.triangle_vertex surface triangle 1
-          and vc = Surface_index.Private.triangle_vertex surface triangle 2 in
+          let va = Surface_index.View.triangle_vertex surface triangle 0
+          and vb = Surface_index.View.triangle_vertex surface triangle 1
+          and vc = Surface_index.View.triangle_vertex surface triangle 2 in
           let a = collision_topology.vertex_points.(va)
           and b = collision_topology.vertex_points.(vb)
           and c = collision_topology.vertex_points.(vc) in
@@ -279,8 +304,8 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
                 /. coordinate_scale)))
             else begin
               let vx, vy, vz = match Option.get directions with
-                | Surface_index.Private.Constant_direction { x; y; z } -> x, y, z
-                | Surface_index.Private.Per_query_directions values ->
+                | Surface_index.View.Constant_direction { x; y; z } -> x, y, z
+                | Surface_index.View.Per_query_directions values ->
                     values.x.(point), values.y.(point), values.z.(point) in
               let direction_scale = Float.max (abs_float vx)
                   (Float.max (abs_float vy) (abs_float vz)) in
@@ -353,7 +378,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
      | Some point -> fail "non_finite_output" (Printf.sprintf
          "ray transform produced a non-finite position at point %d" point)
      | None -> ());
-    let positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
+    let positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
     let needs_interpolation = point_pattern <> None || vertex_pattern <> None
         || primitive_pattern <> None || detail_pattern <> None || match_groups in
     let keep_drivers = source_vertex_numbers_attribute <> None in
@@ -403,7 +428,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
     (match normal_attribute, normal_planes with
      | Some name, Some (x, y, z) ->
          let attribute = Attribute.create_owned ~name ~owner:Attribute.Point
-           (Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z))
+           (Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x ~y ~z))
            |> get_string in
          attributes := attribute :: !attributes;
          if not (imported_point_attribute name) then
@@ -425,7 +450,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
       let value_count = offsets.(point_count) in
       let numbers = Array.make value_count 0 and weights = Array.make value_count 0. in
       if average_drivers then
-        Surface_index.Private.raycast_average_drivers_into ?cancel ?selection
+        Surface_index.View.raycast_average_drivers_into ?cancel ?selection
           ~grain surface ~queries:(Geometry.positions source)
           ~directions:(Option.get directions) ~min_distance ~max_distance:maximum
           ~tolerance ~surface_hit ~samples ~jitter_scale ~seed ~direction_signs
@@ -435,20 +460,20 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
         let triangle = triangles.(point) in
         if triangle >= 0 then begin
           let output = offsets.(point) in
-          numbers.(output) <- Surface_index.Private.triangle_vertex surface triangle 0;
-          numbers.(output + 1) <- Surface_index.Private.triangle_vertex surface triangle 1;
-          numbers.(output + 2) <- Surface_index.Private.triangle_vertex surface triangle 2;
+          numbers.(output) <- Surface_index.View.triangle_vertex surface triangle 0;
+          numbers.(output + 1) <- Surface_index.View.triangle_vertex surface triangle 1;
+          numbers.(output + 2) <- Surface_index.View.triangle_vertex surface triangle 2;
           weights.(output) <- barycentric_a.(point);
           weights.(output + 1) <- barycentric_b.(point);
           weights.(output + 2) <- barycentric_c.(point)
         end);
       let numbers_attribute = Attribute.create_owned ~name:numbers_name
           ~owner:Attribute.Point (Attribute.Int_array
-            (Packed.Int_array.Private.create_validated_owned
+            (Packed.Int_array.View.create_validated_owned
               ~offsets ~values:numbers)) |> get_string
       and weights_attribute = Attribute.create_owned ~name:weights_name
           ~owner:Attribute.Point (Attribute.Float_array
-            (Packed.Float_array.Private.create_validated_owned
+            (Packed.Float_array.View.create_validated_owned
               ~offsets:(Array.copy offsets) ~values:weights)) |> get_string in
       attributes := numbers_attribute :: weights_attribute :: !attributes;
       if keep_drivers then protected_attributes := numbers_attribute
@@ -467,7 +492,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
         |> Geometry.without_attribute ~owner:Attribute.Point "N"
         |> Geometry.without_attribute ~owner:Attribute.Vertex "N"
       else source in
-    let target = Geometry.Private.with_merged_attributes_and_groups_owned
+    let target = Geometry.View.with_merged_attributes_and_groups_owned
         ~positions ~attributes:(Array.of_list (List.rev !attributes)) ~groups target
         |> get_string in
     let output = if not needs_interpolation then target else begin

@@ -25,8 +25,8 @@ let remap_edge_groups_from_index ?cancel ~grain ~source_index ~target_topology
   | [] -> []
   | groups ->
       let target_index = Topology_index.create ?cancel target_topology in
-      let source = Topology_index.Private.view source_index
-      and target = Topology_index.Private.view target_index in
+      let source = Topology_index.View.view source_index
+      and target = Topology_index.View.view target_index in
       List.map (fun group ->
         Edge_group.init ~grain ~topology:target_topology ~index:target_index
           ~name:(Edge_group.name group) (fun edge ->
@@ -50,8 +50,8 @@ let remap_healed_edge_groups ?cancel ~grain ~source_index ~target_topology
   | [] -> []
   | groups ->
       let target_index = Topology_index.create ?cancel target_topology in
-      let source = Topology_index.Private.view source_index
-      and target = Topology_index.Private.view target_index in
+      let source = Topology_index.View.view source_index
+      and target = Topology_index.View.view target_index in
       List.map (fun group ->
         Edge_group.init ~grain ~topology:target_topology ~index:target_index
           ~name:(Edge_group.name group) (fun edge ->
@@ -83,10 +83,10 @@ let[@inline always] max_abs9 ax ay az bx by bz cx cy cz =
 
 let[@inline always] inline_corner ~tolerance positions topology previous next
     vertex =
-  let previous_point = topology.Topology.Private.vertex_points.(previous)
+  let previous_point = topology.Topology.View.vertex_points.(previous)
   and point = topology.vertex_points.(vertex)
   and next_point = topology.vertex_points.(next) in
-  let ax = positions.Packed.Float3.Private.x.(previous_point)
+  let ax = positions.Packed.Float3.View.x.(previous_point)
   and ay = positions.y.(previous_point)
   and az = positions.z.(previous_point)
   and bx = positions.x.(point)
@@ -131,8 +131,8 @@ let remove_inline_points ?cancel ?(grain = 16_384) ?primitives ~distance geometr
   else begin
     Cancel.check_opt cancel;
     let source_topology = Geometry.topology geometry in
-    let topology = Topology.Private.view source_topology
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let topology = Topology.View.view source_topology
+    and positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let primitive_count = Array.length topology.primitive_offsets - 1
     and vertex_count = Array.length topology.vertex_points in
     let selection_error = match primitives with
@@ -271,12 +271,12 @@ let remove_inline_points ?cancel ?(grain = 16_384) ?primitives ~distance geometr
           if vertex land 4095 = 0 then Cancel.check_opt cancel;
           vertex_points.(vertex) <- old_to_new.
             (topology.vertex_points.(vertex_map.(vertex))));
-        let target_topology = Topology.Private.create_validated_owned
+        let target_topology = Topology.View.create_validated_owned
             ~point_count:!output_points ~vertex_points ~primitive_offsets
             ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
         let point_identity = !output_points = source_points in
         let positions = if point_identity then Geometry.positions geometry
-          else Packed.Float3.Private.of_owned_exn
+          else Packed.Float3.View.of_owned_exn
             ~x:(Topology_remap.select_float ?cancel ~grain point_map positions.x)
             ~y:(Topology_remap.select_float ?cancel ~grain point_map positions.y)
             ~z:(Topology_remap.select_float ?cancel ~grain point_map positions.z) in
@@ -311,9 +311,9 @@ let remove_inline_points ?cancel ?(grain = 16_384) ?primitives ~distance geometr
 let unique_points_all ?cancel ?(grain = 16_384) geometry =
   if grain <= 0 then invalid_arg "Rdk_mesh.Facet.facet: grain must be positive";
   let source_topology = Geometry.topology geometry in
-  let topology = Topology.Private.view source_topology in
+  let topology = Topology.View.view source_topology in
   let index = Topology_index.create ?cancel source_topology in
-  let incidence = Topology_index.Private.view index in
+  let incidence = Topology_index.View.view index in
   let source_points = topology.point_count
   and source_vertices = Array.length topology.vertex_points in
   let shared = ref false in
@@ -347,13 +347,13 @@ let unique_points_all ?cancel ?(grain = 16_384) geometry =
         then begin point_map.(!output) <- point; incr output end
       done;
       let vertex_points = Array.init source_vertices Fun.id in
-      let target_topology = Topology.Private.create_validated_owned
+      let target_topology = Topology.View.create_validated_owned
           ~point_count:output_points ~vertex_points
           ~primitive_offsets:(Array.copy topology.primitive_offsets)
           ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
-      let source_positions = Packed.Float3.Private.view
+      let source_positions = Packed.Float3.View.view
           (Geometry.positions geometry) in
-      let positions = Packed.Float3.Private.of_owned_exn
+      let positions = Packed.Float3.View.of_owned_exn
           ~x:(Topology_remap.select_float ?cancel ~grain point_map source_positions.x)
           ~y:(Topology_remap.select_float ?cancel ~grain point_map source_positions.y)
           ~z:(Topology_remap.select_float ?cancel ~grain point_map source_positions.z) in
@@ -376,7 +376,7 @@ let unique_points_all ?cancel ?(grain = 16_384) geometry =
 let unique_points_selected ?cancel ?(grain = 16_384) primitives geometry =
   if grain <= 0 then invalid_arg "Rdk_mesh.Facet.facet: grain must be positive";
   let source_topology = Geometry.topology geometry in
-  let topology = Topology.Private.view source_topology in
+  let topology = Topology.View.view source_topology in
   let primitive_count = Topology.primitive_count source_topology in
   if Group.owner primitives <> Group.Primitive then
     Error "Facet selection must own primitives"
@@ -471,13 +471,13 @@ let unique_points_selected ?cancel ?(grain = 16_384) primitives geometry =
                 vertex_points.(vertex) <- old_to_retained.
                     (topology.vertex_points.(vertex))
               done);
-          let target_topology = Topology.Private.create_validated_owned
+          let target_topology = Topology.View.create_validated_owned
               ~point_count:output_points ~vertex_points
               ~primitive_offsets:(Array.copy topology.primitive_offsets)
               ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
-          let source_positions = Packed.Float3.Private.view
+          let source_positions = Packed.Float3.View.view
               (Geometry.positions geometry) in
-          let positions = Packed.Float3.Private.of_owned_exn
+          let positions = Packed.Float3.View.of_owned_exn
               ~x:(Topology_remap.select_float ?cancel ~grain point_map source_positions.x)
               ~y:(Topology_remap.select_float ?cancel ~grain point_map source_positions.y)
               ~z:(Topology_remap.select_float ?cancel ~grain point_map source_positions.z) in
@@ -506,9 +506,9 @@ let unique_points ?cancel ?grain ?primitives geometry = match primitives with
 let orient_polygons ?cancel ?(grain = 16_384) ?primitives geometry =
   if grain <= 0 then invalid_arg "Rdk_mesh.Facet.facet: grain must be positive";
   let source_topology = Geometry.topology geometry in
-  let topology = Topology.Private.view source_topology in
+  let topology = Topology.View.view source_topology in
   let index = Topology_index.create ?cancel source_topology in
-  let view = Topology_index.Private.view index in
+  let view = Topology_index.View.view index in
   let primitive_count = Array.length topology.primitive_offsets - 1 in
   let selection_error = match primitives with
     | Some group when Group.owner group <> Group.Primitive ->
@@ -619,7 +619,7 @@ let orient_polygons ?cancel ?(grain = 16_384) ?primitives geometry =
             vertex_points.(vertex) <- topology.vertex_points.(vertex);
             vertex_map.(vertex) <- vertex
           done);
-      let target_topology = Topology.Private.create_validated_owned
+      let target_topology = Topology.View.create_validated_owned
           ~point_count:topology.point_count ~vertex_points
           ~primitive_offsets:(Array.copy topology.primitive_offsets)
           ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
@@ -655,8 +655,8 @@ let orient_polygons ?cancel ?(grain = 16_384) ?primitives geometry =
 let split_points_on_edge_ends ?cancel ~grain ?primitives ~index ~split_ends
     geometry =
   let source_topology = Geometry.topology geometry in
-  let topology = Topology.Private.view source_topology
-  and view = Topology_index.Private.view index in
+  let topology = Topology.View.view source_topology
+  and view = Topology_index.View.view index in
   let vertex_count = Array.length topology.vertex_points
   and edge_count = Array.length view.edge_a in
   let selected primitive = match primitives with
@@ -781,13 +781,13 @@ let split_points_on_edge_ends ?cancel ~grain ?primitives ~index ~split_ends
         ~finish:(vertex_count - 1) (fun vertex ->
       if vertex land 4095 = 0 then Cancel.check_opt cancel;
       vertex_points.(vertex) <- root_output.(root vertex));
-    let target_topology = Topology.Private.create_validated_owned
+    let target_topology = Topology.View.create_validated_owned
         ~point_count:output_points ~vertex_points
         ~primitive_offsets:(Array.copy topology.primitive_offsets)
         ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
-    let source_positions = Packed.Float3.Private.view
+    let source_positions = Packed.Float3.View.view
         (Geometry.positions geometry) in
-    let positions = Packed.Float3.Private.of_owned_exn
+    let positions = Packed.Float3.View.of_owned_exn
         ~x:(Topology_remap.select_float ?cancel ~grain point_map source_positions.x)
         ~y:(Topology_remap.select_float ?cancel ~grain point_map source_positions.y)
         ~z:(Topology_remap.select_float ?cancel ~grain point_map source_positions.z) in
@@ -811,7 +811,7 @@ let cusp_polygons ?cancel ?(grain = 16_384) ?primitives ~angle geometry =
     Error "Facet cusp angle must be finite and within [0, pi]"
   else
     let source_topology = Geometry.topology geometry in
-    let topology = Topology.Private.view source_topology in
+    let topology = Topology.View.view source_topology in
     let primitive_count = Array.length topology.primitive_offsets - 1 in
     let selection_error = match primitives with
       | Some group when Group.owner group <> Group.Primitive ->
@@ -839,7 +839,7 @@ let cusp_polygons ?cancel ?(grain = 16_384) ?primitives ~angle geometry =
         !non_polygon)
     else
       let index = Topology_index.create ?cancel source_topology in
-      let view = Topology_index.Private.view index in
+      let view = Topology_index.View.view index in
       let normal_primitives = match primitives with
         | None -> None
         | Some _ -> Some (Group.init ~grain ~owner:Group.Primitive
@@ -918,7 +918,7 @@ let make_planar ?cancel ?(grain = 16_384) ?primitives geometry =
   if grain <= 0 then invalid_arg "Rdk_mesh.Facet.facet: grain must be positive";
   Cancel.check_opt cancel;
   let source_topology = Geometry.topology geometry in
-  let topology = Topology.Private.view source_topology in
+  let topology = Topology.View.view source_topology in
   let primitive_count = Topology.primitive_count source_topology in
   if match primitives with
     | Some group -> Group.owner group <> Group.Primitive
@@ -928,7 +928,7 @@ let make_planar ?cancel ?(grain = 16_384) ?primitives geometry =
   else begin
     let selected primitive = match primitives with
       | None -> true | Some group -> Group.mem primitive group in
-    let source_positions = Packed.Float3.Private.view
+    let source_positions = Packed.Float3.View.view
         (Geometry.positions geometry) in
     let vertex_count = Array.length topology.vertex_points in
     let changed = Bytes.make primitive_count '\000'
@@ -1128,10 +1128,10 @@ let make_planar ?cancel ?(grain = 16_384) ?primitives geometry =
               z.(target) <- projected_z.(vertex)
             done
         done;
-        let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+        let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
         if !extras = 0 then Geometry.with_positions positions geometry
         else begin
-          let target_topology = Topology.Private.create_validated_owned
+          let target_topology = Topology.View.create_validated_owned
               ~point_count:output_points ~vertex_points
               ~primitive_offsets:(Array.copy topology.primitive_offsets)
               ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
@@ -1155,7 +1155,7 @@ let make_planar ?cancel ?(grain = 16_384) ?primitives geometry =
   end
 
 let validate_normal_view ?cancel ~grain owner values =
-  let values = Packed.Float3.Private.view values in
+  let values = Packed.Float3.View.view values in
   let count = Array.length values.x in
   let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
   let failures = Array.make ranges (-1) in
@@ -1188,7 +1188,7 @@ let[@inline always] scaled_average sum divisor scale =
     value *. scale
 
 let consolidate_point_normal ?cancel ~grain clusters
-    (source : Packed.Float3.Private.view) =
+    (source : Packed.Float3.View.view) =
   let x = Array.copy source.x and y = Array.copy source.y
   and z = Array.copy source.z in
   if clusters.Point_clusters.count > 0 then Parallel.for_
@@ -1222,10 +1222,10 @@ let consolidate_point_normal ?cancel ~grain clusters
         x.(point) <- nx; y.(point) <- ny; z.(point) <- nz
       done
     end);
-  Packed.Float3.Private.of_owned_exn ~x ~y ~z
+  Packed.Float3.View.of_owned_exn ~x ~y ~z
 
 let consolidate_vertex_normal ?cancel ~grain ?primitives clusters incidence
-    (source : Packed.Float3.Private.view) =
+    (source : Packed.Float3.View.view) =
   let x = Array.copy source.x and y = Array.copy source.y
   and z = Array.copy source.z in
   if clusters.Point_clusters.count > 0 then Parallel.for_
@@ -1238,7 +1238,7 @@ let consolidate_vertex_normal ?cancel ~grain ?primitives clusters incidence
       let scale = ref 0. and elements = ref 0 in
       for slot = first to last - 1 do
         let point = clusters.members.(slot) in
-        for at = incidence.Topology_index.Private.point_offsets.(point)
+        for at = incidence.Topology_index.View.point_offsets.(point)
             to incidence.point_offsets.(point + 1) - 1 do
           let vertex = incidence.point_vertices.(at) in
           if match primitives with None -> true | Some group ->
@@ -1284,7 +1284,7 @@ let consolidate_vertex_normal ?cancel ~grain ?primitives clusters incidence
       done
       end
     end);
-  Packed.Float3.Private.of_owned_exn ~x ~y ~z
+  Packed.Float3.View.of_owned_exn ~x ~y ~z
 
 let consolidate_normals ?cancel ?(grain = 16_384) ?primitives ~distance geometry =
   if grain <= 0 then invalid_arg "Rdk_mesh.Facet.facet: grain must be positive";
@@ -1325,7 +1325,7 @@ let consolidate_normals ?cancel ?(grain = 16_384) ?primitives ~distance geometry
       let rec validate validated = function
         | [] -> Ok (List.rev validated)
         | attribute :: rest ->
-            (match Attribute.Private.storage attribute with
+            (match Attribute.View.storage attribute with
              | Attribute.Float3 values ->
                  Result.bind (validate_normal_view ?cancel ~grain
                      (Attribute.owner attribute) values) (fun view ->
@@ -1344,7 +1344,7 @@ let consolidate_normals ?cancel ?(grain = 16_384) ?primitives ~distance geometry
                 (fun (owner, _) -> owner = Attribute.Vertex) validated in
             let incidence = if vertex_needed then Some
                 (Topology_index.create ?cancel (Geometry.topology geometry)
-                  |> Topology_index.Private.view)
+                  |> Topology_index.View.view)
               else None in
             let rec attributes result = function
               | [] -> Ok (List.rev result)
@@ -1354,8 +1354,8 @@ let consolidate_normals ?cancel ?(grain = 16_384) ?primitives ~distance geometry
                           || Attribute.owner attribute = Attribute.Vertex)) then
                     attributes (attribute :: result) rest
                   else
-                    let source = match Attribute.Private.storage attribute with
-                      | Attribute.Float3 values -> Packed.Float3.Private.view values
+                    let source = match Attribute.View.storage attribute with
+                      | Attribute.Float3 values -> Packed.Float3.View.view values
                       | _ -> assert false in
                     let values = if Attribute.owner attribute = Attribute.Point
                       then consolidate_point_normal ?cancel ~grain clusters source
@@ -1379,9 +1379,9 @@ let adjust_normal_attribute ?cancel ~grain ?selected ~unit_length ~reverse attri
   if not (String.equal (Attribute.name attribute) "N"
       && (owner = Attribute.Point || owner = Attribute.Vertex)) then
     Ok attribute
-  else match Attribute.Private.storage attribute with
+  else match Attribute.View.storage attribute with
     | Attribute.Float3 values ->
-        let values = Packed.Float3.Private.view values in
+        let values = Packed.Float3.View.view values in
         let count = Array.length values.x in
         let x = Array.copy values.x and y = Array.copy values.y
         and z = Array.copy values.z in
@@ -1424,7 +1424,7 @@ let adjust_normal_attribute ?cancel ~grain ?selected ~unit_length ~reverse attri
             "%s normal attribute contains a non-finite vector"
             (if owner = Attribute.Point then "point" else "vertex"))
         else Attribute.create_owned ~name:"N" ~owner
-            (Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z))
+            (Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x ~y ~z))
     | _ -> Error (Printf.sprintf "%s normal attribute must have float3 storage"
         (if owner = Attribute.Point then "point" else "vertex"))
 
@@ -1446,7 +1446,7 @@ let adjust_normals ?cancel ?(grain = 16_384) ?primitives ~unit_length ~reverse
     let selected_points, selected_vertices = match primitives with
       | None -> None, None
       | Some group ->
-          let view = Topology.Private.view topology in
+          let view = Topology.View.view topology in
           let points = Bytes.make view.point_count '\000'
           and vertices = Bytes.make (Array.length view.vertex_points) '\000' in
           for primitive = 0 to Topology.primitive_count topology - 1 do
@@ -1466,7 +1466,7 @@ let adjust_normals ?cancel ?(grain = 16_384) ?primitives ~unit_length ~reverse
         Bytes.unsafe_get mask element <> '\000') mask in
     let rec loop changed result = function
       | [] -> if not changed then Ok geometry else
-          Geometry.Private.with_attributes_owned (Array.of_list (List.rev result))
+          Geometry.View.with_attributes_owned (Array.of_list (List.rev result))
             geometry
       | attribute :: rest ->
           Result.bind (adjust_normal_attribute ?cancel ~grain
@@ -1487,7 +1487,7 @@ type deform_selection = Deform.selection =
 let facet_point_selection ?cancel ~grain primitives geometry =
   let topology = Geometry.topology geometry in
   let index = Topology_index.create ?cancel topology in
-  let view = Topology_index.Private.view index in
+  let view = Topology_index.View.view index in
   Group.init ~grain ~owner:Group.Point ~name:"__facet_selected_points"
     (Topology.point_count topology) (fun point ->
       let found = ref false and at = ref view.point_offsets.(point) in
@@ -1506,7 +1506,7 @@ let facet_primitives_of_selection ?cancel ~grain selection geometry =
   match selection with
   | Selected_primitives group -> Ok group
   | Selected_points points ->
-      let view = Topology.Private.view topology in
+      let view = Topology.View.view topology in
       Ok (Group.init ~grain ~owner:Group.Primitive
         ~name:"__facet_from_points" (Topology.primitive_count topology)
         (fun primitive ->
@@ -1520,7 +1520,7 @@ let facet_primitives_of_selection ?cancel ~grain selection geometry =
           done;
           !found))
   | Selected_vertices vertices ->
-      let view = Topology.Private.view topology in
+      let view = Topology.View.view topology in
       Ok (Group.init ~grain ~owner:Group.Primitive
         ~name:"__facet_from_vertices" (Topology.primitive_count topology)
         (fun primitive ->
@@ -1534,9 +1534,9 @@ let facet_primitives_of_selection ?cancel ~grain selection geometry =
           done;
           !found))
   | Selected_edges edges ->
-      let view = Topology.Private.view topology in
+      let view = Topology.View.view topology in
       let index = Topology_index.create ?cancel topology in
-      let incidence = Topology_index.Private.view index in
+      let incidence = Topology_index.View.view index in
       Ok (Group.init ~grain ~owner:Group.Primitive
         ~name:"__facet_from_edges" (Topology.primitive_count topology)
         (fun primitive ->

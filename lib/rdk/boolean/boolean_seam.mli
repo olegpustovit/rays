@@ -1,4 +1,4 @@
-(** Private exact seam and coincident-surface product from a Boolean complex. *)
+(** View exact seam and coincident-surface product from a Boolean complex. *)
 
 type kind = Left_self | Between | Right_self
 type t
@@ -19,7 +19,7 @@ val coincident : t -> Geometry.t
 
 val curve_kind : t -> int -> kind
 
-module Private : sig
+module View : sig
   val complex : t -> Boolean_complex.t
   val curves_materialized : t -> bool
   val is_seam_edge : t -> int -> bool

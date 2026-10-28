@@ -69,8 +69,8 @@ let refusal ?with_ text =
       (match result with Error error -> Some (Diagnostic.error_to_string error) | Ok _ -> None)
 
 let equal_positions left right =
-  let left = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions left)
-  and right = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions right) in
+  let left = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions left)
+  and right = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions right) in
   left.x = right.x && left.y = right.y && left.z = right.z
 
 let contains text pattern =
@@ -174,7 +174,7 @@ let test_node_owned_parameters_and_graph_edit () =
   let before_edit = Session.stats evaluator in
   let output = cook_ok evaluator current translated in
   let after_edit = Session.stats evaluator in
-  let positions = Rdk.Packed.Float3.Private.view
+  let positions = Rdk.Packed.Float3.View.view
       (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
   check (positions.x = [|1.5; 1.5|])
     "edited node did not rebuild its cook closure";
@@ -832,8 +832,8 @@ let test_parallel_geometry_exactness () =
   in
   (match colors one, colors many with
    | Rdk.Attribute.Float4 left, Rdk.Attribute.Float4 right ->
-       let left = Rdk.Packed.Float4.Private.view left
-       and right = Rdk.Packed.Float4.Private.view right in
+       let left = Rdk.Packed.Float4.View.view left
+       and right = Rdk.Packed.Float4.View.view right in
        check (left.x = right.x && left.y = right.y && left.z = right.z
            && left.w = right.w) "one/multi-domain colors differ"
    | _ -> fail "Cd has unexpected storage")
@@ -881,7 +881,7 @@ let test_poly_fill_contract () =
 
 let test_poly_path_contract () =
   let evaluator = session () and current = context ~domains:4 ~grain:3 () in
-  let positions = Rdk.Packed.Float3.Private.of_owned_exn
+  let positions = Rdk.Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.;2.;10.;11.;10.5|]
       ~y:[|0.;0.;0.;1.;0.;0.;1.|] ~z:(Array.make 7 0.) in
   let topology = Rdk.Topology.create_owned ~point_count:7
@@ -1148,14 +1148,14 @@ let test_local_subdivide_contract () =
            | Some cause -> contains cause "osd_scheme"
            | None -> false))
        "procedural Subdivide osd_scheme diagnostic");
-  let curve_positions = Rdk.Packed.Float3.Private.of_owned_exn
+  let curve_positions = Rdk.Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;4.|] ~y:[|0.;2.;0.|] ~z:[|0.;0.;0.|] in
   let curve_topology = Rdk.Topology.create_owned ~point_count:3
       ~vertex_points:[|0;1; 1;2|] ~primitive_offsets:[|0;2;4|]
       ~primitive_kinds:[|Rdk.Topology.Open_polyline;
         Rdk.Topology.Open_polyline|] |> Result.get_ok in
   let curve_n = Rdk.Attribute.create_owned ~owner:Rdk.Attribute.Point ~name:"N"
-      (Rdk.Attribute.Float3 (Rdk.Packed.Float3.Private.of_owned_exn
+      (Rdk.Attribute.Float3 (Rdk.Packed.Float3.View.of_owned_exn
         ~x:[|0.;0.;0.|] ~y:[|0.;0.;0.|] ~z:[|1.;1.;1.|]))
       |> Result.get_ok in
   let curve_source = Rdk.Geometry.create ~positions:curve_positions
@@ -1183,7 +1183,7 @@ let test_local_subdivide_contract () =
       (Result.get_ok (Sop.Payload.geometry independent_curves.payload)) |> Option.get |> Rdk.Attribute.storage in
   check (match recomputed_n with
     | Rdk.Attribute.Float3 values ->
-        let values = Rdk.Packed.Float3.Private.view values in
+        let values = Rdk.Packed.Float3.View.view values in
         Array.for_all (( = ) 0.) values.x
         && Array.for_all (( = ) 0.) values.y
         && Array.for_all (( = ) 0.) values.z
@@ -1316,9 +1316,9 @@ let test_edge_flip_contract () =
       && contains (readable graph) "recompute_point_normals=false")
     "procedural Edge Flip cache identity";
   let output = cook_ok evaluator current graph in
-  let source_topology = Rdk.Topology.Private.view
+  let source_topology = Rdk.Topology.View.view
       (Rdk.Geometry.topology (Result.get_ok (Sop.Payload.geometry source_output.payload)))
-  and output_topology = Rdk.Topology.Private.view
+  and output_topology = Rdk.Topology.View.view
       (Rdk.Geometry.topology (Result.get_ok (Sop.Payload.geometry output.payload))) in
   check (Rdk.Geometry.point_count (Result.get_ok (Sop.Payload.geometry output.payload)) = 4
       && Rdk.Geometry.vertex_count (Result.get_ok (Sop.Payload.geometry output.payload)) = 6
@@ -1390,7 +1390,7 @@ let test_edge_straighten_contract () =
       && contains (readable graph) "output_group=straightened")
     "procedural Edge Straighten cache identity";
   let output = cook_ok evaluator current graph in
-  let positions = Rdk.Packed.Float3.Private.view
+  let positions = Rdk.Packed.Float3.View.view
       (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
   let last = Array.length positions.x - 1 in
   let dx = positions.x.(last) -. positions.x.(0)
@@ -1410,7 +1410,7 @@ let test_edge_straighten_contract () =
           |> Option.get |> Rdk.Edge_group.cardinality) = 4)
     "procedural Edge Straighten payload/output group";
   let all = Lisp_sop.node ~with_:["source", (source)] {|(sop/edge_straighten (sop/ext_source))|} |> cook_ok evaluator current in
-  let all_positions = Rdk.Packed.Float3.Private.view
+  let all_positions = Rdk.Packed.Float3.View.view
       (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry all.payload))) in
   check (all_positions.x = positions.x && all_positions.y = positions.y
       && all_positions.z = positions.z)
@@ -1443,7 +1443,7 @@ let test_edge_equalize_contract () =
       && contains (readable graph) "output_group=equalized")
     "procedural Edge Equalize cache identity";
   let output = cook_ok evaluator current graph in
-  let p = Rdk.Packed.Float3.Private.view
+  let p = Rdk.Packed.Float3.View.view
       (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
   check (abs_float ((p.x.(1) -. p.x.(0)) -. 2.) < 1e-6
       && abs_float ((p.x.(2) -. p.x.(1)) -. 2.) < 1e-6
@@ -1480,7 +1480,7 @@ let test_edge_relax_contract () =
       && contains (readable graph) "target_mode=individual_lengths")
     "procedural Edge Relax cache identity";
   let output = cook_ok evaluator current graph in
-  let p = Rdk.Packed.Float3.Private.view
+  let p = Rdk.Packed.Float3.View.view
       (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
   check (abs_float ((p.x.(1) -. p.x.(0)) -. 2.) < 1e-6
       && abs_float ((p.x.(2) -. p.x.(1)) -. 1.) < 1e-6
@@ -1524,7 +1524,7 @@ let test_blend_shapes_contract () =
       && contains (readable graph) "attributes=^*")
     "procedural Blend Shapes cache identity";
   let cooked = cook_ok evaluator current graph in
-  let position = Rdk.Packed.Float3.Private.view
+  let position = Rdk.Packed.Float3.View.view
       (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry cooked.payload))) in
   check (position.x = [|5.;6.;7.|])
     "procedural Blend Shapes differencing result";
@@ -1555,7 +1555,7 @@ let test_blend_shapes_contract () =
     let x = Array.init point_count (fun point ->
       offset +. scale *. float_of_int point *. 0.001) in
     Rdk.Geometry.create
-      ~positions:(Rdk.Packed.Float3.Private.of_owned_exn ~x
+      ~positions:(Rdk.Packed.Float3.View.of_owned_exn ~x
         ~y:(Array.make point_count 0.) ~z:(Array.make point_count 0.))
       ~topology:(Rdk.Topology.empty ~point_count) () |> get_ok in
   let source_geometry = make 0. 1. and target_geometry = make 1. 1.5 in
@@ -1568,8 +1568,8 @@ let test_blend_shapes_contract () =
     Session.close evaluator;
     (Result.get_ok (Sop.Payload.geometry result.payload)) in
   let one = cook 1 and four = cook 4 in
-  check (Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions one)
-      = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions four))
+  check (Rdk.Packed.Float3.View.view (Rdk.Geometry.positions one)
+      = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions four))
     "procedural Blend Shapes differs across domain counts";
   check (Rdk.Geometry.topology one == Rdk.Geometry.topology source_geometry)
     "procedural Blend Shapes rebuilt topology"
@@ -1603,11 +1603,11 @@ let test_attribute_composite_contract () =
     "procedural Attribute Composite cache identity";
   let evaluator = session () and current = context ~domains:4 ~grain:2 () in
   let output = cook_ok evaluator current graph in
-  let positions = Rdk.Packed.Float3.Private.view
+  let positions = Rdk.Packed.Float3.View.view
       (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
   let values = match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point
       "value" (Result.get_ok (Sop.Payload.geometry output.payload)) with
-    | Some attribute -> (match Rdk.Attribute.Private.storage attribute with
+    | Some attribute -> (match Rdk.Attribute.View.storage attribute with
         | Rdk.Attribute.Float values -> values
         | _ -> fail "procedural Attribute Composite changed scalar storage")
     | None -> fail "procedural Attribute Composite dropped value" in
@@ -1622,7 +1622,7 @@ let test_attribute_composite_contract () =
     |> cook_ok evaluator current in
   let scaled_values = match Rdk.Geometry.find_attribute
       ~owner:Rdk.Attribute.Point "value" (Result.get_ok (Sop.Payload.geometry scaled.payload)) with
-    | Some attribute -> (match Rdk.Attribute.Private.storage attribute with
+    | Some attribute -> (match Rdk.Attribute.View.storage attribute with
         | Rdk.Attribute.Float values -> values | _ -> assert false)
     | None -> assert false in
   check (scaled_values = [|4.;8.;12.|])
@@ -1639,7 +1639,7 @@ let test_attribute_composite_contract () =
     let x = Array.init point_count (fun point ->
       offset +. float_of_int point *. 0.001) in
     Rdk.Geometry.create
-      ~positions:(Rdk.Packed.Float3.Private.of_owned_exn ~x
+      ~positions:(Rdk.Packed.Float3.View.of_owned_exn ~x
         ~y:(Array.make point_count 0.) ~z:(Array.make point_count 0.))
       ~topology:(Rdk.Topology.empty ~point_count) () |> Result.get_ok
     |> add_float "value" (Array.init point_count (fun point ->
@@ -1655,12 +1655,12 @@ let test_attribute_composite_contract () =
     Session.close evaluator;
     (Result.get_ok (Sop.Payload.geometry output.payload)) in
   let one = cook 1 and four = cook 4 in
-  check (Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions one)
-      = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions four))
+  check (Rdk.Packed.Float3.View.view (Rdk.Geometry.positions one)
+      = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions four))
     "procedural Attribute Composite positions differ across domain counts";
   let value geometry = match Rdk.Geometry.find_attribute
       ~owner:Rdk.Attribute.Point "value" geometry with
-    | Some attribute -> (match Rdk.Attribute.Private.storage attribute with
+    | Some attribute -> (match Rdk.Attribute.View.storage attribute with
         | Rdk.Attribute.Float values -> values | _ -> assert false)
     | None -> assert false in
   check (value one = value four
@@ -1671,7 +1671,7 @@ let test_edge_transport_contract () =
   let evaluator = session () and current = context ~domains:4 ~grain:7 () in
   let float_values owner name geometry =
     match Rdk.Geometry.find_attribute ~owner name geometry with
-    | Some attribute -> (match Rdk.Attribute.Private.storage attribute with
+    | Some attribute -> (match Rdk.Attribute.View.storage attribute with
         | Rdk.Attribute.Float values -> values
         | _ -> fail ("unexpected Edge Transport storage for " ^ name))
     | None -> fail ("missing Edge Transport attribute " ^ name) in
@@ -1770,7 +1770,7 @@ let test_edge_transport_contract () =
     | Ok node -> (match Session.cook evaluator ~context:current node with Error _ -> true | Ok _ -> false))
     "procedural Edge Transport accepted a primitive attribute";
 
-  let parent_positions = Rdk.Packed.Float3.Private.of_owned_exn
+  let parent_positions = Rdk.Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;0.;2.;1.;10.;14.|]
       ~y:[|0.;0.;2.;0.;3.;0.;0.|] ~z:(Array.make 7 0.) in
   let parent_attribute = Rdk.Attribute.create_owned ~owner:Rdk.Attribute.Point
@@ -1847,7 +1847,7 @@ let test_edge_transport_contract () =
       ~primitive_kinds:(Array.make curve_count Rdk.Topology.Open_polyline)
       |> get_ok in
   let geometry = Rdk.Geometry.create
-      ~positions:(Rdk.Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+      ~positions:(Rdk.Packed.Float3.View.of_owned_exn ~x ~y ~z)
       ~topology () |> get_ok in
   let exact_graph = Lisp_sop.node ~with_:["geometry", (Lisp_sop.snapshot (geometry))] {|(sop/edge_transport_curves
    (sop/ext_geometry)

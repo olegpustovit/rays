@@ -246,7 +246,7 @@ let weight_values geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | None -> fail "attribute-rule weight point attribute %S is missing" name
   | Some attribute ->
-      let values = match Attribute.Private.storage attribute with
+      let values = match Attribute.View.storage attribute with
         | Attribute.Float values -> Array.copy values
         | Attribute.Int values -> Array.map float_of_int values
         | _ -> fail "attribute-rule weight %S must be scalar float or integer"
@@ -552,7 +552,7 @@ let concatenate_int_scalar ?cancel ~grain clusters compact source ordered =
     for slot = clusters.offsets.(cluster) to clusters.offsets.(cluster + 1) - 1 do
       values.(!at) <- source.(ordered.(slot)); incr at
     done);
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
+  Packed.Int_array.View.create_validated_owned ~offsets ~values
 
 let concatenate_float_scalar ?cancel ~grain clusters compact source ordered =
   let lengths = Array.init clusters.Point_clusters.count (fun cluster ->
@@ -566,10 +566,10 @@ let concatenate_float_scalar ?cancel ~grain clusters compact source ordered =
     for slot = clusters.offsets.(cluster) to clusters.offsets.(cluster + 1) - 1 do
       values.(!at) <- source.(ordered.(slot)); incr at
     done);
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values
+  Packed.Float_array.View.create_validated_owned ~offsets ~values
 
 let concatenate_int_rows ?cancel ~grain clusters compact source ordered =
-  let view = Packed.Int_array.Private.view source in
+  let view = Packed.Int_array.View.view source in
   let lengths = Array.make clusters.Point_clusters.count 0 in
   for cluster = 0 to clusters.count - 1 do
     for slot = clusters.offsets.(cluster) to clusters.offsets.(cluster + 1) - 1 do
@@ -591,10 +591,10 @@ let concatenate_int_rows ?cancel ~grain clusters compact source ordered =
       let length = view.offsets.(point + 1) - first in
       Array.blit view.values first values !at length; at := !at + length
     done);
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
+  Packed.Int_array.View.create_validated_owned ~offsets ~values
 
 let concatenate_float_rows ?cancel ~grain clusters compact source ordered =
-  let view = Packed.Float_array.Private.view source in
+  let view = Packed.Float_array.View.view source in
   let lengths = Array.make clusters.Point_clusters.count 0 in
   for cluster = 0 to clusters.count - 1 do
     for slot = clusters.offsets.(cluster) to clusters.offsets.(cluster + 1) - 1 do
@@ -616,7 +616,7 @@ let concatenate_float_rows ?cancel ~grain clusters compact source ordered =
       let length = view.offsets.(point + 1) - first in
       Array.blit view.values first values !at length; at := !at + length
     done);
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values
+  Packed.Float_array.View.create_validated_owned ~offsets ~values
 
 let ordered_members ?cancel ~grain clusters method_ weights =
   if method_ = Attribute_concatenate_weight_order then
@@ -638,7 +638,7 @@ let reduced_attribute ?cancel ~grain ~compact clusters geometry weights_cache
       (reduce_float ?cancel ~grain ~name clusters source method_ weights) in
   let plane_int source = expand clusters compact
       (reduce_int ?cancel ~grain ~name clusters source method_ weights) in
-  let storage = match Attribute.Private.storage attribute with
+  let storage = match Attribute.View.storage attribute with
     | Attribute.Float values when method_ = Attribute_concatenate
         || method_ = Attribute_concatenate_weight_order ->
         Attribute.Float_array (concatenate_float_scalar ?cancel ~grain clusters
@@ -655,22 +655,22 @@ let reduced_attribute ?cancel ~grain ~compact clusters geometry weights_cache
         if method_ = Attribute_concatenate
             || method_ = Attribute_concatenate_weight_order then
           fail "attribute %S concatenate requires scalar or array storage" name;
-        let view = Packed.Float2.Private.view values in
+        let view = Packed.Float2.View.view values in
         Attribute.Float2 (Packed.Float2.of_owned ~x:(plane_float view.x)
           ~y:(plane_float view.y) |> get_ok)
     | Attribute.Float3 values ->
         if method_ = Attribute_concatenate
             || method_ = Attribute_concatenate_weight_order then
           fail "attribute %S concatenate requires scalar or array storage" name;
-        let view = Packed.Float3.Private.view values in
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        let view = Packed.Float3.View.view values in
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:(plane_float view.x) ~y:(plane_float view.y)
           ~z:(plane_float view.z))
     | Attribute.Float4 values ->
         if method_ = Attribute_concatenate
             || method_ = Attribute_concatenate_weight_order then
           fail "attribute %S concatenate requires scalar or array storage" name;
-        let view = Packed.Float4.Private.view values in
+        let view = Packed.Float4.View.view values in
         Attribute.Float4 (Packed.Float4.of_owned ~x:(plane_float view.x)
           ~y:(plane_float view.y) ~z:(plane_float view.z)
           ~w:(plane_float view.w) |> get_ok)
@@ -704,18 +704,18 @@ let default_attribute ?cancel ~grain ~compact clusters default attribute =
       (fun cluster -> average_float clusters source cluster)) in
   let first source = select source representatives in
   let average_numeric = default = Average_numeric in
-  let storage = match Attribute.Private.storage attribute with
+  let storage = match Attribute.View.storage attribute with
     | Attribute.Float values ->
         Attribute.Float (if average_numeric then average values else first values)
     | Attribute.Int values -> Attribute.Int (first values)
     | Attribute.Text values -> Attribute.Text (first values)
     | Attribute.Float2 values ->
-        let view = Packed.Float2.Private.view values in
+        let view = Packed.Float2.View.view values in
         Attribute.Float2 (Packed.Float2.of_owned
           ~x:(if average_numeric then average view.x else first view.x)
           ~y:(if average_numeric then average view.y else first view.y) |> get_ok)
     | Attribute.Float3 values ->
-        let view = Packed.Float3.Private.view values in
+        let view = Packed.Float3.View.view values in
         let x = if average_numeric then average view.x else first view.x
         and y = if average_numeric then average view.y else first view.y
         and z = if average_numeric then average view.z else first view.z in
@@ -728,9 +728,9 @@ let default_attribute ?cancel ~grain ~compact clusters default attribute =
               y.(point) <- y.(point) /. length;
               z.(point) <- z.(point) /. length
             end);
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x ~y ~z)
     | Attribute.Float4 values ->
-        let view = Packed.Float4.Private.view values in
+        let view = Packed.Float4.View.view values in
         let plane source = if average_numeric then average source else first source in
         Attribute.Float4 (Packed.Float4.of_owned ~x:(plane view.x)
           ~y:(plane view.y) ~z:(plane view.z) ~w:(plane view.w) |> get_ok)
@@ -759,7 +759,7 @@ let cluster_membership clusters group method_ cluster =
       | Group_least_point | Group_greatest_point -> assert false
 
 let with_cluster_order clusters compact source target =
-  match Group.Private.order_view source with
+  match Group.View.order_view source with
   | None -> target
   | Some source_order ->
       let cluster_count = clusters.Point_clusters.count in
@@ -780,7 +780,7 @@ let with_cluster_order clusters compact source target =
         end in
       Array.iter (fun point -> visit clusters.of_point.(point)) source_order;
       for cluster = 0 to cluster_count - 1 do visit cluster done;
-      Group.Private.with_owned_order order target
+      Group.View.with_owned_order order target
 
 let reduced_group ~grain ~compact clusters method_ group =
   let cluster_group = Group.init ~grain ~owner:Group.Point

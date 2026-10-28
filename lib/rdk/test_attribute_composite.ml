@@ -1,9 +1,6 @@
+open Rdk_test_support
 open Rdk
 
-let fail message = prerr_endline message; exit 1
-let check condition message = if not condition then fail message
-let get_ok = function Ok value -> value | Error error ->
-  fail (Error.to_string error)
 
 let close left right = Float.abs (left -. right) <= 1e-12
 let array_close left right =
@@ -12,7 +9,7 @@ let array_close left right =
 let triangle xs =
   let topology = Rdk_test_support.Tb.create ~point_count:3 () in
   Rdk_test_support.Tb.add_triangle topology 0 1 2;
-  let positions = Packed.Float3.Private.of_owned_exn ~x:(Array.copy xs)
+  let positions = Packed.Float3.View.of_owned_exn ~x:(Array.copy xs)
       ~y:[|0.;0.;0.|] ~z:[|0.;0.;0.|] in
   Geometry.create ~positions ~topology:(Rdk_test_support.Tb.freeze topology) ()
   |> Result.get_ok
@@ -20,7 +17,7 @@ let triangle xs =
 let points xs =
   let count = Array.length xs in
   Geometry.create
-    ~positions:(Packed.Float3.Private.of_owned_exn ~x:(Array.copy xs)
+    ~positions:(Packed.Float3.View.of_owned_exn ~x:(Array.copy xs)
       ~y:(Array.make count 0.) ~z:(Array.make count 0.))
     ~topology:(Topology.empty ~point_count:count) () |> Result.get_ok
 
@@ -31,7 +28,7 @@ let add ~owner ~name storage geometry =
 let scalar ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail ("wrong storage for " ^ name))
   | None -> fail ("missing attribute " ^ name)
@@ -39,16 +36,16 @@ let scalar ~owner name geometry =
 let vector2 ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Packed.Float2.View.view values
        | _ -> fail ("wrong storage for " ^ name))
   | None -> fail ("missing attribute " ^ name)
 
 let vector4 ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float4 values -> Packed.Float4.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float4 values -> Packed.Float4.View.view values
        | _ -> fail ("wrong storage for " ^ name))
   | None -> fail ("missing attribute " ^ name)
 
@@ -82,10 +79,10 @@ let fixtures () =
       |> add ~owner:Attribute.Point ~name:"solo"
         (Attribute.Float [|8.;8.;8.|])
       |> add ~owner:Attribute.Point ~name:"N" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|0.;0.;0.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|0.;0.;0.|]
           ~y:[|1.;1.;1.|] ~z:[|0.;0.;0.|]))
       |> add ~owner:Attribute.Vertex ~name:"N" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|0.;0.;0.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|0.;0.;0.|]
           ~y:[|1.;1.;1.|] ~z:[|0.;0.;0.|]))
       |> add ~owner:Attribute.Point ~name:"id" (Attribute.Int [|1;2;3|]) in
   let second = triangle [|10.;11.;12.|] |> add_common ~target:true

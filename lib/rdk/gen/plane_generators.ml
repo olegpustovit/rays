@@ -19,7 +19,7 @@ type grid_connectivity =
 let normal_attribute owner count nx ny nz =
   let x = Array.make count nx and y = Array.make count ny
   and z = Array.make count nz in
-  let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   Attribute.create_key_owned (Attribute.normal ~owner) values |> Support.get_ok
 
 let normalize_plane_axis operation label value =
@@ -188,7 +188,7 @@ let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
              if invalid >= 0 then Error (Printf.sprintf
                  "Rdk.Plane_generators.grid: generated point %d is not finite" invalid)
              else
-               let positions = Packed.Float3.Private.of_owned_exn
+               let positions = Packed.Float3.View.of_owned_exn
                    ~x:px ~y:py ~z:pz in
                let line_topology mode =
                  let vertex_points = Array.make vertex_count 0
@@ -237,7 +237,7 @@ let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
                         primitive_offsets.(v_points + column) <-
                           point_count + (column * v_points)
                       done);
-                 Topology.Private.create_validated_owned ~point_count
+                 Topology.View.create_validated_owned ~point_count
                    ~vertex_points ~primitive_offsets ~primitive_kinds in
                let polygon_topology slots reverse_mode =
                  let vertex_points = Array.make vertex_count 0
@@ -272,7 +272,7 @@ let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
                    (fun primitive ->
                      if primitive land 4095 = 0 then Cancel.check_opt cancel;
                      primitive_offsets.(primitive) <- primitive * primitive_size);
-                 Topology.Private.create_validated_owned ~point_count
+                 Topology.View.create_validated_owned ~point_count
                    ~vertex_points ~primitive_offsets ~primitive_kinds in
                let topology = match connectivity with
                  | Grid_points -> Topology.empty ~point_count

@@ -27,8 +27,8 @@ let () = with_cook 1 (fun cook ->
     assert (Rdk.Packed.Float3.get (Rdk.Geometry.positions g) i
             = Rdk.Packed.Float3.get (Rdk.Geometry.positions h) i)
   done;
-  let tg = Rdk.Topology.Private.view (Rdk.Geometry.topology g)
-  and th = Rdk.Topology.Private.view (Rdk.Geometry.topology h) in
+  let tg = Rdk.Topology.View.view (Rdk.Geometry.topology g)
+  and th = Rdk.Topology.View.view (Rdk.Geometry.topology h) in
   assert (tg.vertex_points = th.vertex_points && tg.primitive_offsets = th.primitive_offsets);
   let pieces geometry = Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive "piece" geometry
       |> Option.get |> Rdk.Attribute.storage |> function

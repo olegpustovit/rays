@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let owner_count geometry = function
   | Attribute.Point -> Geometry.point_count geometry
@@ -361,7 +361,7 @@ let run () =
       swap_attribute_method = Attribute_ops.Attribute_copy;
     }] swap_source |> get_rdk in
   let rest = attribute Attribute.Point "rest" position_copy in
-  (match Attribute.Private.storage rest with
+  (match Attribute.View.storage rest with
    | Attribute.Float3 values ->
        check (Packed.Float3.data_id values
            = Packed.Float3.data_id (Geometry.positions swap_source))
@@ -379,7 +379,7 @@ let run () =
     }] with_rest |> get_rdk in
   check (Packed.Float3.get (Geometry.positions position_swapped) 0 = (9., 7., 5.))
     "Attribute Swap did not install rest into P";
-  (match Attribute.Private.storage
+  (match Attribute.View.storage
       (attribute Attribute.Point "rest" position_swapped) with
    | Attribute.Float3 values -> check (Packed.Float3.get values 0 = (1., 2., 3.))
        "Attribute Swap did not install old P into rest"

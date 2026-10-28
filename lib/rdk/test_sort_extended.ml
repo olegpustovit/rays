@@ -4,7 +4,7 @@ open Rdk_test_support
 let int_attribute name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)
@@ -12,7 +12,7 @@ let int_attribute name geometry =
 let primitive_int_attribute name geometry =
   match Geometry.find_attribute ~owner:Attribute.Primitive name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has wrong primitive storage"))
   | None -> fail ("missing primitive " ^ name)
@@ -149,7 +149,7 @@ let test_primitive_indirect () =
     "primitive random Sort Indices without reorder"
 
 let test_topology_and_spatial_keys () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 2.; 3.; 4.|] ~y:(Array.make 5 0.) ~z:(Array.make 5 0.) in
   let builder = Rdk_test_support.Tb.create ~point_count:5 () in
   Rdk_test_support.Tb.add_triangle builder 2 0 3;

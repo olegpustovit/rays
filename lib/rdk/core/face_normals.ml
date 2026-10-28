@@ -6,8 +6,8 @@ let selected selection primitive = match selection with
 let polygon_area_vector ?cancel ~grain ~need_inverse ~first_failure ?primitives
     ~operation geometry =
   let topology = Geometry.topology geometry in
-  let source = Topology.Private.view topology
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let source = Topology.View.view topology
+  and positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = Topology.primitive_count topology in
   let x = Array.make count 0. and y = Array.make count 0.
   and z = Array.make count 0. in
@@ -71,8 +71,8 @@ let compute ?cancel ?(grain = 16_384) ?primitives ~operation geometry =
     | Some group when Group.length group <> primitive_count ->
         Error (operation ^ ": selection length does not match primitive count")
     | _ ->
-        let topology_view = Topology.Private.view topology
-        and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+        let topology_view = Topology.View.view topology
+        and positions = Packed.Float3.View.view (Geometry.positions geometry) in
         let nx = Array.make primitive_count 0.
         and ny = Array.make primitive_count 0.
         and nz = Array.make primitive_count 0. in

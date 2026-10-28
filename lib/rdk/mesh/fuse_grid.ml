@@ -16,11 +16,11 @@ type fuse_targeting = Point_snap.targeting =
 type fuse_attribute_view =
   | Fuse_float of float array
   | Fuse_int of int array
-  | Fuse_float2 of Packed.Float2.Private.view
-  | Fuse_float3 of Packed.Float3.Private.view
-  | Fuse_float4 of Packed.Float4.Private.view
-  | Fuse_int_array of Packed.Int_array.Private.view
-  | Fuse_float_array of Packed.Float_array.Private.view
+  | Fuse_float2 of Packed.Float2.View.view
+  | Fuse_float3 of Packed.Float3.View.view
+  | Fuse_float4 of Packed.Float4.View.view
+  | Fuse_int_array of Packed.Int_array.View.view
+  | Fuse_float_array of Packed.Float_array.View.view
   | Fuse_text of string array
 
 let fuse_clusters ?cancel ?(grain = 16_384) ?selection ?(tolerance = 1e-6)
@@ -43,20 +43,20 @@ let fuse_clusters ?cancel ?(grain = 16_384) ?selection ?(tolerance = 1e-6)
               Geometry.attributes geometry
               |> List.filter_map (fun attribute ->
                 if Attribute.owner attribute <> Attribute.Point then None
-                else Some (match Attribute.Private.storage attribute with
+                else Some (match Attribute.View.storage attribute with
                   | Attribute.Float values -> Fuse_float values
                   | Attribute.Int values -> Fuse_int values
                   | Attribute.Text values -> Fuse_text values
                   | Attribute.Float2 values ->
-                      Fuse_float2 (Packed.Float2.Private.view values)
+                      Fuse_float2 (Packed.Float2.View.view values)
                   | Attribute.Float3 values ->
-                      Fuse_float3 (Packed.Float3.Private.view values)
+                      Fuse_float3 (Packed.Float3.View.view values)
                   | Attribute.Float4 values ->
-                      Fuse_float4 (Packed.Float4.Private.view values)
+                      Fuse_float4 (Packed.Float4.View.view values)
                   | Attribute.Int_array values ->
-                      Fuse_int_array (Packed.Int_array.Private.view values)
+                      Fuse_int_array (Packed.Int_array.View.view values)
                   | Attribute.Float_array values ->
-                      Fuse_float_array (Packed.Float_array.Private.view values)))
+                      Fuse_float_array (Packed.Float_array.View.view values)))
               |> Array.of_list
       else [||] in
     let within value = if exact then value = 0.
@@ -178,9 +178,9 @@ let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
           (fun destinations ->
             let count = Geometry.point_count geometry in
             let mapped = ref 0 and moved = ref 0 in
-            let source = Packed.Float3.Private.view
+            let source = Packed.Float3.View.view
                 (Geometry.positions geometry)
-            and target_positions = Packed.Float3.Private.view
+            and target_positions = Packed.Float3.View.view
                 (Geometry.positions target_geometry) in
             for point = 0 to count - 1 do
               let destination = destinations.(point) in
@@ -281,7 +281,7 @@ let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
                       z.(point) <- target_positions.z.(destination)
                     end);
               Geometry.with_positions
-                (Packed.Float3.Private.of_owned_exn ~x ~y ~z) geometry
+                (Packed.Float3.View.of_owned_exn ~x ~y ~z) geometry
                 |> Support.get_ok
                 |> Geometry.without_attribute ~owner:Attribute.Point "N"
                 |> Geometry.without_attribute ~owner:Attribute.Vertex "N"
