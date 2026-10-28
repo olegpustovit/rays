@@ -1546,8 +1546,8 @@ module Paint = struct
           let id=List.length ui.borrowed_images+2 in ui.borrowed_images<-(id,image)::ui.borrowed_images;id in
     prepare paint;
     Batch.Builder.textured paint.builder ~texture:id ~x ~y ~width:w ~height:h
-      ~u0:0. ~v0:0. ~u1:(float(fst(Image.Private.dimensions image)))
-      ~v1:(float(snd(Image.Private.dimensions image))) ~color:0xffffffffl
+      ~u0:0. ~v0:0. ~u1:(float(fst(Image.dimensions image)))
+      ~v1:(float(snd(Image.dimensions image))) ~color:0xffffffffl
 
   let fill paint ~x ~y ~w ~h color =
     prepare paint;

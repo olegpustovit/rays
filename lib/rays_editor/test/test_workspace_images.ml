@@ -127,12 +127,12 @@ let () =
         ~live:(Input.at_time time) owner (fun ~image ~texture:_ -> ok(image image_value))in
       let first=image_at 0. in
       assert(Result.get_ok (Rays.Image.get_size first)=(65,3));
-      let pixels=Rays.Image.Private.pixels first |> Result.get_ok in
+      let pixels=Rays.Image.pixels first |> Result.get_ok in
       assert(Bytes.get pixels 0=Char.chr 2 && Bytes.get pixels 1=Char.chr 42
         && Bytes.get pixels 2=Char.chr 128 && Bytes.get pixels 3=Char.chr 255);
       assert(image_at 0.==first);
       assert(image_at 1.==first);
-      assert(Rays.Image.Private.pixels first |> Result.get_ok <> pixels);
+      assert(Rays.Image.pixels first |> Result.get_ok <> pixels);
       let prepared=ok(Flow_native.Drawing.prepare evaluated.plan(List.assoc "picture" evaluated.results))in
       let scene=ok(Flow_native.Drawing.render_prepared ~image:(fun v->Editor.Private.with_images
         ~plan:evaluated.plan ~live:(Input.at_time 1.) owner (fun ~image ~texture:_->image v))
@@ -153,10 +153,10 @@ let () =
     let image=resolve doc in
     let resized=workspace "(image/map (fn [uv] [uv.x uv.y 0.5 1]) :width 17 :height 5)"in
     assert(resolve resized==image && Result.get_ok (Rays.Image.get_size image)=(17,5));
-    let previous=Rays.Image.Private.pixels image |> Result.get_ok in
+    let previous=Rays.Image.pixels image |> Result.get_ok in
     let edited=workspace "(image/map (fn [uv] [uv.y uv.x 0.5 1]) :width 17 :height 5)"in
     assert(resolve edited==image);
-    assert(Rays.Image.Private.pixels image |> Result.get_ok <> previous);
+    assert(Rays.Image.pixels image |> Result.get_ok <> previous);
     assert(Editor.Private.image_stats owner=(1,0)));
   assert(Editor.Private.image_stats owner=(1,1));
   print_endline "image/map: replan, body edit and resize replace pixels under one owned image identity"
@@ -169,7 +169,7 @@ let ()=
     let image=ok(Editor.Private.image owner value)in
     assert(Result.get_ok (Rays.Image.get_size image)=(2,2));
     assert(ok(Editor.Private.image owner value)==image);
-    let oracle=Result.get_ok(Rays.Image.Private.pixels image)in
+    let oracle=Result.get_ok(Rays.Image.pixels image)in
     let ui=Pxui.Ui.create()in
     Fun.protect ~finally:(fun()->Pxui.Ui.destroy ui)(fun()->
       let frame : Rays.Frame.t = { input = { (Input.at_time 0.) with size = 32, 32 };
@@ -178,7 +178,7 @@ let ()=
         let box=Pxui.Ui.box ui ~w:(Px 16.) ~h:(Px 16.) "image"in
         Pxui.Ui.draw ui box(fun paint(x,y,w,h)->Pxui.Ui.Paint.image paint ~x ~y ~w ~h image));
       assert(Pxui.Ui.scene ui<>[]));
-    assert(Result.get_ok(Rays.Image.Private.pixels image)=oracle);
+    assert(Result.get_ok(Rays.Image.pixels image)=oracle);
     let prepared=ok(Flow_native.Drawing.prepare evaluated.plan(List.assoc "picture" evaluated.results))in
     let commands=ref None in
     List.iter(fun domains->Parallel.run ~domains(fun()->
@@ -187,7 +187,7 @@ let ()=
       let actual=Rays.Scene.Private.commands scene in
       assert(Array.exists(function Scene_command.Render_ir.Image _->true|_->false)actual);
       (match !commands with None->commands:=Some actual|Some expected->assert(actual=expected));
-      assert(Result.get_ok(Rays.Image.Private.pixels image)=oracle);
+      assert(Result.get_ok(Rays.Image.pixels image)=oracle);
       ())) [1;1;1;8];
     assert(Editor.Private.image_stats owner=(1,0)));
   assert(Editor.Private.image_stats owner=(1,1));
@@ -272,7 +272,7 @@ let () =
       let evaluated = ok (E.static document.checked) in
       let pixels time = Editor.Private.with_images ~plan:evaluated.plan
         ~live:(Input.at_time time) owner (fun ~image ~texture:_ ->
-          Rays.Image.Private.pixels (ok (image (List.assoc "image" evaluated.results))) |> Result.get_ok) in
+          Rays.Image.pixels (ok (image (List.assoc "image" evaluated.results))) |> Result.get_ok) in
       assert (pixels 0. <> pixels 10.));
     let created, destroyed = Editor.Private.image_stats owner in
     assert (created > 0 && created = destroyed)

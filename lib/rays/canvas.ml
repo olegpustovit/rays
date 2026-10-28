@@ -60,7 +60,7 @@ let pixel value ~x ~y=Result.bind(size value)(fun(w,h)->
 let pixels value=Result.bind(size value)(fun(w,h)->
   Result.map(fun bytes->Array.init(w*h)(fun index->color_at bytes(index*4)))(snapshot value))
 let to_image value=match Runtime_resources.Canvas.capture value.resource with
-  |Ok image->Image.Private.of_resource image
+  |Ok image->Image.of_resource image
   |Error error->Error(message"Canvas.to_image"error)
 module Private=struct
   let invalidate=invalidate

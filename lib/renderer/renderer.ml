@@ -167,7 +167,7 @@ let release_headless()=match !headless_gpu with
   |None->()
 let acquire_device operation=
   let shared=match !active_window with
-    |Some({runtime;dead=false;_} as value) when Runtime.Private.is_window runtime->
+    |Some({runtime;dead=false;_} as value) when Runtime.is_window runtime->
         Some(Ok (Scene_execution.device value.renderer,value.gpu_owner))
     |Some _|None->None in
   match shared with
@@ -210,7 +210,7 @@ let create (configuration:configuration) =
     |Ok runtime->match Runtime.set_resizable runtime true with
       |Error e->ignore(Runtime.destroy runtime);backend operation e
       |Ok()->
-        (match Runtime.Private.surface_configuration runtime with
+        (match Runtime.surface_configuration runtime with
          |Error error->ignore(Runtime.destroy runtime);backend operation error
          |Ok surface->let driver = Ogpu.Impl.create_driver () in
              let gpu_owner=create_gpu_owner()in
@@ -231,7 +231,7 @@ let create_offscreen (configuration:configuration)=
       ~height:configuration.drawable_height () with
   |Error error->release_device lease_shared gpu_owner;backend operation error
   |Ok runtime->
-      (match Runtime.Private.surface_configuration runtime with
+      (match Runtime.surface_configuration runtime with
        |Error error->ignore(Runtime.destroy runtime);release_device lease_shared gpu_owner;backend operation error
        |Ok surface->let driver = Ogpu.Impl.create_driver () in
          (match Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend
@@ -241,11 +241,11 @@ let create_offscreen (configuration:configuration)=
               ~owns_device_lease:true gpu_owner runtime renderer)))
 let ensure operation value=if value.dead then fail operation Ogpu.Error.Stale_handle"renderer is destroyed"else Ok()
 let sync_runtime_facts operation value =
-  match Runtime.Private.sync_facts value.runtime with
+  match Runtime.sync_facts value.runtime with
   |Error error->backend operation error
   |Ok()->let facts=Runtime.frame_facts value.runtime in
       if facts=value.renderer_facts then Ok() else
-      match Runtime.Private.surface_configuration value.runtime with
+      match Runtime.surface_configuration value.runtime with
       |Error error->backend operation error
       |Ok configuration->match Scene_execution.resize value.renderer configuration with
           |Error error->backend operation error
@@ -389,7 +389,7 @@ let snapshot value ~lease_policy ~density source =
       let key="canvas:"^string_of_int(Runtime_resources.Canvas.identity canvas)in
       (* A canvas rendered on this window's device is sampled in place. *)
       let gpu=match Runtime_resources.Canvas.gpu_snapshot canvas with
-        |Some(width,height,generation,texture) when Runtime.Private.is_window value.runtime->
+        |Some(width,height,generation,texture) when Runtime.is_window value.runtime->
             let device_id,_=Ogpu.Backend.texture_driver_token texture in
             (match Ok (Scene_execution.device value.renderer) with
              |Ok device when Ogpu.Handle.device_id(Ogpu.Backend.device_handle device)=device_id->
@@ -718,12 +718,12 @@ let read_pixels value ~bytes_per_row =
 let offscreen_target value=
   let operation="Renderer.offscreen_target"in
   match ensure operation value with Error _ as e->e|Ok()->
-  if Runtime.Private.is_window value.runtime then
+  if Runtime.is_window value.runtime then
     fail operation Ogpu.Error.Unsupported "operation requires an offscreen execution"
   else Ok (Scene_execution.target value.renderer)
 let rec destroy value=if value.dead then Ok()else
   let () = release_views value in
-  if Runtime.Private.is_window value.runtime && value.gpu_owner.shared_leases>0 then
+  if Runtime.is_window value.runtime && value.gpu_owner.shared_leases>0 then
       fail"Renderer.destroy"Ogpu.Error.Invalid_argument
         (string_of_int value.gpu_owner.shared_leases^
          " GPU lease(s) still share this window's device; release them first")
@@ -779,7 +779,7 @@ let make_retained_target (f:presentation_facts) draws=
 let adopt_retained_view submission ~density ~layer draws=
   let value=submission.owner in
   let direct()=adopt_draws submission draws in
-  if not (Runtime.Private.is_window value.runtime) then direct() else
+  if not (Runtime.is_window value.runtime) then direct() else
   match presentation_facts value with
   |Error _->direct()
   |Ok f->
@@ -846,7 +846,7 @@ module Private=struct
           ~logical_width:configuration.logical_width ~logical_height:configuration.logical_height
           ~width:configuration.drawable_width ~height:configuration.drawable_height()with
         |Error error->backend operation error
-        |Ok runtime->(match Runtime.Private.surface_configuration runtime with
+        |Ok runtime->(match Runtime.surface_configuration runtime with
           |Error error->ignore(Runtime.destroy runtime);backend operation error
           |Ok surface->let driver = Ogpu.Impl.create_driver () in
             match Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend
@@ -943,7 +943,7 @@ module Private=struct
     {Scene_execution.family=x.family;blend=x.blend;texture=x.texture;auxiliary=x.auxiliary;
      vertex_attributes=x.vertex_attributes;samples=x.samples;draw=x.draw})batch.batch_draws)
   let snapshot_count_for_test value=Snapshot_table.length value.snapshots
-  let window_handle value=Runtime.Private.window_handle value.runtime
+  let window_handle value=Runtime.window_handle value.runtime
   type nonrec submission=submission
   type nonrec batch=batch
   let begin_submission=begin_submission

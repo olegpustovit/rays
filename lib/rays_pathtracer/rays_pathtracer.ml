@@ -473,7 +473,7 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
           (Format.asprintf "%a" Runtime_resources.pp_error)
           (Runtime_resources.Image.create ~width ~height ~rgba:(Bytes.copy pixels))
       in
-      let* image = Rays.Image.Private.of_resource resource in
+      let* image = Rays.Image.of_resource resource in
       Ok
         {
           lease;

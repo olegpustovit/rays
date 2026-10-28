@@ -117,7 +117,7 @@ let run_benchmark model =
     and cpu_seconds = Sys.time () -. cpu
     and allocated_bytes = Gc.allocated_bytes () -. allocated in
     Printf.eprintf "pathtracer_benchmark end %d\n%!" round;
-    let rgba = Rays.Image.Private.pixels (P.image model.tracer) |> get in
+    let rgba = Rays.Image.pixels (P.image model.tracer) |> get in
     let digest = Contexts.sha256 (Bytes.to_string rgba) in
     let row = Printf.sprintf "%d,%d,%.9f,%.9f,%.0f,%s\n"
       round (P.samples model.tracer) seconds cpu_seconds allocated_bytes digest in

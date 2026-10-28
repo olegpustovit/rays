@@ -154,7 +154,7 @@ let run_font () =
   let text = "short\na much longer second line" in
   let pixels align =
     let image = msg (Font.cached_text ~wrap:400 ~align font text (Font.Blended Rays_math.Color.white)) in
-    match Image.Private.pixels image with Ok p -> p | Error m -> fail m in
+    match Image.pixels image with Ok p -> p | Error m -> fail m in
   if Bytes.equal (pixels Font.Left) (pixels Font.Center) then
     fail "Font alignment is ignored";
   Font.destroy font

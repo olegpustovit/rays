@@ -25,7 +25,7 @@ let sanitize text=if String.is_valid_utf_8 text then text else begin
   loop 0;Buffer.contents buffer end
 let resource_align=function Left->Runtime_resources.Font.Left|Center->Center|Right->Right
 let image_of_text text=match Runtime_resources.Text.into_image text with
-  |Ok image->Image.Private.of_resource image|>Result.map_error(fun message->`Msg message)
+  |Ok image->Image.of_resource image|>Result.map_error(fun message->`Msg message)
   |Error error->Error(message"Font.image"error)
 let paint ?(density=1) ?wrap ?(align=Left) font text mode=match Runtime_resources.Font.render font.resource ?wrap_width:wrap ~align:(resource_align align) ~density ~color:(rgba mode)(sanitize text)with
   |Error error->Error(message"Font.render_text"error)|Ok None->

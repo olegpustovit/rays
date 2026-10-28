@@ -61,7 +61,7 @@ let ()=
     let resolve time ~override kind graph=Editor.Private.with_images ~live:(live time)display
       (fun ~image ~texture:_->ok(image(value display ~override kind graph)))in
     let fixed=resolve 0. ~override:false "image/render" "fixed"in
-    let generation image=I.generation(Rays.Image.Private.resource image)in
+    let generation image=I.generation(Rays.Image.resource image)in
     let fixed_generation=generation fixed in
     let images=Array.init 2(fun i->resolve 0. ~override:(i=1) "image/map" "mesh")in
     let saved=exact cpu1 0. ~override:true "image/map" "mesh"in
@@ -72,17 +72,17 @@ let ()=
       Array.iteri(fun i image->
         let override=i=1 in
         assert(resolve time ~override "image/map" "mesh"==image);
-        let resource=Rays.Image.Private.resource image in
+        let resource=Rays.Image.resource image in
         assert(I.cpu_storage_bytes resource=0);
         let expected=rgba(exact cpu1 time ~override "image/map" "mesh")in
         assert(expected=rgba(exact cpu8 time ~override "image/map" "mesh"));
-        let actual=Rays.Image.Private.pixels image |> Result.get_ok in
+        let actual=Rays.Image.pixels image |> Result.get_ok in
         let maximum=ref 0 in
         Bytes.iteri(fun i c->maximum:=max !maximum(abs(Char.code c-Char.code(Bytes.get expected i))))actual;
         Printf.printf "workspace_geometry_capture,override=%b,time=%.2f,max=%d\n%!"override time !maximum;
         assert(!maximum<=1))images;
       assert(resolve time ~override:false "image/render" "mesh"==parent);
-      let actual=Rays.Image.Private.pixels parent |> Result.get_ok in
+      let actual=Rays.Image.pixels parent |> Result.get_ok in
       let expected=rgba(exact cpu1 time ~override:false "image/render" "mesh")in
       assert(expected=rgba(exact cpu8 time ~override:false "image/render" "mesh"));
       Bytes.iteri(fun i c->assert(abs(Char.code c-Char.code(Bytes.get expected i))<=1))actual;
@@ -112,7 +112,7 @@ let () =
       let image_value=List.assoc "rendered" evaluated.results in
       let snapshot state live=Rays_editor.Editor.Private.with_images ~plan:evaluated.plan ~state ~live owner
         (fun ~image ~texture:_->let image=ok(image image_value)in
-          image,Result.get_ok(Rays.Image.Private.pixels image))in
+          image,Result.get_ok(Rays.Image.pixels image))in
       let state=E.create_state()in
       let live0=Input.at_time 0. and live1={(Input.at_time 1.)with frame=1}in
       if stateful then ignore(ok(E.run ~state ~live:live0 ~time:0. doc.checked));
@@ -141,7 +141,7 @@ let ()=
   Fun.protect ~finally:(fun()->Rays_editor.Editor.close owner)(fun()->
     let evaluated=ok(E.static doc.checked)in
     let image=ok(Rays_editor.Editor.Private.image owner(List.assoc "rendered" evaluated.results))in
-    let expected=Result.get_ok(Rays.Image.Private.pixels image)in
+    let expected=Result.get_ok(Rays.Image.pixels image)in
     assert(Result.get_ok (Rays.Image.get_size image)=(8,8));
     assert(ok(Rays_editor.Editor.Private.image owner(List.assoc "rendered" evaluated.results))==image);
     assert(Rays_editor.Editor.Private.image_stats owner=(1,0));
@@ -150,7 +150,7 @@ let ()=
         ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
       Fun.protect ~finally:(fun()->Rays_editor.Editor.close fresh)(fun()->
         let actual=ok(Rays_editor.Editor.Private.image fresh(List.assoc "rendered" evaluated.results))in
-        assert(Result.get_ok(Rays.Image.Private.pixels actual)=expected))))[1;8]);
+        assert(Result.get_ok(Rays.Image.pixels actual)=expected))))[1;8]);
   assert(Rays_editor.Editor.Private.image_stats owner=(1,1));
   let directory ()=Filename.temp_dir "rays-rendered-image-" ""in
   let first=directory()and second=directory()in
@@ -194,7 +194,7 @@ let ()=
     assert(Editor.Private.image_stats !owner=(0,0));
     let image,texture=resolve 0. in
     let identity=Rays.Texture.Private.identity texture in
-    let resource=Rays.Image.Private.resource image in
+    let resource=Rays.Image.resource image in
     assert(I.cpu_storage_bytes resource=0 && I.readbacks resource=0);
     let generation=I.generation resource in
     assert(exact 0.==saved && I.generation resource=generation);
@@ -209,7 +209,7 @@ let ()=
           [Rays.Scene.D3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
             ~texture:(Rays.Scene.D3.textured ~filter:Nearest texture) mesh])]in
       let snapshot()=let image=Rays.Canvas.to_image canvas |> Result.get_ok in
-        Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->Rays.Image.Private.pixels image |> Result.get_ok)in
+        Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->Rays.Image.pixels image |> Result.get_ok)in
       let verify time=
         let actual_image,actual_texture=resolve time in
         assert(actual_image==image && Rays.Texture.Private.identity actual_texture=identity);
@@ -303,7 +303,7 @@ let ()=
       let node=Array.find_opt(fun(n:E.node)->n.kind=kind)plan.nodes |> Option.get in
       E.Deferred(Flow.Ty.image,node.id)in
     let image=Editor.Private.with_images display(fun ~image ~texture:_->ok(image(value display "image/map")))in
-    let resource=Rays.Image.Private.resource image in
+    let resource=Rays.Image.resource image in
     assert(I.cpu_storage_bytes resource=0);
     let generation=I.generation resource in
     let actual=Editor.Private.image_payload display(value display "image/render") |> ok in
@@ -327,7 +327,7 @@ let ()=
         Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->
           (* an export renders at the logical size whatever the display's density *)
           assert(Result.get_ok (Rays.Image.get_size image)=(320,240));
-          assert(Result.get_ok(Rays.Image.Private.pixels image)=expected)))files);
+          assert(Result.get_ok(Rays.Image.pixels image)=expected)))files);
   print_endline "Nested image/render exactness: CPU rounding survives an already-resident GPU child without reading or replacing it"
 
 let ()=
@@ -340,7 +340,7 @@ let ()=
     let node=(Editor.Private.image_plan owner).nodes.(0)in
     let value=E.Deferred(Flow.Ty.image,node.id)in
     let display time=Editor.Private.with_images ~live:(Input.at_time time) owner(fun ~image ~texture:_->
-      let image=ok(image value)in Rays.Image.Private.pixels image |> Result.get_ok)in
+      let image=ok(image value)in Rays.Image.pixels image |> Result.get_ok)in
     let first=display 0. in
     ignore(ok(Editor.Private.image_payload ~live:(Input.at_time 10.) owner value));
     assert(display 0.=first));
@@ -372,7 +372,7 @@ let ()=
     let child=display a "child" and parent=display a "parent"
     and fixed=display a "fixed" and width=display a "width_only"
     and height=display a "height_only"in
-    let generation image=I.generation(Rays.Image.Private.resource image)in
+    let generation image=I.generation(Rays.Image.resource image)in
     let parent_before=generation parent and fixed_before=generation fixed in
     assert(Editor.Private.image_render_stats owner=(5,0,0,0));
     assert(display b "child"==child && Result.get_ok (Rays.Image.get_size child)=(35,33));
@@ -381,7 +381,7 @@ let ()=
     assert(display b "width_only"==width && Result.get_ok (Rays.Image.get_size width)=(9,33));
     assert(display b "height_only"==height && Result.get_ok (Rays.Image.get_size height)=(35,11));
     assert(Editor.Private.image_render_stats owner=(8,3,0,0));
-    let parent_bytes=Result.get_ok(Rays.Image.Private.pixels parent)in
+    let parent_bytes=Result.get_ok(Rays.Image.pixels parent)in
     let offset=(20*80+50)*4 in
     assert(Bytes.sub parent_bytes offset 4=Bytes.make 4 '\000');
     let child_generation=generation child and fixed_generation=generation fixed in
@@ -428,7 +428,7 @@ let ()=
     let resolve time=Editor.Private.with_images ~live:(live time) !owner(fun ~image ~texture->
       ok(image(value())),ok(texture(value())))in
     let image,texture=resolve 0. in
-    let identity=Rays.Texture.Private.identity texture and resource=Rays.Image.Private.resource image in
+    let identity=Rays.Texture.Private.identity texture and resource=Rays.Image.resource image in
     let initial_generation=I.generation resource in
     assert(Editor.Private.image_render_stats !owner=(2,1,1,1));
     for frame=0 to 19 do
@@ -445,7 +445,7 @@ let ()=
         [Rays.Scene.D3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
           ~texture:(Rays.Scene.D3.textured ~filter:Nearest texture) mesh])]in
     let snapshot()=let image=Result.get_ok(Rays.Canvas.to_image destination)in
-      Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->Result.get_ok(Rays.Image.Private.pixels image))in
+      Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->Result.get_ok(Rays.Image.pixels image))in
     let verify time=
       let actual,view=resolve time in
       assert(actual==image && Rays.Texture.Private.identity view=identity);

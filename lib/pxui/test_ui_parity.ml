@@ -40,11 +40,11 @@ let check name golden canvas =
    | None -> ());
   let actual = Result.get_ok (Canvas.to_image canvas) in
   let golden = Image.load_exn (Filename.concat "fixtures" golden) in
-  if Image.Private.dimensions golden <> Image.Private.dimensions actual then
+  if Image.dimensions golden <> Image.dimensions actual then
     failwith (Printf.sprintf "PXUI %s parity: golden is %dx%d, render is %dx%d" name
-      (fst (Image.Private.dimensions golden)) (snd (Image.Private.dimensions golden))
-      (fst (Image.Private.dimensions actual)) (snd (Image.Private.dimensions actual)))
-  else if Result.get_ok (Image.Private.pixels golden) <> Result.get_ok (Image.Private.pixels actual)
+      (fst (Image.dimensions golden)) (snd (Image.dimensions golden))
+      (fst (Image.dimensions actual)) (snd (Image.dimensions actual)))
+  else if Result.get_ok (Image.pixels golden) <> Result.get_ok (Image.pixels actual)
   then failwith (Printf.sprintf "PXUI %s drifted from its golden" name)
   else Printf.printf "PXUI %s parity: exact\n" name;
   ignore(Canvas.destroy canvas)

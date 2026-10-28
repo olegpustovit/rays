@@ -74,7 +74,6 @@ val show_dialog : t -> ?filters:dialog_filter list -> ?default_location:string -
     occlusion and not its end: ask once per frame while hidden. *)
 val visible : t -> (bool, Ogpu.Error.t) result
 val destroy : t -> (unit, Ogpu.Error.t) result
-module Private : sig
   val surface_configuration : t -> (Ogpu.Surface.configuration, Ogpu.Error.t) result
   val sync_facts : t -> (unit, Ogpu.Error.t) result
   val is_window : t -> bool
@@ -92,4 +91,3 @@ module Private : sig
       its size behind the runtime's back. *)
   val window_handle : t -> Sdl3.Window.t option
 
-end

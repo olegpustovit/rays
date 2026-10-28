@@ -89,7 +89,7 @@ let compose_view ?map ~canvases ~ui_visible ~background ~rendered ~focused ~view
     | Some image when view_visible && core.Core_model.map_view -> (fun viewport ->
         let x, y, w, _ = map_rect viewport in
         [Scene.image image ~at:(x, y)
-           ~scale:(float w /. float (max 1 (fst(Image.Private.dimensions image)))) ()])
+           ~scale:(float w /. float (max 1 (fst(Image.dimensions image)))) ()])
     | _ -> world ~paint_view ~key:(match core.Core_model.focus with View key -> key | _ -> "main")
         ~camera ~rendered:focused ~view_visible in
   (* each viewport is drawn from its own orbit *)

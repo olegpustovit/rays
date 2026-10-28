@@ -84,7 +84,7 @@ let run () =
      | [Scene.Private.Scene2_segment (retained,
          [7, Renderer.Image resource])]
          when retained == image_segment
-           && resource == Image.Private.resource image -> ()
+           && resource == Image.resource image -> ()
      | _ -> failwith "display-list image binding lost managed identity");
     let peer = Image.create ~width:1 ~height:1 ~color:Rays_math.Color.white () |> Result.get_ok in
     Fun.protect ~finally:(fun () -> ignore(Image.destroy peer)) (fun () ->
@@ -93,7 +93,7 @@ let run () =
       if first.retained = rebound.retained then
         failwith "equal-generation image identities collided in retained replay");
     let replacement = Image.create ~width:1 ~height:1 ~color:Rays_math.Color.black () |> Result.get_ok in
-    Result.get_ok(Image.Private.replace image replacement);
+    Result.get_ok(Image.replace image replacement);
     let second = Result.get_ok
         (Scene.Private.stage_native ~width:32 ~height:32 [image_node]) in
     if first.retained = second.retained then

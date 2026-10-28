@@ -234,8 +234,8 @@ let bytes_of_image image =
       let n=int_of_float(Float.floor q)in let f=q-.float n in
       Char.chr(if f>0.5||(f=0.5&&n land 1=1)then n+1 else n))
 let cpu_of_image image =
-  let* bytes=message(Image.Private.pixels image)in
-  let width,height=Image.Private.dimensions image in
+  let* bytes=message(Image.pixels image)in
+  let width,height=Image.dimensions image in
   let rgba=Array.init(Bytes.length bytes)(fun i->float(Char.code(Bytes.get bytes i))/.255.)in
   Result.map_error(fun d->error d.Diagnostic.message)(CPU.of_owned_rgba ~width ~height rgba)
 let texture payload=lazy(
@@ -253,13 +253,13 @@ let publish t key entry ~width ~height ~source=
           Fun.protect ~finally:(fun()->if not !accepted then ignore(Runtime_resources.Image.destroy image))(fun()->
             Result.bind(Texture.Private.of_image image)(fun view->
               Result.map(fun public_image->entry.borrowed<-Some view;accepted:=true;public_image)
-                (Image.Private.of_resource image))))
+                (Image.of_resource image))))
     |Some image->Result.map(fun()->image)
         (Result.map_error(fun e->error(Format.asprintf "%a" Runtime_resources.pp_error e))
-          (Runtime_resources.Image.replace_gpu_source (Image.Private.resource image)
+          (Runtime_resources.Image.replace_gpu_source (Image.resource image)
             ~width ~height ~source))in
   let* borrowed=match entry.borrowed with Some view->Ok view|None->
-    message(Texture.Private.of_image(Image.Private.resource image))in
+    message(Texture.Private.of_image(Image.resource image))in
   entry.image<-Some image;entry.borrowed<-Some borrowed;
   entry.texture<-Some(lazy(Ok borrowed));Ok()
 let prepare t plan =
@@ -281,7 +281,7 @@ let peek t plan id=if t.resources.closed || not(Option.fold ~none:false ~some:((
 let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
   if not(Domain.is_main_domain())then Error(error "Image resources must resolve on the initial domain.")else
   if t.resources.closed then Error(error "Workspace image resources are closed.")else
-  L.with_images ?gpu ~metadata:(fun plan id->Option.map Image.Private.dimensions(peek t plan id))
+  L.with_images ?gpu ~metadata:(fun plan id->Option.map Image.dimensions(peek t plan id))
     (fun ?gpu ?context plan ~state ~live value->Result.map(fun entry->(Option.get entry.cpu).payload)
       (resolve ?gpu ?context t ~display:false ~state ~live plan value))(fun()->
   with_request t ?context plan(fun request->
@@ -304,12 +304,12 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
         if node.kind="exact" then begin
           let* child=resolve t ~display:true ~state ~live plan (List.assoc "value" args)in
           let source=Option.get child.image in
-          let width,height=Image.Private.dimensions source in
-          let resource=Image.Private.resource source in
+          let width,height=Image.dimensions source in
+          let resource=Image.resource source in
           let* _=Result.map_error(fun e->error(Format.asprintf "%a" Runtime_resources.pp_error e))
             (Runtime_resources.Image.gpu_snapshot resource)in
           let key=authored_key "exact:" node ^ Marshal.to_string
-            (t.serial,Image.Private.identity source,Runtime_resources.Image.generation resource,width,height)
+            (t.serial,Image.identity source,Runtime_resources.Image.generation resource,width,height)
             [Marshal.No_sharing]in
           let result=match List.assoc_opt key t.entries with
             |Some entry->Ok entry
@@ -323,7 +323,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
                     (* Admission precedes the read. Pixels returns owned bytes;
                        the native image copies them and the CPU snapshot owns them. *)
                     let ( let* )=Result.bind in
-                    let* bytes=Image.Private.pixels source in
+                    let* bytes=Image.pixels source in
                     let* cpu=Result.map_error(fun d->d.Diagnostic.message)
                       (CPU.of_owned_rgba8 ~width ~height bytes)in
                     let* image=Image.upload_rgba ~width ~height ~rgba:bytes()in
@@ -426,7 +426,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
                   if Option.fold ~none:false ~some:((==)(Option.get child.cpu).stamp)child.display then
                     Ok(Option.get child.image)else match child.image with
                   |Some image when Runtime_resources.Image.gpu_snapshot
-                      (Image.Private.resource image)=Ok None->
+                      (Image.resource image)=Ok None->
                       child.display<-None;
                       message(Image.upload_rgba ~into:image ~width ~height ~rgba:(bytes_of_image payload)())
                   |None->

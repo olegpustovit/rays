@@ -74,7 +74,7 @@ let ()=List.iter(fun stateful->
     let owner,_,_=owner in
     Flow_native.Workspace_images.image owner lowered.plan ~state ~live:(live 0)
       (List.assoc "fixed" lowered.evaluated.results) |> ok in
-  let generation image=Native.generation(Rays.Image.Private.resource image)in
+  let generation image=Native.generation(Rays.Image.resource image)in
   let retained=ref []in
   Fun.protect ~finally:(fun()->List.iter(fun(owner,resources,gpu)->
     Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)[cpu1;cpu8;gpu1;gpu8])
@@ -93,19 +93,19 @@ let ()=List.iter(fun stateful->
           if !retained=[] then retained:=[one,Bytes.copy(bytes one)];
           List.iteri(fun index ((owner,_,gpu)as owned)->
             let child=image owned state current override "image/map"in
-            let native=Rays.Image.Private.resource child in
+            let native=Rays.Image.resource child in
             assert(Native.cpu_storage_bytes native=0);
-            let actual=Rays.Image.Private.pixels child |> Result.get_ok in
+            let actual=Rays.Image.pixels child |> Result.get_ok in
             let maximum=ref 0 in
             Bytes.iteri(fun i c->maximum:=max !maximum(abs(Char.code c-Char.code(Bytes.get expected i))))actual;
             assert(!maximum<=1);
             let parent=image owned state current override "image/render"in
-            let rendered=Rays.Image.Private.pixels parent |> Result.get_ok in
+            let rendered=Rays.Image.pixels parent |> Result.get_ok in
             Bytes.iteri(fun i c->assert(abs(Char.code c-Char.code(Bytes.get expected i))<=1))rendered;
             let stats=Flow_native.Workspace_images.capture_stats owner in
             let host,_,_,_,_=Flow_native.Workspace_gpu.image_stats gpu in
             let reads=host.status_reads in
-            let parent_native=Rays.Image.Private.resource parent in
+            let parent_native=Rays.Image.resource parent in
             let child_reads=Native.readbacks native
             and parent_reads=Native.readbacks parent_native in
             assert(image owned state current override "image/map"==child
@@ -185,7 +185,7 @@ let ()=List.iter(fun domains->
     let bytes=P.Image.rgba8 saved |> Option.get |> Bytes.copy in
     retained:=Some(saved,bytes);
     let first=image state 0 |> ok in
-    let original=Rays.Image.Private.pixels first |> Result.get_ok in
+    let original=Rays.Image.pixels first |> Result.get_ok in
     assert(original=bytes && resources.images_created=2);
     advance state 1;
     let stamp=E.state_stamp state in
@@ -195,13 +195,13 @@ let ()=List.iter(fun domains->
        |Ok _->failwith "Invalid source cardinality unexpectedly rendered");
       assert(E.state_stamp state=stamp && resources.images_created=2
         && P.Image.rgba8 saved=Some bytes);
-      assert(Result.is_error(Rays.Image.Private.pixels first))
+      assert(Result.is_error(Rays.Image.pixels first))
     done;
     let fresh=E.create_state()in
     advance fresh 1;
     let fresh_stamp=E.state_stamp fresh in
     let recovered=image fresh 1 |> ok in
-    assert(recovered==first && Rays.Image.Private.pixels recovered=Ok original
+    assert(recovered==first && Rays.Image.pixels recovered=Ok original
       && E.state_stamp fresh=fresh_stamp && E.state_stamp state=stamp
       && resources.images_created=2);
     assert(payload fresh 1 |> ok |> P.Image.rgba8 = Some bytes));
@@ -246,8 +246,8 @@ let ()=
     held:=Some first;
     let saved_bytes=Bytes.copy(bytes first)in
     let frozen=image "exact" 0. |> ok and child=image "image/map" 0. |> ok in
-    let native=Image.Private.resource child in
-    assert(Char.code(Bytes.get saved_bytes 2)=128 && Image.Private.identity frozen<>Image.Private.identity child
+    let native=Image.resource child in
+    assert(Char.code(Bytes.get saved_bytes 2)=128 && Image.identity frozen<>Image.identity child
       && Native.readbacks native=1 && resources.images_created=2);
     assert(payload "exact" 0. |> ok == first);
     assert(payload "image/map" 0. |> ok == ordinary);
@@ -262,12 +262,12 @@ let ()=
       Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy canvas))(fun()->
         render canvas scene;
         let image=Rays.Canvas.to_image canvas |> Result.get_ok in
-        Fun.protect ~finally:(fun()->ignore(Image.destroy image))(fun()->Image.Private.pixels image |> Result.get_ok))in
+        Fun.protect ~finally:(fun()->ignore(Image.destroy image))(fun()->Image.pixels image |> Result.get_ok))in
     let saved_scene=render_saved()in
     assert(saved_scene=saved_bytes);
     let second=payload "exact" 1. |> ok in
     assert(second!=first && bytes second<>saved_bytes && bytes first=saved_bytes);
-    assert(Image.Private.identity(image "exact" 1. |> ok)<>Image.Private.identity frozen
+    assert(Image.identity(image "exact" 1. |> ok)<>Image.identity frozen
       && Native.readbacks native=2 && render_saved()=saved_scene);
     (* Expire a borrowed source without changing its published generation.
        Even a frozen-key hit must validate it before returning the payload. *)
@@ -324,7 +324,7 @@ let ()=List.iter(fun(width,height,expected_reads)->
     held:=Array.init 63(fun frame->resolve frame |> ok);
     let source=Flow_native.Workspace_images.image owner lowered.plan ~state
       ~live:{(Input.at_time 62.)with frame=62}(E.Deferred(Flow.Ty.image,child.id)) |> ok in
-    let native=Rays.Image.Private.resource source in
+    let native=Rays.Image.resource source in
     assert(resources.images_created=64 && Runtime_resources.Image.readbacks native=expected_reads);
     for _=1 to 2 do
       assert(match resolve 63 with Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false)
@@ -367,7 +367,7 @@ let ()=if Array.mem "--capture-budget" Sys.argv then begin
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")lowered.Flow_sop.Lower.plan.nodes |> Option.get in
       let image=Flow_native.Workspace_images.image owner ~state:(E.create_state()) ~live:(Input.at_time time)
         lowered.plan(E.Deferred(Flow.Ty.image,node.id)) |> ok in
-      let bytes=Rays.Image.Private.pixels image |> Result.get_ok in
+      let bytes=Rays.Image.pixels image |> Result.get_ok in
       assert(Char.code(Bytes.get bytes 0)=int_of_float(Float.round((0.5/.65.+.0.03125+.time*.0.015625)*.255.)))in
     let large_lowered=lower large in run large_lowered 0.;run large_lowered 1.;
     assert(Flow_native.Workspace_images.capture_stats owner=(1,0,0,2,2));

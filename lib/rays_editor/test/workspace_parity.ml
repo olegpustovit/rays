@@ -256,7 +256,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
             let image = image value |> ok in
             compare images ("image-" ^ key value ^ Printf.sprintf "-t%g" time)
               (Marshal.to_string (Rays.Image.get_size image |> string_ok,
-                Rays.Image.Private.pixels image |> string_ok) [Marshal.No_sharing]);
+                Rays.Image.pixels image |> string_ok) [Marshal.No_sharing]);
             image in
           let render id scene =
             if Rays.Scene.Private.commands scene = [||] then failwith (name ^ ": empty image oracle commands");

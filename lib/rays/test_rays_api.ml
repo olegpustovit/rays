@@ -253,29 +253,29 @@ let resources () =
   Scene.Private.with_cache_context (Scene.Private.create_cache_context ()) (fun () ->
   let image = Image.create ~width:2 ~height:2 ~color:(Rays_math.Color.rgba 1 2 3 4) () |> Result.get_ok in
   check (Result.get_ok(Image.get_size image) = (2, 2)
-         && Result.get_ok (Image.Private.pixels image)
+         && Result.get_ok (Image.pixels image)
             = Bytes.of_string "\001\002\003\004\001\002\003\004\001\002\003\004\001\002\003\004")
     "Image snapshot";
   let rgba = Bytes.make 16 '\042' in
   let uploaded = Image.upload_rgba ~width:2 ~height:2 ~rgba () |> Result.get_ok in
-  let id = Image.Private.identity uploaded in
+  let id = Image.identity uploaded in
   check (Result.is_error (Image.upload_rgba ~into:uploaded ~width:2 ~height:2
                             ~rgba:(Bytes.make 3 '\000') ())
-         && Image.Private.identity uploaded = id
-         && Result.get_ok (Image.Private.pixels uploaded) = rgba)
+         && Image.identity uploaded = id
+         && Result.get_ok (Image.pixels uploaded) = rgba)
     "invalid RGBA upload changed an image";
   check (Image.upload_rgba ~into:uploaded ~width:2 ~height:2 ~rgba:(Bytes.make 16 '\007') ()
          = Ok uploaded
-         && Image.Private.identity uploaded = id
-         && Result.get_ok (Image.Private.pixels uploaded) = Bytes.make 16 '\007')
+         && Image.identity uploaded = id
+         && Result.get_ok (Image.pixels uploaded) = Bytes.make 16 '\007')
     "RGBA replacement did not preserve image identity";
   Result.get_ok(Image.destroy uploaded);
   let replaced = Image.create ~width:2 ~height:3 () |> Result.get_ok in
   check (Result.get_ok(Image.get_size replaced) = (2, 3)) "image dimensions";
-  let identity = Image.Private.identity replaced in
-  Result.get_ok(Image.Private.replace replaced (Image.create ~width:1 ~height:1 ~color:Rays_math.Color.red () |> Result.get_ok));
-  check (Result.get_ok(Image.get_size replaced) = (1, 1) && Image.Private.identity replaced = identity
-         && Result.get_ok (Image.Private.pixels replaced) = Bytes.of_string "\255\000\000\255")
+  let identity = Image.identity replaced in
+  Result.get_ok(Image.replace replaced (Image.create ~width:1 ~height:1 ~color:Rays_math.Color.red () |> Result.get_ok));
+  check (Result.get_ok(Image.get_size replaced) = (1, 1) && Image.identity replaced = identity
+         && Result.get_ok (Image.pixels replaced) = Bytes.of_string "\255\000\000\255")
     "stable image replacement";
   Result.get_ok(Image.destroy replaced);
   let canvas = Canvas.create_exn ~width:3 ~height:2 in
@@ -286,7 +286,7 @@ let resources () =
       (Audio.Sample.synth audio ~waveform:Sine ~frequency:440. ~duration:0.2 ()) in
   check (Result.is_ok (Audio.Sample.play audio sample)) "sample playing";
   Audio.Sample.destroy sample;
-  for _ = 1 to 100_000 do check (Image.Private.identity image > 0) "stable image identity" done;
+  for _ = 1 to 100_000 do check (Image.identity image > 0) "stable image identity" done;
   Result.get_ok(Image.destroy captured);Result.get_ok(Canvas.destroy canvas);Result.get_ok(Image.destroy image);
   Result.get_ok (Audio.shutdown audio))
 

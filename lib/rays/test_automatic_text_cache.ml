@@ -68,7 +68,7 @@ let run () =
   (* An explicit font owns its cached text: releasing scenes leaves it alone
      and destroying the font destroys it. *)
   let font=Result.get_ok(Font.system~size:15())in
-  let image=Image.Private.resource(Result.get_ok
+  let image=Image.resource(Result.get_ok
     (Font.cached_text font"explicit lifetime"(Font.Blended Rays_math.Color.white)))in
   let other=Scene.[text~at:(0,0)~size:15"explicit lifetime"]in
   ignore(stage other);Scene.Private.release other;

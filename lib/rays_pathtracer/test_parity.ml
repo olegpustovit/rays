@@ -98,7 +98,7 @@ let run () =
               (Scene.D3.with_world baked (Scene.D3.create nodes))]);
             let image = get (Canvas.to_image canvas) in
             let raster = Fun.protect ~finally:(fun () -> ignore(Image.destroy image))
-              (fun () -> Bytes.copy (get (Image.Private.pixels image))) in
+              (fun () -> Bytes.copy (get (Image.pixels image))) in
             assert (Bytes.length traced = width * height * 4 &&
               Bytes.length raster = Bytes.length traced);
             Array.iteri (fun i pixels ->

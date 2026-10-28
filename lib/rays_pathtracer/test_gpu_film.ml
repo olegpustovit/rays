@@ -38,7 +38,7 @@ let run () =
       let tracer=get(P.create ~width:48 ~height:32 scene)in
       Fun.protect ~finally:(fun()->P.destroy tracer)(fun()->
         get(P.render tracer camera);get(P.flush tracer);
-        let image=Rays.Image.Private.resource(P.image tracer)in
+        let image=Rays.Image.resource(P.image tracer)in
         let texture=match Runtime_resources.Image.gpu_snapshot image with
           |Ok(Some(_,_,_,texture))->texture
           |_->failwith"traced film was published through CPU image storage"in
@@ -54,7 +54,7 @@ let run () =
             image (P.image tracer) ~at:(0,0) ()]);
           let copied=get(Rays.Canvas.to_image canvas)in
           let sampled=Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy copied))
-            (fun()->Bytes.copy(get(Rays.Image.Private.pixels copied)))in
+            (fun()->Bytes.copy(get(Rays.Image.pixels copied)))in
           assert(sampled=direct));
         let colors=Hashtbl.create 16 in
         Bytes.iteri(fun index byte->if index mod 4=0 then Hashtbl.replace colors byte())direct;

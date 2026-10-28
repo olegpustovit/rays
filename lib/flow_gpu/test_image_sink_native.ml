@@ -172,7 +172,7 @@ let () =
       let current=Option.get !image in
       let canvas=Rays.Canvas.create ~width:65 ~height:17 |> Result.get_ok in
       Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy canvas))(fun()->
-        let image=match Rays.Image.Private.of_resource current with
+        let image=match Rays.Image.of_resource current with
           |Ok image->image|Error error->failwith("Image.of_resource: "^error)in
         (* [image] aliases [current]; the outer test scope owns and destroys that resource. *)
         let node=Rays.Scene.image image ~at:(0,0)()in
@@ -184,7 +184,7 @@ let () =
           ~id:(Scene_command.Display_list.fresh_id()) ~version:0L |> Result.get_ok in
         let snapshot canvas=let image=Rays.Canvas.to_image canvas |> Result.get_ok in
           Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->
-            Rays.Image.Private.pixels image |> Result.get_ok)in
+            Rays.Image.pixels image |> Result.get_ok)in
         List.iteri(fun index scene->
         let rendering=Rays.Scene.Private.stage_native_render ~width:65 ~height:17 scene |> Result.get_ok in
         if List.length scene>1 || (match rendering.layers with [Scene2_segment _]->true|_->false)
@@ -278,16 +278,16 @@ let ()=
             [Rays.Scene.D3.mesh ~material:(Rays.Material.matte Rays_math.Color.white)
               ~cull:Cull_none ~texture:(Rays.Scene.D3.textured ~filter:Nearest texture)mesh])]in
         let image_scene source_image=Rays.Scene.[clear Rays_math.Color.black;image source_image ~at:(0,0)()]in
-        let displayed=image_scene(Rays.Image.Private.of_resource current|>Result.get_ok)
+        let displayed=image_scene(Rays.Image.of_resource current|>Result.get_ok)
         and meshed=mesh_scene view in
         let mixed source_image texture=Rays.Scene.[clear Rays_math.Color.black;
           group[image source_image ~at:(0,0)()];Private.layer_break;
           group(List.tl(mesh_scene ~viewport:(33,0,32,17) texture))]in
-        let mixed_scene=mixed(Rays.Image.Private.of_resource current|>Result.get_ok)view in
+        let mixed_scene=mixed(Rays.Image.of_resource current|>Result.get_ok)view in
         let scenes=ref[displayed;meshed;mixed_scene]in
         let snapshot target=let image=Rays.Canvas.to_image target |> Result.get_ok in
           Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->
-            Rays.Image.Private.pixels image |> Result.get_ok)in
+            Rays.Image.pixels image |> Result.get_ok)in
         let verify converted width height time=
           let bytes=B.read_texture(G.Image_sink.texture converted |> Option.get)
             ~bytes_per_row:(width*4) |> native in
@@ -351,7 +351,7 @@ let ()=
         resource(I.replace_gpu_source current ~width:17 ~height:5
           ~source:(fun()->G.Image_sink.texture resized));
         assert(Rays.Texture.Private.identity view=identity && Rays.Texture.size view=(17,5));
-        let resized_image=Rays.Image.Private.of_resource current |> Result.get_ok in
+        let resized_image=Rays.Image.of_resource current |> Result.get_ok in
         scenes:=[image_scene resized_image;meshed;mixed resized_image view];
         verify resized 17 5 0.5;
         List.iter(fun(bytes,saved,_)->assert(bytes=saved)) !leases;

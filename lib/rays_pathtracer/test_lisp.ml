@@ -111,7 +111,7 @@ let scenario label (world : W.baked option) =
   get (P.set_world tracer world);
   P.reset tracer; (* a World edit makes the next frame a preview *)
   for _ = 1 to frames do get (P.render tracer camera); get (P.flush tracer) done;
-  let msl = Bytes.copy (get (Rays.Image.Private.pixels (P.image tracer))) in
+  let msl = Bytes.copy (get (Rays.Image.pixels (P.image tracer))) in
   (* the Lisp side: the same uniforms *)
   let forward = normalize (sub (0., 0., 0.) eye) in
   let right = normalize (cross forward (0., 1., 0.)) in

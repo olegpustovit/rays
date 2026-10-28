@@ -27,13 +27,10 @@ let destroy image=map"Image.destroy"(Runtime_resources.Image.destroy image.resou
 let get_size image=map"Image.get_size"(Runtime_resources.Image.size image.resource)
 let get_width image=Result.map fst(get_size image)
 let get_height image=Result.map snd(get_size image)
-module Private=struct
   let replace target source=match Runtime_resources.Image.replace_owned target.resource source.resource with
     |Ok()->target.width<-source.width;target.height<-source.height;Ok()
-    |Error error->Error(message"Image.Private.replace"error)
+    |Error error->Error(message"Image.replace"error)
   let identity image=Runtime_resources.Image.identity image.resource
   let pixels image=map"Image.pixels"(Runtime_resources.Image.pixels image.resource)
-  let of_resource=of_resource
   let resource image=image.resource
   let dimensions image=image.width,image.height
-end

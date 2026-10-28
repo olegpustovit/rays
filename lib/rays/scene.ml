@@ -124,7 +124,7 @@ let display_list ?(images=[]) segment=
     |_->())(Scene_command.Render_ir.commands_readonly
       (Scene_command.Display_list.render_ir segment));
   let resources=Array.fold_right(fun(id,image) rest->
-    (id,Renderer.Image(Image.Private.resource image))::rest)
+    (id,Renderer.Image(Image.resource image))::rest)
     images[]in
   Display_list{segment;resources}
 let text_input_region ~at:(x,y)~w~h ?(focused=false) ?(cursor=0)()=
@@ -176,7 +176,7 @@ module Private=struct
        invalid_arg"Scene.Private.ui: unbound texture resource")
      (Scene_command.Ui_batch.textures batch);
    Ui{ui=batch;ui_resources=List.map(fun(id,image)->
-     id,Renderer.Image(Image.Private.resource image))images}
+     id,Renderer.Image(Image.resource image))images}
  type native_layer=
   |Scene2_layer of Scene_command.Render_ir.t*(int*Renderer.resource)list
   |Scene2_segment of Scene_command.Display_list.t*
@@ -231,9 +231,9 @@ module Private=struct
    Array.unsafe_set builder.values builder.length command;
    builder.length<-builder.length+1
  let image_command builder image x y scale angle=
-  let width,height=Image.Private.dimensions image in let rect={Scene_command.Render_ir.x=0.;y=0.;width=float width;height=float height}in
+  let width,height=Image.dimensions image in let rect={Scene_command.Render_ir.x=0.;y=0.;width=float width;height=float height}in
     let destination={Scene_command.Render_ir.x=float x;y=float y;width=float width*.scale;height=float height*.scale}in
-    let command=Scene_command.Render_ir.Image{resource_id=Image.Private.identity image;source=rect;destination}in
+    let command=Scene_command.Render_ir.Image{resource_id=Image.identity image;source=rect;destination}in
     if angle<>0. then(
       let px=destination.x+.destination.width*.0.5 and py=destination.y+.destination.height*.0.5 and c=cos angle and s=sin angle in
       let xx=c and xy=(-.s)and yx=s and yy=c in
@@ -268,8 +268,8 @@ module Private=struct
  let image_resources ?(density=1) scene=
    let rec nodes acc=function
     |[]->acc
-    |Image node::rest->nodes((Image.Private.identity node.image,Renderer.Image(Image.Private.resource node.image))::acc)rest
-    |Text node::rest->let image=text_image ~density node in nodes((Image.Private.identity image,Renderer.Image(Image.Private.resource image))::acc)rest
+    |Image node::rest->nodes((Image.identity node.image,Renderer.Image(Image.resource node.image))::acc)rest
+    |Text node::rest->let image=text_image ~density node in nodes((Image.identity image,Renderer.Image(Image.resource image))::acc)rest
     |Display_list node::rest->nodes(List.rev_append node.resources acc)rest
     |Group nested::rest|Translate(_,_,nested)::rest|Rotate(_,nested)::rest
     |Scale(_,_,nested)::rest|Affine(_,nested)::rest|Clip(_,_,_,_,nested)::rest|Blend(_,nested)::rest->
@@ -460,7 +460,7 @@ module Private=struct
    |[]->Ok()
    |Image node::rest->
        Result.bind(Runtime_resources.Image.gpu_snapshot
-         (Image.Private.resource node.image))(fun _->validate_native_images rest)
+         (Image.resource node.image))(fun _->validate_native_images rest)
    |(Group nested|Translate(_,_,nested)|Rotate(_,nested)|Scale(_,_,nested)|Affine(_,nested)
      |Clip(_,_,_,_,nested)|Blend(_,nested))::rest->
        Result.bind(validate_native_images nested)(fun()->validate_native_images rest)

@@ -747,7 +747,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
              |Some(Probe.Image preview)->image preview.node
              |_->None in
            Option.iter(fun image->
-             let w,h=Rays.Image.Private.dimensions image in
+             let w,h=Rays.Image.dimensions image in
              Pxui.Ui.inspector_readout ui ~width ~key:"image-size" ~label:"image"
                (Printf.sprintf "%d × %d" w h);
              let height=min 160.(width *. float h /. float w)in
