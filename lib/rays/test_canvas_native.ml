@@ -58,10 +58,10 @@ let completed_source ()=
   let images=ref[]in
   Fun.protect ~finally:(fun()->
     List.iter(fun image->ignore(Image.destroy image))!images;ignore(Canvas.destroy canvas);ignore(Canvas.destroy destination))(fun()->
-    require(Result.is_error(Canvas.Private.gpu_source canvas))"fresh Canvas allowed a GPU borrow";
+    require(Result.is_error(Canvas.gpu_source canvas))"fresh Canvas allowed a GPU borrow";
     let render color=render_canvas canvas Scene.[clear color]in
     let borrow()=
-      let width,height,source=Result.get_ok(Canvas.Private.gpu_source canvas)in
+      let width,height,source=Result.get_ok(Canvas.gpu_source canvas)in
       require((width,height)=(65,3))"Canvas borrow extent";
       let resource=Result.get_ok(Runtime_resources.Image.of_gpu ~width ~height ~source)in
       let image=Result.get_ok(Image.of_resource resource)in images:=image:: !images;
@@ -78,10 +78,10 @@ let completed_source ()=
     let scene=Scene.[clear Rays_math.Color.black;image published ~at:(0,0)()]in
     render_canvas destination scene;
     require(channel destination ~x:64 ~y:2=(255,0,0,255))"borrowed Canvas native consumer pixel";
-    require(Canvas.Private.pixel_stats canvas=(0,0))"Canvas borrowing captured or read source pixels";
+    require(Canvas.pixel_stats canvas=(0,0))"Canvas borrowing captured or read source pixels";
     let wrong_context()=
       require(Option.is_none(source()))"Canvas callback accepted wrong execution context";
-      require(Result.is_error(Canvas.Private.gpu_source canvas))"Canvas borrow accepted wrong execution context";
+      require(Result.is_error(Canvas.gpu_source canvas))"Canvas borrow accepted wrong execution context";
       require(Result.is_error(Canvas.destroy canvas))"Canvas destroy accepted wrong execution context";
       require(Result.is_error(Image.destroy image))"Image destroy accepted wrong execution context";
       let rejected=Result.is_error(Canvas.render canvas Scene.[clear green]) in
@@ -103,16 +103,16 @@ let completed_source ()=
     let source,image=borrow()in
     let failed=Result.is_error(Canvas.render canvas Scene.[rect ~at:(0,0) ~w:1 ~h:1();clear Rays_math.Color.red])in
     require failed "Canvas late Clear fixture succeeded";expires source image;
-    require(Result.is_error(Canvas.Private.gpu_source canvas))"failed render left a completed Canvas source";
-    require(Canvas.Private.pixel_stats canvas=(0,0))"failed Canvas render read or captured pixels";
+    require(Result.is_error(Canvas.gpu_source canvas))"failed render left a completed Canvas source";
+    require(Canvas.pixel_stats canvas=(0,0))"failed Canvas render read or captured pixels";
     render green;
     let source,image=borrow()in
     let failed=Result.is_error(Canvas.render ~density:0 canvas Scene.[clear blue])in
     require failed "Canvas accepted zero density";expires source image;
-    require(Result.is_error(Canvas.Private.gpu_source canvas))"invalid density left a completed source";
+    require(Result.is_error(Canvas.gpu_source canvas))"invalid density left a completed source";
     render green;
     let source,image=borrow()in
-    ignore(Result.get_ok(Canvas.Private.invalidate canvas));expires source image;
+    ignore(Result.get_ok(Canvas.invalidate canvas));expires source image;
     render green;
     let captured=Result.get_ok(Canvas.to_image canvas)in images:=captured:: !images;
     let _,_,_,bytes,lease=Result.get_ok(Runtime_resources.Image.borrow_snapshot
@@ -120,11 +120,11 @@ let completed_source ()=
     Fun.protect ~finally:(fun()->Runtime_resources.Image.release_snapshot lease)(fun()->
       let saved=Bytes.copy bytes in
       require(Bytes.sub saved 0 4=Bytes.of_string "\x00\xff\x00\xff")"Canvas CPU snapshot pixel";
-      require(Canvas.Private.pixel_stats canvas=(1,1))"Canvas capture actual readback count";
+      require(Canvas.pixel_stats canvas=(1,1))"Canvas capture actual readback count";
       render blue;
       let source,image=borrow()in
       ignore(Canvas.destroy canvas);expires source image;
-      require(Canvas.Private.pixel_stats canvas=(1,1))"Canvas destruction read discarded GPU pixels";
+      require(Canvas.pixel_stats canvas=(1,1))"Canvas destruction read discarded GPU pixels";
       require(bytes=saved && Result.get_ok(Image.pixels captured)=saved)
         "Canvas updates or destruction changed retained CPU bytes";
       ignore(Canvas.destroy canvas)));

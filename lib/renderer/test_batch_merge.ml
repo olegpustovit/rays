@@ -33,10 +33,10 @@ let all_sets sets =
 
 let floats a = Test_marks_native.floats a
 let marks_token gpu s =
-  let sink = get (Renderer.Private.create_gpu_marks gpu) in
+  let sink = get (Renderer.create_gpu_marks gpu) in
   let position = floats (Array.init (3 * per_set) (fun k ->
     let x, y = centre s (k / 3) in match k mod 3 with 0 -> x | 1 -> y | _ -> 0.)) in
-  let token = get (Renderer.Private.gpu_marks sink ~kind:4 ~count:per_set
+  let token = get (Renderer.gpu_marks sink ~kind:4 ~count:per_set
     [| Host (position, 3); Host (floats [| radius |], 0); Host (Test_marks_native.words [| word s |], 0);
        Host (Test_marks_native.words [| 0l |], 0); Host (floats [| 1. |], 0) |]) in
   sink, token
@@ -73,7 +73,7 @@ let run () =
     (* Alternate Ui_batch and Marks sets: three families runs never merge, order is kept. *)
     let sources = List.map (fun s -> if s mod 2 = 0 then None else Some (marks_token gpu s)) (range 6) in
     Fun.protect ~finally:(fun () -> List.iter (Option.iter (fun (sink, _) ->
-        Renderer.Private.close_gpu_marks sink)) sources) (fun () ->
+        Renderer.close_gpu_marks sink)) sources) (fun () ->
       let shapes = List.mapi (fun s -> function
         | None -> R.Shapes (cpu_set s)
         | Some (_, token) -> R.Shapes (Scene_command.Ui_batch.of_marks token)) sources in

@@ -80,7 +80,7 @@ let () =
   let point_geometry = Scene_command.Shape2.polygon
       [3.25, -4.75; 4.25, -4.75; 4.25, -3.75; 3.25, -3.75]
       ~fill:(Some 0xaabbccffl) ~stroke:None
-    |> Array.to_list |> List.map Scene.Private.geometry in
+    |> Array.to_list |> List.map Scene.geometry in
   assert (Bytes.equal (serialize point) (serialize point_geometry));
   let points = new_scene
       "(draw/points (map (fn [i] [(+ 1.25 (* i 2.25)) (+ -2.75 (* i 3.5)) 0]) (array/range 2)) :color \"#def\")" in
@@ -88,7 +88,7 @@ let () =
     shape_rect b ~x:1.25 ~y:(-2.75) ~width:1. ~height:1. ~fill:0xddeeffffl ~stroke:0l ();
     shape_rect b ~x:3.5 ~y:0.75 ~width:1. ~height:1. ~fill:0xddeeffffl ~stroke:0l ();
     publish b) in
-  assert (Bytes.equal (serialize points) (serialize [Scene.Private.shapes batch]))
+  assert (Bytes.equal (serialize points) (serialize [Scene.shapes batch]))
 let () =
   assert (List.length digests = List.length pictures);
   List.iteri (fun i body ->
@@ -109,7 +109,7 @@ let () =
   let batch = Scene_command.Ui_batch.Builder.(let b = create () in
     circle b ~x:1.5 ~y:2. ~radius:3. ~fill:0xff0000ffl ~stroke:0l (); publish b) in
   let empty = Scene_command.Ui_batch.Builder.(publish (create ())) in
-  let expected = [Scene.Private.shapes batch; Scene.rotate angle [Scene.Private.shapes empty]] in
+  let expected = [Scene.shapes batch; Scene.rotate angle [Scene.shapes empty]] in
   assert (Bytes.equal (serialize expected) (serialize (ok (Flow_native.Marks_scene.scene ~buffers:none marks))));
   (* A mark the contract rejects is an error, and so is an image without a resolver. *)
   assert (Result.is_error (Flow_native.Marks_scene.scene ~buffers:none [|M.Pop_transform|]));

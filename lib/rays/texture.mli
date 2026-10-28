@@ -24,17 +24,17 @@ val sample :
   Rays_math.Color.t
 (** Sample normalized texture coordinates. [(0, 0)] is the upper-left texel. *)
 
-module Private : sig
-  val of_image : Runtime_resources.Image.t -> (t,string) result
-  val image : t -> Runtime_resources.Image.t option
-  (* Borrow an existing GPU image without CPU storage or texture ownership.
+val of_image : Runtime_resources.Image.t -> (t,string) result
+(* Borrow an existing GPU image without CPU storage or texture ownership.
       Identity is stable; dimensions follow publication/resize. CPU pixel,
       sampling and mipmap operations require an explicit immutable snapshot.
       Creation validates the live GPU source on the initial domain. *)
-  (* Zero-copy construction for fresh immutable pixel arrays. The supplied
+(* Zero-copy construction for fresh immutable pixel arrays. The supplied
       array becomes backing storage and must not be mutated afterward. *)
   val create_owned :
     width:int -> height:int -> Rays_math.Color.t array -> (t, string) result
+module Private : sig
+  val image : t -> Runtime_resources.Image.t option
   (* Allocation-free packed RGBA sampling for renderer-independent image
      processing and deterministic texture queries. *)
   val levels : t -> (int * int * Rays_math.Color.t array) array

@@ -62,22 +62,21 @@ let pixels value=Result.bind(size value)(fun(w,h)->
 let to_image value=match Runtime_resources.Canvas.capture value.resource with
   |Ok image->Image.of_resource image
   |Error error->Error(message"Canvas.to_image"error)
+let pixel_stats value=Runtime_resources.Canvas.pixel_stats value.resource
+let gpu_source value=
+  match Runtime_resources.Canvas.size value.resource with
+  |Error error->Error(message"Canvas.gpu_source"error)
+  |Ok _ when value.destroyed || not value.completed->Error"Canvas.gpu_source: no completed GPU frame"
+  |Ok _->match Runtime_resources.Canvas.gpu_snapshot value.resource with
+    |None->Error"Canvas.gpu_source: no completed GPU frame"
+    |Some(width,height,generation,texture)->
+        let epoch=value.epoch in
+        Ok(width,height,fun()->
+          if value.destroyed || not value.completed || value.epoch<>epoch then None else
+          match Runtime_resources.Canvas.gpu_snapshot value.resource with
+          |Some(_,_,current,source)when current=generation && source==texture->Some texture
+          |_->None)
 module Private=struct
-  let invalidate=invalidate
-  let pixel_stats value=Runtime_resources.Canvas.pixel_stats value.resource
-  let gpu_source value=
-    match Runtime_resources.Canvas.size value.resource with
-    |Error error->Error(message"Canvas.gpu_source"error)
-    |Ok _ when value.destroyed || not value.completed->Error"Canvas.gpu_source: no completed GPU frame"
-    |Ok _->match Runtime_resources.Canvas.gpu_snapshot value.resource with
-      |None->Error"Canvas.gpu_source: no completed GPU frame"
-      |Some(width,height,generation,texture)->
-          let epoch=value.epoch in
-          Ok(width,height,fun()->
-            if value.destroyed || not value.completed || value.epoch<>epoch then None else
-            match Runtime_resources.Canvas.gpu_snapshot value.resource with
-            |Some(_,_,current,source)when current=generation && source==texture->Some texture
-            |_->None)
   type native_stats=Renderer.stats
   let native_stats value=match value.execution with
     |None->Ok Renderer.zero_stats

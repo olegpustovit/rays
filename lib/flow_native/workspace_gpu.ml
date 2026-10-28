@@ -1,7 +1,6 @@
 module G = Flow_ir.Gpu
 module H = Flow_gpu.Host
 module X = Renderer
-module P = X.Private
 
 module Slots = Lru.Make (struct
   type t = int
@@ -43,7 +42,7 @@ let close_image stats sink =
 type t = {
   clock : unit -> float;
   mutable owner : (X.gpu * H.t) option;
-  mark_sets : P.gpu_marks Slots.t;
+  mark_sets : X.gpu_marks Slots.t;
   images : Flow_gpu.Image_sink.t Images.t;
   image_stats : image_stats;
   mutable closed_host : H.stats;
@@ -65,7 +64,7 @@ let create ?(clock = Unix.gettimeofday) () =
   {
     clock;
     owner = None;
-    mark_sets = Slots.create ~release:(fun _ -> P.close_gpu_marks) 64;
+    mark_sets = Slots.create ~release:(fun _ -> X.close_gpu_marks) 64;
     images = Images.create ~release:(fun _ -> close_image image_stats) 64;
     image_stats;
     closed_host = H.zero;
@@ -325,7 +324,7 @@ let marks t : Marks_scene.gpu =
               (fun sink ->
                 Slots.add t.mark_sets slot sink;
                 sink)
-              (native (P.create_gpu_marks gpu))
+              (native (X.create_gpu_marks gpu))
       in
       Result.bind sink (fun sink ->
           let rec resolve values = function
@@ -351,9 +350,9 @@ let marks t : Marks_scene.gpu =
               in
               let source ({ Marks_scene.source; stride } : Marks_scene.attribute) =
                 match source with
-                | Marks_scene.Bytes bytes -> P.Host (bytes, stride)
+                | Marks_scene.Bytes bytes -> X.Host (bytes, stride)
                 | Device value ->
-                    P.Device ((fun () -> Option.bind (output value) Flow_gpu.Run.buffer), stride)
+                    X.Device ((fun () -> Option.bind (output value) Flow_gpu.Run.buffer), stride)
               in
               (* positions a fast kernel wrote come with its count record: the set's instance count is
            the one the device wrote, drawn indirect *)
@@ -363,7 +362,7 @@ let marks t : Marks_scene.gpu =
                     Some ((fun () -> Option.bind (output value) Flow_gpu.Run.count_record), 4L)
                 | _ -> None
               in
-              native (P.gpu_marks ?indirect sink ~kind ~count (Array.map source attributes)))))
+              native (X.gpu_marks ?indirect sink ~kind ~count (Array.map source attributes)))))
 
 let image_stats t =
   if not (Domain.is_main_domain ()) then

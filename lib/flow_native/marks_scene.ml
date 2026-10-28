@@ -85,7 +85,7 @@ let gpu_set buffers ~device ~gpu ~converted ~slot count (kind : M.kind) =
         5, [| vec 0 position; vec 1 end_; host (word_bytes 1 (fun _ -> 0l)) 0; word 3 stroke; one 4 stroke_width |]
     | Point _ -> assert false in
   match gpu ~slot ~kind:kind_word ~count attributes with
-  | Ok token -> Scene.Private.shapes (Scene_command.Ui_batch.of_marks token)
+  | Ok token -> Scene.shapes (Scene_command.Ui_batch.of_marks token)
   | Error (d : Diagnostic.t) -> V.raise_diagnostic d
 
 let has_device (kind : M.kind) =
@@ -147,7 +147,7 @@ let shapes buffers count (kind : M.kind) =
          B.line b ~x0 ~y0 ~x1 ~y1 ~color:(color i) ~width:(width i)
        done
    | Point _ -> assert false);
-  Scene.Private.shapes (B.publish b)
+  Scene.shapes (B.publish b)
 
 (* Point instances retain their logical subpixel positions in Ui_batch. *)
 let points buffers count position fill =
@@ -158,7 +158,7 @@ let points buffers count position fill =
     Scene_command.Ui_batch.Builder.shape_rect batch ~x ~y ~width:1. ~height:1. ~fill:(rgba ink) ~stroke:0l ()
   done;
   if count = 0 then None
-  else Some (Scene.Private.shapes (Scene_command.Ui_batch.Builder.publish batch))
+  else Some (Scene.shapes (Scene_command.Ui_batch.Builder.publish batch))
 
 (* The scene node of a mark set, kept while its description and the physical attribute arrays are the
    same as the previous frame's: a batch whose data did not change is not built again. *)
@@ -213,14 +213,14 @@ let scene ~buffers ?image ?gpu ?cache ?(device = fun _ -> no_device ()) marks =
                | Some gpu -> add (gpu_set buffers ~device ~gpu ~converted:(Option.map (fun c ->
                  c.converted) cache) ~slot:!slot count kind); incr slot)
           | Mark_set {count; kind} as entry -> add (set entry kind (fun () -> shapes buffers count kind))
-          | Geometry {vertices; indices; color} -> add (Scene.Private.geometry {vertices; indices; color})
+          | Geometry {vertices; indices; color} -> add (Scene.geometry {vertices; indices; color})
           | Image {resource; x; y; scale; angle} ->
               (match image with
                | Some resolve -> add (Scene.image (resolve resource) ~at:(x, y) ~scale ~angle ())
                | None -> V.fail "E_IMAGE" "Drawing images need an environment-owned image resolver.")
           | Text {x; y; size; color = c; text} -> add (Scene.text ~at:(x, y) ~color:(color c) ~size text)
           | Push_transform {xx; xy; yx; yy; tx; ty} ->
-              open_ (Scene.Private.transform {Scene_command.Render_ir.xx; xy; yx; yy; tx; ty})
+              open_ (Scene.transform {Scene_command.Render_ir.xx; xy; yx; yy; tx; ty})
           | Push_clip {x; y; width; height} ->
               let x = integer x and y = integer y and w = integer width and h = integer height in
               open_ (Scene.clip ~at:(x, y) ~w ~h)

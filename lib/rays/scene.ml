@@ -699,4 +699,7 @@ module Private=struct
        | Layer_break -> ())
      scene
 end
+let shapes=Private.shapes
+let geometry=Private.geometry
+let transform=Private.transform
 let render scene=Option.iter(fun callback->callback scene)(Domain.DLS.get Private.renderer)

@@ -14,17 +14,17 @@ val to_image : t -> (Image.t,string) result
 val gpu_seconds : t -> (float,string) result
 (* The device's GPU time so far, summed over completed command buffers: the difference across a
    [render] is that frame's GPU time (tools/ui_shot.exe's UI_SHOT_BENCH). *)
-module Private : sig
-  val invalidate : t -> (unit,string) result
-  val gpu_source : t -> ((int * int * (unit -> Ogpu.Backend.texture option)),string) result
+val invalidate : t -> (unit,string) result
+val gpu_source : t -> ((int * int * (unit -> Ogpu.Backend.texture option)),string) result
   (** Borrow the completed GPU frame until another render attempt, explicit
       invalidation, CPU mutation or destruction. Requires the initial SDL domain
       and platform main thread. *)
 
-  val pixel_stats : t -> int * int
+val pixel_stats : t -> int * int
   (** Successful captures and actual successful GPU pixel readbacks, including
       operations through private copying and implicit CPU synchronization. *)
 
+module Private : sig
   type native_stats = Renderer.stats
   val native_stats : t -> (native_stats,string) result
 end
