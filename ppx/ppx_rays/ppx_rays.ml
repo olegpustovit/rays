@@ -54,6 +54,13 @@ let longident_of_list = function
 let located_path ~loc values = { loc; txt = longident_of_list values }
 let ident ~loc values = pexp_ident ~loc (located_path ~loc values)
 
+(* Inside lib/sop, which has no main module to name itself, `-inside-sop` makes the generated
+   [Sop.X] paths the bare [X]. *)
+let inside_sop = ref false
+let () = Driver.add_arg "-inside-sop" (Arg.Set inside_sop)
+    ~doc:" Generated Sop.X paths are the bare X (for lib/sop itself)"
+let sop_path path = if !inside_sop then path else "Sop" :: path
+
 let string_constant expression what = match expression.pexp_desc with
   | Pexp_constant (Pconst_string (value, _, _)) -> value
   | _ -> Location.raise_errorf ~loc:expression.pexp_loc
@@ -437,17 +444,17 @@ let build_expression ~loc ~validate ~fallible ~facts ~rest type_name label input
           Location.raise_errorf ~loc:expression.pexp_loc
             "sop.node_facts requires elementwise, reads, writes, topology and exact exactly once";
         let facts = pexp_record ~loc fields (Some (apply ~loc
-          (ident ~loc ["Sop"; "Node"; "facts"]) [Nolabel, var "node"])) in
+          (ident ~loc (sop_path ["Node"; "facts"])) [Nolabel, var "node"])) in
         pexp_let ~loc Nonrecursive
           [Ast_builder.Default.value_binding ~loc ~pat:(pvar "node") ~expr:operator_call]
-          (apply ~loc (ident ~loc ["Sop"; "Node"; "Private"; "with_facts"])
+          (apply ~loc (ident ~loc (sop_path ["Node"; "Private"; "with_facts"]))
             [Nolabel, facts; Nolabel, var "node"]) in
   let parameterize dynamic_schema rebuild =
     let node = if dynamic_schema then var "node" else operator_call in
     let schema = if dynamic_schema then apply ~loc (var "schema")
         [Nolabel,var "parameters";Nolabel,node]
       else var (type_name ^ "_schema") in
-    let body = apply ~loc (ident ~loc ["Sop"; "Node"; "parameterize"])
+    let body = apply ~loc (ident ~loc (sop_path ["Node"; "parameterize"]))
       [Labelled "schema",schema;Labelled "values",var "parameters";
        Labelled "rebuild",rebuild;Nolabel,node] in
     let body = if dynamic_schema then pexp_let ~loc Nonrecursive
@@ -628,14 +635,14 @@ let generate_node_type declaration =
       @ (if keywords = [] then [] else
           [Labelled "keyword_inputs", elist ~loc (List.map (estring ~loc) keywords)]) in
   let factory = if optional = [] && Option.is_none rest then
-      apply ~loc (ident ~loc ["Sop"; "Edit_graph"; "factory"])
+      apply ~loc (ident ~loc (sop_path ["Edit_graph"; "factory"]))
         (common @ [Labelled "arity", eint ~loc inputs; Nolabel, constructor])
     else
       let requirements = List.init inputs (fun index ->
-        pexp_construct ~loc (located_path ~loc ["Sop"; "Edit_graph";
+        pexp_construct ~loc (located_path ~loc (sop_path ["Edit_graph";
           if Some index = rest then (if List.mem index optional then "Optional_rest" else "Rest")
-          else if List.mem index optional then "Optional" else "Required"]) None) in
-      apply ~loc (ident ~loc ["Sop"; "Edit_graph"; "factory_slots"])
+          else if List.mem index optional then "Optional" else "Required"])) None) in
+      apply ~loc (ident ~loc (sop_path ["Edit_graph"; "factory_slots"]))
         (common @ [Labelled "inputs", elist ~loc requirements;
           Nolabel, constructor]) in
   [value_binding ~loc (declaration.ptype_name.txt ^ "_factory")

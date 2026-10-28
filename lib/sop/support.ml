@@ -55,13 +55,6 @@ type centroid_run_mode = Detail | Primitives | Point_pieces | Primitive_pieces
 type element_group = Point_group of string | Vertex_group of string
   | Primitive_group of string | Edge_group of string
 
-(* [rays.ppx] names the generated schema and node code [Sop.X]; inside
-   this library those units are the bare [X]. *)
-module Sop = struct
-  module Node = Node
-  module Edit_graph = Edit_graph
-end
-
 let vec3_copy value = Rays_math.Vec3.create value.Rays_math.Vec3.x value.y value.z
 
 let cooked geometry = Ok Node.Private.{ geometry; instances = None }

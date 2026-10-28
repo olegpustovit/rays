@@ -3,8 +3,6 @@
 
 open Support
 
-(* ocamldep must see the PPX's [Sop.X] resolve inside this library. *)
-module Sop = Support.Sop
 
 
 module Edge_collapse = struct
