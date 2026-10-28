@@ -47,12 +47,6 @@ module View : sig
     | Constant_direction of { x : float; y : float; z : float }
     | Per_query_directions of Packed.Float3.View.view
 
-  type sample_combine =
-    | Sample_average
-    | Sample_median
-    | Sample_shortest
-    | Sample_longest
-
   val create_validated_triangles :
     ?cancel:Cancel.t -> grain:int -> Geometry.t -> (t, Error.t) result
   (** Build directly from geometry already certified finite, nondegenerate,
@@ -124,32 +118,23 @@ module View : sig
       selected queries write disjoint slots. Missed/unselected slots are reset
       to primitive/triangle [-1], zero weights, and [infinity]. *)
 
-  val raycast_samples_into :
-    ?cancel:Cancel.t -> ?selection:Group.t -> grain:int -> t ->
-    queries:Packed.Float3.t -> directions:ray_directions ->
-    min_distance:float -> max_distance:float -> tolerance:float ->
-    direction_mode:ray_direction_mode -> surface_hit:ray_surface_hit ->
-    samples:int -> jitter_scale:float -> seed:int -> combine:sample_combine ->
-    primitives:int array -> triangles:int array ->
-    barycentric_a:float array -> barycentric_b:float array ->
-    barycentric_c:float array -> distances:float array ->
-    direction_signs:int array -> hit_counts:int array ->
-    normal_x:float array option -> normal_y:float array option ->
-    normal_z:float array option -> unit
-  (** Combine a bounded deterministic cone of rays per selected query. Scratch
-      is O(samples) per worker range; published arrays remain O(queries).
-      Average mode reports the hit nearest the mean as scalar primitive/triangle
-      provenance and returns the number of contributing rays separately. *)
+  val ray_query_once :
+    t -> float -> float -> float -> float -> float -> float -> float -> float ->
+    float -> ray_surface_hit -> float array -> int array -> int array ->
+    float array -> int -> unit
+  (** [ray_query_once index ox oy oz dx dy dz minimum maximum tolerance
+      surface_hit scratch node_stack integer_results float_results result]
+      writes one hit (primitive, triangle; distance and barycentric weights)
+      into slot [result] of the caller's result arrays ([-1] and a signed
+      infinity when it misses). [scratch] holds 8 floats and [node_stack] 65
+      ints. The direction must be normalized. *)
 
-  val raycast_average_drivers_into :
-    ?cancel:Cancel.t -> ?selection:Group.t -> grain:int -> t ->
-    queries:Packed.Float3.t -> directions:ray_directions ->
-    min_distance:float -> max_distance:float -> tolerance:float ->
-    surface_hit:ray_surface_hit -> samples:int -> jitter_scale:float -> seed:int ->
-    direction_signs:int array -> hit_counts:int array -> offsets:int array ->
-    vertex_numbers:int array -> vertex_weights:float array -> unit
-  (** Repeat only the chosen directional sample set and write exact averaged
-      source-vertex CSR drivers. The caller supplies offsets derived from
-      [hit_counts]; every hit contributes three barycentric weights divided by
-      the point's successful-ray count. *)
+  val direction_at : ray_directions -> int -> float * float * float
+  val normalized_direction : float -> float -> float -> float * float * float
+  (** Rejects a non-finite or zero direction. *)
+
+  val triangle_normal_into : t -> int -> float array -> unit
+  (** Unit geometric normal of a triangle into the first three slots, zero when
+      degenerate. *)
+
 end

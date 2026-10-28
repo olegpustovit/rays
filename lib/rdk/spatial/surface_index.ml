@@ -1149,12 +1149,6 @@ type ray_directions =
   | Constant_direction of { x : float; y : float; z : float }
   | Per_query_directions of Packed.Float3.View.view
 
-type sample_combine =
-  | Sample_average
-  | Sample_median
-  | Sample_shortest
-  | Sample_longest
-
 let[@inline] direction_at directions query = match directions with
   | Constant_direction { x; y; z } -> x, y, z
   | Per_query_directions values ->
@@ -1170,122 +1164,7 @@ let[@inline] normalized_direction vx vy vz =
   let inverse = 1. /. sqrt ((sx *. sx) +. (sy *. sy) +. (sz *. sz)) in
   sx *. inverse, sy *. inverse, sz *. inverse
 
-let[@inline] jitter_stream query sample component =
-  (query * 0x1e3779b97f4a7c15)
-  lxor (sample * 0x14d049bb133111eb)
-  lxor (component * 0x11b54a32d192ed03)
-
-let jittered_direction seed query sample jitter_scale dx dy dz output =
-  if sample = 0 || jitter_scale = 0. then begin
-    output.(0) <- dx; output.(1) <- dy; output.(2) <- dz
-  end else begin
-    let inverse_xy = 1. /. Float.hypot dx dy in
-    let ux, uy, uz = if Float.is_finite inverse_xy then
-        -.dy *. inverse_xy, dx *. inverse_xy, 0.
-      else 1., 0., 0. in
-    let vx = (dy *. uz) -. (dz *. uy)
-    and vy = (dz *. ux) -. (dx *. uz)
-    and vz = (dx *. uy) -. (dy *. ux) in
-    let random = Rays_math.Rand.seed seed in
-    let radius = sqrt (Rays_math.Rand.float_at random
-        ~index:(jitter_stream query sample 0)) *. jitter_scale
-    and angle = 2. *. Float.pi *. Rays_math.Rand.float_at random
-        ~index:(jitter_stream query sample 1) in
-    let tangent_u = radius *. cos angle
-    and tangent_v = radius *. sin angle in
-    let scale = Float.max 1.
-        (Float.max (abs_float tangent_u) (abs_float tangent_v)) in
-    let tangent_u = tangent_u /. scale and tangent_v = tangent_v /. scale in
-    let x = (dx /. scale) +. (tangent_u *. ux) +. (tangent_v *. vx)
-    and y = (dy /. scale) +. (tangent_u *. uy) +. (tangent_v *. vy)
-    and z = (dz /. scale) +. (tangent_u *. uz) +. (tangent_v *. vz) in
-    let inverse = 1. /. sqrt ((x *. x) +. (y *. y) +. (z *. z)) in
-    output.(0) <- x *. inverse; output.(1) <- y *. inverse;
-    output.(2) <- z *. inverse
-  end
-
-let[@inline] sample_distance float_results result = float_results.(result * 4)
-let[@inline] sample_hit integer_results result = integer_results.(result * 2) >= 0
-
-let[@inline] compare_samples float_results left right =
-  let left_distance = float_results.(left * 4)
-  and right_distance = float_results.(right * 4) in
-  if left_distance < right_distance then -1
-  else if left_distance > right_distance then 1
-  else Int.compare left right
-
-let sample_swap values left right =
-  if left <> right then begin
-    let value = values.(left) in values.(left) <- values.(right);
-    values.(right) <- value
-  end
-
-let sample_sift_down float_results values root count state =
-  state.(0) <- root; state.(1) <- 1;
-  while state.(1) <> 0 do
-    let child = (state.(0) * 2) + 1 in
-    if child >= count then state.(1) <- 0
-    else begin
-      let selected = if child + 1 < count
-          && compare_samples float_results values.(child) values.(child + 1) < 0
-        then child + 1 else child in
-      if compare_samples float_results values.(state.(0)) values.(selected) < 0
-      then begin sample_swap values state.(0) selected; state.(0) <- selected end
-      else state.(1) <- 0
-    end
-  done
-
-let sort_samples float_results values count state =
-  for root = (count / 2) - 1 downto 0 do
-    sample_sift_down float_results values root count state
-  done;
-  for remaining = count - 1 downto 1 do
-    sample_swap values 0 remaining;
-    sample_sift_down float_results values 0 remaining state
-  done
-
-let combine_samples combine integer_results float_results first samples order
-    sort_state combined_counts combined_distances combined_selected direction =
-  let count = ref 0 and mean = ref 0. and shortest = ref (-1)
-  and longest = ref (-1) in
-  for sample = 0 to samples - 1 do
-    let result = first + sample in
-    if sample_hit integer_results result then begin
-      order.(!count) <- result; incr count;
-      let distance = sample_distance float_results result in
-      mean := !mean +. ((distance -. !mean) /. float_of_int !count);
-      if !shortest < 0 || distance < sample_distance float_results !shortest
-      then shortest := result;
-      if !longest < 0 || distance > sample_distance float_results !longest
-      then longest := result
-    end
-  done;
-  combined_counts.(direction) <- !count;
-  if !count > 0 then begin
-    let distance, selected = match combine with
-      | Sample_shortest -> sample_distance float_results !shortest, !shortest
-      | Sample_longest -> sample_distance float_results !longest, !longest
-      | Sample_median ->
-          sort_samples float_results order !count sort_state;
-          let selected = order.(!count / 2) in
-          sample_distance float_results selected, selected
-      | Sample_average ->
-          let distance = !mean in
-          let selected = ref order.(0) and difference = ref Float.infinity in
-          for slot = 0 to !count - 1 do
-            let candidate = order.(slot) in
-            let candidate_difference = abs_float
-                (sample_distance float_results candidate -. distance) in
-            if candidate_difference < !difference then begin
-              difference := candidate_difference; selected := candidate
-            end
-          done;
-          distance, !selected in
-    combined_distances.(direction) <- distance;
-    combined_selected.(direction) <- selected
-  end
-
-let geometric_normal_into value triangle output =
+let triangle_normal_into value triangle output =
   let a = value.topology.Topology.View.vertex_points.(value.vertex_a.(triangle))
   and b = value.topology.vertex_points.(value.vertex_b.(triangle))
   and c = value.topology.vertex_points.(value.vertex_c.(triangle)) in
@@ -1316,202 +1195,6 @@ let geometric_normal_into value triangle output =
     output.(0) <- nx /. length; output.(1) <- ny /. length;
     output.(2) <- nz /. length
   end
-
-let validate_sample_arrays query_count ~primitives ~triangles ~barycentric_a
-    ~barycentric_b ~barycentric_c ~distances ~direction_signs ~hit_counts =
-  if Array.length primitives < query_count || Array.length triangles < query_count
-      || Array.length barycentric_a < query_count
-      || Array.length barycentric_b < query_count
-      || Array.length barycentric_c < query_count
-      || Array.length distances < query_count
-      || Array.length direction_signs < query_count
-      || Array.length hit_counts < query_count then
-    invalid_arg "Surface_index: sampled ray output arrays are too short"
-
-let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
-    ~min_distance ~max_distance ~tolerance ~direction_mode ~surface_hit
-    ~samples ~jitter_scale ~seed ~combine ~primitives ~triangles ~barycentric_a
-    ~barycentric_b ~barycentric_c ~distances ~direction_signs ~hit_counts
-    ~normal_x ~normal_y ~normal_z =
-  if grain <= 0 then invalid_arg "Surface_index: grain must be positive";
-  if samples < 2 || samples > 1024 then
-    invalid_arg "Surface_index: sampled ray count must be between 2 and 1024";
-  if not (Float.is_finite jitter_scale && jitter_scale >= 0.) then
-    invalid_arg "Surface_index: ray jitter scale must be finite and non-negative";
-  let query_count = Packed.Float3.length queries in
-  validate_sample_arrays query_count ~primitives ~triangles ~barycentric_a
-    ~barycentric_b ~barycentric_c ~distances ~direction_signs ~hit_counts;
-  (match directions with
-   | Per_query_directions values when Array.length values.x <> query_count
-       || Array.length values.y <> query_count
-       || Array.length values.z <> query_count ->
-       invalid_arg "Surface_index: ray direction count does not match queries"
-   | Constant_direction _ | Per_query_directions _ -> ());
-  (match selection with
-   | Some group when Group.owner group <> Group.Point
-       || Group.length group <> query_count ->
-       invalid_arg "Surface_index: ray selection must match query points"
-   | None | Some _ -> ());
-  let requested_normals = match normal_x, normal_y, normal_z with
-    | None, None, None -> false
-    | Some x, Some y, Some z ->
-        if Array.length x < query_count || Array.length y < query_count
-            || Array.length z < query_count then
-          invalid_arg "Surface_index: sampled ray normal arrays are too short";
-        true
-    | _ -> invalid_arg "Surface_index: sampled ray normal arrays must be supplied together" in
-  let queries = Packed.Float3.View.view queries in
-  let range_count = Support.ceiling_div query_count grain in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(range_count - 1) (fun range ->
-    let first = range * grain and last = min query_count ((range + 1) * grain) in
-    let result_count = samples * 2 in
-    let scratch = Array.make 8 0. and node_stack = Array.make 65 0
-    and integer_results = Array.make (result_count * 2) (-1)
-    and float_results = Array.make (result_count * 4) 0.
-    and order = Array.make samples 0 and direction = Array.make 3 0.
-    and sort_state = Array.make 2 0
-    and normal = Array.make 3 0. and combined_counts = Array.make 2 0
-    and combined_distances = Array.make 2 Float.infinity
-    and combined_selected = Array.make 2 (-1) in
-    for query = first to last - 1 do
-      Cancel.poll cancel query 4095;
-      primitives.(query) <- -1; triangles.(query) <- -1;
-      barycentric_a.(query) <- 0.; barycentric_b.(query) <- 0.;
-      barycentric_c.(query) <- 0.; distances.(query) <- Float.infinity;
-      direction_signs.(query) <- 0; hit_counts.(query) <- 0;
-      if match selection with None -> true | Some group -> Group.mem query group then begin
-        let ox = queries.x.(query) and oy = queries.y.(query)
-        and oz = queries.z.(query) in
-        if not (Float.is_finite ox && Float.is_finite oy && Float.is_finite oz) then
-          invalid_arg "Surface_index: selected ray origins must be finite";
-        let vx, vy, vz = direction_at directions query in
-        let dx, dy, dz = normalized_direction vx vy vz in
-        let directions_to_query = match direction_mode with
-          | Ray_forward | Ray_reverse -> 1
-          | Ray_bidirectional_closest | Ray_bidirectional_farthest -> 2 in
-        for side = 0 to directions_to_query - 1 do
-          let sign = match direction_mode with
-            | Ray_reverse -> -1.
-            | Ray_forward -> 1.
-            | Ray_bidirectional_closest | Ray_bidirectional_farthest ->
-                if side = 0 then 1. else -1. in
-          let base = side * samples in
-          for sample = 0 to samples - 1 do
-            Cancel.poll cancel sample 63;
-            jittered_direction seed query sample jitter_scale
-              (sign *. dx) (sign *. dy) (sign *. dz) direction;
-            ray_query_once value ox oy oz direction.(0) direction.(1) direction.(2)
-              min_distance max_distance tolerance surface_hit scratch node_stack
-              integer_results float_results (base + sample)
-          done;
-          combine_samples combine integer_results float_results base samples order
-            sort_state
-            combined_counts combined_distances combined_selected side
-        done;
-        let chosen = if directions_to_query = 1 then 0
-          else if combined_counts.(0) = 0 then 1
-          else if combined_counts.(1) = 0 then 0
-          else match direction_mode with
-            | Ray_bidirectional_closest ->
-                if combined_distances.(1) < combined_distances.(0) then 1 else 0
-            | Ray_bidirectional_farthest ->
-                if combined_distances.(1) > combined_distances.(0) then 1 else 0
-            | Ray_forward | Ray_reverse -> assert false in
-        let selected = combined_selected.(chosen) in
-        if selected >= 0 then begin
-          let integer = selected * 2 and floating = selected * 4 in
-          primitives.(query) <- integer_results.(integer);
-          triangles.(query) <- integer_results.(integer + 1);
-          barycentric_a.(query) <- float_results.(floating + 1);
-          barycentric_b.(query) <- float_results.(floating + 2);
-          barycentric_c.(query) <- float_results.(floating + 3);
-          distances.(query) <- combined_distances.(chosen);
-          hit_counts.(query) <- combined_counts.(chosen);
-          direction_signs.(query) <- (match direction_mode with
-            | Ray_reverse -> -1 | Ray_forward -> 1
-            | Ray_bidirectional_closest | Ray_bidirectional_farthest ->
-                if chosen = 0 then 1 else -1);
-          if requested_normals then begin
-            let nx = ref 0. and ny = ref 0. and nz = ref 0. in
-            if combine = Sample_average then begin
-              let base = chosen * samples in
-              for sample = 0 to samples - 1 do
-                let result = base + sample in
-                if sample_hit integer_results result then begin
-                  geometric_normal_into value integer_results.((result * 2) + 1)
-                    normal;
-                  nx := !nx +. normal.(0); ny := !ny +. normal.(1);
-                  nz := !nz +. normal.(2)
-                end
-              done;
-              let inverse = 1. /. float_of_int combined_counts.(chosen) in
-              nx := !nx *. inverse; ny := !ny *. inverse; nz := !nz *. inverse
-            end else begin
-              geometric_normal_into value triangles.(query) normal;
-              nx := normal.(0); ny := normal.(1); nz := normal.(2)
-            end;
-            (Option.get normal_x).(query) <- !nx;
-            (Option.get normal_y).(query) <- !ny;
-            (Option.get normal_z).(query) <- !nz
-          end
-        end
-      end
-    done)
-
-let raycast_average_drivers_into ?cancel ?selection ~grain value ~queries
-    ~directions ~min_distance ~max_distance ~tolerance ~surface_hit ~samples
-    ~jitter_scale ~seed ~direction_signs ~hit_counts ~offsets ~vertex_numbers
-    ~vertex_weights =
-  let query_count = Packed.Float3.length queries in
-  if Array.length direction_signs < query_count
-      || Array.length hit_counts < query_count
-      || Array.length offsets <> query_count + 1
-      || Array.length vertex_numbers < offsets.(query_count)
-      || Array.length vertex_weights < offsets.(query_count) then
-    invalid_arg "Surface_index: average ray driver arrays are inconsistent";
-  let queries = Packed.Float3.View.view queries in
-  let range_count = Support.ceiling_div query_count grain in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(range_count - 1) (fun range ->
-    let first = range * grain and last = min query_count ((range + 1) * grain) in
-    let scratch = Array.make 8 0. and node_stack = Array.make 65 0
-    and integer_results = Array.make 2 (-1)
-    and float_results = Array.make 4 0. and direction = Array.make 3 0. in
-    for query = first to last - 1 do
-      Cancel.poll cancel query 4095;
-      if direction_signs.(query) <> 0
-          && (match selection with None -> true | Some group -> Group.mem query group)
-      then begin
-        let ox = queries.x.(query) and oy = queries.y.(query)
-        and oz = queries.z.(query) in
-        let vx, vy, vz = direction_at directions query in
-        let dx, dy, dz = normalized_direction vx vy vz in
-        let sign = float_of_int direction_signs.(query)
-        and scale = 1. /. float_of_int hit_counts.(query) in
-        let at = ref offsets.(query) in
-        for sample = 0 to samples - 1 do
-          Cancel.poll cancel sample 63;
-          jittered_direction seed query sample jitter_scale
-            (sign *. dx) (sign *. dy) (sign *. dz) direction;
-          ray_query_once value ox oy oz direction.(0) direction.(1) direction.(2)
-            min_distance max_distance tolerance surface_hit scratch node_stack
-            integer_results float_results 0;
-          if integer_results.(0) >= 0 then begin
-            let triangle = integer_results.(1) and floating = 0 in
-            vertex_numbers.(!at) <- value.vertex_a.(triangle);
-            vertex_numbers.(!at + 1) <- value.vertex_b.(triangle);
-            vertex_numbers.(!at + 2) <- value.vertex_c.(triangle);
-            vertex_weights.(!at) <- float_results.(floating + 1) *. scale;
-            vertex_weights.(!at + 1) <- float_results.(floating + 2) *. scale;
-            vertex_weights.(!at + 2) <- float_results.(floating + 3) *. scale;
-            at := !at + 3
-          end
-        done;
-        if !at <> offsets.(query + 1) then
-          invalid_arg "Surface_index: average ray driver recount differed"
-      end
-    done)
 
 let raycast_many_into ?cancel ?selection ~grain value ~queries ~directions
     ~min_distance ~max_distance ~tolerance ~direction_mode ~surface_hit
@@ -1645,18 +1328,14 @@ module View = struct
   type nonrec ray_directions = ray_directions =
     | Constant_direction of { x : float; y : float; z : float }
     | Per_query_directions of Packed.Float3.View.view
-  type nonrec sample_combine = sample_combine =
-    | Sample_average
-    | Sample_median
-    | Sample_shortest
-    | Sample_longest
-
   let closest_many_into = closest_many_into
   let create_validated_triangles = create_validated_triangles
   let closest_distances_many_into = closest_distances_many_into
   let raycast_many_into = raycast_many_into
-  let raycast_samples_into = raycast_samples_into
-  let raycast_average_drivers_into = raycast_average_drivers_into
+  let ray_query_once = ray_query_once
+  let direction_at = direction_at
+  let normalized_direction = normalized_direction
+  let triangle_normal_into = triangle_normal_into
   let[@inline] triangle_vertex value triangle local =
     if local = 0 then value.vertex_a.(triangle)
     else if local = 1 then value.vertex_b.(triangle)
