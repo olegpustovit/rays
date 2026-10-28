@@ -183,7 +183,7 @@ Exit gates:
 - [ ] P5.G1: rays_editor direct dependencies go from 22 to about 15, with no rdk, flow_gpu or scene_command
 - [ ] P5.G2: no file in lib/ includes a sibling to extend it
 - [x] P5.G3: no `copy_files` of lib sources. Evidence: actual helper ownership replaces the product copies; existing IR fixture modules form a private test-only library. The dependency gate rejects library source copies and production dependencies on that test support, with negative fixtures.
-- [ ] P5.G4: no function over 300 lines in rays_editor, pxui or pxui_graph
+- [x] P5.G4: no function over 300 lines in rays_editor, pxui or pxui_graph Evidence: no function in rays_editor, pxui or pxui_graph, product or test, is over 300 lines; the last four test rows are removed and @tools/codemod/function-lengths is clean.
 - [x] P5.G5: ui_parity goldens are pixel-identical. Evidence at the P5.S1 checkpoint: `@lib/pxui/test_ui_parity` reports exact overlays, zones, table and kit-panel parity; subsequent UI refactors must retain this proof.
 
 Risk: Medium. Pure refactors under strong pixel goldens (`test_ui_parity`) and the shell suite, which runs in full now that P0 wired the slow sections into a lane.
@@ -236,7 +236,7 @@ Findings: WN1 WN11 PL8.
 After P1, rdk holds only live kernels. Give it one error model, one parallel and cancel helper, one storage map, and a three-library structure.
 
 - [x] P6.S1: Errors: one internal `Rdk_error of Error.t`, converted to `result` once at the boundary. Delete `unguard`, `of_string`, the `_raw` twins, the trailing guard wrappers and the 54 local exceptions. Evidence: see RK3.
-- [ ] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites.
+- [x] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites. Evidence: uv_parameterize uses Support.run_ranges; there is one range helper (Support.run_ranges / parallel_for) and one cancel check (Cancel.check_opt).
 - [x] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules. Evidence: see RK8, RK9, RK10 and RK15.
 - [ ] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults.
 - [ ] P6.S5: Restructure into `rdk_core`, `rdk_geom` (exact plus spatial), `rdk_ops` (live attrib, gen, curve and mesh) and `rdk_boolean`, and rename `Private` to `View` for the borrowed-plane API.
@@ -246,7 +246,7 @@ Exit gates:
 
 - [ ] P6.G1: rdk under about 80k lines including tests
 - [x] P6.G2: no `unguard`/`_raw` pairs Evidence: grep for unguard or _raw in lib/rdk finds only local helpers (add_raw, insert_raw, group_of_raw), none of them guarded twins.
-- [ ] P6.G3: one parallel helper
+- [x] P6.G3: one parallel helper Evidence: see P6.S2.
 - [x] P6.G4: rdk test alias under 30 s warm Evidence: after touching an rdk test, a relink and run of every rdk test group took 21.9 s wall on the loaded machine.
 
 Risk: Medium. Exactness and byte-identical parallel results must hold. Every helper swap carries the existing 1-domain vs multi-domain checks.
@@ -787,11 +787,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK29** (P6, low, vibe-code, effort M). Location at baseline: 75 `type x = M.x = …` re-export lines; attribute_ops.mli 791 lines. A façade layer that exists only to back hidden private_modules. Action: Drop it once the oracles are gone.
 
-- [ ] **RK30** (P6, low, naming, effort S). Location at baseline: 13 identifiers of 35+ chars (`promote_include_all_primitives_sharing_boundary_points`). Names that are whole sentences. Action: Shorten them during the RK16 record migration.
+- [x] **RK30** (P6, low, naming, effort S). Location at baseline: 13 identifiers of 35+ chars (`promote_include_all_primitives_sharing_boundary_points`). Names that are whole sentences. Action: Shorten them during the RK16 record migration. Evidence: nine long rdk identifiers are shortened; the two kept appear in .rays sources and flow_manifest.sexp.
 
 - [x] **RK31** (P0, low, test-sprawl, effort S). Location at baseline: test_main.ml group labels (test_motion under core, test_triangulate2d under exact …). `@lib/rdk/test_core` runs mesh tests. Action: Fix the labels. Evidence: group labels in lib/rdk/test_main.ml match their modules (test_motion under mesh).
 
-- [ ] **RK32** (P6, low, doc-rot, effort S). Location at baseline: uv_parameterize.ml:41 · group.mli:35 · attribute_ops.mli:523. 'legacy' names and two legacy driver-name arguments. Action: Drop them.
+- [x] **RK32** (P6, low, doc-rot, effort S). Location at baseline: uv_parameterize.ml:41 · group.mli:35 · attribute_ops.mli:523. 'legacy' names and two legacy driver-name arguments. Action: Drop them. Evidence: the legacy driver-name doc sentence is gone, and no legacy paths remain in uv_parameterize or group.mli.
 
 - [x] **SP1** (P1, high, oracle-only, effort L). Location at baseline: lib/sop/{groups,sop_topology,attributes,shapes}.ml: 164 PPX node modules, 37 registered. About 10.6k of 14.2k lines are OCaml twins of Lisp defnodes, which makes AGENTS' 'declared once' false for 128 nodes. Action: Capture goldens from the Lisp nodes (parity already holds, so no native code is needed), then delete the 128 modules and their Support helpers (prune-dead-code to a fixpoint). Evidence: 868f9ae0 deletes the 127 OCaml twins that have a Lisp defnode; Sop.Nodes lists the 37 native nodes, and the Lisp goldens (819 rows) are the net.
 

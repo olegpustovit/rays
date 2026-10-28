@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **187 / 248 accepted (75.4%)**. This counts individual
+Finding coverage: **189 / 248 accepted (76.2%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
