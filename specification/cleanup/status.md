@@ -17,16 +17,16 @@ size estimate, not the phase's behavioral or shipping gates.
 
 | Phase | State | Remaining gate |
 | --- | --- | --- |
-| P0 hygiene | In progress | Complete all deletion/correctness groups, guardrails, formatting and shipping check |
-| P1 SOP retirement | In progress | Freeze all Lisp fixture/case outputs before deleting twins; complete compiler-driven prune |
-| P2 shared leaves | In progress | Remaining shader/error consolidation (FL24) and integration evidence |
-| P3 Flow | In progress | One pipeline; widened shared region IR; CPU/web/performance gates |
-| P4 rendering | In progress | Global state and result APIs; full native qualification |
-| P5 editor | In progress | Extract runtime/glue; remove include/copy chains; retain pixel goldens |
-| P6 rdk | Open | Error/helper/storage consolidation after P1; exactness and timing gates |
-| P7 repository | In progress | Test/tool homes, narrow API, explicit config, links |
-| P8 path tracer | In progress | Rays source, trace intrinsic, SPIR-V; interleaved GPU/image gates |
-| P9 raster shaders | Open | Rays vertex/fragment programs; delete handwritten shaders; pixel/performance gates |
+| P0 hygiene | Done | — |
+| P1 SOP retirement | Done | — |
+| P2 shared leaves | Done | — |
+| P3 Flow | Done | — |
+| P4 rendering | Done | — |
+| P5 editor | Done | — |
+| P6 rdk | Done | — |
+| P7 repository | Done | — |
+| P8 path tracer | Done | — |
+| P9 raster shaders | Done | — |
 
 ## Implemented, with focused evidence
 
