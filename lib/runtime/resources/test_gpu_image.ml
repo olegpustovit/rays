@@ -82,7 +82,7 @@ let () =
   assert(Result.is_error(I.gpu_snapshot image) && Result.is_error(I.pixels image));
   assert(!reads=2);
   get(I.destroy image);get(I.destroy image);
-  assert(not(B.Private.texture_destroyed first) && not(B.Private.texture_destroyed second));
+  assert(not(B.texture_destroyed first) && not(B.texture_destroyed second));
   let large=texture{descriptor with width=1024;height=1024}in
   let before=Gc.allocated_bytes()in
   let large_image=get(I.of_gpu ~width:1024 ~height:1024 ~source:(fun()->Some large))in

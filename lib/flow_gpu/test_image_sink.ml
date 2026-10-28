@@ -66,7 +66,7 @@ let ()=
     order:=[];let first=convert 65 3 |> get in
     assert(List.rev !order=["compute";"dispatch";"end_compute";"blit";"copy";"end_blit";"commit";"complete"]);
     let first_texture=S.texture first |> Option.get in
-    let d=B.Private.texture_descriptor first_texture in
+    let d=B.texture_descriptor first_texture in
     assert(d.width=65 && d.height=3 && d.format=Rgba8_unorm
       && d.usage=[Texture_binding;Texture_copy_src;Texture_copy_dst]);
     let creates=S.buffer_creations sink,S.texture_creations sink in
@@ -77,14 +77,14 @@ let ()=
     assert(creates=(S.buffer_creations sink,S.texture_creations sink));
     assert(S.texture next<>None);
     fail_texture:=true;assert(Result.is_error(convert 39 5));fail_texture:=false;
-    assert(S.texture next=None && not(B.Private.texture_destroyed first_texture));
+    assert(S.texture next=None && not(B.texture_destroyed first_texture));
     fail_dispatch:=true;assert(Result.is_error(convert 65 3));fail_dispatch:=false;
     fail_copy:=true;assert(Result.is_error(convert 39 5));fail_copy:=false;
     fail_complete:=true;assert(Result.is_error(convert 39 5));fail_complete:=false;
     let recovered=convert 65 3 |> get in
     assert(Option.fold ~none:false ~some:((==)first_texture)(S.texture recovered) && !abandoned=2);
     let resized=convert 39 5 |> get in
-    assert(S.texture recovered=None && B.Private.texture_destroyed first_texture);
+    assert(S.texture recovered=None && B.texture_destroyed first_texture);
     assert(S.texture resized<>None && !reads=1 && !texture_reads=0);
     assert(Flow_gpu.Run.Private.status_reads run= !reads && Flow_gpu.Run.Private.readback_bytes run=0);
     assert(Domain.join(Domain.spawn(fun()->S.texture resized=None)));

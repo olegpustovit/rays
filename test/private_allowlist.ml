@@ -19,10 +19,7 @@ let entries = [
   "rays_pathtracer", "Rays.Image.Private";
   "rays_pathtracer", "Rays.Mesh.Private";
   "rdk", "Mesh.Private";
-  "renderer", "Ogpu.Backend.Private";
   "renderer", "Runtime.Private";
-  "runtime", "Ogpu.Backend.Private";
-  "runtime", "Renderer.Private";
   "tools", "Rays.Image.Private";
   "tools", "Scene.D3.Private";
   "tools", "Sop.Node.Private";

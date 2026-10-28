@@ -492,8 +492,8 @@ let valid_texture(source:sampled_texture)=
   (match Ogpu.Validation.validate_sampler source.sampler with Error _->false|Ok()->true)&&
   (match source.gpu with
   |Some texture->
-      let descriptor=Ogpu.Backend.Private.texture_descriptor texture in
-      not(Ogpu.Backend.Private.texture_destroyed texture)&&
+      let descriptor=Ogpu.Backend.texture_descriptor texture in
+      not(Ogpu.Backend.texture_destroyed texture)&&
       Array.length source.levels=1&&source.levels.(0).width=descriptor.width&&
       source.levels.(0).height=descriptor.height&&
       List.mem Ogpu.Types.Texture_binding descriptor.usage&&
@@ -528,7 +528,7 @@ let image_or_canvas_key key=
 let prepare_texture value ~defer(source:sampled_texture)=
   match source.gpu with
   |Some texture->
-      let device_id,_=Ogpu.Backend.Private.texture_driver_token texture in
+      let device_id,_=Ogpu.Backend.texture_driver_token texture in
       if not(valid_texture source)then
         error"Scene_execution.prepare_texture"Ogpu.Error.Invalid_argument
           "GPU image is malformed or destroyed"

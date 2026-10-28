@@ -390,7 +390,7 @@ let snapshot value ~lease_policy ~density source =
       (* A canvas rendered on this window's device is sampled in place. *)
       let gpu=match Runtime_resources.Canvas.gpu_snapshot canvas with
         |Some(width,height,generation,texture) when Runtime.Private.is_window value.runtime->
-            let device_id,_=Ogpu.Backend.Private.texture_driver_token texture in
+            let device_id,_=Ogpu.Backend.texture_driver_token texture in
             (match Ok (Scene_execution.device value.renderer) with
              |Ok device when Ogpu.Handle.device_id(Ogpu.Backend.device_handle device)=device_id->
                  Some(width,height,generation,texture)

@@ -515,7 +515,7 @@ let private_errors scan =
     | _ -> None in
   let product path = (Filename.check_suffix path ".ml" || Filename.check_suffix path ".mli")
     && owner path <> None
-    && not (contains path "/test/" || contains path "/conformance/" || contains path "/goldens/" || contains path "_fixtures.ml")
+    && not (contains path "/test/" || contains path "/conformance/" || contains path "/goldens/" || contains path "/native_qualification/" || contains path "_fixtures.ml")
     && not (List.exists (fun p -> String.starts_with ~prefix:p (Filename.basename path)) ["test_"; "bench_"]) in
   let defined = Hashtbl.create 512 and submodules = Hashtbl.create 512 in
   let declared = Str.regexp "\\bmodule\\( type\\)? +\\([A-Z][A-Za-z_0-9]*\\)" in

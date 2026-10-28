@@ -81,7 +81,7 @@ let () =
         let output=G.Run.dispatch run inputs |> get in
         let resized=G.Image_sink.convert sink ~width:17 ~height:5 output |> get in
         let texture=G.Image_sink.texture resized |> Option.get in
-        let d=B.Private.texture_descriptor texture in assert(d.width=17 && d.height=5);
+        let d=B.texture_descriptor texture in assert(d.width=17 && d.height=5);
         assert(G.Image_sink.buffer_creations sink=2 && G.Image_sink.texture_creations sink=2);
         assert(Domain.join(Domain.spawn(fun()->G.Image_sink.texture resized=None)));
         G.Image_sink.close sink;G.Image_sink.close sink;
@@ -372,7 +372,7 @@ let ()=
           ~source:(fun()->G.Image_sink.texture resized));
         let texture=G.Image_sink.texture resized |> Option.get in
         resource(I.destroy current);
-        assert(not(B.Private.texture_destroyed texture));
+        assert(not(B.texture_destroyed texture));
         expire();
         List.iter(fun(bytes,saved,_)->assert(bytes=saved)) !leases)));
   assert(handles()=before);

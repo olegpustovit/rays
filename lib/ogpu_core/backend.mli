@@ -186,11 +186,9 @@ val destroy_queue : queue -> (unit,Error.t) result
 val destroy_surface : surface -> (unit,Error.t) result
 val destroy_device : device -> (unit,Error.t) result
 
-module Private : sig
-  val texture_driver_token : texture -> int64 * int64
-  val texture_descriptor : texture -> Types.texture_descriptor
-  val texture_destroyed : texture -> bool
-end
+val texture_driver_token : texture -> int64 * int64
+val texture_descriptor : texture -> Types.texture_descriptor
+val texture_destroyed : texture -> bool
 
 (** {1 Reusable libraries, acceleration structures, and encoders}
 

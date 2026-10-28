@@ -83,8 +83,8 @@ module Image=struct
     else match source()with
     |None->error operation Destroyed "GPU image source was closed or superseded"
     |Some texture->
-        let descriptor=Ogpu.Backend.Private.texture_descriptor texture in
-        if Ogpu.Backend.Private.texture_destroyed texture then
+        let descriptor=Ogpu.Backend.texture_descriptor texture in
+        if Ogpu.Backend.texture_destroyed texture then
           error operation Destroyed "GPU image texture is destroyed"
         else if descriptor.width<>width||descriptor.height<>height||descriptor.depth<>1
           ||descriptor.sample_count<>1||descriptor.format<>Ogpu.Types.Rgba8_unorm
@@ -284,8 +284,8 @@ module Canvas=struct
     let identity x=x.identity
     let pixel_stats x=x.captures,x.readbacks
     let publish_gpu x texture=live"Canvas.publish_gpu"x(fun()->
-      let descriptor=Ogpu.Backend.Private.texture_descriptor texture in
-      if Ogpu.Backend.Private.texture_destroyed texture||
+      let descriptor=Ogpu.Backend.texture_descriptor texture in
+      if Ogpu.Backend.texture_destroyed texture||
          descriptor.width<>x.width||descriptor.height<>x.height||
          not(List.mem Ogpu.Types.Texture_binding descriptor.usage) then
         error"Canvas.publish_gpu"Invalid_argument"GPU texture shape or usage is invalid"
