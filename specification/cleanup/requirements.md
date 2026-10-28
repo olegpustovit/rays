@@ -172,11 +172,11 @@ The editor is composed from libraries with honest boundaries. It does not host t
 
 - [x] P5.S1: Move non-editor code out: `flow_native` (Drawing, Marks_scene, Workspace_*, Live_frame) and `rdk_rays` (Surface, Packed_pieces). Doc goes to `editor_document.Document_edit`, Gate to `input`, and the pure part of lisp_text next to Flow.Syntax (one tolerant lexer). All `copy_files` go away. Evidence: the actual implementations and callers use these owners, Flow_native has no UI dependency, and the copy/production-test-support guards pass. Parser/text-pane, probe/document/editor consistency, native draw snapshots and exact PXUI parity checks pass. The material carry fixture keeps cooked document and real gesture checks while avoiding redundant scene rebuilding and sleep-based simulation (6.1 s total; carry 1.56 s).
 - [ ] P5.S2: Break the `core_*` include chain into explicit modules over `Core_model.t`: Panes, Inspect, List_view, Text, Status, Reduce, Frame. Fold in Environment_*. Rename Core, Environment, Leader and Contexts.
-- [ ] P5.S3: Split `update_frame` per pane, `reduce` into per-intent reducers that return values, and `scope_pane.update` into gesture handlers. Use one `Panel_map` instead of active and parked pane copies.
+- [x] P5.S3: Split `update_frame` per pane, `reduce` into per-intent reducers that return values, and `scope_pane.update` into gesture handlers. Use one `Panel_map` instead of active and parked pane copies. Evidence: update_frame and reduce are split under 300 lines into per-pane and per-intent functions, scope_pane's gestures live in Scope_frame handlers, and one Panel_map replaces the pane copies (UI26).
 - [x] P5.S4: pxui: split into Ui (engine), Ui_text and Ui_kit. One kit for shell, graph and inspector. Move Camera_controls into the viewport. Delete Kit and num_field. Evidence: see UI11 and UI9; Camera_controls moved into the viewport (UI12); Kit.number and the num_field duplicate are gone.
 - [ ] P5.S5: One input path: World drag, viewport grab and graph hints become `Ui.box`/`capture`, with key edges taken from the Router.
 - [ ] P5.S6: editor_document: split Contexts into Kinds, Lowering and Shell_eval; drop digestif; make the workspace a record instead of a tuple; pass caches explicitly; add `.mli` files. Scene, world and settings kinds stop being SOP nodes.
-- [ ] P5.S7: Move the panel kinds and layout gestures out of flow_graph and into editor_document. Route the derived-node inspector through workspace_inspector.
+- [x] P5.S7: Move the panel kinds and layout gestures out of flow_graph and into editor_document. Route the derived-node inspector through workspace_inspector. Evidence: see FL28; flow_graph knows no panel kinds (Editor_document.Panel_kinds) and no layout ops.
 
 Exit gates:
 
@@ -903,7 +903,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL27** (P0, med, doc-rot, effort S). Location at baseline: workspace/iteration.md:523-532,592 · embed.ml:2 · frames.mjs:2. Documents `rays-lisp ml` generating main.ml, which contradicts 'nothing generates OCaml from Lisp'. Action: Rewrite or delete those sections.
 
-- [ ] **FL28** (P5, med, layering, effort M). Location at baseline: flow_graph/edit_layout.ml:7-30 · flow_edit.mli:92-138. The 'domain-neutral' flow_graph hard-codes editor panel kinds and window gestures. Action: Move the panel table to editor_document, passed as a parameter, and split the layout requests out.
+- [x] **FL28** (P5, med, layering, effort M). Location at baseline: flow_graph/edit_layout.ml:7-30 · flow_edit.mli:92-138. The 'domain-neutral' flow_graph hard-codes editor panel kinds and window gestures. Action: Move the panel table to editor_document, passed as a parameter, and split the layout requests out. Evidence: e030c034: the 11 layout ops live in Editor_document.Layout_edit (label, gesture, remap, merges, apply_checked) over the public Flow_graph.Edit_tree helpers. pxui_graph emits a neutral Layout_active request, and the layout constructors are gone from Flow_edit.op.
 
 - [ ] **FL29** (P3, med, test-sprawl, effort M). Location at baseline: lib/flow_ir/dune: 30 test executables; test_workspace_ir 20–25 min. Tier-parity tests multiplied by the number of tiers. Action: After P3, one lowering golden test plus one walker-vs-core sweep that walks each residual once.
 
@@ -975,7 +975,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI25** (P5, med, api-bloat, effort L). Location at baseline: `'prepared` type parameter through Core.t, Cook.t, carry, update. The only production instantiation is Surface; everything else passes unit. Action: Make it concrete after UI6.
 
-- [ ] **UI26** (P5, med, god-module, effort L). Location at baseline: core_model.ml:205 Core.t (~80 fields; active plus parked pane copies). Swapping panes in and out needs `as_pane` rules. Action: A single `Panel_map : panel_key -> pane_state`.
+- [x] **UI26** (P5, med, god-module, effort L). Location at baseline: core_model.ml:205 Core.t (~80 fields; active plus parked pane copies). Swapping panes in and out needs `as_pane` rules. Action: A single `Panel_map : panel_key -> pane_state`. Evidence: 7bff17d3: one Panel_map (Core.t.panes) replaces ten active/parked pane fields; Core_shell.stash is deleted.
 
 - [ ] **UI27** (P5, med, god-module, effort M). Location at baseline: pxui_graph/scope_pane.ml:111 update (938). One gesture function for everything. Action: Gesture handlers that return a change list.
 
