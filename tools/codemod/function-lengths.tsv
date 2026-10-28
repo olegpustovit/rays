@@ -29,7 +29,7 @@ lib/rdk/mesh/poly_bevel.ml	run#1	874
 lib/rdk/mesh/poly_cut.ml	cut#1	590
 lib/rdk/mesh/poly_extrude.ml	run_general#1	463
 lib/rdk/mesh/poly_reduce.ml	plan_round#1	319
-lib/rdk/mesh/ray.ml	run#1	395
+lib/rdk/mesh/ray.ml	run#1	394
 lib/rdk/mesh/subdivide.ml	fvar_refinement#1	339
 lib/rdk/mesh/uv_parameterize.ml	solve#1	490
 lib/rdk/spatial/surface_index.ml	create_with#1	361
