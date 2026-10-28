@@ -60,21 +60,6 @@ let equal_edge_group left right =
      done;
      !equal
 
-let equal_geometry left right =
-  let lp = positions left and rp = positions right
-  and lt = Topology.View.view (Geometry.topology left)
-  and rt = Topology.View.view (Geometry.topology right) in
-  lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
-  && lt.point_count = rt.point_count
-  && lt.vertex_points = rt.vertex_points
-  && lt.primitive_offsets = rt.primitive_offsets
-  && Bytes.equal lt.primitive_kinds rt.primitive_kinds
-  && List.equal equal_attribute (Geometry.attributes left)
-       (Geometry.attributes right)
-  && List.equal equal_group (Geometry.groups left) (Geometry.groups right)
-  && List.equal equal_edge_group (Geometry.edge_groups left)
-       (Geometry.edge_groups right)
-
 let expect_code code = function
   | Error error when Error.code error = code -> ()
   | Error error -> fail (Printf.sprintf "expected %s, received %s: %s"

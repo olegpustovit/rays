@@ -113,56 +113,5 @@ let open_paths () =
       (fun edge -> let a, _ = Topology_index.edge_points index edge in a >= 3) in
   geometry, source, destination
 
-let equal_geometry left right =
-  let lp = Packed.Float3.View.view (Geometry.positions left)
-  and rp = Packed.Float3.View.view (Geometry.positions right)
-  and lt = Topology.View.view (Geometry.topology left)
-  and rt = Topology.View.view (Geometry.topology right) in
-  lp = rp && lt.vertex_points = rt.vertex_points
-  && lt.primitive_offsets = rt.primitive_offsets
-  && Bytes.equal lt.primitive_kinds rt.primitive_kinds
-  && int_attribute Attribute.Vertex "corner" left
-      = int_attribute Attribute.Vertex "corner" right
-  && float_attribute Attribute.Vertex "corner_height" left
-      = float_attribute Attribute.Vertex "corner_height" right
-  && int_attribute Attribute.Primitive "surface" left
-      = int_attribute Attribute.Primitive "surface" right
-  && float_attribute Attribute.Point "height" left
-      = float_attribute Attribute.Point "height" right
-  && float_attribute Attribute.Point "weight" left
-      = float_attribute Attribute.Point "weight" right
-  && int_attribute Attribute.Point "point_id" left
-      = int_attribute Attribute.Point "point_id" right
-  && text_attribute Attribute.Point "side" left
-      = text_attribute Attribute.Point "side" right
-  && (match Geometry.find_attribute ~owner:Attribute.Point "N" left,
-      Geometry.find_attribute ~owner:Attribute.Point "N" right with
-      | Some left, Some right ->
-          (match Attribute.View.storage left, Attribute.View.storage right with
-           | Attribute.Float3 left, Attribute.Float3 right ->
-               Packed.Float3.View.view left = Packed.Float3.View.view right
-           | _ -> false)
-      | _ -> false)
-  && List.for_all (fun name ->
-    (Geometry.find_group ~owner:Group.Primitive name left
-      |> Option.get |> Group.View.bits_view)
-    = (Geometry.find_group ~owner:Group.Primitive name right
-      |> Option.get |> Group.View.bits_view)) ["source_faces";"bridge"]
-  && (Geometry.find_group ~owner:Group.Point "source_points" left
-      |> Option.get |> Group.View.bits_view)
-     = (Geometry.find_group ~owner:Group.Point "source_points" right
-        |> Option.get |> Group.View.bits_view)
-  && (Geometry.find_group ~owner:Group.Vertex "all_corners" left
-      |> Option.get |> Group.View.bits_view)
-     = (Geometry.find_group ~owner:Group.Vertex "all_corners" right
-        |> Option.get |> Group.View.bits_view)
-  && List.for_all (fun name ->
-    let left = Geometry.find_edge_group name left |> Option.get
-    and right = Geometry.find_edge_group name right |> Option.get in
-    Edge_group.length left = Edge_group.length right
-    && Array.init (Edge_group.length left) (fun edge -> Edge_group.mem edge left)
-       = Array.init (Edge_group.length right) (fun edge -> Edge_group.mem edge right))
-      ["source_edges";"destination_edges"]
-
 let run () =
   print_endline "test_poly_bridge: ok"

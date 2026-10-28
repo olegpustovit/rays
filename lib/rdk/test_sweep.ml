@@ -33,23 +33,6 @@ let equal_storage left right =
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
-let equal_geometry left right =
-  let lp = position_view left and rp = position_view right
-  and lt = topology_view left and rt = topology_view right in
-  lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
-  && lt.point_count = rt.point_count
-  && lt.vertex_points = rt.vertex_points
-  && lt.primitive_offsets = rt.primitive_offsets
-  && Bytes.equal lt.primitive_kinds rt.primitive_kinds
-  && List.equal (fun left right ->
-       Attribute.owner left = Attribute.owner right
-       && String.equal (Attribute.name left) (Attribute.name right)
-       && equal_storage left right)
-       (Geometry.attributes left) (Geometry.attributes right)
-  && List.equal equal_group (Geometry.groups left) (Geometry.groups right)
-  && List.equal equal_edge_group
-       (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let with_attribute owner name storage geometry =
   let attribute = Attribute.create_owned ~owner ~name storage |> get_string in
   Geometry.with_attribute attribute geometry |> get_string

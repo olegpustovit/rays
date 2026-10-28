@@ -38,10 +38,6 @@ let expect_code code = function
       code (Error.code error) (Error.to_string error))
   | Ok _ -> fail ("expected error " ^ code)
 
-let equal_geometry left right =
-  let left = positions left and right = positions right in
-  left.x = right.x && left.y = right.y && left.z = right.z
-
 let run () =
   let _source = disjoint [|1.;2.;3.|]
   and _reference = disjoint [|2.;1.;4.|] in

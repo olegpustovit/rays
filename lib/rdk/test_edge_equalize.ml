@@ -39,25 +39,6 @@ let close left right = abs_float (left -. right) <= 4e-6
 let array_close left right = Array.length left = Array.length right
   && Array.for_all2 close left right
 
-let equal_geometry left right =
-  let left_positions = positions left and right_positions = positions right in
-  left_positions.x = right_positions.x
-  && left_positions.y = right_positions.y
-  && left_positions.z = right_positions.z
-  && Topology.point_count (Geometry.topology left)
-     = Topology.point_count (Geometry.topology right)
-  && List.length (Geometry.edge_groups left) = List.length (Geometry.edge_groups right)
-  && List.for_all2 (fun left right ->
-       Edge_group.name left = Edge_group.name right
-       && Edge_group.length left = Edge_group.length right
-       && let same = ref true in
-          for edge = 0 to Edge_group.length left - 1 do
-            if Edge_group.mem edge left <> Edge_group.mem edge right then
-              same := false
-          done;
-          !same)
-       (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let many_disjoint edge_count =
   let point_count = edge_count * 2 in
   let x = Array.make point_count 0. and y = Array.make point_count 0.

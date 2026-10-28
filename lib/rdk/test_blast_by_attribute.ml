@@ -41,42 +41,6 @@ let equal_storage left right =
       && left.w = right.w
   | _ -> false
 
-let equal_geometry left right =
-  let left_positions = Packed.Float3.View.view (Geometry.positions left)
-  and right_positions = Packed.Float3.View.view (Geometry.positions right)
-  and left_topology = Topology.View.view (Geometry.topology left)
-  and right_topology = Topology.View.view (Geometry.topology right) in
-  left_positions.x = right_positions.x
-  && left_positions.y = right_positions.y
-  && left_positions.z = right_positions.z
-  && left_topology.point_count = right_topology.point_count
-  && left_topology.vertex_points = right_topology.vertex_points
-  && left_topology.primitive_offsets = right_topology.primitive_offsets
-  && Bytes.equal left_topology.primitive_kinds right_topology.primitive_kinds
-  && List.equal (fun left right ->
-      Attribute.owner left = Attribute.owner right
-      && String.equal (Attribute.name left) (Attribute.name right)
-      && equal_storage left right)
-      (Geometry.attributes left) (Geometry.attributes right)
-  && List.equal (fun left right ->
-      Group.owner left = Group.owner right
-      && String.equal (Group.name left) (Group.name right)
-      && Group.ordered_elements left = Group.ordered_elements right
-      && Group.length left = Group.length right
-      && let equal = ref true in
-         for element = 0 to Group.length left - 1 do
-           if Group.mem element left <> Group.mem element right then equal := false
-         done;
-         !equal) (Geometry.groups left) (Geometry.groups right)
-  && List.equal (fun left right ->
-      String.equal (Edge_group.name left) (Edge_group.name right)
-      && Edge_group.length left = Edge_group.length right
-      && let equal = ref true in
-         for edge = 0 to Edge_group.length left - 1 do
-           if Edge_group.mem edge left <> Edge_group.mem edge right then equal := false
-         done;
-         !equal) (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let point_source () =
   let geometry = Line_geometry.points (Array.init 6 (fun point -> float_of_int point, 0., 0.))
       |> with_attribute Attribute.Point "value"

@@ -50,10 +50,6 @@ let expect_code code = function
       code (Error.code error) (Error.to_string error))
   | Ok _ -> fail ("expected error " ^ code)
 
-let equal_geometry left right =
-  let lv = values "distance" left and rv = values "distance" right in
-  lv = rv && Geometry.point_count left = Geometry.point_count right
-
 let long_curve point_count =
   let positions = Array.init point_count (fun point ->
       float_of_int point *. 0.001, sin (float_of_int point *. 0.003) *. 0.02, 0.)

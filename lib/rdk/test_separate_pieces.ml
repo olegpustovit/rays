@@ -56,27 +56,6 @@ let equal_storage left right = match left, right with
       Packed.Float_array.View.view left = Packed.Float_array.View.view right
   | _ -> false
 
-let equal_geometry left right =
-  position_view left = position_view right
-  && Topology.View.view (Geometry.topology left)
-     = Topology.View.view (Geometry.topology right)
-  && List.equal (fun left right ->
-      Attribute.owner left = Attribute.owner right
-      && Attribute.name left = Attribute.name right
-      && equal_storage (Attribute.View.storage left)
-           (Attribute.View.storage right))
-      (Geometry.attributes left) (Geometry.attributes right)
-  && List.equal (fun left right ->
-      Group.owner left = Group.owner right
-      && Group.name left = Group.name right
-      && Group.ordered_elements left = Group.ordered_elements right)
-      (Geometry.groups left) (Geometry.groups right)
-  && List.equal (fun left right ->
-      Edge_group.name left = Edge_group.name right
-      && Array.init (Edge_group.length left) (fun edge -> Edge_group.mem edge left)
-         = Array.init (Edge_group.length right) (fun edge -> Edge_group.mem edge right))
-      (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let expect_invalid work message = match work () with
   | Error error ->
       check (Error.code error = "invalid_separate_pieces")
