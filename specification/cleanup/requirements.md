@@ -203,7 +203,7 @@ Delete `pathtrace.metal`. The path tracer is a plain `.rays` program; placement 
 Exit gates:
 
 - [x] P8.G1: no `.metal` file in lib/rays_pathtracer Evidence: lib/rays_pathtracer has no .metal file.
-- [ ] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse
+- [x] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse Evidence: 22f5ed6b: World.bake computes the specular chain and SH9 only when first used, and set_world writes the map and CDF with plain loops (no per-texel boxing). Warm first 4-spp frame, both caches warm, 12 interleaved pairs at load 5.1–5.8: old median 209.6 ms vs Lisp 205.8 ms (Lisp faster in 8 of 12); a second set of 8 pairs: 216.0 vs 211.0. Cold Metal cache 518–550 vs 1,414–1,506 ms. GPU per 16 spp: pathtracer.rays −0.6%, shattered_studio −9.7%. Output byte-identical (render digest, both M1 exact digests, 0/576 channels vs the CPU walker).
 - [x] P8.G3: film RMSE ≤ 1e-4 against today's kernel after N spp Evidence: owner decision 2026-10-28: judged by self-consistency. pathtracer.rays meets RMSE 1e-4 (6.9e-5 at 64 spp). On shattered_studio the Lisp kernel's difference (4.8e-4 at 512 spp, unbiased, falling with spp) is at the deleted kernel's own regrouping noise (3.8e-4).
 - [x] P8.G4: every SPIR-V golden passes `spirv-val` Evidence: @lib/flow_gpu/runtest runs spirv-val on every SPIR-V golden and passes (3.4 s).
 

@@ -4,7 +4,7 @@ Source: [accepted requirements](requirements.md), artifact version 8.
 Baseline: `62582188`. Objective: implement the entire approved P0–P9 plan,
 with Rays Lisp as the product surface and shared compiler input.
 
-Completion: all 248 findings accepted; 109 of 110 phase steps and gates accepted. P8.G2 is reopened: the warm first frame is about 211 ms vs 201 ms for the old kernel. Hardware limit: native Metal curves (GPU family 9) and SPIR-V execution cannot run on this M1, so they are checked by compilation and spirv-val, which is what P8.G4 requires. Owner decisions that changed a gate are recorded in each item's evidence: P1.G1 (size accepted at 254.5k), P8.G3 (shattered_studio judged by self-consistency), UI29 (Navigator keeps its look), UI18 (one inspector), XC29 (no hard line-number limits). The final check.exe --ship, smoke-all and native qualification pass.
+Completion: all 248 findings and all 110 phase steps and gates accepted (P8.G2 re-closed by measurement on 2026-10-28). Hardware limit: native Metal curves (GPU family 9) and SPIR-V execution cannot run on this M1, so they are checked by compilation and spirv-val, which is what P8.G4 requires. Owner decisions that changed a gate are recorded in each item's evidence: P1.G1 (size accepted at 254.5k), P8.G3 (shattered_studio judged by self-consistency), UI29 (Navigator keeps its look), UI18 (one inspector), XC29 (no hard line-number limits). The final check.exe --ship, smoke-all and native qualification pass.
 
 Finding coverage: **248 / 248 accepted (100.0%)**. This counts individual
 findings, not weighted effort or completed phases.
@@ -25,7 +25,7 @@ size estimate, not the phase's behavioral or shipping gates.
 | P5 editor | Done | — |
 | P6 rdk | Done | — |
 | P7 repository | Done | — |
-| P8 path tracer | In progress | P8.G2 warm first frame |
+| P8 path tracer | Done | — |
 | P9 raster shaders | Done | — |
 
 ## Implemented, with focused evidence
