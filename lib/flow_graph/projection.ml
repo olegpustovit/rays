@@ -561,13 +561,16 @@ let bypassable (n : node) =
 let reorderable (n : node) =
   n.zone = None && List.mem n.head [ "list"; "str"; "scene/merge" ]
 
+let find_graph (w : W.t) name =
+  let def = String.starts_with ~prefix:"def:" name in
+  let bare = if def then String.sub name 4 (String.length name - 4) else name in
+  List.find_opt (fun (g : W.graph) -> g.name = bare) (if def then w.defs else w.graphs @ w.defs)
+
 let of_graph ?(folded = fun _ -> true) (catalog : Flow.Catalog.catalog) (w : W.t) name =
   Flow.Phase_timer.measure "project" (fun () ->
   let catalog = {catalog with Flow.Catalog.kinds =
     List.map (fun (node : W.node_definition) -> node.kind) w.nodes @ catalog.kinds} in
-  let def = String.starts_with ~prefix:"def:" name in
-  let bare = if def then String.sub name 4 (String.length name - 4) else name in
-  let g = match List.find_opt (fun (g : W.graph) -> g.name = bare) (if def then w.defs else w.graphs @ w.defs) with
+  let g = match find_graph w name with
     | Some g -> g
     | None -> invalid_arg ("Projection.of_graph: no graph " ^ name) in
   let root = [ (if List.exists (fun (d : W.graph) -> d == g) w.defs then "def:" ^ g.name else g.name) ] in
