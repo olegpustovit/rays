@@ -58,7 +58,7 @@ type state = {
   binding_errors : checked;
   live : live option;
   wrap : bool;  (* long lines continue on the next row *)
-  parinfer : bool;  (* closing brackets follow indentation (Lisp_text.parinfer_text) *)
+  parinfer : bool;  (* closing brackets follow indentation (Flow.Parinfer.rewrite) *)
   menu : (float * float) option;  (* the right-click menu, while open *)
   picker : (int * int * bool) option;  (* the colour literal (byte range with its quotes) being edited, and whether it changed *)
   scrubbing : bool;

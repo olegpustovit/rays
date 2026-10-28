@@ -688,7 +688,7 @@ let lisp_text () =
   check (L.number_at "(sop/box :size_x 1.25 :x 3)" 19 = Some (17, 21)) "the number at a byte";
   check (L.number_at "(sop/box :size_x 1.25 :x 3)" 16 = None) "a space is no number";
   (* parinfer: closers follow indentation, the printed workspaces are already in that shape *)
-  let p text = fst (L.parinfer_text text 0) in
+  let p text = fst (Flow.Parinfer.rewrite text 0) in
   List.iter (fun name ->
     let printed = fst (Flow.Lisp.print (source name)) in
     check (p printed = printed) (name ^ ": parinfer changed the printed workspace")) [ "bloom"; "sunflower"; "rosette" ];
@@ -703,10 +703,10 @@ let lisp_text () =
   check (L.brackets "(a \"x\n)\" b)" = [ (0, 10) ]) "a bracket on a string's second line is not one";
   check (p "(let* [a 1\n       b 2]\n  a)" = "(let* [a 1\n       b 2]\n  a)") "a vector over two lines";
   check (p "(a\n  )" = "(a)\n") "a line of closers alone becomes blank";
-  check (L.parinfer_text "(a \n  )" 6 = ("(a) \n  ", 7)) "Enter before a closer keeps the caret's indentation";
-  check (L.parinfer_text "(a" 2 = ("(a)", 2)) "the caret stays before an inferred closer";
-  check (L.parinfer_text "(a\nb)" 4 = ("(a)\nb", 5)) "the caret follows a moved closer";
-  check (L.parinfer_text "(a  )" 3 = ("(a )", 3)) "a blank typed before a closer survives on the caret's line";
+  check (Flow.Parinfer.rewrite "(a \n  )" 6 = ("(a) \n  ", 7)) "Enter before a closer keeps the caret's indentation";
+  check (Flow.Parinfer.rewrite "(a" 2 = ("(a)", 2)) "the caret stays before an inferred closer";
+  check (Flow.Parinfer.rewrite "(a\nb)" 4 = ("(a)\nb", 5)) "the caret follows a moved closer";
+  check (Flow.Parinfer.rewrite "(a  )" 3 = ("(a )", 3)) "a blank typed before a closer survives on the caret's line";
   check ((L.language ~parinfer:true Pxui.Theme.default).rewrite <> None
          && (L.language Pxui.Theme.default).rewrite = None) "the language rewrites only with parinfer on"
 

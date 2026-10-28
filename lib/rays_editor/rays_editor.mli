@@ -245,7 +245,6 @@ module Private : sig
     (** The ["#rrggbb"] literals of a text, as byte ranges with their colour. *)
     val describe : vocab -> string -> int -> (int * int * string) option
     val number_at : string -> int -> (int * int) option
-    val parinfer_text : string -> int -> string * int
     (** Parinfer's indent mode: the text with its closing brackets inferred from indentation,
         and where the caret lands. *)
     val language : ?vocab:vocab -> ?names:names -> ?imports:(string * string) list -> ?parinfer:bool -> Pxui.Theme.t -> Pxui.Ui.language
