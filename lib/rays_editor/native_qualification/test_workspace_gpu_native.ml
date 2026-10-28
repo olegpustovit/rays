@@ -58,7 +58,16 @@ let () =
       let node override kind =
         Array.find_opt
           (fun (n : E.node) ->
-            n.kind = kind
+            (n.kind = kind
+            || n.kind = "$card"
+               &&
+               match
+                 Option.to_result ~none:"uncompiled"
+                   (Flow_sop.Network.Int_map.find_opt n.id lowered.compiled)
+                 |> Fun.flip Result.bind (fun node -> lowered.card_node ~node)
+               with
+               | Ok card -> "sop/" ^ P.Node.operation card = kind
+               | Error _ -> false)
             && lowered.plan.instances.(n.inst).graph = "mesh"
             && lowered.plan.instances.(n.inst).default <> override)
           lowered.plan.nodes
@@ -869,7 +878,7 @@ let () =
       done;
       let host, created, closed, buffers, textures = Flow_native.Workspace_gpu.image_stats owner in
       assert (
-        created = 161 && closed = 160 && buffers = 81 && textures = 81 && host.status_reads = 1
+        created = 161 && closed = 160 && buffers = 161 && textures = 81 && host.status_reads = 1
         && host.readback_bytes = 0);
       assert (
         try
@@ -880,7 +889,7 @@ let () =
         with Failure message -> message = "publication raised");
       assert (handles () = native_handles);
       let _, created, closed, buffers, textures = Flow_native.Workspace_gpu.image_stats owner in
-      assert (created = 162 && closed = 161 && buffers = 82 && textures = 82);
+      assert (created = 162 && closed = 161 && buffers = 162 && textures = 82);
       let outputs = Array.init 63 (fun i -> publish ("accepted:" ^ string_of_int i) |> ok) in
       assert (Result.is_error (publish "over-capacity"));
       assert (
@@ -895,7 +904,7 @@ let () =
       let before, created, closed, buffers, textures =
         Flow_native.Workspace_gpu.image_stats owner
       in
-      assert (created = 225 && closed = 161 && buffers = 145 && textures = 145);
+      assert (created = 225 && closed = 161 && buffers = 225 && textures = 145);
       Flow_native.Workspace_gpu.close owner;
       Flow_native.Workspace_gpu.close owner;
       let after, created, closed, after_buffers, after_textures =
