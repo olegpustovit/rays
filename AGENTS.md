@@ -129,7 +129,7 @@ libraries cannot reach.
 - `rays` never depends on `pxui`, geometry, sketch libraries, or examples.
 - `pxui_shell` depends only on `rays`, `rays_math`, `editor_core`, and `pxui`; it never imports
   SOP, graph, geometry, or sketch libraries.
-- `pxui` depends only on `rays` and `rays_math`.
+- `pxui` depends only on `rays`, `rays_math` and `param` (the number field's model).
 - `rdk` never reaches `sop`; `sop` never reaches UI
   libraries; `pxui` never reaches `sop`; `param` depends on nothing;
   `pxui_graph` never reaches `sop` or `rdk`;

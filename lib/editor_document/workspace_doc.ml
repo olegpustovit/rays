@@ -325,3 +325,17 @@ let edit catalog t op =
           let fresh = List.find_opt (fun f -> name f = name form) (children next.source) in
           (match old, fresh with Some a, Some b -> not (S.equal a b) | None, None -> false | _ -> true)) forms then Some file else None) t.imports in
       match changed with Some file -> refusal file | None -> Ok next)
+
+(* Non-SOP fields are checked before their static context is materialized. *)
+let context_value ?(force = true) (workspace : t) (plan : Flow.Eval.plan) context =
+  match (if context = Flow.Context.editor then editor_graph workspace
+    else List.find_opt (fun (g : Flow.Workspace.graph) -> g.context = context) workspace.checked.graphs) with
+  | None -> Ok None
+  | Some graph ->
+      (match List.find_opt (fun (i : Flow.Eval.instance) -> i.default && i.graph = graph.name)
+               (Array.to_list plan.instances) with
+       | None -> Ok None
+       | Some instance ->
+           if force then Result.map Option.some (Flow.Eval.force instance.result ~live:(Input.at_time (0. )))
+           else Ok (Some instance.result))
+

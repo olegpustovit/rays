@@ -68,12 +68,6 @@ open Rays
   (* A vector: three cells in the control column, 8 between, each with its axis letter in ink-3
      drawn on [box] (the row); [cell index ~x ~w] makes the cell's own field (x, w relative to
      [box]) and returns what it asks for.  [reserve] keeps room at the right for a row's toggle. *)
-  let number ui ~key ~at ~w ?(h = 20.) ?size ~kind ?range ?display ?edit ?left ?trail ?valid text =
-    let module N = Editor_core.Number in
-    let valid = Option.value valid ~default:(N.valid kind) in
-    fst (Ui.value_field ui ~at ~w ~h ?size ?display ?fraction:(Option.bind range (fun r -> N.fraction r text))
-      ~scrub:(N.scrub kind ?range) ?edit ?left ?trail ~valid key text)
-
   let vector ui box ~at:(cx, cy) ~w ?(reserve = 0.) ?(axes = [ "x"; "y"; "z" ]) cell =
     let n = float (List.length axes) in
     let cell_w = (w -. reserve -. (8. *. (n -. 1.))) /. n in

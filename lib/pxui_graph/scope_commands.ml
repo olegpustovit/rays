@@ -319,10 +319,8 @@ let start_hints t =
   | _ -> t, [ Notice "Select one node to connect from" ]
 
 (* a letter, Backspace or Escape while hints are up; [None] when it was not a hint key *)
-let step_hints t (frame : Frame.t) =
-  let pressed = List.filter (fun k -> not (List.mem k (fst t.held))) frame.input.keys in
-  let clicked = frame.input.buttons <> [] && not (snd t.held) in
-  let t = { t with held = (frame.input.keys, frame.input.buttons <> []) } in
+let step_hints t ~pressed (frame : Frame.t) =
+  let clicked = List.exists (function Input.Pointer_pressed _ -> true | _ -> false) frame.input.events in
   match t.hinting with
   | None -> t, []
   | Some h when not h.armed -> { t with hinting = Some { h with armed = true } }, []  (* the key that began it *)

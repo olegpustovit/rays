@@ -404,7 +404,7 @@ let write_stack st g bottom_first name =
   let layers = List.mapi (fun i (_, name, (info : Edit.node_info)) ->
     let below = if i = 0 then [] else [ sym (let _, n, _ = List.nth bindings (i - 1) in n) ] in
     name, call_of ~kind:("world/" ^ info.operation) ~label:info.label
-      ~default_label:(Edit.factory_label (List.assoc ("world/" ^ info.operation) Contexts.world_kinds))
+      ~default_label:(Edit.factory_label (List.assoc ("world/" ^ info.operation) Kinds.world_kinds))
       ~slots:below info.node) bindings in
   let body = match List.rev layers with
     | [] -> none_world
@@ -657,7 +657,7 @@ let write ~factories (doc : Document.t) level edit =
   if not (writes doc level edit) then Ok None else
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
-      (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+      (Lazy.force doc.workspace.catalog) in
   let st = { catalog; workspace = doc.workspace.ws; unfolded = []; adopted = false } in
   try
     let note = write_edit st doc level edit in
@@ -705,7 +705,7 @@ let run ~factories ~adopt (before : Document.t) (after : Document.t) =
   else
     let ( let* ) = Result.bind in
     let* catalog = Result.map_error Diagnostic.to_string
-        (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+        (Lazy.force before.workspace.catalog) in
     let st = { catalog; workspace = before.workspace.ws; unfolded = []; adopted = false } in
     try
       object_changes st before (Document.scene_graph after);
@@ -723,7 +723,7 @@ let reconcile ~factories ?(adopt = true) before after = run ~factories ~adopt be
 let adopt ~factories (doc : Document.t) =
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
-      (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+      (Lazy.force doc.workspace.catalog) in
   let st = { catalog; workspace = doc.workspace.ws; unfolded = []; adopted = false } in
   try
     adopt_objects st doc;
@@ -735,7 +735,7 @@ let adopt ~factories (doc : Document.t) =
 let bind_home ~factories (doc : Document.t) home =
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
-      (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+      (Lazy.force doc.workspace.catalog) in
   let st = { catalog; workspace = doc.workspace.ws; unfolded = []; adopted = false } in
   try
     let path = bind st home in

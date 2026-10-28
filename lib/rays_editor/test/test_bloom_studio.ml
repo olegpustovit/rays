@@ -19,7 +19,7 @@ let bloom () =
   In_channel.with_open_bin "../../../sketches/ws_bloom.rays" In_channel.input_all
   |> replace "(petals : int 12)" "(petals : int 3)" |> replace ":petals 7 :seed 2" ":petals 2 :seed 2"
 let factories = Sop.Nodes.factories
-let catalog = Editor_document.Contexts.catalog ~version:1 factories |> Result.get_ok
+let catalog = Editor_document.Kinds.catalog ~version:1 factories |> Result.get_ok
 
 (* tall enough to show the whole Navigator without scrolling *)
 (* wide enough for the outline to be the wide sheet's (300 points): node rows, data flow *)

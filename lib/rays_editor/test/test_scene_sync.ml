@@ -7,6 +7,7 @@ open Sop
 
 module Document = Editor_document.Document
 module Contexts = Editor_document.Contexts
+module Kinds = Editor_document.Kinds
 module Objects = Editor_document.Objects
 module Layers = Editor_document.Layers
 module Workspace_doc = Editor_document.Workspace_doc
@@ -143,7 +144,7 @@ let run () =
       (List.assoc path qualified.checked.approx_reasons)) "capture overflow has no reason";
     current := doc) [2.,true;1e39,false;7.,true];
   let previous = !current in
-  let catalog = Result.get_ok (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+  let catalog = Result.get_ok (Kinds.catalog ~version:Flow_sop.Manifest.version factories) in
   let edited = Workspace_doc.edit catalog (previous.workspace.ws)
     (Flow_graph.Flow_edit.Set_arg {node = ["geo";"@result"]; key = Kw "size"; sub = [];
       value = Flow.Syntax.make (Num "2.0")}) |> Result.get_ok in
@@ -396,11 +397,11 @@ let run () =
   (* adding by key: an object joins the scene's merge, a layer goes on top of the stack; a document
      with no scene graph (or World graph) gets one, its host objects written first *)
   let add doc name expr = Result.get_ok (Flow_graph.Flow_edit.apply_checked
-    (Result.get_ok (Contexts.catalog ~version:Flow_sop.Manifest.version factories)) (fst (doc : Workspace_doc.t * _)).source
+    (Result.get_ok (Kinds.catalog ~version:Flow_sop.Manifest.version factories)) (fst (doc : Workspace_doc.t * _)).source
     (Flow_graph.Flow_edit.Add_node { scope = [ "scene" ]; name; expr })) in
   ignore add;
   let call head args = Flow.Syntax.make (Flow.Syntax.List (Flow.Syntax.make (Flow.Syntax.Sym head) :: args)) in
-  let catalog = Result.get_ok (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+  let catalog = Result.get_ok (Kinds.catalog ~version:Flow_sop.Manifest.version factories) in
   let edit (doc : Document.t) op = lower ~previous:doc
     (Result.get_ok (Workspace_doc.edit catalog (doc.workspace.ws) op)) in
   let added = edit doc (Flow_graph.Flow_edit.Add_node { scope = [ "scene" ]; name = "lamp";
@@ -596,7 +597,7 @@ let run_loops () =
          && contains (source half) ":skip [[2 1]]") ("a bound pair, one deleted: " ^ source half);
   same_after_reload half "bound pair half";
   (* a merge that loses an argument renumbers its skip (here b, which it skipped, and d, which it skips, move up) *)
-  let catalog = Result.get_ok (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+  let catalog = Result.get_ok (Kinds.catalog ~version:Flow_sop.Manifest.version factories) in
   let renum = open_text {|(workspace r (graph scene :context scene
     (let* [a (scene/light :name "a") b (scene/light :name "b") c (scene/light :name "c") d (scene/light :name "d")]
       (scene/merge a b c d :skip [1 3]))))|} in
@@ -723,7 +724,7 @@ let run_root () =
   (* a scene without a root renders as the defaults; a camera carries no render size *)
   let old = open_text text in
   check (old.root = R.default && old.homes.root = None) "a scene without a root did not get the default root";
-  check (Result.is_error (Workspace_doc.of_text (Result.get_ok (Contexts.catalog ~version:1 factories)) {|(workspace old
+  check (Result.is_error (Workspace_doc.of_text (Result.get_ok (Kinds.catalog ~version:1 factories)) {|(workspace old
     (graph g :context sop (sop/box))
     (graph scene :context scene
       (scene/merge (scene/geometry (ref g)) (scene/camera :width 1600 :height 900 :max_spp 512))))|}))
@@ -847,7 +848,7 @@ let run_root () =
 
 (* the ops of a gesture, applied together: all or none *)
 let apply_ops (doc : Document.t) ops =
-  let catalog = Result.get_ok (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+  let catalog = Result.get_ok (Kinds.catalog ~version:Flow_sop.Manifest.version factories) in
   List.fold_left (fun doc op ->
     Result.bind doc (fun (doc : Document.t) ->
       match Workspace_doc.edit catalog (doc.workspace.ws) op with

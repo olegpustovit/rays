@@ -304,7 +304,7 @@ let vocabulary factories (doc : Document.t) = lazy (
   Lisp_text.vocab ~ops:(doc.workspace.ws).checked.ops
     (Flow_sop.Catalog.with_library
        (List.map Flow_sop.Catalog.descriptor (factories @ (doc.workspace.lowered).factories))
-      @ Contexts.descriptors))
+      @ Kinds.descriptors))
 
 let vocabulary_for value (doc : Document.t) =
   let previous = (value.doc.Document.workspace.ws).checked

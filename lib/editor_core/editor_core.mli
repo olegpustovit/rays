@@ -83,29 +83,3 @@ module Router : sig
       order. Supply the previous frame's keys for changed modifiers and focus
       cancellation; omitted previous state assumes no modifiers were held. *)
 end
-
-(** The one model of a number field (a card's row, the inspector's control, a vector's cell): how
-    a drag changes its text.  The kind is the parameter's, never the literal's spelling, so a float
-    written [1] scrubs to [1.5]. *)
-module Number : sig
-  type kind = Int | Float
-
-  val valid : kind -> string -> bool
-  (** Text a field of this kind commits: an integer, or a finite float. *)
-
-  val fraction : float * float -> string -> float option
-  (** Where the value sits in a soft range, 0 to 1, for the field's position line. *)
-
-  val show : float -> string
-  (** A float as a field displays it: ten significant digits, never an exponent.  What is written
-      is {!Flow.Lisp.float}. *)
-
-  val scrub : kind -> ?range:float * float -> string -> float -> bool -> string
-  (** [scrub kind ?range origin dx fine]: the text after a drag of [dx] points from the text it
-      began at.  An integer moves by one every 6 points; a float by 0.05 a point, or by a
-      two-hundredth of its soft range, a tenth of that when [fine] (Shift).  The result is rounded
-      to the step's digits (the origin's when it wrote more) and printed by {!Flow.Lisp.float}, so
-      [1234567.89] stays exact and no exponent appears.  With a [range] the drag stops at its ends
-      (typing goes past them; a value already outside is not pulled in).  A drag shorter than one
-      step returns [origin] itself: a click writes nothing. *)
-end

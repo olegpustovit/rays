@@ -151,8 +151,8 @@ val scope_point : t -> scope:path -> float * float -> (float * float) option
 
 val num_field :
   Pxui.Ui.t -> at:float * float -> w:float -> h:float -> ?size:int ->
-  ?kind:Editor_core.Number.kind -> ?range:float * float -> ?nonfinite:bool -> string -> string -> string option
-(** The pane's number field ({!Pxui.Ui.value_field} driven by {!Editor_core.Number}, as the
+  ?kind:Param.Number.kind -> ?range:float * float -> ?nonfinite:bool -> string -> string -> string option
+(** The pane's number field ({!Pxui.Ui.value_field} driven by {!Param.Number}, as the
     inspector's [Pxui_shell.Kit.number]): dragged sideways it scrubs by the step of its [kind] and soft
     [range], Option-click types, a click writes nothing.  [kind] is the parameter's type; without one the
     literal's spelling decides. [nonfinite] admits explicit non-finite literals only when
@@ -162,8 +162,9 @@ val num_field :
 
 val bindings : ('scope, command) Editor_core.Command.t list
 val run_command : t -> command -> t * change list
-val update : t -> Pxui.Ui.t -> Rays.Frame.t -> t * change list
-(** Build the pane inside [Pxui.Ui.frame].  Hidden iterations are never
+val update : ?pressed:Input.key list -> t -> Pxui.Ui.t -> Rays.Frame.t -> t * change list
+(** Build the pane inside [Pxui.Ui.frame].  [pressed] is the keys that went down this frame (the
+    host's edges: the pane never matches key events itself).  Hidden iterations are never
     built: a zone draws its body once, whatever its iteration count. *)
 
 val selected_wire : t -> (path * Flow_graph.Flow_edit.arg_key) option

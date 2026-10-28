@@ -6,7 +6,7 @@ module Workspace_doc = Workspace_doc
 module Timeline = Timeline
 
 let workspace_catalog ?(factories = Sop.Nodes.factories) () =
-  Contexts.catalog ~version:Flow_sop.Manifest.version factories
+  Kinds.catalog ~version:Flow_sop.Manifest.version factories
 
 type window = Contexts.window =
   { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
@@ -173,7 +173,7 @@ module Workspace = struct
   let sop_graphs ?(factories = Sop.Nodes.factories) (doc : Workspace_doc.t) =
     let ( let* ) = Result.bind in
     let* lowered = Result.map_error Diagnostic.to_string
-        (Flow_sop.Lower.workspace ~extra:Contexts.descriptors ~inputs:doc.inputs ~factories doc.source) in
+        (Flow_sop.Lower.workspace ~extra:Kinds.descriptors ~inputs:doc.inputs ~factories doc.source) in
     List.fold_right (fun (g : Flow_sop.Lower.graph) rest ->
       let* rest = rest in
       match g.root with

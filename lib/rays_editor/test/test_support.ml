@@ -47,7 +47,7 @@ module Projection = struct
   module P = Flow_graph.Projection
   let cases = "../../../specification/workspace/cases"
   let read path = In_channel.with_open_bin path In_channel.input_all
-  let catalog = Editor_document.Contexts.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
+  let catalog = Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
   let workspace_of text = match Flow.Syntax.parse text with
     | Error d -> failwith (Diagnostic.to_string d)
     | Ok forms -> (match Flow.Workspace.check catalog forms with
@@ -66,7 +66,7 @@ module Graph_pane = struct
       pointer = 0., 0.; keys = []; events = [] };
     pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0.;
   }
-  let catalog = Editor_document.Contexts.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
+  let catalog = Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
   let load_workspace name =
     let path = Filename.concat "../../../specification/workspace/cases" (name ^ ".lisp") in
     let text = In_channel.with_open_bin path In_channel.input_all in

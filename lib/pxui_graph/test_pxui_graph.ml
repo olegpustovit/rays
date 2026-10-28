@@ -100,7 +100,7 @@ module Scope = Pxui_graph.Scope
 module P = Flow_graph.Projection
 
 let cases = "../specification/workspace/cases"
-let scope_catalog = Editor_document.Contexts.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
+let scope_catalog = Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
 let load_workspace name =
   let text = In_channel.with_open_bin (Filename.concat cases (name ^ ".lisp")) In_channel.input_all in
   match Flow.Syntax.parse text with
@@ -276,7 +276,7 @@ let scope_levels () =
   (* one frame with the key down: scope_step's settle frame would take the press *)
   let one_frame key v =
     let f = frame ~keys:[ key ] () in
-    Pxui.Ui.frame scope_ui f (fun ui -> Scope.update v ui f) in
+    Pxui.Ui.frame scope_ui f (fun ui -> Scope.update ~pressed:[ key ] v ui f) in
   let v, changes = one_frame (Input.KeyChar 'a') hint_view in
   let connects = List.filter (function Scope.Syntax_edit (Flow_graph.Flow_edit.Connect { src = "b"; _ }) -> true | _ -> false)
     changes in

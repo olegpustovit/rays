@@ -9,7 +9,7 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 let die fmt = Printf.ksprintf (fun m -> prerr_endline m; exit 1) fmt
 
 let catalog () =
-  match Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version Sop.Nodes.factories with
+  match Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version Sop.Nodes.factories with
   | Ok c -> c
   | Error d -> die "rays: catalog: %s" (D.to_string d)
 

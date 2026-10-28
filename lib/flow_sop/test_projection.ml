@@ -9,7 +9,7 @@ let fail message = failwith ("test_projection: " ^ message)
 let check condition message = if not condition then fail message
 let read path = In_channel.with_open_bin path In_channel.input_all
 let cases = "../specification/workspace/cases"
-let catalog = Editor_document.Contexts.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
+let catalog = Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
 let fixtures = [ "bloom"; "facade"; "garland"; "kit"; "orrery"; "rosette";
                  "sunflower"; "tiles"; "tree"; "tunnel"; "variations"; "wave" ]
 

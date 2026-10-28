@@ -22,95 +22,10 @@ let ( let* ) = Result.bind
 let diag code message = Diagnostic.error ~code message
 let flow r = Result.map_error (diag "E_DOCUMENT") r
 
-(* ---- the kinds ---- *)
+open Kinds
+open Shell_eval
 
-let name_field : Param.field_view = {
-  name = "name"; label = "Name"; description = None; folder = []; impact = Param.Cook;
-  primary = false; unit = None; vec3 = None; kind = Param.Text_view; default = Param.Text_value "";
-  current = Param.Text_value "" }
-
-(* [:parent "label"] places an object under another by name (a camera has none); [:active true]
-   makes a camera the render camera.  Neither is a field of the node: the lowering reads them. *)
-let parent_field = { name_field with name = "parent"; label = "Parent" }
-let active_field = { name_field with name = "active"; label = "Active camera";
-  kind = Param.Toggle_view; default = Param.Bool_value false; current = Param.Bool_value false }
-
-(* The World and the root are scene kinds too: [scene/world] is a merge member that references a
-   world graph, [scene/root] ends the scene graph. *)
-let scene_kinds = List.map (fun f -> "scene/" ^ Edit.factory_key f, f)
-    (Objects.catalog @ [ Layers.Settings.factory; Objects.Root.factory ])
-let world_kinds = List.map (fun f -> "world/" ^ Edit.factory_key f, f)
-    Layers.catalog
-
-(* Workspace settings: what the host needs to open the window. *)
-type window = { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
-
-let window_schema =
-  let integer min max hard_min = Param.integer ~hard_min ~min ~max () in
-  let int_field name label kind default get set =
-    Param.field ~name ~label:(label ^ " (on restart)") ~kind ~default ~get ~set () in
-  Param.schema ~name:"workspace" ~default:{ title = "Rays"; width = 1280; height = 800;
-                                            fps = 60; seed = 1; fast = true } [
-    Param.field ~name:"title" ~label:"Title (on restart)" ~kind:Param.Text ~default:"Rays"
-      ~get:(fun w -> w.title) ~set:(fun title w -> { w with title }) ();
-    int_field "width" "Width" (integer 320 3840 64) 1280 (fun w -> w.width)
-      (fun width w -> { w with width });
-    int_field "height" "Height" (integer 240 2160 64) 800 (fun w -> w.height)
-      (fun height w -> { w with height });
-    int_field "fps" "Frames per second" (Param.integer ~hard_min:1 ~hard_max:240 ~min:1 ~max:120 ())
-      60 (fun w -> w.fps) (fun fps w -> { w with fps });
-    int_field "seed" "Seed" (Param.integer ~hard_min:0 ~min:0 ~max:9999 ()) 1
-      (fun w -> w.seed) (fun seed w -> { w with seed });
-    (* fast: what only reaches the screen may run on the GPU in float32 and int32 *)
-    Param.field ~name:"precision" ~label:"Precision (live)" ~kind:(Param.choice ~equal:Bool.equal [ "fast", true; "exact", false ])
-      ~default:true ~get:(fun w -> w.fast) ~set:(fun fast w -> { w with fast }) () ]
-
-let window_fields = Param.view window_schema (Param.default window_schema)
-
-(* slot of each kind: a geometry object takes its geometry, a World layer the layer below *)
-let kind_slots qualified = match qualified with
-  | "scene/geometry" -> [ "geometry", Edit.Required; "texture", Edit.Optional ]
-  | "scene/world" -> [ "world", Edit.Required ]
-  | "scene/root" -> [ "scene", Edit.Required; "camera", Edit.Optional ]
-  | q when String.starts_with ~prefix:"world/" q -> [ "below", Edit.Optional ]
-  | _ -> []
-
-let extra_fields = function
-  | "scene/camera" -> [ active_field ]
-  | "scene/geometry" | "scene/light" -> [ parent_field ]
-  | _ -> []
-
-let descriptors : Flow_sop.Catalog.descriptor list =
-  List.map (fun (qualified, factory) ->
-    { Flow_sop.Catalog.qualified; key = Edit.factory_key factory;
-      operation = Edit.factory_operation factory; label = Edit.factory_label factory;
-      category = Edit.factory_category factory; slots = kind_slots qualified;
-      slot_types = (if qualified="scene/geometry" then ["geometry";"image"] else []);
-      keyword_inputs = [];
-      fields = name_field :: extra_fields qualified @
-        List.concat (Result.get_ok (Param.group_vec3 ~infer:true (Edit.factory_fields factory))) })
-    (scene_kinds @ world_kinds)
-  @ [ { Flow_sop.Catalog.qualified = "settings/config"; key = "config"; operation = "config";
-        label = "Settings"; category = [ "Workspace" ]; slots = []; slot_types = [];
-        keyword_inputs = [];
-        fields = window_fields } ]
-
-(* The catalog is a function of the factories alone, and every edit asks for it (0.18 ms and
-   0.6 MB to build): the last one is kept, by the identity of its factories.  Capacity 1. *)
-let last_catalog = Atomic.make None
-
-let catalog ~version factories =
-  match Atomic.get last_catalog with
-  | Some (v, f, result) when v = version && f == factories -> result
-  | _ ->
-      let result = Flow_sop.Catalog.of_factories ~version ~extra:descriptors factories in
-      Atomic.set last_catalog (Some (version, factories, result));
-      result
-
-let ports qualified =
-  match List.find_opt (fun (d : Flow_sop.Catalog.descriptor) -> d.qualified = qualified) descriptors with
-  | Some d -> Result.get_ok (Flow_sop.Port.parameters d.fields)  (* valid by construction *)
-  | None -> []
+type window = Kinds.window = { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
 
 (* ---- lowering a struct ---- *)
 
@@ -151,19 +66,6 @@ let check_context_time (workspace : Workspace_doc.t) (plan : E.plan) =
           graph.name field (W.context_name graph.context))) (live_field "result" instance.result))) with
   | None -> Ok () | Some diagnostic -> Error diagnostic
 
-(* Non-SOP fields are checked before their static context is materialized. *)
-let result ?(force = true) (workspace : Workspace_doc.t) (plan : E.plan) context =
-  match (if context = Flow.Context.editor then Workspace_doc.editor_graph workspace
-    else List.find_opt (fun (g : Flow.Workspace.graph) -> g.context = context) workspace.checked.graphs) with
-  | None -> Ok None
-  | Some graph ->
-      (match List.find_opt (fun (i : E.instance) -> i.default && i.graph = graph.name)
-               (Array.to_list plan.instances) with
-       | None -> Ok None
-       | Some instance ->
-           if force then Result.map Option.some (E.force instance.result ~live:(Input.at_time (0. )))
-           else Ok (Some instance.result))
-
 let has_settings (workspace : Workspace_doc.t) =
   List.exists (fun (g : Flow.Workspace.graph) -> g.context = Flow.Context.settings)
     workspace.checked.graphs
@@ -179,7 +81,7 @@ let settings_of = function
 (* The window the settings graph asks for; defaults without one. *)
 let plan_window (workspace : Workspace_doc.t) plan =
   let* () = check_context_time workspace plan in
-  let* value = result workspace plan Flow.Context.settings in
+  let* value = Workspace_doc.context_value workspace plan Flow.Context.settings in
   match value with
   | None -> Ok (Param.default window_schema)
   | Some value -> Result.map (Settings.get window_schema) (settings_of value)
@@ -613,225 +515,6 @@ let layer_network ?previous ~homes layers =
     (Ok (Edit.empty, [], None, [])) layers in
   Ok (Document.of_geometry ~context:Flow.Context.world graph below, List.rev made)
 
-(* ---- the editor ---- *)
-
-module Panels = Editor_core.Panels
-
-type editor = { tree : Panels.t; origins : (Panels.path * Document.origin) list;
-                named : (Panels.path * string) list; start : Document.start;
-                repeated : string list; follows : (Panels.path * Panels.path) list;
-                viewports : (string * E.value) list;
-                canvases : (string * E.value) list;
-                preview_sources : (string * Document.preview_source) list;
-                switch : Document.switch option }
-
-let viewport_key path = "v" ^ String.concat "." (List.map string_of_int path)
-
-(* The tree of a [ui/workspace] value, with the graph a [ui/graph] names and the scene
-   of each viewport; the origins come from walking the terms beside the values. *)
-let panel_tree root =
-  let named = ref [] and viewports = ref [] and canvases = ref [] and switch = ref None in
-  let start = ref { Document.focus = None; looking = []; graph_views = []; tabs = [] } in
-  let flag name args = List.assoc_opt name args = Some (E.Bool true) in
-  let text name args = match List.assoc_opt name args with Some (E.Text t) -> Some t | _ -> None in
-  let leaf path args panel =
-    if flag "focus" args && !start.focus = None then start := { !start with focus = Some (List.rev path) };
-    Ok (Panels.Leaf panel) in
-  let arg name args = match List.assoc_opt name args with
-    | Some v -> Ok v | None -> Error (diag "E_LOWER" ("A panel is missing its " ^ name ^ ".")) in
-  let axis = function E.Text "vertical" -> `V | _ -> `H in
-  let rec go path = function
-    | E.Struct ("ui/canvas", _, args) ->
-        let key = "c" ^ String.concat "." (List.map string_of_int (List.rev path)) in
-        let* drawing = arg "drawing" args in
-        canvases := (key, drawing) :: !canvases;
-        leaf path args (Panels.Canvas key)
-    | E.Struct ("ui/viewport", _, args) ->
-        let key = viewport_key (List.rev path) in
-        let* scene = arg "scene" args in
-        viewports := (key, scene) :: !viewports;
-        if flag "look_through" args then start := { !start with looking = key :: !start.looking };
-        leaf path args (Panels.View key)
-    | E.Struct ("ui/graph", _, args) ->
-        let here = List.rev path in
-        Option.iter (fun name -> named := (here, name) :: !named) (text "graph" args);
-        Option.iter (fun view -> start := { !start with graph_views = (here, view) :: !start.graph_views })
-          (text "view" args);
-        leaf path args Graph
-    | E.Struct ("ui/inspector", _, args) -> leaf path args Inspector
-    | E.Struct ("ui/spreadsheet", _, args) -> leaf path args Spreadsheet
-    | E.Struct ("ui/outline", _, args) -> leaf path args Outline
-    | E.Struct ("ui/list", _, args) -> leaf path args List
-    | E.Struct ("ui/lisp", _, args) ->
-        Option.iter (fun tab -> start := { !start with tabs = (List.rev path, tab) :: !start.tabs }) (text "tab" args);
-        leaf path args Lisp
-    | E.Struct ("ui/timeline", _, args) -> leaf path args Timeline
-    | E.Struct (("ui/split" | "ui/split-at"), _, args) ->
-        let* first = arg "first" args in
-        let* second = arg "second" args in
-        let* a = go (0 :: path) first in
-        let* b = go (1 :: path) second in
-        let points name = match List.assoc_opt name args with
-          | Some (E.Int n) -> Some n | Some (E.Float f) -> Some (int_of_float f) | _ -> None in
-        let size : Panels.size = match points "first_size", points "second_size", List.assoc_opt "ratio" args with
-          | Some n, _, _ -> `First n
-          | None, Some n, _ -> `Second n
-          | None, None, Some (E.Float r) -> `Ratio r
-          | None, None, Some (E.Int n) -> `Ratio (float_of_int n)
-          | _ -> `Ratio 0.5 in
-        Ok (Panels.Split { axis = axis (Option.value (List.assoc_opt "axis" args) ~default:(E.Text "horizontal"));
-                           size; a; b })
-    | E.Struct ("ui/tile", _, args) ->
-        let* cells = List.fold_left (fun acc (i, (_, v)) ->
-          let* acc = acc in let* c = go (i :: path) v in Ok (c :: acc)) (Ok [])
-          (List.mapi (fun i a -> i, a) args) in
-        Ok (Panels.Tile (List.rev cells))
-    | E.Struct ("ui/floating", _, args) ->
-        let* p = arg "panel" args in
-        let* t = go (0 :: path) p in Ok (Panels.Float t)
-    (* a switch is transparent: its active layout sits at the switch's own place in the tree, and
-       a layout that is not showing registers nothing but its shape *)
-    | E.Struct ("ui/switch", _, args) ->
-        let active = match List.assoc_opt "active" args with Some (E.Int n) -> n | _ -> 0 in
-        let first = !switch = None in
-        if first then switch := Some { Document.layouts = []; active };
-        let kids = List.filter_map (fun (n, v) -> if n = "active" then None else Some v) args in
-        let* trees = List.fold_left (fun acc (i, kid) ->
-          let* acc = acc in
-          let saved = !named, !viewports, !canvases, !start in
-          let* tree = go path kid in
-          if i <> active then (let g, v, c, s = saved in named := g; viewports := v; canvases := c; start := s);
-          Ok (tree :: acc)) (Ok []) (List.mapi (fun i k -> i, k) kids) in
-        let trees = List.rev trees in
-        if first then switch := Some { Document.layouts = trees; active };
-        Ok (List.nth trees active)
-    | _ -> Error (diag "E_LOWER" "The editor graph returns a (ui/workspace ...) of panels.") in
-  let* tree = go [] root in
-  let* () = Result.map_error (diag "E_RANGE") (Panels.valid tree) in
-  Ok (tree, List.rev !named, !start, List.rev !viewports, List.rev !canvases, !switch)
-
-(* Which panels are named: the terms of the graph beside its value. *)
-let origins (graph : W.graph) value =
-  let bindings, result = match graph.body.node with
-    | W.Let (bs, r) -> bs, r | _ -> [], graph.body in
-  let env = List.filter_map (fun (p, t) -> match p with W.Name n -> Some (n, t) | _ -> None) bindings in
-  let found = ref [] and ofs = ref [] in
-  let add path o = found := (List.rev path, o) :: !found in
-  (* a panel that is not a name is written in place: the argument [key] of the call around it *)
-  let inline home path key (t : W.term) = match t.node with
-    | W.Ref_binding (_, []) | W.Loop _ -> ()
-    | _ -> add path (Document.Inline (home, key)) in
-  let rec walk place path (t : W.term) (v : E.value) =
-    let here () = match t.path, place with
-      | Some p, _ -> Document.Bound_at p
-      | None, Some (parent, key) -> Document.Inline_in (parent, key)
-      | None, None -> Document.Looped in
-    let pos i = Flow_graph.Flow_edit.Pos i in
-    match t.node, v with
-    | W.Ref_binding (n, []), _ ->
-        add path (Document.Bound n);
-        Option.iter (fun t' -> walk None path t' v) (List.assoc_opt n env)
-    | W.Op { op = "ui/inspector" | "ui/spreadsheet" | "ui/list" | "ui/lisp"; args; _ }, _ ->
-        Option.iter (fun (a : W.term) -> ofs := (List.rev path, a) :: !ofs) (List.assoc_opt "of" args)
-    | W.Op { op = "ui/workspace"; args = (_, r) :: _; _ }, E.Struct (_, _, (_, rv) :: _) ->
-        let h = here () in
-        inline h path (pos 0) r;
-        walk (Some (h, pos 0)) path r rv
-    | W.Op { op = "ui/split" | "ui/split-at"; args; _ }, E.Struct (_, _, vargs) ->
-        let h = here () in
-        List.iteri (fun i key -> match List.assoc_opt key args, List.assoc_opt key vargs with
-          | Some a, Some va ->
-              let k = pos (Option.get (List.find_index (fun (n, _) -> n = key) args)) in
-              inline h (i :: path) k a;
-              walk (Some (h, k)) (i :: path) a va
-          | _ -> ()) [ "first"; "second" ]
-    | W.Op { op = "ui/switch"; args; _ }, E.Struct (_, _, vargs) ->
-        (* transparent: the active layout is found at the switch's own path *)
-        let h = here () in
-        let layouts l = List.filter (fun (n, _) -> n <> "active") l in
-        let active = match List.assoc_opt "active" vargs with Some (E.Int n) -> n | _ -> 0 in
-        (match List.nth_opt (layouts args) active, List.nth_opt (layouts vargs) active with
-         | Some (_, a), Some (_, va) ->
-             inline h path (pos active) a;
-             walk (Some (h, pos active)) path a va
-         | _ -> ())
-    | W.Op { op = "ui/floating"; args = (_, a) :: _; _ }, E.Struct (_, _, (_, va) :: _) ->
-        let h = here () in
-        inline h (0 :: path) (pos 0) a;
-        walk (Some (h, pos 0)) (0 :: path) a va
-    | W.Op { op = "ui/tile"; args; _ }, E.Struct (_, _, vargs) ->
-        let h = here () in
-        if List.exists (fun (_, (a : W.term)) -> match a.node with W.Loop _ -> true | _ -> false) args
-        then begin
-          let key = pos (Option.get (List.find_index (fun (_, (a : W.term)) ->
-            match a.node with W.Loop _ -> true | _ -> false) args)) in
-          List.iteri (fun i _ -> add (i :: path) (Document.Loop (h, key))) vargs
-        end
-        else List.iteri (fun i (_, a) ->
-          inline h (i :: path) (pos i) a;
-          Option.iter (walk (Some (h, pos i)) (i :: path) a) (List.nth_opt (List.map snd vargs) i)) args
-    | _ -> () in
-  walk None [] result value;
-  !found, List.rev !ofs
-
-let editor (workspace : Workspace_doc.t) (plan : E.plan) =
-  let* value = result ~force:false workspace plan Flow.Context.editor in
-  match value with
-  | None -> Ok None
-  | Some (E.Struct ("ui/workspace", _, ("root", root)::_) as whole) ->
-      let* tree, named, start, viewports, canvases, switch = panel_tree root in
-      let g = Option.get (Workspace_doc.editor_graph workspace) in
-      let origins, ofs = origins g whole in
-      let all = Panels.leaves tree in
-      let bound path = match List.assoc_opt path origins with Some (Document.Bound n) -> Some n | _ -> None in
-      let names = List.filter_map (fun (path, _) -> bound path) all in
-      let repeated = List.sort_uniq String.compare
-        (List.filter (fun n -> List.length (List.filter (( = ) n) names) > 1) names) in
-      (* [:of name]: the graph leaf that binding makes in the layout shown *)
-      let* follows = List.fold_left (fun acc (path, (term : W.term)) ->
-        let* acc = acc in
-        match term.node with
-        | W.Ref_binding (n, []) ->
-            (match List.find_opt (fun (p, panel) -> panel = Panels.Graph && bound p = Some n) all with
-             | Some (target, _) -> Ok ((path, target) :: acc)
-             | None -> Error (diag "E_PANEL_OF" (Printf.sprintf ":of %s is not a graph panel of the layout shown." n)))
-        | _ -> Error (diag "E_PANEL_OF" ":of takes the binding of a graph panel.")) (Ok []) ofs in
-      let leaves = Panels.leaves tree |> List.filter_map (function
-        | path, (Panels.View key | Canvas key) -> Some (path, key, List.assoc_opt path origins) | _ -> None) in
-      (* ponytail: quadratic uniqueness scan over viewport leaves; use name
-         counts if large layouts beyond the 16-renderer limit need it. *)
-      let keys = List.map (fun (_, old, origin) ->
-        let key = match origin with
-          | Some (Document.Bound name) when List.length (List.filter (fun (_, _, o) -> o = origin) leaves) = 1 ->
-              Printf.sprintf "%c:%S/%S" old.[0] g.name name
-          | _ -> old in
-        old, key) leaves in
-      let key old = List.assoc old keys in
-      let rec remap = function
-        | Panels.Leaf (View old) -> Panels.Leaf (View (key old))
-        | Leaf (Canvas old) -> Leaf (Canvas (key old))
-        | Leaf p -> Leaf p
-        | Split s -> Split {s with a = remap s.a; b = remap s.b}
-        | Tile cells -> Tile (List.map remap cells)
-        | Float panel -> Float (remap panel) in
-      let rec authored = function
-        | Document.Bound_at path -> F.arg_text workspace.source path F.Whole
-        | Inline_in (home, arg) -> Option.bind (authored home) (fun form -> F.arg_of form arg)
-        | Copy _ | Looped -> None in
-      let preview_sources = List.map (fun (_, old, origin) ->
-        let panel_form = match origin with
-          | Some (Document.Bound name) -> F.arg_text workspace.source [g.name; name] F.Whole
-          | Some (Inline (home, arg)) -> Option.bind (authored home) (fun form -> F.arg_of form arg)
-          | Some (Loop _) | None -> None in
-        key old, {Document.editor_graph = g.name; panel = origin;
-          scene_ref = Option.bind panel_form (fun form -> F.arg_of form (F.Pos 0));
-          instance = List.assoc old viewports}) (List.filter (fun (_, old, _) -> List.mem_assoc old viewports) leaves) in
-      let start = { start with looking = List.map key start.looking } in
-      Ok (Some { tree = remap tree; origins; named; repeated; follows; start;
-        viewports = List.map (fun (old, scene) -> key old, scene) viewports;
-        canvases = List.map (fun (old, drawing) -> key old, drawing) canvases; preview_sources; switch })
-  | Some _ -> Error (diag "E_LOWER" "The editor graph returns a (ui/workspace ...).")
-
 (* ---- the document of a workspace ---- *)
 
 (* A network the previous document already has, field for field, is kept physically: a
@@ -892,8 +575,8 @@ let of_workspace ~factories ?gpu ?previous (workspace : Workspace_doc.t) =
   let* () = check_scene workspace lowered.plan in
   let* items, root = items workspace lowered in
   (* a viewport over another instance of the scene draws objects of its own *)
-  let* editor = editor workspace lowered.plan in
-  let* default_scene = result ~force:false workspace lowered.plan Flow.Context.scene in
+  let* editor = Shell_eval.editor workspace lowered.plan in
+  let* default_scene = Workspace_doc.context_value ~force:false workspace lowered.plan Flow.Context.scene in
   (* a viewport's own scene draws its objects; its root and World are not the document's *)
   let objects_only calls = List.filter (fun (c : call) -> c.kind <> "scene/root" && c.kind <> "scene/world") calls in
   let default_calls = objects_only (Option.fold ~none:[] ~some:scene_calls default_scene) in
@@ -1068,6 +751,7 @@ let of_workspace ~factories ?gpu ?previous (workspace : Workspace_doc.t) =
                                       switch = e.switch }) editor;
        view_worlds; view_roots; homes;
        workspace = { Document.ws = workspace; lowered;
+                     catalog = lazy (catalog ~version:Flow_sop.Manifest.version factories);
                      fast = lazy (match plan_window workspace lowered.plan with Ok w -> w.fast | Error _ -> true) } }
 
 (* Only the recorded live fields run; SOP networks, source and panel identities

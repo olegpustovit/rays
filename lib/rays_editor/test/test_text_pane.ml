@@ -75,7 +75,7 @@ let token_scrubs () =
     "the caret in an inline function's body did not select its card";
   check (T.binding source ["g";"ys#0";"shift"] <> None)
     "an inline function body path did not find its source binding";
-  let catalog = Editor_document.Contexts.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok in
+  let catalog = Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok in
   let doc = Editor_document.Workspace_doc.of_text catalog
     "(workspace w (graph g :context sop (sop/box))) (view :zoom 999)" |> Result.get_ok in
   let form = S.parse "(graph g :context sop (let* [a (sop/box :size [2 3 4]) b (sop/transform a)] b))"
@@ -260,7 +260,7 @@ let tab_at ?(narrow = false) ~right ~top index =
 (* an editor over the workspace [text], and the line the crash dump's editor.txt has for [name] *)
 let start_env text =
   let open Rays in
-  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
+  let catalog = Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version
       Sop.Nodes.factories |> Result.get_ok in
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
@@ -281,7 +281,7 @@ let dump_line env name =
 
 let editor_text () =
   let open Rays in
-  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
+  let catalog = Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version
       Sop.Nodes.factories |> Result.get_ok in
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
@@ -469,7 +469,7 @@ let editor_text () =
 (* A checker error from a binding apply is marked on the binding text's line, and typing clears it. *)
 let editor_binding () =
   let open Rays in
-  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
+  let catalog = Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version
       Sop.Nodes.factories |> Result.get_ok in
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
@@ -562,7 +562,7 @@ let editor_binding () =
 (* The editor's Lisp as the text area's language: indentation and bracket pairs. *)
 (* E6: a paste pairs names with bindings by position and renames at once *)
 let paste () =
-  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
+  let catalog = Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version
       Sop.Nodes.factories |> Result.get_ok in
   let workspace = Rays_editor.Workspace_doc.of_text catalog
       "(workspace w (graph g :context sop (let* [bed (sop/box)] bed)))" |> Result.get_ok in
@@ -621,7 +621,7 @@ let lisp_text () =
   (* completions over the catalog: ranked, for the token at the caret *)
   let vocab = L.vocab (Flow_sop.Catalog.with_library
       (List.map Flow_sop.Catalog.descriptor Sop.Nodes.factories)
-    @ Editor_document.Contexts.descriptors) in
+    @ Editor_document.Kinds.descriptors) in
   let labels text = List.map (fun (c : Pxui.Ui.completion) -> c.label) (L.complete vocab text (String.length text)) in
   let first text = match labels text with l :: _ -> l | [] -> "" in
   let doc = "(workspace w (graph g :context sop [(depth : int 5)] (let* [ring (sop/box :size_x 2) b (" in
@@ -716,7 +716,7 @@ let lisp_text () =
    mouse stays at the window centre (the pointer is the events'), as the export driver's does. *)
 let editor_w9 () =
   let open Rays in
-  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
+  let catalog = Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version
       Sop.Nodes.factories |> Result.get_ok in
   let soft = [ "rosette"; "soft" ] and petals = [ "rosette"; ":petals" ] in
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_rosette ()) |> Result.get_ok in
@@ -815,7 +815,7 @@ let editor_w9 () =
    the layout on every frame of the drag and the whole drag is one "Edit text" entry. *)
 let editor_active_scrub () =
   let open Rays in
-  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
+  let catalog = Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version
       Sop.Nodes.factories |> Result.get_ok in
   let text = {|(workspace sw
   (graph g :context sop (sop/box))
@@ -876,7 +876,7 @@ let editor_literal_scrub () =
     (graph scene :context scene (scene/merge (scene/geometry (ref g))))
     (graph editor :context editor
       (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph "g") (ui/lisp)))))|} in
-  let catalog = Editor_document.Contexts.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok in
+  let catalog = Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok in
   List.iter (fun (tab_index, tab) ->
     let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
     let presets = Filename.temp_dir "rays-token-presets" "" in
@@ -958,7 +958,7 @@ let editor_literal_scrub () =
    the real clock); on a loaded machine the cook of this workspace exceeded it and the preview was only described. *)
 let editor_text_drop () =
   let open Rays in
-  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
+  let catalog = Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version
       Sop.Nodes.factories |> Result.get_ok in
   let text = {|(workspace drop
   (graph a :context sop (sop/box))

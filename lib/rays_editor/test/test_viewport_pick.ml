@@ -16,7 +16,7 @@ open Test_text
 let lower name =
   match Flow.Syntax.parse (case name) with
   | Error d -> fail (Diagnostic.to_string d)
-  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories:Sop.Nodes.factories forms with
+  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories:Sop.Nodes.factories forms with
       | Ok lowered -> lowered | Error d -> fail (Diagnostic.to_string d))
 
 

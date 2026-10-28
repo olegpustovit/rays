@@ -23,7 +23,7 @@ let garden ?(result = "(sop/merge bed dots)") ~count () = Printf.sprintf {|
 
 let lower source = match Flow.Syntax.parse source with
   | Error d -> fail (Diagnostic.to_string d)
-  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories forms with
+  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories forms with
       | Ok lowered -> lowered
       | Error d -> fail (Diagnostic.to_string d))
 
@@ -207,7 +207,7 @@ let run () =
       (sop/merge (for [p (sop/point_list bed)]
         (let* [ticks (state [n 0.0] (+ n 1))]
           (sop/transform (sop/box) :translate (+ p [ticks 0 0]))))))))|} in
-  (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories
+  (match Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories
      (Result.get_ok (Flow.Syntax.parse nested)) with
    | Error d -> check (d.Diagnostic.code = "E_STATE_ELEMENT") "per-element fold diagnostic"
    | Ok _ -> fail "a cooked-geometry worker cannot own a frame fold");

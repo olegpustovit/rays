@@ -7,7 +7,7 @@ module S = Flow.Syntax
 
 let check condition message = if not condition then failwith message
 let factories = Sop.Nodes.factories
-let catalog = D.Contexts.catalog ~version:1 factories |> Result.get_ok
+let catalog = D.Kinds.catalog ~version:1 factories |> Result.get_ok
 let parse text = match S.parse text with Ok [form] -> form | _ -> failwith text
 let workspace ?settings text = D.Workspace_doc.of_text ?settings catalog text |> Result.get_ok
 let build ?previous ws = D.Contexts.of_workspace ~factories ?previous ws |> Result.get_ok

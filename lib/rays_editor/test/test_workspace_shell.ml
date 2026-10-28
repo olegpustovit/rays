@@ -7,6 +7,7 @@ open Sop
 module Doc = Editor_document.Workspace_doc
 module Document = Editor_document.Document
 module Contexts = Editor_document.Contexts
+module Kinds = Editor_document.Kinds
 module Panels = Editor_core.Panels
 module Layout = Pxui_shell.Layout
 module E = Flow_graph.Flow_edit
@@ -16,7 +17,7 @@ module E3 = Rays_editor.Editor
 let fail message = failwith ("test_workspace_shell: " ^ message)
 let check condition message = if not condition then fail message
 let factories = Sop.Nodes.factories
-let catalog = Contexts.catalog ~version:1 factories |> Result.get_ok
+let catalog = Kinds.catalog ~version:1 factories |> Result.get_ok
 let show ds = String.concat "; " (List.map Diagnostic.to_string ds)
 open Test_text
 

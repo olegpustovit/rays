@@ -13,7 +13,7 @@ module Document = Editor_document.Document
 let fail message = failwith ("test_workspace_doc: " ^ message)
 let check condition message = if not condition then fail message
 let factories = Sop.Nodes.factories
-let catalog = Editor_document.Contexts.catalog ~version:1 factories |> Result.get_ok
+let catalog = Editor_document.Kinds.catalog ~version:1 factories |> Result.get_ok
 let show ds = String.concat "; " (List.map Diagnostic.to_string ds)
 
 open Test_text

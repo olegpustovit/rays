@@ -17,7 +17,7 @@ let geometry_bytes = Test_support.Workspace_cook.geometry_bytes
 let lower ?compiled_ids ?sites source =
   match Flow.Syntax.parse source with
   | Error d -> fail (Diagnostic.to_string d)
-  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories ?compiled_ids ?sites forms with
+  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories ?compiled_ids ?sites forms with
       | Ok lowered -> lowered
       | Error d -> fail (Diagnostic.to_string d))
 
