@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **227 / 248 accepted (91.5%)**. This counts individual
+Finding coverage: **231 / 248 accepted (93.1%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,9 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P9.G1/G4: handwritten MSL remains in product code in three places: the presentation blit in ogpu_metal/presentation.ml (below the renderer), Emit.compaction (threadgroup memory and barriers, which raster and compute stages cannot express yet) and the scene/trace intersection helpers spliced into traced kernels. Backend and conformance tests keep MSL fixtures.
+- Checker speed (852ac499): Workspace.check is about 3x faster (path tracer kernel set 46→16.3 ms, sop_gallery 715→215 ms; golden replay 84→68–71 user-s) with reused identical defn-call checks, packed_kind computed once, typed string equality and form-id hashing. P8.G2 warm first frame is 256–260 ms vs 200–218 handwritten; the remaining Lisp cost is about 33 ms; the rest is tracer creation (50), World bake (25) and GPU (120).
 
 - P8.G3 (owner decision): shattered_studio differs from the old kernel by RMSE 2.70e-3 at 8 spp, falling to 4.78e-4 at 512 spp at 400². The old kernel differs from itself by 3.76e-4 when one camera-ray multiply is regrouped, so the 1e-4 bar is below the old kernel's own consistency on this chaotic scene (about 100k fracture triangles with gaps and a lens): last-bit ray differences pick different but valid paths. No bias; the error falls with spp. pathtracer.rays meets the bar (6.9e-5). One real difference: mirrored instances keep smooth normals (the old kernel rendered them flat).
 - P8.G2: Workspace.check ~call_sites and lazy preview kernels halve the check (96→49 ms). First 4-spp frame: cold Metal cache 518–550 ms Lisp vs 1,414–1,506 old; warm 275–333 vs 200–218 (+80 ms: check 49, build/print 16, library load about 20). GPU per 16 spp: pathtracer.rays −0.6%, shattered_studio 800² −9.7%. Instanced kernels have no 64-bit math in loops.

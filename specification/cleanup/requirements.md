@@ -204,7 +204,7 @@ Exit gates:
 
 - [x] P8.G1: no `.metal` file in lib/rays_pathtracer Evidence: lib/rays_pathtracer has no .metal file.
 - [ ] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse
-- [ ] P8.G3: film RMSE ≤ 1e-4 against today's kernel after N spp
+- [x] P8.G3: film RMSE ≤ 1e-4 against today's kernel after N spp Evidence: owner decision 2026-10-28: judged by self-consistency. pathtracer.rays meets RMSE 1e-4 (6.9e-5 at 64 spp). On shattered_studio the Lisp kernel's difference (4.8e-4 at 512 spp, unbiased, falling with spp) is at the deleted kernel's own regrouping noise (3.8e-4).
 - [x] P8.G4: every SPIR-V golden passes `spirv-val` Evidence: @lib/flow_gpu/runtest runs spirv-val on every SPIR-V golden and passes (3.4 s).
 
 Risk: Medium. This is the hottest kernel. The benchmark lands first, the CPU run of the same .rays file is the oracle, and the old kernel stays until the last slice matches it.
@@ -217,14 +217,14 @@ Delete the last handwritten shaders: the MSL strings in `runtime.ml` and `runtim
 
 - [x] P9.S1: Benchmark first: editor frame time (window-free GPU timing, ui_shot scenes) and a Scene3 scene, interleaved A/B. Evidence: b3e5bf63: UI_SHOT_BENCH=N in tools/ui_shot.exe prints per-render GPU ms (Rays.Canvas.gpu_seconds), with medians and minima; the baseline is in specification/cleanup/benchmarks/raster-lisp.md.
 - [x] P9.S2: Region IR: stage entry points (vertex, fragment) and interpolated outputs between them, plus texture and sampler reads (the glyph atlas, material textures). Blending, depth and culling stay pipeline state in OGPU, not shader code. Evidence: 14f96583/923624a0: the region IR has fragment intrinsics (gpu/fwidth, gpu/sample, gpu/texture-size); a function returning a record of numbers gives the varyings; Emit.stage_body and Flow_gpu.Raster print vertex and fragment stages ([[stage_in]], [[position]], [[flat]], discard, textures), and the Vulkan SPIR-V modules pass spirv-val. CPU, JS and WGSL refuse the stage intrinsics with E_GPU_STAGE.
-- [ ] P9.S3: Port in order of risk: the marks pipeline, then UI (guarded pixel for pixel by `test_ui_parity`), then Scene3 and its variants (folded by static facts like the path tracer's), then sun, then the image sink.
-- [ ] P9.S4: Delete `runtime_shaders.ml`, the MSL strings in `runtime.ml` and the `renderer/shaders/metal` directory planned in P4. P4's per-backend directory then only ever holds generated output.
+- [x] P9.S3: Port in order of risk: the marks pipeline, then UI (guarded pixel for pixel by `test_ui_parity`), then Scene3 and its variants (folded by static facts like the path tracer's), then sun, then the image sink. Evidence: 80b8dde1 ports every raster pipeline in risk order: marks, UI, Scene3 plain, points and textured, sun depth, Scene3_world, Scene2's argument buffer and the image sink (now one full-screen triangle). The 3D winding bug (counter-clockwise winding was tied to vertex slot 7) is fixed per pipeline family (a68b3e9a).
+- [x] P9.S4: Delete `runtime_shaders.ml`, the MSL strings in `runtime.ml` and the `renderer/shaders/metal` directory planned in P4. P4's per-backend directory then only ever holds generated output. Evidence: lib/renderer/shaders/metal holds only generated files; the image-sink MSL in emit.ml and the path tracer's copy are deleted.
 
 Exit gates:
 
 - [ ] P9.G1: no handwritten MSL, HLSL or SPIR-V anywhere in lib/
-- [ ] P9.G2: `test_ui_parity` goldens are pixel-identical
-- [ ] P9.G3: editor and Scene3 GPU frame time no worse than today (A/B, ≥ 5 runs)
+- [x] P9.G2: `test_ui_parity` goldens are pixel-identical Evidence: test_ui_parity is exact, and ui_shot frames are identical outside the status bar at 1x and 2x on 18 sketches.
+- [x] P9.G3: editor and Scene3 GPU frame time no worse than today (A/B, ≥ 5 runs) Evidence: GPU min ms at 2x, interleaved: shattered_studio 12.12–12.63 Lisp vs 12.85–13.06 handwritten; ws_bloom 5.95–6.02 vs 5.86–6.15; ws_layout 3.83 vs 3.84; drawing 0.741 vs 0.742; flow_image_kernel about 2.29 vs 2.30.
 - [ ] P9.G4: the Windows backend needs zero shader work beyond the SPIR-V emitter
 
 Risk: Medium. UI is drawn every frame, but it has the strictest net in the repo (pixel goldens).
@@ -581,7 +581,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **WN1** (P8, high, portability, effort M). Location at baseline: runtime.ml · runtime_shaders.ml · flow_gpu/emit.ml · flow_gpu/image_sink.ml · rays_pathtracer/pathtrace.metal. MSL source text sits in five places outside the Metal backend, while `Shader.descriptor` is already backend-tagged. Action: The path tracer becomes Rays Lisp (P8), and Flow kernels go through the shared `Kernel_layout` (FL6) into an MSL printer and a SPIR-V emitter. Runtime raster shaders follow in P9, so no handwritten shader remains. Evidence: the path tracer is Rays Lisp, Flow kernels go through Kernel_layout to the MSL and SPIR-V printers, and the image-sink MSL lives in flow_gpu's printer. The runtime raster shaders are P9.
 
-- [ ] **WN11** (P8, high, portability, effort M). Location at baseline: flow_gpu/emit.ml (247 lines, MSL text) · flow_gpu/pipelines.ml:22, image_sink.ml:31 (`backend="metal"`). Generated kernels are emitted only as MSL text for Metal's runtime compiler. Vulkan accepts only SPIR-V binary and has no runtime compiler. Action: Add a SPIR-V word emitter over the same kernel IR and `Kernel_layout`, with GLSL.std.450 for math and `OpRayQuery*` for `scene/trace`. Validate goldens with `spirv-val` in tests only; nothing ships a compiler.
+- [x] **WN11** (P8, high, portability, effort M). Location at baseline: flow_gpu/emit.ml (247 lines, MSL text) · flow_gpu/pipelines.ml:22, image_sink.ml:31 (`backend="metal"`). Generated kernels are emitted only as MSL text for Metal's runtime compiler. Vulkan accepts only SPIR-V binary and has no runtime compiler. Action: Add a SPIR-V word emitter over the same kernel IR and `Kernel_layout`, with GLSL.std.450 for math and `OpRayQuery*` for `scene/trace`. Validate goldens with `spirv-val` in tests only; nothing ships a compiler. Evidence: lib/flow_gpu/spirv.ml writes binary SPIR-V for compute and raster stages over the shared IR and Kernel_layout, with OpRayQuery for scene/trace; every golden passes spirv-val.
 
 - [x] **WN2** (P4, med, portability, effort S). Location at baseline: native_layer_token/dune (-framework CoreFoundation) · sdl3/sdl3_cocoa.c, sdl3/dune -framework. Platform C sits inside libraries meant to be cross-platform: the layer token and the SDL binding's Cocoa titlebar and autorelease code. Action: Keep the token as the seam; put its C and `sdl3_cocoa.c` behind per-OS stubs selected in dune (`enabled_if` on `%{system}`).
 
@@ -643,7 +643,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **XC21** (P0, med, error-handling, effort S). Location at baseline: rays_editor/rays_editor.ml:234-235. A library calls `prerr_endline` and then `exit 1`. Action: Return a `result`; `bin/rays` owns the exit.
 
-- [ ] **XC22** (P6, med, error-handling, effort M). Location at baseline: edit_graph.ml:485,507, node.ml:114, carry.ml:83, workspace_images.ml:482. `Invalid_argument`/`Failure` caught and turned back into results. Action: Validate first and return `Error`. Keep `invalid_arg` only for programmer errors.
+- [x] **XC22** (P6, med, error-handling, effort M). Location at baseline: edit_graph.ml:485,507, node.ml:114, carry.ml:83, workspace_images.ml:482. `Invalid_argument`/`Failure` caught and turned back into results. Action: Validate first and return `Error`. Keep `invalid_arg` only for programmer errors. Evidence: 7caaee94: factory build/rebuild, [@sop.validate] callbacks and support decoders return results; [@@sop.node_fallible] covers checks that depend on which inputs are wired. The Invalid_argument/Failure catches in edit_graph, node and workspace_images are gone; messages are byte-identical.
 
 - [x] **XC23** (P4, low, duplication, effort S). Location at baseline: scene_command/render_ir.ml:58-66. A hand-written byte `Encoder`. Action: Use `Buffer` with `add_int32_le` and `add_int64_le`.
 
@@ -785,7 +785,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK28** (P6, low, dead-code, effort S). Location at baseline: core/data_id.ml (3 lines) · Error.of_string · core/kernel.ml (mostly test helpers). One-line modules and aliases. Action: Fold them into Geometry and test support.
 
-- [ ] **RK29** (P6, low, vibe-code, effort M). Location at baseline: 75 `type x = M.x = …` re-export lines; attribute_ops.mli 791 lines. A façade layer that exists only to back hidden private_modules. Action: Drop it once the oracles are gone.
+- [x] **RK29** (P6, low, vibe-code, effort M). Location at baseline: 75 `type x = M.x = …` re-export lines; attribute_ops.mli 791 lines. A façade layer that exists only to back hidden private_modules. Action: Drop it once the oracles are gone. Evidence: e41b82ce drops the rdk type re-export facades (about 55 lines to 0); the hidden modules are public and callers name them (Attribute_transfer.Nearest, Fuse_rules.Keep_first, Boolean_solid.Union). attribute_ops.mli went from 489 to 374 lines.
 
 - [x] **RK30** (P6, low, naming, effort S). Location at baseline: 13 identifiers of 35+ chars (`promote_include_all_primitives_sharing_boundary_points`). Names that are whole sentences. Action: Shorten them during the RK16 record migration. Evidence: nine long rdk identifiers are shortened; the two kept appear in .rays sources and flow_manifest.sexp.
 
@@ -981,7 +981,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI28** (P5, low, god-module, effort M). Location at baseline: environment.ml:8 (306) · text_pane view (323) · navigator view (352). Long view functions. Action: Split them after UI1–UI3. Evidence: update_with is 146 lines (was 246), Text_pane.view about 95 (was 275), Navigator.view about 145 (was 195).
 
-- [ ] **UI29** (P5, med, duplication, effort M). Location at baseline: pxui_shell/tree.ml (431) · rays_editor/navigator.ml (726). Two tree widgets with their own chevrons and indents. Action: Build Navigator on Tree rows.
+- [x] **UI29** (P5, med, duplication, effort M). Location at baseline: pxui_shell/tree.ml (431) · rays_editor/navigator.ml (726). Two tree widgets with their own chevrons and indents. Action: Build Navigator on Tree rows. Evidence: owner decision 2026-10-28: Navigator keeps its own row geometry on the shared kit paints; ui_parity stays exact.
 
 - [x] **UI30** (P0, low, dead-code, effort S). Location at baseline: pxui_shell/shell.ml (4 lines) · rays_editor/common.ml · selection.ml:9-13. A wrapper module, a module with one function, and ignored arguments. Action: Inline and delete them.
 
