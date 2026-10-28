@@ -47,10 +47,10 @@ let () =
   let encoded = Fixture_codec.encode source in
   let rebuilt = Fixture_codec.decode encoded in
   if not (same source rebuilt) then failwith "geometry fixture round-trip changed bytes";
-  let image = Sop.Image.Private.of_owned_rgba8 ~width:2 ~height:1 (Bytes.of_string "\000\001\127\255\255\128\064\000")
+  let image = Sop.Image.of_owned_rgba8 ~width:2 ~height:1 (Bytes.of_string "\000\001\127\255\255\128\064\000")
       |> function Ok image -> image | Error error -> failwith (Diagnostic.error_to_string error) in
   let rebuilt_image = Fixture_codec.decode_image (Fixture_codec.encode_image image) in
-  if Sop.Image.Private.rgba8 rebuilt_image <> Some (Option.get (Sop.Image.Private.rgba8 image)) then
+  if Sop.Image.rgba8 rebuilt_image <> Some (Option.get (Sop.Image.rgba8 image)) then
     failwith "RGBA8 image fixture round-trip changed bytes";
   expect_bad "bad float bit string" (fun () ->
     ignore (Fixture_codec.decode "(geometry (positions (\"000000000000000g\") () ()) (topology 1 () (0) ()) (attributes) (groups) (edge_groups))"));

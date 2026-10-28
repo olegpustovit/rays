@@ -701,7 +701,7 @@ topology preservation and exactness. The optional `[@@sop.node_facts
 conservative declaration and can refer to `parameters`; generated rebuilds
 refresh it after parameter changes. Unannotated nodes read/write `"*"`, are
 irregular, topology-changing and exact. The default declaration is exposed by
-the factory and included in the generated Lisp manifest; `Flow.Check` carries
+the factory and included in the generated Lisp manifest; `Flow.Catalog` carries
 its domain-neutral kernel metadata.
 
 `sop/noise_displace` declares two modes in its parameter schema. The default

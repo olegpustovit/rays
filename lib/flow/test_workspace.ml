@@ -1,7 +1,7 @@
 open Flow
 
 let read path = In_channel.with_open_bin path In_channel.input_all
-let catalog = match Check.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp") with
+let catalog = match Catalog.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp") with
   | Ok (catalog, _) -> catalog
   | Error d -> failwith (Diagnostic.to_string d)
 
@@ -54,7 +54,7 @@ let () =
   List.iter (fun time ->
     let live = Input.at_time time in
     let actual = Result.get_ok (Eval.force ~live result)
-    and reference = Result.get_ok (Eval.Private.force_reference ~live result) in
+    and reference = Result.get_ok (Eval.Host.force_reference ~live result) in
     let expected = Eval.Record ["pair", Vec2 (time,2.); "quad", Vec4 (1.,2.,3.,time);
       "moved", Record ["p", Vec2 (time+.2.,4.); "q", Vec4 (2.,4.,6.,2.*.time)];
       "fields", Float (time+.2.+.time)] in
@@ -76,9 +76,9 @@ let () =
      "(let* [f (fn [(p : vec2)] p)] (f 3))", Eval.Vec2 (3.,3.)]
 
 let () = (* Function ports instantiate bodies, and keep each caller's captures. *)
-  let field = Check.{name = "field"; label = "Field"; fields = []; folder = [];
+  let field = Catalog.{name = "field"; label = "Field"; fields = []; folder = [];
     primary = true; unit = None; ty = Some (Port_type.Fn Ty.{params = [Float]; result = Float})} in
-  let kind = Check.{qualified = "sop/test_field"; context = Context.sop;
+  let kind = Catalog.{qualified = "sop/test_field"; context = Context.sop;
     slots = []; parameters = [field]; outputs = ["geo", Port_type.Geometry]; facts = None} in
   let run_with signature source =
     let parameter = {field with ty = Some (Port_type.Fn signature)} in
@@ -764,7 +764,7 @@ let () =
   let ws = good "(workspace w (defn wave :context value [(x : float)] (sin x))
     (graph g :context value (let* [candidate (map wave (array/float 4))] 0)))" in
   assert (is_candidate ws ["g"; "candidate"]);
-  let opaque = Check.{qualified = "value/opaque"; context = Context.value; slots = [];
+  let opaque = Catalog.{qualified = "value/opaque"; context = Context.value; slots = [];
     parameters = [{name = "value"; label = "Value"; ty = Some Port_type.Float;
       fields = ["value", Param.Floating_view Param.{soft_min = 0.; soft_max = 1.; hard_min = None; hard_max = None}, Param.Float_value 0.];
       folder = []; primary = false; unit = None}]; outputs = ["out", Port_type.Float]; facts = None} in
@@ -808,7 +808,7 @@ let () =
   assert (marked "(map (fn [x] (case x 0 [0 0 0] :else [x 0 0])) (array/float 4))");
   assert (Op.is_display_kind "draw/circles" && Op.is_display_kind "ui/canvas"
     && not (Op.is_display_kind "scene/camera"));
-  let kind = Check.{qualified = "value/test_sink"; context = Context.value;
+  let kind = Catalog.{qualified = "value/test_sink"; context = Context.value;
     slots = [{name = "source"; required = true; rest = false; ty = Some (Ty.Array Ty.Float)}];
     parameters = []; outputs = ["out", Port_type.Float]; facts = None} in
   let checked body = Workspace.check {catalog with kinds = kind :: catalog.kinds}

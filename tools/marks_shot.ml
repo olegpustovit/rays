@@ -79,8 +79,8 @@ let () =
         let cooked = match Sop.Node.Private.cook source context [||] with Ok v -> v | Error d -> fail d.Diagnostic.message in
         let pixels = match Sop.Payload.image cooked.payload with Ok v -> v | Error d -> fail d.Diagnostic.message in
         let width = Sop.Image.width pixels and height = Sop.Image.height pixels in
-        let rgba = match Sop.Image.Private.rgba8 pixels with Some b -> b | None ->
-          let floats = Sop.Image.Private.storage pixels in
+        let rgba = match Sop.Image.rgba8 pixels with Some b -> b | None ->
+          let floats = Sop.Image.storage pixels in
           Bytes.init (Array.length floats) (fun i -> let q = floats.(i) *. 255. in
             let n = int_of_float (Float.floor q) in let f = q -. float n in
             Char.chr (if f > 0.5 || (f = 0.5 && n land 1 = 1) then n+1 else n)) in
@@ -96,7 +96,7 @@ let () =
           let run = Flow_gpu.Run.create gpu pipelines (get (Flow_gpu.Emit.kernel packed)) in
           let sink = get (Flow_gpu.Image_sink.create gpu) in
           Fun.protect ~finally:(fun () -> Flow_gpu.Image_sink.close sink; Flow_gpu.Run.close run) (fun () ->
-            let inputs = get (Flow_ir.Packed.Private.prepare ~state packed ~live) in
+            let inputs = get (Flow_ir.Packed.Host.prepare ~state packed ~live) in
             let output = get (Flow_gpu.Run.dispatch run inputs) in
             let image = get (Flow_gpu.Image_sink.convert sink ~width ~height output) in
             match Ogpu.Backend.read_texture (Option.get (Flow_gpu.Image_sink.texture image)) ~bytes_per_row:(width * 4) with
@@ -106,7 +106,7 @@ let () =
           let cooked = match Sop.Node.Private.cook (Flow_sop.Image_kernel.node ~state kernel) context [||] with
             | Ok c -> c | Error d -> fail d.Diagnostic.message in
           let pixels = match Sop.Payload.image cooked.payload with Ok p -> p | Error d -> fail d.Diagnostic.message in
-          Option.get (Sop.Image.Private.rgba8 pixels) in
+          Option.get (Sop.Image.rgba8 pixels) in
     message (Rays.Image.upload_rgba ~width ~height ~rgba ())
     | kind -> fail ("Unknown image: " ^ kind) in
     Hashtbl.add images id image; image in

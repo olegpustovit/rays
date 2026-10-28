@@ -4,7 +4,7 @@ let get=Test_program.ok
 let native=function Ok x->x|Error e->failwith(Ogpu.Error.to_string e)
 let injected ()=Error(Ogpu.Error.make "test" Invalid_state "injected image sink failure")
 let ()=
-  let base,live=Ogpu.Impl.create_driver()in
+  let base = Ogpu.Impl.create_driver () in let live = Ogpu.Impl.live_handles in
   let device=native(B.create_device base)in
   let queue=native(B.create_queue device)in
   assert(Result.is_error(S.Private.create_owned device queue));
@@ -60,31 +60,31 @@ let ()=
   let sink=S.Private.create_owned device queue |> get in
   Fun.protect ~finally:(fun()->S.close sink;Flow_gpu.Run.close run;Flow_gpu.Pipelines.close cache;
     ignore(B.destroy_queue queue);ignore(B.destroy_device device))(fun()->
-    let inputs=Flow_ir.Packed.Private.prepare packed ~live:(Input.at_time 0.5) |> get in
+    let inputs=Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 0.5) |> get in
     let input=Flow_gpu.Run.dispatch run inputs |> get in
     let convert width height=S.convert sink ~width ~height input in
     order:=[];let first=convert 65 3 |> get in
     assert(List.rev !order=["compute";"dispatch";"end_compute";"blit";"copy";"end_blit";"commit";"complete"]);
     let first_texture=S.texture first |> Option.get in
-    let d=B.Private.texture_descriptor first_texture in
+    let d=B.texture_descriptor first_texture in
     assert(d.width=65 && d.height=3 && d.format=Rgba8_unorm
       && d.usage=[Texture_binding;Texture_copy_src;Texture_copy_dst]);
-    let creates=S.Private.buffer_creations sink,S.Private.texture_creations sink in
+    let creates=S.buffer_creations sink,S.texture_creations sink in
     let next=convert 65 3 |> get in
     assert(S.texture first=None && Option.fold ~none:false ~some:((==)first_texture)(S.texture next));
-    assert(creates=(S.Private.buffer_creations sink,S.Private.texture_creations sink));
+    assert(creates=(S.buffer_creations sink,S.texture_creations sink));
     List.iter(fun(w,h)->assert(Result.is_error(convert w h))) [0,3;65,0;64,3;max_int,2];
-    assert(creates=(S.Private.buffer_creations sink,S.Private.texture_creations sink));
+    assert(creates=(S.buffer_creations sink,S.texture_creations sink));
     assert(S.texture next<>None);
     fail_texture:=true;assert(Result.is_error(convert 39 5));fail_texture:=false;
-    assert(S.texture next=None && not(B.Private.texture_destroyed first_texture));
+    assert(S.texture next=None && not(B.texture_destroyed first_texture));
     fail_dispatch:=true;assert(Result.is_error(convert 65 3));fail_dispatch:=false;
     fail_copy:=true;assert(Result.is_error(convert 39 5));fail_copy:=false;
     fail_complete:=true;assert(Result.is_error(convert 39 5));fail_complete:=false;
     let recovered=convert 65 3 |> get in
     assert(Option.fold ~none:false ~some:((==)first_texture)(S.texture recovered) && !abandoned=2);
     let resized=convert 39 5 |> get in
-    assert(S.texture recovered=None && B.Private.texture_destroyed first_texture);
+    assert(S.texture recovered=None && B.texture_destroyed first_texture);
     assert(S.texture resized<>None && !reads=1 && !texture_reads=0);
     assert(Flow_gpu.Run.Private.status_reads run= !reads && Flow_gpu.Run.Private.readback_bytes run=0);
     assert(Domain.join(Domain.spawn(fun()->S.texture resized=None)));
@@ -94,7 +94,7 @@ let ()=
     let scalar=List.assoc "arithmetic"(Test_program.fixtures 195)in
     let scalar_run=Flow_gpu.Run.Private.create_owned device queue cache (Flow_gpu.Emit.kernel scalar |> get)in
     Fun.protect ~finally:(fun()->Flow_gpu.Run.close scalar_run)(fun()->
-      let values=Flow_ir.Packed.Private.prepare scalar ~live:(Input.at_time 0.5) |> get in
+      let values=Flow_ir.Packed.Host.prepare scalar ~live:(Input.at_time 0.5) |> get in
       let output=Flow_gpu.Run.dispatch scalar_run values |> get in
       assert(Result.is_error(S.convert sink ~width:65 ~height:3 output)));
     assert(S.texture resized<>None);

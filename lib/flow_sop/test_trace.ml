@@ -1,4 +1,4 @@
-(* P8.S2(a): scene/trace on the CPU. A .rays kernel traces a lattice of rays at a two-triangle quad; the
+(* scene/trace on the CPU. A .rays kernel traces a lattice of rays at a two-triangle quad; the
    Packed kernel is bit-identical to the reference walker at 1 and 8 domains, and its t and prim match a
    direct Surface_index.raycast. *)
 open Rdk
@@ -38,7 +38,7 @@ let () =
   ignore (ok (P.force ~strict:true counted ~live));
   assert (Atomic.get calls = count);
   Flow.Ray_host.unregister 8;
-  (* flow_web refuses it with a typed diagnostic (P8.S2 d) *)
+  (* flow_web refuses it with a typed diagnostic *)
   (match Flow_web.Js.region program with
    | _ -> assert false
    | exception Diagnostic.Error d -> assert (d.code = "E_WEB_SOURCE"));

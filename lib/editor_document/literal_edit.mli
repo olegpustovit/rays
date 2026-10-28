@@ -12,7 +12,7 @@ type change = {
 }
 
 val patch :
-  Flow.Check.catalog -> Flow.Workspace.t -> Flow_graph.Flow_edit.op ->
+  Flow.Catalog.catalog -> Flow.Workspace.t -> Flow_graph.Flow_edit.op ->
   (Flow.Workspace.t * change, Diagnostic.t) result option
 (** [None] when the op is not a single literal change. *)
 

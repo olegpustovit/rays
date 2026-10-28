@@ -2,7 +2,7 @@ open Flow
 let checked body =
   let source = "(workspace w (graph g :context value " ^ body ^ "))" in
   let forms = Result.get_ok (Syntax.parse source) in
-  match Workspace.check {Check.version = 1; kinds = []} forms with
+  match Workspace.check {Catalog.version = 1; kinds = []} forms with
   | Some w, [] -> w
   | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let value r = List.assoc "g" (Result.get_ok r).Eval.results
@@ -30,7 +30,7 @@ let () =
     (graph shared :context value (+ (ref level :step 4) (ref level :step 4.0)))
     (graph host_inline :context value (if (< (ref host) 6) 3 6))
     (graph host_bound :context value (let* [n (ref host)] (if (< n 6) 3 6))))|})in
-  let workspace=match Workspace.check {Check.version=1;kinds=[]} forms with
+  let workspace=match Workspace.check {Catalog.version=1;kinds=[]} forms with
     |Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
   let evaluation=Result.get_ok(Eval.static workspace)in
   let identities()=Array.map(fun(i:Eval.instance)->
@@ -63,7 +63,7 @@ let () =
       assert(identities()=original))
       [0,0,1,1;1,0,1,2;1,1,2,2])
     [(fun ~state v ~live->Eval.force ~state v ~live);
-     (fun ~state v ~live->Eval.Private.force_reference ~state v ~live)];
+     (fun ~state v ~live->Eval.Host.force_reference ~state v ~live)];
   print_endline "Graph state: inline/bound known tuples, coercion sharing, opposite orders, private snapshots and host/frame clocks agree"
 
 let () =
@@ -98,12 +98,12 @@ let () =
   assert (Result.is_error (run 1));
   assert (value (run 0) = Eval.Int 1);
   let forms = Result.get_ok (Syntax.parse "(workspace w (graph g :context value (state [s t] s)))") in
-  let _, ds = Workspace.check {Check.version = 1; kinds = []} forms in
+  let _, ds = Workspace.check {Catalog.version = 1; kinds = []} forms in
   assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_STATE_INIT") ds)
 
 let () =
   let forms=Result.get_ok(Syntax.parse "(workspace w (graph host :context host (state [n 0] (+ n 1))) (graph animated :context value (state [n 0] (+ n 1))))")in
-  let workspace=match Workspace.check {Check.version=1;kinds=[]} forms with
+  let workspace=match Workspace.check {Catalog.version=1;kinds=[]} forms with
     |Some workspace,[]->workspace|_,ds->failwith(String.concat "; " (List.map Diagnostic.to_string ds))in
   let state=Eval.create_state()in
   let run tick frame=Result.get_ok(Eval.run ~state ~live:{(Input.at_time 0.)with tick;frame} ~time:0. workspace)in
@@ -123,7 +123,7 @@ let () =
   assert(List.assoc "host" (run 4 0).results=Eval.Int 1)
 
 let () =
-  let catalog=Check.{version=1;kinds=[]} in
+  let catalog=Catalog.{version=1;kinds=[]} in
   let reject expression =
     let forms=Result.get_ok(Syntax.parse("(workspace images (graph g :context value "^expression^"))"))in
     let workspace,ds=Workspace.check catalog forms in
@@ -143,7 +143,7 @@ let () =
   let array_state=Eval.create_state()in
   assert(value(Eval.run ~state:array_state ~time:0. (checked
     "(array/sum (state [s (exact (array/range 3))] s))"))=Eval.Float 3.);
-  assert(List.mem(Eval.Float_array [|0.;1.;2.|])(Eval.Private.state_values array_state));
+  assert(List.mem(Eval.Float_array [|0.;1.;2.|])(Eval.Host.state_values array_state));
   (* An opaque extension can conceal resources from static types. Check the
      seed before the step reads it, and the step before it reaches next. *)
   List.iter(fun wrap->
@@ -171,9 +171,9 @@ let () =
         (match force ~state residual ~live:(Input.at_time 0.)with
          |Error d->assert(d.Diagnostic.code="E_STATE_TYPE")|Ok _->assert false);
         assert(!calls=expected_calls && Eval.state_stamp state=stamp
-          && Eval.Private.state_values state=[]))
+          && Eval.Host.state_values state=[]))
         [(fun ~state v ~live->Eval.force ~state v ~live);
-         (fun ~state v ~live->Eval.Private.force_reference ~state v ~live)])
+         (fun ~state v ~live->Eval.Host.force_reference ~state v ~live)])
       ["(test/opaque true)","(test/opaque false)",1;
        "(test/opaque false)","(test/opaque true)",2]) [0;1;2;3];
   print_endline "Exact images: static state refusal and opaque seed/step backstops preserve caller state; numeric and packed exact state remains data"

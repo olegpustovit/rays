@@ -69,7 +69,6 @@ val range_length : ?limit:int -> int -> int -> int
 (** The checked length of [range], shared with structured region loops.
     The default limit is 4,096; subtraction cannot overflow native Int. *)
 
-module Private : sig
   val constant_array_descriptor : string -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t
   (** Validate the actual count and one used fill element at the constructor's
       authored evaluation site, retaining immutable metadata for a cooked
@@ -92,4 +91,3 @@ module Private : sig
     offsets:('f, 'r) Value.t -> ('f, 'r) Value.t -> ('f, 'r) Value.t
   (** Index into the values of the first maximum of each segment (-1 when the
       segment is empty), for int or finite float values. *)
-end

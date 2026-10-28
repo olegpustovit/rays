@@ -8,11 +8,9 @@ val destroy : t -> (unit,string) result
 val get_width : t -> (int,string) result
 val get_height : t -> (int,string) result
 val get_size : t -> (int * int,string) result
-module Private : sig
   val replace : t -> t -> (unit,string) result
   val identity : t -> int
   val pixels : t -> (bytes,string) result
   val of_resource : Runtime_resources.Image.t -> (t,string) result
   val resource : t -> Runtime_resources.Image.t
   val dimensions : t -> int * int
-end

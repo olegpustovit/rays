@@ -189,7 +189,7 @@ module Builder = struct
         Ok published.value
     | _ ->
         let commands = Array.init value.length (command value) in
-        match Render_ir.Private.create_owned commands with
+        match Render_ir.create_owned commands with
         | Error error -> Error error
         | Ok ir ->
             let source_bytes = Bytes.length value.opcodes

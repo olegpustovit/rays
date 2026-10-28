@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module V = Flow.Value
-module O = Flow.Op.Private
+module O = Flow.Op
 module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let same a b = Marshal.to_string a [Marshal.No_sharing] = Marshal.to_string b [Marshal.No_sharing]
@@ -8,7 +8,7 @@ let reject code f = try ignore(f());failwith("accepted "^code)
   with Diagnostic.Error d -> assert(d.code=code)
 let value ?(declarations="") ?inputs body =
   let source="(workspace w (graph g :context host "^declarations^" (if (> t -1000.) "^body^" "^body^")))" in
-  let workspace=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
+  let workspace=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
     |Some workspace,[] -> workspace
     |_,ds -> failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   List.assoc "g" (ok(E.static ?inputs workspace)).results
@@ -56,7 +56,7 @@ let () =
     let core=match I.Core_lower.lower ~strict:true residual with Ok p->p | Error form->failwith(body^": "^form) in
     let executable=ok(I.Executor.compile ~strict:true value) in
     List.iter(fun time->let live=Input.at_time time in
-      let reference=ok(E.Private.force_reference value ~live) in
+      let reference=ok(E.Host.force_reference value ~live) in
       List.iter(fun domains->let direct,compiled=Parallel.run ~domains(fun()->
         ok(Test_program.run ~root:residual core ~live),ok(I.Executor.force ~strict:true executable ~live)) in
         assert(same direct reference && same compiled reference)) [1;8]) [-0.;0.;0.25;2.])
@@ -75,20 +75,20 @@ let () =
          sample {:nested {:column column :bias minimum}} shift (fn [x] (+ x sample.nested.bias))]
          (map shift sample.nested.column))"];
   let empty=value "(map (fn [x] (if (> t 0.) (array/min (array/float 0)) 0.)) (array/range 0))" in
-  assert(ok(E.Private.force_reference empty ~live:(Input.at_time 1.))=E.Float_array[||]);
+  assert(ok(E.Host.force_reference empty ~live:(Input.at_time 1.))=E.Float_array[||]);
   (match I.Executor.compile ~strict:true empty with
    | Error _ -> ()
    | Ok _ -> failwith "strict compilation accepted an empty body reduction");
   let captured=value "(let* [minimum (array/min (array/float 7 t))] (map (fn [x] (+ x minimum)) (array/range 11)))" in
   let core=match captured with E.Residual r->Result.get_ok(I.Core_lower.lower ~strict:true r)|_->assert false in
   let packed=core.regions.(0) in
-  assert(I.Packed.Private.argument_types packed=[|Flow.Ty.Float|]);
-  List.iter(fun arguments->match I.Packed.Private.bind_arguments packed arguments with
+  assert(I.Packed.Host.argument_types packed=[|Flow.Ty.Float|]);
+  List.iter(fun arguments->match I.Packed.Host.bind_arguments packed arguments with
     |Error d->assert(d.code="E_CORE_ARGUMENT")|Ok _->failwith"invalid argument accepted")
     [[||];[|E.Int 1|];[|E.Float 1.;E.Float 2.|]];
-  (match I.Packed.Private.bind_arguments packed[|E.Float nan|] with
+  (match I.Packed.Host.bind_arguments packed[|E.Float nan|] with
    |Error d->assert(d.code="E_NONFINITE")|Ok _->failwith"nonfinite argument accepted");
-  let bound=ok(I.Packed.Private.bind_arguments packed[|E.Float 3.|]) in
+  let bound=ok(I.Packed.Host.bind_arguments packed[|E.Float 3.|]) in
   assert(ok(I.Packed.force ~strict:true bound ~live:(Input.at_time 1.))
     =E.Float_array(Array.init 11(fun i->float i+.3.)));
   let source=value ~declarations:"[(data : (array float) (array/float 0))]"
@@ -103,7 +103,7 @@ let () =
       |_->Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Unexpected reduction fixture source.") in
     let live=Input.at_time 0.25 in
     assert(same(ok(I.Executor.force ~strict:true ~resolve compiled ~live))
-      (ok(E.Private.force_reference ~resolve source ~live)));
+      (ok(E.Host.force_reference ~resolve source ~live)));
     assert(before=Marshal.to_string data[Marshal.No_sharing]))) [1;8];
   let unsupported=value "(array/min (map (fn [x] (value/rand (+ x t))) (array/range 5001)))" in
   (match I.Executor.compile ~strict:true unsupported with

@@ -12,7 +12,7 @@ module Workspace_doc = Editor_document.Workspace_doc
 module Timeline = Timeline
 
 val workspace_catalog : ?factories:Sop.Edit_graph.factory list -> unit ->
-  (Flow.Check.catalog, Diagnostic.t) result
+  (Flow.Catalog.catalog, Diagnostic.t) result
 (** The catalog a workspace text is checked against ({!Workspace_doc.of_text}):
     the SOP factories (default [Sop.Nodes.factories]) plus the scene,
     world and settings kinds generated from the editor's schemas. *)
@@ -381,7 +381,7 @@ module Editor : sig
 
     val canvas_scenes : 'prepared t -> Rays.Scene.t list
     (** The picture each canvas pane drew last frame, in layout order. *)
-    val image_gpu_stats : 'prepared t -> Flow_gpu.Host.Private.stats * int * int * int * int
+    val image_gpu_stats : 'prepared t -> Flow_gpu.Host.stats * int * int * int * int
     (** Cumulative Host totals, sinks created/closed and sink buffer/texture creations,
         including evicted runners and failed sinks; inspect outside frame measurements. *)
 

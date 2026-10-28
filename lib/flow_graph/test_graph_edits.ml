@@ -1,6 +1,6 @@
 open Flow
 open Flow_graph
-let catalog=Check.{version=1;kinds=[]}
+let catalog=Catalog.{version=1;kinds=[]}
 let ok=function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let source body=ok(Syntax.parse("(workspace w (graph g :context host (let* "^body^")))"))
 let text src=fst(Lisp.print src)
@@ -53,13 +53,13 @@ let () =
 let () =
   (* Repeat in a drawing graph collects the drawings and merges them *)
   let src=ok(Syntax.parse "(workspace w (graph g :context draw (let* [c (draw/circle [0 0 0] 5)] c)))") in
-  let cat=Check.{version=1;kinds=[]} in
+  let cat=Catalog.{version=1;kinds=[]} in
   let r=fst(ok(Flow_edit.apply_checked cat src(Wrap{nodes=[["g";"c"]];loop=For})))in
   assert(has(text r)"c (draw/merge c_each)")
 let () =
   (* a chain step trades places along the chain input; deleting a step hands its place to that input *)
   let src=ok(Syntax.parse "(workspace w (graph g :context draw (draw/translate [1 2 0] (draw/rotate 0.3 (draw/circle [0 0 0] 5)))))") in
-  let cat=Check.{version=1;kinds=[]} in
+  let cat=Catalog.{version=1;kinds=[]} in
   let ed op=fst(ok(Flow_edit.apply_checked cat src op)) in
   let flat t=String.concat " "(List.filter((<>)"")(String.split_on_char ' '(String.map(function '\n'->' '|c->c)t))) in
   let swapped=flat(text(ed(Move_step{node=["g";"@result#1"];earlier=false})))in

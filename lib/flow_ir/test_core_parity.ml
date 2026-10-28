@@ -2,7 +2,7 @@ module E = Flow.Eval
 module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let read path = In_channel.with_open_bin path In_channel.input_all
-let catalog = fst (ok (Flow.Check.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")))
+let catalog = fst (ok (Flow.Catalog.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")))
 let check source = match Flow.Workspace.check catalog (ok (Flow.Syntax.parse source)) with
   | Some ws,ds when not (List.exists (fun (d : Diagnostic.t) -> d.severity=Diagnostic.Error_severity) ds) -> ws
   | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
@@ -27,7 +27,7 @@ let compare value =
   let program=ok (I.Executor.compile value) in
   List.iter (fun time ->
     let live=Input.at_time time in
-    let reference=E.Private.force_reference value ~live in
+    let reference=E.Host.force_reference value ~live in
     assert (same (I.Executor.force program ~live) reference);
     match value with
     | E.Residual r -> (match I.Core_lower.lower r with
@@ -64,10 +64,10 @@ let () =
     let a=ok (I.Executor.compile v) and b=ok (I.Executor.compile v) in
     List.iter (fun time ->
       let live=Input.at_time time in
-      let expected=E.Private.force_reference v ~live in
+      let expected=E.Host.force_reference v ~live in
       assert (same (I.Executor.force a ~live) expected);
       assert (same (I.Executor.force a ~live) expected);
       assert (same (I.Executor.force b ~live) expected)) [0.;1.;10000.;2.];
     let live={(Input.at_time 1.) with dt=nan} in
-  assert (same (I.Executor.force a ~live) (E.Private.force_reference v ~live)));
+  assert (same (I.Executor.force a ~live) (E.Host.force_reference v ~live)));
   Printf.printf "Core parity: fixtures, scalar expressions, direct execution (%d cases), and diagnostics passed\n" !direct

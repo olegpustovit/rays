@@ -80,13 +80,13 @@ let fast64 = {|  let RH = 0;
 let fast_less a b = Printf.sprintf "(r%dh < r%dh || (r%dh === r%dh && r%dl < r%dl))" a b a b a b
 
 let region ?(fast=false) program =
-  let view = P.Private.view program and region = program in
+  let view = P.Host.view program and region = program in
   let fast = fast && region.result = R.Collect
     && not (Array.exists (fun i -> match i with P.Rand_at _ -> true | P.Guarded (_, P.Rand_at _) -> true | _ -> false) view.code) in
   let line = Buffer.create 4096 in
   let add format = Printf.bprintf line format in
   let rec unguarded = function P.Guarded (_,body) -> unguarded body | instruction -> instruction in
-  let checks = P.Private.finite_checks program in
+  let checks = P.Host.finite_checks program in
   let gathered=Array.exists(fun instruction->match unguarded instruction with
     | P.Array_prepare _->true|_->false)view.code in
   let nonfinite = if gathered then "fail('E_NONFINITE', 'packed produced a nonfinite value.');" else "return 1;" in
@@ -639,19 +639,19 @@ let draw ctx : C.draw -> string = fun d ->
   | Push (t, n) -> Printf.sprintf "transform(rt, %s, %s);" (escape (match t with C.Translate -> "translate" | Rotate -> "rotate" | Scale -> "scale")) (local n)
   | Pop -> "emit(rt, {type: \"pop_transform\"});"
 
-(* What each source and uniform of a region reads, by argument index ([Packed.Private.shape] of its
+(* What each source and uniform of a region reads, by argument index ([Packed.Host.shape] of its
    template, whose arguments are [$core/argument] markers): a resident fold takes a count on the
    device from ["arg", i] and ["range", i, mul, div], and declines a placeholder read any other way. *)
 let shapes_json packed =
   let arg = function
     | Flow.Eval.Source ("$core/argument", _, ["index", Flow.Eval.Int i]) -> Some i | _ -> None in
   let shape = function
-    | P.Private.Value v -> (match arg v with Some i -> Printf.sprintf "['arg',%d]" i | None -> "['host']")
+    | P.Host.Value v -> (match arg v with Some i -> Printf.sprintf "['arg',%d]" i | None -> "['host']")
     | Range (v, mul, div) -> (match arg v with Some i -> Printf.sprintf "['range',%d,%d,%d]" i mul div | None -> "['host']")
     | Opaque None -> "['opaque',null]"
     | Opaque (Some vs) -> Printf.sprintf "['opaque',[%s]]" (String.concat "," (List.filter_map (fun v -> Option.map string_of_int (arg v)) vs)) in
   let list a = "[" ^ String.concat "," (Array.to_list (Array.map shape a)) ^ "]" in
-  Printf.sprintf "{sources:%s,uniforms:%s}" (list (P.Private.source_shapes packed)) (list (P.Private.uniform_shapes packed))
+  Printf.sprintf "{sources:%s,uniforms:%s}" (list (P.Host.source_shapes packed)) (list (P.Host.uniform_shapes packed))
 
 let rec statements ctx depth (list : C.statement list) =
   List.iter (statement ctx depth) list
@@ -776,7 +776,7 @@ and binding_plan ?(fast=false) ?kernel packed =
     |Array(Int|Float|Text|Vec2|Vec3|Vec4)|List Any -> true
     |List ty->supported ty|Record fields->List.for_all(fun(_,ty)->supported ty)fields
     |_->false in
-  if not(Array.for_all supported(P.Private.argument_types packed)) then
+  if not(Array.for_all supported(P.Host.argument_types packed)) then
     refuse "This compiled region argument type is outside the 2D web target.";
   let needs_frame_value=ref false in
   let prepare ~uniform program =
@@ -821,7 +821,7 @@ and binding_plan ?(fast=false) ?kernel packed =
   Printf.sprintf
     "{source:%s,argumentTypes:[%s],sources:[%s],captures:[%s],product:%b,skip:[%s],frame:[%s],length:%d,width:%d,integer:%b,text:%b,frameValue:%b,arrayLimit:%sn,countLimit:%sn,kernel:%s,shapes:%s}"
     (escape(region ~fast packed))
-    (String.concat ","(Array.to_list(Array.map ty_json(P.Private.argument_types packed))))
+    (String.concat ","(Array.to_list(Array.map ty_json(P.Host.argument_types packed))))
     (String.concat ","(Array.to_list sources))
     (String.concat ","(Array.to_list captures))
     (r.iteration=R.Product) (String.concat ","(Array.to_list(Array.map string_of_int r.skip)))
@@ -836,7 +836,7 @@ and frame_result ?store ?(fast=false) ?(kernel = fun _ -> None) ?(gpu = fun _ ->
   let body = Buffer.create 4096 in
   (* Once one region consumes computed locals, its producer Invokes need real
      source preparation too. Argument-free fixed exports keep data.bin calls. *)
-  let templated=bindings || Array.exists(fun region->P.Private.argument_types region<>[||])program.regions in
+  let templated=bindings || Array.exists(fun region->P.Host.argument_types region<>[||])program.regions in
   let ctx = { program; body; used = Hashtbl.create 8; map = []; async = false; gpu; state_slot; bindings; templated; plans=Hashtbl.create 4; fast;
     remembered=false; resident=false; kernel } in
   (* A drawing's loop memory, as native [Core_exec.prepare ~remember_loops]: a top-level loop or

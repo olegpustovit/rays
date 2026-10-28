@@ -65,7 +65,7 @@ let draws_of_prepared (staged:Scene.Private.staged_native) prepared=
 let rec validate_images = function
   | [] -> Ok ()
   | (_, Renderer.Image image) :: rest ->
-      Result.bind (Runtime_resources.Image.Private.gpu_snapshot image)
+      Result.bind (Runtime_resources.Image.gpu_snapshot image)
         (fun _ -> validate_images rest)
   | _ :: rest -> validate_images rest
 
@@ -78,7 +78,7 @@ let rec validate_layers = function
 
 let rec validate_mesh_images = function
   | [] -> Ok ()
-  | image :: rest -> Result.bind (Runtime_resources.Image.Private.gpu_snapshot image)
+  | image :: rest -> Result.bind (Runtime_resources.Image.gpu_snapshot image)
       (fun _ -> validate_mesh_images rest)
 
 let render ~execution ~density ~width ~height scene =

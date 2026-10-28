@@ -32,7 +32,7 @@ let with_renderer driver name body=
       (fun()->body renderer)
 
 let run () =
-  let driver,live_handles=Ogpu.Impl.create_driver()in
+  let driver = Ogpu.Impl.create_driver () in let live_handles = Ogpu.Impl.live_handles in
   let before=live_handles()in
   with_renderer driver"retained"(fun replay_renderer->
   let stable=draws 10 in

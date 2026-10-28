@@ -2,7 +2,7 @@ module S = Syntax
 
 type validation = { predicate : S.t; code : string; message : string }
 type t = {
-  kind : Check.kind; slots : Check.slot list; keyword_inputs : string list;
+  kind : Catalog.kind; slots : Catalog.slot list; keyword_inputs : string list;
   fields : Param.field_view list; label : string; operation : string; version : int;
   category : string list; description : string option;
   inputs : (string * Ty.t * S.t option) list; body : S.t;
@@ -58,12 +58,12 @@ let facts x =
   let xs = match x.S.node with S.Map xs -> xs | _ -> bad x ":facts is a metadata map." in
   let opts = options x ["elementwise";"reads";"writes";"topology";"preserves_topology";"exact";"cook-mode"] xs in
   let elementwise = get opts "elementwise" (fun v -> match word v with
-    | "points" -> Check.Points | "primitives" -> Primitives | "none" | "irregular" -> Irregular
-    | _ -> bad v "Elementwise is points, primitives or irregular.") Check.Irregular in
+    | "points" -> Catalog.Points | "primitives" -> Primitives | "none" | "irregular" -> Irregular
+    | _ -> bad v "Elementwise is points, primitives or irregular.") Catalog.Irregular in
   ignore (opt opts "cook-mode" (fun v -> match word v with
     | "generator" | "generic" | "modifier" | "filter" | "analysis" | "irregular" -> ()
     | _ -> bad v "Invalid cook mode."));
-  {Check.elementwise; reads=get opts "reads" strings []; writes=get opts "writes" strings [];
+  {Catalog.elementwise; reads=get opts "reads" strings []; writes=get opts "writes" strings [];
     preserves_topology=get opts "preserves_topology" bool
       (get opts "topology" (fun v -> match word v with
         | "preserved" | "unchanged" -> true | "changed" -> false
@@ -80,7 +80,7 @@ let parse form = try
     | _ -> bad form "A defnode needs metadata, a parameter vector and exactly one body." in
   let hs, ps, body = header [] rest in
   let hs = options form ["label";"operation";"version";"category";"description";"facts";"validate";"code";"message"] hs in
-  let operation=get hs "operation" text (Check.short name) in
+  let operation=get hs "operation" text (Catalog.short name) in
   if not(Symbol.valid_name operation) then bad form ":operation is a nonempty stable operation name.";
   let used = Hashtbl.create 8 and fields = ref [] and slots = ref [] in
   let keywords=ref [] and normalizers=ref [] in
@@ -112,13 +112,13 @@ let parse form = try
       if default <> None then bad p "Typed slots have no default; use :required false for an optional slot.";
       if List.exists (fun k -> List.mem_assoc k opts) ["min";"max";"hard_min";"hard_max";"hard-min";"hard-max";"choices";"kind";"vec3"] then
         bad p "Range and kind metadata belongs to parameters with defaults.";
-      slots := !slots @ [{Check.name=pn;required=optional;rest;ty=(if ty=Ty.geometry then None else Some ty)}]
+      slots := !slots @ [{Catalog.name=pn;required=optional;rest;ty=(if ty=Ty.geometry then None else Some ty)}]
       ; if keyword then begin
         let port=match ty with Ty.Fn (Some signature)->Port_type.Fn signature
           |ty when ty=Ty.image->Port_type.Image
           |_->bad p "Keyword slots must have image or typed fn types." in
         if not optional || rest then bad p "Keyword slots must be required and cannot repeat.";
-        keywords := !keywords @ [{Check.name=pn;label=pn;ty=Some port;fields=[];folder=[];primary=true;unit=None}]
+        keywords := !keywords @ [{Catalog.name=pn;label=pn;ty=Some port;fields=[];folder=[];primary=true;unit=None}]
       end
     end else begin
       if List.mem_assoc "required" opts || List.mem_assoc "rest" opts || List.mem_assoc "keyword" opts then
@@ -175,18 +175,18 @@ let parse form = try
       fields := !fields @ fs
     end;
     pn,(if slot && rest then Ty.List ty else ty),default) ps in
-  List.iteri (fun i (s:Check.slot) -> if s.rest && i<>List.length !slots-1 then bad form "A rest slot must be the final slot.") !slots;
+  List.iteri (fun i (s:Catalog.slot) -> if s.rest && i<>List.length !slots-1 then bad form "A rest slot must be the final slot.") !slots;
   let field_names=List.map (fun (f:Param.field_view) -> f.name) !fields in
   if List.length field_names<>List.length (List.sort_uniq String.compare field_names) then bad form "Overlapping parameter field names.";
-  let parameters = match Check.parameters_of_fields !fields with
+  let parameters = match Catalog.parameters_of_fields !fields with
     | Ok parameters -> parameters
     | Error _ -> bad form "A vec3 group contains three contiguous float fields in the same folder." in
-  let keyword_inputs=List.map (fun (p:Check.parameter)->p.name) !keywords in
-  let kind={Check.qualified=name;context=Context.sop;
-    slots=List.filter (fun (s:Check.slot)->not(List.mem s.name keyword_inputs)) !slots;
+  let keyword_inputs=List.map (fun (p:Catalog.parameter)->p.name) !keywords in
+  let kind={Catalog.qualified=name;context=Context.sop;
+    slots=List.filter (fun (s:Catalog.slot)->not(List.mem s.name keyword_inputs)) !slots;
     parameters=parameters @ !keywords;
     outputs=["geo",Port_type.Geometry];facts=opt hs "facts" facts} in
-  Ok {kind;slots= !slots;keyword_inputs;fields= !fields;label=get hs "label" text (title (Check.short name));operation;version=get hs "version" version 1;
+  Ok {kind;slots= !slots;keyword_inputs;fields= !fields;label=get hs "label" text (title (Catalog.short name));operation;version=get hs "version" version 1;
     category=get hs "category" strings [];description=opt hs "description" text;inputs;body;validations= !validations;
     normalizers= !normalizers;form}
 with Diagnostic.Error d -> Error d

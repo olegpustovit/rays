@@ -60,9 +60,9 @@ val remap : op -> path -> path option
 val apply_checked :
   ?ops:Flow.Op.t list ->
   ?library:bool ->
-  ?checker:(Flow.Check.catalog -> Flow.Syntax.t list ->
+  ?checker:(Flow.Catalog.catalog -> Flow.Syntax.t list ->
     Flow.Workspace.t option * Diagnostic.t list) ->
-  Flow.Check.catalog -> Flow.Syntax.t list -> op ->
+  Flow.Catalog.catalog -> Flow.Syntax.t list -> op ->
   (Flow.Syntax.t list * Flow.Workspace.t, Diagnostic.t) result
 (** The rewritten source (printed and parsed again) and its check, as
     {!Flow_graph.Flow_edit.apply_checked}. *)

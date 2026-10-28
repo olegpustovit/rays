@@ -3,7 +3,7 @@ module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let residual ?(inputs="") body =
   let source="(workspace w (graph g :context value " ^ inputs ^ " (let* [tested " ^ body ^ "] 0.)))" in
-  let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
+  let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
     | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   match snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) with
   | E.Residual r -> r | _ -> failwith ("Expected a residual: " ^ body)
@@ -11,7 +11,7 @@ let () =
   if Array.length Sys.argv=2 && Sys.argv.(1)="--bench-records" then begin
     (* The Slice C record fold (lib/flow/test_workspace_eval.ml), prepared and forced through Executor's core path. *)
     let source="(workspace w (graph g :context value (let* [a (fold [a {:n 0.}] [x (array/range 4096)] (assoc a :n (+ a.n t)))] a.n)))" in
-    let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
+    let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
       | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
     let v=List.assoc "g" (ok (E.static ws)).results in
     let program=ok (I.Executor.compile v) in
@@ -91,7 +91,7 @@ let dump () = String.concat "" (List.map (fun (name,r) ->
   let printed=Format.asprintf "%a" I.Core.pp core in
   List.iter (fun time ->
     let live=Input.at_time time in
-    let expected=E.Private.force_reference (E.Residual r) ~live in
+    let expected=E.Host.force_reference (E.Residual r) ~live in
     let equal_result (a : (E.value,Diagnostic.t) result) (b : (E.value,Diagnostic.t) result) = match a,b with
       | Ok a,Ok b -> same a b | Error a,Error b -> a.code=b.code | _ -> false in
     assert (equal_result (E.force (E.Residual r) ~live) expected);
@@ -113,7 +113,7 @@ let () =
     let program=ok(I.Executor.compile(E.Residual r)) in
     List.iter (fun time ->
       let live=Input.at_time time in
-      let expected=E.Private.force_reference(E.Residual r) ~live in
+      let expected=E.Host.force_reference(E.Residual r) ~live in
       List.iter (fun actual -> match actual,expected with
         | Ok a,Ok b->assert(same a b)
         | Error a,Error b->assert(a.Diagnostic.code=b.code && a.message=b.message && a.cause=b.cause)

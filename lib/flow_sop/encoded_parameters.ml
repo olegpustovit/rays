@@ -11,7 +11,7 @@ let for_node checked (definition : W.node_definition) =
     let graph=W.{name="lisp_normalize_"^name;context=Flow.Context.value;
       inputs=["raw_value",Flow.Ty.Text,None];body;form} in
     let workspace={checked with W.graphs=[graph]} in
-    let evaluate raw=Result.bind(E.Residual.handle (fun () -> E.Private.static_with_requests ~budget:max_int
+    let evaluate raw=Result.bind(E.Residual.handle (fun () -> E.Host.static_with_requests ~budget:max_int
       ~inputs:[graph.name,["raw_value",E.Text raw]] workspace))(fun result->
       match List.assoc graph.name result.results with
       |E.Text canonical when Array.length result.plan.nodes=0->Ok canonical
@@ -34,9 +34,9 @@ let normalize_defaults workspace =
     Result.bind fields (fun fields ->
       Result.map (fun parameters ->
         {node with fields;kind={node.kind with parameters=parameters @
-          List.filter(fun(p:Flow.Check.parameter)->List.mem p.name node.keyword_inputs)node.kind.parameters}})
+          List.filter(fun(p:Flow.Catalog.parameter)->List.mem p.name node.keyword_inputs)node.kind.parameters}})
         (Result.map_error (Diagnostic.error ~code:"E_VEC3")
-          (Flow.Check.parameters_of_fields fields))) in
+          (Flow.Catalog.parameters_of_fields fields))) in
   Result.map(fun nodes->{workspace with W.nodes})
     (List.fold_left(fun result node->Result.bind result(fun nodes->
       Result.map(fun node->nodes@[node])(normalize_node node))) (Ok[])workspace.W.nodes)

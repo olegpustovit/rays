@@ -16,7 +16,7 @@ val region : ?fast:bool -> Flow_ir.Packed.t -> string
       its source's elements; the index space is the product of their lengths.
     - [uniforms]: one [Float64Array] per [uniform_widths] entry, then, as the
       last element, the frame array indexed by instruction slot (as
-      [Packed.Private.inputs.frame]).
+      [Packed.Host.inputs.frame]).
     - [outputs]: one [Float64Array] per output, the collecting kinds only, sized
       [kept * width] where [kept] is the iteration count minus skipped
       indices. A [Sum] or [Accumulate] region appends one state array of

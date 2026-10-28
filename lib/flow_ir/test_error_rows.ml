@@ -4,7 +4,7 @@ module V=Flow.Value
 module D=Diagnostic
 module I=Flow_ir
 let ok=function Ok value->value|Error d->failwith(D.to_string d)
-let catalog=Flow.Check.{version=1;kinds=[]}
+let catalog=Flow.Catalog.{version=1;kinds=[]}
 let mapper="(fn [index] {:code \"E_ROW\" :message (str \"bad \" index) :cause (list (str \"raw 日本😀 \" index))})"
 let source body="(workspace rows (graph g :context value [(flags : (array int) (array/int 0))] (let* [tested "^body^"] 0.)))"
 let parse text=ok(Flow.Syntax.parse text)
@@ -19,7 +19,7 @@ let evaluate ?resolve flags body =
   let program=match I.Core_lower.lower ~strict:true residual with Ok p->p|Error form->failwith form in
   let live=Input.at_time 0. in
   let native=Test_program.run ?resolve program ~live in
-  let reference=E.Private.force_reference ?resolve value ~live in
+  let reference=E.Host.force_reference ?resolve value ~live in
   (match native,reference with
    |Ok a,Ok b->assert(a=b)
    |Error a,Error b->assert(a.code=b.code && a.message=b.message && a.cause=b.cause)
@@ -28,7 +28,7 @@ let resolve grain calls=function
   |E.Source("$core/diagnostic_index",Flow.Ty.Int,["rows",rows;"policy",E.Text policy])->
       incr calls;
       let grain=match policy with "first"->None|"range-last"->Some grain|_->assert false in
-      (match V.Private.error_row_index ?grain rows with Some index->Ok(E.Int index)|None->assert false)
+      (match V.error_row_index ?grain rows with Some index->Ok(E.Int index)|None->assert false)
   |_->assert false
 let failure index=function
   |Error(d:D.t)->assert(d.code="E_ROW" && d.message="bad "^string_of_int index
@@ -42,7 +42,7 @@ let ()=
   assert(!calls=0);
   List.iter(fun bits->let rows=Array.make 32769 0 in List.iter(fun i->rows.(i)<-1)bits;
     let before=Array.copy rows in
-    List.iter(fun grain->let selected=Option.get(V.Private.error_row_index ~grain(E.Int_array rows))in
+    List.iter(fun grain->let selected=Option.get(V.error_row_index ~grain(E.Int_array rows))in
       failure selected(evaluate ~resolve:(resolve grain calls)(E.Int_array rows)
         ("(error_rows flags "^mapper^" :policy \"range-last\")"))) [1;97;4096;max_int];
     failure(List.hd bits)(evaluate(E.Int_array rows)("(error_rows flags "^mapper^")"));assert(rows=before))
@@ -59,10 +59,10 @@ let ()=
 (match evaluate(E.Int_array[|1|])
   "(error_rows flags (fn [index] (error \"cancelled\" \"mapper cancel\" :cause \"original cancel\")))"with
   |Error d->assert(d.code="cancelled" && d.message="mapper cancel" && d.cause=Some "original cancel")|_->assert false);
-(try ignore(V.Private.error_row_index(E.Float_array[|1.|]));assert false
+(try ignore(V.error_row_index(E.Float_array[|1.|]));assert false
  with Diagnostic.Error d -> assert(d.code="E_DIAGNOSTIC_ROWS"));
   let polls=ref 0 in
-  (try ignore(V.Private.error_row_index ~grain:97 ~check:(fun()->incr polls;
+  (try ignore(V.error_row_index ~grain:97 ~check:(fun()->incr polls;
     if !polls=3 then V.fail "E_CANCELLED" "cancel scan")(E.Int_array(Array.make 5001 0)));assert false
    with Diagnostic.Error d -> assert(d.code="E_CANCELLED"));
   List.iter(fun body->let _,ds=W.check catalog(parse(source body))in
@@ -81,7 +81,7 @@ let ()=
     (Set_arg{node=card.path;key=Pos 1;sub=[];value=Flow.Syntax.make(Num "1")}))in
   let printed=fst(Flow.Lisp.print forms)in ignore(checked printed);
   let result=ok(E.static ~record:true ~inputs:["g",["flags",E.Int_array[||]]]workspace)in
-  failure 0(E.Private.force_reference(snd(List.hd(List.assoc ["g";"tested"] result.records)))~live:(Input.at_time 0.));
+  failure 0(E.Host.force_reference(snd(List.hd(List.assoc ["g";"tested"] result.records)))~live:(Input.at_time 0.));
   assert(Result.is_error(Flow_graph.Flow_edit.apply_checked catalog forms
     (Set_arg{node=card.path;key=Pos 1;sub=[];value=Flow.Syntax.make(Str "wrong storage")})))
 let ()=

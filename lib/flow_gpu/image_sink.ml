@@ -99,8 +99,9 @@ let close t =
     Option.iter release t.storage;t.storage<-None;
     ignore(B.destroy_pipeline t.pipeline);ignore(B.destroy_library t.library);t.closed<-true
   end
+let buffer_creations t = t.buffers
+let texture_creations t = t.textures
+
 module Private = struct
   let create_owned = create_owned
-  let buffer_creations t = t.buffers
-  let texture_creations t = t.textures
 end

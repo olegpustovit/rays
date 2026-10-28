@@ -894,9 +894,7 @@ let compute_use_accels (encoder:compute_encoder) accels=
          else check rest) in
   match check accels with Error _ as e->e|Ok()->
   if accels=[] then Ok() else encoder.compute_raw.compute_use_accels (List.map (fun (a:accel)->a.accel_raw.accel_token) accels)
-module Private=struct
   let texture_driver_token (texture:texture) =
     Handle.device_id texture.resource.device.handle, texture.resource.raw.token
   let texture_descriptor (texture:texture)=texture.texture_descriptor
   let texture_destroyed (texture:texture)=texture.resource.dead
-end

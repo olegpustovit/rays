@@ -6,7 +6,7 @@ let number x = Param.float_text x
 let array xs = "Float64Array.from([" ^ String.concat "," (Array.to_list (Array.map number xs)) ^ "])"
 let value ?inputs body =
   let source="(workspace w (graph g :context host [(data : (array vec3) (array/vec3 0))] "^body^"))" in
-  let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
+  let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
     |Some ws,[] -> ws |_,ds -> failwith(String.concat ";" (List.map Diagnostic.to_string ds)) in
   List.assoc "g" (ok(E.static ?inputs ws)).results
 let live = {(Input.at_time 1.) with frame=3}
@@ -43,7 +43,7 @@ let () =
       assert(Array.length result=Array.length expected);
       Array.iteri(fun i x->if bits x<>bits expected.(i) then failwith(Printf.sprintf"FMA native %d %s <> %s" i(bits x)(bits expected.(i))))result
       |_->failwith"FMA array expected")
-      [ok(E.Private.force_reference source ~live);ok(I.Packed.force ~strict:true packed ~live);
+      [ok(E.Host.force_reference source ~live);ok(I.Packed.force ~strict:true packed ~live);
        ok(I.Executor.force ~strict:true compiled ~live)])) [1;8];
   assert(I.Packed.gpu_refusals packed<>[]);
   let scalar=Option.get(Flow.Op.find "fma" Flow.Context.value) in
@@ -54,14 +54,14 @@ let () =
   (* The typed bank also carries Int frame/index and Int source values into FMA. *)
   let mixed=value "(map (fn [x] (fma (float x) (float (frame/index)) t)) (array/range 5001 :type int))" in
   let mixed_compiled=ok(I.Executor.compile ~strict:true mixed) in
-  assert(ok(I.Executor.force ~strict:true mixed_compiled ~live)=ok(E.Private.force_reference mixed ~live));
+  assert(ok(I.Executor.force ~strict:true mixed_compiled ~live)=ok(E.Host.force_reference mixed ~live));
   List.iter(fun body->let v=value body in let p=ok(I.Executor.compile ~strict:true v) in
     assert(ok(I.Executor.force ~strict:true p ~live)=E.Float_array(Array.make 5001 0.)))
     ["(map (fn [x] (if (> t 0.) 0. (fma 1.7976931348623157e308 2. x))) (array/range 5001))"];
   let overflow=value "(map (fn [x] (if (> t 0.) (fma 1.7976931348623157e308 2. x) 0.)) (array/range 5001))" in
   (match I.Executor.force ~strict:true (ok(I.Executor.compile ~strict:true overflow)) ~live with
    |Error d->assert(d.code="E_NONFINITE") |Ok _->failwith"Overflow FMA accepted");
-  let prepared=ok(I.Packed.Private.prepare_values packed ~live) in
+  let prepared=ok(I.Packed.Host.prepare_values packed ~live) in
   let js=Buffer.create 2000000 in
   Printf.bprintf js "import {fma} from %S;\n" ("file://"^Filename.concat(Sys.getcwd())"../web_export/runtime/prims.js");
   Buffer.add_string js (Flow_web.Js.region packed);
@@ -80,7 +80,7 @@ let () =
     let r=match v with E.Residual r->r|_->assert false in
     let p=match I.Packed.compile_result r (E.Residual.residual_view r).term with
       |Ok p->p |Error ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds)) in
-    let inputs=ok(I.Packed.Private.prepare_values p ~live) in
+    let inputs=ok(I.Packed.Host.prepare_values p ~live) in
     let input=function E.Int_array xs->"BigInt64Array.from(["^String.concat ","(Array.to_list(Array.map(fun n->string_of_int n^"n")xs))^"])"
       |E.Float_array xs->array xs|_->assert false in
     let frame=function E.Int n->string_of_int n^"n"|Float x->number x|_->assert false in
@@ -135,7 +135,7 @@ let () =
       Array.iteri(fun i x->if bits x<>bits expected.(i)then
         failwith(Printf.sprintf "Checked arithmetic %d: %s <> %s" i(bits x)(bits expected.(i))))values
     |_->failwith "Checked arithmetic Vec4 array expected" in
-  same(ok(E.Private.force_reference source ~live));
+  same(ok(E.Host.force_reference source ~live));
   List.iter(fun domains->Parallel.run ~domains(fun()->
     same(ok(I.Executor.force ~strict:true compiled ~live));
     same(ok(Test_program.run ~force:(fun p->I.Packed.force ~strict:true p ~live) core ~live));
@@ -145,7 +145,7 @@ let () =
   let evaluate body=let source=value body in
     let compiled=match I.Executor.compile ~strict:true source with Ok p->p|Error d->
       failwith(body^": "^Diagnostic.to_string d) in
-    let expected=ok(E.Private.force_reference source ~live) in
+    let expected=ok(E.Host.force_reference source ~live) in
     assert(ok(I.Executor.force ~strict:true compiled ~live)=expected);expected in
   List.iter(fun body->assert(evaluate body=E.Float_array(Array.make 5001 0.))) [
     "(map (fn [x] (let* [bad (float/mul_checked 1.7976931348623157e308 2.0)] (if bad.valid (+ x t) bad.value))) (array/range 5001))";
@@ -158,7 +158,7 @@ let () =
       try ignore(op.body ~live ~node:(fun _ _->assert false)args);failwith "Nonfinite checked input accepted"
       with Diagnostic.Error d -> assert(d.code="E_NONFINITE")) [nan;infinity;neg_infinity])
     ["float/mul_checked";"float/fma_checked"];
-  let prepared=ok(I.Packed.Private.prepare_values packed ~live) in
+  let prepared=ok(I.Packed.Host.prepare_values packed ~live) in
   let flatten=function E.Float x->[|x|]|Int n->[|float n|]|Bool b->[|if b then 1. else 0.|]
     |Vec3(a,b,c)->[|a;b;c|]|_->failwith "Checked uniform" in
   let js=Buffer.create 3_000_000 in

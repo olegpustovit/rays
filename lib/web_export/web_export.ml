@@ -37,7 +37,7 @@ let first_draw (doc : Doc.t) =
   | None -> Error (D.error ~code:"E_WEB_GRAPH" "The workspace has no draw graph to export.")
 
 let fixed_region (region : C.Region.t) =
-  Flow_ir.Packed.Private.argument_types region=[||]
+  Flow_ir.Packed.Host.argument_types region=[||]
   && not (Array.exists (fun (residual,term) ->
     E.frame_dependent (E.Residual (E.Residual.with_bindings residual ~term []))) region.sources
     || Array.exists E.frame_dependent region.uniforms)
@@ -80,7 +80,7 @@ type files = (string * string) list
 
 (* Only frame-independent inputs and captures can become export data. The two
    different-frame probes below additionally check their prepared values. *)
-type fixed = { packed : Flow_ir.Packed.t; view : Flow_ir.Packed.Private.view; arrays : E.value array;
+type fixed = { packed : Flow_ir.Packed.t; view : Flow_ir.Packed.Host.view; arrays : E.value array;
   uniforms : E.value array; count : int; frame : (int * string * bool) list }
 
 let rec region_instruction = function C.Region.Guarded (_,body) -> region_instruction body | body -> body
@@ -95,10 +95,10 @@ let fixed_inputs (r : C.Region.t) =
     refuse "E_WEB_CAPTURE" "This region reads a value that changes from frame to frame; the web export needs its inputs fixed."
   else
       let packed = r in
-      let view = Flow_ir.Packed.Private.view packed in
+      let view = Flow_ir.Packed.Host.view packed in
       let probe t frame = { (Input.at_time t) with dt = 0.25; frame; tick = frame; size = (640 + frame, 480);
         pointer = (100. +. t, 100.) } in
-      let prepare live = try Flow_ir.Packed.Private.prepare_values packed ~live with Not_found | Invalid_argument _ | Failure _ ->
+      let prepare live = try Flow_ir.Packed.Host.prepare_values packed ~live with Not_found | Invalid_argument _ | Failure _ ->
         Error (D.error ~span:(span_of_region r) ~code:"E_WEB_REGION" "This region could not be prepared.") in
       let* a = prepare (probe 0. 1) in
       let* b = prepare (probe 0.5 7) in
@@ -151,7 +151,7 @@ let region_entry ~fast ~data (r : C.Region.t) =
   if not (fixed_region r) then
     (* bound per call: the frame's binding plan carries its sources; the table holds the template *)
     let packed = r in
-        let view = Flow_ir.Packed.Private.view packed in
+        let view = Flow_ir.Packed.Host.view packed in
         let f = {packed; view; arrays = [||]; uniforms = [||]; count = 0; frame = []} in
         Ok {prefix = Printf.sprintf "{\"source\": %s" (Flow_web.Kernel_table.json_string (Flow_web.Js.region ~fast packed));
           fixed = f; kernel = None; width = Array.length view.outputs.(0); region = r}
@@ -233,7 +233,7 @@ let map_entry (lowered : lowered) id =
   let arg name fallback = Option.value (List.assoc_opt name node.args) ~default:fallback in
   match arg "function" (E.Int 0) with
   | E.Fn fn ->
-      let* pixels = E.Private.map_function ~site:(node.inst, node.site, node.iter)
+      let* pixels = E.Host.map_function ~site:(node.inst, node.site, node.iter)
         ~signature:Flow.Ty.{params=[Vec2]; result=Vec4} fn [E.Vec2_array [|0.5; 0.5|]] in
       (match pixels with
        | E.Residual r ->

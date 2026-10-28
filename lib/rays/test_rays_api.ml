@@ -40,11 +40,11 @@ let random () =
   let xs = Array.init 100_000 (fun i -> float i *. 0.001)
   and ys = Array.init 100_000 (fun i -> float (i mod 97) *. 0.01) in
   let sequential = Array.make 100_000 0. and parallel = Array.make 100_000 0. in
-  Rays_math.Noise.Private.sample2_into noise ~first:0 ~last:100_000 ~frequency:0.5 ~x:xs ~y:ys
+  Rays_math.Noise.sample2_into noise ~first:0 ~last:100_000 ~frequency:0.5 ~x:xs ~y:ys
     ~output:sequential;
   let workers = Array.init 4 (fun domain -> Domain.spawn (fun () ->
       let first = domain * 25_000 in
-      Rays_math.Noise.Private.sample2_into noise ~first ~last:(first + 25_000) ~frequency:0.5 ~x:xs ~y:ys
+      Rays_math.Noise.sample2_into noise ~first ~last:(first + 25_000) ~frequency:0.5 ~x:xs ~y:ys
         ~output:parallel)) in
   Array.iter Domain.join workers;
   check (sequential = parallel && Array.for_all Float.is_finite parallel)
@@ -53,7 +53,7 @@ let random () =
   Parallel.run ~domains:8 (fun () ->
     Parallel.for_ ~chunk_size:1 ~start:0 ~finish:7 (fun chunk ->
       let first = chunk * 12_500 in
-      Rays_math.Noise.Private.sample2_into noise ~first ~last:(first + 12_500)
+      Rays_math.Noise.sample2_into noise ~first ~last:(first + 12_500)
         ~frequency:0.5 ~x:xs ~y:ys ~output:parallel));
   check (sequential = parallel) "Noise one/eight-domain exact 2D plane";
   (* The packed 2D sampler is the z = 0 plane of the 3D noise, bit for bit,
@@ -72,7 +72,7 @@ let random () =
     let x = Array.init (count * count) (fun i -> coordinates.(i / count))
     and y = Array.init (count * count) (fun i -> coordinates.(i mod count)) in
     let output = Array.make (count * count) 0. in
-    Rays_math.Noise.Private.sample2_into noise ~first:0 ~last:(count * count) ~frequency:1. ~x ~y ~output;
+    Rays_math.Noise.sample2_into noise ~first:0 ~last:(count * count) ~frequency:1. ~x ~y ~output;
     Array.iteri (fun i value ->
       check (Int64.bits_of_float value
              = Int64.bits_of_float (Rays_math.Noise.sample3 noise ~x:x.(i) ~y:y.(i) ~z:0.))
@@ -127,7 +127,7 @@ let frame_and_scene () =
   let scene = [ Scene.clear Rays_math.Color.black; Scene.rect ~at:(0, 0) ~w:4 ~h:3 ~fill:Rays_math.Color.red ();
     Scene.text_input_region ~at:(1, 1) ~w:2 ~h:1 ~focused:true ~cursor:1 () ] in
   let ir = Result.get_ok (Scene.Private.to_ir scene) in
-  check (Array.length (Scene_command.Render_ir.Private.commands_readonly ir) = 2
+  check (Array.length (Scene_command.Render_ir.commands_readonly ir) = 2
          && Scene.Private.text_regions scene = [ 1, 1, 2, 1, true, 1 ]) "scene lowering";
   (match Scene.text_input_region ~at:(0, 0) ~w:1 ~h:1 ~cursor:(-1) () with
    | _ -> failwith "negative IME cursor accepted"
@@ -171,7 +171,7 @@ let scene_parity () =
         [ Scene.text ~at:(2, 3) ~size:12 "staged text";
           Scene.view3d ~viewport:(8, 4, 16, 12) ~camera scene3 ];
       Scene.rect ~at:(1, 1) ~w:3 ~h:2 ~fill:Rays_math.Color.red () ] in
-  let commands ir = Scene_command.Render_ir.Private.commands_readonly ir in
+  let commands ir = Scene_command.Render_ir.commands_readonly ir in
   let first = Result.get_ok (Scene.Private.stage_native ~width:32 ~height:24 scene) in
   let first_ir, first_resources = first.scene2, first.resources in
   let automatic_text_id = ref None in
@@ -253,29 +253,29 @@ let resources () =
   Scene.Private.with_cache_context (Scene.Private.create_cache_context ()) (fun () ->
   let image = Image.create ~width:2 ~height:2 ~color:(Rays_math.Color.rgba 1 2 3 4) () |> Result.get_ok in
   check (Result.get_ok(Image.get_size image) = (2, 2)
-         && Result.get_ok (Image.Private.pixels image)
+         && Result.get_ok (Image.pixels image)
             = Bytes.of_string "\001\002\003\004\001\002\003\004\001\002\003\004\001\002\003\004")
     "Image snapshot";
   let rgba = Bytes.make 16 '\042' in
   let uploaded = Image.upload_rgba ~width:2 ~height:2 ~rgba () |> Result.get_ok in
-  let id = Image.Private.identity uploaded in
+  let id = Image.identity uploaded in
   check (Result.is_error (Image.upload_rgba ~into:uploaded ~width:2 ~height:2
                             ~rgba:(Bytes.make 3 '\000') ())
-         && Image.Private.identity uploaded = id
-         && Result.get_ok (Image.Private.pixels uploaded) = rgba)
+         && Image.identity uploaded = id
+         && Result.get_ok (Image.pixels uploaded) = rgba)
     "invalid RGBA upload changed an image";
   check (Image.upload_rgba ~into:uploaded ~width:2 ~height:2 ~rgba:(Bytes.make 16 '\007') ()
          = Ok uploaded
-         && Image.Private.identity uploaded = id
-         && Result.get_ok (Image.Private.pixels uploaded) = Bytes.make 16 '\007')
+         && Image.identity uploaded = id
+         && Result.get_ok (Image.pixels uploaded) = Bytes.make 16 '\007')
     "RGBA replacement did not preserve image identity";
   Result.get_ok(Image.destroy uploaded);
   let replaced = Image.create ~width:2 ~height:3 () |> Result.get_ok in
   check (Result.get_ok(Image.get_size replaced) = (2, 3)) "image dimensions";
-  let identity = Image.Private.identity replaced in
-  Result.get_ok(Image.Private.replace replaced (Image.create ~width:1 ~height:1 ~color:Rays_math.Color.red () |> Result.get_ok));
-  check (Result.get_ok(Image.get_size replaced) = (1, 1) && Image.Private.identity replaced = identity
-         && Result.get_ok (Image.Private.pixels replaced) = Bytes.of_string "\255\000\000\255")
+  let identity = Image.identity replaced in
+  Result.get_ok(Image.replace replaced (Image.create ~width:1 ~height:1 ~color:Rays_math.Color.red () |> Result.get_ok));
+  check (Result.get_ok(Image.get_size replaced) = (1, 1) && Image.identity replaced = identity
+         && Result.get_ok (Image.pixels replaced) = Bytes.of_string "\255\000\000\255")
     "stable image replacement";
   Result.get_ok(Image.destroy replaced);
   let canvas = Canvas.create_exn ~width:3 ~height:2 in
@@ -286,7 +286,7 @@ let resources () =
       (Audio.Sample.synth audio ~waveform:Sine ~frequency:440. ~duration:0.2 ()) in
   check (Result.is_ok (Audio.Sample.play audio sample)) "sample playing";
   Audio.Sample.destroy sample;
-  for _ = 1 to 100_000 do check (Image.Private.identity image > 0) "stable image identity" done;
+  for _ = 1 to 100_000 do check (Image.identity image > 0) "stable image identity" done;
   Result.get_ok(Image.destroy captured);Result.get_ok(Canvas.destroy canvas);Result.get_ok(Image.destroy image);
   Result.get_ok (Audio.shutdown audio))
 

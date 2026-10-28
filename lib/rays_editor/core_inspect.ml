@@ -201,11 +201,11 @@ let kind_fields value graph head authored =
   | Some catalog, Some context ->
       (match (match declaration with
          | Some node when node.kind.context = context -> Ok node.kind
-         | _ -> Flow.Check.resolve_kind catalog context head) with
+         | _ -> Flow.Catalog.resolve_kind catalog context head) with
        | Error _ -> None
-       | Ok (k : Flow.Check.kind) ->
+       | Ok (k : Flow.Catalog.kind) ->
            let number (e : S.t) = match e.node with S.Num t -> float_of_string_opt t | _ -> None in
-           Some (List.concat_map (fun (p : Flow.Check.parameter) ->
+           Some (List.concat_map (fun (p : Flow.Catalog.parameter) ->
              let written = authored p.name in
              let three = List.length p.fields = 3 && p.ty = Some Flow.Port_type.Vec3 in
              List.mapi (fun i (name, view, default) ->
@@ -747,7 +747,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
              |Some(Probe.Image preview)->image preview.node
              |_->None in
            Option.iter(fun image->
-             let w,h=Rays.Image.Private.dimensions image in
+             let w,h=Rays.Image.dimensions image in
              Pxui.Ui.inspector_readout ui ~width ~key:"image-size" ~label:"image"
                (Printf.sprintf "%d × %d" w h);
              let height=min 160.(width *. float h /. float w)in

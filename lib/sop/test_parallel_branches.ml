@@ -26,8 +26,8 @@ let exact ?(entries=64) ?(prepare=fun _ -> ()) graph =
   let one=session ~entries () and eight=session ~entries () in
   Fun.protect ~finally:(fun () -> Session.close one;Session.close eight) (fun () ->
     prepare one;prepare eight;
-    Session.Private.set_parallel_override one (Some true);
-    Session.Private.set_parallel_override eight (Some true);
+    Session.set_parallel_override one (Some true);
+    Session.set_parallel_override eight (Some true);
     let a=cook one 1 graph and b=cook eight 8 graph in
     check (geometry_bytes (Result.get_ok (Sop.Payload.geometry a.payload))=geometry_bytes (Result.get_ok (Sop.Payload.geometry b.payload))) "branch geometry changed";
     check (counters one=counters eight) "input-order cache counters changed";
@@ -75,7 +75,7 @@ let run () =
   ignore(exact ~prepare:(fun s -> Session.set_volatile s (fun _ -> true)) root);
 
   let cached=session () in
-  Session.Private.set_parallel_override cached (Some true);
+  Session.set_parallel_override cached (Some true);
   ignore(cook cached 8 root);
   let before=Session.Private.fanouts cached in
   ignore(cook cached 8 root);
@@ -103,7 +103,7 @@ let run () =
   let source=Lisp_sop.snapshot ((with_color 1.)) in
   let a=Lisp_sop.node ~with_:["source", (source)] {|(sop/noise_displace (sop/ext_source) :seed 1)|} and b=Lisp_sop.node ~with_:["source", (source)] {|(sop/noise_displace (sop/ext_source) :seed 2)|} in
   let refreshing=session () in
-  Session.Private.set_parallel_override refreshing (Some true);
+  Session.set_parallel_override refreshing (Some true);
   ignore(cook refreshing 8 (Lisp_sop.node ~with_:["a", (a); "b", (b)] {|(sop/merge (sop/ext_a) (sop/ext_b))|}));
   let source=Lisp_sop.snapshot ((with_color 2.)) in
   ignore(cook refreshing 8 source);
@@ -124,7 +124,7 @@ let run () =
     while Atomic.get ready<2 && Unix.gettimeofday()<deadline do Domain.cpu_relax() done;
     check (Atomic.get ready=2) "two coarse branches did not execute concurrently" in
   let parallel=session () in
-  Session.Private.set_parallel_override parallel (Some true);
+  Session.set_parallel_override parallel (Some true);
   ignore(cook parallel 8 (node ~inputs:[|node ~run:rendezvous "barrier_a" geometry;
       node ~run:rendezvous "barrier_b" geometry|] "barrier_join" geometry));
   Session.close parallel;
@@ -134,7 +134,7 @@ let run () =
     ~inputs:[||] (fun ~node_id:_ _ _ -> Error(Diagnostic.error ~code:label label)) in
   let errors=node ~inputs:[|broken "first";broken "second"|] "errors" geometry in
   let one=session () and eight=session () in
-  Session.Private.set_parallel_override eight (Some true);
+  Session.set_parallel_override eight (Some true);
   let first s domains=match Session.cook s ~context:(context domains) errors with
     | Error error -> error | Ok _ -> fail "broken branches succeeded" in
   check (first one 1=first eight 8) "first input error/trace changed";
@@ -145,7 +145,7 @@ let run () =
   let cancelled=node ~run:(fun _ -> Context.Cancel.cancel cancel) "cancel_now" geometry in
   let cancelled_graph=node ~inputs:[|cancelled;node "other" geometry|] "cancel_join" geometry in
   let cancelled_session=session () in
-  Session.Private.set_parallel_override cancelled_session (Some true);
+  Session.set_parallel_override cancelled_session (Some true);
   let cancelled_context=Context.create ~domains:8 ~cancel () |> ok in
   (match Session.cook cancelled_session ~context:cancelled_context cancelled_graph with
    | Error error -> check (error.code="cancelled") "cancellation lost its typed diagnostic"
@@ -164,7 +164,7 @@ let run () =
     check (Atomic.get entered) "first error branch was not scheduled";
     Context.Cancel.cancel cancel in
   let cancelled_session=session () in
-  Session.Private.set_parallel_override cancelled_session (Some true);
+  Session.set_parallel_override cancelled_session (Some true);
   let graph=node ~inputs:[|first;node ~run:cancel_after_first "later_cancel" geometry|]
       "first_error_join" geometry in
   (match Session.cook cancelled_session ~context:(Context.create ~domains:8 ~cancel () |> ok) graph with
@@ -179,7 +179,7 @@ let run () =
      (sop/noise_displace :seed %d :frequency 0.3))|} (seed) ((seed+1))) in
   let real=Lisp_sop.node ~with_:["in1796", (chain 1); "in1797", (chain 3)] {|(sop/merge (sop/ext_in1796) (sop/ext_in1797))|} in
   let one=session () and eight=session () in
-  Session.Private.set_parallel_override eight (Some true);
+  Session.set_parallel_override eight (Some true);
   check (geometry_bytes(Result.get_ok (Sop.Payload.geometry (cook one 1 real).payload))=geometry_bytes(Result.get_ok (Sop.Payload.geometry (cook eight 8 real).payload)))
     "allocating two-chain geometry differs at eight domains";
   check (counters one=counters eight) "two-chain cache accounting differs";
@@ -195,7 +195,7 @@ let run () =
       Ok Node.Private.{geometry=inputs.(0);instances=None}) in
   let graph=Lisp_sop.node ~with_:["in1798", (consume "packed_a"); "in1799", (consume "packed_b")] {|(sop/merge (sop/ext_in1798) (sop/ext_in1799))|} in
   let one=session () and eight=session () in
-  Session.Private.set_parallel_override eight (Some true);
+  Session.set_parallel_override eight (Some true);
   check (geometry_bytes(Result.get_ok (Sop.Payload.geometry (cook one 1 graph).payload))=geometry_bytes(Result.get_ok (Sop.Payload.geometry (cook eight 8 graph).payload)))
     "shared packed materialization changed branch bytes";
   check (counters one=counters eight) "materialization replay changed cache accounting";
@@ -217,7 +217,7 @@ let run () =
     ~body:(fun ~inputs ~context:_ element ->
       Lisp_sop.node ~with_:["in1801", (inputs.(1))] (Printf.sprintf {|(sop/noise_displace (sop/ext_in1801) :seed %d)|} (element.index))) () in
   let one=session () and eight=session () in
-  Session.Private.set_parallel_override eight (Some true);
+  Session.set_parallel_override eight (Some true);
   check (geometry_bytes(Result.get_ok (Sop.Payload.geometry (cook one 1 zone).payload))=geometry_bytes(Result.get_ok (Sop.Payload.geometry (cook eight 8 zone).payload)))
     "zone geometry differs at eight domains";
   check (counters one=counters eight) "zone cache accounting differs";

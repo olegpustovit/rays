@@ -8,8 +8,8 @@ let get = function Ok v -> v | Error e -> failwith e
 let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
   (Rdk_rays.Rays_mesh.to_trace_mesh geometry))
 let prepared geometry material = get (P.mesh [rays_mesh geometry, material])
-let pixels tracer = Bytes.copy (get (Rays.Image.Private.pixels (P.image tracer)))
-let live_handles = let _, live = Ogpu.Impl.create_driver () in live
+let pixels tracer = Bytes.copy (get (Rays.Image.pixels (P.image tracer)))
+let live_handles = Ogpu.Impl.live_handles
 
 let check_instance_residency floor =
   (* An instance structure only references its BLAS: without declaring it

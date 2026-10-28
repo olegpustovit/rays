@@ -33,7 +33,7 @@ let ()=List.iter(fun stateful->
     Flow_native.Workspace_images.bind owner lowered;owner,resources,gpu in
   let cpu1=create 1 and cpu8=create 8 and gpu1=create 1 and gpu8=create 8 in
   List.iter(fun(_,_,gpu)->Flow_native.Workspace_gpu.qualification gpu)[gpu1;gpu8];
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   let state=E.create_state()in
   let live frame={(Input.at_time(float frame))with frame}in
   let advance state frame=List.iter(fun value->ignore(E.force ~state value ~live:(live frame) |> ok))lowered.states in
@@ -45,7 +45,7 @@ let ()=List.iter(fun stateful->
     Flow_native.Workspace_images.payload owner lowered.plan ~state ~live(value override kind) |> ok in
   let image (owner,_,_) state live override kind=
     Flow_native.Workspace_images.image owner lowered.plan ~state ~live(value override kind) |> ok in
-  let bytes payload=P.Image.Private.rgba8 payload |> Option.get in
+  let bytes payload=P.Image.rgba8 payload |> Option.get in
   let inspect_packed domains state current override=
     let source=(node override "sop/copy_to_points").id in
     let context=L.source_context lowered ~node:source |> ok in
@@ -68,13 +68,13 @@ let ()=List.iter(fun stateful->
       |0->(float(pixel mod 65)+.0.5)/.65.+.sum_x/.4.
       |1->(float(pixel/65)+.0.5)/.17.+.first_x+.2.*.second_x
       |2->6.*.0.0625|_->1.)in
-    P.Image.Private.of_vec4 ~context:(P.Context.create() |> Result.get_ok) ~width:65 ~height:17 rgba
+    P.Image.of_vec4 ~context:(P.Context.create() |> Result.get_ok) ~width:65 ~height:17 rgba
       |> Result.get_ok |> bytes in
   let fixed owner=
     let owner,_,_=owner in
     Flow_native.Workspace_images.image owner lowered.plan ~state ~live:(live 0)
       (List.assoc "fixed" lowered.evaluated.results) |> ok in
-  let generation image=Native.generation(Rays.Image.Private.resource image)in
+  let generation image=Native.generation(Rays.Image.resource image)in
   let retained=ref []in
   Fun.protect ~finally:(fun()->List.iter(fun(owner,resources,gpu)->
     Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)[cpu1;cpu8;gpu1;gpu8])
@@ -93,30 +93,30 @@ let ()=List.iter(fun stateful->
           if !retained=[] then retained:=[one,Bytes.copy(bytes one)];
           List.iteri(fun index ((owner,_,gpu)as owned)->
             let child=image owned state current override "image/map"in
-            let native=Rays.Image.Private.resource child in
-            assert(Native.Private.cpu_storage_bytes native=0);
-            let actual=Rays.Image.Private.pixels child |> Result.get_ok in
+            let native=Rays.Image.resource child in
+            assert(Native.cpu_storage_bytes native=0);
+            let actual=Rays.Image.pixels child |> Result.get_ok in
             let maximum=ref 0 in
             Bytes.iteri(fun i c->maximum:=max !maximum(abs(Char.code c-Char.code(Bytes.get expected i))))actual;
             assert(!maximum<=1);
             let parent=image owned state current override "image/render"in
-            let rendered=Rays.Image.Private.pixels parent |> Result.get_ok in
+            let rendered=Rays.Image.pixels parent |> Result.get_ok in
             Bytes.iteri(fun i c->assert(abs(Char.code c-Char.code(Bytes.get expected i))<=1))rendered;
             let stats=Flow_native.Workspace_images.capture_stats owner in
             let host,_,_,_,_=Flow_native.Workspace_gpu.image_stats gpu in
             let reads=host.status_reads in
-            let parent_native=Rays.Image.Private.resource parent in
-            let child_reads=Native.Private.readbacks native
-            and parent_reads=Native.Private.readbacks parent_native in
+            let parent_native=Rays.Image.resource parent in
+            let child_reads=Native.readbacks native
+            and parent_reads=Native.readbacks parent_native in
             assert(image owned state current override "image/map"==child
               && image owned state current override "image/render"==parent
               && Flow_native.Workspace_images.capture_stats owner=stats
-              && Native.Private.readbacks native=child_reads
-              && Native.Private.readbacks parent_native=parent_reads);
+              && Native.readbacks native=child_reads
+              && Native.readbacks parent_native=parent_reads);
             let host,_,_,_,_=Flow_native.Workspace_gpu.image_stats gpu in
             assert(host.status_reads=reads && host.readback_bytes=0);
             let cpu=payload owned state current override "image/map"in
-            assert(bytes cpu=expected && Native.Private.cpu_storage_bytes native=0);
+            assert(bytes cpu=expected && Native.cpu_storage_bytes native=0);
             if frame=0 then begin
               let frozen=payload owned state current override "exact"in
               assert(bytes frozen=actual);
@@ -177,15 +177,15 @@ let ()=List.iter(fun domains->
     (value "image/render")in
   let payload state frame=Flow_native.Workspace_images.payload owner lowered.plan ~state ~live:(live frame)
     (value "image/map")in
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   let retained=ref None in
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     advance state 0;
     let saved=payload state 0 |> ok in
-    let bytes=P.Image.Private.rgba8 saved |> Option.get |> Bytes.copy in
+    let bytes=P.Image.rgba8 saved |> Option.get |> Bytes.copy in
     retained:=Some(saved,bytes);
     let first=image state 0 |> ok in
-    let original=Rays.Image.Private.pixels first |> Result.get_ok in
+    let original=Rays.Image.pixels first |> Result.get_ok in
     assert(original=bytes && resources.images_created=2);
     advance state 1;
     let stamp=E.state_stamp state in
@@ -194,19 +194,19 @@ let ()=List.iter(fun domains->
        |Error d->if d.Diagnostic.code<>"E_ARRAY_RANGE"then failwith(Diagnostic.to_string d)
        |Ok _->failwith "Invalid source cardinality unexpectedly rendered");
       assert(E.state_stamp state=stamp && resources.images_created=2
-        && P.Image.Private.rgba8 saved=Some bytes);
-      assert(Result.is_error(Rays.Image.Private.pixels first))
+        && P.Image.rgba8 saved=Some bytes);
+      assert(Result.is_error(Rays.Image.pixels first))
     done;
     let fresh=E.create_state()in
     advance fresh 1;
     let fresh_stamp=E.state_stamp fresh in
     let recovered=image fresh 1 |> ok in
-    assert(recovered==first && Rays.Image.Private.pixels recovered=Ok original
+    assert(recovered==first && Rays.Image.pixels recovered=Ok original
       && E.state_stamp fresh=fresh_stamp && E.state_stamp state=stamp
       && resources.images_created=2);
-    assert(payload fresh 1 |> ok |> P.Image.Private.rgba8 = Some bytes));
+    assert(payload fresh 1 |> ok |> P.Image.rgba8 = Some bytes));
   let saved,bytes=Option.get !retained in
-  assert(P.Image.Private.rgba8 saved=Some bytes && handles()=before
+  assert(P.Image.rgba8 saved=Some bytes && handles()=before
     && resources.images_created=resources.images_destroyed);
   Printf.printf "State capture failure domains=%d: repeated typed array refusal, caller rollback, stale parent invalidation, same-frame fork recovery and retained bytes pass\n"domains)
   [1;8]
@@ -227,7 +227,7 @@ let ()=
   let owner=Flow_native.Workspace_images.create ~domains:1 ~gpu resources in
   Flow_native.Workspace_gpu.qualification gpu;
   let state=E.create_state()in let original_stamp=E.state_stamp state in
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   let plan=ref(lower 65 17)in
   let bind lowered=plan:=lowered;Flow_native.Workspace_images.bind owner lowered in
   bind !plan;
@@ -237,7 +237,7 @@ let ()=
     ~live:(Input.at_time time)(value kind)in
   let image kind time=Flow_native.Workspace_images.image owner (!plan).plan ~state
     ~live:(Input.at_time time)(value kind)in
-  let bytes payload=Sop.Image.Private.rgba8 payload |> Option.get in
+  let bytes payload=Sop.Image.rgba8 payload |> Option.get in
   let held=ref None in
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     let ordinary=payload "image/map" 0. |> ok in
@@ -246,12 +246,12 @@ let ()=
     held:=Some first;
     let saved_bytes=Bytes.copy(bytes first)in
     let frozen=image "exact" 0. |> ok and child=image "image/map" 0. |> ok in
-    let native=Image.Private.resource child in
-    assert(Char.code(Bytes.get saved_bytes 2)=128 && Image.Private.identity frozen<>Image.Private.identity child
-      && Native.Private.readbacks native=1 && resources.images_created=2);
+    let native=Image.resource child in
+    assert(Char.code(Bytes.get saved_bytes 2)=128 && Image.identity frozen<>Image.identity child
+      && Native.readbacks native=1 && resources.images_created=2);
     assert(payload "exact" 0. |> ok == first);
     assert(payload "image/map" 0. |> ok == ordinary);
-    assert(Native.Private.readbacks native=1);
+    assert(Native.readbacks native=1);
     let drawing=Flow_native.Drawing.prepare (!plan).plan
       (List.assoc "composed" (!plan).evaluated.results) |> ok in
     let scene=Flow_native.Drawing.render_prepared ~state
@@ -262,31 +262,31 @@ let ()=
       Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy canvas))(fun()->
         render canvas scene;
         let image=Rays.Canvas.to_image canvas |> Result.get_ok in
-        Fun.protect ~finally:(fun()->ignore(Image.destroy image))(fun()->Image.Private.pixels image |> Result.get_ok))in
+        Fun.protect ~finally:(fun()->ignore(Image.destroy image))(fun()->Image.pixels image |> Result.get_ok))in
     let saved_scene=render_saved()in
     assert(saved_scene=saved_bytes);
     let second=payload "exact" 1. |> ok in
     assert(second!=first && bytes second<>saved_bytes && bytes first=saved_bytes);
-    assert(Image.Private.identity(image "exact" 1. |> ok)<>Image.Private.identity frozen
-      && Native.Private.readbacks native=2 && render_saved()=saved_scene);
+    assert(Image.identity(image "exact" 1. |> ok)<>Image.identity frozen
+      && Native.readbacks native=2 && render_saved()=saved_scene);
     (* Expire a borrowed source without changing its published generation.
        Even a frozen-key hit must validate it before returning the payload. *)
-    let texture=match Native.Private.gpu_snapshot native |> Result.get_ok with
+    let texture=match Native.gpu_snapshot native |> Result.get_ok with
       |Some(_,_,_,texture)->texture|None->assert false in
     let available=ref true in
-    Native.Private.replace_gpu_source native ~width:65 ~height:17
+    Native.replace_gpu_source native ~width:65 ~height:17
       ~source:(fun()->if !available then Some texture else None) |> Result.get_ok;
     let third=payload "exact" 1. |> ok in
-    let reads=Native.Private.readbacks native and created=resources.images_created
+    let reads=Native.readbacks native and created=resources.images_created
     and generation=Native.generation native in
     available:=false;
     for _=1 to 2 do
       assert(match payload "exact" 1. with Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false)
     done;
-    assert(Native.Private.readbacks native=reads && resources.images_created=created
+    assert(Native.readbacks native=reads && resources.images_created=created
       && Native.generation native=generation && E.state_stamp state=original_stamp);
     available:=true;
-    assert(payload "exact" 1. |> ok == third && Native.Private.readbacks native=reads);
+    assert(payload "exact" 1. |> ok == third && Native.readbacks native=reads);
     assert(Result.is_error(payload "exact" Float.infinity));
     assert(E.state_stamp state=original_stamp && bytes first=saved_bytes);
     let recovered=payload "exact" 2. |> ok in
@@ -316,7 +316,7 @@ let ()=List.iter(fun(width,height,expected_reads)->
   let n=Array.find_opt(fun(n:E.node)->n.kind="exact")lowered.plan.nodes |> Option.get in
   let child=Array.find_opt(fun(n:E.node)->n.kind="image/map")lowered.plan.nodes |> Option.get in
   let state=E.create_state()in
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   let held=ref [||]in
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     let resolve frame=Flow_native.Workspace_images.payload owner lowered.plan ~state
@@ -324,14 +324,14 @@ let ()=List.iter(fun(width,height,expected_reads)->
     held:=Array.init 63(fun frame->resolve frame |> ok);
     let source=Flow_native.Workspace_images.image owner lowered.plan ~state
       ~live:{(Input.at_time 62.)with frame=62}(E.Deferred(Flow.Ty.image,child.id)) |> ok in
-    let native=Rays.Image.Private.resource source in
-    assert(resources.images_created=64 && Runtime_resources.Image.Private.readbacks native=expected_reads);
+    let native=Rays.Image.resource source in
+    assert(resources.images_created=64 && Runtime_resources.Image.readbacks native=expected_reads);
     for _=1 to 2 do
       assert(match resolve 63 with Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false)
     done;
-    assert(resources.images_created=64 && Runtime_resources.Image.Private.readbacks native=expected_reads);
+    assert(resources.images_created=64 && Runtime_resources.Image.readbacks native=expected_reads);
     Array.iteri(fun frame payload->
-      let bytes=Sop.Image.Private.rgba8 payload |> Option.get in
+      let bytes=Sop.Image.rgba8 payload |> Option.get in
       assert(Char.code(Bytes.get bytes 0)=int_of_float(Float.round(float frame*.0.0078125*.255.)))) !held);
   assert(resources.images_created=resources.images_destroyed && handles()=before);
   assert(Array.length !held=63 && Sop.Image.width (!held).(0)=width);
@@ -360,14 +360,14 @@ let ()=if Array.mem "--capture-budget" Sys.argv then begin
   let resources=Flow_native.Workspace_resources.create()and gpu=Flow_native.Workspace_gpu.create()in
   let owner=Flow_native.Workspace_images.create ~domains:1 ~gpu resources in
   Flow_native.Workspace_gpu.qualification gpu;
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     let run lowered time=
       Flow_native.Workspace_images.bind owner lowered;
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")lowered.Flow_sop.Lower.plan.nodes |> Option.get in
       let image=Flow_native.Workspace_images.image owner ~state:(E.create_state()) ~live:(Input.at_time time)
         lowered.plan(E.Deferred(Flow.Ty.image,node.id)) |> ok in
-      let bytes=Rays.Image.Private.pixels image |> Result.get_ok in
+      let bytes=Rays.Image.pixels image |> Result.get_ok in
       assert(Char.code(Bytes.get bytes 0)=int_of_float(Float.round((0.5/.65.+.0.03125+.time*.0.015625)*.255.)))in
     let large_lowered=lower large in run large_lowered 0.;run large_lowered 1.;
     assert(Flow_native.Workspace_images.capture_stats owner=(1,0,0,2,2));
@@ -408,7 +408,7 @@ let ()=
     let host,_,_,_,_=Flow_native.Workspace_gpu.image_stats gpu in assert(host.status_reads=2);
     let exact=Flow_native.Workspace_images.payload owner lowered.plan ~state ~live:(Input.at_time 1.)
       (E.Deferred(Flow.Ty.image,(Array.find_opt(fun(n:E.node)->n.site=["mesh";"last"] && n.kind="image/map")lowered.plan.nodes |> Option.get).id)) |> ok in
-    let bytes=P.Image.Private.rgba8 exact |> Option.get in assert(Char.code(Bytes.get bytes 0)=38));
+    let bytes=P.Image.rgba8 exact |> Option.get in assert(Char.code(Bytes.get bytes 0)=38));
   assert(Flow_native.Workspace_images.capture_stats owner=(0,0,0,65,65));
   print_endline "Capture capacity: one image with 65 sources keeps bounded owned data, static reuse survives metadata eviction, exact cooks leave display counters unchanged"
 let ()=
@@ -434,7 +434,7 @@ let ()=
   let cyclic=N.with_frame_nodes frames graph.network in
   let state=E.create_state()in
   let stamp=E.state_stamp state in
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let before=handles()in
   let run domains fail=
     let resources=Flow_native.Workspace_resources.create()and gpu=Flow_native.Workspace_gpu.create()in
@@ -449,21 +449,21 @@ let ()=
       done;
       let result=resolve graph.network |> ok in
       assert(E.state_stamp state=stamp && resources.images_created=0);
-      let saved=P.Image.Private.rgba8 result |> Option.get |> Bytes.copy in
+      let saved=P.Image.rgba8 result |> Option.get |> Bytes.copy in
       let replanned=lower 0.03125 in
       Flow_native.Workspace_images.bind owner replanned;
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")replanned.plan.nodes |> Option.get in
       let rebuilt=Flow_native.Workspace_images.payload owner replanned.plan ~state ~live:(Input.at_time 0.)
         (E.Deferred(Flow.Ty.image,node.id)) |> ok in
-      let changed=P.Image.Private.rgba8 rebuilt |> Option.get |> Bytes.copy in
-      assert(changed<>saved && P.Image.Private.rgba8 result=Some saved
+      let changed=P.Image.rgba8 rebuilt |> Option.get |> Bytes.copy in
+      assert(changed<>saved && P.Image.rgba8 result=Some saved
         && E.state_stamp state=stamp && resources.images_created=0);
       saved,changed)in
   let expected=run 1 false in
   assert(run 1 true=expected && run 8 false=expected && run 8 true=expected && handles()=before);
   print_endline "Workspace capture cycles: typed repeated resolver re-entry, unchanged caller state, same-owner acyclic and changed-plan recovery, CPU domains and clean close pass"
 let ()=
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let before=handles()in
   let owner=Flow_native.Workspace_gpu.create()in
   let rejects_worker()=Domain.join(Domain.spawn(fun()->
@@ -473,7 +473,7 @@ let ()=
     Flow_native.Workspace_gpu.qualification owner;
     let forms=Flow.Syntax.parse "(workspace test (graph image :context image
       (image/map (fn [uv] [uv.x uv.y 0.5 1]))))" |> ok in
-    let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]} forms with
+    let checked=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]} forms with
       |Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
     let lowered=Flow_sop.Lower.of_checked ~factories:[] checked |> ok in
     let node=lowered.plan.nodes.(0)in

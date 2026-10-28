@@ -12,7 +12,7 @@ let numeric=function
   |_->failwith "Numeric scatter data expected"
 let root body=
   let text="(workspace scatter (graph g :context host (if (> t -1000.) "^body^" "^body^")))" in
-  let ws=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+  let ws=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
     |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
   let value=List.assoc "g"(ok(E.static ws)).results in
   let r=match value with E.Residual r->r|_->failwith "Live scatter expected"in
@@ -25,13 +25,13 @@ let ()=
     (quote(path "runtime.js"))(quote(path "workers.js"))(quote(path "prims.js"));
   let live={(Input.at_time 0.25)with frame=3} in
   List.iter(fun body->let value,program=root body in
-    let result=E.Private.force_reference value ~live in
+    let result=E.Host.force_reference value ~live in
     let prepared=Array.map(fun region->let packed=region in
-      packed,(if P.Private.argument_types packed=[||] then Some(ok(P.Private.prepare_values packed ~live)) else None))program.regions in
+      packed,(if P.Host.argument_types packed=[||] then Some(ok(P.Host.prepare_values packed ~live)) else None))program.regions in
     let frame=ok(Flow_web.Js.frame program)in
     Printf.bprintf js "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));const arrays=[%s];\n"
       (quote frame)(String.concat ","(Array.to_list(Array.map(fun(_,v)->
-        match v with None->"[]" |Some v->"["^String.concat ","(Array.to_list(Array.map numeric v.P.Private.arrays))^"]")prepared)));
+        match v with None->"[]" |Some v->"["^String.concat ","(Array.to_list(Array.map numeric v.P.Host.arrays))^"]")prepared)));
     (* The runtime's actual worker transport uses private copies of inputs. *)
     Buffer.add_string js "const data=new ArrayBuffer(arrays.flat().reduce((n,a)=>n+a.byteLength,0));let offset=0;const store=a=>{const spec=[offset,a.length,a instanceof BigInt64Array];new a.constructor(data,offset,a.length).set(a);offset+=a.byteLength;return spec};const inputs=arrays.map(xs=>xs.map(store));const inputBytes=bytes(new Uint8Array(data)).toString('hex');\n";
     let entries=Array.to_list(Array.mapi(fun i(p,v)->match v with
@@ -50,7 +50,7 @@ let ()=
         |E.Vec3(x,y,z)->"["^number x^","^number y^","^number z^"]"
         |E.Vec4(x,y,z,w)->"["^number x^","^number y^","^number z^","^number w^"]"
         |E.Int_array a->"["^String.concat ","(Array.to_list(Array.map(fun i->quote(string_of_int i))a))^"]"
-        |v->"Array.from("^numeric v^")")v.P.Private.uniforms)in
+        |v->"Array.from("^numeric v^")")v.P.Host.uniforms)in
       Printf.sprintf "{source:%s,count:%d,kept:%d,inputs:inputs[%d],uniforms:[%s],frame:[%s],length:%d,width:%d,integer:%b,skip:[]}"
         (quote(Flow_web.Js.region p))v.count v.count i(String.concat ","uniforms)(String.concat ","facts)
         (Array.length r.code)(Array.length r.outputs.(0))(r.term.ty=Flow.Ty.Array Flow.Ty.Int))prepared)in

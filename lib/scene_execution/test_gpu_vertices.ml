@@ -4,7 +4,7 @@ let expect kind=function
   |Error error->failwith(Ogpu.Error.to_string error)
   |Ok _->failwith"GPU vertex guard accepted invalid resource"
 let ()=
-  let base,live=Ogpu.Impl.create_driver()in
+  let base = Ogpu.Impl.create_driver () in let live = Ogpu.Impl.live_handles in
   (* Record native command bindings and ownership, without rasterizing. *)
   let pipelines=ref 0 and next=ref 1_000_000L in
   let indices_seen=ref[]and vertex_bindings=ref[]and producer=ref 0L and mesh_uploads=ref 0 in

@@ -255,7 +255,7 @@ val hash : float list -> float
 val show : value -> string
 (** [str] formatting; a residual shows as [?]. *)
 
-module Private : sig
+module Host : sig
   val static_with_requests :
     ?budget:int ->
     ?record:bool -> ?inputs:(string * (string * value) list) list ->

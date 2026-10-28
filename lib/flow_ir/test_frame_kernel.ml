@@ -2,7 +2,7 @@ module E = Flow.Eval
 module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked text =
-  match Flow.Workspace.check {Flow.Check.version = 1; kinds = []} (ok (Flow.Syntax.parse text)) with
+  match Flow.Workspace.check {Flow.Catalog.version = 1; kinds = []} (ok (Flow.Syntax.parse text)) with
   | Some w, [] -> w | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let read path = In_channel.with_open_text path In_channel.input_all
 let bytes v = Marshal.to_string v [Marshal.No_sharing]
@@ -16,10 +16,10 @@ let compare_frames value frames =
   let one = E.create_state () and eight = E.create_state () and reference = E.create_state () in
   List.iter (fun (frame, dt) ->
     let live = live frame dt in
-    let expected = E.Private.force_reference ~state:reference value ~live in
+    let expected = E.Host.force_reference ~state:reference value ~live in
     List.iter (fun (domains, state) -> Parallel.run ~domains (fun () ->
       assert (same (I.Executor.force ~state program ~live) expected);
-      assert (bytes (E.Private.state_values state) = bytes (E.Private.state_values reference)))) [1, one; 8, eight]) frames
+      assert (bytes (E.Host.state_values state) = bytes (E.Host.state_values reference)))) [1, one; 8, eight]) frames
 
 let compare_prepared value frames =
   let r=match value with E.Residual r -> r | _ -> failwith "Expected a frame residual." in
@@ -29,7 +29,7 @@ let compare_prepared value frames =
   let state=E.create_state () and reference=E.create_state () in
   List.iter (fun (frame,dt) ->
     let live=live frame dt in
-    let expected=E.Private.force_reference ~state:reference value ~live in
+    let expected=E.Host.force_reference ~state:reference value ~live in
     let actual=Result.bind (E.Residual.bind_live ~state r ~live)
       (fun () -> I.Core_exec.execute ~root:r prepared ~live) in
     assert (same actual expected)) frames
@@ -42,7 +42,7 @@ let () =
           | List (_ :: {node = Sym "picture"; _} :: _) -> true | _ -> false) graphs in
         [{workspace with node = List [head; name; picture]}]
     | _ -> assert false in
-  let workspace = match Flow.Workspace.check {Flow.Check.version = 1; kinds = []} source with
+  let workspace = match Flow.Workspace.check {Flow.Catalog.version = 1; kinds = []} source with
     | Some w, [] -> w | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let evaluation = ok (E.static workspace) in
   let particles = List.hd evaluation.states in

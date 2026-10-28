@@ -123,45 +123,40 @@ let[@inline] fbm3_with_scratch scratch noise ~octaves ~lacunarity ~gain
     if scratch.(3) = 0. then 0. else scratch.(2) /. scratch.(3)
   else Float.nan
 
-module Private = struct
-  let permutation noise = Array.copy noise
-  type nonrec fbm3_scratch = fbm3_scratch
-  let create_fbm3_scratch = create_fbm3_scratch
-  let fbm3_with_scratch = fbm3_with_scratch
+let permutation noise = Array.copy noise
 
-  let sample2_into noise ~first ~last ~frequency ~x ~y ~output =
-    if first < 0 || last < first || last > Array.length x
-       || last > Array.length y || last > Array.length output
-    then invalid_arg "Noise.Private.sample2_into: invalid packed range";
-    for index = first to last - 1 do
-      output.(index) <- clamp01
-          ((raw2 noise ~x:(x.(index) *. frequency)
-              ~y:(y.(index) *. frequency) +. 1.) *. 0.5)
-    done
+let sample2_into noise ~first ~last ~frequency ~x ~y ~output =
+  if first < 0 || last < first || last > Array.length x
+     || last > Array.length y || last > Array.length output
+  then invalid_arg "Noise.sample2_into: invalid packed range";
+  for index = first to last - 1 do
+    output.(index) <- clamp01
+        ((raw2 noise ~x:(x.(index) *. frequency)
+            ~y:(y.(index) *. frequency) +. 1.) *. 0.5)
+  done
 
-  let sample3_into noise ~first ~last ?(x_offset = 0) ?(y_offset = 0)
-      ?(z_offset = 0) ?(output_offset = 0) ?(x_stride = 1) ?(y_stride = 1)
-      ?(z_stride = 1) ?(frequency = 1.) ~x ~y ~z ~output () =
-    let valid array offset stride = offset >= 0 && stride > 0
-      && offset <= Array.length array
-      && (last=0 || (offset<Array.length array
-        && last-1 <= (Array.length array-1-offset)/stride)) in
-    let disjoint input offset stride = input != output
-      || (stride=1 && offset=output_offset)
-      || first=last || offset+(last-1)*stride < output_offset+first
-      || output_offset+last <= offset+first*stride in
-    if first < 0 || last < first || not (valid x x_offset x_stride && valid y y_offset y_stride
-      && valid z z_offset z_stride && valid output output_offset 1)
-      || not (disjoint x x_offset x_stride && disjoint y y_offset y_stride && disjoint z z_offset z_stride)
-    then invalid_arg "Noise.Private.sample3_into: invalid or overlapping spans";
-    for index = first to last - 1 do
-      let sx = x.(x_offset + index*x_stride) *. frequency and sy = y.(y_offset + index*y_stride) *. frequency
-      and sz = z.(z_offset + index*z_stride) *. frequency in
-      (* floor subtraction and fade/lerp propagate nonfinite coordinates to
-         NaN. int_of_float's unspecified integer is masked before indexing;
-         the caller checks the sample, so coordinate scans are redundant. *)
-      output.(output_offset + index) <-
-        clamp01 (((if sz=0. then raw2 noise ~x:sx ~y:sy
-          else raw3 noise ~x:sx ~y:sy ~z:sz) +. 1.) /. 2.)
-    done
-end
+let sample3_into noise ~first ~last ?(x_offset = 0) ?(y_offset = 0)
+    ?(z_offset = 0) ?(output_offset = 0) ?(x_stride = 1) ?(y_stride = 1)
+    ?(z_stride = 1) ?(frequency = 1.) ~x ~y ~z ~output () =
+  let valid array offset stride = offset >= 0 && stride > 0
+    && offset <= Array.length array
+    && (last=0 || (offset<Array.length array
+      && last-1 <= (Array.length array-1-offset)/stride)) in
+  let disjoint input offset stride = input != output
+    || (stride=1 && offset=output_offset)
+    || first=last || offset+(last-1)*stride < output_offset+first
+    || output_offset+last <= offset+first*stride in
+  if first < 0 || last < first || not (valid x x_offset x_stride && valid y y_offset y_stride
+    && valid z z_offset z_stride && valid output output_offset 1)
+    || not (disjoint x x_offset x_stride && disjoint y y_offset y_stride && disjoint z z_offset z_stride)
+  then invalid_arg "Noise.sample3_into: invalid or overlapping spans";
+  for index = first to last - 1 do
+    let sx = x.(x_offset + index*x_stride) *. frequency and sy = y.(y_offset + index*y_stride) *. frequency
+    and sz = z.(z_offset + index*z_stride) *. frequency in
+    (* floor subtraction and fade/lerp propagate nonfinite coordinates to
+       NaN. int_of_float's unspecified integer is masked before indexing;
+       the caller checks the sample, so coordinate scans are redundant. *)
+    output.(output_offset + index) <-
+      clamp01 (((if sz=0. then raw2 noise ~x:sx ~y:sy
+        else raw3 noise ~x:sx ~y:sy ~z:sz) +. 1.) /. 2.)
+  done

@@ -1,6 +1,6 @@
 open Flow
 
-let catalog = match Check.catalog_of_manifest (In_channel.with_open_bin "../flow_sop/flow_manifest.sexp" In_channel.input_all) with
+let catalog = match Catalog.catalog_of_manifest (In_channel.with_open_bin "../flow_sop/flow_manifest.sexp" In_channel.input_all) with
   | Ok (c,_) -> c | Error d -> failwith (Diagnostic.to_string d)
 let parse text = Result.get_ok (Syntax.parse text)
 let source node call = "(workspace w "^node^" (graph g :context sop "^call^"))"
@@ -59,7 +59,7 @@ let () =
   let grouped=good (source "(defnode sop/test_node [(geo : geometry)
     (scale_x : float 1 :vec3 [\"scale\" 0]) (scale_y : float 2 :vec3 [\"scale\" 1])
     (scale_z : float 3 :vec3 [\"scale\" 2])] geo)" "(sop/test_node nil :scale [4 5 6])") in
-  assert (List.map (fun (p:Check.parameter) -> p.name) (List.hd grouped.nodes).kind.parameters=["scale"]);
+  assert (List.map (fun (p:Catalog.parameter) -> p.name) (List.hd grouped.nodes).kind.parameters=["scale"]);
   ignore (good (source "(defnode sop/typed_slots [(geo : geometry) (image : image) (field : (fn [vec3] float))] geo)"
     "(sop/typed_slots nil (image/noise :width 1 :height 1) (fn [(p : vec3)] p.x))"));
   let keyword_slots=good (source "(defnode sop/keyword_slots [(geo : geometry)
@@ -68,7 +68,7 @@ let () =
   let keyword_slots=List.hd keyword_slots.nodes in
   assert (List.length keyword_slots.slots=3 && List.length keyword_slots.kind.slots=1);
   assert (keyword_slots.keyword_inputs=["image";"field"]);
-  assert (List.for_all (fun (p:Check.parameter)->p.fields=[] && p.primary) keyword_slots.kind.parameters);
+  assert (List.for_all (fun (p:Catalog.parameter)->p.fields=[] && p.primary) keyword_slots.kind.parameters);
   let typed_map=good (source "(defnode sop/typed_map [(geo : geometry) (field : (fn [vec3] vec3))]
     (let* [mapped (map field (array/vec3 1))] geo))" "nil") in
   (match (List.hd typed_map.nodes).body.body.node with

@@ -27,7 +27,7 @@ let run () =
   (match transformed.layers, transformed.retained with
    | [Scene.Private.Scene2_layer (ir, [])], Some (identity, 1L)
        when String.starts_with ~prefix:"scene-stage:" identity ->
-       (match Array.to_list (Scene_command.Render_ir.Private.commands_readonly ir) with
+       (match Array.to_list (Scene_command.Render_ir.commands_readonly ir) with
         | [Scene_command.Render_ir.Push_transform _;
            Scene_command.Render_ir.Geometry geometry;
            Scene_command.Render_ir.Pop_transform] when geometry = rectangle -> ()
@@ -84,7 +84,7 @@ let run () =
      | [Scene.Private.Scene2_segment (retained,
          [7, Renderer.Image resource])]
          when retained == image_segment
-           && resource == Image.Private.resource image -> ()
+           && resource == Image.resource image -> ()
      | _ -> failwith "display-list image binding lost managed identity");
     let peer = Image.create ~width:1 ~height:1 ~color:Rays_math.Color.white () |> Result.get_ok in
     Fun.protect ~finally:(fun () -> ignore(Image.destroy peer)) (fun () ->
@@ -93,7 +93,7 @@ let run () =
       if first.retained = rebound.retained then
         failwith "equal-generation image identities collided in retained replay");
     let replacement = Image.create ~width:1 ~height:1 ~color:Rays_math.Color.black () |> Result.get_ok in
-    Result.get_ok(Image.Private.replace image replacement);
+    Result.get_ok(Image.replace image replacement);
     let second = Result.get_ok
         (Scene.Private.stage_native ~width:32 ~height:32 [image_node]) in
     if first.retained = second.retained then

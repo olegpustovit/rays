@@ -809,7 +809,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP8** (P3, high, god-module, effort L). Location at baseline: flow_sop/lower.ml:166-1468 lower_checked. One ~1,300-line function with 6 optional flags and ~50 hard-coded kind strings. Action: Per-kind lowerings dispatched from the Operators table. Evidence: lower_checked is split under 300 lines, and Operators.lowering tags the natively lowered kinds; lower.ml's natives table is keyed by that tag, with the kind strings in operators.ml beside their builders.
 
-- [ ] **SP9** (P3, med, parallel-system, effort M). Location at baseline: Edit_graph.factory · Flow_sop.Catalog.descriptor · Flow.Defnode.t · Flow.Check.kind. Four shapes of node metadata. Each node has three names (qualified, key, operation), and 7 nodes have key ≠ operation. Action: One descriptor with `operation = key`; rename the 7.
+- [ ] **SP9** (P3, med, parallel-system, effort M). Location at baseline: Edit_graph.factory · Flow_sop.Catalog.descriptor · Flow.Defnode.t · Flow.Catalog.kind. Four shapes of node metadata. Each node has three names (qualified, key, operation), and 7 nodes have key ≠ operation. Action: One descriptor with `operation = key`; rename the 7.
 
 - [ ] **SP10** (P1, med, vibe-code, effort S). Location at baseline: ppx_rays.ml:612,618,623 · support.ml:65-72 (+4 re-imports). The PPX hard-codes `Sop.Parameter`/`Sop.Edit_graph`, which forces a fake `module Sop = struct … end` shim. Action: Have the PPX emit `Param.*` and drop the shim.
 
@@ -841,7 +841,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP24** (P1, low, dead-code, effort S). Location at baseline: Edit_graph.of_graph/compile/factory_arity · Async_cook.await · Session.Private.clear_cache_keep_timings · ppx sop.name/sop.ignore/sop.node_keywords. Test-only or unused. Action: prune-dead-code after SP1. Evidence: prune-dead-code ran after SP1 (a4c1eb7e).
 
-- [x] **SP25** (P0, low, dead-code, effort S). Location at baseline: Flow.Check.kind.aliases (check.ml:316-319, workspace.ml:2034). All 177 manifest entries are `(aliases)` with an empty list. Action: Delete it until a rename needs it.
+- [x] **SP25** (P0, low, dead-code, effort S). Location at baseline: Flow.Catalog.kind.aliases (check.ml:316-319, workspace.ml:2034). All 177 manifest entries are `(aliases)` with an empty list. Action: Delete it until a rename needs it.
 
 - [ ] **SP26** (P1, low, api-bloat, effort M). Location at baseline: `~factories` threaded through 107 product signatures. It is always `Sop_catalog.Editor.factories` except in tests. Action: Make it an optional argument defaulting to the catalog, or a module-level constant after SP11.
 

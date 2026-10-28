@@ -22,7 +22,7 @@ let close expected actual=List.for_all2(fun a b->abs(a-b)<=1)expected actual
 
 let run () =
   let open Ogpu in
-  let driver,live_handles=Impl.create_driver()in
+  let driver = Impl.create_driver () in let live_handles = Impl.live_handles in
   let before=live_handles()in
   let device=get(Backend.create_device driver)in
   let vertex=shader[{name="sample_vertex";stage=Shader.Vertex}][]

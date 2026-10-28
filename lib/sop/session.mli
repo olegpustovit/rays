@@ -59,10 +59,11 @@ val stats : t -> stats
 val clear : t -> unit
 val close : t -> unit
 
+val set_parallel_override : t -> bool option -> unit
+(** Force or disable the coarse branch gate for exactness checks. [None]
+    restores measured placement. One-domain contexts remain sequential. *)
+
 module Private : sig
-  val set_parallel_override : t -> bool option -> unit
-  (** Force or disable the coarse branch gate for exactness checks. [None]
-      restores measured placement. One-domain contexts remain sequential. *)
   val fanouts : t -> int
   val cache_keys : t -> string list
   val clear_cache_keep_timings : t -> unit

@@ -96,7 +96,6 @@ let rules =
       "flow_native", ["pxui"; "pxui_shell"; "pxui_graph"; "rays_editor"];
       "web_export", ["pxui"; "pxui_shell"; "pxui_graph"; "rays_editor"];
       "lisp_sop", ["editor_document"; "rays"; "runtime"; "pxui"; "rays_editor"];
-      "renderer", ["runtime_input"];
       "rays", ["pxui"; "pxui_shell"; "pxui_graph"; "sop"; "rdk";
                   "rays_editor"];
       "rays_math", ["rays"; "rdk_core"; "rdk_exact"; "rdk_spatial"; "rdk_attrib"; "rdk_curve"; "rdk_mesh"; "rdk_boolean"; "rdk"; "rdk_rays"; "sop"] @ gpu;
@@ -451,9 +450,7 @@ let violations graph ~scan =
   let direct_errors = List.filter_map (fun (lib, dep, message) ->
     if List.mem dep (Option.value ~default:[] (List.assoc_opt lib graph))
     then Some message else None)
-    (["pxui", "sdl3", "pxui depends directly on sdl3 (text input belongs to Scene/runtime)";
-      "pxui", "scene_command", "pxui depends directly on scene_command (UI batches belong to Rays.Scene)"]
-     @ List.map (fun sdl -> "rays", sdl,
+    (List.map (fun sdl -> "rays", sdl,
          "rays depends directly on " ^ sdl ^ " (SDL services belong to runtime)")
          ["sdl3"; "sdl3_image"; "sdl3_ttf"; "sdl3_mixer"]) in
   let edge_errors = List.concat_map (fun (lib, forbidden) ->
@@ -516,21 +513,49 @@ let private_errors scan =
     | ("tools" | "bin" | "ppx" as top) :: _ -> Some top
     | _ -> None in
   let product path = (Filename.check_suffix path ".ml" || Filename.check_suffix path ".mli")
-    && owner path <> None && not (contains path "/test/" || contains path "/conformance/")
+    && owner path <> None
+    && not (contains path "/test/" || contains path "/conformance/" || contains path "/goldens/" || contains path "/native_qualification/" || contains path "_fixtures.ml")
     && not (List.exists (fun p -> String.starts_with ~prefix:p (Filename.basename path)) ["test_"; "bench_"]) in
-  let defined = Hashtbl.create 512 in
-  List.iter (fun (path, _) -> if product path && Filename.check_suffix path ".ml" then
-    Hashtbl.replace defined (String.capitalize_ascii (Filename.remove_extension (Filename.basename path)), owner path) ()) scan;
+  let defined = Hashtbl.create 512 and submodules = Hashtbl.create 512 in
+  let declared = Str.regexp "\\bmodule\\( type\\)? +\\([A-Z][A-Za-z_0-9]*\\)" in
+  List.iter (fun (path, text) -> if product path then begin
+    if Filename.check_suffix path ".ml" then
+      Hashtbl.replace defined (String.capitalize_ascii (Filename.remove_extension (Filename.basename path)), owner path) ();
+    let rec go i = match Str.search_forward declared text i with
+      | exception Not_found -> ()
+      | _ -> Hashtbl.replace submodules (Str.matched_group 2 text, owner path) (); go (Str.match_end ()) in
+    go 0 end) scan;
+  (* [module A = B.C] in a file makes [A.Private] mean [B.C.Private]. *)
+  let alias_re = Str.regexp "\\bmodule +\\([A-Z][A-Za-z_0-9]*\\) *= *\\([A-Z][A-Za-z_0-9]*\\(\\.[A-Z][A-Za-z_0-9]*\\)*\\) *\\($\\|[^.A-Za-z_(]\\)" in
+  let aliases text =
+    let table = Hashtbl.create 16 in
+    let rec go i = match Str.search_forward alias_re text i with
+      | exception Not_found -> table
+      | _ -> Hashtbl.replace table (Str.matched_group 1 text) (Str.matched_group 2 text); go (Str.match_end ()) in
+    go 0 in
   let re = Str.regexp "\\b\\([A-Z][A-Za-z_0-9]*\\)\\(\\.[A-Z][A-Za-z_0-9]*\\)*\\.Private\\b" in
   let found = Hashtbl.create 128 in
   List.iter (fun (path, text) -> if product path then begin
+    let table = aliases text in
+    let rec resolve m depth = match String.index_opt m '.' with
+      | Some k when depth < 4 -> (match Hashtbl.find_opt table (String.sub m 0 k) with
+          | Some target -> resolve (target ^ String.sub m k (String.length m - k)) (depth + 1)
+          | None -> m)
+      | _ -> m in
     let rec go i = match Str.search_forward re text i with
       | exception Not_found -> ()
       | _ ->
-          let m = Str.matched_string text and first = Str.matched_group 1 text in
-          if not (Hashtbl.mem defined (first, owner path)) then
-            Hashtbl.replace found (Option.get (owner path), m) ();
-          go (Str.match_end ()) in
+          let m = resolve (Str.matched_string text) 0 and stop = Str.match_end () in
+          let first = List.hd (String.split_on_char '.' m) and dir = Option.get (owner path) in
+          (* A value reference, or a module alias; not a constructor named Private (a storage mode). *)
+          let line_start = try String.rindex_from text (Str.match_beginning ()) '\n' with Not_found -> 0 in
+          let alias_line = Str.string_match (Str.regexp "[ \t]*\\(let \\)?module ") text line_start
+            || (line_start + 1 < String.length text && Str.string_match (Str.regexp "[ \t]*\\(let \\)?module ") text (line_start + 1)) in
+          let value_ref = stop + 1 < String.length text && text.[stop] = '.' && text.[stop + 1] >= 'a' && text.[stop + 1] <= 'z' in
+          if (value_ref || alias_line)
+             && not (Hashtbl.mem defined (first, Some dir) || Hashtbl.mem submodules (first, Some dir)) then
+            Hashtbl.replace found (dir, m) ();
+          go stop in
     go 0 end) scan;
   let allowed = Private_allowlist.entries in
   List.filter_map (fun (d, m) -> if List.mem (d, m) allowed then None

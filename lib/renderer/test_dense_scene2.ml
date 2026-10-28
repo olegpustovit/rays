@@ -26,7 +26,7 @@ let scene ~reference ~count ~phase =
   Result.get_ok (create (Array.of_list (List.rev !commands)))
 
 let run () =
-  let live_handles=snd(Ogpu.Impl.create_driver()) in
+  let live_handles=Ogpu.Impl.live_handles in
   let baseline=live_handles() in
   List.iter (fun scale ->
     let execution=get (Renderer.create_offscreen
@@ -56,7 +56,7 @@ let run () =
             done
           done) [63;64;65;1024];
         let colored ?(barrier=false) color = scene ~reference:false ~count:63 ~phase:0.
-          |> Private.commands_readonly
+          |> commands_readonly
           |> Array.map (function Geometry g->Geometry {g with color}|c->c)
           |> (fun commands->if barrier then Array.append [|Set_blend Alpha|] commands
               else commands)

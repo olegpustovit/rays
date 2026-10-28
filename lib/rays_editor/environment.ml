@@ -37,7 +37,7 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
              (match Flow_native.Workspace_images.image value.host.images ~state:core.cook.state ~live:input lowered.plan
                 (Flow.Eval.Deferred (Flow.Ty.image, id)) with
               | Ok img ->
-                  let iw, ih = Rays.Image.Private.dimensions img in
+                  let iw, ih = Rays.Image.dimensions img in
                   let scale = Float.min (float w /. float iw) (float h /. float ih) in
                   (key, {size = (w, h); dynamic; plan = lowered.plan; scene = [Rays.Scene.rect ~at:(0, 0) ~w ~h ~fill:Rays_math.Color.black (); Rays.Scene.image img ~at:(0, 0) ~scale ()]; prepared = None; preview}) :: pictures, error
               | Error d -> (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
@@ -100,7 +100,7 @@ let update_with value frame ~inspector =
          |_->())(Pxui_graph.Scope.selected (Core_model.pane_view value.core))
    |_->());
   let update = Flow_native.Workspace_gpu.with_backend value.host.gpu (fun gpu -> Flow_sop.Lower.with_images ~gpu
-    ~metadata:(fun plan id->Option.map Rays.Image.Private.dimensions(Flow_native.Workspace_images.peek value.host.images plan id))
+    ~metadata:(fun plan id->Option.map Rays.Image.dimensions(Flow_native.Workspace_images.peek value.host.images plan id))
     (Flow_native.Workspace_images.payload value.host.images)(fun()->Core.update ~gpu
       ~pump:(fun()->Flow_native.Workspace_gpu.pump value.host.gpu) ~image:(Flow_native.Workspace_images.peek value.host.images lowered.plan)
       ~host_events:(Flow_native.Workspace_host.take_events value.host) value.core ~all_ui_visible:visible

@@ -3,7 +3,7 @@ module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let check ?(extra="") body =
   let forms = ok (Flow.Syntax.parse ("(workspace w " ^ extra ^ " (graph g :context value " ^ body ^ "))")) in
-  match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
+  match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with
   | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let bits x y = Int64.bits_of_float x = Int64.bits_of_float y
 let rec same_bits (a : E.value) (b : E.value) = match a,b with
@@ -33,7 +33,7 @@ let () =
       let live=live frame in
       List.iter (fun (v, program) ->
         let core_before=E.state_stamp core and reference_before=E.state_stamp reference in
-        let expected=E.Private.force_reference ~state:reference v ~live in
+        let expected=E.Host.force_reference ~state:reference v ~live in
         let actual=match program with
           | Ok program -> I.Executor.force ~state:core program ~live
           | Error _ -> expected in
@@ -41,8 +41,8 @@ let () =
         if Result.is_error expected then begin
           if E.state_stamp core<>core_before || E.state_stamp reference<>reference_before then
             failwith (Printf.sprintf "%s frame %d: failed evaluation changed a state epoch" name frame)
-        end else if Marshal.to_string (E.Private.state_values core) [Marshal.No_sharing]
-          <> Marshal.to_string (E.Private.state_values reference) [Marshal.No_sharing] then
+        end else if Marshal.to_string (E.Host.state_values core) [Marshal.No_sharing]
+          <> Marshal.to_string (E.Host.state_values reference) [Marshal.No_sharing] then
           failwith (Printf.sprintf "%s frame %d: state values differ" name frame)) programs
     done) (List.map (fun (name,body) -> name,"",body) cases @ refs);
   if !refused<>[] || !failed<>[] then failwith (String.concat "; " (!refused @ !failed));

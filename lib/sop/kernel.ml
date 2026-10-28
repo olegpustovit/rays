@@ -8,11 +8,9 @@ let create ?(geometry_capture = fun _ -> None) ~payload_bytes prepare =
 let data_id t = t.id
 let payload_bytes t = t.bytes
 let prepare t = t.prepare
-module Private = struct
   let geometry_capture t = t.geometry_capture
   let remap_geometry_captures ~sources t =
     if sources = [] then t else
       {t with geometry_capture = fun id ->
         Option.bind (List.find_opt (fun (_, mapped) -> id=mapped) sources)
           (fun (original, _) -> t.geometry_capture original)}
-end

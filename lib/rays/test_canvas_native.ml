@@ -10,11 +10,11 @@ let channel canvas ~x ~y=
   match Result.get_ok(Canvas.pixel canvas~x~y) with
   |Some color->Rays_math.Color.to_tuple color
   |None->failwith"Canvas native pixel is out of bounds"
-let live_handles=snd(Ogpu.Impl.create_driver())
+let live_handles=Ogpu.Impl.live_handles
 let snapshot canvas=
   let image=Result.get_ok(Canvas.to_image canvas)in
   Fun.protect~finally:(fun()->ignore(Image.destroy image))(fun()->
-    Result.get_ok(Image.Private.pixels image))
+    Result.get_ok(Image.pixels image))
 let region_has_pixel_other_than canvas ~x0 ~y0 ~x1 ~y1 expected=
   let found=ref false in
   for y=y0 to y1 do
@@ -63,17 +63,17 @@ let completed_source ()=
     let borrow()=
       let width,height,source=Result.get_ok(Canvas.Private.gpu_source canvas)in
       require((width,height)=(65,3))"Canvas borrow extent";
-      let resource=Result.get_ok(Runtime_resources.Image.Private.of_gpu ~width ~height ~source)in
-      let image=Result.get_ok(Image.Private.of_resource resource)in images:=image:: !images;
+      let resource=Result.get_ok(Runtime_resources.Image.of_gpu ~width ~height ~source)in
+      let image=Result.get_ok(Image.of_resource resource)in images:=image:: !images;
       source,image in
     let expires source image=
       require(Option.is_none(source()))"old Canvas source remains current";
-      match Runtime_resources.Image.Private.gpu_snapshot(Image.Private.resource image)with
+      match Runtime_resources.Image.gpu_snapshot(Image.resource image)with
       |Error{kind=Ogpu.Error.Destroyed;_}->()
       |_->failwith"expired Canvas image did not report Destroyed"in
     render Rays_math.Color.red;
     let source,image=borrow()in
-    let generation=Runtime_resources.Image.generation(Image.Private.resource image)in
+    let generation=Runtime_resources.Image.generation(Image.resource image)in
     let published=image in
     let scene=Scene.[clear Rays_math.Color.black;image published ~at:(0,0)()]in
     render_canvas destination scene;
@@ -96,7 +96,7 @@ let completed_source ()=
     Thread.join thread;(match !thread_result with Ok()->()|Error exn->raise exn);
     require(Option.is_some(source()))"rejected wrong-context operations invalidated Canvas";
     render blue;expires source image;
-    require(Runtime_resources.Image.generation(Image.Private.resource image)=generation)
+    require(Runtime_resources.Image.generation(Image.resource image)=generation)
       "source expiry mutated published Image generation";
     let replay_failed=Result.is_error(Canvas.render destination scene)in
     require replay_failed "retained Scene replay accepted an expired Canvas source";
@@ -115,9 +115,9 @@ let completed_source ()=
     ignore(Result.get_ok(Canvas.Private.invalidate canvas));expires source image;
     render green;
     let captured=Result.get_ok(Canvas.to_image canvas)in images:=captured:: !images;
-    let _,_,_,bytes,lease=Result.get_ok(Runtime_resources.Image.Private.borrow_snapshot
-      (Image.Private.resource captured))in
-    Fun.protect ~finally:(fun()->Runtime_resources.Image.Private.release_snapshot lease)(fun()->
+    let _,_,_,bytes,lease=Result.get_ok(Runtime_resources.Image.borrow_snapshot
+      (Image.resource captured))in
+    Fun.protect ~finally:(fun()->Runtime_resources.Image.release_snapshot lease)(fun()->
       let saved=Bytes.copy bytes in
       require(Bytes.sub saved 0 4=Bytes.of_string "\x00\xff\x00\xff")"Canvas CPU snapshot pixel";
       require(Canvas.Private.pixel_stats canvas=(1,1))"Canvas capture actual readback count";
@@ -125,7 +125,7 @@ let completed_source ()=
       let source,image=borrow()in
       ignore(Canvas.destroy canvas);expires source image;
       require(Canvas.Private.pixel_stats canvas=(1,1))"Canvas destruction read discarded GPU pixels";
-      require(bytes=saved && Result.get_ok(Image.Private.pixels captured)=saved)
+      require(bytes=saved && Result.get_ok(Image.pixels captured)=saved)
         "Canvas updates or destruction changed retained CPU bytes";
       ignore(Canvas.destroy canvas)));
   require(live_handles()=baseline)"Canvas borrowed-source live-handle delta";
@@ -194,7 +194,7 @@ let run () =
     require stage_failed"Canvas accepted a late native Clear";
     let _,_,references=Font.Private.automatic_counts()in
     require(references=0)"stage failure retained automatic text";
-    require(Result.is_ok(Image.Private.pixels borrowed))
+    require(Result.is_ok(Image.pixels borrowed))
       "stage failure shortened explicit Image ownership";
     let font=Result.get_ok(Font.system~size:12())in
     let camera=Camera.orthographic~height:2.~at:(Rays_math.Vec3.create 0. 0. 2.)
@@ -209,7 +209,7 @@ let run () =
     render reusable;let first=snapshot canvas in
     let _,_,references=Font.Private.automatic_counts()in
     require(references=0)"reusable Scene retained automatic text after lowering";
-    require(Result.is_ok(Image.Private.pixels borrowed))
+    require(Result.is_ok(Image.pixels borrowed))
       "Scene release shortened explicit Image ownership";
     require(region_has_pixel_other_than canvas~x0:12~y0:2~x1:55~y1:30
       (9,17,31,255))"released mixed Scene did not render text";
@@ -238,7 +238,7 @@ let run () =
     let image=Result.get_ok(Canvas.to_image canvas)in
     Fun.protect~finally:(fun()->ignore(Image.destroy image))(fun()->
       require(Result.get_ok(Image.get_size image)=(64,64))"Canvas native to_image extent";
-      let pixels=Result.get_ok(Image.Private.pixels image)in
+      let pixels=Result.get_ok(Image.pixels image)in
       require(Bytes.sub pixels 0 4=Bytes.of_string"\009\017\031\255")
         "Canvas native to_image exact pixel");
     ignore(Canvas.destroy canvas);

@@ -2,7 +2,7 @@ module E = Flow.Eval
 module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let workspace body =
-  match Flow.Workspace.check {Flow.Check.version=1;kinds=[]}
+  match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]}
     (ok (Flow.Syntax.parse ("(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.)))"))) with
   | Some ws,[] -> ws | _,ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds))
 let same_bits a b = Int64.bits_of_float a=Int64.bits_of_float b
@@ -28,7 +28,7 @@ let () =
     let compiled=ok (I.Executor.compile value) in
     List.iter (fun time ->
       let live=Input.at_time time in
-      let expected=E.Private.force_reference value ~live in
+      let expected=E.Host.force_reference value ~live in
       assert (Result.is_error expected);
       (match I.Core_exec.execute prepared ~live with
        | Error _ -> ()
@@ -44,7 +44,7 @@ let () =
   for frame=0 to 7 do
     let live={(Input.at_time (float_of_int frame *. 0.25)) with frame} in
     let core_before=E.state_stamp core and reference_before=E.state_stamp reference in
-    let expected=E.Private.force_reference ~state:reference value ~live in
+    let expected=E.Host.force_reference ~state:reference value ~live in
     let actual,_,walks=I.Executor.Private.force_with_walker_counts ~state:core compiled ~live in
     if Result.is_error expected then incr failures;
     if not (same_result actual expected) then failwith (Printf.sprintf "state frame %d" frame);
@@ -52,8 +52,8 @@ let () =
       (assert(E.state_stamp core=core_before && E.state_stamp reference=reference_before);
        assert(walks=1))
     else assert(walks=0);
-    assert (same_result (Ok(E.List(Array.of_list(E.Private.state_values core))))
-      (Ok(E.List(Array.of_list(E.Private.state_values reference)))))
+    assert (same_result (Ok(E.List(Array.of_list(E.Host.state_values core))))
+      (Ok(E.List(Array.of_list(E.Host.state_values reference)))))
   done;
   assert (!failures>0);
   (* A deliberately unsupported extension op is refused by Core and interpreted
@@ -63,7 +63,7 @@ let () =
     body=(fun ~live ~node:_ _ -> Flow.Value.Float (live.t +. 1.))} in
   let forms=match Flow.Syntax.parse "(workspace w (graph g :context value (test/opaque)))" with
     |Ok forms->forms|Error d->failwith(Diagnostic.to_string d) in
-  let ws=match Flow.Workspace.check ~ops:[opaque] {Flow.Check.version=1;kinds=[]} forms with
+  let ws=match Flow.Workspace.check ~ops:[opaque] {Flow.Catalog.version=1;kinds=[]} forms with
     |Some ws,[]->ws|_,ds->failwith(String.concat "; " (List.map Diagnostic.to_string ds)) in
   let residual=match List.assoc "g" (ok(E.static ws)).results with
     |E.Residual r->r|_->failwith "opaque result was not residual" in
@@ -71,20 +71,20 @@ let () =
   let shared=E.List [|E.Residual residual;E.List [|E.Residual residual|]|] in
   let program=ok(I.Executor.compile shared) and live=Input.at_time 0.25 in
   let actual,attempts,walks=I.Executor.Private.force_with_walker_counts program ~live in
-  assert(actual=E.Private.force_reference shared ~live);
+  assert(actual=E.Host.force_reference shared ~live);
   assert(attempts=1 && walks=1);
   let reference=E.create_state () and strict=E.create_state () in
   let compiled=ok(I.Executor.compile ~strict:true value) in
   for frame=0 to 7 do
     let live={(Input.at_time (float_of_int frame *. 0.25)) with frame} in
     let reference_before=E.state_stamp reference and strict_before=E.state_stamp strict in
-    let expected=E.Private.force_reference ~state:reference value ~live in
+    let expected=E.Host.force_reference ~state:reference value ~live in
     (match I.Executor.force ~strict:true ~state:strict compiled ~live,expected with
      |Error actual,Error expected->assert(actual.code=expected.code && actual.message=expected.message && actual.cause=expected.cause)
      |actual,expected->assert(same_result actual expected));
     if Result.is_error expected then assert(E.state_stamp strict=strict_before && E.state_stamp reference=reference_before);
-    assert(same_result (Ok(E.List(Array.of_list(E.Private.state_values strict))))
-      (Ok(E.List(Array.of_list(E.Private.state_values reference)))))
+    assert(same_result (Ok(E.List(Array.of_list(E.Host.state_values strict))))
+      (Ok(E.List(Array.of_list(E.Host.state_values reference)))))
   done;
   print_endline "Core errors: division by zero, range, non-finite, authored fields and state rollback match the walker"
 
@@ -96,7 +96,7 @@ let () =
   let core=Result.get_ok(I.Core_lower.lower ~strict:true residual) in
   let compiled=ok(I.Executor.compile ~strict:true value) in
   List.iter(fun time->let live=Input.at_time time in
-    let expected=E.Private.force_reference value ~live in
+    let expected=E.Host.force_reference value ~live in
     let check=function
       |Ok actual->assert(expected=Ok actual)
       |Error(d:Diagnostic.t)->(match expected with Error e->assert(d.code=e.code && d.message=e.message && d.cause=e.cause)|_->assert false) in
@@ -108,7 +108,7 @@ let () =
     let value=recorded(Printf.sprintf "(map (fn [x] (if (> t 0.) (error \"E_PACKED_RULE\" \"exact é日本😀\" :cause \"selected packed cause\") x)) (array/range %d))" count) in
     let compiled=ok(I.Executor.compile ~strict:true value) in
     List.iter(fun time->let live=Input.at_time time in
-      let expected=E.Private.force_reference value ~live in
+      let expected=E.Host.force_reference value ~live in
       List.iter(fun domains->Parallel.run ~domains(fun()->
         match I.Executor.force ~strict:true compiled ~live,expected with
         |Ok actual,Ok expected->assert(actual=expected)
@@ -119,5 +119,5 @@ let () =
    | Error d when d.code="E_KERNEL_FORM" -> ()
    | Error d -> failwith ("dynamic packed refusal returned " ^ Diagnostic.to_string d)
    | Ok _ -> failwith "dynamic packed refusal was accepted");
-  assert(Result.is_ok(E.Private.force_reference dynamic ~live:(Input.at_time(-1.))));
+  assert(Result.is_ok(E.Host.force_reference dynamic ~live:(Input.at_time(-1.))));
   print_endline "Authored errors: exact dynamic messages, lazy text/packed branches, empty inputs, rollback and dynamic packed refusal pass"

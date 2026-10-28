@@ -133,7 +133,7 @@ let device_groups ?(approx=Flow.Workspace.Paths.empty) ?(fast=false) program ~wi
     if not !safe then None else
     let normalized = List.map (fun k ->
       let _, _, locals, _ = Option.get info.(k) in
-      Packed.Private.bind_arguments ~validate:false program.regions.(k)
+      Packed.Host.bind_arguments ~validate:false program.regions.(k)
         (Array.of_list (List.map (fun local -> E.Source ("$core/argument", program.locals.(local),
           ["index", E.Int (Hashtbl.find indices local)])) locals))) members in
     if List.exists Result.is_error normalized then None else

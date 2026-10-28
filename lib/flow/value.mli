@@ -43,7 +43,6 @@ val int_array_put : int array -> int -> ('f, 'r) t -> unit
 val array_init : Ty.t -> int -> (int -> ('f, 'r) t) -> ('f, 'r) t
 val validate : ('f, 'r) t -> unit
 
-module Private : sig
   (** Evaluate the protected thunk once. A reached typed failure is rethrown
       through its pure mapper, preserving provenance; cancellation bypasses it. *)
   val with_error : protected:(unit -> ('f,'r) t) -> map:(('f,'r) t -> ('f,'r) t) -> ('f,'r) t
@@ -55,4 +54,3 @@ module Private : sig
   (** The selected index is passed only to an always-throwing diagnostic mapper.
       An all-valid mask returns nil without evaluating select or map. *)
   val diagnose_rows : select:(('f,'r) t -> int -> int) -> map:(('f,'r) t -> ('f,'r) t) -> ('f,'r) t -> ('f,'r) t
-end

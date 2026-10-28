@@ -121,10 +121,10 @@ let display_list ?(images=[]) segment=
     |Glyphs glyphs->
         if not(Hashtbl.mem bound glyphs.resource_id)then
           invalid_arg"Scene.display_list: unbound glyph resource"
-    |_->())(Scene_command.Render_ir.Private.commands_readonly
+    |_->())(Scene_command.Render_ir.commands_readonly
       (Scene_command.Display_list.render_ir segment));
   let resources=Array.fold_right(fun(id,image) rest->
-    (id,Renderer.Image(Image.Private.resource image))::rest)
+    (id,Renderer.Image(Image.resource image))::rest)
     images[]in
   Display_list{segment;resources}
 let text_input_region ~at:(x,y)~w~h ?(focused=false) ?(cursor=0)()=
@@ -176,7 +176,7 @@ module Private=struct
        invalid_arg"Scene.Private.ui: unbound texture resource")
      (Scene_command.Ui_batch.textures batch);
    Ui{ui=batch;ui_resources=List.map(fun(id,image)->
-     id,Renderer.Image(Image.Private.resource image))images}
+     id,Renderer.Image(Image.resource image))images}
  type native_layer=
   |Scene2_layer of Scene_command.Render_ir.t*(int*Renderer.resource)list
   |Scene2_segment of Scene_command.Display_list.t*
@@ -199,10 +199,10 @@ module Private=struct
          mix(mix stamp(Runtime_resources.Image.identity image))
            (Runtime_resources.Image.generation image)
      |_,Text text->
-         mix(mix stamp(Runtime_resources.Text.Private.identity text))
+         mix(mix stamp(Runtime_resources.Text.identity text))
            (Runtime_resources.Text.generation text)
      |_,Canvas canvas->
-         mix(mix stamp(Runtime_resources.Canvas.Private.identity canvas))
+         mix(mix stamp(Runtime_resources.Canvas.identity canvas))
            (Runtime_resources.Canvas.generation canvas))
      (Scene_command.Display_list.version segment)resources)
  let renderer=Domain.DLS.new_key(fun()->None)
@@ -231,9 +231,9 @@ module Private=struct
    Array.unsafe_set builder.values builder.length command;
    builder.length<-builder.length+1
  let image_command builder image x y scale angle=
-  let width,height=Image.Private.dimensions image in let rect={Scene_command.Render_ir.x=0.;y=0.;width=float width;height=float height}in
+  let width,height=Image.dimensions image in let rect={Scene_command.Render_ir.x=0.;y=0.;width=float width;height=float height}in
     let destination={Scene_command.Render_ir.x=float x;y=float y;width=float width*.scale;height=float height*.scale}in
-    let command=Scene_command.Render_ir.Image{resource_id=Image.Private.identity image;source=rect;destination}in
+    let command=Scene_command.Render_ir.Image{resource_id=Image.identity image;source=rect;destination}in
     if angle<>0. then(
       let px=destination.x+.destination.width*.0.5 and py=destination.y+.destination.height*.0.5 and c=cos angle and s=sin angle in
       let xx=c and xy=(-.s)and yx=s and yy=c in
@@ -248,7 +248,7 @@ module Private=struct
    |Geometry g::xs->emit builder(Scene_command.Render_ir.Geometry g);nodes xs
    |Shapes s::xs->emit builder(Scene_command.Render_ir.Shapes s);nodes xs
    |Display_list node::xs->
-       Array.iter (emit builder) (Scene_command.Render_ir.Private.commands_readonly
+       Array.iter (emit builder) (Scene_command.Render_ir.commands_readonly
          (Scene_command.Display_list.render_ir node.segment));
        nodes xs
    |Image node::xs->image_command builder node.image node.x node.y node.scale node.angle;nodes xs
@@ -268,8 +268,8 @@ module Private=struct
  let image_resources ?(density=1) scene=
    let rec nodes acc=function
     |[]->acc
-    |Image node::rest->nodes((Image.Private.identity node.image,Renderer.Image(Image.Private.resource node.image))::acc)rest
-    |Text node::rest->let image=text_image ~density node in nodes((Image.Private.identity image,Renderer.Image(Image.Private.resource image))::acc)rest
+    |Image node::rest->nodes((Image.identity node.image,Renderer.Image(Image.resource node.image))::acc)rest
+    |Text node::rest->let image=text_image ~density node in nodes((Image.identity image,Renderer.Image(Image.resource image))::acc)rest
     |Display_list node::rest->nodes(List.rev_append node.resources acc)rest
     |Group nested::rest|Translate(_,_,nested)::rest|Rotate(_,nested)::rest
     |Scale(_,_,nested)::rest|Affine(_,nested)::rest|Clip(_,_,_,_,nested)::rest|Blend(_,nested)::rest->
@@ -284,7 +284,7 @@ module Private=struct
    |_->
       try
         let commands=commands ~density scene in
-        let created=Scene_command.Render_ir.Private.create_owned commands in
+        let created=Scene_command.Render_ir.create_owned commands in
         match created with
         |Error e->Error("invalid scene description: "^Scene_command.Render_ir.(match e with
           |Non_finite->"non-finite value"|Invalid_extent->"negative extent"
@@ -430,13 +430,13 @@ module Private=struct
    |Scene_command.Render_ir.Geometry geometry->total+
        Array.length geometry.vertices*(Sys.word_size/8)+
        Array.length geometry.indices*(Sys.word_size/8)
-   |_->total+32)0(Scene_command.Render_ir.Private.commands_readonly ir)
+   |_->total+32)0(Scene_command.Render_ir.commands_readonly ir)
  let stage_scene2_layer ~density nodes=
    let resources=image_resources~density nodes in
    let versions=List.map(function
      |id,Renderer.Image image->id,Runtime_resources.Image.identity image,Runtime_resources.Image.generation image
-     |id,Text text->id,Runtime_resources.Text.Private.identity text,Runtime_resources.Text.generation text
-     |id,Canvas canvas->id,Runtime_resources.Canvas.Private.identity canvas,Runtime_resources.Canvas.generation canvas)resources in
+     |id,Text text->id,Runtime_resources.Text.identity text,Runtime_resources.Text.generation text
+     |id,Canvas canvas->id,Runtime_resources.Canvas.identity canvas,Runtime_resources.Canvas.generation canvas)resources in
    let cache=Option.map(fun context->context.scene2_layers)(Domain.DLS.get current_lower_cache)in
    match Option.bind cache(fun cache->try Some(Layer_table.find cache(nodes,density))with Not_found->None)with
    |Some(ir,old)when old=versions->Ok(ir,resources)
@@ -449,18 +449,18 @@ module Private=struct
            Option.iter(fun cache->Layer_table.add cache~bytes(nodes,density)(ir,versions))cache;
            result
 
- let empty_ir=Result.get_ok(Scene_command.Render_ir.Private.create_owned[||])
+ let empty_ir=Result.get_ok(Scene_command.Render_ir.create_owned[||])
  let rec validate_native_resources=function
    |[]->Ok()
    |(_,Renderer.Image image)::rest->
-       Result.bind(Runtime_resources.Image.Private.gpu_snapshot image)
+       Result.bind(Runtime_resources.Image.gpu_snapshot image)
          (fun _->validate_native_resources rest)
    |_::rest->validate_native_resources rest
  let rec validate_native_images=function
    |[]->Ok()
    |Image node::rest->
-       Result.bind(Runtime_resources.Image.Private.gpu_snapshot
-         (Image.Private.resource node.image))(fun _->validate_native_images rest)
+       Result.bind(Runtime_resources.Image.gpu_snapshot
+         (Image.resource node.image))(fun _->validate_native_images rest)
    |(Group nested|Translate(_,_,nested)|Rotate(_,nested)|Scale(_,_,nested)|Affine(_,nested)
      |Clip(_,_,_,_,nested)|Blend(_,nested))::rest->
        Result.bind(validate_native_images nested)(fun()->validate_native_images rest)
@@ -484,7 +484,7 @@ module Private=struct
        let key="texture:"^string_of_int(Texture.Private.identity value.Scene3.value)in
        let source=match Texture.Private.image value.Scene3.value with
        |None->Ok(key,texture_levels value.Scene3.value,None)
-       |Some image->(match Runtime_resources.Image.Private.gpu_snapshot image with
+       |Some image->(match Runtime_resources.Image.gpu_snapshot image with
          |Error error->Error(Scene3_native_lowering.Resource error)
          |Ok None->Error Scene3_native_lowering.Unsupported_texture
          |Ok(Some(width,height,generation,gpu))->
@@ -533,7 +533,7 @@ module Private=struct
                else clear:=unpack_clear color
            |Geometry _|Shapes _|Image _|Glyphs _->seen_draw:=true
            |Set_blend _|Push_clip _|Pop_clip|Push_transform _|Pop_transform->())
-           (Scene_command.Render_ir.Private.commands_readonly
+           (Scene_command.Render_ir.commands_readonly
              (Scene_command.Display_list.render_ir segment))
      |Scene2_layer(ir,_)->Array.iter(function
        |Scene_command.Render_ir.Clear color->
@@ -541,7 +541,7 @@ module Private=struct
           else clear:=unpack_clear color
        |Geometry _|Shapes _|Image _|Glyphs _->seen_draw:=true
        |Set_blend _|Push_clip _|Pop_clip|Push_transform _|Pop_transform->())
-       (Scene_command.Render_ir.Private.commands_readonly ir))layers;
+       (Scene_command.Render_ir.commands_readonly ir))layers;
    match!failure with Some message->Error message|None->
    let scene3=List.filter_map(function Scene3_layer prepared->Some prepared|_->None)layers in
    let retained=match layers with
@@ -597,7 +597,7 @@ module Private=struct
    |Scene_command.Render_ir.Geometry geometry->total+
            Array.length geometry.vertices*(Sys.word_size/8)+
            Array.length geometry.indices*(Sys.word_size/8)
-       |_->total+32)0(Scene_command.Render_ir.Private.commands_readonly ir)
+       |_->total+32)0(Scene_command.Render_ir.commands_readonly ir)
    |Ui_layer(ui,_)->total+Bytes.length(Scene_command.Ui_batch.instances ui)
    |Scene3_layer prepared->total+Array.fold_left(fun total entry->
        total+Bytes.length entry.Renderer.Scene_execution.draw.mesh.vertices+
@@ -615,12 +615,12 @@ module Private=struct
   |(id,Text text)::rest->resource_stamp_loop
       (Rays_math.Hash.mix
         (Rays_math.Hash.mix
-          (Rays_math.Hash.mix stamp id) (Runtime_resources.Text.Private.identity text))
+          (Rays_math.Hash.mix stamp id) (Runtime_resources.Text.identity text))
         (Runtime_resources.Text.generation text)) rest
   |(id,Canvas canvas)::rest->resource_stamp_loop
       (Rays_math.Hash.mix
         (Rays_math.Hash.mix
-          (Rays_math.Hash.mix stamp id) (Runtime_resources.Canvas.Private.identity canvas))
+          (Rays_math.Hash.mix stamp id) (Runtime_resources.Canvas.identity canvas))
         (Runtime_resources.Canvas.generation canvas)) rest
  let native_resource_stamp stage=List.fold_left(fun stamp->function
    |Scene2_layer(_,resources)|Scene2_segment(_,resources)|Ui_layer(_,resources)->

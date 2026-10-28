@@ -77,12 +77,12 @@ let draw_batch (context : Command_control.t) encoder render_pipeline draws =
             (fun (d : Ogpu_core.Backend.driver_batch_draw) (native, buffers, index) ->
               let kind, index_buffer, offset, count = Option.get index in
               ({
-                 Metal.Render_encoder.Private.prepared_pipeline = native;
+                 Metal.Render_encoder.prepared_pipeline = native;
                  prepared_bindings =
                    Array.map
                      (fun (stage, slot, buffer, offset) ->
                        {
-                         Metal.Render_encoder.Private.prepared_stage = metal_stage stage;
+                         Metal.Render_encoder.prepared_stage = metal_stage stage;
                          prepared_index = slot;
                          prepared_offset = offset;
                          prepared_buffer = Buffer.Private.metal buffer;
@@ -94,15 +94,15 @@ let draw_batch (context : Command_control.t) encoder render_pipeline draws =
                  prepared_index_offset = offset;
                  prepared_index_count = count;
                }
-                : Metal.Render_encoder.Private.prepared_indexed_draw))
+                : Metal.Render_encoder.prepared_indexed_draw))
             draws resolved
         in
         match
-          Metal.Render_encoder.Private.prepare_indexed_draws (Device.Private.metal device) prepared
+          Metal.Render_encoder.prepare_indexed_draws (Device.Private.metal device) prepared
         with
         | Error e -> Error (Device.of_metal_error ~operation e)
         | Ok prepared ->
-            native_of (Metal.Render_encoder.Private.execute_prepared_indexed_draws encoder prepared)
+            native_of (Metal.Render_encoder.execute_prepared_indexed_draws encoder prepared)
       end
       else
         let failed e = Error (Device.of_metal_error ~operation e) in
@@ -300,7 +300,7 @@ let create (context : Command_control.t) target =
                     match configured with
                     | Error e -> fail e
                     | Ok () -> (
-                        match Metal.Render_encoder.Private.create_from_pass_scoped native pass with
+                        match Metal.Render_encoder.create_from_pass_scoped native pass with
                         | Error e -> fail e
                         | Ok encoder ->
                             let finish () =

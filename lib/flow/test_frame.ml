@@ -1,7 +1,7 @@
 open Flow
 let check text =
   let forms = Result.get_ok (Syntax.parse ("(workspace w (graph g :context value " ^ text ^ "))")) in
-  match Workspace.check {Check.version = 1; kinds = []} forms with
+  match Workspace.check {Catalog.version = 1; kinds = []} forms with
   | Some w, [] -> w
   | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 
@@ -18,7 +18,7 @@ let () =
     "right", Bool false; "key", Bool true; "time", Float 3.] in
   assert (Eval.force value ~live = Ok expected);
   let changed = {live with pointer = 99., 37.; keys = []; size = 900, 600} in
-  List.iter (fun live -> assert (Eval.force value ~live = Eval.Private.force_reference value ~live)) [live; changed; live];
+  List.iter (fun live -> assert (Eval.force value ~live = Eval.Host.force_reference value ~live)) [live; changed; live];
   assert (Eval.force value ~live:changed <> Ok expected);
   assert (List.assoc "g" (Result.get_ok (Eval.run ~live ~time:3. w)).results = Eval.Float 12.);
   assert (Result.is_error (Eval.force value ~live:{live with dt = nan}));
@@ -49,17 +49,17 @@ let () =
     "key", Text "unknown:4242"; "button", Text "x2"; "phase", Text "momentum"]));
   let forms = Result.get_ok (Syntax.parse
     "(workspace w (graph g :context value (for [i (range (frame/index))] i)))") in
-  let _, ds = Workspace.check {Check.version = 1; kinds = []} forms in
+  let _, ds = Workspace.check {Catalog.version = 1; kinds = []} forms in
   assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_TIME_COUNT") ds)
 
 let () =
   let forms = Result.get_ok (Syntax.parse
     "(workspace w (graph g :context value (let* [r (if (> (frame/index) 0) {:items (list 1 2)} {:items (list 1)})] (for [x r.items] x))))") in
-  let _, ds = Workspace.check {Check.version = 1; kinds = []} forms in
+  let _, ds = Workspace.check {Catalog.version = 1; kinds = []} forms in
   assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_TIME_COUNT") ds)
 
 let () =
   let forms = Result.get_ok (Syntax.parse
     "(workspace w (graph g :context value (let* [f (frame/input)] (for [e f.events] e.kind))))") in
-  let _, ds = Workspace.check {Check.version = 1; kinds = []} forms in
+  let _, ds = Workspace.check {Catalog.version = 1; kinds = []} forms in
   assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_TIME_COUNT") ds)

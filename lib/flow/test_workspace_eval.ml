@@ -1,7 +1,7 @@
 open Flow
 
 let read path = In_channel.with_open_bin path In_channel.input_all
-let catalog = match Check.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp") with
+let catalog = match Catalog.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp") with
   | Ok (catalog, _) -> catalog
   | Error d -> failwith (Diagnostic.to_string d)
 let cases = "../../specification/workspace/cases"
@@ -519,9 +519,9 @@ let () =
     let body = (List.hd ws.graphs).body in
     let term = match body.node with Workspace.Let (_, term) -> term | _ -> assert false in
     assert (Eval.Residual.free_names term = ["outside"]);
-    let walks = Eval.Private.free_name_walks () in
+    let walks = Eval.Host.free_name_walks () in
     ignore (Eval.Residual.free_names term);
-    assert (Eval.Private.free_name_walks () = walks));
+    assert (Eval.Host.free_name_walks () = walks));
   t "free-name walk includes destructured sources and state initial values" (fun () ->
     let ws = check (value "(let* [source (list 3.0 4.0) initial 2.0] (let* [[x y] source total (state [s initial] (+ s t))] (+ x (+ y total))))") in
     let term = match (List.hd ws.graphs).body.node with Workspace.Let (_, term) -> term | _ -> assert false in
@@ -774,7 +774,7 @@ let () =
         assert (List.length !seen = count)
       end in
     let observed = ok (Eval.Residual.handle ~observe (fun () ->
-      Eval.Private.static_with_requests ~record:true ws)) in
+      Eval.Host.static_with_requests ~record:true ws)) in
     assert (!adapter_checked);
     (* Compare ordinary identities as well as immutable data, without comparing
        the closures embedded in function/residual contexts. *)
@@ -886,7 +886,7 @@ let () =
       List.iter (fun time ->
         let live=Input.at_time time in
         assert (Eval.force v ~live = Ok (Eval.Int 2));
-        assert (Eval.Private.force_reference v ~live = Ok (Eval.Int 2))) [-2.5;0.;0.37;2.])
+        assert (Eval.Host.force_reference v ~live = Ok (Eval.Int 2))) [-2.5;0.;0.37;2.])
       ["(let* [r {:n (int t)} updated (reduce (fn [a x] (assoc a :n 1.7)) r (list 0))] updated.n)";
        "(let* [r {:n (int t)} f (fn [a x] (assoc a :n 1.7)) updated (reduce f r (list 0))] updated.n)";
        "(get (first (map (fn [a] (assoc a :n 1.7)) (list {:n (int t)}))) :n)";
@@ -950,7 +950,7 @@ let () =
              | Ok v -> Value.array_length v | Error d -> failwith (Diagnostic.to_string d))
         | _ -> failwith "a map is offered" in
       offered := n :: !offered; bulk n) (fun () ->
-        Eval.Private.static_with_requests ~record:true ws)) in
+        Eval.Host.static_with_requests ~record:true ws)) in
   (* Supplied whole and correct: used. Only the maps over 4,096 elements are offered, once each. *)
   let supplied = run whole in
   assert (List.sort compare !offered = [4097; 4100; 5000]);
@@ -982,14 +982,14 @@ let () =
   (* A failure past the walked elements is the walker's own when the host has no value. *)
   let failing = check "(workspace bulk (graph g :context host (map (fn [i] (exp (- i 4300))) (array/range 5200))))" in
   (match Eval.static failing, Eval.Residual.handle ~bulk:(fun _ -> None) (fun () ->
-      Eval.Private.static_with_requests failing) with
+      Eval.Host.static_with_requests failing) with
    | Error a, Error b -> assert (a.code = "E_NONFINITE" && a = b)
    | _ -> failwith "a nonfinite element past the walked ones fails either way");
   (* A map that reads the frame is never offered: it becomes a residual before any host call. *)
   let live = check "(workspace bulk (graph g :context host (map (fn [i] (+ i t)) (array/range 5000))))" in
   let asked = ref 0 in
   (match ok (Eval.Residual.handle ~bulk:(fun _ -> incr asked; None) (fun () ->
-      Eval.Private.static_with_requests live)) with
+      Eval.Host.static_with_requests live)) with
    | r -> (match result r "g" with Eval.Residual _ -> () | _ -> failwith "a live map stays a residual"));
   assert (!asked = 0);
   print_endline "Static bulk maps: offered past 4,096 elements, checked against the walked ones, refused or wrong values walked"

@@ -147,7 +147,7 @@ parameter is coerced by `Port_type.coerce`, then normalised to the field's hard 
   `sop/<key>` where `<key>` is the factory's stable key verbatim (`uv_sphere`,
   `noise_displace`). The PPX rejects a key or slot name that does not match
   `[a-z][a-z0-9_]*`. `Flow_sop.Catalog.of_factories` turns them into the checker's
-  `Flow.Check.catalog`.
+  `Flow.Catalog.catalog`.
 - **Scene, World and settings kinds** are descriptors `Editor_document.Contexts`
   builds from the editor's own schemas and passes as `~extra`.
 - **Operators** are built into the checker and the evaluator. The value operators any graph
@@ -155,7 +155,7 @@ parameter is coerced by `Port_type.coerce`, then normalised to the field's hard 
   list operations, `value/rand`, `value/hsv`, `value/lerp`, `value/polar`, ...); they are the
   value part of the add menu. `material/standard`, `scene/merge` and the `ui/`
   forms are operators of their contexts.
-- A short name resolves within the graph's context (`Flow.Check.resolve_kind`); a qualified
+- A short name resolves within the graph's context (`Flow.Catalog.resolve_kind`); a qualified
   name resolves exactly. A catalog kind may be passed as a function value: `(map sop/facet xs)`.
 
 ### 3.4 Identity
@@ -278,7 +278,7 @@ list item, a macro hole and a binder always show; the `+` row is not a card line
 ### 5.2 Primary rows
 
 `[@sop.primary]` on a field sets `Param.field.primary`; the manifest records it and
-`Flow.Check.parameter.primary` carries it.
+`Flow.Catalog.parameter.primary` carries it.
 
 ### 5.3 Vec3 grouping
 
@@ -873,7 +873,7 @@ Rule: no syntax is text-only. New syntax or sugar ships with its graph projectio
 A call head is, in order: a special form; a local function in scope; a `defn`; a `defmacro`; a
 built-in operator of the graph's context (a bare name also tries `value/<name>`); a catalog
 kind, by its qualified name or its short name within the graph's context
-(`Flow.Check.resolve_kind`). An unknown head is `E_UNKNOWN_KIND` with a suggestion at edit
+(`Flow.Catalog.resolve_kind`). An unknown head is `E_UNKNOWN_KIND` with a suggestion at edit
 distance 2 or less; a kind of another context is `E_WRONG_CONTEXT`.
 
 `defnode` declares a Lisp-backed SOP catalog kind. Its name is `sop/<name>`;
@@ -1021,7 +1021,7 @@ or reserved binding name is `E_BINDING`; editors pick fresh names with
   suggestion.
 - A literal is checked against the field: a non-integral number for an Int field is
   `E_INT_LITERAL`, outside the hard bounds `E_HARD_RANGE`, outside the soft range
-  `W_SOFT_RANGE` (`Flow.Check.validate_parameter`).
+  `W_SOFT_RANGE` (`Flow.Catalog.validate_parameter`).
 - `if` has the type both branches fit (`Ty.join`). A `fold` or `scan` accumulator has the
   wider of its seed's and its body's types, so an int seed does not round a float body; a
   body that does not fit the seed's type is `E_ACC_TYPE`.
@@ -1241,7 +1241,7 @@ the table remains read-only.
 qualified name, key, operation, label, category path, slots, fields (name, label,
 folder, kind with soft and hard range, default, primary, vec3 group, unit) and outputs. The
 file is checked in; `dune build @lib/sop_catalog/runtest` regenerates it and diffs, and an
-intended change is accepted with `dune promote`. `Flow.Check.catalog_of_manifest` reads it:
+intended change is accepted with `dune promote`. `Flow.Catalog.catalog_of_manifest` reads it:
 `lib/flow`'s own tests check against it (the library cannot link the catalog), and
 `lib/rays_editor/test/test_sop_catalog.ml` proves it equals the live catalog. The editor and `rays`
 check against the live catalog (`Editor_document.Contexts.catalog`): `rays` interprets a `.rays` file,
@@ -1488,7 +1488,7 @@ the device from the first region of 256 elements. A region runs into buffers the
 stands in the locals as a placeholder (zeros of its *capacity*, an upper bound); its kernel writes
 its true count to a 4-byte cell. A region whose source is `array/range` of an array's count times
 a constant or `int/div` by one, or the array itself, takes its count from that cell on the
-device (`Packed.Private.source_shapes`; the fast kernel's `count_in`, mul, div and `count_out`),
+device (`Packed.Host.source_shapes`; the fast kernel's `count_in`, mul, div and `count_out`),
 and a range source binds a shared index buffer instead of an upload; compaction reads its count
 from the mask's cell and writes its own. A level is committed when its compaction is encoded,
 without a wait (at most two in flight), so nothing is read until the loop ends; then the writes
@@ -1612,7 +1612,7 @@ fallback wrap the same result. Declining a child compilation or exceeding the
 combined fusion register budget may still produce a valid unfused program;
 that successful compilation is not reported as a refusal.
 
-`Eval.Private.static_with_kernels` can observe each actual static entry into
+`Eval.Host.static_with_requests` can observe each actual static entry into
 map, reduce, loop or array/sum before materialization, including empty/static
 forms and unsupported types. Each handle contains the current checked term,
 lexical free captures, graph instance and iteration tuple; repeated entries
@@ -2288,7 +2288,7 @@ CPU kernel tier plus CPU instance building; an unmeasured backend keeps CPU. For
 domain before submitting CPU geometry work. The cook worker receives an owned
 CPU array. Attribute-reading cones retain their cooked-input CPU route.
 A large static map in a node body is the one producer the static evaluator may take from the device:
-`Eval.Private.static_with_kernels ~bulk_approx` offers a map of more than 4,096 elements whose
+`Eval.Host.static_with_requests ~bulk_approx` offers a map of more than 4,096 elements whose
 producer the checker marks approximable; when the backend's measured cost beats the CPU row the
 executor runs it, reads it back once, and the evaluator accepts it within 1e-4 (relative plus
 absolute) of the walked first 4,096 elements instead of bit for bit. Everything not so placed keeps

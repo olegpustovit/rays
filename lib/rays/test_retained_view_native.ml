@@ -22,8 +22,8 @@ let run () =
     (match Canvas.save_screen_png path with Ok () -> () | Error message -> failwith message);
     let image = Image.load_exn path in
     Fun.protect ~finally:(fun () -> ignore(Image.destroy image)) (fun () ->
-      let w, h = Image.Private.dimensions image in
-      let pixels = Result.get_ok (Image.Private.pixels image) in
+      let w, h = Image.dimensions image in
+      let pixels = Result.get_ok (Image.pixels image) in
       List.init 64 (fun i ->
         let x = (i mod 8 + 1) * w / 10 + w / 20 and y = ((i / 8) + 1) * h / 10 + h / 20 in
         Bytes.sub pixels (((y * w) + x) * 4) 4)) in

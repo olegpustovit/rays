@@ -6,7 +6,7 @@ let words a=let b=Bytes.create(4*Array.length a)in
   Array.iteri(fun i v->Bytes.set_int32_le b(i*4)v)a;b
 let floats a=words(Array.map Int32.bits_of_float a)
 let ()=
-  let live=snd(Ogpu.Impl.create_driver())in
+  let live=Ogpu.Impl.live_handles in
   let baseline=live()in
   List.iter(fun density->
     let execution=get(Renderer.create_offscreen{Renderer.
@@ -51,7 +51,7 @@ let ()=
           get(P.step~clear ?identity ?version submission[batch]);
           let pixels=get(Renderer.capture execution)in
           assert(Bytes.length pixels=32*24*density*density*4);pixels)in
-      let shapes=Scene_command.Ui_batch.Private.of_marks first in
+      let shapes=Scene_command.Ui_batch.of_marks first in
       List.iter(fun blend->
         let reference=capture(ir blend expected_shapes)in
         if blend=Scene_command.Render_ir.Replace then
@@ -59,9 +59,9 @@ let ()=
             Bytes.sub reference((10*density*32*density+6*density)*4)4);
         for _=1 to 3 do assert(capture(ir blend shapes)=reference)done)
         Scene_command.Render_ir.[Replace;Alpha;Add;Multiply;Screen;Subtract];
-      let stamp=Scene_command.Marks.Private.gpu_stamp in
+      let stamp=Scene_command.Marks.gpu_stamp in
       let retained token=capture~identity:"gpu-marks"~version:(stamp token)
-        (ir Replace(Scene_command.Ui_batch.Private.of_marks token))in
+        (ir Replace(Scene_command.Ui_batch.of_marks token))in
       ignore(retained first);
       assert(get(P.replay~clear~identity:"gpu-marks"~version:(stamp first) execution)=Some());
       let refuse_replay token=match P.replay~clear
@@ -74,7 +74,7 @@ let ()=
         let submission=get(P.begin_submission execution)in
         Fun.protect~finally:(fun()->P.cancel submission)(fun()->
           match P.lower_scene2 submission~density
-            ~resource:(fun _->None)(ir Replace(Scene_command.Ui_batch.Private.of_marks token))with
+            ~resource:(fun _->None)(ir Replace(Scene_command.Ui_batch.of_marks token))with
           |Error error when error.Ogpu.Error.kind=Ogpu.Error.Invalid_state&&
             error.operation="Renderer.lower_scene2"&&
             error.message="GPU shapes are stale or closed"->()

@@ -776,7 +776,7 @@ let run_native () = with_dir (fun directory ->
     ~on_stop:E.close ()));
   let image = Image.load_exn path in
   Fun.protect ~finally:(fun () -> ignore(Image.destroy image)) (fun () ->
-    let pixels = Image.Private.pixels image |> Result.get_ok in
+    let pixels = Image.pixels image |> Result.get_ok in
     let red = ref 0 in
     let x, y, width, height = !primary_bounds in
     let image_width = Result.get_ok (Image.get_width image)

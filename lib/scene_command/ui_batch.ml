@@ -19,33 +19,31 @@ let batches value = value.batches
 let empty = { bytes = Bytes.empty; count = 0; batches = [||]; marks = None; shapes_checked = false }
 let marks value = value.marks
 
-module Private = struct
-  let copy value = { value with bytes = Bytes.copy value.bytes; shapes_checked = false }
-  let of_marks token =
-    let count = Marks.Private.gpu_count token in
-    { bytes = Bytes.empty; count; marks = Some token;
-      batches = [| { first = 0; count; clip = None; texture = 0 } |]; shapes_checked = false }
-  let marks_identity = Marks.Private.gpu_identity
-  let marks_count = Marks.Private.gpu_count
-  let marks_stamp = Marks.Private.gpu_stamp
-  let valid_shapes value =
-    match value.marks with
-    | Some token -> value.count = Marks.Private.gpu_count token && Bytes.length value.bytes = 0
-    | None -> value.shapes_checked ||
-        Bytes.length value.bytes = value.count * instance_bytes &&
-        let rec loop i = i = value.count ||
-          let base = i * instance_bytes in
-          let kind = Bytes.get_int32_le value.bytes (base + 40) in
-          let f word = Int32.float_of_bits (Bytes.get_int32_le value.bytes (base + word * 4)) in
-          (kind = 0l || kind = 4l || kind = 5l) &&
-          Float.is_finite (f 0) && Float.is_finite (f 1) &&
-          Float.is_finite (f 2) && Float.is_finite (f 3) &&
-          Float.is_finite (f 11) && f 11 >= 0. &&
-          Float.is_finite (f 12) && f 12 >= 0. &&
-          Float.is_finite (f 13) &&
-          (kind = 5l || (f 2 >= f 0 && f 3 >= f 1)) && loop (i + 1)
-        in let valid = loop 0 in if valid then value.shapes_checked <- true; valid
-end
+let copy value = { value with bytes = Bytes.copy value.bytes; shapes_checked = false }
+let of_marks token =
+  let count = Marks.gpu_count token in
+  { bytes = Bytes.empty; count; marks = Some token;
+    batches = [| { first = 0; count; clip = None; texture = 0 } |]; shapes_checked = false }
+let marks_identity = Marks.gpu_identity
+let marks_count = Marks.gpu_count
+let marks_stamp = Marks.gpu_stamp
+let valid_shapes value =
+  match value.marks with
+  | Some token -> value.count = Marks.gpu_count token && Bytes.length value.bytes = 0
+  | None -> value.shapes_checked ||
+      Bytes.length value.bytes = value.count * instance_bytes &&
+      let rec loop i = i = value.count ||
+        let base = i * instance_bytes in
+        let kind = Bytes.get_int32_le value.bytes (base + 40) in
+        let f word = Int32.float_of_bits (Bytes.get_int32_le value.bytes (base + word * 4)) in
+        (kind = 0l || kind = 4l || kind = 5l) &&
+        Float.is_finite (f 0) && Float.is_finite (f 1) &&
+        Float.is_finite (f 2) && Float.is_finite (f 3) &&
+        Float.is_finite (f 11) && f 11 >= 0. &&
+        Float.is_finite (f 12) && f 12 >= 0. &&
+        Float.is_finite (f 13) &&
+        (kind = 5l || (f 2 >= f 0 && f 3 >= f 1)) && loop (i + 1)
+      in let valid = loop 0 in if valid then value.shapes_checked <- true; valid
 
 let textures value =
   Array.fold_left (fun ids batch ->

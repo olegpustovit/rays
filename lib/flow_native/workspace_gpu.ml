@@ -36,8 +36,8 @@ type image_stats = {
 
 let close_image stats sink =
   stats.closed <- stats.closed + 1;
-  stats.buffers <- stats.buffers + Flow_gpu.Image_sink.Private.buffer_creations sink;
-  stats.textures <- stats.textures + Flow_gpu.Image_sink.Private.texture_creations sink;
+  stats.buffers <- stats.buffers + Flow_gpu.Image_sink.buffer_creations sink;
+  stats.textures <- stats.textures + Flow_gpu.Image_sink.texture_creations sink;
   Flow_gpu.Image_sink.close sink
 
 type t = {
@@ -45,7 +45,7 @@ type t = {
   mark_sets : P.gpu_marks Slots.t;
   images : Flow_gpu.Image_sink.t Images.t;
   image_stats : image_stats;
-  mutable closed_host : H.Private.stats;
+  mutable closed_host : H.stats;
   mutable backend : G.backend option;
   mutable proxy : G.backend option;
   mutable closed : bool;
@@ -66,7 +66,7 @@ let create () =
     mark_sets = Slots.create ~release:(fun _ -> P.close_gpu_marks) 64;
     images = Images.create ~release:(fun _ -> close_image image_stats) 64;
     image_stats;
-    closed_host = H.Private.zero;
+    closed_host = H.zero;
     measurement_ready = false;
     backend = None;
     proxy = None;
@@ -111,7 +111,7 @@ let measure t ~fast packed ~count =
   if not t.measurement_ready then None
   else
     (* a site's kernel entry, by its code: emitting it again (and digesting it) is per-draw work *)
-    let code = (Flow_ir.Packed.Private.view packed).code in
+    let code = (Flow_ir.Packed.Host.view packed).code in
     let entry =
       match Entries.peek t.entries (code, fast) with
       | Some entry -> entry
@@ -139,8 +139,8 @@ let measure t ~fast packed ~count =
                   match (H.backend host).prepare ~fast packed with
                   | Error _ -> None
                   | Ok kernel -> (
-                      let view = Flow_ir.Packed.Private.view packed in
-                      let inputs : Flow_ir.Packed.Private.inputs =
+                      let view = Flow_ir.Packed.Host.view packed in
+                      let inputs : Flow_ir.Packed.Host.inputs =
                         {
                           arrays =
                             Array.map (fun width -> Array.make (count * width) 0.) view.widths;
@@ -367,12 +367,12 @@ let image_stats t =
   if not (Domain.is_main_domain ()) then
     invalid_arg "Workspace_gpu.image_stats: initial domain required";
   let host =
-    Option.fold ~none:t.closed_host ~some:(fun (_, host) -> H.Private.stats host) t.owner
+    Option.fold ~none:t.closed_host ~some:(fun (_, host) -> H.stats host) t.owner
   in
   let buffers = ref t.image_stats.buffers and textures = ref t.image_stats.textures in
   Images.iter t.images (fun _ sink ->
-      buffers := !buffers + Flow_gpu.Image_sink.Private.buffer_creations sink;
-      textures := !textures + Flow_gpu.Image_sink.Private.texture_creations sink);
+      buffers := !buffers + Flow_gpu.Image_sink.buffer_creations sink;
+      textures := !textures + Flow_gpu.Image_sink.texture_creations sink);
   (host, t.image_stats.created, t.image_stats.closed, !buffers, !textures)
 
 let close t =
@@ -393,7 +393,7 @@ let close t =
     Option.iter
       (fun (gpu, host) ->
         H.close host;
-        t.closed_host <- H.Private.stats host;
+        t.closed_host <- H.stats host;
         X.release_gpu gpu)
       t.owner;
     t.owner <- None;

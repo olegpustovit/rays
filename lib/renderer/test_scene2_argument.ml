@@ -4,7 +4,7 @@ let get = function
   | Ok value -> value
   | Error error -> failwith (Format.asprintf "%a" Renderer.pp_error error)
 
-let live_handles = snd (Ogpu.Impl.create_driver ())
+let live_handles = Ogpu.Impl.live_handles
 
 let create_window width height =
   Renderer.create

@@ -1,6 +1,6 @@
 let get = function Ok value -> value | Error error -> failwith (Ogpu.Error.to_string error)
 let () =
-  let base,live = Ogpu.Impl.create_driver () in
+  let base = Ogpu.Impl.create_driver () in let live = Ogpu.Impl.live_handles in
   (* The portable mock deliberately cannot execute compute. This test driver
      adds owned pipeline handles only; shader execution stays in test_run. *)
   let pipelines=ref 0 and next=ref 0L in

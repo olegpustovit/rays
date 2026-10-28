@@ -9,7 +9,7 @@ let rdk r = get (Result.map_error Rdk.Error.to_string r)
 let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
   (Rdk_rays.Rays_mesh.to_trace_mesh geometry))
 let prepared geometry material = get (P.mesh [rays_mesh geometry, material])
-let live_handles = let _, live = Ogpu.Impl.create_driver () in live
+let live_handles = Ogpu.Impl.live_handles
 let black = { P.sky = rgb 0. 0. 0.; ground = rgb 0. 0. 0.; panels = [] }
 
 (* The kernel's resolve (ACES fit, gamma 2.2, exposure 1) and its inverse. *)

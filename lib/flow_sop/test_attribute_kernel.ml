@@ -199,7 +199,7 @@ let () =
   let evaluate body =
     let forms=Flow.Syntax.parse ("(workspace checked_attribute (graph g :context sop [(geo : geometry nil)] "^
       "(let* [tested "^body^"] geo)))") |>flow_ok in
-    let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]} forms with
+    let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Catalog.{version=1;kinds=[]} forms with
       |Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
     E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]]checked |>flow_ok
       |>fun evaluation->List.assoc["g";"tested"]evaluation.records |>List.hd |>snd in
@@ -239,7 +239,7 @@ let () =
       let program=Flow_ir.Executor.compile ~strict:true value |>flow_ok in
       let live=Input.at_time 0. in
       List.iter(fun domains->Parallel.run ~domains(fun()->
-        let force reference=if reference then E.Private.force_reference ~resolve value ~live
+        let force reference=if reference then E.Host.force_reference ~resolve value ~live
           else Flow_ir.Executor.force ~strict:true ~resolve program ~live in
         List.iter(fun reference->
           let actual=force reference |>flow_ok in
@@ -256,7 +256,7 @@ let () =
         let ordinary=evaluate(Printf.sprintf "(sop/attr geo :checked :owner %s :type %s)" owner_name kind) in
         let ordinary_program=Flow_ir.Executor.compile ~strict:true ordinary |>flow_ok in
         List.iter(function Error d->assert(d.Diagnostic.code="E_NONFINITE")|Ok _->assert false)
-          [E.Private.force_reference ~resolve ordinary ~live;
+          [E.Host.force_reference ~resolve ordinary ~live;
            Flow_ir.Executor.force ~strict:true ~resolve ordinary_program ~live]
       end;
       if count=6 && bad=infinity then begin
@@ -286,22 +286,22 @@ let () =
   let live=Input.at_time 0. in
   let missing=evaluate "(sop/attr_checked geo :missing)" in
   List.iter(function Error d->assert(d.Diagnostic.code="E_ATTR_TYPE")|Ok _->assert false)
-    [E.Private.force_reference ~resolve missing ~live;
+    [E.Host.force_reference ~resolve missing ~live;
      Flow_ir.Executor.force ~strict:true ~resolve(Flow_ir.Executor.compile ~strict:true missing |>flow_ok) ~live];
   let lazy_query=evaluate "(if (> t 0) (sop/attr_checked geo :missing) (sop/attr_checked geo :P))" in
   let program=Flow_ir.Executor.compile ~strict:true lazy_query |>flow_ok in
   List.iter(fun reference->
     let force time=let live=Input.at_time time in
-      if reference then E.Private.force_reference ~resolve lazy_query ~live
+      if reference then E.Host.force_reference ~resolve lazy_query ~live
       else Flow_ir.Executor.force ~strict:true ~resolve program ~live in
     ignore(force (-1.) |>flow_ok);
     (match force 1. with Error d->assert(d.code="E_ATTR_TYPE")|Ok _->assert false);
     ignore(force (-1.) |>flow_ok))[false;true];
-  (match E.Private.force_reference ~resolve:(Flow_sop.Attribute_kernel.resolve ~geometry:(fun _->None)) missing ~live with
+  (match E.Host.force_reference ~resolve:(Flow_sop.Attribute_kernel.resolve ~geometry:(fun _->None)) missing ~live with
    |Error d->assert(d.code="E_DATA_SOURCE")|Ok _->assert false);
   List.iter(fun kind->
     let source="(workspace bad_checked (graph g :context sop (let* [geo (sop/line) data (sop/attr_checked geo :P :type "^kind^")] geo)))" in
-    let _,ds=Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]}(Flow.Syntax.parse source |>flow_ok) in
+    let _,ds=Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Catalog.{version=1;kinds=[]}(Flow.Syntax.parse source |>flow_ok) in
     assert(List.exists(fun(d:Diagnostic.t)->d.code="E_ATTR_TYPE")ds))
     ["int";"text";"float_array";"int_array";"(if true \"float\" \"vec3\")"];
   print_endline "Checked attributes: numeric/all-owner finite classification, raw bytes, strict/reference/domain copies and ordinary nonfinite guards pass"
@@ -404,7 +404,7 @@ let () =
     List.iter(fun(kind,body)->
       let forms=Flow.Syntax.parse(Printf.sprintf
         "(workspace fills (graph g :context sop [(geo : geometry nil)] (let* [data %s mask (array/int (sop/count geo :points) (int (/ 1 (- t 2))))] geo)))" body) |>flow_ok in
-      let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]}forms with
+      let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Catalog.{version=1;kinds=[]}forms with
         |Some checked,[]->checked|_,diagnostics->fail(String.concat "; "(List.map Diagnostic.to_string diagnostics)) in
       let evaluation=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]]checked |>flow_ok in
       let values=List.assoc["g";"data"]evaluation.records |>List.hd |>snd in
@@ -862,7 +862,7 @@ let () =
     Fun.protect ~finally:(fun()->Session.close session)(fun()->
       let image=cook session ~domains ~time:0. (Flow_sop.Image_kernel.node kernel)
         |> Result.get_ok |> fun output->Sop.Payload.image output.payload |> Result.get_ok in
-      Sop.Image.Private.rgba8 image |> Option.get)in
+      Sop.Image.rgba8 image |> Option.get)in
   let initial=bytes 1 kernel in
   assert(initial=bytes 8 kernel);
   if Char.code(Bytes.get initial 0)<>82 then
@@ -920,7 +920,7 @@ let () =
     (* x is a non-dyadic lattice: the probe must use the same fused multiply-add as the cook. *)
     if j mod 3 = 0 then Float.fma (float_of_int index) (4.1 /. 24.) (-2.1)
     else Float.fma (float_of_int index) (4. /. 24.) (-2.)) in
-  let values = E.Private.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
+  let values = E.Host.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
       fn [E.Vec3_array positions] |> flow_ok in
   let program = Flow_sop.Attribute_kernel.prepare ~sources:[] [] values |> flow_ok in
   let packed = Option.get (Flow_ir.Executor.packed_region program) in
@@ -969,7 +969,7 @@ let () =
   let counts = Flow_graph.Probe.counts probe pane ~probe:(fun _ -> 0) in
   let count = match List.assoc_opt zone.path counts with
     | Some count -> count
-    | None -> let scope, iter = E.Private.function_scope fn |> Option.get in
+    | None -> let scope, iter = E.Host.function_scope fn |> Option.get in
         failwith (Printf.sprintf "field probe: projection %s, function %s/%s, counts %s"
           (String.concat "/" zone.path) (String.concat "/" scope)
           (String.concat "," (List.map string_of_int iter))
@@ -1007,7 +1007,7 @@ let () =
     let call = Array.find_opt (fun (n : E.node) -> n.kind = "sop/iso_surface")
       lowered.plan.nodes |> Option.get in
     let fn = match List.assoc "field" call.args with E.Fn fn -> fn | _ -> assert false in
-    let values = E.Private.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
+    let values = E.Host.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
       fn [E.Vec3_array positions] |> flow_ok in
     Flow_sop.Attribute_kernel.prepare ~sources:[] [] values |> flow_ok in
   let derived = prepare "(- (length (- p [0.2 -0.3 0.1])) (+ 0.8 t))"
@@ -1183,7 +1183,7 @@ let () =
         Option.bind (List.find_index ((=) id) sources) (fun index -> List.nth_opt source_geometries index)) in
       List.iter (fun time ->
         let live = Input.at_time time in
-        let expected = E.Private.force_reference ~resolve values ~live |> flow_ok in
+        let expected = E.Host.force_reference ~resolve values ~live |> flow_ok in
         List.iter (fun domains -> Parallel.run ~domains (fun () ->
           let actual = Flow_ir.Executor.force ~resolve program ~live |> flow_ok in
           let modern = Flow_ir.Executor.force ~strict:true ~resolve modern_program ~live |> flow_ok in
@@ -1363,7 +1363,7 @@ let () =
     let before=geometry_bytes original in
     List.iter(fun(kind,fill)->
       let name="array/"^kind in
-      let marker=Flow.Op.Private.constant_array_descriptor name ["count",E.Int count;"value",fill] in
+      let marker=Flow.Op.constant_array_descriptor name ["count",E.Int count;"value",fill] in
       if kind="float" then begin
         let selection=E.Int_array(Array.make count 1) in
         (match Flow_sop.Attribute_kernel.write_selected ~grain:97 ~owner:Attribute.Point ~kind "constant"

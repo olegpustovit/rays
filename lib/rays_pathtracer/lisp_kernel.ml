@@ -80,7 +80,7 @@ let text f =
 type kernel = {
   runner : Flow_gpu.Run.t;
   msl : Flow_gpu.Emit.msl;
-  base : Flow_ir.Packed.Private.inputs;
+  base : Flow_ir.Packed.Host.inputs;
   slots : (string * Flow.Ty.t) option array;  (* the placeholder each uniform reads *)
   zeros : float array array;  (* a bound table's length stand-in: its gather clamp reads the array length *)
   mutable indices : float array;  (* the pixel input's length stand-in; the device buffer holds the indices *)
@@ -102,7 +102,7 @@ let compile f =
   match Flow.Syntax.parse (text f) with
   | Error d -> Error (Diagnostic.to_string d)
   | Ok syntax ->
-  match Flow.Workspace.check ~ops { Flow.Check.version = 1; kinds = [] } syntax with
+  match Flow.Workspace.check ~ops { Flow.Catalog.version = 1; kinds = [] } syntax with
   | None, ds | Some _, (_ :: _ as ds) -> Error (diagnostics ds)
   | Some ws, [] ->
   let* evaluated = Result.map_error (fun d -> "path tracer kernels: " ^ Diagnostic.to_string d) (E.static ~record:true ws) in
@@ -117,23 +117,23 @@ let kernel t ~lease ~pipelines name =
   match List.assoc_opt name t.kernels with
   | Some k -> Ok k
   | None ->
-      let bound = Flow.Eval.Private.map_function_bindings (function
+      let bound = Flow.Eval.Host.map_function_bindings (function
         | Flow.Value.Source (n, _, []) when String.starts_with ~prefix:"pt/" n ->
             snd (List.assoc (String.sub n 3 (String.length n - 3)) t.values)
         | value -> value) (List.assoc name t.fns) in
       let inputs = if name = "trace" then [ t.pixels; t.pixels ] else [ t.pixels ] in
-      let* residual = match Flow.Eval.Private.map_function ~signature:{ params = List.map (fun _ -> Flow.Ty.Int) inputs; result = Vec4 }
+      let* residual = match Flow.Eval.Host.map_function ~signature:{ params = List.map (fun _ -> Flow.Ty.Int) inputs; result = Vec4 }
                               bound inputs with
         | Ok (E.Residual r) -> Ok r | Ok _ -> Error "path tracer kernel did not defer"
         | Error d -> Error (name ^ ": " ^ Diagnostic.to_string d) in
       let* template = Option.to_result ~none:("path tracer kernel " ^ name ^ " has no device template")
           (Packed.compile_template residual (E.Residual.residual_view residual).term) in
       let* msl = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_gpu.Emit.kernel ~fast:true ~instanced:t.instanced ~motion:t.motion ?curves:t.curves template) in
-      let* base = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_ir.Packed.Private.prepare ~fast:true template ~live:(Input.at_time 0.)) in
+      let* base = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_ir.Packed.Host.prepare ~fast:true template ~live:(Input.at_time 0.)) in
       let slots = Array.map (function
-        | Flow_ir.Packed.Private.Value v ->
+        | Flow_ir.Packed.Host.Value v ->
             Option.map (fun (n, (ty, _)) -> n, ty) (List.find_opt (fun (_, (_, p)) -> p == v) t.values)
-        | _ -> None) (Flow_ir.Packed.Private.uniform_shapes template) in
+        | _ -> None) (Flow_ir.Packed.Host.uniform_shapes template) in
       let k = { runner = Flow_gpu.Run.create lease pipelines msl; msl; base; slots; zeros = Array.copy base.tables;
                 indices = [||] } in
       t.kernels <- (name, k) :: t.kernels;
@@ -173,7 +173,7 @@ let close t = List.iter (fun (_, k) -> Flow_gpu.Run.close k.runner) t.kernels; t
 (* The CPU walker's run of kernel [name] over [pixels] (the oracle a device film is checked against): [words n]
    gives uniform [n] and [value n] table [n] as host values. *)
 let cpu t ~words ~value ~pixels name =
-  let bound = Flow.Eval.Private.map_function_bindings (function
+  let bound = Flow.Eval.Host.map_function_bindings (function
     | Flow.Value.Source (n, _, []) when String.starts_with ~prefix:"pt/" n ->
         let n = String.sub n 3 (String.length n - 3) in
         (match fst (List.assoc n t.values) with
@@ -183,7 +183,7 @@ let cpu t ~words ~value ~pixels name =
          | _ -> E.Float (words n).(0))
     | value -> value) (List.assoc name t.fns) in
   let inputs = if name = "trace" then [ pixels; pixels ] else [ pixels ] in
-  match Flow.Eval.Private.map_function ~signature:{ params = List.map (fun _ -> Flow.Ty.Int) inputs; result = Vec4 } bound inputs with
+  match Flow.Eval.Host.map_function ~signature:{ params = List.map (fun _ -> Flow.Ty.Int) inputs; result = Vec4 } bound inputs with
   | Error d -> Error (Diagnostic.to_string d)
   | Ok (E.Residual r) ->
       Result.map_error diagnostics (let* program = Packed.compile_result r (E.Residual.residual_view r).term in

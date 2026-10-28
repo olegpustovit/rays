@@ -62,7 +62,7 @@ let record result =
           (match d.span with Some s -> Printf.sprintf " %d..%d" s.start s.finish | None -> "") d.message) ds;
       add "\n"
   | Ok packed ->
-      let view = P.Private.view packed in
+      let view = P.Host.view packed in
       add "program\n";
       Array.iteri (fun i x -> add "  r%d = %s\n" i (instruction x)) view.code;
       add "  widths %s\n%s  uniform_widths %s\n  collecting %b\n"
@@ -76,10 +76,10 @@ let record result =
   if not (Hashtbl.mem seen text) then (Hashtbl.add seen text (); Buffer.add_string buffer text)
 
 let start () =
-  Buffer.clear buffer; Hashtbl.reset seen; P.Private.trace := record
+  Buffer.clear buffer; Hashtbl.reset seen; P.Host.trace := record
 
 let finish name =
-  P.Private.trace := ignore;
+  P.Host.trace := ignore;
   let text = Buffer.contents buffer in
   match Sys.getenv_opt "REGION_SNAPSHOT_DIR" with
   | Some dir -> Out_channel.with_open_text (Filename.concat dir (name ^ ".txt")) (fun c -> output_string c text)

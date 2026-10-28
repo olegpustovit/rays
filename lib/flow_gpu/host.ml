@@ -100,7 +100,7 @@ let backend t : G.backend =
 type placeholder={key:Obj.t;kind:int;buffer:Ogpu.Backend.buffer*int;length:int;cell:(Ogpu.Backend.buffer*int)option}
 let resident ~fast t : Flow_ir.Core_exec.resident =
   let module E=Flow.Eval in
-  let module P=Flow_ir.Packed.Private in
+  let module P=Flow_ir.Packed.Host in
   let queue=Renderer.gpu_queue t.gpu in
   let table=ref [] and epoch=ref 0L and status_runs=ref [] in
   let pending=ref None in
@@ -279,16 +279,10 @@ let close t=
     List.iter(fun b->ignore(Ogpu.Backend.destroy_buffer b))(Option.fold ~none:[] ~some:(fun(b,_)->[b])t.iota@t.retired_buffers);
     t.iota<-None;t.retired_buffers<-[];Hashtbl.reset t.pool;
     Hashtbl.iter(fun _ bs->List.iter(fun b->ignore(Ogpu.Backend.destroy_buffer b))bs)t.buffers;Hashtbl.reset t.buffers;Pipelines.close t.pipelines;t.closed<-true end
-module Private=struct
-  type nonrec stats=stats={runners_created:int;runners_released:int;
-    pipeline_compilations:int;pipeline_releases:int;buffer_creations:int;
-    input_uploads:int;input_uploaded_bytes:int;status_reads:int;readback_bytes:int}
-  let zero=zero
-  let stats t=
-    if Domain.self()<>t.domain then invalid_arg "Host.Private.stats: creating domain required";
-    let totals=ref !(t.retired)in
-    Cache.iter t.runners(fun _ runner->totals:=add_run !totals runner.run);
-    {!totals with runners_created= !(t.created);
-      pipeline_compilations=Pipelines.Private.compilations t.pipelines;
-      pipeline_releases=Pipelines.Private.releases t.pipelines}
-end
+let stats t=
+  if Domain.self()<>t.domain then invalid_arg "Host.stats: creating domain required";
+  let totals=ref !(t.retired)in
+  Cache.iter t.runners(fun _ runner->totals:=add_run !totals runner.run);
+  {!totals with runners_created= !(t.created);
+    pipeline_compilations=Pipelines.Private.compilations t.pipelines;
+    pipeline_releases=Pipelines.Private.releases t.pipelines}

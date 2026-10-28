@@ -167,7 +167,7 @@ let release_headless()=match !headless_gpu with
   |None->()
 let acquire_device operation=
   let shared=match !active_window with
-    |Some({runtime;dead=false;_} as value) when Runtime.Private.is_window runtime->
+    |Some({runtime;dead=false;_} as value) when Runtime.is_window runtime->
         Some(Ok (Scene_execution.device value.renderer,value.gpu_owner))
     |Some _|None->None in
   match shared with
@@ -175,7 +175,7 @@ let acquire_device operation=
   |Some(Error e)->backend operation e
   |None->(match !headless_gpu with
     |Some(device,owner,count)->incr count;Ok(device,false,owner)
-    |None->let driver,_=Ogpu.Impl.create_driver()in
+    |None->let driver = Ogpu.Impl.create_driver () in
         match Ogpu.Backend.create_device driver with
         |Error e->backend operation e
         |Ok device->let owner=create_gpu_owner()in headless_gpu:=Some(device,owner,ref 1);Ok(device,false,owner))
@@ -210,9 +210,9 @@ let create (configuration:configuration) =
     |Ok runtime->match Runtime.set_resizable runtime true with
       |Error e->ignore(Runtime.destroy runtime);backend operation e
       |Ok()->
-        (match Runtime.Private.surface_configuration runtime with
+        (match Runtime.surface_configuration runtime with
          |Error error->ignore(Runtime.destroy runtime);backend operation error
-         |Ok surface->let driver,_=Ogpu.Impl.create_driver() in
+         |Ok surface->let driver = Ogpu.Impl.create_driver () in
              let gpu_owner=create_gpu_owner()in
              (match Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend
                  ~gpu_vertices:gpu_owner.scene_vertices
@@ -231,9 +231,9 @@ let create_offscreen (configuration:configuration)=
       ~height:configuration.drawable_height () with
   |Error error->release_device lease_shared gpu_owner;backend operation error
   |Ok runtime->
-      (match Runtime.Private.surface_configuration runtime with
+      (match Runtime.surface_configuration runtime with
        |Error error->ignore(Runtime.destroy runtime);release_device lease_shared gpu_owner;backend operation error
-       |Ok surface->let driver,_=Ogpu.Impl.create_driver() in
+       |Ok surface->let driver = Ogpu.Impl.create_driver () in
          (match Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend
              ~device ~gpu_vertices:gpu_owner.scene_vertices ~offscreen:true ~driver ~configuration:surface () with
           |Error error->ignore(Runtime.destroy runtime);release_device lease_shared gpu_owner;backend operation error
@@ -241,11 +241,11 @@ let create_offscreen (configuration:configuration)=
               ~owns_device_lease:true gpu_owner runtime renderer)))
 let ensure operation value=if value.dead then fail operation Ogpu.Error.Stale_handle"renderer is destroyed"else Ok()
 let sync_runtime_facts operation value =
-  match Runtime.Private.sync_facts value.runtime with
+  match Runtime.sync_facts value.runtime with
   |Error error->backend operation error
   |Ok()->let facts=Runtime.frame_facts value.runtime in
       if facts=value.renderer_facts then Ok() else
-      match Runtime.Private.surface_configuration value.runtime with
+      match Runtime.surface_configuration value.runtime with
       |Error error->backend operation error
       |Ok configuration->match Scene_execution.resize value.renderer configuration with
           |Error error->backend operation error
@@ -333,7 +333,7 @@ let snapshot value ~lease_policy ~density source =
         fail operation Ogpu.Error.Stale_handle"image snapshot is destroyed"
       else let key="image:"^string_of_int(Runtime_resources.Image.identity image)
       and generation=Runtime_resources.Image.generation image in
-      (match Runtime_resources.Image.Private.gpu_snapshot image with
+      (match Runtime_resources.Image.gpu_snapshot image with
       |Error e->resource operation e
       |Ok(Some(width,height,generation,gpu))->
           let sampler:Ogpu.Types.sampler_descriptor={label=Some"scene-image";
@@ -346,14 +346,14 @@ let snapshot value ~lease_policy ~density source =
       |Ok None->
       (match find key generation with
       |Some cached->Ok cached
-      |None->match Runtime_resources.Image.Private.borrow_snapshot image with
+      |None->match Runtime_resources.Image.borrow_snapshot image with
       |Ok(width,height,borrowed_generation,pixels,lease)->
           let sampler:Ogpu.Types.sampler_descriptor={label=Some"scene-image";min_filter=Linear;mag_filter=Linear;
             mip_filter=No_mip;address_u=Clamp_to_edge;address_v=Clamp_to_edge;lod_min=0.;lod_max=0.;max_anisotropy=1}in
           let cacheable=Bytes.length pixels<=snapshot_cache_entry_byte_capacity in
           let bytes=if cacheable then
             Fun.protect
-              ~finally:(fun()->Runtime_resources.Image.Private.release_snapshot lease)
+              ~finally:(fun()->Runtime_resources.Image.release_snapshot lease)
               (fun()->Bytes.copy pixels)
           else match lease_policy with
             |Retain_image_snapshots leases->
@@ -361,7 +361,7 @@ let snapshot value ~lease_policy ~density source =
                 pixels
             |Copy_image_snapshots->
                 Fun.protect
-                  ~finally:(fun()->Runtime_resources.Image.Private.release_snapshot lease)
+                  ~finally:(fun()->Runtime_resources.Image.release_snapshot lease)
                   (fun()->Bytes.copy pixels)in
           (* The generation is part of the GPU texture key: a replaced image
              (same identity, new pixels) then misses the executor's static
@@ -376,21 +376,21 @@ let snapshot value ~lease_policy ~density source =
   |Text text->
       (* Text snapshots are immutable and uniquely identified, like images:
          a hit touches no pixels, a miss copies them once. *)
-      let key="text:"^string_of_int(Runtime_resources.Text.Private.identity text)
+      let key="text:"^string_of_int(Runtime_resources.Text.identity text)
       and generation=Runtime_resources.Text.generation text in
       (match if Runtime_resources.Text.destroyed text then None
          else find key generation with
        |Some cached->Ok cached
        |None->match Runtime_resources.Text.size text,
-           Runtime_resources.Text.Private.borrow_pixels text with
+           Runtime_resources.Text.borrow_pixels text with
         |Ok(width,height),Ok pixels->finish key generation width height pixels
         |Error e,_|_,Error e->resource operation e)
   |Canvas canvas->
-      let key="canvas:"^string_of_int(Runtime_resources.Canvas.Private.identity canvas)in
+      let key="canvas:"^string_of_int(Runtime_resources.Canvas.identity canvas)in
       (* A canvas rendered on this window's device is sampled in place. *)
-      let gpu=match Runtime_resources.Canvas.Private.gpu_snapshot canvas with
-        |Some(width,height,generation,texture) when Runtime.Private.is_window value.runtime->
-            let device_id,_=Ogpu.Backend.Private.texture_driver_token texture in
+      let gpu=match Runtime_resources.Canvas.gpu_snapshot canvas with
+        |Some(width,height,generation,texture) when Runtime.is_window value.runtime->
+            let device_id,_=Ogpu.Backend.texture_driver_token texture in
             (match Ok (Scene_execution.device value.renderer) with
              |Ok device when Ogpu.Handle.device_id(Ogpu.Backend.device_handle device)=device_id->
                  Some(width,height,generation,texture)
@@ -418,11 +418,11 @@ let lower_scene2_uncached value ~lease_policy ~density ~resource:resolve ir =
       let resolve_gpu shapes = match Scene_command.Ui_batch.marks shapes with
         | None -> Ok None
         | Some token ->
-            let identity=Scene_command.Marks.Private.gpu_identity token in
+            let identity=Scene_command.Marks.gpu_identity token in
             (match Hashtbl.find_opt value.gpu_owner.marks_registry identity with
              | Some source when valid_gpu_marks source &&
-                 source.marks_stamp=Scene_command.Marks.Private.gpu_stamp token &&
-                 source.marks_count=Scene_command.Marks.Private.gpu_count token ->
+                 source.marks_stamp=Scene_command.Marks.gpu_stamp token &&
+                 source.marks_count=Scene_command.Marks.gpu_count token ->
                  if source.marks_gpu.gpu_device == Scene_execution.device value.renderer
                  then Ok (Some (gpu_marks_key source))
                  else Error "GPU shapes belong to another device"
@@ -432,7 +432,7 @@ let lower_scene2_uncached value ~lease_policy ~density ~resource:resolve ir =
         ~snapshot:(fun ~density source ->
           snapshot value ~lease_policy ~density source)
         ~resolve_gpu ~rollback
-        (Scene_command.Render_ir.Private.commands_readonly ir)
+        (Scene_command.Render_ir.commands_readonly ir)
 (* A plan holding a GPU shape token is lowered again every time: the token's
    source can go stale, and only lowering checks that. *)
 let has_gpu_shapes commands=Array.exists(function
@@ -440,8 +440,8 @@ let has_gpu_shapes commands=Array.exists(function
   |_->false)commands
 let lower_scene2_with_policy value ~lease_policy ~density ~resource:resolve ir =
   if value.dead then lower_scene2_uncached value~lease_policy~density~resource:resolve ir else
-  let commands=Scene_command.Render_ir.Private.commands_readonly ir in
-  let ir_id=Scene_command.Render_ir.Private.identity ir in
+  let commands=Scene_command.Render_ir.commands_readonly ir in
+  let ir_id=Scene_command.Render_ir.identity ir in
   let facts=presentation_facts value|>Result.get_ok in
   let extent=facts.logical_width,facts.logical_height,
     facts.drawable_width,facts.drawable_height in
@@ -467,7 +467,7 @@ let lower_scene2_with_policy value ~lease_policy ~density ~resource:resolve ir =
     let exact (plan:cached_scene2_plan)=
       plan.plan_command_count=command_count&&same_context plan&&
       Renderer_retained_plans.same_resources plan.plan_resources resources&&
-      Scene_command.Render_ir.Private.commands_readonly plan.plan_ir=commands in
+      Scene_command.Render_ir.commands_readonly plan.plan_ir=commands in
     let rebind (plan:cached_scene2_plan)=
       Renderer_retained_plans.rebind value.retained_plans plan ~ir_id ~ir in
     let hit=match Renderer_retained_plans.find value.retained_plans fingerprint with
@@ -718,12 +718,12 @@ let read_pixels value ~bytes_per_row =
 let offscreen_target value=
   let operation="Renderer.offscreen_target"in
   match ensure operation value with Error _ as e->e|Ok()->
-  if Runtime.Private.is_window value.runtime then
+  if Runtime.is_window value.runtime then
     fail operation Ogpu.Error.Unsupported "operation requires an offscreen execution"
   else Ok (Scene_execution.target value.renderer)
 let rec destroy value=if value.dead then Ok()else
   let () = release_views value in
-  if Runtime.Private.is_window value.runtime && value.gpu_owner.shared_leases>0 then
+  if Runtime.is_window value.runtime && value.gpu_owner.shared_leases>0 then
       fail"Renderer.destroy"Ogpu.Error.Invalid_argument
         (string_of_int value.gpu_owner.shared_leases^
          " GPU lease(s) still share this window's device; release them first")
@@ -768,7 +768,7 @@ let make_retained_target (f:presentation_facts) draws=
       match step~clear:(0.,0.,0.,0.)exec draws,offscreen_target exec,
           Runtime_resources.Canvas.create~width:dw~height:dh with
       |Ok(),Ok texture,Ok canvas->
-          (match Runtime_resources.Canvas.Private.publish_gpu canvas texture,
+          (match Runtime_resources.Canvas.publish_gpu canvas texture,
               Scene_command.Render_ir.create[|Scene_command.Render_ir.Image{resource_id=1;
                 source={x=0.;y=0.;width=float dw;height=float dh};
                 destination={x=0.;y=0.;width=float f.logical_width;height=float f.logical_height}}|]with
@@ -779,7 +779,7 @@ let make_retained_target (f:presentation_facts) draws=
 let adopt_retained_view submission ~density ~layer draws=
   let value=submission.owner in
   let direct()=adopt_draws submission draws in
-  if not (Runtime.Private.is_window value.runtime) then direct() else
+  if not (Runtime.is_window value.runtime) then direct() else
   match presentation_facts value with
   |Error _->direct()
   |Ok f->
@@ -846,9 +846,9 @@ module Private=struct
           ~logical_width:configuration.logical_width ~logical_height:configuration.logical_height
           ~width:configuration.drawable_width ~height:configuration.drawable_height()with
         |Error error->backend operation error
-        |Ok runtime->(match Runtime.Private.surface_configuration runtime with
+        |Ok runtime->(match Runtime.surface_configuration runtime with
           |Error error->ignore(Runtime.destroy runtime);backend operation error
-          |Ok surface->let driver,_=Ogpu.Impl.create_driver() in
+          |Ok surface->let driver = Ogpu.Impl.create_driver () in
             match Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend
                 ~device:gpu.gpu_device ~gpu_vertices:gpu.gpu_owner.scene_vertices
                 ~offscreen:true ~driver ~configuration:surface () with
@@ -922,7 +922,7 @@ module Private=struct
           let device=List.rev !device in
           if not !changed&&valid_gpu_marks value&&List.length device=List.length value.marks_device
              &&List.for_all2(fun(_,a)(_,b)->a==b)device value.marks_device then
-            Ok(Scene_command.Marks.Private.gpu_token~identity:value.marks_id~count
+            Ok(Scene_command.Marks.gpu_token~identity:value.marks_id~count
               ~stamp:value.marks_stamp)
           else begin
             unregister_marks value;
@@ -934,7 +934,7 @@ module Private=struct
               ~vertex_count:(4*count)~valid:(fun()->valid_gpu_marks value)()with
             |Error e->value.marks_device<-[];backend operation e
             |Ok registration->value.marks_registration<-Some registration;
-                Ok(Scene_command.Marks.Private.gpu_token~identity:value.marks_id~count
+                Ok(Scene_command.Marks.gpu_token~identity:value.marks_id~count
                   ~stamp:value.marks_stamp)
           end)))
     end
@@ -943,7 +943,7 @@ module Private=struct
     {Scene_execution.family=x.family;blend=x.blend;texture=x.texture;auxiliary=x.auxiliary;
      vertex_attributes=x.vertex_attributes;samples=x.samples;draw=x.draw})batch.batch_draws)
   let snapshot_count_for_test value=Snapshot_table.length value.snapshots
-  let window_handle value=Runtime.Private.window_handle value.runtime
+  let window_handle value=Runtime.window_handle value.runtime
   type nonrec submission=submission
   type nonrec batch=batch
   let begin_submission=begin_submission

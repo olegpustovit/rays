@@ -5,7 +5,7 @@ let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked ?(ops = []) body =
   let text = "(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.0)))" in
   let forms = ok (Flow.Syntax.parse text) in
-  match Flow.Workspace.check ~ops {Flow.Check.version = 1; kinds = []} forms with
+  match Flow.Workspace.check ~ops {Flow.Catalog.version = 1; kinds = []} forms with
     | Some w, [] -> w
     | _, ds -> failwith (text ^ "\n" ^ String.concat "; " (List.map Diagnostic.to_string ds))
 let recorded ?ops body =
@@ -16,9 +16,9 @@ let same a b = match a, b with
   | Error a, Error b -> Diagnostic.to_string a = Diagnostic.to_string b
   | _ -> false
 let () =
-  let trace = !I.Packed.Private.trace in
-  Fun.protect ~finally:(fun () -> I.Packed.Private.trace := trace) (fun () ->
-    I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  Fun.protect ~finally:(fun () -> I.Packed.Host.trace := trace) (fun () ->
+    I.Packed.Host.trace := ignore;
     let packed = Test_program.compile "(map (fn [index]
       (let* [x (+ (float index) t)]
         (if (< (mod x 2053.0) 1025.0)
@@ -52,8 +52,8 @@ let compile ?fusion residual term =
   (match legacy, I.Packed.compile_result ?fusion residual term with
    | None, Error [_] -> ()
    | Some a, Ok b ->
-       assert (Marshal.to_string (I.Packed.Private.view a) [Marshal.No_sharing]
-         = Marshal.to_string (I.Packed.Private.view b) [Marshal.No_sharing]);
+       assert (Marshal.to_string (I.Packed.Host.view a) [Marshal.No_sharing]
+         = Marshal.to_string (I.Packed.Host.view b) [Marshal.No_sharing]);
        assert (I.Packed.stage_count a = I.Packed.stage_count b
          && I.Packed.provenance a = I.Packed.provenance b
          && I.Packed.static_count a = I.Packed.static_count b)
@@ -61,7 +61,7 @@ let compile ?fusion residual term =
   legacy
 let () =
   if Array.exists (fun arg -> arg="--bench-product" || arg="--bench-product-row" || arg="--bench-float-product" || arg="--bench-int-scale") Sys.argv then begin
-    I.Packed.Private.trace := ignore;
+    I.Packed.Host.trace := ignore;
     let count = 1_000_000 and width = 16 in
     let integer = Array.exists ((=) "--bench-int-scale") Sys.argv in
     let repeated_row = Array.exists ((=) "--bench-product-row") Sys.argv in
@@ -102,13 +102,13 @@ let () =
       let native_seconds, native_bytes = measure native in
       let seconds, allocated = measure (fun () -> ok (I.Packed.force ~strict:true packed ~live)) in
       Printf.printf "%s count=%d width=%d registers=%d domains=%d native_seconds=%.6f packed_seconds=%.6f ratio=%.3f native_allocated_bytes=%.0f packed_allocated_bytes=%.0f\n%!"
-        (if integer then "integer_scale" else if float_product then "product_float_bank" else "product_float") count width (Array.length (I.Packed.Private.view packed).code) domains
+        (if integer then "integer_scale" else if float_product then "product_float_bank" else "product_float") count width (Array.length (I.Packed.Host.view packed).code) domains
         native_seconds seconds (seconds /. native_seconds) native_bytes allocated)) [1;4];
     exit 0
   end
 let () =
   if Array.exists ((=) "--bench-guarded") Sys.argv then begin
-    I.Packed.Private.trace := ignore;
+    I.Packed.Host.trace := ignore;
     let count = 1_000_000 in
     let packed = Test_program.compile (Printf.sprintf
       "(map (fn [x] (if (< (mod x 2.0) 1.0)\n\
@@ -125,13 +125,13 @@ let () =
       Array.sort (fun (a, _) (b, _) -> Float.compare a b) trials;
       let seconds, allocated = trials.(1) in
       Printf.printf "guarded_float count=%d registers=%d domains=%d median_seconds=%.6f allocated_bytes=%.0f\n%!"
-        count (Array.length (I.Packed.Private.view packed).code) domains seconds allocated)) [1;4];
+        count (Array.length (I.Packed.Host.view packed).code) domains seconds allocated)) [1;4];
     exit 0
   end
 
 let () =
-  let trace= !I.Packed.Private.trace in
-  I.Packed.Private.trace:=ignore;
+  let trace= !I.Packed.Host.trace in
+  I.Packed.Host.trace:=ignore;
   let count=32769 in
   let source=Printf.sprintf "(array/range %d :type int)" count in
   let cases=[
@@ -153,16 +153,16 @@ let () =
     let packed=Option.get(I.Packed.compile residual (E.Residual.residual_view residual).term) in
     List.iter(fun frame->
       let live={(Input.at_time 0.25)with frame} in
-      let expected=E.Private.force_reference value ~live in
+      let expected=E.Host.force_reference value ~live in
       List.iter(fun domains->Parallel.run ~domains(fun()->
         if not(same expected (I.Packed.force ~strict:true packed ~live))then
           failwith("Typed block parity: "^body))) [1;4;8]) [0;42]) cases;
-  I.Packed.Private.trace:=trace;
+  I.Packed.Host.trace:=trace;
   print_endline "Typed blocks: exact integers, guards, mixed scalar/vector outputs, skipped products, wrapping ordered folds/scans and selected errors agree at one/four/eight domains"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   let base=Test_program.compile ~fusion:false
     "(for [index (array/range 32769 :type int) component (map (fn [x] (+ x t)) (array/range 7))] component)" in
   let region=base in
@@ -205,12 +205,12 @@ let () =
   let packed,ordinary=make (E.Float_array [|infinity|]) [|0.|] in
   assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.force ~strict:true ordinary ~live));
   (match I.Packed.force ~strict:true packed ~live with Error d->assert(d.code="E_ARRAY_TYPE")|_->assert false);
-  I.Packed.Private.trace := trace;
+  I.Packed.Host.trace := trace;
   print_endline "Product row projection: repeated bits, empty sources, selected errors, sinks and one/four/eight domains passed"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   List.iter(fun body->let packed=Test_program.compile ~fusion:false body in
     List.iter(fun time->let live=Input.at_time time in
       List.iter(fun domains->Parallel.run ~domains(fun()->
@@ -222,12 +222,12 @@ let () =
      "(map (fn [x] (if (< x 2) (int/sub 0 x) (int/add x 7))) (array/range (int t) :type int))";
      "(map (fn [x] (int/add x 1)) (array/range (int/add -1 (int t)) :type int))";
      Printf.sprintf "(map (fn [x] (int/add x 1)) (array/range (int/add %d (int t)) :type int))" (Sys.max_array_length+1)];
-  I.Packed.Private.trace:=trace;
+  I.Packed.Host.trace:=trace;
   print_endline "Integer range views: captured counts, Cartesian/guarded indices, empty/changing frames and range diagnostics match reference at one/four/eight domains"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   List.iter(fun count->List.iter(fun factor->List.iter(fun reverse->
     let operation=Printf.sprintf (if reverse then "(int/mul %d x)" else "(int/mul x %d)") factor in
     let packed=Test_program.compile(Printf.sprintf
@@ -244,18 +244,18 @@ let () =
       assert(same(I.Packed.force ~strict:true skipped ~live)
         (Ok(E.Int_array(Array.init(count-1)(fun i->(if i<1 then i else i+1)*factor)))))
     end)[false;true])[0;1;-3;max_int;min_int])[0;1;32769];
-  I.Packed.Private.trace:=trace;
+  I.Packed.Host.trace:=trace;
   print_endline "Integer scaling: exact wrapping constants, empty/multi-block/reference/domain bytes and skipped rows pass"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   let count=32769 in
   let fn=match recorded
     "(fn [(mask : int) (p : vec4)] (if (int/eq mask 1) [t 2 3 4] p))" with E.Fn f->f|_->assert false in
   let mask=Array.init count(fun i->i mod 2) in
   let marker=E.Source("test/borrow_columns",Flow.Ty.Array Flow.Ty.Vec4,[]) in
-  let value=ok(E.Private.map_function ~signature:Flow.Ty.{params=[Int;Vec4];result=Vec4}
+  let value=ok(E.Host.map_function ~signature:Flow.Ty.{params=[Int;Vec4];result=Vec4}
     fn [E.Int_array mask;E.Vec4_array(Array.make(count*4)0.)]) in
   let packed=match value with E.Residual r->Option.get(compile r(E.Residual.residual_view r).term)|_->assert false in
   let region=packed in
@@ -291,12 +291,12 @@ let () =
   refusal "E_ARRAY_COUNT" [|{columns.(0)with data=[||];offset=0};columns.(1);columns.(2);columns.(3)|];
   let bad=Array.copy data in bad.(0)<-nan;
   refusal "E_NONFINITE" (Array.map(fun(c:I.Packed.column)->{c with data=bad})columns);
-  I.Packed.Private.trace := trace;
+  I.Packed.Host.trace := trace;
   print_endline "Typed borrowed columns: mixed Int/Vec4 inputs, exact planes, no source materialization and selected errors passed"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   let count = 32769 in
   let bodies =
     ["(if (< (mod x 2.0) 1.0) (if (< (mod x 4.0) 1.0) (+ (sin x) t) (- (cos x) t)) (+ x t))";
@@ -332,12 +332,12 @@ let () =
     ["(if (< x 1.0) t (exp (* x 1000.0)))";
      "(let* [q (* [x x x] 1.7976931348623157e308)] (if (< x -1.0) (noise3 q :seed 31) t))";
      "(if (> x 1.0) (let* [q (* [x x x] 1.7976931348623157e308)] (if (< x -1.0) (noise3 q :seed 31) t)) t)"];
-  I.Packed.Private.trace := trace;
+  I.Packed.Host.trace := trace;
   print_endline "Guarded float blocks: selected spans, nested branches, noise, borrowed columns and skipped sinks match reference at one/eight domains"
 
 let () =
-  let snapshot_trace= !I.Packed.Private.trace in
-  I.Packed.Private.trace:=ignore;
+  let snapshot_trace= !I.Packed.Host.trace in
+  I.Packed.Host.trace:=ignore;
   let fn=match recorded
     "(fn [(p : vec3) (n : vec3)] (+ p (* n t)))" with E.Fn f->f|_->assert false in
   let count=32769 in
@@ -345,20 +345,20 @@ let () =
   let normals=Array.init (count*3) (fun i->if i<Array.length special then special.(i)
     else sin (float i *. 0.73) *. Float.ldexp 1. (i mod 100-50)) in
   let positions=Array.map (fun n-> -.n) normals in
-  let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
+  let value=ok (E.Host.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
     fn [E.Vec3_array positions;E.Vec3_array normals]) in
   let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
   List.iter (fun time->
     let live=Input.at_time time in
-    let expected=E.Private.force_reference value ~live in
+    let expected=E.Host.force_reference value ~live in
     List.iter (fun domains->Parallel.run ~domains (fun()->
       assert (same (I.Packed.force ~strict:true packed ~live) expected))) [1;8])
     [0.;-0.;1.;Float.next_after 1. infinity;0.16];
   let fn=match recorded ~ops:[]
     "(fn [(p : vec3) (n : vec3)] (+ p (* n (* t (noise3 (* p 0.16) :seed 4611686018427387903)))))"
     with E.Fn f->f|_->assert false in
-  let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
+  let value=ok (E.Host.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
     fn [E.Vec3_array positions;E.Vec3_array normals]) in
   let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
@@ -367,7 +367,7 @@ let () =
     |> (function Ok p->p|Error _->assert false) in
   List.iter (fun time->
     let live=Input.at_time time in
-    let expected=E.Private.force_reference value ~live in
+    let expected=E.Host.force_reference value ~live in
     List.iter (fun domains->Parallel.run ~domains (fun()->
       let actual=I.Packed.force ~strict:true packed ~live in
       assert (same actual expected);
@@ -376,7 +376,7 @@ let () =
   let fn=match recorded ~ops:[]
     "(fn [(p : vec3)] [p.z (+ p.y (* t (- (* (noise3 [(* p.x 0.16) (* p.z 0.16) 0.0] :seed -17) 2.0) 1.0))) p.x])"
     with E.Fn f->f|_->assert false in
-  let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
+  let value=ok (E.Host.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
     fn [E.Vec3_array positions]) in
   let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
@@ -384,7 +384,7 @@ let () =
   let ordinary=I.Core.Region.rebuild region ~code:(Array.append region.code [|I.Core.Region.Unary (Sin,0)|]) ()
     |> (function Ok p->p|Error _->assert false) in
   List.iter (fun time->let live=Input.at_time time in
-    let expected=E.Private.force_reference value ~live in
+    let expected=E.Host.force_reference value ~live in
     List.iter (fun domains->Parallel.run ~domains (fun()->
       let actual=I.Packed.force ~strict:true packed ~live in
       assert (same actual expected);
@@ -423,7 +423,7 @@ let () =
     (Array.init 3 (fun _->I.Packed.{data=[||];offset=0;stride=1}))))
     ~count:0 ~outputs:[|[|None;None;None|]|] packed ~live));
   let fn=match recorded "(fn [(p : vec3)] [p.x p.y (+ p.z t)])" with E.Fn f->f|_->assert false in
-  let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
+  let value=ok (E.Host.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
     fn [E.Vec3_array positions]) in
   let identity=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
@@ -438,7 +438,7 @@ let () =
   let expected=match ok (I.Packed.force ~strict:true identity ~live) with E.Vec3_array a->a|_->assert false in
   Array.iteri (fun component plane->Array.iteri (fun i x->assert
     (Int64.bits_of_float x=Int64.bits_of_float expected.(i*3+component))) plane) planes;
-  I.Packed.Private.trace:=snapshot_trace;
+  I.Packed.Host.trace:=snapshot_trace;
   print_endline "Packed output products: stored rounding, cancellation, signed zero and one/eight domains match reference"
 
 let () =
@@ -449,7 +449,7 @@ let () =
     List.iter (fun time ->
       let live=Input.at_time time in
       let output=I.Packed.force packed ~live in
-      assert (same output (E.Private.force_reference value ~live));
+      assert (same output (E.Host.force_reference value ~live));
       assert (same output (Ok (expected time)))) [0.;0.37;2.])
     ["(map (fn [x] ^:bypass (+ (+ x t) (exp 10000.))) (array/range 4))",
        (fun time -> E.Float_array (Array.init 4 (fun i -> float i +. time)));
@@ -463,7 +463,7 @@ let () =
   assert (compile r (E.Residual.residual_view r).term=None);
   let program=ok (I.Executor.compile value) in
   let live=Input.at_time 0.7 in
-  assert (same (I.Executor.force program ~live) (E.Private.force_reference value ~live));
+  assert (same (I.Executor.force program ~live) (E.Host.force_reference value ~live));
   assert (same (I.Executor.force program ~live) (Ok (E.Float_array [|1.;2.;3.;4.|])))
 
 let () =
@@ -480,7 +480,7 @@ let () =
     | _ -> failwith "length kernel did not defer" in
   List.iter (fun time ->
     let live = Input.at_time time in
-    let reference = E.Private.force_reference value ~live in
+    let reference = E.Host.force_reference value ~live in
     (match time, reference with
      | 0., Ok (E.Float_array values) -> assert (Array.for_all ((=) 0.) values)
      | 1., Error d -> assert (d.code = "E_NONFINITE")
@@ -527,7 +527,7 @@ let () =
         failwith ("No CPU kernel (" ^ Flow.Ty.to_string (Flow.Value.ty_of value) ^ "): " ^ body);
       List.iter (fun time ->
         let live = Input.at_time time in
-        let reference = E.Private.force_reference value ~live in
+        let reference = E.Host.force_reference value ~live in
         List.iter (fun domains -> Parallel.run ~domains (fun () ->
           let output = I.Executor.force program ~live in
           if not (same output reference) then failwith (Printf.sprintf "Parity failed (%d domains, t=%g): %s" domains time body);
@@ -544,7 +544,7 @@ let () =
   let program = ok (I.Executor.compile correlated) in
   assert (not (has_cpu program));
   assert (same (I.Executor.force program ~live:(Input.at_time 0.125))
-    (E.Private.force_reference correlated ~live:(Input.at_time 0.125)));
+    (E.Host.force_reference correlated ~live:(Input.at_time 0.125)));
   List.iter (fun body ->
     let value = recorded body in
     let program = ok (I.Executor.compile value) in
@@ -555,7 +555,7 @@ let () =
     assert (I.Packed.stage_count unfused = 1);
     List.iter (fun time ->
       let live = Input.at_time time in
-      let reference = E.Private.force_reference value ~live in
+      let reference = E.Host.force_reference value ~live in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         assert (same (I.Executor.force program ~live) reference);
         assert (same (I.Packed.force unfused ~live) reference))) [1;8]) [0.;0.125;1.25;7.])
@@ -570,7 +570,7 @@ let () =
   let program = ok (I.Executor.compile value) in
   assert (stages program = 1);
   assert (same (I.Executor.force program ~live:(Input.at_time 0.))
-    (E.Private.force_reference value ~live:(Input.at_time 0.)));
+    (E.Host.force_reference value ~live:(Input.at_time 0.)));
   let ticks = ref 0. in
   let profile = I.Profile.create ~clock:(fun () -> ticks := !ticks +. 0.001; !ticks) in
   let value = recorded "(map (fn [y] (* y y)) (map (fn [x] (sin (+ x t))) (array/range 2051)))" in
@@ -597,21 +597,21 @@ let () =
     List.iter (fun time ->
       let live = Input.at_time time in
       assert (same (I.Executor.force program ~live)
-        (E.Private.force_reference value ~live))) [0.;0.25;2.])
+        (E.Host.force_reference value ~live))) [0.;0.25;2.])
     ["(fold [a false] [x (array/range 1024)] (+ x t))";
      "(scan [a false] [x (array/range 1024)] (+ x t))"];
   let fn = match recorded "(fn [(uv : vec2)] [uv.x uv.y t 1])" with
     | E.Fn fn -> fn | _ -> assert false in
   let grid = Array.init (2 * 32769) (fun i -> float (i mod 17) /. 16.) in
   let original = Array.copy grid in
-  let value = ok (E.Private.map_function
+  let value = ok (E.Host.map_function
     ~signature:Flow.Ty.{params = [Vec2]; result = Vec4} fn [E.Vec2_array grid]) in
   let packed = match value with E.Residual r ->
     compile r (E.Residual.residual_view r).term |> Option.get | _ -> assert false in
   assert (I.Packed.static_count packed = Some 32769);
   List.iter (fun time ->
     let live = Input.at_time time in
-    let expected = E.Private.force_reference value ~live in
+    let expected = E.Host.force_reference value ~live in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       let output = I.Packed.force packed ~live in
       assert (same output expected);
@@ -653,7 +653,7 @@ let () =
   let kernel n = "(map (fn [x] (+ t " ^ sins n "x" ^ ")) (array/range 3))" in
   let residual, term = prepare (kernel 61) in
   let packed = Option.get (compile residual term) in
-  assert (Array.length (I.Packed.Private.view packed).code = Flow.Packed_ops.register_limit);
+  assert (Array.length (I.Packed.Host.view packed).code = Flow.Packed_ops.register_limit);
   ignore (refused (kernel 62) "E_PACKED_LIMIT");
   let constant = "(map (fn [x] (+ (+ x t) (pow 1e200 2.0))) (array/range 3))" in
   (* Ordinary static evaluation also rejects this constant. Compile its
@@ -668,7 +668,7 @@ let () =
     span.finish - span.start = String.length "(pow 1e200 2.0)") d.span);
   let parity value packed = List.iter (fun time ->
     let live = Input.at_time time in
-    let reference = E.Private.force_reference value ~live in
+    let reference = E.Host.force_reference value ~live in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       assert (same (I.Packed.force packed ~live) reference))) [1;8]) [0.;0.125;1.25;7.] in
   List.iter (fun vector ->
@@ -686,8 +686,8 @@ let () =
        let child = match term.node with Flow.Workspace.Hof (`Map, [_; child]) -> child | _ -> assert false in
        let child = Option.get (compile ~fusion:false residual child) in
        let packed = Option.get (compile residual term) in
-       assert (Array.length (I.Packed.Private.view packed).code
-         + Array.length (I.Packed.Private.view child).code > Flow.Packed_ops.register_limit);
+       assert (Array.length (I.Packed.Host.view packed).code
+         + Array.length (I.Packed.Host.view child).code > Flow.Packed_ops.register_limit);
        assert (I.Packed.stage_count packed = 1);
        parity value packed
    | _ -> assert false);
@@ -723,7 +723,7 @@ let () =
   List.iter (fun fusion ->
     let packed = Test_program.compile ~fusion
       ("(map (fn [x] " ^ repeated 5 ^ ") (array/range 16385))") in
-    assert (Array.length (I.Packed.Private.view packed).code = 8);
+    assert (Array.length (I.Packed.Host.view packed).code = 8);
     List.iter (fun time ->
       let live = Input.at_time time in
       let reference = I.Packed.reference packed ~live in
@@ -731,7 +731,7 @@ let () =
         assert (same (I.Packed.force packed ~live) reference))) [1;8]) [0.;0.37;2.]) [false;true];
   let signed = Test_program.compile
     "(map (fn [x] [(+ x t) 0.0 -0.0 (+ x t)]) (array/range 4))" in
-  let view = I.Packed.Private.view signed in
+  let view = I.Packed.Host.view signed in
   assert (view.outputs.(0).(0) = view.outputs.(0).(3));
   assert (view.outputs.(0).(1) <> view.outputs.(0).(2));
   List.iter (fun domains -> Parallel.run ~domains (fun () ->
@@ -743,7 +743,7 @@ let () =
       (array/range 4))" in
   assert (I.Packed.gpu_refusals guards = []);
   assert (Array.fold_left (fun n check -> if check then n + 1 else n) 0
-    (I.Packed.Private.finite_checks guards) = 9);
+    (I.Packed.Host.finite_checks guards) = 9);
   print_endline "Packed sharing: repeated expressions fit the register budget, signed zero and domain parity preserved"
 
 let () =
@@ -752,7 +752,7 @@ let () =
   let tiny = recorded "(map (fn [x] (+ x t)) (array/range 1))" in
   let program = ok (I.Executor.compile ~strict:true ~profile tiny) in
   assert (same (I.Executor.force ~strict:true program ~live)
-    (E.Private.force_reference tiny ~live));
+    (E.Host.force_reference tiny ~live));
   assert (List.exists (fun (run : I.execution) -> run.tier = Cpu_kernel)
     (I.Profile.executions profile));
   List.iter (fun body ->
@@ -772,9 +772,9 @@ let () =
   print_endline "Strict numeric bodies: tiny packed execution, early refusal and no error fallback passed"
 
 let () =
-  let trace= !I.Packed.Private.trace in
-  Fun.protect ~finally:(fun()->I.Packed.Private.trace:=trace)(fun()->
-    I.Packed.Private.trace:=ignore;
+  let trace= !I.Packed.Host.trace in
+  Fun.protect ~finally:(fun()->I.Packed.Host.trace:=trace)(fun()->
+    I.Packed.Host.trace:=ignore;
     let producer=Test_program.compile ~fusion:false
       "(for [x (array/float (int/sub (frame/index) 1)) y (array/float (if (> t 0.) -1 2))] (+ x y))" in
     let captured=Test_program.compile ~fusion:false
@@ -832,5 +832,5 @@ let () =
   let measure = (fun () -> 1.), (fun _ ~seconds:_ ~reference:_ -> incr runs) in
   let value = ok (I.Packed.force ~strict:true ~measure program ~live) in
   assert (!runs = 2);
-  assert (same (Ok value) (E.Private.force_reference (recorded body) ~live));
+  assert (same (Ok value) (E.Host.force_reference (recorded body) ~live));
   print_endline "Packed scope: a map read by three captures of one run is evaluated once, bytes equal to the walker"

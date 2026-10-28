@@ -399,7 +399,7 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
           (Format.asprintf "%a" Runtime_resources.pp_error)
           (Runtime_resources.Image.create ~width ~height ~rgba:(Bytes.copy pixels))
       in
-      let* image = Rays.Image.Private.of_resource resource in
+      let* image = Rays.Image.of_resource resource in
       Ok
         {
           lease;
@@ -529,7 +529,7 @@ let publish t (pending : pending) =
       if t.shared_film then
         Result.map_error
           (Format.asprintf "%a" Runtime_resources.pp_error)
-          (Runtime_resources.Image.Private.replace_gpu t.resource film)
+          (Runtime_resources.Image.replace_gpu t.resource film)
       else
         let* rgba = gpu (B.read_texture film ~bytes_per_row:(t.width * 4)) in
         ();

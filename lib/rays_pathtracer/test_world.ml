@@ -44,7 +44,7 @@ let resolved x =
   int_of_float ((Float.pow (Float.min 1. (Float.max 0. c)) (1. /. 2.2) *. 255.) +. 0.5)
 
 let run () =
-  let live = let _, live = Ogpu.Impl.create_driver () in live in
+  let live = Ogpu.Impl.live_handles in
   let baseline = live () in
   let scene material lights = { P.objects = []; strands = [];
     spheres = [{ P.center = v3 0. 0. 0.; radius = 1.; sphere_material = material }];

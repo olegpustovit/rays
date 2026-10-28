@@ -21,7 +21,7 @@ let uniform l =
                  layer = Gradient { zenith = c; horizon = c; nadir = c; sharpness = 1. } } ] }
 
 let furnace () =
-  let live_handles = snd (Ogpu.Impl.create_driver ()) in
+  let live_handles = Ogpu.Impl.live_handles in
   let baseline = live_handles () in
   let radiance = 0.5 in
   let baked = World.bake ~domains:1 ~width:64 ~height:32 (uniform radiance) in
@@ -76,7 +76,7 @@ let furnace () =
    under a floating box is darker than beside it, the same scene without a
    sun shows no patch, and an identical re-render reuses the map. *)
 let sun_shadow () =
-  let live_handles = snd (Ogpu.Impl.create_driver ()) in
+  let live_handles = Ogpu.Impl.live_handles in
   let baseline = live_handles () in
   let baked = World.bake ~domains:1 ~width:64 ~height:32 (uniform 0.2) in
   let sun = { World.direction = Rays_math.Vec3.unit_z; radiance = World.rgb 2000. 2000. 2000.;

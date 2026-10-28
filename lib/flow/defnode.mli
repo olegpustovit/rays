@@ -1,8 +1,8 @@
 (** Geometry-independent declarations of Lisp-backed catalog kinds. *)
 type validation = { predicate : Syntax.t; code : string; message : string }
 type t = {
-  kind : Check.kind;
-  slots : Check.slot list;
+  kind : Catalog.kind;
+  slots : Catalog.slot list;
   keyword_inputs : string list;
   fields : Param.field_view list;
   label : string;

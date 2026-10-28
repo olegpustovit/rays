@@ -32,7 +32,7 @@ let rec build ~label ~inputs:_ parameters =
             rgba.(offset) <- value; rgba.(offset+1) <- value; rgba.(offset+2) <- value; rgba.(offset+3) <- 1.);
         if Context.cancelled context then cancel () else
         Result.map (fun image -> Node.Private.{payload=Payload.Image image; instances=None})
-          (Image.Private.of_owned_rgba ~width ~height rgba)
+          (Image.of_owned_rgba ~width ~height rgba)
       with Cancelled -> cancel ())
   |> Node.parameterize ~schema ~values:parameters ~rebuild:build
 let noise_factory = Edit_graph.factory ~operation:"image/noise" ~key:"noise"

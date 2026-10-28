@@ -60,7 +60,7 @@ let macro_lens (w : W.t) (call : S.t) =
 
 type cx = {
   w : W.t;
-  catalog : Flow.Check.catalog;
+  catalog : Flow.Catalog.catalog;
   ctx : W.context;
   macros : (string * S.t) list;
   terms : (path, W.term) Hashtbl.t;  (* every bound term of the graph, by path *)
@@ -148,13 +148,13 @@ let show_value = function
   | Text_value s | Choice_value s -> s
 
 (* what a parameter's field is: a soft range paints a position line, a choice a chevron *)
-let control_of (p : Flow.Check.parameter) = match p.fields with
+let control_of (p : Flow.Catalog.parameter) = match p.fields with
   | [ (_, Param.Floating_view r, _) ] -> Range (r.soft_min, r.soft_max)
   | [ (_, Param.Integer_view r, _) ] -> Range (float r.soft_min, float r.soft_max)
   | [ (_, Param.Choice_view _, _) ] -> Choice
   | _ -> Plain
 
-let default_text (p : Flow.Check.parameter) = match p.fields with
+let default_text (p : Flow.Catalog.parameter) = match p.fields with
   | [ (_, _, v) ] -> Some (show_value v)
   | [ _; _; _ ] as fs -> Some ("[" ^ String.concat " " (List.map (fun (_, _, v) -> show_value v) fs) ^ "]")
   | _ -> None
@@ -187,9 +187,9 @@ let macro_rows c (m : S.t) pos =
             |> fun rows -> rows @ [ add c ("+ " ^ r) (E.Pos npos) None ] in
       req_rows @ rest_rows
 
-let kind_rows c (k : Flow.Check.kind) pos kws =
+let kind_rows c (k : Flow.Catalog.kind) pos kws =
   let npos = List.length pos in
-  let slot_rows = List.concat (List.mapi (fun i (s : Flow.Check.slot) ->
+  let slot_rows = List.concat (List.mapi (fun i (s : Flow.Catalog.slot) ->
     let slot_ty = W.slot_ty ~slot:s k in
     let default = if slot_ty = Ty.geometry then None else
       Option.map (fun form -> String.trim (fst (Flow.Lisp.print [form]))) (Ty.default slot_ty) in
@@ -211,13 +211,13 @@ let kind_rows c (k : Flow.Check.kind) pos kws =
           [ row c ~ty:slot_ty ?default ~head:(head_of i) s.name (if s.required && i = npos then E.Pos i else E.Kw s.name) None ])
     k.slots) in
   (* a schema with no primary field takes the fields of its first folder as primary *)
-  let any_primary = List.exists (fun (p : Flow.Check.parameter) -> p.primary) k.parameters in
+  let any_primary = List.exists (fun (p : Flow.Catalog.parameter) -> p.primary) k.parameters in
   let first_folder = match k.parameters with p :: _ -> p.folder | [] -> [] in
   (* the arguments with no folder are the kind's own section, named as the inspector names it *)
-  let kind_section (k : Flow.Check.kind) =
+  let kind_section (k : Flow.Catalog.kind) =
     String.capitalize_ascii (match String.rindex_opt k.qualified '/' with
       | Some i -> String.sub k.qualified (i + 1) (String.length k.qualified - i - 1) | None -> k.qualified) in
-  let param_rows = List.map (fun (p : Flow.Check.parameter) ->
+  let param_rows = List.map (fun (p : Flow.Catalog.parameter) ->
     let kind = if W.group_reader p then Group_reader else if W.group_writer k p then Group_writer else Arg in
     let material = k.qualified = "sop/material" && p.name = "material" in
     row c ~ty:(if material then Flow.Ty.material else match p.ty with Some t -> ty_of_port t | None -> Ty.Text) ?default:(default_text p)
@@ -313,7 +313,7 @@ let call_rows c (e : S.t) h args =
                       | None -> [])
                    @ List.map (fun (n, ty) -> kwrow ~ty n) o.kw
                | None ->
-                   match Flow.Check.resolve_kind c.catalog c.ctx h with
+                   match Flow.Catalog.resolve_kind c.catalog c.ctx h with
                    | Ok k -> kind_rows c k pos kws
                    | Error _ ->
                        (* a call of a local fn reads the fn: a wire, so a used fn never looks unused *)
@@ -561,9 +561,9 @@ let bypassable (n : node) =
 let reorderable (n : node) =
   n.zone = None && List.mem n.head [ "list"; "str"; "scene/merge" ]
 
-let of_graph ?(folded = fun _ -> true) (catalog : Flow.Check.catalog) (w : W.t) name =
+let of_graph ?(folded = fun _ -> true) (catalog : Flow.Catalog.catalog) (w : W.t) name =
   Flow.Phase_timer.measure "project" (fun () ->
-  let catalog = {catalog with Flow.Check.kinds =
+  let catalog = {catalog with Flow.Catalog.kinds =
     List.map (fun (node : W.node_definition) -> node.kind) w.nodes @ catalog.kinds} in
   let def = String.starts_with ~prefix:"def:" name in
   let bare = if def then String.sub name 4 (String.length name - 4) else name in

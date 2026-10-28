@@ -73,7 +73,7 @@ let scenario label world =
     get (P.render t camera); get (P.flush t)
   done;
   if not bench then begin
-    let film = get (Rays.Image.Private.pixels (P.image t)) in
+    let film = get (Rays.Image.pixels (P.image t)) in
     let exposure = match world with Some (b : W.baked) -> 2. ** b.exposure | None -> 1. in
     let aces c = let c = c *. exposure in
       Float.pow (Float.min 1. (Float.max 0. (c *. (2.51 *. c +. 0.03) /. (c *. (2.43 *. c +. 0.59) +. 0.14)))) (1. /. 2.2) in

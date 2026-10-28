@@ -44,7 +44,7 @@ let () =
         let msl = Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program) in
         let runner = Flow_gpu.Run.create gpu pipelines msl in
         Fun.protect ~finally:(fun () -> Flow_gpu.Run.close runner) (fun () ->
-          let values = Test_program.ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
+          let values = Test_program.ok (Flow_ir.Packed.Host.prepare ~fast:true program ~live) in
           let out = Test_program.ok (Flow_gpu.Run.dispatch runner values) in
           let gpu_out = array (Test_program.ok (Flow_gpu.Run.readback out)) in
           assert (Array.length gpu_out = Array.length cpu);

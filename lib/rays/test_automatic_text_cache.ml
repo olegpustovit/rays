@@ -42,7 +42,7 @@ let run () =
     let found=ref None in
     Array.iter(function
       |Scene_command.Render_ir.Image image->found:=Some image.destination
-      |_->())(Scene_command.Render_ir.Private.commands_readonly ir);
+      |_->())(Scene_command.Render_ir.commands_readonly ir);
     match !found with Some rect->rect|None->failwith"density text destination"in
   let d1=dest one and d2=dest two in
   require(abs_float(d1.width-.d2.width)<3.&&abs_float(d1.height-.d2.height)<2.)
@@ -68,7 +68,7 @@ let run () =
   (* An explicit font owns its cached text: releasing scenes leaves it alone
      and destroying the font destroys it. *)
   let font=Result.get_ok(Font.system~size:15())in
-  let image=Image.Private.resource(Result.get_ok
+  let image=Image.resource(Result.get_ok
     (Font.cached_text font"explicit lifetime"(Font.Blended Rays_math.Color.white)))in
   let other=Scene.[text~at:(0,0)~size:15"explicit lifetime"]in
   ignore(stage other);Scene.Private.release other;

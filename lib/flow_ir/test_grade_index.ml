@@ -19,7 +19,7 @@ let same a b=match a,b with
       failwith("Grade/lookup reference disagreement: "^show a^" / "^show b)
 let workspace ?(declarations="") body=
   let text="(workspace ordering (graph g :context host "^declarations^" "^body^"))"in
-  match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+  match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
   |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
 let live_value body=List.assoc "g"(ok(E.static(workspace("(if (> t -1000.) "^body^" "^body^")")))).results
 let oracle_grade compare count descending=
@@ -73,7 +73,7 @@ let ()=
     let executor=ok(I.Executor.compile ~strict:true value)in
     List.iter(fun domains->Parallel.run ~domains(fun()->List.iter(fun time->
       let live={(Input.at_time time)with frame=3}in
-      let expected=E.Private.force_reference value ~live in
+      let expected=E.Host.force_reference value ~live in
       same(Test_program.run core ~live)expected;
       same(I.Executor.force ~strict:true executor ~live)expected)[-1.;0.;0.25;2.]))[1;4;8])
     ["(array/grade (map (fn [(i : int)] (int/mod (int/add i (frame/index)) 7)) (array/range 32769 :type int)) :descending true)";
@@ -110,7 +110,7 @@ let ()=
         |E.Source("fixture/queries",_,_)->Ok(E.Int_array(snd !current))|_->assert false in
       List.iter(fun buffers->current:=buffers;let before=bytes buffers in
         List.iter(fun domains->Parallel.run ~domains(fun()->let live={(Input.at_time 1.)with frame=3}in
-          same(P.force ~strict:true ~resolve p ~live)(E.Private.force_reference ~resolve value ~live);
+          same(P.force ~strict:true ~resolve p ~live)(E.Host.force_reference ~resolve value ~live);
           assert(bytes buffers=before)))[1;4;8])
         [[|2;1;2|],[|2;9;1;2|];[|min_int;max_int|],[|max_int|];[||],[|0;0|]])[false;true])
     ["(array/grade keys)";"(array/index_of keys queries)"];
@@ -121,7 +121,7 @@ let ()=
       let resolve=function E.Source("fixture/keys",_,_)->Ok(E.Int_array[|2;1;2;0|])
         |E.Source("fixture/queries",_,_)->Ok(E.Int_array[|1;9|])|_->assert false in
       same(P.force ~strict:true ~resolve p ~live:(Input.at_time 1.))
-        (E.Private.force_reference ~resolve value ~live:(Input.at_time 1.))) [false;true])
+        (E.Host.force_reference ~resolve value ~live:(Input.at_time 1.))) [false;true])
     ["(array/grade keys)";"(array/index_of keys queries)"];
   let value=dynamic "(array/index_of keys queries)"in
   let executor=ok(I.Executor.compile ~strict:true value)in
@@ -129,18 +129,18 @@ let ()=
     ~code:"E_DATA_SOURCE" ~cause:"lookup source cause" "missing keys")
     |E.Source("fixture/queries",_,_)->Ok(E.Int_array[||])|_->assert false in
   same(I.Executor.force ~strict:true ~resolve:missing executor ~live:(Input.at_time 1.))
-    (E.Private.force_reference ~resolve:missing value ~live:(Input.at_time 1.));
+    (E.Host.force_reference ~resolve:missing value ~live:(Input.at_time 1.));
   let wrong _=Ok(E.Text_array[|"wrong"|])in
   same(I.Executor.force ~strict:true ~resolve:wrong executor ~live:(Input.at_time 1.))
-    (E.Private.force_reference ~resolve:wrong value ~live:(Input.at_time 1.));
+    (E.Host.force_reference ~resolve:wrong value ~live:(Input.at_time 1.));
   let skipped=dynamic "(if (> t 0.) (array/int 0) (array/index_of keys queries))"in
   let no_source _=failwith "Untaken lookup forced Source"in
   same(I.Executor.force ~strict:true ~resolve:no_source(ok(I.Executor.compile ~strict:true skipped))~live:(Input.at_time 1.))
-    (E.Private.force_reference ~resolve:no_source skipped ~live:(Input.at_time 1.));
+    (E.Host.force_reference ~resolve:no_source skipped ~live:(Input.at_time 1.));
   let stateful=live_value "(let* [counter (state [s 0] (int/add s 1))] (if (> t 0.) (array/index_of (error \"E_KEYS\" \"rollback\" :cause \"same cause\") (array/int 0)) (array/grade (array/int 13 counter))))"in
   let a=E.create_state()and b=E.create_state()in
   let executor=ok(I.Executor.compile ~strict:true stateful)in
   List.iteri(fun frame time->let live={(Input.at_time time)with frame;tick=frame}in
-    same(I.Executor.force ~strict:true ~state:a executor ~live)(E.Private.force_reference ~state:b stateful ~live);
-    assert(bytes(E.Private.state_values a)=bytes(E.Private.state_values b))) [-1.;1.;-1.;1.;-1.];
+    same(I.Executor.force ~strict:true ~state:a executor ~live)(E.Host.force_reference ~state:b stateful ~live);
+    assert(bytes(E.Host.state_values a)=bytes(E.Host.state_values b))) [-1.;1.;-1.;1.;-1.];
   print_endline "Grade/index: stable direction, exact Int/byte Text, first match, ownership, strict/reference and lazy source/state parity"

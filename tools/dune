@@ -62,11 +62,6 @@
   editor_document rays_editor ogpu_metal parallel runtime_resources unix))
 
 (executable
- (name bench_topology)
- (modules bench_topology)
- (libraries rdk rays_math unix parallel))
-
-(executable
  (name bench_core)
  (modules bench_core)
  (libraries flow flow_ir input rays_math unix parallel))

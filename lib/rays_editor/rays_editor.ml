@@ -92,7 +92,7 @@ module Editor = struct
       Flow_native.Workspace_images.bind value.host.images (core.doc.workspace.lowered);
       Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu (fun gpu ->
         Flow_sop.Lower.with_images ~gpu
-          ~metadata:(fun plan id -> Option.map Rays.Image.Private.dimensions (Flow_native.Workspace_images.peek value.host.images plan id))
+          ~metadata:(fun plan id -> Option.map Rays.Image.dimensions (Flow_native.Workspace_images.peek value.host.images plan id))
           (Flow_native.Workspace_images.payload value.host.images) (fun () ->
             run ~image:(Flow_native.Workspace_images.image ~gpu value.host.images ~state ~live plan)
               ~texture:(Flow_native.Workspace_images.texture ~gpu value.host.images ~state ~live plan)))

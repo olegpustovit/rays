@@ -41,7 +41,10 @@
 val source_attribute : string
 (** ["__flow_src"]: the primitive int attribute every collecting merge writes. *)
 
-type image_context = {compiled:int Network.Int_map.t; network:Network.t}
+(** Instance chain followed by an inner node id, to its compiled id. *)
+module Path_map : Map.S with type key = int list
+
+type image_context ={compiled:int Network.Int_map.t; network:Network.t}
 
 type image_resolver = ?gpu:Flow_ir.Gpu.config -> ?context:image_context -> Flow.Eval.plan -> state:Flow.Eval.state -> live:Input.t -> Flow.Eval.value ->
   (Sop.Image.t, Diagnostic.t) result
@@ -81,7 +84,7 @@ type t = {
   factories : Sop.Edit_graph.factory list;
   (** Factories owned by this workspace's checked Lisp declarations, including
       embedded node sources. These use the same schema as their graph cards. *)
-  compiled_ids : int Instance_path.Map.t;
+  compiled_ids : int Path_map.t;
   sites : Flow.Workspace.path list;
   compiled : int Network.Int_map.t;  (** plan node id -> compiled id *)
   pending : pending list;
@@ -161,7 +164,7 @@ val changes : Port.parameter -> Flow.Eval.value -> ((string * Param.value) list,
 val workspace :
   factories:Sop.Edit_graph.factory list -> ?extra:Catalog.descriptor list ->
   ?reference:bool -> ?gpu:Flow_ir.Gpu.config -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
-  ?compiled_ids:int Instance_path.Map.t -> ?sites:Flow.Workspace.path list ->
+  ?compiled_ids:int Path_map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   Flow.Syntax.t list -> (t, Diagnostic.t) result
 (** [factories] is the SOP catalog ([Sop.Nodes.factories]). [ops]
@@ -174,7 +177,7 @@ val of_checked :
   ?provenance_tags:bool ->
   ?reference:bool ->
   ?gpu:Flow_ir.Gpu.config -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
-  ?compiled_ids:int Instance_path.Map.t -> ?sites:Flow.Workspace.path list ->
+  ?compiled_ids:int Path_map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   Flow.Workspace.t -> (t, Diagnostic.t) result
 (** [provenance_tags] (default true) numbers a Lisp [sop/merge]'s inputs for the editor ({!tags});

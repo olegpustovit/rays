@@ -7,7 +7,7 @@ let run () =
   (match Font.render font~density:1~color:(255,255,255,255)"\xc0\x80"with Error{kind=Invalid_argument;_}->()|_->failwith"UTF-8");
   let transferred=Option.get(get(Font.render font~density:1~color:(255,255,255,255)"transfer"))in
   let expected=get(Text.pixels transferred)in
-  let image=get(Text.Private.into_image transferred)in
+  let image=get(Text.into_image transferred)in
   if not(Text.destroyed transferred)||get(Image.pixels image)<>expected then
     failwith"text-to-image ownership transfer changed pixels";
   Bytes.fill expected 0(Bytes.length expected)'\000';

@@ -134,9 +134,9 @@ let patch catalog (workspace : W.t) op =
             (workspace.graphs @ workspace.defs) in
           Option.bind call (fun (kind, ctx, authored, argument) ->
             let head = Option.bind (Flow_graph.Flow_edit.arg_text workspace.source path Whole) S.head in
-            match Option.map (Flow.Check.resolve_kind catalog ctx) head with
+            match Option.map (Flow.Catalog.resolve_kind catalog ctx) head with
             | Some (Ok descriptor) when descriptor.qualified = kind ->
-              Option.bind (List.find_opt (fun (p : Flow.Check.parameter) -> p.name = field)
+              Option.bind (List.find_opt (fun (p : Flow.Catalog.parameter) -> p.name = field)
                 descriptor.parameters) (fun parameter ->
               let source, forms = patch_source workspace.source before value in
               let remap_form (form : S.t) = if form.span.finish > form.span.start

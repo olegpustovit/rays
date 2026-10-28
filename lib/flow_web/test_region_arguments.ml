@@ -13,18 +13,18 @@ let data=function
  |_->failwith "Expected array result"
 let compiled ?(require_arguments=true) body=
  let text="(workspace bindings (graph g :context host (if (> t -1000.) "^body^" "^body^")))"in
- let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+ let checked=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
   |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
  let value=List.assoc "g"(ok(E.static checked)).results in
  let residual=match value with E.Residual r->r|_->failwith "Expected live region frame"in
- let refused=ref [] and previous= !(I.Packed.Private.trace) in
- let lowered=Fun.protect ~finally:(fun()->I.Packed.Private.trace:=previous)(fun()->
-  I.Packed.Private.trace:=(function Ok _->()|Error ds->refused:=ds @ !refused);
+ let refused=ref [] and previous= !(I.Packed.Host.trace) in
+ let lowered=Fun.protect ~finally:(fun()->I.Packed.Host.trace:=previous)(fun()->
+  I.Packed.Host.trace:=(function Ok _->()|Error ds->refused:=ds @ !refused);
   I.Core_lower.lower ~strict:true residual)in
  let program=match lowered with Ok p->p|Error reason->
   failwith("Core argument case "^body^": "^reason^"; "^
    String.concat "; "(List.map Diagnostic.to_string(List.rev !refused)))in
- if require_arguments then assert(Array.exists(fun r->I.Packed.Private.argument_types r<>[||])program.regions);
+ if require_arguments then assert(Array.exists(fun r->I.Packed.Host.argument_types r<>[||])program.regions);
  value,program
 let ()=
  let code=Buffer.create 1000000 in
@@ -57,7 +57,7 @@ let ()=
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));const program={regions:[%s]};for(const pool of pools){const rt=createRuntime(program,{pool});const invoke=rt.invoke;rt.invoke=async function(k,args,plan){if(!plan)throw Error('Computed dependency has no region plan');const before=JSON.stringify(snapshot(args));try{return await invoke.call(this,k,args,plan)}finally{if(JSON.stringify(snapshot(args))!==before)throw Error('dynamic arguments mutated')}};\n"(quote frame)(String.concat ","regions);
   List.iter(fun(index,time)->let live={(Input.at_time time)with frame=index;tick=index}in
    Printf.bprintf code "{const input={t:%s,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n"(number time)index index;
-   (match E.Private.force_reference value ~live with
+   (match E.Host.force_reference value ~live with
    |Ok expected->Printf.bprintf code "const result=await frame(input,rt.slots,rt),expected=%s;if(%b?JSON.stringify(result.data)!==JSON.stringify(expected):!bytes(result.data).equals(bytes(expected)))throw Error('argument frame bytes');\n"
        (data expected)(match expected with E.Text_array _->true|_->false)
    |Error d->Printf.bprintf code "try{await frame(input,rt.slots,rt);throw Error('argument frame accepted')}catch(e){if(e.code!==%s||e.message!==%s||e.cause!==%s)throw e}\n"
@@ -93,14 +93,14 @@ let ()=
   let local=Array.length program.locals and constant=Array.length program.constants in
   let ty=Flow.Value.ty_of value in
   let regions=Array.map(fun (r:I.Core.Region.t)->
-   let index=Array.length(I.Packed.Private.argument_types r) in
+   let index=Array.length(I.Packed.Host.argument_types r) in
    let marker=E.Source("$core/argument",ty,["index",E.Int index]) in
    (* with_bindings captures only names read by its term, so an unused binding
       cannot declare this argument. Uniforms are canonical region declarations,
       including slots never read by an instruction; bind_arguments scans them. *)
    let r=Result.get_ok(I.Core.Region.rebuild r ~uniforms:(Array.append r.uniforms[|marker|])
      ~uniform_names:(Array.append r.uniform_names[|"",[]|]) ())in
-   let declared=I.Packed.Private.argument_types r in
+   let declared=I.Packed.Host.argument_types r in
    assert(Array.length declared=index+1 && declared.(index)=ty);
    r)program.regions in
   let rec rewrite (s:I.Core.statement)=
@@ -129,7 +129,7 @@ let ()=
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));for(const pool of pools){const rt=createRuntime({regions:[]},{pool});\n"(quote frame);
   List.iter(fun(index,time)->let live={(Input.at_time time)with frame=index;tick=index}in
    Printf.bprintf code "{const input={t:%s,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n"(number time)index index;
-   (match E.Private.force_reference value ~live with
+   (match E.Host.force_reference value ~live with
     |Ok expected->Printf.bprintf code "const result=await frame(input,rt.slots,rt),expected=%s;if(!bytes(result.data).equals(bytes(expected)))throw Error('Float Product bytes');\n"(data expected)
     |Error d->Printf.bprintf code "try{await frame(input,rt.slots,rt);throw Error('Float Product accepted')}catch(e){if(e.code!==%s||e.message!==%s||e.cause!==%s)throw e}\n"
       (quote d.code)(quote d.message)(Option.fold ~none:"undefined" ~some:quote d.cause));
@@ -189,7 +189,7 @@ let ()=
  (* A concrete graph input gives this producer a genuinely packed residual.
     Its Invoke is asynchronous, with no structured-call slots or state plane. *)
  let forms=ok(Flow.Syntax.parse "(workspace capture (graph g :context host [(source : (array float) (array/float 0))] (map (fn [x] (+ x t)) source)))")in
- let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}forms with
+ let checked=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}forms with
   |Some ws,[]->ws|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
  let value=List.assoc "g"(ok(E.static ~inputs:["g",["source",E.Float_array(Array.init 32769 float_of_int)]]checked)).results in
  let r=match value with E.Residual r->r|_->failwith "Async capture needs a live residual"in

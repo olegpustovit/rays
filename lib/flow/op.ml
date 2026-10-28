@@ -174,7 +174,7 @@ let noise3 = {
         Float (fin "noise3"
           (if octaves=1 then Rays_math.Noise.sample3 (noise_table seed) ~x ~y ~z
            else if lacunarity=2. && gain=0.5 then Rays_math.Noise.fbm3 ~octaves (noise_table seed) ~x ~y ~z
-           else Rays_math.Noise.Private.fbm3_with_scratch (Rays_math.Noise.Private.create_fbm3_scratch ())
+           else Rays_math.Noise.fbm3_with_scratch (Rays_math.Noise.create_fbm3_scratch ())
              (noise_table seed) ~octaves ~lacunarity ~gain ~x ~y ~z))
     | _ -> fail "E_TYPE" "noise3 takes a vec3 position.");
 }
@@ -329,8 +329,6 @@ let constant_descriptor name args =
   let sample=constant_sample ty count (Option.value ~default(List.assoc_opt "value" args)) in
   let value=if count=0 then default else array_get sample 0 in
   Source("$core/constant-array/"^name,Ty.Array ty,["count",Int count;"value",value])
-module Private = struct
-  let array_count = array_count
   let constant_array_descriptor = constant_descriptor
   type reduction = Sum | Minimum | Maximum
   let reduction_name = function Sum -> "sum" | Minimum -> "min" | Maximum -> "max"
@@ -449,7 +447,6 @@ module Private = struct
            result.(row)<- !best end)
      | _ -> fail "E_ARRAY_TYPE" "array/segment_argmax needs an int or float array.");
     Int_array result
-end
 let reduction_type segmented = function
   | Ty.Array (Ty.Int | Float | Vec2 | Vec3 | Vec4 as element) :: _ ->
       if segmented then Ty.Array element else element
@@ -585,21 +582,21 @@ let reductions =
     {run=fun ~name:_ ~node:_ args->scatter_add (List.assoc "indices" args)
       (List.assoc "values" args) (List.assoc "size" args)}]
   @ List.map (fun operation ->
-    let name="array/" ^ Private.reduction_name operation in
+    let name="array/" ^ reduction_name operation in
     mk ~category:"Array" name ["array",Ty.Array Ty.Any] (reduction_type false)
-      {run=fun ~name:_ ~node:_ args -> Private.reduce_array operation (List.assoc "array" args)})
-    [Private.Minimum;Maximum]
+      {run=fun ~name:_ ~node:_ args -> reduce_array operation (List.assoc "array" args)})
+    [Minimum;Maximum]
   @ List.map (fun operation ->
-    let name="array/segment_" ^ Private.reduction_name operation in
+    let name="array/segment_" ^ reduction_name operation in
     mk ~category:"Array" name ["values",Ty.Array Ty.Any;"offsets",Ty.Array Ty.Int] (reduction_type true)
-      {run=fun ~name:_ ~node:_ args -> Private.reduce_array operation
+      {run=fun ~name:_ ~node:_ args -> reduce_array operation
         ~offsets:(List.assoc "offsets" args) (List.assoc "values" args)})
-    [Private.Sum;Minimum;Maximum]
+    [Sum;Minimum;Maximum]
   @ [mk ~category:"Array" "array/segment_argmax" ["values",Ty.Array Ty.Any;"offsets",Ty.Array Ty.Int]
       (function
         | Ty.Array (Ty.Int | Float | Any) :: _ -> Ty.Array Ty.Int
         | _ -> fail "E_ARRAY_TYPE" "array/segment_argmax needs an int or float array.")
-      {run=fun ~name:_ ~node:_ args -> Private.segment_argmax
+      {run=fun ~name:_ ~node:_ args -> segment_argmax
         ~offsets:(List.assoc "offsets" args) (List.assoc "values" args)}]
 let constant_array ty count value =
   (* Validate one element through the shared packed-storage boundary. Empty

@@ -96,7 +96,7 @@ let () =
       let pipelines = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device lease) in
       List.iteri (fun k program ->
         let runner = Flow_gpu.Run.create lease pipelines (Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program)) in
-        let values = Test_program.ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
+        let values = Test_program.ok (Flow_ir.Packed.Host.prepare ~fast:true program ~live) in
         let gpu = vec4 (Test_program.ok (Flow_gpu.Run.readback (Test_program.ok (Flow_gpu.Run.dispatch runner values)))) in
         let expected = List.nth cpu k and worst = ref 0. in
         Array.iteri (fun j x -> worst := Float.max !worst (Float.abs (x -. expected.(j)) /. Float.max 1. (Float.abs expected.(j)))) gpu;

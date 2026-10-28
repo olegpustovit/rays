@@ -87,8 +87,8 @@ val root_used : S.t list -> string -> string list ref
 
 val apply_rewrite :
   ?ops:Flow.Op.t list -> ?library:bool ->
-  ?checker:(Flow.Check.catalog -> S.t list -> Flow.Workspace.t option * Diagnostic.t list) ->
-  Flow.Check.catalog -> (unit -> S.t list) ->
+  ?checker:(Flow.Catalog.catalog -> S.t list -> Flow.Workspace.t option * Diagnostic.t list) ->
+  Flow.Catalog.catalog -> (unit -> S.t list) ->
   (S.t list * Flow.Workspace.t, Diagnostic.t) result
 (** The rewrite, printed and parsed again, then checked as {!Flow_edit.apply_checked} does:
     whatever it raises is a refused edit, never a crash. *)

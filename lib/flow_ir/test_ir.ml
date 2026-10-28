@@ -3,7 +3,7 @@ module E = Flow.Eval
 
 let () =
   let module W = Flow.Workspace in
-  let check source = match W.check Flow.Check.{version=1;kinds=[]}
+  let check source = match W.check Flow.Catalog.{version=1;kinds=[]}
       (Flow.Syntax.parse source |> Result.get_ok) with
     | Some workspace, [] -> workspace
     | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
@@ -74,7 +74,7 @@ let () =
 
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 
-let check ?(ops = []) ?(catalog = {Flow.Check.version = 1; kinds = []}) text =
+let check ?(ops = []) ?(catalog = {Flow.Catalog.version = 1; kinds = []}) text =
   let forms = ok (Flow.Syntax.parse text) in
   match Flow.Workspace.check ~ops catalog forms with
   | Some w, ds when not (List.exists (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds) -> w
@@ -119,7 +119,7 @@ let () =
   List.iter (fun count ->
     let value = value (Printf.sprintf "(array/sum (map (fn [x] (sin (+ x t))) (array/range %d)))" count) in
     assert (same_result (Executor.force (ok (Executor.compile value)) ~live)
-      (E.Private.force_reference value ~live))) [0;16;33;34;512;1024]
+      (E.Host.force_reference value ~live))) [0;16;33;34;512;1024]
 
 let () =
   let profile = Profile.create ~clock:(fun () -> 1.) in
@@ -138,7 +138,7 @@ let () =
     let p = ok (Executor.compile v) in
     List.iter (fun time ->
       let live = Input.at_time time in
-      let reference = E.Private.force_reference v ~live in
+      let reference = E.Host.force_reference v ~live in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         assert (same_result (Executor.force p ~live) reference);
         assert (same_result (Executor.force ~reference:true p ~live) reference))) [1; 8])
@@ -156,17 +156,17 @@ let () =
   let bad_live = {(Input.at_time 0.) with dt = nan} in
   let v = value "(+ t 1)" in
   assert (same_result (Executor.force (ok (Executor.compile v)) ~live:bad_live)
-    (E.Private.force_reference v ~live:bad_live));
+    (E.Host.force_reference v ~live:bad_live));
   let v = value "(let* [a (state [p 0.0] (+ p (frame/dt))) b (* a 2)] (+ a b))" in
   let p = ok (Executor.compile v) in
   let optimized = E.create_state () and reference = E.create_state () in
   List.iter (fun frame ->
     let live = {(Input.at_time (float frame)) with frame; dt = 0.125} in
     assert (same_result (Executor.force ~state:optimized p ~live)
-      (E.Private.force_reference ~state:reference v ~live))) [0; 1; 2; 2; 3; 1];
-  assert (List.length (E.Private.state_values optimized)=List.length (E.Private.state_values reference)
-    && Array.for_all2 same_bits (Array.of_list(E.Private.state_values optimized))
-      (Array.of_list(E.Private.state_values reference)))
+      (E.Host.force_reference ~state:reference v ~live))) [0; 1; 2; 2; 3; 1];
+  assert (List.length (E.Host.state_values optimized)=List.length (E.Host.state_values reference)
+    && Array.for_all2 same_bits (Array.of_list(E.Host.state_values optimized))
+      (Array.of_list(E.Host.state_values reference)))
 
 let () =
   List.iter (fun body ->
@@ -175,7 +175,7 @@ let () =
     if not (has_region v) then failwith ("packed Core region missing for: " ^ body);
     List.iter (fun time ->
       let live = Input.at_time time in
-      let reference = E.Private.force_reference v ~live in
+      let reference = E.Host.force_reference v ~live in
       let sequential = Parallel.run ~domains:1 (fun () -> Executor.force program ~live) in
       let parallel = Parallel.run ~domains:8 (fun () -> Executor.force program ~live) in
       assert (same_result sequential reference && same_result parallel reference)) [0.; 0.125; 1.25; 7.])
@@ -190,14 +190,14 @@ let () =
   let program = ok (Executor.compile v) in
   List.iter (fun time ->
     let live = Input.at_time time in
-    assert (same_result (Executor.force program ~live) (E.Private.force_reference v ~live))) [0.; 0.125; 7.];
+    assert (same_result (Executor.force program ~live) (E.Host.force_reference v ~live))) [0.; 0.125; 7.];
   let v = value "(array/sum (map (fn [x] (+ x t)) (array/float 0)))" in
   assert (Executor.force (ok (Executor.compile v)) ~live:(Input.at_time 1.) = Ok (E.Float 0.));
   let v = value "(array/sum (map (fn [x] (+ x t)) (array/range (frame/index))))" in
   let program = ok (Executor.compile v) in
   List.iter (fun count ->
     let live = {(Input.at_time 1.25) with frame = count} in
-    assert (same_result (Executor.force program ~live) (E.Private.force_reference v ~live))) [0; 1023; 1024; 2051]
+    assert (same_result (Executor.force program ~live) (E.Host.force_reference v ~live))) [0; 1023; 1024; 2051]
 
 let read path = In_channel.with_open_text path In_channel.input_all
 let () =
@@ -212,7 +212,7 @@ let () =
   assert (Option.is_some (Executor.packed_region program));
   List.iter (fun time ->
     let live = Input.at_time time in
-    let reference = ok (E.Private.force_reference v ~live) in
+    let reference = ok (E.Host.force_reference v ~live) in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       let result = ok (Executor.force program ~live) in
       assert (same_bits result reference);
@@ -226,13 +226,13 @@ let () =
   let v = mapped ~ops "(map (fn [p] (noise3 (* p (pow t 1000000)))) (array/vec3 2051 [1 2 3]))" in
   let program = ok (Executor.compile v) in
   let live = Input.at_time 7. in
-  assert (same_result (Executor.force program ~live) (E.Private.force_reference v ~live));
+  assert (same_result (Executor.force program ~live) (E.Host.force_reference v ~live));
   let custom = {Flow.Op.noise3 with name = "toy_noise3"; packed_extension = None;
     body = (fun ~live:_ ~node:_ _ -> E.Float 0.125)} in
   let v = mapped ~ops:[custom] "(map (fn [p] (toy_noise3 p)) (array/vec3 2051 [1 2 3]))" in
   let program = ok (Executor.compile v) in
   assert (Executor.packed_region program = None);
-  assert (same_result (Executor.force program ~live) (E.Private.force_reference v ~live));
+  assert (same_result (Executor.force program ~live) (E.Host.force_reference v ~live));
   match ok (Executor.force program ~live) with
   | E.Float_array xs -> assert (Array.for_all (( = ) 0.125) xs)
   | _ -> assert false
@@ -246,7 +246,7 @@ let () =
     let program=ok(Executor.compile value)in
     assert(Option.is_some(Executor.packed_region program));
     List.iter(fun time->let live=Input.at_time time in
-      let reference=ok(E.Private.force_reference value ~live)in
+      let reference=ok(E.Host.force_reference value ~live)in
       List.iter(fun domains->let actual=Parallel.run ~domains(fun()->ok(Executor.force program ~live))in
         assert(same_bits actual reference)) [1;8]) [0.;0.125;1.25;7.]) [1;5;32]) [0;2026;-451];
   List.iter(fun expression->let ws=check ~ops ("(workspace c (graph g :context value (let* [result "^expression^"] 0)))")in
@@ -263,8 +263,8 @@ let () =
   let live = Input.at_time 1.25 in
   let one = Parallel.run ~domains:1 (fun () -> ok (Executor.force program ~live)) in
   let eight = Parallel.run ~domains:8 (fun () -> ok (Executor.force program ~live)) in
-  let reference = ok (E.Private.force_reference v ~live) in
-  let reference_eight = Parallel.run ~domains:8 (fun () -> ok (E.Private.force_reference v ~live)) in
+  let reference = ok (E.Host.force_reference v ~live) in
+  let reference_eight = Parallel.run ~domains:8 (fun () -> ok (E.Host.force_reference v ~live)) in
   assert (same_bits one reference);
   assert (same_bits eight reference_eight);
   assert (same_bits one eight);
@@ -273,7 +273,7 @@ let () =
        Array.iteri (fun i x -> assert (Int64.bits_of_float x = Int64.bits_of_float (sin (float i *. 0.25 +. 1.25)))) xs
    | _ -> failwith "CPU map did not return a packed array")
 let () =
-  let catalog, _ = ok (Flow.Check.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")) in
+  let catalog, _ = ok (Flow.Catalog.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")) in
   List.iter (fun name ->
     let ws = check ~catalog (read ("../../specification/workspace/cases/" ^ name ^ ".lisp")) in
     let evaluated = ok (E.static ~record:true ws) in
@@ -288,7 +288,7 @@ let () =
         let reference_state = E.create_state () and ir_state = E.create_state () in
         List.iter (fun (v, p) ->
           assert (same_result (Executor.force ~state:ir_state p ~live)
-            (E.Private.force_reference ~state:reference_state v ~live))) prepared)) [1; 8])
+            (E.Host.force_reference ~state:reference_state v ~live))) prepared)) [1; 8])
       [0.; 0.125; 1.25; 7.])
     ["bloom"; "facade"; "garland"; "kit"; "orrery"; "rosette";
      "sunflower"; "tiles"; "tree"; "tunnel"; "variations"; "wave"];
@@ -508,7 +508,7 @@ let () =
         (let* [unused 0] (map (fn [x] (+ x offset)) (array/float 4))))
         (defn invoke :context host [(alias : fn)] (alias 2.0))
         (graph g :context host (invoke :alias f)))"];
-  let checked_forms forms = match W.check {Flow.Check.version = 1; kinds = []} forms with
+  let checked_forms forms = match W.check {Flow.Catalog.version = 1; kinds = []} forms with
     | Some ws,_ -> ws | _,ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
   let graph name = ok (Flow.Syntax.parse ("(graph " ^ name ^ " :context host
     (let* [mapped (map (fn [x] (+ x t)) (array/range 4))] mapped))")) |> List.hd in

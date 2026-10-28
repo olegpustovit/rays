@@ -14,7 +14,7 @@ let checked ?seed body =
   let source = ok (Flow.Syntax.parse
     ("(workspace random (graph g :context host (let* [" ^ binding ^ "tested " ^ body ^ "] 0.0)))")) in
   match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all ~library:false ~sources
-    Flow.Check.{version=1;kinds=[]} source with
+    Flow.Catalog.{version=1;kinds=[]} source with
   | Some workspace, [] -> workspace
   | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
 let value ?seed body = snd (List.hd (List.assoc ["g";"tested"]
@@ -36,7 +36,7 @@ let map ?seed ty input body =
   let source = "(fn [(i : " ^ Flow.Ty.to_string ty ^ ")] " ^ body ^ ")" in
   let fn = match value ?seed source with
     | E.Fn fn -> fn | _ -> assert false in
-  let mapped = ok (E.Private.map_function ~signature:Flow.Ty.{params=[ty];result=Float} fn [input]) in
+  let mapped = ok (E.Host.map_function ~signature:Flow.Ty.{params=[ty];result=Float} fn [input]) in
   mapped,compile mapped
 let js_atom = function
   | E.Int value -> string_of_int value ^ "n"
@@ -48,7 +48,7 @@ let js_input = function
       String.concat "," (Array.to_list (Array.map (fun n -> string_of_int n ^ "n") values)) ^ "])"
   | _ -> failwith "rand_at requires an exact integer JS input"
 let compare_js program ~live expected =
-  let inputs = ok (P.Private.prepare_values program ~live) in
+  let inputs = ok (P.Host.prepare_values program ~live) in
   let script = Buffer.create (Array.length expected * 48) in
   Buffer.add_string script (Flow_web.Js.region program);
   Printf.bprintf script "const inputs=[%s], uniforms=[%s], outputs=[new Float64Array(%d)];\n"
@@ -104,7 +104,7 @@ let () =
   List.iter (fun seed ->
     let live={(Input.at_time 0.) with frame=seed} in
     let expected=Array.init count (fun index -> Rays_math.Rand.float_at (Rays_math.Rand.seed seed) ~index) in
-    same expected (ok (E.Private.force_reference mapped ~live));
+    same expected (ok (E.Host.force_reference mapped ~live));
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       same expected (ok (P.force ~strict:true packed ~live)))) [1;8]) [0;1;42;max_int];
   List.iter (fun seed -> List.iter (fun index ->
@@ -125,7 +125,7 @@ let () =
         mapped,program,Input.at_time 0.
       else mapped,program,{(Input.at_time 0.) with frame=seed} in
     let expected=Array.map (fun index -> Rays_math.Rand.float_at (Rays_math.Rand.seed seed) ~index) indices in
-    same expected (ok (E.Private.force_reference mapped ~live));
+    same expected (ok (E.Host.force_reference mapped ~live));
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       same expected (ok (P.force ~strict:true program ~live)))) [1;8];
     compare_js program ~live expected) [min_int;0;42;max_int];
@@ -137,13 +137,13 @@ let () =
   let indices=Array.init count(fun i->bases.(i mod Array.length bases)+i/Array.length bases) in
   List.iter(fun seed ->
     let mapped,program=map ~seed Flow.Ty.Int(E.Int_array indices) "(rand/at (int/add seed (frame/index)) i)" in
-    let instructions=(P.Private.view program).code in
+    let instructions=(P.Host.view program).code in
     assert(Array.length instructions<=6);
     assert(Array.exists(function P.Rand_at _->true|_->false)instructions);
     assert(P.gpu_refusals program<>[]);
     let live=Input.at_time 0. in
     let expected=Array.map(fun index->Rays_math.Rand.float_at(Rays_math.Rand.seed seed)~index)indices in
-    same expected(ok(E.Private.force_reference mapped ~live));
+    same expected(ok(E.Host.force_reference mapped ~live));
     List.iter(fun domains->Parallel.run ~domains(fun()->
       same expected(ok(P.force ~strict:true program ~live)))) [1;8];
     compare_js program ~live expected;
@@ -153,7 +153,7 @@ let () =
       |_->assert false)(Array.to_list bases)) [min_int;0;42;max_int];
   let mapped=value "(map (fn [(i : int)] [(rand/at (int/add 42 (frame/index)) i) (rand/at (int/add 43 (frame/index)) i) (rand/at (int/add 44 (frame/index)) i)]) (array/range 100000 :type int))" in
   let program=compile mapped and live=Input.at_time 0. in
-  assert(Array.length(P.Private.view program).code<16);
+  assert(Array.length(P.Host.view program).code<16);
   let expected=Array.init(count*3)(fun i->Rays_math.Rand.float_at(Rays_math.Rand.seed(42+i mod 3))~index:(i/3)) in
   List.iter(fun domains->Parallel.run ~domains(fun()->
     match ok(P.force ~strict:true program ~live) with
@@ -162,11 +162,11 @@ let () =
   let seeds=Array.init count(fun i->bases.((i/7) mod Array.length bases)+i/Array.length bases) in
   let fn=match value "(fn [(s : int) (i : int)] (if (int/lt s 0) (rand/at s (int/add i (frame/index))) (rand/at s (int/sub i (frame/index)))))" with
     |E.Fn fn->fn|_->assert false in
-  let mapped=ok(E.Private.map_function ~signature:Flow.Ty.{params=[Int;Int];result=Float}
+  let mapped=ok(E.Host.map_function ~signature:Flow.Ty.{params=[Int;Int];result=Float}
     fn [E.Int_array seeds;E.Int_array indices]) in
   let program=compile mapped in
   let expected=Array.mapi(fun i seed->Rays_math.Rand.float_at(Rays_math.Rand.seed seed)~index:indices.(i))seeds in
-  same expected(ok(E.Private.force_reference mapped ~live));
+  same expected(ok(E.Host.force_reference mapped ~live));
   List.iter(fun domains->Parallel.run ~domains(fun()->
     same expected(ok(P.force ~strict:true program ~live)))) [1;8];
   compare_js program ~live expected;
@@ -186,14 +186,14 @@ let () =
     let mapped,program = map Flow.Ty.Vec3 input
       (Printf.sprintf "(noise3 (+ i [t 0.0 0.0]) :seed %d :octaves %d :lacunarity %.17g :gain %.17g)" seed octaves lacunarity gain) in
     let live=Input.at_time 0. in
-    let expected=match ok (E.Private.force_reference mapped ~live) with
+    let expected=match ok (E.Host.force_reference mapped ~live) with
       | E.Float_array values->values | _->assert false in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       same expected (ok (P.force ~strict:true program ~live)))) [1;8];
     let noise=Rays_math.Noise.create seed in
     Array.iteri (fun i (x,y,z) ->
       let native=if lacunarity=2. && gain=0.5 then Rays_math.Noise.fbm3 ~octaves noise ~x ~y ~z
-        else Rays_math.Noise.Private.fbm3_with_scratch (Rays_math.Noise.Private.create_fbm3_scratch ()) noise ~octaves ~lacunarity ~gain ~x ~y ~z in
+        else Rays_math.Noise.fbm3_with_scratch (Rays_math.Noise.create_fbm3_scratch ()) noise ~octaves ~lacunarity ~gain ~x ~y ~z in
       incr native_samples;
       if Int64.bits_of_float native <> Int64.bits_of_float expected.(i) then incr native_bit_differences;
       let _,exponent=Float.frexp (max (abs_float native) (abs_float expected.(i))) in

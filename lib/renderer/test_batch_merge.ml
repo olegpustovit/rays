@@ -42,7 +42,7 @@ let marks_token gpu s =
   sink, token
 
 let run () =
-  let live_handles = snd (Ogpu.Impl.create_driver ()) in
+  let live_handles = Ogpu.Impl.live_handles in
   let baseline = live_handles () in
   let execution = get (Renderer.create_offscreen {Renderer.
     logical_width = width; logical_height = height; drawable_width = width; drawable_height = height;
@@ -76,7 +76,7 @@ let run () =
         Renderer.Private.close_gpu_marks sink)) sources) (fun () ->
       let shapes = List.mapi (fun s -> function
         | None -> R.Shapes (cpu_set s)
-        | Some (_, token) -> R.Shapes (Scene_command.Ui_batch.Private.of_marks token)) sources in
+        | Some (_, token) -> R.Shapes (Scene_command.Ui_batch.of_marks token)) sources in
       check "interleaved Ui_batch and Marks sets" (range 6) shapes 6);
     (* A clip between two sets keeps them apart; the same clip around both keeps them together. *)
     let clip = R.Push_clip {x = 4.; y = 4.; width = 50.; height = 30.} in

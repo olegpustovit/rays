@@ -1,7 +1,7 @@
 module E=Flow.Eval
 module I=Flow_ir
 let ok=function Ok v->v|Error d->failwith(Diagnostic.to_string d)
-let catalog=Flow.Check.{version=1;kinds=[]}
+let catalog=Flow.Catalog.{version=1;kinds=[]}
 let source body=ok(Flow.Syntax.parse("(workspace capacity (graph g :context host "^body^"))"))
 let checked body=match Flow.Workspace.check catalog(source body)with
   |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
@@ -28,7 +28,7 @@ let ()=
     let core=match I.Core_lower.lower ~strict:true r with Ok c->c|Error form->failwith form in
     let compiled=ok(I.Executor.compile ~strict:true v)in
     List.iter(fun time->let live=Input.at_time time in
-      let expected=ok(E.Private.force_reference v ~live)in
+      let expected=ok(E.Host.force_reference v ~live)in
       assert(expected=E.Int(if time>0. then limit else limit-1));
       assert(ok(Test_program.run ~root:r ~strict:true core ~live)=expected);
       List.iter(fun domains->Parallel.run ~domains(fun()->
@@ -62,7 +62,7 @@ let ()=
     let compiled=ok(I.Executor.compile ~strict:true v)in
     List.iter(fun domains->Parallel.run ~domains(fun()->
       let live={(Input.at_time 1.)with frame=3}in
-      assert(ok(I.Executor.force ~strict:true compiled ~live)=ok(E.Private.force_reference v ~live)))) [1;4;8])
+      assert(ok(I.Executor.force ~strict:true compiled ~live)=ok(E.Host.force_reference v ~live)))) [1;4;8])
     ["(map (fn [(i : int)] (int/sub (array/max_length :type int) (int/add i (frame/index)))) (array/range 5001 :type int))";
      "(map (fn [(i : int)] (float (int/sub (array/max_length :type int) (int/add i (frame/index))))) (array/range 5001 :type int))"];
   (* An explicit, statically folded Float conversion has no retained Int bank. *)
@@ -74,5 +74,5 @@ let ()=
   let compiled=ok(I.Executor.compile ~strict:true v)in
   List.iter(fun domains->Parallel.run ~domains(fun()->
     let live=Input.at_time 1. in
-    assert(ok(I.Executor.force ~strict:true compiled ~live)=ok(E.Private.force_reference v ~live)))) [1;4;8];
+    assert(ok(I.Executor.force ~strict:true compiled ~live)=ok(E.Host.force_reference v ~live)))) [1;4;8];
   print_endline "array/max_length: exact native element bounds, checked literal selectors, symbolic guards, reference/Core/CPU and ordinary Int-bank refusals; no giant allocations"

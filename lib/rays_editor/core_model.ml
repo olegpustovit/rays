@@ -260,7 +260,7 @@ type 'prepared t = {
   edit_phases : Flow.Phase_timer.t;
   select_later : Flow.Workspace.path list;  (* nodes to select once the pane shows their graph *)
   open_import : string option;
-  flow_catalog : Flow.Check.catalog option Lazy.t;
+  flow_catalog : Flow.Catalog.catalog option Lazy.t;
   lisp_vocab : Lisp_text.vocab Lazy.t;  (* what the text pane completes and describes *)
   tree : Pxui_shell.Tree.t;
   outline : Navigator.state;  (* the Navigator panel: its search (view state) *)

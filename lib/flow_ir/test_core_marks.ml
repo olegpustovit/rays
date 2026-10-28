@@ -4,7 +4,7 @@ module Buffers = Flow_ir.Core_exec.Buffers
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context draw " ^ body ^ "))")) in
-  match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
+  match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with
   | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let pictures = [
   "(draw/background \"#14161c\")";
@@ -154,8 +154,8 @@ let nested_maps () =
         [(+ p.x (sin (* (* p.y 0.01) (+ d t)))) (+ p.y k) 0])) (array/range (* (array/count kept) 2)))))" in
   let live = {(Input.at_time 0.25) with size = (200, 100)} in
   (* the walker's points, summed in order as x + 1000 y: the same sum of the drawn buffer must match it *)
-  let expected = match E.Private.force_reference (List.assoc "g" (ok (E.static (match
-      Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse
+  let expected = match E.Host.force_reference (List.assoc "g" (ok (E.static (match
+      Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse
         ("(workspace w (graph g :context value (array/sum (map (fn [v] (+ v.x (* v.y 1000))) " ^ boxes ^ "))))"))) with
        | Some ws, [] -> ws
        | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))))).results) ~live with
@@ -262,7 +262,7 @@ let device_inputs () =
   let module G=Flow_ir.Gpu in
   let seen=ref [] and serial=ref 0 in
   let backend:G.backend={cost=(fun ~fast:_ _ ~count:_->Some 0.);prepare=(fun ~fast:_ packed->
-    let width=Array.length(Flow_ir.Packed.Private.view packed).outputs.(0)in
+    let width=Array.length(Flow_ir.Packed.Host.view packed).outputs.(0)in
     Ok{run=(fun inputs->
       seen:=inputs.arrays:: !seen;incr serial;
       Ok{identity=1;output=0;count=inputs.count;width;stamp=Int64.of_int !serial;gpu_seconds=None});
@@ -279,7 +279,7 @@ let device_inputs () =
     let live=Input.at_time time in
     let device packed=Result.map(Option.map(fun(v:G.value)->
       Array.map(fun output->v.identity,v.count,Array.length output)
-        (Flow_ir.Packed.Private.view packed).outputs))(display packed ~live)in
+        (Flow_ir.Packed.Host.view packed).outputs))(display packed ~live)in
     ignore(ok(Flow_ir.Core_exec.draw ?root ~device program ~live
       ~size:(200,100)~buffers:(Buffers.create())))in
       let fixed=prepared "1024"in

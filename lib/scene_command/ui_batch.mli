@@ -101,11 +101,9 @@ module Builder : sig
       Call [reset] before building the next frame. *)
 end
 
-module Private : sig
-  val copy : t -> t
-  val valid_shapes : t -> bool
-  val of_marks : Marks.gpu_token -> t
-  val marks_identity : Marks.gpu_token -> int
-  val marks_count : Marks.gpu_token -> int
-  val marks_stamp : Marks.gpu_token -> int64
-end
+val copy : t -> t
+val valid_shapes : t -> bool
+val of_marks : Marks.gpu_token -> t
+val marks_identity : Marks.gpu_token -> int
+val marks_count : Marks.gpu_token -> int
+val marks_stamp : Marks.gpu_token -> int64

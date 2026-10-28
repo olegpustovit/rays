@@ -1,9 +1,12 @@
+module Flow_catalog = Catalog
 open Flow
 module Edit = Sop.Edit_graph
 module Zone = Sop.Zone
 module E = Eval
 
-let source_attribute = Rdk.Mesh_merge.provenance_attribute
+module Path_map = Map.Make (struct type t = int list let compare = Stdlib.compare end)
+
+let source_attribute =Rdk.Mesh_merge.provenance_attribute
 
 (* Serial for host-call nodes: they are cooked once in a session that keeps no cache entries, so their
    arguments need no content key (marshalling a million-element array costs more than the kernel). *)
@@ -22,7 +25,7 @@ type t = {
   gpu : Flow_ir.Gpu.config;
   graphs : graph list;
   factories : Edit.factory list;
-  compiled_ids : int Instance_path.Map.t;
+  compiled_ids : int Path_map.t;
   sites : Workspace.path list;
   compiled : int Network.Int_map.t;
   pending : pending list;
@@ -340,7 +343,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
           (fun ~node_id:_ _ _ -> Result.map (fun payload ->
             let payload = match payload, List.assoc_opt index aliases with
               | Sop.Payload.Kernel kernel, Some sources ->
-                  Sop.Payload.Kernel (Sop.Kernel.Private.remap_geometry_captures ~sources kernel)
+                  Sop.Payload.Kernel (Sop.Kernel.remap_geometry_captures ~sources kernel)
               | _ -> payload in
             Sop.Node.Private.{payload;instances=None}) (Lisp_node.input index))) in
       key, factory) inputs in
@@ -377,7 +380,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
             ~inputs:[||] (fun ~node_id:_ _ _ ->
               Result.bind (Lisp_node.input index) (fun payload ->
               Result.bind (Sop.Payload.kernel payload) (fun kernel ->
-                match Sop.Kernel.Private.geometry_capture kernel source with
+                match Sop.Kernel.geometry_capture kernel source with
                 | Some geometry -> Ok Sop.Node.Private.{geometry;instances=None}
                 | None -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
                     "A forwarded function geometry capture is unavailable"))))) in
@@ -426,7 +429,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
         let remapped = List.map (fun (name,fn,index) ->
           let sources = List.filter_map (fun (name,source,slot,_) ->
             if slot=index then Some (source, marker name) else None) geometry_captures in
-          name, E.Private.remap_function_geometry ~sources fn, marker name, index, sources) forwarded in
+          name, E.Host.remap_function_geometry ~sources fn, marker name, index, sources) forwarded in
         let functions = List.map (fun (name,value) -> name,
           let remap offset fn = match List.find_opt (fun (marker,_,_,_,_) ->
             marker=Printf.sprintf "lisp_kernel_%s_%d" name offset) remapped with
@@ -474,7 +477,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
         | None -> List.for_all (fun (node : Sop.Node.info) ->
             node.facts.topology=Sop.Node.Preserved) owned in
       let input_count = List.length inputs in
-      let resolve names = Check.resolve_component_names (fun name ->
+      let resolve names = Flow.Catalog.resolve_component_names (fun name ->
         match List.assoc_opt name parameters with Some (E.Text text) -> Some text | _ -> None) names in
       (* Declared names (parameter-named ones resolved), then what the body's attribute kernels
          name themselves. Behind a wildcard (a selection root) only the declaration speaks;
@@ -496,12 +499,12 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
           then Duplicate_input 0 else Generic);
         elementwise=(match declared with
           | Some f when preserved -> (match f.elementwise with
-              | Check.Points -> Points | Primitives -> Primitives | Irregular -> None)
+              | Flow.Catalog.Points -> Points | Primitives -> Primitives | Irregular -> None)
           | _ -> if preserved then (Sop.Node.facts compiled).elementwise else None);
-        reads=components (Option.map (fun (f : Check.kernel_facts) -> f.reads) declared) (fun f -> f.reads);
-        writes=components (Option.map (fun (f : Check.kernel_facts) -> f.writes) declared) (fun f -> f.writes);
+        reads=components (Option.map (fun (f : Flow.Catalog.kernel_facts) -> f.reads) declared) (fun f -> f.reads);
+        writes=components (Option.map (fun (f : Flow.Catalog.kernel_facts) -> f.writes) declared) (fun f -> f.writes);
         topology=(if preserved then Preserved else Changed);
-        exact=Option.fold ~none:true ~some:(fun (facts : Check.kernel_facts) -> facts.exact)
+        exact=Option.fold ~none:true ~some:(fun (facts : Flow.Catalog.kernel_facts) -> facts.exact)
           definition.kind.facts && List.for_all (fun (node : Sop.Node.info) -> node.facts.exact) owned} in
       let body context =
         if not driven then Ok compiled else
@@ -520,7 +523,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
         ["sop/context_seed", Sop.Context.Dependencies.Seed; "sop/context_frame", Frame;
          "sop/context_time", Time] in
       let cook_mode=if inputs=[] then Sop.Node.Generator else Generic in
-      let exact=Option.fold ~none:true ~some:(fun (facts:Check.kernel_facts)->facts.exact)
+      let exact=Option.fold ~none:true ~some:(fun (facts:Flow.Catalog.kernel_facts)->facts.exact)
         definition.kind.facts in
       let facts=Sop.Node.{cook_mode;elementwise=None;reads=["*"];writes=["*"];topology=Changed;exact} in
       (fun _ -> Error diagnostic), dependencies, facts)
@@ -546,7 +549,7 @@ let is_volatile lowered id = Network.Int_map.mem id lowered.volatile
 let same_function a b = a == b ||
   (E.Residual.function_id a = E.Residual.function_id b
    && E.Residual.function_origin a = E.Residual.function_origin b
-   && E.Private.function_scope a = E.Private.function_scope b
+   && E.Host.function_scope a = E.Host.function_scope b
    && E.Residual.function_name a = E.Residual.function_name b
    && List.equal (fun (an,av) (bn,bv) -> an=bn && av==bv)
      (E.Residual.function_bindings a) (E.Residual.function_bindings b))
@@ -599,14 +602,14 @@ module Lowerer (P : sig
   val defer_body_errors : bool
   val kernel_bindings : (E.fn * int) list
   val on_profile : (Flow_ir.Profile.t -> unit) option
-  val compiled_ids : int Instance_path.Map.t
+  val compiled_ids : int Path_map.t
   val sites : Workspace.path list
   val inputs : (string * (string * Eval.value) list) list option
   val checked : Workspace.t
   val lower_checked :
     factories:Edit.factory list -> ?provenance_tags:bool -> ?reference:bool -> ?gpu:Flow_ir.Gpu.config ->
     ?strict_body:bool -> ?defer_body_errors:bool -> ?kernel_bindings:(E.fn * int) list ->
-    ?on_profile:(Flow_ir.Profile.t -> unit) -> ?compiled_ids:int Instance_path.Map.t -> ?sites:Workspace.path list ->
+    ?on_profile:(Flow_ir.Profile.t -> unit) -> ?compiled_ids:int Path_map.t -> ?sites:Workspace.path list ->
     ?inputs:(string * (string * Eval.value) list) list -> Workspace.t -> (t, Diagnostic.t) result
 end) = struct
   open P
@@ -649,7 +652,7 @@ end) = struct
           else Sop.Context.Dependencies.static)
         (fun ~node_id:_ context payloads->
           let session=lazy(let session=Result.get_ok(Sop.Session.create ~max_entries:0 ~max_payload_bytes:0) in
-            Sop.Session.Private.set_parallel_override session (Some false);session) in
+            Sop.Session.set_parallel_override session (Some false);session) in
           Fun.protect ~finally:(fun()->if Lazy.is_val session then Sop.Session.close(Lazy.force session))(fun()->
           let handles=Hashtbl.create 16 and geometries=Hashtbl.create 16 and next=ref(-1) in
           List.iteri(fun index(id,ty,_)->
@@ -715,7 +718,7 @@ end) = struct
             |_->false in
           let constant=function E.Source(name,_,_)->String.starts_with ~prefix:"$core/constant-array/" name|_->false in
           let force_args ?(keep_constant=false) args=List.map(fun(name,value)->name,if deferred value && not(keep_constant && name="values" && constant value) then
-              ok(E.Private.force_reference ~resolve:(Attribute_kernel.resolve ~geometry)
+              ok(E.Host.force_reference ~resolve:(Attribute_kernel.resolve ~geometry)
                 value ~live:(Sop.Context.input context)) else value)args in
           (* sop/mesh, sop/mesh_planes and sop/remap build their node directly from the evaluated arguments: the former
              synthetic one-node workspace was checked, evaluated and lowered per call. *)
@@ -833,7 +836,7 @@ end) = struct
                   let selected=try
                     let check()=if Sop.Context.cancelled context then
                       Flow.Value.fail "cancelled" "geometry operation was cancelled" in
-                    Ok(Flow.Value.Private.error_row_index ?grain ~check rows)
+                    Ok(Flow.Value.error_row_index ?grain ~check rows)
                    with Diagnostic.Error d -> Error d in
                    Result.bind selected(function Some index->Ok(E.Int index)
                      |None->error "E_DIAGNOSTIC_CONTEXT" "Host diagnosis needs a failing row."))
@@ -887,11 +890,11 @@ end) = struct
     let compiled_id (node : E.node) =
       let key = node.inst :: site_index node.site
         :: List.map (fun k -> -(k + 1)) node.iter in
-      match Instance_path.Map.find_opt key !ids with
+      match Path_map.find_opt key !ids with
       | Some id -> id
       | None ->
           let id = Sop.Node.Private.fresh_id () in
-          ids := Instance_path.Map.add key id !ids; id
+          ids := Path_map.add key id !ids; id
     let compiled = Array.make (Array.length plan.nodes) 0
     let int_arg (n : E.node) k = match List.assoc_opt k n.args with
       | Some (E.Int i) -> i | _ -> fail "E_LOWER" ("Zone node without " ^ k)
@@ -965,7 +968,7 @@ end) = struct
         | E.Fn fn -> [fn]
         | E.List values -> Array.to_list values |> List.concat_map function_elements
         | _ -> [] in
-      let functions = List.filter_map (fun (slot : Check.slot) ->
+      let functions = List.filter_map (fun (slot : Flow.Catalog.slot) ->
         let values = List.filter_map (fun (name,value) -> if name=slot.name then Some value else None) functions
           |> List.concat_map function_elements |> List.map (fun fn -> E.Fn fn) in
         match values with
@@ -1008,7 +1011,7 @@ end) = struct
           let next = ref 0 in
           let connected = List.mapi (fun slot input ->
             slot, Option.map (fun _ -> let index = !next in incr next; index) input) inputs in
-          let bindings = List.mapi (fun slot (s : Check.slot) -> s.name,
+          let bindings = List.mapi (fun slot (s : Flow.Catalog.slot) -> s.name,
             List.filter_map (fun (index, input) ->
               if index=slot || (s.rest && index>=slot) then input else None) connected)
             definition.slots in
@@ -1018,7 +1021,7 @@ end) = struct
               let slot = slots.(min position (Array.length slots - 1)) in
               Workspace.slot_ty ~slot definition.kind = Ty.geometry) input) inputs) in
           Lisp_node.node ~geometry_inputs ~unbound_function:(List.exists
-              (fun (slot : Check.slot) -> match slot.ty with Some (Ty.Fn _) ->
+              (fun (slot : Flow.Catalog.slot) -> match slot.ty with Some (Ty.Fn _) ->
                 not (List.mem_assoc slot.name functions) && (slot.required ||
                   Option.value ~default:[] (List.assoc_opt slot.name bindings) <> []) | _ -> false)
               definition.slots)
@@ -1031,12 +1034,12 @@ end) = struct
         Edit.factory ~key ~operation:definition.operation ~label:definition.label ~category ~fields:definition.fields ~arity:0
           (fun _ -> construct [])
       else Edit.factory_slots ~key ~operation:definition.operation ~label:definition.label ~category
-        ~slots:(List.map (fun (s : Check.slot) -> s.name) definition.slots)
+        ~slots:(List.map (fun (s : Flow.Catalog.slot) -> s.name) definition.slots)
         ~keyword_inputs:definition.keyword_inputs
         ~fields:definition.fields
-        ~input_types:(List.map (fun (s : Check.slot) ->
+        ~input_types:(List.map (fun (s : Flow.Catalog.slot) ->
           Ty.to_string (Workspace.slot_ty ~slot:s definition.kind)) definition.slots)
-        ~inputs:(List.map (fun (s : Check.slot) -> match s.required,s.rest with
+        ~inputs:(List.map (fun (s : Flow.Catalog.slot) -> match s.required,s.rest with
           |true,false->Edit.Required|false,false->Optional|true,true->Rest|false,true->Optional_rest)
           definition.slots)
         construct
@@ -1602,7 +1605,7 @@ let dynamic = ref [] in
         approx = checked.approx; approx_reasons = checked.approx_reasons; profile; preview}
 end
 
-let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?on_profile ?(compiled_ids = Instance_path.Map.empty)
+let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?on_profile ?(compiled_ids = Path_map.empty)
     ?(sites = []) ?inputs checked =
   Phase_timer.measure "lower" (fun () ->
   try
@@ -1620,8 +1623,8 @@ let of_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled
     (lower_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs)
 
 let workspace ~factories ?extra ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs source =
-  Result.bind (Catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
-    match Catalog.check_workspace ~ops:Operators.all catalog source with
+  Result.bind (Flow_catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
+    match Flow_catalog.check_workspace ~ops:Operators.all catalog source with
     | Some checked, _ -> of_checked ~factories ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked
     | None, diagnostics -> Error (match List.find_opt (fun (d : Diagnostic.t) ->
         d.severity = Diagnostic.Error_severity) diagnostics with
@@ -1710,7 +1713,7 @@ let field_calls ?state ~live ~resolve lowered =
     else None) lowered.factories |> Option.value ~default:[] in
   let vector (node : E.node) name =
     match List.assoc_opt name node.args with
-    | Some value -> (match E.Private.force_reference ?state ~resolve value ~live with
+    | Some value -> (match E.Host.force_reference ?state ~resolve value ~live with
         | Ok (E.Vec3 (x,y,z)) -> Some (x,y,z) | _ -> None)
     | None ->
         let component suffix = List.find_map (fun (f : Param.field_view) ->
@@ -1723,7 +1726,7 @@ let field_calls ?state ~live ~resolve lowered =
     Array.to_list lowered.plan.nodes |> List.filter_map (fun (node : E.node) ->
       if node.kind <> "sop/iso_surface" then None else
       match List.assoc_opt "field" node.args with
-      | Some (E.Fn fn) when E.Private.function_scope fn = Some (zone, outer) ->
+      | Some (E.Fn fn) when E.Host.function_scope fn = Some (zone, outer) ->
           (match vector node "resolution", vector node "min", vector node "max" with
            | Some (rx,ry,rz), Some (lx,ly,lz), Some (hx,hy,hz) ->
                let valid n = Float.is_finite n && n >= 1. && Float.floor n = n
@@ -1741,9 +1744,9 @@ let field_calls ?state ~live ~resolve lowered =
                    let p = [|Float.fma (float (k mod nx)) ((hx -. lx) /. rx) lx;
                      Float.fma (float ((k / nx) mod ny)) ((hy -. ly) /. ry) ly;
                      Float.fma (float (k / (nx * ny))) ((hz -. lz) /. rz) lz|] in
-                   Result.bind (E.Private.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
+                   Result.bind (E.Host.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
                      fn [E.Vec3_array p]) (function
-                     | E.Residual residual -> Result.bind (E.Private.map_probe ?state ~resolve
+                     | E.Residual residual -> Result.bind (E.Host.map_probe ?state ~resolve
                          ~offset:(start + k) residual ~live) (fun (_, at) -> at 0)
                      | _ -> assert false) in
                  Some (start, count, at)

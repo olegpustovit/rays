@@ -22,7 +22,7 @@ let run () =
     let builder = Sb.create ~capacity:count () in
     Sb.circles builder ~count ~position:(positions, 2) ~radius:([|0.6|], 0)
       ~fill:(Test_marks_native.rgba 118 186 202 255) ~stroke:0l ~stroke_width:([|1.|], 0);
-    let ir = match R.Private.create_owned [|R.Set_blend Alpha; R.Shapes (Sb.publish builder)|] with
+    let ir = match R.create_owned [|R.Set_blend Alpha; R.Shapes (Sb.publish builder)|] with
       | Ok ir -> ir | Error _ -> failwith "the batch is not a scene" in
     let frame () = Test_ui_pipeline.capture ~clear:(0., 0., 0., 1.) execution (fun submission ->
       Renderer.Private.lower_scene2 submission ~density:1 ~resource:(fun _ -> None) ir) in

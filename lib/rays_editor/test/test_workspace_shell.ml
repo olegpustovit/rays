@@ -2634,7 +2634,7 @@ let run_renderers_native ?(authored = false) () =
     ~on_stop:E3.close ()));
   let mesh_pixels path =
     let image = Rays.Image.load_exn path in
-    let pixels = Rays.Image.Private.pixels image |> Result.get_ok in
+    let pixels = Rays.Image.pixels image |> Result.get_ok in
     let w = Result.get_ok (Rays.Image.get_width image)
     and h = Result.get_ok (Rays.Image.get_height image) in
     let scale = float w /. 900. in
@@ -2684,7 +2684,7 @@ let run_native () =
       E3.after_present e frame)
     ~on_stop:E3.close ()));
   let image = Rays.Image.load_exn path in
-  let pixels = Result.get_ok (Rays.Image.Private.pixels image) in
+  let pixels = Result.get_ok (Rays.Image.pixels image) in
   let image_width = Result.get_ok (Rays.Image.get_width image) in
   let scale = float image_width /. float (match !rects with (_, _, _, _, w) :: _ -> w | [] -> fail "no viewports") in
   check (List.length !rects = 4) "four viewport panels";
@@ -2898,7 +2898,7 @@ let run_roots_native () =
        (describe day160) (describe day195));
   (* what the window shows: both panes drawn, the pictures differ, dusk is darker than noon *)
   let image = Rays.Image.load_exn png in
-  let pixels = Result.get_ok (Rays.Image.Private.pixels image) in
+  let pixels = Result.get_ok (Rays.Image.pixels image) in
   let image_width = Result.get_ok (Rays.Image.get_width image) in
   let scale = float image_width /. float width in
   let region (x, y, w, h) (resolution_w, resolution_h) =

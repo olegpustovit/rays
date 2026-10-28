@@ -36,7 +36,7 @@ let pure ()=
     require(Bytes.length(B.instances b)=64*count)"shape layout";
     let commands=Scene.Private.commands [Scene.Private.shapes b]in
     require(Array.length commands=1)"one packed command";
-    require(B.Private.valid_shapes b)"packed validation") [0;1;63;64;65;100000];
+    require(B.valid_shapes b)"packed validation") [0;1;63;64;65;100000];
   let line ()=
     let b=B.Builder.create ()in
     B.Builder.line b ~x0:1.25 ~y0:2.5 ~x1:9.75 ~y1:10. ~color:0xffffffffl ~width:1.5;
@@ -49,10 +49,10 @@ let pure ()=
   (* A published batch carries its builder's validation, so each corruption is
      tried on a copy nothing has validated yet. *)
   let tampered offset=
-    let fresh=B.Private.copy(line ())in
+    let fresh=B.copy(line ())in
     Bytes.set_int32_le(B.instances fresh)offset(Int32.bits_of_float nan);fresh in
-  require(not(B.Private.valid_shapes(tampered 52)))"nonfinite anti-alias boundary";
-  require(not(B.Private.valid_shapes(tampered 0)))"nonfinite boundary";
+  require(not(B.valid_shapes(tampered 52)))"nonfinite anti-alias boundary";
+  require(not(B.valid_shapes(tampered 0)))"nonfinite boundary";
   require(Scene_command.Render_ir.create [|Shapes(tampered 0)|]=Error Invalid_cardinality)"invalid commands";
   (* The IR owns its copy: the source's storage changing does not reach it. *)
   Bytes.set_int32_le bytes 0 (Int32.bits_of_float 7.5);

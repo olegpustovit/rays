@@ -17,7 +17,7 @@ let fixture ?(identity=false) ty table indices body=
   let text=if identity then
     text |> Str.global_replace(Str.regexp_string "(fn [(i : int)]")"(fn [(i : text)]"
       |> Str.global_replace(Str.regexp_string ") indices)))")") table)))" else text in
-  let ws=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+  let ws=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
     |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds)) in
   let initial=if indices=[||]then[|0|]else indices in
   let value=List.assoc "g"(ok(E.static ~inputs:["g",["table",table;"indices",E.Int_array initial]]ws)).results in
@@ -39,9 +39,9 @@ let ()=
     let p=if skip=[||]then p else I.Core.Region.rebuild p ~skip ()|>Result.get_ok in
     assert(P.gpu_refusals p<>[]);
     assert(Result.is_error(Flow_web.Wgsl.kernel p));
-    let prepared=ok(P.Private.prepare_values p ~live)in
+    let prepared=ok(P.Host.prepare_values p ~live)in
     let result=P.force ~strict:true p ~live in
-    (match expected,result with Some _,Ok got when skip=[||]->assert(Marshal.to_string got[]=Marshal.to_string(ok(E.Private.force_reference value ~live))[])|Some _,Ok _->()|None,Error _->()|_->assert false);
+    (match expected,result with Some _,Ok got when skip=[||]->assert(Marshal.to_string got[]=Marshal.to_string(ok(E.Host.force_reference value ~live))[])|Some _,Ok _->()|None,Error _->()|_->assert false);
     Buffer.add_string js "{\n";
     Printf.bprintf js "const arrays=[%s], captures=[%s];\n"
       (String.concat ","(Array.to_list(Array.map numeric prepared.arrays)))
@@ -108,7 +108,7 @@ let ()=
   List.iter(fun data->let uniforms=Array.copy r.uniforms in uniforms.(slot)<-E.Vec3_array data;
     let bad=I.Core.Region.rebuild r ~uniforms ()|>Result.get_ok in
     let diagnostic=match P.force ~strict:true bad ~live with Error d->d|_->assert false in
-    let prepared=ok(P.Private.prepare_values p ~live)in
+    let prepared=ok(P.Host.prepare_values p ~live)in
     let frame=Array.map(function E.Float x->x|_->0.)prepared.frame in
     Buffer.add_string js "{\n";Buffer.add_string js(Flow_web.Js.region p);
     let data=if Array.exists Float.is_nan data then "Float64Array.of(0,0,0,0,NaN,0)"else numeric(E.Vec3_array data)in

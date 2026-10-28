@@ -2518,10 +2518,8 @@ module Drawable = struct
 
   let texture value = texture_owned ~finalize:true value
 
-  module Private = struct
     let acquire_scoped layer = acquire_owned ~finalize:false layer
     let texture_scoped value = texture_owned ~finalize:false value
-  end
 
   let destroy (value : t) =
     destroy_parent "Metal.Drawable.destroy" value.lifetime value.raw (fun () ->
@@ -4957,7 +4955,6 @@ module Render_encoder = struct
           if finalize then attach_lifetime_finalizer value.lifetime command_buffer.lifetime;
           Ok value
 
-  module Private = struct
     type prepared_indexed_binding = {
       prepared_stage : stage;
       prepared_index : int;
@@ -5013,7 +5010,7 @@ module Render_encoder = struct
       create_from_pass_owned ~finalize:false command_buffer pass
 
     let prepare_indexed_draws (device : Device.t) (draws : prepared_indexed_draw array) =
-      let operation = "Metal.Render_encoder.Private.prepare_indexed_draws" in
+      let operation = "Metal.Render_encoder.prepare_indexed_draws" in
       let* () = before_main operation in
       let* () = ensure_live operation device.lifetime in
       if Array.length draws = 0 then error operation Invalid_argument "indexed draw array is empty"
@@ -5213,7 +5210,7 @@ module Render_encoder = struct
       value.command_buffer.phase <- Failed
 
     let execute_prepared_indexed_draws (value : t) prepared =
-      let operation = "Metal.Render_encoder.Private.execute_prepared_indexed_draws" in
+      let operation = "Metal.Render_encoder.execute_prepared_indexed_draws" in
       let* () = before_main operation in
       let* () = ensure_live operation value.lifetime in
       let* () =
@@ -5236,7 +5233,6 @@ module Render_encoder = struct
             Some
               prepared.prepared_draws.(Array.length prepared.prepared_draws - 1).prepared_pipeline;
           Ok ()
-  end
 
   let destroyed (value : t) = is_destroyed value.lifetime
 

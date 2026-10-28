@@ -27,7 +27,7 @@ let texture index : Scene_execution.sampled_texture =
      max_anisotropy=1};gpu=None}
 
 let run_case name count entry =
-  let driver,live_handles=Ogpu.Impl.create_driver () in
+  let driver = Ogpu.Impl.create_driver () in let live_handles = Ogpu.Impl.live_handles in
   let before=live_handles () in
   match Scene_execution_fixtures.create_offscreen driver configuration with
   | Error { Ogpu.Error.kind = No_adapter; _ } ->

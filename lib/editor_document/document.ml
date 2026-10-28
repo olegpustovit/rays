@@ -92,7 +92,7 @@ type shell = {
 
 (* The authored document, its lowering and the window's precision, read once with the lowering. *)
 type workspace = { ws : Workspace_doc.t; lowered : Flow_sop.Lower.t; fast : bool Lazy.t;
-                   catalog : (Flow.Check.catalog, Diagnostic.t) result Lazy.t (* the factories' kinds, built when an edit first asks *) }
+                   catalog : (Flow.Catalog.catalog, Diagnostic.t) result Lazy.t (* the factories' kinds, built when an edit first asks *) }
 
 type t = {
   scene : Kind_graph.t;  (* objects: the input is the parent *)

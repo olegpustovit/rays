@@ -12,7 +12,7 @@ module Gpu : sig
   type value={identity:int;count:int;width:int;output:int;stamp:int64;gpu_seconds:float option}
   (** Borrowed output metadata; [output] selects a fused producer's buffer.
       [gpu_seconds] is the completed device dispatch duration when the backend supports timestamps. *)
-  type kernel={run:Packed.Private.inputs -> (value,Diagnostic.t)result;
+  type kernel={run:Packed.Host.inputs -> (value,Diagnostic.t)result;
     readback:value -> (Flow.Eval.value,Diagnostic.t)result}
   type backend={cost:fast:bool -> Packed.t -> count:int -> float option;
     prepare:fast:bool -> Packed.t -> (kernel,Diagnostic.t)result}

@@ -17,7 +17,7 @@ let kind_name = function
   | Flow_web.Wgsl.Uniform_buffer -> "uniform" | Storage_read -> "read" | Storage_read_write -> "read_write"
 (* The noise tables are the ones the Metal host uploads (lib/flow_gpu/run.ml): 512 entries per seed. *)
 let table_json (w : Flow_web.Wgsl.wgsl) =
-  json_list (fun seed -> json_ints (Rays_math.Noise.Private.permutation (Rays_math.Noise.create seed)))
+  json_list (fun seed -> json_ints (Rays_math.Noise.permutation (Rays_math.Noise.create seed)))
     (Array.to_list w.table_seeds)
 let kernel_json ?(cpu = "") name (w : Flow_web.Wgsl.wgsl) =
   Printf.sprintf
@@ -30,7 +30,7 @@ let kernel_json ?(cpu = "") name (w : Flow_web.Wgsl.wgsl) =
 let () =
   let program=Test_program.compile
     "(map (fn [x] (if (> x t) (+ x 1.0) (exp (* x 1000.0)))) (array/range 16))"in
-  let view=Flow_ir.Packed.Private.view program in
+  let view=Flow_ir.Packed.Host.view program in
   let wgsl=Test_program.ok(Flow_web.Wgsl.kernel program)in
   let lines=String.split_on_char '\n' wgsl.source in
   let guarded=ref false in
@@ -99,15 +99,15 @@ let () =
          @ Test_program.carried_fixtures 4096 in
        let encode_input (name,program)=
          let w = Test_program.ok (Flow_web.Wgsl.kernel_fast program) in
-         let inputs : Flow_ir.Packed.Private.inputs =
-           Test_program.ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
+         let inputs : Flow_ir.Packed.Host.inputs =
+           Test_program.ok (Flow_ir.Packed.Host.prepare ~fast:true program ~live) in
          name, w, inputs in
-       let cases = List.map (fun (name,w,(inputs : Flow_ir.Packed.Private.inputs)) ->
-         let count=inputs.Flow_ir.Packed.Private.count
-         and arrays=inputs.Flow_ir.Packed.Private.arrays
-         and uniforms=inputs.Flow_ir.Packed.Private.uniforms
-         and tables=inputs.Flow_ir.Packed.Private.tables
-         and frame=inputs.Flow_ir.Packed.Private.frame in
+       let cases = List.map (fun (name,w,(inputs : Flow_ir.Packed.Host.inputs)) ->
+         let count=inputs.Flow_ir.Packed.Host.count
+         and arrays=inputs.Flow_ir.Packed.Host.arrays
+         and uniforms=inputs.Flow_ir.Packed.Host.uniforms
+         and tables=inputs.Flow_ir.Packed.Host.tables
+         and frame=inputs.Flow_ir.Packed.Host.frame in
          let program=List.assoc name programs in
          let expected = match Test_program.ok (Flow_ir.Packed.force_all program ~live) with
            | [Flow.Eval.Int_array a] -> Array.map float a
@@ -121,13 +121,13 @@ let () =
          (List.map encode_input programs) in
        let errors=List.map(fun(name,program)->
          let w=Test_program.ok(Flow_web.Wgsl.kernel_fast program)in
-         let inputs : Flow_ir.Packed.Private.inputs =
-           Test_program.ok(Flow_ir.Packed.Private.prepare ~fast:true program ~live)in
-         let count=inputs.Flow_ir.Packed.Private.count
-         and arrays=inputs.Flow_ir.Packed.Private.arrays
-         and uniforms=inputs.Flow_ir.Packed.Private.uniforms
-         and tables=inputs.Flow_ir.Packed.Private.tables
-         and frame=inputs.Flow_ir.Packed.Private.frame in
+         let inputs : Flow_ir.Packed.Host.inputs =
+           Test_program.ok(Flow_ir.Packed.Host.prepare ~fast:true program ~live)in
+         let count=inputs.Flow_ir.Packed.Host.count
+         and arrays=inputs.Flow_ir.Packed.Host.arrays
+         and uniforms=inputs.Flow_ir.Packed.Host.uniforms
+         and tables=inputs.Flow_ir.Packed.Host.tables
+         and frame=inputs.Flow_ir.Packed.Host.frame in
          Flow_web.Kernel_table.entry ~id:name w,
          Printf.sprintf "%s:{\"count\":%d,\"inputs\":[%s],\"uniforms\":[%s],\"tables\":[%s],\"frame\":%s}"
            (json_string name) count (String.concat "," (Array.to_list (Array.map floats arrays)))
@@ -191,7 +191,7 @@ let () =
     "(map (fn [x] (if (> x t) 0.0 (min (* x x) 1.0))) (array/range 1024))" in
   let source = (Test_program.ok (Flow_web.Wgsl.kernel hidden)).source in
   let lines = String.split_on_char '\n' source in
-  let checks = Flow_ir.Packed.Private.finite_checks hidden in
+  let checks = Flow_ir.Packed.Host.finite_checks hidden in
   List.iteri (fun index line -> if String.starts_with ~prefix:"  let r" line then
     let slot = Scanf.sscanf line "  let r%d:" Fun.id in
     let guard = Printf.sprintf "  if (!wfinite(r%d)) { sb |= 1u; }" slot in

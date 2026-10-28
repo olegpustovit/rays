@@ -5,7 +5,7 @@ let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
   (Rdk_rays.Rays_mesh.to_trace_mesh geometry))
 let execution=function Ok value->value|Error error->
   failwith(Format.asprintf"%a"Renderer.pp_error error)
-let live_handles=let _,live=Ogpu.Impl.create_driver()in live
+let live_handles=Ogpu.Impl.live_handles
 
 let run () =
   let baseline=live_handles()in
@@ -38,8 +38,8 @@ let run () =
       let tracer=get(P.create ~width:48 ~height:32 scene)in
       Fun.protect ~finally:(fun()->P.destroy tracer)(fun()->
         get(P.render tracer camera);get(P.flush tracer);
-        let image=Rays.Image.Private.resource(P.image tracer)in
-        let texture=match Runtime_resources.Image.Private.gpu_snapshot image with
+        let image=Rays.Image.resource(P.image tracer)in
+        let texture=match Runtime_resources.Image.gpu_snapshot image with
           |Ok(Some(_,_,_,texture))->texture
           |_->failwith"traced film was published through CPU image storage"in
         let direct=match Ogpu.Backend.read_texture texture ~bytes_per_row:(48*4)with
@@ -54,7 +54,7 @@ let run () =
             image (P.image tracer) ~at:(0,0) ()]);
           let copied=get(Rays.Canvas.to_image canvas)in
           let sampled=Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy copied))
-            (fun()->Bytes.copy(get(Rays.Image.Private.pixels copied)))in
+            (fun()->Bytes.copy(get(Rays.Image.pixels copied)))in
           assert(sampled=direct));
         let colors=Hashtbl.create 16 in
         Bytes.iteri(fun index byte->if index mod 4=0 then Hashtbl.replace colors byte())direct;
@@ -63,7 +63,7 @@ let run () =
         Hashtbl.add textures (Ogpu.Backend.texture_id texture) ();
         for _=1 to 30 do
           get(P.render tracer camera);get(P.flush tracer);
-          match Runtime_resources.Image.Private.gpu_snapshot image with
+          match Runtime_resources.Image.gpu_snapshot image with
           |Ok(Some(_,_,_,texture))->Hashtbl.replace textures
               (Ogpu.Backend.texture_id texture)()
           |_->failwith"GPU film reverted to CPU storage"

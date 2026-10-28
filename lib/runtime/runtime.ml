@@ -409,10 +409,7 @@ let destroy (value : t) =
       value.window;
     match !failure with None -> Ok () | Some error -> Error error)
 
-module Private = struct
-  module Change_flag = Change_flag
   let is_window (value : t) = Option.is_some value.window
-  let sync_facts = sync_facts
   let surface_configuration (value : t) =
     let layer = match value.window with
       | None -> Ok None
@@ -429,4 +426,3 @@ module Private = struct
         present_mode=(if vsync then Ogpu.Surface.Fifo else Ogpu.Surface.Immediate);
         max_acquired=2; layer }) layer
   let window_handle (value : t) = Option.map (fun window -> window.handle) value.window
-end

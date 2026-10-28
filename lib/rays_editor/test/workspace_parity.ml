@@ -235,7 +235,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
               (fun (_,network) -> let g = (Result.get_ok (Sop.Payload.geometry (cook network cid).payload)) in Hashtbl.add sources id g; Some g)) in
         let resolve = Flow_sop.Attribute_kernel.resolve ~geometry in
         let results = List.mapi (fun index (value, program) ->
-          let result = if reference then E.Private.force_reference ~state ~resolve value ~live
+          let result = if reference then E.Host.force_reference ~state ~resolve value ~live
             else I.Executor.force ~state ~resolve program ~live in
           let id = Printf.sprintf "value-%d-t%g" index time in
           let bytes = match result with Ok v -> "ok:" ^ key v | Error d -> "error:" ^ Diagnostic.to_string d in
@@ -247,7 +247,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
           let bytes = match output.payload with
             | Sop.Payload.Geometry geometry -> Rdk_test_support.geometry_bytes geometry
             | Image image -> Marshal.to_string (Sop.Image.width image, Sop.Image.height image,
-                Sop.Image.Private.storage image) [Marshal.No_sharing]
+                Sop.Image.storage image) [Marshal.No_sharing]
             | Kernel _ -> failwith "Workspace results cannot contain function payloads" in
           compare payloads ("geometry-" ^ id) (bytes ^ Marshal.to_string output.instances []);
           id, cid, output) g.root) networks in
@@ -256,7 +256,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
             let image = image value |> ok in
             compare images ("image-" ^ key value ^ Printf.sprintf "-t%g" time)
               (Marshal.to_string (Rays.Image.get_size image |> string_ok,
-                Rays.Image.Private.pixels image |> string_ok) [Marshal.No_sharing]);
+                Rays.Image.pixels image |> string_ok) [Marshal.No_sharing]);
             image in
           let render id scene =
             if Rays.Scene.Private.commands scene = [||] then failwith (name ^ ": empty image oracle commands");
@@ -294,7 +294,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
           end) evaluated.results
         end); results)) modes in
       (match results with [a;b] -> if not (List.for_all2 equal a b) then failwith (name ^ ": IR/reference value mismatch") | _ -> assert false);
-      let folds state = List.map key (E.Private.state_values state) in
+      let folds state = List.map key (E.Host.state_values state) in
       if folds ir_state <> folds ref_state then failwith (name ^ ": fold state mismatch"))
       [0.;0.125;1.25;7.]))) [1;8]);
   Printf.printf "%s: %d nodes, %d instances, %d values, four times, domains 1/8%s\n%!" name

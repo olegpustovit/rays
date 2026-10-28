@@ -16,35 +16,35 @@ let () =
     let interleaved=Array.init (count*3) (fun i->match i mod 3 with
       |0->x.(i/3)|1->y.(i/3)|_->z.(i/3)) in
     let strided=Array.make count 0. in
-    N.Private.sample3_into noise ~first:0 ~last:count
+    N.sample3_into noise ~first:0 ~last:count
       ~x:interleaved ~y:interleaved ~z:interleaved ~y_offset:1 ~z_offset:2
       ~x_stride:3 ~y_stride:3 ~z_stride:3 ~output:strided ();
     assert (Array.for_all2 bits strided reference);
-    rejects (fun()->N.Private.sample3_into noise ~first:0 ~last:count
+    rejects (fun()->N.sample3_into noise ~first:0 ~last:count
       ~x ~y ~z ~x_stride:0 ~output:strided ());
-    rejects (fun()->N.Private.sample3_into noise ~first:0 ~last:count
+    rejects (fun()->N.sample3_into noise ~first:0 ~last:count
       ~x ~y ~z ~x_stride:max_int ~output:strided ());
     List.iter (fun domains -> P.run ~domains (fun () ->
       let out = Array.make count (-1.) in
       P.for_ ~chunk_size:1 ~start:0 ~finish:2 (fun block ->
         let first = block * 1024 and last = min count ((block + 1) * 1024) in
-        N.Private.sample3_into noise ~first ~last ~x ~y ~z ~output:out ());
+        N.sample3_into noise ~first ~last ~x ~y ~z ~output:out ());
       assert (Array.for_all2 bits out reference))) [1; 8];
     let scratch = Array.make (count * 4) (-1.) in
     Array.blit x 0 scratch 0 count;
     Array.blit y 0 scratch count count;
     Array.blit z 0 scratch (count * 2) count;
-    N.Private.sample3_into noise ~first:1 ~last:(count - 1)
+    N.sample3_into noise ~first:1 ~last:(count - 1)
       ~x:scratch ~y:scratch ~z:scratch ~output:scratch
       ~y_offset:count ~z_offset:(count * 2) ~output_offset:(count * 3) ();
     assert (scratch.(count * 3) = -1. && scratch.(count * 4 - 1) = -1.);
     for i = 1 to count - 2 do assert (bits scratch.(count * 3 + i) reference.(i)) done;
     let in_place = Array.copy x in
-    N.Private.sample3_into noise ~first:0 ~last:count ~x:in_place ~y ~z ~output:in_place ();
+    N.sample3_into noise ~first:0 ~last:count ~x:in_place ~y ~z ~output:in_place ();
     assert (Array.for_all2 bits in_place reference);
     List.iter (fun frequency ->
       let out = Array.make count 0. in
-      N.Private.sample3_into noise ~first:0 ~last:count ~frequency ~x ~y ~z ~output:out ();
+      N.sample3_into noise ~first:0 ~last:count ~frequency ~x ~y ~z ~output:out ();
       Array.iteri (fun i sample -> assert (bits sample (N.sample3 noise
         ~x:(x.(i) *. frequency) ~y:(y.(i) *. frequency) ~z:(z.(i) *. frequency)))) out)
       [0.; -0.; 0.16; -3.7];
@@ -56,22 +56,22 @@ let () =
       List.iter (fun (invalid,frequency) ->
         let coordinates=[|0.37;-1.25;z|] in
         coordinates.(axis)<-invalid;
-        N.Private.sample3_into noise ~first:0 ~last:1 ~frequency
+        N.sample3_into noise ~first:0 ~last:1 ~frequency
           ~x:[|coordinates.(0)|] ~y:[|coordinates.(1)|] ~z:[|coordinates.(2)|] ~output:out ();
         assert (Float.is_nan out.(0)))
         [nan,1.;infinity,1.;neg_infinity,1.;Float.max_float,2.;-.Float.max_float,2.]) [0;1;2]) [0.;0.73];
     List.iter (fun z -> List.iter (fun value -> List.iter (fun axis ->
       let coordinates=[|0.37;-1.25;z|] in coordinates.(axis)<-value;
-      N.Private.sample3_into noise ~first:0 ~last:1
+      N.sample3_into noise ~first:0 ~last:1
         ~x:[|coordinates.(0)|] ~y:[|coordinates.(1)|] ~z:[|coordinates.(2)|] ~output:out ();
       assert (bits out.(0) (N.sample3 noise ~x:coordinates.(0) ~y:coordinates.(1) ~z:coordinates.(2))))
       [0;1;2]) [0.;-0.;Float.max_float;-.Float.max_float;1e300;-1e300]) [0.;0.73];
-    rejects (fun () -> N.Private.sample3_into noise ~first:(-1) ~last:1 ~x ~y ~z ~output:in_place ());
-    rejects (fun () -> N.Private.sample3_into noise ~first:2 ~last:1 ~x ~y ~z ~output:in_place ());
-    rejects (fun () -> N.Private.sample3_into noise ~first:0 ~last:count ~x_offset:max_int ~x ~y ~z ~output:in_place ());
-    rejects (fun () -> N.Private.sample3_into noise ~first:0 ~last:(count - 1)
+    rejects (fun () -> N.sample3_into noise ~first:(-1) ~last:1 ~x ~y ~z ~output:in_place ());
+    rejects (fun () -> N.sample3_into noise ~first:2 ~last:1 ~x ~y ~z ~output:in_place ());
+    rejects (fun () -> N.sample3_into noise ~first:0 ~last:count ~x_offset:max_int ~x ~y ~z ~output:in_place ());
+    rejects (fun () -> N.sample3_into noise ~first:0 ~last:(count - 1)
       ~x:in_place ~y ~z ~output:in_place ~output_offset:1 ());
-    N.Private.sample3_into noise ~first:count ~last:count ~x ~y ~z ~output:in_place ())
+    N.sample3_into noise ~first:count ~last:count ~x ~y ~z ~output:in_place ())
   [0; 42; -17];
   List.iter (fun (op : Flow.Op.t) ->
     assert (match Flow.Op.find op.name Flow.Context.value with Some found -> found == op | None -> false);
@@ -88,7 +88,7 @@ let () =
   let forms=Result.get_ok (Flow.Syntax.parse "(workspace noise_scaling (graph g :context value
     (let* [tested (map (fn [p] (if (> t 1e308) (noise3 (* p t)) 0.0))
       (array/vec3 2051 [2.0 3.0 4.0]))] 0.0)))") in
-  let workspace=match Flow.Workspace.check ~ops:[] {Flow.Check.version=1;kinds=[]} forms with
+  let workspace=match Flow.Workspace.check ~ops:[] {Flow.Catalog.version=1;kinds=[]} forms with
     |Some w,ds when not (List.exists (fun (d:Diagnostic.t)->d.severity=Diagnostic.Error_severity) ds)->w
     |_,ds->failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
   let evaluation=Result.get_ok (Flow.Eval.static ~record:true workspace) in
@@ -132,7 +132,7 @@ let () =
       ^ body ^ ") " ^ source ^ ")] 0.0)))" in
     let forms = Result.get_ok (Flow.Syntax.parse text) in
     let ops = if op.name = "noise3" then [] else [op] in
-    let workspace = match Flow.Workspace.check ~ops {Flow.Check.version=1;kinds=[]} forms with
+    let workspace = match Flow.Workspace.check ~ops {Flow.Catalog.version=1;kinds=[]} forms with
       | Some w, [] -> w
       | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
     let evaluated = Result.get_ok (Flow.Eval.static ~record:true workspace) in

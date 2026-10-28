@@ -19,8 +19,8 @@ let close a b = a = b || Float.abs (a -. b) <= 1e-12 *. Float.max (Float.abs a) 
    the status and one array per output line. *)
 let run_node_raw ?(fast=false) program =
   let live = {(Input.at_time 1.) with frame=3} in
-  let region = program and view = P.Private.view program in
-  let inputs = Test_program.ok (P.Private.prepare_values program ~live) in
+  let region = program and view = P.Host.view program in
+  let inputs = Test_program.ok (P.Host.prepare_values program ~live) in
   let count = if region.iteration = R.Product then
       Array.fold_left ( * ) 1 (Array.map Flow.Value.array_length inputs.arrays) else inputs.count in
   let valid = List.sort_uniq compare (List.filter (fun i -> i >= 0 && i < count) (Array.to_list region.skip)) in
@@ -170,7 +170,7 @@ let () =
     Fun.protect ~finally:(fun()->Sys.remove file)(fun()->
       Out_channel.with_open_bin file(fun channel->
         output_string channel(Flow_web.Js.region caused);
-        Printf.fprintf channel "const inputs = [Float64Array.from([0,1])], uniforms = [new Float64Array(%d).fill(0.5)], outputs = [new Float64Array(2)];\n" (Array.length(P.Private.view caused).code);
+        Printf.fprintf channel "const inputs = [Float64Array.from([0,1])], uniforms = [new Float64Array(%d).fill(0.5)], outputs = [new Float64Array(2)];\n" (Array.length(P.Host.view caused).code);
         output_string channel {|
 if (region(inputs, uniforms, outputs, 0, 0) !== 0 || region(inputs, uniforms, outputs, 0, 1) !== 0) throw new Error('untaken cause raised');
 try { region(inputs, uniforms, outputs, 1, 2); throw new Error('selected cause did not raise'); }

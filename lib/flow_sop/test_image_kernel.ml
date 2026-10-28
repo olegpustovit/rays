@@ -3,7 +3,7 @@ module P = Sop
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let cooked = function Ok x -> x | Error d -> failwith (Diagnostic.error_to_string d)
 let parse text = Flow.Syntax.parse text |> ok
-let catalog = Flow.Check.{version=1;kinds=[]}
+let catalog = Flow.Catalog.{version=1;kinds=[]}
 let check text =
   match Flow.Workspace.check catalog (parse text) with
   | Some w, _ -> w
@@ -21,7 +21,7 @@ let cook ?(time=0.) domains prepared =
     let context = P.Context.create ~domains ~time () |> Result.get_ok in
     let output = P.Session.cook session ~context (Flow_sop.Image_kernel.node prepared) |> cooked in
     P.Payload.image output.payload |> cooked)
-let bytes image = P.Image.Private.rgba8 image |> Option.get
+let bytes image = P.Image.rgba8 image |> Option.get
 let () =
   let text = "(workspace w (graph img :context image (let* [picture
     (image/map (fn [uv] [uv.x uv.y 0.5 1]) :width 387 :height 91)] picture)))" in
@@ -47,7 +47,7 @@ let () =
   let kernel = prepare (fn text) in
   let packed = match Flow_ir.Executor.packed_region (Flow_sop.Image_kernel.program kernel) with
     | Some p -> p | None -> assert false in
-  let inputs = Flow_ir.Packed.Private.prepare packed ~live:(Input.at_time 0.) |> ok in
+  let inputs = Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 0.) |> ok in
   let saved = Array.copy inputs.arrays.(0) in
   let one = cook 1 kernel and eight = cook 8 kernel in
   assert (bytes one=bytes eight && P.Image.payload_bytes one=387*91*4);

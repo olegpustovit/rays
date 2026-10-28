@@ -123,10 +123,10 @@ let ()=
   let queried=evaluate "(sop/topology geo)"in
   let live=Input.at_time 0. in
   let expected=E.Record(List.tl(fields original))in
-  let result=E.Private.force_reference ~resolve:resolver queried ~live |>flow in
+  let result=E.Host.force_reference ~resolve:resolver queried ~live |>flow in
   check(result=expected)"C1 topology kind codes or plane order differ";
   (match result with E.Record fields->List.iter(function _,E.Int_array a->Array.fill a 0(Array.length a)99|_->assert false)fields|_->assert false);
-  check(E.Private.force_reference ~resolve:resolver queried ~live |>flow = expected)"C1 topology query mutated native storage";
+  check(E.Host.force_reference ~resolve:resolver queried ~live |>flow = expected)"C1 topology query mutated native storage";
   let source=Lisp_sop.snapshot original in
   let origins=List.map(fun component->
     let captured="(let* [topology (sop/topology geo)] (map (fn [(i : int)] i) topology."^component^"))" in
@@ -164,7 +164,7 @@ let ()=
   let values={|(workspace topology_cache (graph g :context sop [(geo : geometry nil)]
     (let* [tested (array/int 1 (array/count (get (sop/topology geo) :kinds)))] geo)))|} in
   let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all
-      {Flow.Check.version=1;kinds=[]}(parse values)with
+      {Flow.Catalog.version=1;kinds=[]}(parse values)with
     |Some checked,[]->checked|_,diagnostics->fail(String.concat ";"
         (List.map Diagnostic.to_string diagnostics)) in
   let value=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]] checked |>flow
@@ -421,9 +421,9 @@ let ()=
   let n=Sys.max_floatarray_length/3+1 in
   check(n<=Sys.max_floatarray_length && n*3>Sys.max_floatarray_length)
     "Mesh planes failed to remove the interleaved representation ceiling";
-  check(Flow.Op.Private.array_count "array/float"(E.Int Sys.max_floatarray_length)=Sys.max_floatarray_length)
+  check(Flow.Op.array_count "array/float"(E.Int Sys.max_floatarray_length)=Sys.max_floatarray_length)
     "Mesh planes narrowed native scalar capacity";
-  (try ignore(Flow.Op.Private.array_count "array/float"(E.Int(Sys.max_floatarray_length+1)));
+  (try ignore(Flow.Op.array_count "array/float"(E.Int(Sys.max_floatarray_length+1)));
       fail "Scalar point plane exceeded native array capacity"
    with Diagnostic.Error d -> check(d.code="E_ARRAY_RANGE")"Scalar plane capacity error changed");
   print_endline "Mesh planes finite/count/topology errors, lazy causes and exact scalar capacity retain native boundaries"

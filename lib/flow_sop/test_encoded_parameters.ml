@@ -50,8 +50,8 @@ let ()=
   assert(Flow.Lisp.flat(List.hd checked.source)=Flow.Lisp.flat(List.hd forms));
   let header=flow_ok(Flow.Defnode.parse(List.hd(parse(declaration())))) in
   let manifest,_=flow_ok(Flow_sop.Manifest.generate ~nodes:[header] Sop.Nodes.factories) in
-  let restored,_=flow_ok(Flow.Check.catalog_of_manifest manifest) in
-  let restored_kind=List.find(fun(k:Flow.Check.kind)->k.qualified="sop/test_encoded")restored.kinds in
+  let restored,_=flow_ok(Flow.Catalog.catalog_of_manifest manifest) in
+  let restored_kind=List.find(fun(k:Flow.Catalog.kind)->k.qualified="sop/test_encoded")restored.kinds in
   assert(restored_kind.parameters=definition.kind.parameters);
   let node=root(lower forms) in
   let explicit=root(lower(parse(source ~operation:"native_encoded"()))) in

@@ -2,7 +2,7 @@ let ok = function Ok value -> value | Error error -> failwith (Diagnostic.to_str
 let compile ?(fusion = true) ?(declarations="") body =
   let source="(workspace w " ^ declarations ^ " (graph g :context value (let* [tested " ^ body ^ "] 0.0)))" in
   let forms=ok (Flow.Syntax.parse source) in
-  let workspace=match Flow.Workspace.check ~ops:[] {Flow.Check.version=1;kinds=[]} forms with
+  let workspace=match Flow.Workspace.check ~ops:[] {Flow.Catalog.version=1;kinds=[]} forms with
     | Some workspace, [] -> workspace
     | _,errors -> failwith (String.concat "\n" (List.map Diagnostic.to_string errors)) in
   let evaluated=ok (Flow.Eval.static ~record:true workspace) in

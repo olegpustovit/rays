@@ -26,15 +26,13 @@ let max_f32 = 3.4028234663852886e38
 
 type gpu_token = { identity : int; count : int; stamp : int64 }
 
-module Private = struct
-  let gpu_token ~identity ~count ~stamp =
-    if identity <= 0 || count < 0 || count > max_count || stamp < 0L then
-      invalid_arg "Marks.gpu_token: invalid identity, count or stamp";
-    { identity; count; stamp }
-  let gpu_identity value = value.identity
-  let gpu_count value = value.count
-  let gpu_stamp value = value.stamp
-end
+let gpu_token ~identity ~count ~stamp =
+  if identity <= 0 || count < 0 || count > max_count || stamp < 0L then
+    invalid_arg "Marks.gpu_token: invalid identity, count or stamp";
+  { identity; count; stamp }
+let gpu_identity value = value.identity
+let gpu_count value = value.count
+let gpu_stamp value = value.stamp
 let finite v = Float.is_finite v
 let bounded v = finite v && Float.abs v <= max_f32
 

@@ -52,21 +52,21 @@ let run () =
     failwith"1x facts did not bypass the cache";
   (* A window is not asked for its size every frame: SDL announces a change,
      and one announcement costs exactly one query however many arrive. *)
-  let flag=Runtime.Private.Change_flag.create()in
+  let flag=Runtime.Change_flag.create()in
   let queries=ref 0 in
   let query()=incr queries;!queries in
   for _=1 to 1000 do
-    if Runtime.Private.Change_flag.refresh flag query<>None then
+    if Runtime.Change_flag.refresh flag query<>None then
       failwith"a frame with no size event queried the window"done;
   if !queries<>0 then failwith"quiet frames queried the window";
-  Runtime.Private.Change_flag.announce flag;
-  Runtime.Private.Change_flag.announce flag;
-  if Runtime.Private.Change_flag.refresh flag query<>Some 1 then
+  Runtime.Change_flag.announce flag;
+  Runtime.Change_flag.announce flag;
+  if Runtime.Change_flag.refresh flag query<>Some 1 then
     failwith"an announced change did not query the window once";
-  if Runtime.Private.Change_flag.refresh flag query<>None then
+  if Runtime.Change_flag.refresh flag query<>None then
     failwith"one announcement queried the window twice";
-  Runtime.Private.Change_flag.announce flag;
-  if Runtime.Private.Change_flag.refresh flag query<>Some 2 then
+  Runtime.Change_flag.announce flag;
+  if Runtime.Change_flag.refresh flag query<>Some 2 then
     failwith"a later announcement was lost";
   Printf.printf"runtime scaling: 1x identity, Retina and resize exact, no per-frame window query; 1000 draws at 2x: %.0f words/frame uncached, %.0f cached\n"uncached per_call
 

@@ -6,7 +6,6 @@ val width : t -> int
 val height : t -> int
 val data_id : t -> int
 val payload_bytes : t -> int
-module Private : sig
   val storage : t -> float array
   (** Borrowed immutable float storage, or an explicitly materialized float
       array for an RGBA8 image. No materialized copy is retained by the image. *)
@@ -21,4 +20,3 @@ module Private : sig
   (** Convert finite packed channels to one owned RGBA8 buffer: clamp to [0,1],
       scale by 255, round ties to even. Uses disjoint 16,384-pixel chunks in the
       caller's shared pool; cancellation is checked between chunks. *)
-end
