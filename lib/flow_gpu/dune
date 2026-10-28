@@ -1,8 +1,8 @@
 (library
  (name flow_gpu)
  (public_name rays.flow_gpu)
- (modules lisp_stage trace trace_source compact_source emit spirv pipelines run host image_sink raster image_rgba8_source)
- (private_modules lisp_stage trace trace_source compact_source image_rgba8_source)
+ (modules lisp_stage trace trace_source noise noise_source compact_source emit spirv pipelines run host image_sink raster image_rgba8_source)
+ (private_modules lisp_stage trace trace_source noise noise_source compact_source image_rgba8_source)
  (libraries flow flow_ir ogpu renderer rays_math lru parallel))
 
 ; the device side of scene/trace, compiled once a scene variant (Trace)
@@ -11,6 +11,13 @@
  (deps trace.rays)
  (action (with-stdout-to %{target}
   (progn (echo "let source = {rays|") (cat trace.rays) (echo "|rays}\n")))))
+
+; the device side of noise3, compiled once an octave count (Noise)
+(rule
+ (target noise_source.ml)
+ (deps noise.rays)
+ (action (with-stdout-to %{target}
+  (progn (echo "let source = {rays|") (cat noise.rays) (echo "|rays}\n")))))
 
 ; the resident fold's compaction, generated from shaders/compact.rays (test_raster.exe --write lib)
 (rule

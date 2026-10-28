@@ -81,7 +81,6 @@ let msl ?(arguments = false) ~declarations ~vertex ~fragment () =
     else component "colour" Flow.Ty.Vec4 c ^ "=" ^ value ^ ";") in
   let signature stage extra = String.concat ",\n    " (extra @ buffer_arguments stage) in
   Ok (String.concat "" ([ "#include <metal_stdlib>\nusing namespace metal;\n";
-    "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n";
     (if arguments then "struct raster_texture { texture2d<float, access::sample> image [[id(0)]]; sampler sampling [[id(1)]]; };\n" else "");
     "struct "; out; " {\n" ] @ fields @ [ "};\n";
     Printf.sprintf "vertex %s %s(\n    %s) {\n  %s o;\n" out (identifier vertex)
@@ -138,7 +137,6 @@ let compute_msl ~size ~declarations ~entry =
     Printf.sprintf "device %s%s* buffer%d [[buffer(%d)]]" (if List.mem slot (stored c) then "" else "const ")
       (if ty = Flow.Ty.Array Int then "uint" else "float") slot slot) (List.filter is_buffer c.params) in
   Ok (String.concat "" [ "#include <metal_stdlib>\nusing namespace metal;\n";
-    "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n";
     Printf.sprintf "kernel void %s(\n    %s) {\n" (identifier entry)
       (String.concat ",\n    " (arguments @ [ "uint lid [[thread_position_in_threadgroup]]" ])); body; "}\n" ])
 let compute_program ~size ~declarations ~entry =

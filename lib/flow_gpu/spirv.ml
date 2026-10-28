@@ -98,7 +98,6 @@ type emitter = {
   uint_function_pointer : int;
   mutable status_bits : int;  (* the thread's Function-storage status word *)
   table : int option;
-  noise : (int * int) option;
   scene : (int * int * int * int * int option * int * int * int) option;  (* acceleration structure variable and type, vertices, spheres, ray query, vec3, vec2 *)
   mutable block : int;
   mutable trace_cache : (int list * int * int array) list;
@@ -187,123 +186,6 @@ let conditional e ty condition yes no =
   jump e after;
   label e after;
   result e ty 245 [ yes_value; yes_end; no_value; no_end ]
-
-let noise_sample e offset x y z =
-  let add a b = floating e 129 [ a; b ]
-  and sub a b = floating e 131 [ a; b ]
-  and mul a b = floating e 133 [ a; b ] in
-  let either a b = result e e.boolean 166 [ a; b ] in
-  let invalid = either (non_finite e x) (either (non_finite e y) (non_finite e z)) in
-  conditional e e.float invalid
-    (fun () -> f e nan)
-    (fun () ->
-      let coordinate value =
-        let base = ext e 8 [ value ] in
-        let q = sub value base in
-        let index = result e e.sint 110 [ floating e 140 [ base; f e 256. ] ] in
-        let index = result e e.uint 199 [ result e e.uint 124 [ index ]; u e 255 ] in
-        let fade = mul (mul (mul q q) q) (add (mul q (sub (mul q (f e 6.)) (f e 15.))) (f e 10.)) in
-        (index, q, fade)
-      in
-      let ix, x, fx = coordinate x and iy, y, fy = coordinate y and iz, z, fz = coordinate z in
-      let table index =
-        let index = result e e.uint 128 [ offset; index ] in
-        let pointer = result e e.uint_storage_pointer 65 [ Option.get e.table; u e 0; index ] in
-        result e e.uint 61 [ pointer ]
-      in
-      let plus a b = result e e.uint 128 [ a; b ] in
-      let next a = plus a (u e 1) in
-      let a = plus (table ix) iy and b = plus (table (next ix)) iy in
-      let aa = plus (table a) iz
-      and ab = plus (table (next a)) iz
-      and ba = plus (table b) iz
-      and bb = plus (table (next b)) iz in
-      let gradient hash x y z =
-        let h = result e e.uint 199 [ hash; u e 15 ] in
-        let first = select e e.float (compare e 176 h (u e 8)) x y in
-        let middle = either (compare e 170 h (u e 12)) (compare e 170 h (u e 14)) in
-        let second = select e e.float (compare e 176 h (u e 4)) y (select e e.float middle x z) in
-        let sign mask value =
-          select e e.float
-            (compare e 170 (result e e.uint 199 [ h; u e mask ]) (u e 0))
-            value (floating e 127 [ value ])
-        in
-        add (sign 1 first) (sign 2 second)
-      in
-      let blend a b weight = add a (mul weight (sub b a)) in
-      let xm = sub x (f e 1.) and ym = sub y (f e 1.) and zm = sub z (f e 1.) in
-      let row aa ba y z = blend (gradient (table aa) x y z) (gradient (table ba) xm y z) fx in
-      let x00 = row aa ba y z
-      and x10 = row ab bb ym z
-      and x01 = row (next aa) (next ba) y zm
-      and x11 = row (next ab) (next bb) ym zm in
-      let value = mul (add (blend (blend x00 x10 fy) (blend x01 x11 fy) fz) (f e 1.)) (f e 0.5) in
-      ext e 43 [ value; f e 0.; f e 1. ])
-
-let noise_functions e =
-  match e.noise with
-  | None -> ()
-  | Some (sample, fbm) ->
-      let function_ id types body =
-        let signature = Words.declare e.words 33 (e.float :: types) in
-        Words.instruction e.words.body 54 [ e.float; id; 0; signature ];
-        let parameters =
-          List.map
-            (fun ty ->
-              let id = Words.id e.words in
-              Words.instruction e.words.body 55 [ ty; id ];
-              id)
-            types
-        in
-        label e (Words.id e.words);
-        let value = body parameters in
-        Words.instruction e.words.body 254 [ value ];
-        Words.instruction e.words.body 56 []
-      in
-      function_ sample [ e.float; e.float; e.float; e.uint ] (function
-        | [ x; y; z; offset ] -> noise_sample e offset x y z
-        | _ -> assert false);
-      function_ fbm [ e.float; e.float; e.float; e.uint; e.uint ] (function
-        | [ x; y; z; offset; octaves ] ->
-            let before = e.block in
-            let header = Words.id e.words
-            and body = Words.id e.words
-            and continuing = Words.id e.words
-            and finish = Words.id e.words in
-            let next = Array.init 5 (fun _ -> Words.id e.words) in
-            jump e header;
-            label e header;
-            let phi ty initial next = result e ty 245 [ initial; before; next; continuing ] in
-            let frequency = phi e.float (f e 1.) next.(0)
-            and amplitude = phi e.float (f e 1.) next.(1)
-            and sum = phi e.float (f e 0.) next.(2)
-            and weights = phi e.float (f e 0.) next.(3)
-            and iteration = phi e.uint (u e 0) next.(4) in
-            let within = compare e 176 iteration octaves in
-            Words.instruction e.words.body 246 [ finish; continuing; 0 ];
-            Words.instruction e.words.body 250 [ within; body; finish ];
-            label e body;
-            let scaled value = floating e 133 [ value; frequency ] in
-            let value = result e e.float 57 [ sample; scaled x; scaled y; scaled z; offset ] in
-            let weighted = floating e 133 [ value; amplitude ] in
-            jump e continuing;
-            label e continuing;
-            let define slot ty opcode operands =
-              Words.instruction e.words.body opcode (ty :: next.(slot) :: operands);
-              if ty = e.float then Words.instruction e.words.annotations 71 [ next.(slot); 42 ]
-            in
-            define 0 e.float 133 [ frequency; f e 2. ];
-            define 1 e.float 133 [ amplitude; f e 0.5 ];
-            define 2 e.float 129 [ sum; weighted ];
-            define 3 e.float 129 [ weights; amplitude ];
-            define 4 e.uint 128 [ iteration; u e 1 ];
-            jump e header;
-            label e finish;
-            select e e.float
-              (compare e 180 weights (f e 0.))
-              (f e 0.)
-              (floating e 136 [ sum; weights ])
-        | _ -> assert false)
 
 let binary e operation a b =
   let op opcode = floating e opcode [ a; b ] in
@@ -534,6 +416,11 @@ let narrow_binary e operation a b =
       let zero = compare e 170 b (u e 0) in
       select e e.uint zero (u e 0) (op (if operation = Idiv then 134 else 137) [ a; select e e.uint zero (u e 1) b ])
 
+(* Entry [index] of the seed's noise permutation table, as a uint *)
+let noise_table e (layout : Flow_ir.Kernel_layout.t) seed index =
+  let base = Option.get (Array.find_index (( = ) seed) layout.table_seeds) * 512 in
+  load_uint e (Option.get e.table) (result e e.uint 128 [ u e base; index ])
+
 (* One component of a prepared table's row [at] (a long), clamped into the table. *)
 let element e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width component =
   let k = Option.get (List.find_index (fun (slot, _) -> slot = prepared) layout.gathers) in
@@ -610,10 +497,12 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
     | Int_binary (op, a, b) -> integer_status e op (int_of b); narrow_binary e op (low a) (low b)
     | Int_select (condition, yes, no) -> if yes = no then low yes else select e e.uint (truth e (float_of condition)) (low yes) (low no)
     | Loop_result (loop, component, _) -> registers.(loop + 1 + component)
+    | Stage (Noise_table seed, r) -> noise_table e layout seed (low r.(0))
     | Stage (stage, r) -> stage_value e raster ~table_of ~low ~float_of ~integer ~wide:false stage r | Int_frame name -> frame_word e raster layout name
     | _ -> assert false
     else wide_expression slot instruction
   and wide_expression slot = function
+    | P.Stage (Noise_table seed, r) -> result e (long e) 124 [ result e (Option.get e.ulong) 113 [ noise_table e layout seed (low r.(0)) ] ]
     | P.Stage (stage, r) when raster = None -> stage_value e raster ~table_of ~low ~float_of ~integer ~wide:(integer slot) stage r
     | P.Int_frame name when Flow_ir.Kernel_layout.scene_fact name -> scene_count e layout name ~wide:true
     | P.Const value ->
@@ -644,10 +533,6 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
         match projection with
         | Value -> select e float valid value (f e 0.)
         | Valid -> numeric_truth e valid)
-    | Noise3 (x, y, z, seed, octaves, _, _) ->
-        let table = Option.get (Array.find_index (( = ) seed) layout.table_seeds) * 512 in
-        result e float 57
-          [ snd (Option.get e.noise); float_of x; float_of y; float_of z; u e table; u e octaves ]
     | Select (condition, yes, no) -> if yes = no then float_of yes else
         select e float (truth e (float_of condition)) (float_of yes) (float_of no)
     | Loop_result (loop, component, _) ->
@@ -899,9 +784,9 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     (match P.gpu_refusals ~fused:true ~fast program with
     | [] -> ()
     | diagnostic :: _ -> raise (Diagnostic.Error diagnostic));
-    let program, back = match Trace.expand ~instanced ~motion ~curves:(if curves then Some `Loop else None) ~spheres program with
+    let program, back = match Noise.helpers ~instanced ~motion ~curves:(if curves then Some `Loop else None) ~spheres program with
       | Ok x -> x | Error d -> raise (Diagnostic.Error d) in
-    let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves program in
+    let layout = Noise.checked back (Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves program) in
     (* SPV_NV_ray_tracing_motion_blur moves only trace-rays pipelines, not ray queries *)
     if layout.scene_motion then
       fail "scene/trace motion has no SPIR-V ray-query form; build the scene at the shutter midpoint (Run.build_scene without Ray_tracing_motion).";
@@ -912,7 +797,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     and sint = Words.declare words 21 [ 32; 1 ]
     and float = Words.declare words 22 [ 32 ] in
     let long, ulong =
-      if fast && needs_integer layout then
+      if needs_integer layout then
         (Some (Words.declare words 21 [ 64; 1 ]), Some (Words.declare words 21 [ 64; 0 ]))
       else (None, None)
     in
@@ -991,7 +876,6 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
         layout.scene_binding
     in
     let strands = Option.map (fun binding -> bind storage 12 binding Ogpu.Shader.Storage_buffer) layout.scene_strands in
-    let noise = Option.map (fun _ -> (Words.id words, Words.id words)) table in
     let invocation = variable invocation_pointer 1 in
     Words.instruction words.annotations 71 [ invocation; 11; 28 ];
     let glsl = Words.id words and main = Words.id words in
@@ -1013,7 +897,6 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
         uint_function_pointer;
         status_bits = 0;
         table;
-        noise;
         scene;
         block = 0;
         trace_cache = [];
@@ -1048,7 +931,6 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     label e finish;
     Words.instruction words.body 253 [];
     Words.instruction words.body 56 [];
-    noise_functions e;
     let module_bytes =
       Buffer.create (Buffer.length words.body + Buffer.length words.declarations + 512)
     in
@@ -1136,7 +1018,7 @@ let stage (s : stage) program =
     let sizes = ref false in
     let glsl = Words.id words and main = Words.id words in
     let e = { words; boolean; uint; sint; float; long; ulong; glsl; uniform = 0; uniform_pointer = 0; storage_pointer;
-      uint_storage_pointer; status = 0; uint_function_pointer = pointer 7 uint; status_bits = 0; table = None; noise = None;
+      uint_storage_pointer; status = 0; uint_function_pointer = pointer 7 uint; status_bits = 0; table = None;
       scene = None; block = 0; trace_cache = []; strands = None; loop_depth = 0 } in
     let to_long value = result e (Option.get long) 124 [ result e (Option.get ulong) 113 [ value ] ] in
     let builtins = Hashtbl.create 2 in
