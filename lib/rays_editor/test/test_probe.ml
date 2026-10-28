@@ -278,7 +278,7 @@ let compiled_inputs () =
         "compiled inputs changed the sampled sparkline/footer") [0;4095;4999];
     check (Flow.Eval.state_stamp state = stamp) "compiled probes advanced the host fold";
     let tick = List.assoc ["g";"tick"] evaluated.records |> List.hd |> snd in
-    ignore (Flow.Eval.Private.force_reference ~state tick ~live |> Result.get_ok)) [0;1;3;0];
+    ignore (Flow.Eval.Host.force_reference ~state tick ~live |> Result.get_ok)) [0;1;3;0];
   check (!calls > 0) "live map inputs bypassed the host compiler"
 
 let run () =

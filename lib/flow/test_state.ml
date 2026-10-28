@@ -63,7 +63,7 @@ let () =
       assert(identities()=original))
       [0,0,1,1;1,0,1,2;1,1,2,2])
     [(fun ~state v ~live->Eval.force ~state v ~live);
-     (fun ~state v ~live->Eval.Private.force_reference ~state v ~live)];
+     (fun ~state v ~live->Eval.Host.force_reference ~state v ~live)];
   print_endline "Graph state: inline/bound known tuples, coercion sharing, opposite orders, private snapshots and host/frame clocks agree"
 
 let () =
@@ -143,7 +143,7 @@ let () =
   let array_state=Eval.create_state()in
   assert(value(Eval.run ~state:array_state ~time:0. (checked
     "(array/sum (state [s (exact (array/range 3))] s))"))=Eval.Float 3.);
-  assert(List.mem(Eval.Float_array [|0.;1.;2.|])(Eval.Private.state_values array_state));
+  assert(List.mem(Eval.Float_array [|0.;1.;2.|])(Eval.Host.state_values array_state));
   (* An opaque extension can conceal resources from static types. Check the
      seed before the step reads it, and the step before it reaches next. *)
   List.iter(fun wrap->
@@ -171,9 +171,9 @@ let () =
         (match force ~state residual ~live:(Input.at_time 0.)with
          |Error d->assert(d.Diagnostic.code="E_STATE_TYPE")|Ok _->assert false);
         assert(!calls=expected_calls && Eval.state_stamp state=stamp
-          && Eval.Private.state_values state=[]))
+          && Eval.Host.state_values state=[]))
         [(fun ~state v ~live->Eval.force ~state v ~live);
-         (fun ~state v ~live->Eval.Private.force_reference ~state v ~live)])
+         (fun ~state v ~live->Eval.Host.force_reference ~state v ~live)])
       ["(test/opaque true)","(test/opaque false)",1;
        "(test/opaque false)","(test/opaque true)",2]) [0;1;2;3];
   print_endline "Exact images: static state refusal and opaque seed/step backstops preserve caller state; numeric and packed exact state remains data"

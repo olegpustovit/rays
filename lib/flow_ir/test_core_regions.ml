@@ -41,7 +41,7 @@ let check ?(times=times) ~region (name,body) =
   let program=ok (I.Executor.compile value) in
   List.iter (fun time ->
     let live=Input.at_time time in
-    let expected=E.Private.force_reference value ~live in
+    let expected=E.Host.force_reference value ~live in
     let verify label actual = if not (same_result actual expected) then
       failwith (Printf.sprintf "%s at %g (%s)" name time label) in
     (* A failing region declines to the packed path, so only successes compare with the walker. *)

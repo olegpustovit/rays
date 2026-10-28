@@ -56,7 +56,7 @@ let () =
     let core=match I.Core_lower.lower ~strict:true residual with Ok p->p | Error form->failwith(body^": "^form) in
     let executable=ok(I.Executor.compile ~strict:true value) in
     List.iter(fun time->let live=Input.at_time time in
-      let reference=ok(E.Private.force_reference value ~live) in
+      let reference=ok(E.Host.force_reference value ~live) in
       List.iter(fun domains->let direct,compiled=Parallel.run ~domains(fun()->
         ok(Test_program.run ~root:residual core ~live),ok(I.Executor.force ~strict:true executable ~live)) in
         assert(same direct reference && same compiled reference)) [1;8]) [-0.;0.;0.25;2.])
@@ -75,7 +75,7 @@ let () =
          sample {:nested {:column column :bias minimum}} shift (fn [x] (+ x sample.nested.bias))]
          (map shift sample.nested.column))"];
   let empty=value "(map (fn [x] (if (> t 0.) (array/min (array/float 0)) 0.)) (array/range 0))" in
-  assert(ok(E.Private.force_reference empty ~live:(Input.at_time 1.))=E.Float_array[||]);
+  assert(ok(E.Host.force_reference empty ~live:(Input.at_time 1.))=E.Float_array[||]);
   (match I.Executor.compile ~strict:true empty with
    | Error _ -> ()
    | Ok _ -> failwith "strict compilation accepted an empty body reduction");
@@ -103,7 +103,7 @@ let () =
       |_->Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Unexpected reduction fixture source.") in
     let live=Input.at_time 0.25 in
     assert(same(ok(I.Executor.force ~strict:true ~resolve compiled ~live))
-      (ok(E.Private.force_reference ~resolve source ~live)));
+      (ok(E.Host.force_reference ~resolve source ~live)));
     assert(before=Marshal.to_string data[Marshal.No_sharing]))) [1;8];
   let unsupported=value "(array/min (map (fn [x] (value/rand (+ x t))) (array/range 5001)))" in
   (match I.Executor.compile ~strict:true unsupported with

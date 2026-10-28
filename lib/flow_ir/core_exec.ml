@@ -454,13 +454,13 @@ let prepare ?(remember_loops=false) ?(approx=Flow.Workspace.Paths.empty) ?(fast=
   let expression : C.expr -> state -> E.value = function
     | C.Constant n -> let v=constants.(n) in fun _ -> v
     | Source value -> fun st ->
-        (match E.Private.force_reference ?resolve:st.resolve value ~live:st.live with
+        (match E.Host.force_reference ?resolve:st.resolve value ~live:st.live with
          | Ok value -> value | Error d -> V.raise_diagnostic d)
     | Host_source {name;ty;args}->fun st->
         let args=List.map(fun(name,index)->name,st.values.(index))args in
         if name="$core/complete" && ty=Flow.Ty.geometry && args=["value",V.No_geo] then V.No_geo else
         let value=E.Source(name,ty,args) in
-        (match E.Private.force_reference ?resolve:st.resolve value ~live:st.live with
+        (match E.Host.force_reference ?resolve:st.resolve value ~live:st.live with
          |Ok value->value|Error d->V.raise_diagnostic d)
     | Source_descriptor {name;ty;args}->fun st->
         let args=List.map(fun(name,index)->name,st.values.(index))args in

@@ -103,7 +103,7 @@ let () =
           | Flow.Eval.Fn fn -> Some fn | _ -> assert false) |> Array.of_list in
       let converted = Parallel.run ~domains (fun () ->
         Parallel.map_array ~grain:1 (fun fn ->
-          let value = Flow.Eval.Private.map_function
+          let value = Flow.Eval.Host.map_function
               ~signature:Flow.Ty.{params = [Vec3; Float]; result = Vec3} fn
               [Flow.Eval.Vec3_array [|2.;0.;0.|]; Float_array [|0.|]] |> ok in
           let program = Flow_sop.Attribute_kernel.prepare ~sources:[] [] value |> ok in

@@ -21,13 +21,13 @@ let run ?(require_state_kernel = false) checked =
     for frame = 0 to 1 do
       let live = {(Input.at_time (float frame /. 60.)) with frame; dt = 1. /. 60.; size = 800, 600} in
       let actual = Flow_ir.Executor.force ~state program ~live in
-      let expected = E.Private.force_reference ~state:reference_state value ~live in
+      let expected = E.Host.force_reference ~state:reference_state value ~live in
       let same = match actual, expected with
         | Ok actual, Ok expected -> Marshal.to_string actual [Marshal.No_sharing] = Marshal.to_string expected [Marshal.No_sharing]
         | Error actual, Error expected -> Diagnostic.to_string actual = Diagnostic.to_string expected
         | _ -> false in
-      let state_same = Marshal.to_string (E.Private.state_values state) [Marshal.No_sharing] =
-        Marshal.to_string (E.Private.state_values reference_state) [Marshal.No_sharing] in
+      let state_same = Marshal.to_string (E.Host.state_values state) [Marshal.No_sharing] =
+        Marshal.to_string (E.Host.state_values reference_state) [Marshal.No_sharing] in
       if not same || not state_same then failwith "state residual differs from the reference walker"
     done) evaluation.states
 
@@ -60,15 +60,15 @@ let state_branch_laziness () =
   let reference_state = E.create_state () and core_state = E.create_state () in
   List.iter (fun time ->
     let live = Input.at_time time in
-    let expected = E.Private.force_reference ~state:reference_state value ~live in
+    let expected = E.Host.force_reference ~state:reference_state value ~live in
     let actual = Flow_ir.Executor.force ~state:core_state program ~live in
     let same = match actual, expected with
       | Ok actual, Ok expected -> actual = expected
       | Error actual, Error expected -> Diagnostic.to_string actual = Diagnostic.to_string expected
       | _ -> false in
     if not same then failwith (Printf.sprintf "state branch laziness differs at t=%g" time);
-    if Marshal.to_string (E.Private.state_values core_state) [Marshal.No_sharing]
-       <> Marshal.to_string (E.Private.state_values reference_state) [Marshal.No_sharing] then
+    if Marshal.to_string (E.Host.state_values core_state) [Marshal.No_sharing]
+       <> Marshal.to_string (E.Host.state_values reference_state) [Marshal.No_sharing] then
       failwith (Printf.sprintf "state branch changed inactive state at t=%g" time)) [0.; 101.]
 
 let () =

@@ -19,7 +19,7 @@ let evaluate ?resolve flags body =
   let program=match I.Core_lower.lower ~strict:true residual with Ok p->p|Error form->failwith form in
   let live=Input.at_time 0. in
   let native=Test_program.run ?resolve program ~live in
-  let reference=E.Private.force_reference ?resolve value ~live in
+  let reference=E.Host.force_reference ?resolve value ~live in
   (match native,reference with
    |Ok a,Ok b->assert(a=b)
    |Error a,Error b->assert(a.code=b.code && a.message=b.message && a.cause=b.cause)
@@ -81,7 +81,7 @@ let ()=
     (Set_arg{node=card.path;key=Pos 1;sub=[];value=Flow.Syntax.make(Num "1")}))in
   let printed=fst(Flow.Lisp.print forms)in ignore(checked printed);
   let result=ok(E.static ~record:true ~inputs:["g",["flags",E.Int_array[||]]]workspace)in
-  failure 0(E.Private.force_reference(snd(List.hd(List.assoc ["g";"tested"] result.records)))~live:(Input.at_time 0.));
+  failure 0(E.Host.force_reference(snd(List.hd(List.assoc ["g";"tested"] result.records)))~live:(Input.at_time 0.));
   assert(Result.is_error(Flow_graph.Flow_edit.apply_checked catalog forms
     (Set_arg{node=card.path;key=Pos 1;sub=[];value=Flow.Syntax.make(Str "wrong storage")})))
 let ()=

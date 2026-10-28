@@ -43,7 +43,7 @@ module M = struct
     let resolve=Flow_sop.Attribute_kernel.resolve ~geometry:(fun id->if id=7 then Some input else None) in
     let program=Flow_ir.Executor.compile ~strict:true value|>flow_ok in
     let live=Input.at_time 0. in
-    let expected=Flow.Eval.Private.force_reference ~resolve value ~live in
+    let expected=Flow.Eval.Host.force_reference ~resolve value ~live in
     List.iter(fun domains->Parallel.run ~domains(fun()->
       let actual=Flow_ir.Executor.force ~strict:true ~resolve program ~live in
       check(actual=expected) "Metadata query strict/reference/domain results differ")) [1;8];

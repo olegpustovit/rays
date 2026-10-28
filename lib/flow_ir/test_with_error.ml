@@ -22,7 +22,7 @@ let compare body=
   let r=residual body in
   let program=match I.Core_lower.lower ~strict:true r with Ok program->program|Error form->failwith form in
   let live=Input.at_time 0. in
-  let a=Test_program.run program ~live and b=E.Private.force_reference(E.Residual r)~live in
+  let a=Test_program.run program ~live and b=E.Host.force_reference(E.Residual r)~live in
   (match a,b with
    |Ok a,Ok b->assert(a=b)
    |Error a,Error b->assert(a.code=b.code && a.message=b.message && a.cause=b.cause && a.hints=b.hints && a.trace=b.trace)

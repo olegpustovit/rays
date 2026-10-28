@@ -27,7 +27,7 @@ let check (name,body) =
   let program=ok (I.Executor.compile (E.Residual r)) in
   List.iter (fun time ->
     let live=Input.at_time time in
-    let expected=E.Private.force_reference (E.Residual r) ~live in
+    let expected=E.Host.force_reference (E.Residual r) ~live in
     let verify actual = match actual,expected with
       | Ok actual,Ok expected when same actual expected -> ()
       | Error a,Error b when a.Diagnostic.code=b.Diagnostic.code -> ()
@@ -125,7 +125,7 @@ let () =
       !count in
     assert(List.for_all(fun body->builds body=0)loops);
     List.iter(fun time->let live=Input.at_time time in
-      let expected=ok(E.Private.force_reference ~resolve(E.Residual r) ~live)in
+      let expected=ok(E.Host.force_reference ~resolve(E.Residual r) ~live)in
       let actual=ok(Test_program.run ~strict:true ~resolve core ~live)in
       assert(same actual expected)) [0.;0.25;0.75;1.])
     ["(map (fn [(geo : geometry)] (nth (list geo) (int/mod (frame/index) 1))) parts)";
@@ -152,7 +152,7 @@ let () =
   assert (Array.length core.regions=1);
   assert (counted core.body=1);
   let live=Input.at_time 0. in
-  let want=E.Private.force_reference (E.Residual r) ~live in
+  let want=E.Host.force_reference (E.Residual r) ~live in
   (match Test_program.run core ~live,want with
    | Ok (E.Float_array a),Ok (E.Float_array b) ->
        assert (Array.length a=8 && Array.for_all2 (fun x y -> Int64.bits_of_float x=Int64.bits_of_float y) a b)

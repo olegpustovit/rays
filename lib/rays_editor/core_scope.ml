@@ -25,7 +25,7 @@ let probe_force () : Flow_graph.Probe.force =
       | _ -> Flow_ir.Executor.compile value in
     match prepared with
     | Ok program -> Flow_ir.Executor.force ?state ?elems ?resolve program ~live
-    | Error _ -> Flow.Eval.Private.force_reference ?state ?elems ?resolve value ~live
+    | Error _ -> Flow.Eval.Host.force_reference ?state ?elems ?resolve value ~live
 
 (* The probes of a live graph are forced again only when what a frame can change in them did: its
    time, size, pointer and buttons.  [tick], [dt] and the key and event lists change every frame, so

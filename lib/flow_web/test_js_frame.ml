@@ -297,7 +297,7 @@ let () =
        test_gather runs the strict Text region through the actual runtime/pool. *)
     let frame_program=match I.Core_lower.lower r with Ok p->p|Error form->failwith form in
     let case=value_case name (r,frame_program) in
-    List.iter(fun live->match Test_program.run program ~live,E.Private.force_reference(E.Residual r)~live with
+    List.iter(fun live->match Test_program.run program ~live,E.Host.force_reference(E.Residual r)~live with
       |Ok actual,Ok expected->assert(actual=expected)
       |Error actual,Error expected->assert(actual.code=expected.code && actual.message=expected.message)
       |_->assert false) case.lives;

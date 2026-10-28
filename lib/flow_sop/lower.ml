@@ -429,7 +429,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
         let remapped = List.map (fun (name,fn,index) ->
           let sources = List.filter_map (fun (name,source,slot,_) ->
             if slot=index then Some (source, marker name) else None) geometry_captures in
-          name, E.Private.remap_function_geometry ~sources fn, marker name, index, sources) forwarded in
+          name, E.Host.remap_function_geometry ~sources fn, marker name, index, sources) forwarded in
         let functions = List.map (fun (name,value) -> name,
           let remap offset fn = match List.find_opt (fun (marker,_,_,_,_) ->
             marker=Printf.sprintf "lisp_kernel_%s_%d" name offset) remapped with
@@ -549,7 +549,7 @@ let is_volatile lowered id = Network.Int_map.mem id lowered.volatile
 let same_function a b = a == b ||
   (E.Residual.function_id a = E.Residual.function_id b
    && E.Residual.function_origin a = E.Residual.function_origin b
-   && E.Private.function_scope a = E.Private.function_scope b
+   && E.Host.function_scope a = E.Host.function_scope b
    && E.Residual.function_name a = E.Residual.function_name b
    && List.equal (fun (an,av) (bn,bv) -> an=bn && av==bv)
      (E.Residual.function_bindings a) (E.Residual.function_bindings b))
@@ -718,7 +718,7 @@ end) = struct
             |_->false in
           let constant=function E.Source(name,_,_)->String.starts_with ~prefix:"$core/constant-array/" name|_->false in
           let force_args ?(keep_constant=false) args=List.map(fun(name,value)->name,if deferred value && not(keep_constant && name="values" && constant value) then
-              ok(E.Private.force_reference ~resolve:(Attribute_kernel.resolve ~geometry)
+              ok(E.Host.force_reference ~resolve:(Attribute_kernel.resolve ~geometry)
                 value ~live:(Sop.Context.input context)) else value)args in
           (* sop/mesh, sop/mesh_planes and sop/remap build their node directly from the evaluated arguments: the former
              synthetic one-node workspace was checked, evaluated and lowered per call. *)
@@ -1713,7 +1713,7 @@ let field_calls ?state ~live ~resolve lowered =
     else None) lowered.factories |> Option.value ~default:[] in
   let vector (node : E.node) name =
     match List.assoc_opt name node.args with
-    | Some value -> (match E.Private.force_reference ?state ~resolve value ~live with
+    | Some value -> (match E.Host.force_reference ?state ~resolve value ~live with
         | Ok (E.Vec3 (x,y,z)) -> Some (x,y,z) | _ -> None)
     | None ->
         let component suffix = List.find_map (fun (f : Param.field_view) ->
@@ -1726,7 +1726,7 @@ let field_calls ?state ~live ~resolve lowered =
     Array.to_list lowered.plan.nodes |> List.filter_map (fun (node : E.node) ->
       if node.kind <> "sop/iso_surface" then None else
       match List.assoc_opt "field" node.args with
-      | Some (E.Fn fn) when E.Private.function_scope fn = Some (zone, outer) ->
+      | Some (E.Fn fn) when E.Host.function_scope fn = Some (zone, outer) ->
           (match vector node "resolution", vector node "min", vector node "max" with
            | Some (rx,ry,rz), Some (lx,ly,lz), Some (hx,hy,hz) ->
                let valid n = Float.is_finite n && n >= 1. && Float.floor n = n
@@ -1744,9 +1744,9 @@ let field_calls ?state ~live ~resolve lowered =
                    let p = [|Float.fma (float (k mod nx)) ((hx -. lx) /. rx) lx;
                      Float.fma (float ((k / nx) mod ny)) ((hy -. ly) /. ry) ly;
                      Float.fma (float (k / (nx * ny))) ((hz -. lz) /. rz) lz|] in
-                   Result.bind (E.Private.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
+                   Result.bind (E.Host.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
                      fn [E.Vec3_array p]) (function
-                     | E.Residual residual -> Result.bind (E.Private.map_probe ?state ~resolve
+                     | E.Residual residual -> Result.bind (E.Host.map_probe ?state ~resolve
                          ~offset:(start + k) residual ~live) (fun (_, at) -> at 0)
                      | _ -> assert false) in
                  Some (start, count, at)

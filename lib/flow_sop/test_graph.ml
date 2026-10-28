@@ -41,12 +41,12 @@ let agree ?(decls="") ?(inputs=[]) geometry body expected =
   let live = Input.at_time 0.25 in
   let core = Flow_ir.Executor.compile ~strict:true value |> flow_ok in
   List.iter (fun domains -> Parallel.run ~domains (fun () ->
-    assert (flow_ok (E.Private.force_reference ~resolve value ~live) = expected);
+    assert (flow_ok (E.Host.force_reference ~resolve value ~live) = expected);
     assert (flow_ok (Flow_ir.Executor.force ~strict:true ~resolve core ~live) = expected))) [1;8]
 
 let refused ?(decls="") ?(inputs=[]) geometry body code =
   let value, resolve = evaluate geometry decls inputs body in
-  match E.Private.force_reference ~resolve value ~live:(Input.at_time 0.) with
+  match E.Host.force_reference ~resolve value ~live:(Input.at_time 0.) with
   | Error d -> assert (d.code = code)
   | Ok _ -> failwith ("expected " ^ code)
 

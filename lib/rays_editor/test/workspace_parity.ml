@@ -235,7 +235,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
               (fun (_,network) -> let g = (Result.get_ok (Sop.Payload.geometry (cook network cid).payload)) in Hashtbl.add sources id g; Some g)) in
         let resolve = Flow_sop.Attribute_kernel.resolve ~geometry in
         let results = List.mapi (fun index (value, program) ->
-          let result = if reference then E.Private.force_reference ~state ~resolve value ~live
+          let result = if reference then E.Host.force_reference ~state ~resolve value ~live
             else I.Executor.force ~state ~resolve program ~live in
           let id = Printf.sprintf "value-%d-t%g" index time in
           let bytes = match result with Ok v -> "ok:" ^ key v | Error d -> "error:" ^ Diagnostic.to_string d in
@@ -294,7 +294,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
           end) evaluated.results
         end); results)) modes in
       (match results with [a;b] -> if not (List.for_all2 equal a b) then failwith (name ^ ": IR/reference value mismatch") | _ -> assert false);
-      let folds state = List.map key (E.Private.state_values state) in
+      let folds state = List.map key (E.Host.state_values state) in
       if folds ir_state <> folds ref_state then failwith (name ^ ": fold state mismatch"))
       [0.;0.125;1.25;7.]))) [1;8]);
   Printf.printf "%s: %d nodes, %d instances, %d values, four times, domains 1/8%s\n%!" name

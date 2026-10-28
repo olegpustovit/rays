@@ -91,7 +91,7 @@ let dump () = String.concat "" (List.map (fun (name,r) ->
   let printed=Format.asprintf "%a" I.Core.pp core in
   List.iter (fun time ->
     let live=Input.at_time time in
-    let expected=E.Private.force_reference (E.Residual r) ~live in
+    let expected=E.Host.force_reference (E.Residual r) ~live in
     let equal_result (a : (E.value,Diagnostic.t) result) (b : (E.value,Diagnostic.t) result) = match a,b with
       | Ok a,Ok b -> same a b | Error a,Error b -> a.code=b.code | _ -> false in
     assert (equal_result (E.force (E.Residual r) ~live) expected);
@@ -113,7 +113,7 @@ let () =
     let program=ok(I.Executor.compile(E.Residual r)) in
     List.iter (fun time ->
       let live=Input.at_time time in
-      let expected=E.Private.force_reference(E.Residual r) ~live in
+      let expected=E.Host.force_reference(E.Residual r) ~live in
       List.iter (fun actual -> match actual,expected with
         | Ok a,Ok b->assert(same a b)
         | Error a,Error b->assert(a.Diagnostic.code=b.code && a.message=b.message && a.cause=b.cause)

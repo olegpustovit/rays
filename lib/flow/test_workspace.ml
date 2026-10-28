@@ -54,7 +54,7 @@ let () =
   List.iter (fun time ->
     let live = Input.at_time time in
     let actual = Result.get_ok (Eval.force ~live result)
-    and reference = Result.get_ok (Eval.Private.force_reference ~live result) in
+    and reference = Result.get_ok (Eval.Host.force_reference ~live result) in
     let expected = Eval.Record ["pair", Vec2 (time,2.); "quad", Vec4 (1.,2.,3.,time);
       "moved", Record ["p", Vec2 (time+.2.,4.); "q", Vec4 (2.,4.,6.,2.*.time)];
       "fields", Float (time+.2.+.time)] in

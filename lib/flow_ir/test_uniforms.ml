@@ -35,7 +35,7 @@ let fixture ?override ?seed ty reducer=
   let fn=match evaluate workspace with E.Fn fn->fn|_->assert false in
   let sum=List.assoc "s"(E.Residual.function_bindings fn)in
   let uv=E.Vec2_array(Array.init(32769*2)(fun i->float(i mod 17)/.16.))in
-  let value=ok(E.Private.map_function ~signature:Flow.Ty.{params=[Vec2];result=Vec4} fn [uv])in
+  let value=ok(E.Host.map_function ~signature:Flow.Ty.{params=[Vec2];result=Vec4} fn [uv])in
   let packed=match value with E.Residual r->
     (match P.compile_result r(E.Residual.residual_view r).term with
       |Ok packed->packed|Error ds->failwith(Printf.sprintf "uniform compile %s reducer=%s seed=%s: %s"
@@ -66,7 +66,7 @@ let () =
   let fn = match evaluate (workspace []
     "(fn [(x : float)] [(* (- x 6.0) 50.0) t 0.0])") with
     | E.Fn fn -> fn | _ -> assert false in
-  let call = ok (E.Private.map_function ~signature:Flow.Ty.{params=[Float];result=Vec3}
+  let call = ok (E.Host.map_function ~signature:Flow.Ty.{params=[Float];result=Vec3}
     fn [E.Float_array (Array.init 13 float)]) in
   (* Recorded map calls are nested in this record. Tiny maps use the ordinary
      interpreter placement; strict numeric bodies still require packed execution. *)
@@ -75,7 +75,7 @@ let () =
     let program = ok (Flow_ir.Executor.compile ~strict value) in
     List.iter (fun time ->
       let live = Input.at_time time in
-      let expected = E.Private.force_reference value ~live in
+      let expected = E.Host.force_reference value ~live in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         let actual = Flow_ir.Executor.force ~strict program ~live in
         if not (same actual expected) then failwith (Printf.sprintf
@@ -88,13 +88,13 @@ let () =
   let fn = match evaluate (workspace [] "(fn [(x : float)] [x t 0.0])") with
     | E.Fn fn -> fn | _ -> assert false in
   let residuals = Array.init 129 (fun i ->
-    ok (E.Private.map_function ~signature:Flow.Ty.{params=[Float];result=Vec3} fn
+    ok (E.Host.map_function ~signature:Flow.Ty.{params=[Float];result=Vec3} fn
       [E.Float_array [|float i|]])) in
   let value = E.List (Array.append residuals [|residuals.(0)|]) in
   let program = ok (Flow_ir.Executor.compile value) in
   let live = Input.at_time 0.25 in
   let actual, attempts = Flow_ir.Executor.Private.force_with_lower_attempts program ~live in
-  assert (same actual (E.Private.force_reference value ~live));
+  assert (same actual (E.Host.force_reference value ~live));
   assert (attempts = 129);
   print_endline "One force lowers 129 distinct residuals once and reuses the first shared value"; flush stdout
 let () =
@@ -105,7 +105,7 @@ let () =
     let fn = match evaluate (workspace ~bindings:("data (probe/data) u " ^ uniform)
       [source Flow.Ty.Float] ("(fn [(x : float)] " ^ body ^ ")")) with
       | E.Fn fn -> fn | _ -> assert false in
-    let value = ok (E.Private.map_function
+    let value = ok (E.Host.map_function
       ~signature:Flow.Ty.{params=[Float];result=(if integer then Int else Float)} fn
       [E.Float_array (Array.init 32769 (fun i -> float (i mod 11)))]) in
     let packed = match value with E.Residual residual ->
@@ -113,7 +113,7 @@ let () =
       | _ -> assert false in
     let current = ref (E.Float_array [|1.;2.;3.;4.|]) in
     let resolve = resolve_source current and live = Input.at_time 0.25 in
-    let reference = E.Private.force_reference ~resolve value ~live in
+    let reference = E.Host.force_reference ~resolve value ~live in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       let actual = P.force ~strict:true ~resolve packed ~live in
       let compiled = Flow_ir.Executor.compile ~strict:true value in
@@ -140,8 +140,8 @@ let ()=
     List.iter(fun count->List.iter(fun time->
       let current=ref(data ty count time)in let original=bytes !current in
       let live={(Input.at_time time)with frame=int_of_float(time*.4.)}in
-      let expected=E.Private.force_reference ~resolve:(resolve_source current) value ~live in
-      let scalar=ok(E.Private.force_reference ~resolve:(resolve_source current) sum ~live)in
+      let expected=E.Host.force_reference ~resolve:(resolve_source current) value ~live in
+      let scalar=ok(E.Host.force_reference ~resolve:(resolve_source current) sum ~live)in
       if seed=Some "0" then (match count,scalar with
         |0,E.Int 0->()|n,E.Float _ when n>0->()|_->assert false);
       let uniform=match scalar with E.Int n->[|float n|]|_->components scalar in
@@ -178,7 +178,7 @@ let ()=
     assert(not(P.Private.ordered_add packed));
     List.iter(fun domains->Parallel.run ~domains(fun()->
       let live=Input.at_time 0. in
-      assert(same(P.force packed ~live)(E.Private.force_reference value ~live))))[1;8])
+      assert(same(P.force packed ~live)(E.Host.force_reference value ~live))))[1;8])
     ["(scan [a [t 0.0]] [x (map (fn [x] [x -0.0]) (array/range 32769))] (+ a x))";
      "(fold [a [t 0.0]] [x (array/range 32769)] (+ a x))"];
   let value=evaluate(workspace []
@@ -192,7 +192,7 @@ let ()=
   assert(not(P.Private.ordered_add packed));
   List.iter(fun domains->Parallel.run ~domains(fun()->
     let live=Input.at_time 0.25 in
-    assert(same(P.force packed ~live)(E.Private.force_reference value ~live))))[1;8];
+    assert(same(P.force packed ~live)(E.Host.force_reference value ~live))))[1;8];
   (* A resolver may advance a fold before a later reduction error; both callers roll it back. *)
   let fold=evaluate(workspace [] "(state [a 0.0] (+ a 1.0))")in
   let live=Input.at_time 0. in
@@ -206,11 +206,11 @@ let ()=
         if i mod width=failed_component && i/width>=count-2 then 1e308 else 0.)in
       let current=ref(if width=1 then E.Float_array values else E.Vec3_array values)in
       let original=bytes !current in
-      let resolve value=ignore(ok(E.Private.force_reference ~state fold ~live));resolve_source current value in
+      let resolve value=ignore(ok(E.Host.force_reference ~state fold ~live));resolve_source current value in
       let reference_state=E.create_state()in let reference_before=E.state_stamp reference_state in
-      let reference_resolve value=ignore(ok(E.Private.force_reference ~state:reference_state fold ~live));
+      let reference_resolve value=ignore(ok(E.Host.force_reference ~state:reference_state fold ~live));
         resolve_source current value in
-      let expected=E.Private.force_reference ~state:reference_state ~resolve:reference_resolve value ~live in
+      let expected=E.Host.force_reference ~state:reference_state ~resolve:reference_resolve value ~live in
       assert(Result.is_error expected && E.state_stamp reference_state=reference_before);
       let result=if gpu then Result.map(fun _->E.Int 0)(P.Private.prepare ~state ~resolve packed ~live)
         else P.force ~state ~resolve packed ~live in
@@ -218,14 +218,14 @@ let ()=
       assert(bytes !current=original);
       current:=(if width=1 then E.Float_array[|1.;2.;3.|]
         else E.Vec3_array[|1.;2.;3.;4.;5.;6.|]);
-      let expected=E.Private.force_reference ~resolve:(resolve_source current) value ~live in
+      let expected=E.Host.force_reference ~resolve:(resolve_source current) value ~live in
       if gpu then begin
         let prepared=ok(P.Private.prepare ~state ~resolve packed ~live)in
-        let expected_uniform=ok(E.Private.force_reference ~resolve:(resolve_source current) sum ~live)
+        let expected_uniform=ok(E.Host.force_reference ~resolve:(resolve_source current) sum ~live)
           |> components in
         assert(Array.exists(fun actual->bytes actual=bytes expected_uniform)prepared.uniforms)
       end
       else assert(same(P.force ~state ~resolve packed ~live)expected);
-      assert(ok(E.Private.force_reference ~state fold ~live)=E.Float 1.)) [false;true]) [2;16385])) [1;8])
+      assert(ok(E.Host.force_reference ~state fold ~live)=E.Float 1.)) [false;true]) [2;16385])) [1;8])
     [Flow.Ty.Float,0;Vec3,0;Vec3,1;Vec3,2];
   print_endline "Captured uniform packed/reference parity, ordered named reductions, changing inputs, errors and rollback passed"; flush stdout

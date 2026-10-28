@@ -22,7 +22,7 @@ let prepare ?site ?path ?(approx=Flow.Workspace.Paths.empty) ~identity ~width ~h
         uv.(i) <- (float x +. 0.5) /. float width; uv.(i + 1) <- v
       done
     done;
-    let* values = E.Private.map_function ?site ?path
+    let* values = E.Host.map_function ?site ?path
       ~signature:Flow.Ty.{params=[Vec2];result=Vec4} fn [E.Vec2_array uv] in
     let approx = if path=None then Flow.Workspace.Paths.empty else approx in
     let* program = Attribute_kernel.prepare ~approx ~sink:(Flow_ir.Display "image/map") ~sources inputs values in

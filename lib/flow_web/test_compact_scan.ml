@@ -25,7 +25,7 @@ let ()=
     (quote(path "runtime.js"))(quote(path "workers.js"))(quote(path "prims.js"));
   let live={(Input.at_time 0.25)with frame=3} in
   List.iter(fun body->let value,program=root body in
-    let result=E.Private.force_reference value ~live in
+    let result=E.Host.force_reference value ~live in
     let prepared=Array.map(fun region->let packed=region in
       assert(P.gpu_refusals packed<>[] && Result.is_error(Flow_web.Wgsl.kernel packed));
       packed,(if P.Private.argument_types packed=[||] then Some(ok(P.Private.prepare_values packed ~live)) else None))program.regions in

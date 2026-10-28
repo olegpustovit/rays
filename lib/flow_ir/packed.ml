@@ -171,10 +171,10 @@ let rec force_values ?state ?elems ?resolve ~live ~residual = function
   | value when not (E.is_live value) -> Ok value
   | E.Residual r -> Result.bind (residual r) (force_values ?state ?elems ?resolve ~live ~residual)
   | E.Source _ as value -> Result.bind
-      (E.Private.force_reference ?state ?elems ?resolve value ~live)
+      (E.Host.force_reference ?state ?elems ?resolve value ~live)
       (force_values ?state ?elems ?resolve ~live ~residual)
   | E.Struct (_, Ty.Array _, _) as value -> Result.bind
-      (E.Private.force_reference ?state ?elems ?resolve value ~live)
+      (E.Host.force_reference ?state ?elems ?resolve value ~live)
       (force_values ?state ?elems ?resolve ~live ~residual)
   | E.List values ->
       let out = Array.make (Array.length values) E.No_geo in
@@ -1697,7 +1697,7 @@ module Private = struct
       let rec value = function
         | E.Source("$core/argument",_,["index",E.Int index]) -> arguments.(index)
         | Residual r -> Residual(residual r)
-        | Fn fn -> Fn(E.Private.map_function_bindings value fn)
+        | Fn fn -> Fn(E.Host.map_function_bindings value fn)
         | List values -> List(Array.map value values)
         | Record fields -> Record(List.map(fun(name,v)->name,value v)fields)
         | Struct(name,ty,fields)->Struct(name,ty,List.map(fun(name,v)->name,value v)fields)

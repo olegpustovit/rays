@@ -51,9 +51,9 @@ let () =
         let program=Result.get_ok (Flow_ir.Core_lower.lower r) in
         List.iter (fun time ->
           let live=Input.at_time time in
-          assert (Test_program.run program ~live = E.Private.force_reference (E.Residual r) ~live))
+          assert (Test_program.run program ~live = E.Host.force_reference (E.Residual r) ~live))
           [0.;0.37;2.]
-    | _ -> ()) (fun () -> E.Private.static_with_requests
+    | _ -> ()) (fun () -> E.Host.static_with_requests
       (checked "(fold [s 0.] [i (range 2)] (+ s (+ t i)))"))));
   assert !observed;
   assert (C.literal_of_value (E.Residual (match List.assoc "g" (ok (E.static (checked "(+ t 1)"))).results with
@@ -162,7 +162,7 @@ let () =
     let prepared=Flow_ir.Core_exec.prepare program in
     List.iter(fun(time,frame)->
       let live={(Input.at_time time)with frame;dt=0.125;pointer=(3.,4.)}in
-      let expected=E.Private.force_reference value ~live in
+      let expected=E.Host.force_reference value ~live in
       let actual=Flow_ir.Core_exec.execute prepared ~live in
       assert(Marshal.to_string actual[Marshal.No_sharing]=Marshal.to_string expected[Marshal.No_sharing]))
       [-1.,0;0.,1;0.37,2;2.,0])[
@@ -181,7 +181,7 @@ let () =
         let program = Result.get_ok (Flow_ir.Core_lower.lower r) in
         List.iter (fun time ->
           let live = Input.at_time time in
-          assert (Test_program.run program ~live = E.Private.force_reference (E.Residual r) ~live))
+          assert (Test_program.run program ~live = E.Host.force_reference (E.Residual r) ~live))
           [0.; 0.37; 1e154; 1e200]
     | _ -> assert false)
     ["(+ (* (sin t) 0.5) (* t t))"; "(- (cos t) (* t (* t 1e10)))"]

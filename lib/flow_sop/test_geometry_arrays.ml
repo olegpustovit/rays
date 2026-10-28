@@ -123,10 +123,10 @@ let ()=
   let queried=evaluate "(sop/topology geo)"in
   let live=Input.at_time 0. in
   let expected=E.Record(List.tl(fields original))in
-  let result=E.Private.force_reference ~resolve:resolver queried ~live |>flow in
+  let result=E.Host.force_reference ~resolve:resolver queried ~live |>flow in
   check(result=expected)"C1 topology kind codes or plane order differ";
   (match result with E.Record fields->List.iter(function _,E.Int_array a->Array.fill a 0(Array.length a)99|_->assert false)fields|_->assert false);
-  check(E.Private.force_reference ~resolve:resolver queried ~live |>flow = expected)"C1 topology query mutated native storage";
+  check(E.Host.force_reference ~resolve:resolver queried ~live |>flow = expected)"C1 topology query mutated native storage";
   let source=Lisp_sop.snapshot original in
   let origins=List.map(fun component->
     let captured="(let* [topology (sop/topology geo)] (map (fn [(i : int)] i) topology."^component^"))" in

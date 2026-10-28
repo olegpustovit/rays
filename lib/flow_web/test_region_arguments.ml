@@ -57,7 +57,7 @@ let ()=
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));const program={regions:[%s]};for(const pool of pools){const rt=createRuntime(program,{pool});const invoke=rt.invoke;rt.invoke=async function(k,args,plan){if(!plan)throw Error('Computed dependency has no region plan');const before=JSON.stringify(snapshot(args));try{return await invoke.call(this,k,args,plan)}finally{if(JSON.stringify(snapshot(args))!==before)throw Error('dynamic arguments mutated')}};\n"(quote frame)(String.concat ","regions);
   List.iter(fun(index,time)->let live={(Input.at_time time)with frame=index;tick=index}in
    Printf.bprintf code "{const input={t:%s,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n"(number time)index index;
-   (match E.Private.force_reference value ~live with
+   (match E.Host.force_reference value ~live with
    |Ok expected->Printf.bprintf code "const result=await frame(input,rt.slots,rt),expected=%s;if(%b?JSON.stringify(result.data)!==JSON.stringify(expected):!bytes(result.data).equals(bytes(expected)))throw Error('argument frame bytes');\n"
        (data expected)(match expected with E.Text_array _->true|_->false)
    |Error d->Printf.bprintf code "try{await frame(input,rt.slots,rt);throw Error('argument frame accepted')}catch(e){if(e.code!==%s||e.message!==%s||e.cause!==%s)throw e}\n"
@@ -129,7 +129,7 @@ let ()=
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));for(const pool of pools){const rt=createRuntime({regions:[]},{pool});\n"(quote frame);
   List.iter(fun(index,time)->let live={(Input.at_time time)with frame=index;tick=index}in
    Printf.bprintf code "{const input={t:%s,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n"(number time)index index;
-   (match E.Private.force_reference value ~live with
+   (match E.Host.force_reference value ~live with
     |Ok expected->Printf.bprintf code "const result=await frame(input,rt.slots,rt),expected=%s;if(!bytes(result.data).equals(bytes(expected)))throw Error('Float Product bytes');\n"(data expected)
     |Error d->Printf.bprintf code "try{await frame(input,rt.slots,rt);throw Error('Float Product accepted')}catch(e){if(e.code!==%s||e.message!==%s||e.cause!==%s)throw e}\n"
       (quote d.code)(quote d.message)(Option.fold ~none:"undefined" ~some:quote d.cause));

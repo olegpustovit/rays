@@ -36,7 +36,7 @@ let instantiated ty table body indices=
  let workspace=C.checked ~declarations ("(let* [tested (fn [(i : int)] "^body^")] 0.)")in
  let evaluation=C.ok(E.static ~record:true ~inputs:["g",["data",table]] workspace)in
  let fn=match snd(List.hd(List.assoc["g";"tested"]evaluation.records))with E.Fn fn->fn|_->assert false in
- C.ok(E.Private.map_function ~signature:Flow.Ty.{params=[Int];result=ty} fn [E.Int_array indices])
+ C.ok(E.Host.map_function ~signature:Flow.Ty.{params=[Int];result=ty} fn [E.Int_array indices])
 let ()=
  List.iter(fun ty->List.iter(fun count->let a=sample ty count and b=sample ty 13 in
   let before=C.bytes(a,b)in
@@ -60,14 +60,14 @@ let ()=
     assert(P.gpu_refusals p<>[]);
     let live=Input.at_time 0.25 and before=C.bytes table in
     List.iter(fun domains->Parallel.run ~domains(fun()->
-     C.same(P.force ~strict:true p ~live)(E.Private.force_reference value ~live))) [1;4;8];
+     C.same(P.force ~strict:true p ~live)(E.Host.force_reference value ~live))) [1;4;8];
     assert(C.bytes table=before)) [false;true]) [0;1;13;4097;5001;32769])
   ["(array/nth (array/concat data data) i)";
    "(array/nth (array/slice data 0 13) i)"])C.types;
  List.iter(fun(name,body)->let value=C.value body in
   let residual,core=C.core value and executor=C.ok(I.Executor.compile ~strict:true value)in
   List.iter(fun count->List.iter(fun time->let live={(Input.at_time time)with frame=count;tick=count}in
-   let reference=E.Private.force_reference value ~live in
+   let reference=E.Host.force_reference value ~live in
    List.iter(fun domains->Parallel.run ~domains(fun()->
     C.same(Test_program.run ~root:residual ~strict:true core ~live)reference;
     C.same(I.Executor.force ~strict:true executor ~live)reference))[1;4;8])[-0.25;0.25]) [0;13;5001;32769];
@@ -91,17 +91,17 @@ let ()=
    List.iter(fun size->current:=sample ty size;let before=C.bytes !current in
     let live={(Input.at_time 0.25)with frame=(if size=0 then 0 else 32769)}in
     List.iter(fun domains->Parallel.run ~domains(fun()->
-      C.same(P.force ~strict:true ~resolve p ~live)(E.Private.force_reference ~resolve value ~live))) [1;4;8];
+      C.same(P.force ~strict:true ~resolve p ~live)(E.Host.force_reference ~resolve value ~live))) [1;4;8];
     assert(C.bytes !current=before)) [13;3;0;13];
    let live={(Input.at_time 0.25)with frame=13}in
-   List.iter(fun resolve->C.same(P.force ~strict:true ~resolve p ~live)(E.Private.force_reference ~resolve value ~live))
+   List.iter(fun resolve->C.same(P.force ~strict:true ~resolve p ~live)(E.Host.force_reference ~resolve value ~live))
     [(fun _->Error(Diagnostic.error ~code:"E_DATA_SOURCE" ~cause:"table cause" "missing table"));
      (fun _->Error(Diagnostic.error ~code:"E_CANCELLED" ~cause:"host cancel" "cancelled table"));
      (fun _->Ok(E.Int 0));(fun _->Ok(E.Vec3_array[|1.;2.|]));
      (fun _->Ok(E.Float_array[|nan|]))];
    let no_source _=failwith "Empty gather forced composed table"in
    C.same(P.force ~strict:true ~resolve:no_source p ~live:{live with frame=0})
-     (E.Private.force_reference ~resolve:no_source value ~live:{live with frame=0})) [false;true];
+     (E.Host.force_reference ~resolve:no_source value ~live:{live with frame=0})) [false;true];
   let dynamic body=List.assoc "g"(C.ok(E.static ~inputs:["g",["data",E.Source("fixture/table",array_ty,[])]]
     (C.checked ~declarations:("[(data : (array "^Flow.Ty.to_string ty^") "^C.constant ty "0"^")]") body))).results in
   let count_source _ (term:Flow.Workspace.term)=match term.node with
@@ -112,7 +112,7 @@ let ()=
       let origin=if source="data" && fusion then Some(["fixture";"data"],[])else None in
       assert(P.count_origin p=origin);
       current:=sample ty 13;C.same(P.force ~strict:true ~resolve p ~live:(Input.at_time 0.25))
-        (E.Private.force_reference ~resolve value ~live:(Input.at_time 0.25))) [false;true])
+        (E.Host.force_reference ~resolve value ~live:(Input.at_time 0.25))) [false;true])
     ["data";"(array/concat data data)";"(array/slice data 0 (array/count data))"];
   let value=dynamic "(map (fn [a b] a) data (array/concat data data))"in
   let r=match value with E.Residual r->r|_->assert false in
@@ -132,7 +132,7 @@ let ()=
    let calls=ref 0 in
    let resolve _=incr calls;Error(Diagnostic.error ~code:"E_DATA_SOURCE" ~cause:"order cause" "bad table")in
    let live=Input.at_time 0.25 in
-   C.same(P.force ~strict:true ~resolve p ~live)(E.Private.force_reference ~resolve value ~live);
+   C.same(P.force ~strict:true ~resolve p ~live)(E.Host.force_reference ~resolve value ~live);
    if String.starts_with ~prefix:"(if" body then assert(!calls=0))
  ["(array/nth (array/concat data data) (error \"E_INDEX\" \"bad index\" :cause \"index cause\"))";
   "(array/nth (array/slice data (error \"E_FIRST\" \"bad first\") 1) (error \"E_INDEX\" \"bad index\"))";
@@ -147,7 +147,7 @@ let ()=
    let _,core=C.core value and executor=C.ok(I.Executor.compile ~strict:true value)in
    List.iter(fun fusion->let p=packed(P.compile_result ~fusion r(E.Residual.residual_view r).term)in
     List.iter(fun time->let live=Input.at_time time in
-     let reference=E.Private.force_reference value ~live in
+     let reference=E.Host.force_reference value ~live in
      assert(C.bytes(C.ok reference)=C.bytes(E.Int_array(Array.make count(expected time))));
      List.iter(fun domains->Parallel.run ~domains(fun()->
        C.same(P.force ~strict:true p ~live)reference;
@@ -159,6 +159,6 @@ let ()=
  let stateful=C.value "(let* [counter (state [s 0] (int/add s 1))] (array/slice (array/concat (array/int 1 counter) (array/int 1)) (if (> t 0.) 3 0) 1))"in
  let executor=C.ok(I.Executor.compile ~strict:true stateful)and a=E.create_state()and b=E.create_state()in
  List.iteri(fun frame time->let live={(Input.at_time time)with frame;tick=frame}in
-  C.same(I.Executor.force ~strict:true ~state:a executor ~live)(E.Private.force_reference ~state:b stateful ~live);
-  assert(C.bytes(E.Private.state_values a)=C.bytes(E.Private.state_values b))) [-1.;1.;-1.;1.;-1.];
+  C.same(I.Executor.force ~strict:true ~state:a executor ~live)(E.Host.force_reference ~state:b stateful ~live);
+  assert(C.bytes(E.Host.state_values a)=C.bytes(E.Host.state_values b))) [-1.;1.;-1.;1.;-1.];
  print_endline "C6 composition: six storages, Core/strict gather, selected errors, fresh captures and exact domains1/4/8"

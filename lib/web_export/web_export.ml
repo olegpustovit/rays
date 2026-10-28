@@ -233,7 +233,7 @@ let map_entry (lowered : lowered) id =
   let arg name fallback = Option.value (List.assoc_opt name node.args) ~default:fallback in
   match arg "function" (E.Int 0) with
   | E.Fn fn ->
-      let* pixels = E.Private.map_function ~site:(node.inst, node.site, node.iter)
+      let* pixels = E.Host.map_function ~site:(node.inst, node.site, node.iter)
         ~signature:Flow.Ty.{params=[Vec2]; result=Vec4} fn [E.Vec2_array [|0.5; 0.5|]] in
       (match pixels with
        | E.Residual r ->

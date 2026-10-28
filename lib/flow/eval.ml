@@ -1348,7 +1348,7 @@ let run ?record ?inputs ?state ?live ~time ws =
 
 let show v = show_with Fun.id v
 
-module Private = struct
+module Host = struct
   let static_with_requests = static_impl
   let bind_live = bind_live
   let map_function ?site ?path ~(signature : Ty.fn_signature) fn arrays = protect (fun () ->

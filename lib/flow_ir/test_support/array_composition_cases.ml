@@ -62,7 +62,7 @@ let captured_helper body=
   let view=E.Residual.residual_view root in
   E.Residual.compiled_function root ~instance:view.instance ~prefix:[] ~zone:["g";"tested"]
     ~params:(List.tl params) ~body ~bindings:(("helper",E.Fn helper)::E.Residual.function_bindings template)
-let helper_value body count=ok(E.Private.map_function
+let helper_value body count=ok(E.Host.map_function
   ~signature:Flow.Ty.{params=[Int];result=Int}(captured_helper body)[E.Int_array(Array.init count Fun.id)])
 let same a b=match a,b with
   |Ok a,Ok b->assert(bytes a=bytes b)

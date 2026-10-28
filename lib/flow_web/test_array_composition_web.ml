@@ -38,7 +38,7 @@ let ()=
     (quote frame)(String.concat ","regions);
   List.iter(fun(count,time)->let live={(Input.at_time time)with frame=count;tick=count}in
    Printf.bprintf code "{const input={t:%s,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n" (number time)count count;
-   (match E.Private.force_reference value ~live with
+   (match E.Host.force_reference value ~live with
     |Ok expected->Printf.bprintf code "const got=await frame(input,rt.slots,rt),expected=%s;if(%b?JSON.stringify(textBytes(got.data))!==JSON.stringify(textBytes(expected)):!bytes(got.data).equals(bytes(expected)))throw Error(%s);\n"
        (data expected)(match expected with E.Text_array _->true|_->false)(quote(name^" runtime bytes"))
     |Error d->Printf.bprintf code "try{await frame(input,rt.slots,rt);throw Error('composition accepted')}catch(e){if(e.code!==%s||e.message!==%s||e.cause!==%s)throw e}\n"

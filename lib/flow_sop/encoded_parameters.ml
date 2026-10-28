@@ -11,7 +11,7 @@ let for_node checked (definition : W.node_definition) =
     let graph=W.{name="lisp_normalize_"^name;context=Flow.Context.value;
       inputs=["raw_value",Flow.Ty.Text,None];body;form} in
     let workspace={checked with W.graphs=[graph]} in
-    let evaluate raw=Result.bind(E.Residual.handle (fun () -> E.Private.static_with_requests ~budget:max_int
+    let evaluate raw=Result.bind(E.Residual.handle (fun () -> E.Host.static_with_requests ~budget:max_int
       ~inputs:[graph.name,["raw_value",E.Text raw]] workspace))(fun result->
       match List.assoc graph.name result.results with
       |E.Text canonical when Array.length result.plan.nodes=0->Ok canonical

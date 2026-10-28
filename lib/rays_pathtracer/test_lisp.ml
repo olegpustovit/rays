@@ -166,11 +166,11 @@ let scenario label (world : W.baked option) =
   let pixels = E.Int_array (Array.init (width * height) Fun.id) in
   let residual_of dynamic =
     let values = dynamic @ scene_values in
-    let bound = E.Private.map_function_bindings (function
+    let bound = E.Host.map_function_bindings (function
       | Flow.Value.Source (name, _, []) when String.starts_with ~prefix:"pt/" name ->
           List.assoc (String.sub name 3 (String.length name - 3)) values
       | value -> value) kernel in
-    match ok (E.Private.map_function ~signature:{ params = [ Int ]; result = Vec4 } bound [ pixels ]) with
+    match ok (E.Host.map_function ~signature:{ params = [ Int ]; result = Vec4 } bound [ pixels ]) with
     | E.Residual r -> r | _ -> failwith "kernel did not defer" in
   let compile r = match Flow_ir.Packed.compile_result r (E.Residual.residual_view r).term with
     | Ok p -> p | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in

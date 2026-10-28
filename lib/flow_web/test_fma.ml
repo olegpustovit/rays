@@ -43,7 +43,7 @@ let () =
       assert(Array.length result=Array.length expected);
       Array.iteri(fun i x->if bits x<>bits expected.(i) then failwith(Printf.sprintf"FMA native %d %s <> %s" i(bits x)(bits expected.(i))))result
       |_->failwith"FMA array expected")
-      [ok(E.Private.force_reference source ~live);ok(I.Packed.force ~strict:true packed ~live);
+      [ok(E.Host.force_reference source ~live);ok(I.Packed.force ~strict:true packed ~live);
        ok(I.Executor.force ~strict:true compiled ~live)])) [1;8];
   assert(I.Packed.gpu_refusals packed<>[]);
   let scalar=Option.get(Flow.Op.find "fma" Flow.Context.value) in
@@ -54,7 +54,7 @@ let () =
   (* The typed bank also carries Int frame/index and Int source values into FMA. *)
   let mixed=value "(map (fn [x] (fma (float x) (float (frame/index)) t)) (array/range 5001 :type int))" in
   let mixed_compiled=ok(I.Executor.compile ~strict:true mixed) in
-  assert(ok(I.Executor.force ~strict:true mixed_compiled ~live)=ok(E.Private.force_reference mixed ~live));
+  assert(ok(I.Executor.force ~strict:true mixed_compiled ~live)=ok(E.Host.force_reference mixed ~live));
   List.iter(fun body->let v=value body in let p=ok(I.Executor.compile ~strict:true v) in
     assert(ok(I.Executor.force ~strict:true p ~live)=E.Float_array(Array.make 5001 0.)))
     ["(map (fn [x] (if (> t 0.) 0. (fma 1.7976931348623157e308 2. x))) (array/range 5001))"];
@@ -135,7 +135,7 @@ let () =
       Array.iteri(fun i x->if bits x<>bits expected.(i)then
         failwith(Printf.sprintf "Checked arithmetic %d: %s <> %s" i(bits x)(bits expected.(i))))values
     |_->failwith "Checked arithmetic Vec4 array expected" in
-  same(ok(E.Private.force_reference source ~live));
+  same(ok(E.Host.force_reference source ~live));
   List.iter(fun domains->Parallel.run ~domains(fun()->
     same(ok(I.Executor.force ~strict:true compiled ~live));
     same(ok(Test_program.run ~force:(fun p->I.Packed.force ~strict:true p ~live) core ~live));
@@ -145,7 +145,7 @@ let () =
   let evaluate body=let source=value body in
     let compiled=match I.Executor.compile ~strict:true source with Ok p->p|Error d->
       failwith(body^": "^Diagnostic.to_string d) in
-    let expected=ok(E.Private.force_reference source ~live) in
+    let expected=ok(E.Host.force_reference source ~live) in
     assert(ok(I.Executor.force ~strict:true compiled ~live)=expected);expected in
   List.iter(fun body->assert(evaluate body=E.Float_array(Array.make 5001 0.))) [
     "(map (fn [x] (let* [bad (float/mul_checked 1.7976931348623157e308 2.0)] (if bad.valid (+ x t) bad.value))) (array/range 5001))";

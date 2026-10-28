@@ -41,7 +41,7 @@ let ()=
     assert(Result.is_error(Flow_web.Wgsl.kernel p));
     let prepared=ok(P.Private.prepare_values p ~live)in
     let result=P.force ~strict:true p ~live in
-    (match expected,result with Some _,Ok got when skip=[||]->assert(Marshal.to_string got[]=Marshal.to_string(ok(E.Private.force_reference value ~live))[])|Some _,Ok _->()|None,Error _->()|_->assert false);
+    (match expected,result with Some _,Ok got when skip=[||]->assert(Marshal.to_string got[]=Marshal.to_string(ok(E.Host.force_reference value ~live))[])|Some _,Ok _->()|None,Error _->()|_->assert false);
     Buffer.add_string js "{\n";
     Printf.bprintf js "const arrays=[%s], captures=[%s];\n"
       (String.concat ","(Array.to_list(Array.map numeric prepared.arrays)))

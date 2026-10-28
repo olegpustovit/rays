@@ -69,7 +69,7 @@ let static_map residual =
 
 let static ?record ?inputs workspace =
   E.Residual.handle ~bulk:static_map (fun () ->
-    E.Private.static_with_requests ?record ?inputs workspace)
+    E.Host.static_with_requests ?record ?inputs workspace)
 
 let qualify_workspace ?record ?inputs ?observe ?(gpu=Gpu.default) (workspace : W.t) =
   let roots = Hashtbl.create 32 and index = Hashtbl.create 32 and outcomes = Hashtbl.create 32
@@ -159,7 +159,7 @@ let qualify_workspace ?record ?inputs ?observe ?(gpu=Gpu.default) (workspace : W
             | Some term ->
                 let mapped = Result.map_error (fun d -> [d]) (Result.bind
                   (E.Residual.eval_term residual term ~live:(Input.at_time 0.)) (function
-                    | E.Fn fn -> E.Private.map_function ~path
+                    | E.Fn fn -> E.Host.map_function ~path
                         ~site:(view.instance, view.site, view.iter)
                         ~signature:Ty.{params=[Vec2];result=Vec4} fn [E.Vec2_array [|0.5;0.5|]]
                     | _ -> Error (Diagnostic.error ~code:"E_KERNEL_FORM" "Image map needs a pixel function."))) in
@@ -216,7 +216,7 @@ let qualify_workspace ?record ?inputs ?observe ?(gpu=Gpu.default) (workspace : W
         else None in
   let (let*) = Result.bind in
   let* evaluated = E.Residual.handle ~observe:observed ~bulk:static_map ~bulk_approx (fun () ->
-    E.Private.static_with_requests ?record ?inputs workspace) in
+    E.Host.static_with_requests ?record ?inputs workspace) in
   let packed_by_path = Hashtbl.create 64 in
   List.iter (fun (path, form) -> if not (Hashtbl.mem packed_by_path path) then Hashtbl.add packed_by_path path form) workspace.packed;
   let reasons path = match Hashtbl.find_opt packed_by_path path with
@@ -388,7 +388,7 @@ module Executor = struct
          | Ok _ as result -> result
          | Error _ when not strict ->
              let count_walk () = Option.iter incr walker_counter in
-             E.Private.force_reference_observed ~on_walk:count_walk program.value ~live
+             E.Host.force_reference_observed ~on_walk:count_walk program.value ~live
          | Error _ as error -> error)
     | _ ->
     let result, packed_ran, fell_back, started =
@@ -401,7 +401,7 @@ module Executor = struct
     let state = match state with Some state -> state | None -> E.create_state () in
     let fell_back = ref reference in
     let count_walk () = Option.iter incr walker_counter in
-    let fallback () = fell_back := true; E.Private.force_reference_observed ~state ?elems ?resolve
+    let fallback () = fell_back := true; E.Host.force_reference_observed ~state ?elems ?resolve
         ~on_walk:count_walk program.value ~live in
     let force_with_packed value ~live =
       let forced_one = ref None and forced_many = ref None in
@@ -503,7 +503,7 @@ module Executor = struct
                        if strict then Error d else begin
                          restore ();
                          fell_back := true;
-                         E.Private.force_reference_observed ~state ?elems ?resolve ~on_walk:count_walk (E.Residual r) ~live
+                         E.Host.force_reference_observed ~state ?elems ?resolve ~on_walk:count_walk (E.Residual r) ~live
                        end
                    | None ->
                        if strict && not (E.state_dependent (E.Residual r)) then begin
@@ -513,15 +513,15 @@ module Executor = struct
                        end else begin
                          restore ();
                          fell_back := true;
-                         E.Private.force_reference_observed ~state ?elems ?resolve ~on_walk:count_walk (E.Residual r) ~live
+                         E.Host.force_reference_observed ~state ?elems ?resolve ~on_walk:count_walk (E.Residual r) ~live
                        end) in
                  Result.bind result (fun value ->
                    remember_forced r value;
                    walk value))
         | E.Source _ -> Result.bind
-            (E.Private.force_reference_observed ~state ?elems ?resolve ~on_walk:count_walk value ~live) walk
+            (E.Host.force_reference_observed ~state ?elems ?resolve ~on_walk:count_walk value ~live) walk
         | E.Struct (_, Flow.Ty.Array _, _) -> Result.bind
-            (E.Private.force_reference_observed ~state ?elems ?resolve ~on_walk:count_walk value ~live) walk
+            (E.Host.force_reference_observed ~state ?elems ?resolve ~on_walk:count_walk value ~live) walk
         | E.List values ->
             let out = Array.make (Array.length values) E.No_geo in
             let rec loop i = if i = Array.length values then Ok (E.List out) else

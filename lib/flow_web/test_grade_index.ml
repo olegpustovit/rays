@@ -34,7 +34,7 @@ let ()=
     (quote(path "runtime.js"))(quote(path "workers.js"))(quote(path "prims.js"));
   let live={(Input.at_time 0.25)with frame=3} in
   List.iter(fun body->let value,program=root body in
-    let result=E.Private.force_reference value ~live in
+    let result=E.Host.force_reference value ~live in
     let prepared=Array.map(fun (region:I.Core.Region.t)->let packed=region in
       let ty=packed.term.ty in
       if ty=Flow.Ty.Array Flow.Ty.Int || ty=Flow.Ty.Array Flow.Ty.Text then

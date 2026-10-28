@@ -153,7 +153,7 @@ let () =
     let packed=Option.get(I.Packed.compile residual (E.Residual.residual_view residual).term) in
     List.iter(fun frame->
       let live={(Input.at_time 0.25)with frame} in
-      let expected=E.Private.force_reference value ~live in
+      let expected=E.Host.force_reference value ~live in
       List.iter(fun domains->Parallel.run ~domains(fun()->
         if not(same expected (I.Packed.force ~strict:true packed ~live))then
           failwith("Typed block parity: "^body))) [1;4;8]) [0;42]) cases;
@@ -255,7 +255,7 @@ let () =
     "(fn [(mask : int) (p : vec4)] (if (int/eq mask 1) [t 2 3 4] p))" with E.Fn f->f|_->assert false in
   let mask=Array.init count(fun i->i mod 2) in
   let marker=E.Source("test/borrow_columns",Flow.Ty.Array Flow.Ty.Vec4,[]) in
-  let value=ok(E.Private.map_function ~signature:Flow.Ty.{params=[Int;Vec4];result=Vec4}
+  let value=ok(E.Host.map_function ~signature:Flow.Ty.{params=[Int;Vec4];result=Vec4}
     fn [E.Int_array mask;E.Vec4_array(Array.make(count*4)0.)]) in
   let packed=match value with E.Residual r->Option.get(compile r(E.Residual.residual_view r).term)|_->assert false in
   let region=packed in
@@ -345,20 +345,20 @@ let () =
   let normals=Array.init (count*3) (fun i->if i<Array.length special then special.(i)
     else sin (float i *. 0.73) *. Float.ldexp 1. (i mod 100-50)) in
   let positions=Array.map (fun n-> -.n) normals in
-  let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
+  let value=ok (E.Host.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
     fn [E.Vec3_array positions;E.Vec3_array normals]) in
   let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
   List.iter (fun time->
     let live=Input.at_time time in
-    let expected=E.Private.force_reference value ~live in
+    let expected=E.Host.force_reference value ~live in
     List.iter (fun domains->Parallel.run ~domains (fun()->
       assert (same (I.Packed.force ~strict:true packed ~live) expected))) [1;8])
     [0.;-0.;1.;Float.next_after 1. infinity;0.16];
   let fn=match recorded ~ops:[]
     "(fn [(p : vec3) (n : vec3)] (+ p (* n (* t (noise3 (* p 0.16) :seed 4611686018427387903)))))"
     with E.Fn f->f|_->assert false in
-  let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
+  let value=ok (E.Host.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
     fn [E.Vec3_array positions;E.Vec3_array normals]) in
   let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
@@ -367,7 +367,7 @@ let () =
     |> (function Ok p->p|Error _->assert false) in
   List.iter (fun time->
     let live=Input.at_time time in
-    let expected=E.Private.force_reference value ~live in
+    let expected=E.Host.force_reference value ~live in
     List.iter (fun domains->Parallel.run ~domains (fun()->
       let actual=I.Packed.force ~strict:true packed ~live in
       assert (same actual expected);
@@ -376,7 +376,7 @@ let () =
   let fn=match recorded ~ops:[]
     "(fn [(p : vec3)] [p.z (+ p.y (* t (- (* (noise3 [(* p.x 0.16) (* p.z 0.16) 0.0] :seed -17) 2.0) 1.0))) p.x])"
     with E.Fn f->f|_->assert false in
-  let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
+  let value=ok (E.Host.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
     fn [E.Vec3_array positions]) in
   let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
@@ -384,7 +384,7 @@ let () =
   let ordinary=I.Core.Region.rebuild region ~code:(Array.append region.code [|I.Core.Region.Unary (Sin,0)|]) ()
     |> (function Ok p->p|Error _->assert false) in
   List.iter (fun time->let live=Input.at_time time in
-    let expected=E.Private.force_reference value ~live in
+    let expected=E.Host.force_reference value ~live in
     List.iter (fun domains->Parallel.run ~domains (fun()->
       let actual=I.Packed.force ~strict:true packed ~live in
       assert (same actual expected);
@@ -423,7 +423,7 @@ let () =
     (Array.init 3 (fun _->I.Packed.{data=[||];offset=0;stride=1}))))
     ~count:0 ~outputs:[|[|None;None;None|]|] packed ~live));
   let fn=match recorded "(fn [(p : vec3)] [p.x p.y (+ p.z t)])" with E.Fn f->f|_->assert false in
-  let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
+  let value=ok (E.Host.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
     fn [E.Vec3_array positions]) in
   let identity=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
@@ -449,7 +449,7 @@ let () =
     List.iter (fun time ->
       let live=Input.at_time time in
       let output=I.Packed.force packed ~live in
-      assert (same output (E.Private.force_reference value ~live));
+      assert (same output (E.Host.force_reference value ~live));
       assert (same output (Ok (expected time)))) [0.;0.37;2.])
     ["(map (fn [x] ^:bypass (+ (+ x t) (exp 10000.))) (array/range 4))",
        (fun time -> E.Float_array (Array.init 4 (fun i -> float i +. time)));
@@ -463,7 +463,7 @@ let () =
   assert (compile r (E.Residual.residual_view r).term=None);
   let program=ok (I.Executor.compile value) in
   let live=Input.at_time 0.7 in
-  assert (same (I.Executor.force program ~live) (E.Private.force_reference value ~live));
+  assert (same (I.Executor.force program ~live) (E.Host.force_reference value ~live));
   assert (same (I.Executor.force program ~live) (Ok (E.Float_array [|1.;2.;3.;4.|])))
 
 let () =
@@ -480,7 +480,7 @@ let () =
     | _ -> failwith "length kernel did not defer" in
   List.iter (fun time ->
     let live = Input.at_time time in
-    let reference = E.Private.force_reference value ~live in
+    let reference = E.Host.force_reference value ~live in
     (match time, reference with
      | 0., Ok (E.Float_array values) -> assert (Array.for_all ((=) 0.) values)
      | 1., Error d -> assert (d.code = "E_NONFINITE")
@@ -527,7 +527,7 @@ let () =
         failwith ("No CPU kernel (" ^ Flow.Ty.to_string (Flow.Value.ty_of value) ^ "): " ^ body);
       List.iter (fun time ->
         let live = Input.at_time time in
-        let reference = E.Private.force_reference value ~live in
+        let reference = E.Host.force_reference value ~live in
         List.iter (fun domains -> Parallel.run ~domains (fun () ->
           let output = I.Executor.force program ~live in
           if not (same output reference) then failwith (Printf.sprintf "Parity failed (%d domains, t=%g): %s" domains time body);
@@ -544,7 +544,7 @@ let () =
   let program = ok (I.Executor.compile correlated) in
   assert (not (has_cpu program));
   assert (same (I.Executor.force program ~live:(Input.at_time 0.125))
-    (E.Private.force_reference correlated ~live:(Input.at_time 0.125)));
+    (E.Host.force_reference correlated ~live:(Input.at_time 0.125)));
   List.iter (fun body ->
     let value = recorded body in
     let program = ok (I.Executor.compile value) in
@@ -555,7 +555,7 @@ let () =
     assert (I.Packed.stage_count unfused = 1);
     List.iter (fun time ->
       let live = Input.at_time time in
-      let reference = E.Private.force_reference value ~live in
+      let reference = E.Host.force_reference value ~live in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         assert (same (I.Executor.force program ~live) reference);
         assert (same (I.Packed.force unfused ~live) reference))) [1;8]) [0.;0.125;1.25;7.])
@@ -570,7 +570,7 @@ let () =
   let program = ok (I.Executor.compile value) in
   assert (stages program = 1);
   assert (same (I.Executor.force program ~live:(Input.at_time 0.))
-    (E.Private.force_reference value ~live:(Input.at_time 0.)));
+    (E.Host.force_reference value ~live:(Input.at_time 0.)));
   let ticks = ref 0. in
   let profile = I.Profile.create ~clock:(fun () -> ticks := !ticks +. 0.001; !ticks) in
   let value = recorded "(map (fn [y] (* y y)) (map (fn [x] (sin (+ x t))) (array/range 2051)))" in
@@ -597,21 +597,21 @@ let () =
     List.iter (fun time ->
       let live = Input.at_time time in
       assert (same (I.Executor.force program ~live)
-        (E.Private.force_reference value ~live))) [0.;0.25;2.])
+        (E.Host.force_reference value ~live))) [0.;0.25;2.])
     ["(fold [a false] [x (array/range 1024)] (+ x t))";
      "(scan [a false] [x (array/range 1024)] (+ x t))"];
   let fn = match recorded "(fn [(uv : vec2)] [uv.x uv.y t 1])" with
     | E.Fn fn -> fn | _ -> assert false in
   let grid = Array.init (2 * 32769) (fun i -> float (i mod 17) /. 16.) in
   let original = Array.copy grid in
-  let value = ok (E.Private.map_function
+  let value = ok (E.Host.map_function
     ~signature:Flow.Ty.{params = [Vec2]; result = Vec4} fn [E.Vec2_array grid]) in
   let packed = match value with E.Residual r ->
     compile r (E.Residual.residual_view r).term |> Option.get | _ -> assert false in
   assert (I.Packed.static_count packed = Some 32769);
   List.iter (fun time ->
     let live = Input.at_time time in
-    let expected = E.Private.force_reference value ~live in
+    let expected = E.Host.force_reference value ~live in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       let output = I.Packed.force packed ~live in
       assert (same output expected);
@@ -668,7 +668,7 @@ let () =
     span.finish - span.start = String.length "(pow 1e200 2.0)") d.span);
   let parity value packed = List.iter (fun time ->
     let live = Input.at_time time in
-    let reference = E.Private.force_reference value ~live in
+    let reference = E.Host.force_reference value ~live in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       assert (same (I.Packed.force packed ~live) reference))) [1;8]) [0.;0.125;1.25;7.] in
   List.iter (fun vector ->
@@ -752,7 +752,7 @@ let () =
   let tiny = recorded "(map (fn [x] (+ x t)) (array/range 1))" in
   let program = ok (I.Executor.compile ~strict:true ~profile tiny) in
   assert (same (I.Executor.force ~strict:true program ~live)
-    (E.Private.force_reference tiny ~live));
+    (E.Host.force_reference tiny ~live));
   assert (List.exists (fun (run : I.execution) -> run.tier = Cpu_kernel)
     (I.Profile.executions profile));
   List.iter (fun body ->
@@ -832,5 +832,5 @@ let () =
   let measure = (fun () -> 1.), (fun _ ~seconds:_ ~reference:_ -> incr runs) in
   let value = ok (I.Packed.force ~strict:true ~measure program ~live) in
   assert (!runs = 2);
-  assert (same (Ok value) (E.Private.force_reference (recorded body) ~live));
+  assert (same (Ok value) (E.Host.force_reference (recorded body) ~live));
   print_endline "Packed scope: a map read by three captures of one run is evaluated once, bytes equal to the walker"

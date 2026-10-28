@@ -56,7 +56,7 @@ let make ?state ?live ?time ?resolve ?force ?(bulk_calls = fun _ _ -> [])
   let live_frame = match live with Some _ -> live | None -> Option.map Input.at_time time in
   let state = Option.map E.fork_state state in
   let force : force option = force in
-  let force = Option.value ~default:E.Private.force_reference force in
+  let force = Option.value ~default:E.Host.force_reference force in
   let image id =
     let dimensions=match image id with Some _ as dimensions->dimensions|None->
       if id<0 || id>=Array.length eval.plan.nodes then None else
@@ -205,7 +205,7 @@ let map_calls t zone outer =
       let calls = List.filter_map (fun (it, value) -> if it <> outer then None else
         match value with
         | E.Record ["offset", E.Int offset; "call", E.Residual call] ->
-            (match E.Private.map_probe ?state:t.state ?resolve:t.resolve ~offset call
+            (match E.Host.map_probe ?state:t.state ?resolve:t.resolve ~offset call
               ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame) with
              | Ok (count, at) -> Some (offset, count, at)
              | Error _ -> None)

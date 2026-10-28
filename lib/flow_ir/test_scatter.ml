@@ -75,7 +75,7 @@ let ()=
     let executable=ok(I.Executor.compile ~strict:true v)in
     List.iter(fun domains->Parallel.run ~domains(fun()->
       List.iter(fun time->let live=Input.at_time time in
-        let expected=E.Private.force_reference v ~live in
+        let expected=E.Host.force_reference v ~live in
         same(Test_program.run core ~live) expected;
         same(I.Executor.force ~strict:true executable ~live) expected)[-1.;0.;0.25;2.]))[1;4;8])
     ["(array/scatter_add (map (fn [(i : int)] (int/mod i 97)) (array/range 32769 :type int)) (map (fn [x] (+ x t)) (array/range 32769)) 97)";
@@ -110,29 +110,29 @@ let ()=
     List.iter(fun next->data:=E.Float_array next;calls:=[];
       let live=Input.at_time 1. in
       same(I.Executor.force ~strict:true ~resolve executable ~live)
-        (E.Private.force_reference ~resolve v ~live);
+        (E.Host.force_reference ~resolve v ~live);
       assert(!calls=["indices";"values";"indices";"values"]))[[|1.;2.;3.|];[|7.;8.;9.|]]))[1;4;8];
   let wrong=function E.Source("fixture/indices",_,_)->Ok(E.Float_array[|0.;1.;0.|])|_->assert false in
   same(I.Executor.force ~strict:true ~resolve:wrong executable ~live:(Input.at_time 1.))
-    (E.Private.force_reference ~resolve:wrong v ~live:(Input.at_time 1.));
+    (E.Host.force_reference ~resolve:wrong v ~live:(Input.at_time 1.));
   let skipped_ws=workspace ~declarations:"[(indices : (array int) (array/int 0)) (data : (array float) (array/float 0))]"
     "(if (> t 0.) (array/float 2) (array/scatter_add indices data 2))"in
   let skipped=List.assoc "g"(ok(E.static ~inputs skipped_ws)).results in
   let skipped_program=ok(I.Executor.compile ~strict:true skipped)in
   let no_source _=failwith "Untaken scatter resolved its host source"in
   same(I.Executor.force ~strict:true ~resolve:no_source skipped_program ~live:(Input.at_time 1.))
-    (E.Private.force_reference ~resolve:no_source skipped ~live:(Input.at_time 1.));
+    (E.Host.force_reference ~resolve:no_source skipped ~live:(Input.at_time 1.));
   let failed=function E.Source("fixture/indices",_,_)->Error(Diagnostic.error
       ~code:"E_DATA_SOURCE" ~cause:"scatter input cause" "missing indices")|_->assert false in
   same(I.Executor.force ~strict:true ~resolve:failed executable ~live:(Input.at_time 1.))
-    (E.Private.force_reference ~resolve:failed v ~live:(Input.at_time 1.));
+    (E.Host.force_reference ~resolve:failed v ~live:(Input.at_time 1.));
   let stateful=value "(let* [counter (state [s 0.] (+ s 1.))] (if (> t 0.) (array/scatter_add (array/int 1 -1) (array/float 1 counter) 1) (array/float 1 counter)))"in
   let reference_state=E.create_state() and compiled_state=E.create_state()in
   let executable=ok(I.Executor.compile ~strict:true stateful)in
   List.iteri(fun frame time->let live={(Input.at_time time)with frame;tick=frame}in
     same(I.Executor.force ~strict:true ~state:compiled_state executable ~live)
-      (E.Private.force_reference ~state:reference_state stateful ~live);
-    assert(bytes(E.Private.state_values reference_state)=bytes(E.Private.state_values compiled_state)))
+      (E.Host.force_reference ~state:reference_state stateful ~live);
+    assert(bytes(E.Host.state_values reference_state)=bytes(E.Host.state_values compiled_state)))
     [-1.;1.;-1.;1.;-1.];
   print_endline "Scatter: ordered numeric bytes, Int wrap, malformed inputs, source ownership, lazy errors and strict Core/reference 1/4/8 domains"
 

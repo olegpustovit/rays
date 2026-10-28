@@ -43,7 +43,7 @@ let exact geometry body expected =
   let program=Flow_ir.Executor.compile ~strict:true value |>flow_ok in
   List.iter(fun domains->Parallel.run ~domains(fun()->
     let live=Input.at_time 0.25 in
-    assert(flow_ok(E.Private.force_reference ~resolve value ~live)=expected);
+    assert(flow_ok(E.Host.force_reference ~resolve value ~live)=expected);
     assert(flow_ok(Flow_ir.Executor.force ~strict:true ~resolve program ~live)=expected))) [1;8]
 let create_session ()=Sop.Session.create ~max_entries:32 ~max_payload_bytes:1_000_000 |>ok
 let cook session ?(time=0.) domains node =
@@ -487,7 +487,7 @@ let () =
       assert(stages program=(if promoted || owner="point" then 3 else 1));
       let resolve=Flow_sop.Attribute_kernel.resolve ~geometry:(fun _->Some geometry) in
       List.iter(fun domains->Parallel.run ~domains(fun()->let live=Input.at_time 0.25 in
-        let expected=E.Private.force_reference ~resolve values ~live|>flow_ok in
+        let expected=E.Host.force_reference ~resolve values ~live|>flow_ok in
         let actual=Flow_ir.Executor.force ~strict:true ~resolve program ~live|>flow_ok in
         assert(actual=expected))) [1;4;8]) [false;true])owners;
   print_endline "Promoted captured group descriptors share point fusion origins; original source owners remain distinct"

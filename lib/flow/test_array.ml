@@ -177,7 +177,7 @@ let () =
   assert (value ~context:"host" "(fold [a \"seed\"] [x (array/text 0)] x)"=Eval.Text "seed");
   let bulk_calls=ref 0 in
   ignore (Eval.Residual.handle ~bulk:(fun _->incr bulk_calls;None) (fun () ->
-    Result.get_ok(Eval.Private.static_with_requests
+    Result.get_ok(Eval.Host.static_with_requests
       (check ~context:"host" "(map (fn [x] x) (array/text 5001 \"猫\"))"))));
   assert(!bulk_calls=0);
   List.iter (fun body->assert(Result.is_error(Eval.static(check ~context:"host" body))))

@@ -154,7 +154,7 @@ let nested_maps () =
         [(+ p.x (sin (* (* p.y 0.01) (+ d t)))) (+ p.y k) 0])) (array/range (* (array/count kept) 2)))))" in
   let live = {(Input.at_time 0.25) with size = (200, 100)} in
   (* the walker's points, summed in order as x + 1000 y: the same sum of the drawn buffer must match it *)
-  let expected = match E.Private.force_reference (List.assoc "g" (ok (E.static (match
+  let expected = match E.Host.force_reference (List.assoc "g" (ok (E.static (match
       Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse
         ("(workspace w (graph g :context value (array/sum (map (fn [v] (+ v.x (* v.y 1000))) " ^ boxes ^ "))))"))) with
        | Some ws, [] -> ws

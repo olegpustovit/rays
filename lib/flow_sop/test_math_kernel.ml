@@ -11,7 +11,7 @@ let function_value ?(sources=[]) input_ty body =
   | E.Fn f -> f | _ -> assert false
 let compile ?sources input_ty output_ty input body =
   let fn = function_value ?sources input_ty body in
-  let value = ok (E.Private.map_function ~signature:Flow.Ty.{params=[input_ty];result=output_ty} fn [input]) in
+  let value = ok (E.Host.map_function ~signature:Flow.Ty.{params=[input_ty];result=output_ty} fn [input]) in
   match value with
   | E.Residual residual ->
       let term = (E.Residual.residual_view residual).term in
@@ -38,7 +38,7 @@ let () =
     let value,program = compile input_ty output_ty input body in
     List.iter (fun time ->
       let live = Input.at_time time in
-      let expected = ok (E.Private.force_reference value ~live) |> bytes in
+      let expected = ok (E.Host.force_reference value ~live) |> bytes in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         let actual = ok (P.force ~strict:true program ~live) |> bytes in
         if actual<>expected then failwith (Printf.sprintf "%s differs at %g on %d domains" body time domains))) [1;8])
@@ -46,7 +46,7 @@ let () =
   List.iter (fun (input,body) ->
     let value,program = compile Flow.Ty.Float Flow.Ty.Float input body in
     let live = Input.at_time 0. in
-    let expected = ok (E.Private.force_reference value ~live) |> bytes in
+    let expected = ok (E.Host.force_reference value ~live) |> bytes in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       assert (bytes (ok (P.force ~strict:true program ~live))=expected))) [1;8])
     [E.Float_array [|1e308;1e-300;Int64.float_of_bits 1L;-0.|],"(hypot x (+ x t))"];
@@ -57,7 +57,7 @@ let () =
         if d.Diagnostic.code<>"E_NONFINITE" then
           failwith (body ^ ": " ^ Diagnostic.to_string d)
       | Ok _ -> failwith (body ^ ": expected nonfinite error") in
-    nonfinite (E.Private.force_reference value ~live);
+    nonfinite (E.Host.force_reference value ~live);
     nonfinite (P.force ~strict:true program ~live))
     ["(asin (+ x t))";"(acos (+ x t))";"(log (+ x t))";"(exp (+ (* x 1000.0) t))"];
   print_endline "Packed math matches native reference bytes on one/eight domains; invalid domains refuse"
@@ -82,7 +82,7 @@ let () =
   let value,program=compile ~sources Flow.Ty.Vec4 Flow.Ty.Vec4 input
     "(quat_normalize [x.x x.y x.z (+ x.w t)])" in
   let live=Input.at_time 0. in
-  let expected=bytes(ok(E.Private.force_reference value ~live)) in
+  let expected=bytes(ok(E.Host.force_reference value ~live)) in
   List.iter(fun domains->Parallel.run ~domains(fun()->
     assert(bytes(ok(P.force ~strict:true program ~live))=expected))) [1;8];
   print_endline "Quaternion finite-overflow guards match strict reference bytes at one/eight domains on 32769 elements"
@@ -120,7 +120,7 @@ let () =
           Array.iteri(fun i x->if Int64.bits_of_float x<>Int64.bits_of_float expected.(i) then
             failwith(Printf.sprintf "Native FMA helper %s component%d: %h <> %h" body i x expected.(i)))values
       |_->failwith"FMA helper vector array expected" in
-    check(ok(E.Private.force_reference value ~live));
+    check(ok(E.Host.force_reference value ~live));
     List.iter(fun domains->Parallel.run ~domains(fun()->
       check(ok(P.force ~strict:true program ~live));
       check(ok(Flow_ir.Executor.force ~strict:true compiled ~live))))[1;4;8];
@@ -157,6 +157,6 @@ let () =
     let value,program=compile Flow.Ty.Vec3 Flow.Ty.Vec3(E.Vec3_array[|0.;Float.max_float;0.|])body in
     List.iter(fun result->match result with Error d->assert(d.Diagnostic.code="E_NONFINITE")
       |Ok _->failwith"Cross overflow accepted")
-      [E.Private.force_reference value ~live;P.force ~strict:true program ~live])
+      [E.Host.force_reference value ~live;P.force ~strict:true program ~live])
     ["(cross x [0.0 0.0 2.0])"];
   print_endline"Explicit-FMA cross and matrix products:5001 exact native/reference/strict Core/packed/JS rows, signed zeros/cancellation/subnormals, one/four/eight domains and overflow refusal"

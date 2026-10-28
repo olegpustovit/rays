@@ -26,7 +26,7 @@ let dump () =
     assert (printed=Format.asprintf "%a" C.pp (lower r));
     List.iter (fun time ->
       let live=Input.at_time time in
-      let expected=E.Private.force_reference (E.Residual r) ~live in
+      let expected=E.Host.force_reference (E.Residual r) ~live in
       match Test_program.run core ~live,expected with
       | Ok actual,Ok expected ->
           if name="bypass" || name="bypass-keyword" then assert (same actual (E.Float time));

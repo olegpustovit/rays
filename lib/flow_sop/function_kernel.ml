@@ -47,7 +47,7 @@ let node ?state ?(reference = false) ?elems ~identity ~signature ~fn ~sources in
           (fun index -> Result.to_option (Sop.Payload.geometry payloads.(index))) in
       let resolve = Attribute_kernel.resolve ~geometry:geometry_capture in
       let prepare columns =
-        Result.bind (E.Private.map_function ~signature fn (List.map value columns)) (fun values ->
+        Result.bind (E.Host.map_function ~signature fn (List.map value columns)) (fun values ->
           Result.bind (Attribute_kernel.prepare ~strict:true ~sources inputs values) (fun program ->
             match Flow_ir.Executor.packed_region program with
             | Some packed ->
@@ -70,7 +70,7 @@ let node ?state ?(reference = false) ?elems ~identity ~signature ~fn ~sources in
           (Sop.Payload.payload_components payload))
         (storage (E.Fn fn ::
           (Option.fold ~none:[] ~some:(List.map snd) elems)
-          @ (Option.fold ~none:[] ~some:E.Private.state_values state))) payloads in
+          @ (Option.fold ~none:[] ~some:E.Host.state_values state))) payloads in
       let kernel = K.create ~geometry_capture ~payload_bytes:bytes prepare in
       Ok Sop.Node.Private.{payload = Sop.Payload.Kernel kernel;
         instances = None})

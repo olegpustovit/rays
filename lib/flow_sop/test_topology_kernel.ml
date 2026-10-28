@@ -41,7 +41,7 @@ let () =
       let live=Input.at_time 0. in
       let program=Flow_ir.Executor.compile ~strict:true value |> flow_ok in
       List.iter(fun domains->Parallel.run ~domains(fun()->
-        assert(flow_ok(E.Private.force_reference ~resolve value ~live)=E.Int expected);
+        assert(flow_ok(E.Host.force_reference ~resolve value ~live)=E.Int expected);
         assert(flow_ok(Flow_ir.Executor.force ~strict:true ~resolve program ~live)=E.Int expected))) [1;8])
       ["points",G.point_count geometry;"vertices",G.vertex_count geometry;
        "primitives",G.primitive_count geometry;"edges",Rdk.Topology_index.edge_count index];
@@ -49,20 +49,20 @@ let () =
     let expected = E.Record ["a",E.Int_array (Array.copy view.edge_a);"b",E.Int_array (Array.copy view.edge_b)] in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       let live = Input.at_time 0.25 in
-      let result = flow_ok (E.Private.force_reference ~resolve value ~live) in
+      let result = flow_ok (E.Host.force_reference ~resolve value ~live) in
       assert (result=expected);
       let core = Flow_ir.Executor.compile ~strict:true value |> flow_ok in
       assert (flow_ok (Flow_ir.Executor.force ~strict:true ~resolve core ~live)=expected);
       (match result with E.Record [_,E.Int_array a;_,E.Int_array b] ->
         if Array.length a>0 then begin a.(0)<-99;b.(0)<-99 end | _ -> assert false);
-      assert (flow_ok (E.Private.force_reference ~resolve value ~live)=expected))) [1;8];
+      assert (flow_ok (E.Host.force_reference ~resolve value ~live)=expected))) [1;8];
     let value, resolve = evaluate geometry
       "(map (fn [(x : int)] (int/add x (frame/index))) (get (sop/edges geo) :a))" in
     let core = Flow_ir.Executor.compile ~strict:true value |> flow_ok in
     let live = {(Input.at_time 0.25) with frame=3} in
     let expected = E.Int_array (Array.map (fun x -> x+3) view.edge_a) in
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
-      assert (flow_ok (E.Private.force_reference ~resolve value ~live)=expected);
+      assert (flow_ok (E.Host.force_reference ~resolve value ~live)=expected);
       assert (flow_ok (Flow_ir.Executor.force ~strict:true ~resolve core ~live)=expected))) [1;8];
     let value, resolve = evaluate geometry
       "(let* [n (sop/count geo :points)] (array/int n 9007199254740993))" in

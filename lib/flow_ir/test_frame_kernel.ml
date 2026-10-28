@@ -16,10 +16,10 @@ let compare_frames value frames =
   let one = E.create_state () and eight = E.create_state () and reference = E.create_state () in
   List.iter (fun (frame, dt) ->
     let live = live frame dt in
-    let expected = E.Private.force_reference ~state:reference value ~live in
+    let expected = E.Host.force_reference ~state:reference value ~live in
     List.iter (fun (domains, state) -> Parallel.run ~domains (fun () ->
       assert (same (I.Executor.force ~state program ~live) expected);
-      assert (bytes (E.Private.state_values state) = bytes (E.Private.state_values reference)))) [1, one; 8, eight]) frames
+      assert (bytes (E.Host.state_values state) = bytes (E.Host.state_values reference)))) [1, one; 8, eight]) frames
 
 let compare_prepared value frames =
   let r=match value with E.Residual r -> r | _ -> failwith "Expected a frame residual." in
@@ -29,7 +29,7 @@ let compare_prepared value frames =
   let state=E.create_state () and reference=E.create_state () in
   List.iter (fun (frame,dt) ->
     let live=live frame dt in
-    let expected=E.Private.force_reference ~state:reference value ~live in
+    let expected=E.Host.force_reference ~state:reference value ~live in
     let actual=Result.bind (E.Residual.bind_live ~state r ~live)
       (fun () -> I.Core_exec.execute ~root:r prepared ~live) in
     assert (same actual expected)) frames

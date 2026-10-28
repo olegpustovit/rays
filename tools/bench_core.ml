@@ -40,14 +40,14 @@ let scalar () =
     | Ok core -> I.Core_exec.prepare core
     | Error reason -> failwith reason in
   let direct = I.Core_exec.direct core in assert direct;
-  let reference = E.Private.force_reference value ~live in
+  let reference = E.Host.force_reference value ~live in
   let rows = List.map (fun (label, force) ->
     (match force (), reference with
      | Ok (E.Float a), Ok (E.Float b) when Int64.bits_of_float a = Int64.bits_of_float b -> ()
      | _ -> failwith (label ^ ": result differs from the reference walker"));
     let wall, cpu, bytes = measure force in
     label, wall, cpu, bytes) [
-      "tree walker", (fun () -> E.Private.force_reference value ~live);
+      "tree walker", (fun () -> E.Host.force_reference value ~live);
       "core exec", (fun () -> I.Core_exec.execute core ~live);
       "core fast", (fun () -> I.Core_exec.execute core ~live);
       "core", (fun () -> I.Executor.force program ~live) ] in
@@ -201,7 +201,7 @@ let loops () =
     let residual=kernel_residual("(map (fn [x] "^body^") (array/range 1024))")in
     let packed=match I.Packed.compile_result residual (E.Residual.residual_view residual).term with
       |Ok packed->packed|Error errors->failwith(String.concat "; "(List.map Diagnostic.to_string errors))in
-    let reference()=E.Private.force_reference(E.Residual residual)~live in
+    let reference()=E.Host.force_reference(E.Residual residual)~live in
     let expected=ok(reference())in
     let run domains force=Parallel.run ~domains(fun()->
       if Marshal.to_string(ok(force()))[Marshal.No_sharing]<>Marshal.to_string expected[Marshal.No_sharing]then
@@ -221,7 +221,7 @@ let loop_fusion () = Parallel.run ~domains:1(fun()->
   List.iter(fun(name,body)->
     let residual=kernel_residual body in
     let term=(E.Residual.residual_view residual).term in
-    let expected=ok(E.Private.force_reference(E.Residual residual)~live)in
+    let expected=ok(E.Host.force_reference(E.Residual residual)~live)in
     List.iter(fun fusion->
       let packed=Option.get(I.Packed.compile ~fusion residual term)in
       let force()=I.Packed.force ~strict:true packed ~live in

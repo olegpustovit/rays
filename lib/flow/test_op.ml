@@ -168,7 +168,7 @@ let () =
   let workspace = checked ("(map (fn [x] (int/add x 1)) (array/int 4097 " ^ text ^ "))") in
   let expected = Array.make 4097 (high+1) in
   let run bulk = List.assoc "g" (Result.get_ok (Eval.Residual.handle ~bulk (fun () ->
-    Eval.Private.static_with_requests workspace))).results in
+    Eval.Host.static_with_requests workspace))).results in
   assert (run (fun _ -> Some (Eval.Int_array expected)) = Eval.Int_array expected);
   (* A rounded prefix or wrong kind cannot replace exact integer evaluation. *)
   assert (run (fun _ -> Some (Eval.Int_array (Array.make 4097 high))) = Eval.Int_array expected);
@@ -205,13 +205,13 @@ let () =
     | _ -> assert false in
   let marker = static "(test/present)" in
   assert (Eval.is_live marker && not (Eval.frame_dependent marker));
-  assert (Eval.Private.force_reference ~resolve marker ~live:(Input.at_time 0.) = Ok (Eval.Bool false));
-  assert (Eval.Private.force_reference ~resolve
+  assert (Eval.Host.force_reference ~resolve marker ~live:(Input.at_time 0.) = Ok (Eval.Bool false));
+  assert (Eval.Host.force_reference ~resolve
     (static "(if (test/present) (sqrt -1) 7)") ~live:(Input.at_time 0.) = Ok (Eval.Int 7));
-  (match Eval.Private.force_reference marker ~live:(Input.at_time 0.) with
+  (match Eval.Host.force_reference marker ~live:(Input.at_time 0.) with
    | Error d -> assert (d.code="E_DATA_SOURCE") | Ok _ -> assert false);
   List.iter (fun resolved ->
-    match Eval.Private.force_reference ~resolve:(fun _ -> Ok resolved) marker
+    match Eval.Host.force_reference ~resolve:(fun _ -> Ok resolved) marker
       ~live:(Input.at_time 0.) with
     | Error d -> assert (d.code="E_DATA_SOURCE") | Ok _ -> assert false)
     [marker; Eval.Float 1.]
@@ -225,17 +225,17 @@ let () =
   List.iter(fun marker->List.iter(fun supplied->
     let before=Eval.state_stamp state and calls=ref 0 in
     let resolve _=incr calls;Ok data in
-    let actual=Result.get_ok(Eval.Private.force_reference ?state:supplied ~resolve marker ~live) in
+    let actual=Result.get_ok(Eval.Host.force_reference ?state:supplied ~resolve marker ~live) in
     assert(actual==data && !calls=1 && Eval.state_stamp state=before);
-    List.iter(fun(resolved,code)->match Eval.Private.force_reference ?state:supplied
+    List.iter(fun(resolved,code)->match Eval.Host.force_reference ?state:supplied
         ~resolve:(fun _->Ok resolved) marker ~live with
       |Error d->assert(d.code=code)|Ok _->assert false)
       [marker,"E_DATA_SOURCE";Eval.Int_array[|0;1|],"E_DATA_SOURCE";
        Eval.Float_array[|0.;nan|],"E_NONFINITE"];
     let reason=Diagnostic.error ~cause:"host cause" ~code:"E_HOST" "host failure" in
-    assert(Eval.Private.force_reference ?state:supplied ~resolve:(fun _->Error reason) marker ~live=Error reason);
+    assert(Eval.Host.force_reference ?state:supplied ~resolve:(fun _->Error reason) marker ~live=Error reason);
     calls:=0;
-    (match Eval.Private.force_reference ?state:supplied ~resolve marker
+    (match Eval.Host.force_reference ?state:supplied ~resolve marker
         ~live:{live with dt=nan} with
      |Error d->assert(d.code="E_FRAME" && !calls=0)|Ok _->assert false))
     [None;Some state]) [marker;legacy];
@@ -247,11 +247,11 @@ let () =
   let marker=Eval.Source("test/nested",Ty.Any,[]) in
   let calls=ref 0 in
   let resolve _=incr calls;Ok(Eval.Record fields) in
-  assert(Eval.Private.force_reference ~resolve marker ~live=Ok(Eval.Record["value",Eval.Float 3.]));
+  assert(Eval.Host.force_reference ~resolve marker ~live=Ok(Eval.Record["value",Eval.Float 3.]));
   assert(!calls=1);
   let marker=Eval.Source("test/live_argument",Ty.Float,fields) in
   let resolve actual=assert(actual==marker);Ok(Eval.Float 7.) in
-  assert(Eval.Private.force_reference ~resolve marker ~live=Ok(Eval.Float 7.));
+  assert(Eval.Host.force_reference ~resolve marker ~live=Ok(Eval.Float 7.));
   let descriptor=Eval.Source("test/borrowed",Ty.Array Ty.Float,
     ["geometry",Eval.Deferred(Ty.geometry,17);"owner",Eval.Text "point"])
   and legacy=Eval.Struct("test/borrowed",Ty.Array Ty.Int,["count",Eval.Int 2]) in
@@ -260,16 +260,16 @@ let () =
   List.iter(fun supplied->
     let calls=ref 0 in
     let resolve actual=assert(actual==nested);incr calls;Ok data in
-    assert(Result.get_ok(Eval.Private.force_reference ?state:supplied ~resolve nested ~live)==data);
+    assert(Result.get_ok(Eval.Host.force_reference ?state:supplied ~resolve nested ~live)==data);
     assert(!calls=1);
-    (match Eval.Private.force_reference ?state:supplied ~resolve:(fun actual->
+    (match Eval.Host.force_reference ?state:supplied ~resolve:(fun actual->
       assert(actual==nested);Ok(Eval.Int 0)) nested ~live with
      |Error d->assert(d.code="E_DATA_SOURCE")|Ok _->assert false);
     let reason=Diagnostic.error ~cause:"nested host cause" ~code:"E_HOST" "nested host failure" in
-    assert(Eval.Private.force_reference ?state:supplied ~resolve:(fun actual->
+    assert(Eval.Host.force_reference ?state:supplied ~resolve:(fun actual->
       assert(actual==nested);Error reason) nested ~live=Error reason);
     calls:=0;
-    (match Eval.Private.force_reference ?state:supplied ~resolve nested ~live:{live with dt=nan} with
+    (match Eval.Host.force_reference ?state:supplied ~resolve nested ~live:{live with dt=nan} with
      |Error d->assert(d.code="E_FRAME" && !calls=0)|Ok _->assert false)) [None;Some state];
   let forms=Result.get_ok(Syntax.parse
     "(workspace source_state (graph g :context value (state [previous 0.0] (+ previous 1.0))))") in
@@ -280,7 +280,7 @@ let () =
   let reason=Diagnostic.error ~cause:"rollback cause" ~code:"E_HOST" "stateful host failure" in
   let resolve _=ignore(Result.get_ok(Eval.force ~state fold ~live));
     assert(Eval.state_stamp state<>before);Error reason in
-  assert(Eval.Private.force_reference ~state ~resolve marker ~live=Error reason);
+  assert(Eval.Host.force_reference ~state ~resolve marker ~live=Error reason);
   assert(Eval.state_stamp state=before);
   print_endline "Host forcing: concrete/legacy sources, validation/cause/frame failures and live nested fallback agree with supplied state"
 

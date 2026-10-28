@@ -1612,7 +1612,7 @@ fallback wrap the same result. Declining a child compilation or exceeding the
 combined fusion register budget may still produce a valid unfused program;
 that successful compilation is not reported as a refusal.
 
-`Eval.Private.static_with_kernels` can observe each actual static entry into
+`Eval.Host.static_with_requests` can observe each actual static entry into
 map, reduce, loop or array/sum before materialization, including empty/static
 forms and unsupported types. Each handle contains the current checked term,
 lexical free captures, graph instance and iteration tuple; repeated entries
@@ -2288,7 +2288,7 @@ CPU kernel tier plus CPU instance building; an unmeasured backend keeps CPU. For
 domain before submitting CPU geometry work. The cook worker receives an owned
 CPU array. Attribute-reading cones retain their cooked-input CPU route.
 A large static map in a node body is the one producer the static evaluator may take from the device:
-`Eval.Private.static_with_kernels ~bulk_approx` offers a map of more than 4,096 elements whose
+`Eval.Host.static_with_requests ~bulk_approx` offers a map of more than 4,096 elements whose
 producer the checker marks approximable; when the backend's measured cost beats the CPU row the
 executor runs it, reads it back once, and the evaluator accepts it within 1e-4 (relative plus
 absolute) of the walked first 4,096 elements instead of bit for bit. Everything not so placed keeps

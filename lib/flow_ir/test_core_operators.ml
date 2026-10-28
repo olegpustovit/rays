@@ -122,7 +122,7 @@ let () =
     let core=match I.Core_lower.lower r with Ok p -> p | Error n -> failwith (name ^ " " ^ body ^ ": refused " ^ n) in
     List.iter (fun live ->
       incr n;
-      match Test_program.run core ~live,E.Private.force_reference value ~live with
+      match Test_program.run core ~live,E.Host.force_reference value ~live with
       | Ok a,Ok b -> if not (same a b) then failwith (Printf.sprintf "%s at %g: %s <> %s" body live.t (match a,b with E.Vec3 (x,y,z),E.Vec3 (p,q,r) -> Printf.sprintf "%h %h %h / %h %h %h" x y z p q r | _ -> E.show a) (E.show b))
       | Error (a : Diagnostic.t),Error (b : Diagnostic.t) ->
           if a.code<>b.code then failwith (Printf.sprintf "%s at %g: %s <> %s" body live.t a.code b.code)
@@ -148,7 +148,7 @@ let () =
     let program=ok(I.Executor.compile ~strict:true value) in
     List.iter(fun time->
       let live=Input.at_time time in
-      let expected=ok(E.Private.force_reference value ~live) in
+      let expected=ok(E.Host.force_reference value ~live) in
       assert(ok(Test_program.run core ~live)=expected);
       List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(ok(I.Executor.force ~strict:true program ~live)=expected))) [1;8]) [-1.;0.;1.])
@@ -170,7 +170,7 @@ let () =
   let residual=match dependent with E.Residual r->r|_->assert false in
   assert(I.Core_lower.lower ~strict:true residual=Error "text_collect_dependent_clause");
   assert(Result.is_error(I.Executor.compile ~strict:true dependent));
-  assert(ok(E.Private.force_reference dependent ~live:(Input.at_time 1.))
+  assert(ok(E.Host.force_reference dependent ~live:(Input.at_time 1.))
     =E.Text_array(Array.make 5002 "猫"));
   let nested_numeric=live_value
     "(map (fn [x] (text/trim (text/lower (str (array/sum (map (fn [y] (value/rand y t)) (array/float 2))))))) (array/text 2))" in
@@ -181,6 +181,6 @@ let () =
   (match I.Executor.compile ~strict:true nested_numeric with
    | Error diagnostic->assert(diagnostic.Diagnostic.code="E_KERNEL_FORM")
    | Ok _->failwith "Unsupported numeric producer inside Text map qualified");
-  assert(match ok(E.Private.force_reference nested_numeric ~live:(Input.at_time 1.)) with
+  assert(match ok(E.Host.force_reference nested_numeric ~live:(Input.at_time 1.)) with
     |E.Text_array values->Array.length values=2 |_->false);
   print_endline "Text arrays: strict structured Core and Executor match reference beyond 4,096 at one/eight domains; dependent collecting clauses refuse honestly"
