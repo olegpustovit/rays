@@ -321,8 +321,8 @@ let run driver =
     let scratch=get (Backend.create_buffer ~memory:Types.Device_local device
       {label=Some"scratch";size=Int64.max 256L (Int64.mul 2L sizes.build_scratch_size);usage=[Storage]}) in
     let instances=get (Backend.pack_instance_records device
-      [|{instance={transform=[|1.;0.;0.;0.; 0.;1.;0.;0.; 0.;0.;1.;0.|];mask=0xFFFF_FFFF;structure_index=0};user_id=0;table_offset=0};
-        {instance={transform=[|1.;0.;0.;8.; 0.;1.;0.;0.; 0.;0.;1.;0.|];mask=0xFFFF_FFFF;structure_index=0};user_id=1;table_offset=0}|]) in
+      [|{instance={transform=[|1.;0.;0.;0.; 0.;1.;0.;0.; 0.;0.;1.;0.|];mask=0xFFFF_FFFF;structure_index=0};user_id=0};
+        {instance={transform=[|1.;0.;0.;8.; 0.;1.;0.;0.; 0.;0.;1.;0.|];mask=0xFFFF_FFFF;structure_index=0};user_id=1}|]) in
     let stride=Bytes.length instances/2 in
     let instance_buffer=get (Backend.create_buffer device
       {label=Some"instances";size=Int64.of_int (2*stride);usage=[Storage;Copy_dst]}) in
@@ -392,24 +392,20 @@ let run driver =
     require (hit1=1 && prim1=1 && inst1=0 && close t1 2.) "instance 0 primitive 1 hit differs";
     require (hit2=1 && prim2=0 && inst2=1 && close t2 2.) "instance 1 primitive 0 hit differs";
     require (hit3=1 && prim3=1 && inst3=1 && close t3 2.) "instance 1 primitive 1 hit differs";
-    (* Bounding boxes resolved by an intersection function table, curves,
+    (* Bounding boxes resolved in the kernel's traversal loop, curves,
        motion keyframes, user-id instances with masks, and compaction. *)
     let extra_source=Bytes.of_string (String.concat "\n" [
       "#include <metal_stdlib>";"#include <metal_raytracing>";"using namespace metal;";"using namespace raytracing;";
       "struct Hit { uint hit; uint primitive; uint instance; float t; };";
       "struct Sphere { float4 center_radius; };";
-      "struct BoxResult { bool accept [[accept_intersection]]; float distance [[distance]]; };";
-      "[[intersection(bounding_box)]] BoxResult sphere_hit(float3 origin [[origin]], float3 direction [[direction]], float min_distance [[min_distance]], float max_distance [[max_distance]], uint primitive_id [[primitive_id]], const device Sphere *spheres [[buffer(0)]]) {";
-      "  BoxResult result; result.accept = false; result.distance = 0.0f;";
-      "  float3 c = spheres[primitive_id].center_radius.xyz; float r = spheres[primitive_id].center_radius.w;";
-      "  float3 oc = origin - c; float b = dot(oc, direction); float cc = dot(oc, oc) - r * r; float disc = b * b - cc;";
-      "  if (disc < 0.0f) return result; float t = -b - sqrt(disc);";
-      "  if (t < min_distance || t > max_distance) return result;";
-      "  result.accept = true; result.distance = t; return result; }";
+      "inline bool sphere_hit(ray r, Sphere s, thread float &t) {";
+      "  float3 oc = r.origin - s.center_radius.xyz; float b = dot(oc, r.direction); float cc = dot(oc, oc) - s.center_radius.w * s.center_radius.w; float disc = b * b - cc;";
+      "  if (disc < 0.0f) return false; t = -b - sqrt(disc); return t >= r.min_distance && t <= r.max_distance; }";
       "inline ray make_ray(const device float4 *rays, uint tid) { ray r; r.origin = rays[tid * 2].xyz; r.direction = rays[tid * 2 + 1].xyz; r.min_distance = 0.0f; r.max_distance = 100.0f; return r; }";
-      "kernel void trace_boxes(primitive_acceleration_structure scene [[buffer(0)]], const device float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], intersection_function_table<> table [[buffer(3)]], uint tid [[thread_position_in_grid]]) {";
-      "  intersector<> query; auto hit = query.intersect(make_ray(rays, tid), scene, table);";
-      "  hits[tid].hit = hit.type == intersection_type::bounding_box ? 1u : 0u; hits[tid].primitive = hit.primitive_id; hits[tid].instance = 0u; hits[tid].t = hit.distance; }";
+      "kernel void trace_boxes(primitive_acceleration_structure scene [[buffer(0)]], const device float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], const device Sphere *spheres [[buffer(3)]], uint tid [[thread_position_in_grid]]) {";
+      "  ray r = make_ray(rays, tid); intersection_params params; intersection_query<> query(r, scene, params);";
+      "  while (query.next()) { float t; if (query.get_candidate_intersection_type() == intersection_type::bounding_box && sphere_hit(r, spheres[query.get_candidate_primitive_id()], t)) query.commit_bounding_box_intersection(t); }";
+      "  hits[tid].hit = query.get_committed_intersection_type() == intersection_type::bounding_box ? 1u : 0u; hits[tid].primitive = query.get_committed_primitive_id(); hits[tid].instance = 0u; hits[tid].t = query.get_committed_distance(); }";
       "kernel void trace_curves(primitive_acceleration_structure scene [[buffer(0)]], const device float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], uint tid [[thread_position_in_grid]]) {";
       "  intersector<curve_data> query; auto hit = query.intersect(make_ray(rays, tid), scene);";
       "  hits[tid].hit = hit.type == intersection_type::curve ? 1u : 0u; hits[tid].primitive = hit.primitive_id; hits[tid].instance = 0u; hits[tid].t = hit.distance; }";
@@ -428,14 +424,8 @@ let run driver =
        bindings=[]}) in
     let extra=get (Backend.create_library device extra_shader) in
     let binding index kind : Shader.binding={group=0;binding=index;kind;visibility=[Shader.Compute]} in
-    (match Backend.create_intersection_table trace ~capacity:1 with
-     | Error { Error.kind = Invalid_argument; _ } -> ()
-     | _ -> failwith "table on a pipeline without linked functions was accepted");
-    (match Backend.create_compute_pipeline_from extra ~entry:"trace_boxes" ~interface:(ray_interface@[binding 3 Shader.Intersection_table]) ~linked:["absent_function"] () with
-     | Error _ -> ()
-     | Ok _ -> failwith "unknown linked function was accepted");
     let boxes_pipeline=get (Backend.create_compute_pipeline_from extra ~entry:"trace_boxes"
-      ~interface:(ray_interface@[binding 3 Shader.Intersection_table]) ~linked:["sphere_hit"] ()) in
+      ~interface:(ray_interface@[binding 3 Shader.Storage_buffer]) ()) in
     let float_buffer label values=
       let bytes=Bytes.create (4*Array.length values) in
       Array.iteri (fun i v -> put_f32 bytes (i*4) v) values;
@@ -454,16 +444,7 @@ let run driver =
       get (Backend.end_accel encoder);
       poll_epoch (get (Backend.commit commands)) 1000 in
     build_one box_blas;
-    let table=get (Backend.create_intersection_table boxes_pipeline ~capacity:1) in
-    (match Backend.table_set_function table ~index:0 "trace_boxes" with
-     | Error { Error.kind = Invalid_argument; _ } -> ()
-     | _ -> failwith "unlinked function name was accepted by the table");
-    (match Backend.table_set_function table ~index:1 "sphere_hit" with
-     | Error { Error.kind = Invalid_argument; _ } -> ()
-     | _ -> failwith "table index beyond capacity was accepted");
-    get (Backend.table_set_function table ~index:0 "sphere_hit");
-    get (Backend.table_set_buffer table ~index:0 spheres);
-    let query_with ?extra_bytes ?table pipeline structure=
+    let query_with ?extra_bytes ?extra_buffer pipeline structure=
       let commands=get (Backend.begin_commands queue) in
       let compute=get (Backend.compute_encoder commands) in
       get (Backend.set_pipeline compute pipeline);
@@ -471,12 +452,12 @@ let run driver =
       get (Backend.set_buffer compute ~index:1 rays);
       get (Backend.set_buffer compute ~index:2 hits);
       Option.iter (fun bytes -> get (Backend.set_bytes compute ~index:3 bytes)) extra_bytes;
-      Option.iter (fun table -> get (Backend.set_table compute ~index:3 table)) table;
+      Option.iter (fun buffer -> get (Backend.set_buffer compute ~index:3 buffer)) extra_buffer;
       get (Backend.dispatch_threads compute ~threads:(4,1,1) ~threadgroup:(4,1,1));
       get (Backend.end_compute compute);
       poll_epoch (get (Backend.commit commands)) 1000;
       read_hits () in
-    let box_hits=query_with ~table boxes_pipeline box_blas in
+    let box_hits=query_with ~extra_buffer:spheres boxes_pipeline box_blas in
     let hit0,prim0,_,t0=box_hits.(0) and hit1,prim1,_,t1=box_hits.(1) and hit2,_,_,_=box_hits.(2) and hit3,_,_,_=box_hits.(3) in
     require (hit0=1 && prim0=0 && close t0 1.5) "sphere 0 intersection differs";
     require (hit1=1 && prim1=1 && close t1 1.5) "sphere 1 intersection differs";
@@ -533,8 +514,8 @@ let run driver =
     let identity=[|1.;0.;0.;0.; 0.;1.;0.;0.; 0.;0.;1.;0.|] in
     let shifted=[|1.;0.;0.;8.; 0.;1.;0.;0.; 0.;0.;1.;0.|] in
     let records=get (Backend.pack_instance_records device
-      [|{instance={transform=identity;mask=1;structure_index=0};user_id=7;table_offset=0};
-        {instance={transform=shifted;mask=2;structure_index=0};user_id=9;table_offset=0}|]) in
+      [|{instance={transform=identity;mask=1;structure_index=0};user_id=7};
+        {instance={transform=shifted;mask=2;structure_index=0};user_id=9}|]) in
     require (Bytes.length records=2*68) "user-id record stride differs";
     let record_buffer=get (Backend.create_buffer device {label=Some"user-id-instances";size=Int64.of_int (Bytes.length records);usage=[Storage;Copy_dst]}) in
     get (Backend.write_buffer record_buffer ~offset:0L records);
@@ -555,7 +536,7 @@ let run driver =
     let keyframe_buffer=get (Backend.create_buffer device {label=Some"instance-keyframes";size=Int64.of_int (Bytes.length keyframes);usage=[Storage;Copy_dst]}) in
     get (Backend.write_buffer keyframe_buffer ~offset:0L keyframes);
     let motion_records=get (Backend.pack_motion_instances device
-      [|{record={instance={transform=identity;mask=1;structure_index=0};user_id=5;table_offset=0};
+      [|{record={instance={transform=identity;mask=1;structure_index=0};user_id=5};
          transforms_start=0;transforms_count=2;start_time=0.;end_time=1.;start_border=Clamp;end_border=Clamp}|]) in
     require (Bytes.length motion_records=44) "motion instance record stride differs";
     let motion_record_buffer=get (Backend.create_buffer device {label=Some"motion-instances";size=Int64.of_int (Bytes.length motion_records);usage=[Storage;Copy_dst]}) in
@@ -601,7 +582,7 @@ let run driver =
       require (hit0=1 && prim0=0 && close t0 2. && hit1=1 && prim1=1 && close t1 2. && hit2=0)
       "compacted structure hits differ from the source";
     List.iter (fun destroy -> get (destroy ())) [
-      (fun () -> Backend.destroy_table table);(fun () -> Backend.destroy_pipeline boxes_pipeline);
+      (fun () -> Backend.destroy_pipeline boxes_pipeline);
       (fun () -> Backend.destroy_pipeline curve_pipeline);(fun () -> Backend.destroy_pipeline motion_pipeline);
       (fun () -> Backend.destroy_pipeline masked_pipeline);(fun () -> Backend.destroy_pipeline motion_instances_pipeline);
       (fun () -> Backend.destroy_accel motion_tlas);(fun () -> Backend.destroy_buffer motion_record_buffer);
@@ -634,16 +615,11 @@ let run driver =
      | Error { Error.kind = Unsupported; _ } -> ()
      | _ -> failwith "unsupported acceleration encoder was opened");
     get (Backend.abandon commands);
-    let mock_library=get (Backend.create_library device ray_shader) in
-    (match Backend.create_compute_pipeline_from mock_library ~entry:"trace" ~interface:ray_interface ~linked:["sphere_hit"] () with
-     | Error { Error.kind = Unsupported; _ } -> ()
-     | _ -> failwith "unsupported linked functions were accepted");
-    get (Backend.destroy_library mock_library);
     require (Bytes.length (get (Backend.pack_instance_records device
-      [|{instance={transform=[|1.;0.;0.;0.; 0.;1.;0.;0.; 0.;0.;1.;0.|];mask=1;structure_index=0};user_id=3;table_offset=0}|]))=68)
+      [|{instance={transform=[|1.;0.;0.;0.; 0.;1.;0.;0.; 0.;0.;1.;0.|];mask=1;structure_index=0};user_id=3}|]))=68)
       "user-id instance packing differs";
     require (Bytes.length (get (Backend.pack_motion_instances device
-      [|{record={instance={transform=[|1.;0.;0.;0.; 0.;1.;0.;0.; 0.;0.;1.;0.|];mask=1;structure_index=0};user_id=3;table_offset=0};
+      [|{record={instance={transform=[|1.;0.;0.;0.; 0.;1.;0.;0.; 0.;0.;1.;0.|];mask=1;structure_index=0};user_id=3};
          transforms_start=0;transforms_count=2;start_time=0.;end_time=1.;start_border=Clamp;end_border=Clamp}|]))=44)
       "motion instance packing differs"
   end;

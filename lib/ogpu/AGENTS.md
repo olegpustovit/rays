@@ -26,7 +26,7 @@ Vulkan backend must be addable without changing callers.
 - Shape: dune virtual library with `ogpu_metal`/`ogpu_mock` implementations,
   one backend per executable, conformance suite over the mock and Metal
   covering every capability that exists (compute and render pipelines, ray
-  tracing incl. motion, curves and intersection tables).
+  tracing incl. motion, curves and bounding boxes).
 - Workflow for a new capability: the `add-ogpu-feature` skill. Removing one:
   delete the caller, then the `prune-dead-code` skill (`prune`, `dead-fields`
   for the driver records, `dead-stubs`, `drop-c-unused`).

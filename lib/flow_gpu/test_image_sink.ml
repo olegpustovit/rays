@@ -25,9 +25,9 @@ let ()=
         read=(fun offset length->incr texture_reads;resource.read offset length)})(raw.create_texture descriptor));
     create_library=(fun shader->Result.map(fun(library:B.driver_library)->incr libraries;{
       destroy_library=(fun()->decr libraries;library.destroy_library());
-      create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ~linked:_->
+      create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ->
         if !fail_pipeline then injected()else begin incr pipelines;
-          Ok{max_threads=1024;pipeline_token=1L;create_table=(fun ~capacity:_->assert false);
+          Ok{max_threads=1024;pipeline_token=1L;
             destroy_pipeline=(fun()->decr pipelines;Ok())}end)}) (raw.create_library shader));
     create_queue=(fun()->Result.map(fun queue->{queue with
       complete_through=(fun epoch->event "complete";if !fail_complete then injected()else queue.complete_through epoch);
@@ -37,7 +37,7 @@ let ()=
         compute_encoder=(fun()->event "compute";Ok{
           set_pipeline=(fun _->Ok());set_buffer=(fun ~index:_ ~offset:_ _->Ok());
           set_bytes=(fun ~index:_ _->Ok());set_texture=(fun ~index:_ _->assert false);
-          set_accel=(fun ~index:_ _->assert false);set_table=(fun ~index:_ _->assert false);
+          set_accel=(fun ~index:_ _->assert false);
           compute_use_accels=(fun _->assert false);
           dispatch_threads=(fun ~threads:_ ~threadgroup:_->event "dispatch";if !fail_dispatch then injected()else Ok());
           end_compute=(fun()->event "end_compute";Ok())});

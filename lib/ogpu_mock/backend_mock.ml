@@ -110,7 +110,7 @@ let execute_transfer c resources description =
   end
 let transfer_one=execute_transfer
 let create()=
-  let capabilities={Caps.minimum_m1 with Caps.compute_pipeline=false;render_pipeline=false;ray_tracing=false;function_tables=false;ray_tracing_curves=false;ray_tracing_motion=false} in
+  let capabilities={Caps.minimum_m1 with Caps.compute_pipeline=false;render_pipeline=false;ray_tracing=false;ray_tracing_curves=false;ray_tracing_motion=false} in
   let run_ops ops=
     let rec go=function
       |[]->Ok()
@@ -128,7 +128,7 @@ let create()=
       c.pipelines<-c.pipelines+1;
       add c(Printf.sprintf"create-library:%Ld"id);
       Ok{
-        create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ~linked:_->
+        create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_->
           error"Backend_mock.create_compute_pipeline_in"Error.Unsupported
             "mock backend does not execute compute shaders");
         destroy_library=(fun()->c.pipelines<-c.pipelines-1;
@@ -149,8 +149,8 @@ let create()=
       "mock backend does not rasterize");
     (* The mock mirrors Metal's documented instance record layouts. *)
     instance_layout=(function
-      |Backend.User_id_instances->[|68;0;48;52;56;60;64;-1;-1;-1;-1;-1;-1|]
-      |Motion_instances->[|44;-1;8;12;16;20;24;0;4;28;32;36;40|]);
+      |Backend.User_id_instances->[|68;0;48;52;60;64;-1;-1;-1;-1;-1;-1|]
+      |Motion_instances->[|44;-1;8;12;20;24;0;4;28;32;36;40|]);
     create_texture=(fun d->
       let operation="Backend_mock.create_texture" in
       if should_fail c.fail_texture_after then begin

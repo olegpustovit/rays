@@ -9,7 +9,6 @@ let tests = [
   "test_metal_blit_safe", Test_metal_blit_safe.run;
   "test_metal_device_library_safe", Test_metal_device_library_safe.run;
   "test_metal_device_queue_safe", Test_metal_device_queue_safe.run;
-  "test_metal_function_tables_safe", Test_metal_function_tables_safe.run;
   "test_metal_render_encoder_safe", Test_metal_render_encoder_safe.run;
   "test_metal_compute_encoder_safe", Test_metal_compute_encoder_safe.run;
   "test_metal_command_buffer_safe", Test_metal_command_buffer_safe.run;
