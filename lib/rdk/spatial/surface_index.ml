@@ -50,8 +50,6 @@ type ray_direction_mode =
 
 type ray_surface_hit = Ray_first_surface | Ray_last_surface
 
-exception Surface_error of string
-exception Group_error of string
 
 type pair_builder = {
   mutable pair_first : int array;
@@ -81,7 +79,8 @@ let pair_builder_add builder first second =
   builder.pair_second.(builder.pair_length) <- second;
   builder.pair_length <- builder.pair_length + 1
 
-let fail message = raise (Surface_error message)
+let fail_code code message = Error.fail_with ~operation:"surface_index" ~code message
+let fail = fail_code "invalid_surface"
 let leaf_size = 8
 
 let diagonal_count = 4
@@ -110,9 +109,11 @@ let[@inline] selected bits index =
   Char.code (Bytes.unsafe_get bits (index lsr 3))
   land (1 lsl (index land 7)) <> 0
 
-let create_raw ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
+let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
     ?(vertex_selection = All_triangle_vertices) ?(validated_triangles = false)
     geometry =
+  Error.run ~operation:"surface_index" ~code:"invalid_parameter"
+    ~cancelled:"surface-index construction was cancelled" @@ fun () ->
   if grain <= 0 then invalid_arg "Surface_index: grain must be positive";
   if validated_triangles && (Option.is_some selection || Option.is_some vertices) then
     invalid_arg "Surface_index: validated triangle construction cannot select elements";
@@ -122,17 +123,17 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   let primitive_count = Bytes.length topology.primitive_kinds in
   (match vertices with
    | Some group when Group.owner group <> Group.Vertex ->
-       raise (Group_error "source vertex selection must be a vertex group")
+       fail_code "invalid_group" "source vertex selection must be a vertex group"
    | Some group when Group.length group <> Array.length topology.vertex_points ->
-       raise (Group_error "source vertex group length does not match geometry")
+       fail_code "invalid_group" "source vertex group length does not match geometry"
    | None | Some _ -> ());
   let selected_primitives = match selection with
     | None -> Array.init primitive_count Fun.id
     | Some group ->
         if Group.owner group <> Group.Primitive then
-          raise (Group_error "source selection must be a primitive group");
+          fail_code "invalid_group" "source selection must be a primitive group";
         if Group.length group <> primitive_count then
-          raise (Group_error "source primitive group length does not match geometry");
+          fail_code "invalid_group" "source primitive group length does not match geometry";
         let selected = Array.make (Group.cardinality group) 0 and next = ref 0 in
         Group.iter (fun primitive -> selected.(!next) <- primitive; incr next) group;
         selected in
@@ -473,27 +474,10 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
     node_count = capacity }
 
 let create ?cancel ?grain ?primitives ?vertices ?vertex_selection geometry =
-  try Ok (create_raw ?cancel ?grain ?primitives ?vertices ?vertex_selection
-      geometry) with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"surface_index"
-      ~code:"cancelled" "surface-index construction was cancelled")
-  | Surface_error message -> Error (Error.make ~operation:"surface_index"
-      ~code:"invalid_surface" message)
-  | Group_error message -> Error (Error.make ~operation:"surface_index"
-      ~code:"invalid_group" message)
-  | Invalid_argument message -> Error (Error.make ~operation:"surface_index"
-      ~code:"invalid_parameter" message)
+  create_with ?cancel ?grain ?primitives ?vertices ?vertex_selection geometry
 
 let create_validated_triangles ?cancel ~grain geometry =
-  try Ok (create_raw ?cancel ~grain ~validated_triangles:true geometry) with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"surface_index"
-      ~code:"cancelled" "surface-index construction was cancelled")
-  | Surface_error message -> Error (Error.make ~operation:"surface_index"
-      ~code:"invalid_surface" message)
-  | Group_error message -> Error (Error.make ~operation:"surface_index"
-      ~code:"invalid_group" message)
-  | Invalid_argument message -> Error (Error.make ~operation:"surface_index"
-      ~code:"invalid_parameter" message)
+  create_with ?cancel ~grain ~validated_triangles:true geometry
 
 let triangle_count value = Array.length value.primitives
 
@@ -790,7 +774,7 @@ let overlapping_self_triangle_pairs_disjoint_topology ?cancel ~grain ~tolerance
     done;
     let group = Group.Private.of_owned_bits ~owner:Group.Primitive
         ~name:"__rdk_surface_disjoint_partition" ~length:primitive_count bits in
-    create_raw ?cancel ~grain ~primitives:group indexed.geometry in
+    Error.get (create_with ?cancel ~grain ~primitives:group indexed.geometry) in
   let rec gather indexed =
     Cancel.check_opt cancel;
     let count = Array.length indexed.primitives in
