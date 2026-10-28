@@ -68,8 +68,6 @@ type scene = {
   lights : light list;
 }
 
-let source = Pathtrace_source.source
-
 module B = Ogpu.Backend
 
 (* One in-flight frame: its receipt, which output texture it writes, and
@@ -87,7 +85,7 @@ type pending = {
 (* Instances carry a user id selecting their material; with [motion] every
    instance has two transform keyframes (start and end of the shutter). *)
 type instances = Mesh_data.instances
-type part = Mesh_data.part = Triangle_part of int * int | Sphere_part | Strand_part
+type part = Mesh_data.part = Triangle_part of int * int
 type layout = Mesh_data.layout
 type extras = Mesh_data.extras
 type mesh = material Mesh_data.t
@@ -99,9 +97,11 @@ type t = {
   lease : Renderer.gpu;
   device : B.device;
   queue : B.queue;
-  library : B.library;
-  pipelines : (shape, B.pipeline * B.function_table option) Hashtbl.t;
-  resolve_pipeline : B.pipeline;
+  flow_pipelines : Flow_gpu.Pipelines.t;
+  convert : B.library * B.pipeline;  (* Flow's RGBA8 film conversion *)
+  cell : B.buffer;  (* the Lisp kernels' count word, never read *)
+  mutable kernels : (Lisp_kernel.facts * Lisp_kernel.t) list;  (* newest first, at most four *)
+  mutable from_accum : bool;  (* the last frame accumulated, so the film is a preview's history *)
   mutable gpu : gpu_mesh;
   mutable building : mesh_build option;
   mutable queued_mesh : queued option;
@@ -112,13 +112,11 @@ type t = {
   mutable scene_lights : light list;
   mutable world : Rays.World.baked option;
   mutable world_buffer : B.buffer;
+  mutable cdf_buffer : B.buffer;  (* the World's CDF alone, for the Lisp kernel *)
   bsdf_only : bool;
-  mutable accum : B.buffer;
-  mutable outputs : B.texture array;
+  mutable film : film;
   shared_film : bool;
   mutable next_output_slot : int;
-  mutable history_color : B.buffer array;
-  mutable history_geometry : B.buffer array;
   mutable history_slot : int;
   mutable history_camera : camera option;
   mutable history_epoch : int;
@@ -165,18 +163,10 @@ let color_tuple (color : Linear_color.t) = color.r, color.g, color.b
 
 let vec3_tuple (v : Rays_math.Vec3.t) = (v.x, v.y, v.z)
 
-let frame_facts (t : t) = Frame_data.{
-  width = t.width; height = t.height; sky = t.sky; ground = t.ground;
-  frame = t.frame; spp = t.spp; world = t.world; panel_count = t.panel_count;
-  bounces = t.bounces; exposure = t.exposure; round_samples = t.round_samples;
-  light_count = t.light_count; moving = t.moving; history_camera = t.history_camera;
-  bsdf_only = t.bsdf_only;
-}
-
-(* Analytic primitives share the material index space with the objects. *)
+(* Analytic primitives share the material index space with the objects: sphere k's is [first_material + k],
+   and the sphere records are (centre, radius). *)
 let prepare_extras ~first_material spheres strands =
   let sphere_bytes = Stdlib.Buffer.create 256
-  and box_bytes = Stdlib.Buffer.create 256
   and strand_points = Stdlib.Buffer.create 256
   and strand_radii = Stdlib.Buffer.create 64
   and strand_indices = Stdlib.Buffer.create 64
@@ -184,21 +174,17 @@ let prepare_extras ~first_material spheres strands =
   let finite value = Float.is_finite value && Float.abs value <= 3.402823466e38 in
   let* () =
     List.fold_left
-      (fun acc (index, (sphere : sphere)) ->
+      (fun acc (sphere : sphere) ->
         let* () = acc in
         let x, y, z = vec3_tuple sphere.center in
         if not (finite x && finite y && finite z && finite sphere.radius && sphere.radius > 0.) then
           Error "path tracer sphere needs a finite center and a positive radius"
         else begin
           add_float4 sphere_bytes (x, y, z) sphere.radius;
-          Stdlib.Buffer.add_int32_le sphere_bytes (Int32.of_int (first_material + index));
-          Stdlib.Buffer.add_bytes sphere_bytes (Bytes.make 12 '\000');
-          add_vec3 box_bytes (x -. sphere.radius, y -. sphere.radius, z -. sphere.radius);
-          add_vec3 box_bytes (x +. sphere.radius, y +. sphere.radius, z +. sphere.radius);
           Ok ()
         end)
       (Ok ())
-      (List.mapi (fun index sphere -> (index, sphere)) spheres)
+      spheres
   in
   let point_count = ref 0 and segments = ref 0 in
   let* () =
@@ -227,7 +213,7 @@ let prepare_extras ~first_material spheres strands =
   Ok
     {
       sphere_bytes = Stdlib.Buffer.to_bytes sphere_bytes;
-      box_bytes = Stdlib.Buffer.to_bytes box_bytes;
+      sphere_material = first_material;
       sphere_count = List.length spheres;
       strand_points = Stdlib.Buffer.to_bytes strand_points;
       strand_radii = Stdlib.Buffer.to_bytes strand_radii;
@@ -335,7 +321,7 @@ let light_bytes ?(world_lights = []) lights =
   Stdlib.Buffer.to_bytes builder
 
 (* The baked World as one float32 buffer: camera map, lighting map, CDF
-   marginal, CDF conditional rows (see pathtrace.metal). *)
+   marginal, CDF conditional rows (see pathtrace.rays). *)
 let world_bytes (baked : Rays.World.baked) =
   let { Rays.World.width; height; _ } = baked.camera in
   let cdf = baked.cdf in
@@ -360,62 +346,18 @@ let world_bytes (baked : Rays.World.baked) =
 (* Resource helpers on the leased OGPU device. Scene geometry lives in shared
    memory (Apple silicon is unified); accumulation, history, and build scratch
    are device-local. *)
-let storage_buffer binding = { Ogpu.Shader.group = 0; binding; kind = Storage_buffer; visibility = [ Compute ] }
+let convert_interface = List.init 3 (fun binding -> { Ogpu.Shader.group = 0; binding;
+  kind = (if binding = 2 then Ogpu.Shader.Uniform_buffer else Storage_buffer); visibility = [ Compute ] })
 
-let trace_interface shape =
-  [ { Ogpu.Shader.group = 0; binding = 0; kind = Acceleration_structure; visibility = [ Compute ] }
-  ; { Ogpu.Shader.group = 0; binding = 1; kind = Uniform_buffer; visibility = [ Compute ] } ]
-  @ List.map storage_buffer
-      ([ 2; 3 ] @ (if shape.scene then [ 4 ] else [])
-       @ (if shape.instanced then [ 5; 6; 7; 8; 9; 10 ] else [ 4; 5; 6; 7; 8; 9 ]) @ [ 11; 12; 13; 14 ]
-       @ (if shape.spheres then [ 15 ] else []) @ (if shape.curves then [ 17; 18; 19 ] else [])
-       @ if shape.scene then [ 20 ] else [])
-  @ (if shape.spheres then [ { Ogpu.Shader.group = 0; binding = 16; kind = Intersection_table; visibility = [ Compute ] } ] else [])
-  @ [ { Ogpu.Shader.group = 0; binding = 0; kind = Storage_texture; visibility = [ Compute ] } ]
+let convert_pipeline device =
+  let* shader = gpu (Ogpu.Shader.of_source { backend = "metal"; label = Some "pathtracer RGBA8";
+    bytes = Bytes.of_string Flow_gpu.Emit.image_rgba8_source;
+    entry_points = [ { name = "rays_flow_image_rgba8"; stage = Compute } ]; bindings = convert_interface }) in
+  let* library = gpu (B.create_library device shader) in
+  match gpu (B.create_compute_pipeline_from library ~entry:"rays_flow_image_rgba8" ~interface:convert_interface ()) with
+  | Ok pipeline -> Ok (library, pipeline)
+  | Error _ as failure -> ignore (B.destroy_library library); failure
 
-let resolve_interface =
-  [ { Ogpu.Shader.group = 0; binding = 0; kind = Ogpu.Shader.Uniform_buffer; visibility = [ Compute ] }
-  ; storage_buffer 1; storage_buffer 2
-  ; { Ogpu.Shader.group = 0; binding = 0; kind = Storage_texture; visibility = [ Compute ] } ]
-
-(* The sphere intersection function whose tags match the pipeline's intersector. *)
-let sphere_function shape =
-  "sphere_hit_" ^ (if shape.instanced then "i" else "f") ^ (if shape.motion then "m" else "")
-  ^ if shape.curves then "c" else ""
-
-(* Pipelines are specialized per mesh shape and compiled on first use. *)
-let pipeline_for library pipelines shape =
-  match Hashtbl.find_opt pipelines shape with
-  | Some entry -> Ok entry
-  | None ->
-      let constants =
-        [ ("INSTANCED", Ogpu.Shader.Bool shape.instanced); ("MOTION", Ogpu.Shader.Bool shape.motion)
-        ; ("SPHERES", Ogpu.Shader.Bool shape.spheres); ("CURVES", Ogpu.Shader.Bool shape.curves)
-        ; ("SCENE", Ogpu.Shader.Bool shape.scene) ]
-      in
-      let* pipeline =
-        gpu
-          (B.create_compute_pipeline_from library ~entry:"pathtrace" ~constants
-             ~interface:(trace_interface shape)
-             ~linked:(if shape.spheres then [ sphere_function shape ] else []) ())
-      in
-      let* table =
-        if not shape.spheres then Ok None
-        else
-          let created =
-            let* table = gpu (B.create_intersection_table pipeline ~capacity:1) in
-            match gpu (B.table_set_function table ~index:0 (sphere_function shape)) with
-            | Ok () -> Ok (Some table)
-            | Error _ as failure -> ignore (B.destroy_table table); failure
-          in
-          match created with
-          | Ok _ as ok -> ok
-          | Error _ as failure -> ignore (B.destroy_pipeline pipeline); failure
-      in
-      Hashtbl.add pipelines shape (pipeline, table);
-      Ok (pipeline, table)
-
-(* Size-dependent storage: accumulation, two history frames, three output films. *)
 let unavailable caps =
   if Ogpu.Caps.has caps Ray_tracing then None else Some "Path tracing is not available on this GPU."
 
@@ -447,25 +389,9 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
       let* panels = shared device ~label:"pathtracer-panels" (panel_bytes scene.environment.panels) in
       let* lights = shared device ~label:"pathtracer-lights" (light_bytes scene.lights) in
       let* world_buffer = shared device ~label:"pathtracer-world" (Bytes.make 16 '\000') in
-      let* shader =
-        gpu
-          (Ogpu.Shader.of_source
-             {
-               backend = "metal";
-               label = Some "rays_pathtracer";
-               bytes = Bytes.of_string source;
-               entry_points = [ { name = "pathtrace"; stage = Compute }; { name = "resolve_preview"; stage = Compute } ];
-               bindings = [];
-             })
-      in
-      let* library = gpu (B.create_library device shader) in
-      let pipelines = Hashtbl.create 4 in
-      let* _ = pipeline_for library pipelines gpu_mesh.shape in
-      let* resolve_pipeline =
-        gpu
-          (B.create_compute_pipeline_from library ~entry:"resolve_preview"
-             ~interface:resolve_interface ())
-      in
+      let* cdf_buffer = shared device ~label:"pathtracer-cdf" (Bytes.make 16 '\000') in
+      let* cell = buffer device ~label:"pathtracer-count" 24 in
+      let* convert = convert_pipeline device in
       let* film = allocate_film device ~width ~height in
       let pixels = Bytes.make (width * height * 4) '\000' in
       let* resource =
@@ -479,9 +405,11 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
           lease;
           device;
           queue;
-          library;
-          pipelines;
-          resolve_pipeline;
+          flow_pipelines = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday device;
+          convert;
+          cell;
+          kernels = [];
+          from_accum = false;
           gpu = gpu_mesh;
           building = None;
           queued_mesh = None;
@@ -492,13 +420,11 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
           scene_lights = scene.lights;
           world = None;
           world_buffer;
+          cdf_buffer;
           bsdf_only;
-          accum = film.accum;
-          outputs = film.outputs;
+          film;
           shared_film = Renderer.gpu_shared lease;
           next_output_slot = 0;
-          history_color = film.history_color;
-          history_geometry = film.history_geometry;
           history_slot = 0;
           history_camera = None;
           history_epoch = 0;
@@ -571,26 +497,9 @@ let install_gpu t gpu =
     gpu.owns_prototype <- true
   end;
   let old = t.gpu in
-  (* An intersection table keeps its bound buffer alive: point every table at
-     the new geometry before the old sphere buffer is destroyed. *)
-  let target = Option.value gpu.sphere_buffer ~default:gpu.positions in
-  Hashtbl.iter
-    (fun _ (_, table) -> Option.iter (fun table -> ignore (B.table_set_buffer table ~index:0 target)) table)
-    t.pipelines;
   retire t (fun () -> destroy_gpu old);
   t.gpu <- gpu;
   edited t
-
-(* The pipeline and intersection table for the installed mesh, with the table
-   pointed at the mesh's sphere records. *)
-let current_pipeline t =
-  let* pipeline, table = pipeline_for t.library t.pipelines t.gpu.shape in
-  let* () =
-    match (table, t.gpu.sphere_buffer) with
-    | Some table, Some spheres -> gpu (B.table_set_buffer table ~index:0 spheres)
-    | _ -> Ok ()
-  in
-  Ok (pipeline, table)
 
 let samples t = t.completed * t.spp
 let size t = (t.width, t.height)
@@ -615,7 +524,7 @@ let publish t (pending : pending) =
   if pending.history_epoch = t.history_epoch then t.history_camera <- Some pending.camera;
   if pending.stale || not pending.last then Ok ()
   else
-    let film = t.outputs.(pending.slot) in
+    let film = t.film.outputs.(pending.slot) in
     let* () =
       if t.shared_film then
         Result.map_error
@@ -637,22 +546,23 @@ let status t receipt = gpu (Ogpu.Backend.status t.queue receipt)
    new TLAS over the installed scene's BLASes; geometry, materials, and the
    table are borrowed (owns_prototype = false) until [install_gpu]. *)
 let move_async t (moved : mesh) =
-  match (moved.instances, moved.scene, t.gpu.scene_table) with
-  | Some instances, Some layout, Some table
+  match (moved.instances, moved.scene) with
+  | Some instances, Some layout
     (* ponytail: installed-scene identity is checked only as far as memory
-       safety needs (BLAS count, table size); [move] after a failed rebuild
+       safety needs (BLAS and instance counts); [move] after a failed rebuild
        may place the old geometry. *)
     when List.length t.gpu.scene_blas = Array.length layout.parts
-         && B.buffer_size table = Int64.of_int (8 * Array.length instances.records) ->
+         && t.gpu.tables.instance_count = Array.length instances.records ->
       let owned = ref [] in
       let keep result = Result.map (fun value -> owned := value :: !owned; value) result in
       let started =
         let* packed = gpu (B.pack_instance_records t.device instances.records) in
         let* instance_buffer = keep (shared t.device ~label:"pathtracer-instances" packed) in
-        let* transforms = keep (shared t.device ~label:"pathtracer-transforms" instances.shader_bytes) in
         let* scratch = keep (buffer ~memory:Ogpu.Types.Device_local t.device ~label:"pathtracer-scratch" 1024) in
+        let* tables = upload_tables ~material_data:(material_bytes moved.mesh_materials) t.device moved in
+        owned := table_buffers tables @ !owned;
         let build =
-          { gpu = { t.gpu with instance_buffer = Some instance_buffer; transforms = Some transforms; owns_prototype = false }
+          { gpu = { t.gpu with instance_buffer = Some instance_buffer; owns_prototype = false; tables }
           ; scratch; extra_scratch = None; size_buffer = None; uncompacted = None; stage = Ready
           ; instance_count = Array.length instances.records } in
         match submit_instances t.device t.queue build with
@@ -772,13 +682,8 @@ let resize t ~width ~height =
     (* The image stops sampling the old film before that film is destroyed. *)
     let* () = Result.map_error (Format.asprintf "%a" Runtime_resources.pp_error)
         (Runtime_resources.Image.replace t.resource ~width ~height ~rgba:(Bytes.copy pixels)) in
-    List.iter (fun value -> ignore (B.destroy_buffer value))
-      (t.accum :: Array.to_list t.history_color @ Array.to_list t.history_geometry);
-    Array.iter (fun texture -> ignore (B.destroy_texture texture)) t.outputs;
-    t.accum <- film.accum;
-    t.history_color <- film.history_color;
-    t.history_geometry <- film.history_geometry;
-    t.outputs <- film.outputs;
+    destroy_film t.film;
+    t.film <- film;
     t.width <- width;
     t.height <- height;
     t.next_output_slot <- 0;
@@ -800,6 +705,136 @@ let rec poll t =
       | Error message ->
           t.pending <- rest;
           Error ("path tracer frame failed: " ^ message))
+
+(* The kernels' scene facts: what the static stage folds. *)
+let lisp_facts t =
+  let map w = match t.world with Some (baked : Rays.World.baked) -> w baked.camera | None -> 1 in
+  { Lisp_kernel.spp = t.spp; bounces = t.bounces; round_samples = t.round_samples;
+    panels = (if t.world = None then t.panel_count else 0); lights = t.light_count; world = t.world <> None;
+    background = (match t.world with Some { background = Color _; _ } -> 1 | Some { background = Transparent; _ } -> 2 | _ -> 0);
+    map_w = map (fun m -> m.width); map_h = map (fun m -> m.height);
+    sun = (match t.world with Some { sun = Some sun; _ } -> sun.angular_radius > 0. | _ -> false);
+    bsdf_only = t.bsdf_only; instanced = t.gpu.shape.instanced; classes = t.gpu.tables.classes;
+    motion = t.gpu.shape.motion;
+    curves = (if t.gpu.tables.strand_count = 0 then None else if t.gpu.curves = None then Some `Loop else Some `Native) }
+
+(* ponytail: four specializations kept, the oldest closed once no frame reads it; an LRU would keep the
+   shapes an editor toggles between. *)
+let lisp_kernels t facts =
+  match List.assoc_opt facts t.kernels with
+  | Some kernels -> Ok kernels
+  | None ->
+      let* kernels = Lisp_kernel.compile facts in
+      let keep = List.filteri (fun i _ -> i < 3) t.kernels in
+      List.iter (fun (_, old) -> if not (List.memq old (List.map snd keep)) then retire t (fun () -> Lisp_kernel.close old))
+        t.kernels;
+      t.kernels <- (facts, kernels) :: keep;
+      Ok kernels
+
+(* The Lisp kernels' uniforms for a frame whose band covers pixels [lo, hi). *)
+let lisp_words t camera fov ~lo ~hi =
+  let v3 (v : Rays_math.Vec3.t) = [| v.x; v.y; v.z |] and rgb (c : Linear_color.t) = [| c.r; c.g; c.b |] in
+  let zero = [| 0.; 0.; 0. |] and aspect = float t.width /. float t.height in
+  let forward, right, up = Frame_data.axes camera in
+  let previous = match t.history_camera with
+    | Some p -> (match camera_fov p with Ok f -> Some (p, f) | Error _ -> None) | None -> None in
+  let axis k = match previous with Some (p, _) -> v3 (k (Frame_data.axes p)) | None -> zero in
+  let sun = match t.world with Some { sun = Some sun; _ } when sun.angular_radius > 0. -> Some sun | _ -> None in
+  (* 1 - cos r = 2 sin^2 (r / 2), exact for tiny discs *)
+  let one_minus_cos = match sun with Some sun -> let s = sin (sun.angular_radius /. 2.) in 2. *. s *. s | None -> 0. in
+  let values = [
+    "eye", v3 (Rays.Camera.position camera); "fwd", v3 forward; "rgt", v3 right; "up", v3 up;
+    "tanhalf", [| tan (fov /. 2.) |]; "aspect", [| aspect |]; "lens", [| (Rays.Camera.lens camera).aperture |];
+    "focus", [| Rays.Camera.focus_distance camera |]; "frame", [| float t.frame |];
+    "lo", [| float lo |]; "hi", [| float hi |];
+    "peye", (match previous with Some (p, _) -> v3 (Rays.Camera.position p) | None -> zero);
+    "pfwd", axis (fun (f, _, _) -> f); "prgt", axis (fun (_, r, _) -> r); "pup", axis (fun (_, _, u) -> u);
+    "ptan", [| (match previous with Some (_, f) -> tan (f /. 2.) | None -> 0.) |]; "paspect", [| aspect |];
+    "pvalid", [| (if previous = None then 0. else 1.) |]; "pacc", [| (if t.from_accum then 1. else 0.) |];
+    "sky", rgb t.sky; "ground", rgb t.ground;
+    "bg", (match t.world with Some { background = Color c; _ } -> [| c.r; c.g; c.b |] | _ -> zero);
+    "sundir", (match sun with Some sun -> v3 (Frame_data.normalize sun.direction) | None -> zero);
+    "suncos", [| one_minus_cos |];
+    "sunrad", (match sun with Some sun -> [| sun.radiance.r; sun.radiance.g; sun.radiance.b |] | None -> zero);
+    "sunpdf", [| (if sun = None then 0. else 1. /. (2. *. Float.pi *. one_minus_cos)) |];
+    "exposure", [| (match t.world with Some baked -> t.exposure *. (2. ** baked.exposure) | None -> t.exposure) |];
+    "count", [| float ((t.frame + 1) * t.spp) |]; "spherebase", [| float t.gpu.tables.sphere_base |];
+    "strandbase", [| float t.gpu.tables.triangle_ids |];
+    "width", [| float t.width |]; "height", [| float t.height |] ] in
+  fun name -> List.assoc name values
+
+(* The buffer and element count behind each of the Lisp kernels' tables. *)
+let lisp_table t (tables : Mesh_build.tables) ~geo ~pgeo ~pcol name =
+  let n = t.width * t.height in
+  let maps, cdf = match t.world with
+    | Some baked -> let w, h = baked.camera.width, baked.camera.height in 2 * w * h, h + 1 + (h * (w + 1))
+    | None -> 1, 1 in
+  let count buffer bytes = Int64.to_int (B.buffer_size buffer) / bytes in
+  match name with
+  | "lights" -> t.lights, 4 * max 1 t.light_count
+  | "pan" -> t.panels, 3 * max 1 t.panel_count
+  | "wmap" -> t.world_buffer, maps
+  | "cdf" -> t.cdf_buffer, cdf
+  | "mats" -> t.gpu.materials, count t.gpu.materials 16
+  | "ids" -> tables.ids, tables.id_count
+  | "inst" -> tables.inst, 4 * tables.instance_count
+  | "nrm" -> t.gpu.normals, count t.gpu.normals 12
+  | "accum" -> t.film.accum, n
+  | "geo" -> geo, n
+  | "pgeo" -> pgeo, n
+  | "order" -> t.film.order, n
+  | _ -> pcol, n
+
+(* Flow's RGBA8 conversion of the resolved film into output [slot]. *)
+let encode_rgba t commands slot =
+  let pitch = Frame_data.row_pitch t.width in
+  let size = Bytes.create 12 in
+  put_u32 size 0 (t.width * t.height);
+  put_u32 size 4 t.width;
+  put_u32 size 8 (pitch / 4);
+  let* compute = gpu (B.compute_encoder commands) in
+  let* () = gpu (B.set_pipeline compute (snd t.convert)) in
+  let* () = gpu (B.set_buffer compute ~index:0 t.film.resolved) in
+  let* () = gpu (B.set_buffer compute ~index:1 t.film.rgba) in
+  let* () = gpu (B.set_bytes compute ~index:2 size) in
+  let* () = gpu (B.dispatch_threads compute ~threads:(t.width * t.height, 1, 1) ~threadgroup:(256, 1, 1)) in
+  let* () = gpu (B.end_compute compute) in
+  let* blit = gpu (B.blit_encoder commands) in
+  let* () = gpu (B.buffer_to_texture blit ~src:t.film.rgba ~bytes_per_row:(Int64.of_int pitch)
+    ~bytes_per_image:(Int64.of_int (pitch * t.height)) ~dst:t.film.outputs.(slot)
+    ~extent:{ width = t.width; height = t.height; depth = 1 } ()) in
+  gpu (B.end_blit blit)
+
+(* The Lisp kernels' frame (pathtrace.rays): a preview traces its primary hits, then one centre sample
+   reprojected onto the history, then the 3x3 resolve; an accumulation band adds its pixels' samples to the
+   film (the first band of frame zero also records the primary hits), and the last band resolves it. *)
+let encode_lisp t kernels commands camera fov ~row_offset ~rows ~last ~slot ~previous ~next =
+  let tables = t.gpu.tables in
+  let scene = { Flow_gpu.Run.accel = t.gpu.structure; vertices = t.gpu.positions; spheres = tables.spheres;
+                sphere_count = tables.sphere_count; instances = tables.trace_instances } in
+  let extras = { Flow_gpu.Run.no_extras with
+    strands = (if tables.strand_count = 0 then None else Some tables.strands); strand_count = tables.strand_count;
+    curves = Option.map fst t.gpu.curves } in
+  let n = t.width * t.height in
+  let words = lisp_words t camera fov ~lo:(row_offset * t.width) ~hi:(min n ((row_offset + rows) * t.width)) in
+  let geo = t.film.history_geometry.(next) and pgeo = t.film.history_geometry.(previous) in
+  let history = if t.from_accum then t.film.accum else t.film.history_color.(previous) in
+  let run ?(traced = true) ?(pcol = history) name into =
+    Lisp_kernel.dispatch kernels ~lease:t.lease ~pipelines:t.flow_pipelines ~commands ~count:n
+      ~pixels:(if traced then t.film.pixels else t.film.linear) ~slots:t.film.linear
+      ~cell:t.cell ~into ?scene:(if traced then Some scene else None) ~extras ~resident:(Option.to_list t.gpu.primitive @ t.gpu.scene_blas)
+      ~words ~table:(lisp_table t tables ~geo ~pgeo ~pcol) name in
+  let* () =
+    if t.moving then
+      let* () = run "preview-geometry" geo in
+      let* () = run "preview" t.film.history_color.(next) in
+      run ~traced:false ~pcol:t.film.history_color.(next) "preview-resolve" t.film.resolved
+    else
+      let* () = if row_offset = 0 && t.frame = 0 then run "geometry" geo else Ok () in
+      let* () = run "trace" t.film.accum in
+      if last then run ~traced:false "resolve" t.film.resolved else Ok ()
+  in
+  if last then encode_rgba t commands slot else Ok ()
 
 (* One frame of latency: the frame submitted here is read back by the next
    [render] (or [flush]), so the CPU never waits on the GPU while the display
@@ -833,65 +868,16 @@ let render t (camera : camera) =
     let bands = if t.moving then 1 else max 1 (min t.bands (min t.height free_slots)) in
     let rows_per_band = (t.height + bands - 1) / bands in
     let slot = t.next_output_slot in
-    let previous_history = t.history_slot in
-    let next_history = previous_history lxor 1 in
-    let* pipeline, table = current_pipeline t in
-    let facts = frame_facts t in
+    let previous = t.history_slot in
+    let next = previous lxor 1 in
+    let* kernels = lisp_kernels t (lisp_facts t) in
     let band index =
       let row_offset = index * rows_per_band in
       let rows = max 1 (min rows_per_band (t.height - row_offset)) in
       let last = index = bands - 1 in
-      let* uniforms = Frame_data.uniform_bytes facts camera fov ~row_offset in
       let* commands = gpu (B.begin_commands t.queue) in
       let encoded =
-        let* encoder = gpu (B.compute_encoder commands) in
-        let set index value = gpu (B.set_buffer encoder ~index value) in
-        let* () = gpu (B.set_pipeline encoder pipeline) in
-        let* () = gpu (B.set_accel encoder ~index:0 t.gpu.structure) in
-        (* The instance structure only references its BLASes: declare them
-           read, or the device evicts them over time and rays start missing. *)
-        let* () = gpu (B.compute_use_accels encoder (Option.to_list t.gpu.primitive @ t.gpu.scene_blas)) in
-        let* () = gpu (B.set_bytes encoder ~index:1 uniforms) in
-        let* () = set 2 t.gpu.positions in
-        let* () = set 3 t.gpu.normals in
-        let* () = if t.gpu.shape.instanced && not t.gpu.shape.scene then Ok () else set 4 t.gpu.material_ids in
-        let* () = match t.gpu.scene_table with None -> Ok () | Some table -> set 20 table in
-        let* () = set 5 t.gpu.materials in
-        let* () = set 6 t.panels in
-        let* () = set 7 t.accum in
-        let* () = gpu (B.set_texture encoder ~index:0 t.outputs.(slot)) in
-        let* () = set 8 t.world_buffer in
-        let* () = set 9 t.lights in
-        let* () = match t.gpu.transforms with None -> Ok () | Some transforms -> set 10 transforms in
-        let* () = match t.gpu.sphere_buffer with None -> Ok () | Some spheres -> set 15 spheres in
-        let* () = match table with None -> Ok () | Some table -> gpu (B.set_table encoder ~index:16 table) in
-        let* () =
-          match t.gpu.strands with
-          | None -> Ok ()
-          | Some (points, _, indices, ids) ->
-              let* () = set 17 points in
-              let* () = set 18 indices in
-              set 19 ids
-        in
-        let* () = set 11 t.history_color.(previous_history) in
-        let* () = set 12 t.history_geometry.(previous_history) in
-        let* () = set 13 t.history_color.(next_history) in
-        let* () = set 14 t.history_geometry.(next_history) in
-        let* () = gpu (B.dispatch_threads encoder ~threads:(t.width, rows, 1) ~threadgroup:(16, 16, 1)) in
-        let* () = gpu (B.end_compute encoder) in
-        let* () =
-          if not t.moving then Ok ()
-          else
-            let* resolve = gpu (B.compute_encoder commands) in
-            let set index value = gpu (B.set_buffer resolve ~index value) in
-            let* () = gpu (B.set_pipeline resolve t.resolve_pipeline) in
-            let* () = gpu (B.set_bytes resolve ~index:0 uniforms) in
-            let* () = set 1 t.history_color.(next_history) in
-            let* () = set 2 t.history_geometry.(next_history) in
-            let* () = gpu (B.set_texture resolve ~index:0 t.outputs.(slot)) in
-            let* () = gpu (B.dispatch_threads resolve ~threads:(t.width, t.height, 1) ~threadgroup:(16, 16, 1)) in
-            gpu (B.end_compute resolve)
-        in
+        let* () = encode_lisp t kernels commands camera fov ~row_offset ~rows ~last ~slot ~previous ~next in
         gpu (B.commit commands)
       in
       match encoded with
@@ -906,7 +892,10 @@ let render t (camera : camera) =
     let rec submit index = if index = bands then Ok () else let* () = band index in submit (index + 1) in
     let* () = submit 0 in
     t.next_output_slot <- (slot + 1) mod 3;
-    t.history_slot <- next_history;
+    (* Primary hits are recorded only in previews and the first accumulation frame, and the film itself is
+       the history after accumulating. *)
+    if t.moving || t.frame = 0 then t.history_slot <- next;
+    t.from_accum <- not t.moving;
     (* A preview frame is shown but never counted: accumulation restarts at
        frame zero once the camera rests. *)
     if not t.moving then t.frame <- t.frame + 1;
@@ -950,6 +939,11 @@ let set_world t baked =
   | _ ->
       let* bytes = match baked with None -> Ok (Bytes.make 16 '\000') | Some baked -> world_bytes baked in
       let* () = swap_buffer t ~label:"pathtracer-world" bytes t.world_buffer (fun world -> t.world_buffer <- world) in
+      let cdf = match baked with
+        | None -> Bytes.make 16 '\000'
+        | Some baked -> let w, h = baked.camera.width, baked.camera.height in
+            Bytes.sub bytes (24 * w * h) (Bytes.length bytes - (24 * w * h)) in
+      let* () = swap_buffer t ~label:"pathtracer-cdf" cdf t.cdf_buffer (fun buffer -> t.cdf_buffer <- buffer) in
       t.world <- baked;
       rebuild_lights t
 
@@ -979,30 +973,39 @@ let destroy t =
   List.iter (fun pending -> pending.stale <- true) t.pending;
   release (fun () -> flush t);
   release (fun () -> Rays.Image.destroy t.image);
-  Hashtbl.iter
-    (fun _ (pipeline, table) ->
-      Option.iter (fun table -> release (fun () -> B.destroy_table table)) table;
-      release (fun () -> B.destroy_pipeline pipeline))
-    t.pipelines;
-  release (fun () -> B.destroy_pipeline t.resolve_pipeline);
-  release (fun () -> B.destroy_library t.library);
+  List.iter (fun (_, kernels) -> Lisp_kernel.close kernels) t.kernels;
+  Flow_gpu.Pipelines.close t.flow_pipelines;
+  release (fun () -> B.destroy_pipeline (snd t.convert));
+  release (fun () -> B.destroy_library (fst t.convert));
   destroy_gpu t.gpu;
   List.iter
     (fun value -> release (fun () -> B.destroy_buffer value))
-    [
-      t.panels;
-      t.lights;
-      t.world_buffer;
-      t.accum;
-      t.history_color.(0);
-      t.history_color.(1);
-      t.history_geometry.(0);
-      t.history_geometry.(1);
-    ];
-  Array.iter (fun film -> release (fun () -> B.destroy_texture film)) t.outputs;
+    [ t.panels; t.lights; t.world_buffer; t.cdf_buffer; t.cell ];
+  destroy_film t.film;
   Renderer.release_gpu t.lease
 
 module Private = struct
-  let max_total_threads t =
-    Result.map (fun (pipeline, _) -> B.max_total_threads pipeline) (pipeline_for t.library t.pipelines t.gpu.shape)
+  let cpu_trace t camera ~accum =
+    let* fov = camera_fov camera in
+    let* kernels = lisp_kernels t (lisp_facts t) in
+    let n = t.width * t.height in
+    let words = lisp_words t camera fov ~lo:0 ~hi:n in
+    let value name =
+      if name = "accum" then Flow.Eval.Vec4_array accum
+      else
+        let ty = List.assoc name Lisp_kernel.tables in
+        let buffer, count = lisp_table t t.gpu.tables ~geo:t.film.accum ~pgeo:t.film.accum ~pcol:t.film.accum name in
+        let length = count * Lisp_kernel.width ty in
+        let bytes = Result.get_ok (B.read_buffer buffer ~offset:0L ~length:(4 * length)) in
+        let a = Array.init length (fun i -> Int32.float_of_bits (Bytes.get_int32_le bytes (4 * i))) in
+        match ty with
+        | Flow.Ty.Array Vec4 -> Flow.Eval.Vec4_array a | Array Vec3 -> Vec3_array a
+        | Array Int -> Int_array (Array.map int_of_float a) | _ -> Float_array a in
+    let* film = Lisp_kernel.cpu kernels ~words ~value ~pixels:(Flow.Eval.Int_array (Array.init n Fun.id)) "trace" in
+    match film with Flow.Eval.Vec4_array v -> Ok v | _ -> Error "path tracer CPU film is not vec4"
+  let lisp_kernel t name =
+    let* kernels = lisp_kernels t (lisp_facts t) in
+    let* threads = Lisp_kernel.max_total_threads kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
+    let* source = Lisp_kernel.source kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
+    Ok (threads, source)
 end

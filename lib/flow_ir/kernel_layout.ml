@@ -201,11 +201,17 @@ let specialize (view : Packed.Private.view) =
 
 (* Registers an output reads, through the operands of the specialized code; [whole_loops] keeps every
    instruction of a reached loop body (for per-operation finite checks). *)
+(* a select on a known condition reads only its chosen value (specialize) *)
+let rec operands = function
+  | Packed.Guarded (guards, body) -> List.map fst guards @ operands body
+  | Packed.Select (_, a, b) | Int_select (_, a, b) when a = b -> [ a ]
+  | instruction -> Core.Region.operands instruction
+
 let reachable ~whole_loops (view : Packed.Private.view) dead =
   let used = Array.make (Array.length view.code) false in
   let rec use slot = if not used.(slot) && not dead.(slot) then begin
     used.(slot) <- true;
-    List.iter use (Core.Region.operands view.code.(slot));
+    List.iter use (operands view.code.(slot));
     match guarded view.code.(slot) with
     | Packed.Loop_begin loop when not whole_loops ->
         for carried = slot + 1 to slot + Array.length loop.initial do use carried done; use loop.finish

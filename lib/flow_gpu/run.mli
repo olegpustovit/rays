@@ -16,7 +16,7 @@ val create : Renderer.gpu -> Pipelines.t -> Emit.msl -> t
 val dispatch : ?wait:bool -> ?reset_status:bool -> ?commands:Ogpu.Backend.commands ->
   ?count:(Ogpu.Backend.buffer * int * int) -> ?into:(Ogpu.Backend.buffer * Ogpu.Backend.buffer) -> ?bound:(int -> Ogpu.Backend.buffer option) ->
   ?bound_table:(int -> Ogpu.Backend.buffer option) ->
-  ?scene:scene -> ?extras:extras -> t -> Flow_ir.Packed.Private.inputs ->
+  ?scene:scene -> ?extras:extras -> ?resident:Ogpu.Backend.accel list -> t -> Flow_ir.Packed.Private.inputs ->
   (output, Diagnostic.t) result
 (** [~wait:false] leaves the dispatch in flight, without its status read; [~commands] only encodes it
     into the caller's command buffer (epoch 0 until the caller commits it); [~reset_status:false]
@@ -24,6 +24,7 @@ val dispatch : ?wait:bool -> ?reset_status:bool -> ?commands:Ogpu.Backend.comman
     bounds a fast kernel's count by [cell * mul / div] on the device; [~into:(output, cell)] writes a
     one-output fast kernel's output and count into the caller's buffers; [bound i] and
     [bound_table u] supply device buffers already holding input [i] or uniform [u]'s table.
+    [resident] lists the bottom-level structures an instanced [scene] references, declared read so they stay resident.
     Input arrays are borrowed immutable storage. Replace an array when its
     contents change; mutating an uploaded array is unsupported. Each input
     slot retains only its last successfully uploaded array and covered length,

@@ -73,7 +73,7 @@ let ensure t slot length =
    chains its regions and waits once.  [bound i] / [bound_table u] name a device buffer that already
    holds input [i] / the table of uniform [u], which is then not uploaded. *)
 let msl_scene t = t.msl.Emit.scene
-let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) ?scene ?(extras=no_extras) t (values : P.Private.inputs) =
+let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) ?scene ?(extras=no_extras) ?(resident=[]) t (values : P.Private.inputs) =
   (* the scene's buffers after its spheres, in Kernel_layout's order; the kernel's interface names as many *)
   let scene_tail = match scene with None -> [] | Some s ->
     List.filter_map (Option.map (fun b -> `Buffer b)) [s.instances; extras.vertices_end; extras.strands]
@@ -204,7 +204,7 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
           get (B.set_buffer encoder ~index:(index+2) spheres);
           List.iteri (fun k -> function `Buffer buffer -> get (B.set_buffer encoder ~index:(index+3+k) buffer)
             | `Accel a -> get (B.set_accel encoder ~index:(index+3+k) a)) scene_tail;
-          get (B.compute_use_accels encoder (accel :: Option.to_list extras.curves))) scene;
+          get (B.compute_use_accels encoder (accel :: Option.to_list extras.curves @ resident))) scene;
         get (B.dispatch_threads encoder ~threads:(values.count,1,1) ~threadgroup:(256,1,1))) in
     match commands with
     | Some commands -> encode commands;

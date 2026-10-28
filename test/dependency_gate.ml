@@ -154,7 +154,7 @@ let only =
     "flow_web", ["flow"; "flow_ir"; "param"; "rays_math"; "scene_command"; "parallel"];
     "web_export", ["flow"; "flow_ir"; "flow_web"; "flow_sop"; "editor_document";
                    "input"; "param"; "scene_command"; "sdl3_image"];
-    "rays_pathtracer", ["rays"; "ogpu"; "renderer"; "flow"; "flow_ir"; "flow_gpu";
+    "rays_pathtracer", ["rays"; "ogpu"; "renderer"; "flow"; "flow_ir"; "flow_gpu"; "input";
                        "runtime_resources"; "rays_math"; "unix"];
     "lisp_sop", ["flow"; "flow_sop"; "sop"; "rdk"; "rays_math"] ]
 
