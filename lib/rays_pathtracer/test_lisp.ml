@@ -169,6 +169,10 @@ let scenario label (world : W.baked option) =
     assert (List.for_all (fun line -> not (has "ulong(" line) || has "bool over" line) (loops source));
     assert (List.length source <= 2 * List.length (lines (read "pathtrace.metal")));
     let runner = Flow_gpu.Run.create lease pipelines msl in
+    (* register pressure: Metal lowers a pipeline's thread limit when a kernel needs more registers *)
+    let threads = ok (Flow_gpu.Run.max_total_threads runner) in
+    if Sys.getenv_opt "PT_BENCH" <> None then Printf.eprintf "maxTotalThreadsPerThreadgroup %d\n%!" threads;
+    assert (threads >= (if label = "world" then 448 else 512)); (* the recorded limits; a drop is a regression *)
     let values = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
     let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in
     let result = vec4 (ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene values)))) in

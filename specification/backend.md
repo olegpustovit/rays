@@ -338,7 +338,10 @@ a reusable library; `create_compute_pipeline_from` makes a pipeline per entry
 point with typed function constants and an exact per-entry binding interface
 checked against Metal reflection (buffer, texture, and sampler bindings occupy
 separate index spaces, and `Acceleration_structure` and `Intersection_table`
-are binding kinds). `begin_commands` records one command buffer through
+are binding kinds). `max_total_threads` reads a compute pipeline's
+`maxTotalThreadsPerThreadgroup`, which Metal lowers for a kernel that needs more
+registers (the Flow kernels' register-pressure gate, `Flow_gpu.Run.max_total_threads`;
+0 for a render pipeline). `begin_commands` records one command buffer through
 compute, acceleration, blit, and render encoders (`set_pipeline`, `set_buffer`,
 `set_bytes`, `set_texture`, `set_accel`, `set_table`, `dispatch_threads`,
 `build_accel`, `write_compacted_size`, `compact_accel`, `buffer_to_texture`)

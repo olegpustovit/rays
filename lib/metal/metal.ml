@@ -3620,6 +3620,7 @@ module Compute_pipeline = struct
                   Ok (make device ~reflection raw raw_bindings))
 
   let bindings (value : t) = Option.map Array.to_list value.bindings
+  let max_total_threads (value : t) = value.max_total_threads
 
   let destroy (value : t) =
     destroy_parent "Metal.Compute_pipeline.destroy" value.lifetime value.raw (fun () ->

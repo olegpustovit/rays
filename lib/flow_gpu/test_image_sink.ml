@@ -27,7 +27,7 @@ let ()=
       destroy_library=(fun()->decr libraries;library.destroy_library());
       create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ~linked:_->
         if !fail_pipeline then injected()else begin incr pipelines;
-          Ok{pipeline_token=1L;create_table=(fun ~capacity:_->assert false);
+          Ok{max_threads=1024;pipeline_token=1L;create_table=(fun ~capacity:_->assert false);
             destroy_pipeline=(fun()->decr pipelines;Ok())}end)}) (raw.create_library shader));
     create_queue=(fun()->Result.map(fun queue->{queue with
       complete_through=(fun epoch->event "complete";if !fail_complete then injected()else queue.complete_through epoch);

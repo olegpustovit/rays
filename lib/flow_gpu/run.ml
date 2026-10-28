@@ -272,6 +272,8 @@ let count output = output.count
 let epoch output = output.epoch
 let width output = output.width
 let gpu_seconds output = output.gpu_seconds
+let max_total_threads t =
+  Result.map (fun (compiled : Pipelines.compiled) -> B.max_total_threads compiled.pipeline) (Pipelines.get t.pipelines t.msl)
 let close t =
   if Domain.self()<>t.domain then invalid_arg "Run.close: creating domain required";
   if not t.closed then begin

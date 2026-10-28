@@ -61,6 +61,11 @@ let metal_compare = function
   | Less -> Less | Equal -> Equal | Less_equal -> Less_equal | Greater -> Greater
   | Not_equal -> Not_equal | Greater_equal -> Greater_equal | Always -> Always
 
+(* Metal's maxTotalThreadsPerThreadgroup of a compute pipeline; render pipelines have none (0). *)
+let max_threads pipeline = match Pipeline.Private.native pipeline with
+  | Pipeline.Private.Compute native -> Metal.Compute_pipeline.max_total_threads native
+  | Render _ -> 0
+
 let create () =
   let c =
     {
@@ -303,7 +308,7 @@ let create () =
             Hashtbl.add c.pipeline_tokens id pipeline;
             Ok
               {
-                Ogpu_core.Backend.pipeline_token = id;
+                Ogpu_core.Backend.pipeline_token = id; max_threads = max_threads pipeline;
                 create_table = create_table pipeline;
                 destroy_pipeline =
                   (fun () ->

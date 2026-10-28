@@ -215,7 +215,7 @@ let run driver =
     let triple=get (Backend.create_compute_pipeline_from library ~entry:"scale"
       ~constants:["TRIPLE",Shader.Bool true] ~interface:scale_interface ()) in
     let double=get (Backend.create_compute_pipeline_from library ~entry:"scale"
-      ~constants:["TRIPLE",Shader.Bool false] ~interface:scale_interface ()) in
+      ~constants:["TRIPLE",Shader.Bool false] ~interface:scale_interface ()) in assert (Backend.max_total_threads double >= 32);
     (match Backend.create_compute_pipeline_from library ~entry:"scale"
        ~constants:["TRIPLE",Shader.Bool true]
        ~interface:[{group=0;binding=0;kind=Shader.Storage_buffer;visibility=[Shader.Compute]}] () with

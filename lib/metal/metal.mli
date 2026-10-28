@@ -621,6 +621,8 @@ module Compute_pipeline : sig
     ?reflection:bool -> Function.t ->
     (t, error) result
   val bindings : t -> Binding.t list option
+  val max_total_threads : t -> int
+  (** [maxTotalThreadsPerThreadgroup]: Metal lowers it for a kernel that needs more registers. *)
   val destroy : t -> (unit, error) result
 end
 
