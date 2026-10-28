@@ -40,11 +40,11 @@ let random () =
   let xs = Array.init 100_000 (fun i -> float i *. 0.001)
   and ys = Array.init 100_000 (fun i -> float (i mod 97) *. 0.01) in
   let sequential = Array.make 100_000 0. and parallel = Array.make 100_000 0. in
-  Rays_math.Noise.Private.sample2_into noise ~first:0 ~last:100_000 ~frequency:0.5 ~x:xs ~y:ys
+  Rays_math.Noise.sample2_into noise ~first:0 ~last:100_000 ~frequency:0.5 ~x:xs ~y:ys
     ~output:sequential;
   let workers = Array.init 4 (fun domain -> Domain.spawn (fun () ->
       let first = domain * 25_000 in
-      Rays_math.Noise.Private.sample2_into noise ~first ~last:(first + 25_000) ~frequency:0.5 ~x:xs ~y:ys
+      Rays_math.Noise.sample2_into noise ~first ~last:(first + 25_000) ~frequency:0.5 ~x:xs ~y:ys
         ~output:parallel)) in
   Array.iter Domain.join workers;
   check (sequential = parallel && Array.for_all Float.is_finite parallel)
@@ -53,7 +53,7 @@ let random () =
   Parallel.run ~domains:8 (fun () ->
     Parallel.for_ ~chunk_size:1 ~start:0 ~finish:7 (fun chunk ->
       let first = chunk * 12_500 in
-      Rays_math.Noise.Private.sample2_into noise ~first ~last:(first + 12_500)
+      Rays_math.Noise.sample2_into noise ~first ~last:(first + 12_500)
         ~frequency:0.5 ~x:xs ~y:ys ~output:parallel));
   check (sequential = parallel) "Noise one/eight-domain exact 2D plane";
   (* The packed 2D sampler is the z = 0 plane of the 3D noise, bit for bit,
@@ -72,7 +72,7 @@ let random () =
     let x = Array.init (count * count) (fun i -> coordinates.(i / count))
     and y = Array.init (count * count) (fun i -> coordinates.(i mod count)) in
     let output = Array.make (count * count) 0. in
-    Rays_math.Noise.Private.sample2_into noise ~first:0 ~last:(count * count) ~frequency:1. ~x ~y ~output;
+    Rays_math.Noise.sample2_into noise ~first:0 ~last:(count * count) ~frequency:1. ~x ~y ~output;
     Array.iteri (fun i value ->
       check (Int64.bits_of_float value
              = Int64.bits_of_float (Rays_math.Noise.sample3 noise ~x:x.(i) ~y:y.(i) ~z:0.))

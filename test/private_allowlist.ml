@@ -2,14 +2,11 @@
    The gate rejects a reference not listed here and a listed one that is gone, so
    this list only shrinks. Give the use a public name instead of adding a row. *)
 let entries = [
-  "flow", "Rays_math.Noise.Private";
   "flow_gpu", "Flow_ir.Packed.Private";
-  "flow_gpu", "Rays_math.Noise.Private";
   "flow_graph", "Flow.Eval.Private";
   "flow_ir", "Flow.Eval.Private";
   "flow_ir", "Flow.Op.Private";
   "flow_ir", "Flow.Value.Private";
-  "flow_ir", "Rays_math.Noise.Private";
   "flow_native", "Canvas.Private";
   "flow_native", "Flow_gpu.Host.Private";
   "flow_native", "Flow_gpu.Image_sink.Private";
@@ -34,7 +31,6 @@ let entries = [
   "flow_sop", "Sop.Session.Private";
   "flow_web", "Flow_ir.Packed.Private";
   "flow_web", "Packed.Private";
-  "flow_web", "Rays_math.Noise.Private";
   "ogpu_metal", "Metal.Buffer.Private";
   "ogpu_metal", "Metal.Drawable.Private";
   "ogpu_metal", "Metal.Render_encoder.Private";

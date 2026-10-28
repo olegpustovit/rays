@@ -174,7 +174,7 @@ let noise3 = {
         Float (fin "noise3"
           (if octaves=1 then Rays_math.Noise.sample3 (noise_table seed) ~x ~y ~z
            else if lacunarity=2. && gain=0.5 then Rays_math.Noise.fbm3 ~octaves (noise_table seed) ~x ~y ~z
-           else Rays_math.Noise.Private.fbm3_with_scratch (Rays_math.Noise.Private.create_fbm3_scratch ())
+           else Rays_math.Noise.fbm3_with_scratch (Rays_math.Noise.create_fbm3_scratch ())
              (noise_table seed) ~octaves ~lacunarity ~gain ~x ~y ~z))
     | _ -> fail "E_TYPE" "noise3 takes a vec3 position.");
 }

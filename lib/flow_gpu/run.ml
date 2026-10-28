@@ -159,7 +159,7 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
       let buffer=ensure t t.table length in
       if fresh then begin
         Array.iteri (fun index seed ->
-          let permutation=Rays_math.Noise.Private.permutation (Rays_math.Noise.create seed) in
+          let permutation=Rays_math.Noise.permutation (Rays_math.Noise.create seed) in
           Array.iteri (fun entry value -> Bytes.set_int32_le t.table.bytes ((index*512+entry)*4)
             (Int32.of_int value)) permutation) msl.table_seeds;
         get (B.write_buffer buffer ~offset:0L t.table.bytes);

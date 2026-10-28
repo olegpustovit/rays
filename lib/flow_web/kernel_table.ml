@@ -5,7 +5,7 @@ let kind_name = function
   | Wgsl.Uniform_buffer -> "uniform" | Storage_read -> "read" | Storage_read_write -> "read_write"
 
 let entry ?cpu ~id (w : Wgsl.wgsl) =
-  let tables = json_list (fun seed -> json_ints (Rays_math.Noise.Private.permutation (Rays_math.Noise.create seed)))
+  let tables = json_list (fun seed -> json_ints (Rays_math.Noise.permutation (Rays_math.Noise.create seed)))
     (Array.to_list w.table_seeds) in
   Printf.sprintf
     "{\"id\":%s,%s\"entry\":%s,\"source\":%s,\"interface\":%s,\"uniform_layout\":%s,\"uniform_bytes\":%d,\"table_seeds\":%s,\"tables\":%s,\"input_widths\":%s,\"output_widths\":%s,\"gathers\":%s,\"counts\":%s}"

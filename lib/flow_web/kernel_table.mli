@@ -6,7 +6,7 @@ val json_string : string -> string
 
 val entry : ?cpu:string -> id:string -> Wgsl.wgsl -> string
 (** One kernel object: the printer's source, entry, interface, uniform layout, noise seeds with their
-    512-entry permutations ([Rays_math.Noise.Private.permutation], as the Metal host uploads), and
+    512-entry permutations ([Rays_math.Noise.permutation], as the Metal host uploads), and
     widths. [id] is the name the program dispatches by and must be unique in a table. [cpu], when
     given, is the region's {!Js.region} source (golden fixtures carry one for the browser check). *)
 

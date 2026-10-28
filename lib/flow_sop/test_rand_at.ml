@@ -193,7 +193,7 @@ let () =
     let noise=Rays_math.Noise.create seed in
     Array.iteri (fun i (x,y,z) ->
       let native=if lacunarity=2. && gain=0.5 then Rays_math.Noise.fbm3 ~octaves noise ~x ~y ~z
-        else Rays_math.Noise.Private.fbm3_with_scratch (Rays_math.Noise.Private.create_fbm3_scratch ()) noise ~octaves ~lacunarity ~gain ~x ~y ~z in
+        else Rays_math.Noise.fbm3_with_scratch (Rays_math.Noise.create_fbm3_scratch ()) noise ~octaves ~lacunarity ~gain ~x ~y ~z in
       incr native_samples;
       if Int64.bits_of_float native <> Int64.bits_of_float expected.(i) then incr native_bit_differences;
       let _,exponent=Float.frexp (max (abs_float native) (abs_float expected.(i))) in

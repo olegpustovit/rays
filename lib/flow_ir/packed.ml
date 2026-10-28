@@ -423,7 +423,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
     let tables=Hashtbl.create 8 in
     let noise seed=match Hashtbl.find_opt tables seed with Some n->n|None->
       let n=Rays_math.Noise.create seed in Hashtbl.add tables seed n;n in
-    let scratch=Rays_math.Noise.Private.create_fbm3_scratch () in
+    let scratch=Rays_math.Noise.create_fbm3_scratch () in
     let contiguous=t.iteration=Zip && skip=[||] in
     let indices=if contiguous then [||] else Array.make block_size 0 in
     for block=chunk*blocks_per_chunk to min blocks ((chunk+1)*blocks_per_chunk)-1 do
@@ -634,7 +634,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
             for j=first to last-1 do floats.(at+j)<-Flow.Packed_ops.rand_at integer.(seed+j) integer.(index+j) done
         | Unary(op,a)->for j=first to last-1 do floats.(at+j)<-finite(unary_apply op (numeric a j)) done
         | Noise3(x,y,z,seed,octaves,lacunarity,gain)->for j=first to last-1 do
-            floats.(at+j)<-finite(Rays_math.Noise.Private.fbm3_with_scratch scratch (noise seed)
+            floats.(at+j)<-finite(Rays_math.Noise.fbm3_with_scratch scratch (noise seed)
               ~octaves ~lacunarity ~gain ~x:(numeric x j)~y:(numeric y j)~z:(numeric z j)) done
       and execute_range ?dependent first_slot last_slot first last =
         if carried=0 then match dependent with
@@ -978,7 +978,7 @@ type launch = {
   omitted : bool array; skipped_before : int -> int; noise_scale : (int * int * int * int) option array; collect_product : (int * int * int) option array array;
 }
 type block = {
-  scratch : float array; noise_scratch : Rays_math.Noise.Private.fbm3_scratch;
+  scratch : float array; noise_scratch : Rays_math.Noise.fbm3_scratch;
   tables : Rays_math.Noise.t option array; contiguous : bool; indices : int array;
   start : int; length : int; output_start : int;
 }
@@ -1075,12 +1075,12 @@ let rec block_instruction r b slot instruction first last =
             let x,y,z,frequency=match noise_scale.(slot) with
               |Some (x,y,z,f)->x,y,z,scratch.(f*block_size+first)
               |None->x,y,z,1. in
-            if octaves=1 then Rays_math.Noise.Private.sample3_into noise ~first ~last
+            if octaves=1 then Rays_math.Noise.sample3_into noise ~first ~last
               ~frequency
               ~x:scratch ~x_offset:(x * block_size) ~y:scratch ~y_offset:(y * block_size)
               ~z:scratch ~z_offset:(z * block_size) ~output:scratch ~output_offset:at ()
             else for j=first to last-1 do
-              scratch.(at+j)<-Rays_math.Noise.Private.fbm3_with_scratch noise_scratch noise
+              scratch.(at+j)<-Rays_math.Noise.fbm3_with_scratch noise_scratch noise
                 ~octaves ~lacunarity ~gain
                 ~x:(scratch.(x*block_size+j)*.frequency) ~y:(scratch.(y*block_size+j)*.frequency)
                 ~z:(scratch.(z*block_size+j)*.frequency)
@@ -1166,7 +1166,7 @@ let block_streaming r b (noise,amplitude,(xi,_,xc),(yi,_,yc),(zi,_,zc),frequency
           let scalar id=match t.code.(id) with
             |Const x->x|Uniform (i,c)->uniforms.(i).(c)|Frame _->frame.(id)|_->assert false in
           let x=columns.(xi).(xc) and y=columns.(yi).(yc) and z=columns.(zi).(zc) in
-          Rays_math.Noise.Private.sample3_into (Option.get tables.(noise)) ~first:0 ~last:length
+          Rays_math.Noise.sample3_into (Option.get tables.(noise)) ~first:0 ~last:length
             ~x:x.data ~x_offset:(x.offset+start*x.stride) ~x_stride:x.stride
             ~y:y.data ~y_offset:(y.offset+start*y.stride) ~y_stride:y.stride
             ~z:z.data ~z_offset:(z.offset+start*z.stride) ~z_stride:z.stride
@@ -1240,7 +1240,7 @@ let block_scalar_streaming r b (noise,(xi,_,xc),(yi,_,yc),z,frequency,gain,bias,
           let z,z_offset,z_stride=match z with
             |Some (i,_,c)->let z=columns.(i).(c) in z.data,z.offset+start*z.stride,z.stride
             |None->scratch,block_size,1 in
-          Rays_math.Noise.Private.sample3_into (Option.get tables.(noise)) ~first:0 ~last:length
+          Rays_math.Noise.sample3_into (Option.get tables.(noise)) ~first:0 ~last:length
             ~x:x.data ~x_offset:(x.offset+start*x.stride) ~x_stride:x.stride
             ~y:y.data ~y_offset:(y.offset+start*y.stride) ~y_stride:y.stride
             ~z ~z_offset ~z_stride ~frequency:(Option.fold ~none:1. ~some:scalar frequency) ~output:scratch ();
@@ -1379,7 +1379,7 @@ let run_chunk r chunk =
   if r.ordered_add then chunk_ordered r chunk else begin
       let scratch = Array.make ((if Option.is_some streaming then (if plane_outputs=None then 1 else 2)
         else if Option.is_some scalar_streaming then 2 else Array.length t.code) * block_size) 0. in
-      let noise_scratch=Rays_math.Noise.Private.create_fbm3_scratch () in
+      let noise_scratch=Rays_math.Noise.create_fbm3_scratch () in
       let tables=Array.map(fun instruction -> match unguarded instruction with Noise3(_,_,_,seed,_,_,_)->Some(Flow.Op.noise_table seed)
         |_->None)t.code in
       let contiguous = t.iteration=Zip && skip=[||] in

@@ -17,7 +17,7 @@ let kind_name = function
   | Flow_web.Wgsl.Uniform_buffer -> "uniform" | Storage_read -> "read" | Storage_read_write -> "read_write"
 (* The noise tables are the ones the Metal host uploads (lib/flow_gpu/run.ml): 512 entries per seed. *)
 let table_json (w : Flow_web.Wgsl.wgsl) =
-  json_list (fun seed -> json_ints (Rays_math.Noise.Private.permutation (Rays_math.Noise.create seed)))
+  json_list (fun seed -> json_ints (Rays_math.Noise.permutation (Rays_math.Noise.create seed)))
     (Array.to_list w.table_seeds)
 let kernel_json ?(cpu = "") name (w : Flow_web.Wgsl.wgsl) =
   Printf.sprintf
