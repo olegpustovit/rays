@@ -205,7 +205,7 @@ and st = {
   kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
   node_defs :
     ( string,
-      W.node_definition * ((string * value) list -> (string * value) list option) Lazy.t )
+      (W.node_definition * ((string * value) list -> (string * value) list option)) Lazy.t )
     Hashtbl.t;
       (* Lisp nodes whose bodies evaluate inline in the calling program, with the host's
          canonicalization of their call parameters *)
@@ -782,8 +782,9 @@ and ev_raw c env (x : W.term) : value =
       in
       let call vals = catalog_call c ~authored:x.form.id kind ctx vals in
       match Hashtbl.find_opt c.st.node_defs kind with
-      | Some (d, canonical) when not (List.exists (fun (_, v) -> is_live v) vals) -> (
-          match Lazy.force canonical vals with
+      | Some inlined -> (
+          let d, canonical = Lazy.force inlined in
+          match canonical vals with
           | Some parameters -> inline_node c d parameters ~call vals
           | None -> call vals)
       | _ -> call vals)
@@ -1126,9 +1127,19 @@ and inline_node c (d : W.node_definition) parameters ~call vals =
       d.validations;
     ev c' env d.body.body
   with
+  | Residual _ when List.exists (fun (_, v) -> match v with Residual _ -> true | _ -> false) vals ->
+      (* a structure that follows a per-frame argument: the card is rebuilt per frame, as before *)
+      st.steps <- steps;
+      drop ();
+      call vals
   | v ->
       st.steps <- steps;
       v
+  | exception Needs_t ->
+      (* a validation that reads a live argument *)
+      st.steps <- steps;
+      drop ();
+      call vals
   | exception Refused e ->
       st.steps <- steps;
       raise (Diagnostic.Error e)
@@ -1831,7 +1842,7 @@ and graph_value ?(rec_ = true) c name over =
 
 let diagnostic code msg span = Diagnostic.error ?span ~code msg
 let inline_nodes = Atomic.make false
-let inline_parameters = Atomic.make (fun _ _ vals -> Some vals)
+let inline_parameters = Atomic.make (fun _ d -> (d, fun vals -> Some vals))
 
 (* ponytail: a node with callable slots still lowers as its own nested workspace *)
 let inline_simple (d : W.node_definition) =
@@ -1872,7 +1883,7 @@ let new_state ?(budget = max_steps) ~record ws =
          List.iter
            (fun (d : W.node_definition) ->
              if inline_simple d then
-               Hashtbl.replace t d.kind.qualified (d, lazy (Atomic.get inline_parameters ws d)))
+               Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
            ws.W.nodes;
        t);
     ops = ws.ops;

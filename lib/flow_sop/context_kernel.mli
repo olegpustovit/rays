@@ -47,3 +47,8 @@ val fuse :
 val reachable_defs : Flow.Workspace.t -> Flow.Workspace.graph list -> Flow.Workspace.graph list
 (** The checked helpers the graphs reach, directly or through the Lisp nodes they call, in
     declaration order. *)
+
+val label_context :
+  label:string -> Flow.Workspace.graph -> Flow.Workspace.graph * (string * string) list
+(** The body reading each distinct context operator, labelled for inline evaluation (a cook-time
+    source), through a reserved input; with each input's operator. *)

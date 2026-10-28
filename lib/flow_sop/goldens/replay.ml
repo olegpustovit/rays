@@ -519,15 +519,25 @@ let lower ?(reference = false) ?cache ?times ?parsed source factories ops with_ 
             Lowered_cache.add cache.lowered key node;
             node)
   in
+  (* the graph is a DAG (an inlined body reads its input many times): each node is rebuilt once *)
+  let restored = Hashtbl.create 64 in
   let rec restore node =
-    if Sop.Node.operation node = "lisp_sop_ext" then List.assoc (Sop.Node.parameters node) with_
-    else
-      match Sop.Node.inputs node with
-      | [] -> node
-      | children ->
-          let rebuilt = List.map restore children in
-          if List.for_all2 ( == ) children rebuilt then node
-          else Sop.Node.Build.rebuild_with_inputs node (Array.of_list rebuilt)
+    match Hashtbl.find_opt restored (Sop.Node.id node) with
+    | Some node -> node
+    | None ->
+        let result =
+          if Sop.Node.operation node = "lisp_sop_ext" then
+            List.assoc (Sop.Node.parameters node) with_
+          else
+            match Sop.Node.inputs node with
+            | [] -> node
+            | children ->
+                let rebuilt = List.map restore children in
+                if List.for_all2 ( == ) children rebuilt then node
+                else Sop.Node.Build.rebuild_with_inputs node (Array.of_list rebuilt)
+        in
+        Hashtbl.add restored (Sop.Node.id node) result;
+        result
   in
   restore node
 

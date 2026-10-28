@@ -397,108 +397,212 @@ let constant_source = function
          with Diagnostic.Error d -> Error d)
   | _ -> None
 
-let rec resolve ~geometry value =
-  match constant_source value with
-  | Some result ->
-      Result.bind result (fun (operation, count, value) ->
-          try
-            Ok
-              ((Option.get (Flow.Op.find operation Flow.Context.value)).body
-                 ~live:(Input.at_time 0.)
-                 ~node:(fun _ _ -> assert false)
-                 [ ("count", E.Int count); ("value", value) ])
-          with Diagnostic.Error d -> Error d)
+let seed_for ?(salt = 0) ~seed ~namespace ~label () =
+  let identity = Rays_math.Hash.string (namespace ^ ":" ^ label) in
+  (* The salt is the low 63 bits of a 64-bit word, xor-ed into the identity before mixing. *)
+  let salt = Int64.logand (Int64.of_int salt) Int64.max_int in
+  let mixed = Int64.logxor seed (Int64.mul (Int64.logxor identity salt) 0x9e3779b97f4a7c15L) in
+  Int64.to_int (Int64.logxor mixed (Int64.shift_right_logical mixed 32))
+
+let context_label = "$label"
+
+(* The cook context an inlined body reads (Operators.context_source): a kernel node declares it
+   ([dependencies]) and resolves it from its cook context, as the nested card specialized it. *)
+let context_value context = function
+  | E.Source ("sop/context_seed", _, args) ->
+      let text name = match List.assoc_opt name args with Some (E.Text t) -> t | _ -> "" in
+      let salt = match List.assoc_opt "salt" args with Some (E.Int n) -> n | _ -> 0 in
+      Some
+        (E.Int
+           (seed_for ~salt ~seed:(Sop.Context.seed context) ~namespace:(text "namespace")
+              ~label:(text context_label) ()))
+  | E.Source ("sop/context_frame", _, _) ->
+      Some (E.Float (Int64.to_float (Sop.Context.frame context)))
+  | E.Source ("sop/context_time", _, _) -> Some (E.Float (Sop.Context.time context))
+  | _ -> None
+
+let context_facts =
+  Sop.Context.Dependencies.
+    [ ("sop/context_seed", Seed); ("sop/context_frame", Frame); ("sop/context_time", Time) ]
+
+let context_reads value =
+  let residuals = Residuals.create 16 and functions = Functions.create 16 in
+  let found = ref Sop.Context.Dependencies.static in
+  let add name =
+    Option.iter
+      (fun fact -> found := Sop.Context.Dependencies.(union !found (one fact)))
+      (List.assoc_opt name context_facts)
+  in
+  (* an inlined body's context operators are inputs (Context_kernel.label_context): residuals and
+     closures capture their sources as bindings *)
+  let rec visit = function
+    | E.Source (name, _, fs) ->
+        add name;
+        List.iter (fun (_, v) -> visit v) fs
+    | Residual r ->
+        if not (Residuals.mem residuals r) then begin
+          Residuals.add residuals r ();
+          List.iter (fun (_, v) -> visit v) (E.Residual.residual_view r).bindings
+        end
+    | List vs -> Array.iter visit vs
+    | Fn f when not (Functions.mem functions f) ->
+        Functions.add functions f ();
+        List.iter (fun (_, v) -> visit v) (E.Residual.function_bindings f)
+    | Record fs | Struct (_, _, fs) -> List.iter (fun (_, v) -> visit v) fs
+    | _ -> ()
+  in
+  visit value;
+  !found
+
+let dependencies value =
+  if E.frame_dependent value then Sop.Context.Dependencies.(union (context_reads value) (one Input))
+  else context_reads value
+
+(* The data with its context sources replaced by this cook context's values: a kernel over it
+   compiles them as constants (a noise seed is a region immediate). *)
+let specialize context value =
+  let residuals = Hashtbl.create 16 and functions = Hashtbl.create 16 in
+  let rec map value =
+    match context_value context value with
+    | Some value -> value
+    | None -> (
+        match value with
+        | E.Residual r -> (
+            let id = E.Residual.residual_id r in
+            match Hashtbl.find_opt residuals id with
+            | Some mapped -> mapped
+            | None ->
+                let view = E.Residual.residual_view r in
+                let bindings = List.map (fun (name, v) -> (name, map v)) view.bindings in
+                let mapped =
+                  if List.for_all2 (fun (_, a) (_, b) -> a == b) view.bindings bindings then value
+                  else E.Residual (E.Residual.with_bindings r ~term:view.term bindings)
+                in
+                Hashtbl.add residuals id mapped;
+                mapped)
+        | Fn f -> (
+            let id = E.Residual.function_id f in
+            match Hashtbl.find_opt functions id with
+            | Some mapped -> mapped
+            | None ->
+                let mapped = E.Fn (E.Host.map_function_bindings map f) in
+                Hashtbl.add functions id mapped;
+                mapped)
+        | List vs -> List (Array.map map vs)
+        | Record fs -> Record (fields fs)
+        | Struct (name, ty, fs) -> Struct (name, ty, fields fs)
+        | Source (name, ty, fs) -> Source (name, ty, fields fs)
+        | value -> value)
+  and fields fs = List.map (fun (name, v) -> (name, map v)) fs in
+  map value
+
+let rec resolve ?context ~geometry value =
+  match Option.bind context (fun context -> context_value context value) with
+  | Some value -> Ok value
   | None -> (
-      match value with
-      | E.Source ("sop/attr_checked", _, args) -> (
-          match
-            ( List.assoc_opt "geometry" args,
-              List.assoc_opt "attribute" args,
-              List.assoc_opt "component" args )
-          with
-          | Some (E.Deferred (ty, id)), Some (E.Text name), Some (E.Text component)
-            when Flow.Ty.is_geometry ty -> (
-              match geometry id with
-              | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked."
-              | Some geometry ->
-                  Result.bind (options args) (fun (owner, kind) ->
-                      read_checked ~component ~owner ~kind name geometry))
-          | _ ->
-              error "E_ATTR_TYPE"
-                "sop/attr_checked needs geometry, an attribute name and a component.")
-      | E.Source ("sop/attr_planes", _, args) -> (
-          match
-            ( List.assoc_opt "geometry" args,
-              List.assoc_opt "attribute" args,
-              List.assoc_opt "component" args )
-          with
-          | Some (E.Deferred (ty, id)), Some (E.Text name), Some (E.Text component)
-            when Flow.Ty.is_geometry ty -> (
-              match geometry id with
-              | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked."
-              | Some geometry ->
-                  Result.bind (options args) (fun (owner, _) ->
-                      read_planes ~component ~owner name geometry))
-          | _ ->
-              error "E_ATTR_TYPE"
-                "sop/attr_planes needs geometry, an attribute name and a component.")
-      | E.Struct ("sop/attr", _, args) | E.Source ("sop/attr", _, args) -> (
-          match (List.assoc_opt "geometry" args, List.assoc_opt "attribute" args) with
-          | Some (E.Deferred (ty, id)), Some (E.Text name) when Flow.Ty.is_geometry ty -> (
-              match geometry id with
-              | Some geometry ->
-                  Result.bind (options args) (fun (owner, kind) ->
-                      let component =
-                        match List.assoc_opt "component" args with
-                        | Some (E.Text name) -> Some name
-                        | _ -> None
-                      in
-                      read ?component ~owner ~kind name geometry)
-              | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked.")
-          | _ -> error "E_ATTR_TYPE" "sop/attr needs geometry and an attribute name.")
-      | E.Source ("sop/has_attr", _, args) -> (
-          match (List.assoc_opt "geometry" args, List.assoc_opt "attribute" args) with
-          | Some (E.Deferred (ty, id)), Some (E.Text name) when Flow.Ty.is_geometry ty -> (
-              match geometry id with
-              | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked."
-              | Some geometry ->
-                  Result.bind (options args) (fun (owner, _) ->
-                      let requested =
-                        match List.assoc_opt "type" args with
-                        | Some (E.Text kind) -> Some kind
-                        | _ -> None
-                      in
-                      Ok
-                        (E.Bool
-                           (match storage ~owner ~name geometry with
-                           | None -> false
-                           | Some storage ->
-                               Option.fold ~none:true ~some:(( = ) (storage_kind storage)) requested)))
-              )
-          | _ -> error "E_ATTR_TYPE" "sop/has_attr needs geometry and an attribute name.")
-      | E.Source (("sop/components" as name), ty, args) ->
-          Result.bind (concrete_args ~geometry args) (fun args ->
-              Topology_kernel_impl.resolve ~geometry (E.Source (name, ty, args)))
-      | E.Source
-          (("sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/triangles"), _, _)
-        as source ->
-          Topology_kernel_impl.resolve ~geometry source
-      | E.Source (("sop/attr_type" | "sop/attr_names" | "sop/attr_entries"), _, _) as source ->
-          Attribute_metadata.resolve ~geometry source
-      | E.Source
-          ( (("graph/shortest_paths" | "graph/forest" | "graph/color" | "graph/chains") as name),
-            ty,
-            args ) ->
-          Result.bind (concrete_args ~geometry args) (fun args ->
-              Graph_kernel.resolve (E.Source (name, ty, args)))
-      | source -> Group_kernel.resolve ~geometry source)
+      match constant_source value with
+      | Some result ->
+          Result.bind result (fun (operation, count, value) ->
+              try
+                Ok
+                  ((Option.get (Flow.Op.find operation Flow.Context.value)).body
+                     ~live:(Input.at_time 0.)
+                     ~node:(fun _ _ -> assert false)
+                     [ ("count", E.Int count); ("value", value) ])
+              with Diagnostic.Error d -> Error d)
+      | None -> (
+          match value with
+          | E.Source ("sop/attr_checked", _, args) -> (
+              match
+                ( List.assoc_opt "geometry" args,
+                  List.assoc_opt "attribute" args,
+                  List.assoc_opt "component" args )
+              with
+              | Some (E.Deferred (ty, id)), Some (E.Text name), Some (E.Text component)
+                when Flow.Ty.is_geometry ty -> (
+                  match geometry id with
+                  | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked."
+                  | Some geometry ->
+                      Result.bind (options args) (fun (owner, kind) ->
+                          read_checked ~component ~owner ~kind name geometry))
+              | _ ->
+                  error "E_ATTR_TYPE"
+                    "sop/attr_checked needs geometry, an attribute name and a component.")
+          | E.Source ("sop/attr_planes", _, args) -> (
+              match
+                ( List.assoc_opt "geometry" args,
+                  List.assoc_opt "attribute" args,
+                  List.assoc_opt "component" args )
+              with
+              | Some (E.Deferred (ty, id)), Some (E.Text name), Some (E.Text component)
+                when Flow.Ty.is_geometry ty -> (
+                  match geometry id with
+                  | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked."
+                  | Some geometry ->
+                      Result.bind (options args) (fun (owner, _) ->
+                          read_planes ~component ~owner name geometry))
+              | _ ->
+                  error "E_ATTR_TYPE"
+                    "sop/attr_planes needs geometry, an attribute name and a component.")
+          | E.Struct ("sop/attr", _, args) | E.Source ("sop/attr", _, args) -> (
+              match (List.assoc_opt "geometry" args, List.assoc_opt "attribute" args) with
+              | Some (E.Deferred (ty, id)), Some (E.Text name) when Flow.Ty.is_geometry ty -> (
+                  match geometry id with
+                  | Some geometry ->
+                      Result.bind (options args) (fun (owner, kind) ->
+                          let component =
+                            match List.assoc_opt "component" args with
+                            | Some (E.Text name) -> Some name
+                            | _ -> None
+                          in
+                          read ?component ~owner ~kind name geometry)
+                  | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked.")
+              | _ -> error "E_ATTR_TYPE" "sop/attr needs geometry and an attribute name.")
+          | E.Source ("sop/has_attr", _, args) -> (
+              match (List.assoc_opt "geometry" args, List.assoc_opt "attribute" args) with
+              | Some (E.Deferred (ty, id)), Some (E.Text name) when Flow.Ty.is_geometry ty -> (
+                  match geometry id with
+                  | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked."
+                  | Some geometry ->
+                      Result.bind (options args) (fun (owner, _) ->
+                          let requested =
+                            match List.assoc_opt "type" args with
+                            | Some (E.Text kind) -> Some kind
+                            | _ -> None
+                          in
+                          Ok
+                            (E.Bool
+                               (match storage ~owner ~name geometry with
+                               | None -> false
+                               | Some storage ->
+                                   Option.fold ~none:true
+                                     ~some:(( = ) (storage_kind storage))
+                                     requested))))
+              | _ -> error "E_ATTR_TYPE" "sop/has_attr needs geometry and an attribute name.")
+          | E.Source (("sop/components" as name), ty, args) ->
+              Result.bind (concrete_args ?context ~geometry args) (fun args ->
+                  Topology_kernel_impl.resolve ~geometry (E.Source (name, ty, args)))
+          | E.Source
+              ( ("sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/triangles"),
+                _,
+                _ ) as source ->
+              Topology_kernel_impl.resolve ~geometry source
+          | E.Source (("sop/attr_type" | "sop/attr_names" | "sop/attr_entries"), _, _) as source ->
+              Attribute_metadata.resolve ~geometry source
+          | E.Source
+              ( (("graph/shortest_paths" | "graph/forest" | "graph/color" | "graph/chains") as name),
+                ty,
+                args ) ->
+              Result.bind (concrete_args ?context ~geometry args) (fun args ->
+                  Graph_kernel.resolve (E.Source (name, ty, args)))
+          | source -> Group_kernel.resolve ~geometry source))
 
 (* Array arguments of a pure source may still be host sources (a sop/adjacency
    record): resolve them so the algorithm sees concrete arrays. *)
-and concrete_args ~geometry args =
+and concrete_args ?context ~geometry args =
   let rec concrete = function
     | (E.Source _ | E.Struct ("sop/attr", _, _)) as source ->
-        Result.bind (resolve ~geometry source) concrete
+        Result.bind (resolve ?context ~geometry source) concrete
     | E.Record fields -> Result.map (fun fields -> E.Record fields) (all fields)
     | value -> Ok value
   and all = function
@@ -1339,16 +1443,12 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
   in
   let node =
     N.Build.make_geometry ~label:("Write " ^ name) ~operation:"flow.with_attr" ~version:1
-      ~parameters ~cook_mode:(N.Duplicate_input 0)
-      ~dependencies:
-        (if E.frame_dependent data then Sop.Context.Dependencies.one Sop.Context.Dependencies.Input
-         else Sop.Context.Dependencies.static)
-      ~inputs:(Array.of_list inputs)
-      (fun ~node_id:_ context geometries ->
+      ~parameters ~cook_mode:(N.Duplicate_input 0) ~dependencies:(dependencies data)
+      ~inputs:(Array.of_list inputs) (fun ~node_id:_ context geometries ->
         let geometry id =
           Option.map (fun index -> geometries.(index)) (List.find_index (( = ) id) sources)
         in
-        let resolve = resolve ~geometry in
+        let resolve = resolve ~context ~geometry in
         let result =
           if geometries = [||] then error "E_DATA_SOURCE" "Attribute write needs geometry."
           else if Sop.Context.cancelled context then

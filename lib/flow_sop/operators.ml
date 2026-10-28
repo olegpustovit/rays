@@ -723,6 +723,23 @@ let with_group : Flow.Op.t =
     body = (fun ~live:_ ~node args -> node "sop/with_group" args);
   }
 
+(* Inside an inlined defnode body (the host adds the card's cook label as [$label]) a context
+   operator is a cook-time source the kernel resolves from its cook context; elsewhere it is refused. *)
+let context_label = Attribute_kernel.context_label
+
+let context_source what ~live:_ ~node:_ (args : (string * (_, _) Flow.Value.t) list) =
+  match List.assoc_opt context_label args with
+  | Some (Flow.Value.Text _) ->
+      let name, ty =
+        match what with
+        | "Context seed" -> ("sop/context_seed", Flow.Ty.Int)
+        | "Provenance base" -> ("sop/provenance_base", Flow.Ty.Int)
+        | "Context frame" -> ("sop/context_frame", Flow.Ty.Float)
+        | _ -> ("sop/context_time", Flow.Ty.Float)
+      in
+      Flow.Value.Source (name, ty, args)
+  | _ -> Flow.Value.fail "E_NODE_CONTEXT" (what ^ " is available inside a defnode body.")
+
 let context_seed : Flow.Op.t =
   {
     attr with
@@ -747,9 +764,7 @@ let context_seed : Flow.Op.t =
         match List.assoc_opt "salt" args with
         | None | Some (Flow.Value.Int _) -> ()
         | Some _ -> Flow.Value.fail "E_SEED_SALT" "A context seed salt must be an integer.");
-    body =
-      (fun ~live:_ ~node:_ _ ->
-        Flow.Value.fail "E_NODE_CONTEXT" "Context seed is available inside a defnode body.");
+    body = (fun ~live ~node args -> context_source "Context seed" ~live ~node args);
   }
 
 let provenance_base : Flow.Op.t =
@@ -763,9 +778,7 @@ let provenance_base : Flow.Op.t =
     out_args = None;
     shape = Flow.Op.Scalar;
     check = (fun _ -> ());
-    body =
-      (fun ~live:_ ~node:_ _ ->
-        Flow.Value.fail "E_NODE_CONTEXT" "Provenance base is available inside a defnode body.");
+    body = (fun ~live ~node args -> context_source "Provenance base" ~live ~node args);
   }
 
 let context_frame : Flow.Op.t =
@@ -779,9 +792,7 @@ let context_frame : Flow.Op.t =
     out_args = None;
     shape = Flow.Op.Scalar;
     check = (fun _ -> ());
-    body =
-      (fun ~live:_ ~node:_ _ ->
-        Flow.Value.fail "E_NODE_CONTEXT" "Context frame is available inside a defnode body.");
+    body = (fun ~live ~node args -> context_source "Context frame" ~live ~node args);
   }
 
 let context_time : Flow.Op.t =
@@ -795,17 +806,10 @@ let context_time : Flow.Op.t =
     out_args = None;
     shape = Flow.Op.Scalar;
     check = (fun _ -> ());
-    body =
-      (fun ~live:_ ~node:_ _ ->
-        Flow.Value.fail "E_NODE_CONTEXT" "Context time is available inside a defnode body.");
+    body = (fun ~live ~node args -> context_source "Context time" ~live ~node args);
   }
 
-let seed_for ?(salt = 0) ~seed ~namespace ~label () =
-  let identity = Rays_math.Hash.string (namespace ^ ":" ^ label) in
-  (* The salt is the low 63 bits of a 64-bit word, xor-ed into the identity before mixing. *)
-  let salt = Int64.logand (Int64.of_int salt) Int64.max_int in
-  let mixed = Int64.logxor seed (Int64.mul (Int64.logxor identity salt) 0x9e3779b97f4a7c15L) in
-  Int64.to_int (Int64.logxor mixed (Int64.shift_right_logical mixed 32))
+let seed_for = Attribute_kernel.seed_for
 
 let metadata_text args name =
   match List.assoc name args with

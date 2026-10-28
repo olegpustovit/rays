@@ -648,3 +648,54 @@ let reachable_defs (workspace : W.t) roots =
   in
   List.iter visit roots;
   List.filter (fun (d : W.graph) -> Hashtbl.mem seen d.name) workspace.defs
+
+(* An inlined body reads its cook context through inputs: each distinct context operator, with
+   the card's cook label, is the default of a reserved input the body refers to by name. It evaluates
+   to a cook-time source, which residuals capture as a binding, never as a term, so a kernel
+   specializes it per context by its captures alone. *)
+let label_context ~label graph =
+  let inputs = ref [] in
+  let key (args : (string * W.term) list) =
+    List.map
+      (fun (name, (a : W.term)) ->
+        match a.node with
+        | W.Text s -> name ^ "=" ^ s
+        | Lit (Param.Int_value n) -> name ^ "=" ^ string_of_int n
+        | _ -> name ^ "=?")
+      args
+  in
+  let graph =
+    map
+      (fun t ->
+        match t.W.node with
+        | W.Op ({ op; args; _ } as o) when List.mem op context_ops ->
+            let k = String.concat ";" (op :: key args) in
+            let name =
+              match List.assoc_opt k !inputs with
+              | Some (name, _) -> name
+              | None ->
+                  let name = "$context" ^ string_of_int (List.length !inputs) in
+                  let text = { t with node = W.Text label; path = None; ty = Flow.Ty.Text } in
+                  let call =
+                    {
+                      t with
+                      node = W.Op { o with args = args @ [ (Operators.context_label, text) ] };
+                    }
+                  in
+                  inputs := !inputs @ [ (k, (name, call)) ];
+                  name
+            in
+            { t with node = W.Ref_binding (name, []) }
+        | _ -> t)
+      graph
+  in
+  ( {
+      graph with
+      inputs =
+        graph.inputs
+        @ List.map (fun (_, (name, (call : W.term))) -> (name, call.ty, Some call)) !inputs;
+    },
+    List.map
+      (fun (_, (name, (call : W.term))) ->
+        (name, match call.node with W.Op { op; _ } -> op | _ -> assert false))
+      !inputs )

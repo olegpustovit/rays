@@ -226,13 +226,13 @@ val inline_nodes : bool Atomic.t
 val inline_parameters :
   (Workspace.t ->
   Workspace.node_definition ->
-  (string * value) list ->
-  (string * value) list option)
+  Workspace.node_definition * ((string * value) list -> (string * value) list option))
   Atomic.t
-(** The host's canonical parameters of an inlined call (ranges, choices, encoded text), raising the
-    diagnostic a node build would refuse with; [None] keeps the call a node of its own (its body
-    reaches its cook context, say). Applied once per workspace and definition, then per call; the
-    default inlines every call with its arguments. *)
+(** The definition an inlined call evaluates (the host labels its context operators) and the host's
+    canonical parameters of an inlined call (ranges, choices, encoded text), raising the diagnostic
+    a node build would refuse with; [None] keeps the call a node of its own (its body reaches its
+    cook context, say). Applied once per workspace and definition, then per call; the default
+    inlines every call with its arguments. *)
 
 val node_error : string
 (** The reserved argument of a card whose inlined body failed: its diagnostic, marshalled. The host

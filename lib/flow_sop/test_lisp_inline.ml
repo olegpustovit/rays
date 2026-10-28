@@ -73,14 +73,23 @@ let outcome ?(seed = 0L) inline text =
     | Error d -> Error ("lower", d.code, d.message, d.cause)
     | Ok l -> (
         let graph = List.hd l.graphs in
+        let live = Input.at_time 0.125 in
+        let resolved =
+          match
+            Flow_sop.Value_lane.resolve ~live (Flow_sop.Value_lane.create ()) ~time:0.125
+              graph.network
+          with
+          | Ok resolved -> resolved.geometry
+          | Error d -> failwith (Diagnostic.to_string d)
+        in
         let compiled =
-          Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root) |> get_string_ok
+          Edit.compile_node resolved ~node_id:(Option.get graph.root) |> get_string_ok
         in
         let session =
           Session.create ~max_entries:8 ~max_payload_bytes:(1 lsl 24) |> get_string_ok
         in
         let context =
-          Sop.Context.create ~seed ~frame:3L ~time:0.125 ~domains:1 () |> get_string_ok
+          Sop.Context.create ~seed ~frame:3L ~time:0.125 ~input:live ~domains:1 () |> get_string_ok
         in
         let output = Session.cook session ~context compiled in
         Session.close session;
@@ -132,20 +141,47 @@ let () =
 let () =
   List.iter
     (fun (call, inlines) ->
-      let text = Printf.sprintf "(workspace c (graph g :context sop %s))" call in
+      let text =
+        Printf.sprintf
+          "(workspace c (defnode sop/b_live [(geo : geometry) (on : bool false)] (if on \
+           (sop/with_attr geo :P (map (fn [p] (+ p [1 0 0])) (sop/attr geo :P))) geo)) (graph g \
+           :context sop %s))"
+          call
+      in
       let nested = outcome ~seed:2026L false text in
       let before = Atomic.get L.Private.nested_lowerings in
       let inline = outcome ~seed:2026L true text in
       let lowered = Atomic.get L.Private.nested_lowerings - before in
-      if nested <> inline then failwith ("step C: inline differs from nested for " ^ call);
+      if nested <> inline then begin
+        let show = function
+          | Ok b -> "ok " ^ string_of_int (String.length b)
+          | Error (w, c, m, _) -> w ^ " " ^ c ^ " " ^ m
+        in
+        failwith
+          ("step C: inline differs from nested for " ^ call ^ ": " ^ show nested ^ " vs "
+         ^ show inline)
+      end;
       if Result.is_error nested then failwith ("step C: " ^ call ^ " did not cook");
       if lowered = 0 <> inlines then failwith ("step C: " ^ call ^ " inlined wrongly"))
     [
-      ("(sop/noise_displace (sop/line :points 9) :context_seed true :amplitude 0.5)", false);
+      ("(sop/noise_displace (sop/line :points 9) :context_seed true :amplitude 0.5)", true);
       ("(sop/noise_displace (sop/line :points 9) :seed 4 :amplitude 0.5)", true);
-      ("(sop/mountain (sop/line :points 9) :seed_mode \"Auto\")", false);
+      ("(sop/mountain (sop/line :points 9) :seed_mode \"Auto\")", true);
       ("(sop/mountain (sop/line :points 9))", true);
-      ("(sop/attribute_fade (sop/line :points 9))", false);
-      ("(sop/merge (sop/line :points 2) (sop/line :points 3))", false);
+      ("(sop/attribute_fade (sop/line :points 9))", true);
+      ("(sop/merge (sop/line :points 2) (sop/line :points 3))", true);
+      (* live arguments are program inputs: per frame (a drive inside the body, a frame uniform)
+         and cooked data; a structure that follows the frame keeps the card a node *)
+      ("(sop/noise_displace (sop/line :points 9) :amplitude (* t 4.0))", true);
+      ("(sop/attribute_fade (sop/line :points 9) :frame_offset (* t 8.0))", false);
+      ("(sop/b_live (sop/line :points 9) :on (> t 0.1))", false);
     ];
-  print_endline "inline cards: context-reaching bodies lower per context, the rest inline"
+  (* cooked data as an argument: the nested card refused it (E_DATA_SOURCE); inline it is an input *)
+  (match
+     outcome true
+       "(workspace c (graph g :context sop (let* [g (sop/line :points 9)] (sop/noise_displace g \
+        :amplitude (float (sop/count g :points))))))"
+   with
+  | Ok _ -> ()
+  | Error (_, code, message, _) -> failwith ("step C: cooked argument " ^ code ^ " " ^ message));
+  print_endline "inline cards: context-reaching bodies and live arguments inline"

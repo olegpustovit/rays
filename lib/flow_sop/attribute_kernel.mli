@@ -8,7 +8,24 @@ val reads : Flow.Eval.value -> string list
 val owner : string -> (Rdk.Attribute.owner, Diagnostic.t) result
 val value_type : string -> (Flow.Ty.t, Diagnostic.t) result
 
+val seed_for : ?salt:int -> seed:int64 -> namespace:string -> label:string -> unit -> int
+(** {!Operators.seed_for}. *)
+
+val context_label : string
+(** {!Operators.context_label}. *)
+
+val dependencies : Flow.Eval.value -> Sop.Context.Dependencies.t
+(** What a kernel over this data reads of its cook context: [Input] when it is frame dependent, the
+    seed, frame and time an inlined body's context sources read. *)
+
+val context_reads : Flow.Eval.value -> Sop.Context.Dependencies.t
+(** The seed, frame and time alone. *)
+
+val specialize : Sop.Context.t -> Flow.Eval.value -> Flow.Eval.value
+(** The data with its context sources replaced by the context's values, through captures. *)
+
 val resolve :
+  ?context:Sop.Context.t ->
   geometry:(int -> Rdk.Geometry.t option) ->
   Flow.Eval.value ->
   (Flow.Eval.value, Diagnostic.t) result

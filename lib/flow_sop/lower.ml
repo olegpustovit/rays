@@ -185,35 +185,75 @@ let changes parameter value =
 
 (* An inlined Lisp call's parameters take the node path: the call's changes over the schema
    defaults (ranges, choices, encoded text through the declared normalizers), then the node's
-   arguments. A refusal is the lowering error the node's construction raised. A body that reaches
-   its cook context (seed, frame, time, provenance base) with these parameters stays a node,
-   specialized per context.
-   ponytail: context values as cook-time sources of the one program would inline those too. *)
+   arguments. A refusal is the lowering error the node's construction raised. The body's context
+   operators carry the card's cook label (its kind key): the seed, frame and time are cook-time
+   sources its kernels resolve from their cook context; the provenance base is allocated where the
+   body's sop/concat lowers. *)
 let () =
   Atomic.set E.inline_parameters (fun (checked : Workspace.t) (d : Workspace.node_definition) ->
-      let schema =
-        lazy (Lisp_node.schema "parameters" d.fields (Encoded_parameters.for_node checked d))
+      let normalizers = lazy (Encoded_parameters.for_node checked d) in
+      let schema = lazy (Lisp_node.schema "parameters" d.fields (Lazy.force normalizers))
       and parameters = lazy (ok (Port.parameters d.fields)) in
-      fun vals ->
-        let changes =
-          List.concat_map
-            (fun (name, value) ->
-              match Port.find_parameter (Lazy.force parameters) name with
-              | Ok parameter -> changes_of parameter value
-              | Error _ -> [])
-            vals
-        in
-        let schema = Lazy.force schema in
-        match
-          Result.bind
-            (Param.apply_all schema (Param.default schema) changes)
-            (fun (values, _) -> Lisp_node.arguments d.fields values)
-        with
-        | Error message -> fail "E_LOWER" message
-        | Ok arguments ->
-            if Context_kernel.context_ops_reached ~inputs:arguments ~defs:checked.defs d.body = []
-            then Some arguments
-            else None)
+      let key = String.sub d.kind.qualified 4 (String.length d.kind.qualified - 4) in
+      let body, context_inputs = Context_kernel.label_context ~label:key d.body in
+      ( { d with body },
+        fun vals ->
+          let live, vals = List.partition (fun (_, value) -> E.is_live value) vals in
+          let changes =
+            List.concat_map
+              (fun (name, value) ->
+                match Port.find_parameter (Lazy.force parameters) name with
+                | Ok parameter -> changes_of parameter value
+                | Error _ -> [])
+              vals
+          in
+          (* a live argument (per frame, or cooked data) is passed as it is, a program input: its
+           field must have nothing to canonicalize *)
+          let raw (name, _) =
+            match List.find_opt (fun (f : Param.field_view) -> f.name = name) d.fields with
+            | None ->
+                not
+                  (List.exists
+                     (fun (f : Param.field_view) ->
+                       f.vec3 <> None && Option.map fst f.vec3 = Some name)
+                     d.fields)
+            | Some f -> (
+                f.vec3 = None
+                && (not (List.mem_assoc name (Lazy.force normalizers)))
+                &&
+                match f.kind with
+                | Param.Toggle_view -> true
+                | Integer_view { hard_min = None; hard_max = None; _ }
+                | Floating_view { hard_min = None; hard_max = None; _ } ->
+                    true
+                | _ -> false)
+          in
+          if not (List.for_all raw live) then None
+          else
+            let live_names = List.map fst live in
+            let override arguments =
+              List.filter (fun (name, _) -> not (List.mem name live_names)) arguments @ live
+            in
+            let schema = Lazy.force schema in
+            match
+              Result.bind
+                (Param.apply_all schema (Param.default schema) changes)
+                (fun (values, _) -> Lisp_node.arguments d.fields values)
+            with
+            | Error message -> fail "E_LOWER" message
+            | Ok arguments ->
+                (* a context input the call does not reach is bound to a placeholder, so no kernel
+               captures its source *)
+                let reached =
+                  if context_inputs = [] then []
+                  else
+                    Context_kernel.context_ops_reached ~inputs:arguments ~defs:checked.defs d.body
+                in
+                Some
+                  (override arguments
+                  @ List.filter_map
+                      (fun (name, op) -> if List.mem op reached then None else Some (name, E.Int 0))
+                      context_inputs) ))
 
 let at_zero value = if E.is_live value then ok (E.force value ~live:(Input.at_time 0.)) else value
 let is_zone kind = Operators.lowering kind = Some Operators.Zone
@@ -280,7 +320,50 @@ let geometry_arrays_data args =
        (fun (name, _) -> not (List.mem name [ "source"; "target"; "sources"; "geometry" ]))
        args)
 
-let geometry_arrays_node ~profile ~strict_body ~reference ~approx ~kernel_source ?(host = false)
+(* A kernel over data that reads its cook context (an inlined body's seed, frame or time) is built
+   per context from the specialized data, as the nested card rebuilt its body: the last context's
+   build is kept. The node at the default context gives the identity, facts and strict refusals. *)
+let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
+  let reads = Attribute_kernel.context_reads value in
+  if reads = Sop.Context.Dependencies.static then build Fun.id
+  else
+    let make context = build (Attribute_kernel.specialize context) in
+    let base = make (Result.get_ok (Sop.Context.create ())) in
+    let key context =
+      let has fact = Sop.Context.Dependencies.mem fact reads in
+      ( (if has Seed then Sop.Context.seed context else 0L),
+        (if has Frame then Sop.Context.frame context else 0L),
+        if has Time then Int64.bits_of_float (Sop.Context.time context) else 0L )
+    in
+    let last = Atomic.make None in
+    Sop.Node.Build.make ~label:(Sop.Node.label base) ~operation:(Sop.Node.operation base)
+      ~version:(Sop.Node.version base) ~parameters:(Sop.Node.parameters base)
+      ~cook_mode:(Sop.Node.facts base).cook_mode
+      ~dependencies:(Sop.Context.Dependencies.union (Sop.Node.dependencies base) reads)
+      ~input_policy:(Sop.Node.Build.input_policy base)
+      ~inputs:(Sop.Node.Build.input_array base)
+      (fun ~node_id:_ context payloads ->
+        let node =
+          match Atomic.get last with
+          | Some (k, node) when k = key context -> node
+          | _ ->
+              let node = make context in
+              Atomic.set last (Some (key context, node));
+              node
+        in
+        Sop.Node.Build.cook node context payloads)
+    |> Sop.Node.Build.with_facts (Sop.Node.facts base)
+
+let rec geometry_arrays_node ~profile ~strict_body ~reference ~approx ~kernel_source ?host ?state
+    ?elems ~operation ~args ~sources inputs =
+  per_context (E.Record args) (fun specialize ->
+      let args =
+        match specialize (E.Record args) with E.Record args -> args | _ -> assert false
+      in
+      geometry_arrays_node_in ~profile ~strict_body ~reference ~approx ~kernel_source ?host ?state
+        ?elems ~operation ~args ~sources inputs)
+
+and geometry_arrays_node_in ~profile ~strict_body ~reference ~approx ~kernel_source ?(host = false)
     ?state ?elems ~operation ~args ~sources inputs =
   let data = geometry_arrays_data args in
   let program =
@@ -309,9 +392,7 @@ let geometry_arrays_node ~profile ~strict_body ~reference ~approx ~kernel_source
         (if List.mem operation [ "sop/remap"; "sop/concat"; "sop/with_planes" ] then
            Sop.Node.Generic
          else Sop.Node.Generator)
-      ~dependencies:
-        (if E.frame_dependent data then Sop.Context.Dependencies.one Input
-         else Sop.Context.Dependencies.static)
+      ~dependencies:(Attribute_kernel.dependencies data)
       ~inputs:(Array.of_list inputs)
       (fun ~node_id:_ context geometries ->
         let cancelled () = Sop.Context.cancelled context in
@@ -325,7 +406,7 @@ let geometry_arrays_node ~profile ~strict_body ~reference ~approx ~kernel_source
             Result.bind program (fun program ->
                 Result.bind
                   (Flow_ir.Executor.force ?state ?elems ~reference ~strict:strict_body
-                     ~resolve:(Attribute_kernel.resolve ~geometry)
+                     ~resolve:(Attribute_kernel.resolve ~context ~geometry)
                      program ~live:(Sop.Context.input context))
                   (function
                     | E.Record fields ->
@@ -447,12 +528,24 @@ let is_resource (n : E.node) =
 let attribute_node ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source ?state ?elems
     ?selection ?default ?(owner = Rdk.Attribute.Point) ?(kind = "vec3") ~name ~values ~sources
     inputs =
+  let data =
+    E.Record
+      ([ ("values", values) ]
+      @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
+      @ Option.to_list (Option.map (fun v -> ("default", v)) default))
+  in
+  per_context data @@ fun specialize ->
+  let values = specialize values
+  and selection = Option.map specialize selection
+  and default = Option.map specialize default in
   if strict_body then ignore (ok (Attribute_kernel.prepare ~strict:true ~sources inputs values));
   Attribute_kernel.node ?state ?elems ?selection ?default ~gpu ~strict:strict_body ~reference
     ~profile ~approx ~owner ~kind ~source:(Lazy.force kernel_source) ~name ~values ~sources inputs
 
 let group_node ~strict_body ~reference ~profile ~approx ~kernel_source ?state ?elems ~args ~sources
     inputs =
+  per_context (E.Record args) @@ fun specialize ->
+  let args = match specialize (E.Record args) with E.Record args -> args | _ -> assert false in
   let text key default =
     match List.assoc_opt key args with
     | None -> default
@@ -471,9 +564,7 @@ let group_node ~strict_body ~reference ~profile ~approx ~kernel_source ?state ?e
         ^ Flow.Value.key_of ~residual:E.Residual.residual_id values
         ^ Option.fold ~none:"" ~some:E.state_stamp state)
       ~cook_mode:Sop.Node.Generic
-      ~dependencies:
-        (if E.frame_dependent values then Sop.Context.Dependencies.one Input
-         else Sop.Context.Dependencies.static)
+      ~dependencies:(Attribute_kernel.dependencies values)
       ~inputs:(Array.of_list inputs)
       (fun ~node_id:_ context geometries ->
         let result =
@@ -488,7 +579,7 @@ let group_node ~strict_body ~reference ~profile ~approx ~kernel_source ?state ?e
                 in
                 Result.bind
                   (Flow_ir.Executor.force ?state ?elems ~reference ~strict:strict_body
-                     ~resolve:(Attribute_kernel.resolve ~geometry)
+                     ~resolve:(Attribute_kernel.resolve ~context ~geometry)
                      program ~live:(Sop.Context.input context))
                   (function
                     | E.Record fields ->
@@ -1150,6 +1241,10 @@ struct
       ?host ?state ?elems ~operation ~args ~sources inputs
 
   let structural_node residual captures =
+    per_context (E.Residual residual) @@ fun specialize ->
+    let residual =
+      match specialize (E.Residual residual) with E.Residual r -> r | _ -> assert false
+    in
     let program =
       match Flow_ir.Core_lower.lower ~strict:true ~budget:32768 residual with
       | Ok program -> program
@@ -1160,9 +1255,7 @@ struct
     let node =
       Sop.Node.Build.make ~operation:"flow.geometry_select" ~version:1
         ~parameters:(Lazy.force kernel_source) ~cook_mode:Sop.Node.Generic ~inputs
-        ~dependencies:
-          (if E.frame_dependent (E.Residual residual) then Sop.Context.Dependencies.one Input
-           else Sop.Context.Dependencies.static)
+        ~dependencies:(Attribute_kernel.dependencies (E.Residual residual))
         (fun ~node_id:_ context payloads ->
           let session =
             lazy
@@ -1316,7 +1409,7 @@ struct
                       then
                         ok
                           (E.Host.force_reference
-                             ~resolve:(Attribute_kernel.resolve ~geometry)
+                             ~resolve:(Attribute_kernel.resolve ~context ~geometry)
                              value ~live:(Sop.Context.input context))
                       else value ))
                   args
@@ -1629,7 +1722,7 @@ struct
                                  (fun (name, _) -> name <> "$name" && name <> "$context")
                                  args)
                         | _ -> error "E_DATA_SOURCE" "A host call needs its checked kind.")
-                  | value -> Attribute_kernel.resolve ~geometry value
+                  | value -> Attribute_kernel.resolve ~context ~geometry value
                 with Diagnostic.Error d -> Error d
               in
               let result =
@@ -2092,6 +2185,21 @@ struct
         | _ -> own)
     | _ -> None
 
+  (* the editor's provenance: a merge tags its input i with base + i *)
+  let tag_sources cid args =
+    let sources = geo_of args in
+    let base = !tags in
+    tags := base + List.length sources;
+    List.iteri
+      (fun index source ->
+        let s = plan.nodes.(source) in
+        provenance :=
+          Network.Int_map.add (base + index)
+            { merge = cid; input = index; source = compiled.(source); site = s.site; iter = s.iter }
+            !provenance)
+      sources;
+    base
+
   let lower_default (node : E.node) args cid =
     let kind = node.kind and dynamic = ref [] in
     let node_error =
@@ -2134,26 +2242,7 @@ struct
             (* the editor's provenance: a Lisp sop/merge tags input i with base + i *)
             let tag_base =
               if kind <> "sop/merge" || not provenance_tags then None
-              else begin
-                let sources = geo_of args in
-                let base = !tags in
-                tags := base + List.length sources;
-                List.iteri
-                  (fun index source ->
-                    let s = plan.nodes.(source) in
-                    provenance :=
-                      Network.Int_map.add (base + index)
-                        {
-                          merge = cid;
-                          input = index;
-                          source = compiled.(source);
-                          site = s.site;
-                          iter = s.iter;
-                        }
-                        !provenance)
-                  sources;
-                Some base
-              end
+              else Some (tag_sources cid args)
             in
             lisp_factory ?error:node_error ~functions:args ?provenance:tag_base
               (Option.value fused_definition ~default:definition)
@@ -2466,6 +2555,16 @@ struct
     let reg key lower = Hashtbl.replace natives key lower in
     reg Geometry_arrays (fun (node : E.node) args cid ->
         let operation = node.kind in
+        (* an inlined merge body's provenance base, allocated here as its card was *)
+        let args =
+          List.map
+            (fun (name, value) ->
+              match value with
+              | E.Source ("sop/provenance_base", _, _) ->
+                  (name, E.Int (if provenance_tags then tag_sources cid args else -1))
+              | value -> (name, value))
+            args
+        in
         let sources = deps node in
         let factory =
           Edit.factory ~key:(geometry_arrays_key operation) ~label:(geometry_arrays_label operation)

@@ -6,6 +6,10 @@ val seed_for : ?salt:int -> seed:int64 -> namespace:string -> label:string -> un
     [salt] (default 0) is its low 63 bits xor-ed into the identity before mixing. Names and labels
     are hashed as UTF-8 bytes. *)
 
+val context_label : string
+(** The reserved argument naming the card whose inlined body reads its cook context: a context
+    operator carrying it is a cook-time source. *)
+
 (** How the lowerer builds a node of this kind; [None] is an ordinary catalog or Lisp node. *)
 type lowering =
   | Geometry_arrays
