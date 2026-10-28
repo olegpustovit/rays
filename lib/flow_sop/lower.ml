@@ -836,7 +836,7 @@ end) = struct
                   let selected=try
                     let check()=if Sop.Context.cancelled context then
                       Flow.Value.fail "cancelled" "geometry operation was cancelled" in
-                    Ok(Flow.Value.Private.error_row_index ?grain ~check rows)
+                    Ok(Flow.Value.error_row_index ?grain ~check rows)
                    with Diagnostic.Error d -> Error d in
                    Result.bind selected(function Some index->Ok(E.Int index)
                      |None->error "E_DIAGNOSTIC_CONTEXT" "Host diagnosis needs a failing row."))

@@ -578,7 +578,7 @@ and ev_raw c env (x : W.term) : value =
   | W.Error_rows{rows;policy;mapper}->
       if c.st.time=None then raise Needs_t;
       let value=concrete_data c(ev(sub c "0")env rows)in
-      Value.Private.diagnose_rows value
+      Value.diagnose_rows value
         ~select:(fun rows first->match c.st.resolve,policy with
           |None,W.First->first
           |None,W.Range_last->fail "E_DIAGNOSTIC_CONTEXT" "Range-last diagnosis needs its native host."
@@ -592,7 +592,7 @@ and ev_raw c env (x : W.term) : value =
           |_->fail "E_DIAGNOSTIC_MAP" "A row mapper is a function.")
   | W.With_error(protected,mapper) ->
       if c.st.time=None then raise Needs_t;
-      Value.Private.with_error
+      Value.with_error
         ~protected:(fun()->let value=concrete_data c(ev (sub c "0") env protected) in
           match value,c.st.resolve with
           | Deferred(ty,_),Some resolve when Ty.is_cooked ty->

@@ -28,7 +28,7 @@ let resolve grain calls=function
   |E.Source("$core/diagnostic_index",Flow.Ty.Int,["rows",rows;"policy",E.Text policy])->
       incr calls;
       let grain=match policy with "first"->None|"range-last"->Some grain|_->assert false in
-      (match V.Private.error_row_index ?grain rows with Some index->Ok(E.Int index)|None->assert false)
+      (match V.error_row_index ?grain rows with Some index->Ok(E.Int index)|None->assert false)
   |_->assert false
 let failure index=function
   |Error(d:D.t)->assert(d.code="E_ROW" && d.message="bad "^string_of_int index
@@ -42,7 +42,7 @@ let ()=
   assert(!calls=0);
   List.iter(fun bits->let rows=Array.make 32769 0 in List.iter(fun i->rows.(i)<-1)bits;
     let before=Array.copy rows in
-    List.iter(fun grain->let selected=Option.get(V.Private.error_row_index ~grain(E.Int_array rows))in
+    List.iter(fun grain->let selected=Option.get(V.error_row_index ~grain(E.Int_array rows))in
       failure selected(evaluate ~resolve:(resolve grain calls)(E.Int_array rows)
         ("(error_rows flags "^mapper^" :policy \"range-last\")"))) [1;97;4096;max_int];
     failure(List.hd bits)(evaluate(E.Int_array rows)("(error_rows flags "^mapper^")"));assert(rows=before))
@@ -59,10 +59,10 @@ let ()=
 (match evaluate(E.Int_array[|1|])
   "(error_rows flags (fn [index] (error \"cancelled\" \"mapper cancel\" :cause \"original cancel\")))"with
   |Error d->assert(d.code="cancelled" && d.message="mapper cancel" && d.cause=Some "original cancel")|_->assert false);
-(try ignore(V.Private.error_row_index(E.Float_array[|1.|]));assert false
+(try ignore(V.error_row_index(E.Float_array[|1.|]));assert false
  with Diagnostic.Error d -> assert(d.code="E_DIAGNOSTIC_ROWS"));
   let polls=ref 0 in
-  (try ignore(V.Private.error_row_index ~grain:97 ~check:(fun()->incr polls;
+  (try ignore(V.error_row_index ~grain:97 ~check:(fun()->incr polls;
     if !polls=3 then V.fail "E_CANCELLED" "cancel scan")(E.Int_array(Array.make 5001 0)));assert false
    with Diagnostic.Error d -> assert(d.code="E_CANCELLED"));
   List.iter(fun body->let _,ds=W.check catalog(parse(source body))in

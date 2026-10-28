@@ -301,7 +301,7 @@ let () =
   let capture f=try Ok(f()) with Diagnostic.Error d -> Error(d.code,d.message) in
   List.iter(fun(name,fill)->let op=Option.get(Op.find name Context.value) in
     List.iter(fun count->let args=["count",Int count;"value",fill] in
-      let actual=capture(fun()->Op.Private.constant_array_descriptor name args) in
+      let actual=capture(fun()->Op.constant_array_descriptor name args) in
       let expected=capture(fun()->op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args) in
       match actual,expected with
       |Error a,Error b->assert(a=b)
@@ -310,18 +310,18 @@ let () =
           if count>0 then assert(row=Value.array_get data 0)
       |_->assert false) [0;1;7;-1];
     List.iter(fun fill->let args=["count",Int 1;"value",fill] in
-      assert(capture(fun()->Op.Private.constant_array_descriptor name args)=
+      assert(capture(fun()->Op.constant_array_descriptor name args)=
         (match capture(fun()->op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args)with
          |Error e->Error e|Ok _->assert false))) [Text "wrong";Float nan])
     ["array/float",Float(-0.);"array/vec3",Vec3(-0.,1.,2.);"array/vec4",Vec4(-0.,1.,2.,3.)];
   List.iter(fun count->let args=["count",Int count;"value",Text "unused"] in
     let op=Option.get(Op.find "array/vec4" Context.value) in
-    assert(capture(fun()->Op.Private.constant_array_descriptor "array/vec4" args)=
+    assert(capture(fun()->Op.constant_array_descriptor "array/vec4" args)=
       (match capture(fun()->op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args)with
        |Error e->Error e|Ok _->assert false))) [Sys.max_floatarray_length/4+1];
-  (match Op.Private.constant_array_descriptor "array/vec4" ["count",Int 0;"value",Text "unused"]with
+  (match Op.constant_array_descriptor "array/vec4" ["count",Int 0;"value",Text "unused"]with
    |Source(_,_,["count",Int 0;"value",Vec4(0.,0.,0.,0.)])->()|_->assert false);
-  List.iter(fun args->match capture(fun()->Op.Private.constant_array_descriptor "array/vec4" args)with
+  List.iter(fun args->match capture(fun()->Op.constant_array_descriptor "array/vec4" args)with
     |Error("E_ARRAY_TYPE",_)->()|_->assert false) [[];["count",Int 1;"count",Int 1];["count",Int 1;"extra",Int 0]];
   print_endline "Constant array descriptors: canonical count/bounds/empty/fill checks match dense constructor errors"
 

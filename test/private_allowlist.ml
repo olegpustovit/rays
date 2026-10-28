@@ -2,8 +2,6 @@
    The gate rejects a reference not listed here and a listed one that is gone, so
    this list only shrinks. Give the use a public name instead of adding a row. *)
 let entries = [
-  "flow_ir", "Flow.Op.Private";
-  "flow_ir", "Flow.Value.Private";
   "flow_native", "Canvas.Private";
   "flow_native", "Flow_gpu.Host.Private";
   "flow_native", "Flow_gpu.Image_sink.Private";
@@ -14,8 +12,6 @@ let entries = [
   "flow_native", "Sop.Image.Private";
   "flow_native", "Sop.Node.Private";
   "flow_native", "Texture.Private";
-  "flow_sop", "Flow.Op.Private";
-  "flow_sop", "Flow.Value.Private";
   "flow_sop", "Flow_sop.Catalog.Private";
   "flow_sop", "Flow_sop.Lower.Private";
   "flow_sop", "Sop.Image.Private";
@@ -47,8 +43,6 @@ let entries = [
   "renderer", "Runtime_resources.Text.Private";
   "runtime", "Ogpu.Backend.Private";
   "runtime", "Renderer.Private";
-  "tools", "Flow.Op.Private";
-  "tools", "Flow.Value.Private";
   "tools", "Rays.Image.Private";
   "tools", "Scene.D3.Private";
   "tools", "Sop.Image.Private";

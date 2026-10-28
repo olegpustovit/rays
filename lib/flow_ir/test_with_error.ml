@@ -62,19 +62,19 @@ let ()=
       handler=[statement 2(Assign(2,Local 0))];mapped=2;result=3})];results=[|3|];state_slots=[||];regions=[||];call_slots=0}in
   (match Test_program.run program ~live:(Input.at_time 0.)with Error actual->assert(actual=original)|_->assert false);
   let without_cause={original with cause=None}in
-  (try ignore(V.Private.with_error ~protected:(fun()->V.raise_diagnostic without_cause)
+  (try ignore(V.with_error ~protected:(fun()->V.raise_diagnostic without_cause)
     ~map:Fun.id);assert false
    with Diagnostic.Error actual->assert(actual=without_cause));
   let called=ref 0 in
-  (try ignore(V.Private.with_error ~protected:(fun()->V.raise_diagnostic original)
+  (try ignore(V.with_error ~protected:(fun()->V.raise_diagnostic original)
     ~map:(fun _->incr called;V.Record["code",Text "E_NEW";"message",Text "new";"cause",List[|Text "a";Text "b"|]]));assert false
    with Diagnostic.Error actual->assert(actual.code="E_DIAGNOSTIC_MAP" && actual.trace=original.trace
      && actual.hints=original.hints && actual.cause=original.cause));assert(!called=1);
-  (try ignore(V.Private.with_error ~protected:(fun()->V.raise_diagnostic original)
+  (try ignore(V.with_error ~protected:(fun()->V.raise_diagnostic original)
     ~map:(fun _->V.fail "E_CANCELLED" "mapper cancellation"));assert false
    with Diagnostic.Error actual->assert(actual.code="E_CANCELLED" && actual.message="mapper cancellation"
      && actual.span=None && actual.hints=[] && actual.trace=[]));
-  (try ignore(V.Private.with_error ~protected:(fun()->raise Exit) ~map:(fun _->assert false));assert false with Exit->())
+  (try ignore(V.with_error ~protected:(fun()->raise Exit) ~map:(fun _->assert false));assert false with Exit->())
 
 let () =
   let request = residual "(exact (map (fn [x] (+ x 1.0)) (array/float 4 2.0)))" in
@@ -82,7 +82,7 @@ let () =
   let mapped = ref 0 in
   let actual = try
     ignore (E.Residual.handle ~bulk:(fun _ -> raise (Diagnostic.Error callback_error)) (fun () ->
-      V.Private.with_error
+      V.with_error
         ~protected:(fun () -> Option.get (Effect.perform (E.Residual.Bulk_static request)))
         ~map:(function
           | V.Record fields -> incr mapped;

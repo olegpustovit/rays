@@ -234,7 +234,7 @@ let constant_source = function
   |E.Source(name,ty,args) when String.starts_with ~prefix:"$core/constant-array/" name ->
       Some (try
         let operation=String.sub name 21 (String.length name-21) in
-        match Flow.Op.Private.constant_array_descriptor operation args with
+        match Flow.Op.constant_array_descriptor operation args with
         |E.Source(_,actual,fields) when actual=ty->
             (match List.assoc_opt "count" fields,List.assoc_opt "value" fields with
              |Some(E.Int count),Some value->Ok(operation,count,value)
@@ -755,7 +755,7 @@ let write_constant ?state ?elems ~resolve ~owner ~kind ~name prepared target ~li
                  let value=match value with Some program->Result.map(fun value->["value",value])(force program)
                    |None->Ok [] in
                  Result.bind value (fun value->
-                   let sample=try Ok(Flow.Op.Private.constant_array_descriptor op.Flow.Op.name (("count",count)::value))
+                   let sample=try Ok(Flow.Op.constant_array_descriptor op.Flow.Op.name (("count",count)::value))
                      with Diagnostic.Error d -> Error d in
                    Result.bind sample (fun sample->
                      write_constant_source ~grain:4096 ~owner ~kind name sample target)))
@@ -801,7 +801,7 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                       (fun value->
                         (* Reuse the declared constructor's count, empty-fill and
                            finite checks before evaluating later write arguments. *)
-                        let values=try Ok(Flow.Op.Private.constant_array_descriptor op.Flow.Op.name (("count",count)::value))
+                        let values=try Ok(Flow.Op.constant_array_descriptor op.Flow.Op.name (("count",count)::value))
                           with Diagnostic.Error d -> Error d in
                         Result.bind values(fun values->Result.bind rest(fun rest->
                           Result.bind(force rest)(function

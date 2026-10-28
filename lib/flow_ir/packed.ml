@@ -240,7 +240,7 @@ let typed_inputs ?column_source ~evaluate (t:t) =
       |_->None);
     let value=if borrowed.(i)<>None then E.No_geo else match integer_range r term with
     | Some(r,count) ->
-        ranges.(i)<-Some(Flow.Op.Private.array_count ~limit:Sys.max_array_length
+        ranges.(i)<-Some(Flow.Op.array_count ~limit:Sys.max_array_length
           "array/range" (evaluate r count)); E.No_geo
     | None -> evaluate r term in
     lengths.(i)<-(match ranges.(i),borrowed.(i)with

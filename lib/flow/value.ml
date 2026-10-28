@@ -257,7 +257,6 @@ let rec validate = function
   | Record fs | Struct (_, _, fs) | Source (_, _, fs) -> List.iter (fun (_, v) -> validate v) fs
   | _ -> ()
 
-module Private = struct
   let with_error ~protected ~map =
     let cancelled (d:Diagnostic.t) = d.code="cancelled" || d.code="E_CANCELLED" in
     let payload (d:Diagnostic.t) = Record ["code",Text d.code;"message",Text d.message;
@@ -320,4 +319,3 @@ let diagnose_rows ~select ~map value =
       with_error ~protected:(fun()->fail "E_DIAGNOSTIC_ROW" "A diagnostic row failed.")
         ~map:(fun _->map(Int index))
 
-end

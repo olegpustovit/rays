@@ -135,15 +135,15 @@ let primitive ~track ~locals op args =
           | _ -> V.fail "E_TYPE" "rand/at needs integer seed and index.")
     | Array_reduce operation ->
         let values=a_ "array" in
-        fun st -> Flow.Op.Private.reduce_array operation st.values.(values)
+        fun st -> Flow.Op.reduce_array operation st.values.(values)
     | Array_segment operation ->
         let values=a_ "values" and offsets=a_ "offsets" in
-        fun st -> Flow.Op.Private.reduce_array
+        fun st -> Flow.Op.reduce_array
           ~rows:(fun ~start ~finish f -> Parallel.for_ ~start ~finish f) operation
           ~offsets:st.values.(offsets) st.values.(values)
     | Array_segment_argmax ->
         let values=a_ "values" and offsets=a_ "offsets" in
-        fun st -> Flow.Op.Private.segment_argmax
+        fun st -> Flow.Op.segment_argmax
           ~rows:(fun ~start ~finish f -> Parallel.for_ ~start ~finish f)
           ~offsets:st.values.(offsets) st.values.(values)
     | Remainder -> let a=a () and b=b () in
@@ -467,7 +467,7 @@ let prepare ?(remember_loops=false) ?(approx=Flow.Workspace.Paths.empty) ?(fast=
         let prefix="$core/constant-array/" in
         if String.starts_with ~prefix name then
           let operation=String.sub name(String.length prefix)(String.length name-String.length prefix) in
-          let value=Flow.Op.Private.constant_array_descriptor operation args in
+          let value=Flow.Op.constant_array_descriptor operation args in
           if V.ty_of value<>ty then V.fail "E_ARRAY_TYPE" "Constant array descriptor has the wrong declared type.";
           value
         else E.Source(name,ty,args)
@@ -609,7 +609,7 @@ let prepare ?(remember_loops=false) ?(approx=Flow.Workspace.Paths.empty) ?(fast=
           | None -> V.fail "E_CORE" "Drawing statements need a mark table.")
     | Diagnose_rows{rows;policy;index;handler;diagnostic;result}->
         let handler=plain_block handler in
-        fun st->st.values.(result)<-V.Private.diagnose_rows st.values.(rows)
+        fun st->st.values.(result)<-V.diagnose_rows st.values.(rows)
           ~select:(fun rows first->match st.resolve,policy with
             |None,Flow.Workspace.First->first
             |None,Flow.Workspace.Range_last->V.fail "E_DIAGNOSTIC_CONTEXT" "Range-last diagnosis needs its native host."
@@ -621,7 +621,7 @@ let prepare ?(remember_loops=false) ?(approx=Flow.Workspace.Paths.empty) ?(fast=
           ~map:(fun value->st.values.(index)<-value;handler st;seal st diagnostic;st.values.(diagnostic))
     | Protect {body;value;failure;handler;mapped;result}->
         let body=plain_block body and handler=plain_block handler in
-        fun st->st.values.(result)<-V.Private.with_error
+        fun st->st.values.(result)<-V.with_error
           ~protected:(fun()->body st;seal st value;st.values.(value))
           ~map:(fun diagnostic->st.values.(failure)<-diagnostic;handler st;seal st mapped;st.values.(mapped))
     | If {condition;yes;no} ->

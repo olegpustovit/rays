@@ -421,9 +421,9 @@ let ()=
   let n=Sys.max_floatarray_length/3+1 in
   check(n<=Sys.max_floatarray_length && n*3>Sys.max_floatarray_length)
     "Mesh planes failed to remove the interleaved representation ceiling";
-  check(Flow.Op.Private.array_count "array/float"(E.Int Sys.max_floatarray_length)=Sys.max_floatarray_length)
+  check(Flow.Op.array_count "array/float"(E.Int Sys.max_floatarray_length)=Sys.max_floatarray_length)
     "Mesh planes narrowed native scalar capacity";
-  (try ignore(Flow.Op.Private.array_count "array/float"(E.Int(Sys.max_floatarray_length+1)));
+  (try ignore(Flow.Op.array_count "array/float"(E.Int(Sys.max_floatarray_length+1)));
       fail "Scalar point plane exceeded native array capacity"
    with Diagnostic.Error d -> check(d.code="E_ARRAY_RANGE")"Scalar plane capacity error changed");
   print_endline "Mesh planes finite/count/topology errors, lazy causes and exact scalar capacity retain native boundaries"

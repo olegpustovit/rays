@@ -1365,7 +1365,7 @@ let () =
     let before=geometry_bytes original in
     List.iter(fun(kind,fill)->
       let name="array/"^kind in
-      let marker=Flow.Op.Private.constant_array_descriptor name ["count",E.Int count;"value",fill] in
+      let marker=Flow.Op.constant_array_descriptor name ["count",E.Int count;"value",fill] in
       if kind="float" then begin
         let selection=E.Int_array(Array.make count 1) in
         (match Flow_sop.Attribute_kernel.write_selected ~grain:97 ~owner:Attribute.Point ~kind "constant"

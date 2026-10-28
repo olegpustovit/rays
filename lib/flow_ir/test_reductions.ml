@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module V = Flow.Value
-module O = Flow.Op.Private
+module O = Flow.Op
 module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let same a b = Marshal.to_string a [Marshal.No_sharing] = Marshal.to_string b [Marshal.No_sharing]

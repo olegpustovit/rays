@@ -301,13 +301,13 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     arr2[3.;-0.;1.;0.];arr3[3.;2.;-0.;1.;4.;0.];arr4[3.;2.;1.;-0.;1.;4.;5.;0.];
     arr1[nan];arr1[infinity];E.Text_array[|"x"|]] in
   List.iter(fun operation->List.iter(fun array->add(C.Array_reduce operation)[array])arrays)
-    [Flow.Op.Private.Minimum;Maximum];
+    [Flow.Op.Minimum;Maximum];
   List.iter(fun operation->List.iter(fun array->
     let count=Flow.Value.array_length array in
     List.iter(fun offsets->add(C.Array_segment operation)[array;E.Int_array offsets])
       [[|0;count|];[|0;0;count|];[|0|];[||];[|0;count+1;count|];[|0;-1;count|];[|0;max_int;count|]];
     add(C.Array_segment operation)[array;arr1[0.;float count]]) arrays)
-    [Flow.Op.Private.Sum;Minimum;Maximum];
+    [Flow.Op.Sum;Minimum;Maximum];
   List.iter(fun array->
     let count=Flow.Value.array_length array in
     List.iter(fun offsets->add C.Array_segment_argmax [array;E.Int_array offsets])
@@ -1313,8 +1313,8 @@ let diagnostic_json(d:Diagnostic.t)=Printf.sprintf
   {|{"error":{"code":%s,"message":%s%s}}|}(str d.code)(str d.message)
   (Option.fold ~none:"" ~some:(fun cause->",\"cause\":"^str cause)d.cause) in
 let diagnose rows grain =
-  try json(Flow.Value.Private.diagnose_rows rows
-    ~select:(fun rows _->Option.get(Flow.Value.Private.error_row_index ~grain rows))
+  try json(Flow.Value.diagnose_rows rows
+    ~select:(fun rows _->Option.get(Flow.Value.error_row_index ~grain rows))
     ~map:(function E.Int index->E.Record["code",E.Text"E_ROW";
         "message",E.Text("bad "^string_of_int index);
         "cause",E.List[|E.Text("raw 日本😀 "^string_of_int index)|]]|_->assert false))
