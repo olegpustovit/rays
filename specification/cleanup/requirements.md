@@ -76,7 +76,7 @@ Decided 2026-10-27: Rays Lisp is the SOP surface. The 128 OCaml node twins, the 
 
 Exit gates:
 
-- [x] P1.G1: lib/ under about 230k lines (from about 300k), counted with wc Evidence: owner decision 2026-10-28: accepted at 254.5k lines (from 332.5k, −23%); the plan's estimate predates the emitters, Lisp kernels and tests this cleanup added.
+- [x] P1.G1: lib/ under about 230k lines (from about 300k), counted with wc Evidence: owner decision 2026-10-28: accepted at 254.5k lines (from 332.5k, −23%); like-for-like after formatting both trees with the same .ocamlformat: 472,041 at baseline 62582188 vs 365,490 now (−22.6%); the plan's estimate predates the emitters, Lisp kernels and tests this cleanup added.
 - [x] P1.G2: the `ports` alias runs under 2 minutes Evidence: per the owner, the golden lane is the 819-row corpus (c182d05a) and the full 58k corpus is dropped. @lib/flow_sop/goldens/runtest passes in 1:49 wall through check.exe, including the build, at load 18–21.
 - [x] P1.G3: the manifest lists 37 native and 128 Lisp SOPs, with zero OCaml twins Evidence: flow_manifest.sexp lists 37 native and 128 Lisp SOPs, with zero OCaml twins (@lib/sop_catalog/runtest diff passes).
 - [x] P1.G4: `prune-dead-code` reports nothing left Evidence: prune-dead-code reports nothing further in lib/rdk; dead-stubs reports nothing in lib/metal.
@@ -203,7 +203,7 @@ Delete `pathtrace.metal`. The path tracer is a plain `.rays` program; placement 
 Exit gates:
 
 - [x] P8.G1: no `.metal` file in lib/rays_pathtracer Evidence: lib/rays_pathtracer has no .metal file.
-- [x] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse Evidence: GPU ms per 16 spp, interleaved: pathtracer.rays −0.6%, shattered_studio 800² −9.7%. Pipeline compile: with the kernel disk cache (key: executable, kernel text and scene facts) the Lisp front end takes 0.3–0.4 ms per kernel, Metal pipeline creation 0.3–1.2 ms; cold Metal cache first frame 518–550 vs 1,414–1,506 ms. The warm first frame is 208–218 ms (median about 211) vs 198.5–207 ms (about 201) for the old kernel; the roughly 10 ms is a major GC cycle from document loading landing in the World bake, and with a forced GC both are within 1–5 ms.
+- [ ] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse
 - [x] P8.G3: film RMSE ≤ 1e-4 against today's kernel after N spp Evidence: owner decision 2026-10-28: judged by self-consistency. pathtracer.rays meets RMSE 1e-4 (6.9e-5 at 64 spp). On shattered_studio the Lisp kernel's difference (4.8e-4 at 512 spp, unbiased, falling with spp) is at the deleted kernel's own regrouping noise (3.8e-4).
 - [x] P8.G4: every SPIR-V golden passes `spirv-val` Evidence: @lib/flow_gpu/runtest runs spirv-val on every SPIR-V golden and passes (3.4 s).
 
