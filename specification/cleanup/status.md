@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **217 / 248 accepted (87.5%)**. This counts individual
+Finding coverage: **223 / 248 accepted (89.9%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- rdk blocked: RK29 (the remaining type re-exports expose constructors from private modules to their facades; moving them would create module cycles), XC22 (edit_graph and node catches wrap generated build/rebuild closures running 27 [@sop.validate] callbacks and about 111 invalid_arg decoders; validating first changes the PPX factory contract. Carry is fixed via Projection.find_graph).
 
 - Editor items blocked on decisions: UI18 (merging the Kind_graph scene/World inspector into workspace_inspector changes visible rows and edit semantics pinned by test_scene_tree), UI25 (the prepared type parameter is instantiated with about 6 types across about 85 test sites), UI29 (Navigator on Pxui_shell.Tree needs Tree hooks for custom trailing widgets). Partial: UI21 (4 of about 85 Private re-exports removed; the rest need tests moved to their owners), UI27 (Scope_frame.update about 110 lines, but steps still emit through a ref), UI13 (the World drag is world_drag_frame over Ui events, modifiers as a value). P5.G2: Eval.Residual and the sop test shim are explicit; the rdk_test_support includes remain.
 

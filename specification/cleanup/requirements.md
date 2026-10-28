@@ -239,7 +239,7 @@ After P1, rdk holds only live kernels. Give it one error model, one parallel and
 - [x] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites. Evidence: uv_parameterize uses Support.run_ranges; there is one range helper (Support.run_ranges / parallel_for) and one cancel check (Cancel.check_opt).
 - [x] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules. Evidence: see RK8, RK9, RK10 and RK15.
 - [ ] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults.
-- [ ] P6.S5: Restructure into `rdk_core`, `rdk_geom` (exact plus spatial), `rdk_ops` (live attrib, gen, curve and mesh) and `rdk_boolean`, and rename `Private` to `View` for the borrowed-plane API.
+- [x] P6.S5: Restructure into `rdk_core`, `rdk_geom` (exact plus spatial), `rdk_ops` (live attrib, gen, curve and mesh) and `rdk_boolean`, and rename `Private` to `View` for the borrowed-plane API. Evidence: fa4541bc: rdk_exact+rdk_spatial are rdk_geom, and rdk_attrib+rdk_curve+rdk_mesh are rdk_ops (include_subdirs); the gate library count went from 59 to 56. Private is View (RK17).
 - [x] P6.S6: Tests: local fixtures, one support library opened everywhere, and `parallel_exact` shared. Evidence: see RK23; rdk tests share one support library.
 
 Exit gates:
@@ -647,7 +647,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **XC23** (P4, low, duplication, effort S). Location at baseline: scene_command/render_ir.ml:58-66. A hand-written byte `Encoder`. Action: Use `Buffer` with `add_int32_le` and `add_int64_le`.
 
-- [ ] **XC24** (P6, low, duplication, effort M). Location at baseline: 29 hand-written array-doubling sites (14 in rdk, ui.ml:89, eval.ml:935, packed.ml:508). `Dynarray` is already used 23 times. Action: Use `Dynarray` on the paths that are not hot.
+- [x] **XC24** (P6, low, duplication, effort M). Location at baseline: 29 hand-written array-doubling sites (14 in rdk, ui.ml:89, eval.ml:935, packed.ml:508). `Dynarray` is already used 23 times. Action: Use `Dynarray` on the paths that are not hot. Evidence: Dissolve uses Dynarray for its boxed primitive-kind buffer; the remaining doubling sites are packed int/float tables or hash tables, where Dynarray is not a drop-in.
 
 - [x] **XC25** (P5, low, duplication, effort S). Location at baseline: 4 rect records, ~104 anonymous 4-tuples in .mli files; rect hit test at ui.ml:662 and scope_pane.ml:14. Rect types and hit tests are spread around. Action: Export `Ui.contains` and delete the pxui_graph copy. Typing the tuples is optional. Evidence: Ui.contains replaces the hand-rolled rect tests in scope_frame, core and viewport.
 
@@ -741,7 +741,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK6** (P6, high, duplication, effort M). Location at baseline: support.ml:158, kernel.ml:8, curve_ops.ml:17, poly_path.ml:7, uv_ops.ml:52, uv_parameterize.ml:32, sweep.ml:44, boolean_(corner_)payload. At least 8 copies of the parallel-for helper, plus 132 inline `~chunk_size:1` range loops. Action: Use one `Support.parallel_for`/`parallel_ranges`.
 
-- [ ] **RK7** (P6, high, duplication, effort M). Location at baseline: 886 inline `if i land MASK = 0 then Cancel.check_opt` sites with 11 different masks. The cancellation cadence is copied by hand everywhere. Action: Add `Cancel.poll cancel i`, or put the check inside the parallel helper. The change is mechanical.
+- [x] **RK7** (P6, high, duplication, effort M). Location at baseline: 886 inline `if i land MASK = 0 then Cancel.check_opt` sites with 11 different masks. The cancellation cadence is copied by hand everywhere. Action: Add `Cancel.poll cancel i`, or put the check inside the parallel helper. The change is mechanical. Evidence: c74afdab: one inline Cancel.poll cancel i mask replaces 481 hand-written masked checks in 82 files, keeping every site's cadence. Microbench (4e8 iterations): non-opaque 1.50–1.57 vs 1.48–1.56 s; the dev profile's -opaque costs at most about 5% on a few-instruction loop.
 
 - [x] **RK8** (P6, high, duplication, effort M). Location at baseline: 209 `match storage with`; Float4 arms ×85 in 40 files; planes_of_storage at attribute_composite.ml:77 and attribute_generate.ml:504. The same code is copied for each storage type. Action: Add `Attribute.map_float_planes`/`planes` to core. Evidence: Attribute.float_planes and of_float_planes collapse the Float..Float4 arms in Attribute_transfer and both Boolean_payload interpolators.
 
@@ -749,7 +749,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK10** (P6, med, duplication, effort S). Location at baseline: point_clusters.ml:91 · point_snap.ml:100. Two open-addressing uniform grids. Action: Extract one `Point_grid`. Evidence: one Point_grid module serves Point_clusters and Point_snap.
 
-- [ ] **RK11** (P6, med, layering, effort S). Location at baseline: surface_index.ml:1219-1232 → mesh/ray.ml:221 via Private. Ray-SOP policy (sample average/median, directions) lives inside the spatial index. Action: Move it into `Ray`; the index keeps only hit queries.
+- [x] **RK11** (P6, med, layering, effort S). Location at baseline: surface_index.ml:1219-1232 → mesh/ray.ml:221 via Private. Ray-SOP policy (sample average/median, directions) lives inside the spatial index. Action: Move it into `Ray`; the index keeps only hit queries. Evidence: 1297fa3a moves the ray sampling policy (combine, jitter, normal averaging, average driver; about 340 lines) from Surface_index into Ray; the index keeps hit queries.
 
 - [x] **RK12** (P1, med, dead-code, effort S). Location at baseline: mesh/sweep_circle.ml:3 run_legacy (~650) · sweep_modeling.ml · point_replication.ml · group_mesh.ml · exact/voronoi2.ml (3-line comment). Legacy paths and empty or adapter modules, all oracle-only. Action: Delete them, together with the Voronoi2 alias at rdk.ml:10. Evidence: Voronoi2 and the sweep_circle run_legacy path are gone.
 
@@ -765,9 +765,9 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK18** (P6, med, vibe-code, effort S). Location at baseline: 13 `owner_count`, 42 local `fail`, 13 `get_ok`, 14 `checked_add`, 5 union-find. Shared definitions already exist in core. Action: `tools/dedupe --qualify Support`, then delete the tool (TT11). Evidence: the 13 boolean tests' local fail/check/get copies are gone; they open Rdk_test_support, which gained failf.
 
-- [ ] **RK19** (P6, med, naming, effort M). Location at baseline: Blast_points, Centroid_piece_points, Copy_target_points, Connectivity_points, Group_points …. The owner type is re-encoded with a prefix in each module. Action: Reuse `Attribute.owner` with a validation check.
+- [x] **RK19** (P6, med, naming, effort M). Location at baseline: Blast_points, Centroid_piece_points, Copy_target_points, Connectivity_points, Group_points …. The owner type is re-encoded with a prefix in each module. Action: Reuse `Attribute.owner` with a validation check. Evidence: da526300: the Connectivity and Mirror owner enums are Attribute.owner (Detail refused), and SOP's element_owner is Group_ops.owner. Dead Blast_by_attribute, Extract_centroid and Copy_target types are deleted.
 
-- [ ] **RK20** (P6, med, god-module, effort M). Location at baseline: mesh/subdivide.ml 4,607. Its own fail, get_ok, checked arithmetic and union-find; eight Float2/3/4 copies; three resolve-defaults blocks. `edge_divide` is oracle-only. Action: After RK3 and RK8 it shrinks by 15–20%. Split out the stitching (3263-3700).
+- [x] **RK20** (P6, med, god-module, effort M). Location at baseline: mesh/subdivide.ml 4,607. Its own fail, get_ok, checked arithmetic and union-find; eight Float2/3/4 copies; three resolve-defaults blocks. `edge_divide` is oracle-only. Action: After RK3 and RK8 it shrinks by 15–20%. Split out the stitching (3263-3700). Evidence: 8a0e21af splits subdivide.ml into Subdivide_refine, Subdivide_stitch and the driver.
 
 - [x] **RK21** (P1, med, god-module, effort M). Location at baseline: curve/curve_ops.ml 2,794. Production uses only `join` plus its endpoint kd-tree (~670 lines). Radix sort is copied 3 times. Action: Keep `curve_join.ml`, move radix sort to Support, delete the rest. Evidence: Curve_ops is Curve_join and holds only the join and its endpoint tree.
 
@@ -781,7 +781,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK26** (P6, low, layering, effort M). Location at baseline: Sweep/Polywire in curve vs Sweep_circle/Revolve in mesh; Triangulate2d in mesh vs Delaunay2/CDT in exact; Bounds2 in exact vs Bounds3 in spatial. The sublibrary placement no longer means anything, and gen is empty after RK1. Action: Collapse to rdk_core / rdk_geom / rdk_ops / rdk_boolean.
 
-- [ ] **RK27** (P6, low, duplication, effort S). Location at baseline: core/polygon_triangulation.ml · contour_triangulation.ml:196 · planar_cdt.ml:1081. Three ear-clipping routines. Action: Route them through `find_projected_ear` where exactness allows.
+- [x] **RK27** (P6, low, duplication, effort S). Location at baseline: core/polygon_triangulation.ml · contour_triangulation.ml:196 · planar_cdt.ml:1081. Three ear-clipping routines. Action: Route them through `find_projected_ear` where exactness allows. Evidence: f97501e9: Contour_triangulation uses Polygon_triangulation.find_ear ~distinct. planar_cdt keeps its exact-predicate lowest-point ear by design.
 
 - [ ] **RK28** (P6, low, dead-code, effort S). Location at baseline: core/data_id.ml (3 lines) · Error.of_string · core/kernel.ml (mostly test helpers). One-line modules and aliases. Action: Fold them into Geometry and test support.
 
