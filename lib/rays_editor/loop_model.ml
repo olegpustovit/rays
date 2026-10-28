@@ -58,7 +58,8 @@ let seed_lights lights scene =
 let create ?inputs ?name ?presets ?factories ?gpu_owner
     ?settings ?(lights = [])
     ?(camera = V.default_camera ()) ?(background = Rays_math.Color.hex_exn "#f4f5f0")
-    ?seed ?grain ?domains ?max_entries ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ?opened ~workspace ?source ~prepare ~draw
+    ?seed ?grain ?domains ?max_entries ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size
+      ?ui_font ?opened ~workspace ?source ~prepare ~draw
     () =
   let workspace = match inputs with None -> workspace
     | Some inputs -> {workspace with Workspace_doc.inputs} in
@@ -89,7 +90,8 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner
       rendered = None; views = []; drawn = Document.Int_map.empty; composed = None;
       resolved = None; context_error = None; canvases = []; host; baked = None; baked_from = None; baked_views = []; map = None;
       render_status = None; pending_render = None;
-      background; extra; hidden_scene_cache = None; world_drag = None; pick_press = None; source; held = None; open_dialog = None; refused = None; opened = core.doc; state_owned = false; cameras = []; viewing = None;
+      background; extra; hidden_scene_cache = None; world_drag = None; pick_press = None; source; held = None; open_dialog = None;
+        refused = None; opened = core.doc; state_owned = false; cameras = []; viewing = None;
       state_checked = neg_infinity; saved_doc = core.doc; saved_view = V.section camera extra; state_error = None })
 
 let document value = Editor_inspect.objects value.core

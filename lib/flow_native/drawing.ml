@@ -32,7 +32,8 @@ let prepare ?(gpu=Flow_ir.Gpu.default) ?profile ?(approx=Flow.Workspace.Paths.em
     core=lazy(match Flow_ir.Core_draw.lower plan root with
       |Ok(program,residual)->Ok(C.prepare ~remember_loops:true ~approx
           ~fast:gpu.fast program,residual,C.Buffers.create())
-      |Error name->Error(Diagnostic.error ~code:"E_DRAW_KIND" (Printf.sprintf "The drawing cannot be lowered to the core path (%s)." name)));
+      |Error name->Error(Diagnostic.error ~code:"E_DRAW_KIND" (Printf.sprintf "The drawing cannot be lowered to the core path (%s)."
+        name)));
     whole=static root; kept=None; borrows=false; cache=Marks_scene.cache ();
     display=(let display=I.region_display ~gpu ?profile ~approx () in fun packed ~live->display packed ~live);
     readback=I.region_readback ~gpu ()}

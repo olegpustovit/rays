@@ -216,7 +216,8 @@ let sync_scope value =
         (* a moved node or a dragged pane changes the layout, not the values: the records keep their
            memo of footers and probes (a rebuild each frame of a drag cost about 0.8 s here) *)
         let reuse = match previous with Some k when not fresh -> k.records | _ -> None in
-        let records = if reuse <> None then reuse else Option.map (Flow_graph.Probe.make ~force ~state:value.cook.state ?live:time ~geometry ~resolve ~execution
+        let records = if reuse <> None then reuse else Option.map (Flow_graph.Probe.make ~force ~state:value.cook.state
+          ?live:time ~geometry ~resolve ~execution
           ~bulk_calls:(Flow_sop.Lower.field_calls ~state:value.cook.state
             ~live:(Option.value ~default:(Input.at_time 0.) time) ~resolve lowered)
           ~image:(Flow_sop.Lower.image_metadata lowered.plan)

@@ -234,7 +234,8 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
                      (match Flow_graph.Flow_edit.arg_text (doc.workspace.ws).source node key with
                       | Some e when Flow_graph.Flow_edit.value_call e ->
                           let at = Layout_by_path.Path_map.find_opt (sp @ [ src ]) (next.workspace.ws).layout.at in
-                          Editor_document.Document_edit.layout_edit doc (fun l -> { l with collapsed = Layout_by_path.Path_map.add (sp @ [ leaf ]) false l.collapsed;
+                          Editor_document.Document_edit.layout_edit doc (fun l ->
+                            { l with collapsed = Layout_by_path.Path_map.add (sp @ [ leaf ]) false l.collapsed;
                             at = (match at with Some p -> Layout_by_path.Path_map.add (sp @ [ leaf ]) p l.at | None -> l.at) })
                       | _ -> doc)
                  | _ -> doc in
@@ -244,7 +245,8 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
                  | Duplicate { nodes } -> { g with added = Flow_graph.Flow_edit.duplicated (next.workspace.ws).source nodes }
                  | _ -> g in
                doc, { (result : _ frame_result) with label = Flow_graph.Flow_edit.label op; edit_error = None;
-               effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }, first_note g (Option.map (fun words -> "Wrote " ^ words) (Echo.words op))
+               effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects },
+                 first_note g (Option.map (fun words -> "Wrote " ^ words) (Echo.words op))
            | Error message -> refuse message)
       | Layout_edit op ->
           (match Editor_document.Document_edit.layout_op ~factories:value.factories next op with
@@ -260,7 +262,8 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
                  | Set_graph { name; _ } when label = "New material" || label = "New graph" -> { g with created = Some name }
                  | _ -> g) g ops in
                doc, { (result : _ frame_result) with label; edit_error = None;
-                 effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }, first_note g (Option.map (fun words -> "Wrote " ^ words) (Echo.batch ops))
+                 effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects },
+                   first_note g (Option.map (fun words -> "Wrote " ^ words) (Echo.batch ops))
            | Error message -> refuse message)
       | Pin_row { node; label; pin } ->
           let module PM = Layout_by_path.Path_map in

@@ -424,7 +424,8 @@ let output_section ~width ~geo ui =
   ()
 
 (* the intents the rows' widgets returned, as document changes *)
-let field_edits ~on_choice ~width ~expanded ~parameters ~ref_rows ~row_of ~arg_row ~value ~size_names ~(n : Flow_graph.Projection.node) ~resized ~graph ~layout_names ~rows ui =
+let field_edits ~on_choice ~width ~expanded ~parameters ~ref_rows ~row_of ~arg_row ~value ~size_names
+  ~(n : Flow_graph.Projection.node) ~resized ~graph ~layout_names ~rows ui =
   let num f =
 Flow.Syntax.make (Flow.Syntax.Num (Flow.Lisp.float f)) in
   let edits = if rows = [] then [] else
@@ -463,9 +464,11 @@ Flow.Syntax.make (Flow.Syntax.Num (Flow.Lisp.float f)) in
                     let name, make = new_material value in
                     Some (Syntax_batch ("New material", [ make; Flow_graph.Flow_edit.Set_arg
                       { node = n.path; key = r.key; sub = [];
-                        value = Flow.Syntax.make (Flow.Syntax.List [ Flow.Syntax.make (Flow.Syntax.Sym "ref"); Flow.Syntax.make (Flow.Syntax.Sym name) ]) } ]))
+                        value = Flow.Syntax.make (Flow.Syntax.List [ Flow.Syntax.make (Flow.Syntax.Sym "ref");
+                          Flow.Syntax.make (Flow.Syntax.Sym name) ]) } ]))
                 | Param.Choice_value chosen when chosen <> "(none)" && chosen <> "" ->
-                    let syntax = Flow.Syntax.make (Flow.Syntax.List [ Flow.Syntax.make (Flow.Syntax.Sym "ref"); Flow.Syntax.make (Flow.Syntax.Sym chosen) ]) in
+                    let syntax = Flow.Syntax.make (Flow.Syntax.List [ Flow.Syntax.make (Flow.Syntax.Sym "ref");
+                      Flow.Syntax.make (Flow.Syntax.Sym chosen) ]) in
                     Some (Syntax_edit (Flow_graph.Flow_edit.Set_arg
                       { node = n.path; key = r.key; sub = []; value = syntax }))
                 | _ -> None)
@@ -562,7 +565,8 @@ let layout_and_size_rows ~value ~(n : Flow_graph.Projection.node) () =
   let layout_names = match n.head, value.doc.Document.shell with
     | "ui/switch", Some { switch = Some sw; _ }
       when List.length sw.layouts
-           = List.length (List.filter (fun (r : Flow_graph.Projection.row) -> match r.key with Flow_graph.Flow_edit.Pos _ -> r.kind <> Flow_graph.Projection.Add | _ -> false) n.rows) ->
+           = List.length (List.filter (fun (r : Flow_graph.Projection.row) -> match r.key with Flow_graph.Flow_edit.Pos _ ->
+             r.kind <> Flow_graph.Projection.Add | _ -> false) n.rows) ->
         Some (Array.of_list (Editor_core.Panels.labels sw.layouts), sw.active)
     | _ -> None in
   let layout_row = Option.map (fun (names, active) ->
@@ -589,7 +593,8 @@ let layout_and_size_rows ~value ~(n : Flow_graph.Projection.node) () =
 let reference_rows ~value ~(n : Flow_graph.Projection.node) () =
   let is_ref_slot (r : Flow_graph.Projection.row) =
     (match r.expr with
-     | Some { Flow.Syntax.node = Flow.Syntax.List [ { Flow.Syntax.node = Flow.Syntax.Sym "ref"; _ }; { Flow.Syntax.node = Flow.Syntax.Sym _; _ } ]; _ } -> true
+     | Some { Flow.Syntax.node = Flow.Syntax.List [ { Flow.Syntax.node = Flow.Syntax.Sym "ref"; _ };
+       { Flow.Syntax.node = Flow.Syntax.Sym _; _ } ]; _ } -> true
      | _ -> false)
     || r.ty = Some Flow.Ty.material
     || (r.ty = Some Flow.Ty.geometry && String.starts_with ~prefix:"scene/" n.head) in
@@ -602,7 +607,8 @@ let reference_rows ~value ~(n : Flow_graph.Projection.node) () =
     if not (is_ref_slot r) then None else
     let is_material = r.ty = Some Flow.Ty.material in
     let target = match r.expr with
-      | Some { Flow.Syntax.node = Flow.Syntax.List [ { Flow.Syntax.node = Flow.Syntax.Sym "ref"; _ }; { Flow.Syntax.node = Flow.Syntax.Sym name; _ } ]; _ } -> name
+      | Some { Flow.Syntax.node = Flow.Syntax.List [ { Flow.Syntax.node = Flow.Syntax.Sym "ref"; _ };
+        { Flow.Syntax.node = Flow.Syntax.Sym name; _ } ]; _ } -> name
       | _ -> "" in
     let choices = match (if is_material then material_graphs else sop_graphs) with
       | [] when not is_material -> [| "(none)" |]
@@ -653,7 +659,8 @@ let readout_rows ~(n : Flow_graph.Projection.node) ~value ~(footer : Flow_graph.
 let zone_says ~width ~zone_text ~(n : Flow_graph.Projection.node) ui =
   (match n.zone, zone_text with
    | Some z, Some (_, sentence) ->
-       let vars = List.filter_map (fun (r : Flow_graph.Projection.rail_row) -> if r.role = Flow_graph.Projection.Var then Some r.name else None) z.rail in
+       let vars = List.filter_map (fun (r : Flow_graph.Projection.rail_row) -> if r.role = Flow_graph.Projection.Var then Some r.name else
+         None) z.rail in
        Pxui.Ui.inspector_message ui ~key:"ws-zone-says"
          (sentence (match vars with v :: _ -> v | [] -> "item"));
        List.iter (fun (r : Flow_graph.Projection.rail_row) ->
@@ -714,7 +721,8 @@ let expression_inspector ~width ~value ~row_subject ui =
       |> List.filter_map (arg_request ~source:(value.doc.workspace.ws).source h ~arg_row:(arg_row_in entries)))) in
   requests, []
 
-let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun _ _ -> ()) ?(resized = fun _ _ -> None) ?(follows = fun _ -> None) value ui ~width path =
+let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun _ _ -> ()) ?(resized = fun _ _ ->
+  None) ?(follows = fun _ -> None) value ui ~width path =
   let module P = Flow_graph.Projection in
   let module Probe = Flow_graph.Probe in
   let module S = Flow.Syntax in
@@ -845,7 +853,8 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
                     | Some state -> n.head ^ " · " ^ state
                     | None ->
                    (match String.concat " · " (List.map snd readouts) with
-                    | "" -> Flow.Ty.to_string n.ty | text -> text)))) ~reset:"Reset all" ~reset_enabled:(List.exists (fun (parameter : Flow_sop.Port.parameter) -> authored parameter <> None) parameters) () in
+                    | "" -> Flow.Ty.to_string n.ty | text -> text)))) ~reset:"Reset all" ~reset_enabled:(List.exists
+                      (fun (parameter : Flow_sop.Port.parameter) -> authored parameter <> None) parameters) () in
            let pressed = Option.map (fun i -> snd (List.nth buttons i)) head.chosen in
            (* Reset all: every written argument of the node removed, one undoable entry *)
            let reset_all = if not head.reset_pressed then [] else
@@ -904,7 +913,8 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
                  then [ Syntax_edit (Flow_graph.Flow_edit.Unfold { node = n.path; key = r.key; sub = [] }) ] else []
              | _ -> []) op_rows in
            let arg_row = arg_row_in entries in
-           let rows = Option.to_list layout_row @ Option.to_list size_row @ List.map snd ref_rows @ List.map (fun (_, _, _, ir) -> ir) entries @ List.map (fun (parameter : Flow_sop.Port.parameter) ->
+           let rows = Option.to_list layout_row @ Option.to_list size_row @ List.map snd ref_rows @ List.map (fun (_, _, _, ir) ->
+             ir) entries @ List.map (fun (parameter : Flow_sop.Port.parameter) ->
              let wired = match authored parameter with Some e -> not (literal e) | None -> false in
              { Pxui_shell.Inspector.path = parameter.path; fields = parameter.fields; shown = on_card_row parameter.path; locked = false;
                (* a computed argument reads as its expression, "=" first: typing another one, or
@@ -922,7 +932,8 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
                  | _ -> None) }) parameters in
            let expanded = List.filter_map (fun (f : Param.field_view) ->
              match f.folder with [] -> None | first :: _ -> Some first) fields |> List.sort_uniq String.compare in
-           let edits = field_edits ~rows ~layout_names ~graph ~resized ~n ~size_names ~value ~arg_row ~row_of ~ref_rows ~parameters ~expanded ~width ~on_choice ui in
+           let edits = field_edits ~rows ~layout_names ~graph ~resized ~n ~size_names ~value ~arg_row
+             ~row_of ~ref_rows ~parameters ~expanded ~width ~on_choice ui in
            output_section ~geo ~width ui;
            let note = note_section ~n ~width ui in
            let picks = iteration_picks ~records ~n ~probes ~chain ~footer ui in

@@ -340,7 +340,8 @@ let pane_changes ~(value : _ t) ~vw ~command_changes ~scope_changes ~menu_pick ~
   changes
 
 (* every inspector leaf: the one in use over the frame's state, the others over their own pane *)
-let draw_inspectors ~(value : _ t) ~workspace ~image ~camera_panel ~inspector_visible ~unchanged ~(g : Pxui_shell.Layout.geometry) ~scope_view
+let draw_inspectors ~(value : _ t) ~workspace ~image ~camera_panel ~inspector_visible ~unchanged ~(g :
+  Pxui_shell.Layout.geometry) ~scope_view
     ~selection ~scope_active ~graph_shown ~focus ~focus_path ~pane_of ~in_use ~roots ui =
   (* the split a card of the editor graph is, sized another way from what it shows now *)
   let resized node how = match node, value.doc.Document.shell with
@@ -354,10 +355,12 @@ let draw_inspectors ~(value : _ t) ~workspace ~image ~camera_panel ~inspector_vi
     | _ -> None in
   let inspectors = List.map (fun ((leaf : Pxui_shell.Layout.leaf), root) ->
     let pane = pane_of (panel_key value.doc leaf.path, leaf.path, leaf.panel, `List) in
-    if in_use pane then leaf, inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized ~geometry:g ~ui (value, scope_view, selection, scope_active) root leaf.body
+    if in_use pane then leaf, inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized ~geometry:g ~ui (value,
+      scope_view, selection, scope_active) root leaf.body
     else
       let shown = graph_shown && stored_projection pane = Graph_view && graph_name pane <> None in
-      let panel, _, _, _, moves, drops = inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized ~geometry:g ~ui (pane, pane_view pane, pane_selection pane, shown) root leaf.body in
+      let panel, _, _, _, moves, drops = inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized ~geometry:g ~ui (pane,
+        pane_view pane, pane_selection pane, shown) root leaf.body in
       leaf, (panel, [], [], value.live_cook, moves, drops))
     roots in
   let panel = match List.find_opt (fun ((l : Pxui_shell.Layout.leaf), _) ->
@@ -808,7 +811,8 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
     let workspace, drag_changes = settle_layout ~value ~vw ~workspace ~frame ~keymap ~shortcut_frame ~g ~intents
       ~strip_layout ~timeline_leaves:(of_kind Timeline) ui in
     let changes = changes @ drag_changes in
-    { workspace; focus; focus_path; pane_keys; outline; outline_intents; selection; menu; menu_pick; scope_view; scope_changes; tree; document = objects value;
+    { workspace; focus; focus_path; pane_keys; outline; outline_intents; selection; menu; menu_pick; scope_view; scope_changes; tree;
+      document = objects value;
       edit_error = value.edit_error;
       effects = Param.no_effects;
       timeline_intents; frame_request = initial_frame_request; prompt = None; prompt_intent = None;
@@ -819,7 +823,8 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
       handle_changes; bar_action; view_pick; drops = inspector_drops @ viewport_drops } in
   let leader_panel = match leader with
     | Editor_commands.Pending prefix -> Some (fun ui ->
-        Pxui_shell.Which_key.panel ui ~category:Editor_commands.group ~describe:Editor_commands.describe_prefix ~order:Editor_commands.order keymap ~prefix
+        Pxui_shell.Which_key.panel ui ~category:Editor_commands.group ~describe:Editor_commands.describe_prefix
+          ~order:Editor_commands.order keymap ~prefix
           ~focus:(Editor_commands.scope focus) ~focus_name:(Editor_commands.pane_name focus))
     | Idle -> None in
   (* Presets: / s names and saves the document, / b browses, loads
@@ -847,7 +852,9 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
         { result with prompt; prompt_intent }) else None) with
     | Some result -> result
     | None ->
-      { workspace; focus; focus_path; pane_keys = []; graph_panes = Panel_map.others value.panes; locals = value.locals; other_texts = []; outline = value.outline; outline_intents = []; selection; menu; menu_pick = None; scope_view; scope_changes = scope_command_changes; tree; document = objects value;
+      { workspace; focus; focus_path; pane_keys = []; graph_panes = Panel_map.others value.panes; locals = value.locals; other_texts = [];
+        outline = value.outline; outline_intents = []; selection; menu; menu_pick = None; scope_view;
+        scope_changes = scope_command_changes; tree; document = objects value;
         edit_error = value.edit_error;
         effects = Param.no_effects; timeline_intents = [];
         frame_request = initial_frame_request; prompt = initial_prompt;
@@ -857,7 +864,8 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
         changes = command_changes; tree_intents = list_intents;
         text_intents = []; open_graph;
         settings_changes = []; handle_changes = None; bar_action = None; view_pick = None; drops = [] } in
-  reduce ?gpu ?pump Editor_reduce.Frame_input.{ carry_changed; all_ui_visible; view_state; carrying; held_keys; leader; frame; hud; actions; guide; copied;
+  reduce ?gpu ?pump Editor_reduce.Frame_input.{ carry_changed; all_ui_visible; view_state; carrying; held_keys; leader; frame; hud;
+    actions; guide; copied;
     steady; status_fps; status_fps_at; timeline; timeline_changes; graph_shown; text; text_shown; row_sets; rows } value result
 let update ?gpu ?(image=fun _->None) ?(host_events=[]) ?pump value ~all_ui_visible ~text_focus ~camera_panel ~view_handles ~render_status
     ~error_status ~view_state (frame : Frame.t) =

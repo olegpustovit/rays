@@ -186,7 +186,8 @@ let graph_row p (g : W.graph) detail =
               chip = (if g.context = Flow.Context.material then List.assoc_opt g.name p.chips else None);
               dim = unused;
               (* how many graphs read it, in the section's right column *)
-              used = (if g.context = Flow.Context.material || g.context = Flow.Context.sop || g.context = Flow.Context.world then Some used else None);
+              used = (if g.context = Flow.Context.material || g.context = Flow.Context.sop || g.context = Flow.Context.world then
+                Some used else None);
               detail = (if unused then "unused" else if g.context = Flow.Context.material
                         then Option.value ~default:"" (List.assoc_opt g.name p.notes) else detail) }
 
@@ -426,7 +427,8 @@ let paint_rows ~rows ~state ~p ~label_w ~wide ~muted ~hovered ~rh ~tops ~(theme 
               Ui.Paint.cap paint ~at:(x +. w -. 12. -. Ui.Paint.cap_width paint right, cy) ~color:ink_3 right
         | Object_row o ->
             shade ~selected:o.chosen false;
-            (* the objects are the children of the root row (its letter at 26 wide, 12 narrow), each level 8 points in; wide, the root's chevron takes the first 14; the selected row sits in a 4-point wrapper with its own
+            (* the objects are the children of the root row (its letter at 26 wide, 12 narrow), each level 8 points in; wide,
+              the root's chevron takes the first 14; the selected row sits in a 4-point wrapper with its own
                padding (15 and 3), so its letter is a point left and its flags 5 points right *)
             let ox = if o.chosen && wide then x +. 26.5
               else x +. (if wide then 38. else 20.) +. 8. *. float o.depth -. (if o.chosen then 1. else 0.) in

@@ -329,7 +329,8 @@ let apply_action camera extra = function
   | Editor_commands.Look_through_camera -> set_look extra true, None
   (* the header's tabs: the same request as the Scene root section's renderer row *)
   | Editor_commands.Render_mode index ->
-      { extra with root_request = Some { extra.root with renderer = List.nth [ Objects.Root.Raster; Wireframe; Path_traced ] (max 0 (min 2 index)) } }, None
+      { extra with root_request = Some { extra.root with renderer = List.nth [ Objects.Root.Raster; Wireframe;
+        Path_traced ] (max 0 (min 2 index)) } }, None
   | Fly when extra.fly = None ->
       set_relative true;
       { extra with fly = Some (Float.max 0.5 (Easy_camera.distance camera *. 0.5)) },

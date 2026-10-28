@@ -74,7 +74,8 @@ let no_errors = { at = ""; found = [] }
 
 let initial = { tab = Selection; draft = None; binding_draft = None; graphs = [];
   doc_base = None; binding_base = None;
-  doc_errors = no_errors; binding_errors = no_errors; live = None; wrap = false; parinfer = true; menu = None; picker = None; scrubbing = false; target = None;
+  doc_errors = no_errors; binding_errors = no_errors; live = None; wrap = false; parinfer = true; menu = None; picker = None;
+    scrubbing = false; target = None;
   find = None; pending = []; request = None; nonce = 0; cache = None }
 
 (* ---- reading the source ---- *)
@@ -411,7 +412,8 @@ let make_shown_with ?workspace source graph selected tab =
   and applied_spans = lazy (snd (Lazy.force printed)) in
   let key = match selected with Some path -> path | None -> [ graph ] in
   match tab with
-  | Document -> { graph; text = Lazy.force applied; mark = Option.bind selected (path_mark source (Lazy.force applied_spans)); key; applied; body = None;
+  | Document -> { graph; text = Lazy.force applied; mark = Option.bind selected (path_mark source (Lazy.force applied_spans)); key;
+    applied; body = None;
       source; spans = Lazy.force applied_spans; applied_spans }
   | Selection | Graph ->
       (match root_form source graph with
@@ -968,7 +970,8 @@ let find_bar ~state ~emit ~theme ~find_row ~key ~width ~x ~current ~matches ~rul
 
   (* the toolbar and the message row under an editable area; a right-click menu offers the same
      buttons and the wrap toggle *)
-let editor_area ui ~emit ~x ~width ~row ~(theme : Pxui.Theme.t) ~footer ~narrow ~bar ~find_row ~language ~names ~time state (shown : shown) key ~at:(ey, eh) ~text ~errors ~spans ?reveal ?(caret_select = fun _ -> None)
+let editor_area ui ~emit ~x ~width ~row ~(theme : Pxui.Theme.t) ~footer ~narrow ~bar ~find_row ~language
+  ~names ~time state (shown : shown) key ~at:(ey, eh) ~text ~errors ~spans ?reveal ?(caret_select = fun _ -> None)
       ~apply ~discard ~can_apply ~message ~draft ~scrub () =
   let module Ui = Pxui.Ui in
     let chips = Lisp_text.color_chips text in
@@ -1109,7 +1112,8 @@ let editor_area ui ~emit ~x ~width ~row ~(theme : Pxui.Theme.t) ~footer ~narrow 
       rule "-rule2" (ty +. 1. +. bar)
     end;
     let wrong = errors <> [] in
-    let msg = Ui.box ui ~flags:Ui.clip ~w:(Ui.Px width) ~h:(Ui.Px (if narrow then 0. else row)) ~at:(x, ty +. bar +. 2.) (key ^ "-message") in
+    let msg = Ui.box ui ~flags:Ui.clip ~w:(Ui.Px width) ~h:(Ui.Px (if narrow then 0. else row)) ~at:(x,
+      ty +. bar +. 2.) (key ^ "-message") in
     if not narrow then Ui.draw ui msg (fun paint (x, y, w, h) ->
       (* the state: a dot in the error colour or the accent for a draft, then what it says; the
          first error is "n errors" in the error colour and its line and message in ink-2 *)
@@ -1224,7 +1228,8 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
        let spans = if dirty then [] else Option.to_list shown.mark in
        editor "text-graph" ~at:(body_y, body_h) ~text ~errors
          ~spans ?reveal:(if dirty then None else Option.map fst shown.mark)
-         ~caret_select:(caret_select text) ~apply:(fun t -> Graph_apply (shown.graph, t)) ~discard:(Graph_discard shown.graph) ~can_apply:dirty
+         ~caret_select:(caret_select text) ~apply:(fun t -> Graph_apply (shown.graph,
+           t)) ~discard:(Graph_discard shown.graph) ~can_apply:dirty
          ~message:(message errors ~dirty
            ~clean:(Printf.sprintf "Edit %s as text; Check and apply checks the whole workspace." shown.graph))
          ~draft:(fun t -> Graph_draft (shown.graph, t))

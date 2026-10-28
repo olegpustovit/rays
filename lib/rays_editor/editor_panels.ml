@@ -36,7 +36,8 @@ let panel_title value (leaf : Pxui_shell.Layout.leaf) =
     | List -> "List", level_name value
     | Lisp -> "Lisp", if (let _, _, w, _ = leaf.frame in w < 400) then ""  (* the narrow sheet has the kind alone *)
         else if graph = "" then value.file else if value.file = "" then graph else value.file ^ " / " ^ graph
-    | Inspector -> "Inspector", (match (if (pane_laid value) = None then [] else inspector_paths (Pxui_graph.Scope.selected (pane_view value))) with
+    | Inspector -> "Inspector", (match (if (pane_laid value) = None then [] else inspector_paths (Pxui_graph.Scope.selected
+      (pane_view value))) with
         | [ path ] when graph <> "" ->
             (* the node's title (a result is `result`, not `@result`); the narrow column has the node alone *)
             let title = match Option.bind (pane_laid value) (fun (k : scope_key) -> Flow_graph.Projection.find k.scope path) with
@@ -257,7 +258,8 @@ let layout_intents value (workspace : shell) intents =
               | Layout_edit.Set_panel_kind { panel; _ } ->
                   [ Layout_inline { home; key; make = (fun p ->
                       Layout_edit.Set_panel_kind { node = p @ [ "@result" ]; panel }) } ]
-              | _ -> [ Declined ("These panels are copies made by a loop in " ^ Document.describe (value.doc.Document.workspace.ws).source home
+              | _ -> [ Declined ("These panels are copies made by a loop in " ^ Document.describe (value.doc.Document.workspace.ws).source
+                home
                   ^ ": retype them (/ o), or edit the loop in the editor graph.") ])
          | None -> [ Declined "This panel is not part of the editor graph's tree." ])
     | _ when workspace.restored ->
@@ -354,7 +356,8 @@ let apply_change (document, error, effects) = function
       (match Kind_graph.find document node with
        | None -> document, Some (Printf.sprintf "no object #%d" node), effects
        | Some _ -> Kind_graph.update document node (fun n -> { n with label }), None, effects)
-  | Follow_source _ | Syntax_edit _ | Layout_edit _ | Layout_inline _ | Syntax_batch _ | Syntax_inline _ | Select_layout _ | Panel_state _ | Dock_panels _ | Object_arg _ | Pin_row _ | Notice _ | Declined _ -> document, error, effects
+  | Follow_source _ | Syntax_edit _ | Layout_edit _ | Layout_inline _ | Syntax_batch _ | Syntax_inline
+    _ | Select_layout _ | Panel_state _ | Dock_panels _ | Object_arg _ | Pin_row _ | Notice _ | Declined _ -> document, error, effects
 
 (* Command-C / X: the selected bindings as Lisp pairs ("name expr" per line) on the clipboard,
    the text a let* vector or the Lisp pane takes. *)

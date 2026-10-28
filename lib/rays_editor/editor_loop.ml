@@ -39,8 +39,11 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
               | Ok img ->
                   let iw, ih = Rays.Image.dimensions img in
                   let scale = Float.min (float w /. float iw) (float h /. float ih) in
-                  (key, {size = (w, h); dynamic; plan = lowered.plan; scene = [Rays.Scene.rect ~at:(0, 0) ~w ~h ~fill:Rays_math.Color.black (); Rays.Scene.image img ~at:(0, 0) ~scale ()]; prepared = None; preview}) :: pictures, error
-              | Error d -> (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
+                  (key, {size = (w, h); dynamic; plan = lowered.plan; scene = [Rays.Scene.rect ~at:(0,
+                    0) ~w ~h ~fill:Rays_math.Color.black (); Rays.Scene.image img ~at:(0, 0) ~scale ()]; prepared = None;
+                    preview}) :: pictures, error
+              | Error d -> (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None;
+                preview} previous) :: pictures,
                   Some (Diagnostic.to_string d))
          | None -> pictures, error
          | Some _ when same_plan && not dynamic && Option.fold ~none:false
@@ -53,7 +56,8 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
                | _ -> Flow_native.Drawing.prepare ~gpu ~profile:lowered.profile
                    ~approx:(core.doc.workspace.ws).checked.approx ~states:lowered.states lowered.plan drawing in
              (match Result.bind prepared (fun p -> Result.map (fun scene -> p, scene)
-                 (Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Lowering.fast core.doc) value.host.gpu(fun gpu->Flow_native.Drawing.render_prepared ~state:core.cook.state
+                 (Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Lowering.fast core.doc)
+                   value.host.gpu(fun gpu->Flow_native.Drawing.render_prepared ~state:core.cook.state
                    ~gpu:(Flow_native.Workspace_gpu.marks value.host.gpu) ?resident:(Flow_native.Workspace_gpu.resident gpu value.host.gpu)
                    ~image:(Flow_native.Workspace_images.image ~gpu value.host.images ~state:core.cook.state ~live:input lowered.plan)
                    p ~live:input ~size:(w, h)))) with
@@ -65,7 +69,8 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
                   let previous = Option.map (fun p -> match p.prepared with
                     | Some prepared when Flow_native.Drawing.borrows_gpu prepared -> {p with scene = []}
                     | _ -> p) previous in
-                  (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
+                  (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None;
+                    preview} previous) :: pictures,
                   Some (Diagnostic.to_string d)))
     | _ -> pictures, error) ([], context_error) (Editor_shell.geometry core core.workspace raw_frame).leaves in
   canvases, context_error
@@ -77,7 +82,8 @@ let preview_images value frame =
   let gpu = Flow_native.Workspace_gpu.config ~fast:(Editor_document.Lowering.fast value.core.doc) value.host.gpu in
   let live = { (Flow_native.Live_frame.of_frame frame) with t = Timeline.time (Editor_list.timeline value.core) } in
   let errors = ref [] in
-  let preview image = match Flow_native.Workspace_images.image ~gpu value.host.images ~state:value.core.cook.state ~live lowered.plan image with
+  let preview image = match Flow_native.Workspace_images.image ~gpu value.host.images ~state:value.core.cook.state
+    ~live lowered.plan image with
     | Ok _ -> ()
     | Error diagnostic -> errors := Diagnostic.to_string diagnostic :: !errors in
   (match Editor_model.pane_laid value.core with
@@ -382,7 +388,8 @@ let crash_dump value directory =
   let history = core.history in
   let editor = Buffer.create 2048 in
   Printf.bprintf editor
-      "level: %s\nprojection: %s\npane graph: %s\ngraph panels: %s\nwindows: %s\npanels: %s\nroute: %s\ntext: %s\nmap view: %b\ngraph pan: %b\nguide: %b\nkey hud: %s\nselected: %s\nscope selected: %s\nfocus: %s\nprompt: %s\n\
+      "level: %s\nprojection: %s\npane graph: %s\ngraph panels: %s\nwindows: %s\npanels: %s\nroute: %s\n\
+      text: %s\nmap view: %b\ngraph pan: %b\nguide: %b\nkey hud: %s\nselected: %s\nscope selected: %s\nfocus: %s\nprompt: %s\n\
        undo: %s (%d entries)\nredo: %s\ncook: %s\nedit error: %s\nrenderer: %s\nlive scene: %s\nautosave: %s\n\
        load document.rays with / b (workspace documents only) after copying it to %s\n"
       (Editor_status.level_name core)

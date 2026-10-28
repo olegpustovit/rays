@@ -235,7 +235,9 @@ module Workspace = struct
           | Some document, _ -> document_camera document base
           | None, Some [] -> declared_camera ~factories:[] doc base
           | None, _ -> base in
-        Editor_loop.run ?inputs ~gpu_owner ?max_frames:process.max_frames ?crash_dir:process.crash_dir ~profile:process.profile ?preferences:process.preferences ?ui_font:process.ui_font ~config ~lights ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
+        Editor_loop.run ?inputs ~gpu_owner ?max_frames:process.max_frames ?crash_dir:process.crash_dir
+          ~profile:process.profile ?preferences:process.preferences ?ui_font:process.ui_font ~config ~lights
+          ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
           ~workspace:doc ?source ~prepare ~draw:scene3 ()
           |> Result.map_error (fun error -> Diagnostic.error ~code:"E_RUNTIME"
             (Rays.Sketch.error_to_string error))))
