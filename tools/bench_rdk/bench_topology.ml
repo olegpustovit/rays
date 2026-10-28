@@ -1,7 +1,7 @@
 open Rdk
 
-let () =
-  let count = if Array.length Sys.argv > 1 then int_of_string Sys.argv.(1) else 1_000_000 in
+let run () =
+  let count = if Array.length Sys.argv > 2 then int_of_string Sys.argv.(2) else 1_000_000 in
   if count < 2 then invalid_arg "at least two vertices required";
   List.iter (fun domains -> Parallel.run ~domains (fun () ->
     (* Establish the cached pool before collecting constructor samples. *)
