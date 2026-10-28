@@ -497,12 +497,12 @@ let run ?cancel { grain; selection; collision_primitives; method_; direction;
         |> get_string in
     let output = if not needs_interpolation then target else begin
         let selection = Option.get hit_selection in
-        get_rdk (Attribute_ops.interpolate ?cancel ~grain ~selection
-          ~driver:(Attribute_ops.Vertex_weights {
-            numbers_attribute = numbers_name; weights_attribute = weights_name })
-          ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
-          ~match_groups ~target_owner:Attribute.Point ~attributes:[]
-          ~source:collision ~target ())
+        get_rdk (Attribute_ops.interpolate { cancel; grain = Some grain; selection = Some selection;
+          driver = Some (Attribute_ops.Vertex_weights { numbers_attribute = numbers_name;
+            weights_attribute = weights_name }); compute_weights = None; point_pattern; vertex_pattern; primitive_pattern; detail_pattern;
+          match_groups; pre_scale = None; normalize_weights = None; threshold = None; blend = None;
+          unmatched = Keep_target; target_owner = Attribute.Point; attributes = [];
+          source = collision; target } ())
       end in
     let output = if need_drivers && not keep_drivers then output
         |> Geometry.without_attribute ~owner:Attribute.Point numbers_name

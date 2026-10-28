@@ -1627,7 +1627,7 @@ let facet ?cancel ?(grain = 16_384) ?primitives
           let selection = Option.map (fun primitives ->
             facet_point_selection ?cancel ~grain primitives geometry)
               (current_selection geometry) in
-          Ok (Error.get (Fuse_grid.fuse ?cancel ~grain ?selection ~tolerance geometry))
+          Ok (Error.get (Fuse_grid.weld ?cancel ~grain ?selection ~tolerance geometry))
       | None, Some distance ->
           consolidate_normals ?cancel ~grain
             ?primitives:(current_selection geometry) ~distance geometry
@@ -1668,11 +1668,29 @@ let facet ?cancel ?(grain = 16_384) ?primitives
       | Some name -> Geometry.without_group ~owner:Group.Primitive name geometry)
       result
 
-let run ?cancel ?grain ?selection ?pre_compute_normals
-    ?make_normals_unit_length ?unique_points ?consolidate_distance
-    ?consolidate_normals_distance ?remove_inline_points ?inline_distance
-    ?orient_polygons ?cusp_angle ?remove_degenerate ?make_planar
-    ?post_compute_normals ?reverse_normals geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  selection : Deform.selection option;
+  pre_compute_normals : bool option;
+  make_normals_unit_length : bool option;
+  unique_points : bool option;
+  consolidate_distance : float option;
+  consolidate_normals_distance : float option;
+  remove_inline_points : bool option;
+  inline_distance : float option;
+  orient_polygons : bool option;
+  cusp_angle : float option;
+  remove_degenerate : bool option;
+  make_planar : bool option;
+  post_compute_normals : bool option;
+  reverse_normals : bool option;
+}
+
+let run ({ cancel; grain; selection; pre_compute_normals; make_normals_unit_length; unique_points;
+    consolidate_distance; consolidate_normals_distance; remove_inline_points; inline_distance;
+    orient_polygons; cusp_angle; remove_degenerate; make_planar; post_compute_normals;
+    reverse_normals } : params) geometry =
   Error.guard ~operation:"facet" ~code:"invalid_geometry" (fun () ->
     let resolved = match selection with
       | None -> Ok None

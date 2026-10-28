@@ -424,17 +424,35 @@ let delete_overlaps ?cancel ~grain ~delete_pairs geometry =
 
 type overlap_policy = Keep_first_overlap | Delete_overlap_pairs
 
-let run ?cancel ?(grain = 16_384) ?(epsilon = 1e-12)
-    ?(remove_degenerate = true) ?consolidate_distance ?overlaps
-    ?(reverse_winding = false) ?(remove_nan_points = false)
-    ?(remove_unused_points = false) ?(delete_unused_groups = false)
-    ?point_attributes ?vertex_attributes ?primitive_attributes ?detail_attributes
-    ?point_groups ?vertex_groups ?primitive_groups ?edge_groups
-    geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int;
+  epsilon : float;
+  remove_degenerate : bool;
+  consolidate_distance : float option;
+  overlaps : overlap_policy option;
+  reverse_winding : bool;
+  remove_nan_points : bool;
+  remove_unused_points : bool;
+  delete_unused_groups : bool;
+  point_attributes : string option;
+  vertex_attributes : string option;
+  primitive_attributes : string option;
+  detail_attributes : string option;
+  point_groups : string option;
+  vertex_groups : string option;
+  primitive_groups : string option;
+  edge_groups : string option;
+}
+
+let run ({ cancel; grain; epsilon; remove_degenerate; consolidate_distance; overlaps;
+    reverse_winding; remove_nan_points; remove_unused_points; delete_unused_groups;
+    point_attributes; vertex_attributes; primitive_attributes; detail_attributes;
+    point_groups; vertex_groups; primitive_groups; edge_groups } : params) geometry =
   Error.guard ~operation:"clean" ~code:"invalid_geometry" @@ fun () ->
   let overlaps = Option.map (fun policy -> policy = Delete_overlap_pairs) overlaps in
   let consolidate tolerance geometry =
-    Ok (Error.get (Fuse_grid.fuse ?cancel ~grain ~tolerance geometry))
+    Ok (Error.get (Fuse_grid.weld ?cancel ~grain ~tolerance geometry))
   and compact geometry = Ok (Error.get (Compact_points.run ?cancel ~grain geometry)) in
   if grain <= 0 then invalid_arg "Rdk_mesh.Clean.clean: grain must be positive";
   if not (Float.is_finite epsilon) || epsilon < 0. then

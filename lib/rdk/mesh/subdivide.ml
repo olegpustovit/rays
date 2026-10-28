@@ -4191,17 +4191,34 @@ let refine_curves ?cancel ?grain ?selection ~independent scheme iterations geome
         combine_parts ?cancel ?grain ~source:geometry [retained; refine refined_source]
       end
 
-let subdivide ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1)
-    ?primitives ?(cracks = Subdivide_do_not_close)
-    ?(consistent_topology = false) ?creases ?crease_primitives ?crease_weight
-    ?(generate_resulting_creases = true) ?resulting_crease_group
-    ?hole_primitives ?(remove_holes = true)
-    ?(boundary_interpolation = Subdivide_boundary_edge_only)
-    ?(face_varying_interpolation = Subdivide_fvar_all)
-    ?triangle_policy:(triangle_subdivision = Subdivide_triangles_catmull_clark)
-    ?(creasing_method = Subdivide_creasing_uniform)
-    ?(treat_curves_as_independent = false)
-    ?(recompute_point_normals = false) geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  scheme : scheme;
+  iterations : int;
+  primitives : Rdk_core.Group.t option;
+  cracks : crack_policy;
+  consistent_topology : bool;
+  creases : Rdk_core.Geometry.t option;
+  crease_primitives : Rdk_core.Group.t option;
+  crease_weight : float option;
+  generate_resulting_creases : bool;
+  resulting_crease_group : String.t option;
+  hole_primitives : Rdk_core.Group.t option;
+  remove_holes : bool;
+  boundary_interpolation : boundary_interpolation;
+  face_varying_interpolation : face_varying_interpolation;
+  triangle_policy : triangle_policy;
+  creasing_method : creasing_method;
+  treat_curves_as_independent : bool;
+  recompute_point_normals : bool;
+}
+
+let subdivide ({ cancel; grain; scheme; iterations; primitives; cracks; consistent_topology; creases;
+    crease_primitives; crease_weight; generate_resulting_creases; resulting_crease_group;
+    hole_primitives; remove_holes; boundary_interpolation; face_varying_interpolation;
+    triangle_policy = triangle_subdivision; creasing_method; treat_curves_as_independent;
+    recompute_point_normals } : params) geometry =
   Error.guard ~operation:"subdivide" ~code:"invalid_topology" @@ fun () ->
   let had_point_normals =
     Geometry.find_attribute ~owner:Attribute.Point "N" geometry <> None in

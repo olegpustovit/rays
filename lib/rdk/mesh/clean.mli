@@ -6,13 +6,25 @@ val delete_degenerate :
 
 type overlap_policy = Keep_first_overlap | Delete_overlap_pairs
 
-val run :
-  ?cancel:Cancel.t -> ?grain:int -> ?epsilon:float ->
-  ?remove_degenerate:bool -> ?consolidate_distance:float ->
-  ?overlaps:overlap_policy -> ?reverse_winding:bool ->
-  ?remove_nan_points:bool -> ?remove_unused_points:bool ->
-  ?delete_unused_groups:bool -> ?point_attributes:string ->
-  ?vertex_attributes:string -> ?primitive_attributes:string ->
-  ?detail_attributes:string -> ?point_groups:string ->
-  ?vertex_groups:string -> ?primitive_groups:string ->
-  ?edge_groups:string -> Geometry.t -> (Geometry.t, Error.t) result
+type params = {
+  cancel : Cancel.t option;
+  grain : int;
+  epsilon : float;
+  remove_degenerate : bool;
+  consolidate_distance : float option;
+  overlaps : overlap_policy option;
+  reverse_winding : bool;
+  remove_nan_points : bool;
+  remove_unused_points : bool;
+  delete_unused_groups : bool;
+  point_attributes : string option;
+  vertex_attributes : string option;
+  primitive_attributes : string option;
+  detail_attributes : string option;
+  point_groups : string option;
+  vertex_groups : string option;
+  primitive_groups : string option;
+  edge_groups : string option;
+}
+
+val run : params -> Geometry.t -> (Geometry.t, Error.t) result

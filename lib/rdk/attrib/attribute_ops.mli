@@ -371,28 +371,30 @@ val blur_points :
     components * points). Each point sums neighbors in stable edge order and
     writes one disjoint slot, so one- and multi-domain results are exact. *)
 
-val interpolate :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?selection:Group.t ->
-  ?driver:interpolate_driver ->
-  ?compute_weights:interpolate_computed ->
-  ?point_pattern:string ->
-  ?vertex_pattern:string ->
-  ?primitive_pattern:string ->
-  ?detail_pattern:string ->
-  ?match_groups:bool ->
-  ?pre_scale:float ->
-  ?normalize_weights:bool ->
-  ?threshold:float ->
-  ?blend:float ->
-  ?unmatched:unmatched ->
-  target_owner:Attribute.owner ->
-  attributes:interpolate_attribute list ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  selection : Group.t option;
+  driver : interpolate_driver option;
+  compute_weights : interpolate_computed option;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+  match_groups : bool;
+  pre_scale : float option;
+  normalize_weights : bool option;
+  threshold : float option;
+  blend : float option;
+  unmatched : unmatched;
+  target_owner : Attribute.owner;
+  attributes : interpolate_attribute list;
+  source : Geometry.t;
+  target : Geometry.t;
+}
+
+val interpolate : params -> unit -> (Geometry.t, Error.t) result
+
 (** Interpolate source attributes onto destination elements. The default
     driver uses destination integer [source_primitive] and float3 [source_uvw]
     attributes; [driver] also accepts corresponding CSR number/weight rows for

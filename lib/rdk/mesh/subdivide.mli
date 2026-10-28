@@ -145,25 +145,27 @@ type detail_overrides = {
   osd_creasingmethod : Rdk_core.Attribute.t option;
   osd_trianglesubdiv : Rdk_core.Attribute.t option;
 }
-val subdivide :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?scheme:scheme ->
-  ?iterations:int ->
-  ?primitives:Rdk_core.Group.t ->
-  ?cracks:crack_policy ->
-  ?consistent_topology:bool ->
-  ?creases:Rdk_core.Geometry.t ->
-  ?crease_primitives:Rdk_core.Group.t ->
-  ?crease_weight:float ->
-  ?generate_resulting_creases:bool ->
-  ?resulting_crease_group:String.t ->
-  ?hole_primitives:Rdk_core.Group.t ->
-  ?remove_holes:bool ->
-  ?boundary_interpolation:boundary_interpolation ->
-  ?face_varying_interpolation:face_varying_interpolation ->
-  ?triangle_policy:triangle_policy ->
-  ?creasing_method:creasing_method ->
-  ?treat_curves_as_independent:bool ->
-  ?recompute_point_normals:bool ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  scheme : scheme;
+  iterations : int;
+  primitives : Rdk_core.Group.t option;
+  cracks : crack_policy;
+  consistent_topology : bool;
+  creases : Rdk_core.Geometry.t option;
+  crease_primitives : Rdk_core.Group.t option;
+  crease_weight : float option;
+  generate_resulting_creases : bool;
+  resulting_crease_group : String.t option;
+  hole_primitives : Rdk_core.Group.t option;
+  remove_holes : bool;
+  boundary_interpolation : boundary_interpolation;
+  face_varying_interpolation : face_varying_interpolation;
+  triangle_policy : triangle_policy;
+  creasing_method : creasing_method;
+  treat_curves_as_independent : bool;
+  recompute_point_normals : bool;
+}
+
+val subdivide : params -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

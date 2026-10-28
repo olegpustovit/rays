@@ -412,12 +412,10 @@ module Remesh = struct
             (match resolve_optional_edge_group "remesh" hard_edge_group geometry with
              | Error error -> Error error
              | Ok hard_edges ->
-                 match Rdk.Remesh.run ~cancel:(Context.cancel_token context)
-                     ~grain:(Context.grain context) ~iterations ~smoothing ~project
-                     ~use_input_points_only ?hard_points ?hard_edges
-                     ?target_size_attribute ~preserve_uv_seams ~uv_attribute
-                     ?output_hard_edges ?output_mesh_size ?output_quality
-                     ~recompute_point_normals ~target_length geometry with
+                 match Rdk.Remesh.run { cancel = Some (Context.cancel_token context); grain = (Context.grain context);
+    iterations; smoothing; project; use_input_points_only; hard_points; hard_edges;
+    target_size_attribute; preserve_uv_seams; uv_attribute; output_hard_edges;
+    output_mesh_size; output_quality; recompute_point_normals; target_length } geometry with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
   )
@@ -563,7 +561,7 @@ module Clean = struct
     let vertex_groups = optional_text parameters.vertex_groups in
     let primitive_groups = optional_text parameters.primitive_groups in
     let edge_groups = optional_text parameters.edge_groups in
-    let epsilon = if epsilon_mode = Kernel_auto then None else Some epsilon in
+    let epsilon = if epsilon_mode = Kernel_auto then 1e-12 else epsilon in
     let consolidate_distance = if consolidate_mode = Kernel_auto then None else Some consolidate_distance in
     let overlaps = match overlaps with
       | Clean_overlap_auto -> None
@@ -574,12 +572,11 @@ module Clean = struct
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
       (fun ~node_id:_ context inputs ->
-        match Rdk.Clean.run ~cancel:(Context.cancel_token context)
-            ~grain:(Context.grain context) ?epsilon ~remove_degenerate
-            ?consolidate_distance ?overlaps ~reverse_winding ~remove_nan_points
-            ~remove_unused_points ~delete_unused_groups ?point_attributes
-            ?vertex_attributes ?primitive_attributes ?detail_attributes
-            ?point_groups ?vertex_groups ?primitive_groups ?edge_groups inputs.(0) with
+        match Rdk.Clean.run { cancel = Some (Context.cancel_token context); grain = (Context.grain context);
+    epsilon; remove_degenerate; consolidate_distance; overlaps; reverse_winding;
+    remove_nan_points; remove_unused_points; delete_unused_groups; point_attributes;
+    vertex_attributes; primitive_attributes; detail_attributes; point_groups;
+    vertex_groups; primitive_groups; edge_groups } inputs.(0) with
         | Ok geometry -> cooked geometry
         | Error error -> structured_rdk_error error)
   )
@@ -747,12 +744,15 @@ module Facet = struct
         match resolve_element_group ~operation:"facet" selection geometry with
         | Error error -> Error error
         | Ok selection ->
-            match Rdk.Facet.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?selection ~pre_compute_normals
-                ~make_normals_unit_length ~unique_points ?consolidate_distance
-                ?consolidate_normals_distance ~remove_inline_points
-                ~inline_distance ~orient_polygons ?cusp_angle ~remove_degenerate
-                ~make_planar ~post_compute_normals ~reverse_normals geometry with
+            match Rdk.Facet.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context);
+    selection; pre_compute_normals = Some pre_compute_normals;
+    make_normals_unit_length = Some make_normals_unit_length;
+    unique_points = Some unique_points; consolidate_distance;
+    consolidate_normals_distance; remove_inline_points = Some remove_inline_points;
+    inline_distance = Some inline_distance; orient_polygons = Some orient_polygons;
+    cusp_angle; remove_degenerate = Some remove_degenerate;
+    make_planar = Some make_planar; post_compute_normals = Some post_compute_normals;
+    reverse_normals = Some reverse_normals } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -1189,11 +1189,15 @@ module Boolean_fracture = struct
     Node.Private.make_geometry ?label ~operation:"boolean" ~version:1 ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|source;cutters|]
       (fun ~node_id:_ context inputs ->
-        match Rdk.Boolean.run ~cancel:(Context.cancel_token context) ~grain:(Context.grain context)
-            ~operation:Rdk.Boolean.Difference ~left_treatment:Rdk.Boolean.Solid ~right_treatment:Rdk.Boolean.Surface
-            ~resolve_right_self_intersections:resolve_cutter_self_intersections ~point_conflict ~point_tolerance ~tiny_seam_threshold
-            ~cleanup_max_batches ~strict_cleanup ~seam_points:Rdk.Boolean.Shared_seam_points ~detriangulation ~assume_flat
-            ~require_closed ~piece_attribute ~right:inputs.(1) inputs.(0) with
+        match Rdk.Boolean.run { cancel = Some (Context.cancel_token context); grain = (Context.grain context);
+    operation = Rdk.Boolean.Difference; left_treatment = Rdk.Boolean.Solid;
+    right_treatment = Rdk.Boolean.Surface; resolve_left_self_intersections = false;
+    resolve_right_self_intersections = resolve_cutter_self_intersections; point_conflict;
+    point_tolerance; tiny_seam_threshold; cleanup_max_batches; strict_cleanup;
+    seam_points = Rdk.Boolean.Shared_seam_points; detriangulation; assume_flat;
+    require_closed = Some require_closed; piece_attribute = Some piece_attribute;
+    left_piece_group = Some "boolean_left"; overlap_piece_group = Some "boolean_overlap";
+    right_piece_group = Some "boolean_right"; right = inputs.(1) } inputs.(0) with
         | Ok geometry -> cooked geometry | Error error -> structured_rdk_error error)
   )
 
@@ -1448,18 +1452,18 @@ module Fuse = struct
              | Ok target_selection ->
                 let target = if Array.length inputs = 2
                     then Some target_geometry else None in
-                (match Rdk.Fuse_grid.fuse ~cancel:(Context.cancel_token context)
-                    ~grain:(Context.grain context) ?selection ?target_selection
-                    ~targeting ~using ~tolerance ~position ?weight_attribute
-                    ~attributes ~attribute_rules ~group_rules ~metric
-                    ~inclusive ~match_attributes ?radius_attribute
-                    ?match_attribute ~match_condition ~match_tolerance
-                    ~modify_target ~fuse_points ~keep_fused_points
-                    ?snapped_group ?snapped_destination_attribute
-                    ~remove_degenerate_primitives
-                    ~remove_unused_points_from_degenerate_primitives
-                    ~remove_all_unused_points
-                    ?target inputs.(0) with
+                (match Rdk.Fuse_grid.fuse
+                    { cancel = Some (Context.cancel_token context);
+                      grain = Context.grain context; selection; target_selection;
+                      targeting; using; tolerance; position; weight_attribute;
+                      attributes; attribute_rules; group_rules; metric;
+                      inclusive; match_attributes; radius_attribute;
+                      match_attribute; match_condition; match_tolerance;
+                      modify_target; fuse_points; keep_fused_points;
+                      snapped_group; snapped_destination_attribute;
+                      remove_degenerate_primitives;
+                      remove_unused_points_from_degenerate_primitives;
+                      remove_all_unused_points; target } inputs.(0) with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error)))
   )
@@ -1642,15 +1646,14 @@ module Subdivide_cracks = struct
         | _, Error error, _ -> Error error
         | _, _, Error error -> Error error
         | Ok primitives, Ok crease_primitives, Ok hole_primitives ->
-            match Rdk.Subdivide.subdivide ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ~scheme ~iterations ?primitives
-                ~cracks ~consistent_topology
-                ?creases:(Option.map (fun _ -> inputs.(1)) creases)
-                ?crease_primitives ?crease_weight ~generate_resulting_creases
-                ?resulting_crease_group ?hole_primitives ~remove_holes
-                ~boundary_interpolation ~face_varying_interpolation
-                ~triangle_policy ~creasing_method ~treat_curves_as_independent
-                ~recompute_point_normals
+            match Rdk.Subdivide.subdivide
+                { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context);
+                  scheme; iterations; primitives; cracks; consistent_topology;
+                  creases = Option.map (fun _ -> inputs.(1)) creases;
+                  crease_primitives; crease_weight; generate_resulting_creases;
+                  resulting_crease_group; hole_primitives; remove_holes;
+                  boundary_interpolation; face_varying_interpolation; triangle_policy;
+                  creasing_method; treat_curves_as_independent; recompute_point_normals }
                 geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
@@ -1782,15 +1785,14 @@ module Boolean = struct
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|left; right|] (fun ~node_id:_ context inputs ->
-        match Rdk.Boolean.run ~cancel:(Context.cancel_token context)
-            ~grain:(Context.grain context) ~operation ~left_treatment
-            ~right_treatment ~resolve_left_self_intersections
-            ~resolve_right_self_intersections ~point_conflict ~point_tolerance
-            ~tiny_seam_threshold ~cleanup_max_batches ~strict_cleanup
-            ~seam_points ~detriangulation ~assume_flat ?require_closed
-            ?piece_attribute
-            ~left_piece_group ~overlap_piece_group ~right_piece_group
-            ~right:inputs.(1) inputs.(0) with
+        match Rdk.Boolean.run { cancel = Some (Context.cancel_token context); grain = (Context.grain context);
+    operation; left_treatment; right_treatment; resolve_left_self_intersections;
+    resolve_right_self_intersections; point_conflict; point_tolerance;
+    tiny_seam_threshold; cleanup_max_batches; strict_cleanup; seam_points;
+    detriangulation; assume_flat; require_closed; piece_attribute;
+    left_piece_group;
+    overlap_piece_group;
+    right_piece_group; right = inputs.(1) } inputs.(0) with
         | Ok geometry -> cooked geometry
         | Error error -> structured_rdk_error error)
   )

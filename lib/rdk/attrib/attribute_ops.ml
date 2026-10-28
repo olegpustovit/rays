@@ -220,11 +220,31 @@ let expand_interpolate_patterns ~match_groups ?point_pattern ?vertex_pattern
     | None | Some _ -> ()) (Geometry.groups source);
   Ok (List.rev !output, List.rev !groups))
 
-let interpolate ?cancel ?grain ?selection ?driver ?compute_weights
-    ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
-    ?(match_groups = false)
-    ?pre_scale ?normalize_weights ?threshold ?blend
-    ?(unmatched = Keep_target) ~target_owner ~attributes ~source ~target () =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  selection : Group.t option;
+  driver : interpolate_driver option;
+  compute_weights : interpolate_computed option;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+  match_groups : bool;
+  pre_scale : float option;
+  normalize_weights : bool option;
+  threshold : float option;
+  blend : float option;
+  unmatched : unmatched;
+  target_owner : Attribute.owner;
+  attributes : interpolate_attribute list;
+  source : Geometry.t;
+  target : Geometry.t;
+}
+
+let interpolate ({ cancel; grain; selection; driver; compute_weights; point_pattern; vertex_pattern;
+    primitive_pattern; detail_pattern; match_groups; pre_scale; normalize_weights; threshold;
+    blend; unmatched; target_owner; attributes; source; target } : params) () =
   let unmatched = match unmatched with
     | Keep_target -> Attribute_interpolate.Keep_target
     | Default_value -> Attribute_interpolate.Default_value in

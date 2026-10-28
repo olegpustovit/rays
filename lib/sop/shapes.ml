@@ -163,13 +163,10 @@ module Clip = struct
       (fun ~node_id:_ context inputs ->
         match resolve_element_group ~operation:"clip" selection inputs.(0) with
         | Error error -> Error error
-        | Ok selection -> match Rdk.Plane_clip.clip ~cancel:(Context.cancel_token context)
-            ~grain:(Context.grain context) ~keep ~snapping_tolerance ~fill
-            ~split_connectivity ~clip_attribute ~distance ?selection
-            ~replace_existing_groups
-            ?clipped_edge_group
-            ?cap_group ?clipped_group ?above_group ?below_group ~origin ~normal
-            inputs.(0) with
+        | Ok selection -> match Rdk.Plane_clip.clip { cancel = Some (Context.cancel_token context); grain = (Context.grain context); keep;
+    snapping_tolerance; fill; split_connectivity; clip_attribute; distance; selection;
+    replace_existing_groups; clipped_edge_group; cap_group; clipped_group; above_group;
+    below_group; origin; normal } inputs.(0) with
         | Ok geometry -> cooked geometry
         | Error error -> structured_rdk_error error)
   )

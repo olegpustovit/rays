@@ -23,19 +23,35 @@ let has_corner_payload geometry =
     | Group.Primitive -> false) (Geometry.groups geometry)
   || Geometry.edge_groups geometry <> []
 
-let run ?cancel ?(grain = 16_384) ?(operation = Union)
-    ?(left_treatment = Solid) ?(right_treatment = Solid)
-    ?(resolve_left_self_intersections = false)
-    ?(resolve_right_self_intersections = false)
-    ?(point_conflict = Promote_to_vertex) ?(point_tolerance = 0.)
-    ?(tiny_seam_threshold = 0.) ?(cleanup_max_batches = 8)
-    ?(strict_cleanup = true)
-    ?(seam_points = Shared_seam_points) ?(detriangulation = Triangles)
-    ?(assume_flat = false) ?require_closed
-    ?piece_attribute
-    ?(left_piece_group = Some "boolean_left")
-    ?(overlap_piece_group = Some "boolean_overlap")
-    ?(right_piece_group = Some "boolean_right") ~right left =
+type params = {
+  cancel : Cancel.t option;
+  grain : int;
+  operation : operation;
+  left_treatment : treatment;
+  right_treatment : treatment;
+  resolve_left_self_intersections : bool;
+  resolve_right_self_intersections : bool;
+  point_conflict : point_conflict;
+  point_tolerance : float;
+  tiny_seam_threshold : float;
+  cleanup_max_batches : int;
+  strict_cleanup : bool;
+  seam_points : seam_points;
+  detriangulation : detriangulation;
+  assume_flat : bool;
+  require_closed : bool option;
+  piece_attribute : string option;
+  left_piece_group : string option;
+  overlap_piece_group : string option;
+  right_piece_group : string option;
+  right : Geometry.t;
+}
+
+let run ({ cancel; grain; operation; left_treatment; right_treatment;
+    resolve_left_self_intersections; resolve_right_self_intersections; point_conflict;
+    point_tolerance; tiny_seam_threshold; cleanup_max_batches; strict_cleanup; seam_points;
+    detriangulation; assume_flat; require_closed; piece_attribute; left_piece_group;
+    overlap_piece_group; right_piece_group; right } : params) left =
   if grain <= 0 then error "invalid_parameter" "grain must be positive"
   else if not (Float.is_finite point_tolerance) || point_tolerance < 0. then
     error "invalid_parameter"

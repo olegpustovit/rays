@@ -9,28 +9,32 @@ type detriangulation = Boolean_materialization.detriangulation =
   | Triangles | All_polygons | Unchanged_polygons
 type seam_output = Seam_curves | Coincident_patches
 
-val run :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?operation:operation ->
-  ?left_treatment:treatment ->
-  ?right_treatment:treatment ->
-  ?resolve_left_self_intersections:bool ->
-  ?resolve_right_self_intersections:bool ->
-  ?point_conflict:point_conflict ->
-  ?point_tolerance:float ->
-  ?tiny_seam_threshold:float ->
-  ?cleanup_max_batches:int ->
-  ?strict_cleanup:bool ->
-  ?seam_points:seam_points ->
-  ?detriangulation:detriangulation ->
-  ?assume_flat:bool ->
-  ?require_closed:bool ->
-  ?piece_attribute:string ->
-  ?left_piece_group:string option ->
-  ?overlap_piece_group:string option ->
-  ?right_piece_group:string option ->
-  right:Geometry.t -> Geometry.t -> (Geometry.t, Error.t) result
+type params = {
+  cancel : Cancel.t option;
+  grain : int;
+  operation : operation;
+  left_treatment : treatment;
+  right_treatment : treatment;
+  resolve_left_self_intersections : bool;
+  resolve_right_self_intersections : bool;
+  point_conflict : point_conflict;
+  point_tolerance : float;
+  tiny_seam_threshold : float;
+  cleanup_max_batches : int;
+  strict_cleanup : bool;
+  seam_points : seam_points;
+  detriangulation : detriangulation;
+  assume_flat : bool;
+  require_closed : bool option;
+  piece_attribute : string option;
+  left_piece_group : string option;
+  overlap_piece_group : string option;
+  right_piece_group : string option;
+  right : Geometry.t;
+}
+
+val run : params -> Geometry.t -> (Geometry.t, Error.t) result
+
 (** Build one exact two-operand arrangement and evaluate a polygon Boolean.
     Both operands may be oriented solids or zero-volume surfaces.
     Point/vertex/primitive attributes and ordinary/native groups transfer

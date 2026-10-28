@@ -1590,11 +1590,28 @@ let install_outputs ?cancel ~grain ~target_length ~target_size_attribute
             (Attribute.Float quality)) (fun attribute ->
           Geometry.with_attribute attribute geometry))))
 
-let run ?cancel ?(grain = 16_384) ?(iterations = 3) ?(smoothing = 0.5)
-    ?(project = true) ?(use_input_points_only = false) ?hard_points ?hard_edges
-    ?target_size_attribute ?(preserve_uv_seams = true) ?(uv_attribute = "uv")
-    ?output_hard_edges ?output_mesh_size ?output_quality
-    ?(recompute_point_normals = true) ~target_length geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int;
+  iterations : int;
+  smoothing : float;
+  project : bool;
+  use_input_points_only : bool;
+  hard_points : Group.t option;
+  hard_edges : Edge_group.t option;
+  target_size_attribute : string option;
+  preserve_uv_seams : bool;
+  uv_attribute : string;
+  output_hard_edges : string option;
+  output_mesh_size : string option;
+  output_quality : string option;
+  recompute_point_normals : bool;
+  target_length : float;
+}
+
+let run ({ cancel; grain; iterations; smoothing; project; use_input_points_only; hard_points;
+    hard_edges; target_size_attribute; preserve_uv_seams; uv_attribute; output_hard_edges;
+    output_mesh_size; output_quality; recompute_point_normals; target_length } : params) geometry =
   Error.guard ~operation:"remesh" ~code:"invalid_remesh" @@ fun () ->
   try
     if grain <= 0 then fail "grain must be positive"

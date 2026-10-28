@@ -21,7 +21,7 @@ lib/rdk/exact/planar_cdt.ml	build#1	976
 lib/rdk/exact/planar_constraints.ml	build#1	373
 lib/rdk/exact/planar_refinement.ml	build#1	401
 lib/rdk/gen/iso_surface.ml	extract_with#1	373
-lib/rdk/mesh/plane_clip.ml	clip#1	1523
+lib/rdk/mesh/plane_clip.ml	clip#1	1521
 lib/rdk/mesh/poly_bevel.ml	run#1	874
 lib/rdk/mesh/poly_cut.ml	cut#1	590
 lib/rdk/mesh/poly_extrude.ml	run_general#1	463

@@ -1110,7 +1110,7 @@ let test_local_subdivide_contract () =
       && contains (readable detail_graph) "triangle_policy=catmull_clark")
     "procedural detail-override Subdivide cache identity";
   let detail_output = cook_ok evaluator current detail_graph in
-  let expected_detail = Rdk.Subdivide.subdivide ~iterations:2 ~remove_holes:true
+  let expected_detail = Rdk_test_support.Subdivide.subdivide ~iterations:2 ~remove_holes:true
       ~generate_resulting_creases:true
       ~boundary_interpolation:Rdk.Subdivide.Subdivide_boundary_edge_and_corner
       ~face_varying_interpolation:Rdk.Subdivide.Subdivide_fvar_none

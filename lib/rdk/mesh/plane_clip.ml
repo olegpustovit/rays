@@ -167,11 +167,29 @@ let add_segment value ~a ~b ~side =
     value.segment_count <- index + 1
   end
 
-let clip ?cancel ?(grain = 16_384) ?(keep = Above)
-    ?(snapping_tolerance = 1e-9) ?(fill = false)
-    ?(split_connectivity = false) ?(clip_attribute = "P") ?(distance = 0.)
-    ?selection ?(replace_existing_groups = true) ?clipped_edge_group ?cap_group
-    ?clipped_group ?above_group ?below_group ~origin ~normal geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int;
+  keep : keep;
+  snapping_tolerance : float;
+  fill : bool;
+  split_connectivity : bool;
+  clip_attribute : string;
+  distance : float;
+  selection : Deform.selection option;
+  replace_existing_groups : bool;
+  clipped_edge_group : string option;
+  cap_group : string option;
+  clipped_group : string option;
+  above_group : string option;
+  below_group : string option;
+  origin : Rays_math.Vec3.t;
+  normal : Rays_math.Vec3.t;
+}
+
+let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; clip_attribute;
+    distance; selection; replace_existing_groups; clipped_edge_group; cap_group;
+    clipped_group; above_group; below_group; origin; normal } : params) geometry =
   Error.guard ~operation:"clip" ~code:"invalid_geometry" @@ fun () ->
   try
     if grain <= 0 then invalid_arg "Rdk.Plane_clip.clip: grain must be positive";

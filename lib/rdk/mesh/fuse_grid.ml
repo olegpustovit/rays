@@ -111,19 +111,38 @@ let fuse_clusters ?cancel ?(grain = 16_384) ?selection ?(tolerance = 1e-6)
             ~attribute_rules ~group_rules
             ~compact:(not keep_fused_points) ~rewire:true clusters geometry)
 
-let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
-    ?(targeting = Near_points) ?(using = Least_target_point)
-    ?(tolerance = 1e-6) ?(position = Average_position)
-    ?weight_attribute ?(attributes = Keep_first) ?(attribute_rules = [])
-    ?(group_rules = []) ?(metric = Euclidean)
-    ?(inclusive = true)
-    ?(match_attributes = false) ?radius_attribute ?match_attribute
-    ?(match_condition = Equal_attribute_values) ?(match_tolerance = 0.)
-    ?(modify_target = false) ?(fuse_points = true)
-    ?(keep_fused_points = false) ?snapped_group
-    ?snapped_destination_attribute ?(remove_degenerate_primitives = false)
-    ?(remove_unused_points_from_degenerate_primitives = false)
-    ?(remove_all_unused_points = false) ?target geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int;
+  selection : Rdk_core.Group.t option;
+  target_selection : Rdk_core.Group.t option;
+  targeting : fuse_targeting;
+  using : fuse_using;
+  tolerance : float;
+  position : Fuse_reduce.position;
+  weight_attribute : string option;
+  attributes : Fuse_reduce.attributes;
+  attribute_rules : Fuse_reduce.attribute_rule list;
+  group_rules : Fuse_reduce.group_rule list;
+  metric : fuse_metric;
+  inclusive : bool;
+  match_attributes : bool;
+  radius_attribute : string option;
+  match_attribute : string option;
+  match_condition : fuse_match_condition;
+  match_tolerance : float;
+  modify_target : bool;
+  fuse_points : bool;
+  keep_fused_points : bool;
+  snapped_group : string option;
+  snapped_destination_attribute : string option;
+  remove_degenerate_primitives : bool;
+  remove_unused_points_from_degenerate_primitives : bool;
+  remove_all_unused_points : bool;
+  target : Rdk_core.Geometry.t option;
+}
+
+let fuse ({ cancel; grain; selection; target_selection; targeting; using; tolerance; position; weight_attribute; attributes; attribute_rules; group_rules; metric; inclusive; match_attributes; radius_attribute; match_attribute; match_condition; match_tolerance; modify_target; fuse_points; keep_fused_points; snapped_group; snapped_destination_attribute; remove_degenerate_primitives; remove_unused_points_from_degenerate_primitives; remove_all_unused_points; target } : params) geometry =
   Error.guard ~operation:"fuse" ~code:"invalid_geometry" @@ fun () ->
   match Fuse_rules.validate ~attribute_rules ~group_rules geometry with
   | Error message -> Error message
@@ -307,3 +326,14 @@ let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
             end)
             ))
   end)
+
+let weld ?cancel ~grain ?selection ~tolerance geometry =
+  fuse { cancel; grain; selection; target_selection = None; targeting = Near_points;
+    using = Least_target_point; tolerance; position = Average_position; weight_attribute = None;
+    attributes = Keep_first; attribute_rules = []; group_rules = []; metric = Euclidean;
+    inclusive = true; match_attributes = false; radius_attribute = None; match_attribute = None;
+    match_condition = Equal_attribute_values; match_tolerance = 0.; modify_target = false;
+    fuse_points = true; keep_fused_points = false; snapped_group = None;
+    snapped_destination_attribute = None; remove_degenerate_primitives = false;
+    remove_unused_points_from_degenerate_primitives = false; remove_all_unused_points = false;
+    target = None } geometry
