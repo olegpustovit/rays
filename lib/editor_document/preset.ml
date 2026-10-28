@@ -23,7 +23,7 @@ let rec finite (f : S.t) = match f.node with
 
 (* ---- files ---- *)
 
-let flow_catalog factories = Contexts.catalog ~version:1 factories
+let flow_catalog factories = Kinds.catalog ~version:1 factories
 
 (* the text of the document: a settings graph owns the settings; else the document's are the
    sketch's, saved beside the text *)

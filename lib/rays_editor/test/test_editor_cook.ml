@@ -101,7 +101,7 @@ Lisp_sop.node ~with_:["source", (source)] (Printf.sprintf {|(sop/transform (sop/
   (* a live drive: the box's scale is the clock *)
   let lowered = match Flow.Syntax.parse "(workspace live (graph g :context sop (sop/box :uniform_scale t)))" with
     | Error d -> failwith (Diagnostic.to_string d)
-    | Ok forms -> (match Flow_sop.Lower.workspace ~extra:Editor_document.Contexts.descriptors
+    | Ok forms -> (match Flow_sop.Lower.workspace ~extra:Editor_document.Kinds.descriptors
           ~factories:Sop_catalog.Editor.factories forms with
         | Ok lowered -> lowered | Error d -> failwith (Diagnostic.to_string d)) in
   let graph = List.hd lowered.graphs in

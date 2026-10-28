@@ -84,7 +84,7 @@ let create ?gpu ?settings
         scope_view = Pxui_graph.Scope.create (); probes = Layout_by_path.Path_map.empty; lit = None;
         previews = Document.Int_map.empty; viewed = Document.Int_map.empty; canvas_preview = None; canvas_viewed = None; view_key = None;
         scope_key = None; edit_phases = Flow.Phase_timer.empty; select_later = []; open_import = None; pane_graph = None; back = [];
-        flow_catalog = lazy (Result.to_option (Editor_document.Contexts.catalog
+        flow_catalog = lazy (Result.to_option (Editor_document.Kinds.catalog
           ~version:Flow_sop.Manifest.version factories));
         lisp_vocab = vocabulary factories doc;
         tree = Pxui_shell.Tree.create (); outline = Navigator.initial; held_keys = []; sketch_blocked = []; window_focus = 2;

@@ -11,15 +11,7 @@
     argument, a World layer the layer below it.  [scene/merge] joins scenes.
     Scene, world and settings arguments are evaluated at [t = 0]. *)
 
-val descriptors : Flow_sop.Catalog.descriptor list
-(** Every generated kind; the manifest generator writes them. *)
-
-val catalog : version:int -> Sop.Edit_graph.factory list ->
-  (Flow.Check.catalog, Diagnostic.t) result
-(** {!Flow_sop.Catalog.of_factories} with {!descriptors}: what a workspace text
-    is checked against. *)
-
-type window = { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
+type window = Kinds.window = { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
 (** What [(settings/config :title :width :height :fps :seed)] asks of the host
     when it starts. These fields apply on restart; editing saved settings does
     not reconfigure the running window, frame scheduler or cook seed. *)
@@ -73,9 +65,6 @@ val instance_root : Flow.Eval.value -> Document.view_root option
 
 val graph_of : Workspace_doc.t -> Flow.Workspace.context -> Flow.Workspace.graph option
 (** The first graph of a context. *)
-
-val world_kinds : (string * Sop.Edit_graph.factory) list
-(** The qualified World kinds ([world/sky], ...) with their factories. *)
 
 val sha256 : string -> string
 (** Lower-case hex SHA-256: the digest of a sketch source. *)

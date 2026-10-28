@@ -9,7 +9,7 @@ let fail message = failwith ("test_workspace_edit: " ^ message)
 let check condition message = if not condition then fail message
 let read path = In_channel.with_open_bin path In_channel.input_all
 let cases = "../specification/workspace/cases"
-let catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
+let catalog = Editor_document.Kinds.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
 
 let parse text = match S.parse text with
   | Ok forms -> forms | Error d -> fail (Diagnostic.to_string d)

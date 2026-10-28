@@ -100,7 +100,7 @@ module Scope = Pxui_graph.Scope
 module P = Flow_graph.Projection
 
 let cases = "../specification/workspace/cases"
-let scope_catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
+let scope_catalog = Editor_document.Kinds.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
 let load_workspace name =
   let text = In_channel.with_open_bin (Filename.concat cases (name ^ ".lisp")) In_channel.input_all in
   match Flow.Syntax.parse text with

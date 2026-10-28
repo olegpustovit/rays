@@ -407,6 +407,6 @@ let load path =
   text, (match imports with
     | Error ds -> Error ds
     | Ok imports ->
-        match Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version Sop_catalog.Editor.factories with
+        match Editor_document.Kinds.catalog ~version:Flow_sop.Manifest.version Sop_catalog.Editor.factories with
         | Error d -> Error [d]
         | Ok catalog -> Result.map fst (Doc.check_text ~imports catalog text))

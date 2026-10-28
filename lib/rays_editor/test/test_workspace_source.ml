@@ -12,7 +12,7 @@ let check condition message = if not condition then fail message
 open Test_text
 
 let sha = Editor_document.Contexts.sha256
-let catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
+let catalog = Editor_document.Kinds.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
 
 let sketch radius = Printf.sprintf {|;; the header
 (workspace w

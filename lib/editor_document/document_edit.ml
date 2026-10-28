@@ -21,7 +21,7 @@ let syntax_edit_result ~factories (doc : Document.t) op =
   let missing graph = not (List.exists (fun (g : Flow.Workspace.graph) -> g.name = graph)
     (doc.workspace.ws).checked.graphs) in
   let run (doc : Document.t) =
-    let* catalog = Contexts.catalog ~version:Flow_sop.Manifest.version factories in
+    let* catalog = Kinds.catalog ~version:Flow_sop.Manifest.version factories in
     let* workspace = Workspace_doc.edit catalog (doc.workspace.ws) op in
     Contexts.of_workspace ~factories ~previous:doc workspace in
   (* a gesture on the scene the host composes (the text has no such graph yet, so the edit finds
@@ -56,7 +56,7 @@ let text_edit ?imports ~factories (doc : Document.t) text =
   let workspace = doc.workspace.ws in
   let ( let* ) = Result.bind in
   let one result = Result.map_error (fun d -> [ d ]) result in
-  let* catalog = one (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
+  let* catalog = one (Kinds.catalog ~version:Flow_sop.Manifest.version factories) in
   let* edited = Workspace_doc.of_text ~imports:(Option.value imports
       ~default:(Workspace_doc.import_texts workspace))
       ~ops:workspace.checked.ops ~settings:workspace.settings

@@ -102,7 +102,7 @@ let test_morph_sketch () =
     | Error d -> fail (Diagnostic.to_string d)
     | Ok forms ->
         match Flow_sop.Lower.workspace
-            ~extra:Editor_document.Contexts.descriptors
+            ~extra:Editor_document.Kinds.descriptors
             ~factories:Sop_catalog.Editor.factories forms with
         | Ok lowered -> lowered
         | Error d -> fail (Diagnostic.to_string d) in

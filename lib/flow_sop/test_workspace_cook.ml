@@ -13,7 +13,7 @@ let merge nodes =
   Lisp_sop.node ~with_ ("(sop/merge " ^ String.concat " " (List.map (fun (k, _) -> "(sop/ext_" ^ k ^ ")") with_) ^ ")")
 
 let () =
-  let catalog = Result.get_ok (Editor_document.Contexts.catalog ~version:Manifest.version factories) in
+  let catalog = Result.get_ok (Editor_document.Kinds.catalog ~version:Manifest.version factories) in
   let forms = Result.get_ok (Flow.Syntax.parse
     "(workspace pixels (graph g :context image [] (let* [img (image/noise :width 17 :height 9 :frequency 0.12 :seed 31)] img)))") in
   let checked = match Flow.Workspace.check catalog forms with
@@ -41,7 +41,7 @@ let lower ?(edit = Fun.id) name =
   match Hashtbl.find_opt lowered_cache name with Some l -> l | None ->
   let lowered = match Flow.Syntax.parse (edit (read (Filename.concat cases (name ^ ".lisp")))) with
   | Error d -> fail (Diagnostic.to_string d)
-  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories forms with
+  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories forms with
       | Ok lowered -> lowered
       | Error d -> fail (name ^ ": " ^ Diagnostic.to_string d)) in
   Hashtbl.add lowered_cache name lowered; lowered
@@ -104,7 +104,7 @@ let skips () =
     | Ok forms ->
         let compiled_ids = Option.map (fun (l : Lower.t) -> l.compiled_ids) previous
         and sites = Option.map (fun (l : Lower.t) -> l.sites) previous in
-        (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories ?compiled_ids ?sites forms with
+        (match Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories ?compiled_ids ?sites forms with
          | Ok lowered -> lowered | Error d -> fail (Diagnostic.to_string d)) in
   let all = lower_text (text "") in
   let some = lower_text ~previous:all (text ":skip [2] ") in
@@ -307,7 +307,7 @@ let run () =
   let cooked = ref 0 in
   List.iter (fun name ->
     let lowered = lower name in
-    let catalog = Editor_document.Contexts.catalog ~version:Manifest.version factories |> Result.get_ok in
+    let catalog = Editor_document.Kinds.catalog ~version:Manifest.version factories |> Result.get_ok in
     let forms = Flow.Syntax.parse (read (Filename.concat cases (name ^ ".lisp"))) |> Result.get_ok in
     let checked = match Catalog.check_workspace ~ops:Operators.all catalog forms with
       | Some checked, _ -> checked | _ -> fail (name ^ " did not check") in
@@ -395,7 +395,7 @@ let run () =
          = 3 + 2 + 2 + 2) "bloom provenance size"
    | graphs -> fail (Printf.sprintf "bloom has %d sop networks" (List.length graphs)));
   (* every collecting merge tags its primitives with the input index *)
-  let small = Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories
+  let small = Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories
     (Flow.Syntax.parse "(workspace w (graph g :context sop (sop/merge (for [i (range 6)] (sop/uv_sphere :center [i 0 0])))))" |> Result.get_ok) |> Result.get_ok in
   let graph = List.hd small.graphs in
   check (nodes graph = 7) "merge loop node count";
@@ -420,14 +420,14 @@ let run () =
   (* ids are stable when the previous ids and sites are passed back *)
   let kit = lower "kit" in
   let again = match Flow.Syntax.parse (read (Filename.concat cases "kit.lisp")) with
-    | Ok forms -> Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories ~compiled_ids:kit.compiled_ids
+    | Ok forms -> Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories ~compiled_ids:kit.compiled_ids
         ~sites:kit.sites forms |> Result.get_ok
     | Error _ -> fail "parse" in
   check (again.compiled_ids = kit.compiled_ids
     && Flow_sop.Network.Int_map.equal ( = ) again.compiled kit.compiled)
     "compiled ids are stable";
   (* the checker runs first *)
-  (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories
+  (match Lower.workspace ~extra:Editor_document.Kinds.descriptors ~factories
      (Flow.Syntax.parse "(workspace w (graph g :context sop (sop/nope)))" |> Result.get_ok) with
    | Error _ -> ()
    | Ok _ -> fail "lowering accepted an unchecked workspace")
