@@ -76,7 +76,7 @@ Decided 2026-10-27: Rays Lisp is the SOP surface. The 128 OCaml node twins, the 
 
 Exit gates:
 
-- [ ] P1.G1: lib/ under about 230k lines (from about 300k), counted with wc
+- [x] P1.G1: lib/ under about 230k lines (from about 300k), counted with wc Evidence: owner decision 2026-10-28: accepted at 254.5k lines (from 332.5k, −23%); the plan's estimate predates the emitters, Lisp kernels and tests this cleanup added.
 - [x] P1.G2: the `ports` alias runs under 2 minutes Evidence: per the owner, the golden lane is the 819-row corpus (c182d05a) and the full 58k corpus is dropped. @lib/flow_sop/goldens/runtest passes in 1:49 wall through check.exe, including the build, at load 18–21.
 - [x] P1.G3: the manifest lists 37 native and 128 Lisp SOPs, with zero OCaml twins Evidence: flow_manifest.sexp lists 37 native and 128 Lisp SOPs, with zero OCaml twins (@lib/sop_catalog/runtest diff passes).
 - [x] P1.G4: `prune-dead-code` reports nothing left Evidence: prune-dead-code reports nothing further in lib/rdk; dead-stubs reports nothing in lib/metal.
@@ -222,10 +222,10 @@ Delete the last handwritten shaders: the MSL strings in `runtime.ml` and `runtim
 
 Exit gates:
 
-- [ ] P9.G1: no handwritten MSL, HLSL or SPIR-V anywhere in lib/
+- [x] P9.G1: no handwritten MSL, HLSL or SPIR-V anywhere in lib/ Evidence: f6fde32c moves the Perlin noise3/fbm helpers into lib/flow_gpu/noise.rays (spliced per kernel; GPU output byte-identical on 18 kernels; 32-octave fast 47.8→13.6 ms) and fmod64 into IR integer mod. grep of lib/ finds MSL/SPIR-V text only in the two printers, printer goldens, test-only libraries, tests and generated .metal/.spv files.
 - [x] P9.G2: `test_ui_parity` goldens are pixel-identical Evidence: test_ui_parity is exact, and ui_shot frames are identical outside the status bar at 1x and 2x on 18 sketches.
 - [x] P9.G3: editor and Scene3 GPU frame time no worse than today (A/B, ≥ 5 runs) Evidence: GPU min ms at 2x, interleaved: shattered_studio 12.12–12.63 Lisp vs 12.85–13.06 handwritten; ws_bloom 5.95–6.02 vs 5.86–6.15; ws_layout 3.83 vs 3.84; drawing 0.741 vs 0.742; flow_image_kernel about 2.29 vs 2.30.
-- [ ] P9.G4: the Windows backend needs zero shader work beyond the SPIR-V emitter
+- [x] P9.G4: the Windows backend needs zero shader work beyond the SPIR-V emitter Evidence: SPIR-V comes from the same IR for every compute and raster stage (renderer, presentation blit, compaction, trace and noise helpers); no handwritten shader remains, so a Vulkan backend needs only the SPIR-V emitter.
 
 Risk: Medium. UI is drawn every frame, but it has the strictest net in the repo (pixel goldens).
 
@@ -238,7 +238,7 @@ After P1, rdk holds only live kernels. Give it one error model, one parallel and
 - [x] P6.S1: Errors: one internal `Rdk_error of Error.t`, converted to `result` once at the boundary. Delete `unguard`, `of_string`, the `_raw` twins, the trailing guard wrappers and the 54 local exceptions. Evidence: see RK3.
 - [x] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites. Evidence: uv_parameterize uses Support.run_ranges; there is one range helper (Support.run_ranges / parallel_for) and one cancel check (Cancel.check_opt).
 - [x] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules. Evidence: see RK8, RK9, RK10 and RK15.
-- [ ] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults.
+- [x] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults. Evidence: 431 → 121 optional parameters: every public rdk kernel SOPs call takes a required params record, with defaults in the SOP declarations and optional-argument fronts in rdk_test_support. The remaining optionals are boolean stage builders, internal helpers behind converted entries, and general constructors and indexes.
 - [x] P6.S5: Restructure into `rdk_core`, `rdk_geom` (exact plus spatial), `rdk_ops` (live attrib, gen, curve and mesh) and `rdk_boolean`, and rename `Private` to `View` for the borrowed-plane API. Evidence: fa4541bc: rdk_exact+rdk_spatial are rdk_geom, and rdk_attrib+rdk_curve+rdk_mesh are rdk_ops (include_subdirs); the gate library count went from 59 to 56. Private is View (RK17).
 - [x] P6.S6: Tests: local fixtures, one support library opened everywhere, and `parallel_exact` shared. Evidence: see RK23; rdk tests share one support library.
 
@@ -725,7 +725,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL33** (P0, low, doc-rot, effort S). Location at baseline: lib/runtime/AGENTS.md:23,31,86,90 · lib/ogpu/AGENTS.md ('since G4'). Says rays and runtime submit through ogpu_metal_native, which the gate now forbids. A rule is stated twice. HTTP and DOM policy text remains. Action: Update both files.
 
-- [ ] **PL34** (P4, low, naming, effort M). Location at baseline: scene_execution.mli:80 vertex_attributes option. Two Scene3 vertex ABIs ('legacy packed ABI'). Action: Pick one.
+- [x] **PL34** (P4, low, naming, effort M). Location at baseline: scene_execution.mli:80 vertex_attributes option. Two Scene3 vertex ABIs ('legacy packed ABI'). Action: Pick one. Evidence: one Scene3 vertex ABI: the legacy 68-byte f64 path (None at surface[82]) is removed from scene.rays and the generated shaders, and validation is per family (Scene3, points, textured and world require 24-byte vertices plus 12-byte attributes; Scene2, UI and Marks require None).
 
 - [x] **PL35** (P0, low, dead-code, effort S). Location at baseline: runtime.ml:627 create_offscreen ?title:_. An ignored parameter. Action: Delete it.
 
@@ -783,7 +783,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK27** (P6, low, duplication, effort S). Location at baseline: core/polygon_triangulation.ml · contour_triangulation.ml:196 · planar_cdt.ml:1081. Three ear-clipping routines. Action: Route them through `find_projected_ear` where exactness allows. Evidence: f97501e9: Contour_triangulation uses Polygon_triangulation.find_ear ~distinct. planar_cdt keeps its exact-predicate lowest-point ear by design.
 
-- [ ] **RK28** (P6, low, dead-code, effort S). Location at baseline: core/data_id.ml (3 lines) · Error.of_string · core/kernel.ml (mostly test helpers). One-line modules and aliases. Action: Fold them into Geometry and test support.
+- [x] **RK28** (P6, low, dead-code, effort S). Location at baseline: core/data_id.ml (3 lines) · Error.of_string · core/kernel.ml (mostly test helpers). One-line modules and aliases. Action: Fold them into Geometry and test support. Evidence: 070a3f95 deletes core/kernel.ml; generate_point_ranges is Rdk.Geometry.generate_point_ranges. Data_id and Error.of_string were already gone.
 
 - [x] **RK29** (P6, low, vibe-code, effort M). Location at baseline: 75 `type x = M.x = …` re-export lines; attribute_ops.mli 791 lines. A façade layer that exists only to back hidden private_modules. Action: Drop it once the oracles are gone. Evidence: e41b82ce drops the rdk type re-export facades (about 55 lines to 0); the hidden modules are public and callers name them (Attribute_transfer.Nearest, Fuse_rules.Keep_first, Boolean_solid.Union). attribute_ops.mli went from 489 to 374 lines.
 
