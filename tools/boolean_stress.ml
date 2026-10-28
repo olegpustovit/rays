@@ -299,8 +299,8 @@ let validate_finite name geometry =
 let validate_closed_manifold name geometry =
   if Geometry.primitive_count geometry > 0 then begin
     let index = Topology_index.create (Geometry.topology geometry) in
-    let boundary = Topology_index.boundary_edge_count index
-    and non_manifold = Topology_index.non_manifold_edge_count index in
+    let boundary = Topology_index_front.boundary_edge_count index
+    and non_manifold = Topology_index_front.non_manifold_edge_count index in
     if boundary <> 0 || non_manifold <> 0 then
       fail "%s: output is not closed two-manifold (boundary=%d non_manifold=%d)"
         name boundary non_manifold
@@ -438,7 +438,7 @@ let write_case_manifest path recipes =
         recipe.name recipe.resolve_left recipe.resolve_right) recipes)
 
 let run_once ~domains ~grain operation recipe = Parallel.run ~domains (fun () ->
-    Boolean.run ~grain ~operation
+    Boolean_front.run ~grain ~operation
       ~left_treatment:recipe.left_treatment
       ~right_treatment:recipe.right_treatment
       ~seam_points:recipe.seam_points
