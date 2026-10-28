@@ -197,7 +197,7 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
           doc, { (result : _ frame_result) with label =
             (if state.collapsed then "Collapse panel" else "Arrange panel"); edit_error = None }
       | Select_layout name when Option.map (fun (g : Flow.Workspace.graph) -> g.name)
-          (Workspace_doc.editor_graph (fst next.workspace)) = Some name -> next, result
+          (Workspace_doc.editor_graph (next.workspace.ws)) = Some name -> next, result
       | Select_layout name ->
           (match Editor_document.Document_edit.select_layout ~factories:value.factories next name with
            | Ok doc -> doc, { (result : _ frame_result) with label = "Switch layout"; edit_error = None }
@@ -210,9 +210,9 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
                  | Flow_graph.Flow_edit.Connect { node; key; src; _ } when node <> [] ->
                      let sp = List.rev (List.tl (List.rev node)) in
                      let leaf = Flow_graph.Flow_edit.nested_leaf (List.nth node (List.length node - 1)) key in
-                     (match Flow_graph.Flow_edit.arg_text (fst doc.workspace).source node key with
+                     (match Flow_graph.Flow_edit.arg_text (doc.workspace.ws).source node key with
                       | Some e when Flow_graph.Flow_edit.value_call e ->
-                          let at = Layout_by_path.Path_map.find_opt (sp @ [ src ]) (fst next.workspace).layout.at in
+                          let at = Layout_by_path.Path_map.find_opt (sp @ [ src ]) (next.workspace.ws).layout.at in
                           Editor_document.Document_edit.layout_edit doc (fun l -> { l with collapsed = Layout_by_path.Path_map.add (sp @ [ leaf ]) false l.collapsed;
                             at = (match at with Some p -> Layout_by_path.Path_map.add (sp @ [ leaf ]) p l.at | None -> l.at) })
                       | _ -> doc)
@@ -221,7 +221,7 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
                 | Flow_graph.Flow_edit.Add_node { scope; name; _ } -> added := [ scope @ [ name ] ]
                 | Rename_graph { name; to_ } -> renamed := Some (name, to_)
                 | Duplicate { nodes } ->
-                    added := Flow_graph.Flow_edit.duplicated (fst next.workspace).source nodes
+                    added := Flow_graph.Flow_edit.duplicated (next.workspace.ws).source nodes
                 | _ -> ());
                if !edit_note = None then
                  edit_note := Option.map (fun words -> "Wrote " ^ words) (Echo.words op);
@@ -275,7 +275,7 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
             let* doc, node = Editor_document.Scene_sync.bind_home ~factories:value.factories next home in
             let* doc = Editor_document.Document_edit.syntax_edit ~factories:value.factories doc
               (Flow_graph.Flow_edit.Unfold { node; key; sub = [] }) in
-            (match Flow_graph.Flow_edit.arg_text (fst doc.workspace).source node key with
+            (match Flow_graph.Flow_edit.arg_text (doc.workspace.ws).source node key with
              | Some { Flow.Syntax.node = Sym name; _ } ->
                  let path = List.rev (name :: List.tl (List.rev node)) in
                  let* doc = Editor_document.Document_edit.syntax_edit ~factories:value.factories doc (make path) in
@@ -313,7 +313,7 @@ let prompt_step ~(value : _ t) ~view_state (result : _ frame_result) =
           | Load_preset_file name -> Preset.path ~directory:value.presets ~name, "Loaded preset " ^ name
           | _ -> state_file value, "Restored last edited state" in
         let rejected = if intent = Load_last_state then "Last edited state rejected: " else "Preset rejected: " in
-        (match Preset.load_with_ops ~gpu:value.gpu ~ops:(fst value.doc.workspace).checked.ops ~path
+        (match Preset.load_with_ops ~gpu:value.gpu ~ops:(value.doc.workspace.ws).checked.ops ~path
             ~factories:value.factories ~settings:value.doc.settings () with
          | Ok preset -> result.prompt, Some (Info, restored), Some preset
          | Error message -> result.prompt, Some (Refusal, rejected ^ message), None)
@@ -332,7 +332,7 @@ let prompt_step ~(value : _ t) ~view_state (result : _ frame_result) =
   let prompt, notice = match List.find_map (function
       | Pxui_graph.Scope.Macro_requested nodes -> Some nodes | _ -> None) result.scope_changes with
     | Some nodes ->
-        (match Flow_graph.Flow_edit.macro_draft (fst value.doc.Document.workspace).source nodes with
+        (match Flow_graph.Flow_edit.macro_draft (value.doc.Document.workspace.ws).source nodes with
          | Ok draft ->
              Some (Making_macro { nodes; draft; state = { name = draft.name;
                holes = Array.of_list (List.mapi (fun i _ -> i < 2, "p" ^ string_of_int (i + 1)) draft.literals) } }),
@@ -711,7 +711,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
   if doc.workspace != value.doc.workspace || value'.viewed != value.viewed then begin
     let roots = Document.Int_map.fold (fun _ (_, root) roots ->
       Flow_sop.Network.Int_map.add root () roots) value'.viewed Flow_sop.Network.Int_map.empty in
-    Cook.set_volatile value.cook (fun id -> Flow_sop.Lower.is_volatile (snd doc.workspace) id
+    Cook.set_volatile value.cook (fun id -> Flow_sop.Lower.is_volatile (doc.workspace.lowered) id
       || Flow_sop.Network.Int_map.mem id roots)
   end;
   let probes = match value'.scope_key with Some k when scope_name value' <> None -> k.targets | _ -> [] in

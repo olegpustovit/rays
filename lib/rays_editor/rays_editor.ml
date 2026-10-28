@@ -55,10 +55,10 @@ module Editor = struct
   let world = Environment_model.world
   module Private = struct
     let gpu_qualification value=Flow_native.Workspace_gpu.qualification value.Environment_model.host.gpu
-    let image_plan value=(snd value.Environment_model.core.doc.workspace).plan
+    let image_plan value=(value.Environment_model.core.doc.workspace.lowered).plan
     let image_payload ?state ?live value image=
       let core=value.Environment_model.core in
-      Flow_native.Workspace_images.bind value.host.images (snd core.doc.workspace);
+      Flow_native.Workspace_images.bind value.host.images (core.doc.workspace.lowered);
       Flow_native.Workspace_images.payload value.host.images (image_plan value)
         ~state:(Option.value ~default:core.cook.state state)
         ~live:(Option.value ~default:core.live_frame live) image
@@ -77,16 +77,16 @@ module Editor = struct
     let host_stats value = let host=value.Environment_model.host in
       host.quit_requested,host.fired,host.resources.samples_created,host.resources.samples_destroyed
     let image value image = let core=value.Environment_model.core in
-      Flow_native.Workspace_images.bind value.host.images (snd core.doc.workspace);
+      Flow_native.Workspace_images.bind value.host.images (core.doc.workspace.lowered);
       let gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu in
       Flow_native.Workspace_images.image ~gpu value.host.images ~state:core.cook.state ~live:core.live_frame
-        (snd core.doc.workspace).plan image
+        (core.doc.workspace.lowered).plan image
     let with_images ?state ?live ?plan value run =
       let core = value.Environment_model.core in
       let state = Option.value ~default:core.cook.state state
       and live = Option.value ~default:core.live_frame live
-      and plan = Option.value ~default:(snd core.doc.workspace).plan plan in
-      Flow_native.Workspace_images.bind value.host.images (snd core.doc.workspace);
+      and plan = Option.value ~default:(core.doc.workspace.lowered).plan plan in
+      Flow_native.Workspace_images.bind value.host.images (core.doc.workspace.lowered);
       Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu (fun gpu ->
         Flow_sop.Lower.with_images ~gpu
           ~metadata:(fun plan id -> Option.map Rays.Image.Private.dimensions (Flow_native.Workspace_images.peek value.host.images plan id))

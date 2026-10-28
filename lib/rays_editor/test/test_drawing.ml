@@ -144,13 +144,13 @@ let pure workspace =
   let inputs = ["g", ["radius", E.Float 9.]] in
   let workspace = {(doc input_text) with inputs} in
   let document = ok (Editor_document.Contexts.of_workspace ~factories:Sop_catalog.Editor.factories workspace) in
-  let _, lower = document.workspace in
+  let lower = document.workspace.lowered in
   assert (List.assoc "radius" lower.plan.nodes.(0).args = E.Float 9.);
   let source = edited workspace.source (F.Set_arg {node = ["g"; "@result"]; key = F.Pos 0;
     sub = []; value = List.hd (ok (Flow.Syntax.parse "[20 20 0]"))}) in
   let workspace = {workspace with source; checked = checked source} in
   let after = ok (Editor_document.Contexts.of_workspace ~factories:Sop_catalog.Editor.factories ~previous:document workspace) in
-  assert (List.assoc "radius" (snd after.workspace).plan.nodes.(0).args = E.Float 9.);
+  assert (List.assoc "radius" (after.workspace.lowered).plan.nodes.(0).args = E.Float 9.);
   let bad = {workspace with inputs = ["g", ["radius", E.Text "wrong"]]} in
   assert (Result.is_error (Editor_document.Contexts.of_workspace ~factories:Sop_catalog.Editor.factories bad));
   let module Editor = Rays_editor.Editor in

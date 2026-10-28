@@ -23,7 +23,7 @@ let install value doc ~label ~merge =
   let level = Document.resolve_level doc value.level in
   let value' = { value with doc; level; lisp_vocab = vocabulary_for value doc;
     workspace = unrestore value.doc doc value.workspace } in
-  Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (snd doc.workspace));
+  Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (doc.workspace.lowered));
   { value' with history = commit ~label ~merge doc value.history;
     selection = if level = value.level then value.selection else Selection.empty }
 
@@ -38,7 +38,7 @@ let text_edit ?imports ?(label = "Edit text") ?(merge = Editor_core.History.Step
    Without a closure the tab shows the graph form, replaced whole. *)
 let binding_edit ?(merge = Editor_core.History.Step) value path text =
   let at_line_1 (d : Diagnostic.t) = { d with position = Some { line = 1; col = 0 }; span = None } in
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   match Text_pane.graph_op ws.source ~graph:(List.hd path) ~selection:path text with
   | Error d -> Error [ (if d.position = None then at_line_1 d else d) ]
   | Ok op ->
@@ -49,7 +49,7 @@ let binding_edit ?(merge = Editor_core.History.Step) value path text =
 (* The Graph tab's apply: the draft must be the one graph (or function) form, which replaces the
    graph's; atomic like every apply. *)
 let graph_edit ?(merge = Editor_core.History.Step) value name text =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   match Text_pane.graph_op ws.source ~graph:name text with
   | Error d ->
       Error [ (if d.position = None then { d with position = Some { line = 1; col = 0 } } else d) ]
@@ -90,7 +90,7 @@ let apply_text value intents =
       | _ -> {value.text with scrubbing = false;
           cache = (if value.text.scrubbing then None else value.text.cache)} in
     let with_text text = { value with text } in
-    let workspace = fst value.doc.Document.workspace in
+    let workspace = value.doc.Document.workspace.ws in
     let base old = Some (Option.value ~default:workspace old) in
     (* a Graph tab's slot: each graph keeps its own draft, base and errors *)
     let slot graph = Text_pane.graph_slot text graph in
@@ -185,20 +185,20 @@ let apply_text value intents =
     | Doc_scrub (draft, done_) ->
         (match (if finished done_ draft text.doc_base text.draft then Ok value else
           checked ~metadata:true ~shown:whole ~draft text.doc_base (scrub (text_edit ~merge:scrub_merge value))) with
-         | Ok value -> { value with text = { text with draft = (if done_ then None else Some draft); doc_base = (if done_ then None else Some (fst value.doc.workspace)); doc_errors = Text_pane.no_errors; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
+         | Ok value -> { value with text = { text with draft = (if done_ then None else Some draft); doc_base = (if done_ then None else Some (value.doc.workspace.ws)); doc_errors = Text_pane.no_errors; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
          | Error found -> with_text { text with draft = Some draft; doc_base = base text.doc_base; doc_errors = { at = draft; found }; scrubbing = false })
     | Graph_scrub (graph, draft, done_) ->
         let gbase = Option.bind (slot graph) (fun s -> s.Text_pane.gbase) in
         (match (if finished done_ draft gbase (Option.map (fun s -> s.Text_pane.gtext) (slot graph)) then Ok value else
           checked ~shown:(of_graph graph) ~draft gbase (scrub (graph_edit ~merge:scrub_merge value graph))) with
          | Ok value ->
-             let kept = if done_ then None else Some { Text_pane.gtext = draft; gbase = Some (fst value.doc.workspace); gerrors = Text_pane.no_errors } in
+             let kept = if done_ then None else Some { Text_pane.gtext = draft; gbase = Some (value.doc.workspace.ws); gerrors = Text_pane.no_errors } in
              { value with text = { (put graph kept) with scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
          | Error found -> with_text { (put graph (failed graph draft found)) with scrubbing = false })
     | Binding_scrub (path, draft, done_) ->
         (match (if finished done_ draft text.binding_base (Option.bind text.binding_draft (fun (p,d) -> if p = path then Some d else None)) then Ok value else
           checked_binding ~merge:scrub_merge path ~draft text.binding_base (scrub (binding_edit ~merge:scrub_merge value path))) with
-         | Ok value -> { value with text = { text with binding_draft = (if done_ then None else Some (path, draft)); binding_base = (if done_ then None else Some (fst value.doc.workspace)); binding_errors = Text_pane.no_errors; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
+         | Ok value -> { value with text = { text with binding_draft = (if done_ then None else Some (path, draft)); binding_base = (if done_ then None else Some (value.doc.workspace.ws)); binding_errors = Text_pane.no_errors; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
          | Error found -> with_text { text with binding_draft = Some (path, draft); binding_base = base text.binding_base; binding_errors = { at = draft; found }; scrubbing = false })
     | Literal_scrub _ -> value) value intents
 
@@ -225,7 +225,7 @@ let has_draft ?except value =
 
 (* What Command-S writes: the workspace text and, without a settings graph, the settings. *)
 let same_text (a : Document.t) (b : Document.t) =
-  fst a.workspace == fst b.workspace && a.settings == b.settings
+  a.workspace.ws == b.workspace.ws && a.settings == b.settings
 
 (* Work a reload of the source file would lose: edits since the file's text, or a draft. *)
 let unsaved ?except value = not (same_text value.doc value.filed) || has_draft ?except value

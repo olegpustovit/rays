@@ -18,7 +18,7 @@ let rec reads name (e : Flow.Syntax.t) = match e.node with
 (* Where a node is added from the list or the pane: the graph the level shows, else the scene
    or World graph that adding an object or a layer creates. *)
 let add_target value =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   match graph_name value with
   | Some name ->
       let context = match List.find_opt (fun (g : Flow.Workspace.graph) -> g.name = name) ws.checked.graphs with
@@ -145,16 +145,16 @@ let scope_add value key =
       (* several selected objects move into a new merge; with none selected, an empty merge *)
       (match Pxui_graph.Scope.selected value.scope_view with
        | _ :: _ :: _ as nodes ->
-           let ws, _ = value.doc.Document.workspace in
+           let ws = value.doc.Document.workspace.ws in
            [ Syntax_edit (Flow_graph.Flow_edit.Group_merge { nodes;
                name = Flow_graph.Flow_edit.fresh_name ws.source ~root:graph "group" }) ]
        | _ ->
-           let ws, _ = value.doc.Document.workspace in
+           let ws = value.doc.Document.workspace.ws in
            [ Syntax_edit (Flow_graph.Flow_edit.Add_node { scope = [ graph ];
                name = Flow_graph.Flow_edit.fresh_name ws.source ~root:graph "group";
                expr = Flow.Syntax.make (Flow.Syntax.List [ Flow.Syntax.make (Flow.Syntax.Sym "scene/merge") ]) }) ])
   | Some (graph, context) ->
-      let ws, _ = value.doc.Document.workspace in
+      let ws = value.doc.Document.workspace.ws in
       let is_value = String.length key > 0 && key.[0] = '=' in
       let material_of = String.starts_with ~prefix:"of-material:" key in
       let kind = List.find_opt (fun (d : Flow_sop.Catalog.descriptor) -> d.key = key) (kinds value context) in

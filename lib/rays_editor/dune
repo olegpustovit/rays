@@ -6,4 +6,4 @@
   core_text core_panels core_menu core_carry core_reduce core_host core_inspector_pane core_viewport_pane core world_map
   environment_view environment_model environment_source environment
   viewport renderer)
-(libraries editor_document flow_native rays rays_math input rdk rdk_rays rays_pathtracer sop flow flow_ir flow_gpu flow_sop flow_graph editor_core pxui pxui_shell pxui_graph sop_catalog renderer scene_command lru runtime_resources unix))
+(libraries editor_document flow_native rays rays_math input rdk rdk_rays rays_pathtracer sop flow flow_ir flow_sop flow_graph editor_core pxui pxui_shell pxui_graph sop_catalog lru runtime_resources unix))

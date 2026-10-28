@@ -11,7 +11,7 @@ open Core_status
 let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
     ~geometry:(g : Pxui_shell.Layout.geometry) ~ui
     (value, scope_view, selection, scope_active) inspector_root bounds =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let document = (network value).graph.geometry in
   let selected_ids = Selection.selected_nodes selection in
   let lowered_level = match value.level with

@@ -111,7 +111,7 @@ let can_redo value = Editor_core.History.can_redo value.core.Core_model.history
 let undo_label value = if can_undo value
   then Some (Editor_core.History.label value.core.Core_model.history) else None
 let redo_label value = Editor_core.History.redo_label value.core.Core_model.history
-let workspace value = fst value.core.Core_model.doc.workspace
+let workspace value = value.core.Core_model.doc.workspace.ws
 let probe value zone = Layout_by_path.Path_map.find_opt zone value.core.Core_model.probes
 let set_probe value zone index =
   { value with core = { value.core with Core_model.probes = Layout_by_path.Path_map.add zone index value.core.Core_model.probes } }
@@ -217,7 +217,7 @@ let composition_key core scene = scene, core.Core_model.level,
 let compose value (update : (_, _) Core_model.update) ~baked ~baked_views ~scene =
   let live={update.core.live_frame with t=Timeline.time(Core_list.timeline update.core);
     frame=Int64.to_int(Timeline.frame(Core_list.timeline update.core))}in
-  let lowered=snd update.core.doc.workspace in
+  let lowered=update.core.doc.workspace.lowered in
   Flow_native.Workspace_images.bind value.host.images lowered;
   let plan=lowered.plan in
   let textures,errors=Document.Int_map.fold(fun id source (textures,errors)->

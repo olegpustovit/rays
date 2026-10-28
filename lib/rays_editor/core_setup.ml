@@ -99,8 +99,8 @@ let create ?gpu ?settings
         list_at = None; text_at = None; outline_at = None; locals = [];
         started = { on = None; views = []; tabs = [] };
         framing = None; carry = None; carry_budget; traces = []; view_tools = None; gates = []; selected_box = None;
-        file = (fst doc.Document.workspace).checked.name ^ ".rays" } in
-      Cook.set_volatile cook (Flow_sop.Lower.is_volatile (snd doc.workspace));
+        file = (doc.Document.workspace.ws).checked.name ^ ".rays" } in
+      Cook.set_volatile cook (Flow_sop.Lower.is_volatile (doc.workspace.lowered));
       (* the panels open as their start keywords say; the first graph pane (the focused leaf, else
          the first) opens on the graph it pins *)
       let on = match Option.bind doc.Document.shell (fun s -> s.start.focus) with

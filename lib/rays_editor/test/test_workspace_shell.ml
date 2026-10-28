@@ -385,7 +385,7 @@ let run_values () =
   Fun.protect ~finally:(fun()->E3.close e)(fun()->
     check(E3.undo_label e=Some "Add node" && has(source e)"(sop/line)")
       ("Line actual zero-input menu insertion: "^source e);
-    let ws=E3.workspace e in let doc=build_ok ws in let lowered=snd doc.Document.workspace in
+    let ws=E3.workspace e in let doc=build_ok ws in let lowered=doc.Document.workspace.lowered in
     let pane=Flow_graph.Projection.of_graph catalog ws.checked "g" in
     check(List.exists(fun(card:Flow_graph.Projection.node)->card.head="sop/line")pane.nodes)
       "Line menu insertion has no geometry card";
@@ -394,7 +394,7 @@ let run_values () =
     "Points production menu still uses an OCaml registration";
   let pick_points editor=
     let doc=build_ok(E3.workspace editor) in
-    let lowered=snd doc.Document.workspace in
+    let lowered=doc.Document.workspace.lowered in
     let module Menu=Pxui_graph.Node_menu in
     let entries=List.map(fun(d:Flow_sop.Catalog.descriptor)->Menu.{key=d.key;
       label=d.label;category=d.category;
@@ -406,7 +406,7 @@ let run_values () =
   Fun.protect ~finally:(fun()->E3.close e)(fun()->
     check(E3.undo_label e=Some "Add node" && has(source e)"(sop/points)")
       ("Points actual zero-input menu insertion: "^source e);
-    let ws=E3.workspace e in let doc=build_ok ws in let lowered=snd doc.Document.workspace in
+    let ws=E3.workspace e in let doc=build_ok ws in let lowered=doc.Document.workspace.lowered in
     let pane=Flow_graph.Projection.of_graph catalog ws.checked "g" in
     check(List.exists(fun(card:Flow_graph.Projection.node)->card.head="sop/points")pane.nodes)
       "Points menu insertion has no geometry card";
@@ -451,7 +451,7 @@ let run_values () =
       ("ordinary full attribute menu starter lost typed legacy array/geometry defaults: "^source e);
     let saved=of_text(source e) in
     let doc=build_ok saved in
-    let lowered=snd doc.Document.workspace in
+    let lowered=doc.Document.workspace.lowered in
     let graph=List.find(fun(graph:Flow_sop.Lower.graph)->graph.name="g")lowered.graphs in
     let info=List.find(fun(info:Edit_graph.node_info)->info.operation="flow.with_attr")
       (Edit_graph.inspect graph.network.geometry) in

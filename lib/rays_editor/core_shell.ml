@@ -10,7 +10,7 @@ let layouts value =
   | Some { switch = Some sw; _ } ->
       List.mapi (fun i name -> name, i = sw.active) (Editor_core.Panels.labels sw.layouts)
   | _ ->
-      let doc = fst value.doc.Document.workspace in
+      let doc = value.doc.Document.workspace.ws in
       let current = Option.map (fun (g : Flow.Workspace.graph) -> g.name) (Workspace_doc.editor_graph doc) in
       (match List.filter (fun (g : Flow.Workspace.graph) -> g.context = Flow.Context.editor) doc.checked.graphs with
        | [] | [ _ ] -> []
@@ -19,7 +19,7 @@ let layouts value =
 (* What the text pane completes beyond its own text: the graphs, the materials, the cameras of the
    first scene graph and the layouts. *)
 let completion_names value : Lisp_text.names =
-  let ws = fst value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let graphs = ws.checked.graphs in
   let named context = List.filter_map (fun (g : Flow.Workspace.graph) ->
     if g.context = context then Some g.name else None) graphs in
@@ -42,7 +42,7 @@ let visible (shell : shell) panel = not (List.mem panel shell.hidden)
 
 let panel_key (doc : Document.t) path =
   let graph = Option.fold ~none:"@default" ~some:(fun (g : Flow.Workspace.graph) -> g.name)
-    (Workspace_doc.editor_graph (fst doc.workspace)) in
+    (Workspace_doc.editor_graph (doc.workspace.ws)) in
   let origin path = Option.bind doc.shell (fun s -> List.assoc_opt path s.Document.origins) in
   (* a binding several leaves are made from names none of them: each is keyed by its place *)
   let once name = not (Option.fold ~none:false ~some:(fun (s : Document.shell) -> List.mem name s.repeated) doc.shell) in
@@ -55,7 +55,7 @@ let panel_key (doc : Document.t) path =
   | _ -> graph :: "@panel" :: List.map string_of_int path
 
 let panel_state value path =
-  let saved key = Layout_by_path.Path_map.find_opt key (fst value.doc.workspace).layout.panels in
+  let saved key = Layout_by_path.Path_map.find_opt key (value.doc.workspace.ws).layout.panels in
   let state = if value.workspace.restored then Editor_core.Panels.default_state else
     match saved (panel_key value.doc path) with
     | Some state -> state

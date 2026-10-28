@@ -67,7 +67,7 @@ let snapshot (doc : Document.t) =
   List.map (fun (f : Param.field_view) -> f.name, f.current) (Editor_document.Settings.fields doc.settings)
   |> List.sort compare
 
-let source (doc : Document.t) = Workspace_doc.to_text (fst doc.workspace)
+let source (doc : Document.t) = Workspace_doc.to_text (doc.workspace.ws)
 
 (* the text of [doc], opened again, says the same *)
 let same_after_reload doc what =
@@ -131,9 +131,9 @@ let run () =
   let current = ref first in
   List.iter (fun (offset,accepted) ->
     let previous = !current in
-    let workspace = {(fst previous.workspace) with inputs = ["g",["offset",E.Float offset]]} in
+    let workspace = {(previous.workspace.ws) with inputs = ["g",["offset",E.Float offset]]} in
     let doc = lower ~previous workspace in
-    let qualified,lowered = doc.workspace in
+    let qualified = doc.workspace.ws and lowered = doc.workspace.lowered in
     check (Flow.Workspace.Paths.mem path qualified.checked.approx = accepted)
       "input changes reused stale qualification";
     check (qualified.checked.approx == lowered.approx) "document did not publish lowering qualification";
@@ -144,18 +144,18 @@ let run () =
     current := doc) [2.,true;1e39,false;7.,true];
   let previous = !current in
   let catalog = Result.get_ok (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
-  let edited = Workspace_doc.edit catalog (fst previous.workspace)
+  let edited = Workspace_doc.edit catalog (previous.workspace.ws)
     (Flow_graph.Flow_edit.Set_arg {node = ["geo";"@result"]; key = Kw "size"; sub = [];
       value = Flow.Syntax.make (Num "2.0")}) |> Result.get_ok in
   check (edited.literal <> None) "catalog literal did not exercise the fast patch";
   let doc = lower ~previous edited in
-  check (Flow.Workspace.Paths.mem path (fst doc.workspace).checked.approx)
+  check (Flow.Workspace.Paths.mem path (doc.workspace.ws).checked.approx)
     "patched authored forms lost their producer associations";
-  check ((fst doc.workspace).source == edited.source && contains (Workspace_doc.to_text (fst doc.workspace)) ":size 2.0")
+  check ((doc.workspace.ws).source == edited.source && contains (Workspace_doc.to_text (doc.workspace.ws)) ":size 2.0")
     "publishing metadata lost the literal edit";
-  let unchanged = lower ~previous:doc (fst doc.workspace) in
-  check ((fst unchanged.workspace).checked == (fst doc.workspace).checked
-    && snd unchanged.workspace == snd doc.workspace) "unchanged qualification broke literal reuse";
+  let unchanged = lower ~previous:doc (doc.workspace.ws) in
+  check ((unchanged.workspace.ws).checked == (doc.workspace.ws).checked
+    && unchanged.workspace.lowered == doc.workspace.lowered) "unchanged qualification broke literal reuse";
   let old_form = List.find (fun (_,p) -> p = path) qualification.checked.packed_roots |> fst in
   let generated = Flow.Syntax.make old_form.node in
   let generated_checked = {qualification.checked with
@@ -168,13 +168,13 @@ let run () =
             if term.form == old_form then {term with form = generated} else term) bindings,result)}}
       | _ -> assert false) qualification.checked.graphs} in
   let generated_doc = lower {qualification with checked = generated_checked} in
-  let edited = Workspace_doc.edit catalog (fst generated_doc.workspace)
+  let edited = Workspace_doc.edit catalog (generated_doc.workspace.ws)
     (Flow_graph.Flow_edit.Set_arg {node = ["geo";"@result"]; key = Kw "size"; sub = [];
       value = Flow.Syntax.make (Num "2.0")}) |> Result.get_ok in
   check (List.exists (fun (form,_) -> form == generated) edited.checked.packed_roots)
     "literal patch replaced a generated ID-zero producer";
   let edited_doc = lower ~previous:generated_doc edited in
-  check (Flow.Workspace.Paths.mem path (fst edited_doc.workspace).checked.approx)
+  check (Flow.Workspace.Paths.mem path (edited_doc.workspace.ws).checked.approx)
     "generated empty-span root stopped matching after literal patch";
   let doc = open_text text in
   (* Following the viewport writes camera coordinates every frame. Rounding them
@@ -198,7 +198,7 @@ let run () =
   let edited = ok (reconcile doc (set doc "arm" [ float "translate_x" 4.; float "translate_y" 2. ])) in
   check (contains (source edited) ":translate [4.0 2.0 0.0]") "a transform edit did not reach the text";
   check (node_id edited "arm" = arm) "an edit changed an object's id";
-  check (snd edited.workspace != snd doc.workspace) "the edited text was not lowered again";
+  check (edited.workspace.lowered != doc.workspace.lowered) "the edited text was not lowered again";
   same_after_reload edited "transform";
   (* the inspector's and the handles' route writes the fields text first (the derived object is
      never edited): the same text as the reconciled edit, ranges applied, ids kept *)
@@ -330,7 +330,7 @@ let run () =
   (let plain = open_text "(workspace plain (graph g :context sop (sop/box)))" in
    match Sync.write ~factories plain Document.Scene (Sync.Settings settings) with
    | Ok (Some (kept, _)) ->
-       check (kept.settings == settings && (fst kept.workspace).settings == settings)
+       check (kept.settings == settings && (kept.workspace.ws).settings == settings)
          "settings with no graph were not kept by the workspace"
    | _ -> failwith "settings with no graph were refused");
   check (contains (source edited) ":width 800") "a settings edit did not reach the text";
@@ -402,7 +402,7 @@ let run () =
   let call head args = Flow.Syntax.make (Flow.Syntax.List (Flow.Syntax.make (Flow.Syntax.Sym head) :: args)) in
   let catalog = Result.get_ok (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
   let edit (doc : Document.t) op = lower ~previous:doc
-    (Result.get_ok (Workspace_doc.edit catalog (fst doc.workspace) op)) in
+    (Result.get_ok (Workspace_doc.edit catalog (doc.workspace.ws) op)) in
   let added = edit doc (Flow_graph.Flow_edit.Add_node { scope = [ "scene" ]; name = "lamp";
     expr = call "scene/light" [ Flow.Syntax.make (Flow.Syntax.Kw "name"); Flow.Syntax.make (Flow.Syntax.Str "lamp") ] }) in
   check (contains (source added) "scene/merge body arm cam side (scene/light :name \"fill\") lamp"
@@ -416,7 +416,7 @@ let run () =
   same_after_reload layered "added layer";
   let twice = edit added (Flow_graph.Flow_edit.Delete_nodes { nodes = [ [ "scene"; "lamp" ] ] }) in
   check (snapshot twice = snapshot doc) "deleting what was added did not give the scene back";
-  check (Result.is_ok (Workspace_doc.edit catalog (fst layered.workspace) (Flow_graph.Flow_edit.Delete_nodes { nodes = [ [ "world"; "haze" ] ] })))
+  check (Result.is_ok (Workspace_doc.edit catalog (layered.workspace.ws) (Flow_graph.Flow_edit.Delete_nodes { nodes = [ [ "world"; "haze" ] ] })))
     "a World layer could not be deleted by its binding";
   (* through the editor: a workspace with no scene graph gets one when an object is added *)
   let env = Rays_editor.Editor.create ~ui_text_size:11 ~workspace:(Ws_fixture.of_text "(workspace bare (graph g :context sop (sop/box)))")
@@ -601,7 +601,7 @@ let run_loops () =
     (let* [a (scene/light :name "a") b (scene/light :name "b") c (scene/light :name "c") d (scene/light :name "d")]
       (scene/merge a b c d :skip [1 3]))))|} in
   check (List.length (lamps renum) = 2) "a merge :skip did not leave two lamps";
-  let edit_text doc op = Workspace_doc.to_text (Result.get_ok (Workspace_doc.edit catalog (fst doc.Document.workspace) op)) in
+  let edit_text doc op = Workspace_doc.to_text (Result.get_ok (Workspace_doc.edit catalog (doc.Document.workspace.ws) op)) in
   let after = edit_text renum (Flow_graph.Flow_edit.Delete_nodes { nodes = [ [ "scene"; "b" ] ] }) in
   check (contains after ":skip [2]") ("deleting an argument did not renumber the skip: " ^ after);
   let after = edit_text renum (Flow_graph.Flow_edit.Delete_nodes { nodes = [ [ "scene"; "a" ] ] }) in
@@ -850,7 +850,7 @@ let apply_ops (doc : Document.t) ops =
   let catalog = Result.get_ok (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
   List.fold_left (fun doc op ->
     Result.bind doc (fun (doc : Document.t) ->
-      match Workspace_doc.edit catalog (fst doc.workspace) op with
+      match Workspace_doc.edit catalog (doc.workspace.ws) op with
       | Error d -> Error (Diagnostic.to_string d)
       | Ok workspace -> Contexts.of_workspace ~factories ~previous:doc workspace
           |> Result.map_error Diagnostic.to_string)) (Ok doc) ops
@@ -858,7 +858,7 @@ let apply_ops (doc : Document.t) ops =
 let okx = function Ok d -> d | Error m -> failwith m
 
 let graph_names (doc : Document.t) =
-  List.map (fun (g : Flow.Workspace.graph) -> g.name) (fst doc.workspace).checked.graphs
+  List.map (fun (g : Flow.Workspace.graph) -> g.name) (doc.workspace.ws).checked.graphs
 
 let geometries doc = List.length (Objects.ids "geometry" (scene doc))
 
@@ -904,7 +904,7 @@ let run_compose () =
   let shared = okx (apply_ops worlded [Flow_graph.Flow_edit.Set_graph {name="saved"; form=saved}]) in
   let sky_text doc =
     let graph = List.find (fun (g : Flow.Workspace.graph) -> g.name = "sky")
-        (fst doc.Document.workspace).checked.graphs in
+        (doc.Document.workspace.ws).checked.graphs in
     fst (Flow.Lisp.print [graph.form]) in
   let retained = delete_world shared in
   check (Objects.ids "world" (scene retained) = [] && List.mem "saved" (graph_names retained)

@@ -28,7 +28,7 @@ let flow_catalog factories = Contexts.catalog ~version:1 factories
 (* the text of the document: a settings graph owns the settings; else the document's are the
    sketch's, saved beside the text *)
 let text (doc : Document.t) =
-  let workspace, _ = doc.workspace in
+  let workspace = doc.workspace.ws in
   Workspace_doc.to_text (if Contexts.has_settings workspace then workspace
     else { workspace with settings = doc.settings })
 
