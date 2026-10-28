@@ -4,7 +4,7 @@ module P = Flow_graph.Projection
 module E = Flow_graph.Flow_edit
 
 let ok = Result.get_ok
-let check condition message = if not condition then failwith message
+let check = Test_support.check
 let parse text = match S.parse text with
   | Ok forms -> forms | Error d -> failwith (Diagnostic.to_string d)
 let checked catalog forms = match W.check ~ops:Flow_sop.Operators.all catalog forms with

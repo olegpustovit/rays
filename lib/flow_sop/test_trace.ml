@@ -4,7 +4,7 @@
 open Rdk
 open Rdk_test_support
 module P = Flow_ir.Packed
-let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let id = 7
 let count = 256
 let x i = (0.15 *. float (i mod 16)) -. 1.2 and y i = (0.15 *. float (i / 16)) -. 1.2

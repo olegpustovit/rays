@@ -1,7 +1,7 @@
 open Flow
 open Flow_graph
 let catalog = {Catalog.version = 1; kinds = []}
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 
 let () =
   let source=ok(Syntax.parse "(workspace lookup (graph g :context value (let* [table (array/int 3 9007199254740993) picked (array/nth table 1)] picked)))") in

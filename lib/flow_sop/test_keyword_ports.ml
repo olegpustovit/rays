@@ -21,7 +21,7 @@ module Field = struct
   let factory = parameters_factory build
 end
 
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let checked catalog args =
   let forms = Flow.Syntax.parse ("(workspace w (graph g :context sop (sop/test_field " ^ args ^ ")))" ) |> ok in
   let workspace, _ = Flow.Workspace.check catalog forms in

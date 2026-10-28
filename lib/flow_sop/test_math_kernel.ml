@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module P = Flow_ir.Packed
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let function_value ?(sources=[]) input_ty body =
   let source = Flow.Syntax.parse ("(workspace math (graph result :context value (let* [tested (fn [(x : "
     ^ Flow.Ty.to_string input_ty ^ ")] " ^ body ^ ")] 0.0)))" ) |> ok in

@@ -4,7 +4,7 @@
 module E = Flow.Eval
 module I = Flow_ir
 
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let writing = Array.to_list Sys.argv = [Sys.argv.(0); "--write-goldens"]
 let has text part = try ignore (Str.search_forward (Str.regexp_string part) text 0); true with Not_found -> false
 

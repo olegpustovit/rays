@@ -15,21 +15,21 @@
  (name test_units)
  (modules test_units test_node_sources test_math_helpers test_math_kernel test_lisp_node test_node_facts test_encoded_parameters test_lisp_projection test_merge_source test_image_kernel test_keyword_ports test_metadata_kernel test_topology_kernel test_geometry_arrays test_group_kernel test_noise_displace_contract test_remap test_concat test_planes test_iterate test_adjacency test_graph test_lisp_fusion test_trace test_mesh_planes)
  (deps nodes/prelude.rays)
- (libraries flow flow_ir flow_ir_test_support flow_web flow_graph flow_sop sop rdk rdk_test_support lisp_sop rays_math input unix parallel)
+ (libraries test_support flow flow_ir flow_ir_test_support flow_web flow_graph flow_sop sop rdk rdk_test_support lisp_sop rays_math input unix parallel)
  (preprocess (pps rays.ppx)))
 
 (test
  (name test_attribute_kernel)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_attribute_kernel)
- (libraries flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries test_support flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop rays_math parallel))
 
 (test
  (name test_rand_at)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_rand_at)
  (deps nodes/prelude.rays)
- (libraries flow flow_ir flow_sop flow_web rays_math parallel))
+ (libraries test_support flow flow_ir flow_sop flow_web rays_math parallel))
 
 ; Tests that need no editor: they link the catalog and the document contexts,
 ; not rays_editor. They read their fixtures relative to test/, where they ran
@@ -68,7 +68,7 @@
  (name test_gpu_bulk)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_gpu_bulk)
- (libraries flow flow_ir flow_sop sop rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries test_support flow flow_ir flow_sop sop rdk rdk_test_support lisp_sop rays_math parallel))
 
 (executable
  (name flow_manifest)

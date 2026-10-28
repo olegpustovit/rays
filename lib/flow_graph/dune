@@ -8,29 +8,29 @@
 (test
  (name test_domain)
  (modules test_domain)
- (libraries flow_graph))
+ (libraries test_support flow_graph))
 
 (test
  (name test_nonfinite)
  (modules test_nonfinite)
- (libraries flow_graph param))
+ (libraries test_support flow_graph param))
 
 (test
  (name test_string_bytes)
  (modules test_string_bytes)
- (libraries flow_graph))
+ (libraries test_support flow_graph))
 
 (test
  (name test_array_composition_graph)
  (modules test_array_composition_graph)
- (libraries flow_graph))
+ (libraries test_support flow_graph))
 
 (test
  (name test_iterate_graph)
  (modules test_iterate_graph)
- (libraries flow_graph))
+ (libraries test_support flow_graph))
 
 (test
  (name test_graph_edits)
  (modules test_graph_edits)
- (libraries flow_graph))
+ (libraries test_support flow_graph))

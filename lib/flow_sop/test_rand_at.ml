@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module P = Flow_ir.Packed
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let sources =
   let text = In_channel.with_open_text "nodes/prelude.rays" In_channel.input_all in
   let workspace = ok (Flow.Syntax.parse text) |> List.hd in

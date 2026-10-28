@@ -1,4 +1,4 @@
-let check condition message = if not condition then failwith message
+open Test_support
 
 let cook node =
   let context = Result.get_ok (Sop.Context.create ()) in

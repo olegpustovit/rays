@@ -8,4 +8,4 @@
 (test
  (name test_workspace_node)
  (modules test_workspace_node)
- (libraries lisp_sop sop rdk))
+ (libraries test_support lisp_sop sop rdk))

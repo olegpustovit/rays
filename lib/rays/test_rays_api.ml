@@ -3,7 +3,7 @@
    resource ownership. *)
 open Rays
 
-let check condition message = if not condition then failwith message
+open Test_support
 
 let sketch_startup_result () =
   let called = ref false in

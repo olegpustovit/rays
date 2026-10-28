@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let bits x y = Int64.bits_of_float x = Int64.bits_of_float y
 let rec same (a : E.value) (b : E.value) = match a,b with
   | Float x,Float y -> bits x y

@@ -15,13 +15,13 @@
  (name test_spirv)
  (modules test_spirv)
  (deps goldens/spirv.sexp)
- (libraries flow_gpu flow_ir flow_ir_test_support ogpu_mock))
+ (libraries test_support flow_gpu flow_ir flow_ir_test_support ogpu_mock))
 
 (test
  (name test_emit)
  (modules test_emit)
  (deps (glob_files goldens/*.metal))
- (libraries flow_gpu flow flow_ir flow_ir_test_support flow_web rays_math ogpu_mock parallel))
+ (libraries test_support flow_gpu flow flow_ir flow_ir_test_support flow_web rays_math ogpu_mock parallel))
 
 (executable
  (enabled_if (= %{system} macosx))
@@ -52,17 +52,17 @@
 (test
  (name test_pipelines)
  (modules test_pipelines)
- (libraries flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
+ (libraries test_support flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
 
 (test
  (name test_run_lifetime)
  (modules test_run_lifetime)
- (libraries flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
+ (libraries test_support flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
 
 (test
  (name test_image_sink)
  (modules test_image_sink)
- (libraries flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
+ (libraries test_support flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
 
 (executable
  (enabled_if (= %{system} macosx))
@@ -80,7 +80,7 @@
  (enabled_if (= %{system} macosx))
  (name test_trace)
  (modules test_trace)
- (libraries flow_gpu flow flow_ir flow_ir_test_support flow_sop rdk rdk_test_support renderer ogpu ogpu_metal input unix parallel))
+ (libraries test_support flow_gpu flow flow_ir flow_ir_test_support flow_sop rdk rdk_test_support renderer ogpu ogpu_metal input unix parallel))
 
 (rule
  (enabled_if (= %{system} macosx))
@@ -126,4 +126,4 @@
  (name test_raster)
  (modules test_raster)
  (deps (glob_files ../renderer/shaders/*.rays) (glob_files ../renderer/shaders/metal/*.metal) (glob_files ../renderer/shaders/spirv/*.spv))
- (libraries flow_gpu ogpu_mock))
+ (libraries test_support flow_gpu ogpu_mock))

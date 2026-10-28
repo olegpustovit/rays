@@ -9,7 +9,7 @@ open Rdk
 open Rdk_test_support
 module B = Ogpu.Backend
 module R = Flow_gpu.Run
-let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let count = 256
 let spheres = [| (0.3, 0.2, 1.0, 0.4); (-0.5, -0.4, 0.5, 0.3) |]
 let grid size = match Plane_generators.grid ~counts:Grid_point_counts ~connectivity:Grid_triangles

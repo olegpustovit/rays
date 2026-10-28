@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let bits x = Printf.sprintf "%016Lx" (Int64.bits_of_float x)
 let number x = Param.float_text x
 let array xs = "Float64Array.from([" ^ String.concat "," (Array.to_list (Array.map number xs)) ^ "])"

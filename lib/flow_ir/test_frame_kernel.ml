@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let checked text =
   match Flow.Workspace.check {Flow.Catalog.version = 1; kinds = []} (ok (Flow.Syntax.parse text)) with
   | Some w, [] -> w | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))

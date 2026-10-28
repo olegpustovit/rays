@@ -72,7 +72,7 @@ let () =
     (List.assoc ["img";"a"] qualified.approx_reasons));
   print_endline "image qualification: authored sites, shared functions, folded/unsupported forms, capture requalification, state and declaration identity pass"
 
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 
 let check ?(ops = []) ?(catalog = {Flow.Catalog.version = 1; kinds = []}) text =
   let forms = ok (Flow.Syntax.parse text) in

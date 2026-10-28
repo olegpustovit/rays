@@ -2,7 +2,7 @@ module E = Flow.Eval
 module M = Rays_math.Mat4
 module V = Rays_math.Vec3
 module Q = Rays_math.Quat
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let parse x = Flow.Syntax.parse x |> ok
 let sources =
   let channel = open_in "nodes/prelude.rays" in
