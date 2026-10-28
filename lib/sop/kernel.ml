@@ -4,7 +4,7 @@ type t = {id : int; bytes : int; prepare : column list -> (runner, Diagnostic.t)
   geometry_capture : int -> Rdk.Geometry.t option}
 let create ?(geometry_capture = fun _ -> None) ~payload_bytes prepare =
   if payload_bytes < 0 then invalid_arg "Kernel.create: negative payload size";
-  {id = Rdk.Data_id.fresh (); bytes = payload_bytes; prepare; geometry_capture}
+  {id = Rdk.Geometry.fresh_data_id (); bytes = payload_bytes; prepare; geometry_capture}
 let data_id t = t.id
 let payload_bytes t = t.bytes
 let prepare t = t.prepare

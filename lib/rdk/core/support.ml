@@ -1,3 +1,6 @@
+let next_data_id = Atomic.make 0
+let fresh_data_id () = Atomic.fetch_and_add next_data_id 1
+
 module Bits = struct
 
   let[@inline always] mem bits index =

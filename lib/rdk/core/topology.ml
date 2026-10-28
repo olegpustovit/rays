@@ -68,20 +68,20 @@ let create_owned ~point_count ~vertex_points ~primitive_offsets ~primitive_kinds
       (fun index -> Char.chr (kind_code primitive_kinds.(index))) in
   Result.map
     (fun () -> { point_count; vertex_points; primitive_offsets; primitive_kinds;
-                 data_id = Data_id.fresh () })
+                 data_id = Support.fresh_data_id () })
     (validate ~point_count ~vertex_points ~primitive_offsets ~primitive_kinds)
 
 let polygons_owned ~point_count ~vertex_points ~primitive_offsets =
   let primitive_kinds = Bytes.make (Array.length primitive_offsets - 1) '\000' in
   Result.map
     (fun () -> { point_count; vertex_points; primitive_offsets; primitive_kinds;
-                 data_id = Data_id.fresh () })
+                 data_id = Support.fresh_data_id () })
     (validate ~point_count ~vertex_points ~primitive_offsets ~primitive_kinds)
 
 let empty ~point_count =
   if point_count < 0 then invalid_arg "Topology.empty: negative point count";
   { point_count; vertex_points = [||]; primitive_offsets = [|0|]; primitive_kinds = Bytes.empty;
-    data_id = Data_id.fresh () }
+    data_id = Support.fresh_data_id () }
 let point_count value = value.point_count
 let vertex_count value = Array.length value.vertex_points
 let primitive_count value = Array.length value.primitive_offsets - 1
@@ -172,7 +172,7 @@ module Builder = struct
       vertex_points = take value.vertex_points value.vertex_count;
       primitive_offsets = take value.primitive_offsets (value.primitive_count + 1);
       primitive_kinds = take_bytes value.primitive_kinds value.primitive_count;
-      data_id = Data_id.fresh () }
+      data_id = Support.fresh_data_id () }
 end
 
 module View = struct
@@ -192,5 +192,5 @@ module View = struct
   let create_validated_owned ~point_count ~vertex_points ~primitive_offsets
       ~primitive_kinds =
     { point_count; vertex_points; primitive_offsets; primitive_kinds;
-      data_id = Data_id.fresh () }
+      data_id = Support.fresh_data_id () }
 end

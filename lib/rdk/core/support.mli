@@ -1,6 +1,9 @@
 (** Small shared kernel helpers: packed bitsets, open-addressing key maps,
     and index quickselect. *)
 
+val fresh_data_id : unit -> int
+(** Monotonic identity for immutable packed values. *)
+
 module Bits : sig
 
   val mem : Bytes.t -> int -> bool

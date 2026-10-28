@@ -105,7 +105,7 @@ module Float3 = struct
   let of_owned ~x ~y ~z =
     match same_length "Float3" (Array.length x) (Array.length y),
           same_length "Float3" (Array.length x) (Array.length z) with
-    | Ok (), Ok () -> Ok { x; y; z; data_id = Data_id.fresh () }
+    | Ok (), Ok () -> Ok { x; y; z; data_id = Support.fresh_data_id () }
     | Error message, _ | _, Error message -> Error message
 
   module Builder = struct
@@ -125,7 +125,7 @@ module Float3 = struct
     let freeze value =
       if value.frozen then invalid_arg "Packed.Float3.Builder.freeze: already frozen";
       value.frozen <- true;
-      { x = value.x; y = value.y; z = value.z; data_id = Data_id.fresh () }
+      { x = value.x; y = value.y; z = value.z; data_id = Support.fresh_data_id () }
   end
 
   module View = struct

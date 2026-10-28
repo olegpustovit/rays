@@ -63,7 +63,7 @@ let validate positions topology attributes groups edge_groups =
 
 let make positions topology attributes groups edge_groups =
   { positions; topology; attributes; groups; edge_groups;
-    data_id = Data_id.fresh () }
+    data_id = Support.fresh_data_id () }
 let create ~positions ~topology ?(attributes = []) ?(groups = [])
     ?(edge_groups = []) () =
   let attributes = Array.of_list attributes and groups = Array.of_list groups
@@ -71,6 +71,7 @@ let create ~positions ~topology ?(attributes = []) ?(groups = [])
   Result.map (fun () -> make positions topology attributes groups edge_groups)
     (validate positions topology attributes groups edge_groups)
 let data_id value = value.data_id
+let fresh_data_id = Support.fresh_data_id
 let positions value = value.positions
 let topology value = value.topology
 let point_count value = Topology.point_count value.topology

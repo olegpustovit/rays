@@ -20,14 +20,14 @@ let payload_bytes image = match image.storage with
     Result.bind (dimensions ~width ~height ~limit:Sys.max_string_length) (fun () ->
       if Bytes.length bytes <> width * height * 4 then
         error "Image RGBA8 storage must contain four bytes per pixel."
-      else Ok {width; height; storage=Rgba8 bytes; data_id=Rdk.Data_id.fresh ()})
+      else Ok {width; height; storage=Rgba8 bytes; data_id=Rdk.Geometry.fresh_data_id ()})
   let of_owned_rgba ~width ~height rgba =
     Result.bind (dimensions ~width ~height ~limit:Sys.max_floatarray_length) (fun () ->
     if Array.length rgba <> width * height * 4 then
       error "Image RGBA storage must contain four samples per pixel."
     else if not (Array.for_all (fun sample -> Float.is_finite sample && sample >= 0. && sample <= 1.) rgba) then
       error "Image RGBA samples must be finite and within [0,1]."
-    else Ok {width; height; storage=Floats rgba; data_id=Rdk.Data_id.fresh ()})
+    else Ok {width; height; storage=Floats rgba; data_id=Rdk.Geometry.fresh_data_id ()})
   let of_vec4 ~context ~width ~height rgba =
     Result.bind (dimensions ~width ~height ~limit:(min Sys.max_string_length Sys.max_floatarray_length)) (fun () ->
     if Array.length rgba <> width * height * 4 then

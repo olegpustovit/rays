@@ -15,6 +15,8 @@ val create :
   unit ->
   (t, string) result
 val data_id : t -> int
+val fresh_data_id : unit -> int
+(** A new identity for a non-geometry payload (image, kernel). *)
 val positions : t -> Packed.Float3.t
 val topology : t -> Topology.t
 val point_count : t -> int
