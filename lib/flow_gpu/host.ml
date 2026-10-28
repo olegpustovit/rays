@@ -279,16 +279,10 @@ let close t=
     List.iter(fun b->ignore(Ogpu.Backend.destroy_buffer b))(Option.fold ~none:[] ~some:(fun(b,_)->[b])t.iota@t.retired_buffers);
     t.iota<-None;t.retired_buffers<-[];Hashtbl.reset t.pool;
     Hashtbl.iter(fun _ bs->List.iter(fun b->ignore(Ogpu.Backend.destroy_buffer b))bs)t.buffers;Hashtbl.reset t.buffers;Pipelines.close t.pipelines;t.closed<-true end
-module Private=struct
-  type nonrec stats=stats={runners_created:int;runners_released:int;
-    pipeline_compilations:int;pipeline_releases:int;buffer_creations:int;
-    input_uploads:int;input_uploaded_bytes:int;status_reads:int;readback_bytes:int}
-  let zero=zero
-  let stats t=
-    if Domain.self()<>t.domain then invalid_arg "Host.Private.stats: creating domain required";
-    let totals=ref !(t.retired)in
-    Cache.iter t.runners(fun _ runner->totals:=add_run !totals runner.run);
-    {!totals with runners_created= !(t.created);
-      pipeline_compilations=Pipelines.Private.compilations t.pipelines;
-      pipeline_releases=Pipelines.Private.releases t.pipelines}
-end
+let stats t=
+  if Domain.self()<>t.domain then invalid_arg "Host.stats: creating domain required";
+  let totals=ref !(t.retired)in
+  Cache.iter t.runners(fun _ runner->totals:=add_run !totals runner.run);
+  {!totals with runners_created= !(t.created);
+    pipeline_compilations=Pipelines.Private.compilations t.pipelines;
+    pipeline_releases=Pipelines.Private.releases t.pipelines}

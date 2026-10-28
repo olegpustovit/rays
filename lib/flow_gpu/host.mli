@@ -16,12 +16,10 @@ val resident : fast:bool -> t -> Flow_ir.Core_exec.resident
 val close : t -> unit
 (** Close before releasing the caller's GPU lease. *)
 
-module Private : sig
-  type stats = {runners_created:int; runners_released:int;
-    pipeline_compilations:int; pipeline_releases:int; buffer_creations:int;
-    input_uploads:int; input_uploaded_bytes:int; status_reads:int; readback_bytes:int}
-  val zero : stats
-  val stats : t -> stats
-  (** Cumulative successful operations, including evicted runners and closed owners.
-      Inspect on the creating domain, outside measured frame work. *)
-end
+type stats = {runners_created:int; runners_released:int;
+  pipeline_compilations:int; pipeline_releases:int; buffer_creations:int;
+  input_uploads:int; input_uploaded_bytes:int; status_reads:int; readback_bytes:int}
+val zero : stats
+val stats : t -> stats
+(** Cumulative successful operations, including evicted runners and closed owners.
+    Inspect on the creating domain, outside measured frame work. *)

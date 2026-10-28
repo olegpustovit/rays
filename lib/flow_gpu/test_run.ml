@@ -102,7 +102,7 @@ let () = match Renderer.acquire_gpu () with
                          (match Flow_gpu.Host.output host value with
                           |Error d->assert(d.Diagnostic.code="E_RANGE" && d.message=expected_message)
                           |Ok _->failwith"Host.output exposed a GPU buffer with a selected integer error");
-                         assert((Flow_gpu.Host.Private.stats host).status_reads=1))
+                         assert((Flow_gpu.Host.stats host).status_reads=1))
                      end
                  |Ok value->assert(not selected && array value=Array.init 8 float))))
           ["shift-selected","(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod (frame/index) 1)))) (float x))) (array/range 8 :type int))",true,"Integer shift count must be within [0, 62].";
@@ -130,7 +130,7 @@ let () = match Renderer.acquire_gpu () with
            let empty=Test_program.ok(kernel.run{values with count=0})in
            let borrowed=Option.get(Test_program.ok(Flow_gpu.Host.output host empty))in
            assert(array(Test_program.ok(kernel.readback{empty with width=Flow_gpu.Run.width borrowed}))=[||]
-             && (Flow_gpu.Host.Private.stats host).status_reads=0)));
+             && (Flow_gpu.Host.stats host).status_reads=0)));
         List.iter(fun(body,refuses)->
           let program=Test_program.compile("(map (fn [x] "^body^") (array/range 2))")in
           let runner=Flow_gpu.Run.create gpu pipelines (Test_program.ok(Flow_gpu.Emit.kernel ~fast:true program))in
@@ -294,13 +294,13 @@ let ()=
       let value=first.run inputs |> Test_program.ok in
       ignore(first.readback value |> Test_program.ok);
       assert(Option.is_some(Test_program.ok(H.output host value)));
-      let initial=H.Private.stats host in
+      let initial=H.stats host in
       assert(initial.runners_created=1 && initial.runners_released=0 && initial.status_reads=1);
       for _=1 to 64 do
         let kernel=backend.prepare ~fast:false packed |> Test_program.ok in
         ignore(kernel.run inputs |> Test_program.ok)
       done;
-      let evicted=H.Private.stats host in
+      let evicted=H.stats host in
       assert(evicted.runners_created>=65 && evicted.runners_released=evicted.runners_created-64
         && evicted.pipeline_compilations=1 && evicted.status_reads=65);
       assert(evicted.buffer_creations=65*initial.buffer_creations
@@ -309,12 +309,12 @@ let ()=
         && evicted.readback_bytes=initial.readback_bytes && initial.readback_bytes=4096);
       assert(Test_program.ok(H.output host value)=None);
       ignore(first.run inputs |> Test_program.ok);
-      let renewed=H.Private.stats host in
+      let renewed=H.stats host in
       assert(renewed.runners_created=evicted.runners_created+1
         && renewed.runners_released=evicted.runners_released+1 && renewed.status_reads=66);
-      assert(Domain.join(Domain.spawn(fun()->try ignore(H.Private.stats host);false with Invalid_argument _->true)));
+      assert(Domain.join(Domain.spawn(fun()->try ignore(H.stats host);false with Invalid_argument _->true)));
       H.close host;H.close host;
-      let closed=H.Private.stats host in
+      let closed=H.stats host in
       assert(closed.runners_created=renewed.runners_created && closed.runners_released=closed.runners_created
         && closed.pipeline_compilations=1 && closed.pipeline_releases=1
         && closed.status_reads=renewed.status_reads && closed.readback_bytes=initial.readback_bytes

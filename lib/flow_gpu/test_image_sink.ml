@@ -69,12 +69,12 @@ let ()=
     let d=B.Private.texture_descriptor first_texture in
     assert(d.width=65 && d.height=3 && d.format=Rgba8_unorm
       && d.usage=[Texture_binding;Texture_copy_src;Texture_copy_dst]);
-    let creates=S.Private.buffer_creations sink,S.Private.texture_creations sink in
+    let creates=S.buffer_creations sink,S.texture_creations sink in
     let next=convert 65 3 |> get in
     assert(S.texture first=None && Option.fold ~none:false ~some:((==)first_texture)(S.texture next));
-    assert(creates=(S.Private.buffer_creations sink,S.Private.texture_creations sink));
+    assert(creates=(S.buffer_creations sink,S.texture_creations sink));
     List.iter(fun(w,h)->assert(Result.is_error(convert w h))) [0,3;65,0;64,3;max_int,2];
-    assert(creates=(S.Private.buffer_creations sink,S.Private.texture_creations sink));
+    assert(creates=(S.buffer_creations sink,S.texture_creations sink));
     assert(S.texture next<>None);
     fail_texture:=true;assert(Result.is_error(convert 39 5));fail_texture:=false;
     assert(S.texture next=None && not(B.Private.texture_destroyed first_texture));

@@ -15,7 +15,7 @@ val marks : t -> Marks_scene.gpu
    owning the uploads of its CPU attributes and borrowing its GPU ones. *)
 
 val close : t -> unit
-val image_stats : t -> Flow_gpu.Host.Private.stats * int * int * int * int
+val image_stats : t -> Flow_gpu.Host.stats * int * int * int * int
 (** Host totals, sinks created/closed and sink buffer/texture creations, including
     failed uncommitted sinks and totals retained after close. *)
 module Private : sig

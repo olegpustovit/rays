@@ -3,8 +3,6 @@
    this list only shrinks. Give the use a public name instead of adding a row. *)
 let entries = [
   "flow_native", "Canvas.Private";
-  "flow_native", "Flow_gpu.Host.Private";
-  "flow_native", "Flow_gpu.Image_sink.Private";
   "flow_native", "Image.Private";
   "flow_native", "Renderer.Private";
   "flow_native", "Runtime_resources.Image.Private";
@@ -24,7 +22,6 @@ let entries = [
   "rays", "Runtime_resources.Canvas.Private";
   "rays", "Runtime_resources.Image.Private";
   "rays", "Runtime_resources.Text.Private";
-  "rays_editor", "Flow_gpu.Host.Private";
   "rays_editor", "Pxui_graph.Scope.Private";
   "rays_editor", "Rays.Image.Private";
   "rays_editor", "Scene.D3.Private";

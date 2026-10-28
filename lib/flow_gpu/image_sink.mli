@@ -18,8 +18,9 @@ val texture : output -> Ogpu.Backend.texture option
 val close : t -> unit
 (** Idempotent on the creating initial domain. Close before releasing its GPU. *)
 
+val buffer_creations : t -> int
+val texture_creations : t -> int
+
 module Private : sig
   val create_owned : Ogpu.Backend.device -> Ogpu.Backend.queue -> (t, Diagnostic.t) result
-  val buffer_creations : t -> int
-  val texture_creations : t -> int
 end

@@ -62,14 +62,14 @@ let () =
               List.iteri(fun c n->assert(Char.code(Bytes.get actual(4*i+c))=n))[0;2;2;128]
             done;
             if name="clip"then assert(actual=expected);
-            let creates=G.Image_sink.Private.buffer_creations sink,G.Image_sink.Private.texture_creations sink in
+            let creates=G.Image_sink.buffer_creations sink,G.Image_sink.texture_creations sink in
             ignore(G.Image_sink.convert sink ~width:65 ~height:3 output |> get);
-            assert(creates=(G.Image_sink.Private.buffer_creations sink,G.Image_sink.Private.texture_creations sink));
+            assert(creates=(G.Image_sink.buffer_creations sink,G.Image_sink.texture_creations sink));
             assert(G.Image_sink.texture converted=None);
             let stale=output in
             ignore(G.Run.dispatch run input |> get);
             assert(Result.is_error(G.Image_sink.convert sink ~width:65 ~height:3 stale))) [0.;0.5;1.]);
-        assert(G.Image_sink.Private.buffer_creations sink=1 && G.Image_sink.Private.texture_creations sink=1))
+        assert(G.Image_sink.buffer_creations sink=1 && G.Image_sink.texture_creations sink=1))
         ["gradient","[uv.x uv.y 0.5 1]";
          "live","[(+ uv.x (* t 0.25)) uv.y 0.5 1]";
          "ties","[(/ 0.5 255) (/ 1.5 255) (/ 2.5 255) (/ 127.5 255)]";
@@ -82,7 +82,7 @@ let () =
         let resized=G.Image_sink.convert sink ~width:17 ~height:5 output |> get in
         let texture=G.Image_sink.texture resized |> Option.get in
         let d=B.Private.texture_descriptor texture in assert(d.width=17 && d.height=5);
-        assert(G.Image_sink.Private.buffer_creations sink=2 && G.Image_sink.Private.texture_creations sink=2);
+        assert(G.Image_sink.buffer_creations sink=2 && G.Image_sink.texture_creations sink=2);
         assert(Domain.join(Domain.spawn(fun()->G.Image_sink.texture resized=None)));
         G.Image_sink.close sink;G.Image_sink.close sink;
         assert(G.Image_sink.texture resized=None && Result.is_error(G.Image_sink.convert sink ~width:17 ~height:5 output))));

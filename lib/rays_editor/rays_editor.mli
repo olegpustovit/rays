@@ -381,7 +381,7 @@ module Editor : sig
 
     val canvas_scenes : 'prepared t -> Rays.Scene.t list
     (** The picture each canvas pane drew last frame, in layout order. *)
-    val image_gpu_stats : 'prepared t -> Flow_gpu.Host.Private.stats * int * int * int * int
+    val image_gpu_stats : 'prepared t -> Flow_gpu.Host.stats * int * int * int * int
     (** Cumulative Host totals, sinks created/closed and sink buffer/texture creations,
         including evicted runners and failed sinks; inspect outside frame measurements. *)
 
