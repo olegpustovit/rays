@@ -213,3 +213,31 @@ let promote ?cancel ?grain ?into ?method_ ?delete_source ?piece_attribute ?index
     ~source ~destination ~name geometry =
   Attribute_ops.promote_pattern ?cancel ?grain ?into_pattern:into ?method_ ?delete_source
     ?piece_attribute ?index_pattern:index_attribute ~source ~destination ~pattern:name geometry
+
+(* [Triangulate2d.run] with the defaults tests rely on; the SOP declaration owns the real ones. *)
+let triangulate2d ?cancel ?(grain = 16_384) ?selection ?constraint_edges
+    ?constraint_primitives ?(projection = Triangulate2d.Best_fit) ?(seed = 0L)
+    ?(split_crossing_constraints = false) ?(flood_from_hull_boundary = false)
+    ?(remove_outside_constraint_polygons = false)
+    ?(silhouette_constraints = false) ?(remove_outside_silhouette = false)
+    ?(ignore_non_constraint_points = false) ?(remove_duplicate_points = false)
+    ?(refine = false) ?(allow_constraint_splitting = true)
+    ?(minimum_angle = Float.pi /. 9.) ?maximum_area ?target_edge_length
+    ?(minimum_edge_length = 0.) ?(maximum_new_points = 100_000)
+    ?(regularization_steps = 0) ?(allow_movement_of_interior_input_points = false)
+    ?(preserve_point_payload = true) ?(restore_original_point_positions = true)
+    ?(keep_primitives = false) ?split_point_group ?refinement_point_group
+    ?triangle_group ?constraint_group ?(remove_unused_points = false)
+    ?(recompute_point_normals = false) geometry =
+  Triangulate2d.run ?cancel
+    { grain; selection; constraint_edges; constraint_primitives; projection; seed;
+      split_crossing_constraints; flood_from_hull_boundary;
+      remove_outside_constraint_polygons; silhouette_constraints;
+      remove_outside_silhouette; ignore_non_constraint_points;
+      remove_duplicate_points; refine; allow_constraint_splitting; minimum_angle;
+      maximum_area; target_edge_length; minimum_edge_length; maximum_new_points;
+      regularization_steps; allow_movement_of_interior_input_points;
+      preserve_point_payload; restore_original_point_positions; keep_primitives;
+      split_point_group; refinement_point_group; triangle_group; constraint_group;
+      remove_unused_points; recompute_point_normals }
+    geometry

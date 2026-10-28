@@ -903,23 +903,49 @@ let exact_points x y arrangement = match arrangement with
       Array.init (Array.length x) (fun point ->
         Implicit_point.explicit source point |> Result.get_ok)
 
-let run ?cancel ?(grain = 16_384) ?selection ?constraint_edges
-    ?constraint_primitives ?(projection = Best_fit) ?(seed = 0L)
-    ?(split_crossing_constraints = false) ?(flood_from_hull_boundary = false)
-    ?(remove_outside_constraint_polygons = false)
-    ?(silhouette_constraints = false) ?(remove_outside_silhouette = false)
-    ?(ignore_non_constraint_points = false)
-    ?(remove_duplicate_points = false)
-    ?(refine = false) ?(allow_constraint_splitting = true)
-    ?(minimum_angle = Float.pi /. 9.) ?maximum_area ?target_edge_length
-    ?(minimum_edge_length = 0.) ?(maximum_new_points = 100_000)
-    ?(regularization_steps = 0)
-    ?(allow_movement_of_interior_input_points = false)
-    ?(preserve_point_payload = true)
-    ?(restore_original_point_positions = true) ?(keep_primitives = false)
-    ?split_point_group ?refinement_point_group ?triangle_group
-    ?constraint_group
-    ?(remove_unused_points = false) ?(recompute_point_normals = false) geometry =
+type params = {
+  grain : int;
+  selection : Element_selection.t option;
+  constraint_edges : Edge_group.t option;
+  constraint_primitives : Group.t option;
+  projection : projection;
+  seed : int64;
+  split_crossing_constraints : bool;
+  flood_from_hull_boundary : bool;
+  remove_outside_constraint_polygons : bool;
+  silhouette_constraints : bool;
+  remove_outside_silhouette : bool;
+  ignore_non_constraint_points : bool;
+  remove_duplicate_points : bool;
+  refine : bool;
+  allow_constraint_splitting : bool;
+  minimum_angle : float;
+  maximum_area : float option;
+  target_edge_length : float option;
+  minimum_edge_length : float;
+  maximum_new_points : int;
+  regularization_steps : int;
+  allow_movement_of_interior_input_points : bool;
+  preserve_point_payload : bool;
+  restore_original_point_positions : bool;
+  keep_primitives : bool;
+  split_point_group : string option;
+  refinement_point_group : string option;
+  triangle_group : string option;
+  constraint_group : string option;
+  remove_unused_points : bool;
+  recompute_point_normals : bool;
+}
+let run ?cancel { grain; selection; constraint_edges; constraint_primitives;
+    projection; seed; split_crossing_constraints; flood_from_hull_boundary;
+    remove_outside_constraint_polygons; silhouette_constraints;
+    remove_outside_silhouette; ignore_non_constraint_points;
+    remove_duplicate_points; refine; allow_constraint_splitting; minimum_angle;
+    maximum_area; target_edge_length; minimum_edge_length; maximum_new_points;
+    regularization_steps; allow_movement_of_interior_input_points;
+    preserve_point_payload; restore_original_point_positions; keep_primitives;
+    split_point_group; refinement_point_group; triangle_group; constraint_group;
+    remove_unused_points; recompute_point_normals } geometry =
   Error.guard ~operation:"triangulate_2d" ~code:"invalid_triangulation" @@ fun () ->
   let finish output =
     Result.bind (if remove_unused_points then

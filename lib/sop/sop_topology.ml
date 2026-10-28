@@ -2073,22 +2073,20 @@ module Triangulate_2d = struct
         | Error error,_,_ -> Error error
         | _,Error error,_ | _,_,Error error -> Error error
         | Ok selection,Ok constraint_edges,Ok constraint_primitives ->
-            match Rdk.Triangulate2d.run
-                ~cancel:(Context.cancel_token context) ~grain:(Context.grain context)
-                ?selection ?constraint_edges ?constraint_primitives ~projection
-                ~seed ~split_crossing_constraints ~flood_from_hull_boundary
-                ~remove_outside_constraint_polygons
-                ~silhouette_constraints ~remove_outside_silhouette
-                ~ignore_non_constraint_points
-                ~remove_duplicate_points
-                ~refine ~allow_constraint_splitting ~minimum_angle ?maximum_area
-                ?target_edge_length ~minimum_edge_length ~maximum_new_points
-                ~regularization_steps ~allow_movement_of_interior_input_points
-                ~preserve_point_payload ~restore_original_point_positions
-                ~keep_primitives
-                ~remove_unused_points ~recompute_point_normals
-                ?split_point_group ?refinement_point_group ?triangle_group
-                ?constraint_group geometry with
+            match Rdk.Triangulate2d.run ~cancel:(Context.cancel_token context)
+                { grain = Context.grain context; selection; constraint_edges;
+                  constraint_primitives; projection; seed;
+                  split_crossing_constraints; flood_from_hull_boundary;
+                  remove_outside_constraint_polygons; silhouette_constraints;
+                  remove_outside_silhouette; ignore_non_constraint_points;
+                  remove_duplicate_points; refine; allow_constraint_splitting;
+                  minimum_angle; maximum_area; target_edge_length;
+                  minimum_edge_length; maximum_new_points; regularization_steps;
+                  allow_movement_of_interior_input_points;
+                  preserve_point_payload; restore_original_point_positions;
+                  keep_primitives; split_point_group; refinement_point_group;
+                  triangle_group; constraint_group; remove_unused_points;
+                  recompute_point_normals } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
