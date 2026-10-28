@@ -4,7 +4,7 @@ open Rdk_test_support
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
 let approximate_point value pair point =
-  Rdk_exact.Implicit_point.approximate (Coplanar.View.point value pair point)
+  Rdk_geom.Implicit_point.approximate (Coplanar.View.point value pair point)
 
 let close left right = abs_float (left -. right) <= 1e-12
 

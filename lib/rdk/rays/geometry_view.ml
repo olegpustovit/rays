@@ -7,10 +7,10 @@ module G = Rdk_core.Geometry
 module P = Rdk_core.Packed
 
 type t = G.t
-type surface = Rdk_spatial.Surface_index.t
+type surface = Rdk_geom.Surface_index.t
 
 let error_string = Rdk_core.Error.to_string
-let points_of_nothing = Rdk_attrib.Line_geometry.points [||]
+let points_of_nothing = Rdk_ops.Line_geometry.points [||]
 let point_count = G.point_count
 
 let bounds geometry =
@@ -100,12 +100,12 @@ let tags ~attribute geometry =
   Option.bind (G.find_attribute ~owner:A.Primitive attribute geometry) (fun a ->
     match Attribute.View.storage a with A.Int values -> Some values | _ -> None)
 
-let surface geometry = Result.to_option (Rdk_spatial.Surface_index.create geometry)
+let surface geometry = Result.to_option (Rdk_geom.Surface_index.create geometry)
 
 let cast ~attribute surface geometry ~origin ~direction =
   match surface, tags ~attribute geometry with
   | Some surface, Some tags ->
-      (match Rdk_spatial.Surface_index.raycast surface ~origin ~direction with
+      (match Rdk_geom.Surface_index.raycast surface ~origin ~direction with
        | Ok (Some hit) -> Some (hit.distance, tags.(hit.primitive))
        | Ok None | Error _ -> None)
   | _ -> None
@@ -113,7 +113,7 @@ let cast ~attribute surface geometry ~origin ~direction =
 let cast_material surface geometry ~origin ~direction =
   match surface with
   | Some surface ->
-      (match Rdk_spatial.Surface_index.raycast surface ~origin ~direction with
+      (match Rdk_geom.Surface_index.raycast surface ~origin ~direction with
        | Ok (Some hit) ->
            let path = match G.find_attribute ~owner:A.Primitive "shop_materialpath" geometry with
              | Some a -> (match A.storage a with

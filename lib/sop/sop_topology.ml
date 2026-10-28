@@ -431,7 +431,7 @@ end
 
 module Convex_hull = struct
   type parameters = {
-    group_owner : element_owner [@sop.default Element_point]
+    group_owner : Rdk.Group_ops.owner [@sop.default Rdk.Group_ops.Group_points]
       [@sop.label "Group type"] [@sop.kind element_owner_parameter];
     group : string [@sop.default ""] [@sop.label "Group"];
     preserve_point_payload : bool [@sop.default true]
@@ -664,7 +664,7 @@ end
 module Facet = struct
   type parameters = {
     group : string [@sop.default ""] [@sop.label "Primitive group"];
-    group_owner : Support.element_owner [@sop.default Element_primitive]
+    group_owner : Rdk.Group_ops.owner [@sop.default Rdk.Group_ops.Group_primitives]
       [@sop.label "Group owner"] [@sop.kind element_owner_parameter];
     consolidation : Support.facet_consolidation [@sop.default Consolidation_none]
       [@sop.label "Consolidation"] [@sop.folder "Consolidate"] [@sop.kind facet_consolidation_parameter];

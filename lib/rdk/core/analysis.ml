@@ -1,4 +1,3 @@
-type connectivity_owner = Connectivity_points | Connectivity_primitives
 
 (* Signed volume of a closed polygon shell: the divergence-theorem fan sum,
    exact for non-convex faces. *)
@@ -108,7 +107,9 @@ let classify_connectivity ?primitives ?points ?seams owner geometry =
   and primitive_count = Geometry.primitive_count geometry in
   let topology_value = Geometry.topology geometry in
   let validation =
-    if owner = Connectivity_primitives && points <> None then
+    if owner <> Attribute.Point && owner <> Attribute.Primitive then
+      Error "Connectivity: owner must be point or primitive"
+    else if owner = Attribute.Primitive && points <> None then
       Error "Connectivity: point include group is available only in point mode"
     else Result.bind
         (require_connectivity_group "primitive include group" Group.Primitive
@@ -128,7 +129,8 @@ let classify_connectivity ?primitives ?points ?seams owner geometry =
         let point_allowed point = match points with
           | None -> true | Some group -> Group.mem point group in
         match owner with
-        | Connectivity_points ->
+        | Attribute.Vertex | Attribute.Detail -> assert false (* refused by the validation above *)
+        | Attribute.Point ->
             let set = disjoint_set point_count point_allowed in
             let index_value = Topology_index.create topology_value in
             let reverse = Topology_index.View.view index_value in
@@ -152,7 +154,7 @@ let classify_connectivity ?primitives ?points ?seams owner geometry =
                 end
               done;
               component_classes set) edge_validation
-        | Connectivity_primitives ->
+        | Attribute.Primitive ->
             let set = disjoint_set primitive_count primitive_allowed in
             match seams with
             | None ->

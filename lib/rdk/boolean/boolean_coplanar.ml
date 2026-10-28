@@ -296,7 +296,7 @@ let build ?cancel ~grain constraints =
          deterministic concurrency without promising multicore speedup. *)
       if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
           ~finish:(count - 1) (fun pair ->
-        if pair land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel pair 255;
         try overlaps.(pair) <- build_pair constraints pair
         with Construction_failed | Invalid_argument _ ->
           Bytes.unsafe_set failures pair '\001');

@@ -76,7 +76,7 @@ let run () =
   let centroids = Array.make 9 0. in
   let lower = Array.init 9 float_of_int
   and upper = Array.init 9 (fun item -> float_of_int item +. 1.) in
-  let bounds = Rdk_spatial.Bounds3_index.create ~grain:16
+  let bounds = Rdk_geom.Bounds3_index.create ~grain:16
       ~centroid_x:centroids ~centroid_y:centroids ~centroid_z:centroids
       ~item_min_x:lower ~item_min_y:lower ~item_min_z:lower
       ~item_max_x:upper ~item_max_y:upper ~item_max_z:upper () in

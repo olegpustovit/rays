@@ -72,7 +72,8 @@ let shared doc graph =
   match readers doc graph with n when n > 1 -> Printf.sprintf " · %d objects read it" n | _ -> ""
 
 let scope_of ~catalog (doc : Document.t) graph =
-  try Some (P.of_graph catalog (doc.workspace.ws).checked graph) with Invalid_argument _ -> None
+  let checked = (doc.workspace.ws).checked in
+  Option.map (fun _ -> P.of_graph catalog checked graph) (P.find_graph checked graph)
 
 (* a [sop/material] that has no group: it paints everything that reaches it *)
 let whole_material (n : P.node) =

@@ -181,14 +181,14 @@ let torus ?(connectivity = Torus_triangles)
               start +. (span *. float_of_int index /. float_of_int divisor) in
           Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(rows - 1)
             (fun row ->
-              if row land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel row 4095;
               let value = angle u_start u_span u_wrap rows row in
               u_sine.(row) <- sin value; u_cosine.(row) <- cos value;
               u_parameter.(row) <- float_of_int row
                   /. float_of_int (if u_wrap then rows else rows - 1));
           Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(columns - 1)
             (fun column ->
-              if column land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel column 4095;
               let value = angle v_start v_span v_wrap columns column in
               v_sine.(column) <- sin value; v_cosine.(column) <- cos value;
               v_parameter.(column) <- float_of_int column
@@ -260,7 +260,7 @@ let torus ?(connectivity = Torus_triangles)
                 let at = row * columns in
                 for column = 0 to columns - 1 do
                   let point = at + column in
-                  if point land 4095 = 0 then Cancel.check_opt cancel;
+                  Cancel.poll cancel point 4095;
                   if not (write_point point row column) && errors.(range) < 0 then
                     errors.(range) <- point
                 done
@@ -309,7 +309,7 @@ let torus ?(connectivity = Torus_triangles)
                   let row_vertex_count = row_primitive_count * rows in
                   Parallel.for_ ~chunk_size:(max 1 (grain / max rows columns))
                     ~start:0 ~finish:(primitive_count - 1) (fun primitive ->
-                      if primitive land 1023 = 0 then Cancel.check_opt cancel;
+                      Cancel.poll cancel primitive 1023;
                       if primitive < row_primitive_count then begin
                         let column = primitive and at = primitive * rows in
                         Bytes.set primitive_kinds primitive
@@ -332,7 +332,7 @@ let torus ?(connectivity = Torus_triangles)
                       end);
                   Parallel.for_ ~chunk_size:grain ~start:0 ~finish:primitive_count
                     (fun primitive ->
-                      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                      Cancel.poll cancel primitive 4095;
                       primitive_offsets.(primitive) <-
                         if primitive <= row_primitive_count
                         then primitive * rows
@@ -352,7 +352,7 @@ let torus ?(connectivity = Torus_triangles)
                         row column in
                   Parallel.for_ ~chunk_size:(max 1 (grain / vertices_per_cell))
                     ~start:0 ~finish:(surface_cells - 1) (fun cell ->
-                      if cell land 4095 = 0 then Cancel.check_opt cancel;
+                      Cancel.poll cancel cell 4095;
                       let row = cell / v_cells and column = cell mod v_cells in
                       let next_row = row + 1 and next_column = column + 1 in
                       let a = point_of row column
@@ -431,7 +431,7 @@ let torus ?(connectivity = Torus_triangles)
                     Parallel.for_
                       ~chunk_size:(max 1 (grain / vertices_per_cell))
                       ~start:0 ~finish:(u_cells - 1) (fun row ->
-                        if row land 4095 = 0 then Cancel.check_opt cancel;
+                        Cancel.poll cancel row 4095;
                         let next_row = row + 1 in
                         let a = point_of row 0 and b = point_of next_row 0
                         and c = point_of next_row (columns - 1)
@@ -481,7 +481,7 @@ let torus ?(connectivity = Torus_triangles)
                     and end_base = fixed_vertex_count + columns in
                     Parallel.for_ ~chunk_size:grain ~start:0
                       ~finish:((2 * columns) - 1) (fun local ->
-                        if local land 4095 = 0 then Cancel.check_opt cancel;
+                        Cancel.poll cancel local 4095;
                         if local < columns then begin
                           let column = if reverse_surface then local
                             else columns - 1 - local in
@@ -497,7 +497,7 @@ let torus ?(connectivity = Torus_triangles)
                   end;
                   Parallel.for_ ~chunk_size:grain ~start:0
                     ~finish:fixed_primitive_count (fun primitive ->
-                      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                      Cancel.poll cancel primitive 4095;
                       primitive_offsets.(primitive) <- primitive
                           * (if triangle_mode then 3 else 4));
                   if u_end_caps then begin

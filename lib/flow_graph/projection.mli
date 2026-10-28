@@ -122,6 +122,9 @@ and result =
   | Node of path  (** the synthetic [@result] node *)
   | Literal of Flow.Syntax.t
 
+val find_graph : Flow.Workspace.t -> string -> Flow.Workspace.graph option
+(** The graph [of_graph] would project (a [def:] name finds a definition), or [None]. *)
+
 val of_graph : ?folded:(path -> bool) -> Flow.Catalog.catalog -> Flow.Workspace.t -> string -> scope
 (** The root scope of a graph or, for ["def:name"] or a [defn] name, of a
     definition.  Raises [Invalid_argument] when there is none.  An operator call written in an input

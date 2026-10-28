@@ -51,7 +51,7 @@ let build_component_tree ?cancel min_x min_y min_z max_x max_y max_z =
     let span lower upper =
       let minimum = ref Float.infinity and maximum = ref Float.neg_infinity in
       for component = 0 to count - 1 do
-        if component land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel component 4095;
         let value = center lower.(component) upper.(component) in
         minimum := Float.min !minimum value;
         maximum := Float.max !maximum value
@@ -68,7 +68,7 @@ let build_component_tree ?cancel min_x min_y min_z max_x max_y max_z =
     let comparisons = ref 0 in
     Array.sort (fun left right ->
       incr comparisons;
-      if !comparisons land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !comparisons 4095;
       let compared = Float.compare
           (center lower.(left) upper.(left))
           (center lower.(right) upper.(right)) in
@@ -91,7 +91,7 @@ let build_component_tree ?cancel min_x min_y min_z max_x max_y max_z =
   let rec build first last =
     if first <= last then begin
       incr built;
-      if !built land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !built 4095;
       let middle = first + ((last - first) / 2) in
       let component = order.(middle) in
       tree_min_x.(middle) <- min_x.(component);
@@ -135,7 +135,7 @@ let build_components ?cancel constraints side =
   let first_triangle = Array.make
       (Boolean_constraints.View.source_point_count constraints) (-1) in
   for triangle = 0 to triangle_count - 1 do
-    if triangle land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel triangle 4095;
     for local = 0 to 2 do
       let point = triangle_point constraints triangle local in
       if point < 0 || point >= Array.length first_triangle then
@@ -146,12 +146,12 @@ let build_components ?cancel constraints side =
     done
   done;
   for triangle = 0 to triangle_count - 1 do
-    if triangle land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel triangle 4095;
     parent.(triangle) <- find triangle
   done;
   let component_of_root = Array.make triangle_count (-1) and count = ref 0 in
   for triangle = 0 to triangle_count - 1 do
-    if triangle land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel triangle 4095;
     if parent.(triangle) = triangle then begin
       component_of_root.(triangle) <- !count;
       incr count
@@ -159,7 +159,7 @@ let build_components ?cancel constraints side =
   done;
   let component_of_triangle = Array.init triangle_count
       (fun triangle ->
-        if triangle land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel triangle 4095;
         component_of_root.(parent.(triangle))) in
   let counts = Array.make !count 0 in
   Array.iter (fun component -> counts.(component) <- counts.(component) + 1)
@@ -170,7 +170,7 @@ let build_components ?cancel constraints side =
   done;
   let triangles = Array.make triangle_count 0 and cursor = Array.copy offsets in
   for triangle = 0 to triangle_count - 1 do
-    if triangle land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel triangle 4095;
     let component = component_of_triangle.(triangle) in
     triangles.(cursor.(component)) <- triangle;
     cursor.(component) <- cursor.(component) + 1
@@ -183,7 +183,7 @@ let build_components ?cancel constraints side =
   and max_z = Array.make !count Float.neg_infinity
   and source = Boolean_constraints.View.source constraints in
   for triangle = 0 to triangle_count - 1 do
-    if triangle land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel triangle 4095;
     let component = component_of_triangle.(triangle) in
     for local = 0 to 2 do
       let x, y, z = Implicit_point.source_coordinate source
@@ -271,7 +271,7 @@ let classify_operand ?cancel constraints components side query axis
     let component = components.query_candidates.(candidate) in
     for slot = components.offsets.(component) to components.offsets.(component + 1) - 1 do
     let face = components.triangles.(slot) in
-    if face land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel face 4095;
     if not (skip face) then begin
       match Implicit_point.axis_ray_source_triangle source
           ~a:(triangle_point constraints face 0)
@@ -308,7 +308,7 @@ let classify_operand_symbolic ?cancel constraints components side query
     for slot = components.offsets.(component)
         to components.offsets.(component + 1) - 1 do
       let face = components.triangles.(slot) in
-      if face land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel face 4095;
       if not (skip face) then begin
         match Implicit_point.symbolic_ray_source_triangle source
             ~a:(triangle_point constraints face 0)

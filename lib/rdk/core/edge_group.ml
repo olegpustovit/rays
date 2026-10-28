@@ -138,7 +138,7 @@ let remap ?cancel ~source_index ~target_topology ~target_index ~point_map value 
     let builder = Builder.create ~topology:target_topology ~index:target_index
         ~name:value.name in
     for edge = 0 to value.length - 1 do
-      if edge land 16_383 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 16_383;
       if mem edge value then begin
         let a, b = Topology_index.edge_points source_index edge in
         let a = point_map.(a) and b = point_map.(b) in
@@ -180,7 +180,7 @@ let replicate_exact_copies ?cancel ~source_topology ~source_index
         = expected_primitives + 1) in
       let copy = ref 0 in
       while !valid && !copy < copies do
-        if !copy land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel !copy 255;
         let point_offset = !copy * source.point_count
         and vertex_offset = !copy * source_vertices
         and primitive_offset = !copy * source_primitives in
@@ -215,7 +215,7 @@ let replicate_exact_copies ?cancel ~source_topology ~source_index
           else begin
             let bits = Bytes.make (byte_count length) '\000' in
             for edge = 0 to source_edges - 1 do
-              if edge land 16_383 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel edge 16_383;
               if mem edge value then
                 for copy = 0 to copies - 1 do
                   let target_edge = (copy * source_edges) + edge in

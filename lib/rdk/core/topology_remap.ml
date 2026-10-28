@@ -12,7 +12,7 @@ let select ?cancel ~grain ?missing mapping source =
       let first = range * grain in
       let last = min count (first + grain) in
       for index = first to last - 1 do
-        if index land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel index 4095;
         let from = mapping.(index) in
         if from >= 0 || missing = None then output.(index) <- source.(from)
       done);
@@ -24,7 +24,7 @@ let select_float ?cancel ~grain ?missing mapping (source : float array) =
   let output = Array.make count (Option.value missing ~default:0.) in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(count - 1) (fun index ->
-    if index land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel index 4095;
     let from = mapping.(index) in
     if from >= 0 || missing = None then output.(index) <- source.(from));
   output
@@ -152,7 +152,7 @@ let group ?cancel ~grain mapping group =
   let output = Group.init ~grain ~owner:(Group.owner group)
       ~name:(Group.name group) (Array.length mapping)
       (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel output 4095;
         Group.mem mapping.(output) group) in
   Group.View.remap_order ~source:group ~source_of_target:mapping output
 
@@ -247,7 +247,7 @@ let split_point_edge_groups ?cancel ~grain ~source_index ~target_topology groups
             let source_of_target = Array.make edge_count (-1)
             and failure = ref None in
             for source_edge = 0 to Array.length source.edge_a - 1 do
-              if source_edge land 4_095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel source_edge 4_095;
               for at = source.edge_offsets.(source_edge)
                   to source.edge_offsets.(source_edge + 1) - 1 do
                 let vertex = source.edge_vertices.(at) in
@@ -284,7 +284,7 @@ let split_point_edge_groups ?cancel ~grain ~source_index ~target_topology groups
                      if byte_count > 0 then Parallel.for_
                          ~chunk_size:(max 1 (grain / 8)) ~start:0
                          ~finish:(byte_count - 1) (fun byte ->
-                           if byte land 511 = 0 then Cancel.check_opt cancel;
+                           Cancel.poll cancel byte 511;
                            let value = ref 0 in
                            for bit = 0 to 7 do
                              let edge = (byte lsl 3) + bit in
@@ -313,11 +313,11 @@ let edge_groups_from_ancestry ?cancel ~grain ~source_index ~target_topology
   else begin
     let invalid = ref false in
     for edge = 0 to target_edges - 1 do
-      if edge land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 4095;
       if offsets.(edge) < 0 || offsets.(edge + 1) < offsets.(edge) then invalid := true
     done;
     for at = 0 to Array.length ancestors - 1 do
-      if at land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel at 4095;
       if ancestors.(at) < 0 || ancestors.(at) >= source_edges then invalid := true
     done;
     if !invalid then Error "Topology_remap.edge_groups_from_ancestry: invalid source ancestry"
@@ -335,7 +335,7 @@ let edge_groups_from_ancestry ?cancel ~grain ~source_index ~target_topology
           if edge < target_edges then begin
             let member = ref false and at = ref offsets.(edge) in
             while not !member && !at < offsets.(edge + 1) do
-              if !at land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel !at 4095;
               member := Edge_group.mem ancestors.(!at) group;
               incr at
             done;

@@ -352,8 +352,8 @@ module Fuse_grid = struct
   include Rdk.Fuse_grid
   let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
       ?(targeting = Near_points) ?(using = Least_target_point)
-      ?(tolerance = 1e-6) ?(position = Rdk_mesh.Fuse_reduce.Average_position)
-      ?weight_attribute ?(attributes = Rdk_mesh.Fuse_reduce.Keep_first) ?(attribute_rules = [])
+      ?(tolerance = 1e-6) ?(position = Rdk_ops.Fuse_reduce.Average_position)
+      ?weight_attribute ?(attributes = Rdk_ops.Fuse_reduce.Keep_first) ?(attribute_rules = [])
       ?(group_rules = []) ?(metric = Euclidean)
       ?(inclusive = true)
       ?(match_attributes = false) ?radius_attribute ?match_attribute

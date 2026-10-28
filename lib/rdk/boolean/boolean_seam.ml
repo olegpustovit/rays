@@ -135,7 +135,7 @@ let verify_curves ?cancel ~grain curves =
     let topology = Geometry.topology curves in
     let invalid = ref None and primitive = ref 0 in
     while Option.is_none !invalid && !primitive < Topology.primitive_count topology do
-      if !primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel !primitive 4095;
       let size = Topology.primitive_size topology !primitive in
       (match Topology.primitive_kind topology !primitive with
        | Topology.Polygon -> invalid := Some (Printf.sprintf
@@ -201,7 +201,7 @@ let validate_curve_ancestry ?cancel complex_edge_count selected curves curve_kin
     invalid_arg "Boolean seam curve ancestry has inconsistent cardinality";
   let seen = Bytes.make complex_edge_count '\000' in
   for curve = 0 to curve_count - 1 do
-    if curve land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel curve 4095;
     let first = curve_edge_offsets.(curve)
     and last = curve_edge_offsets.(curve + 1) in
     if first > last then invalid_arg "Boolean seam curve ancestry offsets decrease";
@@ -226,7 +226,7 @@ let materialize_coincident ?cancel complex facet_masks =
   Array.iter (fun mask -> if mask land 4 <> 0 then incr selected) facet_masks;
   let used = Bytes.make (Boolean_complex.vertex_count complex) '\000' in
   for facet = 0 to Boolean_complex.facet_count complex - 1 do
-    if facet land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel facet 4095;
     if facet_masks.(facet) land 4 <> 0 then
       for local = 0 to 2 do
         Bytes.unsafe_set used (Boolean_complex.facet_vertex complex facet local) '\001'
@@ -256,7 +256,7 @@ let materialize_curves ?cancel complex edge_kinds =
   let vertex_count = Boolean_complex.vertex_count complex in
   let used = Bytes.make vertex_count '\000' in
   for edge = 0 to Boolean_complex.edge_count complex - 1 do
-    if edge land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel edge 4095;
     let code = Char.code (Bytes.unsafe_get edge_kinds edge) in
     if code < 3 then begin
       let first = Boolean_complex.edge_first complex edge
@@ -418,7 +418,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
     let classify_range first_edge last_edge =
       let selected = ref 0 in
         for edge = first_edge to last_edge - 1 do
-          if edge land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel edge 4095;
           let first, last = Boolean_complex.edge_incident_range complex edge
           and mask = ref 0 and has_unshared = ref false in
           for incident = first to last - 1 do

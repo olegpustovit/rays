@@ -34,7 +34,7 @@ let build ?cancel complex =
     let facets = Array.make offsets.(edges) 0
     and locals = Bytes.make offsets.(edges) '\000' in
     for edge = 0 to edges - 1 do
-      if edge land 255 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel edge 255;
       let first, last = Boolean_complex.edge_incident_range complex edge
       and output = offsets.(edge) in
       let count = last - first in

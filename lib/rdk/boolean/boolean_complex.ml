@@ -229,7 +229,7 @@ let parallel_sort_indices ?cancel compare values =
 let stable_counting_pass ?cancel ~key_count keys values scratch counts =
   Array.fill counts 0 key_count 0;
   for slot = 0 to Array.length values - 1 do
-    if slot land 16383 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel slot 16383;
     let key = keys.(values.(slot)) in
     if key < 0 || key >= key_count then
       invalid_arg "Boolean complex counting-sort key is out of range";
@@ -376,7 +376,7 @@ let build ?cancel constraints refinement =
       incr raw in
     let append_side side face_count get triangle_point =
       for face = 0 to face_count - 1 do
-        if face land 255 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel face 255;
         match get refinement face with
         | None ->
             append side face (-1)

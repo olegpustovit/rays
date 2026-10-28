@@ -69,7 +69,7 @@ let accumulate_points ?cancel ~weighting geometry faces =
   (match weighting with
    | Face_area ->
       for primitive = 0 to primitive_count - 1 do
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         if Bytes.get topology.primitive_kinds primitive = '\000' then begin
           let first = topology.primitive_offsets.(primitive)
           and last = topology.primitive_offsets.(primitive + 1) in
@@ -83,7 +83,7 @@ let accumulate_points ?cancel ~weighting geometry faces =
       done
    | Each_vertex ->
       for primitive = 0 to primitive_count - 1 do
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         if Bytes.get topology.primitive_kinds primitive = '\000' then begin
           let inverse = faces.inverse_length.(primitive) in
           if inverse <> 0. then begin
@@ -103,7 +103,7 @@ let accumulate_points ?cancel ~weighting geometry faces =
       done
    | Vertex_angle ->
       for primitive = 0 to primitive_count - 1 do
-        if primitive land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel primitive 4095;
         if Bytes.get topology.primitive_kinds primitive = '\000' then begin
           let inverse = faces.inverse_length.(primitive) in
           if inverse <> 0. then begin
@@ -141,7 +141,7 @@ let selection_group ?cancel ~grain topology point_index edge_index selection own
     | _ -> None in
   let point_reverse () = Option.get point_reverse
   and edge_reverse () = Option.get edge_reverse in
-  let cancelled element = if element land 4095 = 0 then Cancel.check_opt cancel in
+  let cancelled element = Cancel.poll cancel element 4095 in
   let point_selected point =
     cancelled point;
     match selection with
@@ -273,7 +273,7 @@ let write_points ?cancel ~grain ~selection ~keep_original_zero ~reverse
   Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
     let first = range * grain and last = min count ((range + 1) * grain) in
     for point = first to last - 1 do
-      if point land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel point 4095;
       if match selection with None -> true | Some group -> Group.mem point group then begin
         let vx = sums.x.(point) and vy = sums.y.(point) and vz = sums.z.(point) in
         if not (Float.is_finite vx && Float.is_finite vy && Float.is_finite vz)
@@ -308,7 +308,7 @@ let write_smooth_vertices ?cancel ~grain ~selection ~keep_original_zero ~reverse
   Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
     let first = range * grain and last = min count ((range + 1) * grain) in
     for vertex = first to last - 1 do
-      if vertex land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 4095;
       if match selection with None -> true | Some group -> Group.mem vertex group then
         let point = source.vertex_points.(vertex) in
         if not (store ~keep_original_zero ~reverse ~existing output vertex
@@ -330,7 +330,7 @@ let write_cusped_vertices ?cancel ~grain ~weighting ~cusp_angle ~selection
     | Vertex_angle ->
         let values = Array.make count 0. in
         Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1) (fun vertex ->
-          if vertex land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel vertex 4095;
           let primitive = reverse_topology.primitive_of_vertex.(vertex) in
           if Bytes.get topology.primitive_kinds primitive = '\000' then
             values.(vertex) <- corner_angle positions topology primitive vertex);
@@ -342,7 +342,7 @@ let write_cusped_vertices ?cancel ~grain ~weighting ~cusp_angle ~selection
   Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
     let first = range * grain and last = min count ((range + 1) * grain) in
     for vertex = first to last - 1 do
-      if vertex land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel vertex 4095;
       if match selection with None -> true | Some group -> Group.mem vertex group then begin
         let primitive = reverse_topology.primitive_of_vertex.(vertex) in
         let current_inverse = faces.inverse_length.(primitive) in
@@ -410,7 +410,7 @@ let fast_point_area ?cancel ~grain geometry =
       and z = Array.make point_count 0. in
       let primitive = ref 0 in
       for vertex = 0 to Array.length topology.vertex_points - 1 do
-        if vertex land 16_383 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel vertex 16_383;
         while vertex >= topology.primitive_offsets.(!primitive + 1) do
           incr primitive
         done;
@@ -425,7 +425,7 @@ let fast_point_area ?cancel ~grain geometry =
       Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(point_ranges - 1) (fun range ->
         let first = range * grain and last = min point_count ((range + 1) * grain) in
         for point = first to last - 1 do
-          if point land 4095 = 0 then Cancel.check_opt cancel;
+          Cancel.poll cancel point 4095;
           let vx = x.(point) and vy = y.(point) and vz = z.(point) in
           if not (Float.is_finite vx && Float.is_finite vy && Float.is_finite vz)
           then point_errors.(range) <- point
@@ -525,7 +525,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?primitives
             Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
               let first = range * grain and last = min count ((range + 1) * grain) in
               for primitive = first to last - 1 do
-                if primitive land 4095 = 0 then Cancel.check_opt cancel;
+                Cancel.poll cancel primitive 4095;
                 if match effective_selection with None -> true
                     | Some group -> Group.mem primitive group then
                   if not (store ~keep_original_zero ~reverse ~existing output primitive
@@ -539,7 +539,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?primitives
         | Attribute.Detail ->
             let sx = ref 0. and sy = ref 0. and sz = ref 0. in
             for primitive = 0 to Geometry.primitive_count geometry - 1 do
-              if primitive land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel primitive 4095;
               sx := !sx +. faces.raw.x.(primitive);
               sy := !sy +. faces.raw.y.(primitive);
               sz := !sz +. faces.raw.z.(primitive)

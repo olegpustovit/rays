@@ -1,7 +1,7 @@
 open Rdk
 open Rdk_test_support
 
-module Point = Rdk_exact.Implicit_point
+module Point = Rdk_geom.Implicit_point
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
 module Refinement = Rdk_boolean.Boolean_refinement

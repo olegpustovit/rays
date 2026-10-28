@@ -54,7 +54,7 @@ let promote ?cancel ~grain ?(name = "__element_selection") ~destination
     let point_reverse () = Option.get point_index
     and edge_reverse () = Option.get edge_index in
     let cancelled element =
-      if element land 4095 = 0 then Cancel.check_opt cancel in
+      Cancel.poll cancel element 4095 in
     let point_selected point =
       cancelled point;
       match selection with

@@ -21,7 +21,7 @@ let[@inline always] hash a b =
 let create ?cancel (topology : Topology.View.view) =
   let outgoing = ref 0 in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-    if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4_095;
     let size = topology.primitive_offsets.(primitive + 1)
         - topology.primitive_offsets.(primitive) in
     outgoing := !outgoing +
@@ -50,7 +50,7 @@ let create ?cancel (topology : Topology.View.view) =
       incr edge_count
     end in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
-    if primitive land 4_095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel primitive 4_095;
     let first = topology.primitive_offsets.(primitive)
     and last = topology.primitive_offsets.(primitive + 1) in
     for vertex = first to last - 1 do

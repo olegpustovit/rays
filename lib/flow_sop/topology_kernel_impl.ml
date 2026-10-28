@@ -61,8 +61,8 @@ let triangles geometry component =
 
 let components geometry args =
   let owner = match List.assoc_opt "over" args with
-    | None | Some (E.Text "edges") -> Ok (Rdk.Analysis.Connectivity_points, Rdk.Group.Point, G.point_count geometry)
-    | Some (E.Text "points") -> Ok (Rdk.Analysis.Connectivity_primitives, Rdk.Group.Primitive, G.primitive_count geometry)
+    | None | Some (E.Text "edges") -> Ok (Rdk.Attribute.Point, Rdk.Group.Point, G.point_count geometry)
+    | Some (E.Text "points") -> Ok (Rdk.Attribute.Primitive, Rdk.Group.Primitive, G.primitive_count geometry)
     | _ -> error "E_COMPONENTS_OVER" "Components :over is edges or points." in
   Result.bind owner (fun (owner, group_owner, count) ->
     let group = match List.assoc_opt "mask" args with
@@ -88,8 +88,8 @@ let components geometry args =
       | Some _ -> error "E_COMPONENTS_SEAMS" "Components seams is an integer array." in
     Result.bind seams (fun seams ->
     Result.bind group (fun group ->
-      let primitives = if owner = Rdk.Analysis.Connectivity_primitives then group else None
-      and points = if owner = Rdk.Analysis.Connectivity_points then group else None in
+      let primitives = if owner = Rdk.Attribute.Primitive then group else None
+      and points = if owner = Rdk.Attribute.Point then group else None in
       match Rdk.Analysis.classify_connectivity ?primitives ?points ?seams owner geometry with
       | Error e -> error "E_COMPONENTS" (Rdk.Error.to_string e)
       | Ok (ids, n) -> (match List.assoc_opt "component" args with

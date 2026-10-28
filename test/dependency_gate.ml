@@ -98,13 +98,10 @@ let rules =
       "lisp_sop", ["editor_document"; "rays"; "runtime"; "pxui"; "rays_editor"];
       "rays", ["pxui"; "pxui_shell"; "pxui_graph"; "sop"; "rdk";
                   "rays_editor"];
-      "rays_math", ["rays"; "rdk_core"; "rdk_exact"; "rdk_spatial"; "rdk_attrib"; "rdk_curve"; "rdk_mesh"; "rdk_boolean"; "rdk"; "rdk_rays"; "sop"] @ gpu;
-      "rdk_core", "rdk_exact" :: "rdk_spatial" :: "rdk_attrib" :: "rdk_curve" :: "rdk_mesh" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
-      "rdk_exact", "rdk_spatial" :: "rdk_attrib" :: "rdk_curve" :: "rdk_mesh" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
-      "rdk_spatial", "rdk_attrib" :: "rdk_curve" :: "rdk_mesh" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
-      "rdk_attrib", "rdk_curve" :: "rdk_mesh" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
-      "rdk_curve", "rdk_mesh" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
-      "rdk_mesh", "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
+      "rays_math", ["rays"; "rdk_core"; "rdk_geom"; "rdk_ops"; "rdk_boolean"; "rdk"; "rdk_rays"; "sop"] @ gpu;
+      "rdk_core", "rdk_geom" :: "rdk_ops" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
+      "rdk_geom", "rdk_ops" :: "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
+      "rdk_ops", "rdk_boolean" :: "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
       "rdk_boolean", "rays" :: "rdk" :: "rdk_rays" :: "sop" :: gpu;
       "rdk", "rays" :: "rdk_rays" :: "sop" :: "pxui" :: "pxui_shell" :: gpu;
       "sop", "rays" :: "rdk_rays" :: "pxui" :: "pxui_shell" :: "pxui_graph"
@@ -670,10 +667,9 @@ let run () =
     if violations (inject lib dep) ~scan:[] = [] then
       failwith (Printf.sprintf "gate accepted injected edge %s -> %s" lib dep))
     ["ogpu_core", "metal"; "ogpu", "ogpu_metal_native"; "ogpu_mock", "metal"; "rays", "pxui"; "pxui", "sop"; "pxui", "sdl3"; "pxui", "scene_command"; "sdl3", "rays";
-     "rdk", "rays"; "rdk_core", "rdk_exact";
-     "rdk_exact", "rdk_boolean"; "rdk_spatial", "rdk_attrib";
-     "rdk_attrib", "rdk_boolean"; "rdk_attrib", "rdk_curve";
-     "rdk_mesh", "rdk_boolean"; "rdk_boolean", "rdk";
+     "rdk", "rays"; "rdk_core", "rdk_geom";
+     "rdk_geom", "rdk_boolean"; "rdk_geom", "rdk_ops";
+     "rdk_ops", "rdk_boolean"; "rdk_boolean", "rdk";
      "rdk_core", "rays";
      "rays_math", "rays"; "renderer", "runtime_input";
      "rays", "sdl3_ttf";

@@ -1,7 +1,7 @@
 open Rays
 open Rdk_core
-open Rdk_attrib
-open Rdk_mesh
+open Rdk_ops
+open Rdk_ops
 
 type preview = Pieces of Packed_pieces.t | Mesh of Mesh.t
 type t = { preview : preview; transforms : Rays_math.Mat4.t array option;

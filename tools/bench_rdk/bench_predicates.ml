@@ -103,7 +103,7 @@ let run () =
     Predicates.orient3d_packed ~x:underflow_x ~y:underflow_y
       ~z:underflow_z 0 1 2 3 |> sign_code);
   let module Point = struct
-    include Rdk_exact.Implicit_point
+    include Rdk_geom.Implicit_point
   end in
   let construction_x = [|
     0.; 2.; 1.; 1.; 1.; 1.;

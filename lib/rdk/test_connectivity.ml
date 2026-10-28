@@ -46,11 +46,11 @@ let expect_error code = function
 let test_point_and_primitive_modes () =
   let geometry = two_quads () in
   let classes, count = Analysis.classify_connectivity
-      Analysis.Connectivity_primitives geometry |> get_ok in
+      Attribute.Primitive geometry |> get_ok in
   check (classes = [|0; 0|] && count = 1)
     "shared-point primitive connectivity";
   let classes, count = Analysis.classify_connectivity
-      Analysis.Connectivity_points geometry |> get_ok in
+      Attribute.Point geometry |> get_ok in
   check (classes = [|0; 0; 0; 0; 0; 0|] && count = 1)
     "edge-connected point connectivity";
   let masked = with_group Group.Point "without_bridge"
@@ -58,7 +58,7 @@ let test_point_and_primitive_modes () =
   let points = Geometry.find_group ~owner:Group.Point "without_bridge" masked
       |> Option.get in
   let classes, count = Analysis.classify_connectivity ~points
-      Analysis.Connectivity_points masked |> get_ok in
+      Attribute.Point masked |> get_ok in
   check (classes = [|0; -1; 1; 0; -1; 1|] && count = 2)
     "excluded bridge points split the point graph";
   let masked = with_group Group.Primitive "right" (fun primitive -> primitive = 1)
@@ -66,7 +66,7 @@ let test_point_and_primitive_modes () =
   let primitives = Geometry.find_group ~owner:Group.Primitive "right" masked
       |> Option.get in
   let classes, count = Analysis.classify_connectivity ~primitives
-      Analysis.Connectivity_primitives masked |> get_ok in
+      Attribute.Primitive masked |> get_ok in
   check (classes = [|-1; 0|] && count = 1)
     "excluded primitives retain the minus-one sentinel"
 
@@ -74,7 +74,7 @@ let test_seams () =
   let geometry = two_quads () in
   let seam = shared_edge geometry in
   let classes, count = Analysis.classify_connectivity ~seams:seam
-      Analysis.Connectivity_primitives geometry |> get_ok in
+      Attribute.Primitive geometry |> get_ok in
   check (classes = [|0; 1|] && count = 2)
     "native shared-edge seam did not split primitive islands"
 
@@ -85,19 +85,19 @@ let test_validation () =
   and seam = shared_edge geometry in
   expect_error "invalid_connectivity"
     (Analysis.classify_connectivity ~points:point_group
-       Analysis.Connectivity_primitives geometry);
+       Attribute.Primitive geometry);
   let point_classes, point_count = Analysis.classify_connectivity ~seams:seam
-      Analysis.Connectivity_points geometry |> get_ok in
+      Attribute.Point geometry |> get_ok in
   check (Array.length point_classes = Geometry.point_count geometry
       && point_count = 1)
     "point seam classification did not preserve the connected remainder";
   expect_error "invalid_connectivity"
     (Analysis.classify_connectivity ~primitives:wrong_length
-       Analysis.Connectivity_primitives geometry);
+       Attribute.Primitive geometry);
   let unrelated = two_quads () in
   expect_error "invalid_connectivity"
     (Analysis.classify_connectivity ~seams:(shared_edge unrelated)
-       Analysis.Connectivity_primitives geometry)
+       Attribute.Primitive geometry)
 
 let run () =
   test_point_and_primitive_modes ();

@@ -189,7 +189,7 @@ let union_many ?cancel ?(grain = 32_768) ~name groups =
         if count > 0 then
           Parallel.for_ ~chunk_size:(max 1 (grain / 8)) ~start:0
             ~finish:(count - 1) (fun byte ->
-              if byte land 4095 = 0 then Cancel.check_opt cancel;
+              Cancel.poll cancel byte 4095;
               let value = ref 0 in
               for group = 0 to input_count - 1 do
                 value := !value lor

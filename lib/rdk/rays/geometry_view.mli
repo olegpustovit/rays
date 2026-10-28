@@ -2,7 +2,7 @@
     picking and the probed-iteration tint.  Pure over the geometry; no UI. *)
 
 type t = Rdk_core.Geometry.t
-type surface = Rdk_spatial.Surface_index.t
+type surface = Rdk_geom.Surface_index.t
 
 val error_string : Rdk_core.Error.t -> string
 

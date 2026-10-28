@@ -394,7 +394,7 @@ let build_internal ?cancel ?(require_closed = true)
     and reversed = Bytes.make (Boolean_complex.facet_count complex) '\000'
     and selected_count = ref 0 in
     for facet = 0 to facets - 1 do
-      if facet land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel facet 4095;
       match facet_selection with
       | Some values ->
           let choice = Bytes.unsafe_get values facet in
@@ -523,7 +523,7 @@ let build_internal ?cancel ?(require_closed = true)
       | None -> barycentric_cache
           (if with_corner_payload then !selected_count * 3 else 0) in
     for facet = 0 to facets - 1 do
-      if facet land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel facet 4095;
       if Bytes.unsafe_get selected facet <> '\000' then begin
         let a = point_map.(Boolean_complex.facet_vertex complex facet 0)
         and b = point_map.(Boolean_complex.facet_vertex complex facet 1)
@@ -805,7 +805,7 @@ let reverse_ancestry ?cancel value =
     and next_edge_source = ref 0 in
     let old_local = function 0 -> 2 | 1 -> 1 | _ -> 0 in
     for primitive = 0 to primitives - 1 do
-      if primitive land 4095 = 0 then Cancel.check_opt cancel;
+      Cancel.poll cancel primitive 4095;
       let offset = primitive * 3 in
       vertex_points.(offset) <- source_topology.vertex_points.(offset);
       vertex_points.(offset + 1) <- source_topology.vertex_points.(offset + 2);
@@ -881,7 +881,7 @@ let concatenate_ancestries ?cancel values =
       if !total_edge_sources > Sys.max_array_length - sources then
         invalid_arg "Boolean concatenated edge ancestry exceeds array limits";
       total_edge_sources := !total_edge_sources + sources;
-      if index land 255 = 0 then Cancel.check_opt cancel) values;
+      Cancel.poll cancel index 255) values;
     if !total_primitives > Sys.max_array_length / 3 then
       invalid_arg "Boolean concatenated corner cardinality exceeds array limits";
     let used = Bytes.make (Boolean_complex.vertex_count complex) '\000' in

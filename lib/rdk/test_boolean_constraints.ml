@@ -3,7 +3,7 @@ open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 let approximate_point plan point =
-  Rdk_exact.Implicit_point.approximate (Constraints.View.point plan point)
+  Rdk_geom.Implicit_point.approximate (Constraints.View.point plan point)
 
 let close left right = abs_float (left -. right) <= 1e-12
 

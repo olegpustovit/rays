@@ -5,6 +5,14 @@ type scratch
 val create_scratch : unit -> scratch
 (** Reusable single-caller workspace. *)
 
+val find_ear :
+  distinct:(int -> int -> int -> int -> bool) ->
+  u:float array -> v:float array -> base:int -> orientation:float ->
+  remaining:int array -> active:int -> int
+(** [find_projected_ear] with a caller-chosen test for which ring points may
+    block an ear: [distinct p a b c] is true when point [p] differs from the
+    ear corners. *)
+
 val find_projected_ear :
   u:float array -> v:float array -> base:int -> orientation:float ->
   remaining:int array -> active:int -> int

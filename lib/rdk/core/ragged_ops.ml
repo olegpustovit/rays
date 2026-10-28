@@ -11,14 +11,14 @@ let offsets_for_mapping ?cancel ?(grain = 16_384) ~operation
   let lengths = Array.make output_count 0 in
   if output_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(output_count - 1) (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel output 4095;
         let source = mapping.(output) in
         validate_source_index operation source_count source;
         if source >= 0 then lengths.(output) <-
           source_offsets.(source + 1) - source_offsets.(source));
   let offsets = Array.make (output_count + 1) 0 in
   for output = 0 to output_count - 1 do
-    if output land 4095 = 0 then Cancel.check_opt cancel;
+    Cancel.poll cancel output 4095;
     if lengths.(output) > max_int - offsets.(output) then invalid_arg
         (operation ^ ": packed value count overflow");
     offsets.(output + 1) <- offsets.(output) + lengths.(output)
@@ -33,7 +33,7 @@ let remap_int ?cancel ?(grain = 16_384) mapping source =
   let values = Array.make offsets.(output_count) 0 in
   if output_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(output_count - 1) (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel output 4095;
         let input = mapping.(output) in
         if input >= 0 then Array.blit source.values source.offsets.(input)
           values offsets.(output) (offsets.(output + 1) - offsets.(output)));
@@ -47,7 +47,7 @@ let remap_float ?cancel ?(grain = 16_384) mapping source =
   let values = Array.make offsets.(output_count) 0. in
   if output_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
       ~finish:(output_count - 1) (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
+        Cancel.poll cancel output 4095;
         let input = mapping.(output) in
         if input >= 0 then Array.blit source.values source.offsets.(input)
           values offsets.(output) (offsets.(output + 1) - offsets.(output)));
