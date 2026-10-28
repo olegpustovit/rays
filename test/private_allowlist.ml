@@ -9,8 +9,6 @@ let entries = [
   "flow_native", "Scene.Private";
   "flow_native", "Sop.Node.Private";
   "flow_native", "Texture.Private";
-  "flow_sop", "Flow_sop.Catalog.Private";
-  "flow_sop", "Flow_sop.Lower.Private";
   "flow_sop", "Sop.Node.Private";
   "pxui", "Font.Private";
   "pxui", "Image.Private";
