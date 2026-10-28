@@ -4,4 +4,4 @@
  (libraries rdk_core rdk_exact rays_math parallel)
  (flags (:standard -open Rdk_core -open Rdk_exact))
  (private_modules )
- (modules spatial_index surface_index bounds3_index proximity_index linear_piece_index point_clusters point_snap triangle_intersection curve_intersection))
+ (modules spatial_index surface_index bounds3_index proximity_index linear_piece_index point_clusters point_grid point_snap triangle_intersection curve_intersection))
