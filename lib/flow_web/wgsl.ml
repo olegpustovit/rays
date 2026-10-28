@@ -102,6 +102,7 @@ let binary operation a b =
   | Or -> truth ("(" ^ a ^ " != 0.0 || " ^ b ^ " != 0.0)")
   | Atan2 -> "atan2(" ^ a ^ ", " ^ b ^ ")"
   | Hypot -> fail "Native-safe hypot is not supported by the WGSL kernel target."
+  | Ldexp -> "ldexp(" ^ a ^ ", i32(" ^ b ^ "))"
 let unary operation a = match operation with
   | P.Sin -> "sin(" ^ a ^ ")" | Cos -> "cos(" ^ a ^ ")"
   | Sqrt -> "sqrt(abs(" ^ a ^ "))" | Abs -> "abs(" ^ a ^ ")" | Not -> truth ("(" ^ a ^ " == 0.0)")
@@ -111,6 +112,7 @@ let unary operation a = match operation with
   | Exp -> "exp(" ^ a ^ ")"
   | Log -> "select(log(select(1.0, " ^ a ^ ", " ^ a
       ^ " > 0.0)), bitcast<f32>(0x7fc00000u), " ^ a ^ " <= 0.0)"
+  | Rsqrt -> "inverseSqrt(abs(" ^ a ^ "))"
   | Sign -> "select(" ^ a ^ ", select(-1.0, 1.0, " ^ a ^ " > 0.0), " ^ a ^ " != 0.0)"
 let kernel ?(image = false) program = try
   (match P.gpu_refusals program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));

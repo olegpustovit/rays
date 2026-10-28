@@ -1,5 +1,5 @@
-type binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot
-type unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign
+type binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot | Ldexp
+type unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign | Rsqrt
 type integer = Iadd | Isub | Imul | Idiv | Imod | Iand | Ior | Ixor | Ishl | Ishr
 type comparison = Ilt | Ile | Igt | Ige | Ieq
 type conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
@@ -18,9 +18,9 @@ let array_width = function
 
 let binaries = ["+", Add; "-", Sub; "*", Mul; "/", Div; "mod", Mod; "pow", Pow;
   "min", Min; "max", Max; "<", Lt; "<=", Le; ">", Gt; ">=", Ge; "=", Eq;
-  "and", And; "or", Or; "atan2", Atan2; "hypot", Hypot]
+  "and", And; "or", Or; "atan2", Atan2; "hypot", Hypot; "ldexp", Ldexp]
 let unaries = ["sin", Sin; "cos", Cos; "sqrt", Sqrt; "abs", Abs; "not", Not;
-  "tan", Tan; "asin", Asin; "acos", Acos; "exp", Exp; "log", Log; "sign", Sign]
+  "tan", Tan; "asin", Asin; "acos", Acos; "exp", Exp; "log", Log; "sign", Sign; "rsqrt", Rsqrt]
 let noise_names = ["noise3"]
 let derived_names = ["length";"dot";"cross";"normalize";"fma"]
 let binary name = List.assoc_opt name binaries

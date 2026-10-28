@@ -335,6 +335,7 @@ let binary e operation a b =
   | Or -> numeric_truth e (result e e.boolean 166 [ truth e a; truth e b ])
   | Atan2 -> ext e 25 [ a; b ]
   | Hypot -> fail "Native-safe hypot is not supported by the SPIR-V kernel target."
+  | Ldexp -> ext e 53 [ a; result e e.sint 110 [ b ] ]
 
 let unary e operation value =
   match operation with
@@ -343,6 +344,7 @@ let unary e operation value =
   | Tan -> ext e 15 [ value ]
   | Abs -> ext e 4 [ value ]
   | Sqrt -> ext e 31 [ ext e 4 [ value ] ]
+  | Rsqrt -> ext e 32 [ ext e 4 [ value ] ]
   | Not -> numeric_truth e (compare e 180 value (f e 0.))
   | Asin | Acos ->
       let clamped = ext e 43 [ value; f e (-1.); f e 1. ] in
@@ -657,7 +659,7 @@ let element e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width compo
    buffers (uniform, uint index, width, component), raster-stage intrinsics and output stores. *)
 type raster = { input : int -> int -> int; int_input : int -> int; gather : int -> int -> int -> int -> int;
   int_gather : int -> int -> int; intrinsic : Flow_ir.Core.Region.stage -> int array -> int;
-  output : int -> int -> int -> unit }
+  output : int -> int -> int -> unit; builtin : string -> int }
 
 let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
@@ -749,6 +751,7 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
     | Int_const value -> l e (Int64.of_int value)
     | Int_input input -> to_int (load e inputs.(input) index)
     | Int_uniform input -> to_int (uniform_float e layout.uniforms.(input))
+    | Int_frame name when raster <> None -> (Option.get raster).builtin name
     | Int_frame _ -> to_int (uniform_float e layout.frames.(slot))
     | Int_binary (op, a, b) ->
         let a=int_of a and b=int_of b in
@@ -779,6 +782,7 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
         let compute () =
           let value =
             match instruction with
+            | P.Frame name when raster <> None -> (Option.get raster).builtin name
             | P.Frame _ -> uniform_float e layout.frames.(slot)
             | _ -> expression slot instruction
           in
@@ -1166,7 +1170,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
       }
   with Diagnostic.Error diagnostic -> Error diagnostic
 
-type output = Position | Varying of int * bool | Colour | Discard
+type output = Position | Point_size | Varying of int * bool | Colour | Discard
 type stage = { vertex : bool; inputs : (int * int * bool) array; outputs : output array;
   buffers : (int * int * bool) list }
 
@@ -1196,9 +1200,9 @@ let stage (s : stage) program =
     let variable ty storage = let id = Words.id words in
       Words.instruction words.declarations 59 [ ty; id; storage ]; id in
     let decorate id decoration operands = Words.instruction words.annotations 71 (id :: decoration :: operands) in
-    let io storage width location flat =
+    let io ?(builtin = 0) storage width location flat =
       let id = variable (pointer storage (vector width)) storage in
-      (match location with Some l -> decorate id 30 [ l ] | None -> decorate id 11 [ 0 ]);
+      (match location with Some l -> decorate id 30 [ l ] | None -> decorate id 11 [ builtin ]);
       if flat then decorate id 14 [];
       interface := id :: !interface; id in
     let inputs = Array.map (fun (location, width, flat) -> io 1 width (Some location) flat) s.inputs in
@@ -1206,6 +1210,7 @@ let stage (s : stage) program =
         let id = variable (pointer 1 uint) 1 in decorate id 11 [ 42 ]; interface := id :: !interface; Some id end else None in
     let outputs = Array.mapi (fun k o -> match o with
       | Position -> io 3 4 None false
+      | Point_size -> io ~builtin:1 3 1 None false
       | Varying (location, flat) -> io 3 (Array.length layout.view.outputs.(k)) (Some location) flat
       | Colour -> io 3 4 (Some 0) false
       | Discard -> 0) s.outputs in
@@ -1216,15 +1221,21 @@ let stage (s : stage) program =
     let image = Words.declare words 25 [ float; 1; 0; 0; 0; 1; 0 ] and sampler = Words.declare words 26 [] in
     let sampled = Words.declare words 27 [ image ] in
     let textures = Hashtbl.create 2 in
-    let texture t = match Hashtbl.find_opt textures t with Some ids -> ids | None ->
-      let at kind binding = let id = variable (pointer 0 kind) 0 in decorate id 34 [ 0 ]; decorate id 33 [ binding ]; id in
-      let ids = at image t, at sampler (t + 1) in Hashtbl.add textures t ids; ids in
+    (* texture t and its sampler t + 1, each declared when first used *)
+    let texture t = match Hashtbl.find_opt textures t with Some id -> id | None ->
+      let id = variable (pointer 0 image) 0 in decorate id 34 [ 0 ]; decorate id 33 [ t ]; Hashtbl.add textures t id; id in
+    let sampler_of t = match Hashtbl.find_opt textures (-1 - t) with Some id -> id | None ->
+      let id = variable (pointer 0 sampler) 0 in decorate id 34 [ 0 ]; decorate id 33 [ t + 1 ]; Hashtbl.add textures (-1 - t) id; id in
     let sizes = ref false in
     let glsl = Words.id words and main = Words.id words in
     let e = { words; boolean; uint; sint; float; long; ulong; glsl; uniform = 0; uniform_pointer = 0; storage_pointer;
       uint_storage_pointer; status = 0; uint_function_pointer = pointer 7 uint; status_bits = 0; table = None; noise = None;
       scene = None; block = 0; trace_cache = []; strands = None; loop_depth = 0 } in
     let to_long value = result e (Option.get long) 124 [ result e (Option.get ulong) 113 [ value ] ] in
+    let builtins = Hashtbl.create 2 in
+    let builtin ty decoration = match Hashtbl.find_opt builtins decoration with Some id -> id | None ->
+      let id = variable (pointer 1 ty) 1 in decorate id 11 [ decoration ]; interface := id :: !interface;
+      Hashtbl.add builtins decoration id; id in
     let discard = ref None in
     let raster = {
       input = (fun k c -> let _, width, _ = s.inputs.(k) in
@@ -1236,18 +1247,33 @@ let stage (s : stage) program =
       int_gather = (fun u at -> to_long (load_uint e (fst (List.assoc u buffers)) at));
       intrinsic = (fun stage operands -> match stage with
         | Flow_ir.Core.Region.Fwidth -> result e float 209 [ operands.(0) ]
-        | Sample (t, c) -> let i, smp = texture t in
-            let combined = result e sampled 86 [ result e image 61 [ i ]; result e sampler 61 [ smp ] ] in
+        | Sample (t, c) | Sample_level (t, c) ->
+            let combined = result e sampled 86 [ result e image 61 [ texture t ]; result e sampler 61 [ sampler_of t ] ] in
             let uv = result e vec2 80 [ operands.(0); operands.(1) ] in
-            result e float 81 [ result e vec4 87 [ combined; uv ]; c ]
-        | Texture_size (t, c) -> sizes := true; let i, _ = texture t in
+            let texel = match stage with
+              | Sample_level _ -> result e vec4 88 [ combined; uv; 2; operands.(2) ] (* ExplicitLod, Lod *)
+              | _ -> result e vec4 87 [ combined; uv ] in
+            result e float 81 [ texel; c ]
+        | Read (t, c) ->
+            let ivec2 = typ 23 [ sint; 2 ] in
+            let at = result e ivec2 80 [ result e sint 110 [ operands.(0) ]; result e sint 110 [ operands.(1) ] ] in
+            result e float 81 [ result e vec4 95 [ result e image 61 [ texture t ]; at ]; c ]
+        | Texture_size (t, c) -> sizes := true; let i = texture t in
             let size = result e (typ 23 [ sint; 2 ]) 103 [ result e image 61 [ i ]; Words.constant words sint 0l ] in
             result e float 111 [ result e sint 81 [ size; c ] ]);
       output = (fun k c value -> match s.outputs.(k) with
         | Discard -> discard := Some value
         | _ -> let width = Array.length layout.view.outputs.(k) in
             let target = if width = 1 then outputs.(k) else result e (pointer 3 float) 65 [ outputs.(k); u e c ] in
-            Words.instruction words.body 62 [ target; value ]) } in
+            Words.instruction words.body 62 [ target; value ]);
+      (* instance id (a long, as an Int frame fact), facing (1.0 or 0.0) and FragCoord *)
+      builtin = (function
+        | "gpu/instance-id" -> to_long (result e uint 61 [ builtin uint 43 ])
+        | "gpu/front-facing" -> numeric_truth e (result e boolean 61 [ builtin boolean 17 ])
+        | "gpu/fragment-x" | "gpu/fragment-y" | "gpu/depth" as name ->
+            let c = match name with "gpu/fragment-x" -> 0 | "gpu/fragment-y" -> 1 | _ -> 2 in
+            result e float 81 [ result e (vector 4) 61 [ builtin (vector 4) 15 ]; c ]
+        | name -> fail ("no raster built-in " ^ name)) } in
     Words.instruction words.body 54 [ void; main; 0; Words.declare words 33 [ void ] ];
     label e (Words.id words);
     e.status_bits <- result e e.uint_function_pointer 59 [ 7; u e 0 ];

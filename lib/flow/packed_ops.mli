@@ -1,8 +1,8 @@
 (** The operation names shared by the packed CPU/GPU emitter and the checker's
     advisory eligibility set. Adding a name requires both execution tiers to
     implement its instruction semantics. *)
-type binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot
-type unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign
+type binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot | Ldexp
+type unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign | Rsqrt
 type integer = Iadd | Isub | Imul | Idiv | Imod | Iand | Ior | Ixor | Ishl | Ishr
 type comparison = Ilt | Ile | Igt | Ige | Ieq
 type conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string

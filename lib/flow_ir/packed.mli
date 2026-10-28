@@ -1,8 +1,8 @@
 (** Specialized numeric packed maps, loops and reductions with scalar registers
     in 1,024-element blocks. Accumulators retain reference evaluation order. *)
 type t = Core.Region.t
-type binary = Flow.Packed_ops.binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot
-type unary = Flow.Packed_ops.unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign
+type binary = Flow.Packed_ops.binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot | Ldexp
+type unary = Flow.Packed_ops.unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign | Rsqrt
 type conversion = Core.Region.conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
 type projection = Core.Region.projection = Value | Valid
 type loop = Core.Region.loop = {first:int; last:int; finish:int; initial:int array; limit:int option;

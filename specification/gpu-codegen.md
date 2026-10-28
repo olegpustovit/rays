@@ -78,15 +78,29 @@ record (a record result is one output per numeric leaf), printed by `Emit`'s ins
 raster placement (`Emit.stage_body`): elements are `vid` or interpolated inputs read where used,
 gathers read the bound buffers without clamps, and there is no status word.
 
-- A stage's `(array float)` and `(array int)` parameters are the renderer's buffers, bound at their
-  position among them (a buffer read as floats and as words is bound twice). The vertex entry's first
-  parameter is the vertex id.
-- The vertex result has `:position` (clip space) and the varyings; those under `:flat` are not
-  interpolated. The fragment's other parameters are the varyings, by name, and its result is a colour
+- A stage's `(array float)` and `(array int)` parameters are the renderer's buffers. The vertex
+  stage's bind in their order; a fragment buffer named like a vertex one shares its binding, any other
+  follows the vertex stage's (one binding namespace, as OGPU's layouts). A buffer read as floats and
+  as words is bound twice. Textures take the bindings the author names after them. The vertex
+  entry's first parameter is the vertex id.
+- The vertex result has `:position` (clip space), optionally `:point-size`, and the varyings; those
+  under `:flat` are not interpolated. The fragment's other parameters are the varyings, by name, and its result is a colour
   or `{:color c :discard b}`.
-- Fragment intrinsics are `gpu/fwidth`, `gpu/sample` and `gpu/texture-size` (Region `Stage`); texture
-  `t` is sampled with sampler `t + 1`. The CPU and every other target refuse them (`E_GPU_STAGE`).
-- Blending, depth and culling are OGPU pipeline state, never shader code.
+- Fragment intrinsics are `gpu/fwidth`, `gpu/sample`, `gpu/sample-level` (an explicit mip level),
+  `gpu/read` (a whole texel at integer coordinates, no sampler) and `gpu/texture-size` (Region
+  `Stage`); texture `t` is sampled with sampler `t + 1`. An argument-buffer pipeline
+  (`Raster.msl ~arguments:true`, Scene2's) holds texture `t` and its sampler in the argument buffer at
+  buffer `t`. Built-in facts read like frame facts: `(gpu/instance-id)` in a vertex,
+  `(gpu/front-facing)`, `(gpu/depth)` (window depth) and `(gpu/fragment-x)`/`(gpu/fragment-y)` (pixel
+  position) in a fragment. The CPU and every other target
+  refuse them all (`E_GPU_STAGE`).
+- Blending, depth, culling and winding are OGPU pipeline state, never shader code; the renderer sets
+  them per pipeline family (3D families wind counter-clockwise), never from which slots a draw binds.
+- Pixels equal to an MSL intrinsic need its rounding, written out: MSL's `dot` is the fused chain
+  `fma(z, z', fma(y, y', x*x'))`, `normalize(v)` is `v * rsqrt(dot(v, v))` (`rsqrt` is a Lisp
+  unary), `cross` is `fma(a.y, b.z, -(a.z*b.y))` per component, and the compiler contracts `a + b*c`
+  to `fma(b, c, a)`. Flow's `dot`, `length` and `normalize` keep the CPU's unfused sums. GPU `pow` and
+  `exp2` are not exact on integer powers of two: scaling by one is `ldexp` (`shaders/scene.rays`).
 - The same programs print as Vulkan SPIR-V (`Spirv.stage`, `Raster.spirv`): one module per stage,
   entry `main`, varyings at `Location`s in the vertex result's leaf order (`Flat` under `:flat`),
   `VertexIndex`/`Position` built-ins, buffers as storage runtime arrays at their bindings, texture `t`

@@ -98,7 +98,7 @@ type t = {
   device : B.device;
   queue : B.queue;
   flow_pipelines : Flow_gpu.Pipelines.t;
-  convert : B.library * B.pipeline;  (* Flow's RGBA8 film conversion *)
+  convert : Flow_gpu.Image_sink.t;  (* Flow's RGBA8 film conversion *)
   cell : B.buffer;  (* the Lisp kernels' count word, never read *)
   mutable kernels : (Lisp_kernel.facts * Lisp_kernel.t) list;  (* newest first, at most four *)
   mutable from_accum : bool;  (* the last frame accumulated, so the film is a preview's history *)
@@ -346,18 +346,6 @@ let world_bytes (baked : Rays.World.baked) =
 (* Resource helpers on the leased OGPU device. Scene geometry lives in shared
    memory (Apple silicon is unified); accumulation, history, and build scratch
    are device-local. *)
-let convert_interface = List.init 3 (fun binding -> { Ogpu.Shader.group = 0; binding;
-  kind = (if binding = 2 then Ogpu.Shader.Uniform_buffer else Storage_buffer); visibility = [ Compute ] })
-
-let convert_pipeline device =
-  let* shader = gpu (Ogpu.Shader.of_source { backend = "metal"; label = Some "pathtracer RGBA8";
-    bytes = Bytes.of_string Flow_gpu.Emit.image_rgba8_source;
-    entry_points = [ { name = "rays_flow_image_rgba8"; stage = Compute } ]; bindings = convert_interface }) in
-  let* library = gpu (B.create_library device shader) in
-  match gpu (B.create_compute_pipeline_from library ~entry:"rays_flow_image_rgba8" ~interface:convert_interface ()) with
-  | Ok pipeline -> Ok (library, pipeline)
-  | Error _ as failure -> ignore (B.destroy_library library); failure
-
 let unavailable caps =
   if Ogpu.Caps.has caps Ray_tracing then None else Some "Path tracing is not available on this GPU."
 
@@ -391,7 +379,7 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
       let* world_buffer = shared device ~label:"pathtracer-world" (Bytes.make 16 '\000') in
       let* cdf_buffer = shared device ~label:"pathtracer-cdf" (Bytes.make 16 '\000') in
       let* cell = buffer device ~label:"pathtracer-count" 24 in
-      let* convert = convert_pipeline device in
+      let* convert = Result.map_error Diagnostic.to_string (Flow_gpu.Image_sink.create lease) in
       let* film = allocate_film device ~width ~height in
       let pixels = Bytes.make (width * height * 4) '\000' in
       let* resource =
@@ -787,23 +775,9 @@ let lisp_table t (tables : Mesh_build.tables) ~geo ~pgeo ~pcol name =
 
 (* Flow's RGBA8 conversion of the resolved film into output [slot]. *)
 let encode_rgba t commands slot =
-  let pitch = Frame_data.row_pitch t.width in
-  let size = Bytes.create 12 in
-  put_u32 size 0 (t.width * t.height);
-  put_u32 size 4 t.width;
-  put_u32 size 8 (pitch / 4);
-  let* compute = gpu (B.compute_encoder commands) in
-  let* () = gpu (B.set_pipeline compute (snd t.convert)) in
-  let* () = gpu (B.set_buffer compute ~index:0 t.film.resolved) in
-  let* () = gpu (B.set_buffer compute ~index:1 t.film.rgba) in
-  let* () = gpu (B.set_bytes compute ~index:2 size) in
-  let* () = gpu (B.dispatch_threads compute ~threads:(t.width * t.height, 1, 1) ~threadgroup:(256, 1, 1)) in
-  let* () = gpu (B.end_compute compute) in
-  let* blit = gpu (B.blit_encoder commands) in
-  let* () = gpu (B.buffer_to_texture blit ~src:t.film.rgba ~bytes_per_row:(Int64.of_int pitch)
-    ~bytes_per_image:(Int64.of_int (pitch * t.height)) ~dst:t.film.outputs.(slot)
-    ~extent:{ width = t.width; height = t.height; depth = 1 } ()) in
-  gpu (B.end_blit blit)
+  Result.map_error Diagnostic.to_string
+    (Flow_gpu.Image_sink.encode t.convert commands ~source:t.film.resolved ~width:t.width ~height:t.height
+       t.film.outputs.(slot))
 
 (* The Lisp kernels' frame (pathtrace.rays): a preview traces its primary hits, then one centre sample
    reprojected onto the history, then the 3x3 resolve; an accumulation band adds its pixels' samples to the
@@ -975,8 +949,7 @@ let destroy t =
   release (fun () -> Rays.Image.destroy t.image);
   List.iter (fun (_, kernels) -> Lisp_kernel.close kernels) t.kernels;
   Flow_gpu.Pipelines.close t.flow_pipelines;
-  release (fun () -> B.destroy_pipeline (snd t.convert));
-  release (fun () -> B.destroy_library (fst t.convert));
+  Flow_gpu.Image_sink.close t.convert;
   destroy_gpu t.gpu;
   List.iter
     (fun value -> release (fun () -> B.destroy_buffer value))

@@ -38,7 +38,7 @@ let cases = [
   "array/segment_argmax","(array/nth (array/segment_argmax (array/int 5 (frame/index)) (map (fn [x] (int x)) (array/range 6))) 3)";
   "tan","(tan t)"; "atan2","(atan2 t -0.3)";
   "asin","(asin (* t 0.1))"; "acos","(acos (* t 0.1))";
-  "log","(log (+ t 4.0))"; "sign","(sign t)"; "hypot","(hypot t 3.0)";
+  "log","(log (+ t 4.0))"; "sign","(sign t)"; "rsqrt","(rsqrt (+ t 4.0))"; "hypot","(hypot t 3.0)"; "ldexp","(ldexp t 3.0)";
   "dot","(dot [t 0.3 -0.2] [0.7 -0.2 1.1])";
   "cross","(cross [t 0.3 -0.2] [0.7 -0.2 1.1])";
   "normalize","(normalize [t 0.3 -0.2])";
@@ -109,7 +109,7 @@ let () =
   let covered=List.sort_uniq compare (List.map fst cases) in
   List.iter (fun (o : Flow.Op.t) ->
     if o.ctx=Flow.Context.value && o.shape=Flow.Op.Scalar
-      && not (List.mem o.name ["color/hsla"; "text/float"; "scene/trace"; "gpu/fwidth"; "gpu/sample"; "gpu/texture-size"])
+      && not (List.mem o.name ["color/hsla"; "text/float"; "scene/trace"; "gpu/fwidth"; "gpu/sample"; "gpu/sample-level"; "gpu/read"; "gpu/texture-size"; "gpu/instance-id"; "gpu/front-facing"; "gpu/depth"; "gpu/fragment-x"; "gpu/fragment-y"])
       && not (List.mem o.name covered) then
       failwith ("No core operator case for " ^ o.name)) (Flow.Op.of_context Flow.Context.value);
   let n=ref 0 and static=ref [] in

@@ -107,7 +107,7 @@ module Region : sig
   type conversion = Flow.Packed_ops.conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
   type loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
     span:Diagnostic.span}
-  type stage = Fwidth | Sample of int * int | Texture_size of int * int
+  type stage = Fwidth | Sample of int * int | Sample_level of int * int | Read of int * int | Texture_size of int * int
     (** [fwidth x]; component c of texture t sampled at (u, v) (its sampler at t + 1); axis c of
         texture t's size in texels *)
   type instruction =

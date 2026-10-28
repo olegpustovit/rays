@@ -3,8 +3,8 @@ module W = Flow.Workspace
 module V = Flow.Value
 module Ty = Flow.Ty
 
-type binary = Flow.Packed_ops.binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot
-type unary = Flow.Packed_ops.unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign
+type binary = Flow.Packed_ops.binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot | Ldexp
+type unary = Flow.Packed_ops.unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign | Rsqrt
 type conversion = Core.Region.conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
 type projection = Core.Region.projection = Value | Valid
 type loop = Core.Region.loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
@@ -60,11 +60,12 @@ let[@inline always] binary_apply op x y = match op with
   | Gt->if x>y then 1. else 0. | Ge->if x>=y then 1. else 0.
   | Eq->if x=y then 1. else 0. | And->if x<>0. && y<>0. then 1. else 0.
   | Or->if x<>0. || y<>0. then 1. else 0.
-  | Atan2->Float.atan2 x y | Hypot->Float.hypot x y
+  | Atan2->Float.atan2 x y | Hypot->Float.hypot x y | Ldexp->Float.ldexp x (int_of_float y)
 let[@inline always] unary_apply op x = match op with
   | Sin->sin x | Cos->cos x | Sqrt->sqrt (Float.abs x) | Abs->Float.abs x
   | Not->if x=0. then 1. else 0. | Tan->tan x | Asin->asin x | Acos->acos x
   | Exp->exp x | Log->log x | Sign->if x>0. then 1. else if x<0. then -1. else x
+  | Rsqrt->1. /. sqrt (Float.abs x)
 let[@inline always] checked_projection projection value =
   let valid=Float.is_finite value in
   match projection with Value -> if valid then value else 0. | Valid -> if valid then 1. else 0.
@@ -593,7 +594,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
             | Min->for j=first to last-1 do floats.(at+j)<-finite(Float.min floats.(a+j)floats.(b+j)) done
             | Max->for j=first to last-1 do floats.(at+j)<-finite(Float.max floats.(a+j)floats.(b+j)) done
             | Atan2->for j=first to last-1 do floats.(at+j)<-finite(Float.atan2 floats.(a+j)floats.(b+j)) done
-            | Hypot->for j=first to last-1 do floats.(at+j)<-finite(Float.hypot floats.(a+j)floats.(b+j)) done
+            | (Hypot|Ldexp) as o->for j=first to last-1 do floats.(at+j)<-finite(binary_apply o floats.(a+j)floats.(b+j)) done
             | Lt->for j=first to last-1 do floats.(at+j)<-(if floats.(a+j)<floats.(b+j) then 1. else 0.) done
             | Le->for j=first to last-1 do floats.(at+j)<-(if floats.(a+j)<=floats.(b+j) then 1. else 0.) done
             | Gt->for j=first to last-1 do floats.(at+j)<-(if floats.(a+j)>floats.(b+j) then 1. else 0.) done
@@ -1107,7 +1108,7 @@ let rec block_instruction r b slot instruction first last =
                  if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
              | Max -> for j = first to last - 1 do let x = Float.max scratch.(a+j) scratch.(b+j) in
                  if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
-             | (Atan2 | Hypot) -> for j=first to last-1 do
+             | (Atan2 | Hypot | Ldexp) -> for j=first to last-1 do
                  let x=binary_apply operation scratch.(a+j) scratch.(b+j) in
                  if not(Float.is_finite x)then nonfinite ();scratch.(at+j)<-x done
              | (Lt | Le | Gt | Ge | Eq | And | Or) ->
@@ -1147,7 +1148,7 @@ let rec block_instruction r b slot instruction first last =
              | Cos -> for j = first to last - 1 do let x = cos scratch.(a+j) in if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
              | Sqrt -> for j = first to last - 1 do scratch.(at+j) <- sqrt (Float.abs scratch.(a+j)) done
              | Abs -> for j = first to last - 1 do scratch.(at+j) <- Float.abs scratch.(a+j) done
-             | (Tan|Asin|Acos|Exp|Log|Sign) -> for j=first to last-1 do
+             | (Tan|Asin|Acos|Exp|Log|Sign|Rsqrt) -> for j=first to last-1 do
                  let x=unary_apply operation scratch.(a+j)in
                  if not(Float.is_finite x)then nonfinite ();scratch.(at+j)<-x done
              | Not -> for j = first to last - 1 do scratch.(at+j) <- if scratch.(a+j) = 0. then 1. else 0. done)

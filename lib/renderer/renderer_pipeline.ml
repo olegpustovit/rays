@@ -6,7 +6,7 @@ open Ogpu.Render_pass
 open Scene_execution
 
 let source_scene3 = Metal_scene3_source.source
-let source_scene3_points = "#define RAYS_POINTS\n" ^ source_scene3
+let source_scene3_points = Metal_scene3_points_source.source
 let source_scene3_textured = Metal_scene3_textured_source.source
 let source_scene3_world = Metal_scene3_world_source.source
 let source_scene3_sun_depth = Metal_scene3_sun_depth_source.source
@@ -24,11 +24,11 @@ let make_sun_depth_pipeline backend backend_device =
       }
   in
   let ( let* ) = Result.bind in
-  let* vertex = artifact (List.map buffer [ 0; 3; 6; 7 ]) in
+  let* vertex = artifact (List.map buffer [ 0; 1; 2; 3; 4 ]) in
   let* fragment = artifact [] in
   let* bindings =
     Ogpu.Binding.create_layout
-      (List.map (fun binding -> { Ogpu.Binding.binding; kind = Buffer; visibility = [ Vertex ] }) [ 0; 3; 6; 7 ])
+      (List.map (fun binding -> { Ogpu.Binding.binding; kind = Buffer; visibility = [ Vertex ] }) [ 0; 1; 2; 3; 4 ])
   in
   let* layout =
     Ogpu.Binding.create_pipeline_layout
@@ -58,189 +58,95 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
   else
   let make_sun_depth_pipeline device=make_sun_depth_pipeline backend device in
   let make_pipeline backend_device family blend samples =
-    let source, extra =
+    (* Every pipeline is generated (shaders/*.rays) and binds in its Lisp declaration order: buffer 0
+       and the vertex buffers, the one buffer both stages read, then the fragment's resources. *)
+    let texture t = [ (t, `Texture); (t + 1, `Sampler) ] in
+    let scene3 = ([ 1; 3; 4; 5 ], [ 2 ]) in
+    let source, (vertex_entry, fragment_entry), (vertex_buffers, shared), fragment_resources =
       match family with
       | Scene_execution.Scene2 | Scene2_textured ->
-          ( Renderer_shaders.scene2_textured_argument,
-            [
-              {
-                Ogpu.Shader.group = 0;
-                binding = 1;
-                kind = Storage_buffer;
-                visibility = [ Fragment ];
-              };
-            ] )
-      | Scene3 -> (source_scene3, [])
-      | Scene3_points -> (source_scene3_points, [])
-      | Scene3_textured ->
-          ( source_scene3_textured,
-            [
-              {
-                Ogpu.Shader.group = 0;
-                binding = 1;
-                kind = Sampled_texture;
-                visibility = [ Fragment ];
-              };
-              { group = 0; binding = 2; kind = Sampler; visibility = [ Fragment ] };
-            ] )
+          (* records as words 0, the affine 1, the texture's argument buffer 2 *)
+          (Renderer_shaders.scene2_textured_argument, ("scene2_vertex", "scene2_fragment"), ([ 1 ], []), [ (2, `Buffer) ])
+      (* records as floats 0 and words 1, surface 2, instances 3, attributes 4 and 5 *)
+      | Scene3 -> (source_scene3, ("scene3_vertex", "scene3_fragment"), scene3, [])
+      | Scene3_points -> (source_scene3_points, ("scene3_points_vertex", "scene3_fragment"), scene3, [])
+      | Scene3_textured -> (source_scene3_textured, ("scene3_vertex", "scene3_textured_fragment"), scene3, texture 6)
       | Scene3_world ->
-          ( source_scene3_world,
-            [
-              { Ogpu.Shader.group = 0; binding = 1; kind = Sampled_texture; visibility = [ Fragment ] };
-              { group = 0; binding = 2; kind = Sampler; visibility = [ Fragment ] };
-              { group = 0; binding = 3; kind = Storage_buffer; visibility = [ Fragment ] };
-              { group = 0; binding = 4; kind = Sampled_texture; visibility = [ Fragment ] };
-              { group = 0; binding = 5; kind = Sampler; visibility = [ Fragment ] };
-              { group = 0; binding = 8; kind = Sampled_texture; visibility = [ Fragment ] };
-              { group = 0; binding = 9; kind = Sampled_texture; visibility = [ Fragment ] };
-              { group = 0; binding = 10; kind = Sampler; visibility = [ Fragment ] };
-            ] )
-      | Ui ->
-          ( Renderer_shaders.ui,
-            [
-              { Ogpu.Shader.group = 0; binding = 3; kind = Sampled_texture; visibility = [ Fragment ] };
-              { group = 0; binding = 4; kind = Sampler; visibility = [ Fragment ] };
-            ] )
-      | Marks -> (Renderer_shaders.marks, [])
+          (* the World block 6, image 7 (8), specular 9 (10), camera map 11 (12), sun map 13 *)
+          ( source_scene3_world, ("scene3_vertex", "world_fragment"), scene3,
+            ((6, `Buffer) :: texture 7) @ texture 9 @ texture 11 @ [ (13, `Texture) ] )
+      | Ui -> (Renderer_shaders.ui, ("ui_vertex", "ui_fragment"), ([ 1; 2 ], []), texture 3)
+      | Marks -> (Renderer_shaders.marks, ("marks_vertex", "marks_fragment"), ([ 1; 2; 3; 4; 5; 6; 7; 8 ], []), [])
     in
-    (* generated stages (shaders/*.rays) are named after their Lisp entries *)
-    let vertex_entry, fragment_entry = match family with
-      | Marks -> "marks_vertex", "marks_fragment"
-      | Ui -> "ui_vertex", "ui_fragment"
-      | Scene2 | Scene2_textured -> "scene_vertex", "scene_fragment_argument"
-      | _ -> "scene_vertex", "scene_fragment" in
-    let artifact bindings =
+    let resources =
+      List.map (fun binding -> (binding, `Buffer, `Vertex)) (0 :: vertex_buffers)
+      @ List.map (fun binding -> (binding, `Buffer, `Both)) shared
+      @ List.map (fun (binding, kind) -> (binding, kind, `Fragment)) fragment_resources
+    in
+    let artifact stage =
       Ogpu.Shader.create
         {
           backend;
           label = Some "runtime-next";
           bytes = Bytes.of_string source;
-          entry_points =
-            [
-              { name = vertex_entry; stage = Vertex };
-              { name = fragment_entry; stage = Fragment };
-            ];
-          bindings;
+          entry_points = [ { name = vertex_entry; stage = Vertex }; { name = fragment_entry; stage = Fragment } ];
+          bindings =
+            List.filter_map
+              (fun (binding, kind, visibility) ->
+                if (visibility = `Fragment) <> (stage = Fragment) then None
+                else
+                  Some
+                    {
+                      Ogpu.Shader.group = 0;
+                      binding;
+                      kind = (match kind with `Buffer -> Storage_buffer | `Texture -> Sampled_texture | `Sampler -> Sampler);
+                      visibility = (match visibility with `Vertex -> [ Vertex ] | `Both -> [ Vertex; Fragment ] | `Fragment -> [ Fragment ]);
+                    })
+              resources;
         }
     in
-    let vertex_schema =
-      { Ogpu.Shader.group = 0; binding = 0; kind = Storage_buffer; visibility = [ Vertex ] }
-      ::
-      (match family with
-      | Scene_execution.Scene2 | Scene2_textured ->
-          [ { Ogpu.Shader.group = 0; binding = 6; kind = Storage_buffer; visibility = [ Vertex ] } ]
-      | Ui -> List.map (fun binding -> { Ogpu.Shader.group = 0; binding; kind = Storage_buffer; visibility = [ Vertex ] }) [ 1; 2 ]
-      | Marks ->
-          List.map
-            (fun binding ->
-              { Ogpu.Shader.group = 0; binding; kind = Storage_buffer; visibility = [ Vertex ] })
-            [ 1; 2; 3; 4; 5; 6; 7; 8 ]
-      | Scene3 | Scene3_points | Scene3_textured | Scene3_world ->
-          [
-            {
-              Ogpu.Shader.group = 0;
-              binding = 6;
-              kind = Storage_buffer;
-              visibility = [ Vertex; Fragment ];
-            };
-            { Ogpu.Shader.group = 0; binding = 7; kind = Storage_buffer; visibility = [ Vertex ] };
-            { Ogpu.Shader.group = 0; binding = 11; kind = Storage_buffer; visibility = [ Vertex ] };
-          ])
+    let ( let* ) = Result.bind in
+    let* vertex = artifact Vertex in
+    let* fragment = artifact Fragment in
+    let* bindings =
+      Ogpu.Binding.create_layout
+        (List.map
+           (fun (binding, kind, visibility) ->
+             {
+               Ogpu.Binding.binding;
+               kind = (match kind with `Buffer -> Buffer | `Texture -> Texture | `Sampler -> Sampler);
+               visibility = (match visibility with `Vertex -> [ Vertex ] | `Both -> [ Vertex; Fragment ] | `Fragment -> [ Fragment ]);
+             })
+           resources)
     in
-    match (artifact vertex_schema, artifact extra) with
-    | Error e, _ -> Error e
-    | _, Error e -> Error e
-    | Ok vertex, Ok fragment -> (
-        let entries =
-          { Ogpu.Binding.binding = 0; kind = Buffer; visibility = [ Vertex ] }
-          ::
+    let* layout =
+      Ogpu.Binding.create_pipeline_layout
+        ~device:(Ogpu.Backend.device_handle backend_device)
+        ~capabilities:(Ogpu.Backend.capabilities backend_device)
+        [ (0, bindings) ]
+    in
+    Ogpu.Backend.create_render_pipeline ~blend
+      ~topology:(if family = Scene3_points then Ogpu.Render_pass.Point_list else Triangle_list)
+      ~indirect:
+        (match family with
+        | Scene2 | Scene2_textured | Scene3 | Scene3_points -> true
+        | Scene3_textured | Scene3_world | Ui | Marks -> false)
+      backend_device
+      {
+        backend;
+        label = Some "runtime-next";
+        layout;
+        vertex;
+        vertex_entry;
+        fragment = Some fragment;
+        fragment_entry = Some fragment_entry;
+        color_format = Rgba8_unorm;
+        depth_format =
           (match family with
-          | Scene_execution.Scene2 | Scene2_textured ->
-              [ { Ogpu.Binding.binding = 6; kind = Buffer; visibility = [ Vertex ] } ]
-          | Ui -> List.map (fun binding -> { Ogpu.Binding.binding; kind = Buffer; visibility = [ Vertex ] }) [ 1; 2 ]
-          | Marks ->
-              List.map
-                (fun binding -> { Ogpu.Binding.binding; kind = Buffer; visibility = [ Vertex ] })
-                [ 1; 2; 3; 4; 5; 6; 7; 8 ]
-          | Scene3 | Scene3_points | Scene3_textured | Scene3_world ->
-              [
-                { Ogpu.Binding.binding = 6; kind = Buffer; visibility = [ Vertex; Fragment ] };
-                { Ogpu.Binding.binding = 7; kind = Buffer; visibility = [ Vertex ] };
-                { Ogpu.Binding.binding = 11; kind = Buffer; visibility = [ Vertex ] };
-              ])
-        in
-        let bindings =
-          match family with
-          | Scene2 | Scene2_textured ->
-              entries @ [ { Ogpu.Binding.binding = 1; kind = Buffer; visibility = [ Fragment ] } ]
-          | Ui ->
-              entries
-              @ [
-                  { Ogpu.Binding.binding = 3; kind = Texture; visibility = [ Fragment ] };
-                  { binding = 4; kind = Sampler; visibility = [ Fragment ] };
-                ]
-          | Scene3 | Scene3_points | Marks -> entries
-          | Scene3_textured ->
-              entries
-              @ [
-                  { Ogpu.Binding.binding = 1; kind = Texture; visibility = [ Fragment ] };
-                  { binding = 2; kind = Sampler; visibility = [ Fragment ] };
-                ]
-          | Scene3_world ->
-              entries
-              @ [
-                  { Ogpu.Binding.binding = 1; kind = Texture; visibility = [ Fragment ] };
-                  { binding = 2; kind = Sampler; visibility = [ Fragment ] };
-                  { binding = 3; kind = Buffer; visibility = [ Fragment ] };
-                  { binding = 4; kind = Texture; visibility = [ Fragment ] };
-                  { binding = 5; kind = Sampler; visibility = [ Fragment ] };
-                ]
-              @ (if family = Scene3_world then
-                   [
-                     { Ogpu.Binding.binding = 8; kind = Texture; visibility = [ Fragment ] };
-                     { binding = 9; kind = Texture; visibility = [ Fragment ] };
-                     { binding = 10; kind = Sampler; visibility = [ Fragment ] };
-                   ]
-                 else [])
-        in
-        match Ogpu.Binding.create_layout bindings with
-        | Error e -> Error e
-        | Ok bindings -> (
-            let groups = [ (0, bindings) ] in
-            match
-              Ogpu.Binding.create_pipeline_layout
-                ~device:(Ogpu.Backend.device_handle backend_device)
-                ~capabilities:(Ogpu.Backend.capabilities backend_device)
-                groups
-            with
-            | Error _ as e -> e
-            | Ok layout -> (
-                let descriptor : Ogpu.Pipeline.render_descriptor =
-                  {
-                    backend;
-                    label = Some "runtime-next";
-                    layout;
-                    vertex;
-                    vertex_entry;
-                    fragment = Some fragment;
-                    fragment_entry = Some fragment_entry;
-                    color_format = Rgba8_unorm;
-                    depth_format =
-                      (match family with
-                      | Scene_execution.Scene2 | Scene2_textured | Ui | Marks -> Ogpu.Pipeline.No_depth
-                      | Scene3 | Scene3_points | Scene3_textured | Scene3_world -> Depth32_float);
-                    sample_count = samples;
-                  }
-                in
-                Ogpu.Backend.create_render_pipeline ~blend
-                  ~topology:
-                    (if family = Scene3_points then Ogpu.Render_pass.Point_list
-                     else Triangle_list)
-                  ~indirect:
-                    (match family with
-                     | Scene2 | Scene2_textured | Scene3 | Scene3_points -> true
-                     | Scene3_textured | Scene3_world | Ui | Marks -> false)
-                  backend_device descriptor)))
+          | Scene_execution.Scene2 | Scene2_textured | Ui | Marks -> Ogpu.Pipeline.No_depth
+          | Scene3 | Scene3_points | Scene3_textured | Scene3_world -> Depth32_float);
+        sample_count = samples;
+      }
   in
   Scene_execution.create ?device ?gpu_vertices ~sun_depth:make_sun_depth_pipeline ~offscreen driver configuration
     make_pipeline

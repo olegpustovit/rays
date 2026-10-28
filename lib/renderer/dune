@@ -5,11 +5,11 @@
  (modules renderer renderer_pipeline renderer_shaders renderer_retained_plans renderer_leases renderer_lowering scene_execution scene_attachment_pool
   metal_scene2_textured_argument_source metal_ui_source metal_marks_source
   metal_scene3_source metal_scene3_textured_source metal_scene3_world_source
-  metal_scene3_sun_depth_source)
+  metal_scene3_sun_depth_source metal_scene3_points_source)
  (private_modules renderer_pipeline renderer_shaders renderer_retained_plans renderer_leases renderer_lowering scene_attachment_pool
   metal_scene2_textured_argument_source metal_ui_source metal_marks_source
   metal_scene3_source metal_scene3_textured_source metal_scene3_world_source
-  metal_scene3_sun_depth_source)
+  metal_scene3_sun_depth_source metal_scene3_points_source)
  (libraries ogpu scene_command runtime lru rays_math
   runtime_resources))
 
@@ -40,6 +40,12 @@
  (deps shaders/metal/scene3.metal)
  (action (with-stdout-to %{target}
   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3.metal}))))
+
+(rule
+ (target metal_scene3_points_source.ml)
+ (deps shaders/metal/scene3_points.metal)
+ (action (with-stdout-to %{target}
+  (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_points.metal}))))
 
 (rule
  (target metal_scene3_textured_source.ml)
