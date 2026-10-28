@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **190 / 248 accepted (76.6%)**. This counts individual
+Finding coverage: **191 / 248 accepted (77.0%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P8 switch-over (52748872..cc4fe379): rays_pathtracer runs only on the Lisp kernels; tiled 16x16 dispatch order closed a 13% gap. GPU ms per 16 spp, 5 interleaved pairs: pathtracer.rays 493.2 vs 497.1 (load 21–26); shattered_studio 33,932 vs 35,294 (load 6–66). Film: pathtracer.rays RMSE 6.9e-5 at 64 spp; both M1 exact digests unchanged. Still failing: shattered_studio RMSE 2.75e-3 at 8 spp (P8.G3; about 0.03% of channels; suspects are the instanced geometric normal, mirrored instances, visible rect lights), and first-frame compile 2.5–4.0 s vs 1.3–2.0 s (P8.G2; about 1 s is Flow.Workspace.check per scene shape). Also open: the unused OGPU intersection-table API (WN9), 64-bit index math in instanced loops, bound materials about 10% slower than literal ones, and two new rays_pathtracer allowlist rows.
 
 - P5.G4: pxui and pxui_graph have no function over 300 lines, product or test. rays_editor test functions still over: test_rays_editor 650, test_sop_catalog 482, test_scene_tree 321, test_scene_sync 303. P5.S3 Panel_map and the P5.S7 layout ops (minimal design: an Editor_document.Layout_edit.op beside Syntax_edit in the change types) are open. UI13: the World drag consumes Ui.input ~owner events, which are already filtered by the one hit path; the per-event fold and its 4-point threshold remain.
 
