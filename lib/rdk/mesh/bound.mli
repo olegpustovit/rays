@@ -6,7 +6,7 @@ type deform_selection = Deform.selection =
   | Selected_primitives of Group.t
   | Selected_edges of Edge_group.t
 
-module Private : sig
+module View : sig
   val selected_bounds :
     ?cancel:Cancel.t -> grain:int -> operation:string ->
     deform_selection option -> Geometry.t -> (Analysis.bounds, string) result

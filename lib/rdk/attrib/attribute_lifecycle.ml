@@ -37,7 +37,7 @@ let reference_names = function
       let tables = Array.init 4 (fun _ -> Hashtbl.create 16) in
       Array.iter (fun attribute ->
         Hashtbl.replace tables.(owner_index (Attribute.owner attribute))
-          (Attribute.name attribute) ()) (Geometry.Private.attributes geometry);
+          (Attribute.name attribute) ()) (Geometry.View.attributes geometry);
       tables
 
 let delete ?cancel ?reference ?(delete_non_selected = false)
@@ -64,7 +64,7 @@ let delete ?cancel ?reference ?(delete_non_selected = false)
     | Some pattern when reference_owner_nonempty.(owner) ->
         Attribute_pattern.apply ~selected:from_reference pattern name
     | Some pattern -> Attribute_pattern.matches pattern name in
-  let attributes = Geometry.Private.attributes geometry in
+  let attributes = Geometry.View.attributes geometry in
   if Array.length attributes = 0 then Ok geometry
   else begin
     let output = Array.make (Array.length attributes) attributes.(0) in
@@ -81,7 +81,7 @@ let delete ?cancel ?reference ?(delete_non_selected = false)
     else
       let output = if !output_count = Array.length output then output
         else Array.sub output 0 !output_count in
-      Geometry.Private.with_attributes_owned output geometry
+      Geometry.View.with_attributes_owned output geometry
   end))))
 
 type entry = {
@@ -97,7 +97,7 @@ type store = {
 }
 
 let store_of_geometry geometry =
-  let attributes = Geometry.Private.attributes geometry in
+  let attributes = Geometry.View.attributes geometry in
   let entries = Array.map (fun attribute ->
       { owner = Attribute.owner attribute; attribute; alive = true }) attributes in
   let tables = Array.init 4 (fun _ -> Hashtbl.create
@@ -189,7 +189,7 @@ let rename ?cancel ~rules geometry =
         output.(!next) <- entry.attribute;
         incr next
       end) store.entries;
-      Geometry.Private.with_attributes_owned output geometry
+      Geometry.View.with_attributes_owned output geometry
     end))
 
 type swap_method =
@@ -215,7 +215,7 @@ type swap_store = {
 type swap_slot = Swap_position | Swap_attribute of entry
 
 let swap_store_of_geometry geometry =
-  let attributes = Geometry.Private.attributes geometry in
+  let attributes = Geometry.View.attributes geometry in
   let entries = Dynarray.init (Array.length attributes) (fun index ->
       let attribute = attributes.(index) in
       { owner = Attribute.owner attribute; attribute; alive = true }) in
@@ -243,7 +243,7 @@ let swap_remove store entry =
   end
 
 let swap_set_position store attribute =
-  match Attribute.Private.storage attribute with
+  match Attribute.View.storage attribute with
   | Attribute.Float3 positions ->
       if Packed.Float3.data_id positions <> Packed.Float3.data_id store.swap_positions
       then begin
@@ -444,6 +444,6 @@ let swap ?cancel ~rules geometry =
               if entry.alive then Some entry.attribute else None)
           |> Array.of_seq in
         if store.swap_positions_changed then
-          Geometry.Private.with_positions_and_attributes_owned
+          Geometry.View.with_positions_and_attributes_owned
             store.swap_positions attributes geometry
-        else Geometry.Private.with_attributes_owned attributes geometry))
+        else Geometry.View.with_attributes_owned attributes geometry))

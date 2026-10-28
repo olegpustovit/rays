@@ -60,9 +60,9 @@ let fixture () =
   let geometry = Kernel.generate_point_ranges 1 (fun ~first:_ ~last:_ ~x ~y ~z->x.(0)<-0.;y.(0)<-0.;z.(0)<-0.) in
   geometry |> add Attribute.Point "source" 2. |> add Attribute.Point "target" 7.
     |> add Attribute.Detail "source" 11.
-let names geometry = Geometry.Private.attributes geometry |> Array.map (fun attribute->Attribute.owner attribute,Attribute.name attribute)
+let names geometry = Geometry.View.attributes geometry |> Array.map (fun attribute->Attribute.owner attribute,Attribute.name attribute)
 let value owner name geometry = match Geometry.find_attribute ~owner name geometry with
-  |Some attribute -> (match Attribute.Private.storage attribute with Attribute.Float values->values.(0)|_->assert false)
+  |Some attribute -> (match Attribute.View.storage attribute with Attribute.Float values->values.(0)|_->assert false)
   |None -> assert false
 let () =
   let input=fixture () in
@@ -97,7 +97,7 @@ let () =
   print_endline "metadata draft focused semantics passed"
 
 let () =
-  let positions=Packed.Float3.Private.of_owned_exn ~x:[|0.;1.;0.;2.|]
+  let positions=Packed.Float3.View.of_owned_exn ~x:[|0.;1.;0.;2.|]
     ~y:[|0.;0.;1.;2.|] ~z:[|0.;0.;0.;0.|] in
   let topology=Topology.polygons_owned ~point_count:4 ~vertex_points:[|0;1;2|]
     ~primitive_offsets:[|0;3|] |> get_string_ok in
@@ -109,7 +109,7 @@ let () =
     ["float",Attribute.Float (plane (-0.));
      "int",Attribute.Int (Array.make count max_int);
      "vec2",Attribute.Float2 (Packed.Float2.of_owned ~x:(plane (-0.)) ~y:(plane 2.) |> string_ok);
-     "vec3",Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x:(plane 1.) ~y:(plane 2.) ~z:(plane 3.));
+     "vec3",Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x:(plane 1.) ~y:(plane 2.) ~z:(plane 3.));
      "vec4",Attribute.Float4 (Packed.Float4.of_owned ~x:(plane 1.) ~y:(plane 2.) ~z:(plane 3.) ~w:(plane 4.) |> string_ok);
      "text",Attribute.Text (Array.make count "preserved ✓\n");
      "float_array",Attribute.Float_array (Packed.Float_array.create_owned ~offsets ~values:(Array.make (count*16) 0.25) |> string_ok);
@@ -123,7 +123,7 @@ let () =
   List.iter (fun (owner,_) -> List.iter (fun kind ->
     let source=Geometry.find_attribute ~owner ("a_"^kind) geometry |> Option.get in
     let result=Geometry.find_attribute ~owner ("b_"^kind) renamed |> Option.get in
-    check (Attribute.Private.storage source==Attribute.Private.storage result) "rename copied or changed attribute storage";
+    check (Attribute.View.storage source==Attribute.View.storage result) "rename copied or changed attribute storage";
     check (M.attr_type ~owner ~name:("b_"^kind) renamed=Ok (Flow.Eval.Text kind)) "renamed type query differs")
     ["float";"int";"vec2";"vec3";"vec4";"text";"float_array";"int_array"]) owners;
   check (geometry_bytes geometry=before) "all-storage rename mutated source";

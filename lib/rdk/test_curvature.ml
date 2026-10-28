@@ -7,7 +7,7 @@ let get = function Ok value -> value | Error error -> fail (Error.to_string erro
 let geometry ?(attributes = []) ?(groups = []) points triangles =
   let points = Array.of_list points and triangles = Array.of_list triangles in
   let point_count = Array.length points and primitive_count = Array.length triangles in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.map (fun (x,_,_) -> x) points)
       ~y:(Array.map (fun (_,y,_) -> y) points)
       ~z:(Array.map (fun (_,_,z) -> z) points) in
@@ -34,7 +34,7 @@ let octahedron ?(scale = 1.) ?(center = 0.,0.,0.) () =
 let values name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has non-float storage"))
   | None -> fail (name ^ " is missing")

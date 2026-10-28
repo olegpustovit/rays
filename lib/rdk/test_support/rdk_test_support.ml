@@ -24,7 +24,7 @@ let expect_code code = function
       (Error.to_string error))
   | Ok _ -> fail ("expected error " ^ code)
 
-let positions geometry = Packed.Float3.Private.view (Geometry.positions geometry)
+let positions geometry = Packed.Float3.View.view (Geometry.positions geometry)
 
 (* [Analysis.bounds] was pruned from the library; the tests keep an independent
    bounding box of the points under its old name. *)
@@ -60,25 +60,25 @@ let compare_storage floats left right = match Attribute.storage left, Attribute.
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       floats left.x right.x && floats left.y right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       floats left.x right.x && floats left.y right.y && floats left.z right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       floats left.x right.x && floats left.y right.y && floats left.z right.z
       && floats left.w right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && floats left.values right.values
   | _ -> false
 
@@ -96,18 +96,18 @@ let geometry_bytes geometry =
   let attribute attribute =
     let storage = match Attribute.storage attribute with
       | Float values -> encode values | Int values -> encode values | Text values -> encode values
-      | Int_array values -> encode (Packed.Int_array.Private.view values)
-      | Float_array values -> encode (Packed.Float_array.Private.view values)
-      | Float2 values -> let v = Packed.Float2.Private.view values in encode (v.x, v.y)
-      | Float3 values -> let v = Packed.Float3.Private.view values in encode (v.x, v.y, v.z)
-      | Float4 values -> let v = Packed.Float4.Private.view values in encode (v.x, v.y, v.z, v.w) in
+      | Int_array values -> encode (Packed.Int_array.View.view values)
+      | Float_array values -> encode (Packed.Float_array.View.view values)
+      | Float2 values -> let v = Packed.Float2.View.view values in encode (v.x, v.y)
+      | Float3 values -> let v = Packed.Float3.View.view values in encode (v.x, v.y, v.z)
+      | Float4 values -> let v = Packed.Float4.View.view values in encode (v.x, v.y, v.z, v.w) in
     Attribute.owner attribute, Attribute.name attribute, Attribute.kind_name attribute, storage in
   let group group = Group.owner group, Group.name group,
     Array.init (Group.length group) (fun i -> Group.mem i group), Group.ordered_elements group in
   let edge_group group = Edge_group.name group,
     Array.init (Edge_group.length group) (fun i -> Edge_group.mem i group) in
-  let p = Packed.Float3.Private.view (Geometry.positions geometry) in
-  encode (p.x, p.y, p.z, Topology.Private.view (Geometry.topology geometry),
+  let p = Packed.Float3.View.view (Geometry.positions geometry) in
+  encode (p.x, p.y, p.z, Topology.View.view (Geometry.topology geometry),
     List.map attribute (Geometry.attributes geometry), List.map group (Geometry.groups geometry),
     List.map edge_group (Geometry.edge_groups geometry))
 
@@ -136,10 +136,10 @@ let equal_edge_group left right =
   end
 
 let compare_geometry floats left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   floats lp.x rp.x && floats lp.y rp.y && floats lp.z rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -189,8 +189,8 @@ module Tb = struct
 end
 
 let equal_positions left right =
-  let left = Packed.Float3.Private.view (Geometry.positions left)
-  and right = Packed.Float3.Private.view (Geometry.positions right) in
+  let left = Packed.Float3.View.view (Geometry.positions left)
+  and right = Packed.Float3.View.view (Geometry.positions right) in
   left.x = right.x && left.y = right.y && left.z = right.z
 
 let near_array expected actual =
@@ -201,8 +201,8 @@ let near_array expected actual =
 let float_array_values ~owner ~name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float_array values -> Packed.Float_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float_array values -> Packed.Float_array.View.view values
        | _ -> fail ("unexpected non-float-array storage for " ^ name))
   | None -> fail ("missing float-array attribute " ^ name)
 

@@ -463,7 +463,7 @@ let run_values () =
       let geo=Payload.geometry output.payload|>Result.get_ok in
       check(Rdk.Geometry.point_count geo=0)"ordinary attribute menu starter did not cook actual empty geometry";
       let attr=Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "attribute"geo|>Option.get in
-      check(Rdk.Attribute.Private.storage attr|>function Rdk.Attribute.Float3 data->Rdk.Packed.Float3.length data=0|_->false)
+      check(Rdk.Attribute.View.storage attr|>function Rdk.Attribute.Float3 data->Rdk.Packed.Float3.length data=0|_->false)
         "ordinary attribute menu starter lost vec3 storage"));
   let e = add "sop/remap" in
   check (E3.undo_label e = Some "Add node" && has (source e) "(sop/remap (sop/mesh"
@@ -2505,7 +2505,7 @@ let run_view_native () =
       ~camera:(Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:6.8 ~azimuth:0.72 ~elevation:0.42 ())
       ~prepare:(fun _ output ->
         match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive "piece" (Result.get_ok (Sop.Payload.geometry output.Session.payload)) with
-        | Some attribute when (match Rdk.Attribute.Private.storage attribute with
+        | Some attribute when (match Rdk.Attribute.View.storage attribute with
             | Rdk.Attribute.Int _ | Text _ -> true | _ -> false) ->
             Rdk_rays.Packed_pieces.of_geometry ~piece_attribute:"piece" (Result.get_ok (Sop.Payload.geometry output.payload))
             |> Result.map (fun pieces -> `Pieces pieces)

@@ -15,26 +15,26 @@ let grid ?(columns = 7) ?(rows = 6) ?(size = 6.) () =
 let attribute_equal left right =
   Attribute.owner left = Attribute.owner right
   && Attribute.name left = Attribute.name right
-  && match Attribute.Private.storage left, Attribute.Private.storage right with
+  && match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float a, Attribute.Float b -> a = b
   | Attribute.Int a, Attribute.Int b -> a = b
   | Attribute.Text a, Attribute.Text b -> a = b
   | Attribute.Float2 a, Attribute.Float2 b ->
-      let a = Packed.Float2.Private.view a and b = Packed.Float2.Private.view b in
+      let a = Packed.Float2.View.view a and b = Packed.Float2.View.view b in
       a.x = b.x && a.y = b.y
   | Attribute.Float3 a, Attribute.Float3 b ->
-      let a = Packed.Float3.Private.view a and b = Packed.Float3.Private.view b in
+      let a = Packed.Float3.View.view a and b = Packed.Float3.View.view b in
       a.x = b.x && a.y = b.y && a.z = b.z
   | Attribute.Float4 a, Attribute.Float4 b ->
-      let a = Packed.Float4.Private.view a and b = Packed.Float4.Private.view b in
+      let a = Packed.Float4.View.view a and b = Packed.Float4.View.view b in
       a.x = b.x && a.y = b.y && a.z = b.z && a.w = b.w
   | Attribute.Int_array a, Attribute.Int_array b ->
-      let a = Packed.Int_array.Private.view a
-      and b = Packed.Int_array.Private.view b in
+      let a = Packed.Int_array.View.view a
+      and b = Packed.Int_array.View.view b in
       a.offsets = b.offsets && a.values = b.values
   | Attribute.Float_array a, Attribute.Float_array b ->
-      let a = Packed.Float_array.Private.view a
-      and b = Packed.Float_array.Private.view b in
+      let a = Packed.Float_array.View.view a
+      and b = Packed.Float_array.View.view b in
       a.offsets = b.offsets && a.values = b.values
   | _ -> false
 
@@ -57,10 +57,10 @@ let edge_pairs geometry group =
   List.sort compare !pairs
 
 let geometry_equal left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -78,13 +78,13 @@ let geometry_equal left right =
 let scalar owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let check_triangles geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   for primitive = 0 to Geometry.primitive_count geometry - 1 do
     check (Bytes.get topology.primitive_kinds primitive = '\000'
       && topology.primitive_offsets.(primitive + 1)
@@ -93,7 +93,7 @@ let check_triangles geometry =
   done
 
 let seam_fixture () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.|] ~y:[|0.;0.;1.;1.|] ~z:[|0.;0.;0.;0.|] in
   let topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2; 0;2;3|] ~primitive_offsets:[|0;3;6|]
@@ -130,7 +130,7 @@ let test_adaptive_hard_and_uv_seams () =
   and index = Topology_index.create (Geometry.topology output) in
   check (Edge_group.cardinality features > Topology_index.boundary_edge_count index)
     "Remesh did not preserve the UV discontinuity as a hard interior feature";
-  let positions = Packed.Float3.Private.view (Geometry.positions output) in
+  let positions = Packed.Float3.View.view (Geometry.positions output) in
   let pinned = ref false in
   for point = 0 to Geometry.point_count output - 1 do
     if positions.x.(point) = 0. && positions.y.(point) = 0.
@@ -139,7 +139,7 @@ let test_adaptive_hard_and_uv_seams () =
   check !pinned "Remesh removed or moved an explicit hard point"
 
 let test_input_points_only () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.|] ~y:[|0.;0.;1.;1.|] ~z:[|0.;0.;0.;0.|] in
   let topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get_string in
@@ -160,8 +160,8 @@ let component_hashes geometry =
   let mix_float hash value = mix hash (Hashtbl.hash (Int64.bits_of_float value)) in
   let floats values = Array.fold_left mix_float 17 values
   and ints values = Array.fold_left mix 17 values in
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   [ "positions", mix (mix (floats positions.x) (floats positions.y)) (floats positions.z);
     "vertex_points", ints topology.vertex_points;
     "primitive_offsets", ints topology.primitive_offsets ]
@@ -170,15 +170,15 @@ let component_hashes geometry =
           (match Attribute.owner attribute with Attribute.Point -> "point"
             | Vertex -> "vertex" | Primitive -> "primitive" | Detail -> "detail")
           (Attribute.name attribute) in
-      name, (match Attribute.Private.storage attribute with
+      name, (match Attribute.View.storage attribute with
         | Attribute.Float values -> floats values
         | Attribute.Int values -> ints values
         | Attribute.Text values -> Array.fold_left (fun h v -> mix h (Hashtbl.hash v)) 17 values
         | Attribute.Float2 values ->
-            let values = Packed.Float2.Private.view values in
+            let values = Packed.Float2.View.view values in
             mix (floats values.x) (floats values.y)
         | Attribute.Float3 values ->
-            let values = Packed.Float3.Private.view values in
+            let values = Packed.Float3.View.view values in
             mix (mix (floats values.x) (floats values.y)) (floats values.z)
         | _ -> 1)) (Geometry.attributes geometry)
   @ List.map (fun group ->

@@ -15,7 +15,7 @@ let make () =
     let add name storage g = Geometry.with_attribute (Attribute.create_owned ~name ~owner storage |> get_string_ok) g |> get_string_ok in
     g |> add "f" (Attribute.Float (plane 0 n))
       |> add "v2" (Attribute.Float2 (Packed.Float2.of_owned ~x:(plane 1 n) ~y:(plane 2 n) |> get_string_ok))
-      |> add "v3" (Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x:(plane 1 n) ~y:(plane 2 n) ~z:(plane 3 n)))
+      |> add "v3" (Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x:(plane 1 n) ~y:(plane 2 n) ~z:(plane 3 n)))
       |> add "v4" (Attribute.Float4 (Packed.Float4.of_owned ~x:(plane 1 n) ~y:(plane 2 n) ~z:(plane 3 n) ~w:(plane 4 n) |> get_string_ok))
       |> add "i" (Attribute.Int (Array.init n Fun.id))
       |> add "nf" (Attribute.Float (Array.init n (fun i->if i = 0 then Float.nan else 1.)))) g
@@ -32,13 +32,13 @@ let cook ?(reference=false) ?(domains=1) ?(grain=97) body =
   Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->
     Result.map (fun (o:Sop.Session.output)->Sop.Payload.geometry o.payload |> Result.get_ok)
       (Sop.Session.cook session ~context:(Sop.Context.create ~domains ~grain () |> get_string_ok) node))
-let storage owner name g = Attribute.Private.storage (Geometry.find_attribute ~owner name g |> Option.get)
+let storage owner name g = Attribute.View.storage (Geometry.find_attribute ~owner name g |> Option.get)
 let bits a = Array.map Int64.bits_of_float a
 let planes_of = function
   | Attribute.Float a -> [bits a]
-  | Float2 d -> let v = Packed.Float2.Private.view d in [bits v.x; bits v.y]
-  | Float3 d -> let v = Packed.Float3.Private.view d in [bits v.x; bits v.y; bits v.z]
-  | Float4 d -> let v = Packed.Float4.Private.view d in [bits v.x; bits v.y; bits v.z; bits v.w]
+  | Float2 d -> let v = Packed.Float2.View.view d in [bits v.x; bits v.y]
+  | Float3 d -> let v = Packed.Float3.View.view d in [bits v.x; bits v.y; bits v.z]
+  | Float4 d -> let v = Packed.Float4.View.view d in [bits v.x; bits v.y; bits v.z; bits v.w]
   | _ -> []
 let owners = ["point",Attribute.Point;"vertex",Attribute.Vertex;"primitive",Attribute.Primitive;"detail",Attribute.Detail]
 let () =
@@ -60,7 +60,7 @@ let () =
       doubled {:width p.width :x (exact (map (fn [(v : float)] (* v 2.)) p.x)) :y p.y :z p.z :w p.w}]
       (sop/with_planes src "P" doubled :owner "point"))|} with
    | Ok out -> let a = Geometry.positions out and b = Geometry.positions (Lazy.force src) in
-       let a = Packed.Float3.Private.view a and b = Packed.Float3.Private.view b in
+       let a = Packed.Float3.View.view a and b = Packed.Float3.View.view b in
        check (Array.for_all2 (fun x y->x = 2. *. y) a.x b.x && a.y = b.y && a.z = b.z) "computed P planes"
    | Error d -> fail (Diagnostic.error_to_string d));
   (* Refusals keep typed codes. *)

@@ -34,7 +34,7 @@ let attribute_result ?cancel ~grain ?(defaults = false) mapping attribute =
     if defaults then select ?cancel ~grain ~missing mapping source else select ?cancel ~grain mapping source
   and select_float ?cancel ~grain mapping source =
     if defaults then select_float ?cancel ~grain ~missing:0. mapping source else select_float ?cancel ~grain mapping source in
-  let storage = match Attribute.Private.storage attribute with
+  let storage = match Attribute.View.storage attribute with
     | Attribute.Float values -> Attribute.Float (select_float ?cancel ~grain mapping values)
     | Attribute.Int values -> Attribute.Int (select ?cancel ~grain ~missing:0 mapping values)
     | Attribute.Text values -> Attribute.Text (select ?cancel ~grain ~missing:"" mapping values)
@@ -43,18 +43,18 @@ let attribute_result ?cancel ~grain ?(defaults = false) mapping attribute =
     | Attribute.Float_array values ->
         Attribute.Float_array (Ragged_ops.remap_float ?cancel ~grain mapping values)
     | Attribute.Float2 values ->
-        let values = Packed.Float2.Private.view values in
+        let values = Packed.Float2.View.view values in
         Attribute.Float2 (Packed.Float2.of_owned
           ~x:(select_float ?cancel ~grain mapping values.x)
           ~y:(select_float ?cancel ~grain mapping values.y) |> Result.get_ok)
     | Attribute.Float3 values ->
-        let values = Packed.Float3.Private.view values in
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        let values = Packed.Float3.View.view values in
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:(select_float ?cancel ~grain mapping values.x)
           ~y:(select_float ?cancel ~grain mapping values.y)
           ~z:(select_float ?cancel ~grain mapping values.z))
     | Attribute.Float4 values ->
-        let values = Packed.Float4.Private.view values in
+        let values = Packed.Float4.View.view values in
         Attribute.Float4 (Packed.Float4.of_owned
           ~x:(select_float ?cancel ~grain mapping values.x)
           ~y:(select_float ?cancel ~grain mapping values.y)
@@ -96,7 +96,7 @@ let nearest_rows left right weight =
 let blend_attribute ?cancel ~grain left right weight attribute =
   let nearest () = nearest_rows left right weight in
   let float = blend_float ?cancel ~grain left right weight in
-  let storage = match Attribute.Private.storage attribute with
+  let storage = match Attribute.View.storage attribute with
     | Attribute.Float values -> Attribute.Float (float values)
     | Attribute.Int values ->
         Attribute.Int (if Array.length weight = 0 then [||] else select ?cancel ~grain (nearest ()) values)
@@ -107,10 +107,10 @@ let blend_attribute ?cancel ~grain left right weight attribute =
     | Attribute.Float_array values ->
         Attribute.Float_array (Ragged_ops.remap_float ?cancel ~grain (nearest ()) values)
     | Attribute.Float2 values ->
-        let values = Packed.Float2.Private.view values in
+        let values = Packed.Float2.View.view values in
         Attribute.Float2 (Packed.Float2.of_owned ~x:(float values.x) ~y:(float values.y) |> Result.get_ok)
     | Attribute.Float3 values ->
-        let values = Packed.Float3.Private.view values in
+        let values = Packed.Float3.View.view values in
         let x = float values.x and y = float values.y and z = float values.z in
         if String.equal (Attribute.name attribute) "N" then
           blend_ranges ?cancel ~grain (Array.length x) (fun first last ->
@@ -122,9 +122,9 @@ let blend_attribute ?cancel ~grain left right weight attribute =
                 z.(index) <- z.(index) /. length
               end
             done);
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x ~y ~z)
     | Attribute.Float4 values ->
-        let values = Packed.Float4.Private.view values in
+        let values = Packed.Float4.View.view values in
         Attribute.Float4 (Packed.Float4.of_owned ~x:(float values.x) ~y:(float values.y)
           ~z:(float values.z) ~w:(float values.w) |> Result.get_ok) in
   Attribute.create_owned ~name:(Attribute.name attribute)
@@ -154,15 +154,15 @@ let group ?cancel ~grain mapping group =
       (fun output ->
         if output land 4095 = 0 then Cancel.check_opt cancel;
         Group.mem mapping.(output) group) in
-  Group.Private.remap_order ~source:group ~source_of_target:mapping output
+  Group.View.remap_order ~source:group ~source_of_target:mapping output
 
 let blend_group ?cancel ~grain left right weight value =
   group ?cancel ~grain (nearest_rows left right weight) value
 
 let blend_positions ?cancel ~grain left right weight positions =
-  let p = Packed.Float3.Private.view positions in
+  let p = Packed.Float3.View.view positions in
   let blend = blend_float ?cancel ~grain left right weight in
-  Packed.Float3.Private.of_owned_exn ~x:(blend p.x) ~y:(blend p.y) ~z:(blend p.z)
+  Packed.Float3.View.of_owned_exn ~x:(blend p.x) ~y:(blend p.y) ~z:(blend p.z)
 
 let mapped_group ?cancel ~grain ~point_map ~vertex_map ~primitive_map value =
   let mapping = match Group.owner value with
@@ -229,8 +229,8 @@ let split_point_edge_groups ?cancel ~grain ~source_index ~target_topology groups
   match groups with
   | [] -> Ok []
   | groups ->
-      let source = Topology_index.Private.view source_index
-      and target = Topology.Private.view target_topology in
+      let source = Topology_index.View.view source_index
+      and target = Topology.View.view target_topology in
       if Array.length target.vertex_points <> Array.length source.next_vertex then
         Error "split-point edge remap requires unchanged corner cardinality"
       else begin
@@ -293,7 +293,7 @@ let split_point_edge_groups ?cancel ~grain ~source_index ~target_topology groups
                              then value := !value lor (1 lsl bit)
                            done;
                            Bytes.unsafe_set bits byte (Char.unsafe_chr !value));
-                     Edge_group.Private.of_owned_bits ~topology:target_topology
+                     Edge_group.View.of_owned_bits ~topology:target_topology
                        ~edge_count ~name:(Edge_group.name group) bits) groups))
       end
 
@@ -343,6 +343,6 @@ let edge_groups_from_ancestry ?cancel ~grain ~source_index ~target_topology
           end
         done;
         Bytes.unsafe_set bits byte (Char.unsafe_chr !packed));
-      Edge_group.Private.of_owned_bits ~topology:target_topology
+      Edge_group.View.of_owned_bits ~topology:target_topology
         ~edge_count:target_edges ~name:(Edge_group.name group) bits) groups)
   end

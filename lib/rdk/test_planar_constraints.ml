@@ -4,11 +4,11 @@ open Rdk
 module Planar_constraints = struct
   include Planar_constraints
   let source_point_count value = point_count value - split_point_count value
-  let approximate_x value = (Private.view value).x
-  let approximate_y value = (Private.view value).y
-  let insert_points value = (Private.view value).insert_points
-  let constraint_points value = (Private.view value).constraint_points
-  let constraint_winding value = (Private.view value).constraint_winding
+  let approximate_x value = (View.view value).x
+  let approximate_y value = (View.view value).y
+  let insert_points value = (View.view value).insert_points
+  let constraint_points value = (View.view value).constraint_points
+  let constraint_winding value = (View.view value).constraint_winding
 end
 
 let fail format = Printf.ksprintf failwith format

@@ -23,23 +23,23 @@ let of_geometry ?instances geometry =
   let count = Geometry.primitive_count geometry in
   let* roughness = match Geometry.find_attribute ~owner:Attribute.Primitive "material_roughness" geometry with
     | None -> Ok None
-    | Some a -> (match Attribute.Private.storage a with
+    | Some a -> (match Attribute.View.storage a with
         | Attribute.Float a -> Ok (Some a) | _ -> Error "material_roughness must be primitive float") in
   let* round = match Geometry.find_attribute ~owner:Attribute.Primitive "material_round" geometry with
     | None -> Ok None
-    | Some a -> (match Attribute.Private.storage a with
+    | Some a -> (match Attribute.View.storage a with
         | Attribute.Float a -> Ok (Some a) | _ -> Error "material_round must be primitive float") in
   let* emission = match Geometry.find_attribute ~owner:Attribute.Primitive "material_emission" geometry with
     | None -> Ok None
-    | Some a -> (match Attribute.Private.storage a with
+    | Some a -> (match Attribute.View.storage a with
         | Attribute.Float4 a -> Ok (Some a) | _ -> Error "material_emission must be primitive float4") in
   let* color = match Geometry.find_attribute ~owner:Attribute.Primitive "material_color" geometry with
     | None -> Ok None
-    | Some a -> (match Attribute.Private.storage a with
+    | Some a -> (match Attribute.View.storage a with
         | Attribute.Float4 a -> Ok (Some a) | _ -> Error "material_color must be primitive float4") in
   let valid x = Float.is_finite x && x >= 0. && x <= 1. in
   let valid_tuple = Option.fold ~none:true ~some:(fun a ->
-    let v = Packed.Float4.Private.view a in
+    let v = Packed.Float4.View.view a in
     Array.for_all valid v.x && Array.for_all valid v.y && Array.for_all valid v.z) in
   let has_material = roughness <> None || emission <> None || color <> None || round <> None in
   let* () = if Option.fold ~none:true ~some:(Array.for_all (fun x -> Float.is_finite x && x >= 0.)) round then Ok ()

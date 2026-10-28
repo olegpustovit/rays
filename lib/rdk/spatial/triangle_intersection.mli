@@ -34,9 +34,9 @@ val events_points_into :
   self:bool ->
   tolerance:float ->
   include_coplanar:bool ->
-  left_positions:Packed.Float3.Private.view ->
+  left_positions:Packed.Float3.View.view ->
   left_a:int -> left_b:int -> left_c:int ->
-  right_positions:Packed.Float3.Private.view ->
+  right_positions:Packed.Float3.View.view ->
   right_a:int -> right_b:int -> right_c:int ->
   int
 (** The same decision/event kernel over explicit packed point indices. This is

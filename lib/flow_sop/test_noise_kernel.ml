@@ -2,7 +2,7 @@ open Rdk
 open Rdk_test_support
 module E = Flow.Eval
 let flow_ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
-let packed (v : Packed.Float3.Private.view) =
+let packed (v : Packed.Float3.View.view) =
   E.Vec3_array (Array.init (Array.length v.x * 3) (fun i -> match i mod 3 with
     | 0 -> v.x.(i / 3) | 1 -> v.y.(i / 3) | _ -> v.z.(i / 3)))
 
@@ -14,15 +14,15 @@ let () =
         y.(i) <- sin (float i *. 0.31);
         z.(i) <- float (i mod 23) *. (-0.2)
       done) in
-    let normals = Packed.Float3.Private.of_owned_exn
+    let normals = Packed.Float3.View.of_owned_exn
       ~x:(Array.init count (fun i -> cos (float i *. 0.23)))
       ~y:(Array.make count 0.37) ~z:(Array.make count (-1.2)) in
     let normal_attribute = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
       (Attribute.Float3 normals) |> get_string_ok in
     let source = Geometry.with_attribute normal_attribute source |> get_string_ok in
     let source_bits = geometry_bytes source in
-    let p = packed (Packed.Float3.Private.view (Geometry.positions source))
-    and n = packed (Packed.Float3.Private.view normals) in
+    let p = packed (Packed.Float3.View.view (Geometry.positions source))
+    and n = packed (Packed.Float3.View.view normals) in
     let forms = Flow.Syntax.parse
       "(workspace kernel (graph g :context value [(positions : (array vec3) (array/vec3 0)) (normals : (array vec3) (array/vec3 0))] (let* [mapped (map (fn [p n] (+ p (* n (* (+ 0.8 (* t 0)) (noise3 (* p 0.16)))))) positions normals)] 0.0)))"
       |> flow_ok in
@@ -37,7 +37,7 @@ let () =
       Flow_ir.Cost.packed ~count = Flow_ir.Cpu_kernel) (Flow_ir.Executor.packed_region program));
     let check_result native = function
       | E.Vec3_array values ->
-          let positions = Packed.Float3.Private.view (Geometry.positions native) in
+          let positions = Packed.Float3.View.view (Geometry.positions native) in
           assert (Array.length values = count * 3);
           for i = 0 to count - 1 do
             assert (Int64.bits_of_float values.(i * 3) = Int64.bits_of_float positions.x.(i));

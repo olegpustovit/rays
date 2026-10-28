@@ -56,7 +56,7 @@ let same_group left right =
 let text_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Text values -> values
        | _ -> fail ("non-text attribute " ^ name))
   | None -> fail ("missing attribute " ^ name)

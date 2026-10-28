@@ -15,7 +15,7 @@ let add storage ~owner ~name geometry =
 let float_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail ("wrong float storage for " ^ name))
   | None -> fail ("missing " ^ name)
@@ -23,7 +23,7 @@ let float_values ~owner name geometry =
 let int_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail ("wrong int storage for " ^ name))
   | None -> fail ("missing " ^ name)
@@ -31,7 +31,7 @@ let int_values ~owner name geometry =
 let text_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Text values -> values
        | _ -> fail ("wrong text storage for " ^ name))
   | None -> fail ("missing " ^ name)
@@ -39,21 +39,21 @@ let text_values ~owner name geometry =
 let float2_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Packed.Float2.View.view values
        | _ -> fail ("wrong float2 storage for " ^ name))
   | None -> fail ("missing " ^ name)
 
 let float4_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float4 values -> Packed.Float4.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float4 values -> Packed.Float4.View.view values
        | _ -> fail ("wrong float4 storage for " ^ name))
   | None -> fail ("missing " ^ name)
 
 let two_triangles () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;0.; 2.;3.;2.|] ~y:[|0.;0.;1.; 0.;0.;1.|]
       ~z:(Array.make 6 0.) in
   let topology = Rdk_test_support.Tb.create ~point_count:6 () in
@@ -63,7 +63,7 @@ let two_triangles () =
   |> Result.get_ok
 
 let quad () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.|] ~y:[|0.;0.;1.;1.|] ~z:(Array.make 4 1.) in
   let topology = Rdk_test_support.Tb.create ~point_count:4 () in
   Rdk_test_support.Tb.add_polygon topology [|0;1;2;3|];

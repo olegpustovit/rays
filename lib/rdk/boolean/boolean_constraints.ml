@@ -65,7 +65,7 @@ let coplanar_first_triangle value pair = value.coplanar_first_triangles.(pair)
 let coplanar_second_triangle value pair = value.coplanar_second_triangles.(pair)
 let degenerate_pair_count value = value.degenerate_pairs
 
-module Private = struct
+module View = struct
   let left_geometry value = value.left_geometry
   let right_geometry value = value.right_geometry
   let resolve_left_self_intersections value = value.resolve_left_self_intersections
@@ -86,8 +86,8 @@ module Private = struct
 end
 
 let concatenate_positions left right =
-  let left = Packed.Float3.Private.view (Geometry.positions left)
-  and right = Packed.Float3.Private.view (Geometry.positions right) in
+  let left = Packed.Float3.View.view (Geometry.positions left)
+  and right = Packed.Float3.View.view (Geometry.positions right) in
   let left_count = Array.length left.x and right_count = Array.length right.x in
   if left_count > Sys.max_array_length - right_count then
     invalid_arg "Boolean constraint point cardinality exceeds array limits";
@@ -106,9 +106,9 @@ let all_triangle_points topology surface offset =
   let output = Array.make (triangle_count * 3) 0 in
   for triangle = 0 to triangle_count - 1 do
     for local = 0 to 2 do
-      let vertex = Surface_index.Private.triangle_vertex surface triangle local in
+      let vertex = Surface_index.View.triangle_vertex surface triangle local in
       output.((triangle * 3) + local) <-
-        offset + topology.Topology.Private.vertex_points.(vertex)
+        offset + topology.Topology.View.vertex_points.(vertex)
     done
   done;
   output
@@ -122,8 +122,8 @@ let edge_constant_components source triangle edge =
 
 let construct_event source source_points left_triangle right_triangle
     left_feature right_feature =
-  let left_vertex = Predicates.Private.triangle_feature_vertex_local left_feature
-  and right_vertex = Predicates.Private.triangle_feature_vertex_local right_feature in
+  let left_vertex = Predicates.View.triangle_feature_vertex_local left_feature
+  and right_vertex = Predicates.View.triangle_feature_vertex_local right_feature in
   if left_vertex >= 0 then Ok source_points.(local_vertex left_triangle left_vertex)
   else if right_vertex >= 0 then
     Ok source_points.(local_vertex right_triangle right_vertex)
@@ -132,8 +132,8 @@ let construct_event source source_points left_triangle right_triangle
         let line_start, line_end = local_edge triangle edge in
         Implicit_point.line_plane source ~line_start ~line_end
           ~plane_a:plane.(0) ~plane_b:plane.(1) ~plane_c:plane.(2) in
-      let left_edge = Predicates.Private.triangle_feature_edge_local left_feature
-      and right_edge = Predicates.Private.triangle_feature_edge_local right_feature in
+      let left_edge = Predicates.View.triangle_feature_edge_local left_feature
+      and right_edge = Predicates.View.triangle_feature_edge_local right_feature in
       if left_edge >= 0 && right_edge >= 0
           && edge_constant_components source right_triangle right_edge
              > edge_constant_components source left_triangle left_edge then
@@ -212,9 +212,9 @@ let make_face_csr target_side triangle_count first_sides first_triangles
   offsets, values
 
 let event_explicit_point first_triangle second_triangle first_feature second_feature =
-  let first = Predicates.Private.triangle_feature_vertex_local first_feature in
+  let first = Predicates.View.triangle_feature_vertex_local first_feature in
   if first >= 0 then first_triangle.(first) else
-  let second = Predicates.Private.triangle_feature_vertex_local second_feature in
+  let second = Predicates.View.triangle_feature_vertex_local second_feature in
   if second >= 0 then second_triangle.(second) else -1
 
 let ordinary_topology_contact first_triangle second_triangle count
@@ -301,16 +301,16 @@ let build ?cancel ?(resolve_left_self_intersections = false)
           | Error failure -> Error failure
           | Ok right_surface ->
               let cross_first, cross_second =
-                Surface_index.Private.overlapping_triangle_pairs ?cancel ~grain
+                Surface_index.View.overlapping_triangle_pairs ?cancel ~grain
                   ~tolerance:0. left_surface right_surface in
               let left_self_first, left_self_second =
                 if resolve_left_self_intersections then
-                  Surface_index.Private.overlapping_self_triangle_pairs
+                  Surface_index.View.overlapping_self_triangle_pairs
                     ?cancel ~grain ~tolerance:0. left_surface
                 else [||], [||] in
               let right_self_first, right_self_second =
                 if resolve_right_self_intersections then
-                  Surface_index.Private.overlapping_self_triangle_pairs
+                  Surface_index.View.overlapping_self_triangle_pairs
                     ?cancel ~grain ~tolerance:0. right_surface
                 else [||], [||] in
               let cross_count = Array.length cross_first
@@ -349,8 +349,8 @@ let build ?cancel ?(resolve_left_self_intersections = false)
                 | Error _ -> invalid_arg "Boolean constraint source is invalid" in
               let source_points = Array.init (Array.length x) (fun point ->
                   Implicit_point.explicit source point |> Result.get_ok) in
-              let left_topology = Topology.Private.view (Geometry.topology left)
-              and right_topology = Topology.Private.view (Geometry.topology right) in
+              let left_topology = Topology.View.view (Geometry.topology left)
+              and right_topology = Topology.View.view (Geometry.topology right) in
               let left_triangle_points =
                 all_triangle_points left_topology left_surface 0
               and right_triangle_points =
@@ -388,7 +388,7 @@ let build ?cancel ?(resolve_left_self_intersections = false)
                           || ordinary_shared_edge_only ~x ~y ~z
                             left_triangle right_triangle)
                     then 0 else
-                    Predicates.Private.triangle_triangle_features_into
+                    Predicates.View.triangle_triangle_features_into
                       ~x ~y ~z
                       ~left_a:left_triangle.(0) ~left_b:left_triangle.(1)
                       ~left_c:left_triangle.(2)

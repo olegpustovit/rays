@@ -78,9 +78,9 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
     let topology = Geometry.topology geometry in
     if not (Topology.all_triangles topology) then raise (Invalid
         "Rdk.Poly_reduce: the round planner requires triangle polygons");
-    let topology_view = Topology.Private.view topology in
+    let topology_view = Topology.View.view topology in
     let index_value = Topology_index.create ?cancel topology in
-    let index = Topology_index.Private.view index_value in
+    let index = Topology_index.View.view index_value in
     let point_count = Geometry.point_count geometry
     and primitive_count = Geometry.primitive_count geometry
     and edge_count = Array.length index.edge_a in
@@ -94,7 +94,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
       "Rdk.Poly_reduce: hard points" hard_points;
     validate_edge_group ~topology ~edge_count
       "Rdk.Poly_reduce: hard edges" hard_edges;
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let first_non_finite = Atomic.make max_int in
     let record_min target value =
       let rec loop current =
@@ -374,7 +374,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
       end;
       incr ordinal
     done;
-    let edges = Edge_group.Private.of_owned_bits ~topology ~edge_count
+    let edges = Edge_group.View.of_owned_bits ~topology ~edge_count
         ~name:"__rdk_poly_reduce_round" selected in
     Ok { edges; removed_primitives = !removed }
   with

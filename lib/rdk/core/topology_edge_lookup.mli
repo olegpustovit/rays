@@ -4,7 +4,7 @@
 
 type t
 
-val create : ?cancel:Cancel.t -> Topology.Private.view -> t
+val create : ?cancel:Cancel.t -> Topology.View.view -> t
 val count : t -> int
 val endpoints : t -> int -> int * int
 val find : t -> a:int -> b:int -> int

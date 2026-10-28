@@ -15,7 +15,7 @@ let fixtures () =
    Rdk.Topology.create_owned ~point_count:4 ~vertex_points:[|0;1;2;2;1;0|]
      ~primitive_offsets:[|0;3;6|] ~primitive_kinds:[|Rdk.Topology.Polygon;Open_polyline|] |> ok]
   |>List.map(fun topology->let n=Rdk.Topology.point_count topology in
-    G.create ~positions:(Rdk.Packed.Float3.Private.of_owned_exn ~x:(Array.init n float)
+    G.create ~positions:(Rdk.Packed.Float3.View.of_owned_exn ~x:(Array.init n float)
       ~y:(Array.make n 0.) ~z:(Array.make n 0.)) ~topology () |>ok)
 let native_write ?order ~owner ~name mask geometry = match owner with
   | None -> assert(order=None);let topology=G.topology geometry in
@@ -201,7 +201,7 @@ let () =
     assert_mask(cook session 8 changed)(Array.make n 0);
     assert((Sop.Session.stats session).misses>before.misses));
   let n=5001 in
-  let geometry=G.create ~positions:(Rdk.Packed.Float3.Private.of_owned_exn
+  let geometry=G.create ~positions:(Rdk.Packed.Float3.View.of_owned_exn
     ~x:(Array.make n 0.) ~y:(Array.make n 0.) ~z:(Array.make n 0.))
     ~topology:(Rdk.Topology.empty ~point_count:n)() |>ok in
   let node=Lisp_sop.workspace_node ~with_:["source",Lisp_sop.snapshot geometry] {|(workspace live_groups
@@ -328,7 +328,7 @@ let ()=
       ~vertex_points:(Array.init(n*2)(fun i->i/2))
       ~primitive_offsets:(Array.init(n+1)(fun i->i*2))
       ~primitive_kinds:(Array.make n Rdk.Topology.Open_polyline) |>ok in
-    let geometry=G.create ~positions:(Rdk.Packed.Float3.Private.of_owned_exn
+    let geometry=G.create ~positions:(Rdk.Packed.Float3.View.of_owned_exn
       ~x:(Array.make n 0.) ~y:(Array.make n 0.) ~z:(Array.make n 0.)) ~topology() |>ok in
     List.iter(fun(owner,native_owner)->match native_owner with None->()|Some native_owner->
       let length=count geometry (Some native_owner) in
@@ -341,7 +341,7 @@ let ()=
             Group.ordered ~owner:native_owner ~name:"bytes" ~length members |>ok
           else Group.init ~owner:native_owner ~name:"bytes" length selected in
         let geometry=G.with_group group geometry |>ok in
-        let bits=Bytes.copy(Group.Private.bits_view group)
+        let bits=Bytes.copy(Group.View.bits_view group)
         and order=Group.ordered_elements group and identity=Group.data_id group in
         let expected=Array.init length(fun i->if Group.mem i group then 1 else 0) in
         List.iter(fun domains->Parallel.run ~domains(fun()->
@@ -350,7 +350,7 @@ let ()=
               if length>0 then actual.(0)<-1-actual.(0)
           |_->assert false)) [1;4;8];
         assert(query geometry owner "bytes" None=E.Int_array expected);
-        assert(Group.Private.bits_view group=bits && Group.ordered_elements group=order
+        assert(Group.View.bits_view group=bits && Group.ordered_elements group=order
           && Group.data_id group=identity)) [false;true])owners)
     [0;1;7;8;9;63;64;65;32769];
   print_endline "Ordinary group byte masks preserve empty/tails/all owners/explicit order and immutable storage at one/four/eight domains"
@@ -373,7 +373,7 @@ let promotion_fixture n =
     Rdk.Topology.create_owned ~point_count:n ~vertex_points:[|0;1;2;2;1;3;4;4;0|]
       ~primitive_offsets:[|0;3;6;9|]
       ~primitive_kinds:[|Rdk.Topology.Polygon;Polygon;Open_polyline|]|>ok in
-  G.create ~positions:(Rdk.Packed.Float3.Private.of_owned_exn
+  G.create ~positions:(Rdk.Packed.Float3.View.of_owned_exn
     ~x:(Array.init n float) ~y:(Array.make n 0.) ~z:(Array.make n 0.)) ~topology()|>ok
 let () =
   List.iter(fun n->let geometry=promotion_fixture n in
@@ -498,7 +498,7 @@ let () = if Array.mem "--bench-promotion" Sys.argv then begin
     ~vertex_points:(Array.init(3*primitives)Fun.id)
     ~primitive_offsets:(Array.init(primitives+1)(fun i->3*i))
     ~primitive_kinds:(Array.make primitives Rdk.Topology.Polygon)|>ok in
-  let geometry=G.create ~positions:(Rdk.Packed.Float3.Private.of_owned_exn
+  let geometry=G.create ~positions:(Rdk.Packed.Float3.View.of_owned_exn
     ~x:(Array.init n float) ~y:(Array.make n 0.) ~z:(Array.make n 0.)) ~topology()|>ok in
   let measure force =
     let samples=Array.init 3(fun _->

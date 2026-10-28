@@ -24,7 +24,7 @@ val key : name:string -> owner:owner -> 'a kind -> 'a key
 val create_key_owned : 'a key -> 'a -> (t, string) result
 val get : 'a key -> t -> 'a option
 (** Scalar, integer, and text planes are returned as copies. Packed tuple and
-    CSR array values are immutable outside their explicitly unsafe [Private]
+    CSR array values are immutable outside their explicitly unsafe [View]
     views. *)
 
 val normal : owner:owner -> Packed.Float3.t key
@@ -44,7 +44,7 @@ val with_name : string -> t -> (t, string) result
 val payload_bytes : t -> int
 val kind_name : t -> string
 
-module Private : sig
+module View : sig
   val storage : t -> storage
   (** Borrowed zero-copy storage for audited sibling-library kernels. The
       returned arrays must never be mutated or retained beyond the immutable

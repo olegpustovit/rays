@@ -10,7 +10,7 @@ let triangulate x y = Delaunay2.build ~seed:17L ~x ~y () |> get_string
 let cdt ?workspace ?(flood = false) ?winding ?(remove_outside_polygons = false)
     x y constraints =
   let seed = triangulate x y in
-  let view = Delaunay2.Private.view seed in
+  let view = Delaunay2.View.view seed in
   Planar_cdt.build ?workspace ~point_count:(Array.length x)
     ~orient:(fun a b c -> Predicates.orient2d_packed ~x ~y a b c)
     ~incircle:(fun a b c d -> Predicates.incircle_packed ~x ~y a b c d)

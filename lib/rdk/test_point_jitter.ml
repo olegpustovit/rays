@@ -32,14 +32,14 @@ let source () =
   |> add_attribute ~owner:Attribute.Point ~name:"stable_id"
        (Attribute.Int [|7; 7; 9; 10|])
   |> add_attribute ~owner:Attribute.Point ~name:"N"
-       (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+       (Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:[|1.; 1.; 1.; 1.|] ~y:[|0.; 0.; 0.; 0.|]
           ~z:[|0.; 0.; 0.; 0.|]))
   |> add_attribute ~owner:Attribute.Vertex ~name:"N"
-       (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+       (Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:[||] ~y:[||] ~z:[||]))
   |> add_attribute ~owner:Attribute.Primitive ~name:"N"
-       (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+       (Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:[||] ~y:[||] ~z:[||]))
   |> add_attribute ~owner:Attribute.Detail ~name:"tag"
        (Attribute.Text [|"preserve"|])

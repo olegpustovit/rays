@@ -10,9 +10,9 @@ type detection =
 type numeric =
   | Scalar_float of float array
   | Scalar_int of int array
-  | Tuple2 of Packed.Float2.Private.view
-  | Tuple3 of Packed.Float3.Private.view
-  | Tuple4 of Packed.Float4.Private.view
+  | Tuple2 of Packed.Float2.View.view
+  | Tuple3 of Packed.Float3.View.view
+  | Tuple4 of Packed.Float4.View.view
 
 exception Poly_cut_error of string
 let fail message = raise (Poly_cut_error message)
@@ -51,16 +51,16 @@ let validate_point_selection point_count = function
 let numeric_attribute name geometry =
   if String.trim name = "" then fail "cut attribute name must not be empty";
   if String.equal name "P" then
-    Tuple3 (Packed.Float3.Private.view (Geometry.positions geometry))
+    Tuple3 (Packed.Float3.View.view (Geometry.positions geometry))
   else match Geometry.find_attribute ~owner:Attribute.Point name geometry with
     | None -> fail (Printf.sprintf "point cut attribute %S was not found" name)
     | Some attribute ->
-        match Attribute.Private.storage attribute with
+        match Attribute.View.storage attribute with
         | Attribute.Float values -> Scalar_float values
         | Attribute.Int values -> Scalar_int values
-        | Attribute.Float2 values -> Tuple2 (Packed.Float2.Private.view values)
-        | Attribute.Float3 values -> Tuple3 (Packed.Float3.Private.view values)
-        | Attribute.Float4 values -> Tuple4 (Packed.Float4.Private.view values)
+        | Attribute.Float2 values -> Tuple2 (Packed.Float2.View.view values)
+        | Attribute.Float3 values -> Tuple3 (Packed.Float3.View.view values)
+        | Attribute.Float4 values -> Tuple4 (Packed.Float4.View.view values)
         | _ -> fail (Printf.sprintf
             "point cut attribute %S must have numeric scalar or tuple storage, not %s"
             name (Attribute.kind_name attribute))
@@ -150,7 +150,7 @@ let remap_edge_groups ?cancel ~grain ~source_index ~target_topology
   | [] -> []
   | groups ->
       let target_index = Topology_index.create ?cancel target_topology in
-      let target = Topology_index.Private.view target_index in
+      let target = Topology_index.View.view target_index in
       let source_of_target = Array.make (Topology_index.edge_count target_index) (-1) in
       let conflict = ref None in
       for vertex = 0 to Array.length source_edge_of_vertex - 1 do
@@ -189,13 +189,13 @@ let remap_edge_groups ?cancel ~grain ~source_index ~target_topology
             end
           done;
           Bytes.unsafe_set bytes byte (Char.unsafe_chr !value));
-        Edge_group.Private.of_owned_bits ~topology:target_topology ~edge_count
+        Edge_group.View.of_owned_bits ~topology:target_topology ~edge_count
           ~name:(Edge_group.name group) bytes) groups
 
 let edge_remove_fast ?cancel ~grain ~keep_closed ~topology_value ~topology
     ~source_index ~index ~edge_parts ~primitive_action geometry =
-  let topology : Topology.Private.view = topology
-  and index : Topology_index.Private.view = index in
+  let topology : Topology.View.view = topology
+  and index : Topology_index.View.view = index in
   let primitive_count = Geometry.primitive_count geometry in
   let fragment_counts = Array.make primitive_count 0
   and corner_counts = Array.make primitive_count 0 in
@@ -385,9 +385,9 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
     if grain <= 0 then fail "grain must be positive";
     Cancel.check_opt cancel;
     let topology_value = Geometry.topology geometry in
-    let topology = Topology.Private.view topology_value in
+    let topology = Topology.View.view topology_value in
     let source_index = Topology_index.create ?cancel topology_value in
-    let index = Topology_index.Private.view source_index in
+    let index = Topology_index.View.view source_index in
     let point_count = Geometry.point_count geometry
     and vertex_count = Geometry.vertex_count geometry
     and primitive_count = Geometry.primitive_count geometry in
@@ -904,7 +904,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
           Array.unsafe_set output_point_right output (Array.unsafe_get point_right vertex);
           Array.unsafe_set output_point_weight output (Array.unsafe_get weights vertex)
         end);
-      let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+      let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
       let x = Array.make output_point_count 0.
       and y = Array.make output_point_count 0.
       and z = Array.make output_point_count 0. in
@@ -963,7 +963,7 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
           ~target_topology:output_topology ~source_edge_of_vertex
           (Geometry.edge_groups geometry) in
       Geometry.create
-        ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+        ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
         ~topology:output_topology ~attributes ~groups ~edge_groups ()
     end
   with Poly_cut_error message -> Error message

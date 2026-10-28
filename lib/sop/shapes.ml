@@ -248,8 +248,8 @@ module Pack_instances = struct
       ~inputs:[|source; instances|]
       (fun ~node_id:_ _context inputs ->
         let row name = match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point name inputs.(1) with
-          | Some attribute -> (match Rdk.Attribute.Private.storage attribute with
-              | Rdk.Attribute.Float4 values -> Ok (Rdk.Packed.Float4.Private.view values)
+          | Some attribute -> (match Rdk.Attribute.View.storage attribute with
+              | Rdk.Attribute.Float4 values -> Ok (Rdk.Packed.Float4.View.view values)
               | _ -> Error (Diagnostic.error ~code:"invalid_attribute"
                   (Printf.sprintf "pack_instances: %s must be point float4" name)))
           | None -> Error (Diagnostic.error ~code:"invalid_attribute"

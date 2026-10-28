@@ -7,7 +7,7 @@ let get = function Ok value -> value | Error error -> fail (Error.to_string erro
 let int_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has non-integer storage"))
   | None -> fail ("missing " ^ name)
@@ -15,7 +15,7 @@ let int_attribute owner name geometry =
 let detail_int_array name geometry =
   match Geometry.find_attribute ~owner:Attribute.Detail name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int_array values -> Packed.Int_array.get values 0
        | _ -> fail (name ^ " has non-integer-array storage"))
   | None -> fail ("missing " ^ name)
@@ -199,7 +199,7 @@ let disconnected_triangles count =
       ~primitive_offsets:(Array.init (count + 1) (fun primitive -> primitive * 3))
       ~primitive_kinds:(Array.make count Topology.Polygon) |> get_string in
   Geometry.create
-    ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z) ~topology ()
+    ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z) ~topology ()
   |> get_string
 
 let test_parallel_exact () =
@@ -224,8 +224,8 @@ let test_parallel_exact () =
         source |> get) in
   let sorted_one = run_sorted 1 and sorted_four = run_sorted 4 in
   let signature geometry =
-    let p = Packed.Float3.Private.view (Geometry.positions geometry)
-    and t = Topology.Private.view (Geometry.topology geometry) in
+    let p = Packed.Float3.View.view (Geometry.positions geometry)
+    and t = Topology.View.view (Geometry.topology geometry) in
     Array.copy p.x, Array.copy p.y, Array.copy p.z,
     Array.copy t.vertex_points, Array.copy t.primitive_offsets,
     Bytes.copy t.primitive_kinds,

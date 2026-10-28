@@ -10,13 +10,13 @@ let attribute owner name storage =
 let normal owner ?(name = "N") geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some value ->
-      (match Attribute.Private.storage value with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage value with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail "normal attribute has wrong storage")
   | None -> fail "normal attribute is missing"
 
 let check_vec values index (x, y, z) message =
-  check (near values.Packed.Float3.Private.x.(index) x
+  check (near values.Packed.Float3.View.x.(index) x
       && near values.y.(index) y && near values.z.(index) z) message
 
 let group owner name geometry =
@@ -32,7 +32,7 @@ let with_constant_normal owner geometry =
     | Vertex -> Geometry.vertex_count geometry
     | Primitive -> Geometry.primitive_count geometry
     | Detail -> 1 in
-  let values = Packed.Float3.Private.of_owned_exn
+  let values = Packed.Float3.View.of_owned_exn
       ~x:(Array.make count 0.) ~y:(Array.make count 1.)
       ~z:(Array.make count 0.) in
   Geometry.with_attribute

@@ -20,7 +20,7 @@ let geometry_owned positions edges values =
     | None -> []
     | Some values -> [Attribute.create_owned ~owner:Attribute.Point ~name:"value"
         (Attribute.Float values) |> get_ok] in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology ~attributes () |> get_ok
 
 let fixture () = geometry_owned
@@ -30,7 +30,7 @@ let fixture () = geometry_owned
 
 let values name geometry = match Geometry.find_attribute
     ~owner:Attribute.Point name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Float values -> values | _ -> fail "wrong output storage")
   | None -> fail "missing output attribute"
 
@@ -70,7 +70,7 @@ let curve_geometry positions vertex_points primitive_offsets primitive_kinds
   and z = Array.map (fun (_,_,z) -> z) positions in
   let topology = Topology.create_owned ~point_count ~vertex_points
       ~primitive_offsets ~primitive_kinds |> get_ok in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology ~attributes () |> get_ok
 
 let curve_fixture () =

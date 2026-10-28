@@ -28,8 +28,8 @@ let order keys =
   order
 
 let digest geometry =
-  let view = Rdk.Topology.Private.view (Rdk.Geometry.topology geometry) in
-  let positions = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions geometry) in
+  let view = Rdk.Topology.View.view (Rdk.Geometry.topology geometry) in
+  let positions = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry) in
   let attributes = List.map (fun attribute ->
     Rdk.Attribute.name attribute, Rdk.Attribute.owner attribute,
     Rdk.Attribute.kind_name attribute, Rdk.Attribute.length attribute)

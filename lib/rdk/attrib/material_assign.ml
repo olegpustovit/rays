@@ -31,7 +31,7 @@ let run ?cancel ?group ~name ~color:(r, g, b) ~roughness ?(round = 0.)
           | None -> let x,y,z,w = defaults in
               Ok (Array.make count x, Array.make count y, Array.make count z, Array.make count w)
           | Some a -> (match Attribute.storage a with
-              | Attribute.Float4 a -> let v = Packed.Float4.Private.view a in
+              | Attribute.Float4 a -> let v = Packed.Float4.View.view a in
                   Ok (Array.copy v.x, Array.copy v.y, Array.copy v.z, Array.copy v.w)
               | _ -> Error (name ^ " must be float4")) in
         let ( let* ) = Result.bind in
@@ -58,6 +58,6 @@ let run ?cancel ?group ~name ~color:(r, g, b) ~roughness ?(round = 0.)
           let* cd = attribute "material_color" (Attribute.Float4 cd) in
           let* emission = attribute "material_emission" (Attribute.Float4 emission) in
           let* rounds = attribute "material_round" (Attribute.Float rounds) in
-          Geometry.Private.with_merged_attributes_owned [|path; roughness; cd; emission; rounds|] geometry in
+          Geometry.View.with_merged_attributes_owned [|path; roughness; cd; emission; rounds|] geometry in
         Result.map_error (fun message -> Error.make ~operation:"material" ~code:"invalid_attribute" message) result
   with Cancel.Cancelled -> error "cancelled" "material assignment cancelled"

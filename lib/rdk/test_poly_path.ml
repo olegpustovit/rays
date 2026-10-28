@@ -5,38 +5,38 @@ open Rdk_test_support
 let get_ok = get
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_geometry left right =
-  let left_positions = Packed.Float3.Private.view (Geometry.positions left)
-  and right_positions = Packed.Float3.Private.view (Geometry.positions right)
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  let left_positions = Packed.Float3.View.view (Geometry.positions left)
+  and right_positions = Packed.Float3.View.view (Geometry.positions right)
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -58,7 +58,7 @@ let add_attribute owner name storage geometry =
   Geometry.with_attribute attribute geometry |> get_ok
 
 let graph_fixture () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 2.; 3.; 2.; 2.; 10.; 11.; 10.5|]
       ~y:[|0.; 0.; 0.; 0.; 1.; -1.; 0.; 0.; 1.|]
       ~z:(Array.make 9 0.) in
@@ -80,7 +80,7 @@ let graph_fixture () =
       |> add_attribute Attribute.Point "point_float"
            (Attribute.Float (Array.init 9 float_of_int))
       |> add_attribute Attribute.Point "point_vector"
-           (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+           (Attribute.Float3 (Packed.Float3.View.of_owned_exn
              ~x:(Array.init 9 float_of_int) ~y:(Array.make 9 2.)
              ~z:(Array.make 9 3.)))
       |> add_attribute Attribute.Point "point_quaternion"
@@ -101,7 +101,7 @@ let graph_fixture () =
            (Attribute.Float2 (Packed.Float2.of_owned
              ~x:(Array.init 15 float_of_int) ~y:(Array.make 15 0.) |> get_ok))
       |> add_attribute Attribute.Vertex "vertex_vector"
-           (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+           (Attribute.Float3 (Packed.Float3.View.of_owned_exn
              ~x:(Array.init 15 float_of_int) ~y:(Array.make 15 1.)
              ~z:(Array.make 15 2.)))
       |> add_attribute Attribute.Vertex "vertex_quaternion"
@@ -126,7 +126,7 @@ let graph_fixture () =
            (Attribute.Float2 (Packed.Float2.of_owned
              ~x:[|1.;2.;3.;4.;5.;6.|] ~y:(Array.make 6 0.) |> get_ok))
       |> add_attribute Attribute.Primitive "primitive_vector"
-           (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+           (Attribute.Float3 (Packed.Float3.View.of_owned_exn
              ~x:[|1.;2.;3.;4.;5.;6.|] ~y:(Array.make 6 1.)
              ~z:(Array.make 6 2.)))
       |> add_attribute Attribute.Primitive "primitive_quaternion"
@@ -161,7 +161,7 @@ let attribute owner name geometry =
   Geometry.find_attribute ~owner name geometry |> Option.get
 
 let endpoint_fixture () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 1.04; 2.; 5.; 6.|]
       ~y:[|0.; 0.; 0.; 0.; 0.02; 1.|] ~z:(Array.make 6 0.) in
   let topology = Topology.create_owned ~point_count:6
@@ -191,7 +191,7 @@ let scale_fixture columns rows =
       incr primitive
     done
   done;
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.init point_count (fun p -> float_of_int (p mod (columns + 1))))
       ~y:(Array.init point_count (fun p -> float_of_int (p / (columns + 1))))
       ~z:(Array.make point_count 0.) in

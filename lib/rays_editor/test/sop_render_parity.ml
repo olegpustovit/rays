@@ -40,7 +40,7 @@ let torus () =
 
 let signal_curve () =
   let count = 97 in
-  let positions = Rdk.Packed.Float3.Private.of_owned_exn
+  let positions = Rdk.Packed.Float3.View.of_owned_exn
       ~x:(Array.init count (fun point ->
         -2.2 +. (4.4 *. float_of_int point /. float_of_int (count - 1))))
       ~y:(Array.init count (fun point -> 0.16 *. sin (float_of_int point *. 0.19)))

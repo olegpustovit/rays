@@ -28,15 +28,15 @@ let primitive_attributes base ~with_label =
     attribute "id" (Attribute.Int (integer (int_of_float base + 100)));
     attribute "uv_pair" (Attribute.Float2 (float2 x y));
     attribute "direction" (Attribute.Float3
-      (Packed.Float3.Private.of_owned_exn ~x:(Array.copy x) ~y:(Array.copy y)
+      (Packed.Float3.View.of_owned_exn ~x:(Array.copy x) ~y:(Array.copy y)
         ~z:(Array.copy z)));
     attribute "rgba" (Attribute.Float4
       (float4 (Array.copy x) (Array.copy y) (Array.copy z) w));
     attribute "int_rows" (Attribute.Int_array
-      (Packed.Int_array.Private.create_validated_owned
+      (Packed.Int_array.View.create_validated_owned
         ~offsets:(Array.copy offsets) ~values:int_values));
     attribute "float_rows" (Attribute.Float_array
-      (Packed.Float_array.Private.create_validated_owned
+      (Packed.Float_array.View.create_validated_owned
         ~offsets:(Array.copy offsets) ~values:float_values));
   ] in
   if with_label then
@@ -60,7 +60,7 @@ let tetra ~origin:(ox,oy,oz) ~base ~with_label =
   ] @ if with_label then [
     Group.init ~owner:Group.Primitive ~name:"left_only" 4 ((=) 0)
   ] else [] in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology ~attributes:(primitive_attributes base ~with_label) ~groups ()
     |> get_string
 
@@ -76,7 +76,7 @@ let cube_quads ~origin:(ox,oy,oz) =
       ~vertex_points:[|0;3;2;1; 4;5;6;7; 0;1;5;4;
                        3;7;6;2; 0;4;7;3; 1;2;6;5|]
       ~primitive_offsets:[|0;4;8;12;16;20;24|] |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let duplicated_tetra ~origin:(ox,oy,oz) =
@@ -91,13 +91,13 @@ let duplicated_tetra ~origin:(ox,oy,oz) =
       ~vertex_points:[|0;2;1; 0;1;3; 1;2;3; 2;0;3;
                        4;6;5; 4;5;7; 5;6;7; 6;4;7|]
       ~primitive_offsets:[|0;3;6;9;12;15;18;21;24|] |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let find_storage owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | None -> fail "missing attribute %s" name
-  | Some attribute -> Attribute.Private.storage attribute
+  | Some attribute -> Attribute.View.storage attribute
 
 let validate left right ancestry output =
   check (Geometry.positions output == Geometry.positions (Extract.geometry ancestry)
@@ -110,15 +110,15 @@ let validate left right ancestry output =
   and labels = match find_storage Attribute.Primitive "label" output with
     | Attribute.Text values -> values | _ -> assert false
   and pairs = match find_storage Attribute.Primitive "uv_pair" output with
-    | Attribute.Float2 value -> Packed.Float2.Private.view value | _ -> assert false
+    | Attribute.Float2 value -> Packed.Float2.View.view value | _ -> assert false
   and directions = match find_storage Attribute.Primitive "direction" output with
-    | Attribute.Float3 value -> Packed.Float3.Private.view value | _ -> assert false
+    | Attribute.Float3 value -> Packed.Float3.View.view value | _ -> assert false
   and colors = match find_storage Attribute.Primitive "rgba" output with
-    | Attribute.Float4 value -> Packed.Float4.Private.view value | _ -> assert false
+    | Attribute.Float4 value -> Packed.Float4.View.view value | _ -> assert false
   and int_rows = match find_storage Attribute.Primitive "int_rows" output with
-    | Attribute.Int_array value -> Packed.Int_array.Private.view value | _ -> assert false
+    | Attribute.Int_array value -> Packed.Int_array.View.view value | _ -> assert false
   and float_rows = match find_storage Attribute.Primitive "float_rows" output with
-    | Attribute.Float_array value -> Packed.Float_array.Private.view value | _ -> assert false in
+    | Attribute.Float_array value -> Packed.Float_array.View.view value | _ -> assert false in
   let selected = Option.get (Geometry.find_group ~owner:Group.Primitive "selected" output)
   and left_only = Option.get (Geometry.find_group ~owner:Group.Primitive "left_only" output) in
   let ordered = Option.get
@@ -206,15 +206,15 @@ let add_corner_payload base geometry =
       make owner (prefix ^ "_f2")
         (Attribute.Float2 (float2 (Array.copy x) (Array.copy y)));
       make owner (if owner = Attribute.Vertex then "N" else prefix ^ "_f3")
-        (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        (Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:(Array.copy x) ~y:(Array.copy y) ~z:(Array.copy z)));
       make owner (prefix ^ "_f4")
         (Attribute.Float4 (float4 x y z w));
       make owner (prefix ^ "_ia") (Attribute.Int_array
-        (Packed.Int_array.Private.create_validated_owned
+        (Packed.Int_array.View.create_validated_owned
           ~offsets:(Array.copy offsets) ~values:int_values));
       make owner (prefix ^ "_fa") (Attribute.Float_array
-        (Packed.Float_array.Private.create_validated_owned
+        (Packed.Float_array.View.create_validated_owned
           ~offsets:(Array.copy offsets) ~values:float_values));
     ] in
   let attributes = Geometry.attributes geometry
@@ -250,8 +250,8 @@ let add_seam_payload base geometry =
   Geometry.with_attribute point geometry |> get_string
 
 let add_affine_payload geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   let values = Array.init (Geometry.point_count geometry) (fun point ->
       positions.x.(point) +. positions.y.(point) +. positions.z.(point)) in
   let point_attribute = Attribute.create_owned ~name:"affine" ~owner:Attribute.Point
@@ -277,11 +277,11 @@ let add_ragged_point_payload side geometry =
   and values = Array.init 7 (fun index -> side +. float_of_int index /. 10.) in
   geometry |> add_named_attribute Attribute.Point "ragged"
     (Attribute.Float_array
-       (Packed.Float_array.Private.create_validated_owned ~offsets ~values))
+       (Packed.Float_array.View.create_validated_owned ~offsets ~values))
 
 let test_surface_cut_payload () =
   let left = cube_quads ~origin:(0.,0.,0.) in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|-1.; 2.; -1.; 2.|] ~y:[|0.5; 0.5; 0.5; 0.5|]
       ~z:[|0.25; 0.25; 0.75; 0.75|] in
   let topology = Topology.polygons_owned ~point_count:4

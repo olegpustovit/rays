@@ -362,7 +362,7 @@ let run ?cancel ?(grain = 16_384)
                       then primitive * segments
                       else row_vertex_count
                         + ((primitive - row_count) * (rings + 1)));
-                Topology.Private.create_validated_owned ~point_count
+                Topology.View.create_validated_owned ~point_count
                   ~vertex_points ~primitive_offsets ~primitive_kinds
             | Sphere_triangles | Sphere_alternating_triangles | Sphere_quads ->
                 let vertex_points = Array.make vertex_count 0
@@ -487,20 +487,20 @@ let run ?cancel ?(grain = 16_384)
                   (fun primitive ->
                     if primitive land 4095 = 0 then Cancel.check_opt cancel;
                     primitive_offsets.(primitive) <- vertex_offset primitive);
-                Topology.Private.create_validated_owned ~point_count
+                Topology.View.create_validated_owned ~point_count
                   ~vertex_points ~primitive_offsets ~primitive_kinds in
-          let positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
+          let positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
           let attributes = ref [] in
           (match point_normals with
            | Some (x, y, z) ->
-               let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+               let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
                attributes := (Attribute.create_key_owned
                    (Attribute.normal ~owner:Attribute.Point) values |> Support.get_ok)
                  :: !attributes
            | None -> ());
           (match vertex_normals with
            | Some (x, y, z) ->
-               let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+               let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
                attributes := (Attribute.create_key_owned
                    (Attribute.normal ~owner:Attribute.Vertex) values |> Support.get_ok)
                  :: !attributes

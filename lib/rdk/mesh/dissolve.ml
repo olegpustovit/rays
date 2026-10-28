@@ -83,7 +83,7 @@ let set_selected bits edge =
   Bytes.unsafe_set bits byte (Char.chr
     (Char.code (Bytes.unsafe_get bits byte) lor mask))
 
-let point_of_vertex topology vertex = topology.Topology.Private.vertex_points.(vertex)
+let point_of_vertex topology vertex = topology.Topology.View.vertex_points.(vertex)
 
 let simplify ?cancel ~tolerance ~affected ~closed positions topology corners =
   let count = Array.length corners and minimum = if closed then 3 else 2 in
@@ -106,7 +106,7 @@ let simplify ?cancel ~tolerance ~affected ~closed positions topology corners =
       and b = point_of_vertex topology corners.(index)
       and c = point_of_vertex topology corners.(right) in
       if not (Bytes.get affected b = '\001') then false else
-      let ux = positions.Packed.Float3.Private.x.(b) -. positions.x.(a)
+      let ux = positions.Packed.Float3.View.x.(b) -. positions.x.(a)
       and uy = positions.y.(b) -. positions.y.(a)
       and uz = positions.z.(b) -. positions.z.(a)
       and vx = positions.x.(c) -. positions.x.(b)
@@ -174,7 +174,7 @@ let bridge_loops ?cancel topology index selected_edges loops =
         Cancel.check_opt cancel;
         let found_loop = ref (-1) and found_current = ref (-1)
         and found_other = ref (-1) and edge = ref 0 in
-        while !found_loop < 0 && !edge < Array.length index.Topology_index.Private.edge_a do
+        while !found_loop < 0 && !edge < Array.length index.Topology_index.View.edge_a do
           if selected selected_edges !edge then begin
             let a = index.edge_a.(!edge) and b = index.edge_b.(!edge) in
             let ca = find_point topology !current a
@@ -220,9 +220,9 @@ let run ?cancel ?(grain = 16_384) ?edges ?(operation = Dissolve_selected)
       fail "collinearity tolerance must be finite and between zero and pi radians";
     Cancel.check_opt cancel;
     let topology_value = Geometry.topology geometry in
-    let topology = Topology.Private.view topology_value
+    let topology = Topology.View.view topology_value
     and index_value = Topology_index.create ?cancel topology_value in
-    let index = Topology_index.Private.view index_value in
+    let index = Topology_index.View.view index_value in
     let edge_count = Array.length index.edge_a
     and primitive_count = Bytes.length topology.primitive_kinds
     and vertex_count = Array.length topology.vertex_points in
@@ -354,7 +354,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(operation = Dissolve_selected)
       let visited = Bytes.make vertex_count '\000'
       and output = Output.create initial_vertices initial_primitives
       and processed = Bytes.make primitive_count '\000'
-      and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+      and positions = Packed.Float3.View.view (Geometry.positions geometry) in
       let trace start =
         let values = Int_buffer.create 16 and current = ref start
         and closed = ref false in

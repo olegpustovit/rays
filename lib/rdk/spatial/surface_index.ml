@@ -1,8 +1,8 @@
 
 type t = {
   geometry : Geometry.t;
-  positions : Packed.Float3.Private.view;
-  topology : Topology.Private.view;
+  positions : Packed.Float3.View.view;
+  topology : Topology.View.view;
   primitives : int array;
   vertex_a : int array;
   vertex_b : int array;
@@ -117,8 +117,8 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   if validated_triangles && (Option.is_some selection || Option.is_some vertices) then
     invalid_arg "Surface_index: validated triangle construction cannot select elements";
   Cancel.check_opt cancel;
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   let primitive_count = Bytes.length topology.primitive_kinds in
   (match vertices with
    | Some group when Group.owner group <> Group.Vertex ->
@@ -139,7 +139,7 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   let selected_primitives = match vertices with
     | None -> selected_primitives
     | Some vertices ->
-        let vertex_bits = Group.Private.bits_view vertices in
+        let vertex_bits = Group.View.bits_view vertices in
         let candidate_count = Array.length selected_primitives
         and chunk = max 1 grain in
         let range_count = Support.ceiling_div candidate_count chunk in
@@ -253,7 +253,7 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   let triangles, primitives, vertex_a, vertex_b, vertex_c = match vertices with
     | None -> triangles, primitives, vertex_a, vertex_b, vertex_c
     | Some selected_vertices ->
-        let selected_vertex_bits = Group.Private.bits_view selected_vertices in
+        let selected_vertex_bits = Group.View.bits_view selected_vertices in
         let range_count = Support.ceiling_div triangles grain in
         let keep = Bytes.make triangles '\000'
         and range_counts = Array.make range_count 0 in
@@ -531,13 +531,13 @@ let exact_plane_overlap left_surface left_triangle right_surface right_triangle 
 
 let triangle_has_point surface triangle point =
   if point < 0 then false else
-  let points = surface.topology.Topology.Private.vertex_points in
+  let points = surface.topology.Topology.View.vertex_points in
   point = points.(surface.vertex_a.(triangle))
   || point = points.(surface.vertex_b.(triangle))
   || point = points.(surface.vertex_c.(triangle))
 
 let triangles_share_point left_surface left_triangle right_surface right_triangle =
-  let points = left_surface.topology.Topology.Private.vertex_points in
+  let points = left_surface.topology.Topology.View.vertex_points in
   triangle_has_point right_surface right_triangle
     points.(left_surface.vertex_a.(left_triangle))
   || triangle_has_point right_surface right_triangle
@@ -556,8 +556,8 @@ let overlapping_triangle_pairs_raw ?cancel ?(single_pass = false)
   if left_count = 0 || Array.length right_surface.primitives = 0 then [||], [||]
   else begin
     let shared_topology =
-      left_surface.topology.Topology.Private.vertex_points
-      == right_surface.topology.Topology.Private.vertex_points in
+      left_surface.topology.Topology.View.vertex_points
+      == right_surface.topology.Topology.View.vertex_points in
     (* One-pass collection owns a builder per stable range. A lower bound keeps
        empty/disjoint workloads O(F / 128) in builder metadata even when the
        caller requests grain one; output order remains triangle-major and is
@@ -738,7 +738,7 @@ let overlapping_self_triangle_pairs_disjoint_topology ?cancel ~grain ~tolerance
           (Char.chr (Char.code (Bytes.unsafe_get bits slot) lor mask))
       end
     done;
-    let group = Group.Private.of_owned_bits ~owner:Group.Primitive
+    let group = Group.View.of_owned_bits ~owner:Group.Primitive
         ~name:"__rdk_surface_disjoint_partition" ~length:primitive_count bits in
     create_raw ?cancel ~grain ~primitives:group indexed.geometry in
   let rec gather indexed =
@@ -807,7 +807,7 @@ let[@inline] aabb_distance_squared value node qx qy qz =
   (dx *. dx) +. (dy *. dy) +. (dz *. dz)
 
 let[@inline] closest_triangle_into value triangle qx qy qz scratch =
-  let a = value.topology.Topology.Private.vertex_points.(value.vertex_a.(triangle))
+  let a = value.topology.Topology.View.vertex_points.(value.vertex_a.(triangle))
   and b = value.topology.vertex_points.(value.vertex_b.(triangle))
   and c = value.topology.vertex_points.(value.vertex_c.(triangle)) in
   let ax = value.positions.x.(a) and ay = value.positions.y.(a)
@@ -938,7 +938,7 @@ let closest_many_into ?cancel ?selection ?position_indices ~grain value ~queries
      || Array.length barycentric_c < query_count
      || Array.length distances_squared < query_count then
     invalid_arg "Surface_index: output arrays are too short";
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = (query_count + grain - 1) / grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -997,7 +997,7 @@ let closest_distances_many_into ?cancel ?selection ~grain value
    | None | Some _ -> ());
   if Array.length distances_squared < query_count then
     invalid_arg "Surface_index: output array is too short";
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = (query_count + grain - 1) / grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1058,7 +1058,7 @@ let[@inline] ray_aabb_intersects value node ox oy oz dx dy dz minimum maximum
 
 let[@inline] ray_triangle_into value triangle ox oy oz dx dy dz minimum maximum
     tolerance scratch =
-  let a = value.topology.Topology.Private.vertex_points.(value.vertex_a.(triangle))
+  let a = value.topology.Topology.View.vertex_points.(value.vertex_a.(triangle))
   and b = value.topology.vertex_points.(value.vertex_b.(triangle))
   and c = value.topology.vertex_points.(value.vertex_c.(triangle)) in
   let ax = value.positions.x.(a) and ay = value.positions.y.(a)
@@ -1167,7 +1167,7 @@ let ray_query_once value ox oy oz dx dy dz minimum maximum tolerance surface_hit
 
 type ray_directions =
   | Constant_direction of { x : float; y : float; z : float }
-  | Per_query_directions of Packed.Float3.Private.view
+  | Per_query_directions of Packed.Float3.View.view
 
 type sample_combine =
   | Sample_average
@@ -1306,7 +1306,7 @@ let combine_samples combine integer_results float_results first samples order
   end
 
 let geometric_normal_into value triangle output =
-  let a = value.topology.Topology.Private.vertex_points.(value.vertex_a.(triangle))
+  let a = value.topology.Topology.View.vertex_points.(value.vertex_a.(triangle))
   and b = value.topology.vertex_points.(value.vertex_b.(triangle))
   and c = value.topology.vertex_points.(value.vertex_c.(triangle)) in
   let ax = value.positions.x.(a) and ay = value.positions.y.(a)
@@ -1380,7 +1380,7 @@ let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
           invalid_arg "Surface_index: sampled ray normal arrays are too short";
         true
     | _ -> invalid_arg "Surface_index: sampled ray normal arrays must be supplied together" in
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1490,7 +1490,7 @@ let raycast_average_drivers_into ?cancel ?selection ~grain value ~queries
       || Array.length vertex_numbers < offsets.(query_count)
       || Array.length vertex_weights < offsets.(query_count) then
     invalid_arg "Surface_index: average ray driver arrays are inconsistent";
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1564,7 +1564,7 @@ let raycast_many_into ?cancel ?selection ~grain value ~queries ~directions
       || Array.length barycentric_c < query_count
       || Array.length distances < query_count then
     invalid_arg "Surface_index: ray output arrays are too short";
-  let queries = Packed.Float3.Private.view queries in
+  let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
@@ -1643,7 +1643,7 @@ let raycast_many_into ?cancel ?selection ~grain value ~queries ~directions
 
 let raycast value ~origin ~direction =
   try
-    let queries = Packed.Float3.Private.of_owned_exn ~x:[|origin.Rays_math.Vec3.x|]
+    let queries = Packed.Float3.View.of_owned_exn ~x:[|origin.Rays_math.Vec3.x|]
         ~y:[|origin.y|] ~z:[|origin.z|]
     in
     let primitive = [|-1|] and triangle = [|-1|]
@@ -1661,10 +1661,10 @@ let raycast value ~origin ~direction =
   with Invalid_argument message -> Error (Error.make ~operation:"surface_index"
       ~code:"invalid_ray" message)
 
-module Private = struct
+module View = struct
   type nonrec ray_directions = ray_directions =
     | Constant_direction of { x : float; y : float; z : float }
-    | Per_query_directions of Packed.Float3.Private.view
+    | Per_query_directions of Packed.Float3.View.view
   type nonrec sample_combine = sample_combine =
     | Sample_average
     | Sample_median

@@ -2,7 +2,7 @@ open Rdk
 open Rdk_test_support
 let ok=function Ok value->value|Error message->failwith message
 let flow=function Ok value->value|Error d->failwith(Diagnostic.to_string d)
-let source x=Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn
+let source x=Geometry.create ~positions:(Packed.Float3.View.of_owned_exn
   ~x:[|x|] ~y:[|-0.|] ~z:[|Float.next_after 0. 1.|]) ~topology:(Topology.empty ~point_count:1)()|>ok
 let factory counter key geometry=Sop.Edit_graph.factory ~key ~label:key ~category:["Test"] ~arity:0(fun _->
   Sop.Node.Private.make_geometry ~operation:key ~version:1 ~parameters:(geometry_bytes geometry)

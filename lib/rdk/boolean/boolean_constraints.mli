@@ -1,4 +1,4 @@
-(** Private exact triangle-pair classification and per-face constraint plans. *)
+(** View exact triangle-pair classification and per-face constraint plans. *)
 
 type side = Left | Right
 type t
@@ -40,7 +40,7 @@ val coplanar_first_triangle : t -> int -> int
 val coplanar_second_triangle : t -> int -> int
 val degenerate_pair_count : t -> int
 
-module Private : sig
+module View : sig
   val left_geometry : t -> Geometry.t
   val right_geometry : t -> Geometry.t
   val resolve_left_self_intersections : t -> bool

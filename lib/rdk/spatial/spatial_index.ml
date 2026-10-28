@@ -1,6 +1,6 @@
 
 type t = {
-  positions : Packed.Float3.Private.view;
+  positions : Packed.Float3.View.view;
   order : int array;
   axes : int array;
 }
@@ -12,7 +12,7 @@ let length value = Array.length value.order
 
 let create_raw ?cancel ?(grain = 16_384) ?points:selection packed =
   if grain <= 0 then invalid_arg "grain must be positive";
-  let positions = Packed.Float3.Private.view packed in
+  let positions = Packed.Float3.View.view packed in
   let count = Packed.Float3.length packed in
   let order = match selection with
     | None -> Array.init count Fun.id
@@ -84,7 +84,7 @@ let create ?cancel ?grain ?points packed =
 
 type query_context = {
   tree : t;
-  queries : Packed.Float3.Private.view;
+  queries : Packed.Float3.View.view;
   maximum_squared : float;
   indices : int array;
   distances : float array;
@@ -157,10 +157,10 @@ let nearest_k_into value ~x ~y ~z ~max_distance_squared ~indices
     ~distances_squared ~offset ~count =
   if count < 0 || offset < 0 || offset > Array.length indices - count
      || offset > Array.length distances_squared - count then
-    invalid_arg "Spatial_index.Private.nearest_k_into: invalid output slice";
+    invalid_arg "Spatial_index.View.nearest_k_into: invalid output slice";
   if count = 0 || length value = 0 then 0
   else
-    let queries : Packed.Float3.Private.view =
+    let queries : Packed.Float3.View.view =
       { x = [|x|]; y = [|y|]; z = [|z|] } in
     let context = { tree = value; queries; maximum_squared = max_distance_squared;
       indices; distances = distances_squared; capacity = count } in
@@ -169,7 +169,7 @@ let nearest_k_into value ~x ~y ~z ~max_distance_squared ~indices
 let nearest_k_many_into ?cancel ?points ~grain value ~queries ~max_distance_squared
     ~capacity ~indices ~distances_squared ~counts =
   if grain <= 0 then invalid_arg
-      "Spatial_index.Private.nearest_k_many_into: grain must be positive";
+      "Spatial_index.View.nearest_k_many_into: grain must be positive";
   let query_count = Packed.Float3.length queries in
   (match points with
    | Some group when Group.owner group <> Group.Point
@@ -180,8 +180,8 @@ let nearest_k_many_into ?cancel ?points ~grain value ~queries ~max_distance_squa
      || Array.length indices < query_count * capacity
      || Array.length distances_squared < query_count * capacity
      || Array.length counts < query_count then
-    invalid_arg "Spatial_index.Private.nearest_k_many_into: invalid output storage";
-  let context = { tree = value; queries = Packed.Float3.Private.view queries;
+    invalid_arg "Spatial_index.View.nearest_k_many_into: invalid output storage";
+  let context = { tree = value; queries = Packed.Float3.View.view queries;
     maximum_squared = max_distance_squared; indices;
     distances = distances_squared; capacity } in
   if query_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
@@ -193,7 +193,7 @@ let nearest_k_many_into ?cancel ?points ~grain value ~queries ~max_distance_squa
 
 type distance_query_context = {
   distance_tree : t;
-  distance_queries : Packed.Float3.Private.view;
+  distance_queries : Packed.Float3.View.view;
   distance_maximum_squared : float;
   distance_output : float array;
 }
@@ -231,7 +231,7 @@ let rec visit_distance_squared context query first last depth =
 let nearest_distances_many_into ?cancel ?points ~grain value ~queries
     ~max_distance_squared ~distances_squared =
   if grain <= 0 then invalid_arg
-      "Spatial_index.Private.nearest_distances_many_into: grain must be positive";
+      "Spatial_index.View.nearest_distances_many_into: grain must be positive";
   let query_count = Packed.Float3.length queries in
   (match points with
    | Some group when Group.owner group <> Group.Point
@@ -239,8 +239,8 @@ let nearest_distances_many_into ?cancel ?points ~grain value ~queries
        invalid_arg "Spatial_index: query selection must be a matching point group"
    | None | Some _ -> ());
   if Array.length distances_squared < query_count then invalid_arg
-      "Spatial_index.Private.nearest_distances_many_into: output array is too short";
-  let queries = Packed.Float3.Private.view queries in
+      "Spatial_index.View.nearest_distances_many_into: output array is too short";
+  let queries = Packed.Float3.View.view queries in
   let context = { distance_tree = value; distance_queries = queries;
     distance_maximum_squared = max_distance_squared;
     distance_output = distances_squared } in
@@ -254,7 +254,7 @@ let nearest_distances_many_into ?cancel ?points ~grain value ~queries
             visit_distance_squared context query 0 (length value - 1) 0
         end)
 
-module Private = struct
+module View = struct
   let nearest_k_into = nearest_k_into
   let nearest_k_many_into = nearest_k_many_into
   let nearest_distances_many_into = nearest_distances_many_into

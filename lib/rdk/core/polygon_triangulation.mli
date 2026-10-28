@@ -13,8 +13,8 @@ val find_projected_ear :
 
 val primitive :
   ?cancel:Cancel.t ->
-  positions:Packed.Float3.Private.view ->
-  topology:Topology.Private.view ->
+  positions:Packed.Float3.View.view ->
+  topology:Topology.View.view ->
   ?scratch:scratch ->
   int ->
   emit:(int -> int -> int -> int -> unit) ->

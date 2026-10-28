@@ -12,7 +12,7 @@ let geometry_owned ~kinds positions vertex_points primitive_offsets =
   and z = Array.map (fun (_, _, z) -> z) positions in
   let topology = Topology.create_owned ~point_count ~vertex_points
       ~primitive_offsets ~primitive_kinds:kinds |> get_ok in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_ok
 
 let disjoint () = geometry_owned
@@ -67,7 +67,7 @@ let many_disjoint edge_count =
     and length = 0.5 +. float_of_int (edge mod 17) *. 0.1 in
     x.(point) <- base; x.(point + 1) <- base +. length
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.create_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (edge_count + 1) (fun edge -> edge * 2))
@@ -84,7 +84,7 @@ let many_chains count =
     x.(point + 1) <- base +. 0.5 +. float_of_int (chain mod 5) *. 0.1;
     x.(point + 2) <- base +. 2.5
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.create_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (count + 1) (fun chain -> chain * 3))

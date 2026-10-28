@@ -4,7 +4,7 @@ open Test_support
 let string_ok = function Ok value -> value | Error message -> fail message
 
 let geometry () =
-  let positions = Rdk.Packed.Float3.Private.of_owned_exn
+  let positions = Rdk.Packed.Float3.View.of_owned_exn
       ~x:[|-2.5; -1.5; -2.; 1.5; 2.5; 2.|]
       ~y:[|-0.5; -0.5; 0.5; -0.5; -0.5; 0.5|]
       ~z:(Array.make 6 0.) in
@@ -14,7 +14,7 @@ let geometry () =
   let geometry = Rdk.Geometry.create ~positions ~topology () |> string_ok in
   let normals = Rdk.Attribute.create_owned ~name:"N"
       ~owner:Rdk.Attribute.Vertex
-      (Rdk.Attribute.Float3 (Rdk.Packed.Float3.Private.of_owned_exn
+      (Rdk.Attribute.Float3 (Rdk.Packed.Float3.View.of_owned_exn
         ~x:(Array.make 6 0.) ~y:(Array.make 6 1.) ~z:(Array.make 6 0.)))
       |> string_ok in
   let geometry = Rdk.Geometry.with_attribute normals geometry |> string_ok in

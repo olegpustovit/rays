@@ -5,23 +5,23 @@ open Rdk_test_support
 let float2_attribute geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Packed.Float2.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let float3_attribute geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let equal_geometry left right =
   let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -35,7 +35,7 @@ let equal_geometry left right =
 let check_vertex_normal_winding geometry message =
   let point = positions geometry
   and normal = float3_attribute geometry Attribute.Vertex "N"
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  and topology = Topology.View.view (Geometry.topology geometry) in
   for primitive = 0 to Geometry.primitive_count geometry - 1 do
     let first = topology.primitive_offsets.(primitive)
     and last = topology.primitive_offsets.(primitive + 1) in
@@ -71,7 +71,7 @@ let check_default_and_connectivity () =
   and points = make Parametric_generators.Torus_points in
   let point = positions triangles
   and normal = float3_attribute triangles Attribute.Point "N"
-  and topology = Topology.Private.view (Geometry.topology triangles) in
+  and topology = Topology.View.view (Geometry.topology triangles) in
   check (Geometry.point_count triangles = 32
       && Geometry.vertex_count triangles = 192
       && Geometry.primitive_count triangles = 64)
@@ -100,8 +100,8 @@ let check_default_and_connectivity () =
         = Topology.Closed_polyline)
       "wrapped Torus curve was not closed"
   done;
-  let regular = Topology.Private.view (Geometry.topology triangles)
-  and checker = Topology.Private.view (Geometry.topology alternating) in
+  let regular = Topology.View.view (Geometry.topology triangles)
+  and checker = Topology.View.view (Geometry.topology alternating) in
   check (regular.vertex_points <> checker.vertex_points)
     "alternating Torus collapsed to regular triangles"
 
@@ -115,7 +115,7 @@ let check_uv_normals_and_winding () =
   let uv = float2_attribute geometry Attribute.Vertex "uv"
   and normal = float3_attribute geometry Attribute.Vertex "N"
   and point = positions geometry
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  and topology = Topology.View.view (Geometry.topology geometry) in
   for primitive = 0 to Geometry.primitive_count geometry - 1 do
     let first = topology.primitive_offsets.(primitive)
     and last = topology.primitive_offsets.(primitive + 1) in

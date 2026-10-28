@@ -7,27 +7,27 @@ let get_rdk = function Ok value -> value | Error error -> fail (Error.to_string 
 let equal_attribute left right =
   Attribute.owner left = Attribute.owner right
   && Attribute.name left = Attribute.name right
-  && match Attribute.Private.storage left, Attribute.Private.storage right with
+  && match Attribute.View.storage left, Attribute.View.storage right with
      | Attribute.Float a, Attribute.Float b -> a = b
      | Attribute.Int a, Attribute.Int b -> a = b
      | Attribute.Text a, Attribute.Text b -> a = b
      | Attribute.Float2 a, Attribute.Float2 b ->
-         Packed.Float2.Private.view a = Packed.Float2.Private.view b
+         Packed.Float2.View.view a = Packed.Float2.View.view b
      | Attribute.Float3 a, Attribute.Float3 b ->
-         Packed.Float3.Private.view a = Packed.Float3.Private.view b
+         Packed.Float3.View.view a = Packed.Float3.View.view b
      | Attribute.Float4 a, Attribute.Float4 b ->
-         Packed.Float4.Private.view a = Packed.Float4.Private.view b
+         Packed.Float4.View.view a = Packed.Float4.View.view b
      | Attribute.Int_array a, Attribute.Int_array b ->
-         Packed.Int_array.Private.view a = Packed.Int_array.Private.view b
+         Packed.Int_array.View.view a = Packed.Int_array.View.view b
      | Attribute.Float_array a, Attribute.Float_array b ->
-         Packed.Float_array.Private.view a = Packed.Float_array.Private.view b
+         Packed.Float_array.View.view a = Packed.Float_array.View.view b
      | _ -> false
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp = rp && lt.vertex_points = rt.vertex_points
   && lt.primitive_offsets = rt.primitive_offsets
   && Bytes.equal lt.primitive_kinds rt.primitive_kinds
@@ -40,7 +40,7 @@ let equal_geometry left right =
     Group.owner left = Group.owner right && Group.name left = Group.name right
     && Group.length left = Group.length right
     && Group.ordered_elements left = Group.ordered_elements right
-    && Group.Private.bits_view left = Group.Private.bits_view right)
+    && Group.View.bits_view left = Group.View.bits_view right)
       (Geometry.groups left) (Geometry.groups right)
   && List.compare_lengths (Geometry.edge_groups left)
        (Geometry.edge_groups right) = 0
@@ -52,7 +52,7 @@ let equal_geometry left right =
       (Geometry.edge_groups left) (Geometry.edge_groups right)
 
 let open_sections () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.; 0.;0.6;1.4;2.|]
       ~y:[|0.;0.;0.; 1.;1.;1.;1.|]
       ~z:[|0.;0.;0.; 0.;0.2;0.2;0.|] in
@@ -82,7 +82,7 @@ let open_sections () =
 
 let int_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry |> Option.get
-        |> Attribute.Private.storage with
+        |> Attribute.View.storage with
   | Attribute.Int values -> values
   | _ -> fail (name ^ " storage")
 
@@ -106,7 +106,7 @@ let ring_sections ?(reverse_second = false)
   let topology = Topology.create_owned ~point_count:points ~vertex_points
       ~primitive_offsets:(Array.init (count + 1) (fun value -> value * 4))
       ~primitive_kinds:(Array.make count kind) |> get in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get
 
 let many_sections () =
@@ -138,7 +138,7 @@ let many_sections () =
   and group = Group.ordered ~owner:Group.Primitive ~name:"ordered_sections"
       ~length:sections (Array.init sections (fun value -> sections - value - 1))
       |> get in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology ~attributes:[attribute] ~groups:[group] () |> get
 
 let run () =

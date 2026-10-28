@@ -4,7 +4,7 @@ open Rays
 
 type 'a source = Point of 'a | Vertex of 'a
 
-let mesh_vec3 (view : Packed.Float3.Private.view) : Mesh.Private.vec3_view =
+let mesh_vec3 (view : Packed.Float3.View.view) : Mesh.Private.vec3_view =
   { x = view.x; y = view.y; z = view.z }
 
 let standard geometry ~name ~point_kind ~vertex_kind =
@@ -12,7 +12,7 @@ let standard geometry ~name ~point_kind ~vertex_kind =
     match Geometry.find_attribute ~owner name geometry with
     | None -> Ok None
     | Some attribute ->
-        (match expected (Attribute.Private.storage attribute) with
+        (match expected (Attribute.View.storage attribute) with
          | Some value -> Ok (Some value)
          | None -> Error (Printf.sprintf
              "Rdk.Rays_mesh.to_mesh: %s %s attribute has storage %s"
@@ -30,7 +30,7 @@ let float3 = function Attribute.Float3 value -> Some value | _ -> None
 let float4 = function
   | Attribute.Float4 value -> Some value
   | Attribute.Float3 value ->
-      let v = Packed.Float3.Private.view value in
+      let v = Packed.Float3.View.view value in
       Some (Packed.Float4.of_owned ~x:(Array.copy v.x) ~y:(Array.copy v.y)
         ~z:(Array.copy v.z) ~w:(Array.make (Packed.Float3.length value) 1.) |> Result.get_ok)
   | _ -> None
@@ -39,7 +39,7 @@ let source_has_vertex = function Some (Vertex _) -> true | _ -> false
 
 let expanded_vec3 topology count source =
   let values = match source with Point values | Vertex values -> values in
-  let input = Packed.Float3.Private.view values in
+  let input = Packed.Float3.View.view values in
   let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
   for vertex = 0 to count - 1 do
     let source_index = match source with
@@ -49,11 +49,11 @@ let expanded_vec3 topology count source =
     y.(vertex) <- input.y.(source_index);
     z.(vertex) <- input.z.(source_index)
   done;
-  Packed.Float3.Private.of_owned_exn ~x ~y ~z
+  Packed.Float3.View.of_owned_exn ~x ~y ~z
 
 let color_array ~expanded topology count source =
   let values = match source with Point values | Vertex values -> values in
-  let input = Packed.Float4.Private.view values in
+  let input = Packed.Float4.View.view values in
   Array.init count (fun vertex ->
     let index = match source with
       | Point _ -> if expanded then Topology.point_of_vertex topology vertex else vertex
@@ -62,7 +62,7 @@ let color_array ~expanded topology count source =
 
 let tex_coord_array ~expanded topology count source =
   let values = match source with Point values | Vertex values -> values in
-  let input = Packed.Float2.Private.view values in
+  let input = Packed.Float2.View.view values in
   Array.init count (fun vertex ->
     let index = match source with
       | Point _ -> if expanded then Topology.point_of_vertex topology vertex else vertex
@@ -117,10 +117,10 @@ let curve_mesh geometry =
       if expand then
         let positions = expanded_vec3 topology count
             (Point (Geometry.positions geometry))
-            |> Packed.Float3.Private.view |> mesh_vec3 in
+            |> Packed.Float3.View.view |> mesh_vec3 in
         let normals = Option.map (fun source ->
           expanded_vec3 topology count source
-          |> Packed.Float3.Private.view |> mesh_vec3)
+          |> Packed.Float3.View.view |> mesh_vec3)
             normals in
         let colors = Option.map (color_array ~expanded:true topology count) colors
         and tex_coords = Option.map
@@ -129,9 +129,9 @@ let curve_mesh geometry =
           ?normals ?colors ?tex_coords positions
       else
         let positions = Geometry.positions geometry
-            |> Packed.Float3.Private.view |> mesh_vec3 in
+            |> Packed.Float3.View.view |> mesh_vec3 in
         let normals = Option.map (function
-          | Point values -> Packed.Float3.Private.view values |> mesh_vec3
+          | Point values -> Packed.Float3.View.view values |> mesh_vec3
           | Vertex _ -> assert false) normals in
         let colors = Option.map (color_array ~expanded:false topology count) colors
         and tex_coords = Option.map
@@ -161,10 +161,10 @@ let rec to_mesh_raw_impl geometry =
           let count = Topology.vertex_count topology in
           let position_source = Point (Geometry.positions geometry) in
           let positions = expanded_vec3 topology count position_source
-              |> Packed.Float3.Private.view |> mesh_vec3 in
+              |> Packed.Float3.View.view |> mesh_vec3 in
           let normals = Option.map (fun source ->
             expanded_vec3 topology count source
-            |> Packed.Float3.Private.view |> mesh_vec3) normals in
+            |> Packed.Float3.View.view |> mesh_vec3) normals in
           let colors = Option.map (color_array ~expanded:true topology count) colors
           and tex_coords = Option.map
               (tex_coord_array ~expanded:true topology count) tex_coords in
@@ -173,9 +173,9 @@ let rec to_mesh_raw_impl geometry =
             ?normals ?colors ?tex_coords positions
         else
           let positions = Geometry.positions geometry
-              |> Packed.Float3.Private.view |> mesh_vec3 in
+              |> Packed.Float3.View.view |> mesh_vec3 in
           let normals = Option.map (function
-            | Point values -> Packed.Float3.Private.view values |> mesh_vec3
+            | Point values -> Packed.Float3.View.view values |> mesh_vec3
             | Vertex _ -> assert false) normals in
           let count = Geometry.point_count geometry in
           let colors = Option.map (color_array ~expanded:false topology count) colors
@@ -185,7 +185,7 @@ let rec to_mesh_raw_impl geometry =
             Mesh.Private.create_packed_shared ~mode:Mesh.Points ?normals ?colors
               ?tex_coords positions
           else
-            let view = Topology.Private.view topology in
+            let view = Topology.View.view topology in
             Mesh.Private.create_packed_shared ~mode:Mesh.Triangles
               ~indices:view.vertex_points ?normals ?colors ?tex_coords positions
 
@@ -201,7 +201,7 @@ let to_trace_mesh geometry =
     to_mesh_raw_impl triangles)
 
 let rdk_float3 (view : Mesh.Private.vec3_view) =
-  Packed.Float3.Private.of_shared_exn ~x:view.x ~y:view.y ~z:view.z
+  Packed.Float3.View.of_shared_exn ~x:view.x ~y:view.y ~z:view.z
 
 let color_attribute colors =
   let count = Array.length colors in
@@ -239,7 +239,7 @@ let of_mesh_raw_impl mesh =
               let primitive_count = Array.length view.indices / 3 in
               let offsets = Array.init (primitive_count + 1) (fun index ->
                 index * 3) in
-              Topology.Private.polygons_shared
+              Topology.View.polygons_shared
                 ~point_count:(Packed.Float3.length positions)
                 ~vertex_points:view.indices ~primitive_offsets:offsets
         | _ -> assert false in

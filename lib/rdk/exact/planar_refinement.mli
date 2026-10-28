@@ -49,7 +49,7 @@ val provenance_parent_second : t -> int -> int
 val provenance_parent_third : t -> int -> int
 val provenance_parent_weights : t -> int -> float * float * float
 
-module Private : sig
+module View : sig
   val approximate_x : t -> float array
   val approximate_y : t -> float array
   (** Borrowed final projected-coordinate planes for audited adapters. *)

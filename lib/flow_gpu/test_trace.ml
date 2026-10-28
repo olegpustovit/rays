@@ -17,9 +17,9 @@ let vertex_bytes geometry =
   assert (Surface_index.triangle_count index = 2);
   let positions = Geometry.positions geometry and bytes = Bytes.create 72 in
   for triangle = 0 to 1 do
-    let prim = Surface_index.Private.triangle_primitive index triangle in
+    let prim = Surface_index.View.triangle_primitive index triangle in
     for corner = 0 to 2 do
-      let x, y, z = Packed.Float3.get positions (Surface_index.Private.triangle_point index triangle corner) in
+      let x, y, z = Packed.Float3.get positions (Surface_index.View.triangle_point index triangle corner) in
       List.iteri (fun k v -> Bytes.set_int32_le bytes ((prim * 9 + corner * 3 + k) * 4) (Int32.bits_of_float v)) [x; y; z]
     done
   done;

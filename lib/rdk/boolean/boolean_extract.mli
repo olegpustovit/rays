@@ -1,4 +1,4 @@
-(** Private typed expression extraction from classified Weiler cells. *)
+(** View typed expression extraction from classified Weiler cells. *)
 
 type expression =
   | Left
@@ -34,7 +34,7 @@ val build_with_ancestry :
   Boolean_complex.t -> Boolean_weiler.t -> Boolean_cells.t ->
   (ancestry, Error.t) result
 
-module Private : sig
+module View : sig
   type barycentric_cache
   type ancestry_view = {
 

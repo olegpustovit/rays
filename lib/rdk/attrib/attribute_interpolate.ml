@@ -31,28 +31,28 @@ type plane =
       source : string array; output : string array; existing : string array option;
     }
   | Float2_plane of {
-      source : Packed.Float2.Private.view;
-      output : Packed.Float2.Private.view;
-      existing : Packed.Float2.Private.view option;
+      source : Packed.Float2.View.view;
+      output : Packed.Float2.View.view;
+      existing : Packed.Float2.View.view option;
     }
   | Float3_plane of {
-      source : Packed.Float3.Private.view;
-      output : Packed.Float3.Private.view;
-      existing : Packed.Float3.Private.view option;
+      source : Packed.Float3.View.view;
+      output : Packed.Float3.View.view;
+      existing : Packed.Float3.View.view option;
     }
   | Float4_plane of {
-      source : Packed.Float4.Private.view;
-      output : Packed.Float4.Private.view;
-      existing : Packed.Float4.Private.view option;
+      source : Packed.Float4.View.view;
+      output : Packed.Float4.View.view;
+      existing : Packed.Float4.View.view option;
     }
   | Int_array_plane of {
-      source : Packed.Int_array.Private.view;
-      existing : Packed.Int_array.Private.view option;
+      source : Packed.Int_array.View.view;
+      existing : Packed.Int_array.View.view option;
       choices : int array;
     }
   | Float_array_plane of {
-      source : Packed.Float_array.Private.view;
-      existing : Packed.Float_array.Private.view option;
+      source : Packed.Float_array.View.view;
+      existing : Packed.Float_array.View.view option;
       choices : int array;
     }
 
@@ -126,13 +126,13 @@ let create_group_jobs ~target_owner ~target groups =
               Hashtbl.add seen (Group.name source) ();
               let existing = Geometry.find_group ~owner:target_group_owner
                   (Group.name source) target in
-              let existing_bits = Option.map Group.Private.bits_view existing in
+              let existing_bits = Option.map Group.View.bits_view existing in
               let output_bits = match existing_bits with
                 | None -> Bytes.make ((target_count + 7) / 8) '\000'
                 | Some bits -> Bytes.copy bits in
               create ({
                 group_source_owner = spec.group_source_owner;
-                group_source_bits = Group.Private.bits_view source;
+                group_source_bits = Group.View.bits_view source;
                 group_target_owner = target_group_owner;
                 group_target_name = Group.name source;
                 group_existing_bits = existing_bits;
@@ -168,12 +168,12 @@ let source_storage source_owner source_name source =
     | None -> Error (Printf.sprintf
         "Attribute Interpolate: source is missing %s attribute %S"
         (owner_name source_owner) source_name)
-    | Some attribute -> Ok (Attribute.Private.storage attribute)
+    | Some attribute -> Ok (Attribute.View.storage attribute)
 
 let target_storage target_owner target_name target =
   if target_owner = Attribute.Point && String.equal target_name "P" then
     Some (Attribute.Float3 (Geometry.positions target))
-  else Option.map Attribute.Private.storage
+  else Option.map Attribute.View.storage
       (Geometry.find_attribute ~owner:target_owner target_name target)
 
 let kind_matches source target = match source, target with
@@ -238,21 +238,21 @@ let create_job ~target_owner ~source ~target spec =
             existing = Option.map (function Attribute.Text values -> values
               | _ -> assert false) existing }
         | Attribute.Float2 source ->
-            let source = Packed.Float2.Private.view source in
+            let source = Packed.Float2.View.view source in
             let existing = Option.map (function Attribute.Float2 values ->
-              Packed.Float2.Private.view values | _ -> assert false) existing in
-            let output = Packed.Float2.Private.view (Packed.Float2.of_owned
+              Packed.Float2.View.view values | _ -> assert false) existing in
+            let output = Packed.Float2.View.view (Packed.Float2.of_owned
                 ~x:(match existing with Some values -> Array.copy values.x
                   | None -> Array.make count 0.)
                 ~y:(match existing with Some values -> Array.copy values.y
                   | None -> Array.make count 0.) |> Result.get_ok) in
             Float2_plane { source; output; existing }
         | Attribute.Float3 source ->
-            let source = Packed.Float3.Private.view source in
+            let source = Packed.Float3.View.view source in
             let existing = Option.map (function Attribute.Float3 values ->
-              Packed.Float3.Private.view values | _ -> assert false) existing in
-            let output = Packed.Float3.Private.view
-                (Packed.Float3.Private.of_owned_exn
+              Packed.Float3.View.view values | _ -> assert false) existing in
+            let output = Packed.Float3.View.view
+                (Packed.Float3.View.of_owned_exn
                   ~x:(match existing with Some values -> Array.copy values.x
                     | None -> Array.make count 0.)
                   ~y:(match existing with Some values -> Array.copy values.y
@@ -261,10 +261,10 @@ let create_job ~target_owner ~source ~target spec =
                     | None -> Array.make count 0.)) in
             Float3_plane { source; output; existing }
         | Attribute.Float4 source ->
-            let source = Packed.Float4.Private.view source in
+            let source = Packed.Float4.View.view source in
             let existing = Option.map (function Attribute.Float4 values ->
-              Packed.Float4.Private.view values | _ -> assert false) existing in
-            let output = Packed.Float4.Private.view (Packed.Float4.of_owned
+              Packed.Float4.View.view values | _ -> assert false) existing in
+            let output = Packed.Float4.View.view (Packed.Float4.of_owned
                 ~x:(match existing with Some values -> Array.copy values.x
                   | None -> Array.make count 0.)
                 ~y:(match existing with Some values -> Array.copy values.y
@@ -276,15 +276,15 @@ let create_job ~target_owner ~source ~target spec =
             Float4_plane { source; output; existing }
         | Attribute.Int_array source ->
             let existing = Option.map (function Attribute.Int_array values ->
-              Packed.Int_array.Private.view values | _ -> assert false) existing in
+              Packed.Int_array.View.view values | _ -> assert false) existing in
             Int_array_plane {
-              source = Packed.Int_array.Private.view source;
+              source = Packed.Int_array.View.view source;
               existing; choices = Array.make count (-1) }
         | Attribute.Float_array source ->
             let existing = Option.map (function Attribute.Float_array values ->
-              Packed.Float_array.Private.view values | _ -> assert false) existing in
+              Packed.Float_array.View.view values | _ -> assert false) existing in
             Float_array_plane {
-              source = Packed.Float_array.Private.view source;
+              source = Packed.Float_array.View.view source;
               existing; choices = Array.make count (-1) } in
       Ok { source_owner = spec.source_owner; target_owner;
         target_name = spec.target_name; position; normalize; plane })
@@ -500,9 +500,9 @@ let array_offsets ?cancel ~operation ~source_offsets ~existing_offsets choices =
 
 let materialize_int_array ?cancel ~grain source existing choices =
   let existing_offsets = Option.map
-      (fun (view : Packed.Int_array.Private.view) -> view.offsets) existing in
+      (fun (view : Packed.Int_array.View.view) -> view.offsets) existing in
   let offsets = array_offsets ?cancel ~operation:"Attribute Interpolate int array"
-      ~source_offsets:source.Packed.Int_array.Private.offsets ~existing_offsets
+      ~source_offsets:source.Packed.Int_array.View.offsets ~existing_offsets
       choices in
   let count = Array.length choices and values = Array.make offsets.(Array.length choices) 0 in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
@@ -519,14 +519,14 @@ let materialize_int_array ?cancel ~grain source existing choices =
                 offsets.(destination)
                 (offsets.(destination + 1) - offsets.(destination))
         else ());
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
+  Packed.Int_array.View.create_validated_owned ~offsets ~values
 
 let materialize_float_array ?cancel ~grain source existing choices =
   let existing_offsets = Option.map
-      (fun (view : Packed.Float_array.Private.view) -> view.offsets) existing in
+      (fun (view : Packed.Float_array.View.view) -> view.offsets) existing in
   let offsets = array_offsets ?cancel
       ~operation:"Attribute Interpolate float array"
-      ~source_offsets:source.Packed.Float_array.Private.offsets ~existing_offsets
+      ~source_offsets:source.Packed.Float_array.View.offsets ~existing_offsets
       choices in
   let count = Array.length choices
   and values = Array.make offsets.(Array.length choices) 0. in
@@ -544,7 +544,7 @@ let materialize_float_array ?cancel ~grain source existing choices =
                 offsets.(destination)
                 (offsets.(destination + 1) - offsets.(destination))
         else ());
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values
+  Packed.Float_array.View.create_validated_owned ~offsets ~values
 
 let storage_of_job ?cancel ~grain job = match job.plane with
   | Float_plane values -> Attribute.Float values.output
@@ -553,7 +553,7 @@ let storage_of_job ?cancel ~grain job = match job.plane with
   | Float2_plane values -> Attribute.Float2 (Packed.Float2.of_owned
       ~x:values.output.x ~y:values.output.y |> Result.get_ok)
   | Float3_plane values -> Attribute.Float3
-      (Packed.Float3.Private.of_owned_exn ~x:values.output.x
+      (Packed.Float3.View.of_owned_exn ~x:values.output.x
         ~y:values.output.y ~z:values.output.z)
   | Float4_plane values -> Attribute.Float4 (Packed.Float4.of_owned
       ~x:values.output.x ~y:values.output.y ~z:values.output.z
@@ -566,7 +566,7 @@ let storage_of_job ?cancel ~grain job = match job.plane with
         values.choices)
 
 let groups_of_jobs jobs = Array.map (fun job ->
-    Group.Private.of_owned_bits ~owner:job.group_target_owner
+    Group.View.of_owned_bits ~owner:job.group_target_owner
       ~name:job.group_target_name ~length:job.group_target_count
       job.group_output_bits) jobs
 
@@ -583,8 +583,8 @@ let[@inline always] commit_group_score job destination ~blend score =
 let interpolate_primitive_groups ?cancel ?(grain = 16_384) ?selection
     ~unmatched ~blend ~pre_scale ~primitive_numbers ~uvw ~topology
     ~primitive_count jobs =
-  let topology : Topology.Private.view = topology
-  and uvw : Packed.Float3.Private.view = uvw in
+  let topology : Topology.View.view = topology
+  and uvw : Packed.Float3.View.view = uvw in
   if Array.length jobs = 0 then ()
   else
     let target_count = jobs.(0).group_target_count in
@@ -655,7 +655,7 @@ let install ?cancel ~grain ?(extra = [||]) ?(groups = [||]) jobs target =
   | None ->
       let attributes = Array.append
           (Array.of_list (List.rev !attributes)) extra in
-      Geometry.Private.with_merged_attributes_and_groups_owned
+      Geometry.View.with_merged_attributes_and_groups_owned
         ?positions:!position ~attributes ~groups target
 
 let compute_primitive_weights ?cancel ?(grain = 16_384) ?selection ~unmatched
@@ -680,11 +680,11 @@ let compute_primitive_weights ?cancel ?(grain = 16_384) ?selection ~unmatched
     let existing_result = match existing_numbers, existing_weights with
       | None, None -> Ok None
       | Some numbers, Some weights ->
-          (match Attribute.Private.storage numbers,
-              Attribute.Private.storage weights with
+          (match Attribute.View.storage numbers,
+              Attribute.View.storage weights with
            | Attribute.Int_array numbers, Attribute.Float_array weights ->
-               let numbers = Packed.Int_array.Private.view numbers
-               and weights = Packed.Float_array.Private.view weights in
+               let numbers = Packed.Int_array.View.view numbers
+               and weights = Packed.Float_array.View.view weights in
                if numbers.offsets = weights.offsets then Ok (Some (numbers, weights))
                else Error
                  "Attribute Interpolate: existing computed array row layouts differ"
@@ -693,8 +693,8 @@ let compute_primitive_weights ?cancel ?(grain = 16_384) ?selection ~unmatched
       | Some _, None | None, Some _ -> Error
           "Attribute Interpolate: existing computed number and weight attributes must occur together" in
     Result.bind existing_result (fun existing ->
-    let uvw : Packed.Float3.Private.view = uvw in
-    let topology = Topology.Private.view (Geometry.topology source)
+    let uvw : Packed.Float3.View.view = uvw in
+    let topology = Topology.View.view (Geometry.topology source)
     and primitive_count = Geometry.primitive_count source
     and target_count = owner_count target target_owner in
     let selected destination = match selection with
@@ -759,9 +759,9 @@ let compute_primitive_weights ?cancel ?(grain = 16_384) ?selection ~unmatched
                 | _ -> assert false
             done
           end);
-    let numbers = Packed.Int_array.Private.create_validated_owned ~offsets
+    let numbers = Packed.Int_array.View.create_validated_owned ~offsets
         ~values:numbers
-    and weights = Packed.Float_array.Private.create_validated_owned
+    and weights = Packed.Float_array.View.create_validated_owned
         ~offsets:(Array.copy offsets) ~values:weights in
     Result.bind (Attribute.create_owned ~owner:target_owner
         ~name:computed.computed_numbers_attribute (Attribute.Int_array numbers))
@@ -795,10 +795,10 @@ let interpolate_primitive ?cancel ?(grain = 16_384) ?selection ?compute
         "Attribute Interpolate: missing destination float3 attribute %S"
         uvw_attribute)
     | Some primitive_driver, Some uvw_driver ->
-        (match Attribute.Private.storage primitive_driver,
-            Attribute.Private.storage uvw_driver with
+        (match Attribute.View.storage primitive_driver,
+            Attribute.View.storage uvw_driver with
          | Attribute.Int primitive_numbers, Attribute.Float3 uvw ->
-             let uvw = Packed.Float3.Private.view uvw in
+             let uvw = Packed.Float3.View.view uvw in
              Result.bind (selection_elements target_owner selection target)
                (fun (selected_count, selected_element) ->
              Result.bind (create_group_jobs ~target_owner ~target groups)
@@ -842,7 +842,7 @@ let interpolate_primitive ?cancel ?(grain = 16_384) ?selection ?compute
                      && Float.is_finite uvw.z.(element)) then
                    invalid_arg "Attribute Interpolate: UVW contains a non-finite value"
                done;
-               let topology = Topology.Private.view (Geometry.topology source)
+               let topology = Topology.View.view (Geometry.topology source)
                and primitive_count = Geometry.primitive_count source
                and point_numeric = select_jobs jobs Attribute.Point true
                and vertex_numeric = select_jobs jobs Attribute.Vertex true
@@ -958,9 +958,9 @@ let weighted_owner_supported weighted_owner source_owner = match weighted_owner 
 let interpolate_weighted_groups ?cancel ?(grain = 16_384) ?selection
     ~unmatched ~blend ~pre_scale ~normalize_weights ~threshold ~weighted_owner
     ~numbers ~weights ~topology ~primitive_of_vertex jobs =
-  let topology : Topology.Private.view = topology
-  and numbers : Packed.Int_array.Private.view = numbers
-  and weights : Packed.Float_array.Private.view = weights in
+  let topology : Topology.View.view = topology
+  and numbers : Packed.Int_array.View.view = numbers
+  and weights : Packed.Float_array.View.view = weights in
   if Array.length jobs = 0 then ()
   else
     let target_count = jobs.(0).group_target_count in
@@ -1045,11 +1045,11 @@ let interpolate_weighted ?cancel ?(grain = 16_384) ?selection
         "Attribute Interpolate: missing destination float-array attribute %S"
         weights_attribute)
     | Some numbers_driver, Some weights_driver ->
-        (match Attribute.Private.storage numbers_driver,
-            Attribute.Private.storage weights_driver with
+        (match Attribute.View.storage numbers_driver,
+            Attribute.View.storage weights_driver with
          | Attribute.Int_array numbers, Attribute.Float_array weights ->
-             let numbers = Packed.Int_array.Private.view numbers
-             and weights = Packed.Float_array.Private.view weights in
+             let numbers = Packed.Int_array.View.view numbers
+             and weights = Packed.Float_array.View.view weights in
              if numbers.offsets <> weights.offsets then Error
                  "Attribute Interpolate: number and weight row layouts must match"
              else Result.bind (selection_elements target_owner selection target)
@@ -1113,7 +1113,7 @@ let interpolate_weighted ?cancel ?(grain = 16_384) ?selection
                match !invalid with
                | Some message -> Error message
                | None ->
-                   let topology = Topology.Private.view (Geometry.topology source) in
+                   let topology = Topology.View.view (Geometry.topology source) in
                    let needs_primitive_map = weighted_owner = Vertices
                        && (Array.exists (fun job ->
                          job.source_owner = Attribute.Primitive) jobs

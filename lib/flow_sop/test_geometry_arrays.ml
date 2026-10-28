@@ -19,8 +19,8 @@ let geometry=function
   |Ok(output:Sop.Session.output)->Result.get_ok(Sop.Payload.geometry output.payload)
   |Error diagnostic->failwith(Diagnostic.error_to_string diagnostic)
 let fields geometry=
-  let topology=Topology.Private.view(Geometry.topology geometry)
-  and positions=Packed.Float3.Private.view(Geometry.positions geometry)in
+  let topology=Topology.View.view(Geometry.topology geometry)
+  and positions=Packed.Float3.View.view(Geometry.positions geometry)in
   ["points",E.Vec3_array(Array.init(Array.length positions.x*3)(fun i->
       match i mod 3 with 0->positions.x.(i/3)|1->positions.y.(i/3)|_->positions.z.(i/3)));
    "vertex_points",E.Int_array(Array.copy topology.vertex_points);
@@ -30,7 +30,7 @@ let fixtures ()=
   let make count vertices offsets kinds=
     let topology=Topology.create_owned ~point_count:count ~vertex_points:vertices
       ~primitive_offsets:offsets ~primitive_kinds:kinds |>get_string_ok in
-    let positions=Packed.Float3.Private.of_owned_exn ~x:(Array.init count float)
+    let positions=Packed.Float3.View.of_owned_exn ~x:(Array.init count float)
       ~y:(Array.init count(fun i->if i mod 2=0 then -0. else 0.25)) ~z:(Array.make count 2.)in
     Geometry.create ~positions ~topology () |>get_string_ok in
   [make 0 [||][|0|][||];make 5 [|0;1;2;2;1;3|][|0;3;6|][|Topology.Polygon;Polygon|];
@@ -174,7 +174,7 @@ let ()=
   check((Sop.Node.facts node).reads=[])"C1 topology-only capture reads unrelated attributes";
   with_session(fun session->
     ignore(geometry(cook session node));
-    let positions=Packed.Float3.Private.of_owned_exn ~x:(Array.make(Geometry.point_count input)8.)
+    let positions=Packed.Float3.View.of_owned_exn ~x:(Array.make(Geometry.point_count input)8.)
       ~y:(Array.make(Geometry.point_count input)4.) ~z:(Array.make(Geometry.point_count input)2.) in
     let changed=Geometry.with_positions positions input |>get_string_ok in
     let changed=Geometry.with_attribute(Attribute.create_owned ~name:"unrelated" ~owner:Point
@@ -340,7 +340,7 @@ let ()=
    rules. Both public forms reach the same immutable topology boundary. *)
 let plane_type=Flow.Ty.Record(List.map(fun name->name,Flow.Ty.Array Flow.Ty.Float)["x";"y";"z"])
 let plane_fields geometry=
-  let p=Packed.Float3.Private.view(Geometry.positions geometry)in
+  let p=Packed.Float3.View.view(Geometry.positions geometry)in
   ("points",E.Record["x",E.Float_array(Array.copy p.x);"y",E.Float_array(Array.copy p.y);"z",E.Float_array(Array.copy p.z)])
     ::List.tl(fields geometry)
 let plane_arrays_source={|(workspace planes
@@ -394,7 +394,7 @@ let ()=
     match cook session ~domains(plane_arrays ~reference(replace key value))with
     |Error d->check(d.code=code)"Mesh planes malformed storage changed error code"
     |Ok _->fail "Mesh planes malformed storage succeeded")) [1;4;8]) [false;true])bad;
-  List.iter(fun axis->List.iter(fun bad->let p=Packed.Float3.Private.view(Geometry.positions(List.nth(fixtures())1))in
+  List.iter(fun axis->List.iter(fun bad->let p=Packed.Float3.View.view(Geometry.positions(List.nth(fixtures())1))in
     let point_fields=List.map(fun(name,values)->let values=Array.copy values in
       if name=axis then values.(0)<-bad;name,E.Float_array values)["x",p.x;"y",p.y;"z",p.z]in
     List.iter(fun reference->match L.workspace ~reference ~factories
@@ -582,7 +582,7 @@ let ()=
     (graph g :context sop (sop/compact_mesh)))|}in
   let topology=Topology.create_owned ~point_count:3 ~vertex_points:[|0;1;2|]
     ~primitive_offsets:[|0;3|] ~primitive_kinds:[|Topology.Polygon|]|>get_string_ok in
-  let positions=Packed.Float3.Private.of_owned_exn ~x:[|1.;1.;1.|] ~y:[|-0.;-0.;-0.|] ~z:[|2.;2.;2.|]in
+  let positions=Packed.Float3.View.of_owned_exn ~x:[|1.;1.;1.|] ~y:[|-0.;-0.;-0.|] ~z:[|2.;2.;2.|]in
   let expected=Geometry.create ~positions ~topology ()|>get_string_ok|>geometry_bytes in
   List.iter(fun reference->let _,node=L.workspace ~reference ~factories(parse source)|>flow|>compile in
     List.iter(fun domains->List.iter(fun grain->with_session(fun session->
@@ -594,7 +594,7 @@ let ()=
   let invoke name args=(Option.get(Flow.Op.find name Flow.Context.value)).body
     ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args in
   let int_attribute name geometry=match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-    |Some attribute->(match Attribute.Private.storage attribute with Attribute.Int a->a|_->assert false)
+    |Some attribute->(match Attribute.View.storage attribute with Attribute.Int a->a|_->assert false)
     |None->assert false in
   let texts=[|"b";"a";"b";"\255\128";"x\000y";"é日本😀";"\240\144\128\128";"\238\128\128"|]in
   List.iter(fun(storage,keys)->let count=match keys with

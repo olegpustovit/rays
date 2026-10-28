@@ -38,7 +38,7 @@ let validate_edge_group geometry = function
       else Ok ()
 
 let validate_positions ?cancel geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let invalid = ref (-1) and point = ref 0 in
   while !point < Array.length positions.x && !invalid < 0 do
     if !point land 4095 = 0 then Cancel.check_opt cancel;
@@ -57,7 +57,7 @@ let target_values ?cancel name geometry = match name with
         | None -> fail (Printf.sprintf
             "point target-size attribute %S does not exist" name)
         | Some attribute ->
-            (match Attribute.Private.storage attribute with
+            (match Attribute.View.storage attribute with
              | Attribute.Float values ->
                  let invalid = ref (-1) and point = ref 0 in
                  while !point < Array.length values && !invalid < 0 do
@@ -95,18 +95,18 @@ let uv_reader name geometry =
   match Geometry.find_attribute ~owner:Attribute.Vertex name geometry with
   | None -> Ok None
   | Some attribute ->
-      let equal = match Attribute.Private.storage attribute with
+      let equal = match Attribute.View.storage attribute with
         | Attribute.Float values -> Some (fun a b -> values.(a) = values.(b))
         | Attribute.Float2 values ->
-            let values = Packed.Float2.Private.view values in
+            let values = Packed.Float2.View.view values in
             Some (fun a b -> values.x.(a) = values.x.(b)
               && values.y.(a) = values.y.(b))
         | Attribute.Float3 values ->
-            let values = Packed.Float3.Private.view values in
+            let values = Packed.Float3.View.view values in
             Some (fun a b -> values.x.(a) = values.x.(b)
               && values.y.(a) = values.y.(b) && values.z.(a) = values.z.(b))
         | Attribute.Float4 values ->
-            let values = Packed.Float4.Private.view values in
+            let values = Packed.Float4.View.view values in
             Some (fun a b -> values.x.(a) = values.x.(b)
               && values.y.(a) = values.y.(b) && values.z.(a) = values.z.(b)
               && values.w.(a) = values.w.(b))
@@ -119,12 +119,12 @@ let uv_reader name geometry =
            name))
 
 let endpoint_vertices topology index edge incidence =
-  let vertex = index.Topology_index.Private.edge_vertices.(incidence) in
+  let vertex = index.Topology_index.View.edge_vertices.(incidence) in
   let next = index.next_vertex.(vertex) in
   if next < 0 then None
   else
     let a = index.edge_a.(edge) and b = index.edge_b.(edge)
-    and point = topology.Topology.Private.vertex_points.(vertex)
+    and point = topology.Topology.View.vertex_points.(vertex)
     and next_point = topology.vertex_points.(next) in
     if point = a && next_point = b then Some (vertex, next)
     else if point = b && next_point = a then Some (next, vertex)
@@ -133,9 +133,9 @@ let endpoint_vertices topology index edge incidence =
 let install_feature_groups ?cancel ~grain ~hard_points ~hard_edges
     ~preserve_uv_seams ~uv_attribute ~point_name ~edge_name geometry =
   let topology_value = Geometry.topology geometry in
-  let topology = Topology.Private.view topology_value in
+  let topology = Topology.View.view topology_value in
   let index_value = Topology_index.create ?cancel topology_value in
-  let index = Topology_index.Private.view index_value in
+  let index = Topology_index.View.view index_value in
   let uv = if preserve_uv_seams then uv_reader uv_attribute geometry else Ok None in
   Result.bind uv (fun uv_equal ->
     let feature_edges = Edge_group.init ~grain ~topology:topology_value
@@ -168,7 +168,7 @@ let feature_group name geometry = match Geometry.find_edge_group name geometry w
   | None -> fail "internal feature-edge ancestry was lost"
 
 let primitive_is_triangle topology primitive =
-  Bytes.unsafe_get topology.Topology.Private.primitive_kinds primitive = '\000'
+  Bytes.unsafe_get topology.Topology.View.primitive_kinds primitive = '\000'
   && topology.primitive_offsets.(primitive + 1)
      - topology.primitive_offsets.(primitive) = 3
 
@@ -415,7 +415,7 @@ let edge_group_index l name = let found = ref (-1) in
 
 let local_of_geometry ?cancel ~grain ~target_size_attribute geometry =
   let topology_value = Geometry.topology geometry in
-  let topology = Topology.Private.view topology_value in
+  let topology = Topology.View.view topology_value in
   let tris = Bytes.length topology.primitive_kinds in
   for primitive = 0 to tris - 1 do
     if primitive land 4095 = 0 then Cancel.check_opt cancel;
@@ -427,8 +427,8 @@ let local_of_geometry ?cancel ~grain ~target_size_attribute geometry =
   (* The shared reverse index is usually cached for this geometry (feature
      installation, smoothing and projection build it); its edge numbering is
      the one the selections tie-break on. *)
-  let index = Topology_index.Private.view (Topology_index.create ?cancel topology_value) in
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let index = Topology_index.View.view (Topology_index.create ?cancel topology_value) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let point_groups = Geometry.groups geometry
       |> List.filter (fun group -> Group.owner group = Group.Point)
       |> Array.of_list in
@@ -440,7 +440,7 @@ let local_of_geometry ?cancel ~grain ~target_size_attribute geometry =
     | None -> [||]
     | Some name -> (match Geometry.find_attribute ~owner:Attribute.Point name
         geometry with
-      | Some attribute -> (match Attribute.Private.storage attribute with
+      | Some attribute -> (match Attribute.View.storage attribute with
           | Attribute.Float values -> Array.copy values
           | _ -> invalid_arg (Printf.sprintf
               "%s: point target-size attribute %S must be scalar float"
@@ -1355,7 +1355,7 @@ let materialize l =
       vertex_weight.(target) <- l.c_weight.(corner)
     done
   done;
-  let topology = Topology.Private.create_validated_owned ~point_count
+  let topology = Topology.View.create_validated_owned ~point_count
       ~vertex_points
       ~primitive_offsets:(Array.init (ranking.tri_count + 1) (fun rank -> rank * 3))
       ~primitive_kinds:(Bytes.make ranking.tri_count '\000') in
@@ -1397,7 +1397,7 @@ let materialize l =
              let mapped = Array.to_list order |> List.filter_map (fun point ->
                let target = p_map.(point) in
                if target >= 0 then Some target else None) |> Array.of_list in
-             Group.Private.with_owned_order mapped target)
+             Group.View.with_owned_order mapped target)
     | Group.Vertex ->
         let index = !next_vertex in
         incr next_vertex;
@@ -1412,13 +1412,13 @@ let materialize l =
              let mapped = Array.to_list order |> List.filter_map (fun corner ->
                let target = corner_rank.(corner) in
                if target >= 0 then Some target else None) |> Array.of_list in
-             Group.Private.with_owned_order mapped target)
+             Group.View.with_owned_order mapped target)
     | Group.Primitive ->
         let target = Group.init ~grain ~owner:Group.Primitive
             ~name:(Group.name group) ranking.tri_count (fun rank ->
               Group.mem primitive_source.(rank) group) in
         if not (Group.is_ordered group) then target
-        else Group.Private.remap_order ~source:group
+        else Group.View.remap_order ~source:group
           ~source_of_target:primitive_source target) in
   let edge_groups = Array.to_list (Array.mapi (fun index name ->
     let source = l.e_groups.(index) in
@@ -1430,10 +1430,10 @@ let materialize l =
           (Char.chr (Char.code (Bytes.unsafe_get bits slot) lor mask))
       end
     done;
-    Edge_group.Private.of_owned_bits ~topology ~edge_count:ranking.edge_count
+    Edge_group.View.of_owned_bits ~topology ~edge_count:ranking.edge_count
       ~name bits) l.edge_group_names) in
   Result.map (fun geometry -> geometry, p_map)
-    (Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+    (Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
       ~topology ~attributes ~groups ~edge_groups ())
 
 (* Smoothing constraints over the materialized points. *)
@@ -1473,7 +1473,7 @@ let project_to_reference ?cancel ~grain ~surface ~scratch reference geometry =
     let primitives = scratch.primitives and triangles = scratch.triangles
     and a = scratch.barycentric_a and b = scratch.barycentric_b
     and c = scratch.barycentric_c and distances = scratch.distances_squared in
-    Surface_index.Private.closest_many_into ?cancel ~selection:used ~grain surface
+    Surface_index.View.closest_many_into ?cancel ~selection:used ~grain surface
       ~queries:(Geometry.positions geometry) ~max_distance_squared:infinity
       ~primitives ~triangles ~barycentric_a:a ~barycentric_b:b
       ~barycentric_c:c ~distances_squared:distances;
@@ -1483,9 +1483,9 @@ let project_to_reference ?cancel ~grain ~surface ~scratch reference geometry =
     if !missed >= 0 then fail (Printf.sprintf
         "could not project point %d to the input surface" !missed)
     else
-      let source_positions = Packed.Float3.Private.view (Geometry.positions reference)
-      and source_topology = Topology.Private.view (Geometry.topology reference)
-      and current = Packed.Float3.Private.view (Geometry.positions geometry) in
+      let source_positions = Packed.Float3.View.view (Geometry.positions reference)
+      and source_topology = Topology.View.view (Geometry.topology reference)
+      and current = Packed.Float3.View.view (Geometry.positions geometry) in
       let x = Array.copy current.x and y = Array.copy current.y
       and z = Array.copy current.z in
       if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
@@ -1493,9 +1493,9 @@ let project_to_reference ?cancel ~grain ~surface ~scratch reference geometry =
         if point land 4095 = 0 then Cancel.check_opt cancel;
         if Group.mem point used then begin
           let triangle = triangles.(point) in
-          let vertex0 = Surface_index.Private.triangle_vertex surface triangle 0
-          and vertex1 = Surface_index.Private.triangle_vertex surface triangle 1
-          and vertex2 = Surface_index.Private.triangle_vertex surface triangle 2 in
+          let vertex0 = Surface_index.View.triangle_vertex surface triangle 0
+          and vertex1 = Surface_index.View.triangle_vertex surface triangle 1
+          and vertex2 = Surface_index.View.triangle_vertex surface triangle 2 in
           let p0 = source_topology.vertex_points.(vertex0)
           and p1 = source_topology.vertex_points.(vertex1)
           and p2 = source_topology.vertex_points.(vertex2) in
@@ -1510,18 +1510,18 @@ let project_to_reference ?cancel ~grain ~surface ~scratch reference geometry =
             +. c.(point) *. source_positions.z.(p2)
         end);
       Geometry.with_positions
-        (Packed.Float3.Private.of_owned_exn ~x ~y ~z) geometry
+        (Packed.Float3.View.of_owned_exn ~x ~y ~z) geometry
 
 let install_outputs ?cancel ~grain ~target_length ~target_size_attribute
     ~edge_name ~output_hard_edges ~output_mesh_size ~output_quality geometry =
   let topology_value = Geometry.topology geometry in
-  let topology = Topology.Private.view topology_value in
+  let topology = Topology.View.view topology_value in
   Result.bind (feature_group edge_name geometry) (fun features ->
   let with_hard_edges = match output_hard_edges with
     | None -> Ok geometry
     | Some name ->
         let index_value = Topology_index.create ?cancel topology_value in
-        let index = Topology_index.Private.view index_value in
+        let index = Topology_index.View.view index_value in
         let group = Edge_group.init ~grain ~topology:topology_value
             ~index:index_value ~name (fun edge ->
           Edge_group.mem edge features
@@ -1545,7 +1545,7 @@ let install_outputs ?cancel ~grain ~target_length ~target_size_attribute
   Result.bind with_size (fun geometry -> match output_quality with
     | None -> Ok geometry
     | Some name ->
-        let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+        let positions = Packed.Float3.View.view (Geometry.positions geometry) in
         let primitive_count = Geometry.primitive_count geometry in
         let quality = Parallel.init_array ~grain primitive_count (fun primitive ->
           if primitive land 4095 = 0 then Cancel.check_opt cancel;
@@ -1639,7 +1639,7 @@ let run ?cancel ?(grain = 16_384) ?(iterations = 3) ?(smoothing = 0.5)
            in place and the result is materialized once. *)
         let l, cached_ranking = match !cached with
           | Some (l, ranking) ->
-              let positions = Packed.Float3.Private.view
+              let positions = Packed.Float3.View.view
                   (Geometry.positions !current) in
               Array.blit positions.x 0 l.x 0 l.points;
               Array.blit positions.y 0 l.y 0 l.points;

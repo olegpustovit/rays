@@ -5,7 +5,7 @@ open Rdk
 let get = function Ok value -> value | Error error -> fail (Error.to_string error)
 let near a b = abs_float (a -. b) <= 1e-12
 
-let positions geometry = Packed.Float3.Private.view (Geometry.positions geometry)
+let positions geometry = Packed.Float3.View.view (Geometry.positions geometry)
 
 let attribute owner name storage =
   Attribute.create_owned ~owner ~name storage |> Result.get_ok
@@ -18,7 +18,7 @@ let check_point geometry point (x, y, z) message =
   check (near p.x.(point) x && near p.y.(point) y && near p.z.(point) z) message
 
 let two_triangles () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;0.;10.;14.;10.|] ~y:[|0.;0.;2.;0.;0.;2.|]
       ~z:(Array.make 6 0.) in
   let topology = Topology.polygons_owned ~point_count:6
@@ -28,13 +28,13 @@ let two_triangles () =
 
 let int_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Int values -> values | _ -> fail (name ^ " storage"))
   | None -> fail (name ^ " missing")
 
 let text_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Text values -> values | _ -> fail (name ^ " storage"))
   | None -> fail (name ^ " missing")
 

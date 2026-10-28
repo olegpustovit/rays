@@ -145,15 +145,15 @@ let options args =
   Result.map(fun _->owner,kind)(value_type kind))))
 let storage ~owner ~name geometry =
   if owner=A.Point && name="P" then Some (A.Float3 (G.positions geometry))
-  else Option.map A.Private.storage (G.find_attribute ~owner name geometry)
+  else Option.map A.View.storage (G.find_attribute ~owner name geometry)
 let storage_kind = function
   | A.Float _->"float"|Int _->"int"|Float2 _->"vec2"|Float3 _->"vec3"
   | Float4 _->"vec4"|Text _->"text"|Float_array _->"float_array"|Int_array _->"int_array"
 let columns = function
   | A.Float data -> Some [|data|]
-  | Float2 data -> let p=Rdk.Packed.Float2.Private.view data in Some [|p.x;p.y|]
-  | Float3 data -> let p=P.Private.view data in Some [|p.x;p.y;p.z|]
-  | Float4 data -> let p=Rdk.Packed.Float4.Private.view data in Some [|p.x;p.y;p.z;p.w|]
+  | Float2 data -> let p=Rdk.Packed.Float2.View.view data in Some [|p.x;p.y|]
+  | Float3 data -> let p=P.View.view data in Some [|p.x;p.y;p.z|]
+  | Float4 data -> let p=Rdk.Packed.Float4.View.view data in Some [|p.x;p.y;p.z;p.w|]
   | _ -> None
 let typed_storage ~owner ~name ~kind geometry =
   match storage ~owner ~name geometry with
@@ -170,10 +170,10 @@ let read ?component ~owner ~kind name geometry =
   | None -> (match storage,component with
       | A.Int data,None -> Ok(E.Int_array(Array.copy data))
       | A.Text data,None -> Ok(E.Text_array(Array.copy data))
-      | A.Float_array data,Some "offsets" -> Ok(E.Int_array(Array.copy (Rdk.Packed.Float_array.Private.view data).offsets))
-      | A.Float_array data,Some "values" -> Ok(E.Float_array(Array.copy (Rdk.Packed.Float_array.Private.view data).values))
-      | A.Int_array data,Some "offsets" -> Ok(E.Int_array(Array.copy (Rdk.Packed.Int_array.Private.view data).offsets))
-      | A.Int_array data,Some "values" -> Ok(E.Int_array(Array.copy (Rdk.Packed.Int_array.Private.view data).values))
+      | A.Float_array data,Some "offsets" -> Ok(E.Int_array(Array.copy (Rdk.Packed.Float_array.View.view data).offsets))
+      | A.Float_array data,Some "values" -> Ok(E.Float_array(Array.copy (Rdk.Packed.Float_array.View.view data).values))
+      | A.Int_array data,Some "offsets" -> Ok(E.Int_array(Array.copy (Rdk.Packed.Int_array.View.view data).offsets))
+      | A.Int_array data,Some "values" -> Ok(E.Int_array(Array.copy (Rdk.Packed.Int_array.View.view data).values))
       | _ -> error "E_ATTR_TYPE" "This attribute storage requires its typed array foundation.")
   | Some planes ->
       let count = owner_count geometry owner and width=Array.length planes in
@@ -309,7 +309,7 @@ and concrete_args ~geometry args =
 let make_storage kind planes = match kind with
   | "float" -> Ok (A.Float planes.(0))
   | "vec2" -> Result.map (fun data->A.Float2 data) (Rdk.Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1))
-  | "vec3" -> Ok (A.Float3 (P.Private.of_shared_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2)))
+  | "vec3" -> Ok (A.Float3 (P.View.of_shared_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2)))
   | "vec4" -> Result.map (fun data->A.Float4 data) (Rdk.Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1) ~z:planes.(2) ~w:planes.(3))
   | _ -> Error "Unsupported floating attribute type"
 let install ~owner ~kind name planes geometry =
@@ -339,13 +339,13 @@ let borrowed_storage ~geometry values =
         |(A.Float_array _|A.Int_array _),None->error "E_ATTR_TYPE" "This attribute storage requires its typed array foundation."
         |storage,None->Ok(storage,count)
         |A.Float_array data,Some(E.Text "offsets") ->
-            let data=(Rdk.Packed.Float_array.Private.view data).offsets in Ok(A.Int data,Array.length data)
+            let data=(Rdk.Packed.Float_array.View.view data).offsets in Ok(A.Int data,Array.length data)
         |A.Float_array data,Some(E.Text "values") ->
-            let data=(Rdk.Packed.Float_array.Private.view data).values in Ok(A.Float data,Array.length data)
+            let data=(Rdk.Packed.Float_array.View.view data).values in Ok(A.Float data,Array.length data)
         |A.Int_array data,Some(E.Text "offsets") ->
-            let data=(Rdk.Packed.Int_array.Private.view data).offsets in Ok(A.Int data,Array.length data)
+            let data=(Rdk.Packed.Int_array.View.view data).offsets in Ok(A.Int data,Array.length data)
         |A.Int_array data,Some(E.Text "values") ->
-            let data=(Rdk.Packed.Int_array.Private.view data).values in Ok(A.Int data,Array.length data)
+            let data=(Rdk.Packed.Int_array.View.view data).values in Ok(A.Int data,Array.length data)
         |_->error "E_ATTR_TYPE" "This attribute storage requires its typed array foundation." in
       Result.bind result(fun(storage,count)->Result.bind(value_type(storage_kind storage))(fun actual->
         if ty<>Flow.Ty.Any && ty<>actual then error "E_DATA_SOURCE" "The host returned a data source of the wrong type."
@@ -694,7 +694,7 @@ let write_planes ?state ?elems ?gpu ~strict ~resolve ~geometry ~owner ~kind ~nam
   | Some packed when Flow_ir.Packed.elementwise packed ->
       let region=packed in
       if width kind=0 || Array.length region.outputs<>1 || Array.length region.outputs.(0)<>width kind then Ok None else
-      let original=P.Private.view (G.positions target) in
+      let original=P.View.view (G.positions target) in
       let original=[|original.x;original.y;original.z|] in
       let count=owner_count target owner in
       let column_source=borrowed_columns ~geometry in

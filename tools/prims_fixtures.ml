@@ -527,7 +527,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     add_host "sop/context_seed" [E.Text "noise_displace";context] (json (E.Int result)))
     ["Noise Displace";"result";"é日";""]) [0L;1L;(-1L);42L;Int64.max_int;Int64.min_int];
   let geometry =
-    let positions=Rdk.Packed.Float3.Private.of_owned_exn ~x:[|0.;1.;0.|] ~y:[|0.;0.;1.|] ~z:[|0.;0.;0.|] in
+    let positions=Rdk.Packed.Float3.View.of_owned_exn ~x:[|0.;1.;0.|] ~y:[|0.;0.;1.|] ~z:[|0.;0.;0.|] in
     let topology=Rdk.Topology.polygons_owned ~point_count:3 ~vertex_points:[|0;1;2|] ~primitive_offsets:[|0;3|] |> Result.get_ok in
     let attributes=List.concat_map (fun (owner,count) -> List.map (fun name ->
       Rdk.Attribute.create_owned ~name ~owner (Rdk.Attribute.Float (Array.init count float)) |> Result.get_ok)
@@ -536,8 +536,8 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     Rdk.Geometry.create ~positions ~topology ~attributes () |> Result.get_ok in
   let owner_name=function Rdk.Attribute.Point->"point"|Vertex->"vertex"|Primitive->"primitive"|Detail->"detail" in
   let geometry_value geometry =
-    let topology=Rdk.Topology.Private.view (Rdk.Geometry.topology geometry) in
-    let positions=Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions geometry) in
+    let topology=Rdk.Topology.View.view (Rdk.Geometry.topology geometry) in
+    let positions=Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry) in
     let positions=Array.init (Array.length positions.x*3) (fun i -> match i mod 3 with
       |0->positions.x.(i/3)|1->positions.y.(i/3)|_->positions.z.(i/3)) in
     let tuple width planes =
@@ -547,19 +547,19 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
       | Rdk.Attribute.Float values -> "float",E.Float_array values
       | Int values -> "int",E.Int_array values
       | Text values -> "text",E.Text_array values
-      | Float2 values -> let v=Rdk.Packed.Float2.Private.view values in "vec2",tuple 2 [|v.x;v.y|]
-      | Float3 values -> let v=Rdk.Packed.Float3.Private.view values in "vec3",tuple 3 [|v.x;v.y;v.z|]
-      | Float4 values -> let v=Rdk.Packed.Float4.Private.view values in "vec4",tuple 4 [|v.x;v.y;v.z;v.w|]
-      | Float_array values -> let v=Rdk.Packed.Float_array.Private.view values in
+      | Float2 values -> let v=Rdk.Packed.Float2.View.view values in "vec2",tuple 2 [|v.x;v.y|]
+      | Float3 values -> let v=Rdk.Packed.Float3.View.view values in "vec3",tuple 3 [|v.x;v.y;v.z|]
+      | Float4 values -> let v=Rdk.Packed.Float4.View.view values in "vec4",tuple 4 [|v.x;v.y;v.z;v.w|]
+      | Float_array values -> let v=Rdk.Packed.Float_array.View.view values in
           "float_array",E.Record["offsets",E.Int_array v.offsets;"values",E.Float_array v.values]
-      | Int_array values -> let v=Rdk.Packed.Int_array.Private.view values in
+      | Int_array values -> let v=Rdk.Packed.Int_array.View.view values in
           "int_array",E.Record["offsets",E.Int_array v.offsets;"values",E.Int_array v.values] in
     E.Record ["positions",E.Vec3_array positions;
       "vertex_points",E.List (Array.map (fun n->E.Int n) topology.vertex_points);
       "primitive_offsets",E.List (Array.map (fun n->E.Int n) topology.primitive_offsets);
       "primitive_kinds",E.Text (Bytes.to_string topology.primitive_kinds);
       "attributes",E.List (Array.of_list (List.map (fun attribute->
-        let kind,values=storage(Rdk.Attribute.Private.storage attribute) in
+        let kind,values=storage(Rdk.Attribute.View.storage attribute) in
         E.Record ["owner",E.Text (owner_name (Rdk.Attribute.owner attribute));"name",E.Text (Rdk.Attribute.name attribute);
           "type",E.Text kind;"values",values]) (Rdk.Geometry.attributes geometry)));
       "groups",E.List(Array.of_list(List.map(fun group->
@@ -710,7 +710,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     let fresh=match kind with
       |"float"->Rdk.Attribute.Float(floats 1)|"int"->Int(Array.init count(fun i->max_int-i))
       |"vec2"->Float2(Result.get_ok(Rdk.Packed.Float2.of_owned ~x:(floats 1) ~y:(floats 1)))
-      |"vec3"->Float3(Rdk.Packed.Float3.Private.of_owned_exn ~x:(floats 1) ~y:(floats 1) ~z:(floats 1))
+      |"vec3"->Float3(Rdk.Packed.Float3.View.of_owned_exn ~x:(floats 1) ~y:(floats 1) ~z:(floats 1))
       |"vec4"->Float4(Result.get_ok(Rdk.Packed.Float4.of_owned ~x:(floats 1) ~y:(floats 1) ~z:(floats 1) ~w:(floats 1)))
       |"float_array"->Float_array(Result.get_ok(Rdk.Packed.Float_array.create_owned
           ~offsets:(Array.init(count+1)(fun i->if i=0 then 0 else 2)) ~values:[|(-0.);0.25|]))
@@ -735,7 +735,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
         let storage=match kind with
           |"float"->Rdk.Attribute.Float planes.(0)
           |"vec2"->Float2(Result.get_ok(Rdk.Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)))
-          |"vec3"->Float3(Rdk.Packed.Float3.Private.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
+          |"vec3"->Float3(Rdk.Packed.Float3.View.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
           |_->Float4(Result.get_ok(Rdk.Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1) ~z:planes.(2) ~w:planes.(3))) in
         let bad_geometry=Rdk.Geometry.with_attribute
           (Rdk.Attribute.create_owned ~owner:owner_enum ~name:"typed" storage|>Result.get_ok)geometry|>Result.get_ok in
@@ -767,7 +767,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
      direct writer boundary as the JS geometry-host primitive. *)
   let planar_pack planes=match Array.length planes with
     |2->Rdk.Attribute.Float2(Rdk.Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)|>Result.get_ok)
-    |3->Float3(Rdk.Packed.Float3.Private.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
+    |3->Float3(Rdk.Packed.Float3.View.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
     |_->Float4(Rdk.Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1) ~z:planes.(2) ~w:planes.(3)|>Result.get_ok) in
   let planar_record planes=E.Record(List.mapi(fun c data->[|"x";"y";"z";"w"|].(c),E.Float_array data)(Array.to_list planes)) in
   let planar_add args expected =
@@ -781,7 +781,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     Result.bind(Flow_sop.Attribute_kernel.owner owner)(fun owner->
       Result.map geometry_value(Flow_sop.Attribute_kernel.write ~grain:97 ~owner ~kind name values geo)) in
   let empty=Rdk.Geometry.create
-    ~positions:(Rdk.Packed.Float3.Private.of_owned_exn ~x:[||] ~y:[||] ~z:[||])
+    ~positions:(Rdk.Packed.Float3.View.of_owned_exn ~x:[||] ~y:[||] ~z:[||])
     ~topology:(Rdk.Topology.empty ~point_count:0)()|>Result.get_ok in
   let bytes=Rdk.Attribute.create_owned ~owner:Rdk.Attribute.Detail ~name:"planar_bytes"
     (Rdk.Attribute.Text[|"\255\000é"|])|>Result.get_ok in
@@ -837,7 +837,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
   let topology_fixture points vertices offsets kinds =
     let topology=Rdk.Topology.create_owned ~point_count:points ~vertex_points:vertices
       ~primitive_offsets:offsets ~primitive_kinds:kinds |>Result.get_ok in
-    let positions=Rdk.Packed.Float3.Private.of_owned_exn
+    let positions=Rdk.Packed.Float3.View.of_owned_exn
       ~x:(Array.init points float) ~y:(Array.make points 0.) ~z:(Array.make points 0.) in
     Rdk.Geometry.create ~positions ~topology () |>Result.get_ok in
   let topology_fixtures = [
@@ -848,8 +848,8 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     topology_fixture 6 [|0;1;2;0;1;3;1;0;4;0;1;5|] [|0;3;6;9;12|]
       [|Rdk.Topology.Polygon;Open_polyline;Closed_polyline;Polygon|]] in
   let mesh_fields geometry =
-    let topology=Rdk.Topology.Private.view(Rdk.Geometry.topology geometry)
-    and positions=Rdk.Packed.Float3.Private.view(Rdk.Geometry.positions geometry) in
+    let topology=Rdk.Topology.View.view(Rdk.Geometry.topology geometry)
+    and positions=Rdk.Packed.Float3.View.view(Rdk.Geometry.positions geometry) in
     ["points",E.Vec3_array(Array.init(Array.length positions.x*3)(fun i->
         match i mod 3 with 0->positions.x.(i/3)|1->positions.y.(i/3)|_->positions.z.(i/3)));
       "vertex_points",E.Int_array topology.vertex_points;
@@ -883,7 +883,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
   let mesh_case ?(planes=false) fields=add_host (if planes then "sop/mesh_planes" else "sop/mesh")
     (List.map snd fields)(host_result(fun()->mesh ~planes fields)) in
   let mesh_plane_fields geometry=
-    let p=Rdk.Packed.Float3.Private.view(Rdk.Geometry.positions geometry)in
+    let p=Rdk.Packed.Float3.View.view(Rdk.Geometry.positions geometry)in
     ("points",E.Record["x",E.Float_array p.x;"y",E.Float_array p.y;"z",E.Float_array p.z])
       ::List.tl(mesh_fields geometry)in
   List.iter(fun geometry->
@@ -1089,7 +1089,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
      "points",E.Record["x",E.Float_array[||];"y",E.Float_array[|0.|];"z",E.Float_array[||]];
      "points",E.Record["x",E.Float_array[||];"y",E.Float_array[|nan|];"z",E.Float_array[||]]];
   List.iter(fun axis->List.iter(fun bad->
-    let p=Rdk.Packed.Float3.Private.view(Rdk.Geometry.positions(List.nth topology_fixtures 1))in
+    let p=Rdk.Packed.Float3.View.view(Rdk.Geometry.positions(List.nth topology_fixtures 1))in
     let coordinates=E.Record(List.map(fun(name,values)->let values=Array.copy values in
       if name=axis then values.(0)<-bad;name,E.Float_array values)["x",p.x;"y",p.y;"z",p.z])in
     mesh_case ~planes:true(("points",coordinates)::List.tl plane_base)) [nan;infinity;neg_infinity]) ["x";"y";"z"];
@@ -1325,8 +1325,8 @@ List.iter(fun bad->
   and y=Array.make count 0. and z=Array.make count 0. in
   (* Only x is invalid where flagged; keep every other row wholly finite. *)
   Array.fill y 0 count 0.;
-  let directions=Rdk.Packed.Float3.Private.of_owned_exn ~x ~y ~z in
-  let positions=Rdk.Packed.Float3.Private.of_owned_exn
+  let directions=Rdk.Packed.Float3.View.of_owned_exn ~x ~y ~z in
+  let positions=Rdk.Packed.Float3.View.of_owned_exn
     ~x:(Array.make count 0.) ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
   let topology=Rdk.Topology.empty ~point_count:count in
   let geometry=Rdk.Geometry.create ~positions ~topology()|>Result.get_ok in
@@ -1355,7 +1355,7 @@ List.iter(fun bad->
       let kinds=["float",Attribute.Float(floats 0);"int",Int(Array.init n(fun i->(1 lsl 55)+i));
         "text",Text(Array.init n(fun i->if i mod 2=0 then "猫\255" else "😀\000"));
         "vec2",Float2(Packed.Float2.of_owned ~x:(floats 1) ~y:(floats 2)|>get_string_ok);
-        "vec3",Float3(Packed.Float3.Private.of_owned_exn ~x:(floats 3) ~y:(floats 4) ~z:(floats 5));
+        "vec3",Float3(Packed.Float3.View.of_owned_exn ~x:(floats 3) ~y:(floats 4) ~z:(floats 5));
         "vec4",Float4(Packed.Float4.of_owned ~x:(floats 2) ~y:(floats 3) ~z:(floats 4) ~w:(floats 5)|>get_string_ok);
         "mat16",Float_array(Packed.Float_array.create_owned ~offsets
           ~values:(Array.init(n*16)raw)|>get_string_ok);
@@ -1374,13 +1374,13 @@ List.iter(fun bad->
       [Group.Point;Vertex;Primitive] in
     let index=Topology_index.create topology in
     let edge_groups=[Edge_group.init ~topology ~index ~name:"edges"(fun i->i mod 2=0)] in
-    Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn
+    Geometry.create ~positions:(Packed.Float3.View.of_owned_exn
       ~x:(Array.init count raw) ~y:(Array.init count(fun i->raw(i+1))) ~z:(Array.init count(fun i->raw(i+2))))
       ~topology ~attributes:attrs ~groups ~edge_groups () |>get_string_ok in
   let remap_target copies source =
     let open Rdk in
     let get_string_ok = Result.get_ok in
-    let t=Topology.Private.view(Geometry.topology source) in
+    let t=Topology.View.view(Geometry.topology source) in
     let points=Geometry.point_count source and vertices=Geometry.vertex_count source
     and primitives=Geometry.primitive_count source in
     let topology=Topology.create_owned ~point_count:(copies*points)
@@ -1388,7 +1388,7 @@ List.iter(fun bad->
       ~primitive_offsets:(Array.init(copies*primitives+1)(fun i->if i=copies*primitives then copies*vertices
         else t.primitive_offsets.(i mod primitives)+(i/primitives)*vertices))
       ~primitive_kinds:(Array.init(copies*primitives)(fun _->Topology.Polygon)) |>get_string_ok in
-    Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x:(Array.make(copies*points)3.)
+    Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x:(Array.make(copies*points)3.)
       ~y:(Array.make(copies*points)(-0.)) ~z:(Array.make(copies*points)7.)) ~topology () |>get_string_ok
  in
 (* Opaque affinity survives independently encoded source/target records. This
@@ -1432,7 +1432,7 @@ let remap_case source target fields =
         let hex text=String.init(2*String.length text)(fun i->
           "0123456789abcdef".[(Char.code text.[i/2] lsr (if i mod 2=0 then 4 else 0)) land 15]) in
         let text_bytes=Rdk.Geometry.attributes value |>List.filter_map(fun attribute->
-          match Rdk.Attribute.Private.storage attribute with
+          match Rdk.Attribute.View.storage attribute with
           |Rdk.Attribute.Text strings->Some(E.Record[
               "owner",E.Text(match Rdk.Attribute.owner attribute with
                 Point->"point"|Vertex->"vertex"|Primitive->"primitive"|Detail->"detail");
@@ -1473,10 +1473,10 @@ let large_attributes=[
     (Text(Array.init large_count(fun i->large_text.(i mod Array.length large_text))))|>Result.get_ok] in
 let large_order=Rdk.Group.ordered ~owner:Point ~name:"ordered" ~length:large_count
   (Array.init large_count(fun i->large_count-1-i))|>Result.get_ok in
-let large_source=Rdk.Geometry.create ~positions:(Rdk.Packed.Float3.Private.of_owned_exn
+let large_source=Rdk.Geometry.create ~positions:(Rdk.Packed.Float3.View.of_owned_exn
   ~x:(Array.init large_count raw) ~y:(Array.make large_count(-0.)) ~z:(Array.make large_count 0.))
   ~topology:large_topology ~attributes:large_attributes ~groups:[large_order]()|>Result.get_ok in
-let large_target=Rdk.Geometry.create ~positions:(Rdk.Packed.Float3.Private.of_owned_exn
+let large_target=Rdk.Geometry.create ~positions:(Rdk.Packed.Float3.View.of_owned_exn
   ~x:(Array.make large_count 0.) ~y:(Array.make large_count 0.) ~z:(Array.make large_count 0.))
   ~topology:large_topology()|>Result.get_ok in
 remap_case large_source large_target ["points",E.Int_array(Array.init large_count Fun.id);
@@ -1496,7 +1496,7 @@ List.iter(fun(name,value)->remap_case source target
 (* Native and host accept shared topology with changed P, but reject equal
    connectivity allocated under a distinct native topology identity. *)
 let source=remap_source 3 in
-let changed_p=Rdk.Geometry.with_positions(Rdk.Packed.Float3.Private.of_owned_exn
+let changed_p=Rdk.Geometry.with_positions(Rdk.Packed.Float3.View.of_owned_exn
   ~x:[|8.;7.;6.|] ~y:[|-0.;0.;-0.|] ~z:[|2.;3.;4.|])source|>Result.get_ok in
 let unrelated=remap_target 1 source in
 let fields=["points",E.Int_array[|0;1;2|];"vertices",E.Int_array[|0;1;2|];

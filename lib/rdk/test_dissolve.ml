@@ -50,15 +50,15 @@ let add_payload geometry =
 
 let int_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry |> Option.get
-        |> Attribute.Private.storage with
+        |> Attribute.View.storage with
   | Attribute.Int values -> values
   | _ -> fail (name ^ " storage")
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.vertex_points = rt.vertex_points
   && lt.primitive_offsets = rt.primitive_offsets
@@ -68,20 +68,20 @@ let equal_geometry left right =
   && List.for_all2 (fun left right ->
     Attribute.owner left = Attribute.owner right
     && Attribute.name left = Attribute.name right
-    && match Attribute.Private.storage left, Attribute.Private.storage right with
+    && match Attribute.View.storage left, Attribute.View.storage right with
        | Attribute.Float a, Attribute.Float b -> a = b
        | Attribute.Int a, Attribute.Int b -> a = b
        | Attribute.Text a, Attribute.Text b -> a = b
        | Attribute.Float2 a, Attribute.Float2 b ->
-           Packed.Float2.Private.view a = Packed.Float2.Private.view b
+           Packed.Float2.View.view a = Packed.Float2.View.view b
        | Attribute.Float3 a, Attribute.Float3 b ->
-           Packed.Float3.Private.view a = Packed.Float3.Private.view b
+           Packed.Float3.View.view a = Packed.Float3.View.view b
        | Attribute.Float4 a, Attribute.Float4 b ->
-           Packed.Float4.Private.view a = Packed.Float4.Private.view b
+           Packed.Float4.View.view a = Packed.Float4.View.view b
        | Attribute.Int_array a, Attribute.Int_array b ->
-           Packed.Int_array.Private.view a = Packed.Int_array.Private.view b
+           Packed.Int_array.View.view a = Packed.Int_array.View.view b
        | Attribute.Float_array a, Attribute.Float_array b ->
-           Packed.Float_array.Private.view a = Packed.Float_array.Private.view b
+           Packed.Float_array.View.view a = Packed.Float_array.View.view b
        | _ -> false) (Geometry.attributes left) (Geometry.attributes right)
   && List.compare_lengths (Geometry.groups left) (Geometry.groups right) = 0
   && List.for_all2 (fun left right ->
@@ -89,7 +89,7 @@ let equal_geometry left right =
     && Group.name left = Group.name right
     && Group.length left = Group.length right
     && Group.ordered_elements left = Group.ordered_elements right
-    && Group.Private.bits_view left = Group.Private.bits_view right)
+    && Group.View.bits_view left = Group.View.bits_view right)
       (Geometry.groups left) (Geometry.groups right)
   && List.compare_lengths (Geometry.edge_groups left)
        (Geometry.edge_groups right) = 0
@@ -158,7 +158,7 @@ let test_boundary () =
          = Topology.Open_polyline) "boundary dissolve curve"
 
 let ring () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|-2.;2.;2.;-2.; -1.;1.;1.;-1.|]
       ~y:[|0.;0.;0.;0.; 0.;0.;0.;0.|]
       ~z:[|-2.;-2.;2.;2.; -1.;-1.;1.;1.|] in
@@ -203,7 +203,7 @@ let test_errors_and_curves () =
        "foreign topology diagnostic"
    | Ok _ -> fail "foreign edge group accepted");
   let malformed vertex_points =
-    let positions = Packed.Float3.Private.of_owned_exn
+    let positions = Packed.Float3.View.of_owned_exn
         ~x:[|0.;1.;0.;1.;0.5|] ~y:[|0.;0.;1.;1.;2.|]
         ~z:(Array.make 5 0.) in
     let topology = Topology.polygons_owned ~point_count:5 ~vertex_points
@@ -231,7 +231,7 @@ let test_errors_and_curves () =
 let test_normals () =
   let source = two_quads () in
   let normals = Attribute.create_owned ~owner:Attribute.Point ~name:"N"
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:(Array.make (Geometry.point_count source) 1.)
         ~y:(Array.make (Geometry.point_count source) 0.)
         ~z:(Array.make (Geometry.point_count source) 0.))) |> get in
@@ -242,9 +242,9 @@ let test_normals () =
       |> Option.get in
   check (Attribute.length normal = Geometry.point_count output)
     "recomputed normal cardinality";
-  match Attribute.Private.storage normal with
+  match Attribute.View.storage normal with
   | Attribute.Float3 values ->
-      let values = Packed.Float3.Private.view values in
+      let values = Packed.Float3.View.view values in
       check (Array.for_all (fun point ->
         let length = sqrt ((values.x.(point) *. values.x.(point))
           +. (values.y.(point) *. values.y.(point))

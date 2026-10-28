@@ -33,9 +33,9 @@ let compute_faces ?cancel ~grain ~need_inverse ?primitives geometry =
     (Face_normals.polygon_area_vector ?cancel ~grain ~need_inverse
       ~first_failure:false ?primitives ~operation geometry)
 
-let[@inline always] corner_angle (positions : Packed.Float3.Private.view)
-    (topology : Topology.Private.view) primitive vertex =
-  let first = topology.Topology.Private.primitive_offsets.(primitive)
+let[@inline always] corner_angle (positions : Packed.Float3.View.view)
+    (topology : Topology.View.view) primitive vertex =
+  let first = topology.Topology.View.primitive_offsets.(primitive)
   and last = topology.primitive_offsets.(primitive + 1) in
   let previous = if vertex = first then last - 1 else vertex - 1
   and next = if vertex + 1 = last then first else vertex + 1 in
@@ -60,8 +60,8 @@ let[@inline always] corner_angle (positions : Packed.Float3.Private.view)
       ((ux *. vx) +. (uy *. vy) +. (uz *. vz))
 
 let accumulate_points ?cancel ~weighting geometry faces =
-  let topology = Topology.Private.view (Geometry.topology geometry)
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry)
+  and positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = topology.point_count in
   let x = Array.make count 0. and y = Array.make count 0.
   and z = Array.make count 0. in
@@ -122,7 +122,7 @@ let accumulate_points ?cancel ~weighting geometry faces =
   { x; y; z }
 
 let selection_group ?cancel ~grain topology point_index edge_index selection owner =
-  let source = Topology.Private.view topology in
+  let source = Topology.View.view topology in
   let need_point_reverse = match owner, selection with
     | Attribute.Point, (Element_selection.Selected_vertices _
         | Selected_primitives _)
@@ -134,10 +134,10 @@ let selection_group ?cancel ~grain topology point_index edge_index selection own
           | Selected_primitives _ | Selected_edges _)
       | Attribute.Detail, _) -> false in
   let point_reverse = if need_point_reverse then
-      Some (Point_index.Private.view (Lazy.force point_index)) else None in
+      Some (Point_index.View.view (Lazy.force point_index)) else None in
   let edge_reverse = match selection, owner with
     | Element_selection.Selected_edges _, (Attribute.Point | Vertex | Primitive) ->
-        Some (Topology_index.Private.view (Lazy.force edge_index))
+        Some (Topology_index.View.view (Lazy.force edge_index))
     | _ -> None in
   let point_reverse () = Option.get point_reverse
   and edge_reverse () = Option.get edge_reverse in
@@ -232,9 +232,9 @@ let existing_planes ~owner ~attribute geometry =
   match Geometry.find_attribute ~owner attribute geometry with
   | None -> Ok None
   | Some value ->
-      (match Attribute.Private.storage value with
+      (match Attribute.View.storage value with
        | Attribute.Float3 values ->
-           let values = Packed.Float3.Private.view values in
+           let values = Packed.Float3.View.view values in
            Ok (Some { x = values.x; y = values.y; z = values.z })
        | _ -> Error (Printf.sprintf "%s: %s %s must have float3 storage"
            operation (match owner with Point -> "point" | Vertex -> "vertex"
@@ -301,7 +301,7 @@ let write_points ?cancel ~grain ~selection ~keep_original_zero ~reverse
 
 let write_smooth_vertices ?cancel ~grain ~selection ~keep_original_zero ~reverse
     ~existing topology output sums =
-  let source = Topology.Private.view topology in
+  let source = Topology.View.view topology in
   let count = Array.length source.vertex_points in
   let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
   let errors = Array.make ranges (-1) in
@@ -322,9 +322,9 @@ let write_smooth_vertices ?cancel ~grain ~selection ~keep_original_zero ~reverse
 
 let write_cusped_vertices ?cancel ~grain ~weighting ~cusp_angle ~selection
     ~keep_original_zero ~reverse ~existing geometry index faces output =
-  let topology = Topology.Private.view (Geometry.topology geometry)
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and reverse_topology = Point_index.Private.view index in
+  let topology = Topology.View.view (Geometry.topology geometry)
+  and positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and reverse_topology = Point_index.View.view index in
   let count = Array.length topology.vertex_points in
   let angles = match weighting with
     | Vertex_angle ->
@@ -390,7 +390,7 @@ let install ~owner ~attribute values geometry =
   let geometry = List.fold_left (fun geometry owner ->
       Geometry.without_attribute ~owner attribute geometry)
       geometry [Attribute.Point; Vertex; Primitive; Detail] in
-  let packed = Packed.Float3.Private.of_owned_exn
+  let packed = Packed.Float3.View.of_owned_exn
       ~x:values.x ~y:values.y ~z:values.z in
   Result.bind (Attribute.create_owned ~owner ~name:attribute
       (Attribute.Float3 packed)) (fun value -> Geometry.with_attribute value geometry)
@@ -400,7 +400,7 @@ let install ~owner ~attribute values geometry =
    point planes: the general owner-aware planner would otherwise retain a
    second point-sized buffer and box cross-function float arguments. *)
 let fast_point_area ?cancel ~grain geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   match Face_normals.polygon_area_vector ?cancel ~grain ~need_inverse:false
       ~first_failure:true ~operation geometry with
   | Error _ as error -> error
@@ -462,7 +462,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?primitives
        && not keep_original_zero && not reverse && String.equal attribute "N"
        && (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
            | None -> true
-           | Some value -> (match Attribute.Private.storage value with
+           | Some value -> (match Attribute.View.storage value with
                | Attribute.Float3 _ -> true | _ -> false))
     then fast_point_area ?cancel ~grain geometry
     else

@@ -13,7 +13,7 @@ let add_group group geometry = Geometry.with_group group geometry |> get_string_
 let point_float geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point float " ^ name)
@@ -21,7 +21,7 @@ let point_float geometry name =
 let point_int geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point integer " ^ name)
@@ -29,24 +29,24 @@ let point_int geometry name =
 let point_float3 geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point float3 " ^ name)
 
 let point_int_array geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Int_array values -> Packed.Int_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Int_array values -> Packed.Int_array.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point int array " ^ name)
 
 let point_float_array geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float_array values -> Packed.Float_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float_array values -> Packed.Float_array.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point float array " ^ name)
 
@@ -58,37 +58,37 @@ let source_points values = Line_geometry.points values
 let equal_attribute left right =
   Attribute.owner left = Attribute.owner right
   && String.equal (Attribute.name left) (Attribute.name right)
-  && match Attribute.Private.storage left, Attribute.Private.storage right with
+  && match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_geometry left right =
   let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -120,7 +120,7 @@ let check_basic_projection () =
   check (Array.length numbers.offsets = 4 && numbers.offsets = weights.offsets
       && numbers.offsets.(3) = 6) "Ray CSR provenance layout";
   let collision_positions = positions collision
-  and collision_topology = Topology.Private.view (Geometry.topology collision) in
+  and collision_topology = Topology.View.view (Geometry.topology collision) in
   for point = 0 to 1 do
     let first = numbers.offsets.(point) in
     let total = weights.values.(first) +. weights.values.(first + 1)
@@ -229,7 +229,7 @@ let check_multi_samples () =
     "Ray average provenance did not retain every successful sample";
   check (near (Array.fold_left ( +. ) 0. weights.values) 1.)
     "Ray average provenance weights do not sum to one";
-  let collision_topology = Topology.Private.view
+  let collision_topology = Topology.View.view
       (Geometry.topology collision_with_signal) in
   let reconstructed = ref 0. in
   for at = numbers.offsets.(0) to numbers.offsets.(1) - 1 do
@@ -261,7 +261,7 @@ let check_selection_and_directions () =
       ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source ~collision:(plane 0.) () |> get_ok |> positions in
   check (selected.y = [|2.; 0.; 2.|]) "Ray point restriction";
-  let directions = Packed.Float3.Private.of_owned_exn
+  let directions = Packed.Float3.View.of_owned_exn
       ~x:(Array.make 3 0.) ~y:[|-1.; -2.; -3.|] ~z:(Array.make 3 0.) in
   let direction_attribute = Attribute.create_owned ~name:"ray_dir"
       ~owner:Attribute.Point (Attribute.Float3 directions) |> get_string_ok in
@@ -311,7 +311,7 @@ let check_imports () =
     "Ray did not interpolate imported numeric fields at the hit";
   (match Geometry.find_attribute ~owner:Attribute.Point "material" output with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Text values -> check
             (values.(0) = "m1")
             "Ray primitive text import"
@@ -322,7 +322,7 @@ let check_imports () =
   (match Geometry.find_group ~owner:Group.Point "marked" output with
    | Some group -> check (Group.mem 0 group) "Ray group import"
    | None -> fail "Ray imported group missing");
-  let imported_normals = Packed.Float3.Private.of_owned_exn
+  let imported_normals = Packed.Float3.View.of_owned_exn
       ~x:(Array.make point_count 1.) ~y:(Array.make point_count 0.)
       ~z:(Array.make point_count 0.) in
   let imported_normals = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
@@ -367,7 +367,7 @@ let check_validation () =
       ~source ~collision ());
   let curve = Line_geometry.polyline [|(-1.,0.,0.); (1.,0.,0.)|] |> get_ok in
   expect_code "invalid_surface" (ray ~source ~collision:curve ());
-  let bad_direction = Packed.Float3.Private.of_owned_exn ~x:[|0.|]
+  let bad_direction = Packed.Float3.View.of_owned_exn ~x:[|0.|]
       ~y:[|Float.nan|] ~z:[|0.|] in
   let bad_direction = Attribute.create_owned ~name:"bad" ~owner:Attribute.Point
       (Attribute.Float3 bad_direction) |> get_string_ok in

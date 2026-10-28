@@ -12,7 +12,7 @@ let with_attribute attribute geometry =
   Geometry.with_attribute attribute geometry |> Result.get_ok
 
 let fixture () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.;3.;4.; 10.;11.;11.;10.|]
       ~y:[|0.;0.;0.;0.;0.; 0.;0.;1.;1.|] ~z:(Array.make 9 0.) in
   let topology = Topology.create_owned ~point_count:9
@@ -37,23 +37,23 @@ let fixture () =
     attribute Attribute.Detail "author" (Attribute.Text [|"curve"|]);
   ] () |> Result.get_ok
 
-let positions geometry = Packed.Float3.Private.view (Geometry.positions geometry)
+let positions geometry = Packed.Float3.View.view (Geometry.positions geometry)
 
 let float_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Float values -> values | _ -> fail (name ^ " storage"))
   | None -> fail (name ^ " missing")
 
 let int_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Int values -> values | _ -> fail (name ^ " storage"))
   | None -> fail (name ^ " missing")
 
 let text_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> (match Attribute.Private.storage attribute with
+  | Some attribute -> (match Attribute.View.storage attribute with
       | Attribute.Text values -> values | _ -> fail (name ^ " storage"))
   | None -> fail (name ^ " missing")
 
@@ -73,7 +73,7 @@ let equal_geometry left right =
 
 let large_fixture count =
   let points = count * 2 in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.init points (fun point -> Float.of_int (point / 2)))
       ~y:(Array.init points (fun point -> Float.of_int (point land 1)))
       ~z:(Array.make points 0.) in
@@ -91,7 +91,7 @@ let large_fixture count =
   |> Result.get_ok
 
 let long_curve_fixture point_count =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.init point_count Float.of_int) ~y:(Array.make point_count 0.)
       ~z:(Array.make point_count 0.) in
   let topology = Topology.create_owned ~point_count

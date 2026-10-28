@@ -1,4 +1,4 @@
-(** Private primitive-owned payload transfer for exact Boolean extraction. *)
+(** View primitive-owned payload transfer for exact Boolean extraction. *)
 
 val copy_primitives :
   ?cancel:Cancel.t -> grain:int -> Boolean_extract.ancestry ->

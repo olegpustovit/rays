@@ -1,4 +1,4 @@
-(** Private Weiler half-facet adjacency and local shell graph. *)
+(** View Weiler half-facet adjacency and local shell graph. *)
 
 type side = Negative | Positive
 type t
@@ -17,6 +17,6 @@ val facet_right_winding : t -> int -> int
 (** Signed operand contributions relative to the complex facet's stored
     orientation. Crossing Negative -> Positive subtracts these values. *)
 
-module Private : sig
+module View : sig
   val complex : t -> Boolean_complex.t
 end

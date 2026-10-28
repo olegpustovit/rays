@@ -59,7 +59,7 @@ let run () =
   and segment_z = [|0.;0.;0.; -1.;1.; -1.;1.|] in
   measure "segment_triangle_packed_filtered" count (fun index ->
     let p, q = if index land 1 = 0 then 3, 4 else 5, 6 in
-    Predicates.Private.segment_triangle_code_packed
+    Predicates.View.segment_triangle_code_packed
       ~x:segment_x ~y:segment_y ~z:segment_z
       ~segment_start:p ~segment_end:q ~triangle_a:0 ~triangle_b:1
       ~triangle_c:2);
@@ -76,7 +76,7 @@ let run () =
   and triangle_z = [|0.;0.;0.; -1.1;1.3;-0.9|]
   and triangle_output = Array.make 4 0 in
   measure "triangle_triangle_packed_filtered" count (fun _ ->
-    Predicates.Private.triangle_triangle_features_into
+    Predicates.View.triangle_triangle_features_into
       ~x:triangle_x ~y:triangle_y ~z:triangle_z
       ~left_a:0 ~left_b:1 ~left_c:2 ~right_a:3 ~right_b:4 ~right_c:5
       triangle_output);
@@ -85,7 +85,7 @@ let run () =
   and edge_y = [|0.;0.;2.; -0.5;1.5;1.5|]
   and edge_z = [|0.;0.;0.; -1.;1.;-1.|] in
   measure "triangle_triangle_edge_edge_fallback" fallback_count (fun _ ->
-    Predicates.Private.triangle_triangle_features_into
+    Predicates.View.triangle_triangle_features_into
       ~x:edge_x ~y:edge_y ~z:edge_z
       ~left_a:0 ~left_b:1 ~left_c:2 ~right_a:3 ~right_b:4 ~right_c:5
       triangle_output);

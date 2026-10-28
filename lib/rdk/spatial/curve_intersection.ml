@@ -28,7 +28,7 @@ let[@inline always] barycentric px py pz ax ay az bx by bz cx cy cz output offse
   end
 
 let[@inline always] load_relative scratch target positions point ox oy oz =
-  scratch.(target) <- positions.Packed.Float3.Private.x.(point) -. ox;
+  scratch.(target) <- positions.Packed.Float3.View.x.(point) -. ox;
   scratch.(target + 1) <- positions.y.(point) -. oy;
   scratch.(target + 2) <- positions.z.(point) -. oz
 
@@ -67,7 +67,7 @@ let segment_segment_events_into ~scratch ~events ~self ~tolerance
     ~right_a ~right_b ~right_u0 ~right_u1 =
   if Array.length scratch < 26 || Array.length events < 2 * stride then
     invalid_arg "Curve_intersection.segment_segment_events_into: scratch too small";
-  let ox = left_positions.Packed.Float3.Private.x.(left_a)
+  let ox = left_positions.Packed.Float3.View.x.(left_a)
   and oy = left_positions.y.(left_a) and oz = left_positions.z.(left_a) in
   scratch.(0) <- 0.; scratch.(1) <- 0.; scratch.(2) <- 0.;
   load_relative scratch 3 left_positions left_b ox oy oz;
@@ -174,7 +174,7 @@ let segment_triangle_events_into ~scratch ~events ~self ~tolerance
     ~triangle_c =
   if Array.length scratch < 26 || Array.length events < 2 * stride then
     invalid_arg "Curve_intersection.segment_triangle_events_into: scratch too small";
-  let ox = segment_positions.Packed.Float3.Private.x.(segment_a)
+  let ox = segment_positions.Packed.Float3.View.x.(segment_a)
   and oy = segment_positions.y.(segment_a) and oz = segment_positions.z.(segment_a) in
   scratch.(0) <- 0.; scratch.(1) <- 0.; scratch.(2) <- 0.;
   load_relative scratch 3 segment_positions segment_b ox oy oz;

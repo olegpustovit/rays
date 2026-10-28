@@ -14,7 +14,7 @@ let with_float name owner k g =
 let with_vec3 name k g =
   let n = Geometry.point_count g in
   Geometry.with_attribute (Attribute.create_owned ~name ~owner:Attribute.Point
-    (Attribute.Float3(Packed.Float3.Private.of_owned_exn ~x:(Array.init n (fun i->float (i+k)))
+    (Attribute.Float3(Packed.Float3.View.of_owned_exn ~x:(Array.init n (fun i->float (i+k)))
       ~y:(Array.make n (-0.)) ~z:(Array.make n 0.5))) |> get_string_ok) g |> get_string_ok
 let with_text name g =
   let n = Geometry.primitive_count g in

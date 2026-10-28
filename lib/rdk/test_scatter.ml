@@ -28,44 +28,44 @@ let attribute geometry owner name =
   | Some attribute -> attribute
   | None -> fail ("missing attribute " ^ name)
 
-let point_float geometry name = match Attribute.Private.storage
+let point_float geometry name = match Attribute.View.storage
     (attribute geometry Attribute.Point name) with
   | Attribute.Float values -> values
   | _ -> fail (name ^ " is not point float")
 
-let point_int geometry name = match Attribute.Private.storage
+let point_int geometry name = match Attribute.View.storage
     (attribute geometry Attribute.Point name) with
   | Attribute.Int values -> values
   | _ -> fail (name ^ " is not point int")
 
-let point_text geometry name = match Attribute.Private.storage
+let point_text geometry name = match Attribute.View.storage
     (attribute geometry Attribute.Point name) with
   | Attribute.Text values -> values
   | _ -> fail (name ^ " is not point text")
 
-let point_float2 geometry name = match Attribute.Private.storage
+let point_float2 geometry name = match Attribute.View.storage
     (attribute geometry Attribute.Point name) with
-  | Attribute.Float2 values -> Packed.Float2.Private.view values
+  | Attribute.Float2 values -> Packed.Float2.View.view values
   | _ -> fail (name ^ " is not point float2")
 
-let point_float3 geometry name = match Attribute.Private.storage
+let point_float3 geometry name = match Attribute.View.storage
     (attribute geometry Attribute.Point name) with
-  | Attribute.Float3 values -> Packed.Float3.Private.view values
+  | Attribute.Float3 values -> Packed.Float3.View.view values
   | _ -> fail (name ^ " is not point float3")
 
-let point_float4 geometry name = match Attribute.Private.storage
+let point_float4 geometry name = match Attribute.View.storage
     (attribute geometry Attribute.Point name) with
-  | Attribute.Float4 values -> Packed.Float4.Private.view values
+  | Attribute.Float4 values -> Packed.Float4.View.view values
   | _ -> fail (name ^ " is not point float4")
 
-let point_int_array geometry name = match Attribute.Private.storage
+let point_int_array geometry name = match Attribute.View.storage
     (attribute geometry Attribute.Point name) with
-  | Attribute.Int_array values -> Packed.Int_array.Private.view values
+  | Attribute.Int_array values -> Packed.Int_array.View.view values
   | _ -> fail (name ^ " is not point int array")
 
-let point_float_array geometry name = match Attribute.Private.storage
+let point_float_array geometry name = match Attribute.View.storage
     (attribute geometry Attribute.Point name) with
-  | Attribute.Float_array values -> Packed.Float_array.Private.view values
+  | Attribute.Float_array values -> Packed.Float_array.View.view values
   | _ -> fail (name ^ " is not point float array")
 
 let expect_code code = function
@@ -75,7 +75,7 @@ let expect_code code = function
   | Ok _ -> fail ("expected " ^ code)
 
 let two_triangles () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 0.; 10.; 11.; 10.|]
       ~y:[|0.; 0.; 0.; 0.; 0.; 0.|]
       ~z:[|0.; 0.; 1.; 0.; 0.; 1.|] in
@@ -87,7 +87,7 @@ let two_triangles () =
 
 let source_with_payload () =
   let source = two_triangles () in
-  let point_x = Packed.Float3.Private.view (Geometry.positions source) in
+  let point_x = Packed.Float3.View.view (Geometry.positions source) in
   source
   |> add (float_attribute ~owner:Attribute.Primitive "density" [|0.; 2.|])
   |> add (float_attribute ~owner:Attribute.Point "foo" (Array.copy point_x.x))

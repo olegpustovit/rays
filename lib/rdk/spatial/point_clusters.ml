@@ -94,7 +94,7 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
       Error (Printf.sprintf "%s point count exceeds spatial-table limits"
         operation)
     else begin
-      let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+      let positions = Packed.Float3.View.view (Geometry.positions geometry) in
       let min_x = ref infinity and min_y = ref infinity
       and min_z = ref infinity and max_x = ref neg_infinity
       and max_y = ref neg_infinity and max_z = ref neg_infinity

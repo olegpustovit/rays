@@ -46,7 +46,7 @@ let loop_pairs ?(pairs = 1) ?(source_points = 4) ?destination_points () =
         if point mod points_per_pair < source_points then "source" else "destination")))
       |> get
   and normals = Attribute.create_owned ~owner:Attribute.Point ~name:"N"
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:(Array.make point_count 1.) ~y:(Array.make point_count 0.)
         ~z:(Array.make point_count 0.))) |> get
   and vertex_attribute = Attribute.create_owned ~owner:Attribute.Vertex ~name:"corner"
@@ -63,7 +63,7 @@ let loop_pairs ?(pairs = 1) ?(source_points = 4) ?destination_points () =
       ~name:"source_points" point_count (fun point ->
         point mod points_per_pair < source_points) in
   let geometry = Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z) ~topology
+      ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z) ~topology
       ~attributes:[point_attribute;height_attribute;point_ids;point_labels;normals;
         vertex_attribute;vertex_height;primitive_attribute]
       ~groups:[vertex_group;source_faces;source_points_group] () |> get in
@@ -82,24 +82,24 @@ let loop_pairs ?(pairs = 1) ?(source_points = 4) ?destination_points () =
 
 let int_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry |> Option.get
-        |> Attribute.Private.storage with
+        |> Attribute.View.storage with
   | Attribute.Int values -> values
   | _ -> fail (name ^ " storage")
 
 let float_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry |> Option.get
-        |> Attribute.Private.storage with
+        |> Attribute.View.storage with
   | Attribute.Float values -> values
   | _ -> fail (name ^ " storage")
 
 let text_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry |> Option.get
-        |> Attribute.Private.storage with
+        |> Attribute.View.storage with
   | Attribute.Text values -> values
   | _ -> fail (name ^ " storage")
 
 let open_paths () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.; 0.;1.;2.|] ~y:[|0.;0.;0.;1.;1.;1.|]
       ~z:(Array.make 6 0.) in
   let topology = Topology.create_owned ~point_count:6
@@ -114,10 +114,10 @@ let open_paths () =
   geometry, source, destination
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp = rp && lt.vertex_points = rt.vertex_points
   && lt.primitive_offsets = rt.primitive_offsets
   && Bytes.equal lt.primitive_kinds rt.primitive_kinds
@@ -138,24 +138,24 @@ let equal_geometry left right =
   && (match Geometry.find_attribute ~owner:Attribute.Point "N" left,
       Geometry.find_attribute ~owner:Attribute.Point "N" right with
       | Some left, Some right ->
-          (match Attribute.Private.storage left, Attribute.Private.storage right with
+          (match Attribute.View.storage left, Attribute.View.storage right with
            | Attribute.Float3 left, Attribute.Float3 right ->
-               Packed.Float3.Private.view left = Packed.Float3.Private.view right
+               Packed.Float3.View.view left = Packed.Float3.View.view right
            | _ -> false)
       | _ -> false)
   && List.for_all (fun name ->
     (Geometry.find_group ~owner:Group.Primitive name left
-      |> Option.get |> Group.Private.bits_view)
+      |> Option.get |> Group.View.bits_view)
     = (Geometry.find_group ~owner:Group.Primitive name right
-      |> Option.get |> Group.Private.bits_view)) ["source_faces";"bridge"]
+      |> Option.get |> Group.View.bits_view)) ["source_faces";"bridge"]
   && (Geometry.find_group ~owner:Group.Point "source_points" left
-      |> Option.get |> Group.Private.bits_view)
+      |> Option.get |> Group.View.bits_view)
      = (Geometry.find_group ~owner:Group.Point "source_points" right
-        |> Option.get |> Group.Private.bits_view)
+        |> Option.get |> Group.View.bits_view)
   && (Geometry.find_group ~owner:Group.Vertex "all_corners" left
-      |> Option.get |> Group.Private.bits_view)
+      |> Option.get |> Group.View.bits_view)
      = (Geometry.find_group ~owner:Group.Vertex "all_corners" right
-        |> Option.get |> Group.Private.bits_view)
+        |> Option.get |> Group.View.bits_view)
   && List.for_all (fun name ->
     let left = Geometry.find_edge_group name left |> Option.get
     and right = Geometry.find_edge_group name right |> Option.get in

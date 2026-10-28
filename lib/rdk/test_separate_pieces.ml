@@ -26,17 +26,17 @@ let make_curves positions primitive_points =
   and y = Array.map (fun (_, y, _) -> y) positions
   and z = Array.map (fun (_, _, z) -> z) positions in
   Geometry.create
-    ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+    ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> Result.get_ok
 
 let position_view geometry =
-  Packed.Float3.Private.view (Geometry.positions geometry)
+  Packed.Float3.View.view (Geometry.positions geometry)
 
 let float3_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " is not float3"))
   | None -> fail (name ^ " is missing")
 
@@ -45,26 +45,26 @@ let equal_storage left right = match left, right with
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      Packed.Float2.Private.view left = Packed.Float2.Private.view right
+      Packed.Float2.View.view left = Packed.Float2.View.view right
   | Attribute.Float3 left, Attribute.Float3 right ->
-      Packed.Float3.Private.view left = Packed.Float3.Private.view right
+      Packed.Float3.View.view left = Packed.Float3.View.view right
   | Attribute.Float4 left, Attribute.Float4 right ->
-      Packed.Float4.Private.view left = Packed.Float4.Private.view right
+      Packed.Float4.View.view left = Packed.Float4.View.view right
   | Attribute.Int_array left, Attribute.Int_array right ->
-      Packed.Int_array.Private.view left = Packed.Int_array.Private.view right
+      Packed.Int_array.View.view left = Packed.Int_array.View.view right
   | Attribute.Float_array left, Attribute.Float_array right ->
-      Packed.Float_array.Private.view left = Packed.Float_array.Private.view right
+      Packed.Float_array.View.view left = Packed.Float_array.View.view right
   | _ -> false
 
 let equal_geometry left right =
   position_view left = position_view right
-  && Topology.Private.view (Geometry.topology left)
-     = Topology.Private.view (Geometry.topology right)
+  && Topology.View.view (Geometry.topology left)
+     = Topology.View.view (Geometry.topology right)
   && List.equal (fun left right ->
       Attribute.owner left = Attribute.owner right
       && Attribute.name left = Attribute.name right
-      && equal_storage (Attribute.Private.storage left)
-           (Attribute.Private.storage right))
+      && equal_storage (Attribute.View.storage left)
+           (Attribute.View.storage right))
       (Geometry.attributes left) (Geometry.attributes right)
   && List.equal (fun left right ->
       Group.owner left = Group.owner right

@@ -6,38 +6,38 @@ let get_ok = get
 let near ?(epsilon = 1e-12) left right = abs_float (left -. right) <= epsilon
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -57,7 +57,7 @@ let add_attribute owner name storage geometry =
   Geometry.with_attribute attribute geometry |> get_ok
 
 let open_box ?(offset = 0.) () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|-1. +. offset; 1. +. offset; 1. +. offset; -1. +. offset;
            -1. +. offset; 1. +. offset; 1. +. offset; -1. +. offset|]
       ~y:[|-1.; -1.; 1.; 1.; -1.; -1.; 1.; 1.|]
@@ -83,7 +83,7 @@ let open_box ?(offset = 0.) () =
              ~x:(Array.init 8 float_of_int)
              ~y:(Array.init 8 (fun point -> float_of_int (-point))) |> get_ok))
       |> add_attribute Attribute.Point "point_vector"
-           (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+           (Attribute.Float3 (Packed.Float3.View.of_owned_exn
              ~x:(Array.init 8 float_of_int)
              ~y:(Array.init 8 (fun point -> float_of_int (point + 10)))
              ~z:(Array.init 8 (fun point -> float_of_int (point + 20)))))
@@ -116,7 +116,7 @@ let open_box ?(offset = 0.) () =
   let rim = Edge_group.init ~topology ~index ~name:"rim" (fun edge ->
       Topology_index.edge_incidence_count index edge = 1
       && let a, b = Topology_index.edge_points index edge in
-         let positions = Packed.Float3.Private.view positions in
+         let positions = Packed.Float3.View.view positions in
          positions.z.(a) = 1. && positions.z.(b) = 1.) in
   Geometry.with_edge_group rim geometry |> get_ok
 
@@ -130,8 +130,8 @@ let assert_closed geometry message =
   check (Topology_index.boundary_edge_count index = 0) message
 
 let assert_source_prefix source output =
-  let source = Topology.Private.view (Geometry.topology source)
-  and output = Topology.Private.view (Geometry.topology output) in
+  let source = Topology.View.view (Geometry.topology source)
+  and output = Topology.View.view (Geometry.topology output) in
   check (Array.sub output.vertex_points 0 (Array.length source.vertex_points)
       = source.vertex_points) "Poly Fill changed source corner prefix";
   check (Array.sub output.primitive_offsets 0 (Array.length source.primitive_offsets)
@@ -151,8 +151,8 @@ let test_modes_and_payload () =
     "single-polygon patch group";
   check (group_cardinality Group.Primitive "bottom" single = 1)
     "generated patch inherited a primitive group";
-  let single_topology = Topology.Private.view (Geometry.topology single)
-  and single_positions = Packed.Float3.Private.view (Geometry.positions single) in
+  let single_topology = Topology.View.view (Geometry.topology single)
+  and single_positions = Packed.Float3.View.view (Geometry.positions single) in
   let single_first = single_topology.primitive_offsets.(5) in
   let sa = single_topology.vertex_points.(single_first)
   and sb = single_topology.vertex_points.(single_first + 1)
@@ -165,7 +165,7 @@ let test_modes_and_payload () =
     "default patch winding did not oppose the source boundary";
   let triangles = Poly_fill.run ~mode:Poly_fill.Fill_triangles
       ~patch_group:"patch" source |> get_rdk in
-  let triangle_vertices = Topology.Private.view (Geometry.topology triangles)
+  let triangle_vertices = Topology.View.view (Geometry.topology triangles)
       |> fun topology -> Array.sub topology.vertex_points 20 6 in
   check (triangle_vertices = [|6;4;5;4;6;7|])
     "triangle fill changed ordered ear clipping";
@@ -181,18 +181,18 @@ let test_modes_and_payload () =
   check (Geometry.point_count fan = 9 && Geometry.vertex_count fan = 32
       && Geometry.primitive_count fan = 9) "triangle-fan cardinality";
   assert_closed fan "triangle fan left a boundary";
-  let positions = Packed.Float3.Private.view (Geometry.positions fan) in
+  let positions = Packed.Float3.View.view (Geometry.positions fan) in
   check (near positions.x.(8) 0. && near positions.y.(8) 0.
       && near positions.z.(8) 1.) "triangle-fan center position";
   let weight = Geometry.find_attribute ~owner:Attribute.Point "weight" fan
       |> Option.get in
-  (match Attribute.Private.storage weight with
+  (match Attribute.View.storage weight with
    | Attribute.Float values -> check (near values.(8) 5.5)
        "triangle-fan point center did not average numeric data"
    | _ -> fail "point weight storage changed");
   let point_id = Geometry.find_attribute ~owner:Attribute.Point "point_id" fan
       |> Option.get in
-  (match Attribute.Private.storage point_id with
+  (match Attribute.View.storage point_id with
    | Attribute.Int values -> check (values.(8) >= 4 && values.(8) <= 7)
        "triangle-fan discrete center ancestry"
    | _ -> fail "point id storage changed");
@@ -209,7 +209,7 @@ let test_modes_and_payload () =
   for edge = 0 to Topology_index.edge_count source_index - 1 do
     if Topology_index.edge_incidence_count source_index edge = 1 then begin
       let a, b = Topology_index.edge_points source_index edge in
-      let source_positions = Packed.Float3.Private.view (Geometry.positions source) in
+      let source_positions = Packed.Float3.View.view (Geometry.positions source) in
       if source_positions.z.(a) = 1. && source_positions.z.(b) = 1. then
         boundary_vertices := Topology_index.edge_vertex source_index ~edge ~local:0
           :: !boundary_vertices
@@ -220,9 +220,9 @@ let test_modes_and_payload () =
       /. float_of_int (List.length !boundary_vertices) in
   let vertex_weight = Geometry.find_attribute ~owner:Attribute.Vertex
       "vertex_weight" fan |> Option.get in
-  (match Attribute.Private.storage vertex_weight with
+  (match Attribute.View.storage vertex_weight with
    | Attribute.Float values ->
-       let topology = Topology.Private.view (Geometry.topology fan) in
+       let topology = Topology.View.view (Geometry.topology fan) in
        for vertex = 20 to Array.length topology.vertex_points - 1 do
          if topology.vertex_points.(vertex) = 8 then
            check (near values.(vertex) expected_vertex_mean)
@@ -266,9 +266,9 @@ let test_unique_reverse_and_normals () =
     "unique fill native edge-group target cardinality";
   let reversed = Poly_fill.run ~mode:Poly_fill.Fill_single_polygon
       ~reverse_patches:true source |> get_rdk in
-  let topology = Topology.Private.view (Geometry.topology reversed) in
+  let topology = Topology.View.view (Geometry.topology reversed) in
   let first = topology.primitive_offsets.(5) in
-  let positions = Packed.Float3.Private.view (Geometry.positions reversed) in
+  let positions = Packed.Float3.View.view (Geometry.positions reversed) in
   let a = topology.vertex_points.(first)
   and b = topology.vertex_points.(first + 1)
   and c = topology.vertex_points.(first + 2) in
@@ -278,7 +278,7 @@ let test_unique_reverse_and_normals () =
   and vy = positions.y.(c) -. positions.y.(a) in
   check (ux *. vy -. uy *. vx < 0.) "reverse_patches did not reverse winding";
   let point_normal = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:(Array.make 8 1.) ~y:(Array.make 8 0.) ~z:(Array.make 8 0.)))
       |> get_ok in
   let with_normal = Geometry.with_attribute point_normal source |> get_ok in
@@ -287,9 +287,9 @@ let test_unique_reverse_and_normals () =
   let normal = Geometry.find_attribute ~owner:Attribute.Point "N" updated
       |> Option.get in
   check (Attribute.length normal = 9) "updated point normal length";
-  (match Attribute.Private.storage normal with
+  (match Attribute.View.storage normal with
    | Attribute.Float3 values ->
-       let values = Packed.Float3.Private.view values in
+       let values = Packed.Float3.View.view values in
        check (near values.x.(8) 0. && near values.y.(8) 0.
           && values.z.(8) > 0.999999) "patch center normal was not recomputed"
    | _ -> fail "point normal storage changed");
@@ -303,7 +303,7 @@ let test_selection_and_failures () =
   let merged = Mesh_merge.run [left; right] |> get_rdk in
   let topology = Geometry.topology merged in
   let index = Topology_index.create topology in
-  let positions = Packed.Float3.Private.view (Geometry.positions merged) in
+  let positions = Packed.Float3.View.view (Geometry.positions merged) in
   let one_edge = ref (-1) and interior = ref (-1) in
   for edge = 0 to Topology_index.edge_count index - 1 do
     let a, b = Topology_index.edge_points index edge in
@@ -337,7 +337,7 @@ let test_selection_and_failures () =
    | Error error -> check (Error.code error = "invalid_geometry")
        "foreign edge-group error code"
    | Ok _ -> fail "Poly Fill accepted a foreign edge group");
-  let branched_positions = Packed.Float3.Private.of_owned_exn
+  let branched_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 0.; -1.; 0.|] ~y:[|0.; 0.; 1.; 0.; -1.|]
       ~z:(Array.make 5 0.) in
   let branched_topology = Topology.polygons_owned ~point_count:5
@@ -350,8 +350,8 @@ let test_selection_and_failures () =
        "branched-boundary error code"
    | Ok _ -> fail "Poly Fill accepted a branched boundary");
   let nonfinite = open_box () in
-  let source_positions = Packed.Float3.Private.view (Geometry.positions nonfinite) in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let source_positions = Packed.Float3.View.view (Geometry.positions nonfinite) in
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.mapi (fun point value -> if point = 4 then Float.nan else value)
         source_positions.x)
       ~y:(Array.copy source_positions.y) ~z:(Array.copy source_positions.z) in
@@ -366,7 +366,7 @@ let test_selection_and_failures () =
    | Ok _ -> fail "Poly Fill accepted an empty patch group");
   let polygon points =
     let count = Array.length points in
-    let positions = Packed.Float3.Private.of_owned_exn
+    let positions = Packed.Float3.View.of_owned_exn
         ~x:(Array.map (fun (x, _, _) -> x) points)
         ~y:(Array.map (fun (_, y, _) -> y) points)
         ~z:(Array.map (fun (_, _, z) -> z) points) in
@@ -385,7 +385,7 @@ let test_selection_and_failures () =
        "self-intersection error code"
    | Ok _ -> fail "Poly Fill triangulated a self-intersecting loop");
   let diagonal_source = open_box () in
-  let diagonal_topology = Topology.Private.view
+  let diagonal_topology = Topology.View.view
       (Geometry.topology diagonal_source) in
   let topology = Topology.create_owned ~point_count:8
       ~vertex_points:(Array.append diagonal_topology.vertex_points [|4;6|])
@@ -434,7 +434,7 @@ let many_open_boxes count =
       vertex_points.(vertex_base + local) <- point_base + local_vertices.(local)
     done
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.polygons_owned ~point_count ~vertex_points
       ~primitive_offsets |> get_ok in
   let geometry = Geometry.create ~positions ~topology () |> get_ok in

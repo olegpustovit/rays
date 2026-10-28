@@ -41,7 +41,7 @@ module Int_array = struct
   let create_owned ~offsets ~values =
     Result.map (fun () -> { offsets; values })
       (validate_offsets "Int_array" offsets (Array.length values))
-  module Private = struct
+  module View = struct
     type view = { offsets : int array; values : int array }
     let view (value : buffer) = { offsets = value.offsets; values = value.values }
     let create_validated_owned ~offsets ~values : buffer =
@@ -67,7 +67,7 @@ module Float_array = struct
   let create_owned ~offsets ~values =
     Result.map (fun () -> { offsets; values })
       (validate_offsets "Float_array" offsets (Array.length values))
-  module Private = struct
+  module View = struct
     type view = { offsets : int array; values : float array }
     let view (value : buffer) = { offsets = value.offsets; values = value.values }
     let create_validated_owned ~offsets ~values : buffer =
@@ -84,7 +84,7 @@ module Float2 = struct
   let of_owned ~x ~y =
     Result.map (fun () -> { x; y })
       (same_length "Float2" (Array.length x) (Array.length y))
-  module Private = struct
+  module View = struct
     type view = { x : float array; y : float array }
     let view (value : buffer) = { x = value.x; y = value.y }
   end
@@ -128,7 +128,7 @@ module Float3 = struct
       { x = value.x; y = value.y; z = value.z; data_id = Data_id.fresh () }
   end
 
-  module Private = struct
+  module View = struct
     type view = { x : float array; y : float array; z : float array }
     let view (value : buffer) = { x = value.x; y = value.y; z = value.z }
     let of_owned_exn ~x ~y ~z =
@@ -157,7 +157,7 @@ module Float4 = struct
     | Ok (), Ok (), Ok () -> Ok { x; y; z; w }
     | Error message, _, _ | _, Error message, _ | _, _, Error message ->
         Error message
-  module Private = struct
+  module View = struct
     type view = {
       x : float array; y : float array; z : float array; w : float array;
     }

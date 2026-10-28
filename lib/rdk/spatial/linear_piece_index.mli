@@ -13,7 +13,7 @@ val create :
 
 val piece_count : t -> int
 
-module Private : sig
+module View : sig
   val kind : t -> int -> kind
   val primitive : t -> int -> int
   val local : t -> int -> int
@@ -24,7 +24,7 @@ module Private : sig
   val curve_u : t -> int -> int -> float
   (** Global polygon-curve parameter at segment endpoint 0 or 1. *)
 
-  val positions : t -> Packed.Float3.Private.view
+  val positions : t -> Packed.Float3.View.view
 
   val overlapping_pairs :
     ?cancel:Cancel.t -> grain:int -> tolerance:float -> t -> t ->

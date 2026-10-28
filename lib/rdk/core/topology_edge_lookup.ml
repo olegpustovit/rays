@@ -18,7 +18,7 @@ let[@inline always] hash a b =
   let value = Rays_math.Hash.mix a (b * 31_337) in
   (value lxor (value lsr 16)) land max_int
 
-let create ?cancel (topology : Topology.Private.view) =
+let create ?cancel (topology : Topology.View.view) =
   let outgoing = ref 0 in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
     if primitive land 4_095 = 0 then Cancel.check_opt cancel;

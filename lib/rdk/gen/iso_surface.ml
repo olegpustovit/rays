@@ -180,7 +180,7 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
       else if total_triangles > Sys.max_array_length / 3 then
         Error "Iso3.extract: output is too large"
       else
-        let packed_vec3 count : Packed.Float3.Private.view = {
+        let packed_vec3 count : Packed.Float3.View.view = {
           x = Array.make count 0.;
           y = Array.make count 0.;
           z = Array.make count 0.;
@@ -188,7 +188,7 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
         let output_vertex_count = total_triangles * 3 in
         let vertices = packed_vec3 output_vertex_count
         and normals = packed_vec3 output_vertex_count in
-        let store (target : Packed.Float3.Private.view) index value =
+        let store (target : Packed.Float3.View.view) index value =
           target.x.(index) <- value.Rays_math.Vec3.x;
           target.y.(index) <- value.y;
           target.z.(index) <- value.z
@@ -198,7 +198,7 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
           values.(left) <- values.(right);
           values.(right) <- value
         in
-        let[@inline] swap_slots (target : Packed.Float3.Private.view) left right =
+        let[@inline] swap_slots (target : Packed.Float3.View.view) left right =
           swap target.x left right;
           swap target.y left right;
           swap target.z left right
@@ -395,9 +395,9 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
           end
         done in
         iter_slabs emit_range;
-        let positions = Packed.Float3.Private.of_owned_exn
+        let positions = Packed.Float3.View.of_owned_exn
             ~x:vertices.x ~y:vertices.y ~z:vertices.z in
-        let normals = Packed.Float3.Private.of_owned_exn
+        let normals = Packed.Float3.View.of_owned_exn
             ~x:normals.x ~y:normals.y ~z:normals.z in
         Ok (positions, normals)
   with Non_finite_field ->
@@ -410,7 +410,7 @@ let geometry_of_packed (positions, normals) =
   let primitive_offsets = Array.init (triangle_count + 1)
       (fun index -> index * 3) in
   (* The extractor emits exactly three uniquely numbered points per triangle. *)
-  let topology = Topology.Private.create_validated_owned ~point_count
+  let topology = Topology.View.create_validated_owned ~point_count
       ~vertex_points ~primitive_offsets
       ~primitive_kinds:(Bytes.make triangle_count '\000') in
   Result.bind
@@ -429,6 +429,6 @@ let extract_dense ~resolution ~min ~max ~iso ~field () =
   protect (Dense field) geometry_of_packed
     ~resolution ~min ~max ~iso ()
 
-module Private = struct
+module View = struct
 
 end

@@ -13,7 +13,7 @@ let error code message = Error (Error.make ~operation ~code message)
 let left_face value face = value.left.(face)
 let right_face value face = value.right.(face)
 
-module Private = struct
+module View = struct
   let constraints value = value.constraints
 end
 
@@ -65,12 +65,12 @@ let build ?cancel ?coplanar ~grain constraints =
       and right_count = Boolean_constraints.right_triangle_count constraints in
       match build_side ?cancel ~grain constraints Boolean_face_arrangement.Left
           ?coplanar left_count Boolean_constraints.left_constraint_range
-          Boolean_coplanar.Private.left_pair_range with
+          Boolean_coplanar.View.left_pair_range with
       | Error failure -> Error failure
       | Ok (left, _refined_left) ->
           match build_side ?cancel ~grain constraints Boolean_face_arrangement.Right
               ?coplanar right_count Boolean_constraints.right_constraint_range
-              Boolean_coplanar.Private.right_pair_range with
+              Boolean_coplanar.View.right_pair_range with
           | Error failure -> Error failure
           | Ok (right, _refined_right) ->
               Ok { constraints; left; right;  }

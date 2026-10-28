@@ -134,7 +134,7 @@ let editor ?presets text =
   | Ok e -> e | Error m -> fail m
 
 let first_x geometry =
-  let view = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions geometry) in
+  let view = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry) in
   view.x.(0)
 
 (* update frames until [ok] holds: the editor awaits each frame's cook, so a bounded number of

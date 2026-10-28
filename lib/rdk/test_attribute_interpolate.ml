@@ -22,7 +22,7 @@ let group_values ~owner name geometry =
 
 let packed3 values =
   let count = Array.length values in
-  Packed.Float3.Private.of_owned_exn
+  Packed.Float3.View.of_owned_exn
     ~x:(Array.init count (fun index -> let x, _, _ = values.(index) in x))
     ~y:(Array.init count (fun index -> let _, y, _ = values.(index) in y))
     ~z:(Array.init count (fun index -> let _, _, z = values.(index) in z))
@@ -35,7 +35,7 @@ let make_geometry positions add_primitives =
 
 let points count =
   Geometry.create
-    ~positions:(Packed.Float3.Private.of_owned_exn
+    ~positions:(Packed.Float3.View.of_owned_exn
       ~x:(Array.make count 0.) ~y:(Array.make count 0.) ~z:(Array.make count 0.))
     ~topology:(Topology.empty ~point_count:count) () |> Result.get_ok
 
@@ -66,7 +66,7 @@ let add_weight_drivers ~owner numbers weights geometry =
 let float_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail ("wrong float storage for " ^ name))
   | None -> fail ("missing " ^ name)
@@ -74,7 +74,7 @@ let float_values ~owner name geometry =
 let int_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail ("wrong int storage for " ^ name))
   | None -> fail ("missing " ^ name)
@@ -82,7 +82,7 @@ let int_values ~owner name geometry =
 let text_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Text values -> values
        | _ -> fail ("wrong text storage for " ^ name))
   | None -> fail ("missing " ^ name)
@@ -90,31 +90,31 @@ let text_values ~owner name geometry =
 let float2_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Packed.Float2.View.view values
        | _ -> fail ("wrong float2 storage for " ^ name))
   | None -> fail ("missing " ^ name)
 
 let float3_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail ("wrong float3 storage for " ^ name))
   | None -> fail ("missing " ^ name)
 
 let float4_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float4 values -> Packed.Float4.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float4 values -> Packed.Float4.View.view values
        | _ -> fail ("wrong float4 storage for " ^ name))
   | None -> fail ("missing " ^ name)
 
 let int_array_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int_array values -> values
        | _ -> fail ("wrong int-array storage for " ^ name))
   | None -> fail ("missing " ^ name)
@@ -122,7 +122,7 @@ let int_array_values ~owner name geometry =
 let float_array_values ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float_array values -> values
        | _ -> fail ("wrong float-array storage for " ^ name))
   | None -> fail ("missing " ^ name)
@@ -178,7 +178,7 @@ let test_triangle_mixed_storage_and_position () =
         spec Attribute.Primitive "primitive_weight";
         spec Attribute.Detail "detail_weight";
       ] in
-  let position = Packed.Float3.Private.view (Geometry.positions result)
+  let position = Packed.Float3.View.view (Geometry.positions result)
   and uv = float2_values ~owner:Attribute.Point "uv" result
   and normal = float3_values ~owner:Attribute.Point "N" result
   and tuple4 = float4_values ~owner:Attribute.Point "tuple4" result in
@@ -510,7 +510,7 @@ let test_attribute_pattern_expansion () =
       ~vertex_pattern:"vertex_*" ~primitive_pattern:"primitive_*"
       ~detail_pattern:"detail_*" ~target_owner:Attribute.Point
       ~attributes:[] ~source ~target () |> get_ok in
-  let positions = Packed.Float3.Private.view (Geometry.positions result) in
+  let positions = Packed.Float3.View.view (Geometry.positions result) in
   if positions.x <> [|0.5|] || positions.y <> [|0.5|]
       || float_values ~owner:Attribute.Point "weight" result <> [|7.5|]
       || float_values ~owner:Attribute.Point "vertex_weight" result <> [|175.|]
@@ -726,28 +726,28 @@ let test_parallel_exact_scale () =
     Attribute_ops.interpolate ~grain:257 ~target_owner:Attribute.Point
       ~compute_weights ~attributes ~source ~target () |> get_ok) in
   let one = run 1 and four = run 4 in
-  let p_one = Packed.Float3.Private.view (Geometry.positions one)
-  and p_four = Packed.Float3.Private.view (Geometry.positions four)
+  let p_one = Packed.Float3.View.view (Geometry.positions one)
+  and p_four = Packed.Float3.View.view (Geometry.positions four)
   and q_one = float4_values ~owner:Attribute.Point "tuple4" one
   and q_four = float4_values ~owner:Attribute.Point "tuple4" four
-  and cn_one = Packed.Int_array.Private.view
+  and cn_one = Packed.Int_array.View.view
       (int_array_values ~owner:Attribute.Point "computed_points" one)
-  and cn_four = Packed.Int_array.Private.view
+  and cn_four = Packed.Int_array.View.view
       (int_array_values ~owner:Attribute.Point "computed_points" four)
-  and array_i_one = Packed.Int_array.Private.view
+  and array_i_one = Packed.Int_array.View.view
       (int_array_values ~owner:Attribute.Point "neighbors" one)
-  and array_i_four = Packed.Int_array.Private.view
+  and array_i_four = Packed.Int_array.View.view
       (int_array_values ~owner:Attribute.Point "neighbors" four)
-  and array_f_one = Packed.Float_array.Private.view
+  and array_f_one = Packed.Float_array.View.view
       (float_array_values ~owner:Attribute.Point "samples" one)
-  and array_f_four = Packed.Float_array.Private.view
+  and array_f_four = Packed.Float_array.View.view
       (float_array_values ~owner:Attribute.Point "samples" four) in
   let cw geometry = Geometry.find_attribute ~owner:Attribute.Point
       "computed_weights" geometry |> Option.get
-      |> Attribute.Private.storage
+      |> Attribute.View.storage
       |> (function Attribute.Float_array values -> values
                  | _ -> fail "wrong computed_weights storage")
-      |> Packed.Float_array.Private.view in
+      |> Packed.Float_array.View.view in
   let cw_one = cw one and cw_four = cw four in
   if p_one.x <> p_four.x || p_one.y <> p_four.y || p_one.z <> p_four.z
       || float_values ~owner:Attribute.Point "weight" one
@@ -772,8 +772,8 @@ let test_parallel_exact_scale () =
         weights_attribute="computed_weights" })
       ~target_owner:Attribute.Point ~attributes ~source ~target:one () |> get_ok) in
   let weighted_one = weighted_run 1 and weighted_four = weighted_run 4 in
-  let wp_one = Packed.Float3.Private.view (Geometry.positions weighted_one)
-  and wp_four = Packed.Float3.Private.view (Geometry.positions weighted_four)
+  let wp_one = Packed.Float3.View.view (Geometry.positions weighted_one)
+  and wp_four = Packed.Float3.View.view (Geometry.positions weighted_four)
   and wq_one = float4_values ~owner:Attribute.Point "tuple4" weighted_one
   and wq_four = float4_values ~owner:Attribute.Point "tuple4" weighted_four in
   if wp_one.x <> wp_four.x || wp_one.y <> wp_four.y || wp_one.z <> wp_four.z

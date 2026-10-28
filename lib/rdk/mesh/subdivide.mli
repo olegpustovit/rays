@@ -28,8 +28,8 @@ exception Subdivide_error of string
 type plan = {
   scheme : scheme;
   source : Rdk_core.Geometry.t;
-  source_topology : Rdk_core.Topology.Private.view;
-  index : Rdk_core.Topology_index.Private.view;
+  source_topology : Rdk_core.Topology.View.view;
+  index : Rdk_core.Topology_index.View.view;
   source_points : int;
   source_vertices : int;
   source_primitives : int;
@@ -79,7 +79,7 @@ type fvar_point_plan = {
   fvar_point_offsets : int array;
   fvar_point_sources : int array;
   fvar_point_weights : float array;
-  fvar_index : Rdk_core.Topology_index.Private.view;
+  fvar_index : Rdk_core.Topology_index.View.view;
   fvar_creases : crease_plan option;
 }
 type fvar_refinement =

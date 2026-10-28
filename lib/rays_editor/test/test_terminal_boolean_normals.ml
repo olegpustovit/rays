@@ -4,11 +4,11 @@
 let get=function Ok value->value|Error _->failwith"terminal normal fixture"
 
 let geometry () =
-  let positions=Rdk.Packed.Float3.Private.of_owned_exn
+  let positions=Rdk.Packed.Float3.View.of_owned_exn
     ~x:[|-0.5;0.5;0.|]~y:[|-0.5;-0.5;0.5|]~z:[|0.;0.;0.|]in
   let topology=get(Rdk.Topology.polygons_owned~point_count:3
     ~vertex_points:[|0;2;1|]~primitive_offsets:[|0;3|])in
-  let values=Rdk.Packed.Float3.Private.of_owned_exn
+  let values=Rdk.Packed.Float3.View.of_owned_exn
     ~x:[|0.;0.;0.|]~y:[|0.;0.;0.|]~z:[|-1.;-1.;-1.|]in
   let normal=get(Rdk.Attribute.create_owned~name:"N"~owner:Rdk.Attribute.Vertex
     (Rdk.Attribute.Float3 values))in

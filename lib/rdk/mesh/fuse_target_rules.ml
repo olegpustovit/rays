@@ -82,7 +82,7 @@ let validate_weight target (rule : compiled_attribute_rule) =
              if not (Float.is_finite value) then
                fail "target weight attribute %S is non-finite at point %d"
                  name point) values in
-           match Attribute.Private.storage attribute with
+           match Attribute.View.storage attribute with
            | Attribute.Float values -> check values
            | Attribute.Int _ -> ()
            | _ -> fail "target weight attribute %S must be scalar float or integer"
@@ -102,7 +102,7 @@ let scalar_int_array ?cancel ~grain destinations source target =
   run ?cancel ~grain count (fun point ->
     let destination = destinations.(point) in
     if destination >= 0 then values.(point) <- target.(destination));
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
+  Packed.Int_array.View.create_validated_owned ~offsets ~values
 
 let scalar_float_array ?cancel ~grain destinations source target =
   let count = Array.length destinations in
@@ -111,11 +111,11 @@ let scalar_float_array ?cancel ~grain destinations source target =
   run ?cancel ~grain count (fun point ->
     let destination = destinations.(point) in
     if destination >= 0 then values.(point) <- target.(destination));
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values
+  Packed.Float_array.View.create_validated_owned ~offsets ~values
 
 let mapped_int_rows ?cancel ~grain destinations source target =
-  let source = Packed.Int_array.Private.view source
-  and target = Packed.Int_array.Private.view target in
+  let source = Packed.Int_array.View.view source
+  and target = Packed.Int_array.View.view target in
   let count = Array.length destinations and offsets = Array.make
       (Array.length destinations + 1) 0 in
   for point = 0 to count - 1 do
@@ -135,11 +135,11 @@ let mapped_int_rows ?cancel ~grain destinations source target =
       else target.values, target.offsets.(destination),
         target.offsets.(destination + 1) in
     Array.blit input first values offsets.(point) (last - first));
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
+  Packed.Int_array.View.create_validated_owned ~offsets ~values
 
 let mapped_float_rows ?cancel ~grain destinations source target =
-  let source = Packed.Float_array.Private.view source
-  and target = Packed.Float_array.Private.view target in
+  let source = Packed.Float_array.View.view source
+  and target = Packed.Float_array.View.view target in
   let count = Array.length destinations and offsets = Array.make
       (Array.length destinations + 1) 0 in
   for point = 0 to count - 1 do
@@ -159,7 +159,7 @@ let mapped_float_rows ?cancel ~grain destinations source target =
       else target.values, target.offsets.(destination),
         target.offsets.(destination + 1) in
     Array.blit input first values offsets.(point) (last - first));
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values
+  Packed.Float_array.View.create_validated_owned ~offsets ~values
 
 let target_attribute name target =
   match Geometry.find_attribute ~owner:Attribute.Point name target with
@@ -174,8 +174,8 @@ let apply_attribute ?cancel ~grain destinations target
   let incompatible () = fail
       "source and target point attribute %S storage differs or does not support this rule"
       name in
-  let storage = match Attribute.Private.storage source_attribute,
-      Attribute.Private.storage target_attribute with
+  let storage = match Attribute.View.storage source_attribute,
+      Attribute.View.storage target_attribute with
     | Attribute.Float source, Attribute.Float target when concatenate rule.method_ ->
         Attribute.Float_array
           (scalar_float_array ?cancel ~grain destinations source target)
@@ -194,23 +194,23 @@ let apply_attribute ?cancel ~grain destinations target
         Attribute.Text (mapped_array ?cancel ~grain destinations source target)
     | Attribute.Float2 source, Attribute.Float2 target ->
         if concatenate rule.method_ then incompatible ();
-        let source = Packed.Float2.Private.view source
-        and target = Packed.Float2.Private.view target in
+        let source = Packed.Float2.View.view source
+        and target = Packed.Float2.View.view target in
         Attribute.Float2 (Packed.Float2.of_owned
           ~x:(mapped_array ?cancel ~grain destinations source.x target.x)
           ~y:(mapped_array ?cancel ~grain destinations source.y target.y) |> get_ok)
     | Attribute.Float3 source, Attribute.Float3 target ->
         if concatenate rule.method_ then incompatible ();
-        let source = Packed.Float3.Private.view source
-        and target = Packed.Float3.Private.view target in
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        let source = Packed.Float3.View.view source
+        and target = Packed.Float3.View.view target in
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:(mapped_array ?cancel ~grain destinations source.x target.x)
           ~y:(mapped_array ?cancel ~grain destinations source.y target.y)
           ~z:(mapped_array ?cancel ~grain destinations source.z target.z))
     | Attribute.Float4 source, Attribute.Float4 target ->
         if concatenate rule.method_ then incompatible ();
-        let source = Packed.Float4.Private.view source
-        and target = Packed.Float4.Private.view target in
+        let source = Packed.Float4.View.view source
+        and target = Packed.Float4.View.view target in
         Attribute.Float4 (Packed.Float4.of_owned
           ~x:(mapped_array ?cancel ~grain destinations source.x target.x)
           ~y:(mapped_array ?cancel ~grain destinations source.y target.y)

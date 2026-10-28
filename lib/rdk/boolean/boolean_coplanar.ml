@@ -55,7 +55,7 @@ let boundary_second value pair boundary = match kind value pair with
       (boundary + 1) mod count
   | _ -> invalid_arg "Coplanar Boolean overlap has no requested boundary"
 
-module Private = struct
+module View = struct
   let constraints value = value.constraints
   let point value pair point = value.overlaps.(pair).points.(point)
   let boundary_support_first value pair boundary =
@@ -145,16 +145,16 @@ let convex_hull projection candidates count =
 exception Construction_failed
 
 let build_pair constraints pair =
-  let source = Boolean_constraints.Private.source constraints
+  let source = Boolean_constraints.View.source constraints
   and first_side = Boolean_constraints.coplanar_first_side constraints pair
   and second_side = Boolean_constraints.coplanar_second_side constraints pair
   and first_face = Boolean_constraints.coplanar_first_triangle constraints pair
   and second_face = Boolean_constraints.coplanar_second_triangle constraints pair in
   let first_ids = Array.init 3 (fun local ->
-      Boolean_constraints.Private.triangle_point
+      Boolean_constraints.View.triangle_point
         constraints first_side first_face local)
   and second_ids = Array.init 3 (fun local ->
-      Boolean_constraints.Private.triangle_point
+      Boolean_constraints.View.triangle_point
         constraints second_side second_face local) in
   let first_triangle = Array.map (fun point ->
       Implicit_point.explicit source point |> Result.get_ok) first_ids

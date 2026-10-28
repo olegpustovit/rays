@@ -174,7 +174,7 @@ let run_default ?cancel ?(grain = 1_024) ~distance geometry =
     Error "Rdk_mesh.Poly_extrude.poly_extrude: distance must be finite"
   else
     let topology = Geometry.topology geometry
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    and positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let source_vertices = Geometry.vertex_count geometry
     and source_primitives = Geometry.primitive_count geometry in
     let curve = ref None in
@@ -267,9 +267,9 @@ let run_default ?cancel ?(grain = 1_024) ~distance geometry =
         match Array.find_opt Option.is_some failures |> Option.join with
         | Some message -> Error message
         | None ->
-            let output_positions = Packed.Float3.Private.of_owned_exn
+            let output_positions = Packed.Float3.View.of_owned_exn
                 ~x:px ~y:py ~z:pz in
-            let output_topology = Topology.Private.create_validated_owned
+            let output_topology = Topology.View.create_validated_owned
                 ~point_count:output_points ~vertex_points ~primitive_offsets
                 ~primitive_kinds in
             let rec attributes result = function
@@ -337,7 +337,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
         <> Topology.data_id topology ->
         Error "Rdk_mesh.Poly_extrude.poly_extrude: split edge group belongs to another topology"
     | None | Some _ -> Ok () in
-  let topology_view = Topology.Private.view topology in
+  let topology_view = Topology.View.view topology in
   let source_points = topology_view.point_count
   and source_primitives = Bytes.length topology_view.primitive_kinds in
   let selected = Array.init source_primitives (fun primitive ->
@@ -349,7 +349,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   let* face_nx, face_ny, face_nz = Face_normals.compute ?cancel ~grain
       ?primitives ~operation:"Rdk_mesh.Poly_extrude.poly_extrude" geometry in
   let index = Topology_index.create ?cancel topology in
-  let index_view = Topology_index.Private.view index in
+  let index_view = Topology_index.View.view index in
   let primitive_component = Array.make source_primitives (-1) in
   let* component_count = match divide with
     | Extrude_individual ->
@@ -544,7 +544,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
       (Int64.add (Int64.of_int !base_vertices)
         (Int64.add (Int64.of_int front_vertices)
           (Int64.of_int side_vertices))) in
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let px = Array.make output_points 0. and py = Array.make output_points 0.
   and pz = Array.make output_points 0. and point_map = Array.make output_points 0 in
   Array.blit positions.x 0 px 0 source_points;
@@ -676,8 +676,8 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
           vertex_map.(output + 2) <- next;
           vertex_map.(output + 3) <- vertex
         done);
-  let output_positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
-  let output_topology = Topology.Private.create_validated_owned
+  let output_positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
+  let output_topology = Topology.View.create_validated_owned
       ~point_count:output_points ~vertex_points ~primitive_offsets ~primitive_kinds in
   let rec remap_attributes result = function
     | [] -> Ok (List.rev result)
@@ -705,7 +705,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   let* edge_groups = if not needs_edge_output then Ok [] else begin
     let source_edge_index = index
     and target_edges = Edge_lookup.create ?cancel
-        (Topology.Private.view output_topology) in
+        (Topology.View.view output_topology) in
     let edge_count = Edge_lookup.count target_edges in
     let make_bits () = Bytes.make ((edge_count + 7) / 8) '\000' in
     let add_edge bits a b =
@@ -715,7 +715,7 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
         Bytes.set bits byte
           (Char.chr (Char.code (Bytes.get bits byte) lor mask))
       end in
-    let freeze name bits = Edge_group.Private.of_owned_bits
+    let freeze name bits = Edge_group.View.of_owned_bits
         ~topology:output_topology ~edge_count ~name bits in
     let map_edge_group source_group =
       let bits = make_bits () in

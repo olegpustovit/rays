@@ -80,7 +80,7 @@ let validate_target_kinds ~operation ~owner attributes target =
 let validate_sampled_storage ~operation attributes =
   Array.fold_left (fun result attribute ->
     Result.bind result (fun () ->
-      match Attribute.Private.storage attribute with
+      match Attribute.View.storage attribute with
       | Attribute.Int_array _ | Attribute.Float_array _ -> Error (Printf.sprintf
           "%s: sampled transfer of array attribute %s requires an explicit array policy"
           operation (Attribute.name attribute))
@@ -100,7 +100,7 @@ let make_attribute_array count make =
     fill 1)
 
 let install_attributes_batch geometry attributes =
-  Geometry.Private.with_merged_attributes_owned attributes geometry
+  Geometry.View.with_merged_attributes_owned attributes geometry
 
 let reset_selected selection reset = match selection with
   | None -> ()
@@ -109,10 +109,10 @@ let reset_selected selection reset = match selection with
 let initial_float ?selection unmatched target_attribute count =
   match unmatched, target_attribute with
   | Keep_target, Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> Array.copy values | _ -> assert false)
   | Default_value, Some attribute when selection <> None ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values ->
            let output = Array.copy values in
            reset_selected selection (fun element -> output.(element) <- 0.);
@@ -123,10 +123,10 @@ let initial_float ?selection unmatched target_attribute count =
 let initial_int ?selection unmatched target_attribute count =
   match unmatched, target_attribute with
   | Keep_target, Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> Array.copy values | _ -> assert false)
   | Default_value, Some attribute when selection <> None ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values ->
            let output = Array.copy values in
            reset_selected selection (fun element -> output.(element) <- 0);
@@ -137,10 +137,10 @@ let initial_int ?selection unmatched target_attribute count =
 let initial_text ?selection unmatched target_attribute count =
   match unmatched, target_attribute with
   | Keep_target, Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Text values -> Array.copy values | _ -> assert false)
   | Default_value, Some attribute when selection <> None ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Text values ->
            let output = Array.copy values in
            reset_selected selection (fun element -> output.(element) <- "");
@@ -152,9 +152,9 @@ let initial_text ?selection unmatched target_attribute count =
    target's planes (selected elements zeroed for [Default_value]) or zeros. *)
 let initial_planes ?selection unmatched target_attribute like count =
   let existing = match unmatched, target_attribute with
-    | Keep_target, Some attribute -> Attribute.float_planes (Attribute.Private.storage attribute)
+    | Keep_target, Some attribute -> Attribute.float_planes (Attribute.View.storage attribute)
     | Default_value, Some attribute when selection <> None ->
-        Attribute.float_planes (Attribute.Private.storage attribute)
+        Attribute.float_planes (Attribute.View.storage attribute)
     | _ -> None in
   match existing with
   | Some planes ->
@@ -239,8 +239,8 @@ let[@inline always] transfer_kernel_weight kernel t =
           (6. *. t2 *. t3)
 
 let primitive_barycenters ?cancel ~grain geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry)
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry)
+  and positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = Geometry.primitive_count geometry in
   let x = Array.make count 0. and y = Array.make count 0.
   and z = Array.make count 0. in
@@ -260,7 +260,7 @@ let primitive_barycenters ?cancel ~grain geometry =
         x.(primitive) <- !sx *. scale;
         y.(primitive) <- !sy *. scale;
         z.(primitive) <- !sz *. scale);
-  Packed.Float3.Private.of_owned_exn ~x ~y ~z
+  Packed.Float3.View.of_owned_exn ~x ~y ~z
 
 let transfer_spatial_raw ?cancel ?(grain = 16_384) ?names ?pattern
     ?(mode = Nearest) ?max_distance ?(blend_width = 0.)
@@ -317,15 +317,15 @@ let transfer_spatial_raw ?cancel ?(grain = 16_384) ?names ?pattern
        || Packed.Float3.length target_positions <> target_count then
       invalid_arg (operation ^ ": internal sample cardinality mismatch");
     let source_points = Option.map
-        (Group.Private.with_owner Group.Point) source_elements
+        (Group.View.with_owner Group.Point) source_elements
     and target_points = Option.map
-        (Group.Private.with_owner Group.Point) target_elements in
+        (Group.View.with_owner Group.Point) target_elements in
     match Spatial_index.create ?cancel ~grain ?points:source_points source_positions with
     | Error error when String.equal (Error.code error) "cancelled" ->
         raise Cancel.Cancelled
     | Error error -> Error (Error.to_string error)
     | Ok index ->
-        let target_view = Packed.Float3.Private.view target_positions in
+        let target_view = Packed.Float3.View.view target_positions in
         for element = 0 to target_count - 1 do
           if element land 16_383 = 0 then Cancel.check_opt cancel;
           if (match target_elements with None -> true
@@ -339,7 +339,7 @@ let transfer_spatial_raw ?cancel ?(grain = 16_384) ?names ?pattern
         let neighbors = Array.make slots (-1)
         and distances = Array.make slots Float.infinity
         and neighbor_counts = Array.make target_count 0 in
-        Spatial_index.Private.nearest_k_many_into ?cancel ?points:target_points
+        Spatial_index.View.nearest_k_many_into ?cancel ?points:target_points
           ~grain index
           ~queries:target_positions
           ~max_distance_squared:maximum_squared ~capacity:neighbor_capacity
@@ -463,7 +463,7 @@ let transfer_spatial_raw ?cancel ?(grain = 16_384) ?names ?pattern
         let make_attribute source_attribute =
           let name = Attribute.name source_attribute in
           let existing = Geometry.find_attribute ~owner name target in
-          let storage = match Attribute.Private.storage source_attribute with
+          let storage = match Attribute.View.storage source_attribute with
             | (Attribute.Float _ | Attribute.Float2 _ | Attribute.Float3 _
               | Attribute.Float4 _) as like ->
                 let source = Option.get (Attribute.float_planes like) in
@@ -633,7 +633,7 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
              | Primitive -> "primitive" | Detail -> "detail")
             specification.source_name)
         | Some attribute ->
-            (match Attribute.Private.storage attribute with
+            (match Attribute.View.storage attribute with
              | Attribute.Int_array _ | Attribute.Float_array _ ->
                  failure := Some (Printf.sprintf
                    "sampled transfer of array attribute %s requires an explicit array policy"
@@ -677,7 +677,7 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
       and source_attribute = Option.get source_attributes.(index) in
       let existing = Geometry.find_attribute ~owner:target_owner
           specification.target_name target in
-      let storage = match Attribute.Private.storage source_attribute with
+      let storage = match Attribute.View.storage source_attribute with
         | (Attribute.Float _ | Attribute.Float2 _ | Attribute.Float3 _
           | Attribute.Float4 _) as like ->
             Attribute.of_float_planes ~like (initial_planes
@@ -709,7 +709,7 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
       let query_positions, position_indices = match target_owner with
         | Attribute.Point -> Geometry.positions target, None
         | Attribute.Vertex ->
-            let topology = Topology.Private.view (Geometry.topology target) in
+            let topology = Topology.View.view (Geometry.topology target) in
             Geometry.positions target, Some topology.vertex_points
         | Attribute.Primitive -> primitive_barycenters ?cancel ~grain target, None
         | Attribute.Detail -> assert false in
@@ -719,7 +719,7 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
       and barycentric_b = Array.make target_count 0.
       and barycentric_c = Array.make target_count 0.
       and distances_squared = Array.make target_count Float.infinity in
-      Surface_index.Private.closest_many_into ?cancel ?selection:target_elements
+      Surface_index.View.closest_many_into ?cancel ?selection:target_elements
         ?position_indices ~grain surface ~queries:query_positions
         ~max_distance_squared:maximum_squared
         ~primitives ~triangles ~barycentric_a ~barycentric_b ~barycentric_c
@@ -733,13 +733,13 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
                   values.(point) <- transfer_influence ~falloff
                     ~threshold_squared ~blend_width distances_squared.(point));
           Some values in
-      let source_topology = Topology.Private.view (Geometry.topology source) in
+      let source_topology = Topology.View.view (Geometry.topology source) in
       let source_element owner primitive triangle local = match owner with
         | Attribute.Point ->
-            let vertex = Surface_index.Private.triangle_vertex surface triangle local in
+            let vertex = Surface_index.View.triangle_vertex surface triangle local in
             source_topology.vertex_points.(vertex)
         | Attribute.Vertex ->
-            Surface_index.Private.triangle_vertex surface triangle local
+            Surface_index.View.triangle_vertex surface triangle local
         | Attribute.Primitive -> primitive
         | Attribute.Detail -> 0 in
       let transfer_numeric owner source_values output =
@@ -782,7 +782,7 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
         let existing = Geometry.find_attribute ~owner:target_owner
             specification.target_name target in
         let owner = specification.source_owner in
-        let storage = match Attribute.Private.storage source_attribute with
+        let storage = match Attribute.View.storage source_attribute with
           | (Attribute.Float _ | Attribute.Float2 _ | Attribute.Float3 _
             | Attribute.Float4 _) as like ->
               let source = Option.get (Attribute.float_planes like) in

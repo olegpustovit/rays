@@ -60,7 +60,7 @@ let previews () =
           "the scratch preview disconnected the authored result's inputs";
         let output = cook s viewed in
         check (prims output = expected_prims) "a preview contains only the selected element";
-        let x = let positions = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions output) in
+        let x = let positions = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions output) in
           Array.fold_left (+.) 0. positions.x /. float (Array.length positions.x) in
         check (Float.abs (x -. expected_x) < 1e-6)
           (Printf.sprintf "preview %s at %s: expected %.1f, got %.1f"
@@ -125,7 +125,7 @@ let previews () =
         let context = Result.get_ok (Sop.Context.create ~domains:1 ~grain:1 ~input ~time:input.t
           ~frame:(Int64.of_int frame) ()) in
         let output = Result.get_ok (Session.cook s ~context compiled) in
-        let positions = Rdk.Packed.Float3.Private.view
+        let positions = Rdk.Packed.Float3.View.view
           (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
         Array.fold_left (+.) 0. positions.x /. float (Array.length positions.x) in
       ignore (resolve left 1 0.25);
@@ -146,7 +146,7 @@ let previews () =
         let context = Result.get_ok (Sop.Context.create ~domains ~grain:1 ~input ~time:input.t
           ~frame:(Int64.of_int input.frame) ()) in
         let output = Result.get_ok (Session.cook s ~context compiled) in
-        let positions = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
+        let positions = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
         let mean values = Array.fold_left (+.) 0. values /. float (Array.length values) in
         check (mean positions.x = float (index mod 2 * 10) +. input.t && mean positions.y = input.t)
           "preview selectors changed the live frame or fold's accumulated value";
@@ -160,7 +160,7 @@ let move_point session (graph : Lower.graph) operation ~index ~by =
       (Edit.inspect graph.network.geometry) in
   let base = (Result.get_ok (Sop.Payload.geometry (Result.get_ok (Session.cook session ~context:(context ~domains:1)
     (Result.get_ok (Edit.compile_node graph.network.geometry ~node_id:field.id)))).payload)) in
-  let view = Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions base) in
+  let view = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions base) in
   let moved = Result.get_ok (Rdk.Geometry.with_positions
     (Rdk.Packed.Float3.of_owned ~x:(Array.copy view.x)
        ~y:(Array.mapi (fun i v -> if i = index then v +. by else v) view.y)

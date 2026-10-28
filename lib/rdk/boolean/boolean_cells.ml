@@ -25,7 +25,7 @@ let shell_count value = Array.length value.left
 let left_winding value shell = value.left.(shell)
 let right_winding value shell = value.right.(shell)
 
-module Private = struct
+module View = struct
   let weiler value = value.weiler
 end
 
@@ -118,10 +118,10 @@ let build_components ?cancel constraints side =
   let triangle_count, triangle_point = match side with
     | Boolean_complex.Left ->
         Boolean_constraints.left_triangle_count constraints,
-        Boolean_constraints.Private.left_triangle_point
+        Boolean_constraints.View.left_triangle_point
     | Boolean_complex.Right ->
         Boolean_constraints.right_triangle_count constraints,
-        Boolean_constraints.Private.right_triangle_point in
+        Boolean_constraints.View.right_triangle_point in
   let parent = Array.init triangle_count Fun.id in
   let rec find value =
     let next = parent.(value) in
@@ -133,7 +133,7 @@ let build_components ?cancel constraints side =
     if left <> right then
       if left < right then parent.(right) <- left else parent.(left) <- right in
   let first_triangle = Array.make
-      (Boolean_constraints.Private.source_point_count constraints) (-1) in
+      (Boolean_constraints.View.source_point_count constraints) (-1) in
   for triangle = 0 to triangle_count - 1 do
     if triangle land 4095 = 0 then Cancel.check_opt cancel;
     for local = 0 to 2 do
@@ -181,7 +181,7 @@ let build_components ?cancel constraints side =
   and max_x = Array.make !count Float.neg_infinity
   and max_y = Array.make !count Float.neg_infinity
   and max_z = Array.make !count Float.neg_infinity
-  and source = Boolean_constraints.Private.source constraints in
+  and source = Boolean_constraints.View.source constraints in
   for triangle = 0 to triangle_count - 1 do
     if triangle land 4095 = 0 then Cancel.check_opt cancel;
     let component = component_of_triangle.(triangle) in
@@ -261,10 +261,10 @@ let classify_operand ?cancel constraints components side query axis
     ~positive skip =
   let triangle_point = match side with
     | Boolean_complex.Left ->
-        Boolean_constraints.Private.left_triangle_point
+        Boolean_constraints.View.left_triangle_point
     | Boolean_complex.Right ->
-        Boolean_constraints.Private.right_triangle_point in
-  let source = Boolean_constraints.Private.source constraints
+        Boolean_constraints.View.right_triangle_point in
+  let source = Boolean_constraints.View.source constraints
   and axis = axis_index axis and winding = ref 0 and ambiguous = ref false in
   let component_count = query_components_indexed components query in
   for candidate = 0 to component_count - 1 do
@@ -297,10 +297,10 @@ let classify_operand_symbolic ?cancel constraints components side query
     skip =
   let triangle_point = match side with
     | Boolean_complex.Left ->
-        Boolean_constraints.Private.left_triangle_point
+        Boolean_constraints.View.left_triangle_point
     | Boolean_complex.Right ->
-        Boolean_constraints.Private.right_triangle_point in
-  let source = Boolean_constraints.Private.source constraints
+        Boolean_constraints.View.right_triangle_point in
+  let source = Boolean_constraints.View.source constraints
   and winding = ref 0 and boundary = ref (-1) and degenerate = ref (-1) in
   let component_count = query_components_indexed components query in
   for candidate = 0 to component_count - 1 do
@@ -335,9 +335,9 @@ let build ?cancel
     ?(track_left = true) ?(track_right = true) complex weiler =
   try
     Cancel.check_opt cancel;
-    if Boolean_weiler.Private.complex weiler != complex then
+    if Boolean_weiler.View.complex weiler != complex then
       invalid_arg "Weiler graph belongs to a different Boolean complex";
-    let constraints = Boolean_complex.Private.constraints complex
+    let constraints = Boolean_complex.View.constraints complex
     and shells = Boolean_weiler.shell_count weiler
     and facets = Boolean_complex.facet_count complex in
     let left_components, right_components = Parallel.both
@@ -406,11 +406,11 @@ let build ?cancel
     let seed_component shell =
       let incidence = incidences.(offsets.(shell)) in
       let facet = incidence lsr 1 in
-      let a = Boolean_complex.Private.vertex complex
+      let a = Boolean_complex.View.vertex complex
           (Boolean_complex.facet_vertex complex facet 0)
-      and b = Boolean_complex.Private.vertex complex
+      and b = Boolean_complex.View.vertex complex
           (Boolean_complex.facet_vertex complex facet 1)
-      and c = Boolean_complex.Private.vertex complex
+      and c = Boolean_complex.View.vertex complex
           (Boolean_complex.facet_vertex complex facet 2) in
       let query = match Implicit_point.centroid3 a b c with
         | Ok point -> point

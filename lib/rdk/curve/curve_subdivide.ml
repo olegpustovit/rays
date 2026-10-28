@@ -36,11 +36,11 @@ type plan = {
 }
 
 let primitive_size topology primitive =
-  topology.Topology.Private.primitive_offsets.(primitive + 1)
+  topology.Topology.View.primitive_offsets.(primitive + 1)
   - topology.primitive_offsets.(primitive)
 
 let validate ?cancel geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   if topology.point_count = 0 || Bytes.length topology.primitive_kinds = 0 then
     fail "polygon-curve input must contain at least one primitive";
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
@@ -60,21 +60,21 @@ let validate ?cancel geometry =
         fail "a polygon curve contains a zero-length topology edge"
     done
   done;
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   if Array.exists (fun value -> not (Float.is_finite value)) positions.x
      || Array.exists (fun value -> not (Float.is_finite value)) positions.y
      || Array.exists (fun value -> not (Float.is_finite value)) positions.z then
     fail "positions must be finite"
 
 let other_endpoint index point edge =
-  if index.Topology_index.Private.edge_a.(edge) = point then index.edge_b.(edge)
+  if index.Topology_index.View.edge_a.(edge) = point then index.edge_b.(edge)
   else if index.edge_b.(edge) = point then index.edge_a.(edge)
   else fail "curve point-edge incidence is inconsistent"
 
 let shared_plan ?cancel ?grain scheme geometry topology index =
-  let source_points = topology.Topology.Private.point_count
+  let source_points = topology.Topology.View.point_count
   and source_primitives = Bytes.length topology.primitive_kinds
-  and edge_count = Array.length index.Topology_index.Private.edge_a in
+  and edge_count = Array.length index.Topology_index.View.edge_a in
   let output_points = checked_add "curve subdivision point count"
       source_points edge_count in
   let point_offsets = Array.make (output_points + 1) 0 in
@@ -161,7 +161,7 @@ let shared_plan ?cancel ?grain scheme geometry topology index =
     done;
     if !output <> primitive_offsets.(primitive + 1) then
       fail "curve subdivision vertex cardinality mismatch");
-  let output_topology = Topology.Private.create_validated_owned
+  let output_topology = Topology.View.create_validated_owned
       ~point_count:output_points ~vertex_points ~primitive_offsets
       ~primitive_kinds in
   let output_index = match Geometry.edge_groups geometry with
@@ -174,9 +174,9 @@ let shared_plan ?cancel ?grain scheme geometry topology index =
     source_edge_of_output_vertex }
 
 let independent_plan ?cancel ?grain scheme geometry
-    (topology : Topology.Private.view)
-    (index : Topology_index.Private.view) =
-  let source_primitives = Bytes.length topology.Topology.Private.primitive_kinds in
+    (topology : Topology.View.view)
+    (index : Topology_index.View.view) =
+  let source_primitives = Bytes.length topology.Topology.View.primitive_kinds in
   let output_points = ref 0 in
   let primitive_offsets = Array.make (source_primitives + 1) 0 in
   for primitive = 0 to source_primitives - 1 do
@@ -266,7 +266,7 @@ let independent_plan ?cancel ?grain scheme geometry
         point_weights.(midpoint_at + 1) <- 0.5
       end
     done);
-  let output_topology = Topology.Private.create_validated_owned
+  let output_topology = Topology.View.create_validated_owned
       ~point_count:output_points ~vertex_points ~primitive_offsets
       ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
   let output_index = match Geometry.edge_groups geometry with
@@ -280,9 +280,9 @@ let independent_plan ?cancel ?grain scheme geometry
 
 let make_plan ?cancel ?grain ~independent scheme geometry =
   validate ?cancel geometry;
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let index_value = Topology_index.create ?cancel (Geometry.topology geometry) in
-  let index = Topology_index.Private.view index_value in
+  let index = Topology_index.View.view index_value in
   if independent then independent_plan ?cancel ?grain scheme geometry topology index
   else shared_plan ?cancel ?grain scheme geometry topology index
 
@@ -332,7 +332,7 @@ let numeric ?cancel ?grain plan owner source = match owner with
 
 let remap_attribute ?cancel ?grain plan attribute =
   let owner = Attribute.owner attribute in
-  let storage = match Attribute.Private.storage attribute with
+  let storage = match Attribute.View.storage attribute with
       | Attribute.Float values -> Attribute.Float (numeric ?cancel ?grain plan owner values)
       | Attribute.Int values -> Attribute.Int (discrete ?cancel ?grain plan owner values)
       | Attribute.Text values -> Attribute.Text (discrete ?cancel ?grain plan owner values)
@@ -343,18 +343,18 @@ let remap_attribute ?cancel ?grain plan attribute =
           Attribute.Float_array (Ragged_ops.remap_float ?cancel ?grain
             (discrete_mapping plan owner) values)
       | Attribute.Float2 values ->
-          let values = Packed.Float2.Private.view values in
+          let values = Packed.Float2.View.view values in
           Attribute.Float2 (Packed.Float2.of_owned
             ~x:(numeric ?cancel ?grain plan owner values.x)
             ~y:(numeric ?cancel ?grain plan owner values.y) |> Result.get_ok)
       | Attribute.Float3 values ->
-          let values = Packed.Float3.Private.view values in
-          Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+          let values = Packed.Float3.View.view values in
+          Attribute.Float3 (Packed.Float3.View.of_owned_exn
             ~x:(numeric ?cancel ?grain plan owner values.x)
             ~y:(numeric ?cancel ?grain plan owner values.y)
             ~z:(numeric ?cancel ?grain plan owner values.z))
       | Attribute.Float4 values ->
-          let values = Packed.Float4.Private.view values in
+          let values = Packed.Float4.View.view values in
           Attribute.Float4 (Packed.Float4.of_owned
             ~x:(numeric ?cancel ?grain plan owner values.x)
             ~y:(numeric ?cancel ?grain plan owner values.y)
@@ -396,7 +396,7 @@ let remap_group ?cancel ?grain plan group =
           if Bytes.get plan.vertex_old output <> '\000'
           then plan.vertex_left.(output) else -1)
       | Group.Primitive -> plan.primitive_source in
-    Group.Private.remap_order ~source:group ~source_of_target target
+    Group.View.remap_order ~source:group ~source_of_target target
 
 let remap_edge_group ?cancel plan group =
   if Edge_group.topology_data_id group
@@ -405,7 +405,7 @@ let remap_edge_group ?cancel plan group =
   let output_index = match plan.output_index with
     | Some index -> index
     | None -> fail "curve edge-group remap is missing its output topology index" in
-  let output_view = Topology_index.Private.view output_index in
+  let output_view = Topology_index.View.view output_index in
   let builder = Edge_group.Builder.create ~topology:plan.output_topology
       ~index:output_index ~name:(Edge_group.name group) in
   for vertex = 0 to Array.length plan.source_edge_of_output_vertex - 1 do
@@ -421,8 +421,8 @@ let remap_edge_group ?cancel plan group =
 
 let once ?cancel ?grain ~independent scheme geometry =
   let plan = make_plan ?cancel ?grain ~independent scheme geometry in
-  let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(point_float ?cancel ?grain plan source_positions.x)
       ~y:(point_float ?cancel ?grain plan source_positions.y)
       ~z:(point_float ?cancel ?grain plan source_positions.z) in

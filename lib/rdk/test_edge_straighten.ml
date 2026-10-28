@@ -24,19 +24,19 @@ let geometry_owned ~kinds positions vertex_points primitive_offsets =
   and z = Array.map (fun (_, _, z) -> z) positions in
   let topology = Topology.create_owned ~point_count ~vertex_points
       ~primitive_offsets ~primitive_kinds:kinds |> get_ok in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_ok
 
 let equal_attribute left right =
   Attribute.owner left = Attribute.owner right
   && Attribute.name left = Attribute.name right
-  && match Attribute.Private.storage left, Attribute.Private.storage right with
+  && match Attribute.View.storage left, Attribute.View.storage right with
      | Attribute.Float a, Attribute.Float b -> a = b
      | Attribute.Int a, Attribute.Int b -> a = b
      | Attribute.Text a, Attribute.Text b -> a = b
      | Attribute.Float3 a, Attribute.Float3 b ->
-         let a = Packed.Float3.Private.view a
-         and b = Packed.Float3.Private.view b in
+         let a = Packed.Float3.View.view a
+         and b = Packed.Float3.View.view b in
          a.x = b.x && a.y = b.y && a.z = b.z
      | _ -> false
 
@@ -62,8 +62,8 @@ let equal_edge_group left right =
 
 let equal_geometry left right =
   let lp = positions left and rp = positions right
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -92,11 +92,11 @@ let decorated_bend () =
     ~attributes:[
       attribute Attribute.Point "id" (Attribute.Int [|10;11;12|]);
       attribute Attribute.Point "N" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|0.;0.;0.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|0.;0.;0.|]
           ~y:[|0.;0.;0.|] ~z:[|1.;1.;1.|]));
       attribute Attribute.Vertex "corner" (Attribute.Float [|3.;4.;5.|]);
       attribute Attribute.Vertex "N" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|0.;0.;0.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|0.;0.;0.|]
           ~y:[|0.;0.;0.|] ~z:[|1.;1.;1.|]));
       attribute Attribute.Primitive "material" (Attribute.Text [|"wire"|]);
       attribute Attribute.Detail "meta" (Attribute.Int [|42|]);
@@ -114,7 +114,7 @@ let many_bends count =
     x.(point + 1) <- ox; y.(point + 1) <- oy +. 1.;
     x.(point + 2) <- ox +. 1.; y.(point + 2) <- oy
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.create_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (count + 1) (fun primitive -> primitive * 3))

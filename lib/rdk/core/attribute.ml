@@ -103,15 +103,15 @@ let kind_name value = match value.storage with
   | Int_array _ -> "int_array" | Float_array _ -> "float_array"
   | Float3 _ -> "float3" | Float4 _ -> "float4" | Text _ -> "text"
 
-module Private = struct
+module View = struct
   let storage value = value.storage
 end
 
 let float_planes = function
   | Float values -> Some [| values |]
-  | Float2 v -> let v = Packed.Float2.Private.view v in Some [| v.x; v.y |]
-  | Float3 v -> let v = Packed.Float3.Private.view v in Some [| v.x; v.y; v.z |]
-  | Float4 v -> let v = Packed.Float4.Private.view v in Some [| v.x; v.y; v.z; v.w |]
+  | Float2 v -> let v = Packed.Float2.View.view v in Some [| v.x; v.y |]
+  | Float3 v -> let v = Packed.Float3.View.view v in Some [| v.x; v.y; v.z |]
+  | Float4 v -> let v = Packed.Float4.View.view v in Some [| v.x; v.y; v.z; v.w |]
   | Int _ | Int_array _ | Float_array _ | Text _ -> None
 
 let of_float_planes ~like planes = match like with
@@ -119,7 +119,7 @@ let of_float_planes ~like planes = match like with
   | Float2 _ ->
       Float2 (Result.get_ok (Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)))
   | Float3 _ ->
-      Float3 (Packed.Float3.Private.of_owned_exn ~x:planes.(0) ~y:planes.(1)
+      Float3 (Packed.Float3.View.of_owned_exn ~x:planes.(0) ~y:planes.(1)
         ~z:planes.(2))
   | Float4 _ ->
       Float4 (Result.get_ok (Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1)

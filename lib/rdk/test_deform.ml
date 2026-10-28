@@ -16,7 +16,7 @@ let float_attribute name values =
   |> get_string_ok
 
 let float3_attribute ~owner name x y z =
-  let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   Attribute.create_owned ~name ~owner (Attribute.Float3 values) |> get_string_ok
 
 let point_float name geometry =
@@ -27,7 +27,7 @@ let point_float name geometry =
 let point_float3 name geometry =
   Geometry.find_attribute ~owner:Attribute.Point name geometry |> Option.get
   |> Attribute.get (Attribute.key ~name ~owner:Attribute.Point Attribute.float3)
-  |> Option.get |> Packed.Float3.Private.view
+  |> Option.get |> Packed.Float3.View.view
 
 let expect_error code = function
   | Error error when String.equal (Error.code error) code -> ()
@@ -50,7 +50,7 @@ let expect_only_points_moved source output expected delta_x delta_y delta_z =
   done
 
 let run () =
-  let quad_positions = Packed.Float3.Private.of_owned_exn
+  let quad_positions = Packed.Float3.View.of_owned_exn
       ~x:[|-1.; 1.; 1.; -1.|] ~y:[|0.; 0.; 0.; 0.|]
       ~z:[|-1.; -1.; 1.; 1.|] in
   let quad_topology_builder = Tb.create ~point_count:4 () in

@@ -41,7 +41,7 @@ val point_edge : t -> point:int -> local:int -> int
 val boundary_edge_count : t -> int
 val non_manifold_edge_count : t -> int
 
-module Private : sig
+module View : sig
   type view = {
     primitive_of_vertex : int array;
     next_vertex : int array;

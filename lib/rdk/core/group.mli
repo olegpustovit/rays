@@ -44,7 +44,7 @@ module Builder : sig
   val freeze : t -> group
 end
 
-module Private : sig
+module View : sig
   val bits_view : t -> bytes
   (** Borrow packed membership storage for audited kernels. The returned bytes
       must never be mutated or retained beyond the immutable group's lifetime. *)

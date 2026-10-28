@@ -2,12 +2,12 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let topology geometry = Topology.Private.view (Geometry.topology geometry)
+let topology geometry = Topology.View.view (Geometry.topology geometry)
 
 let attribute_storage geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
   | None -> fail ("missing attribute " ^ name)
-  | Some attribute -> Attribute.Private.storage attribute
+  | Some attribute -> Attribute.View.storage attribute
 
 let equal_geometry left right =
   let lp = positions left and rp = positions right

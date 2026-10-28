@@ -24,15 +24,15 @@ let geometry_owned positions vertex_points primitive_offsets =
   and z = Array.map (fun (_, _, z) -> z) positions in
   let topology = Topology.polygons_owned ~point_count ~vertex_points
       ~primitive_offsets |> get_ok in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_ok
 
 let vertex_points geometry =
-  (Topology.Private.view (Geometry.topology geometry)).vertex_points
+  (Topology.View.view (Geometry.topology geometry)).vertex_points
 
 let vertex_float name geometry =
   match Geometry.find_attribute ~owner:Attribute.Vertex name geometry
-      |> Option.get |> Attribute.Private.storage with
+      |> Option.get |> Attribute.View.storage with
   | Attribute.Float values -> values
   | _ -> fail (name ^ " is not vertex float")
 
@@ -48,17 +48,17 @@ let edge_group_pairs name geometry =
 let equal_attribute left right =
   Attribute.owner left = Attribute.owner right
   && Attribute.name left = Attribute.name right
-  && match Attribute.Private.storage left, Attribute.Private.storage right with
+  && match Attribute.View.storage left, Attribute.View.storage right with
      | Attribute.Float a, Attribute.Float b -> a = b
      | Attribute.Int a, Attribute.Int b -> a = b
      | Attribute.Text a, Attribute.Text b -> a = b
      | Attribute.Float3 a, Attribute.Float3 b ->
-         let a = Packed.Float3.Private.view a
-         and b = Packed.Float3.Private.view b in
+         let a = Packed.Float3.View.view a
+         and b = Packed.Float3.View.view b in
          a.x = b.x && a.y = b.y && a.z = b.z
      | Attribute.Int_array a, Attribute.Int_array b ->
-         let a = Packed.Int_array.Private.view a
-         and b = Packed.Int_array.Private.view b in
+         let a = Packed.Int_array.View.view a
+         and b = Packed.Int_array.View.view b in
          a.offsets = b.offsets && a.values = b.values
      | _ -> false
 
@@ -73,10 +73,10 @@ let equal_group left right =
      !equal
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -113,7 +113,7 @@ let decorated_quad () =
     ~attributes:[
       attribute Attribute.Point "id" (Attribute.Int [|10;11;12;13|]);
       attribute Attribute.Point "N" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|1.;1.;1.;1.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|1.;1.;1.;1.|]
           ~y:[|0.;0.;0.;0.|] ~z:[|0.;0.;0.;0.|]));
       attribute Attribute.Vertex "uv" (Attribute.Float
         [|10.;20.;30.;40.;50.;60.|]);
@@ -141,7 +141,7 @@ let disconnected_triangle_pairs count =
   done;
   let topology = Topology.polygons_owned ~point_count:points ~vertex_points
       ~primitive_offsets:offsets |> get_ok in
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let geometry = Geometry.create ~positions ~topology () |> get_ok in
   let index = Topology_index.create topology in
   let edges = Edge_group.init ~grain:127 ~topology ~index ~name:"flip"

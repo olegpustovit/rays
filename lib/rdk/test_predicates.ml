@@ -82,7 +82,7 @@ let check_segment_segment expected x y z left_a left_b right_a right_b message =
 
 let triangle_event_count x y z la lb lc ra rb rc =
   let output = Array.make 4 (-1) in
-  Predicates.Private.triangle_triangle_features_into ~x ~y ~z
+  Predicates.View.triangle_triangle_features_into ~x ~y ~z
     ~left_a:la ~left_b:lb ~left_c:lc ~right_a:ra ~right_b:rb ~right_c:rc
     output, output
 
@@ -226,7 +226,7 @@ let run () =
   let count, _ = triangle_event_count tx ty tz 0 1 2 0 1 2 in
   check (count = -1) "triangle/triangle coplanar result";
   let coplanar_contact la lb lc ra rb rc =
-    Predicates.Private.coplanar_triangles_contact_packed ~x:tx ~y:ty ~z:tz
+    Predicates.View.coplanar_triangles_contact_packed ~x:tx ~y:ty ~z:tz
       ~left_a:la ~left_b:lb ~left_c:lc ~right_a:ra ~right_b:rb ~right_c:rc in
   check (coplanar_contact 0 1 2 0 1 2)
     "identical coplanar triangles do not contact";
@@ -236,7 +236,7 @@ let run () =
   and cy = [|0.;0.;4.; 1.;1.;2.; 0.;0.;1.; 0.;0.;-1.|]
   and cz = Array.make 12 0. in
   let contact la lb lc ra rb rc =
-    Predicates.Private.coplanar_triangles_contact_packed ~x:cx ~y:cy ~z:cz
+    Predicates.View.coplanar_triangles_contact_packed ~x:cx ~y:cy ~z:cz
       ~left_a:la ~left_b:lb ~left_c:lc ~right_a:ra ~right_b:rb ~right_c:rc in
   check (contact 0 1 2 3 4 5) "contained coplanar triangle does not contact";
   check (contact 0 1 2 6 7 8) "edge-touching coplanar triangle does not contact";
@@ -324,7 +324,7 @@ let run () =
     let ax = coordinate 0 and ay = coordinate 1
     and bx = coordinate 2 and by = coordinate 3
     and cx = coordinate 4 and cy = coordinate 5 in
-    let arena = Predicates.Private.exact_orient2d_arena
+    let arena = Predicates.View.exact_orient2d_arena
         ~ax ~ay ~bx ~by ~cx ~cy
     and reference = exact_orient2d_reference
         ~ax ~ay ~bx ~by ~cx ~cy in
@@ -336,7 +336,7 @@ let run () =
     and bx = coordinate 3 and by = coordinate 4 and bz = coordinate 5
     and cx = coordinate 6 and cy = coordinate 7 and cz = coordinate 8
     and dx = coordinate 9 and dy = coordinate 10 and dz = coordinate 11 in
-    let arena = Predicates.Private.exact_orient3d_arena
+    let arena = Predicates.View.exact_orient3d_arena
         ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz
     and reference = exact_orient3d_reference
         ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz in
@@ -348,7 +348,7 @@ let run () =
     and bx = coordinate 2 and by = coordinate 3
     and cx = coordinate 4 and cy = coordinate 5
     and dx = coordinate 6 and dy = coordinate 7 in
-    let arena = Predicates.Private.exact_incircle_arena
+    let arena = Predicates.View.exact_incircle_arena
         ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy
     and reference = exact_incircle_reference
         ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy in

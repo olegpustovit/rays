@@ -17,7 +17,7 @@ let has_corner_payload geometry =
   Array.exists (fun attribute -> match Attribute.owner attribute with
     | Attribute.Point | Attribute.Vertex -> true
     | Attribute.Primitive | Attribute.Detail -> false)
-    (Geometry.Private.attributes geometry)
+    (Geometry.View.attributes geometry)
   || List.exists (fun group -> match Group.owner group with
     | Group.Point | Group.Vertex -> true
     | Group.Primitive -> false) (Geometry.groups geometry)
@@ -89,7 +89,7 @@ let run ?cancel ?(grain = 16_384) ?(operation = Union)
             bind (Boolean_solid.shatter_with_ancestry ?cancel
                 ~require_closed:false ~defer_rounded_slivers:true
                 ~corner_payload prepared) (fun pieces ->
-              bind (Boolean_extract.Private.concatenate_ancestries ?cancel pieces)
+              bind (Boolean_extract.View.concatenate_ancestries ?cancel pieces)
                 (fun ancestry ->
                   let counts = Array.map (fun piece -> Geometry.primitive_count
                       (Boolean_extract.geometry piece)) pieces in
@@ -112,7 +112,7 @@ let run ?cancel ?(grain = 16_384) ?(operation = Union)
                         | None -> Ok geometry
                         | Some name ->
                             let values = Boolean_extract.piece_ids
-                                ~weiler:(Boolean_solid.Private.weiler prepared)
+                                ~weiler:(Boolean_solid.View.weiler prepared)
                                 ~ancestry ~source
                                 ~primitive_count:(Geometry.primitive_count geometry) in
                             bind (Attribute.create_owned ~name

@@ -21,7 +21,7 @@ let run ?cancel ?(grain = 16_384) ?primitives
   if grain <= 0 then invalid_arg "Rdk_mesh.Reverse_faces.reverse: grain must be positive";
   Cancel.check_opt cancel;
   let topology = Geometry.topology geometry in
-  let source = Topology.Private.view topology in
+  let source = Topology.View.view topology in
   let vertex_count = Topology.vertex_count topology in
   let primitive_count = Topology.primitive_count topology in
   (match primitives with
@@ -82,7 +82,7 @@ let run ?cancel ?(grain = 16_384) ?primitives
           vertex_map.(vertex) <- old_vertex
         done
       end);
-  let reversed_topology = Topology.Private.create_validated_owned
+  let reversed_topology = Topology.View.create_validated_owned
       ~point_count:(Geometry.point_count geometry)
       ~vertex_points ~primitive_offsets:(Array.copy source.primitive_offsets)
       ~primitive_kinds:(Bytes.copy source.primitive_kinds) in

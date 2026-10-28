@@ -15,7 +15,7 @@ let fixtures () =
      [|0;3;6;9;12|] [|T.Polygon;Open_polyline;Closed_polyline;Polygon|]]
   |> List.map (fun (name, topology) ->
     let count = T.point_count topology in
-    let positions = Rdk.Packed.Float3.Private.of_owned_exn
+    let positions = Rdk.Packed.Float3.View.of_owned_exn
       ~x:(Array.init count float) ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
     name, (G.create ~positions ~topology () |> ok))
 
@@ -35,7 +35,7 @@ let evaluate geometry body =
 let () =
   List.iter (fun (name, geometry) ->
     let index = Rdk.Topology_index.create (G.topology geometry) in
-    let view = Rdk.Topology_index.Private.view index in
+    let view = Rdk.Topology_index.View.view index in
     List.iter (fun (element, expected) ->
       let value, resolve = evaluate geometry ("(sop/count geo :" ^ element ^ ")") in
       let live=Input.at_time 0. in
@@ -155,7 +155,7 @@ let () =
   let session=Sop.Session.create ~max_entries:16 ~max_payload_bytes:1_000_000 |>ok in
   Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->
     check(cooked session node)geometry;
-    let positions=Rdk.Packed.Float3.Private.of_owned_exn ~x:(Array.make(G.point_count geometry)2.)
+    let positions=Rdk.Packed.Float3.View.of_owned_exn ~x:(Array.make(G.point_count geometry)2.)
       ~y:(Array.make(G.point_count geometry)3.) ~z:(Array.make(G.point_count geometry)4.) in
     let changed=G.with_positions positions geometry |>ok in
     let changed=G.with_attribute(Rdk.Attribute.create_owned ~name:"unrelated" ~owner:Rdk.Attribute.Point

@@ -39,7 +39,7 @@ let high_valence_surface () =
   let topology = Topology.polygons_owned ~point_count ~vertex_points:vertices
       ~primitive_offsets:(Array.init (primitive_count + 1) (fun value -> value * 3))
       |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let sorted_keys triangle_count first second =
@@ -53,9 +53,9 @@ let filtered_reference surface first second =
   for pair = 0 to Array.length first - 1 do
     let shared = ref false in
     for left = 0 to 2 do
-      let point = Surface_index.Private.triangle_point surface first.(pair) left in
+      let point = Surface_index.View.triangle_point surface first.(pair) left in
       for right = 0 to 2 do
-        if point = Surface_index.Private.triangle_point surface second.(pair) right then
+        if point = Surface_index.View.triangle_point surface second.(pair) right then
           shared := true
       done
     done;
@@ -89,15 +89,15 @@ let run () =
   let geometry = high_valence_surface () in
   let surface = Surface_index.create ~grain:1 geometry |> get in
   let raw_first, raw_second =
-    Surface_index.Private.overlapping_self_triangle_pairs
+    Surface_index.View.overlapping_self_triangle_pairs
       ~grain:1 ~tolerance:0. surface in
   let reference_first, reference_second =
     filtered_reference surface raw_first raw_second in
   let one_first, one_second =
-    Surface_index.Private.overlapping_self_triangle_pairs_disjoint_topology
+    Surface_index.View.overlapping_self_triangle_pairs_disjoint_topology
       ~grain:1 ~tolerance:0. surface in
   let many_first, many_second =
-    Surface_index.Private.overlapping_self_triangle_pairs_disjoint_topology
+    Surface_index.View.overlapping_self_triangle_pairs_disjoint_topology
       ~grain:8 ~tolerance:0. surface in
   let triangles = Surface_index.triangle_count surface in
   let reference = sorted_keys triangles reference_first reference_second

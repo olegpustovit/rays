@@ -7,24 +7,24 @@ let near ?(epsilon = 1e-9) left right = abs_float (left -. right) <= epsilon
 let float2_attribute geometry name =
   match Geometry.find_attribute ~owner:Attribute.Vertex name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Packed.Float2.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let float3_attribute ~owner geometry name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -51,7 +51,7 @@ let with_int name values geometry =
   Geometry.with_attribute attribute geometry |> get_string
 
 let with_float3 name ~x ~y ~z geometry =
-  let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let attribute = Attribute.create_owned ~owner:Attribute.Point ~name
       (Attribute.Float3 values) |> get_string in
   Geometry.with_attribute attribute geometry |> get_string
@@ -67,7 +67,7 @@ let attribute ~owner name storage =
 let find_storage ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | None -> fail ("missing attribute " ^ name)
-  | Some value -> Attribute.Private.storage value
+  | Some value -> Attribute.View.storage value
 
 let expect_invalid = function
   | Error error when Error.code error = "invalid_geometry" -> ()
@@ -96,7 +96,7 @@ let transport tx0 ty0 tz0 tx1 ty1 tz1 nx ny nz =
     (nz *. cosine) +. (cross_z *. sine) +. (kz *. dot *. (1. -. cosine))
 
 let advanced_source () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 2.; 0.; 2.; 9.|] ~y:[|0.; 0.; 3.; 3.; 9.|]
       ~z:(Array.make 5 0.) in
   let topology = Topology.create_owned ~point_count:5
@@ -132,7 +132,7 @@ let advanced_source () =
       (Packed.Float2.of_owned ~x:[|0.;10.;20.;30.;40.|]
         ~y:[|1.;11.;21.;31.;41.|] |> get_string));
     attribute ~owner:Attribute.Point "p3" (Attribute.Float3
-      (Packed.Float3.Private.of_owned_exn ~x:[|0.;10.;20.;30.;40.|]
+      (Packed.Float3.View.of_owned_exn ~x:[|0.;10.;20.;30.;40.|]
         ~y:[|1.;11.;21.;31.;41.|] ~z:[|2.;12.;22.;32.;42.|]));
     attribute ~owner:Attribute.Point "p4" (Attribute.Float4
       (Packed.Float4.of_owned ~x:[|0.;10.;20.;30.;40.|]

@@ -19,7 +19,7 @@ let scalar_attribute label name geometry =
   | None -> raise (Invalid (Printf.sprintf "%s point attribute %S is missing"
       label name))
   | Some attribute ->
-      match Attribute.Private.storage attribute with
+      match Attribute.View.storage attribute with
       | Attribute.Float values -> `Float values
       | Attribute.Int values -> `Int values
       | Attribute.Text values -> `Text values
@@ -82,7 +82,7 @@ let compatible condition tolerance views query target =
   | Unequal_attribute_values -> not equal
 
 let validate_positions ?cancel label geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   for point = 0 to Geometry.point_count geometry - 1 do
     if point land 4095 = 0 then Cancel.check_opt cancel;
     if not (Float.is_finite positions.x.(point) && Float.is_finite positions.y.(point)
@@ -98,7 +98,7 @@ let specified ?cancel ~grain ?queries ?targets attribute_name ~source ~target =
   ignore (validate_positions ?cancel "target" target);
   let values = match Geometry.find_attribute ~owner:Attribute.Point attribute_name source with
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values -> values
          | _ -> raise (Invalid (Printf.sprintf
              "specified target attribute %S must be a point integer"

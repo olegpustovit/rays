@@ -323,7 +323,7 @@ let radix_sort_nonnegative ?cancel values =
   end
 
 let primitive_to_point ?cancel geometry index =
-  let index_view = Topology_index.Private.view index in
+  let index_view = Topology_index.View.view index in
   let point_count = Geometry.point_count geometry in
   let offsets = Array.make (point_count + 1) 0 in
   for point = 0 to point_count - 1 do
@@ -359,7 +359,7 @@ let primitive_to_point ?cancel geometry index =
 
 let make_relation ?cancel ~source ~destination geometry =
   let topology = Geometry.topology geometry
-  and topology_view = Topology.Private.view (Geometry.topology geometry) in
+  and topology_view = Topology.View.view (Geometry.topology geometry) in
   if source = destination then Identity (owner_count geometry destination)
   else match source, destination with
   | Attribute.Detail, destination -> Constant_zero (owner_count geometry destination)
@@ -367,10 +367,10 @@ let make_relation ?cancel ~source ~destination geometry =
   | Attribute.Point, Attribute.Vertex -> Direct topology_view.vertex_points
   | Attribute.Primitive, Attribute.Vertex ->
       let index = Topology_index.create ?cancel topology in
-      Direct (Topology_index.Private.view index).primitive_of_vertex
+      Direct (Topology_index.View.view index).primitive_of_vertex
   | Attribute.Vertex, Attribute.Point ->
       let index = Topology_index.create ?cancel topology in
-      let view = Topology_index.Private.view index in
+      let view = Topology_index.View.view index in
       Csr_map { offsets = view.point_offsets; indices = view.point_vertices }
   | Attribute.Vertex, Attribute.Primitive ->
       Csr_identity { offsets = topology_view.primitive_offsets }
@@ -463,7 +463,7 @@ let text_piece_ids values =
 
 let make_piece_relation ?cancel ~source_count ~piece_attribute base_relation =
   let piece_of_destination, piece_count =
-    match Attribute.Private.storage piece_attribute with
+    match Attribute.View.storage piece_attribute with
     | Attribute.Int values -> int_piece_ids values
     | Attribute.Text values -> text_piece_ids values
     | Attribute.Float _ | Attribute.Float2 _ | Attribute.Float3 _
@@ -926,7 +926,7 @@ let fixed_int_tuple_array ?cancel ~grain components =
         for component = 0 to width - 1 do
           values.(first + component) <- components.(component).(destination)
         done);
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
+  Packed.Int_array.View.create_validated_owned ~offsets ~values
 
 let map_plane ?cancel ~grain mapping values default =
   let count = Array.length mapping and output = Array.make (Array.length mapping) default in
@@ -945,12 +945,12 @@ let relation_offsets relation =
 let int_array_all ?cancel ~grain relation source =
   let offsets = relation_offsets relation
   and values = fill_incidence_plane ?cancel ~grain ~default:0 relation source in
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
+  Packed.Int_array.View.create_validated_owned ~offsets ~values
 
 let float_array_all ?cancel ~grain relation source =
   let offsets = relation_offsets relation
   and values = fill_incidence_plane ?cancel ~grain ~default:0. relation source in
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values
+  Packed.Float_array.View.create_validated_owned ~offsets ~values
 
 let int_array_unique ?cancel ~grain relation source =
   let count = Attribute_relation.count relation
@@ -994,7 +994,7 @@ let int_array_unique ?cancel ~grain relation source =
             end
           done
         end);
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
+  Packed.Int_array.View.create_validated_owned ~offsets ~values
 
 let float_array_unique ?cancel ~grain relation source =
   let count = Attribute_relation.count relation
@@ -1038,10 +1038,10 @@ let float_array_unique ?cancel ~grain relation source =
             end
           done
         end);
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values
+  Packed.Float_array.View.create_validated_owned ~offsets ~values
 
 let remap_int_array ?cancel ~grain mapping values =
-  let source = Packed.Int_array.Private.view values
+  let source = Packed.Int_array.View.view values
   and count = Array.length mapping in
   let offsets = Array.make (count + 1) 0 in
   for destination = 0 to count - 1 do
@@ -1060,10 +1060,10 @@ let remap_int_array ?cancel ~grain mapping values =
         let first = source.offsets.(source_row)
         and length = source.offsets.(source_row + 1) - source.offsets.(source_row) in
         Array.blit source.values first output offsets.(destination) length);
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values:output
+  Packed.Int_array.View.create_validated_owned ~offsets ~values:output
 
 let remap_float_array ?cancel ~grain mapping values =
-  let source = Packed.Float_array.Private.view values
+  let source = Packed.Float_array.View.view values
   and count = Array.length mapping in
   let offsets = Array.make (count + 1) 0 in
   for destination = 0 to count - 1 do
@@ -1082,7 +1082,7 @@ let remap_float_array ?cancel ~grain mapping values =
         let first = source.offsets.(source_row)
         and length = source.offsets.(source_row + 1) - source.offsets.(source_row) in
         Array.blit source.values first output offsets.(destination) length);
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values:output
+  Packed.Float_array.View.create_validated_owned ~offsets ~values:output
 
 type promotion_plan = {
   relation : relation;
@@ -1104,7 +1104,7 @@ let make_promotion_plan ?cancel ?piece_attribute ~source ~destination geometry =
              | Attribute.Primitive -> "primitive"
              | Attribute.Detail -> "detail") piece_name)
        | Some piece ->
-           (match Attribute.Private.storage piece with
+           (match Attribute.View.storage piece with
             | Attribute.Int _ | Attribute.Text _ ->
                 let relation, mapping = make_piece_relation ?cancel
                     ~source_count:(owner_count geometry source)
@@ -1130,7 +1130,7 @@ let validate_index_request ~method_ ~destination ~into ~piece_attribute
   | Some _ when not (indexed_method method_) -> Error
       "Rdk.Attribute_ops.promote: source index requires first, last, minimum, maximum, or mode"
   | Some _ ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float _ | Attribute.Int _ | Attribute.Text _
        | Attribute.Float2 _ | Attribute.Float3 _ | Attribute.Float4 _ -> Ok ()
        | Attribute.Int_array _ | Attribute.Float_array _ -> Error
@@ -1159,7 +1159,7 @@ let promote_bound ?cancel ~grain ~method_ ~delete_source ~source ~destination
     | Some mapping -> remap_int_array ?cancel ~grain mapping values
   and map_float_array values = match mapping with None -> values
     | Some mapping -> remap_float_array ?cancel ~grain mapping values in
-  let storage_result = match Attribute.Private.storage attribute with
+  let storage_result = match Attribute.View.storage attribute with
     | Attribute.Float values ->
         (match method_, index_attribute with
          | Array_all, None -> Ok (Attribute.Float_array
@@ -1210,7 +1210,7 @@ let promote_bound ?cancel ~grain ~method_ ~delete_source ~source ~destination
          | Array_all | Unique_values -> unsupported "float2"
          | First | Last | Average | Minimum | Maximum | Mode | Median | Sum
          | Sum_squares | Root_mean_square ->
-             let view = Packed.Float2.Private.view values in
+             let view = Packed.Float2.View.view values in
              (match index_attribute with
               | None ->
                   let x = float_plane ?cancel ~grain method_ relation view.x
@@ -1233,7 +1233,7 @@ let promote_bound ?cancel ~grain ~method_ ~delete_source ~source ~destination
          | Array_all | Unique_values -> unsupported "float3"
          | First | Last | Average | Minimum | Maximum | Mode | Median | Sum
          | Sum_squares | Root_mean_square ->
-             let view = Packed.Float3.Private.view values in
+             let view = Packed.Float3.View.view values in
              (match index_attribute with
               | None ->
                   let x = float_plane ?cancel ~grain method_ relation view.x
@@ -1243,7 +1243,7 @@ let promote_bound ?cancel ~grain ~method_ ~delete_source ~source ~destination
                   and z = float_plane ?cancel ~grain method_ relation view.z
                       |> map_float in
                   Ok (Attribute.Float3
-                    (Packed.Float3.Private.of_owned_exn ~x ~y ~z), None)
+                    (Packed.Float3.View.of_owned_exn ~x ~y ~z), None)
               | Some _ ->
                   let x, ix = indexed_float_plane ?cancel ~grain method_
                       relation view.x
@@ -1251,7 +1251,7 @@ let promote_bound ?cancel ~grain ~method_ ~delete_source ~source ~destination
                       relation view.y
                   and z, iz = indexed_float_plane ?cancel ~grain method_
                       relation view.z in
-                  Ok (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+                  Ok (Attribute.Float3 (Packed.Float3.View.of_owned_exn
                       ~x:(map_float x) ~y:(map_float y) ~z:(map_float z)),
                     Some (Attribute.Int_array (fixed_int_tuple_array ?cancel
                       ~grain [|map_int ix; map_int iy; map_int iz|])))))
@@ -1260,7 +1260,7 @@ let promote_bound ?cancel ~grain ~method_ ~delete_source ~source ~destination
          | Array_all | Unique_values -> unsupported "float4"
          | First | Last | Average | Minimum | Maximum | Mode | Median | Sum
          | Sum_squares | Root_mean_square ->
-             let view = Packed.Float4.Private.view values in
+             let view = Packed.Float4.View.view values in
              (match index_attribute with
               | None ->
                   let x = float_plane ?cancel ~grain method_ relation view.x

@@ -7,34 +7,34 @@ let get_rdk = function Ok value -> value | Error error -> fail (Error.to_string 
 
 let point_cloud values = Line_geometry.points values
 
-let same_storage left right = match Attribute.Private.storage left,
-    Attribute.Private.storage right with
+let same_storage left right = match Attribute.View.storage left,
+    Attribute.View.storage right with
   | Attribute.Float a, Attribute.Float b -> a = b
   | Attribute.Int a, Attribute.Int b -> a = b
   | Attribute.Text a, Attribute.Text b -> a = b
   | Attribute.Float2 a, Attribute.Float2 b ->
-      let a = Packed.Float2.Private.view a and b = Packed.Float2.Private.view b in
+      let a = Packed.Float2.View.view a and b = Packed.Float2.View.view b in
       a.x = b.x && a.y = b.y
   | Attribute.Float3 a, Attribute.Float3 b ->
-      let a = Packed.Float3.Private.view a and b = Packed.Float3.Private.view b in
+      let a = Packed.Float3.View.view a and b = Packed.Float3.View.view b in
       a.x = b.x && a.y = b.y && a.z = b.z
   | Attribute.Float4 a, Attribute.Float4 b ->
-      let a = Packed.Float4.Private.view a and b = Packed.Float4.Private.view b in
+      let a = Packed.Float4.View.view a and b = Packed.Float4.View.view b in
       a.x = b.x && a.y = b.y && a.z = b.z && a.w = b.w
   | Attribute.Int_array a, Attribute.Int_array b ->
-      let a = Packed.Int_array.Private.view a and b = Packed.Int_array.Private.view b in
+      let a = Packed.Int_array.View.view a and b = Packed.Int_array.View.view b in
       a.offsets = b.offsets && a.values = b.values
   | Attribute.Float_array a, Attribute.Float_array b ->
-      let a = Packed.Float_array.Private.view a
-      and b = Packed.Float_array.Private.view b in
+      let a = Packed.Float_array.View.view a
+      and b = Packed.Float_array.View.view b in
       a.offsets = b.offsets && a.values = b.values
   | _ -> false
 
 let same_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.vertex_points = rt.vertex_points
   && lt.primitive_offsets = rt.primitive_offsets
@@ -62,9 +62,9 @@ let check_closed geometry message =
       && Topology_index.non_manifold_edge_count index = 0) message
 
 let check_contains source hull message =
-  let source_positions = Packed.Float3.Private.view (Geometry.positions source)
-  and hull_positions = Packed.Float3.Private.view (Geometry.positions hull)
-  and topology = Topology.Private.view (Geometry.topology hull) in
+  let source_positions = Packed.Float3.View.view (Geometry.positions source)
+  and hull_positions = Packed.Float3.View.view (Geometry.positions hull)
+  and topology = Topology.View.view (Geometry.topology hull) in
   for primitive = 0 to Geometry.primitive_count hull - 1 do
     let first = topology.primitive_offsets.(primitive) in
     check (topology.primitive_offsets.(primitive + 1) - first = 3)
@@ -94,7 +94,7 @@ let test_affine_dimensions () =
       && Geometry.primitive_count point = 0) "singleton hull";
   let line = point_cloud [|2.,0.,0.; -1.,0.,0.; 5.,0.,0.; 0.,0.,0.; 5.,0.,0.|]
       |> Convex_hull.run |> get_rdk in
-  let line_positions = Packed.Float3.Private.view (Geometry.positions line) in
+  let line_positions = Packed.Float3.View.view (Geometry.positions line) in
   check (Geometry.point_count line = 2 && Geometry.vertex_count line = 2
       && Geometry.primitive_count line = 1
       && Topology.primitive_kind (Geometry.topology line) 0
@@ -119,7 +119,7 @@ let decorated_cube () =
   let id = Attribute.create_owned ~owner:Attribute.Point ~name:"id"
       (Attribute.Int (Array.init points (fun point -> 100 + point))) |> get
   and normal = Attribute.create_owned ~owner:Attribute.Point ~name:"N"
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:(Array.make points 1.) ~y:(Array.make points 0.)
         ~z:(Array.make points 0.))) |> get
   and detail = Attribute.create_owned ~owner:Attribute.Detail ~name:"tag"
@@ -144,10 +144,10 @@ let test_solid_payload_and_selection () =
   check (Geometry.find_attribute ~owner:Attribute.Detail "tag" hull <> None)
     "detail payload was dropped";
   let ids = match Geometry.find_attribute ~owner:Attribute.Point "id" hull
-      |> Option.get |> Attribute.Private.storage with
+      |> Option.get |> Attribute.View.storage with
     | Attribute.Int values -> values | _ -> fail "id storage" in
   let ancestry = match Geometry.find_attribute ~owner:Attribute.Point
-      "source_point" hull |> Option.get |> Attribute.Private.storage with
+      "source_point" hull |> Option.get |> Attribute.View.storage with
     | Attribute.Int values -> values | _ -> fail "ancestry storage" in
   check (ancestry = [|0;1;2;3;4;5;6;7|]
       && ids = Array.map (fun point -> 100 + point) ancestry)

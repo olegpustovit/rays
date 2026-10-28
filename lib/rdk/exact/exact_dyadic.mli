@@ -1,4 +1,4 @@
-(** Private exact dyadic arithmetic for binary64 predicate fallback. *)
+(** View exact dyadic arithmetic for binary64 predicate fallback. *)
 
 type t
 

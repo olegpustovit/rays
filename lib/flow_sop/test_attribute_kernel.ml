@@ -40,7 +40,7 @@ let () =
   let pack width planes=match width with
     |1->Attribute.Float planes.(0)
     |2->Float2(Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)|>get_string_ok)
-    |3->Float3(Packed.Float3.Private.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
+    |3->Float3(Packed.Float3.View.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
     |_->Float4(Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1) ~z:planes.(2) ~w:planes.(3)|>get_string_ok) in
   let array width values=match width with 1->E.Float_array values|2->Vec2_array values|3->Vec3_array values|_->Vec4_array values
   and row width values=match width with 1->E.Float values.(0)|2->Vec2(values.(0),values.(1))
@@ -152,10 +152,10 @@ let () =
   let original=Line_geometry.points[|Int64.float_of_bits 0x7ff8000000001234L,0.,0.;
     infinity,neg_infinity,-0.;-0.,0.,Float.min_float|] in
   let original=Geometry.with_group(Group.init ~owner:Point ~name:"chosen" 3((=)0))original|>get_string_ok in
-  let before=geometry_bytes original and positions=Packed.Float3.Private.view(Geometry.positions original) in
+  let before=geometry_bytes original and positions=Packed.Float3.View.view(Geometry.positions original) in
   let x=Array.copy positions.x and y=Array.copy positions.y and z=Array.copy positions.z in
   x.(0)<- -0.;y.(0)<-0.5;z.(0)<-Float.min_float;
-  let expected=Geometry.with_positions(Packed.Float3.Private.of_owned_exn ~x ~y ~z)original|>get_string_ok|>geometry_bytes in
+  let expected=Geometry.with_positions(Packed.Float3.View.of_owned_exn ~x ~y ~z)original|>get_string_ok|>geometry_bytes in
   let input=Lisp_sop.snapshot original in
   let factories=Edit.factory ~key:"ext_raw_positions" ~label:"Raw positions" ~category:["Test"] ~arity:0(fun _->input)::factories in
   let forms=Flow.Syntax.parse{|(workspace selected_positions
@@ -190,7 +190,7 @@ let () =
       let bytes=Gc.allocated_bytes()-.bytes in
       assert(bytes<512.*.float count);
       let colors=Geometry.find_attribute ~owner:Point "selected" output|>Option.get|>Attribute.storage in
-      match colors with Float4 colors->let colors=Packed.Float4.Private.view colors in
+      match colors with Float4 colors->let colors=Packed.Float4.View.view colors in
         for i=0 to count-1 do assert(colors.x.(i)=(if i mod 2=0 then 0.2 else 1.)) done
       |_->assert false))[1;8];
   print_endline "Selected host dispatch: deferred masks hydrate before concrete writes without serializing a new dense node"
@@ -218,7 +218,7 @@ let () =
       let storage=match kind with
         |"float"->Attribute.Float planes.(0)
         |"vec2"->Float2(Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)|>get_string_ok)
-        |"vec3"->Float3(Packed.Float3.Private.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
+        |"vec3"->Float3(Packed.Float3.View.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
         |_->Float4(Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1) ~z:planes.(2) ~w:planes.(3)|>get_string_ok) in
       let attribute=Attribute.create_owned ~owner ~name:"checked" storage |>get_string_ok in
       let geo=Geometry.with_attribute attribute original |>get_string_ok in
@@ -333,9 +333,9 @@ let () =
   let data=[|-0.;0.;Float.max_float|] in
   let written=write data |> flow_ok in
   let stored=Geometry.find_attribute ~owner:Attribute.Point "csr" written |>Option.get
-    |>Attribute.Private.storage in
+    |>Attribute.View.storage in
   (match stored with Attribute.Float_array stored->
-    let stored=Packed.Float_array.Private.view stored in
+    let stored=Packed.Float_array.View.view stored in
     assert(stored.values!=data && stored.offsets=[|0;3|]);
     Array.iteri(fun i x->assert(Int64.bits_of_float x=Int64.bits_of_float data.(i)))stored.values
    |_->assert false);
@@ -437,7 +437,7 @@ let () =
   print_endline "Constant constructors: strict scalar forces, owned outputs, lazy/empty/count/error and one/eight-domain reference parity"
 
 let () =
-  let positions=Packed.Float3.Private.of_owned_exn ~x:[|0.;1.;0.;2.|]
+  let positions=Packed.Float3.View.of_owned_exn ~x:[|0.;1.;0.;2.|]
     ~y:[|0.;0.;1.;2.|] ~z:[|0.;0.;0.;0.|] in
   let topology=Topology.polygons_owned ~point_count:4 ~vertex_points:[|0;1;2|]
     ~primitive_offsets:[|0;3|] |> get_string_ok in
@@ -539,7 +539,7 @@ let () =
 
 let () =
   let count=4097 in
-  let positions=Packed.Float3.Private.of_owned_exn ~x:(Array.make count 0.)
+  let positions=Packed.Float3.View.of_owned_exn ~x:(Array.make count 0.)
     ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
   let original=Geometry.create ~positions ~topology:(Topology.empty ~point_count:count)
     ~attributes:[Attribute.create_owned ~name:"name" ~owner:Attribute.Point
@@ -558,7 +558,7 @@ let () =
   print_endline "Strict authored text attribute map preserves UTF-8 beyond 4096 elements at one/eight domains"
 
 let () =
-  let positions=Packed.Float3.Private.of_owned_exn ~x:[||] ~y:[||] ~z:[||] in
+  let positions=Packed.Float3.View.of_owned_exn ~x:[||] ~y:[||] ~z:[||] in
   let empty=Geometry.create ~positions ~topology:(Topology.empty ~point_count:0) ()|>get_string_ok in
   let input=Lisp_sop.snapshot empty in
   let cases count=["float",E.Float_array(Array.make count (-0.));
@@ -612,7 +612,7 @@ let () =
 
 let () =
   let count=32769 in
-  let positions=Packed.Float3.Private.of_owned_exn ~x:(Array.make count 0.)
+  let positions=Packed.Float3.View.of_owned_exn ~x:(Array.make count 0.)
     ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
   let original=Geometry.create ~positions ~topology:(Topology.empty ~point_count:count) ()|>get_string_ok in
   let input=Lisp_sop.snapshot original in
@@ -636,7 +636,7 @@ let () =
 
 let () =
   let bare=Line_geometry.points [|0.,0.,0.;1.,0.,0.|] in
-  let tuple count f=Packed.Float3.Private.of_owned_exn
+  let tuple count f=Packed.Float3.View.of_owned_exn
     ~x:(Array.init count(fun i->let x,_,_=f i in x))
     ~y:(Array.init count(fun i->let _,y,_=f i in y))
     ~z:(Array.init count(fun i->let _,_,z=f i in z)) in
@@ -657,7 +657,7 @@ let () =
       Fun.protect ~finally:(fun()->Session.close session)(fun()->
         let output=cook session ~domains ~time:0. node|>geometry in
         let expected=match Geometry.find_attribute ~owner:Point "N" original with
-          |Some attribute->(match Attribute.Private.storage attribute with Float3 normals->normals
+          |Some attribute->(match Attribute.View.storage attribute with Float3 normals->normals
             |_->tuple 2(fun _->0.25,0.5,0.75))
           |None->tuple 2(fun _->0.25,0.5,0.75) in
         let actual=Geometry.find_attribute ~owner:Point "Cd" output|>Option.get
@@ -670,7 +670,7 @@ let () =
   print_endline "Cooked has_attr Bool selects lazy typed reads; missing/wrong normals keep explicit fallback and truthful reads"
 
 let () =
-  let positions=Packed.Float3.Private.of_owned_exn ~x:[|0.;1.;0.;2.|]
+  let positions=Packed.Float3.View.of_owned_exn ~x:[|0.;1.;0.;2.|]
     ~y:[|0.;0.;1.;2.|] ~z:[|0.;0.;0.;0.|] in
   let topology=Topology.polygons_owned ~point_count:4 ~vertex_points:[|0;1;2|]
     ~primitive_offsets:[|0;3|]|>get_string_ok in
@@ -737,7 +737,7 @@ let () =
 
 let () =
   List.iter (fun count ->
-    let positions = Packed.Float3.Private.of_owned_exn
+    let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.make count 0.) ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
     let original = Geometry.create ~positions ~topology:(Topology.empty ~point_count:count) ()
       |> get_string_ok in
@@ -762,7 +762,7 @@ let () =
         let output = cook session ~domains ~time:0. (node source) |> geometry in
         let packed = Geometry.find_attribute ~owner:Attribute.Point "Cd" output |> Option.get
           |> Attribute.get (Attribute.key ~name:"Cd" ~owner:Attribute.Point Attribute.float3)
-          |> Option.get |> Packed.Float3.Private.view in
+          |> Option.get |> Packed.Float3.View.view in
         for i = 0 to count - 1 do
           assert (Int64.bits_of_float packed.x.(i) = Int64.bits_of_float values.(3*i));
           assert (Int64.bits_of_float packed.y.(i) = Int64.bits_of_float values.(3*i+1));
@@ -787,7 +787,7 @@ let () =
   List.iter (fun count ->
     let plane component=Array.init count (fun i ->
       if (i+component) mod 7=0 then -0. else float_of_int (i+component)*.0.125) in
-    let positions=Packed.Float3.Private.of_owned_exn ~x:(plane 0) ~y:(plane 1) ~z:(plane 2) in
+    let positions=Packed.Float3.View.of_owned_exn ~x:(plane 0) ~y:(plane 1) ~z:(plane 2) in
     let original=Geometry.create ~positions ~topology:(Topology.empty ~point_count:count) () |> get_string_ok in
     let before=geometry_bytes original in
     let input=Sop.Node.Private.make_geometry ~operation:"test.borrowed_planes" ~version:1
@@ -804,12 +804,12 @@ let () =
       List.iter (fun domains ->
         let output=cook session ~domains ~time:0. (make "P" "(map (fn [p] p) (sop/attr g :P))") |> geometry in
         assert (geometry_bytes output=before);
-        let old=Packed.Float3.Private.view positions and fresh=Packed.Float3.Private.view (Geometry.positions output) in
+        let old=Packed.Float3.View.view positions and fresh=Packed.Float3.View.view (Geometry.positions output) in
         assert (old.x==fresh.x && old.y==fresh.y && old.z==fresh.z);
         let painted=cook session ~domains ~time:0. (make "Cd" "(map (fn [p] p) (sop/attr g :P))") |> geometry in
         let copied=Geometry.find_attribute ~owner:Attribute.Point "Cd" painted |> Option.get
           |> Attribute.get (Attribute.key ~name:"Cd" ~owner:Attribute.Point Attribute.float3) |> Option.get
-          |> Packed.Float3.Private.view in
+          |> Packed.Float3.View.view in
         assert (old.x!=copied.x && old.y!=copied.y && old.z!=copied.z);
         assert (Marshal.to_string [|old.x;old.y;old.z|] [Marshal.No_sharing]
           =Marshal.to_string [|copied.x;copied.y;copied.z|] [Marshal.No_sharing]);
@@ -1427,7 +1427,7 @@ let ()=
    writers retain their independent contracts. *)
 let planar_storage planes = match Array.length planes with
   |2->Attribute.Float2(Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)|>get_string_ok)
-  |3->Float3(Packed.Float3.Private.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
+  |3->Float3(Packed.Float3.View.of_owned_exn ~x:planes.(0) ~y:planes.(1) ~z:planes.(2))
   |_->Float4(Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1) ~z:planes.(2) ~w:planes.(3)|>get_string_ok)
 let planar_record planes = E.Record(List.mapi(fun i data->[|"x";"y";"z";"w"|].(i),E.Float_array data)(Array.to_list planes))
 let planar_oracle ~owner ~kind:_ name planes original =
@@ -1458,11 +1458,11 @@ let ()=
       List.iter(fun domains->List.iter(fun grain->Parallel.run ~domains(fun()->
         let output=Flow_sop.Attribute_kernel.write ~grain ~owner ~kind "planes" values original|>flow_ok in
         assert(geometry_bytes output=geometry_bytes expected && geometry_bytes original=before);
-        let storage=Geometry.find_attribute ~owner "planes" output|>Option.get|>Attribute.Private.storage in
+        let storage=Geometry.find_attribute ~owner "planes" output|>Option.get|>Attribute.View.storage in
         let owned=match storage with
-          |Float2 p->let p=Packed.Float2.Private.view p in [|p.x;p.y|]
-          |Float3 p->let p=Packed.Float3.Private.view p in [|p.x;p.y;p.z|]
-          |Float4 p->let p=Packed.Float4.Private.view p in [|p.x;p.y;p.z;p.w|]
+          |Float2 p->let p=Packed.Float2.View.view p in [|p.x;p.y|]
+          |Float3 p->let p=Packed.Float3.View.view p in [|p.x;p.y;p.z|]
+          |Float4 p->let p=Packed.Float4.View.view p in [|p.x;p.y;p.z;p.w|]
           |_->assert false in
         if count>0 then begin
           Array.iteri(fun c plane->assert(plane!=data.(c)))owned;
@@ -1483,10 +1483,10 @@ let ()=
         error(planar_record bad)"E_NONFINITE"(Some"Attribute values must be finite.");
         let alias=Array.make width data.(0) in
         let output=Flow_sop.Attribute_kernel.write ~grain:97 ~owner ~kind "aliased"(planar_record alias)original|>flow_ok in
-        let output=Geometry.find_attribute ~owner "aliased" output|>Option.get|>Attribute.Private.storage in
-        let a,b=match output with Float2 p->let p=Packed.Float2.Private.view p in p.x,p.y
-          |Float3 p->let p=Packed.Float3.Private.view p in p.x,p.y
-          |Float4 p->let p=Packed.Float4.Private.view p in p.x,p.y|_->assert false in
+        let output=Geometry.find_attribute ~owner "aliased" output|>Option.get|>Attribute.View.storage in
+        let a,b=match output with Float2 p->let p=Packed.Float2.View.view p in p.x,p.y
+          |Float3 p->let p=Packed.Float3.View.view p in p.x,p.y
+          |Float4 p->let p=Packed.Float4.View.view p in p.x,p.y|_->assert false in
         assert(a!=b && a!=data.(0));a.(0)<-99.;assert(Int64.bits_of_float b.(0)=Int64.bits_of_float(-0.))
       end;
       if owner=Point then begin
@@ -1659,8 +1659,8 @@ let ()=
     (graph g :context sop (sop/planar_fold (sop/ext_planes))))|}in
   let s=session()in Fun.protect ~finally:(fun()->Session.close s)(fun()->List.iter(fun domains->
     let geo=cook s ~domains ~time:0. fold|>geometry in
-    let attr=Geometry.find_attribute ~owner:Point "folded"geo|>Option.get|>Attribute.Private.storage in
-    match attr with Float3 p->let p=Packed.Float3.Private.view p in
+    let attr=Geometry.find_attribute ~owner:Point "folded"geo|>Option.get|>Attribute.View.storage in
+    match attr with Float3 p->let p=Packed.Float3.View.view p in
       assert(p.x=[|1.;1.|] && Int64.bits_of_float p.y.(0)=Int64.bits_of_float(-0.) && p.z=[|0.25;0.25|])
     |_->assert false)[1;4;8]);
   print_endline "Full planar attributes: real4225-point Quad owner/source identities, strict/reference domain/grain facts and geometry fold"

@@ -18,7 +18,7 @@ let with_int name values geometry =
 let float_values name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " is not scalar float"))
   | None -> fail ("missing " ^ name)
@@ -26,8 +26,8 @@ let float_values name geometry =
 let color_values geometry =
   match Geometry.find_attribute ~owner:Attribute.Point "Cd" geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float4 values -> Packed.Float4.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float4 values -> Packed.Float4.View.view values
        | _ -> fail "Cd is not float4")
   | None -> fail "missing Cd"
 
@@ -43,15 +43,15 @@ let expect_invalid work message = match work () with
   | Ok _ -> fail (message ^ ": unexpectedly accepted")
 
 let equal_float2 left right =
-  let left = Packed.Float2.Private.view left and right = Packed.Float2.Private.view right in
+  let left = Packed.Float2.View.view left and right = Packed.Float2.View.view right in
   left.x = right.x && left.y = right.y
 
 let equal_float3 left right =
-  let left = Packed.Float3.Private.view left and right = Packed.Float3.Private.view right in
+  let left = Packed.Float3.View.view left and right = Packed.Float3.View.view right in
   left.x = right.x && left.y = right.y && left.z = right.z
 
 let equal_float4 left right =
-  let left = Packed.Float4.Private.view left and right = Packed.Float4.Private.view right in
+  let left = Packed.Float4.View.view left and right = Packed.Float4.View.view right in
   left.x = right.x && left.y = right.y && left.z = right.z && left.w = right.w
 
 let equal_storage left right = match left, right with
@@ -62,20 +62,20 @@ let equal_storage left right = match left, right with
   | Attribute.Float4 left, Attribute.Float4 right -> equal_float4 left right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_attributes left right =
   List.equal (fun left right -> Attribute.owner left = Attribute.owner right
       && String.equal (Attribute.name left) (Attribute.name right)
-      && equal_storage (Attribute.Private.storage left)
-           (Attribute.Private.storage right))
+      && equal_storage (Attribute.View.storage left)
+           (Attribute.View.storage right))
     (Geometry.attributes left) (Geometry.attributes right)
 
 let run () =

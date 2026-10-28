@@ -19,7 +19,7 @@ let columns owner geometry =
     if A.owner attribute <> owner then [] else
     let name = A.name attribute and length = A.length attribute in
     let guard cell row = if row < length then cell row else "" in
-    let columns = match A.Private.storage attribute with
+    let columns = match A.View.storage attribute with
       | Float values -> [name, fun row -> number values.(row)]
       | Int values -> [name, fun row -> string_of_int values.(row)]
       | Text values -> [name, fun row -> values.(row)]

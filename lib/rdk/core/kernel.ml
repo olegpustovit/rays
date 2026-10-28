@@ -12,18 +12,18 @@ let generate_point_ranges count operation =
   if count < 0 then invalid_arg "Kernel.generate_point_ranges: negative point count";
   let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
   Support.run_ranges count (fun ~first ~last -> operation ~first ~last ~x ~y ~z);
-  Packed.Float3.Private.of_owned_exn ~x ~y ~z |> geometry_of_positions
+  Packed.Float3.View.of_owned_exn ~x ~y ~z |> geometry_of_positions
 
 let edit_point_ranges ?grain operation geometry =
-  let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let source = Packed.Float3.View.view (Geometry.positions geometry) in
   let x = Array.copy source.x and y = Array.copy source.y and z = Array.copy source.z in
   Support.run_ranges ?grain (Array.length x)
     (fun ~first ~last -> operation ~first ~last ~x ~y ~z);
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   Geometry.with_positions positions geometry |> Result.get_ok
 
 let transform ?grain matrix geometry =
-  let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let source = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = Array.length source.x in
   let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
   let (m00,m01,m02,m03), (m10,m11,m12,m13),
@@ -39,5 +39,5 @@ let transform ?grain matrix geometry =
     end else begin
       x.(index) <- ox /. ow; y.(index) <- oy /. ow; z.(index) <- oz /. ow
     end);
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   Geometry.with_positions positions geometry |> Result.get_ok

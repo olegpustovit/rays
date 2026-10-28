@@ -13,12 +13,12 @@ let grid ?(columns = 24) ?(rows = 18) () =
   |> get_rdk
 
 let topology_arrays geometry =
-  let view = Topology.Private.view (Geometry.topology geometry) in
+  let view = Topology.View.view (Geometry.topology geometry) in
   view.vertex_points, view.primitive_offsets, view.primitive_kinds
 
 let same_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right) in
   let lv, lo, lk = topology_arrays left and rv, ro, rk = topology_arrays right in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lv = rv && lo = ro && lk = rk
@@ -40,8 +40,8 @@ let test_reduces_and_preserves_boundary () =
     "PolyReduce did not reduce a dense triangle grid";
   check (Geometry.primitive_count output >= (source_count / 2) - 1)
     "PolyReduce overshot its target";
-  let source_positions = Packed.Float3.Private.view (Geometry.positions source)
-  and output_positions = Packed.Float3.Private.view (Geometry.positions output) in
+  let source_positions = Packed.Float3.View.view (Geometry.positions source)
+  and output_positions = Packed.Float3.View.view (Geometry.positions output) in
   let boundary_coordinate x z = abs_float x = 4. || abs_float z = 4. in
   let source_boundary = ref [] and output_boundary = ref [] in
   for point = 0 to Geometry.point_count source - 1 do
@@ -59,7 +59,7 @@ let test_reduces_and_preserves_boundary () =
 
 let test_original_positions_and_constraints () =
   let source = grid ~columns:18 ~rows:14 () in
-  let positions = Packed.Float3.Private.view (Geometry.positions source) in
+  let positions = Packed.Float3.View.view (Geometry.positions source) in
   let hard = Group.init ~owner:Group.Point ~name:"pin"
       (Geometry.point_count source) (fun point -> point = 100) in
   let output = Poly_reduce.run ~grain:11 ~target:(Poly_reduce.Reduce_ratio 0.35)
@@ -69,7 +69,7 @@ let test_original_positions_and_constraints () =
       |> Option.get in
   check (Group.cardinality reduced = Geometry.primitive_count output)
     "PolyReduce output group did not cover the operated surface";
-  let output_positions = Packed.Float3.Private.view (Geometry.positions output) in
+  let output_positions = Packed.Float3.View.view (Geometry.positions output) in
   for point = 0 to Geometry.point_count output - 1 do
     let found = ref false in
     for source_point = 0 to Geometry.point_count source - 1 do
@@ -158,9 +158,9 @@ let test_noop_invalid_and_cancel () =
   check (match Poly_reduce.run ~target:(Poly_reduce.Reduce_primitive_count 0) curve with
     | Error _ -> true | Ok _ -> false) "PolyReduce accepted curve topology";
   let topology = Geometry.topology source in
-  let positions = Packed.Float3.Private.view (Geometry.positions source) in
+  let positions = Packed.Float3.View.view (Geometry.positions source) in
   let non_finite = Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn
+      ~positions:(Packed.Float3.View.of_owned_exn
         ~x:(Array.mapi (fun point value -> if point = 3 then Float.nan else value)
           positions.x)
         ~y:(Array.copy positions.y) ~z:(Array.copy positions.z))
@@ -188,7 +188,7 @@ let test_parallel_exact () =
 
 let test_extreme_coordinate_normalization () =
   let limit = Float.max_float in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|-.limit;limit;limit;-.limit|] ~y:[|0.;0.;0.;0.|]
       ~z:[|-.limit;-.limit;limit;limit|] in
   let topology = Topology.polygons_owned ~point_count:4
@@ -197,7 +197,7 @@ let test_extreme_coordinate_normalization () =
   let source = Geometry.create ~positions ~topology () |> Result.get_ok in
   let output = Poly_reduce.run ~target:(Poly_reduce.Reduce_primitive_count 1)
       ~preserve_boundary:false source |> get_rdk in
-  let positions = Packed.Float3.Private.view (Geometry.positions output) in
+  let positions = Packed.Float3.View.view (Geometry.positions output) in
   for point = 0 to Geometry.point_count output - 1 do
     check (Float.is_finite positions.x.(point)
         && Float.is_finite positions.y.(point)

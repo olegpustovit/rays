@@ -188,7 +188,7 @@ let weight_values name geometry =
   | None -> raise (Invalid (Printf.sprintf
       "Rdk.Fuse_reduce.fuse: position weight point attribute %S is missing" name))
   | Some attribute ->
-      let values = match Attribute.Private.storage attribute with
+      let values = match Attribute.View.storage attribute with
         | Attribute.Float values -> Array.copy values
         | Attribute.Int values -> Array.map float_of_int values
         | _ -> raise (Invalid (Printf.sprintf
@@ -233,7 +233,7 @@ let apply ?cancel ~grain ~position ?weight_attribute ~attributes
           "Rdk.Fuse_reduce.fuse: position weight attribute name must not be empty")
       | true, Some name -> Some (weight_values name geometry)
       | false, _ -> None in
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let selected = match position with
       | Minimum_weight_position -> Some (selected_by_weight clusters
           (Option.get weights) true)
@@ -247,13 +247,13 @@ let apply ?cancel ~grain ~position ?weight_attribute ~attributes
     and py = Fuse_rules.expand clusters compact (cluster_plane positions.y)
     and pz = Fuse_rules.expand clusters compact (cluster_plane positions.z) in
     validate_positions px py pz;
-    let output_positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
+    let output_positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
     let point_map = if compact then clusters.of_point
       else if rewire then Array.init source_count (fun point ->
         clusters.representatives.(clusters.of_point.(point)))
       else Array.init source_count Fun.id in
     let source_topology_value = Geometry.topology geometry in
-    let source_topology = Topology.Private.view source_topology_value in
+    let source_topology = Topology.View.view source_topology_value in
     let output_topology = if not compact && not rewire then source_topology_value
       else begin
         let vertex_points = Array.make (Geometry.vertex_count geometry) 0 in
@@ -261,7 +261,7 @@ let apply ?cancel ~grain ~position ?weight_attribute ~attributes
             ~start:0 ~finish:(Array.length vertex_points - 1) (fun vertex ->
               if vertex land 16383 = 0 then Cancel.check_opt cancel;
               vertex_points.(vertex) <- point_map.(source_topology.vertex_points.(vertex)));
-        Topology.Private.create_validated_owned
+        Topology.View.create_validated_owned
           ~point_count:(if compact then clusters.count else source_count)
           ~vertex_points ~primitive_offsets:(Array.copy source_topology.primitive_offsets)
           ~primitive_kinds:(Bytes.copy source_topology.primitive_kinds)

@@ -19,7 +19,7 @@ let geometry points triangles =
       ~vertex_points:triangles
       ~primitive_offsets:(Array.init ((Array.length triangles / 3) + 1)
         (fun primitive -> primitive * 3)) |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let crossing_input () =

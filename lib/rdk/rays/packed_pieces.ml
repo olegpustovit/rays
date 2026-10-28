@@ -48,7 +48,7 @@ let primitive_pieces ~piece_attribute geometry =
   | None -> Error (Printf.sprintf
       "Packed_pieces: missing primitive piece attribute %S" piece_attribute)
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> Ok (dense_int values)
        | Attribute.Text values -> Ok (dense_text values)
        | _ -> Error (Printf.sprintf

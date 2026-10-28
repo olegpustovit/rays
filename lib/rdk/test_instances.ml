@@ -5,30 +5,30 @@ open Rdk_test_support
 let get_ok = get
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | _ -> false
 
 let geometry_equal left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points

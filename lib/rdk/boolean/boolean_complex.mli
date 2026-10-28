@@ -1,4 +1,4 @@
-(** Private conforming two-complex assembled from refined Boolean faces. *)
+(** View conforming two-complex assembled from refined Boolean faces. *)
 
 type side = Boolean_constraints.side = Left | Right
 type t
@@ -25,7 +25,7 @@ val edge_incident_range : t -> int -> int * int
 val edge_incident_facet : t -> int -> int
 val edge_incident_local : t -> int -> int
 
-module Private : sig
+module View : sig
   val constraints : t -> Boolean_constraints.t
   val vertex : t -> int -> Implicit_point.t
 end

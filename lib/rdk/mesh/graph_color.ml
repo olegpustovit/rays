@@ -90,7 +90,7 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
     (match Geometry.find_attribute ~owner:target_attribute_owner
         color_attribute geometry with
      | Some attribute ->
-         (match Attribute.Private.storage attribute with
+         (match Attribute.View.storage attribute with
           | Attribute.Int _ -> ()
           | _ -> fail "Graph Color output attribute already has non-integer storage")
      | None -> ());
@@ -98,8 +98,8 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
     let color_count = ref 0 in
     if selected_count > 0 then begin
       let index = Topology_index.create ?cancel topology in
-      let reverse = Topology_index.Private.view index
-      and forward = Topology.Private.view topology in
+      let reverse = Topology_index.View.view index
+      and forward = Topology.View.view topology in
       let parent = Array.init count Fun.id and rank = Bytes.make count '\000' in
       let root element =
         let representative = ref element in
@@ -338,7 +338,7 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
         for color = 1 to !color_count - 1 do
           begins.(color) <- begins.(color - 1) + lengths.(color - 1)
         done;
-        let packed values = Packed.Int_array.Private.create_validated_owned
+        let packed values = Packed.Int_array.View.create_validated_owned
             ~offsets:[|0;Array.length values|] ~values in
         let begin_attribute = Attribute.create_owned ~owner:Attribute.Detail
             ~name:worksets.begin_attribute

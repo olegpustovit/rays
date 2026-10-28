@@ -105,7 +105,7 @@ let point_locations geometry = Geometry.positions geometry
 
 let primitive_locations ?cancel ~grain geometry =
   let topology = Geometry.topology geometry
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  and positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = Geometry.primitive_count geometry in
   let x = Array.make count 0. and y = Array.make count 0.
   and z = Array.make count 0. and bad = Atomic.make max_int in
@@ -135,7 +135,7 @@ let primitive_locations ?cancel ~grain geometry =
   if Atomic.get bad <> max_int then fail (Printf.sprintf
       "Attribute Mirror primitive %d has no finite bounding-box center"
       (Atomic.get bad));
-  Packed.Float3.Private.of_owned_exn ~x ~y ~z
+  Packed.Float3.View.of_owned_exn ~x ~y ~z
 
 let locations ?cancel ~grain owner geometry = match owner with
   | Mirror_point_attributes -> point_locations geometry
@@ -171,7 +171,7 @@ let finalize_mapping plane source_of_output =
 let plane_mapping ?cancel ~grain ~group ~group_use owner plane geometry =
   let count = owner_count owner geometry in
   let locations = locations ?cancel ~grain owner geometry in
-  let view = Packed.Float3.Private.view locations in
+  let view = Packed.Float3.View.view locations in
   let side = Bytes.make count '\000' and bad = Atomic.make max_int in
   Support.parallel_for ?cancel ~grain count (fun element ->
     let distance = plane_distance plane view.x.(element) view.y.(element)
@@ -210,7 +210,7 @@ let plane_mapping ?cancel ~grain ~group ~group_use owner plane geometry =
           (owner_name owner) element)
     end
   done;
-  let reflected = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let reflected = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let index = Spatial_index.create ?cancel ~grain reflected
     |> function Ok index -> index | Error error -> fail (Error.to_string error) in
   let destination_elements = Array.make !destination_count 0
@@ -228,12 +228,12 @@ let plane_mapping ?cancel ~grain ~group ~group_use owner plane geometry =
       query_z.(slot) <- view.z.(element)
     end
   done;
-  let queries = Packed.Float3.Private.of_owned_exn
+  let queries = Packed.Float3.View.of_owned_exn
       ~x:query_x ~y:query_y ~z:query_z in
   let nearest = Array.make !destination_count (-1)
   and distances = Array.make !destination_count infinity
   and counts = Array.make !destination_count 0 in
-  Spatial_index.Private.nearest_k_many_into ?cancel ~grain index
+  Spatial_index.View.nearest_k_many_into ?cancel ~grain index
     ~queries ~max_distance_squared:(plane.tolerance *. plane.tolerance)
     ~capacity:1 ~indices:nearest ~distances_squared:distances ~counts;
   let source_of_output = Array.make count (-1) in
@@ -256,7 +256,7 @@ let explicit_mapping ?cancel ~grain ~group ~group_use owner
         "Attribute Mirror could not find %s mapping attribute %S"
         (owner_name owner) mapping_attribute)
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values when Array.length values = count -> values
          | Attribute.Int _ -> fail "Attribute Mirror mapping cardinality mismatch"
          | _ -> fail "Attribute Mirror mapping attribute must be integer") in
@@ -418,7 +418,7 @@ let remap_attribute ?cancel ~grain ~transform ~string_replace mapping attribute 
   let label = Printf.sprintf "%s attribute %S"
       (match owner with Attribute.Point -> "point" | Attribute.Vertex -> "vertex"
         | Attribute.Primitive -> "primitive" | Attribute.Detail -> "detail") name in
-  let storage = match Attribute.Private.storage attribute with
+  let storage = match Attribute.View.storage attribute with
     | Attribute.Float values -> Attribute.Float
         (copy_float ?cancel ~grain mapping label values)
     | Attribute.Int values -> Attribute.Int
@@ -434,19 +434,19 @@ let remap_attribute ?cancel ~grain ~transform ~string_replace mapping attribute 
                  output.(element) <- replace_all ~search ~replacement output.(element)));
         Attribute.Text output
     | Attribute.Float2 values ->
-        let values = Packed.Float2.Private.view values in
+        let values = Packed.Float2.View.view values in
         let output = copy_tuple ?cancel ~grain mapping transform label
             [|values.x; values.y|] in
         Attribute.Float2 (Packed.Float2.of_owned ~x:output.(0) ~y:output.(1)
           |> Result.get_ok)
     | Attribute.Float3 values ->
-        let values = Packed.Float3.Private.view values in
+        let values = Packed.Float3.View.view values in
         let output = copy_tuple ?cancel ~grain mapping transform label
             [|values.x; values.y; values.z|] in
-        Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:output.(0) ~y:output.(1) ~z:output.(2))
     | Attribute.Float4 values ->
-        let values = Packed.Float4.Private.view values in
+        let values = Packed.Float4.View.view values in
         let output = copy_tuple ?cancel ~grain mapping transform label
             [|values.x; values.y; values.z; values.w|] in
         Attribute.Float4 (Packed.Float4.of_owned ~x:output.(0) ~y:output.(1)
@@ -459,10 +459,10 @@ let remap_attribute ?cancel ~grain ~transform ~string_replace mapping attribute 
   |> function Ok attribute -> attribute | Error message -> fail message
 
 let position_attribute ?cancel ~grain ~transform mapping geometry =
-  let values = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let values = Packed.Float3.View.view (Geometry.positions geometry) in
   let output = copy_tuple ?cancel ~grain mapping transform "point attribute P"
       [|values.x; values.y; values.z|] in
-  Packed.Float3.Private.of_owned_exn ~x:output.(0) ~y:output.(1) ~z:output.(2)
+  Packed.Float3.View.of_owned_exn ~x:output.(0) ~y:output.(1) ~z:output.(2)
 
 let run ?cancel ?(grain = 16_384) ?group
     ?(group_use = Mirror_group_as_source) ?(attributes = "Cd")
@@ -538,7 +538,7 @@ let run ?cancel ?(grain = 16_384) ?group
     if not changed && positions = None && Array.length attributes = 0
         && output_mapping = None && !groups = [] then Ok geometry
     else begin
-      let output = Geometry.Private.with_merged_attributes_and_groups_owned
+      let output = Geometry.View.with_merged_attributes_and_groups_owned
           ?positions ~attributes:(Array.of_list (List.rev !generated))
           ~groups:(Array.of_list (List.rev !groups)) geometry
         |> function Ok output -> output | Error message -> fail message in

@@ -14,7 +14,7 @@ module Set = Set.Make (Int)
 let tags geometry =
   Option.bind (Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive
     Flow_sop.Lower.source_attribute geometry) (fun attribute ->
-      match Rdk.Attribute.Private.storage attribute with
+      match Rdk.Attribute.View.storage attribute with
       | Rdk.Attribute.Int values -> Some values | _ -> None)
 
 let same_set a b = a == b || Set.equal a b
@@ -61,10 +61,10 @@ let tint (output : Sop.Session.output) lit =
       let corners = Rdk.Topology.vertex_count topology in
       let base = match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Vertex "Cd" geometry,
                        Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "Cd" geometry with
-        | Some a, _ -> (match Rdk.Attribute.Private.storage a with
-            | Rdk.Attribute.Float4 c -> Some (`Vertex (Rdk.Packed.Float4.Private.view c)) | _ -> None)
-        | None, Some a -> (match Rdk.Attribute.Private.storage a with
-            | Rdk.Attribute.Float4 c -> Some (`Point (Rdk.Packed.Float4.Private.view c)) | _ -> None)
+        | Some a, _ -> (match Rdk.Attribute.View.storage a with
+            | Rdk.Attribute.Float4 c -> Some (`Vertex (Rdk.Packed.Float4.View.view c)) | _ -> None)
+        | None, Some a -> (match Rdk.Attribute.View.storage a with
+            | Rdk.Attribute.Float4 c -> Some (`Point (Rdk.Packed.Float4.View.view c)) | _ -> None)
         | None, None -> None in
       let r = Array.make corners 1. and g = Array.make corners 1.
       and b = Array.make corners 1. and w = Array.make corners 1. in

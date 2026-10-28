@@ -13,7 +13,7 @@ let geometry points triangles =
       ~vertex_points:triangles
       ~primitive_offsets:(Array.init ((Array.length triangles / 3) + 1)
         (fun primitive -> primitive * 3)) |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let geometry_with_topology points vertex_points primitive_offsets primitive_kinds =
@@ -23,7 +23,7 @@ let geometry_with_topology points vertex_points primitive_offsets primitive_kind
   and z = Array.init count (fun point -> let _, _, z = points.(point) in z) in
   let topology = Topology.create_owned ~point_count:count ~vertex_points
       ~primitive_offsets ~primitive_kinds |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let open_curve points =
@@ -54,21 +54,21 @@ let collision () = geometry
 let int_rows name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Int_array value -> Packed.Int_array.Private.view value
+      (match Attribute.View.storage attribute with
+       | Attribute.Int_array value -> Packed.Int_array.View.view value
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)
 
 let float_rows name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float_array value -> Packed.Float_array.Private.view value
+      (match Attribute.View.storage attribute with
+       | Attribute.Float_array value -> Packed.Float_array.View.view value
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)
 
 let positions geometry =
-  let view = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let view = Packed.Float3.View.view (Geometry.positions geometry) in
   view.x, view.y, view.z
 
 let expect code = function

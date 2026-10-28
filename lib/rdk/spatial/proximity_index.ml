@@ -1,6 +1,6 @@
 
 type features = {
-  positions : Packed.Float3.Private.view;
+  positions : Packed.Float3.View.view;
   entity_count : int;
   offsets : int array;
   entities : int array;
@@ -33,7 +33,7 @@ let triangle = '\001'
 let feature_count features = Array.length features.a
 
 let validate_point positions point label =
-  let x = positions.Packed.Float3.Private.x.(point)
+  let x = positions.Packed.Float3.View.x.(point)
   and y = positions.y.(point) and z = positions.z.(point) in
   if not (Float.is_finite x && Float.is_finite y && Float.is_finite z) then
     raise (Invalid (Printf.sprintf "%s references non-finite point %d" label point))
@@ -41,8 +41,8 @@ let validate_point positions point label =
 let primitive_features ?cancel ?(grain = 16_384) geometry =
   try
     if grain <= 0 then invalid_arg "Proximity index: grain must be positive";
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-    and topology = Topology.Private.view (Geometry.topology geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry)
+    and topology = Topology.View.view (Geometry.topology geometry) in
     let entity_count = Geometry.primitive_count geometry in
     let offsets = Array.make (entity_count + 1) 0 in
     for primitive = 0 to entity_count - 1 do
@@ -136,9 +136,9 @@ let primitive_features ?cancel ?(grain = 16_384) geometry =
 let edge_features ?cancel ?(grain = 16_384) geometry =
   try
     if grain <= 0 then invalid_arg "Proximity index: grain must be positive";
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let index = Topology_index.create ?cancel (Geometry.topology geometry) in
-    let reverse = Topology_index.Private.view index in
+    let reverse = Topology_index.View.view index in
     let entity_count = Topology_index.edge_count index in
     let offsets = Array.init (entity_count + 1) Fun.id
     and entities = Array.init entity_count Fun.id

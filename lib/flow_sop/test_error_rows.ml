@@ -5,11 +5,11 @@ let ok=function Ok value->value|Error message->failwith message
 let parse text=match Flow.Syntax.parse text with Ok forms->forms|Error d->failwith(D.to_string d)
 let count=32769
 let fixture bad selected =
-  let positions=Rdk.Packed.Float3.Private.of_owned_exn
+  let positions=Rdk.Packed.Float3.View.of_owned_exn
     ~x:(Array.make count 0.) ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
   let x=Array.init count(fun i->if List.mem i bad then Float.nan else 0.)
   and y=Array.make count 0. and z=Array.make count 0. in
-  let directions=Rdk.Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let directions=Rdk.Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology=Rdk.Topology.empty ~point_count:count in
   let geometry=ok(Rdk.Geometry.create ~positions ~topology())in
   let geometry=ok(Rdk.Geometry.with_attribute

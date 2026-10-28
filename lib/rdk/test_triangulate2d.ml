@@ -5,16 +5,16 @@ open Rdk
 let get = function Ok value -> value | Error error -> fail (Error.to_string error)
 
 let topology_signature geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   Array.copy topology.vertex_points,Array.copy topology.primitive_offsets
 
 let position_signature geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   Array.copy positions.x,Array.copy positions.y,Array.copy positions.z
 
 let attribute_storage ~owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute -> Attribute.Private.storage attribute
+  | Some attribute -> Attribute.View.storage attribute
   | None -> fail ("missing attribute " ^ name)
 
 let test_xy_payload_and_group () =
@@ -102,7 +102,7 @@ let test_projected_output_positions () =
       [|9.,9.,9.;8.,8.,8.;7.,7.,7.;6.,6.,6.|] in
   let coordinates = Attribute.create_owned ~owner:Attribute.Point
       ~name:"planar3" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x:[|0.;2.;2.;0.|]
+        (Packed.Float3.View.of_owned_exn ~x:[|0.;2.;2.;0.|]
           ~y:[|0.;0.;2.;2.|] ~z:[|nan;100.;-200.;infinity|]))
       |> Result.get_ok in
   let attribute_source = Geometry.with_attribute coordinates attribute_source
@@ -142,12 +142,12 @@ let test_attribute_and_selection () =
       ~selection:(Transform_ops.Selected_points group)
       ~projection:(Triangulate2d.Point_attribute "planar") input |> get in
   check (Geometry.primitive_count output = 2) "attribute/selection cardinality";
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   check (Array.for_all (fun point -> point < 4) topology.vertex_points)
     "unselected point entered triangulation"
 
 let test_keep_primitives_payload_groups_and_edges () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.;0.5;1.5|] ~y:[|0.;0.;2.;2.;0.5;1.5|]
       ~z:[|0.;1.;2.;3.;4.;5.|] in
   let topology = Topology.create_owned ~point_count:6
@@ -180,7 +180,7 @@ let test_keep_primitives_payload_groups_and_edges () =
       |> Result.get_ok
   and vertex_vector = Attribute.create_owned ~owner:Attribute.Vertex
       ~name:"vertex_vector" (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn
+        (Packed.Float3.View.of_owned_exn
           ~x:[|0.;1.;2.;3.;4.;5.;6.;7.|]
           ~y:[|10.;11.;12.;13.;14.;15.;16.;17.|]
           ~z:[|20.;21.;22.;23.;24.;25.;26.;27.|])) |> Result.get_ok
@@ -223,7 +223,7 @@ let test_keep_primitives_payload_groups_and_edges () =
   check (topology_signature output = topology_signature parallel)
     "Keep Primitives topology differs across domains";
   let output_topology = Geometry.topology output in
-  let view = Topology.Private.view output_topology in
+  let view = Topology.View.view output_topology in
   check (Geometry.primitive_count output > 2
       && Topology.primitive_kind output_topology 0 = Topology.Polygon
       && Topology.primitive_kind output_topology 1 = Topology.Open_polyline
@@ -259,21 +259,21 @@ let test_keep_primitives_payload_groups_and_edges () =
    | _ -> fail "Keep Primitives vertex float-row storage changed");
   (match attribute_storage ~owner:Attribute.Vertex "vertex_uv" output with
    | Attribute.Float2 values ->
-       let values = Packed.Float2.Private.view values in
+       let values = Packed.Float2.View.view values in
        check (values.x.(4) = 6. && values.y.(5) = 17.
            && values.x.(6) = 0. && values.y.(6) = 0.)
          "Keep Primitives vertex float2 payload/defaults"
    | _ -> fail "Keep Primitives vertex float2 storage changed");
   (match attribute_storage ~owner:Attribute.Vertex "vertex_vector" output with
    | Attribute.Float3 values ->
-       let values = Packed.Float3.Private.view values in
+       let values = Packed.Float3.View.view values in
        check (values.x.(4) = 6. && values.z.(5) = 27.
            && values.x.(6) = 0. && values.y.(6) = 0. && values.z.(6) = 0.)
          "Keep Primitives vertex float3 payload/defaults"
    | _ -> fail "Keep Primitives vertex float3 storage changed");
   (match attribute_storage ~owner:Attribute.Vertex "vertex_color" output with
    | Attribute.Float4 values ->
-       let values = Packed.Float4.Private.view values in
+       let values = Packed.Float4.View.view values in
        check (values.x.(4) = 6. && values.w.(5) = 37.
            && values.x.(6) = 0. && values.w.(6) = 0.)
          "Keep Primitives vertex float4 payload/defaults"
@@ -323,7 +323,7 @@ let test_keep_primitives_payload_groups_and_edges () =
   check (match attribute_storage ~owner:Attribute.Vertex "vertex_weight" output with
       | Attribute.Float values -> values = parallel_weights | _ -> false)
     "Keep Primitives payload differs across domains";
-  let duplicate_positions = Packed.Float3.Private.of_owned_exn
+  let duplicate_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.;0.|] ~y:[|0.;0.;1.;1.;0.|]
       ~z:[|0.;0.;0.;0.;9.|] in
   let duplicate_topology = Topology.polygons_owned ~point_count:5
@@ -334,7 +334,7 @@ let test_keep_primitives_payload_groups_and_edges () =
   let deduplicated = triangulate2d ~grain:1
       ~projection:Triangulate2d.Plane_xy ~keep_primitives:true
       ~remove_duplicate_points:true duplicate_input |> get in
-  let deduplicated_topology = Topology.Private.view
+  let deduplicated_topology = Topology.View.view
       (Geometry.topology deduplicated) in
   check (Geometry.point_count deduplicated = 4
       && Geometry.primitive_count deduplicated = 3
@@ -342,7 +342,7 @@ let test_keep_primitives_payload_groups_and_edges () =
     "Keep Primitives duplicate compaction deleted rather than rewired a retained face"
 
 let constrained_square () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.|] ~y:[|0.;0.;1.;1.|] ~z:[|0.;0.;0.;0.|] in
   let topology = Topology.create_owned ~point_count:4
       ~vertex_points:[|1;3|] ~primitive_offsets:[|0;2|]
@@ -374,7 +374,7 @@ let test_constraints () =
   let output = triangulate2d ~projection:Triangulate2d.Plane_xy
       ~constraint_edges:edges ~constraint_group:"constraints" input |> get in
   check_constraint_edge output;
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.;0.;2.;1.|] ~y:[|0.;0.;0.;2.;2.;1.|]
       ~z:[|0.;0.;0.;0.;0.;0.|] in
   let topology = Topology.create_owned ~point_count:6
@@ -398,7 +398,7 @@ let test_constraints () =
    | None -> fail "embedded constraint output group is missing")
 
 let crossing_constraints () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.|] ~y:[|0.;0.;2.;2.|] ~z:[|0.;100.;10.;200.|] in
   let topology = Topology.create_owned ~point_count:4
       ~vertex_points:[|0;2; 1;3|] ~primitive_offsets:[|0;2;4|]
@@ -439,22 +439,22 @@ let test_crossing_constraints_and_payload () =
       && Geometry.vertex_count output = 12) "crossing output cardinality";
   check (topology_signature output = topology_signature parallel)
     "crossing one/four-domain topology differs";
-  let positions = Packed.Float3.Private.view (Geometry.positions output) in
+  let positions = Packed.Float3.View.view (Geometry.positions output) in
   check (positions.x.(4) = 1. && positions.y.(4) = 1. && positions.z.(4) = 5.)
     "crossing 3D interpolation";
   let float_attribute name geometry =
     match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-    | Some attribute -> (match Attribute.Private.storage attribute with
+    | Some attribute -> (match Attribute.View.storage attribute with
         | Attribute.Float values -> values | _ -> fail "float storage changed")
     | None -> fail ("missing point attribute " ^ name) in
   let int_attribute name geometry =
     match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-    | Some attribute -> (match Attribute.Private.storage attribute with
+    | Some attribute -> (match Attribute.View.storage attribute with
         | Attribute.Int values -> values | _ -> fail "integer storage changed")
     | None -> fail ("missing point attribute " ^ name) in
   let text_attribute name geometry =
     match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-    | Some attribute -> (match Attribute.Private.storage attribute with
+    | Some attribute -> (match Attribute.View.storage attribute with
         | Attribute.Text values -> values | _ -> fail "text storage changed")
     | None -> fail ("missing point attribute " ^ name) in
   let weights = float_attribute "weight" output
@@ -482,7 +482,7 @@ let test_crossing_constraints_and_payload () =
   let _,_,projected_z = position_signature projected in
   check (Array.for_all ((=) 0.) projected_z)
     "crossing split point was not embedded on the projected output plane";
-  let authored_positions = Packed.Float3.Private.of_owned_exn
+  let authored_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.;1.|] ~y:[|0.;0.;2.;2.;1.|]
       ~z:[|0.;0.;0.;0.;7.|] in
   let authored_topology = Topology.create_owned ~point_count:5
@@ -511,7 +511,7 @@ let test_crossing_constraints_and_payload () =
    | None -> fail "authored crossing constraint group is missing")
 
 let test_hull_boundary_flood () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|-2.;2.;2.;-2.; -1.;1.;1.;-1.; 0.|]
       ~y:[|-2.;-2.;2.;2.; -1.;-1.;1.;1.; 0.|]
       ~z:[|0.;0.;0.;0.;0.;0.;0.;0.;0.|] in
@@ -531,7 +531,7 @@ let test_hull_boundary_flood () =
     "hull flood one/four-domain topology differs";
   check (Geometry.primitive_count output = 4)
     "hull flood retained the wrong triangle count";
-  let view = Topology.Private.view (Geometry.topology output) in
+  let view = Topology.View.view (Geometry.topology output) in
   check (Array.for_all (fun point -> point >= 4) view.vertex_points)
     "hull flood retained exterior geometry";
   (match Geometry.find_edge_group "boundary" output with
@@ -558,14 +558,14 @@ let test_hull_boundary_flood () =
     "edge-only constraints incorrectly contributed polygon winding"
 
 let test_ignore_non_constraint_points () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.;1.|] ~y:[|0.;0.;2.;2.;1.|]
       ~z:[|0.;0.;0.;0.;9.|] in
   let topology = Topology.polygons_owned ~point_count:5
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|]
       |> Result.get_ok in
   let authored_normal = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:(Array.make 5 1.) ~y:(Array.make 5 0.) ~z:(Array.make 5 0.)))
       |> Result.get_ok in
   let input = Geometry.create ~positions ~topology ~attributes:[authored_normal] ()
@@ -585,7 +585,7 @@ let test_ignore_non_constraint_points () =
     "Ignore Non-Constraint Points cardinality";
   check (topology_signature ignored = topology_signature parallel)
     "Ignore Non-Constraint Points differs across domains";
-  let view = Topology.Private.view (Geometry.topology ignored) in
+  let view = Topology.View.view (Geometry.topology ignored) in
   check (Array.for_all (fun point -> point <> 4) view.vertex_points)
     "ignored interior point entered output topology";
   (match Geometry.find_edge_group "boundary" ignored with
@@ -600,9 +600,9 @@ let test_ignore_non_constraint_points () =
     "Triangulate 2D unused-point compaction cardinality";
   (match Geometry.find_attribute ~owner:Attribute.Point "N" compacted with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Float3 values ->
-            let values = Packed.Float3.Private.view values in
+            let values = Packed.Float3.View.view values in
             check (Array.for_all ((=) 0.) values.x
                 && Array.for_all ((=) 0.) values.y
                 && Array.for_all ((=) 1.) values.z)
@@ -640,14 +640,14 @@ let test_remove_duplicate_points () =
     "projected duplicate removal cardinality";
   check (topology_signature output = topology_signature parallel)
     "projected duplicate removal topology differs across domains";
-  let positions = Packed.Float3.Private.view (Geometry.positions output) in
+  let positions = Packed.Float3.View.view (Geometry.positions output) in
   check (positions.x = [|0.;1.;1.;0.;9.|]
       && positions.y = [|0.;0.;1.;1.;9.|]
       && positions.z = [|0.;0.;0.;0.;9.|])
     "projected duplicate removal deleted or reordered an unrelated point";
   (match Geometry.find_attribute ~owner:Attribute.Point "id" output with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Int values ->
             check (values = [|10;11;12;13;15|])
               "projected duplicate point attribute remap"
@@ -674,8 +674,8 @@ let test_quality_refinement () =
   let output = run 1 and parallel = run 4 in
   check (Geometry.point_count output > 4 && Geometry.point_count output <= 104)
     "quality refinement point budget";
-  let output_positions = Packed.Float3.Private.view (Geometry.positions output)
-  and parallel_positions = Packed.Float3.Private.view (Geometry.positions parallel) in
+  let output_positions = Packed.Float3.View.view (Geometry.positions output)
+  and parallel_positions = Packed.Float3.View.view (Geometry.positions parallel) in
   check (topology_signature output = topology_signature parallel
       && output_positions.x = parallel_positions.x
       && output_positions.y = parallel_positions.y
@@ -688,7 +688,7 @@ let test_quality_refinement () =
   let positions = output_positions in
   (match Geometry.find_attribute ~owner:Attribute.Point "value" output with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Float values ->
             for point = 0 to Geometry.point_count output - 1 do
               check (abs_float (positions.z.(point) -. values.(point)) < 1e-10)
@@ -696,7 +696,7 @@ let test_quality_refinement () =
             done
         | _ -> fail "quality refinement payload storage changed")
    | None -> fail "quality refinement payload is missing");
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   for primitive = 0 to Geometry.primitive_count output - 1 do
     let first = topology.primitive_offsets.(primitive) in
     let a = topology.vertex_points.(first)
@@ -710,7 +710,7 @@ let test_quality_refinement () =
     check (0.5 *. twice_area <= 0.3 +. 1e-12)
       "quality refinement maximum area"
   done;
-  let constrained_positions = Packed.Float3.Private.of_owned_exn
+  let constrained_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;4.;2.|] ~y:[|0.;0.;0.2|] ~z:[|0.;8.;9.|] in
   let constrained_topology = Topology.create_owned ~point_count:3
       ~vertex_points:[|0;1|] ~primitive_offsets:[|0;2|]
@@ -726,7 +726,7 @@ let test_quality_refinement () =
       constrained |> get in
   check (Geometry.point_count split = 4)
     "constraint refinement point cardinality";
-  let split_positions = Packed.Float3.Private.view (Geometry.positions split) in
+  let split_positions = Packed.Float3.View.view (Geometry.positions split) in
   check (split_positions.x.(3) = 2. && split_positions.y.(3) = 0.
       && split_positions.z.(3) = 4.)
     "constraint refinement midpoint interpolation";
@@ -734,7 +734,7 @@ let test_quality_refinement () =
    | Some group -> check (Edge_group.cardinality group = 2)
        "constraint refinement did not split the protected edge"
    | None -> fail "constraint refinement edge group is missing");
-  let boundary_positions = Packed.Float3.Private.of_owned_exn
+  let boundary_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.|] ~y:[|0.;0.;2.;2.|] ~z:[|0.;0.;0.;0.|] in
   let boundary_topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|]
@@ -757,7 +757,7 @@ let test_quality_refinement () =
       ~primitive_offsets:[|0;4;6;8|]
       ~primitive_kinds:[|Topology.Polygon;Topology.Open_polyline;
         Topology.Open_polyline|] |> Result.get_ok in
-  let crossing_positions = Packed.Float3.Private.of_owned_exn
+  let crossing_positions = Packed.Float3.View.of_owned_exn
       ~x:[|20.;300.;300.;20.|] ~y:[|20.;20.;200.;200.|]
       ~z:[|0.;0.;0.;0.|] in
   let crossing_geometry = Geometry.create ~positions:crossing_positions
@@ -790,10 +790,10 @@ let test_quality_refinement () =
   let targeted = triangulate2d ~grain:1
       ~projection:Triangulate2d.Plane_xy ~refine:true ~minimum_angle:1e-6
       ~target_edge_length:0.75 ~maximum_new_points:100 input |> get in
-  let targeted_positions = Packed.Float3.Private.view
+  let targeted_positions = Packed.Float3.View.view
       (Geometry.positions targeted) in
   let targeted_index = Topology_index.create (Geometry.topology targeted)
-      |> Topology_index.Private.view in
+      |> Topology_index.View.view in
   for edge = 0 to Array.length targeted_index.edge_a - 1 do
     let a = targeted_index.edge_a.(edge) and b = targeted_index.edge_b.(edge) in
     let dx = targeted_positions.x.(b) -. targeted_positions.x.(a)
@@ -820,11 +820,11 @@ let test_quality_refinement () =
       ~projection:Triangulate2d.Plane_xy ~refine:true ~minimum_angle:1e-6
       ~maximum_area:0.2 ~maximum_new_points:64 irregular |> get in
   let regularized = run_regularized 1 and regularized_parallel = run_regularized 4 in
-  let regularized_positions = Packed.Float3.Private.view
+  let regularized_positions = Packed.Float3.View.view
       (Geometry.positions regularized)
-  and parallel_positions = Packed.Float3.Private.view
+  and parallel_positions = Packed.Float3.View.view
       (Geometry.positions regularized_parallel)
-  and unregularized_positions = Packed.Float3.Private.view
+  and unregularized_positions = Packed.Float3.View.view
       (Geometry.positions unregularized) in
   check (topology_signature regularized = topology_signature regularized_parallel
       && regularized_positions.x = parallel_positions.x
@@ -842,7 +842,7 @@ let test_quality_refinement () =
       "regularization provenance lost linear 3D payload"
   done;
   check !moved "quality regularization did not move any generated interior point";
-  let movable_positions = Packed.Float3.Private.of_owned_exn
+  let movable_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.;0.2|] ~y:[|0.;0.;2.;2.;0.3|]
       ~z:[|0.;2.;6.;4.;0.8|] in
   let movable_topology = Topology.polygons_owned ~point_count:5
@@ -868,7 +868,7 @@ let test_quality_refinement () =
    | None -> fail "input-point regularization boundary group is missing")
 
 let test_projected_silhouette () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|-2.;2.;2.;-2.; -1.;1.;1.;-1.;0.|]
       ~y:[|-2.;-2.;2.;2.; -1.;-1.;1.;1.;0.|]
       ~z:[|0.;0.;0.;0.;0.;0.;0.;0.;0.|] in
@@ -892,7 +892,7 @@ let test_projected_silhouette () =
     "silhouette one/four-domain topology differs";
   check (Geometry.primitive_count output = 4)
     "silhouette removal retained the wrong triangle count";
-  let view = Topology.Private.view (Geometry.topology output) in
+  let view = Topology.View.view (Geometry.topology output) in
   check (Array.for_all (fun point -> point >= 4) view.vertex_points)
     "silhouette removal retained an exterior point";
   let reversed_topology = Topology.polygons_owned ~point_count:9
@@ -910,7 +910,7 @@ let test_projected_silhouette () =
       ~selection:(Transform_ops.Selected_points partial) ~silhouette_constraints:true input with
    | Error _ -> ()
    | Ok _ -> fail "silhouette accepted a partially selected polygon");
-  let flat_positions = Packed.Float3.Private.of_owned_exn
+  let flat_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.;0.;2.|] ~y:[|0.;0.;0.;1.;1.|]
       ~z:[|0.;0.;0.;0.;0.|] in
   let flat_topology = Topology.polygons_owned ~point_count:5

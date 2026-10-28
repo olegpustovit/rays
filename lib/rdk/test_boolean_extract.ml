@@ -23,7 +23,7 @@ let geometry points triangles =
       ~vertex_points:triangles
       ~primitive_offsets:(Array.init ((Array.length triangles / 3) + 1)
         (fun primitive -> primitive * 3)) |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let polygon_geometry points vertex_points primitive_offsets =
@@ -33,7 +33,7 @@ let polygon_geometry points vertex_points primitive_offsets =
   and z = Array.init count (fun point -> let _, _, z = points.(point) in z) in
   let topology = Topology.polygons_owned ~point_count:count ~vertex_points
       ~primitive_offsets |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let tetra ~origin:(ox,oy,oz) size = geometry
@@ -71,8 +71,8 @@ let pipeline ?(resolve_left_self_intersections = false)
   complex, weiler, cells
 
 let signed_volume geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   let volume = ref 0. in
   for triangle = 0 to Geometry.primitive_count geometry - 1 do
     let offset = triangle * 3 in
@@ -90,13 +90,13 @@ let signed_volume geometry =
   !volume
 
 let signature geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-  and topology = Topology.Private.view (Geometry.topology geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry)
+  and topology = Topology.View.view (Geometry.topology geometry) in
   Array.copy positions.x, Array.copy positions.y, Array.copy positions.z,
   Array.copy topology.vertex_points, Array.copy topology.primitive_offsets
 
 let test_materialization_validation () =
-  let validate = Extract.Private.validate_materialized in
+  let validate = Extract.View.validate_materialized in
   (match validate ~x:[|0.;1.;0.|] ~y:[|0.;0.;1.|] ~z:[|0.;0.;0.|]
       ~vertex_points:[|0;1;2|] () with
    | Ok () -> ()
@@ -117,7 +117,7 @@ let test_materialization_validation () =
    | Ok () -> ()
    | Error error -> fail "explicit deferred rounding repair was rejected: %s"
        (Error.to_string error));
-  let x, y, z, representatives, map = Extract.Private.coalesce_positions
+  let x, y, z, representatives, map = Extract.View.coalesce_positions
       ~complex_vertices:[|10;11;12;13;14|]
       ~x:[|0.;1.;1.;2.;1.|] ~y:[|0.;0.;0.;0.;0.|]
       ~z:[|0.;0.;0.;0.;0.|] in

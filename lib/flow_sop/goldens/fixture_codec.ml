@@ -14,9 +14,9 @@ let attribute_owner = function Attribute.Point -> "point" | Vertex -> "vertex"
 let group_owner = function Group.Point -> "point" | Vertex -> "vertex" | Primitive -> "primitive"
 
 let encode geometry =
-  let position = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let position = Packed.Float3.View.view (Geometry.positions geometry) in
   let topology = Geometry.topology geometry in
-  let topology_view = Topology.Private.view topology in
+  let topology_view = Topology.View.view topology in
   let topology_form = tagged "topology" [num topology_view.point_count;
     ints topology_view.vertex_points; ints topology_view.primitive_offsets;
     list (List.init (Topology.primitive_count topology) (fun i ->
@@ -27,11 +27,11 @@ let encode geometry =
       | Attribute.Float xs -> "float", [floats xs]
       | Int xs -> "int", [ints xs]
       | Text xs -> "text", [list (Array.to_list (Array.map str xs))]
-      | Float2 xs -> let v = Packed.Float2.Private.view xs in "float2", [floats v.x; floats v.y]
-      | Float3 xs -> let v = Packed.Float3.Private.view xs in "float3", [floats v.x; floats v.y; floats v.z]
-      | Float4 xs -> let v = Packed.Float4.Private.view xs in "float4", [floats v.x; floats v.y; floats v.z; floats v.w]
-      | Int_array xs -> let v = Packed.Int_array.Private.view xs in "int_array", [ints v.offsets; ints v.values]
-      | Float_array xs -> let v = Packed.Float_array.Private.view xs in "float_array", [ints v.offsets; floats v.values] in
+      | Float2 xs -> let v = Packed.Float2.View.view xs in "float2", [floats v.x; floats v.y]
+      | Float3 xs -> let v = Packed.Float3.View.view xs in "float3", [floats v.x; floats v.y; floats v.z]
+      | Float4 xs -> let v = Packed.Float4.View.view xs in "float4", [floats v.x; floats v.y; floats v.z; floats v.w]
+      | Int_array xs -> let v = Packed.Int_array.View.view xs in "int_array", [ints v.offsets; ints v.values]
+      | Float_array xs -> let v = Packed.Float_array.View.view xs in "float_array", [ints v.offsets; floats v.values] in
     tagged "attribute" [sym (attribute_owner (Attribute.owner value)); str (Attribute.name value); sym kind; list planes] in
   let group value =
     let members = Array.init (Group.length value) Fun.id |> Array.to_list |> List.filter (fun i -> Group.mem i value)
