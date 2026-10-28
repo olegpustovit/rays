@@ -259,7 +259,7 @@ size estimate, not the phase's behavioral or shipping gates.
 
 ## In progress and remaining proof
 
-- P7.S2 (bac1955e): dependency_gate rejects any new cross-library `.Private.` reference outside an explicit allowlist (129 rows; G2 wants fewer than 20; most are rdk/sop). Open: TT31 generated alias rule, TT30 packaging checks, SP21, XC17, XC26, RK17, UI37. Pre-existing failures to fix: test_workspace_ir and test_workspace_images ("fold state mismatch"), test_2d_ports line 73.
+- P7.S2 (bac1955e): dependency_gate rejects any new cross-library `.Private.` reference outside an explicit allowlist (129 rows; G2 wants fewer than 20; most are rdk/sop). Open: TT31 generated alias rule, TT30 packaging checks, SP21, XC17, XC26, RK17, UI37. The pre-existing failures are fixed: workspace_parity compares fold contents instead of opaque state stamps, and test_2d_ports renders inside one text cache. The lowering digest key checks physical equality before structural (85% of test_sop_catalog samples): sop_catalog 61→31 s, workspace_live 128→31 s, workspace_doc 163→40 s, bloom_studio 180+→30 s.
 
 - P8.S3 (2c809a35..423c6a7a): lib/rays_pathtracer/pathtrace.rays `trace-pixel` covers the camera (pinhole, thin lens), NEE+MIS, GGX/diffuse sampling, Russian roulette, the firefly clamp, accumulation and dome panels, through the normal Flow pipeline. Film A/B against pathtrace.metal (same PCG order): 16x12 byte-identical on CPU and Metal; 96x72x16 frames, 1/20,736 channels, RMSE 2.7e-5; 480x840 CPU, RMSE 1.0e-5. GPU is about 7x slower (93–105 ms vs 13.7 ms per frame, indicative only at load 60–78). Packed_ops.register_limit was raised to 16,384 for the per-pixel kernel. Open: the speed gap, the world map and CDF, motion, curves, bevel probes, then P8.S4.
 
