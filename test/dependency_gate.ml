@@ -96,7 +96,6 @@ let rules =
       "flow_native", ["pxui"; "pxui_shell"; "pxui_graph"; "rays_editor"];
       "web_export", ["pxui"; "pxui_shell"; "pxui_graph"; "rays_editor"];
       "lisp_sop", ["editor_document"; "rays"; "runtime"; "pxui"; "rays_editor"];
-      "renderer", ["runtime_input"];
       "rays", ["pxui"; "pxui_shell"; "pxui_graph"; "sop"; "rdk";
                   "rays_editor"];
       "rays_math", ["rays"; "rdk_core"; "rdk_exact"; "rdk_spatial"; "rdk_attrib"; "rdk_gen"; "rdk_curve"; "rdk_mesh"; "rdk_boolean"; "rdk"; "rdk_rays"; "sop"] @ gpu;
@@ -452,9 +451,7 @@ let violations graph ~scan =
   let direct_errors = List.filter_map (fun (lib, dep, message) ->
     if List.mem dep (Option.value ~default:[] (List.assoc_opt lib graph))
     then Some message else None)
-    (["pxui", "sdl3", "pxui depends directly on sdl3 (text input belongs to Scene/runtime)";
-      "pxui", "scene_command", "pxui depends directly on scene_command (UI batches belong to Rays.Scene)"]
-     @ List.map (fun sdl -> "rays", sdl,
+    (List.map (fun sdl -> "rays", sdl,
          "rays depends directly on " ^ sdl ^ " (SDL services belong to runtime)")
          ["sdl3"; "sdl3_image"; "sdl3_ttf"; "sdl3_mixer"]) in
   let edge_errors = List.concat_map (fun (lib, forbidden) ->

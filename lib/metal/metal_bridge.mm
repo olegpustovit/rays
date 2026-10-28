@@ -4913,13 +4913,10 @@ extern "C" CAMLprim value caml_rays_metal_layer_configure(value rl,value rw,valu
     l.drawableSize=CGSizeMake(w,h);l.pixelFormat=(MTLPixelFormat)format;l.framebufferOnly=Bool_val(Field(rflags,0));l.maximumDrawableCount=Long_val(Field(rflags,1));l.allowsNextDrawableTimeout=Bool_val(Field(rflags,2));l.displaySyncEnabled=Bool_val(Field(rflags,3));l.presentsWithTransaction=Bool_val(Field(rflags,4));
     CAMLreturn(result_unit()); } @catch(NSException*x){CAMLreturn(result_error(x.reason));}}
 
-/* M3: former metal_layer10_residual_bridge.inc */
 
-/* M3: former metal_presentation_layer_snapshot.inc */
 
 extern "C" CAMLprim value caml_rays_metal_drawable_texture(value rd){CAMLparam1(rd);CAMLlocal3(raw,metadata,result);@autoreleasepool{@try{id<CAMetalDrawable>d=object_of_handle(rd,Handle_kind::Metal_drawable);id<MTLTexture>texture=d.texture;if(!texture)CAMLreturn(result_error_text("drawable has no texture"));raw=allocate_handle(texture,Handle_kind::Texture);metadata=caml_alloc_tuple(4);Store_field(metadata,0,raw);Store_field(metadata,1,Val_long(texture.width));Store_field(metadata,2,Val_long(texture.height));Store_field(metadata,3,Val_long(texture.pixelFormat));result=result_ok(metadata);CAMLreturn(result);}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}}
 
-/* M3: former metal_presentation_command_snapshot.inc */
 extern "C" CAMLprim value caml_rays_metal_presentation_command_snapshot(value raw){CAMLparam1(raw); Autorelease_pool pool;CAMLlocal2(tuple,result);@try{id<MTLCommandBuffer>c=object_of_handle(raw,Handle_kind::Command_buffer);tuple=caml_alloc_tuple(8);Store_field(tuple,0,caml_copy_int64(c.commandQueue.device.registryID));Store_field(tuple,1,caml_copy_int64(c.device.registryID));Store_field(tuple,2,caml_copy_int64(c.errorOptions));Store_field(tuple,3,caml_copy_double(c.GPUStartTime));Store_field(tuple,4,caml_copy_double(c.GPUEndTime));Store_field(tuple,5,caml_copy_double(c.kernelStartTime));Store_field(tuple,6,caml_copy_double(c.kernelEndTime));Store_field(tuple,7,Val_bool(c.retainedReferences));result=result_ok(tuple);CAMLreturn(result);}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}
 
 struct PresentationCallbackState { std::atomic<int> state{0}; value *root=nullptr; };
@@ -4929,7 +4926,6 @@ extern "C" CAMLprim value caml_rays_metal_command_buffer_cancel_handler(value ra
 
 extern "C" CAMLprim value caml_rays_metal_render_pass_descriptor_set_sizes(value rp,value rw,value rh,value ra,value rs){CAMLparam5(rp,rw,rh,ra,rs); Autorelease_pool pool;MTLRenderPassDescriptor*p=object_of_handle(rp,Handle_kind::Render_pass_descriptor);intnat w=Long_val(rw),h=Long_val(rh),a=Long_val(ra),s=Long_val(rs);if(w<=0||h<=0||a<=0||s<=0)CAMLreturn(result_error_text("invalid render pass sizes"));p.renderTargetWidth=w;p.renderTargetHeight=h;p.renderTargetArrayLength=a;p.defaultRasterSampleCount=s;CAMLreturn(result_unit());}
 
-/* M3: former metal_presentation_render_pass_advanced.inc */
 
 extern "C" CAMLprim value caml_rays_metal_render_pass_resolve_texture(
     value raw,value replacement,value set_raw){
@@ -5405,14 +5401,12 @@ extern "C" CAMLprim value caml_rays_metal_command_buffer_error(value raw) {
 #include "metal_gen_stubs.inc"
 #pragma clang diagnostic pop
 
-/* M3: former metal_resource_descriptor_owned_generated.inc */
 /* Isolated resource100 descriptor-owned shard.  Transplant after adding the
    three explicit Handle_kind cases named below. */
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-/* M3: former metal_resource_ownership_generated.inc */
 /* resource100 ownership shard: 44 direct typed selectors / 56 inventory IDs.
    The safe OCaml adapter validates liveness, same-device, ranges, alignment,
    capabilities and completion retention before entering these wrappers. */
@@ -5422,21 +5416,16 @@ extern "C" CAMLprim value caml_rays_metal_command_buffer_error(value raw) {
 
 #pragma clang diagnostic pop
 
-/* M3: former metal_resource_scalar_generated.inc */
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_render_command_mechanical_generated.inc */
 
-/* M3: former metal_render_command_sample_descriptor.inc */
 
-/* M3: former metal_render_command_stage_bindings.inc */
 enum class RaysRenderStage:intnat{Vertex=0,Fragment=1,Tile=2,Object=3,Mesh=4};
 template<class T>static std::vector<T> rays_render_handles(value a,Handle_kind kind){mlsize_t n=Wosize_val(a);std::vector<T>v;v.reserve(n);for(mlsize_t i=0;i<n;i++)v.push_back(Is_none(Field(a,i))?nil:object_of_handle(Field(Field(a,i),0),kind));return v;}
 
-/* M3: former metal_render_command_draw_state.inc */
 
 #pragma clang diagnostic pop
 
@@ -5444,7 +5433,6 @@ template<class T>static std::vector<T> rays_render_handles(value a,Handle_kind k
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_pipeline_header_mechanical_generated.mm */
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 /* exact conventional render/compute pipeline mechanical shard */
@@ -5467,7 +5455,6 @@ template<class T>static std::vector<T> rays_render_handles(value a,Handle_kind k
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_shader_callable_bridge.inc */
 /* Shader157 callable native subset.
    Exact OCaml descriptor schemas do not yet exist for stitching graphs,
    stitched-library descriptors, reflection objects, preprocessor dictionaries,
@@ -5479,7 +5466,6 @@ template<class T>static std::vector<T> rays_render_handles(value a,Handle_kind k
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_mesh_tile_ownership_materializers.inc */
 /* Isolated typed ownership shard for the 57 non-mechanical mesh/tile IDs.
    The includer supplies retain_handle/release_handle and converts NSError. */
 enum class RaysMeshTileKind { Function, BinaryArchive, DynamicLibrary,
@@ -5513,7 +5499,6 @@ extern value rays_mesh_tile_error(NSString *);
 
 #endif
 
-/* M3: former metal_mesh_tile_counter_callable_bridge.inc */
 /* Exact CAML hookup for the prepared mesh/tile materializers. */
 
 #pragma clang diagnostic pop
@@ -5521,9 +5506,7 @@ extern value rays_mesh_tile_error(NSString *);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_command_support_mechanical.inc */
 
-/* M3: former metal_command_support_callable_bridge.inc */
 /* Corrected Command-support121 handwritten callable shard (18/103 split).
    Callback capture/event notification, function-log enumeration and complex
    blit copies remain blocked until their roots and full range schemas exist. */
@@ -5533,7 +5516,6 @@ extern value rays_mesh_tile_error(NSString *);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_mesh_tile_mechanical_generated.mm */
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
@@ -5561,7 +5543,6 @@ extern "C" void rays_mtl_tile_descriptor_set_mechanical(
 }
 extern "C" NSUInteger rays_mtl_mesh_tile_mechanical_id_count(void) { return 48; }
 
-/* M3: former metal_mesh_tile_mechanical_callable_bridge.inc */
 /* Callable adapters for all 16 contained-value properties in the prepared
    Mesh/tile105 mechanical shard. Object graph properties remain handwritten. */
 
@@ -5570,7 +5551,6 @@ extern "C" NSUInteger rays_mtl_mesh_tile_mechanical_id_count(void) { return 48; 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_command_event_constructors.inc */
 /* Constructible Command-support event handles. The source registry ID is
    returned with the handle because some valid shared events report nil from
    MTLEvent.device on older Metal runtimes. */
@@ -5580,9 +5560,7 @@ extern "C" NSUInteger rays_mtl_mesh_tile_mechanical_id_count(void) { return 48; 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_io_counter_callable_tail.inc */
 
-/* M3: former metal_mesh_tile_pipeline_compile.inc */
 /* Exact synchronous Mesh/tile105 descriptor compilation selectors:
    method:-[MTLDevice newRenderPipelineStateWithMeshDescriptor:options:reflection:error:]
    method:-[MTLDevice newRenderPipelineStateWithTileDescriptor:options:reflection:error:]
@@ -5593,31 +5571,25 @@ extern "C" NSUInteger rays_mtl_mesh_tile_mechanical_id_count(void) { return 48; 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal4_remaining_callable_bridge.inc */
 /* Next coherent authoritative Metal4 ownership closure: binary-function
    descriptor graph (20 IDs), command-buffer resource views (7), and render
    encoder commands (9). */
 
-/* M3: former metal4_acceleration_structure11_callable_bridge.inc */
 /* MTL4AccelerationStructure11 is an exact class-metadata tail. These nine
    constructors are support machinery for concrete descriptor ownership; the
    abstract Descriptor and GeometryDescriptor classes are never instantiated. */
 
-/* M3: former metal4_argument_table_resource_bridge.inc */
 /* Exact MTL4ArgumentTable setResource:atBufferIndex: path.  The table stores a
    resource ID, not an owning object reference; the handwritten safe graph must
    retain the Buffer/AccelerationStructure until replacement or completion. */
 
-/* M3: former metal4_command_encoder_wait_fence_bridge.inc */
 /* Remaining MTL4CommandEncoder fence wait.  The command-buffer state is the
    retention owner; validation completes before the native command mutation. */
 
-/* M3: former metal_device_residual_library5_bridge.inc */
 /* Exact synchronous MTLLibrary constructors from the MTLDevice.h residual.
    Every returned library is owned by its OCaml handle.  Input bytes are copied
    into dispatch-owned storage before the synchronous Metal call. */
 
-/* M3: former metal_device_residual_queues3_bridge.inc */
 /* Exact MTLDevice queue constructors. Returned queue handles own the native
    object; descriptor log-state identity is validated before construction. */
 
@@ -5626,7 +5598,6 @@ extern "C" NSUInteger rays_mtl_mesh_tile_mechanical_id_count(void) { return 48; 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
-/* M3: former metal_tensor_mechanical_callable_bridge.inc */
 /* Tensor descriptors still serve buffer-backed Resource100 tensors. */
 static_assert(std::is_same_v<decltype(((MTLTensorDescriptor *)nil).dimensions), MTLTensorExtents *>);
 static_assert(std::is_same_v<decltype(((MTLTensorDescriptor *)nil).strides), MTLTensorExtents *>);
@@ -5634,7 +5605,6 @@ static_assert(std::is_same_v<decltype(((MTLTensorDescriptor *)nil).dataType), MT
 
 /* MTLSize helpers retained for compile-option snapshots. */
 
-/* M3: former metal_library42_callable_bridge.inc */
 /* Remaining synchronous MTLLibrary42 calls use the ordinary Metal bridge
    handle/result helpers. The deprecated encoder reflection stays isolated. */
 
@@ -5643,7 +5613,6 @@ static_assert(std::is_same_v<decltype(((MTLTensorDescriptor *)nil).dataType), MT
 
 #pragma clang diagnostic pop
 
-/* M3: former metal_argument_encoder34_callable_bridge.inc */
 /* ArgumentEncoder34 isolated callable shard. Array inputs are completely
    decoded, kind-checked, range-checked, and same-device checked before the
    first Objective-C mutation, preserving atomic rejection. */
@@ -5654,27 +5623,22 @@ extern "C" CAMLprim value caml_rays_metal_argument_encoder_set_buffer(value raw,
 
 extern "C" CAMLprim value caml_rays_metal_argument_encoder_single(value raw,value tag,value object,value offset,value index){CAMLparam5(raw,tag,object,offset,index); Autorelease_pool pool;int64_t o=Int64_val(offset),i=Int64_val(index);if(o<0||i<0)CAMLreturn(result_error_text("negative argument offset or index"));@try{id<MTLArgumentEncoder>e=object_of_handle(raw,Handle_kind::Shader_argument_encoder);id x=nil;switch(Long_val(tag)){case 0:x=object_of_handle(object,Handle_kind::Buffer);break;case 1:x=object_of_handle(object,Handle_kind::Texture);break;case 2:x=object_of_handle(object,Handle_kind::Sampler);break;case 3:x=object_of_handle(object,Handle_kind::Acceleration_structure);break;case 4:x=object_of_handle(object,Handle_kind::Indirect_command_buffer);break;case 5:x=object_of_handle(object,Handle_kind::Visible_function_table);break;case 6:x=object_of_handle(object,Handle_kind::Intersection_function_table);break;case 7:x=object_of_handle(object,Handle_kind::Render_pipeline);break;case 8:x=object_of_handle(object,Handle_kind::Compute_pipeline);break;case 9:x=object_of_handle(object,Handle_kind::Depth_stencil);break;default:CAMLreturn(result_error_text("unknown argument binding kind"));}if(!rays_argument_same_device(e,x))CAMLreturn(result_error_text("argument binding device mismatch"));switch(Long_val(tag)){case 0:[e setBuffer:x offset:o atIndex:i];break;case 1:[e setTexture:x atIndex:i];break;case 2:[e setSamplerState:x atIndex:i];break;case 3:[e setAccelerationStructure:x atIndex:i];break;case 4:[e setIndirectCommandBuffer:x atIndex:i];break;case 5:[e setVisibleFunctionTable:x atIndex:i];break;case 6:[e setIntersectionFunctionTable:x atIndex:i];break;case 7:[e setRenderPipelineState:x atIndex:i];break;case 8:[e setComputePipelineState:x atIndex:i];break;case 9:[e setDepthStencilState:x atIndex:i];break;}CAMLreturn(result_unit());}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}
 
-/* M3: former metal_acceleration_command32_callable_bridge.inc */
 /* Missing18 callable IDs complement the existing build/refit/copy/compact
    encoder methods. Every array is fully kind/device validated before mutation. */
 
 extern "C" CAMLprim value caml_rays_metal_acceleration_encoder_write_type(value raw,value structure,value buffer,value offset,value type){CAMLparam5(raw,structure,buffer,offset,type); Autorelease_pool pool;int64_t o=Int64_val(offset);if(o<0)CAMLreturn(result_error_text("negative compacted-size offset"));@try{id<MTLBuffer>b=object_of_handle(buffer,Handle_kind::Buffer);NSUInteger bytes=Long_val(type)==0?sizeof(uint32_t):sizeof(uint64_t);if((uint64_t)o>b.length||bytes>b.length-o)CAMLreturn(result_error_text("compacted-size destination range out of bounds"));[object_of_handle(raw,Handle_kind::Acceleration_encoder) writeCompactedAccelerationStructureSize:object_of_handle(structure,Handle_kind::Acceleration_structure) toBuffer:b offset:o sizeDataType:(MTLDataType)Long_val(type)];CAMLreturn(result_unit());}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}
 
-/* M3: former metal_blit_command25_callable_bridge.inc */
 /* BlitCommand25 isolated callable shard. Positional copy specs are decoded and
    checked completely before the selected command is emitted. */
 
-/* M3: former metal_compute_pass20_callable_bridge.inc */
 /* ComputePass20 complete descriptor graph. Returned objects use the three
    dedicated handle kinds added by integration. */
 
-/* M3: former metal_function_log18_callable_bridge.inc */
 /* FunctionLog18 ownership shard.  The scalar type/line/column selectors live
    in the mechanical command-support shard.  These wrappers preserve nullable
    protocol edges with exact handle kinds and copy NSString/NSURL text before
    the command-completion callback which supplied the log is allowed to end. */
 
-/* M3: former metal_command_queue15_callable_bridge.inc */
 /* CommandQueue15 isolated shard. Integration adds Command_queue_descriptor and
    Log_state handle kinds. Handles allocated for unretained-reference command
    buffers retain the returned Objective-C object, making that SDK fast path
@@ -5683,11 +5647,8 @@ extern "C" CAMLprim value caml_rays_metal_acceleration_encoder_write_type(value 
 /* mode 0 is commandBufferWithUnretainedReferences; mode 1 materializes the
    exact command-buffer descriptor tuple (retainedReferences,errorOptions,log). */
 
-/* M3: former metal_compute_pipeline11_callable_bridge.inc */
 
-/* M3: former metal_command_buffer19_encoder_info.inc */
 
-/* M3: former metal_indirect_command14_callable_bridge.inc */
 /* IndirectCommand14 residual shard. expected_device is the authoritative ICB
    owner registry ID retained by the safe parent; all resource edges are fully
    checked before a command mutation. Safe integration retains bound resources
@@ -5711,12 +5672,10 @@ extern "C" CAMLprim value caml_rays_metal_indirect_render_draw_indexed_bytecode(
    tuple is (controlPoints,patchStart,patchCount,patchOffset,controlOffset,
    instances,baseInstance,tessOffset,tessStride), all int64. */
 
-/* M3: former metal_acceleration_structure28_callable_bridge.inc */
 /* AccelerationStructure28 constructor-only ownership shard. Integration adds
    ten exact descriptor handle kinds; property graphs remain handwritten and
    validate all buffers before mutating these retained descriptors. */
 
-/* M3: former metal_log_state9_callable_bridge.inc */
 #include <condition_variable>
 #include <cstddef>
 #include <mutex>
@@ -5765,29 +5724,24 @@ class RaysLogHandlerGate {
 struct RaysLogHandlerState{std::shared_ptr<RaysLogHandlerGate>gate=std::make_shared<RaysLogHandlerGate>();value*root=nullptr;};
 struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
 
-/* M3: former metal_function_handle8_callable_bridge.inc */
 /* FunctionHandle8 isolated snapshot. A single exact-kind read materializes all
    four SDK properties; method/property companion IDs share these direct typed
    selectors without exposing Device handles or native strings. */
 
-/* M3: former metal_linked_functions9_callable_bridge.inc */
 /* LinkedFunctions9 isolated shard. The safe owner supplies its authoritative
    pipeline device ID. Every nullable array/dictionary edge is decoded,
    kind/device checked, and copied before the first descriptor mutation. */
 
-/* M3: former metal_linked_functions9_constructor_bridge.inc */
 /* Handwritten enabling constructor for the LinkedFunctions9 safe graph.
    MTLLinkedFunctions is a descriptor-like retained object with no device
    property.  The safe OCaml owner therefore records the authoritative device
    separately and passes its registry ID to every function-bearing setter. */
 
-/* M3: former metal4_command_queue8_callable_bridge.inc */
 /* MTL4CommandQueue8 isolated tail. Every call is compile/runtime gated and
    receives a live-state witness from the safe queue owner. */
 
 /* operation: 0 add residency, 1 signal drawable, 2 wait drawable, 3 wait event. */
 
-/* M3: former metal_render_pipeline93_descriptor_bridge.inc */
 /* RenderPipeline93 mechanical descriptor foundation. The OCaml safe layer
    owns graph semantics; these direct calls only construct/reset descriptors,
    copy labels, and access the checked color-attachment array. */
@@ -5800,7 +5754,6 @@ struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
 /* Descriptor-array immutable snapshots: descriptor kind 0 render, 1 mesh,
    2 tile; array kind 0 colors, then stage buffer arrays in header order. */
 
-/* M3: former metal_render_pipeline93_linked_graph_bridge.inc */
 /* RenderPipeline93 linked-function graph closure (exact 12 SDK IDs).
 
    MTLLinkedFunctions properties are copied by the descriptor.  Setters accept
@@ -5811,19 +5764,16 @@ struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
    Mesh lanes: 0 object, 1 mesh, 2 fragment.  Tile has one linked-functions
    lane.  A missing OCaml option maps to nil and remains a valid graph reset. */
 
-/* M3: former metal_render_pipeline93_function_handle_bridge.inc */
 /* RenderPipeline93 pipeline-state function lookup closure (exact 3 IDs).
    Results are nullable and become independently owned Function_handle values.
    The safe layer validates liveness, same-device identity, one exact stage bit,
    UTF-8/NUL-free names, and retains the source function through this call. */
 
-/* M3: former metal_render_pipeline93_function_tables_bridge.inc */
 /* RenderPipeline93 function-table allocation closure (exact 2 IDs).
    The public safe API supplies a checked positive capacity and exact stage;
    this native layer constructs the SDK descriptor locally, avoiding exposure
    of a mutable descriptor handle, then returns one owned table handle. */
 
-/* M3: former metal_render_pipeline93_functions_descriptor_bridge.inc */
 /* RenderPipeline93 functions-descriptor closure (exact 10 IDs): class plus
    getter/setter/property triples for vertex, fragment and tile additional
    binary-linkable MTLFunction values.  Shared hookup must add the exact owned handle kind
@@ -5831,7 +5781,6 @@ struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
    before any SDK setter executes; the safe layer retains logical children and
    validates one device identity when attaching this descriptor to a pipeline. */
 
-/* M3: former metal_render_pipeline93_state_factories_bridge.inc */
 /* Final RenderPipeline93 state factory closure (exact 3 IDs).
    Hookup adds Pipeline_descriptor4 and the functions-descriptor kind prepared
    in the exact10 shard.  Every returned object is independently owned. */
@@ -5839,7 +5788,6 @@ struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-/* M3: former metal_render_pipeline93_vertex_reflection_bridge.inc */
 /* Final RenderPipeline93 descriptor/reflection closure (exact 9 IDs).
    Hookup adds exact owned Vertex_descriptor and Render_pipeline_reflection
    kinds. Vertex descriptors are copied; reflection arrays become immutable
@@ -5847,22 +5795,18 @@ struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
 
 #pragma clang diagnostic pop
 
-/* M3: former metal_intersection_table8_callable_bridge.inc */
 /* IntersectionFunctionTable8 isolated shard. Function-handle entries carry
    authoritative safe-owner registry IDs because MTLFunctionHandle exposes no
    device property. All arrays are decoded before the first table write. */
 
-/* M3: former metal_stage_input_output10_callable_bridge.inc */
 /* StageInputOutputDescriptor10 isolated ownership shard. Attribute replacement
    is decoded before mutation; returned child arrays/descriptors are retained
    exact-kind handles. The safe graph owns descriptor children until reset. */
 
-/* M3: former metal_blit_pass10_callable_bridge.inc */
 /* BlitPass10 residual ownership shard. Descriptor creation and attachment-array
    acquisition already use Blit_pass_descriptor/Blit_sample_attachment_array.
    These adapters complete nullable array and counter-buffer graph ownership. */
 
-/* M3: former metal_drawable10_callable_bridge.inc */
 /* Drawable10 isolated shard. Safe owners retain the drawable from acquisition
    through schedule and completion. Handler roots are bounded, exactly-once,
    and explicitly cancellable if presentation never occurs. */
@@ -5873,24 +5817,19 @@ struct RaysDrawableCallbackToken {
   std::shared_ptr<RaysDrawableCallbackState> state;
 };
 
-/* M3: former metal_function_constant_values3_callable_bridge.inc */
 /* FunctionConstantValues3 isolated shard. Values are passed as owned OCaml
    byte snapshots. The data type determines exact element width; the complete
    payload and range are validated before the single native mutation. */
 
-/* M3: former metal_binary_archive5_callable_bridge.inc */
 /* BinaryArchive5 isolated descriptor-addition shard. Descriptor/library device
    metadata is checked in full before invoking the selected archive mutation.
    Safe integration retains successful descriptor/library edges only after Ok. */
 
-/* M3: former metal_tensor_ownership_callable_bridge.inc */
 /* Handwritten Tensor ownership15 bridge; returned objects receive exact kinds. */
 
-/* M3: former metal_resource_remaining16_bridge.inc */
 /* Typed enablers for the final Resource100 ownership graphs.  This include is
    intentionally standalone until the shared bridge owner yields integration. */
 
-/* M3: former metal_compute_encoder35_bindings.inc */
 template<class T> static std::vector<T> rays_compute_handles(value a, Handle_kind kind) {
   mlsize_t n = Wosize_val(a); std::vector<T> values; values.reserve(n);
   for (mlsize_t i = 0; i < n; ++i)
@@ -5898,7 +5837,6 @@ template<class T> static std::vector<T> rays_compute_handles(value a, Handle_kin
   return values;
 }
 
-/* M3: former metal_compute_encoder35_commands.inc */
 #define C35_ENTRY(NAME) extern "C" CAMLprim value NAME
 #define C35_ENCODER(V) id<MTLComputeCommandEncoder> e=object_of_handle((V),Handle_kind::Compute_encoder)
 C35_ENTRY(caml_rays_metal_compute35_bytes_plain)(value re,value rb,value ri){CAMLparam3(re,rb,ri); Autorelease_pool pool;@try{C35_ENCODER(re);[e setBytes:Bytes_val(rb) length:caml_string_length(rb) atIndex:Int64_val(ri)];CAMLreturn(result_unit());}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}
@@ -5908,15 +5846,12 @@ C35_ENTRY(caml_rays_metal_compute35_accelerations)(value re,value ra){CAMLparam2
 #undef C35_ENTRY
 #undef C35_ENCODER
 
-/* M3: former metal_device_residual_final4_bridge.inc */
 /* Final exact MTLDevice selector closure: two function handles, one immutable
    argument-descriptor array constructor, and the synchronous render pipeline
    constructor. */
 
-/* M3: former metal_device_final_constructors3_bridge.inc */
 /* Exact final three MTLDevice constructors. */
 
-/* M3: former metal_device_capability13_bridge.inc */
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
@@ -5926,7 +5861,6 @@ C35_ENTRY(caml_rays_metal_compute35_accelerations)(value re,value ra){CAMLparam2
 #pragma clang diagnostic pop
 #pragma clang diagnostic pop
 
-/* M3: former metal_device_spatial_timestamp6_bridge.inc */
 
 #pragma clang diagnostic pop
 
