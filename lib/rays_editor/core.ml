@@ -825,7 +825,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
      (Enter), and deletes (Delete twice). A load replaces the document below
      as one undo entry. *)
   let initial_prompt = List.fold_left (fun prompt -> function
-    | Leader.Save_preset -> Some (Saving (Preset.default_name ()))
+    | Leader.Save_preset -> Some (Saving (Preset.default_name ~now:(value.clock ())))
     | Browse_presets ->
         browse value ""
     | Guide_keys -> Some Keys
@@ -859,7 +859,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
   reduce ?gpu ?pump ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~leader ~frame ~hud ~actions ~guide ~copied ~steady ~status_fps ~status_fps_at ~timeline ~timeline_changes ~graph_shown ~text ~text_shown ~row_sets ~rows value result
 let update ?gpu ?(image=fun _->None) ?(host_events=[]) ?pump value ~all_ui_visible ~text_focus ~camera_panel ~view_handles ~render_status
     ~error_status ~view_state (frame : Frame.t) =
-  let update, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
+  let update, phases = Flow.Phase_timer.sample ~clock:value.clock (fun () ->
   let value, frame, carry_changed = carry_step value ~text_focus frame in
   update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_visible ~text_focus ~camera_panel ~view_handles
     ~render_status ~error_status ~view_state frame) in

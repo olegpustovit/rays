@@ -61,7 +61,7 @@ let set_root value root =
    entry): the same reduction as a [Syntax_edit] intent, committed as one
    history entry named by the op ([Gesture] merge for a scrub). *)
 let syntax_edit value op =
-  let result, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
+  let result, phases = Flow.Phase_timer.sample ~clock:value.clock (fun () ->
   Result.map (fun doc -> install value doc ~label:(Flow_graph.Flow_edit.label op)
     ~merge:(Option.fold ~none:Editor_core.History.Step
       ~some:(fun key -> Editor_core.History.Gesture key) (Flow_graph.Flow_edit.gesture op)))

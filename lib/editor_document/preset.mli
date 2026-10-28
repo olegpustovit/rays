@@ -15,7 +15,7 @@ type loaded = {
 val sanitize : string -> string
 (** Keep [A-Za-z0-9_-]; every other character becomes [_]. *)
 
-val default_name : unit -> string
+val default_name : now:float -> string
 (** Local time as [YYYY-MM-DD_HH-MM-SS]. *)
 
 val path : directory:string -> name:string -> string

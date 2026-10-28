@@ -52,7 +52,7 @@ let create ?gpu ?settings
     ?(name = "sketch") ?presets ?(state_key = name) ?(factories = [])
     ?(seed = 0L) ?(grain = 16_384)
     ?domains ?(max_entries = 512)
-    ?(max_payload_bytes = 256 * 1024 * 1024) ?await ?(carry_budget = 0.5)
+    ?(max_payload_bytes = 256 * 1024 * 1024) ?await ?(carry_budget = 0.5) ?(clock = Unix.gettimeofday)
     ?preferences ?(ui_text_size = default_text_size) ?ui_font ?opened ~workspace ~prepare () =
   let factories = if factories = [] then Sop.Nodes.factories else factories in
   let settings = Option.value settings ~default:workspace.Workspace_doc.settings in
@@ -97,7 +97,7 @@ let create ?gpu ?settings
         graph_at = None; graph_pane = None; graph_panes = [];
         list_at = None; text_at = None; outline_at = None; locals = [];
         started = { on = None; views = []; tabs = [] };
-        framing = None; carry = None; carry_budget; traces = []; view_tools = None; gates = []; selected_box = None;
+        framing = None; carry = None; carry_budget; clock; traces = []; view_tools = None; gates = []; selected_box = None;
         file = (doc.Document.workspace.ws).checked.name ^ ".rays" } in
       Cook.set_volatile cook (Flow_sop.Lower.is_volatile (doc.workspace.lowered));
       (* the panels open as their start keywords say; the first graph pane (the focused leaf, else

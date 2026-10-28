@@ -121,7 +121,7 @@ let sync_scope value =
       let time = if not (Flow.Workspace.Paths.is_empty ws.checked.live)
         then Some {value.live_frame with Input.t = Timeline.time value.timeline;
           frame = Int64.to_int (Timeline.frame value.timeline)} else None in
-      let now = Unix.gettimeofday () in
+      let now = value.clock () in
       let summaries = value.cook.Cook.summaries in
       let executions = Flow_ir.Profile.executions lowered.profile in
       (* a moving clock or pointer re-forces the probes at most five times a second: a forced frame sets the quiet time to four

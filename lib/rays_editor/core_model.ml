@@ -297,6 +297,7 @@ type 'prepared t = {
   framing : int option;  (* the object a framing cook is running for: its bounds come back in its own space *)
   carry : 'prepared carry option;
   carry_budget : float;  (* seconds a carry's preview may take to apply or cook before it is only described *)
+  clock : unit -> float;  (* wall seconds, for the carry budget, the probe rate and phase timings; injected *)
   traces : (string * trace) list;  (* what each traced viewport's readout says: the film, the samples, the bounces and the seconds the accumulation took *)
   file : string;  (* what the status strip calls the document: its source file, else its name *)
   gates : (string * (int * int * int * int)) list;  (* the render frame of each viewport that shows less than its pane *)

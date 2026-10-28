@@ -35,9 +35,9 @@ let carry_try value (c : _ carry) place =
   match Lazy.force value.flow_catalog with
   | None -> Refused { place; reason = "The catalog is unavailable" }
   | Some catalog ->
-      let start = Unix.gettimeofday () in
+      let start = value.clock () in
       let result = Carry.put ~factories:value.factories ~catalog c.original c.payload place in
-      let spent = Unix.gettimeofday () -. start in
+      let spent = value.clock () -. start in
       (match result with
        | Error reason -> Refused { place; reason }
        | Ok (doc, what) ->
