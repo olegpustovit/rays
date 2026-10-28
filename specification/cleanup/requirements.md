@@ -943,7 +943,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI9** (P5, high, duplication, effort M). Location at baseline: ui.ml:2359,2391,2041 · pxui_shell/kit.ml:91 · Ui.inspector_* (15) · camera_controls number. Four widget kits. `Kit.switch` repaints `Ui.paint_switch` line for line. Action: One `Ui_kit` in pxui used by shell and graph; delete Kit and `Ui.button`/`toggle`.
 
-- [ ] **UI10** (P5, med, duplication, effort S). Location at baseline: pxui_graph/scope_pane.ml:18 num_field. A copy of Kit.number, forced because the gate keeps pxui_graph off pxui_shell. Action: Goes with UI9.
+- [x] **UI10** (P5, med, duplication, effort S). Location at baseline: pxui_graph/scope_pane.ml:18 num_field. A copy of Kit.number, forced because the gate keeps pxui_graph off pxui_shell. Action: Goes with UI9. Evidence: 82a616dc moves Number to Param.Number; Pxui.Ui.number_field is the one field, Kit.number is deleted and Scope.num_field wraps it.
 
 - [ ] **UI11** (P5, high, god-module, effort M). Location at baseline: pxui/ui.ml 4,072 (text_area_submit 612 lines at :3193). The engine is mixed with the widget kit and text editing. Action: Split into ui.ml (engine), ui_text.ml and ui_kit.ml, re-exported through `Ui`.
 
@@ -951,9 +951,9 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI13** (P5, high, duplication, effort M). Location at baseline: environment.ml:97-128 · viewport.ml:269-276 · scope_commands.ml:322-325. A second capture and hit path: raw mouse folds, a hand-rolled 4-point threshold, raw rect grabs, and key edges detected by hand. This breaks the 'one engine' rule. Action: Use `Ui.box` drags with `signal`/`capture`, and take key edges from the Router.
 
-- [ ] **UI14** (P5, med, layering, effort M). Location at baseline: editor_document/contexts.ml (1,129). A grab bag: kind schemas, window settings, scene walking, UI panel tree, editor eval, `of_workspace` (203 lines) and sha256. Action: Split into Kinds, Lowering and Shell_eval. Move sha256 to Store and drop digestif.
+- [x] **UI14** (P5, med, layering, effort M). Location at baseline: editor_document/contexts.ml (1,129). A grab bag: kind schemas, window settings, scene walking, UI panel tree, editor eval, `of_workspace` (203 lines) and sha256. Action: Split into Kinds, Lowering and Shell_eval. Move sha256 to Store and drop digestif. Evidence: Kinds and Shell_eval are split out of Contexts, each with an .mli (0cf26259, 840edbf1); Contexts went from 1,110 to 787 lines.
 
-- [ ] **UI15** (P5, med, correctness-risk, effort S). Location at baseline: contexts.ml:125 last_catalog, :224 last_fast · drawing.ml:8. Hidden global Atomic caches in a library that is supposed to be pure. Action: Pass the caches explicitly.
+- [x] **UI15** (P5, med, correctness-risk, effort S). Location at baseline: contexts.ml:125 last_catalog, :224 last_fast · drawing.ml:8. Hidden global Atomic caches in a library that is supposed to be pure. Action: Pass the caches explicitly. Evidence: the global last_catalog cache is gone; each Document.workspace carries its own lazy catalog, and the precision is a workspace field.
 
 - [x] **UI16** (P5, med, layering, effort S). Location at baseline: rays_editor/doc.ml. Document reducers with no UI dependency. Action: Move it into editor_document as `Document_edit`. Evidence: rays_editor/doc.ml is gone; editor_document/document_edit.ml owns document edits.
 

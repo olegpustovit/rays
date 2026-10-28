@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **169 / 248 accepted (68.1%)**. This counts individual
+Finding coverage: **172 / 248 accepted (69.4%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P8 (1daebeb7, 7ec58656, b0aa3bd7, 12001218): pathtrace.rays adds the World map (CDF search, sun, background modes, camera-visible rects, coverage, direct/indirect split), several rect lights and bevel probe rays. 16x12 is byte-identical on CPU and Metal; 480x840 RMSE is 8.7e-6 (dome) and 1.2e-5 (World). Interleaved GPU ms at load about 24, Lisp vs metal: dome 6.4 vs 9.2, World 8.1 vs 9.9, dome+bevel 11.2 vs 13.2, World+bevel 12.7 vs 14.2. Kernel_layout.specialize folds statically known branches. OGPU Backend.max_total_threads is exposed and test_lisp gates on it (≥512 dome, ≥448 World). Open: motion and curves in scene/trace, host-side scene facts for real scenes, the switch-over and P8.S4.
 
 - P8 speed (bb2c92b0..41c82bac): the Lisp `trace-pixel` runs at 6.2 ms per frame against pathtrace.metal at 9.1 ms (480x840, 2 spp, 4 bounces, 5 interleaved pairs in one process; load 10–88). Film: 16x12 byte-identical on CPU and Metal, 480x840 RMSE 1.3e-5. Causes found in the emitted MSL: 1,192 device atomics, 1,647 single-instruction guard blocks, unguarded closest-hit shadow rays, dead loop code and 64-bit PCG. Fixes: a thread-local status word with one atomic per kernel; shared guard blocks per scope; traces inside their guards, with any-hit shadow rays; the fast tier checks only inputs and outputs; live-only loop bodies; Kernel_layout.narrow prints 32-bit unsigned registers where the CPU bits are provably kept (MSL, WGSL, SPIR-V); single-use values inline (8,215 → 1,513 lines). test_lisp asserts the shape gates. CPU code paths are byte-identical (scalar bench_core 102.1 → 98.8 ns, noisy). Open: the structured kernel IR rewrite, the OGPU maxTotalThreadsPerThreadgroup accessor, static specialization, then world map, motion, curves and bevel before the switch-over.
 
