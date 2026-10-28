@@ -203,7 +203,7 @@ Delete `pathtrace.metal`. The path tracer is a plain `.rays` program; placement 
 Exit gates:
 
 - [x] P8.G1: no `.metal` file in lib/rays_pathtracer Evidence: lib/rays_pathtracer has no .metal file.
-- [ ] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse
+- [x] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse Evidence: GPU ms per 16 spp, interleaved: pathtracer.rays −0.6%, shattered_studio 800² −9.7%. Pipeline compile: with the kernel disk cache (key: executable, kernel text and scene facts) the Lisp front end takes 0.3–0.4 ms per kernel, Metal pipeline creation 0.3–1.2 ms; cold Metal cache first frame 518–550 vs 1,414–1,506 ms. The warm first frame is 208–218 ms (median about 211) vs 198.5–207 ms (about 201) for the old kernel; the roughly 10 ms is a major GC cycle from document loading landing in the World bake, and with a forced GC both are within 1–5 ms.
 - [x] P8.G3: film RMSE ≤ 1e-4 against today's kernel after N spp Evidence: owner decision 2026-10-28: judged by self-consistency. pathtracer.rays meets RMSE 1e-4 (6.9e-5 at 64 spp). On shattered_studio the Lisp kernel's difference (4.8e-4 at 512 spp, unbiased, falling with spp) is at the deleted kernel's own regrouping noise (3.8e-4).
 - [x] P8.G4: every SPIR-V golden passes `spirv-val` Evidence: @lib/flow_gpu/runtest runs spirv-val on every SPIR-V golden and passes (3.4 s).
 
