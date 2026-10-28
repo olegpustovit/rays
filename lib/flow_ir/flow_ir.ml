@@ -21,7 +21,12 @@ module Gpu = struct
     gpu_seconds : float option;
   }
 
-  type planes = { count : int; width : int; materialise : unit -> float array array }
+  type planes = {
+    count : int;
+    width : int;
+    materialise : unit -> float array array;
+    resident : E.value option;
+  }
 
   type kernel = {
     run : Packed.Host.inputs -> (value, Diagnostic.t) result;
@@ -37,7 +42,7 @@ module Gpu = struct
           let planes =
             Array.init width (fun c -> Array.init count (fun i -> data.((i * width) + c)))
           in
-          Ok { count; width; materialise = (fun () -> planes) }
+          Ok { count; width; materialise = (fun () -> planes); resident = None }
       | _ -> Error (Diagnostic.error ~code:"E_GPU" "GPU output is not a float array."))
 
   type backend = {
@@ -1288,13 +1293,14 @@ module Executor = struct
   (* A fused SOP write's record ({!Cost.sop_device}): its elementwise fields over one count are one
      region, one dispatch and a readback per output, by field name. [None] leaves the record to
      the CPU: the device declines or fails, or the cost model keeps it there. *)
-  let record_on_device ?state ?resolve ?(gpu = Gpu.default) program ~live =
+  let record_on_device ?state ?resolve ?resident ?(gpu = Gpu.default) program ~live =
     match (gpu.backend, Lazy.force program.record_region) with
     | Some backend, Some (names, merged)
       when gpu.fast && Packed.gpu_refusals ~fused:true ~fast:true merged = [] -> (
         let ( let* ) = Result.bind in
         let device =
-          let* inputs = Packed.Host.prepare ~fast:true ?state ?resolve merged ~live in
+          (* a source another write keeps on this device is bound there, not read back *)
+          let* inputs = Packed.Host.prepare ~fast:true ?state ?resolve ?resident merged ~live in
           if not (Cost.sop_device gpu.policy merged ~count:inputs.count) then Ok None
           else
             let* kernel =

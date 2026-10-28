@@ -4,7 +4,9 @@
    The device cook takes at most two dispatches, a recook uploads nothing and reads nothing back
    (its attributes stay in device buffers), a CPU read of P materialises exactly that one output,
    its noise and P agree with the CPU within float32 tolerance and N exactly (a translation keeps
-   it), and once the geometries are collected no buffer is held. CPU and GPU cook times are
+   it). Two consecutive fused writes run on the device with nothing uploaded or read back on a
+   recook (the second binds the first's resident P), and reading the second's P materialises one
+   output. Once the geometries are collected no buffer is held. CPU and GPU cook times are
    printed, median of 5. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
@@ -16,11 +18,39 @@ let text =
      :translate [0.0 1.0 0.0]))))"
     side side
 
-let node ?gpu () =
+(* Two fused writes, the second over the first ([a] is read twice, so they do not fold into one):
+   the second binds the first's resident P where the device holds it. *)
+let consecutive =
+  Printf.sprintf
+    "(workspace chain (graph g :context sop (let* [a (-> (sop/grid :counts \"Point counts\" \
+     :connectivity \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7) \
+     (sop/transform :translate [0.0 1.0 0.0])) b (-> a (sop/attribute_noise :name \"n2\" :seed 3) \
+     (sop/transform :translate [1.0 0.0 0.0]))] (sop/merge b (sop/attribute_noise a :name \
+     \"n2\")))))"
+    side side
+
+(* the root, or with [~after] the first write of N after the first write of [after]: the last
+   write of the chain that starts there, which the lowering fuses *)
+let node ?gpu ?(text = text) ?after () =
   let lowered = Flow_sop.Lower.workspace ?gpu (Flow.Syntax.parse text |> ok) |> ok in
   let graph = List.hd lowered.graphs in
-  Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)
-  |> Result.get_ok
+  let node_id =
+    match after with
+    | None -> Option.get graph.root
+    | Some name ->
+        let write name (n : Flow.Eval.node) =
+          n.kind = "sop/with_attr" && List.assoc_opt "attribute" n.args = Some (Text name)
+        in
+        let first = Array.find_opt (write name) lowered.plan.nodes |> Option.get in
+        let last =
+          Array.find_opt
+            (fun (n : Flow.Eval.node) -> n.id > first.id && write "N" n)
+            lowered.plan.nodes
+          |> Option.get
+        in
+        Flow_sop.Network.Int_map.find last.id lowered.compiled
+  in
+  Sop.Edit_graph.compile_node graph.network.geometry ~node_id |> Result.get_ok
 
 let cook node =
   let session = Sop.Session.create ~max_entries:4 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok in
@@ -144,7 +174,49 @@ let () =
             "grid > attribute_noise > transform, %d points: CPU cook %.3f s, GPU cook %.3f s \
              (first %.3f s), %d dispatch(es), largest difference %.2e\n\
              %!"
-            count cpu_seconds gpu_seconds first_seconds per_cook !worst);
+            count cpu_seconds gpu_seconds first_seconds per_cook !worst;
+          (* GPU to GPU: the second write reads the first's P where it is, a CPU reader of the
+             result reads back its P alone *)
+          let second = node ~gpu:counted ~text:consecutive ~after:"n2" () in
+          let reference, _ = cook (node ~text:consecutive ~after:"n2" ()) in
+          ignore (cook second);
+          dispatches := 0;
+          let before = stats () in
+          let chained, _ = cook second in
+          let after = stats () in
+          if !dispatches <> 2 then
+            failwith (Printf.sprintf "two consecutive writes took %d dispatches" !dispatches);
+          if
+            after.input_uploads <> before.input_uploads
+            || after.readback_bytes <> before.readback_bytes
+            || after.materialisations <> before.materialisations
+          then
+            failwith
+              (Printf.sprintf "consecutive writes moved data: %d uploads, %d bytes, %d read"
+                 (after.input_uploads - before.input_uploads)
+                 (after.readback_bytes - before.readback_bytes)
+                 (after.materialisations - before.materialisations));
+          if not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions chained)) then
+            failwith "the second write's P is not device-resident";
+          let chained_seconds, _ = median (fun () -> cook second) in
+          let steady = stats () in
+          let p = Rdk.Geometry.positions reference and q = Rdk.Geometry.positions chained in
+          let worst = ref 0. in
+          for i = 0 to count - 1 do
+            let x, y, z = Rdk.Packed.Float3.get p i and gx, gy, gz = Rdk.Packed.Float3.get q i in
+            worst :=
+              Float.max !worst
+                (Float.max
+                   (Float.abs (x -. gx))
+                   (Float.max (Float.abs (y -. gy)) (Float.abs (z -. gz))))
+          done;
+          if (stats ()).materialisations <> steady.materialisations + 1 then
+            failwith "reading the second write's P did not materialise exactly one output";
+          if !worst > 1e-5 then
+            failwith (Printf.sprintf "chained GPU P differs from CPU by %.3e" !worst);
+          Printf.printf
+            "two consecutive fused writes: GPU recook %.3f s, largest difference %.2e\n%!"
+            chained_seconds !worst);
       (* the geometries are gone: every buffer they held is back with its runner *)
       Gc.full_major ();
       let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in

@@ -242,13 +242,17 @@ module Host : sig
 
   (* Materialize CPU inputs while preserving exact integer storage. [lengths i] gives source [i]'s
      length instead of building it (an Int or Float range the caller binds on the device); its
-     array is then empty. [source] lets the caller supply an immutable cached
+     array is then empty. [resident v], for a host source [v] the resolve would answer, is data the
+     caller holds on the device: its placeholder array and element count. A source that is exactly
+     such a read is that placeholder (counted as its count), never built; one that computes over it
+     is evaluated again with [resolve]. [source] lets the caller supply an immutable cached
      source; its storage type is checked as usual. *)
   val prepare_values :
     ?state:Flow.Eval.state ->
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
     ?measure:(unit -> float) * (t -> seconds:float -> reference:bool -> unit) ->
     ?lengths:(int -> int option) ->
+    ?resident:(Flow.Eval.value -> (Flow.Eval.value * int) option) ->
     ?source:(Flow.Eval.residual -> Flow.Workspace.term -> Flow.Eval.value option) ->
     t ->
     live:Flow.Eval.live ->
@@ -272,6 +276,7 @@ module Host : sig
     ?state:Flow.Eval.state ->
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
     ?measure:(unit -> float) * (t -> seconds:float -> reference:bool -> unit) ->
+    ?resident:(Flow.Eval.value -> (Flow.Eval.value * int) option) ->
     ?source:(Flow.Eval.residual -> Flow.Workspace.term -> Flow.Eval.value option) ->
     t ->
     live:Flow.Eval.live ->

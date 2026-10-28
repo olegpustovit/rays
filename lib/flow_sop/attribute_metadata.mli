@@ -1,6 +1,10 @@
 val delete : owner:string -> pattern:string -> Sop.Node.t -> Sop.Node.t
 (** Topology-preserving attribute metadata operations over cooked geometry. *)
 
+val kind : owner:Rdk.Attribute.owner -> name:string -> Rdk.Geometry.t -> string option
+(** An attribute's type name (float, int, vec2-4, text, float_array, int_array), without reading its
+    storage. *)
+
 val attribute_owner : string -> (Rdk.Attribute.owner option, Diagnostic.t) result
 val group_owner : string -> (Rdk.Group_ops.owner option, Diagnostic.t) result
 val attr_conflict : string -> (Rdk.Attribute_lifecycle.rename_conflict, Diagnostic.t) result

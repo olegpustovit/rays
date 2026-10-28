@@ -612,12 +612,10 @@ let rec resolve ?context ~geometry value =
                           in
                           Ok
                             (E.Bool
-                               (match storage ~owner ~name geometry with
+                               (match Attribute_metadata.kind ~owner ~name geometry with
                                | None -> false
-                               | Some storage ->
-                                   Option.fold ~none:true
-                                     ~some:(( = ) (storage_kind storage))
-                                     requested))))
+                               | Some kind -> Option.fold ~none:true ~some:(( = ) kind) requested)))
+                  )
               | _ -> error "E_ATTR_TYPE" "sop/has_attr needs geometry and an attribute name.")
           | E.Source (("sop/components" as name), ty, args) ->
               Result.bind (concrete_args ?context ~geometry args) (fun args ->
@@ -686,7 +684,11 @@ let install ~owner ~kind name planes geometry =
 
 (* A device output as the attribute's storage, read from the device only when a CPU reader first
    needs it (any domain); until then the geometry holds the device's buffer. *)
-let install_deferred ~owner ~kind name ({ count; materialise; _ } : Flow_ir.Gpu.planes) geometry =
+type Rdk.Packed.Deferred.holder += Resident of E.value * int
+
+let install_deferred ~owner ~kind name ({ count; materialise; resident; _ } : Flow_ir.Gpu.planes)
+    geometry =
+  let holder = Option.map (fun v -> Resident (v, count)) resident in
   Result.map_error
     (Diagnostic.error ~code:"E_ATTR_TYPE")
     (Result.bind
@@ -694,13 +696,35 @@ let install_deferred ~owner ~kind name ({ count; materialise; _ } : Flow_ir.Gpu.
        (fun like ->
          if owner = A.Point && name = "P" then
            match like with
-           | A.Float3 _ -> G.with_positions (P.deferred ~length:count materialise) geometry
+           | A.Float3 _ -> G.with_positions (P.deferred ?holder ~length:count materialise) geometry
            | _ -> Error "Canonical point P requires vec3 storage."
          else
            Result.bind
-             (A.create_deferred ~name ~owner ~like ~length:count (fun () ->
+             (A.create_deferred ?holder ~name ~owner ~like ~length:count (fun () ->
                   Result.get_ok (make_storage kind (materialise ()))))
              (fun attr -> G.with_attribute attr geometry)))
+
+(* A whole-attribute read ([sop/attr] without a component) of storage a device still holds: its
+   placeholder and count, which the device binds to the held buffer without reading it back. *)
+let resident_read ~geometry = function
+  | (E.Struct ("sop/attr", _, args) | E.Source ("sop/attr", _, args))
+    when not (List.mem_assoc "component" args) -> (
+      match (List.assoc_opt "geometry" args, List.assoc_opt "attribute" args) with
+      | Some (E.Deferred (ty, id)), Some (E.Text name) when Flow.Ty.is_geometry ty -> (
+          match (geometry id, options args) with
+          | Some geometry, Ok (owner, kind) -> (
+              let holder =
+                if owner = A.Point && name = "P" then P.holder (G.positions geometry)
+                else Option.bind (G.find_attribute ~owner name geometry) A.holder
+              in
+              match (holder, value_type kind) with
+              | Some (Resident (v, count)), Ok ty
+                when Flow.Value.ty_of v = ty && count = owner_count geometry owner ->
+                  Some (v, count)
+              | _ -> None)
+          | _ -> None)
+      | _ -> None)
+  | _ -> None
 
 let borrowed_storage ~geometry values =
   let descriptor = function
@@ -1629,7 +1653,9 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                   let live = Sop.Context.input context in
                   let device =
                     if reference || elems <> None then Ok None
-                    else Flow_ir.Executor.record_on_device ?state ~resolve ?gpu program ~live
+                    else
+                      Flow_ir.Executor.record_on_device ?state ~resolve
+                        ~resident:(resident_read ~geometry) ?gpu program ~live
                   in
                   let grain = Sop.Context.grain context in
                   let writes =

@@ -23,7 +23,29 @@ type kept = {
   lock : Mutex.t;  (** orders an invalidate against close's destroy; never held while converting *)
   planes : float array array option Atomic.t;
   mutable destroyed : bool;
+  placeholder : float array;
+      (** one element of zeros: a later kernel's source that is this array reads the buffer *)
 }
+
+(* Kept outputs a later dispatch may bind by their placeholder, on the initial domain. *)
+let bindable : (float array * kept Weak.t) list ref = ref []
+
+(* The held buffer a placeholder stands for, while its holder has not read it back (its buffer is
+   then released) and it covers [length] floats. *)
+let held_input array ~length =
+  bindable := List.filter (fun (_, w) -> Weak.check w 0) !bindable;
+  List.find_map
+    (fun (p, w) ->
+      if p != array then None
+      else
+        Option.bind (Weak.get w 0) (fun kept ->
+            if
+              Atomic.get kept.planes = None
+              && (not kept.destroyed)
+              && kept.kept_count * kept.kept_width >= length
+            then Some kept.kept_buffer
+            else None))
+    !bindable
 
 type t = {
   device : B.device;
@@ -221,6 +243,15 @@ let msl_scene t = t.msl.Emit.scene
 let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(bound = fun _ -> None)
     ?(bound_table = fun _ -> None) ?scene ?(extras = no_extras) ?(resident = []) t
     (values : P.Host.inputs) =
+  (* a source another runner keeps on the device (its placeholder) is bound to its buffer *)
+  let bound index =
+    match bound index with
+    | Some _ as b -> b
+    | None when index < Array.length values.arrays && Array.length values.arrays.(index) <= 4 ->
+        held_input values.arrays.(index)
+          ~length:(values.count * t.msl.input_widths.(min index (Array.length t.inputs - 1)))
+    | None -> None
+  in
   (* the scene's buffers after its spheres, in Kernel_layout's order; the kernel's interface names at most
      as many (the tables its trace helpers read) *)
   let scene_tail =
@@ -723,6 +754,7 @@ let keep ?index output =
           lock = Mutex.create ();
           planes = Atomic.make None;
           destroyed = false;
+          placeholder = Array.make width 0.;
         }
       in
       let capacity = slot.capacity in
@@ -737,10 +769,13 @@ let keep ?index output =
       (* any domain, any allocation: only name the holder; after close nothing drains it *)
       let id = kept.id and released = t.released in
       Gc.finalise (fun _ -> release released id) kept;
-      Ok (output.count, width, fun () -> materialise t kept)
+      bindable := (kept.placeholder, weak) :: !bindable;
+      Ok (output.count, width, (fun () -> materialise t kept), Some kept.placeholder)
   | _ ->
       (* an empty or unmapped output is read now *)
-      Result.map (fun planes -> (output.count, width, fun () -> planes)) (planes ?index output)
+      Result.map
+        (fun planes -> (output.count, width, (fun () -> planes), None))
+        (planes ?index output)
 
 let buffer ?index output =
   let index = Option.value ~default:output.index index in

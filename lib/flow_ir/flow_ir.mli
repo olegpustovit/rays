@@ -22,10 +22,17 @@ module Gpu : sig
   (** Borrowed output metadata; [output] selects a fused producer's buffer. [gpu_seconds] is the
       completed device dispatch duration when the backend supports timestamps. *)
 
-  type planes = { count : int; width : int; materialise : unit -> float array array }
+  type planes = {
+    count : int;
+    width : int;
+    materialise : unit -> float array array;
+    resident : Flow.Eval.value option;
+  }
   (** An output kept where it was computed: [materialise] (once, from any domain, never failing: the
       dispatch's completion and status were checked when it was kept) reads it as [width] owned
-      planes of [count] floats, for a planar store. Until then the device owns it. *)
+      planes of [count] floats, for a planar store. Until then the device owns it, and [resident] is
+      a placeholder array (of one element) the same backend binds to that buffer when a later
+      kernel's source is it, without reading it. *)
 
   type kernel = {
     run : Packed.Host.inputs -> (value, Diagnostic.t) result;
@@ -181,6 +188,7 @@ module Executor : sig
   val record_on_device :
     ?state:Flow.Eval.state ->
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
+    ?resident:(Flow.Eval.value -> (Flow.Eval.value * int) option) ->
     ?gpu:Gpu.config ->
     program ->
     live:Flow.Eval.live ->
@@ -190,7 +198,8 @@ module Executor : sig
       device as its planes (a field of width [w]: [w] arrays of the count), by field name, read only
       when they materialise. [None] keeps the record on the CPU, also when the device fails. An
       input array the device already holds (the same array as the last dispatch's) is not uploaded
-      again. *)
+      again. [resident v] names a source bound as the value [v] (an attribute read) that the device
+      already holds: its placeholder ({!Gpu.planes}) and count, passed instead of evaluating it. *)
 
   val force_into :
     ?state:Flow.Eval.state ->

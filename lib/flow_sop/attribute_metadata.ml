@@ -296,13 +296,22 @@ let storage_kind = function
   | Float_array _ -> "float_array"
   | Int_array _ -> "int_array"
 
+(* an attribute's type without reading its storage (a device-resident one stays there) *)
+let kind ~owner ~name geometry =
+  if owner = A.Point && name = "P" then Some "vec3"
+  else
+    Option.map
+      (fun attribute ->
+        match A.kind_name attribute with
+        | "float2" -> "vec2"
+        | "float3" -> "vec3"
+        | "float4" -> "vec4"
+        | kind -> kind)
+      (G.find_attribute ~owner name geometry)
+
 let type_of ~owner ~name geometry =
-  let storage =
-    if owner = A.Point && name = "P" then Some (A.Float3 (G.positions geometry))
-    else Option.map A.View.storage (G.find_attribute ~owner name geometry)
-  in
-  match storage with
-  | Some storage -> Ok (E.Text (storage_kind storage))
+  match kind ~owner ~name geometry with
+  | Some kind -> Ok (E.Text kind)
   | None -> error "E_ATTR_TYPE" (Printf.sprintf "Attribute %S is missing." name)
 
 let names ~owner ~pattern geometry =

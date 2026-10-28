@@ -33,6 +33,7 @@ val tex_coord : owner:owner -> Packed.Float2.t key
 val create_owned : name:string -> owner:owner -> storage -> (t, string) result
 
 val create_deferred :
+  ?holder:Packed.Deferred.holder ->
   name:string ->
   owner:owner ->
   like:storage ->
@@ -45,6 +46,9 @@ val create_deferred :
 
 val resident : t -> bool
 (** Deferred and not yet materialised. *)
+
+val holder : t -> Packed.Deferred.holder option
+(** A resident attribute's holder ({!Packed.Deferred.holder}). *)
 
 val name : t -> string
 val owner : t -> owner

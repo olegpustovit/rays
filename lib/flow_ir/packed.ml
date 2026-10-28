@@ -3191,20 +3191,21 @@ module Host = struct
               | _ -> false)
             p.outputs.(0))
 
-  let prepare_values ?state ?resolve ?measure ?(lengths = fun _ -> None) ?(source = fun _ _ -> None)
-      (t : t) ~live =
+  let prepare_values ?state ?resolve ?measure ?(lengths = fun _ -> None) ?resident
+      ?(source = fun _ _ -> None) (t : t) ~live =
     let state = match state with Some state -> state | None -> E.create_state () in
     E.transaction state (fun () ->
         try
-          let rec evaluate residual term =
+          let rec evaluate residual term = evaluate_with resolve residual term
+          and evaluate_with resolve residual term =
             match term.W.node with
             | W.Ref_binding (name, []) -> (
                 match List.assoc_opt name (E.Residual.residual_view residual).bindings with
                 | Some (E.Residual residual) ->
-                    evaluate residual (E.Residual.residual_view residual).term
-                | _ -> materialize residual term)
-            | _ -> materialize residual term
-          and materialize residual term =
+                    evaluate_with resolve residual (E.Residual.residual_view residual).term
+                | _ -> materialize resolve residual term)
+            | _ -> materialize resolve residual term
+          and materialize resolve residual term =
             match
               compile_impl ~fusion:t.fusion ~dynamic:t.dynamic ~count_source:t.count_source residual
                 term
@@ -3213,9 +3214,38 @@ module Host = struct
                 (* a region that only copies its one source (a branch chosen by constants) is that
                    source: the same array, which a device holding it does not upload again *)
                 let residual, term = program.sources.(0) in
-                evaluate residual term
+                evaluate_with resolve residual term
             | Ok program -> get (force ~state ?resolve ?measure program ~live)
             | Error _ -> get (E.Residual.eval_term ~state ?resolve residual term ~live)
+          in
+          (* A source that is one read of data the device holds ([resident]) is that data's
+             placeholder, bound on the device, with its count: tried with a resolve answering
+             placeholders, kept only when the source is exactly the one placeholder it was handed
+             (anything computed over a placeholder is evaluated again with the caller's resolve). *)
+          let placed = Array.make (Array.length t.sources) None in
+          let evaluate_source i residual term =
+            match (resident, resolve) with
+            | None, _ | _, None -> evaluate residual term
+            | Some resident, Some resolve -> (
+                let handed = ref [] in
+                let speculative v =
+                  match resident v with
+                  | Some (p, n) ->
+                      handed := (p, n) :: !handed;
+                      Ok p
+                  | None -> resolve v
+                in
+                match evaluate_with (Some speculative) residual term with
+                | value when !handed = [] -> value
+                | value -> (
+                    match !handed with
+                    | [ (p, n) ] when value == p ->
+                        placed.(i) <- Some n;
+                        value
+                    | _ -> evaluate residual term)
+                | exception (Diagnostic.Error _ | Unsupported | Invalid_argument _)
+                  when !handed <> [] ->
+                    evaluate residual term)
           in
           let empty_product = ref false in
           (* a source whose length the caller knows (a range it binds on the device) is not built *)
@@ -3241,14 +3271,18 @@ module Host = struct
                   else
                     match source residual term with
                     | Some value -> value
-                    | None -> evaluate residual term
+                    | None -> evaluate_source i residual term
                 in
                 if t.iteration = Product && V.array_length value = 0 && known.(i) = None then
                   empty_product := true;
                 value)
               t.sources
           in
-          let length i value = match known.(i) with Some n -> n | None -> V.array_length value in
+          let length i value =
+            match (known.(i), placed.(i)) with
+            | Some n, _ | None, Some n -> n
+            | None, None -> V.array_length value
+          in
           Array.iteri
             (fun index value ->
               if V.ty_of value <> (snd t.sources.(index)).W.ty then
@@ -3324,11 +3358,12 @@ module Host = struct
 
   (* A device kernel's inputs as 32-bit floats: integer arrays and scalars travel as floats (exact to
      2^24, the fast precision's contract), an array-valued uniform as the table a gather reads. *)
-  let prepare ?(fast = false) ?state ?resolve ?measure ?source (t : t) ~live =
+  let prepare ?(fast = false) ?state ?resolve ?measure ?resident ?source (t : t) ~live =
     if Array.exists Core.Region.text_register t.code || (integer_program t && not fast) then
       Error
         (Diagnostic.error ~code:"E_GPU_FORM"
            (if Array.exists Core.Region.text_register t.code then "Text kernels stay on the CPU."
             else "Integer sources, uniforms and instructions stay on the CPU."))
-    else Result.map device_inputs (prepare_values ?state ?resolve ?measure ?source t ~live)
+    else
+      Result.map device_inputs (prepare_values ?state ?resolve ?measure ?resident ?source t ~live)
 end

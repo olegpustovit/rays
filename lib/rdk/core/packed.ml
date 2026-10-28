@@ -105,9 +105,12 @@ module Float2 = struct
 end
 
 module Deferred = struct
-  type 'a t = { make : (unit -> 'a) option Atomic.t; value : 'a option Atomic.t }
+  type holder = ..
 
-  let create make = { make = Atomic.make (Some make); value = Atomic.make None }
+  (* the thunk and its holder, dropped together once forced *)
+  type 'a t = { make : ((unit -> 'a) * holder option) option Atomic.t; value : 'a option Atomic.t }
+
+  let create ?holder make = { make = Atomic.make (Some (make, holder)); value = Atomic.make None }
 
   (* From any domain, holding no lock (the thunk may run parallel work whose tasks force the same
      value): domains that race may each run the thunk, the first result wins and every reader sees
@@ -118,13 +121,16 @@ module Deferred = struct
     | None -> (
         match Atomic.get value.make with
         | None -> Option.get (Atomic.get value.value)
-        | Some make ->
+        | Some (make, _) ->
             let forced = make () in
             ignore (Atomic.compare_and_set value.value None (Some forced));
             Atomic.set value.make None;
             Option.get (Atomic.get value.value))
 
   let forced value = Option.is_some (Atomic.get value.value)
+
+  let holder value =
+    if forced value then None else Option.bind (Atomic.get value.make) (fun (_, holder) -> holder)
 end
 
 module Float3 = struct
@@ -165,7 +171,7 @@ module Float3 = struct
     | Ok (), Ok () -> Ok (make x y z)
     | Error message, _ | _, Error message -> Error message
 
-  let deferred ~length materialise =
+  let deferred ?holder ~length materialise =
     if length < 0 then invalid_arg "Packed.Float3.deferred: negative length";
     {
       planes = { x = [||]; y = [||]; z = [||] };
@@ -173,7 +179,7 @@ module Float3 = struct
       data_id = Support.fresh_data_id ();
       deferred =
         Some
-          (Deferred.create (fun () ->
+          (Deferred.create ?holder (fun () ->
                match materialise () with
                | [| x; y; z |]
                  when Array.length x = length && Array.length y = length && Array.length z = length
@@ -183,6 +189,7 @@ module Float3 = struct
     }
 
   let resident value = match value.deferred with Some d -> not (Deferred.forced d) | None -> false
+  let holder value = Option.bind value.deferred Deferred.holder
 
   module Builder = struct
     type nonrec t = { x : float array; y : float array; z : float array; mutable frozen : bool }

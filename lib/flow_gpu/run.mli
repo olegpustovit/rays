@@ -66,12 +66,17 @@ val planes : ?index:int -> output -> (float array array, Diagnostic.t) result
     [planes.(c).(i)]), converted once from the mapped float32 contents in parallel blocks, with the
     finite check folded in. *)
 
-val keep : ?index:int -> output -> (int * int * (unit -> float array array), Diagnostic.t) result
+val keep :
+  ?index:int ->
+  output ->
+  (int * int * (unit -> float array array) * float array option, Diagnostic.t) result
 (** Hand a completed, status-checked output to a lazy planar store: its count, width and a
     [materialise] that reads {!planes} once, from any domain (an invalidate and a conversion, no
     queue work). The runner makes a fresh buffer for its next dispatch; the holder's buffer is
     destroyed after the holder is collected (at the runner's next dispatch) or at {!close}, which
-    first materialises every holder still alive. *)
+    first materialises every holder still alive. The last component is the output's placeholder, an
+    array of [width] zeros: a later {!dispatch} (of any runner) whose input is that array binds the
+    held buffer instead, while it is held and not yet read back. *)
 
 val buffer : ?index:int -> output -> Ogpu.Backend.buffer option
 val count_record : output -> Ogpu.Backend.buffer option

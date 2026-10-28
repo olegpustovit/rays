@@ -221,7 +221,18 @@ let backend t : G.backend =
                         | Ok None -> error "GPU output was closed or superseded."
                         | Ok (Some output) ->
                             Result.map
-                              (fun (count, width, materialise) -> { G.count; width; materialise })
+                              (fun (count, width, materialise, placeholder) ->
+                                let resident =
+                                  Option.map
+                                    (fun p : Flow.Eval.value ->
+                                      match width with
+                                      | 1 -> Float_array p
+                                      | 2 -> Vec2_array p
+                                      | 3 -> Vec3_array p
+                                      | _ -> Vec4_array p)
+                                    placeholder
+                                in
+                                { G.count; width; materialise; resident })
                               (Run.keep output));
                   })
                 (Pipelines.get t.pipelines msl)));
