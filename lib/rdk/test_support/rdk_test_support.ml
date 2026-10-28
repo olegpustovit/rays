@@ -330,6 +330,12 @@ module Transform_ops_front = struct
                        (Attribute.normal ~owner) normals |> get_string_ok in
                    Geometry.with_attribute attribute output |> get_string_ok))
           transformed [Attribute.Point; Attribute.Vertex]
+  let compose_transform ?(order = Transform_srt) ?(rotation_order = Transform_xyz) ?(translate = Rays_math.Vec3.zero) ?(rotate = Rays_math.Vec3.zero) ?(scale = Rays_math.Vec3.create 1. 1. 1.) ?(shear = Rays_math.Vec3.zero) ?(uniform_scale = 1.) ?(pivot = Rays_math.Vec3.zero) ?(pivot_rotation = Rays_math.Vec3.zero) ?(invert = false) () =
+    Rdk.Transform_ops.compose_transform ({ order; rotation_order; translate; rotate; scale; shear; uniform_scale; pivot; pivot_rotation; invert } : Rdk.Transform_ops.compose_transform_params)
+  let soft_transform ?cancel ?grain ?selection ?(metric = Soft_radius) ?(falloff = Soft_cubic) ?(radius = 1.) ?falloff_attribute ?(recompute_normals = true) matrix geometry =
+    Rdk.Transform_ops.soft_transform ({ cancel; grain; selection; metric; falloff; radius; falloff_attribute; recompute_normals } : Rdk.Transform_ops.soft_transform_params) matrix geometry
+  let distance_from_geometry ?cancel ?grain ?affected ?reference_selection ?(reference_kind = Distance_reference_primitives) ?(falloff = Soft_linear) ?(radius = Distance_maximum) ?(distance_attribute = Some "distance") ?mask_attribute ~reference source =
+    Rdk.Transform_ops.distance_from_geometry ({ cancel; grain; affected; reference_selection; reference_kind; falloff; radius; distance_attribute; mask_attribute; reference } : Rdk.Transform_ops.distance_from_geometry_params) source
 end
 
 let float3_values attribute = match Attribute.View.storage attribute with

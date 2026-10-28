@@ -213,10 +213,11 @@ module Distance_from_geometry = struct
              | Error error -> Error error
              | Ok reference_selection ->
                  match Rdk.Transform_ops.distance_from_geometry
-                     ~cancel:(Context.cancel_token context)
-                     ~grain:(Context.grain context) ?affected ?reference_selection
-                     ~reference_kind ~falloff ~radius ~distance_attribute
-                     ?mask_attribute ~reference:inputs.(1) inputs.(0) with
+                     { cancel = Some (Context.cancel_token context);
+                       grain = Some (Context.grain context); affected;
+                       reference_selection; reference_kind; falloff; radius;
+                       distance_attribute; mask_attribute;
+                       reference = inputs.(1) } inputs.(0) with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
   )

@@ -373,15 +373,15 @@ module Soft_transform = struct
       let* () = if parameters.metric = Soft_attribute && parameters.metric_attribute = "P" then
         refuse "metric attribute requires scalar storage" else Ok () in
       let* () = if String.trim parameters.falloff_attribute = "P" then refuse "falloff output must not replace P" else Ok () in
-      match Rdk.Transform_ops.compose_transform ~order:parameters.order ~rotation_order:parameters.rotation_order
-        ~translate:(Rays_math.Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z)
-        ~rotate:(Rays_math.Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z)
-        ~scale:(Rays_math.Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z)
-        ~shear:(Rays_math.Vec3.create parameters.shear_xy parameters.shear_xz parameters.shear_yz)
-        ~uniform_scale:parameters.uniform_scale
-        ~pivot:(Rays_math.Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z)
-        ~pivot_rotation:(Rays_math.Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z)
-        ~invert:parameters.invert () with
+      match Rdk.Transform_ops.compose_transform { order = parameters.order; rotation_order = parameters.rotation_order;
+        translate = Rays_math.Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z;
+        rotate = Rays_math.Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z;
+        scale = Rays_math.Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z;
+        shear = Rays_math.Vec3.create parameters.shear_xy parameters.shear_xz parameters.shear_yz;
+        uniform_scale = parameters.uniform_scale;
+        pivot = Rays_math.Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z;
+        pivot_rotation = Rays_math.Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z;
+        invert = parameters.invert } with
       | Error error -> refuse (Rdk.Error.to_string error)
       | Ok matrix ->
           if List.for_all (fun index ->
@@ -421,8 +421,8 @@ module Soft_transform = struct
       | Soft_radius -> Rdk.Transform_ops.Soft_radius
       | Soft_edge -> Rdk.Transform_ops.Soft_edge
       | Soft_attribute -> Rdk.Transform_ops.Soft_attribute {attribute=metric_attribute;apply_rolloff} in
-    let matrix = Rdk.Transform_ops.compose_transform ~order ~rotation_order ~translate ~rotate ~scale
-        ~shear:(Rays_math.Vec3.create shear_xy shear_xz shear_yz) ~uniform_scale ~pivot ~pivot_rotation ~invert ()
+    let matrix = Rdk.Transform_ops.compose_transform { order; rotation_order; translate; rotate; scale;
+        shear = Rays_math.Vec3.create shear_xy shear_xz shear_yz; uniform_scale; pivot; pivot_rotation; invert }
         |> Result.get_ok in
     Node.Build.make_geometry ?label ~operation:"soft_transform" ~version:1
       ~parameters:""
@@ -432,9 +432,9 @@ module Soft_transform = struct
         match resolve_element_group ~operation:"soft_transform" selection inputs.(0) with
         | Error error -> Error error
         | Ok selection -> match Rdk.Transform_ops.soft_transform
-            ~cancel:(Context.cancel_token context) ~grain:(Context.grain context)
-            ?selection ~metric ~falloff ~radius ?falloff_attribute
-            ~recompute_normals matrix inputs.(0) with
+            { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context);
+              selection; metric; falloff; radius; falloff_attribute; recompute_normals }
+            matrix inputs.(0) with
           | Ok geometry -> cooked geometry
           | Error error -> structured_rdk_error error)
   )

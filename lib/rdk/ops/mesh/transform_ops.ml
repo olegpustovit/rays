@@ -33,11 +33,20 @@ let transform_rotation_matrix order angles =
     | Transform_zxy -> z, x, y | Transform_zyx -> z, y, x in
   Rays_math.Mat4.mul third (Rays_math.Mat4.mul second first)
 
-let compose_transform ?(order = Transform_srt)
-    ?(rotation_order = Transform_xyz) ?(translate = Rays_math.Vec3.zero)
-    ?(rotate = Rays_math.Vec3.zero) ?(scale = Rays_math.Vec3.create 1. 1. 1.) ?(shear = Rays_math.Vec3.zero)
-    ?(uniform_scale = 1.) ?(pivot = Rays_math.Vec3.zero)
-    ?(pivot_rotation = Rays_math.Vec3.zero) ?(invert = false) () =
+type compose_transform_params = {
+  order : transform_order;
+  rotation_order : transform_rotation_order;
+  translate : Rays_math.Vec3.t;
+  rotate : Rays_math.Vec3.t;
+  scale : Rays_math.Vec3.t;
+  shear : Rays_math.Vec3.t;
+  uniform_scale : float;
+  pivot : Rays_math.Vec3.t;
+  pivot_rotation : Rays_math.Vec3.t;
+  invert : bool;
+}
+
+let compose_transform ({ order; rotation_order; translate; rotate; scale; shear; uniform_scale; pivot; pivot_rotation; invert } : compose_transform_params) =
   Error.guard ~operation:"compose_transform" ~code:"invalid_transform" @@ fun () ->
   let vectors = ["translate", translate; "rotate", rotate; "scale", scale;
     "shear", shear; "pivot", pivot; "pivot_rotation", pivot_rotation] in
@@ -177,10 +186,21 @@ let valid_output_attribute_name = function
       let name = String.trim name in
       name <> "" && name <> "P"
 
-let distance_from_geometry ?cancel ?(grain = 16_384) ?affected
-    ?reference_selection ?(reference_kind = Distance_reference_primitives)
-    ?(falloff = Soft_linear) ?(radius = Distance_maximum)
-    ?(distance_attribute = Some "distance") ?mask_attribute ~reference source =
+type distance_from_geometry_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  affected : Element_selection.t option;
+  reference_selection : Element_selection.t option;
+  reference_kind : distance_from_geometry_reference;
+  falloff : soft_transform_falloff;
+  radius : distance_along_radius;
+  distance_attribute : string option;
+  mask_attribute : string option;
+  reference : Geometry.t;
+}
+
+let distance_from_geometry ({ cancel; grain; affected; reference_selection; reference_kind; falloff; radius; distance_attribute; mask_attribute; reference } : distance_from_geometry_params) source =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"distance_from_geometry" ~code:"invalid_distance" @@ fun () ->
   let operation = "Rdk.Transform_ops.distance_from_geometry" in
   if grain <= 0 then Error (operation ^ ": grain must be positive")
@@ -348,9 +368,19 @@ let soft_attribute_weights ?cancel ~grain ~radius ~falloff ~apply_rolloff
       | _ -> Error (Printf.sprintf
           "Rdk.Transform_ops.soft_transform: point distance attribute %S must be float" name)
 
-let soft_transform ?cancel ?(grain = 16_384) ?selection
-    ?(metric = Soft_radius) ?(falloff = Soft_cubic) ?(radius = 1.)
-    ?falloff_attribute ?(recompute_normals = true) matrix geometry =
+type soft_transform_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  selection : Element_selection.t option;
+  metric : soft_transform_metric;
+  falloff : soft_transform_falloff;
+  radius : float;
+  falloff_attribute : string option;
+  recompute_normals : bool;
+}
+
+let soft_transform ({ cancel; grain; selection; metric; falloff; radius; falloff_attribute; recompute_normals } : soft_transform_params) matrix geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"soft_transform" ~code:"invalid_transform" @@ fun () ->
   if grain <= 0 then Error "Rdk.Transform_ops.soft_transform: grain must be positive"
   else if not (Float.is_finite radius) || radius < 0. then
