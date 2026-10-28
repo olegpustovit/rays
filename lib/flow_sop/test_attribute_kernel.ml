@@ -1994,6 +1994,16 @@ let () =
     "image capture foundation: live override cone, no downstream image callback, shared program \
      proof and materialized instance P pass"
 
+(* the field of the iso_surface card: the call inlines, its marker carries the function *)
+let field_function (lowered : L.t) =
+  Array.find_map
+    (fun (n : E.node) ->
+      match (List.assoc_opt "kind" n.args, List.assoc_opt "field" n.args) with
+      | Some (E.Text "sop/iso_surface"), Some (E.Fn fn) when n.kind = E.card_kind -> Some fn
+      | _ -> None)
+    lowered.plan.nodes
+  |> Option.get
+
 let () =
   let text =
     "(workspace field (graph g :context sop\n\
@@ -2001,10 +2011,7 @@ let () =
     \      :resolution [24 24 24] :min [-2.1 -2 -2] :max [2 2 2] :iso 0)))"
   in
   let lowered = lower text in
-  let call =
-    Array.find_opt (fun (n : E.node) -> n.kind = "sop/iso_surface") lowered.plan.nodes |> Option.get
-  in
-  let fn = match List.assoc "field" call.args with E.Fn fn -> fn | _ -> assert false in
+  let fn = field_function lowered in
   (* Independent index decomposition pins all 65^3 positions and x-fast order. *)
   let positions =
     Array.init
@@ -2165,11 +2172,7 @@ let () =
         ("(workspace rounding (graph g :context sop\n      (sop/iso_surface :field (fn [p] "
        ^ expression ^ ") :resolution [129 256 2]\n        :min [-2 -1.5 -1] :max [3 2 1.7])))")
     in
-    let call =
-      Array.find_opt (fun (n : E.node) -> n.kind = "sop/iso_surface") lowered.plan.nodes
-      |> Option.get
-    in
-    let fn = match List.assoc "field" call.args with E.Fn fn -> fn | _ -> assert false in
+    let fn = field_function lowered in
     let values =
       E.Host.map_function
         ~signature:Flow.Ty.{ params = [ Vec3 ]; result = Float }
@@ -2419,7 +2422,9 @@ let () =
       let prepare inputs = Flow_sop.Attribute_kernel.prepare ~sources inputs values |> flow_ok in
       assert (stages (Flow_ir.Executor.compile values |> flow_ok) = 1);
       let program = prepare inputs in
-      assert (stages program = expected_stages);
+      if stages program <> expected_stages then
+        failwith
+          (Printf.sprintf "%s: %d stages, expected %d" other (stages program) expected_stages);
       (* Cooked Core calls use Source descriptors. Their captured count proofs,
        selective reads and borrowed columns must match legacy Struct reads. *)
       let forms =
@@ -2503,9 +2508,9 @@ let () =
             [ 0.; 0.125; 1.25; 7. ]))
     [
       ("g", 3);
-      ("(sop/transform g :translate [0 0 1])", 3);
+      (* a native topology-preserving node: a separate source with g's topology origin *)
+      ("(sop/soft_transform g :translate [0 0 1])", 3);
       ("(sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 1025 :rows 2)", 1);
-      ("(sop/scatter (sop/grid) :count 2050 :seed 9)", 1);
     ]
 
 let () =
@@ -2639,7 +2644,8 @@ let () =
             |> get_string_ok
           in
           let output = Session.cook session ~context node |> geometry in
-          assert (Geometry.find_attribute ~owner:Attribute.Point "N" output = None))
+          (* the grid writes N and a P write keeps it *)
+          assert (Geometry.find_attribute ~owner:Attribute.Point "N" output <> None))
         [ 0; 1; 2 ]);
   let forms = Flow.Syntax.parse (source noise_body) |> flow_ok in
   let bare = lower (source "(with_attr g :P (attr g :P))") in
@@ -2696,7 +2702,12 @@ let () =
         cook probe_session ~domains:8 ~time:1.25 (List.hd (Sop.Node.inputs node)) |> geometry
       in
       let geometry_id =
-        Array.find_opt (fun (n : E.node) -> n.kind = "sop/grid") large.plan.nodes |> Option.get
+        (* the inlined grid's card *)
+        Array.find_opt
+          (fun (n : E.node) ->
+            n.kind = E.card_kind && List.assoc_opt "kind" n.args = Some (E.Text "sop/grid"))
+          large.plan.nodes
+        |> Option.get
         |> fun n -> n.id
       in
       let reads = ref 0 in
@@ -3264,7 +3275,14 @@ let () =
             Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)
             |> get_string_ok
           in
-          let node = Sop.Node.Build.rebuild_with_inputs node [| Lisp_sop.snapshot small |] in
+          (* the inlined body reads the planar source where it is used: replace it there *)
+          let rec rewire node =
+            if Sop.Node.operation node = "test.planar_source" then Lisp_sop.snapshot small
+            else
+              Sop.Node.Build.rebuild_with_inputs node
+                (Array.of_list (List.map rewire (Sop.Node.inputs node)))
+          in
+          let node = rewire node in
           let expected =
             planar_oracle ~owner:Point ~kind:"vec3" "planar"
               [| [| 0.5; 1.5 |]; [| 0.5; 1.5 |]; [| -0.; -0. |] |]

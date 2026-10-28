@@ -1405,8 +1405,30 @@ let write_constant ?state ?elems ~resolve ~owner ~kind ~name prepared target ~li
               Result.bind sample (fun sample ->
                   write_constant_source ~grain:4096 ~owner ~kind name sample target)))
 
+(* the literal (owner, name) deletions a fused write runs after it (Lower.fold_writes) *)
+let delete_after deletes cancel geometry =
+  List.fold_left
+    (fun geometry (owner, pattern) ->
+      Result.bind geometry (fun geometry ->
+          let pattern_for selected = if owner = selected then pattern else "" in
+          Result.map_error
+            (fun e -> Diagnostic.error ~code:"E_ATTR_DELETE" (Rdk.Error.to_string e))
+            (Rdk.Attribute_ops.delete
+               {
+                 cancel = Some cancel;
+                 reference = None;
+                 delete_non_selected = false;
+                 point_pattern = Some (pattern_for "point");
+                 vertex_pattern = Some (pattern_for "vertex");
+                 primitive_pattern = Some (pattern_for "primitive");
+                 detail_pattern = Some (pattern_for "detail");
+               }
+               geometry)))
+    (Ok geometry) deletes
+
 let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?gpu ?selection
-    ?default ?(owner = A.Point) ?(kind = "vec3") ~source ~name ~values ~sources inputs =
+    ?default ?(owner = A.Point) ?(kind = "vec3") ?(deletes = []) ~source ~name ~values ~sources
+    inputs =
   let selected = selection <> None || default <> None in
   let data =
     if not selected then values
@@ -1434,6 +1456,8 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
   in
   let parameters =
     source ^ ";" ^ owner_name owner ^ ";" ^ kind ^ ";" ^ name ^ ";"
+    ^ String.concat "," (List.map (fun (o, p) -> o ^ ":" ^ p) deletes)
+    ^ ";"
     ^ Flow.Value.key_of ~residual:E.Residual.residual_id data
     ^ Option.fold ~none:""
         ~some:(fun bindings ->
@@ -1540,6 +1564,10 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                                       write_storage ~owned_fields ~grain:(Sop.Context.grain context)
                                         ~owner ~kind name values geometries.(0)))))
         in
+        let result =
+          if deletes = [] then result
+          else Result.bind result (delete_after deletes (Sop.Context.cancel_token context))
+        in
         Result.map (fun geometry -> N.Build.{ geometry; instances = None }) result)
   in
   N.Build.with_facts
@@ -1548,6 +1576,6 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
       elementwise = (match owner with A.Point -> N.Points | Primitive -> Primitives | _ -> None);
       topology = N.Preserved;
       reads = (if selected then List.sort_uniq String.compare (name :: reads data) else reads data);
-      writes = [ name ];
+      writes = List.sort_uniq String.compare (name :: List.map snd deletes);
     }
     node

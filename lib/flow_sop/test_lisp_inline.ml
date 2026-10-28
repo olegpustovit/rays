@@ -182,3 +182,34 @@ let () =
       ("(sop/b_live (sop/line :points 9) :on (> t 0.1))", false);
     ];
   print_endline "inline cards: context-reaching bodies and live arguments inline"
+
+(* Step E2: a cooked-data argument (a count of the cooked input) inlines; the body reads it as a
+   value resolved once per cook, so the card cooks as the same call with that value written out
+   (nested refused it, E_DATA_SOURCE), in time linear in the points. *)
+let () =
+  let text amplitude points =
+    Printf.sprintf
+      "(workspace e (graph g :context sop (let* [g (sop/line :points %d)] (sop/noise_displace g \
+       :amplitude %s))))"
+      points amplitude
+  in
+  let timed points =
+    let start = Unix.gettimeofday () in
+    let result = outcome true (text "(/ (float (sop/count g :points)) 4096.0)" points) in
+    (result, Unix.gettimeofday () -. start)
+  in
+  List.iter
+    (fun points ->
+      let inline, _ = timed points in
+      let written = outcome true (text (Printf.sprintf "%.17g" (float points /. 4096.)) points) in
+      if inline <> written || Result.is_error inline then
+        failwith (Printf.sprintf "step E2: cooked argument differs at %d points" points))
+    [ 9; 4096 ];
+  let before = Atomic.get L.Private.nested_lowerings in
+  let _, small = timed 20_000 and _, large = timed 80_000 in
+  if Atomic.get L.Private.nested_lowerings <> before then
+    failwith "step E2: a cooked argument nested";
+  if large > (12. *. small) +. 0.05 then
+    failwith (Printf.sprintf "step E2: 4x points took %.3fs vs %.3fs" large small);
+  Printf.printf "inline cards: cooked-data arguments resolve once per cook (20k %.3fs, 80k %.3fs)\n"
+    small large

@@ -122,6 +122,7 @@ val node :
   ?default:Flow.Eval.value ->
   ?owner:Rdk.Attribute.owner ->
   ?kind:string ->
+  ?deletes:(string * string) list ->
   source:string ->
   name:string ->
   values:Flow.Eval.value ->

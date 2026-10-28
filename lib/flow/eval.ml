@@ -1403,7 +1403,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
   match Option.bind replay (fun entry -> replay_inline c entry (inline_inputs parameters vals)) with
   | Some v ->
       st.steps <- steps;
-      card c ~form d parameters v
+      card c ~form d parameters ~vals v
   | None -> (
       let inlined0 = st.inlined in
       st.inlined <- d.kind.qualified :: st.inlined;
@@ -1493,7 +1493,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
                   if Hashtbl.length inline_memo >= 256 then Hashtbl.reset inline_memo;
                   Hashtbl.replace inline_memo key entry)
           | _ -> ());
-          card c ~form d parameters v
+          card c ~form d parameters ~vals v
       | exception Needs_t ->
           (* a validation that reads a live argument *)
           st.steps <- steps;
@@ -1515,7 +1515,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
    parameters), what the host keys per-card ids, display, probes, provenance, facts and caching by;
    the call's value is the marker. A body whose geometry is decided by cooked data (a residual)
    cooks behind it, one card's structure as before; otherwise it passes the body's result through. *)
-and card c ~form (d : W.node_definition) parameters v =
+and card c ~form (d : W.node_definition) parameters ~vals v =
   let marker () =
     let st = c.st in
     let n =
@@ -1526,7 +1526,10 @@ and card c ~form (d : W.node_definition) parameters v =
         iter = c.iter;
         kind = card_kind;
         ty = Ty.geometry;
-        args = [ ("value", v); ("kind", Text d.kind.qualified); ("parameters", Record parameters) ];
+        args =
+          [ ("value", v); ("kind", Text d.kind.qualified); ("parameters", Record parameters) ]
+          (* the call's functions, which the host's field probes sample *)
+          @ List.filter (fun (_, v) -> match v with Fn _ -> true | _ -> false) vals;
       }
     in
     st.nodes <- n :: st.nodes;
@@ -2238,12 +2241,6 @@ let inline_parameters =
   Atomic.make (fun _ (d : W.node_definition) ->
       (d, lazy (Digest.string (Marshal.to_string d [])), fun vals -> Some vals))
 
-(* ponytail: a node with callable slots still lowers as its own nested workspace *)
-let inline_simple (d : W.node_definition) =
-  List.for_all
-    (fun (s : Catalog.slot) -> match s.ty with Some (Ty.Fn _) -> false | _ -> true)
-    d.slots
-
 let new_state ?(budget = max_steps) ~record ws =
   let graphs = Hashtbl.create 8 and defs = Hashtbl.create 8 in
   List.iter (fun (g : W.graph) -> Hashtbl.replace graphs g.name g) ws.W.graphs;
@@ -2276,8 +2273,7 @@ let new_state ?(budget = max_steps) ~record ws =
        if Atomic.get inline_nodes then
          List.iter
            (fun (d : W.node_definition) ->
-             if inline_simple d then
-               Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
+             Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
            ws.W.nodes;
        t);
     ops = ws.ops;
@@ -2639,8 +2635,10 @@ module Host = struct
     | Closure cl -> Closure { cl with env = Smap.map f cl.env }
     | Named _ as fn -> fn
 
-  let remap_function_geometry ~sources fn =
-    (* Residuals are shared: each is rewritten once, or the copy is exponential in the depth of the sharing. *)
+  (* [f] replaces a value outright; otherwise captures are rewritten through closures, residuals and
+     aggregates. Residuals are shared: each is rewritten once, or the copy is exponential in the
+     depth of the sharing. *)
+  let rewriter f =
     let module Seen = Hashtbl.Make (struct
       type t = residual
 
@@ -2648,38 +2646,52 @@ module Host = struct
       let hash (r : residual) = Hashtbl.hash r.rid
     end) in
     let seen = Seen.create 64 in
-    let rec value = function
-      | Deferred (ty, id) when Ty.is_geometry ty ->
-          Deferred (ty, Option.value ~default:id (List.assoc_opt id sources))
-      | Fn fn -> Fn (function_value fn)
-      | Residual r -> (
-          match Seen.find_opt seen r with
-          | Some copy -> Residual copy
-          | None ->
-              let copy =
-                {
-                  r with
-                  rid = Atomic.fetch_and_add bulk_ids (-1);
-                  renv = Smap.map value r.renv;
-                  live = None;
-                  dep_frame = 0;
-                  dep_state = 0;
-                }
-              in
-              Seen.add seen r copy;
-              Residual copy)
-      | List values -> List (Array.map value values)
-      | Record fields -> Record (List.map (fun (name, v) -> (name, value v)) fields)
-      | Struct (name, ty, fields) ->
-          Struct (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
-      | Source (name, ty, fields) ->
-          Source (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
-      | v -> v
+    let rec value v =
+      match f v with
+      | Some v -> v
+      | None -> (
+          match v with
+          | Fn fn -> Fn (function_value fn)
+          | Residual r -> (
+              match Seen.find_opt seen r with
+              | Some copy -> Residual copy
+              | None ->
+                  let copy =
+                    {
+                      r with
+                      rid = Atomic.fetch_and_add bulk_ids (-1);
+                      renv = Smap.map value r.renv;
+                      live = None;
+                      dep_frame = 0;
+                      dep_state = 0;
+                    }
+                  in
+                  Seen.add seen r copy;
+                  Residual copy)
+          | List values -> List (Array.map value values)
+          | Record fields -> Record (List.map (fun (name, v) -> (name, value v)) fields)
+          | Struct (name, ty, fields) ->
+              Struct (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
+          | Source (name, ty, fields) ->
+              Source (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
+          | v -> v)
     and function_value = function
       | Closure cl -> Closure { cl with env = Smap.map value cl.env }
       | Named _ as fn -> fn
     in
-    if sources = [] then fn else function_value fn
+    (value, function_value)
+
+  let rewrite f = fst (rewriter f)
+
+  let remap_function_geometry ~sources fn =
+    if sources = [] then fn
+    else
+      snd
+        (rewriter (function
+          | Deferred (ty, id) when Ty.is_geometry ty ->
+              Some (Deferred (ty, Option.value ~default:id (List.assoc_opt id sources)))
+          | _ -> None))
+        fn
 
   let state_values state =
     List.map snd (State_map.bindings state.before) @ List.map snd (State_map.bindings state.next)

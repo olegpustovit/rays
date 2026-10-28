@@ -219,9 +219,9 @@ type t = {
 }
 
 val inline_nodes : bool Atomic.t
-(** Switch of the single-program design (default off): a Lisp node without callable slots, called
-    with static arguments, evaluates its body in the calling program instead of lowering as its own
-    workspace, unless {!inline_parameters} keeps it a node. *)
+(** Switch of the single-program design (default on): a Lisp node call evaluates its body in the
+    calling program instead of lowering as its own workspace, unless {!inline_parameters} keeps it a
+    node. *)
 
 val inline_parameters :
   (Workspace.t ->
@@ -243,7 +243,8 @@ val context_label : string
 
 val card_kind : string
 (** The kind of an inlined card's marker node: [value] is the body's geometry (a cooked node, or a
-    residual the host cooks behind the marker), [kind] the card's qualified kind. The marker sits at
+    residual the host cooks behind the marker), [kind] the card's qualified kind, [parameters] its
+    canonical parameters, and each function argument of the call under its name. The marker sits at
     the call's site. *)
 
 val node_error : string
@@ -363,6 +364,10 @@ module Host : sig
 
   val map_function_bindings : (value -> value) -> fn -> fn
   (** Replace immutable closure captures, preserving callable identity and scope. *)
+
+  val rewrite : (value -> value option) -> value -> value
+  (** A copy of the value with what the function replaces replaced, through closure and residual
+      captures and aggregates (each shared residual copied once, with a fresh id). *)
 
   val remap_function_geometry : sources:(int * int) list -> fn -> fn
   (** Remap geometry IDs through closure and residual captures when a host moves a callable between

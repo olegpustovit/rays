@@ -3,6 +3,7 @@
 open Rdk
 open Rdk_test_support
 module L = Flow_sop.Lower
+module E = Flow.Eval
 module Edit = Sop.Edit_graph
 module Session = Sop.Session
 
@@ -112,3 +113,88 @@ let () =
   print_endline
     "Lisp fusion: four noise_displace nodes cook as at most one kernel run, equal at one and four \
      domains"
+
+(* E4: the chain over a cooked (native) input: each card's body writes P over the previous card,
+   through its N deletions; the writes fold into one region, with the bytes of the unfolded
+   (reference) lowering at one and four domains, and the intermediate cards keep their own. *)
+let () =
+  let base = Printf.sprintf "(sop/soft_transform %s)" grid in
+  let text =
+    Printf.sprintf "(workspace cooked (graph g :context sop (let* [g %s %s] d4)))" base
+      (String.concat " "
+         (List.mapi
+            (fun i (amplitude, frequency, seed) ->
+              Printf.sprintf "d%d (sop/noise_displace %s :amplitude %g :frequency %g :seed %d)"
+                (i + 1)
+                (if i = 0 then "g" else Printf.sprintf "d%d" i)
+                amplitude frequency seed)
+            stages))
+  in
+  let cook_root ?(reference = false) domains =
+    profiles := [];
+    let l =
+      L.workspace ~reference
+        ~on_profile:(fun p -> profiles := p :: !profiles)
+        (Flow.Syntax.parse text |> flow_ok)
+      |> flow_ok
+    in
+    let session =
+      Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok
+    in
+    let bytes = Session.cook session ~context:(context ~domains) (compiled l) |> geometry in
+    Session.close session;
+    (geometry_bytes bytes, kernel_runs l, l)
+  in
+  let expected, _, _ = cook_root ~reference:true 1 in
+  List.iter
+    (fun domains ->
+      let bytes, runs, l = cook_root domains in
+      assert (bytes = expected);
+      assert (runs <= 1);
+      (* the second card still cooks as two displacements *)
+      if domains = 1 then begin
+        let graph = List.hd l.graphs in
+        let d2 =
+          Array.to_list l.plan.nodes
+          |> List.filter (fun (n : E.node) ->
+              n.kind = E.card_kind
+              && List.assoc_opt "kind" n.args = Some (E.Text "sop/noise_displace"))
+          |> fun cards -> List.nth cards 1
+        in
+        let node =
+          Edit.compile_node graph.network.geometry
+            ~node_id:(Flow_sop.Network.Int_map.find d2.id l.compiled)
+          |> get_string_ok
+        in
+        let session =
+          Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok
+        in
+        let two = Session.cook session ~context:(context ~domains) node |> geometry in
+        Session.close session;
+        let reference_text =
+          Printf.sprintf "(workspace two (graph g :context sop (let* [g %s %s] d2)))" base
+            (String.concat " "
+               (List.filteri
+                  (fun i _ -> i < 2)
+                  (List.mapi
+                     (fun i (amplitude, frequency, seed) ->
+                       Printf.sprintf
+                         "d%d (sop/noise_displace %s :amplitude %g :frequency %g :seed %d)" (i + 1)
+                         (if i = 0 then "g" else Printf.sprintf "d%d" i)
+                         amplitude frequency seed)
+                     stages)))
+        in
+        let r = lower reference_text in
+        let session =
+          Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok
+        in
+        let expected_two =
+          Session.cook session ~context:(context ~domains) (compiled r) |> geometry
+        in
+        Session.close session;
+        assert (geometry_bytes two = geometry_bytes expected_two)
+      end)
+    [ 1; 4 ];
+  print_endline
+    "Lisp fusion: four noise_displace cards over a cooked input fold into one region, as the \
+     unfolded bytes; an intermediate card cooks as itself"
