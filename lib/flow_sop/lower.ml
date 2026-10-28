@@ -4,7 +4,9 @@ module Edit = Sop.Edit_graph
 module Zone = Sop.Zone
 module E = Eval
 
-let source_attribute = Rdk.Mesh_merge.provenance_attribute
+module Path_map = Map.Make (struct type t = int list let compare = Stdlib.compare end)
+
+let source_attribute =Rdk.Mesh_merge.provenance_attribute
 
 (* Serial for host-call nodes: they are cooked once in a session that keeps no cache entries, so their
    arguments need no content key (marshalling a million-element array costs more than the kernel). *)
@@ -23,7 +25,7 @@ type t = {
   gpu : Flow_ir.Gpu.config;
   graphs : graph list;
   factories : Edit.factory list;
-  compiled_ids : int Instance_path.Map.t;
+  compiled_ids : int Path_map.t;
   sites : Workspace.path list;
   compiled : int Network.Int_map.t;
   pending : pending list;
@@ -600,14 +602,14 @@ module Lowerer (P : sig
   val defer_body_errors : bool
   val kernel_bindings : (E.fn * int) list
   val on_profile : (Flow_ir.Profile.t -> unit) option
-  val compiled_ids : int Instance_path.Map.t
+  val compiled_ids : int Path_map.t
   val sites : Workspace.path list
   val inputs : (string * (string * Eval.value) list) list option
   val checked : Workspace.t
   val lower_checked :
     factories:Edit.factory list -> ?provenance_tags:bool -> ?reference:bool -> ?gpu:Flow_ir.Gpu.config ->
     ?strict_body:bool -> ?defer_body_errors:bool -> ?kernel_bindings:(E.fn * int) list ->
-    ?on_profile:(Flow_ir.Profile.t -> unit) -> ?compiled_ids:int Instance_path.Map.t -> ?sites:Workspace.path list ->
+    ?on_profile:(Flow_ir.Profile.t -> unit) -> ?compiled_ids:int Path_map.t -> ?sites:Workspace.path list ->
     ?inputs:(string * (string * Eval.value) list) list -> Workspace.t -> (t, Diagnostic.t) result
 end) = struct
   open P
@@ -888,11 +890,11 @@ end) = struct
     let compiled_id (node : E.node) =
       let key = node.inst :: site_index node.site
         :: List.map (fun k -> -(k + 1)) node.iter in
-      match Instance_path.Map.find_opt key !ids with
+      match Path_map.find_opt key !ids with
       | Some id -> id
       | None ->
           let id = Sop.Node.Private.fresh_id () in
-          ids := Instance_path.Map.add key id !ids; id
+          ids := Path_map.add key id !ids; id
     let compiled = Array.make (Array.length plan.nodes) 0
     let int_arg (n : E.node) k = match List.assoc_opt k n.args with
       | Some (E.Int i) -> i | _ -> fail "E_LOWER" ("Zone node without " ^ k)
@@ -1603,7 +1605,7 @@ let dynamic = ref [] in
         approx = checked.approx; approx_reasons = checked.approx_reasons; profile; preview}
 end
 
-let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?on_profile ?(compiled_ids = Instance_path.Map.empty)
+let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?on_profile ?(compiled_ids = Path_map.empty)
     ?(sites = []) ?inputs checked =
   Phase_timer.measure "lower" (fun () ->
   try

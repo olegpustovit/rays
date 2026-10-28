@@ -110,8 +110,8 @@ let skips () =
   let some = lower_text ~previous:all (text ":skip [2] ") in
   let graph (l : Lower.t) = List.find (fun (g : Lower.graph) -> g.name = "g") l.graphs in
   check (nodes (graph some) = nodes (graph all) - 2) "a skipped iteration did not remove its two nodes";
-  Instance_path.Map.iter (fun path id ->
-    match Instance_path.Map.find_opt path all.compiled_ids with
+  Lower.Path_map.iter (fun path id ->
+    match Lower.Path_map.find_opt path all.compiled_ids with
     | Some before -> check (before = id) "a surviving node changed its compiled id"
     | None -> fail "a skip minted a compiled id") some.compiled_ids;
   (* provenance: what the merge took names the iteration that made it, not its position *)
@@ -141,7 +141,7 @@ let optional_rest () =
     "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/box :center [2 0 0]) r %s] r)))" result in
   let lower_text ?previous text=
     let forms=Flow.Syntax.parse text |> Result.get_ok in
-    let compiled_ids,sites=match previous with None -> Instance_path.Map.empty,[]
+    let compiled_ids,sites=match previous with None -> Lower.Path_map.empty,[]
       | Some (lowered : Lower.t) -> lowered.compiled_ids,lowered.sites in
     match Lower.workspace ~factories ~compiled_ids ~sites forms with
       | Ok lowered -> lowered | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
