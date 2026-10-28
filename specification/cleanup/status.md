@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **185 / 248 accepted (74.6%)**. This counts individual
+Finding coverage: **187 / 248 accepted (75.4%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P5.G4: pxui and pxui_graph have no function over 300 lines, product or test. rays_editor test functions still over: test_rays_editor 650, test_sop_catalog 482, test_scene_tree 321, test_scene_sync 303. P5.S3 Panel_map and the P5.S7 layout ops (minimal design: an Editor_document.Layout_edit.op beside Syntax_edit in the change types) are open. UI13: the World drag consumes Ui.input ~owner events, which are already filtered by the one hit path; the per-event fold and its 4-point threshold remain.
 
 - P6.G1: rdk is 85.9k lines (product 60.7k, tests 22.6k, test support 2.6k), against a target under 80k. The fixture-generator tests (test_box, test_uv_sphere, test_torus, test_grid, about 1.2k) now test only test support. The native-vs-Lisp oracles and their tests are gone (f5438269).
 - P5.S7/FL28: flow_graph knows no panel kind (Editor_document.Panel_kinds builds the forms), but the layout-rewrite gestures still live in flow_graph. UI18: geometry-object inspection goes through workspace_inspector; the scene-object/World-layer sheet is still separate. XC27: the editor clock is injected, while sop async_cook/session and flow_sop lower still read it.
