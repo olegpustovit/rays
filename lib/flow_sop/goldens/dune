@@ -21,14 +21,9 @@
 ; After an intentional node change, promote with
 ;   dune exec --root . lib/flow_sop/goldens/replay.exe -- --update lib/flow_sop/goldens/data NODE...
 ; (or --update-all DIR), then review the ports.sexp.gz diff.
-; Lisp-node goldens (data/ is gzip, see replay.ml). runtest replays the first case of every
-; node/fixture pair; the full corpus is qualification-scale.
+; Lisp-node goldens (data/ is gzip, see replay.ml): runtest replays every row, the first case
+; of each node/fixture pair, on 4 workers.
 (rule
  (alias runtest)
  (deps data/ports.sexp.gz data/coverage.sexp.gz (glob_files data/inputs/*.gz))
- (action (setenv REPLAY_JOBS 4 (run %{exe:replay.exe} --sample 1 data))))
-
-(rule
- (alias qualification-scale)
- (deps data/ports.sexp.gz data/coverage.sexp.gz (glob_files data/inputs/*.gz))
- (action (setenv REPLAY_JOBS 4 (run %{exe:replay.exe} --corpus data))))
+ (action (setenv REPLAY_JOBS 4 (run %{exe:replay.exe} data))))

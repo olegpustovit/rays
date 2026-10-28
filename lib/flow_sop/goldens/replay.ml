@@ -759,11 +759,7 @@ let () = match Array.to_list Sys.argv with
       let rows, coverage = read_corpus directory in
       check_fixture ~prepared:false ~profile:true (create_cache ()) directory key fixture rows coverage;
       Printf.printf "selected fixture provenance %s\n%!" status
-  | [_] | [_; "--corpus"; _] | [_; "--sample"; _; _] ->
-      let sample, directory = match Sys.argv with
-        | [|_; _; n; directory|] -> int_of_string n, directory
-        | [|_; _; directory|] -> max_int, directory
-        | _ -> max_int, Filename.dirname Sys.executable_name in
+  | [_; directory] ->
       let rows, coverage = read_corpus directory in
       check_coverage coverage rows;
       let nodes = List.fold_left (fun nodes row ->
@@ -783,14 +779,6 @@ let () = match Array.to_list Sys.argv with
           (List.length expected_nodes)
           (String.concat "," absent) (String.concat "," extra))
       end;
-      (* --sample N keeps the first N rows of every node/fixture pair. *)
-      let seen = Hashtbl.create 1024 in
-      let rows = List.filter (fun row ->
-        let key = match children "golden" row with
-          | node :: fixture :: _ -> string node, string fixture
-          | _ -> fail "malformed golden row" in
-        let count = Option.value (Hashtbl.find_opt seen key) ~default:0 in
-        Hashtbl.replace seen key (count + 1); count < sample) rows in
       (* REPLAY_JOBS=J forks J workers, each owning the nodes that hash to it (so a node's prepared library is built once). *)
       let jobs = match Sys.getenv_opt "REPLAY_JOBS" with Some j -> max 1 (int_of_string j) | None -> 1 in
       let children = List.init (if jobs = 1 then 0 else jobs) (fun job ->
@@ -806,4 +794,4 @@ let () = match Array.to_list Sys.argv with
       List.iter (fun pid -> if snd (Unix.waitpid [] pid) <> Unix.WEXITED 0 then fail "golden replay worker failed") children;
       if jobs = 1 then (let cache = create_cache () in List.iter (check_row cache directory) rows);
       Printf.printf "checked %d Lisp SOP golden rows without native factories\n%!" (List.length rows)
-  | _ -> fail "usage: replay.exe [--corpus DIR | --keys DIR KEY... | --fixture DIR KEY FIXTURE | --fixture-ordinary DIR KEY FIXTURE | --fixture-profile DIR KEY FIXTURE | --fixture-ordinary-profile DIR KEY FIXTURE | --benchmark-inputs DIR ROUNDS | --self-test]"
+  | _ -> fail "usage: replay.exe [DIR | --update DIR NODE... | --update-all DIR | --keys DIR KEY... | --fixture DIR KEY FIXTURE | --fixture-ordinary DIR KEY FIXTURE | --fixture-profile DIR KEY FIXTURE | --fixture-ordinary-profile DIR KEY FIXTURE | --benchmark-inputs DIR ROUNDS | --self-test]"
