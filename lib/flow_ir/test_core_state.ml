@@ -98,6 +98,11 @@ let () =
         "(let* [s (state [a 0.] (+ a (frame/dt)))] (array/sum (map (fn [x] (+ x s)) (array/range \
          5000))))" );
       ("previous", "", "(array/sum (state [p (exact (array/range 5000))] (map (fn [x] (+ x t)) p)))");
+      (* the state array shrinks every force: a map reading it never reuses the last size *)
+      ( "resized",
+        "",
+        "(let* [p (state [p (exact (array/range 5000))] (array/range (- (array/count p) 700)))] \
+         (array/sum (map (fn [x] (+ x 1)) p)))" );
       ( "two-states",
         "",
         "(let* [a (state [s 0.] (+ s t))] (array/sum (state [p (exact (array/range 5000))] (map \
@@ -146,5 +151,5 @@ let () =
             kernels))
     [ 1; 8 ];
   print_endline
-    "Core state kernels: result, previous, two-state and sum regions match the walker at one and \
-     eight domains"
+    "Core state kernels: result, previous, resized, two-state and sum regions match the walker at \
+     one and eight domains"

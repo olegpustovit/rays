@@ -112,8 +112,7 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
                       Ok p
                   | _ ->
                       Flow_native.Drawing.prepare ~gpu ~profile:lowered.profile
-                        ~approx:core.doc.workspace.ws.checked.approx ~states:lowered.states
-                        lowered.plan drawing
+                        ~states:lowered.states lowered.plan drawing
                 in
                 match
                   Result.bind prepared (fun p ->
