@@ -186,39 +186,20 @@ let triangulate ?cancel ~point ~outer ~holes () =
     let output = Array.make ((ring_count - 2) * 3) 0
     and remaining = Array.copy ring and active = ref ring_count
     and emitted = ref 0 in
-    let contains a b c p =
-      cross x y a b p >= -.epsilon
-      && cross x y b c p >= -.epsilon
-      && cross x y c a p >= -.epsilon in
     while !active > 3 do
       Cancel.check_opt cancel;
-      let ear = ref (-1) and slot = ref 0 in
-      while !slot < !active && !ear < 0 do
-        let a = remaining.((!slot + !active - 1) mod !active)
-        and b = remaining.(!slot)
-        and c = remaining.((!slot + 1) mod !active) in
-        if cross x y a b c > epsilon then begin
-          let blocked = ref false and other = ref 0 in
-          while !other < !active && not !blocked do
-            let p = remaining.(!other) in
-            if not (same_point x y p a || same_point x y p b
-                || same_point x y p c)
-               && contains a b c p
-            then blocked := true;
-            incr other
-          done;
-          if not !blocked then ear := !slot
-        end;
-        incr slot
-      done;
-      if !ear < 0 then fail "bridged contours are non-simple or cannot be triangulated";
-      let a = remaining.((!ear + !active - 1) mod !active)
-      and b = remaining.(!ear)
-      and c = remaining.((!ear + 1) mod !active) in
+      let ear = Polygon_triangulation.find_ear
+          ~distinct:(fun p a b c -> not (same_point x y p a || same_point x y p b
+            || same_point x y p c))
+          ~u:x ~v:y ~base:0 ~orientation:1. ~remaining ~active:!active in
+      if ear < 0 then fail "bridged contours are non-simple or cannot be triangulated";
+      let a = remaining.((ear + !active - 1) mod !active)
+      and b = remaining.(ear)
+      and c = remaining.((ear + 1) mod !active) in
       let base = !emitted * 3 in
       output.(base) <- token.(a); output.(base + 1) <- token.(b);
       output.(base + 2) <- token.(c);
-      Array.blit remaining (!ear + 1) remaining !ear (!active - !ear - 1);
+      Array.blit remaining (ear + 1) remaining ear (!active - ear - 1);
       decr active; incr emitted
     done;
     let base = !emitted * 3 in

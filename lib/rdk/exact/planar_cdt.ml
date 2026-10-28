@@ -1056,6 +1056,7 @@ let build ?cancel ?workspace ~point_count ~orient ~incircle
           invalid_arg "Planar CDT constraint cavity exceeded its triangle budget";
         write_emitted !emitted_count a b c;
         incr emitted_count in
+      (* Not Polygon_triangulation.find_ear: exact orientation predicates and the lowest-point ear, not the first. *)
       let ear_clip path =
         let size = Array.length path in
         if size >= 3 then begin

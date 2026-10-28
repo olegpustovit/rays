@@ -28,7 +28,8 @@ let[@inline] contains u v base orientation a b c point =
   && cross u v base orientation b c point >= -.1e-12
   && cross u v base orientation c a point >= -.1e-12
 
-let find_projected_ear ~u ~v ~base ~orientation ~remaining ~active =
+(* [distinct p a b c]: whether ring point [p] may block the ear (a, b, c). *)
+let[@inline always] find_ear ~distinct ~u ~v ~base ~orientation ~remaining ~active =
   let ear = ref (-1) and slot = ref 0 in
   while !slot < active && !ear < 0 do
     let a = remaining.(base + ((!slot + active - 1) mod active))
@@ -38,7 +39,7 @@ let find_projected_ear ~u ~v ~base ~orientation ~remaining ~active =
       let blocked = ref false and other = ref 0 in
       while !other < active && not !blocked do
         let point = remaining.(base + !other) in
-        if point <> a && point <> b && point <> c
+        if distinct point a b c
            && contains u v base orientation a b c point then
           blocked := true;
         incr other
@@ -48,6 +49,10 @@ let find_projected_ear ~u ~v ~base ~orientation ~remaining ~active =
     incr slot
   done;
   !ear
+
+let find_projected_ear ~u ~v ~base ~orientation ~remaining ~active =
+  find_ear ~distinct:(fun p a b c -> p <> a && p <> b && p <> c)
+    ~u ~v ~base ~orientation ~remaining ~active
 
 let primitive ?cancel ~(positions : Packed.Float3.View.view)
     ~(topology : Topology.View.view) ?scratch primitive ~emit =
