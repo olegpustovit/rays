@@ -707,7 +707,7 @@ fun migration_input ->
   check (Geometry.find_group ~owner:Group.Primitive "grown_faces" one <> None
       && Geometry.find_edge_group "grown_edges" one <> None)
     "Group Expand/Promote exactness fixture dropped outputs";
-  let constrained_source = Rdk.Plane_generators.grid ~columns:400 ~rows:300 ~size:20. ()
+  let constrained_source = Rdk_test_support.Plane_generators.grid ~columns:400 ~rows:300 ~size:20. ()
       |> get_rdk in
   let constrained_primitive_count = Geometry.primitive_count constrained_source in
   let region_attribute = Attribute.create_owned ~owner:Attribute.Primitive
@@ -867,7 +867,7 @@ fun migration_input ->
   check (match Geometry.find_edge_group "chaikin_creases" one with
     | Some group -> Edge_group.cardinality group > 0 | None -> false)
     "parallel Chaikin subdivision omitted its resulting crease group";
-  let all_edge_source = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_quads
+  let all_edge_source = Rdk_test_support.Plane_generators.grid ~connectivity:Rdk_test_support.Plane_generators.Grid_quads
       ~columns:120 ~rows:80 ~size:8. () |> get_rdk in
   let all_edge_source_count = Array.length
       ((Topology_index.create (Geometry.topology all_edge_source)
@@ -998,7 +998,7 @@ fun migration_input ->
       (boundary_fixture Subdivide.Subdivide_boundary_none) in
   check (Geometry.primitive_count no_boundary_surface = (120 - 2) * (80 - 2) * 4)
     "parallel None point-boundary subdivision cardinality";
-  let fvar_source = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_quads
+  let fvar_source = Rdk_test_support.Plane_generators.grid ~connectivity:Rdk_test_support.Plane_generators.Grid_quads
       ~columns:120 ~rows:80 ~size:8. () |> get_rdk in
   let fvar_topology = Topology.View.view (Geometry.topology fvar_source) in
   let fvar_index = Topology_index.create (Geometry.topology fvar_source)
@@ -1040,7 +1040,7 @@ fun migration_input ->
     "one-domain and four-domain Smooth Triangles subdivision differ";
   check (Geometry.primitive_count one = 120 * 80 * 2 * 3)
     "parallel Smooth Triangles subdivision cardinality";
-  let detail_source = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_triangles
+  let detail_source = Rdk_test_support.Plane_generators.grid ~connectivity:Rdk_test_support.Plane_generators.Grid_triangles
       ~columns:120 ~rows:80 ~size:8. () |> get_rdk in
   let detail_vertex_count = Geometry.vertex_count detail_source in
   let detail_source = Geometry.with_attribute
@@ -1140,7 +1140,7 @@ fun migration_input ->
          <> None
       && Geometry.find_attribute ~owner:Attribute.Point "sample_a" one = None)
     "one-domain and four-domain renamed pattern promotion differ";
-  let piece_geometry = Rdk.Plane_generators.grid ~columns:200 ~rows:120 ~size:12. () |> get_rdk in
+  let piece_geometry = Rdk_test_support.Plane_generators.grid ~columns:200 ~rows:120 ~size:12. () |> get_rdk in
   let point_count = Geometry.point_count piece_geometry in
   let piece_values = Attribute.create_owned ~name:"piece_value"
       ~owner:Attribute.Point (Attribute.Int (Array.init point_count
@@ -1351,7 +1351,7 @@ fun migration_input ->
     "one-domain and four-domain vertex surface transfer differ";
   check (Geometry.find_attribute ~owner:Attribute.Vertex "surface_distance" one
     <> None) "vertex surface transfer distance attribute missing";
-  let enumerate_source = Rdk.Plane_generators.grid ~columns:500 ~rows:300 ~size:20. ()
+  let enumerate_source = Rdk_test_support.Plane_generators.grid ~columns:500 ~rows:300 ~size:20. ()
       |> get_rdk in
   let enumerate_count = Geometry.point_count enumerate_source in
   let enumerate_piece = Attribute.create_owned ~owner:Attribute.Point

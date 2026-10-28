@@ -239,8 +239,8 @@ let check_row (name, expect, text) =
 
 (* The immutable cache and the shared source geometry (no rdk twin). *)
 let check_cache_and_sharing () =
-  let source = Rdk.Uv_sphere.run
-      ~connectivity:Rdk.Uv_sphere.Sphere_alternating_triangles
+  let source = Rdk_test_support.Uv_sphere.run
+      ~connectivity:Rdk_test_support.Uv_sphere.Sphere_alternating_triangles
       ~segments:48 ~rings:24 ~radius:2. () |> Result.get_ok in
   let with_ = ["src", Lisp_sop.snapshot source] in
   List.iter (fun (name, text) ->

@@ -28,27 +28,6 @@ type distance_from_geometry_reference =
   | Distance_reference_points
   | Distance_reference_primitives
 
-let normalized_direction ?(grain = 16_384) matrix values =
-  let source = Packed.Float3.View.view values in
-  let count = Array.length source.x in
-  let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
-  let (m00,m01,m02,_), (m10,m11,m12,_), (m20,m21,m22,_), _ =
-    Rays_math.Mat4.to_rows matrix in
-  if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
-      (fun index ->
-        let vx = source.x.(index) and vy = source.y.(index)
-        and vz = source.z.(index) in
-        let ox = m00 *. vx +. m01 *. vy +. m02 *. vz
-        and oy = m10 *. vx +. m11 *. vy +. m12 *. vz
-        and oz = m20 *. vx +. m21 *. vy +. m22 *. vz in
-        let length = sqrt ((ox *. ox) +. (oy *. oy) +. (oz *. oz)) in
-        if length > 1e-20 then begin
-          x.(index) <- ox /. length;
-          y.(index) <- oy /. length;
-          z.(index) <- oz /. length
-        end);
-  Packed.Float3.View.of_owned_exn ~x ~y ~z
-
 let transform_rotation_matrix order angles =
   let x = Rays_math.Mat4.rotation_x angles.Rays_math.Vec3.x
   and y = Rays_math.Mat4.rotation_y angles.y
@@ -468,24 +447,3 @@ let soft_transform ?cancel ?(grain = 16_384) ?selection
               | Some name -> Result.bind (Attribute.create_owned
                   ~owner:Attribute.Point ~name (Attribute.Float weights))
                   (fun attribute -> Geometry.with_attribute attribute output)))))))
-
-let transform ?grain matrix geometry =
-  let transformed = Kernel.transform ?grain matrix geometry in
-  match Rays_math.Mat4.inverse matrix with
-  | None -> transformed
-      |> Geometry.without_attribute ~owner:Attribute.Point "N"
-      |> Geometry.without_attribute ~owner:Attribute.Vertex "N"
-  | Some inverse ->
-      let normal_matrix = Rays_math.Mat4.transpose inverse in
-      List.fold_left (fun output owner ->
-        match Geometry.find_attribute ~owner "N" geometry with
-        | None -> output
-        | Some attribute ->
-            (match Attribute.get (Attribute.normal ~owner) attribute with
-             | None -> output
-             | Some normals ->
-                 let normals = normalized_direction ?grain normal_matrix normals in
-                 let attribute = Attribute.create_key_owned
-                     (Attribute.normal ~owner) normals |> Support.get_ok in
-                 Geometry.with_attribute attribute output |> Support.get_ok))
-        transformed [Attribute.Point; Attribute.Vertex]

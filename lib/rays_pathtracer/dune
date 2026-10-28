@@ -19,7 +19,7 @@
  (enabled_if (= %{system} macosx))
  (name test_main)
  (modules test_main test_pathtracer test_gpu_film test_parity test_world test_scene)
- (libraries rays rays_pathtracer renderer runtime_resources ogpu ogpu_metal rdk rdk_rays rays_math unix))
+ (libraries rays rays_pathtracer renderer runtime_resources ogpu ogpu_metal rdk rdk_test_support rdk_rays rays_math unix))
 
 (rule
  (enabled_if (= %{system} macosx))

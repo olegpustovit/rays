@@ -42,7 +42,7 @@
  (enabled_if (= %{system} macosx))
  (name test_main)
  (modules test_main test_support test_text sop_params_fixture test_rays test_sop_ui test_custom_sop test_rays_editor test_editor_document test_editor_input test_editor_commands ws_fixture test_editor_cook test_editor_transactions test_editor_consistency test_scene_tree test_scene_sync test_sop_catalog test_packed_pieces test_terminal_boolean_normals test_workspace_live test_workspace_doc test_probe test_viewport_pick test_text_pane test_workspace_shell test_workspace_source test_bloom_studio sop_render_parity)
- (libraries rays rays_math pxui pxui_shell runtime_input sop rdk rdk_rays flow_native flow_ir flow_sop pxui_graph
+ (libraries rays rays_math pxui pxui_shell runtime_input sop rdk rdk_test_support rdk_rays flow_native flow_ir flow_sop pxui_graph
     scene_command rays_editor editor_document flow_graph unix str compiler-libs.common rays.sdl3 lisp_sop parallel ogpu_metal)
  (preprocess (pps rays.ppx))
  (link_flags -linkall))

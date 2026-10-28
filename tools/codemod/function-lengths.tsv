@@ -20,10 +20,10 @@ lib/rdk/exact/delaunay2.ml	build#1	301
 lib/rdk/exact/planar_cdt.ml	build#1	976
 lib/rdk/exact/planar_constraints.ml	build#1	373
 lib/rdk/exact/planar_refinement.ml	build#1	401
-lib/rdk/gen/box_generator.ml	box#1	461
+lib/rdk/test_support/box_generator.ml	box#1	461
 lib/rdk/gen/iso_surface.ml	extract_with#1	373
-lib/rdk/gen/parametric_generators.ml	torus#1	481
-lib/rdk/gen/uv_sphere.ml	run#1	456
+lib/rdk/test_support/parametric_generators.ml	torus#1	481
+lib/rdk/test_support/uv_sphere.ml	run#1	456
 lib/rdk/mesh/plane_clip.ml	clip#1	1523
 lib/rdk/mesh/poly_bevel.ml	run#1	874
 lib/rdk/mesh/poly_cut.ml	cut#1	590

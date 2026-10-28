@@ -45,5 +45,3 @@ val distance_from_geometry :
   ?falloff:soft_transform_falloff -> ?radius:distance_along_radius ->
   ?distance_attribute:string option -> ?mask_attribute:string ->
   reference:Geometry.t -> Geometry.t -> (Geometry.t, Error.t) result
-
-val transform : ?grain:int -> Rays_math.Mat4.t -> Geometry.t -> Geometry.t

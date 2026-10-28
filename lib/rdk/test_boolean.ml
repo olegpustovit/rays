@@ -1,4 +1,5 @@
 open Rdk
+open Rdk_test_support
 
 let fail format = Printf.ksprintf failwith format
 let check condition message = if not condition then fail "%s" message

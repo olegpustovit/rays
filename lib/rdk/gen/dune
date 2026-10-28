@@ -4,4 +4,4 @@
  (libraries rdk_core rdk_exact rdk_spatial rdk_attrib rays_math parallel)
  (flags (:standard -open Rdk_core -open Rdk_exact -open Rdk_spatial -open Rdk_attrib))
  (private_modules)
- (modules box_generator iso_surface line_geometry parametric_generators plane_generators point_replicate scatter spiral uv_sphere))
+ (modules iso_surface line_geometry point_replicate scatter spiral))

@@ -1,5 +1,6 @@
 open Rays
 open Rdk
+open Rdk_test_support
 
 type level = Quick | Standard | Full
 

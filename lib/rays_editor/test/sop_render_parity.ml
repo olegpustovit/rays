@@ -33,8 +33,8 @@ let tilted =
     grid (entry 1 1) (entry 1 2) (entry 2 1) (entry 2 2)
 
 let torus () =
-  Rdk.Parametric_generators.torus
-    ~connectivity:Rdk.Parametric_generators.Torus_alternating_triangles
+  Rdk_test_support.Parametric_generators.torus
+    ~connectivity:Rdk_test_support.Parametric_generators.Torus_alternating_triangles
     ~rows:16 ~columns:12 ~major_radius:1. ~minor_radius:0.3 ()
   |> Result.get_ok |> Lisp_sop.snapshot
 
@@ -56,7 +56,7 @@ let signal_curve () =
   |> Result.get_ok |> Lisp_sop.snapshot
 
 let rewire_source () =
-  let geometry = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_quads
+  let geometry = Rdk_test_support.Plane_generators.grid ~connectivity:Rdk_test_support.Plane_generators.Grid_quads
       ~columns:3 ~rows:3 ~size:2. () |> Result.get_ok in
   let targets = Array.init (Rdk.Geometry.point_count geometry)
       (fun point -> if point = 0 then 1 else -1) in

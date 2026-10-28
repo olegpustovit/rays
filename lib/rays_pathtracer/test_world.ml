@@ -132,9 +132,9 @@ let bench () =
     for _ = 1 to n do get (P.render t cam); get (P.flush t) done;
     Test_pathtracer.pixels t in
   let floor = get (Result.map_error Rdk.Error.to_string
-    (Rdk.Box_generator.box ~center:(v3 0. (-1.05) 0.) ~size:(v3 6. 0.1 6.) ())) in
+    (Rdk_test_support.Box_generator.box ~center:(v3 0. (-1.05) 0.) ~size:(v3 6. 0.1 6.) ())) in
   let ball = get (Result.map_error Rdk.Error.to_string
-    (Rdk.Uv_sphere.run ~center:(v3 0. 0. 0.) ~segments:48 ~rings:24 ~radius:1. ())) in
+    (Rdk_test_support.Uv_sphere.run ~center:(v3 0. 0. 0.) ~segments:48 ~rings:24 ~radius:1. ())) in
   let scene = { P.objects = [ (rays_mesh floor, P.material ~roughness:0.7 (rgb 0.7 0.7 0.7))
                             ; (rays_mesh ball, P.material ~roughness:0.3 (rgb 0.8 0.5 0.3)) ]
               ; spheres = []

@@ -6,6 +6,7 @@
    and without Ray_tracing_motion the static kernel over the shutter-midpoint scene matches it at time 0.5.
    Strands: Metal curve primitives and, without Ray_tracing_curves, the in-loop capsule test match it too. *)
 open Rdk
+open Rdk_test_support
 module B = Ogpu.Backend
 module R = Flow_gpu.Run
 let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)

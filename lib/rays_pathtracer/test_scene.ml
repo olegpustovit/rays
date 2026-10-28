@@ -23,9 +23,9 @@ let unresolve value =
 
 let run () =
   let initial_handles = live_handles () in
-  let floor = rdk (Rdk.Box_generator.box ~center:(V.create 0. (-0.05) 0.) ~size:(V.create 20. 0.1 20.) ()) in
-  let box = rdk (Rdk.Box_generator.box ~center:(V.create 0. 0.5 0.) ~size:(V.create 1. 1. 1.) ()) in
-  let ball = rdk (Rdk.Uv_sphere.run ~center:V.zero ~segments:24 ~rings:12 ~radius:0.4 ()) in
+  let floor = rdk (Rdk_test_support.Box_generator.box ~center:(V.create 0. (-0.05) 0.) ~size:(V.create 20. 0.1 20.) ()) in
+  let box = rdk (Rdk_test_support.Box_generator.box ~center:(V.create 0. 0.5 0.) ~size:(V.create 1. 1. 1.) ()) in
+  let ball = rdk (Rdk_test_support.Uv_sphere.run ~center:V.zero ~segments:24 ~rings:12 ~radius:0.4 ()) in
   let scene = { P.objects = [ (rays_mesh floor, P.material (rgb 0.5 0.5 0.5)) ]; spheres = []; strands = []
               ; environment = { sky = rgb 0.5 0.6 0.8; ground = rgb 0.2 0.2 0.2; panels = [] }
               ; lights = [ P.rect_light ~intensity:20. ~size:(2., 2.) ~target:V.zero (V.create (-2.) 5. 2.) ] } in
@@ -48,9 +48,9 @@ let run () =
         ; (t2, get (P.mesh_instanced ~prototype:(prepared ball gray) ~materials:[| green; blue |] [| a; b |]))
         ; (M.identity, get (P.mesh [ (rays_mesh floor, gray) ])) ]) in
       let composed = get (P.mesh
-        [ (rays_mesh (Rdk.Transform_ops.transform t1 box), red)
-        ; (rays_mesh (Rdk.Transform_ops.transform (M.mul t2 a) ball), green)
-        ; (rays_mesh (Rdk.Transform_ops.transform (M.mul t2 b) ball), blue)
+        [ (rays_mesh (Rdk_test_support.Transform_ops.transform t1 box), red)
+        ; (rays_mesh (Rdk_test_support.Transform_ops.transform (M.mul t2 a) ball), green)
+        ; (rays_mesh (Rdk_test_support.Transform_ops.transform (M.mul t2 b) ball), blue)
         ; (rays_mesh floor, gray) ]) in
       let placed = scene_of t1 in
       let render ?(frames = 2) () =
@@ -128,7 +128,7 @@ let run () =
          mesh, a full scene_mesh + queue_mesh + flush against move + flush. *)
       let boxes = get (P.mesh_instanced ~prototype:(prepared box red)
         (Array.init 2000 (fun i -> M.translation (V.create (float (i mod 50) *. 0.3 -. 7.5) 0. (float (i / 50) *. -0.3))))) in
-      let dense = get (P.mesh [ (rays_mesh (rdk (Rdk.Uv_sphere.run ~center:V.zero ~segments:100 ~rings:101 ~radius:0.5 ())), blue) ]) in
+      let dense = get (P.mesh [ (rays_mesh (rdk (Rdk_test_support.Uv_sphere.run ~center:V.zero ~segments:100 ~rings:101 ~radius:0.5 ())), blue) ]) in
       let at x = M.translation (V.create x 1. 0.) in
       let time f = let start = Unix.gettimeofday () in f (); (Unix.gettimeofday () -. start) *. 1000. in
       let runs = 8 in
@@ -221,10 +221,10 @@ let run () =
    preview frame an edit now renders. Not in runtest. *)
 let bench () =
   let concrete = P.material ~roughness:0.6 ~round:0.07 (rgb 0.42 0.42 0.44) in
-  let box = rdk (Rdk.Box_generator.box ~size:(V.create 0.28 0.28 0.28) ()) in
+  let box = rdk (Rdk_test_support.Box_generator.box ~size:(V.create 0.28 0.28 0.28) ()) in
   let boxes = get (P.mesh_instanced ~prototype:(prepared box concrete)
     (Array.init 2000 (fun i -> M.translation (V.create (float (i mod 50) *. 0.3 -. 7.5) (float (i / 50) *. 0.3) 0.)))) in
-  let dense = get (P.mesh [ (rays_mesh (rdk (Rdk.Uv_sphere.run ~center:V.zero ~segments:100 ~rings:101 ~radius:1. ())), concrete) ]) in
+  let dense = get (P.mesh [ (rays_mesh (rdk (Rdk_test_support.Uv_sphere.run ~center:V.zero ~segments:100 ~rings:101 ~radius:1. ())), concrete) ]) in
   let at x = M.translation (V.create x 6. 2.) in
   let scene = { P.objects = [ (rays_mesh box, concrete) ]; spheres = []; strands = []
               ; environment = { sky = rgb 0.006 0.007 0.009; ground = rgb 0.002 0.002 0.003; panels = [] }

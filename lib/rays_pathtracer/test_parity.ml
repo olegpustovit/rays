@@ -64,7 +64,7 @@ let run () =
   let rdk value = get (Result.map_error Rdk.Error.to_string value) in
   let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
     (Rdk_rays.Rays_mesh.to_trace_mesh geometry)) in
-  let geometry = Array.map (fun center -> rdk (Rdk.Uv_sphere.run
+  let geometry = Array.map (fun center -> rdk (Rdk_test_support.Uv_sphere.run
     ~center ~radius:0.9 ~segments:64 ~rings:32 ())) probes in
   let objects = Array.to_list (Array.mapi (fun i geometry ->
     rays_mesh geometry, P.material ~roughness:(roughness shininess.(i))

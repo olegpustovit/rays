@@ -15,7 +15,7 @@ let check_instance_residency floor =
   (* An instance structure only references its BLAS: without declaring it
      read each dispatch, the device evicts it and later frames get darker. *)
   let big = get (Result.map_error Rdk.Error.to_string
-    (Rdk.Uv_sphere.run ~center:Rays_math.Vec3.zero ~segments:96 ~rings:48 ~radius:0.4 ())) in
+    (Rdk_test_support.Uv_sphere.run ~center:Rays_math.Vec3.zero ~segments:96 ~rings:48 ~radius:0.4 ())) in
   let grid = Array.init 64 (fun i -> Rays_math.Mat4.translation
     (Rays_math.Vec3.create (float (i mod 8) -. 3.5) (float (i / 8) -. 3.5) 0.)) in
   let lattice_material = P.material ~roughness:0.6 (rgb 0.8 0.8 0.8) in
@@ -50,9 +50,9 @@ let run ?(frame = fun _ _ -> ()) () =
   assert (P.unavailable { Ogpu.Caps.minimum_m1 with ray_tracing = true } = None);
   let initial_handles = live_handles () in
   let sphere = get (Result.map_error Rdk.Error.to_string
-    (Rdk.Uv_sphere.run ~center:(Rays_math.Vec3.create 0. 1. 0.) ~segments:24 ~rings:12 ~radius:1. ())) in
+    (Rdk_test_support.Uv_sphere.run ~center:(Rays_math.Vec3.create 0. 1. 0.) ~segments:24 ~rings:12 ~radius:1. ())) in
   let floor = get (Result.map_error Rdk.Error.to_string
-    (Rdk.Box_generator.box ~center:(Rays_math.Vec3.create 0. (-0.05) 0.) ~size:(Rays_math.Vec3.create 20. 0.1 20.) ())) in
+    (Rdk_test_support.Box_generator.box ~center:(Rays_math.Vec3.create 0. (-0.05) 0.) ~size:(Rays_math.Vec3.create 20. 0.1 20.) ())) in
   let scene =
     { P.objects =
         [ (rays_mesh sphere, P.material ~roughness:0.2 ~metallic:1. (rgb 0.9 0.7 0.4))
@@ -142,7 +142,7 @@ let run ?(frame = fun _ _ -> ()) () =
       get (P.render tracer camera); get (P.flush tracer);
       let instanced_pixels = pixels tracer in
       frame "instanced sphere" instanced_pixels;
-      let transformed = Rdk.Transform_ops.transform matrix sphere in
+      let transformed = Rdk_test_support.Transform_ops.transform matrix sphere in
       get (P.replace_mesh tracer (get (P.mesh [rays_mesh transformed, instance_material])));
       get (P.render tracer camera); get (P.flush tracer);
       get (P.render tracer camera); get (P.flush tracer);

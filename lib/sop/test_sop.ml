@@ -799,7 +799,7 @@ let test_snapshot_feedback_boundary () =
       ~version:1 ~parameters:"dx=0.25" [previous]
       (fun ~context:_ inputs ->
         match inputs with
-        | [|geometry|] -> Ok (Rdk.Transform_ops.transform
+        | [|geometry|] -> Ok (Rdk_test_support.Transform_ops.transform
             (Rays_math.Mat4.translation (Rays_math.Vec3.create 0.25 0. 0.)) geometry)
         | _ -> Error "solver step requires one snapshot") in
   let output = cook_ok evaluator current step in
@@ -998,7 +998,7 @@ let test_sweep_contract () =
   Session.close evaluator
 
 let test_local_subdivide_contract () =
-  let base = Rdk.Plane_generators.grid ~columns:3 ~rows:2 ~size:2. () |> Result.get_ok in
+  let base = Rdk_test_support.Plane_generators.grid ~columns:3 ~rows:2 ~size:2. () |> Result.get_ok in
   let source_primitives = Rdk.Geometry.primitive_count base in
   let selected = Rdk.Group.ordered ~owner:Rdk.Group.Primitive ~name:"left"
       ~length:source_primitives [|0|] |> Result.get_ok in
@@ -1083,7 +1083,7 @@ let test_local_subdivide_contract () =
   check (try ignore (Lisp_sop.node ~with_:["base", (Lisp_sop.snapshot (base))] (Printf.sprintf {|(sop/subdivide (sop/ext_base) :hole_group "" :crease_weight %s)|} ((Lisp_sop.float Float.nan))));
       false with Invalid_argument message -> contains message "E_NONFINITE")
     "procedural Subdivide accepted non-finite all-edge sharpness at construction";
-  let triangle_source = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_triangles
+  let triangle_source = Rdk_test_support.Plane_generators.grid ~connectivity:Rdk_test_support.Plane_generators.Grid_triangles
       ~columns:3 ~rows:2 ~size:3. () |> Result.get_ok in
   let add_detail name storage geometry =
     let attribute = Rdk.Attribute.create_owned ~owner:Rdk.Attribute.Detail
