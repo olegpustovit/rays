@@ -142,7 +142,7 @@ let run ?(frame = fun _ _ -> ()) () =
       get (P.render tracer camera); get (P.flush tracer);
       let instanced_pixels = pixels tracer in
       frame "instanced sphere" instanced_pixels;
-      let transformed = Rdk_test_support.Transform_ops.transform matrix sphere in
+      let transformed = Rdk_test_support.Transform_ops_front.transform matrix sphere in
       get (P.replace_mesh tracer (get (P.mesh [rays_mesh transformed, instance_material])));
       get (P.render tracer camera); get (P.flush tracer);
       get (P.render tracer camera); get (P.flush tracer);

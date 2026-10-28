@@ -406,3 +406,6 @@ module Private = struct
   let install_test_backend = install_test_backend
   let on_owner_for_test = route
 end
+
+type policy = G.config
+let default_policy = G.default

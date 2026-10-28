@@ -2,8 +2,8 @@ open Rdk
 open Rdk_test_support
 
 (* The removed accessors, over the borrowed view. *)
-module Planar_constraints = struct
-  include Planar_constraints
+module Planar_constraints_front = struct
+  open Planar_constraints
   let source_point_count value = point_count value - split_point_count value
   let approximate_x value = (View.view value).x
   let approximate_y value = (View.view value).y
@@ -17,20 +17,20 @@ let square_crossing () =
   let x = [|0.;2.;2.;0.|] and y = [|0.;0.;2.;2.|] in
   let value = Planar_constraints.build ~split_crossings:true ~x ~y
       ~segment_points:[|0;2; 1;3|] () |> get_string in
-  checkf (Planar_constraints.source_point_count value = 4) "source cardinality";
+  checkf (Planar_constraints_front.source_point_count value = 4) "source cardinality";
   checkf (Planar_constraints.point_count value = 5) "crossing point cardinality";
   checkf (Planar_constraints.split_point_count value = 1) "split cardinality";
-  checkf (Planar_constraints.insert_points value = [|4|]) "inserted point ids";
-  let output_x = Planar_constraints.approximate_x value
-  and output_y = Planar_constraints.approximate_y value in
+  checkf (Planar_constraints_front.insert_points value = [|4|]) "inserted point ids";
+  let output_x = Planar_constraints_front.approximate_x value
+  and output_y = Planar_constraints_front.approximate_y value in
   checkf (output_x.(4) = 1. && output_y.(4) = 1.)
     "crossing approximation is (%g,%g)" output_x.(4) output_y.(4);
-  checkf (Planar_constraints.constraint_points value
+  checkf (Planar_constraints_front.constraint_points value
       = [|0;4; 1;4; 2;4; 3;4|]) "atomic crossing constraints";
   let weighted = Planar_constraints.build ~split_crossings:true ~x ~y
       ~segment_points:[|0;2;1;3|] ~segment_winding:[|2;3|] ()
       |> get_string in
-  checkf (Planar_constraints.constraint_winding weighted = [|2;3;-2;-3|])
+  checkf (Planar_constraints_front.constraint_winding weighted = [|2;3;-2;-3|])
     "crossing constraint winding propagation";
   checkf (Planar_constraints.split_source_first value 0 = 0
       && Planar_constraints.split_source_second value 0 = 2)
@@ -52,12 +52,12 @@ let test_t_junction_and_overlap () =
       ~segment_points:[|0;1; 2;3|] () |> get_string in
   checkf (Planar_constraints.split_point_count junction = 0)
     "T junction invented a point";
-  checkf (Planar_constraints.constraint_points junction
+  checkf (Planar_constraints_front.constraint_points junction
       = [|0;2; 1;2; 2;3|]) "T junction was not atomized";
   let x = [|0.;3.;1.;2.|] and y = [|0.;0.;0.;0.|] in
   let overlap = Planar_constraints.build ~split_crossings:true ~x ~y
       ~segment_points:[|0;1; 2;3|] () |> get_string in
-  checkf (Planar_constraints.constraint_points overlap
+  checkf (Planar_constraints_front.constraint_points overlap
       = [|0;2; 1;3; 2;3|]) "collinear overlap was not atomized/deduplicated"
 
 let test_embedded_source_points () =
@@ -70,39 +70,39 @@ let test_embedded_source_points () =
   let one = run 1 and four = run 4 in
   checkf (Planar_constraints.split_point_count one = 0)
     "embedded authored points invented constructed points";
-  checkf (Planar_constraints.constraint_points one
+  checkf (Planar_constraints_front.constraint_points one
       = [|0;1; 1;2; 2;3; 3;4|])
     "embedded authored points did not atomize the constraint";
-  checkf (Planar_constraints.constraint_points four
-      = Planar_constraints.constraint_points one)
+  checkf (Planar_constraints_front.constraint_points four
+      = Planar_constraints_front.constraint_points one)
     "embedded point atomization differs across domains";
   let maximum = Float.max_float in
   let extreme = Planar_constraints.build ~split_crossings:true
       ~x:[|-.maximum;0.;maximum|] ~y:[|0.;0.;0.|]
       ~segment_points:[|0;2|] ~embedded_points:[|0;1;2|] ()
       |> get_string in
-  checkf (Planar_constraints.constraint_points extreme = [|0;1;1;2|])
+  checkf (Planar_constraints_front.constraint_points extreme = [|0;1;1;2|])
     "maximum-range embedded point was not classified exactly";
   let tiny = Float.next_after 0. Float.infinity in
   let subnormal = Planar_constraints.build ~split_crossings:true
       ~x:[|0.;tiny;tiny +. tiny|] ~y:[|0.;0.;0.|]
       ~segment_points:[|0;2|] ~embedded_points:[|0;1;2|] ()
       |> get_string in
-  checkf (Planar_constraints.constraint_points subnormal = [|0;1;1;2|])
+  checkf (Planar_constraints_front.constraint_points subnormal = [|0;1;1;2|])
     "subnormal embedded point was not classified exactly";
   let crossing = Planar_constraints.build ~grain:1 ~split_crossings:true
       ~x:[|0.;2.;2.;0.;1.|] ~y:[|0.;0.;2.;2.;1.|]
       ~segment_points:[|0;2;1;3|] ~embedded_points:[|0;1;2;3;4|] ()
       |> get_string in
   checkf (Planar_constraints.split_point_count crossing = 0
-      && Planar_constraints.constraint_points crossing
+      && Planar_constraints_front.constraint_points crossing
          = [|0;4;1;4;2;4;3;4|])
     "authored point at a proper crossing was not preferred exactly";
   let duplicate = Planar_constraints.build ~split_crossings:true
       ~x:[|0.;1.;1.;2.|] ~y:[|0.;0.;0.;0.|]
       ~segment_points:[|0;3|] ~embedded_points:[|0;1;2;3|] ()
       |> get_string in
-  checkf (Planar_constraints.constraint_points duplicate = [|0;1;1;3|])
+  checkf (Planar_constraints_front.constraint_points duplicate = [|0;1;1;3|])
     "exact-coordinate duplicate embedded points were not canonicalized"
 
 let test_many_way_dedup_and_domains () =
@@ -114,12 +114,12 @@ let test_many_way_dedup_and_domains () =
   let one = run 1 and four = run 4 in
   checkf (Planar_constraints.split_point_count one = 1)
     "many-way crossing did not exact-deduplicate";
-  checkf (Planar_constraints.approximate_x one
-      = Planar_constraints.approximate_x four
-      && Planar_constraints.approximate_y one
-         = Planar_constraints.approximate_y four
-      && Planar_constraints.constraint_points one
-         = Planar_constraints.constraint_points four)
+  checkf (Planar_constraints_front.approximate_x one
+      = Planar_constraints_front.approximate_x four
+      && Planar_constraints_front.approximate_y one
+         = Planar_constraints_front.approximate_y four
+      && Planar_constraints_front.constraint_points one
+         = Planar_constraints_front.constraint_points four)
     "domain count changed planar arrangement"
 
 let test_extreme_scales () =
@@ -128,8 +128,8 @@ let test_extreme_scales () =
       ~x:[|-.maximum;maximum;0.;0.|] ~y:[|0.;0.;-.maximum;maximum|]
       ~segment_points:[|0;1;2;3|] () |> get_string in
   checkf (Planar_constraints.split_point_count large = 1
-      && (Planar_constraints.approximate_x large).(4) = 0.
-      && (Planar_constraints.approximate_y large).(4) = 0.)
+      && (Planar_constraints_front.approximate_x large).(4) = 0.
+      && (Planar_constraints_front.approximate_y large).(4) = 0.)
     "large-coordinate exact crossing";
   checkf (Planar_constraints.split_source_parameter large 0 = 0.5)
     "large-coordinate split parameter";
@@ -139,8 +139,8 @@ let test_extreme_scales () =
       ~x:[|0.;twice;twice;0.|] ~y:[|0.;0.;twice;twice|]
       ~segment_points:[|0;2;1;3|] () |> get_string in
   checkf (Planar_constraints.split_point_count small = 1
-      && (Planar_constraints.approximate_x small).(4) = tiny
-      && (Planar_constraints.approximate_y small).(4) = tiny)
+      && (Planar_constraints_front.approximate_x small).(4) = tiny
+      && (Planar_constraints_front.approximate_y small).(4) = tiny)
     "subnormal-coordinate exact crossing"
 
 let test_scale_and_ownership () =
@@ -152,14 +152,14 @@ let test_scale_and_ownership () =
   let value = Planar_constraints.build ~split_crossings:true ~x ~y
       ~segment_points:edges () |> get_string in
   checkf (Planar_constraints.split_point_count value = 0
-      && Array.length (Planar_constraints.constraint_points value) = segments * 2)
+      && Array.length (Planar_constraints_front.constraint_points value) = segments * 2)
     "disjoint scale cardinality";
   let point_count = 20_000 in
   let embedded = Planar_constraints.build ~grain:257 ~split_crossings:true
       ~x:(Array.init point_count float_of_int) ~y:(Array.make point_count 0.)
       ~segment_points:[|0;point_count - 1|]
       ~embedded_points:(Array.init point_count Fun.id) () |> get_string in
-  checkf (Array.length (Planar_constraints.constraint_points embedded)
+  checkf (Array.length (Planar_constraints_front.constraint_points embedded)
       = (point_count - 1) * 2)
     "embedded-point scale cardinality"
 

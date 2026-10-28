@@ -48,9 +48,9 @@ let run () =
         ; (t2, get (P.mesh_instanced ~prototype:(prepared ball gray) ~materials:[| green; blue |] [| a; b |]))
         ; (M.identity, get (P.mesh [ (rays_mesh floor, gray) ])) ]) in
       let composed = get (P.mesh
-        [ (rays_mesh (Rdk_test_support.Transform_ops.transform t1 box), red)
-        ; (rays_mesh (Rdk_test_support.Transform_ops.transform (M.mul t2 a) ball), green)
-        ; (rays_mesh (Rdk_test_support.Transform_ops.transform (M.mul t2 b) ball), blue)
+        [ (rays_mesh (Rdk_test_support.Transform_ops_front.transform t1 box), red)
+        ; (rays_mesh (Rdk_test_support.Transform_ops_front.transform (M.mul t2 a) ball), green)
+        ; (rays_mesh (Rdk_test_support.Transform_ops_front.transform (M.mul t2 b) ball), blue)
         ; (rays_mesh floor, gray) ]) in
       let placed = scene_of t1 in
       let render ?(frames = 2) () =

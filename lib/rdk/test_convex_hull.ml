@@ -59,8 +59,8 @@ let expect_error code = function
 
 let check_closed geometry message =
   let index = Topology_index.create (Geometry.topology geometry) in
-  check (Topology_index.boundary_edge_count index = 0
-      && Topology_index.non_manifold_edge_count index = 0) message
+  check (Topology_index_front.boundary_edge_count index = 0
+      && Topology_index_front.non_manifold_edge_count index = 0) message
 
 let check_contains source hull message =
   let source_positions = Packed.Float3.View.view (Geometry.positions source)

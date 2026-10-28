@@ -72,15 +72,15 @@ let run () =
       ~primitive_offsets:[|0;3;6;8|]
       ~primitive_kinds:[|Topology.Polygon; Topology.Polygon;
         Topology.Open_polyline|] in
-  let coarse = Clean.run ~epsilon:0.1 tolerance_source |> get_rdk
-  and fine = Clean.run ~epsilon:0.05 tolerance_source |> get_rdk in
+  let coarse = Clean_front.run ~epsilon:0.1 tolerance_source |> get_rdk
+  and fine = Clean_front.run ~epsilon:0.05 tolerance_source |> get_rdk in
   check (Geometry.primitive_count coarse = 1
       && Geometry.primitive_count fine = 2)
     (Printf.sprintf
       "Clean edge-length degeneracy tolerance or extreme-coordinate robustness (%d/%d)"
       (Geometry.primitive_count coarse) (Geometry.primitive_count fine));
   let clean_at domains = Parallel.run ~domains (fun () ->
-      Clean.run ~grain:1 ~epsilon:0.05 tolerance_source |> get_rdk) in
+      Clean_front.run ~grain:1 ~epsilon:0.05 tolerance_source |> get_rdk) in
   check (geometry_equal (clean_at 1) (clean_at 4))
     "Clean degenerate output differs across domain counts";
 
@@ -94,7 +94,7 @@ let run () =
       ~owner:Attribute.Primitive (Attribute.Int [|10;20;30;40;50|]) |> get in
   let overlap_source = Geometry.with_attribute primitive_id overlap_source |> get in
   let overlap_bytes = geometry_bytes overlap_source in
-  let overlap_at domains policy = Parallel.run ~domains (fun () -> Clean.run ~grain:1
+  let overlap_at domains policy = Parallel.run ~domains (fun () -> Clean_front.run ~grain:1
       ~remove_degenerate:false ~overlaps:policy overlap_source |> get_rdk) in
   let keep_first = overlap_at 1 Clean.Keep_first_overlap
   and delete_pairs = overlap_at 1 Clean.Delete_overlap_pairs in
@@ -118,7 +118,7 @@ let run () =
   let duplicate_points = make_geometry ~x:[|0.;0.;1.|] ~y:[|0.;0.;0.|]
       ~z:[|0.;0.;0.|] ~vertex_points:[||] ~primitive_offsets:[|0|]
       ~primitive_kinds:[||] in
-  let consolidated = Clean.run ~remove_degenerate:false
+  let consolidated = Clean_front.run ~remove_degenerate:false
       ~consolidate_distance:0. duplicate_points |> get_rdk in
   check (Geometry.point_count consolidated = 2)
     "Clean exact point consolidation";
@@ -145,7 +145,7 @@ let run () =
   ] in
   let metadata_source = Geometry.create ~positions:(Geometry.positions metadata_source)
       ~topology:(Geometry.topology metadata_source) ~attributes ~groups () |> get in
-  let cleaned_metadata = Clean.run ~remove_degenerate:false ~reverse_winding:true
+  let cleaned_metadata = Clean_front.run ~remove_degenerate:false ~reverse_winding:true
       ~delete_unused_groups:true ~point_attributes:"temp*"
       ~vertex_attributes:"temp*" ~primitive_attributes:"temp*"
       ~detail_attributes:"temp*" ~point_groups:"drop*" metadata_source |> get_rdk in
@@ -157,18 +157,18 @@ let run () =
     "Clean attribute/group/empty-group cleanup";
 
   let valid = Plane_generators.grid ~columns:2 ~rows:2 ~size:2. () |> get_rdk in
-  check (Clean.run valid |> get_rdk == valid) "Clean no-op lost geometry identity";
-  (match Clean.run ~consolidate_distance:(-1.) valid with
+  check (Clean_front.run valid |> get_rdk == valid) "Clean no-op lost geometry identity";
+  (match Clean_front.run ~consolidate_distance:(-1.) valid with
    | Error error -> check (Error.code error = "invalid_geometry")
        "Clean consolidate-distance diagnostic"
    | Ok _ -> fail "Clean accepted a negative consolidate distance");
-  (match Clean.run ~point_attributes:"[" valid with
+  (match Clean_front.run ~point_attributes:"[" valid with
    | Error error -> check (Error.code error = "invalid_geometry")
        "Clean pattern diagnostic"
    | Ok _ -> fail "Clean accepted an invalid pattern");
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  (match Clean.run ~cancel:cancelled valid with
+  (match Clean_front.run ~cancel:cancelled valid with
    | Error error -> check (Error.code error = "cancelled")
        "Clean cancellation diagnostic"
    | Ok _ -> fail "cancelled Clean published geometry");
@@ -204,7 +204,7 @@ let run () =
   let dense = Geometry.create ~positions:(Geometry.positions base)
       ~topology:dense_topology ~attributes:[dense_id] () |> get in
   let run domains = Parallel.run ~domains (fun () ->
-      Clean.run ~grain:257 ~remove_degenerate:false
+      Clean_front.run ~grain:257 ~remove_degenerate:false
         ~overlaps:Clean.Keep_first_overlap dense |> get_rdk) in
   let one = run 1 and many = run 4 in
   check (geometry_equal one many)

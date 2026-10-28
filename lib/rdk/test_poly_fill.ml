@@ -107,7 +107,7 @@ let group_cardinality owner name geometry =
 
 let assert_closed geometry message =
   let index = Topology_index.create (Geometry.topology geometry) in
-  check (Topology_index.boundary_edge_count index = 0) message
+  check (Topology_index_front.boundary_edge_count index = 0) message
 
 let assert_source_prefix source output =
   let source = Topology.View.view (Geometry.topology source)
@@ -235,7 +235,7 @@ let test_unique_reverse_and_normals () =
   let unique = Poly_fill.run ~mode:Poly_fill.Fill_single_polygon ~unique_points:true
       source |> get_rdk in
   check (Geometry.point_count unique = 12
-      && Topology_index.boundary_edge_count
+      && Topology_index_front.boundary_edge_count
            (Topology_index.create (Geometry.topology unique)) = 8)
     "unique fill did not detach the patch boundary";
   check (group_cardinality Group.Point "top" unique = 8)

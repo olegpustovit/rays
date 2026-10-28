@@ -59,7 +59,7 @@ let transfer ~geometry ~triangle_geometry =
       ~owner:Attribute.Primitive (Attribute.Int [|4; 8|]) |> get_ok in
   let primitive_source = triangle_geometry
       (* Exact centroids (2,1)/(1,2) make the target (1.5,1.5) a true tie. *)
-      |> Transform_ops.transform (Rays_math.Mat4.scaling (Rays_math.Vec3.create 3. 3. 3.))
+      |> Transform_ops_front.transform (Rays_math.Mat4.scaling (Rays_math.Vec3.create 3. 3. 3.))
       |> Geometry.with_attribute primitive_weight |> get_ok
       |> Geometry.with_attribute primitive_id |> get_ok in
   let primitive_target_positions = Packed.Float3.View.of_owned_exn

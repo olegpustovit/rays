@@ -35,8 +35,8 @@ let positions geometry = Packed.Float3.View.view (Geometry.positions geometry)
 
 (* [Analysis.bounds] was pruned from the library; the tests keep an independent
    bounding box of the points under its old name. *)
-module Analysis = struct
-  include Analysis
+module Analysis_front = struct
+  open Analysis
   type bounds = { min : Rays_math.Vec3.t; max : Rays_math.Vec3.t;
                   center : Rays_math.Vec3.t; size : Rays_math.Vec3.t }
   let bounds geometry =
@@ -269,8 +269,8 @@ let displace_y ~amplitude ~frequency ~seed geometry =
   Geometry.with_positions (Packed.Float3.View.of_owned_exn ~x:(Array.copy p.x) ~y ~z:(Array.copy p.z)) geometry
 
 (* [Rdk.Transform_ops] plus the whole-geometry [transform] the scene fixtures use. *)
-module Transform_ops = struct
-  include Rdk.Transform_ops
+module Transform_ops_front = struct
+  open Rdk.Transform_ops
   let normalized_direction ?(grain = 16_384) matrix values =
     let source = Packed.Float3.View.view values in
     let count = Array.length source.x in
@@ -336,8 +336,8 @@ let float3_values attribute = match Attribute.View.storage attribute with
   | Attribute.Float3 values -> Some values | _ -> None
 
 (* The exact-edge counts of a topology index, over the public incidence counts. *)
-module Topology_index = struct
-  include Rdk.Topology_index
+module Topology_index_front = struct
+  open Rdk.Topology_index
   let count_edges index keep =
     let count = ref 0 in
     for edge = 0 to edge_count index - 1 do
@@ -348,8 +348,8 @@ module Topology_index = struct
 end
 
 (* Optional-argument fronts over the parameter records of the rdk operations. *)
-module Fuse_grid = struct
-  include Rdk.Fuse_grid
+module Fuse_grid_front = struct
+  open Rdk.Fuse_grid
   let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
       ?(targeting = Rdk.Point_snap.Near_points) ?(using = Rdk.Point_snap.Least_target_point)
       ?(tolerance = 1e-6) ?(position = Rdk_ops.Fuse_reduce.Average_position)
@@ -366,8 +366,8 @@ module Fuse_grid = struct
     Rdk.Fuse_grid.fuse { cancel; grain; selection; target_selection; targeting; using; tolerance; position; weight_attribute; attributes; attribute_rules; group_rules; metric; inclusive; match_attributes; radius_attribute; match_attribute; match_condition; match_tolerance; modify_target; fuse_points; keep_fused_points; snapped_group; snapped_destination_attribute; remove_degenerate_primitives; remove_unused_points_from_degenerate_primitives; remove_all_unused_points; target } geometry
 end
 
-module Subdivide = struct
-  include Rdk.Subdivide
+module Subdivide_front = struct
+  open Rdk.Subdivide
   let subdivide ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1)
       ?primitives ?(cracks = Subdivide_do_not_close)
       ?(consistent_topology = false) ?creases ?crease_primitives ?crease_weight
@@ -383,8 +383,8 @@ module Subdivide = struct
       cancel; grain; scheme; iterations; primitives; cracks; consistent_topology; creases; crease_primitives; crease_weight; generate_resulting_creases; resulting_crease_group; hole_primitives; remove_holes; boundary_interpolation; face_varying_interpolation; triangle_policy = triangle_subdivision; creasing_method; treat_curves_as_independent; recompute_point_normals } geometry
 end
 
-module Boolean = struct
-  include Rdk.Boolean
+module Boolean_front = struct
+  open Rdk.Boolean
   let run ?cancel ?(grain = 16_384) ?(operation = Rdk.Boolean_solid.Union)
       ?(left_treatment = Rdk.Boolean_solid.Solid) ?(right_treatment = Rdk.Boolean_solid.Solid)
       ?(resolve_left_self_intersections = false)
@@ -402,8 +402,8 @@ module Boolean = struct
       cancel; grain; operation; left_treatment; right_treatment; resolve_left_self_intersections; resolve_right_self_intersections; point_conflict; point_tolerance; tiny_seam_threshold; cleanup_max_batches; strict_cleanup; seam_points; detriangulation; assume_flat; require_closed; piece_attribute; left_piece_group; overlap_piece_group; right_piece_group; right } left
 end
 
-module Clean = struct
-  include Rdk.Clean
+module Clean_front = struct
+  open Rdk.Clean
   let run ?cancel ?(grain = 16_384) ?(epsilon = 1e-12)
       ?(remove_degenerate = true) ?consolidate_distance ?overlaps
       ?(reverse_winding = false) ?(remove_nan_points = false)
@@ -415,8 +415,8 @@ module Clean = struct
       cancel; grain; epsilon; remove_degenerate; consolidate_distance; overlaps; reverse_winding; remove_nan_points; remove_unused_points; delete_unused_groups; point_attributes; vertex_attributes; primitive_attributes; detail_attributes; point_groups; vertex_groups; primitive_groups; edge_groups } geometry
 end
 
-module Facet = struct
-  include Rdk.Facet
+module Facet_front = struct
+  open Rdk.Facet
   let run ?cancel ?grain ?selection ?pre_compute_normals
       ?make_normals_unit_length ?unique_points ?consolidate_distance
       ?consolidate_normals_distance ?remove_inline_points ?inline_distance
@@ -426,8 +426,8 @@ module Facet = struct
       cancel; grain; selection; pre_compute_normals; make_normals_unit_length; unique_points; consolidate_distance; consolidate_normals_distance; remove_inline_points; inline_distance; orient_polygons; cusp_angle; remove_degenerate; make_planar; post_compute_normals; reverse_normals } geometry
 end
 
-module Remesh = struct
-  include Rdk.Remesh
+module Remesh_front = struct
+  open Rdk.Remesh
   let run ?cancel ?(grain = 16_384) ?(iterations = 3) ?(smoothing = 0.5)
       ?(project = true) ?(use_input_points_only = false) ?hard_points ?hard_edges
       ?target_size_attribute ?(preserve_uv_seams = true) ?(uv_attribute = "uv")
@@ -437,8 +437,8 @@ module Remesh = struct
       cancel; grain; iterations; smoothing; project; use_input_points_only; hard_points; hard_edges; target_size_attribute; preserve_uv_seams; uv_attribute; output_hard_edges; output_mesh_size; output_quality; recompute_point_normals; target_length } geometry
 end
 
-module Plane_clip = struct
-  include Rdk.Plane_clip
+module Plane_clip_front = struct
+  open Rdk.Plane_clip
   let clip ?cancel ?(grain = 16_384) ?(keep = Above)
       ?(snapping_tolerance = 1e-9) ?(fill = false)
       ?(split_connectivity = false) ?(clip_attribute = "P") ?(distance = 0.)
@@ -448,8 +448,8 @@ module Plane_clip = struct
       cancel; grain; keep; snapping_tolerance; fill; split_connectivity; clip_attribute; distance; selection; replace_existing_groups; clipped_edge_group; cap_group; clipped_group; above_group; below_group; origin; normal } geometry
 end
 
-module Attribute_ops = struct
-  include Rdk.Attribute_ops
+module Attribute_ops_front = struct
+  open Rdk.Attribute_ops
   let interpolate ?cancel ?grain ?selection ?driver ?compute_weights
       ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
       ?(match_groups = false)

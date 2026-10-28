@@ -114,7 +114,7 @@ let test_adaptive_hard_and_uv_seams () =
   let source, hard_points = seam_fixture () in
   let detail = Geometry.find_attribute ~owner:Attribute.Detail "tag" source
       |> Option.get in
-  let output = Remesh.run ~grain:3 ~iterations:2 ~target_length:1.
+  let output = Remesh_front.run ~grain:3 ~iterations:2 ~target_length:1.
       ~target_size_attribute:"target" ~hard_points
       ~output_hard_edges:"features" ~output_mesh_size:"effective_size"
       ~output_quality:"quality" source |> get in
@@ -128,7 +128,7 @@ let test_adaptive_hard_and_uv_seams () =
     "Remesh copied immutable detail payload";
   let features = Geometry.find_edge_group "features" output |> Option.get
   and index = Topology_index.create (Geometry.topology output) in
-  check (Edge_group.cardinality features > Topology_index.boundary_edge_count index)
+  check (Edge_group.cardinality features > Topology_index_front.boundary_edge_count index)
     "Remesh did not preserve the UV discontinuity as a hard interior feature";
   let positions = Packed.Float3.View.view (Geometry.positions output) in
   let pinned = ref false in
@@ -144,7 +144,7 @@ let test_input_points_only () =
   let topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get_string in
   let source = Geometry.create ~positions ~topology () |> get_string in
-  let output = Remesh.run ~iterations:2 ~smoothing:0.
+  let output = Remesh_front.run ~iterations:2 ~smoothing:0.
       ~use_input_points_only:true ~target_length:0.1
       ~recompute_point_normals:false source |> get in
   check (Geometry.point_count output = 4 && Geometry.primitive_count output = 2)
@@ -239,7 +239,7 @@ let payload_fixture () =
 let test_local_edits_match_chained_kernels () =
   let source, pinned = payload_fixture () in
   let run domains = Parallel.run ~domains (fun () ->
-    Remesh.run ~grain:13 ~iterations:2 ~smoothing:0.3 ~project:true
+    Remesh_front.run ~grain:13 ~iterations:2 ~smoothing:0.3 ~project:true
       ~target_length:0.8 ~hard_points:pinned ~output_hard_edges:"hard"
       ~output_mesh_size:"size" ~output_quality:"quality" source |> get) in
   let output = run 1 in
@@ -250,7 +250,7 @@ let test_local_edits_match_chained_kernels () =
     "Remesh dropped the explicit order of a point group";
   check (Geometry.find_edge_group "authored_edges" output <> None)
     "Remesh dropped an authored edge group";
-  let flips_only = Remesh.run ~grain:7 ~iterations:2 ~smoothing:0.
+  let flips_only = Remesh_front.run ~grain:7 ~iterations:2 ~smoothing:0.
       ~project:false ~use_input_points_only:true ~target_length:0.8
       ~recompute_point_normals:false source |> get in
   dump "flips" flips_only;
@@ -271,27 +271,27 @@ let test_errors_and_cancellation () =
     | Error error -> check (Error.code error = code)
         ("Remesh returned unexpected error code " ^ Error.code error)
     | Ok _ -> fail ("Remesh accepted invalid input for " ^ code) in
-  expect "invalid_remesh" (Remesh.run ~target_length:0. source);
-  expect "invalid_remesh" (Remesh.run ~target_length:1. ~iterations:(-1) source);
-  expect "invalid_remesh" (Remesh.run ~target_length:1. ~smoothing:1.1 source);
+  expect "invalid_remesh" (Remesh_front.run ~target_length:0. source);
+  expect "invalid_remesh" (Remesh_front.run ~target_length:1. ~iterations:(-1) source);
+  expect "invalid_remesh" (Remesh_front.run ~target_length:1. ~smoothing:1.1 source);
   let wrong = Group.init ~owner:Group.Vertex ~name:"wrong"
       (Geometry.vertex_count source) (fun _ -> true) in
-  expect "invalid_remesh" (Remesh.run ~target_length:1. ~hard_points:wrong source);
+  expect "invalid_remesh" (Remesh_front.run ~target_length:1. ~hard_points:wrong source);
   let bad_size = source |> add_attribute ~owner:Attribute.Point ~name:"size"
       (Attribute.Float (Array.init (Geometry.point_count source)
         (fun point -> if point = 2 then Float.nan else 1.))) in
   expect "invalid_remesh"
-    (Remesh.run ~target_length:1. ~target_size_attribute:"size" bad_size);
+    (Remesh_front.run ~target_length:1. ~target_size_attribute:"size" bad_size);
   let curve = Line_geometry.polyline [|0.,0.,0.;1.,0.,0.;2.,0.,0.|] |> get in
-  expect "invalid_remesh" (Remesh.run ~target_length:1. curve);
+  expect "invalid_remesh" (Remesh_front.run ~target_length:1. curve);
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  expect "cancelled" (Remesh.run ~cancel:cancelled ~target_length:1. source)
+  expect "cancelled" (Remesh_front.run ~cancel:cancelled ~target_length:1. source)
 
 let test_parallel_exact () =
   let source = grid ~columns:14 ~rows:12 ~size:6. () in
   let run domains = Parallel.run ~domains (fun () ->
-    Remesh.run ~grain:31 ~iterations:1 ~target_length:0.45
+    Remesh_front.run ~grain:31 ~iterations:1 ~target_length:0.45
       ~output_hard_edges:"hard" ~output_mesh_size:"size"
       ~output_quality:"quality" source |> get) in
   let one = run 1 and four = run 4 in

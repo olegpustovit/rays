@@ -36,7 +36,7 @@ let run () =
         if Array.length geometries <> 1 then Error "expected one input" else
         let offset = parameters.translate_x
             +. (parameters.time_scale *. Context.time context) in
-        Ok (Rdk_test_support.Transform_ops.transform
+        Ok (Rdk_test_support.Transform_ops_front.transform
           (Rays_math.Mat4.translation (Rays_math.Vec3.create offset 0. 0.)) geometries.(0)))) in
   if List.length (Node.parameter_fields node) <> 2
      || not (Node.has_parameters node)

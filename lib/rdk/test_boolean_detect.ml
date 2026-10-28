@@ -115,8 +115,8 @@ let test_tolerance_and_translation () =
   check (without.values = [||] && within.values = [|0|])
     "Boolean Detect world-space tolerance";
   let move = Rays_math.Mat4.translation (Rays_math.Vec3.create 1e12 (-1e12) 1e12) in
-  let moved_source = Transform_ops.transform move (source ())
-  and moved_collision = Transform_ops.transform move (collision ()) in
+  let moved_source = Transform_ops_front.transform move (source ())
+  and moved_collision = Transform_ops_front.transform move (collision ()) in
   let origin_output = Boolean_detect.run_checked ~collision:(collision ())
       ~intersecting_group:(Some "intersections")
       ~intersections_attribute:"hits" ~count_attribute:"hit_count" (source ())
@@ -195,7 +195,7 @@ let test_parallel_exact () =
   let source = Plane_generators.grid ~grain:31 ~counts:Plane_generators.Grid_point_counts
       ~connectivity:Plane_generators.Grid_alternating_triangles
       ~columns:80 ~rows:60 ~size:20. () |> get in
-  let collision = Transform_ops.transform ~grain:31 (Rays_math.Mat4.rotation_x (Float.pi /. 2.))
+  let collision = Transform_ops_front.transform ~grain:31 (Rays_math.Mat4.rotation_x (Float.pi /. 2.))
       source in
   let run domains = Parallel.run ~domains (fun () ->
     Boolean_detect.run_checked ~grain:31 ~collision

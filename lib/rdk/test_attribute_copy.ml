@@ -2,8 +2,8 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-module Attribute_ops = struct
-  include Attribute_ops
+module Attribute_ops_front = struct
+  open Attribute_ops
   let copy_rule ?into ~owner pattern =
     { Attribute_copy.copy_owner = owner; copy_pattern = pattern; copy_into = into }
 end

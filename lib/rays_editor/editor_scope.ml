@@ -9,23 +9,8 @@ let picture_node records path ~probes =
   List.find_map (fun ty -> Option.map (fun id -> ty, id) (Flow_graph.Probe.plan_node ~ty records path ~probes))
     Flow.Ty.[ drawing; image ]
 
-(* Probe inputs use the same exact frame/region compiler as the canvas. Prepared programs
-   survive live frames, while values and state remain local to each probe snapshot. *)
-let probe_force () : Flow_graph.Probe.force =
-  let programs = Lru.Identity_list.create ~equal:( == ) 64 in
-  fun ?state ?elems ?resolve value ~live ->
-    let prepared = match value with
-      | Flow.Eval.Residual residual ->
-          (match Lru.Identity_list.peek programs residual with
-           | Some program -> program
-           | None ->
-               let program = Flow_ir.Executor.compile value in
-               Lru.Identity_list.add programs residual program;
-               program)
-      | _ -> Flow_ir.Executor.compile value in
-    match prepared with
-    | Ok program -> Flow_ir.Executor.force ?state ?elems ?resolve program ~live
-    | Error _ -> Flow.Eval.Host.force_reference ?state ?elems ?resolve value ~live
+(* Probe inputs use the same exact frame/region compiler as the canvas. *)
+let probe_force = Flow_native.Probe_run.force
 
 (* The probes of a live graph are forced again only when what a frame can change in them did: its
    time, size, pointer and buttons.  [tick], [dt] and the key and event lists change every frame, so
@@ -123,7 +108,7 @@ let sync_scope value =
           frame = Int64.to_int (Timeline.frame value.timeline)} else None in
       let now = value.clock () in
       let summaries = value.cook.Cook.summaries in
-      let executions = Flow_ir.Profile.executions lowered.profile in
+      let executions = Flow_native.Probe_run.reports lowered.profile in
       (* a moving clock or pointer re-forces the probes at most five times a second: a forced frame sets the quiet time to four
          times its own length, so forcing never takes more than a fifth of the time (a pointer read by
          a deep fold re-forced 0.1 s of probes every frame of a move) *)
@@ -133,7 +118,7 @@ let sync_scope value =
       let quiet (k : scope_key) = Float.min 2. (Float.max 0.2 (4. *. (now -. k.stamp))) in
       let fresh = match previous with
         | Some k -> not (k.evaluated == evaluated && k.summaries == summaries
-            && List.compare_lengths k.executions executions = 0
+            && Flow_native.Probe_run.same_count k.executions executions
             && (Option.equal steady_equal k.time time
               || (now -. k.stamp < k.gap && Option.is_some k.time = Option.is_some time)))
         | None -> true in
@@ -188,28 +173,10 @@ let sync_scope value =
           Option.bind (Flow_sop.Network.Int_map.find_opt id lowered.compiled) (fun node_id ->
             Option.bind (node_owner value node_id) (fun object_id ->
               Cook.source value.cook ~object_id ~node_id))) in
-        let rec covers site path = match site, path with
-          | [a], b :: _ -> a = b || String.starts_with ~prefix:(a ^ "#") b
-          | a :: rest, b :: tail when a = b -> covers rest tail
-          | _ -> false in
-        let rec prefix xs ys = match xs, ys with
-          | [], _ -> true | x :: xs, y :: ys -> x = y && prefix xs ys | _ -> false in
         let execution path ~probes =
           let instance = Array.find_index (fun (i : Flow.Eval.instance) -> i.graph = name && i.default)
             lowered.plan.instances in
-          let found = List.fold_left (fun best (report : Flow_ir.execution) ->
-            List.fold_left (fun best (origin, site, iter) ->
-              if not ((origin < 0 || instance = Some origin) && covers site path && prefix iter probes) then best else
-              let score = List.fold_left (fun n s -> n + String.length s + 1) 0 site in
-              match best with Some (previous, _) when previous >= score -> best
-                | _ -> Some (score, report)) best report.sites) None executions in
-          match found with
-          | Some (_, report) -> Some Flow_graph.Probe.{
-              tier = (match report.tier with Interp -> "Interp" | Core -> "Core" | Cpu_kernel -> "CPU"
-                |Gpu->"GPU"|Gpu_compile->"Gpu_compile"|Gpu_readback->"Readback");
-              group = fst report.owner;
-              seconds = if fst report.owner = path then Some report.seconds else None}
-          | None -> None in
+          Flow_native.Probe_run.find executions ~instance path ~probes in
         let force = match previous with
           | Some k when k.evaluated == evaluated -> k.force
           | _ -> probe_force () in
@@ -258,7 +225,7 @@ let scene_target value id =
             let ws = value.doc.Document.workspace.ws in
             let evaluated = value.doc.Document.workspace.lowered.evaluated in
             Some { ws; probe_map = value.probes; graph; evaluated = Some evaluated; summaries = [];
-                   time = None; executions = [];
+                   time = None; executions = Flow_native.Probe_run.no_reports;
                    records = Some (Flow_graph.Probe.make ~state:value.cook.state evaluated);
                    force = probe_force (); targets = []; stamp = 0.; gap = 0.; fresh_last = false;
                    scope = Flow_graph.Projection.of_graph catalog ws.checked graph

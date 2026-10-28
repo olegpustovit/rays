@@ -133,7 +133,7 @@ let spec ?into owner name =
 
 let interpolate ?grain ?selection ?pre_scale ?blend ?unmatched ~target_owner
     ~attributes ~source target =
-  Attribute_ops.interpolate ?grain ?selection ?pre_scale ?blend ?unmatched
+  Attribute_ops_front.interpolate ?grain ?selection ?pre_scale ?blend ?unmatched
     ~target_owner ~attributes ~source ~target () |> get_ok
 
 let near left right = Float.abs (left -. right) <= 1e-12
@@ -297,7 +297,7 @@ let test_explicit_weight_modes () =
       |> add_weight_drivers ~owner:Attribute.Point
            [|[|0;1|]; [|1;2|]; [||]|]
            [|[|0.25;0.75|]; [|0.5;0.5|]; [||]|] in
-  let point = Attribute_ops.interpolate
+  let point = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~target_owner:Attribute.Point ~attributes:[
@@ -314,7 +314,7 @@ let test_explicit_weight_modes () =
       |> add (Attribute.Float [|100.|]) ~owner:Attribute.Point ~name:"weight"
       |> add (Attribute.Float [|100.|]) ~owner:Attribute.Point
            ~name:"detail_weight" in
-  let normalized = Attribute_ops.interpolate
+  let normalized = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~pre_scale:2. ~normalize_weights:true ~threshold:0.8
@@ -328,7 +328,7 @@ let test_explicit_weight_modes () =
   let vertex_target = points 1
       |> add_weight_drivers ~owner:Attribute.Point [|[|0;2|]|]
            [|[|0.25;0.75|]|] in
-  let vertex = Attribute_ops.interpolate
+  let vertex = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Vertex_weights {
         numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~target_owner:Attribute.Point ~attributes:[spec Attribute.Point "weight";
@@ -352,7 +352,7 @@ let test_explicit_weight_modes () =
   let primitive_target = points 1
       |> add_weight_drivers ~owner:Attribute.Point [|[|0;1|]|]
            [|[|0.25;0.75|]|] in
-  let primitive = Attribute_ops.interpolate
+  let primitive = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Primitive_weights {
         numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~target_owner:Attribute.Point ~attributes:[
@@ -374,7 +374,7 @@ let test_signed_normalization_and_group_threshold () =
       |> add (Attribute.Int [|99;99;99|])
            ~owner:Attribute.Point ~name:"id"
       |> add_group ~owner:Group.Point ~name:"hot" [|2|] in
-  let result = Attribute_ops.interpolate
+  let result = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="source_elements";
         weights_attribute="source_weights" })
@@ -403,7 +403,7 @@ let test_array_field_row_selection () =
   let primitive_target = points 3
       |> add_drivers ~owner:Attribute.Point [|0;0;0|]
            [|(0.,0.,0.);(1.,0.,0.);(0.,1.,0.)|] in
-  let primitive = Attribute_ops.interpolate ~target_owner:Attribute.Point
+  let primitive = Attribute_ops_front.interpolate ~target_owner:Attribute.Point
       ~attributes ~source ~target:primitive_target () |> get_ok in
   if Array.init 3 (Packed.Int_array.get
       (int_array_values ~owner:Attribute.Point "neighbors" primitive))
@@ -421,7 +421,7 @@ let test_array_field_row_selection () =
       |> add (Attribute.Float_array
           (float_rows [|[|9.|];[|8.|];[|7.|]|]))
            ~owner:Attribute.Point ~name:"samples" in
-  let weighted = Attribute_ops.interpolate
+  let weighted = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="source_elements";
         weights_attribute="source_weights" })
@@ -439,7 +439,7 @@ let test_array_field_row_selection () =
            [|[|1.|];[|1.|]|]
       |> add (Attribute.Int_array (int_rows [|[|9|];[|8|]|]))
            ~owner:Attribute.Point ~name:"neighbors" in
-  let run_blend blend = Attribute_ops.interpolate
+  let run_blend blend = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="source_elements";
         weights_attribute="source_weights" })
@@ -457,7 +457,7 @@ let test_array_field_row_selection () =
       |> add_drivers ~owner:Attribute.Point [|-1|] [|(0.,0.,0.)|]
       |> add (Attribute.Int_array (int_rows [|[|9|]|]))
            ~owner:Attribute.Point ~name:"neighbors" in
-  let defaulted = Attribute_ops.interpolate
+  let defaulted = Attribute_ops_front.interpolate
       ~unmatched:Attribute_transfer.Default_value ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Point "neighbors"]
       ~source ~target:missed () |> get_ok in
@@ -473,13 +473,13 @@ let test_computed_weights_equivalence () =
     computed_owner = Attribute.Point;
     computed_numbers_attribute = "computed_points";
     computed_weights_attribute = "computed_weights" } in
-  let computed_only = Attribute_ops.interpolate ~compute_weights
+  let computed_only = Attribute_ops_front.interpolate ~compute_weights
       ~target_owner:Attribute.Point ~attributes:[] ~source ~target () |> get_ok in
   if Array.init 3 (Packed.Int_array.get
       (int_array_values ~owner:Attribute.Point "computed_points" computed_only))
       <> [|[|0;1;2|];[|0;1;2|];[||]|] then
     fail "compute-only Attribute Interpolate rows";
-  let primitive = Attribute_ops.interpolate ~compute_weights
+  let primitive = Attribute_ops_front.interpolate ~compute_weights
       ~target_owner:Attribute.Point ~attributes:[spec Attribute.Point "weight";
         spec Attribute.Point "id"] ~source ~target () |> get_ok in
   let numbers = int_array_values ~owner:Attribute.Point "computed_points"
@@ -487,7 +487,7 @@ let test_computed_weights_equivalence () =
   if Array.init 3 (Packed.Int_array.get numbers)
       <> [|[|0;1;2|];[|0;1;2|];[||]|] then
     fail "computed point-number rows";
-  let weighted = Attribute_ops.interpolate
+  let weighted = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="computed_points";
         weights_attribute="computed_weights" })
@@ -506,7 +506,7 @@ let test_attribute_pattern_expansion () =
   let source = triangle_source () in
   let target = points 1 |> add_drivers ~owner:Attribute.Point [|0|]
       [|(0.25,0.25,0.)|] in
-  let result = Attribute_ops.interpolate ~point_pattern:"P weight ^id"
+  let result = Attribute_ops_front.interpolate ~point_pattern:"P weight ^id"
       ~vertex_pattern:"vertex_*" ~primitive_pattern:"primitive_*"
       ~detail_pattern:"detail_*" ~target_owner:Attribute.Point
       ~attributes:[] ~source ~target () |> get_ok in
@@ -519,10 +519,10 @@ let test_attribute_pattern_expansion () =
       || Geometry.find_attribute ~owner:Attribute.Point "id" result <> None then
     fail "owner-specific Attribute Interpolate pattern expansion";
   expect_invalid "malformed interpolation pattern accepted"
-    (Attribute_ops.interpolate ~point_pattern:"[bad"
+    (Attribute_ops_front.interpolate ~point_pattern:"[bad"
       ~target_owner:Attribute.Point ~attributes:[] ~source ~target ());
   expect_invalid "explicit/pattern duplicate output accepted"
-    (Attribute_ops.interpolate ~point_pattern:"weight"
+    (Attribute_ops_front.interpolate ~point_pattern:"weight"
       ~target_owner:Attribute.Point ~attributes:[spec Attribute.Point "weight"]
       ~source ~target ())
 
@@ -537,7 +537,7 @@ let test_source_group_matching () =
       |> add_group ~owner:Group.Point ~name:"corner_hot" [|2|] in
   let selection = Group.ordered ~owner:Group.Point ~name:"selected" ~length:3
       [|0;1|] |> Result.get_ok in
-  let result = Attribute_ops.interpolate ~selection ~match_groups:true
+  let result = Attribute_ops_front.interpolate ~selection ~match_groups:true
       ~point_pattern:"hot" ~vertex_pattern:"corner_*"
       ~primitive_pattern:"face_*" ~target_owner:Attribute.Point
       ~attributes:[] ~source ~target () |> get_ok in
@@ -551,7 +551,7 @@ let test_source_group_matching () =
   let blend_target = points 2 |> add_drivers ~owner:Attribute.Point [|0;0|]
       [|(1.,0.,0.);(0.,0.,0.)|]
       |> add_group ~owner:Group.Point ~name:"hot" [|1|] in
-  let blended = Attribute_ops.interpolate ~blend:0.5 ~match_groups:true
+  let blended = Attribute_ops_front.interpolate ~blend:0.5 ~match_groups:true
       ~point_pattern:"hot" ~target_owner:Attribute.Point ~attributes:[]
       ~source ~target:blend_target () |> get_ok in
   if group_values ~owner:Group.Point "hot" blended <> [|true;true|] then
@@ -559,7 +559,7 @@ let test_source_group_matching () =
   let weighted_target = points 2
       |> add_weight_drivers ~owner:Attribute.Point
            [|[|0;2|];[|0;1|]|] [|[|0.25;0.75|];[|0.8;0.2|]|] in
-  let weighted = Attribute_ops.interpolate
+  let weighted = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Vertex_weights {
         numbers_attribute="source_elements";
         weights_attribute="source_weights" })
@@ -574,7 +574,7 @@ let test_source_group_matching () =
     fail "weighted mixed-owner source group interpolation";
   let normalized_target = points 1
       |> add_weight_drivers ~owner:Attribute.Point [|[|1|]|] [|[|0.1|]|] in
-  let normalized = Attribute_ops.interpolate
+  let normalized = Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="source_elements";
         weights_attribute="source_weights" })
@@ -589,11 +589,11 @@ let test_source_group_matching () =
     | Error error when String.equal (Error.code error) "invalid_interpolate" -> ()
     | _ -> fail label in
   expect_invalid "duplicate cross-owner destination group accepted"
-    (Attribute_ops.interpolate ~match_groups:true ~point_pattern:"hot"
+    (Attribute_ops_front.interpolate ~match_groups:true ~point_pattern:"hot"
       ~primitive_pattern:"hot" ~target_owner:Attribute.Point ~attributes:[]
       ~source:duplicate_source ~target ());
   expect_invalid "point-weight mode accepted primitive source group"
-    (Attribute_ops.interpolate
+    (Attribute_ops_front.interpolate
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="source_elements";
         weights_attribute="source_weights" })
@@ -608,7 +608,7 @@ let expect_code code label = function
 let test_errors_and_cancellation () =
   let source = triangle_source () and target = points 1 in
   expect_code "invalid_interpolate" "missing drivers accepted"
-    (Attribute_ops.interpolate ~target_owner:Attribute.Point
+    (Attribute_ops_front.interpolate ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Point "weight"] ~source ~target ());
   let wrong_driver = target
       |> add (Attribute.Float [|0.|]) ~owner:Attribute.Point
@@ -616,31 +616,31 @@ let test_errors_and_cancellation () =
       |> add (Attribute.Float3 (packed3 [|(0.,0.,0.)|]))
            ~owner:Attribute.Point ~name:"source_uvw" in
   expect_code "invalid_interpolate" "wrong driver storage accepted"
-    (Attribute_ops.interpolate ~target_owner:Attribute.Point
+    (Attribute_ops_front.interpolate ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Point "weight"] ~source
       ~target:wrong_driver ());
   let incompatible = points 1 |> add_drivers ~owner:Attribute.Point [|0|]
       [|(0.,0.,0.)|]
       |> add (Attribute.Text [|"bad"|]) ~owner:Attribute.Point ~name:"weight" in
   expect_code "invalid_interpolate" "incompatible target accepted"
-    (Attribute_ops.interpolate ~target_owner:Attribute.Point
+    (Attribute_ops_front.interpolate ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Point "weight"] ~source
       ~target:incompatible ());
   let driven = points 1 |> add_drivers ~owner:Attribute.Point [|0|]
       [|(Float.nan,0.,0.)|] in
   expect_code "invalid_parameter" "non-finite UVW accepted"
-    (Attribute_ops.interpolate ~target_owner:Attribute.Point
+    (Attribute_ops_front.interpolate ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Point "weight"] ~source ~target:driven ());
   let driven = points 1 |> add_drivers ~owner:Attribute.Point [|0|]
       [|(0.,0.,0.)|] in
   expect_code "invalid_interpolate" "duplicate target accepted"
-    (Attribute_ops.interpolate ~target_owner:Attribute.Point
+    (Attribute_ops_front.interpolate ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Point "weight";
         spec ~into:"weight" Attribute.Point "id"] ~source ~target:driven ());
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
   expect_code "cancelled" "cancelled interpolation published output"
-    (Attribute_ops.interpolate ~cancel:cancelled ~target_owner:Attribute.Point
+    (Attribute_ops_front.interpolate ~cancel:cancelled ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Point "weight"] ~source ~target:driven ());
   let bad_layout = points 2
       |> add (Attribute.Int_array (int_rows [|[|0|];[|1|]|]))
@@ -648,34 +648,34 @@ let test_errors_and_cancellation () =
       |> add (Attribute.Float_array (float_rows [|[|1.;0.|];[||]|]))
            ~owner:Attribute.Point ~name:"source_weights" in
   expect_code "invalid_interpolate" "mismatched weighted row layouts accepted"
-    (Attribute_ops.interpolate ~driver:(Attribute_ops.Point_weights {
+    (Attribute_ops_front.interpolate ~driver:(Attribute_ops.Point_weights {
        numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~target_owner:Attribute.Point ~attributes:[spec Attribute.Point "weight"]
       ~source ~target:bad_layout ());
   let bad_number = points 1 |> add_weight_drivers ~owner:Attribute.Point
       [|[|99|]|] [|[|1.|]|] in
   expect_code "invalid_interpolate" "out-of-range weighted number accepted"
-    (Attribute_ops.interpolate ~driver:(Attribute_ops.Point_weights {
+    (Attribute_ops_front.interpolate ~driver:(Attribute_ops.Point_weights {
        numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~target_owner:Attribute.Point ~attributes:[spec Attribute.Point "weight"]
       ~source ~target:bad_number ());
   let bad_weight = points 1 |> add_weight_drivers ~owner:Attribute.Point
       [|[|0|]|] [|[|Float.nan|]|] in
   expect_code "invalid_interpolate" "non-finite explicit weight accepted"
-    (Attribute_ops.interpolate ~driver:(Attribute_ops.Point_weights {
+    (Attribute_ops_front.interpolate ~driver:(Attribute_ops.Point_weights {
        numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~target_owner:Attribute.Point ~attributes:[spec Attribute.Point "weight"]
       ~source ~target:bad_weight ());
   let point_weighted = points 1 |> add_weight_drivers ~owner:Attribute.Point
       [|[|0|]|] [|[|1.|]|] in
   expect_code "invalid_interpolate" "point mode accepted vertex source field"
-    (Attribute_ops.interpolate ~driver:(Attribute_ops.Point_weights {
+    (Attribute_ops_front.interpolate ~driver:(Attribute_ops.Point_weights {
        numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Vertex "vertex_weight"]
       ~source ~target:point_weighted ());
   expect_code "invalid_interpolate" "weighted mode accepted computed outputs"
-    (Attribute_ops.interpolate ~driver:(Attribute_ops.Point_weights {
+    (Attribute_ops_front.interpolate ~driver:(Attribute_ops.Point_weights {
        numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~compute_weights:{ computed_owner=Attribute.Point;
         computed_numbers_attribute="computed_numbers";
@@ -683,7 +683,7 @@ let test_errors_and_cancellation () =
       ~target_owner:Attribute.Point ~attributes:[spec Attribute.Point "weight"]
       ~source ~target:point_weighted ());
   expect_code "cancelled" "cancelled weighted interpolation published output"
-    (Attribute_ops.interpolate ~cancel:cancelled
+    (Attribute_ops_front.interpolate ~cancel:cancelled
       ~driver:(Attribute_ops.Point_weights {
        numbers_attribute="source_elements"; weights_attribute="source_weights" })
       ~target_owner:Attribute.Point ~attributes:[spec Attribute.Point "weight"]
@@ -723,7 +723,7 @@ let test_parallel_exact_scale () =
     computed_numbers_attribute="computed_points";
     computed_weights_attribute="computed_weights" } in
   let run domains = Parallel.run ~domains (fun () ->
-    Attribute_ops.interpolate ~grain:257 ~target_owner:Attribute.Point
+    Attribute_ops_front.interpolate ~grain:257 ~target_owner:Attribute.Point
       ~compute_weights ~attributes ~source ~target () |> get_ok) in
   let one = run 1 and four = run 4 in
   let p_one = Packed.Float3.View.view (Geometry.positions one)
@@ -766,7 +766,7 @@ let test_parallel_exact_scale () =
       || cw_one.offsets <> cw_four.offsets || cw_one.values <> cw_four.values then
     fail "200k Attribute Interpolate one/four-domain exactness";
   let weighted_run domains = Parallel.run ~domains (fun () ->
-    Attribute_ops.interpolate ~grain:257
+    Attribute_ops_front.interpolate ~grain:257
       ~driver:(Attribute_ops.Point_weights {
         numbers_attribute="computed_points";
         weights_attribute="computed_weights" })

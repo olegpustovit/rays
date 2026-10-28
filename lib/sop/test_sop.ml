@@ -804,7 +804,7 @@ let test_snapshot_feedback_boundary () =
       ~version:1 ~parameters:"dx=0.25" [previous]
       (fun ~context:_ inputs ->
         match inputs with
-        | [|geometry|] -> Ok (Rdk_test_support.Transform_ops.transform
+        | [|geometry|] -> Ok (Rdk_test_support.Transform_ops_front.transform
             (Rays_math.Mat4.translation (Rays_math.Vec3.create 0.25 0. 0.)) geometry)
         | _ -> Error "solver step requires one snapshot") in
   let output = cook_ok evaluator current step in
@@ -863,7 +863,7 @@ let test_poly_fill_contract () =
     "procedural Poly Fill patch cardinality";
   let topology_index = Rdk.Topology_index.create
       (Rdk.Geometry.topology (Result.get_ok (Sop.Payload.geometry first.payload))) in
-  check (Rdk_test_support.Topology_index.boundary_edge_count topology_index = 32)
+  check (Rdk_test_support.Topology_index_front.boundary_edge_count topology_index = 32)
     "procedural unique Poly Fill did not detach its two patches";
   let before = Session.stats evaluator in
   ignore (cook_ok evaluator current graph);
@@ -1115,7 +1115,7 @@ let test_local_subdivide_contract () =
       && contains (readable detail_graph) "triangle_policy=catmull_clark")
     "procedural detail-override Subdivide cache identity";
   let detail_output = cook_ok evaluator current detail_graph in
-  let expected_detail = Rdk_test_support.Subdivide.subdivide ~iterations:2 ~remove_holes:true
+  let expected_detail = Rdk_test_support.Subdivide_front.subdivide ~iterations:2 ~remove_holes:true
       ~generate_resulting_creases:true
       ~boundary_interpolation:Rdk.Subdivide.Subdivide_boundary_edge_and_corner
       ~face_varying_interpolation:Rdk.Subdivide.Subdivide_fvar_none

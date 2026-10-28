@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let bounds geometry = match Analysis.bounds geometry with
+let bounds geometry = match Analysis_front.bounds geometry with
   | Some bounds -> bounds
   | None -> fail "geometry has no bounds"
 

@@ -112,7 +112,7 @@ let test_transfer () =
   let source = point_cloud 2
       |> with_group Group.Point "picked" (fun point -> point = 0)
       |> with_group Group.Point "unused" (fun point -> point = 1) in
-  let source = Transform_ops.transform (Rays_math.Mat4.scaling (Rays_math.Vec3.create 10. 1. 1.)) source in
+  let source = Transform_ops_front.transform (Rays_math.Mat4.scaling (Rays_math.Vec3.create 10. 1. 1.)) source in
   let target = Line_geometry.points [|(0.1, 0., 0.); (9.9, 0., 0.); (5., 0., 0.)|] in
   let rules = [transfer_rule Group_ops.Group_points "picked" "near_"] in
   let transferred = Group_ops.transfer ~grain:1 ~distance:0.2 ~rules
@@ -238,7 +238,7 @@ let test_transfer_parallel_exactness () =
       |> with_ordered_group Group.Point "ordered_seed" [|404; 5; 8_000; 2|]
       |> with_group Group.Primitive "face_band" (fun primitive -> primitive mod 19 < 3)
       |> with_edge_group "edge_band" (fun edge -> edge mod 23 < 2) in
-  let target = Transform_ops.transform ~grain:257
+  let target = Transform_ops_front.transform ~grain:257
       (Rays_math.Mat4.translation (Rays_math.Vec3.create 0.0001 0. 0.0001)) source in
   let rules = [transfer_rule Group_ops.Group_points "point_band" "mapped_";
     transfer_rule Group_ops.Group_points "ordered_seed" "mapped_";

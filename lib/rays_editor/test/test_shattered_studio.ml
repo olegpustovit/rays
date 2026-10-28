@@ -42,8 +42,8 @@ let () = with_cook 1 (fun cook ->
   let parts = Rdk.Deletion.primitive_partitions ~piece_count:!count ~primitive_pieces:membership g in
   Array.iter (fun part ->
     let index = Rdk.Topology_index.create (Rdk.Geometry.topology part) in
-    assert (Rdk_test_support.Topology_index.boundary_edge_count index = 0);
-    assert (Rdk_test_support.Topology_index.non_manifold_edge_count index = 0)) parts;
+    assert (Rdk_test_support.Topology_index_front.boundary_edge_count index = 0);
+    assert (Rdk_test_support.Topology_index_front.non_manifold_edge_count index = 0)) parts;
   let source = Node.inputs fracture |> List.hd |> cook in
   let original_volume = Rdk.Analysis.signed_volume (Result.get_ok (Sop.Payload.geometry source.payload))
   and fractured_volume = Rdk.Analysis.signed_volume g in

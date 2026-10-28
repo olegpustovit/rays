@@ -71,7 +71,7 @@ let transforms count = Array.init count (fun instance ->
 
 let legacy_materialize matrices source =
   Array.to_list matrices
-  |> List.map (fun matrix -> Transform_ops.transform ~grain:1 matrix source)
+  |> List.map (fun matrix -> Transform_ops_front.transform ~grain:1 matrix source)
   |> Mesh_merge.run ~grain:1
   |> get_rdk
 

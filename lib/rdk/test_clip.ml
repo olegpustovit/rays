@@ -79,13 +79,13 @@ let shared_selection_fixture () =
 let check_custom_clip_attribute () =
   let source = triangle ()
       |> with_attribute "field" (Attribute.Float [|(-1.); 1.; 1.|]) in
-  let clipped = Plane_clip.clip ~clip_attribute:"field" ~origin:Rays_math.Vec3.zero
+  let clipped = Plane_clip_front.clip ~clip_attribute:"field" ~origin:Rays_math.Vec3.zero
       ~normal:Rays_math.Vec3.unit_x source |> get_ok in
-  let bounds = Analysis.bounds clipped |> Option.get in
+  let bounds = Analysis_front.bounds clipped |> Option.get in
   check (near bounds.min.x (-5.) && near bounds.max.x 10.)
     "scalar Clip Attribute did not control the intersection parameter";
   let clip storage = triangle () |> with_attribute "field" storage
-      |> Plane_clip.clip ~clip_attribute:"field" ~origin:Rays_math.Vec3.zero
+      |> Plane_clip_front.clip ~clip_attribute:"field" ~origin:Rays_math.Vec3.zero
            ~normal:Rays_math.Vec3.unit_x |> get_ok in
   let float2 = clip (Attribute.Float2 (Packed.Float2.of_owned
       ~x:[|(-1.); 1.; 1.|] ~y:[|0.; 0.; 0.|] |> get_string_ok))
@@ -108,9 +108,9 @@ let check_custom_clip_attribute () =
 
 let check_distance () =
   let source = Box_generator.box ~size:(Rays_math.Vec3.create 4. 3. 2.) () |> get_ok in
-  let offset = Plane_clip.clip ~keep:Plane_clip.All ~distance:0.75 ~origin:Rays_math.Vec3.zero
+  let offset = Plane_clip_front.clip ~keep:Plane_clip.All ~distance:0.75 ~origin:Rays_math.Vec3.zero
       ~normal:(Rays_math.Vec3.create 8. 0. 0.) source |> get_ok
-  and translated = Plane_clip.clip ~keep:Plane_clip.All
+  and translated = Plane_clip_front.clip ~keep:Plane_clip.All
       ~origin:(Rays_math.Vec3.create 0.75 0. 0.) ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (equal_geometry offset translated)
     "Clip distance is not equivalent to translating along the normalized normal"
@@ -119,7 +119,7 @@ let check_selection_isolation () =
   let source = shared_selection_fixture () in
   let selected = Group.init ~owner:Group.Primitive ~name:"selected" 2
       (fun primitive -> primitive = 0) in
-  let output = Plane_clip.clip ~grain:1 ~snapping_tolerance:0.001
+  let output = Plane_clip_front.clip ~grain:1 ~snapping_tolerance:0.001
       ~selection:(Element_selection.Selected_primitives selected) ~clipped_group:"clipped"
       ~above_group:"above" ~clipped_edge_group:"clip_edges"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
@@ -153,7 +153,7 @@ let check_selection_isolation () =
   let existing = Group.init ~owner:Group.Primitive ~name:"clipped" 2
       (fun primitive -> primitive = 1) in
   let source_with_existing = Geometry.with_group existing source |> get_string_ok in
-  let unioned = Plane_clip.clip ~grain:1 ~snapping_tolerance:0.001
+  let unioned = Plane_clip_front.clip ~grain:1 ~snapping_tolerance:0.001
       ~selection:(Element_selection.Selected_primitives selected)
       ~replace_existing_groups:false ~clipped_group:"clipped"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source_with_existing |> get_ok in
@@ -161,7 +161,7 @@ let check_selection_isolation () =
    | Some group -> check (Group.cardinality group = 2)
        "Clip Replace Existing=false did not union primitive membership"
    | None -> fail "unioned Clip primitive group missing");
-  let split = Plane_clip.clip ~grain:1 ~keep:Plane_clip.All ~split_connectivity:true
+  let split = Plane_clip_front.clip ~grain:1 ~keep:Plane_clip.All ~split_connectivity:true
       ~snapping_tolerance:0.001 ~selection:(Element_selection.Selected_primitives selected)
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   let split_ids = int_attribute ~owner:Attribute.Primitive "primitive_id" split
@@ -179,7 +179,7 @@ let check_selection_isolation () =
     "selected keep-all Clip shared a point with unselected topology"
 
 let clipped_count selection source =
-  let output = Plane_clip.clip ~grain:1 ~selection ~clipped_group:"clipped"
+  let output = Plane_clip_front.clip ~grain:1 ~selection ~clipped_group:"clipped"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   match Geometry.find_group ~owner:Group.Primitive "clipped" output with
   | Some group -> Group.cardinality group
@@ -187,11 +187,11 @@ let clipped_count selection source =
 
 let check_typed_selection_promotion () =
   let source = shared_selection_fixture () in
-  let unrestricted = Plane_clip.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source
+  let unrestricted = Plane_clip_front.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source
       |> get_ok in
   let points = Group.init ~owner:Group.Point ~name:"shared_point" 4
       (fun point -> point = 1) in
-  let point_output = Plane_clip.clip ~selection:(Element_selection.Selected_points points)
+  let point_output = Plane_clip_front.clip ~selection:(Element_selection.Selected_points points)
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (equal_geometry unrestricted point_output)
     "point-selected Clip did not promote to every incident primitive";
@@ -215,7 +215,7 @@ let check_typed_selection_promotion () =
   let foreign_index = Topology_index.create (Geometry.topology foreign) in
   let foreign_edges = Edge_group.init ~topology:(Geometry.topology foreign)
       ~index:foreign_index ~name:"foreign" (fun edge -> edge = 0) in
-  expect_code "invalid_geometry" (Plane_clip.clip
+  expect_code "invalid_geometry" (Plane_clip_front.clip
       ~selection:(Element_selection.Selected_edges foreign_edges) ~origin:Rays_math.Vec3.zero
       ~normal:Rays_math.Vec3.unit_x source)
 
@@ -224,7 +224,7 @@ let check_selected_free_points () =
       |> with_attribute "id" (Attribute.Int [|10; 20; 30|]) in
   let selected = Group.init ~owner:Group.Point ~name:"selected_free" 3
       (fun point -> point = 0) in
-  let output = Plane_clip.clip ~selection:(Element_selection.Selected_points selected)
+  let output = Plane_clip_front.clip ~selection:(Element_selection.Selected_points selected)
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (Geometry.point_count output = 2
       && int_attribute ~owner:Attribute.Point "id" output = [|20; 30|])
@@ -240,13 +240,13 @@ let check_selected_caps_and_edge_output () =
       (Geometry.primitive_count source)
       (fun primitive -> primitive < first_primitives) in
   let run domains = Parallel.run ~domains (fun () ->
-      Plane_clip.clip ~grain:1 ~fill:true
+      Plane_clip_front.clip ~grain:1 ~fill:true
         ~selection:(Element_selection.Selected_primitives selected) ~cap_group:"caps"
         ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_y source |> get_ok) in
   let one = run 1 and four = run 4 in
   check (equal_geometry one four)
     "selected filled Clip differs across domain counts";
-  let bounds = Analysis.bounds one |> Option.get in
+  let bounds = Analysis_front.bounds one |> Option.get in
   check (near bounds.min.y (-1.) && near bounds.max.y 1.)
     "selected filled Clip changed the unselected closed component";
   (match Geometry.find_group ~owner:Group.Primitive "caps" one with
@@ -263,7 +263,7 @@ let check_selected_caps_and_edge_output () =
       ~topology:(Rdk_test_support.Tb.freeze topology) () |> get_string_ok in
   let selected = Group.init ~owner:Group.Primitive ~name:"first" 2
       (fun primitive -> primitive = 0) in
-  let output = Plane_clip.clip ~selection:(Element_selection.Selected_primitives selected)
+  let output = Plane_clip_front.clip ~selection:(Element_selection.Selected_primitives selected)
       ~clipped_edge_group:"plane_edges" ~origin:Rays_math.Vec3.zero
       ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   (match Geometry.find_edge_group "plane_edges" output with
@@ -279,7 +279,7 @@ let check_degenerate_fallback () =
       ~vertex_points:[|0; 1; 1; 2; 3|] ~primitive_offsets:[|0; 5|]
       ~primitive_kinds:[|Topology.Polygon|] |> get_string_ok in
   let source = Geometry.create ~positions ~topology () |> get_string_ok in
-  let output = Plane_clip.clip ~origin:(Rays_math.Vec3.create (-10.) 0. 0.)
+  let output = Plane_clip_front.clip ~origin:(Rays_math.Vec3.create (-10.) 0. 0.)
       ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (Geometry.primitive_count output = 1
       && Geometry.vertex_count output = 4)
@@ -290,7 +290,7 @@ let check_degenerate_fallback () =
       ~vertex_points:[|0; 1; 0; 2|] ~primitive_offsets:[|0; 4|]
       ~primitive_kinds:[|Topology.Polygon|] |> get_string_ok in
   let source = Geometry.create ~positions ~topology () |> get_string_ok in
-  let output = Plane_clip.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
+  let output = Plane_clip_front.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (Geometry.primitive_count output = 1
       && Geometry.vertex_count output = 4)
     "non-adjacent repeated-corner polygon bypassed general duplicate suppression"
@@ -311,7 +311,7 @@ let check_disconnected_concave_fragments () =
         ~owner:Attribute.Primitive (Attribute.Int [|17|]) |> get_string_ok] ()
       |> get_string_ok in
   let run domains = Parallel.run ~domains (fun () ->
-      Plane_clip.clip ~grain:1 ~clipped_group:"clipped"
+      Plane_clip_front.clip ~grain:1 ~clipped_group:"clipped"
         ~clipped_edge_group:"cut_edges" ~origin:Rays_math.Vec3.zero
         ~normal:Rays_math.Vec3.unit_x source |> get_ok) in
   let one = run 1 and four = run 4 in
@@ -343,7 +343,7 @@ let check_disconnected_concave_fragments () =
    | Some group -> check (Edge_group.cardinality group = 2)
        "concave Clip did not emit one cut edge per fragment"
    | None -> fail "concave Clip cut-edge group missing");
-  let both = Plane_clip.clip ~grain:1 ~keep:Plane_clip.All ~origin:Rays_math.Vec3.zero
+  let both = Plane_clip_front.clip ~grain:1 ~keep:Plane_clip.All ~origin:Rays_math.Vec3.zero
       ~normal:Rays_math.Vec3.unit_x source |> get_ok in
   check (Geometry.primitive_count both = 3)
     "keep-all concave Clip did not emit two above and one below fragment";
@@ -354,12 +354,12 @@ let check_disconnected_concave_fragments () =
   Rdk_test_support.Tb.add_polygon quad_topology [|0; 1; 2; 3|];
   let quad = Geometry.create ~positions:quad_positions
       ~topology:(Rdk_test_support.Tb.freeze quad_topology) () |> get_string_ok in
-  let quad = Plane_clip.clip ~grain:1 ~origin:(Rays_math.Vec3.create 1.5 0. 0.)
+  let quad = Plane_clip_front.clip ~grain:1 ~origin:(Rays_math.Vec3.create 1.5 0. 0.)
       ~normal:Rays_math.Vec3.unit_x quad |> get_ok in
   check (Geometry.primitive_count quad = 2 && Geometry.vertex_count quad = 6)
     "concave quadrilateral did not leave the exact-size fast plan";
   let solid = Poly_extrude.run ~distance:1. source |> get_ok in
-  let filled = Plane_clip.clip ~grain:1 ~fill:true ~cap_group:"caps"
+  let filled = Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x solid |> get_ok in
   match Geometry.find_group ~owner:Group.Primitive "caps" filled with
   | Some group -> check (Group.cardinality group = 2)
@@ -401,7 +401,7 @@ let hollow_square_prism () =
 let check_nested_cap_contours () =
   let source = hollow_square_prism () in
   let run domains = Parallel.run ~domains (fun () ->
-      Plane_clip.clip ~grain:1 ~fill:true ~cap_group:"annulus_caps"
+      Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"annulus_caps"
         ~clipped_edge_group:"annulus_edges"
         ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok) in
   let one = run 1 and four = run 4 in
@@ -445,26 +445,26 @@ let check_nested_cap_contours () =
       "nested Clip triangulation sealed the interior hole") caps;
   check (near !area 12.) "nested Clip cap area does not preserve the hole";
   let index = Topology_index.create (Geometry.topology one) in
-  check (Topology_index.boundary_edge_count index = 0
-      && Topology_index.non_manifold_edge_count index = 0)
+  check (Topology_index_front.boundary_edge_count index = 0
+      && Topology_index_front.non_manifold_edge_count index = 0)
     "nested Clip cap is not a closed two-manifold";
   let center = Rays_math.Vec3.create 1e150 (-1e150) 5e149 and scale = 1e140 in
-  let transformed = Transform_ops.transform
+  let transformed = Transform_ops_front.transform
       (Rays_math.Mat4.mul (Rays_math.Mat4.translation center)
         (Rays_math.Mat4.scaling (Rays_math.Vec3.create scale scale scale))) source in
-  let transformed = Plane_clip.clip ~grain:1 ~fill:true ~cap_group:"caps"
+  let transformed = Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps"
       ~origin:center ~normal:Rays_math.Vec3.unit_x transformed |> get_ok in
   let transformed_caps = Geometry.find_group ~owner:Group.Primitive "caps"
       transformed |> Option.get in
   check (Group.cardinality transformed_caps = 8)
     "nested Clip lost scale robustness at large finite coordinates";
   let components = Array.init 8 (fun component ->
-      Transform_ops.transform (Rays_math.Mat4.translation
+      Transform_ops_front.transform (Rays_math.Mat4.translation
         (Rays_math.Vec3.create 0. ((float_of_int component -. 3.5) *. 6.) 0.))
         (hollow_square_prism ())) in
   let components = Mesh_merge.run (Array.to_list components) |> get_ok in
   let run_components domains = Parallel.run ~domains (fun () ->
-      Plane_clip.clip ~grain:1 ~fill:true ~cap_group:"caps" ~origin:Rays_math.Vec3.zero
+      Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps" ~origin:Rays_math.Vec3.zero
         ~normal:Rays_math.Vec3.unit_x components |> get_ok) in
   let component_one = run_components 1 and component_four = run_components 4 in
   check (equal_geometry component_one component_four)
@@ -505,7 +505,7 @@ let check_multiple_nested_cap_contours () =
       |> Reverse_faces.run |> get_ok in
   let source = Mesh_merge.run [outer; first_hole; second_hole] |> get_ok in
   let run domains keep = Parallel.run ~domains (fun () ->
-      Plane_clip.clip ~grain:1 ~keep ~fill:true ~cap_group:"caps"
+      Plane_clip_front.clip ~grain:1 ~keep ~fill:true ~cap_group:"caps"
         ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok) in
   let one = run 1 Plane_clip.Above and four = run 4 Plane_clip.Above in
   check (equal_geometry one four)
@@ -525,7 +525,7 @@ let check_multiple_nested_cap_contours () =
   let middle = box 4. 4. |> Reverse_faces.run |> get_ok
   and island = box 2. 2. in
   let nested = Mesh_merge.run [box 6. 6.; middle; island] |> get_ok
-      |> Plane_clip.clip ~grain:1 ~fill:true ~cap_group:"caps"
+      |> Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps"
            ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x |> get_ok in
   let nested_caps = Geometry.find_group ~owner:Group.Primitive "caps" nested
       |> Option.get in
@@ -533,7 +533,7 @@ let check_multiple_nested_cap_contours () =
       && near (cap_area_yz nested nested_caps) 24.)
     "depth-two nested Clip did not preserve the interior island";
   let nested_solids = Mesh_merge.run [box 6. 6.; box 2. 2.] |> get_ok
-      |> Plane_clip.clip ~grain:1 ~fill:true ~cap_group:"caps"
+      |> Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps"
            ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x |> get_ok in
   let solid_caps = Geometry.find_group ~owner:Group.Primitive "caps"
       nested_solids |> Option.get in
@@ -555,45 +555,45 @@ let check_multiple_nested_cap_contours () =
       ~size:(Rays_math.Vec3.create 0.5 0.5 1.) () |> get_ok
       |> Reverse_faces.run |> get_ok in
   let concave_nested = Mesh_merge.run [concave; concave_hole] |> get_ok
-      |> Plane_clip.clip ~grain:1 ~fill:true ~cap_group:"caps"
+      |> Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps"
            ~origin:(Rays_math.Vec3.create 0. 0. 0.5) ~normal:Rays_math.Vec3.unit_z |> get_ok in
   let concave_caps = Geometry.find_group ~owner:Group.Primitive "caps"
       concave_nested |> Option.get in
   check (Group.cardinality concave_caps = 12)
     "concave outer contour with a hole triangle cardinality";
   let concave_index = Topology_index.create (Geometry.topology concave_nested) in
-  check (Topology_index.boundary_edge_count concave_index = 0
-      && Topology_index.non_manifold_edge_count concave_index = 0)
+  check (Topology_index_front.boundary_edge_count concave_index = 0
+      && Topology_index_front.non_manifold_edge_count concave_index = 0)
     "concave outer contour with a hole is not a closed two-manifold";
   let overlap_a = box ~center:(Rays_math.Vec3.create 0. (-0.3) 0.) 2. 2.
       |> Reverse_faces.run |> get_ok
   and overlap_b = box ~center:(Rays_math.Vec3.create 0. 0.3 0.) 2. 2.
       |> Reverse_faces.run |> get_ok in
   let overlapping = Mesh_merge.run [outer; overlap_a; overlap_b] |> get_ok in
-  expect_code "invalid_geometry" (Plane_clip.clip ~grain:1 ~fill:true
+  expect_code "invalid_geometry" (Plane_clip_front.clip ~grain:1 ~fill:true
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x overlapping);
   let same_winding_overlap = Mesh_merge.run [outer;
       box ~center:(Rays_math.Vec3.create 0. (-0.3) 0.) 2. 2.;
       box ~center:(Rays_math.Vec3.create 0. 0.3 0.) 2. 2.] |> get_ok in
-  expect_code "invalid_geometry" (Plane_clip.clip ~grain:1 ~fill:true
+  expect_code "invalid_geometry" (Plane_clip_front.clip ~grain:1 ~fill:true
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x same_winding_overlap)
 
 let check_validation () =
   let source = triangle () in
-  expect_code "invalid_geometry" (Plane_clip.clip ~clip_attribute:""
+  expect_code "invalid_geometry" (Plane_clip_front.clip ~clip_attribute:""
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source);
-  expect_code "invalid_geometry" (Plane_clip.clip ~clip_attribute:"missing"
+  expect_code "invalid_geometry" (Plane_clip_front.clip ~clip_attribute:"missing"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source);
-  expect_code "invalid_geometry" (Plane_clip.clip ~distance:Float.nan
+  expect_code "invalid_geometry" (Plane_clip_front.clip ~distance:Float.nan
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source);
-  expect_code "invalid_geometry" (Plane_clip.clip ~clipped_edge_group:" "
+  expect_code "invalid_geometry" (Plane_clip_front.clip ~clipped_edge_group:" "
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source);
   let text = with_attribute "field" (Attribute.Text [|"a"; "b"; "c"|]) source in
-  expect_code "invalid_geometry" (Plane_clip.clip ~clip_attribute:"field"
+  expect_code "invalid_geometry" (Plane_clip_front.clip ~clip_attribute:"field"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x text);
   let non_finite = with_attribute "field"
       (Attribute.Float [|(-1.); Float.infinity; 1.|]) source in
-  expect_code "invalid_geometry" (Plane_clip.clip ~clip_attribute:"field"
+  expect_code "invalid_geometry" (Plane_clip_front.clip ~clip_attribute:"field"
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x non_finite)
 
 let run () =

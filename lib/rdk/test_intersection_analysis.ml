@@ -273,7 +273,7 @@ let test_parallel_exact () =
   let source = Plane_generators.grid ~grain:31 ~counts:Plane_generators.Grid_point_counts
       ~connectivity:Plane_generators.Grid_alternating_triangles
       ~columns:80 ~rows:60 ~size:20. () |> get in
-  let collision = Transform_ops.transform ~grain:31
+  let collision = Transform_ops_front.transform ~grain:31
       (Rays_math.Mat4.rotation_x (Float.pi /. 2.)) source in
   let run domains = Parallel.run ~domains (fun () ->
     Intersection_analysis.run ~grain:31 ~include_coplanar:false ~collision source

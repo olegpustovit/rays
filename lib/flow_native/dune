@@ -1,8 +1,8 @@
 (library
  (name flow_native)
  (public_name rays.flow_native)
- (modules drawing live_frame marks_scene workspace_gpu workspace_host workspace_images workspace_resources)
- (libraries editor_document rays rays_math input rdk flow flow_ir flow_gpu flow_sop
+ (modules drawing probe_run live_frame marks_scene workspace_gpu workspace_host workspace_images workspace_resources)
+ (libraries editor_document rays rays_math input rdk flow flow_graph flow_ir flow_gpu flow_sop
    scene_command renderer lru runtime_resources parallel sop unix))
 
 (test

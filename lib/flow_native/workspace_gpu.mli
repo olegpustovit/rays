@@ -1,3 +1,8 @@
+type policy = Flow_ir.Gpu.config
+(** The workspace owner's immutable execution policy. *)
+
+val default_policy : policy
+
 type t
 val create : ?clock:(unit -> float) -> unit -> t
 val config : ?fast:bool -> t -> Flow_ir.Gpu.config

@@ -170,7 +170,7 @@ let test_morph_sketch () =
     (Printf.sprintf "Skin made %d primitives over %d points"
       (Rdk.Geometry.primitive_count vase) (Rdk.Geometry.point_count vase));
   let index = Rdk.Topology_index.create (Rdk.Geometry.topology vase) in
-  check (Rdk_test_support.Topology_index.non_manifold_edge_count index = 0)
+  check (Rdk_test_support.Topology_index_front.non_manifold_edge_count index = 0)
     "Skin wall has non-manifold edges";
   check (Option.bind (Rdk.Geometry.find_group ~owner:Rdk.Group.Point "rim" vase)
            Rdk.Group.ordered_elements = Some [|0; 8; 16; 24|])

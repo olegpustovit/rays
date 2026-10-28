@@ -56,7 +56,7 @@ let create ?gpu ?settings
     ?preferences ?(ui_text_size = default_text_size) ?ui_font ?opened ~workspace ~prepare () =
   let factories = if factories = [] then Sop.Nodes.factories else factories in
   let settings = Option.value settings ~default:workspace.Workspace_doc.settings in
-  let gpu = Option.value ~default:Flow_ir.Gpu.default gpu in
+  let gpu = Option.value ~default:Flow_native.Workspace_gpu.default_policy gpu in
   let opened = workspace_doc ~gpu ?opened ~factories ~seed_scene
       { workspace with Workspace_doc.settings } in
   Result.bind opened (fun doc ->

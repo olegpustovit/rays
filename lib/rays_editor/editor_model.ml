@@ -28,7 +28,7 @@ type scope_key = {
   ws : Workspace_doc.t; probe_map : int Layout_by_path.Path_map.t; graph : string;
   evaluated : Flow.Eval.t option;
   summaries : Cook.summary list; time : Input.t option;
-  executions : Flow_ir.execution list;
+  executions : Flow_native.Probe_run.reports;
   records : Flow_graph.Probe.t option;
   force : Flow_graph.Probe.force;
   scope : Flow_graph.Projection.scope;
@@ -238,7 +238,7 @@ type t = {
   notice : (notice_kind * string) option;  (* the last message and what it was: information or a refusal *)
   notice_at : float;  (* when the notice last changed: the echo tip shows it for a while *)
   doc : Document.t;  (* always the history's present *)
-  gpu : Flow_ir.Gpu.config;  (* the workspace owner's immutable execution policy *)
+  gpu : Flow_native.Workspace_gpu.policy;  (* the workspace owner's immutable execution policy *)
   filed : Document.t;  (* the document as its source file has it: an external change may replace it *)
   panes : graph_pane Panel_map.t;
   (* the graph panels' own canvas, level, selection, graph and route, by panel key; the one in use

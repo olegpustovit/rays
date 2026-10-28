@@ -135,7 +135,7 @@ let test_selected_loop_validation_scope () =
   let geometry = Geometry.create ~positions ~topology () |> get_string in
   let triangle = Group.init ~owner:Group.Primitive ~name:"triangle" 2
       (fun primitive -> primitive = 0) in
-  let output = Subdivide.subdivide ~scheme:Subdivide.Loop ~primitives:triangle geometry
+  let output = Subdivide_front.subdivide ~scheme:Subdivide.Loop ~primitives:triangle geometry
       |> get_rdk in
   check (Geometry.primitive_count output = 5
       && Topology.primitive_size (Geometry.topology output) 0 = 4)
@@ -156,7 +156,7 @@ let test_disconnected_selected_fans () =
   let diagonal = Group.ordered ~owner:Group.Primitive ~name:"diagonal"
       ~length:4 [|0;3|] |> get_string in
   let run domains = Parallel.run ~domains (fun () ->
-      Subdivide.subdivide ~grain:1 ~primitives:diagonal geometry |> get_rdk) in
+      Subdivide_front.subdivide ~grain:1 ~primitives:diagonal geometry |> get_rdk) in
   let one = run 1 and four = run 4 in
   check (equal_geometry one four)
     "disconnected selected-fan splitting differs across domains";
@@ -195,14 +195,14 @@ let test_chaikin_creasing () =
   let source_index = Topology_index.create (Geometry.topology input) in
   let edge neighbor = Topology_index.find_edge source_index ~a:4 ~b:neighbor
       |> Option.get in
-  let uniform = Subdivide.subdivide ~grain:1
+  let uniform = Subdivide_front.subdivide ~grain:1
       ~creasing_method:Subdivide.Subdivide_creasing_uniform
       ~resulting_crease_group:"remaining" input |> get_rdk
-  and chaikin = Subdivide.subdivide ~grain:1
+  and chaikin = Subdivide_front.subdivide ~grain:1
       ~creasing_method:Subdivide.Subdivide_creasing_chaikin
       ~resulting_crease_group:"remaining" input |> get_rdk in
   check (equal_geometry uniform
-      (Subdivide.subdivide ~grain:1 ~resulting_crease_group:"remaining" input |> get_rdk))
+      (Subdivide_front.subdivide ~grain:1 ~resulting_crease_group:"remaining" input |> get_rdk))
     "uniform creasing is not the compatibility default";
   let midpoint neighbor = Geometry.point_count input + edge neighbor in
   let close left right = Float.abs (left -. right) <= 1e-12 in
@@ -263,10 +263,10 @@ let test_chaikin_creasing () =
         (Packed.Float3.View.view (Geometry.positions mask_input)).z.(point))
         mask_topology.vertex_points)) in
   let mask_input = Geometry.with_attribute mask_fvar mask_input |> get_string in
-  let mask_uniform = Subdivide.subdivide ~grain:1
+  let mask_uniform = Subdivide_front.subdivide ~grain:1
       ~creasing_method:Subdivide.Subdivide_creasing_uniform
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_none mask_input |> get_rdk
-  and mask_chaikin = Subdivide.subdivide ~grain:1
+  and mask_chaikin = Subdivide_front.subdivide ~grain:1
       ~creasing_method:Subdivide.Subdivide_creasing_chaikin
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_none mask_input |> get_rdk in
   let source_positions = Packed.Float3.View.view (Geometry.positions mask_input)
@@ -297,21 +297,21 @@ let test_chaikin_creasing () =
     "Chaikin vertex rule did not follow its surviving child crease neighborhood";
 
   let exact domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 ~iterations:2
+    Subdivide_front.subdivide ~grain:1 ~iterations:2
       ~creasing_method:Subdivide.Subdivide_creasing_chaikin
       ~resulting_crease_group:"remaining" (make ()) |> get_rdk) in
   let exact_one = exact 1 and exact_four = exact 4 in
   check (equal_geometry exact_one exact_four)
     "recursive Chaikin creasing differs across one and four domains";
   check (not (equal_geometry exact_one
-      (Subdivide.subdivide ~grain:1 ~iterations:2
+      (Subdivide_front.subdivide ~grain:1 ~iterations:2
         ~creasing_method:Subdivide.Subdivide_creasing_uniform
         ~resulting_crease_group:"remaining" (make ()) |> get_rdk)))
     "recursive Chaikin creasing collapsed to uniform decay";
 
   let clean = Plane_generators.grid ~connectivity:Plane_generators.Grid_quads
       ~columns:2 ~rows:2 ~size:2. () |> get_rdk in
-  let second_input = Subdivide.subdivide ~grain:1 ~creases:input
+  let second_input = Subdivide_front.subdivide ~grain:1 ~creases:input
       ~creasing_method:Subdivide.Subdivide_creasing_chaikin
       ~resulting_crease_group:"remaining" clean |> get_rdk in
   check (equal_geometry chaikin second_input)
@@ -321,22 +321,22 @@ let test_chaikin_creasing () =
       ~length:(Geometry.primitive_count input) [|0;1|] |> get_string in
   let local_input = Geometry.with_group selection input |> get_string in
   let local domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 ~primitives:selection
+    Subdivide_front.subdivide ~grain:1 ~primitives:selection
       ~creasing_method:Subdivide.Subdivide_creasing_chaikin local_input |> get_rdk) in
   check (equal_geometry (local 1) (local 4))
     "local Chaikin creasing differs across one and four domains";
 
   let loop domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 ~scheme:Subdivide.Loop
+    Subdivide_front.subdivide ~grain:1 ~scheme:Subdivide.Loop
       ~creasing_method:Subdivide.Subdivide_creasing_chaikin
       (make ~connectivity:Plane_generators.Grid_triangles ()) |> get_rdk) in
   check (equal_geometry (loop 1) (loop 4))
     "Loop Chaikin creasing differs across one and four domains";
 
   let corner_only = quad ~corner_weights:[|2.;0.;0.;0.|] () in
-  let corner_uniform = Subdivide.subdivide
+  let corner_uniform = Subdivide_front.subdivide
       ~creasing_method:Subdivide.Subdivide_creasing_uniform corner_only |> get_rdk
-  and corner_chaikin = Subdivide.subdivide
+  and corner_chaikin = Subdivide_front.subdivide
       ~creasing_method:Subdivide.Subdivide_creasing_chaikin corner_only |> get_rdk in
   check (equal_geometry corner_uniform corner_chaikin)
     "Chaikin edge policy changed uniform corner sharpness decay"
@@ -345,9 +345,9 @@ let test_point_boundary_interpolation () =
   let input = quad () |> Geometry.with_attribute
       (attribute Attribute.Point "sample" (Attribute.Float [|0.;2.;4.;6.|]))
       |> get_string in
-  let edge_only = Subdivide.subdivide
+  let edge_only = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_only input |> get_rdk
-  and edge_and_corner = Subdivide.subdivide
+  and edge_and_corner = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_and_corner input
       |> get_rdk in
   let edge_positions = Packed.Float3.View.view
@@ -363,7 +363,7 @@ let test_point_boundary_interpolation () =
   check ((float_values Attribute.Point "sample" edge_and_corner).(0) = 0.)
     "Edge and Corner did not pin an ordinary point attribute";
 
-  let none = Subdivide.subdivide
+  let none = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none input |> get_rdk in
   check (Geometry.point_count none = 9 && Geometry.vertex_count none = 0
       && Geometry.primitive_count none = 0)
@@ -373,7 +373,7 @@ let test_point_boundary_interpolation () =
     | Some holes -> Group.length holes = 0 && Group.cardinality holes = 0
     | None -> false)
     "None did not preserve canonical empty output-hole membership";
-  let retained = Subdivide.subdivide ~remove_holes:false
+  let retained = Subdivide_front.subdivide ~remove_holes:false
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none input |> get_rdk in
   check (Geometry.primitive_count retained = 4
       && Group.cardinality
@@ -383,7 +383,7 @@ let test_point_boundary_interpolation () =
   let grid () = Plane_generators.grid ~connectivity:Plane_generators.Grid_quads
       ~columns:3 ~rows:3 ~size:3. () |> get_rdk in
   let run policy domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 ~boundary_interpolation:policy (grid ()) |> get_rdk) in
+    Subdivide_front.subdivide ~grain:1 ~boundary_interpolation:policy (grid ()) |> get_rdk) in
   List.iter (fun policy ->
     let one = run policy 1 and four = run policy 4 in
     check (equal_geometry one four)
@@ -393,14 +393,14 @@ let test_point_boundary_interpolation () =
   let center_only = run Subdivide.Subdivide_boundary_none 1 in
   check (Geometry.primitive_count center_only = 4)
     "None did not retain exactly the descendants of the interior grid face";
-  let recursive = Subdivide.subdivide ~iterations:2
+  let recursive = Subdivide_front.subdivide ~iterations:2
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none (grid ()) |> get_rdk in
   check (Geometry.primitive_count recursive = 16)
     "recursive None removed boundary holes before the final level";
   let with_center_hole = grid () |> Geometry.with_group
       (Group.ordered ~owner:Group.Primitive ~name:"subdivision_hole"
         ~length:9 [|4|] |> get_string) |> get_string in
-  let all_holes = Subdivide.subdivide
+  let all_holes = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none with_center_hole
       |> get_rdk in
   check (Geometry.primitive_count all_holes = 0)
@@ -408,7 +408,7 @@ let test_point_boundary_interpolation () =
   let local_source = grid () |> Geometry.with_group
       (Group.ordered ~owner:Group.Primitive ~name:"center"
         ~length:9 [|4|] |> get_string) |> get_string in
-  let local = Subdivide.subdivide ~grain:1
+  let local = Subdivide_front.subdivide ~grain:1
       ~primitives:(group Group.Primitive "center" local_source)
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none local_source
       |> get_rdk in
@@ -417,9 +417,9 @@ let test_point_boundary_interpolation () =
 
   let strip = Plane_generators.grid ~connectivity:Plane_generators.Grid_quads
       ~columns:2 ~rows:1 ~size:2. () |> get_rdk in
-  let strip_edge = Subdivide.subdivide
+  let strip_edge = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_only strip |> get_rdk
-  and strip_corners = Subdivide.subdivide
+  and strip_corners = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_and_corner strip
       |> get_rdk in
   let edge_positions = Packed.Float3.View.view
@@ -437,12 +437,12 @@ let test_point_boundary_interpolation () =
       ~vertex_points:[|0;1;2|] ~primitive_offsets:[|0;3|] |> get_string in
   let triangle = Geometry.create ~positions:triangle_positions
       ~topology:triangle_topology () |> get_string in
-  let loop_edge = Subdivide.subdivide ~scheme:Subdivide.Loop
+  let loop_edge = Subdivide_front.subdivide ~scheme:Subdivide.Loop
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_only triangle |> get_rdk
-  and loop_corners = Subdivide.subdivide ~scheme:Subdivide.Loop
+  and loop_corners = Subdivide_front.subdivide ~scheme:Subdivide.Loop
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_and_corner triangle
       |> get_rdk
-  and loop_none = Subdivide.subdivide ~scheme:Subdivide.Loop
+  and loop_none = Subdivide_front.subdivide ~scheme:Subdivide.Loop
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none triangle |> get_rdk in
   let loop_edge_positions = Packed.Float3.View.view
       (Geometry.positions loop_edge)
@@ -459,26 +459,26 @@ let test_point_boundary_interpolation () =
 
   let closed = Box_generator.box ~connectivity:Box_generator.Box_quads ~consolidate_points:true
       ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_rdk in
-  let closed_edge = Subdivide.subdivide
+  let closed_edge = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_only closed |> get_rdk
-  and closed_corner = Subdivide.subdivide
+  and closed_corner = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_and_corner closed
       |> get_rdk
-  and closed_none = Subdivide.subdivide
+  and closed_none = Subdivide_front.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none closed |> get_rdk in
   check (equal_geometry closed_edge closed_corner
       && equal_geometry closed_edge closed_none)
     "point-boundary policy changed a closed manifold";
-  let bilinear_none = Subdivide.subdivide ~scheme:Subdivide.Bilinear
+  let bilinear_none = Subdivide_front.subdivide ~scheme:Subdivide.Bilinear
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none input |> get_rdk
-  and bilinear_edge = Subdivide.subdivide ~scheme:Subdivide.Bilinear
+  and bilinear_edge = Subdivide_front.subdivide ~scheme:Subdivide.Bilinear
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_only input |> get_rdk in
   check (equal_geometry bilinear_none bilinear_edge)
     "point-boundary interpolation changed bilinear subdivision";
 
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
-  (match Subdivide.subdivide ~cancel
+  (match Subdivide_front.subdivide ~cancel
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none (grid ()) with
    | Error error when Error.code error = "cancelled" -> ()
    | _ -> fail "cancelled boundary-hole classification published geometry")
@@ -506,10 +506,10 @@ let test_triangle_subdivision_policy () =
   let triangle_values = [|2.;6.;10.;14.|] in
   let triangles = make [|0;1;2; 1;0;3|] [|0;3;6|] triangle_values in
   let shared = edge_point triangles ~a:0 ~b:1 in
-  let standard = Subdivide.subdivide ~grain:1
+  let standard = Subdivide_front.subdivide ~grain:1
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_none
       ~triangle_policy:Subdivide.Subdivide_triangles_catmull_clark triangles |> get_rdk
-  and smooth = Subdivide.subdivide ~grain:1
+  and smooth = Subdivide_front.subdivide ~grain:1
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_none
       ~triangle_policy:Subdivide.Subdivide_triangles_smooth triangles |> get_rdk in
   let face0 = (2. +. 6. +. 10.) /. 3.
@@ -539,14 +539,14 @@ let test_triangle_subdivision_policy () =
       && close (fvar_at_shared smooth) expected_smooth)
     "Smooth Triangles did not apply to smoothly refined face-varying data";
   check (equal_geometry standard
-      (Subdivide.subdivide ~grain:1
+      (Subdivide_front.subdivide ~grain:1
         ~face_varying_interpolation:Subdivide.Subdivide_fvar_none triangles |> get_rdk))
     "Catmull-Clark triangle policy is not the compatibility default";
 
   let mixed_values = [|2.;6.;10.;14.;18.|] in
   let mixed = make [|0;1;2; 1;0;3;4|] [|0;3;7|] mixed_values in
   let mixed_shared = edge_point mixed ~a:0 ~b:1 in
-  let mixed_smooth = Subdivide.subdivide ~grain:1
+  let mixed_smooth = Subdivide_front.subdivide ~grain:1
       ~triangle_policy:Subdivide.Subdivide_triangles_smooth mixed |> get_rdk in
   let triangle_face = (2. +. 6. +. 10.) /. 3.
   and quad_face = (6. +. 2. +. 14. +. 18.) /. 4. in
@@ -564,9 +564,9 @@ let test_triangle_subdivision_policy () =
   let creased = Geometry.with_attribute
       (attribute Attribute.Vertex "creaseweight" (Attribute.Float creaseweights))
       triangles |> get_string in
-  let creased_standard = Subdivide.subdivide ~grain:1
+  let creased_standard = Subdivide_front.subdivide ~grain:1
       ~triangle_policy:Subdivide.Subdivide_triangles_catmull_clark creased |> get_rdk
-  and creased_smooth = Subdivide.subdivide ~grain:1
+  and creased_smooth = Subdivide_front.subdivide ~grain:1
       ~triangle_policy:Subdivide.Subdivide_triangles_smooth creased |> get_rdk in
   check (equal_geometry creased_standard creased_smooth
       && close (Packed.Float3.View.view
@@ -574,9 +574,9 @@ let test_triangle_subdivision_policy () =
     "fully sharp edge did not take precedence over Smooth Triangles";
 
   List.iter (fun scheme ->
-    let ordinary = Subdivide.subdivide ~grain:1 ~scheme
+    let ordinary = Subdivide_front.subdivide ~grain:1 ~scheme
         ~triangle_policy:Subdivide.Subdivide_triangles_catmull_clark triangles |> get_rdk
-    and alternate = Subdivide.subdivide ~grain:1 ~scheme
+    and alternate = Subdivide_front.subdivide ~grain:1 ~scheme
         ~triangle_policy:Subdivide.Subdivide_triangles_smooth triangles |> get_rdk in
     check (equal_geometry ordinary alternate)
       "triangle policy changed a non-Catmull-Clark scheme")
@@ -585,7 +585,7 @@ let test_triangle_subdivision_policy () =
   let dense = Plane_generators.grid ~connectivity:Plane_generators.Grid_triangles
       ~columns:4 ~rows:3 ~size:4. () |> get_rdk in
   let exact domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 ~iterations:2
+    Subdivide_front.subdivide ~grain:1 ~iterations:2
       ~triangle_policy:Subdivide.Subdivide_triangles_smooth dense |> get_rdk) in
   check (equal_geometry (exact 1) (exact 4))
     "recursive Smooth Triangles differs across one and four domains";
@@ -593,12 +593,12 @@ let test_triangle_subdivision_policy () =
       ~length:(Geometry.primitive_count dense) [|0;1;2;3|] |> get_string in
   let local_input = Geometry.with_group selection dense |> get_string in
   let local domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 ~primitives:selection
+    Subdivide_front.subdivide ~grain:1 ~primitives:selection
       ~triangle_policy:Subdivide.Subdivide_triangles_smooth local_input |> get_rdk) in
   let local_one = local 1 in
   check (equal_geometry local_one (local 4))
     "local Smooth Triangles differs across one and four domains";
-  let local_standard = Subdivide.subdivide ~grain:1 ~primitives:selection
+  let local_standard = Subdivide_front.subdivide ~grain:1 ~primitives:selection
       ~triangle_policy:Subdivide.Subdivide_triangles_catmull_clark local_input |> get_rdk in
   check (not (equal_geometry local_one local_standard))
     "local Subdivide ignored its Smooth Triangles policy"
@@ -626,7 +626,7 @@ let test_face_varying_interpolation () =
     !result in
   let output_original_corner source_vertex = source_vertex * 4 in
   let run ?(iterations = 1) mode geometry =
-    Subdivide.subdivide ~grain:1 ~iterations
+    Subdivide_front.subdivide ~grain:1 ~iterations
       ~face_varying_interpolation:mode geometry |> get_rdk in
   let continuous () = Plane_generators.grid ~connectivity:Plane_generators.Grid_quads
       ~columns:3 ~rows:3 ~size:3. () |> get_rdk
@@ -819,14 +819,14 @@ let test_face_varying_interpolation () =
   ] in
   List.iter (fun mode ->
     let refine domains = Parallel.run ~domains (fun () ->
-      Subdivide.subdivide ~grain:1 ~scheme:Subdivide.Loop
+      Subdivide_front.subdivide ~grain:1 ~scheme:Subdivide.Loop
         ~face_varying_interpolation:mode loop_input |> get_rdk) in
     check (equal_geometry (refine 1) (refine 4))
       "Loop face-varying policy differs across one and four domains")
     fvar_modes;
-  let loop_none = Subdivide.subdivide ~grain:1 ~scheme:Subdivide.Loop
+  let loop_none = Subdivide_front.subdivide ~grain:1 ~scheme:Subdivide.Loop
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_none loop_input |> get_rdk
-  and loop_all = Subdivide.subdivide ~grain:1 ~scheme:Subdivide.Loop
+  and loop_all = Subdivide_front.subdivide ~grain:1 ~scheme:Subdivide.Loop
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_all loop_input |> get_rdk in
   check (float_values Attribute.Vertex "fvar" loop_none
       <> float_values Attribute.Vertex "fvar" loop_all)
@@ -836,7 +836,7 @@ let test_face_varying_interpolation () =
       ~length:(Geometry.primitive_count input) [|0;1;3;4|] |> get_string in
   let local_input = Geometry.with_group local_selection input |> get_string in
   let local mode domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 ~primitives:local_selection
+    Subdivide_front.subdivide ~grain:1 ~primitives:local_selection
       ~face_varying_interpolation:mode local_input |> get_rdk) in
   let local_none_one = local Subdivide.Subdivide_fvar_none 1
   and local_none_four = local Subdivide.Subdivide_fvar_none 4
@@ -847,15 +847,15 @@ let test_face_varying_interpolation () =
       <> float_values Attribute.Vertex "fvar" local_all)
     "local Subdivide ignored its face-varying interpolation policy";
 
-  let bilinear_none = Subdivide.subdivide ~scheme:Subdivide.Bilinear
+  let bilinear_none = Subdivide_front.subdivide ~scheme:Subdivide.Bilinear
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_none input |> get_rdk in
   check (equal_geometry bilinear_none
-      (Subdivide.subdivide ~scheme:Subdivide.Bilinear
+      (Subdivide_front.subdivide ~scheme:Subdivide.Bilinear
         ~face_varying_interpolation:Subdivide.Subdivide_fvar_all input |> get_rdk))
     "face-varying policy changed bilinear interpolation";
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
-  (match Subdivide.subdivide ~cancel
+  (match Subdivide_front.subdivide ~cancel
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_none input with
    | Error error when Error.code error = "cancelled" -> ()
    | _ -> fail "cancelled face-varying refinement published geometry")
@@ -900,7 +900,7 @@ let test_polygon_curve_subdivision () =
   let run domains ?(independent = false) ?(iterations = 1)
       ?(scheme = Subdivide.Catmull_clark) () =
     Parallel.run ~domains (fun () ->
-      Subdivide.subdivide ~grain:1 ~iterations ~scheme
+      Subdivide_front.subdivide ~grain:1 ~iterations ~scheme
         ~treat_curves_as_independent:independent (curve_network ()) |> get_rdk) in
   let shared = run 1 () and shared_four = run 4 () in
   check (equal_geometry shared shared_four)
@@ -969,7 +969,7 @@ let test_polygon_curve_subdivision () =
     "bilinear polygon-curve refinement moved an old point";
   let overridden = curve_network ()
       |> with_detail "osd_scheme" (Attribute.Text [|"bilinear"|])
-      |> Subdivide.subdivide ~scheme:Subdivide.Catmull_clark |> get_rdk
+      |> Subdivide_front.subdivide ~scheme:Subdivide.Catmull_clark |> get_rdk
       |> without_details ["osd_scheme"] in
   check (equal_geometry overridden bilinear)
     "polygon-curve subdivision ignored its osd_scheme detail override";
@@ -977,7 +977,7 @@ let test_polygon_curve_subdivision () =
   let local_selection = Group.ordered ~owner:Group.Primitive ~name:"local_curve"
       ~length:2 [|0|] |> get_string in
   let local domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 ~primitives:local_selection local_source |> get_rdk) in
+    Subdivide_front.subdivide ~grain:1 ~primitives:local_selection local_source |> get_rdk) in
   let local_one = local 1 and local_four = local 4 in
   check (equal_geometry local_one local_four
       && Geometry.primitive_count local_one = 2
@@ -994,7 +994,7 @@ let test_polygon_curve_subdivision () =
   let closed_source = Geometry.create ~positions:closed_positions
       ~topology:closed_topology () |> get_string in
   let closed domains = Parallel.run ~domains (fun () ->
-    Subdivide.subdivide ~grain:1 closed_source |> get_rdk) in
+    Subdivide_front.subdivide ~grain:1 closed_source |> get_rdk) in
   let closed_one = closed 1 and closed_four = closed 4 in
   check (equal_geometry closed_one closed_four
       && Geometry.point_count closed_one = 8
@@ -1013,7 +1013,7 @@ let test_polygon_curve_subdivision () =
   let free_source = Geometry.create ~positions:free_positions
       ~topology:free_topology () |> get_string in
   List.iter (fun independent ->
-    let output = Subdivide.subdivide ~treat_curves_as_independent:independent
+    let output = Subdivide_front.subdivide ~treat_curves_as_independent:independent
         free_source |> get_rdk in
     let positions = Packed.Float3.View.view (Geometry.positions output) in
     check (Geometry.point_count output = 4
@@ -1029,17 +1029,17 @@ let test_polygon_curve_subdivision () =
       ~positions:(Packed.Float3.View.of_owned_exn
         ~x:[|0.;1.|] ~y:[|0.;0.|] ~z:[|0.;0.|])
       ~topology:invalid_topology () |> get_string in
-  (match Subdivide.subdivide invalid with
+  (match Subdivide_front.subdivide invalid with
    | Ok _ -> fail "Subdivide accepted a zero-length curve topology edge"
    | Error error -> check (contains (Error.message error) "zero-length")
        "Subdivide returned the wrong zero-length curve diagnostic");
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
-  (match Subdivide.subdivide ~cancel (curve_network ()) with
+  (match Subdivide_front.subdivide ~cancel (curve_network ()) with
    | Ok _ -> fail "polygon-curve Subdivide ignored cancellation"
    | Error error -> check (Error.code error = "cancelled")
        "polygon-curve Subdivide cancellation diagnostic");
-  (match Subdivide.subdivide ~scheme:Subdivide.Loop (curve_network ()) with
+  (match Subdivide_front.subdivide ~scheme:Subdivide.Loop (curve_network ()) with
    | Ok _ -> fail "Subdivide accepted polygon curves under Loop"
    | Error error ->
        check (contains (Error.message error) "cannot refine polygon curves")
@@ -1072,7 +1072,7 @@ let test_mixed_surface_curve_subdivision () =
   let run domains ?selection ?(independent = false) ?(recompute = false) () =
     Parallel.run ~domains (fun () ->
       let geometry = mixed_surface_curves () in
-      Subdivide.subdivide ~grain:1 ?primitives:selection
+      Subdivide_front.subdivide ~grain:1 ?primitives:selection
         ~treat_curves_as_independent:independent
         ~recompute_point_normals:recompute geometry |> get_rdk) in
   let one = run 1 () and four = run 4 () in
@@ -1131,7 +1131,7 @@ let test_mixed_surface_curve_subdivision () =
   done
 
 let test_checked_loop_quad_error () =
-  match Subdivide.subdivide ~scheme:Subdivide.Loop (quad ()) with
+  match Subdivide_front.subdivide ~scheme:Subdivide.Loop (quad ()) with
   | Error error when Error.code error = "invalid_topology" -> ()
   | _ -> fail "Loop Subdivide accepted a quad"
 

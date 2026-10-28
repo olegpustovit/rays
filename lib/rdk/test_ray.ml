@@ -3,7 +3,7 @@ open Rdk
 open Rdk_test_support
 
 let translated y geometry =
-  Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 0. y 0.)) geometry
+  Transform_ops_front.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 0. y 0.)) geometry
 
 let add_attribute attribute geometry =
   Geometry.with_attribute attribute geometry |> get_string_ok

@@ -134,7 +134,7 @@ let only =
     "flow_sop", ["flow"; "flow_ir"; "lru"; "param"; "sop"; "rays_diagnostic"; "rays_math"; "unix"; "parallel"];
     "flow_ir", ["flow"; "param"; "rays_math"; "scene_command"; "lru"; "parallel"];
     "flow_graph", ["flow"; "param"];
-    "flow_native", ["editor_document"; "rays"; "rays_math"; "input"; "rdk"; "flow"; "flow_ir";
+    "flow_native", ["editor_document"; "rays"; "rays_math"; "input"; "rdk"; "flow"; "flow_graph"; "flow_ir";
                     "flow_gpu"; "flow_sop"; "scene_command"; "renderer"; "lru";
                     "runtime_resources"; "parallel"; "sop"; "unix"];
     "ogpu_core", ["native_layer_token"];

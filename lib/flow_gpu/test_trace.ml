@@ -67,7 +67,7 @@ let compare_runs ?caps ?(cpu_time = Fun.id) ?(tolerance = 1e-5) name lease id de
     assert (!hits > 0 && !worst <= tolerance)) times;
   R.close runner; Flow_gpu.Pipelines.close pipelines; built.release ();
   built
-let tilted ~angle ~shift geometry = Transform_ops.transform
+let tilted ~angle ~shift geometry = Transform_ops_front.transform
   (Rays_math.Mat4.mul (Rays_math.Mat4.translation (Rays_math.Vec3.create shift 0.1 0.5)) (Rays_math.Mat4.rotation_x angle)) geometry
 let flat lease =
   let a = grid 2. in
