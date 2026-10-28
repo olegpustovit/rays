@@ -20,7 +20,7 @@ module Image_texels = struct
         Result.bind (Payload.image inputs.(0)) (fun image ->
           let width = Image.width image and rgba = Image.storage image in
           let count = width * Image.height image in
-          let geometry = Rdk.Kernel.generate_point_ranges count (fun ~first ~last ~x ~y ~z ->
+          let geometry = Rdk.Geometry.generate_point_ranges count (fun ~first ~last ~x ~y ~z ->
             for i = first to last - 1 do
               x.(i) <- float (i mod width); y.(i) <- float (i / width); z.(i) <- float width
             done) in

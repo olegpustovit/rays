@@ -133,7 +133,7 @@ let patterns () =
 let kernel () =
   let count = 1_000_000 in
   let generated_ranges domains = Parallel.run ~domains (fun () ->
-    Kernel.generate_point_ranges count
+    Rdk.Geometry.generate_point_ranges count
       (fun ~first ~last ~x ~y ~z ->
         for index = first to last - 1 do
           let value = float_of_int index in

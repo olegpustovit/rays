@@ -7,7 +7,7 @@ open Test_support
 let ok_string = function Ok value -> value | Error error -> failwith error
 
 let geometry () =
-  Kernel.generate_point_ranges 129 (fun ~first ~last ~x ~y ~z ->
+  Rdk.Geometry.generate_point_ranges 129 (fun ~first ~last ~x ~y ~z ->
     for i = first to last - 1 do
       x.(i) <- float i *. 0.13 -. 0.4;
       y.(i) <- sin (float i *. 0.27);
@@ -75,7 +75,7 @@ let () =
     assert (geometry_bytes (capture_once ~max_entries:0 c42_four seeded)
       = geometry_bytes (capture_once ~max_entries:16 c42_four seeded));
     if Sys.getenv_opt "RAYS_CAPTURE_SESSION_BENCH" <> None then begin
-      let benchmark_input = Kernel.generate_point_ranges 4225 (fun ~first ~last ~x ~y ~z ->
+      let benchmark_input = Rdk.Geometry.generate_point_ranges 4225 (fun ~first ~last ~x ~y ~z ->
         for i = first to last - 1 do
           x.(i) <- float i *. 0.13 -. 0.4;
           y.(i) <- sin (float i *. 0.27);

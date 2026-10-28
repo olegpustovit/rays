@@ -24,11 +24,11 @@ let make_sun_depth_pipeline backend backend_device =
       }
   in
   let ( let* ) = Result.bind in
-  let* vertex = artifact (List.map buffer [ 0; 1; 2; 3; 4 ]) in
+  let* vertex = artifact (List.map buffer [ 0; 2; 3; 4 ]) in
   let* fragment = artifact [] in
   let* bindings =
     Ogpu.Binding.create_layout
-      (List.map (fun binding -> { Ogpu.Binding.binding; kind = Buffer; visibility = [ Vertex ] }) [ 0; 1; 2; 3; 4 ])
+      (List.map (fun binding -> { Ogpu.Binding.binding; kind = Buffer; visibility = [ Vertex ] }) [ 0; 2; 3; 4 ])
   in
   let* layout =
     Ogpu.Binding.create_pipeline_layout
@@ -61,13 +61,13 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
     (* Every pipeline is generated (shaders/*.rays) and binds in its Lisp declaration order: buffer 0
        and the vertex buffers, the one buffer both stages read, then the fragment's resources. *)
     let texture t = [ (t, `Texture); (t + 1, `Sampler) ] in
-    let scene3 = ([ 1; 3; 4; 5 ], [ 2 ]) in
+    let scene3 = ([ 3; 4; 5 ], [ 2 ]) in
     let source, (vertex_entry, fragment_entry), (vertex_buffers, shared), fragment_resources =
       match family with
       | Scene_execution.Scene2 | Scene2_textured ->
           (* records as words 0, the affine 1, the texture's argument buffer 2 *)
           (Renderer_shaders.scene2_textured_argument, ("scene2_vertex", "scene2_fragment"), ([ 1 ], []), [ (2, `Buffer) ])
-      (* records as floats 0 and words 1, surface 2, instances 3, attributes 4 and 5 *)
+      (* records as floats 0 (slot 1 unused), surface 2, instances 3, attributes 4 and 5 *)
       | Scene3 -> (source_scene3, ("scene3_vertex", "scene3_fragment"), scene3, [])
       | Scene3_points -> (source_scene3_points, ("scene3_points_vertex", "scene3_fragment"), scene3, [])
       | Scene3_textured -> (source_scene3_textured, ("scene3_vertex", "scene3_textured_fragment"), scene3, texture 6)

@@ -36,16 +36,16 @@ let run () =
   match create_offscreen ~logical_width:4 ~logical_height:4 ~width:4 ~height:4 with
   | Error error -> failwith (Format.asprintf "%a" Renderer.pp_error error)
   | Ok runtime ->
-      let indices = Bytes.make 12 '\000' and vertices = Bytes.make (68 * 3) '\000' in
+      let indices = Bytes.make 12 '\000' and vertices = Bytes.make (24 * 3) '\000' and attributes = Bytes.make (12 * 3) '\000' in
       Bytes.set_int32_le indices 4 1l;
       Bytes.set_int32_le indices 8 2l;
       List.iteri
         (fun index (x, y) ->
-          let offset = index * 68 in
-          Bytes.set_int64_le vertices offset (Int64.bits_of_float x);
-          Bytes.set_int64_le vertices (offset + 8) (Int64.bits_of_float y);
-          Bytes.set_int64_le vertices (offset + 40) (Int64.bits_of_float 1.);
-          Bytes.set_int32_le vertices (offset + 48) 0xffffffffl)
+          let offset = index * 24 in
+          Bytes.set_int32_le vertices offset (Int32.bits_of_float x);
+          Bytes.set_int32_le vertices (offset + 4) (Int32.bits_of_float y);
+          Bytes.set_int32_le vertices (offset + 20) (Int32.bits_of_float 1.);
+          Bytes.set_int32_le attributes (index * 12) 0xffffffffl)
         [ (-1., -1.); (3., -1.); (-1., 3.) ];
       let mesh : Renderer.Scene_execution.mesh =
         {
@@ -75,7 +75,7 @@ let run () =
           blend = Ogpu.Pipeline.Replace;
           texture = None;
           auxiliary = None;
-          vertex_attributes = None;
+          vertex_attributes = Some ("test-attributes", attributes);
           samples = 1;
           draw = { mesh; state = state scissor uniform };
         }
@@ -115,25 +115,27 @@ let run () =
       if actual <> expected then failwith "instanced Scene3 draw differs from two indexed draws";
       let primitive_mesh primitive positions =
         let count = List.length positions in
-        let vertices = Bytes.make (count * 68) '\000' and indices = Bytes.make (count * 4) '\000' in
+        let vertices = Bytes.make (count * 24) '\000' and attributes = Bytes.make (count * 12) '\000' and indices = Bytes.make (count * 4) '\000' in
         List.iteri
           (fun index (x, y) ->
-            let offset = index * 68 in
-            Bytes.set_int64_le vertices offset (Int64.bits_of_float x);
-            Bytes.set_int64_le vertices (offset + 8) (Int64.bits_of_float y);
-            Bytes.set_int64_le vertices (offset + 40) (Int64.bits_of_float 1.);
-            Bytes.set_int32_le vertices (offset + 48) 0xffffffffl;
+            let offset = index * 24 in
+            Bytes.set_int32_le vertices offset (Int32.bits_of_float x);
+            Bytes.set_int32_le vertices (offset + 4) (Int32.bits_of_float y);
+            Bytes.set_int32_le vertices (offset + 20) (Int32.bits_of_float 1.);
+            Bytes.set_int32_le attributes (index * 12) 0xffffffffl;
             Bytes.set_int32_le indices (index * 4) (Int32.of_int index))
           positions;
-        { mesh with vertices; indices; vertex_count = count; index_count = count; primitive }
+        ({ mesh with vertices; indices; vertex_count = count; index_count = count; primitive }, attributes)
       in
       List.iter
         (fun (primitive, positions) ->
+          let mesh, attributes = primitive_mesh primitive positions in
           let entry =
             {
               left with
               family = (if primitive = Ogpu.Render_pass.Point_list then Scene3_points else Scene3);
-              draw = { left.draw with mesh = primitive_mesh primitive positions };
+              draw = { left.draw with mesh };
+              vertex_attributes = Some ("primitive-attributes", attributes);
             }
           in
           let pixels = render [ entry ] in

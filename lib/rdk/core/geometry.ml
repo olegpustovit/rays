@@ -245,3 +245,11 @@ module View = struct
       (validate positions value.topology attributes value.groups
          value.edge_groups)
 end
+
+let generate_point_ranges count operation =
+  if count < 0 then invalid_arg "Geometry.generate_point_ranges: negative point count";
+  let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
+  Support.run_ranges count (fun ~first ~last -> operation ~first ~last ~x ~y ~z);
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
+  let topology = Topology.empty ~point_count:(Packed.Float3.length positions) in
+  create ~positions ~topology () |> Result.get_ok

@@ -53,16 +53,16 @@ let run () =
   match create_window 4 4 with
   | Error _ -> print_endline "renderer Scene3 lighting: skipped"
   | Ok runtime ->
-      let indices = Bytes.make 12 '\000' and vertices = Bytes.make (68 * 3) '\000' in
+      let indices = Bytes.make 12 '\000' and vertices = Bytes.make (24 * 3) '\000' and attributes = Bytes.make (12 * 3) '\000' in
       Bytes.set_int32_le indices 4 1l;
       Bytes.set_int32_le indices 8 2l;
       List.iteri
         (fun index (x, y) ->
-          let offset = index * 68 in
-          Bytes.set_int64_le vertices offset (Int64.bits_of_float x);
-          Bytes.set_int64_le vertices (offset + 8) (Int64.bits_of_float y);
-          Bytes.set_int64_le vertices (offset + 40) (Int64.bits_of_float 1.);
-          Bytes.set_int32_le vertices (offset + 48) 0xffffffffl)
+          let offset = index * 24 in
+          Bytes.set_int32_le vertices offset (Int32.bits_of_float x);
+          Bytes.set_int32_le vertices (offset + 4) (Int32.bits_of_float y);
+          Bytes.set_int32_le vertices (offset + 20) (Int32.bits_of_float 1.);
+          Bytes.set_int32_le attributes (index * 12) 0xffffffffl)
         [ (-1., -1.); (3., -1.); (-1., 3.) ];
       let mesh : Renderer.Scene_execution.mesh =
         {
@@ -92,7 +92,7 @@ let run () =
           blend = Ogpu.Pipeline.Replace;
           texture = None;
           auxiliary = None;
-          vertex_attributes = None;
+          vertex_attributes = Some ("test-attributes", attributes);
           samples = 1;
           draw = { mesh; state };
         }

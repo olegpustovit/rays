@@ -197,16 +197,13 @@ let resolve_gpu_vertices value (entry:sampled_draw)=
         error"Renderer.submit"Ogpu.Error.Invalid_argument"GPU shape layout is malformed"
       else Ok(Some source)
   |_->error"Renderer.submit"Ogpu.Error.Stale_handle"GPU vertices are stale or closed"
+(* Scene3 draws carry the 12-byte attribute record a vertex; 2D, UI and Marks draws carry none. *)
 let valid_vertex_attributes(entry:sampled_draw)=
-  let packed=Option.fold~none:false~some:(fun bytes->
-    Bytes.length bytes>=83*4&&
-    Int32.float_of_bits(Bytes.get_int32_le bytes(82*4))>0.5)
-    entry.draw.state.transform_uniforms in
-  match entry.vertex_attributes with
-  |None->not packed
-  |Some(key,bytes)->
-      entry.family<>Scene2&&entry.family<>Scene2_textured&&entry.family<>Ui&&entry.family<>Marks&&
-      packed&&key<>""&&entry.draw.mesh.vertex_count>=0&&
+  match entry.family,entry.vertex_attributes with
+  |(Scene2|Scene2_textured|Ui|Marks),None->true
+  |(Scene2|Scene2_textured|Ui|Marks),Some _|(Scene3|Scene3_points|Scene3_textured|Scene3_world),None->false
+  |_,Some(key,bytes)->
+      key<>""&&entry.draw.mesh.vertex_count>=0&&
       entry.draw.mesh.vertex_count<=Sys.max_string_length/24&&
       Bytes.length entry.draw.mesh.vertices=entry.draw.mesh.vertex_count*24&&
       Bytes.length bytes=entry.draw.mesh.vertex_count*12
@@ -1144,9 +1141,8 @@ let render_sun value scratch=
             |None,Some offset->Some(item.buffer,offset,offset)
             |None,None->None in
           (match uniforms with None->draw(index+1)|Some(buffer,offset,instances_offset)->
-          (* scene.rays sun-vertex: records as floats 0 and words 1, the World block 2, surface 3, instances 4 *)
+          (* scene.rays sun-vertex: records as floats 0 (slot 1 unused), the World block 2, surface 3, instances 4 *)
           let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:0 item.buffer in
-          let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:1 item.buffer in
           let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:2 world.auxiliary_buffer in
           let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:3~offset buffer in
           let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:4~offset:instances_offset buffer in

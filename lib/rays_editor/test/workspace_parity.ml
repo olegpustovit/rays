@@ -28,65 +28,7 @@ let signature (e : E.t) =
   List.map (fun (n,v) -> n,key v) e.results, List.map key e.states,
   List.map (fun (p, vs) -> p,List.map (fun (it,v) -> it,key v) vs) e.records
 
-(* Native qualification oracle: original CPU doubles, original 68-byte ABI.
-   The production mirror never feeds this packing path. *)
-let legacy_vertices mesh =
-  let view = Rays.Mesh.View.view mesh in
-  let mesh = match view.normals, view.mode with
-    | None, (Rays.Mesh.Triangles | Triangle_strip | Triangle_fan) -> Rays.Mesh.recalculate_normals mesh
-    | _ -> mesh in
-  let view = Rays.Mesh.View.view mesh in
-  let bytes = Bytes.make (Array.length view.vertices * 68) '\000' in
-  Array.iteri (fun index (position : Rays_math.Vec3.t) ->
-    let normal = Option.fold ~none:(Rays_math.Vec3.create 0. 0. 1.)
-      ~some:(fun normals -> normals.(index)) view.normals in
-    let put offset value = Bytes.set_int64_le bytes (index * 68 + offset) (Int64.bits_of_float value) in
-    put 0 position.x; put 8 position.y; put 16 position.z;
-    put 24 normal.x; put 32 normal.y; put 40 normal.z;
-    let color = Option.fold ~none:Rays_math.Color.white ~some:(fun colors -> colors.(index)) view.colors in
-    Bytes.set_int32_le bytes (index * 68 + 48) (Int32.of_int
-      ((color.r lsl 24) lor (color.g lsl 16) lor (color.b lsl 8) lor color.a));
-    Option.iter (fun coordinates -> let uv : Rays_math.Vec2.t = coordinates.(index) in
-      put 52 uv.x; put 60 uv.y) view.tex_coords) view.vertices;
-  bytes
-
-let compare_float32 runtime id mesh scene =
-  let native result = Result.map_error (Format.asprintf "%a" Renderer.pp_error) result |> string_ok in
-  let staged = Rays.Scene.Layer.stage_native ~width:320 ~height:240 scene
-    |> string_ok in
-  let current = List.concat_map (fun (prepared : Renderer.Scene_execution.prepared_scene3) ->
-    Array.to_list prepared.entries) staged.scene3 in
-  let vertices = legacy_vertices mesh in
-  let legacy = List.map (fun (entry : Renderer.Scene_execution.sampled_draw) ->
-    let uniforms = Bytes.copy (Option.get entry.draw.state.transform_uniforms) in
-    Bytes.set_int32_le uniforms (82 * 4) 0l;
-    let attributes_key = fst (Option.get entry.vertex_attributes) in
-    {entry with vertex_attributes = None; draw = {
-      mesh = {entry.draw.mesh with key = Host (Scene_execution.mesh_key_string entry.draw.mesh.key ^ ":f64-oracle:" ^ attributes_key); vertices};
-      state = {entry.draw.state with transform_uniforms = Some uniforms}}}) current in
-  let render entries =
-    let draws=List.map(fun (entry:Renderer.Scene_execution.sampled_draw)->
-      Renderer.prepared_draw ~family:entry.family ~blend:entry.blend
-        ?texture:entry.texture ?auxiliary:entry.auxiliary
-        ?vertex_attributes:entry.vertex_attributes ~samples:entry.samples entry.draw)entries in
-    ignore (native (Renderer.draw ~clear:(0.,0.,0.,1.) runtime draws));
-    native (Renderer.read_pixels runtime ~bytes_per_row:1280) in
-  let before = render legacy and after = render current in
-  let maximum = ref 0 and changed = ref 0 in
-  for pixel = 0 to Bytes.length after / 4 - 1 do
-    let different = ref false in
-    for channel = 0 to 3 do
-      let index = pixel * 4 + channel in
-      let difference = abs (Char.code (Bytes.get before index) - Char.code (Bytes.get after index)) in
-      maximum := max !maximum difference;
-      if difference <> 0 then different := true
-    done;
-    if !different then incr changed
-  done;
-  Printf.printf "Scene3 f64/f32 %s: maximum channel difference %d, changed pixels %d/%d\n%!"
-    id !maximum !changed (Bytes.length after / 4)
-
-let picture ?compare ?texture (output : S.output) =
+let picture ?texture (output : S.output) =
   let geometry = Result.get_ok (Sop.Payload.geometry output.payload) in
   let mesh = Rdk_rays.Rays_mesh.to_mesh geometry |> Result.map_error Rdk.Error.to_string |> string_ok in
   let positions = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry) in
@@ -105,7 +47,6 @@ let picture ?compare ?texture (output : S.output) =
   let rendered = Option.fold ~none:rendered
     ~some:(fun texture -> Rays.Scene.D3.Walk.with_texture (Rays.Scene.D3.textured texture) rendered) texture in
   let scene = [Rays.Scene.clear Rays_math.Color.black; Rays.Scene.view3d ~camera rendered] in
-  Option.iter (fun compare -> compare mesh scene) compare;
   scene
 
 let qualify ~name (workspace : Editor_document.Workspace_doc.t) =
@@ -182,22 +123,9 @@ let check ?directory ?(commands = false) ?(factories = Sop.Nodes.factories) ~nam
     let drawing = List.exists (fun (_,v) -> Flow.Value.ty_of v = Flow.Ty.drawing) evaluated.results in
     Rays.Canvas.create_exn ~width:(if drawing then 800 else 320) ~height:(if drawing then 600 else 240)) directory in
   let images = Hashtbl.create 32 and payloads = Hashtbl.create 32 in
-  let mirror = try Option.bind pixels (fun _ ->
-    if Sys.getenv_opt "RAYS_SCENE3_FLOAT32_COMPARE" <> Some "1" then None else
-    let gpu = Renderer.acquire_gpu () |> Result.map_error
-      (Format.asprintf "%a" Renderer.pp_error) |> string_ok in
-    let configuration={Renderer.default_configuration with logical_width=320;logical_height=240;
-      drawable_width=320;drawable_height=240}in
-    match Renderer.Native.create_offscreen_with_gpu gpu configuration with
-    | Ok runtime -> Some (gpu, runtime)
-    | Error error -> Renderer.release_gpu gpu; failwith (Format.asprintf "%a" Renderer.pp_error error))
-    with exn -> Option.iter (fun canvas->ignore(Rays.Canvas.destroy canvas)) pixels; raise exn in
   let compare table id value = match Hashtbl.find_opt table id with
     | None -> Hashtbl.add table id value | Some expected -> if value <> expected then failwith (name ^ ": " ^ id ^ " mismatch") in
-  Fun.protect ~finally:(fun () -> Fun.protect ~finally:(fun () ->
-    Option.iter (fun (gpu, runtime) -> Fun.protect ~finally:(fun () -> Renderer.release_gpu gpu)
-      (fun () -> ignore (Renderer.destroy runtime))) mirror)
-    (fun () -> Option.iter (fun canvas->ignore(Rays.Canvas.destroy canvas)) pixels)) (fun () ->
+  Fun.protect ~finally:(fun () -> Option.iter (fun canvas->ignore(Rays.Canvas.destroy canvas)) pixels) (fun () ->
   List.iter (fun domains -> Parallel.run ~domains (fun () ->
     let ir_state = E.create_state () and ref_state = E.create_state () in
     let modes = [false, compiled, ir_state; true, reference, ref_state] |> List.map (fun (reference, (lowered : L.t), state) ->
@@ -282,9 +210,7 @@ let check ?directory ?(commands = false) ?(factories = Sop.Nodes.factories) ~nam
                 render id [Rays.Scene.image (image (E.Deferred (Flow.Ty.image, node.id))) ~at:(0,0) ()]
             | Kernel _ -> failwith "Workspace results cannot display function payloads"
             | Geometry _ ->
-            let compare = if not reference && domains = 1 && frame = 0 then
-              Option.map (fun (_, runtime) -> compare_float32 runtime id) mirror else None in
-            render id (picture ?compare output);
+            render id (picture output);
             List.iteri (fun index (target, source) -> if target = cid then
               render (Printf.sprintf "%s-texture-%d" id index) (picture ~texture:(texture source |> ok) output)) textures) cooked;
           List.iter (fun (graph, value) -> if Flow.Value.ty_of value = Flow.Ty.drawing then begin

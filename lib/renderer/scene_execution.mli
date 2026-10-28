@@ -61,7 +61,8 @@ type sampled_draw = {
   auxiliary : auxiliary_resource option;
   vertex_attributes : (string * bytes) option;
   (** Independently retained Scene3 color/UV stream (12 bytes per vertex),
-      bound at vertex buffer 11. [None] retains the legacy packed ABI. *)
+      bound at vertex buffer 11. Required (and only valid) for the Scene3 families;
+      2D, UI and Marks draws carry [None]. *)
   samples : int;
   draw : geometry_draw;
 }

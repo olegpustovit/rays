@@ -57,7 +57,7 @@ let rdk_ok = get_string_ok
 let add owner name value geometry =
   Geometry.with_attribute (Attribute.create_owned ~owner ~name (Attribute.Float [|value|]) |> string_ok) geometry |> string_ok
 let fixture () =
-  let geometry = Kernel.generate_point_ranges 1 (fun ~first:_ ~last:_ ~x ~y ~z->x.(0)<-0.;y.(0)<-0.;z.(0)<-0.) in
+  let geometry = Rdk.Geometry.generate_point_ranges 1 (fun ~first:_ ~last:_ ~x ~y ~z->x.(0)<-0.;y.(0)<-0.;z.(0)<-0.) in
   geometry |> add Attribute.Point "source" 2. |> add Attribute.Point "target" 7.
     |> add Attribute.Detail "source" 11.
 let names geometry = Geometry.View.attributes geometry |> Array.map (fun attribute->Attribute.owner attribute,Attribute.name attribute)
@@ -79,7 +79,7 @@ let () =
   check (missed==input) "pattern no-match must be a no-op";
   check (M.attr_type ~owner:Attribute.Point ~name:"P" input=Ok (Flow.Eval.Text "vec3")) "canonical P type missing";
   check (match M.attr_type ~owner:Attribute.Point ~name:"absent" input with Error diagnostic->diagnostic.code="E_ATTR_TYPE"|_->false) "type query fabricated missing storage";
-  let grouped=Kernel.generate_point_ranges 4 (fun ~first ~last ~x ~y ~z->
+  let grouped=Rdk.Geometry.generate_point_ranges 4 (fun ~first ~last ~x ~y ~z->
     for i=first to last-1 do x.(i)<-float i;y.(i)<-0.;z.(i)<-0. done) in
   let ordered name elements = Group.ordered ~owner:Group.Point ~name ~length:4 elements |> string_ok in
   let grouped=grouped |> Geometry.with_group (ordered "source" [|1;2|]) |> string_ok

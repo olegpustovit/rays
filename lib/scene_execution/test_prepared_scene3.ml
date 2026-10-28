@@ -5,11 +5,11 @@ let state : Scene_execution.state =
     transform_uniforms=Some(Bytes.make 208 '\000')}
 
 let mesh : Scene_execution.mesh =
-  {key=Host "scene3:test";vertices=Bytes.make(3*68)'\000';vertex_count=3;
+  {key=Host "scene3:test";vertices=Bytes.make(3*24)'\000';vertex_count=3;
    indices=Bytes.make 12 '\000';index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
 
 let entry : Scene_execution.scene3_entry =
-  {family=Scene3;blend=Ogpu.Pipeline.Replace;texture=None;auxiliary=None;vertex_attributes=None;
+  {family=Scene3;blend=Ogpu.Pipeline.Replace;texture=None;auxiliary=None;vertex_attributes=Some("attributes",Bytes.make 36 '\000');
    samples=1;draw={mesh;state}}
 
 let expect_invalid label = function
@@ -34,21 +34,16 @@ let run () =
   if Result.is_ok(Scene_execution.prepare_scene3~clear:(0.,0.,0.,1.)
     ~clear_depth:nan[|entry|])then
     failwith"Scene3 accepted non-finite clear";
-  let uniforms=Bytes.make 5456 '\000'in
-  Bytes.set_int32_le uniforms(82*4)(Int32.bits_of_float 1.);
-  let packed={entry with vertex_attributes=Some("attributes",Bytes.make 36 '\000');
-    draw={mesh={mesh with vertices=Bytes.make 72 '\000'};
-      state={state with transform_uniforms=Some uniforms}}}in
+  let packed={entry with vertex_attributes=Some("other",Bytes.make 36 '\000')}in
   let prepare ?(clear=(0.,0.,0.,1.)) ?(clear_depth=1.) entries=
     Scene_execution.prepare_scene3~clear~clear_depth entries in
   let valid candidate=Result.is_ok(prepare[|candidate|])in
   assert(valid packed);
   List.iter(fun(label,candidate)->expect_invalid label(prepare[|candidate|]))[
-    "packed positions without attributes",{packed with vertex_attributes=None};
+    "Scene3 without attributes",{packed with vertex_attributes=None};
     "short packed attributes",{packed with vertex_attributes=Some("attributes",Bytes.make 35 '\000')};
     "empty attribute key",{packed with vertex_attributes=Some("",Bytes.make 36 '\000')};
-    "packed flag with legacy vertices",{packed with draw={packed.draw with mesh}};
-    "attributes without packed flag",{entry with vertex_attributes=packed.vertex_attributes}
+    "legacy 68-byte vertices",{packed with draw={packed.draw with mesh={mesh with vertices=Bytes.make 204 '\000'}}}
   ];
   let overflow = {entry with family=Scene3_points;
     draw={entry.draw with mesh={mesh with primitive=Point_list;

@@ -15,20 +15,19 @@ let pixel bytes offset expected message=
   require(Bytes.sub bytes offset 4=expected)message
 let putf bytes offset value=Bytes.set_int64_le bytes offset(Int64.bits_of_float value)
 let scene3_draw key red=
-  let vertices=Bytes.make(3*68)'\000'and indices=Bytes.create 12 in
-  List.iteri(fun index(x,y)->let offset=index*68 in
-    putf vertices offset x;putf vertices(offset+8)y;
-    putf vertices(offset+16)0.;putf vertices(offset+24)1.;
-    putf vertices(offset+28)red;putf vertices(offset+36)0.;
-    putf vertices(offset+44)0.;putf vertices(offset+52)0.;
-    putf vertices(offset+60)0.)[-1.,1.;1.,1.;-1.,-1.];
+  let vertices=Bytes.make(3*24)'\000'and attributes=Bytes.make(3*12)'\000'and indices=Bytes.create 12 in
+  List.iteri(fun index(x,y)->let offset=index*24 in
+    Bytes.set_int32_le vertices offset(Int32.bits_of_float x);
+    Bytes.set_int32_le vertices(offset+4)(Int32.bits_of_float y);
+    Bytes.set_int32_le vertices(offset+20)(Int32.bits_of_float 1.);
+    Bytes.set_int32_le attributes(index*12)(if red>0. then 0xff0000ffl else 0l))[-1.,1.;1.,1.;-1.,-1.];
   List.iteri(fun index value->Bytes.set_int32_le indices(index*4)value)[0l;1l;2l];
   let mesh:Scene_execution.mesh={key=Host key;vertices;vertex_count=3;indices;index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
   and state:Scene_execution.state={viewport=(0,0,5,4);scissor=(0,0,5,4);
     cull=Ogpu.Render_pass.Cull_none;depth_compare=Ogpu.Render_pass.Always;
     depth_write=false;depth_load=Ogpu.Render_pass.Clear;depth_clear=1.;
     transform_uniforms=None}in
-  Renderer.prepared_draw~family:Scene3
+  Renderer.prepared_draw~family:Scene3~vertex_attributes:(key^":attributes",attributes)
     {Scene_execution.mesh;state}
 
 let test_retained execution red=

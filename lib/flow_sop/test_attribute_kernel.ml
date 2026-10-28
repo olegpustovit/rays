@@ -398,7 +398,7 @@ let () =
 
 let () =
   List.iter(fun count->
-    let original=Kernel.generate_point_ranges count(fun ~first ~last ~x ~y ~z->
+    let original=Rdk.Geometry.generate_point_ranges count(fun ~first ~last ~x ~y ~z->
       for i=first to last-1 do x.(i)<-float i;y.(i)<- -0.;z.(i)<-0. done) in
     let before=geometry_bytes original and input=Lisp_sop.snapshot original in
     List.iter(fun(kind,body)->
@@ -1194,7 +1194,7 @@ let () =
      "(sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 1025 :rows 2)", 1;
      "(sop/scatter (sop/grid) :count 2050 :seed 9)", 1]
 let () =
-  let empty = Kernel.generate_point_ranges 0 (fun ~first:_ ~last:_ ~x:_ ~y:_ ~z:_ -> ()) in
+  let empty = Rdk.Geometry.generate_point_ranges 0 (fun ~first:_ ~last:_ ~x:_ ~y:_ ~z:_ -> ()) in
   let empty_input = Sop.Node.Build.make_geometry ~operation:"empty_fixture" ~version:1
     ~parameters:"" ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
