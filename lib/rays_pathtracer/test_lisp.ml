@@ -171,7 +171,8 @@ let scenario label (world : W.baked option) =
     let runner = Flow_gpu.Run.create lease pipelines msl in
     (* register pressure: Metal lowers a pipeline's thread limit when a kernel needs more registers *)
     let threads = ok (Flow_gpu.Run.max_total_threads runner) in
-    if Sys.getenv_opt "PT_BENCH" <> None then Printf.eprintf "maxTotalThreadsPerThreadgroup %d\n%!" threads;
+    if Sys.getenv_opt "PT_BENCH" <> None then
+      Printf.eprintf "maxTotalThreadsPerThreadgroup %d (pathtrace.metal %d)\n%!" threads (get (P.Private.max_total_threads tracer));
     assert (threads >= (if label = "world" then 448 else 512)); (* the recorded limits; a drop is a regression *)
     let values = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
     let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in

@@ -216,3 +216,8 @@ val image : t -> Rays.Image.t
     completed GPU film directly. *)
 
 val destroy : t -> unit
+
+module Private : sig
+  val max_total_threads : t -> (int, string) result
+  (** The current mesh shape's pathtrace pipeline thread limit (the Lisp kernel's register-pressure reference). *)
+end
