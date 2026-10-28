@@ -1,6 +1,5 @@
 (* Each Lisp node's declared facts, checked on its factory node: this module lowers calls as that
    node. *)
-let inline = Atomic.exchange Flow.Eval.inline_nodes false
 
 open Sop
 open Rdk
@@ -129,4 +128,3 @@ let test_declarations () =
     (List.length !preserved)
 
 let () = test_declarations ()
-let () = Atomic.set Flow.Eval.inline_nodes inline

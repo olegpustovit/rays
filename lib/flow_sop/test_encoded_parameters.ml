@@ -33,20 +33,14 @@ let source ?hook ?default ?operation ?version ?(argument = "") () =
   ^ " (graph g :context sop (let* [card (sop/test_encoded (sop/line :points 3) " ^ argument
   ^ ")] card)))"
 
-(* The card's factory node: these checks are its parameter protocol (the inspector's), so the call
-   lowers as that node rather than inline. *)
-let as_node f =
-  let inline = Atomic.exchange Flow.Eval.inline_nodes false in
-  Fun.protect ~finally:(fun () -> Atomic.set Flow.Eval.inline_nodes inline) f
-
-let lower forms = as_node (fun () -> flow_ok (Flow_sop.Lower.workspace forms))
-let of_checked ?factories checked = as_node (fun () -> Flow_sop.Lower.of_checked ?factories checked)
+let lower forms = flow_ok (Flow_sop.Lower.workspace forms)
+let of_checked ?factories checked = Flow_sop.Lower.of_checked ?factories checked
 
 let root lowered =
   let graph =
     List.find (fun (g : Flow_sop.Lower.graph) -> g.default) lowered.Flow_sop.Lower.graphs
   in
-  ok (Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
+  ok (Lisp_sop.root lowered graph)
 
 let field node = List.hd (Sop.Node.parameter_fields node)
 

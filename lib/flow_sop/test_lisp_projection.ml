@@ -1,6 +1,5 @@
 (* The card's inspector rows and its factory node's parameter metadata: this module lowers calls
    as that node. *)
-let inline = Atomic.exchange Flow.Eval.inline_nodes false
 
 module S = Flow.Syntax
 module W = Flow.Workspace
@@ -183,5 +182,3 @@ let () =
        (List.find (fun (row : P.row) -> row.key = Kw "distance") node.rows).expr
     = Some "4.0")
     "nested Lisp parameter gesture failed"
-
-let () = Atomic.set Flow.Eval.inline_nodes inline

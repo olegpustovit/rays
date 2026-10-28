@@ -57,6 +57,7 @@ type t = {
   approx_reasons : (Workspace.path * Diagnostic.t list) list;
   profile : Flow_ir.Profile.t;
   preview : node:int -> probes:int list -> Network.t -> (Network.t * int) option;
+  card_node : node:int -> (Sop.Node.t, string) result;
 }
 
 let fail code message = raise (Diagnostic.Error (Diagnostic.error ~code message))
@@ -2575,10 +2576,22 @@ struct
       lower_checked ~reference ~gpu ~strict_body:true ~defer_body_errors:true ~kernel_bindings
         ?on_profile ~factories ~inputs checked
     in
+    (* the evaluated error belongs to the call's own parameters (the first build's): a rebuild
+       with others evaluates the body *)
+    let errored = ref None in
     let build_body bindings ~label ~context inputs parameters =
+      let failed =
+        match (error, !errored) with
+        | Some _, None ->
+            errored := Some parameters;
+            true
+        | Some _, Some original -> original = parameters
+        | None, _ -> false
+      in
       match error with
-      | Some diagnostic -> Ok (lisp_body_failed ~checked ~definition ~inputs ~parameters diagnostic)
-      | None ->
+      | Some diagnostic when failed ->
+          Ok (lisp_body_failed ~checked ~definition ~inputs ~parameters diagnostic)
+      | _ ->
           build_lisp_body ~gpu ~lower_nested ~record_profile ~checked ~definition ~provenance ~label
             ~context ~inputs ~parameters ~bindings ~functions ~factories ~def_context_use
     in
@@ -2929,6 +2942,20 @@ struct
       =
     Hashtbl.create 16
 
+  (* a card's canonical parameters as the values of its schema's fields *)
+  let card_values defaults parameters =
+    List.map
+      (fun (name, default) ->
+        ( name,
+          match (List.assoc_opt name parameters, default) with
+          | Some (E.Bool b), _ -> Param.Bool_value b
+          | Some (E.Int n), _ -> Int_value n
+          | Some (E.Float f), _ -> Float_value f
+          | Some (E.Text t), Param.Choice_value _ -> Choice_value t
+          | Some (E.Text t), _ -> Text_value t
+          | _, value -> value ))
+      defaults
+
   (* An inlined card's marker: a pass-through of the body's result, or the structural node of a
      body whose geometry is decided by cooked data. *)
   let lower_card (node : E.node) args cid =
@@ -2974,19 +3001,7 @@ struct
           let schema =
             Lisp_node.schema "parameters" d.fields (Encoded_parameters.for_node checked d)
           in
-          let values =
-            List.map
-              (fun (name, default) ->
-                ( name,
-                  match (List.assoc_opt name parameters, default) with
-                  | Some (E.Bool b), _ -> Param.Bool_value b
-                  | Some (E.Int n), _ -> Int_value n
-                  | Some (E.Float f), _ -> Float_value f
-                  | Some (E.Text t), Param.Choice_value _ -> Choice_value t
-                  | Some (E.Text t), _ -> Text_value t
-                  | _, value -> value ))
-              (Param.default schema)
-          in
+          let values = card_values (Param.default schema) parameters in
           let rec attach node =
             Result.value ~default:node
               (Sop.Node.Build.parameterize_with_key ~schema ~values
@@ -3855,11 +3870,92 @@ struct
           (Network.with_frame_nodes frames network, root))
         outer
 
+  (* A card's factory node (the node menu's and inspector's), over the nodes its call's slots
+     name in the graph that holds the card, with the call's parameters and functions. *)
+  let card_node ~node:cid =
+    match
+      Array.find_opt
+        (fun (n : E.node) -> n.kind = E.card_kind && compiled.(n.id) = cid)
+        evaluated.plan.nodes
+    with
+    | None -> Error "No card has this compiled id"
+    | Some n when List.exists (fun (_, v) -> match v with E.Fn _ -> true | _ -> false) n.args ->
+        (* ponytail: the call's functions would be forwarded into a second evaluation whose
+           function ids can equal the body's own; narrow [same_function] before allowing it *)
+        Error "A card with function arguments has no factory node"
+    | Some n -> (
+        match
+          ( List.assoc_opt "kind" n.args,
+            List.assoc_opt "parameters" n.args,
+            List.assoc_opt "slots" n.args,
+            List.find_opt
+              (fun (g : graph) -> Edit.find g.network.geometry ~node_id:cid <> None)
+              graphs )
+        with
+        | Some (E.Text kind), Some (E.Record parameters), Some (E.Record slots), Some graph -> (
+            try
+              let slot_value = function
+                | E.Int id -> E.Deferred (plan.nodes.(id).ty, id)
+                | _ -> E.No_geo
+              in
+              let rest =
+                match lisp_definition kind with
+                | Some d ->
+                    List.filter_map
+                      (fun (s : Flow.Catalog.slot) -> if s.rest then Some s.name else None)
+                      d.slots
+                | None -> []
+              in
+              let args =
+                List.filter_map
+                  (fun (name, ids) ->
+                    match ids with
+                    | E.List [||] -> None
+                    | E.List [| id |] when not (List.mem name rest) -> Some (name, slot_value id)
+                    | E.List ids -> Some (name, E.List (Array.map slot_value ids))
+                    | _ -> None)
+                  slots
+                @ List.filter (fun (_, v) -> match v with E.Fn _ -> true | _ -> false) n.args
+              in
+              (* its own site: the call's kernels must not take the ids of the body's *)
+              let p =
+                lower_default { n with kind; args; site = n.site @ [ "~factory" ] } args cid
+              in
+              let changes =
+                match lisp_definition kind with
+                | Some d ->
+                    card_values
+                      (Param.default
+                         (Lisp_node.schema "parameters" d.fields
+                            (Encoded_parameters.for_node checked d)))
+                      parameters
+                | None -> []
+              in
+              let compile id =
+                edit (Edit.compile_node graph.network.geometry ~node_id:compiled.(id))
+              in
+              let options =
+                List.init p.arity (fun i ->
+                    match List.find_opt (fun (k : kernel_input) -> k.index = i) p.kernels with
+                    | Some k -> Some (kernel_node k (List.map compile k.sources))
+                    | None -> Option.map compile (List.assoc_opt i p.slots))
+              in
+              Ok
+                (edit
+                   (Sop.Node.Build.restore_id cid
+                      (edit
+                         (Lisp_node.with_initial_changes
+                            ~operation:(Edit.factory_operation p.factory) changes (fun () ->
+                              Edit.instantiate_optional p.factory options)))))
+            with Diagnostic.Error d -> Error (Diagnostic.to_string d))
+        | _ -> Error "The card has no kind, parameters, slots or graph")
+
   let result =
     {
       gpu;
       graphs;
       factories = lisp_factories;
+      card_node;
       compiled_ids = !ids;
       sites = List.rev !site_list;
       compiled = compiled_context;

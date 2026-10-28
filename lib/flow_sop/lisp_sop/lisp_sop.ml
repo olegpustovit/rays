@@ -39,8 +39,22 @@ let restore with_ root =
   in
   go root
 
+let root (lowered : Flow_sop.Lower.t) (graph : Flow_sop.Lower.graph) =
+  let root = Option.get graph.root in
+  if
+    Flow_sop.Network.Int_map.exists
+      (fun id cid -> cid = root && lowered.plan.nodes.(id).kind = Flow.Eval.card_kind)
+      lowered.compiled
+  then
+    match lowered.card_node ~node:root with
+    | Ok node -> Ok node
+    | Error _ -> Sop.Edit_graph.compile_node graph.network.geometry ~node_id:root
+  else Sop.Edit_graph.compile_node graph.network.geometry ~node_id:root
+
 (* A Lisp call lowers as its factory node (the node menu's and inspector's), whose parameters,
-   facts and rebuilds these helpers' callers check. *)
+   facts and rebuilds these helpers' callers check.
+   ponytail: still the global switch; Lower.t.card_node gives the same node for cards without
+   function arguments, but a merge's tags and list-valued rest slots differ from it (handoff E5). *)
 let as_node f =
   let inline = Atomic.exchange Flow.Eval.inline_nodes false in
   Fun.protect ~finally:(fun () -> Atomic.set Flow.Eval.inline_nodes inline) f

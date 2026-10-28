@@ -1,5 +1,4 @@
 (* The node's parameter contract, checked on its factory node: this module lowers calls as that node. *)
-let inline = Atomic.exchange Flow.Eval.inline_nodes false
 
 open Rdk
 open Rdk_test_support
@@ -50,7 +49,7 @@ let node input keywords =
   in
   let lowered = Flow_sop.Lower.of_checked ~factories workspace |> ok in
   let graph = List.hd lowered.graphs in
-  Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root) |> ok_string
+  Lisp_sop.root lowered graph |> ok_string
 
 let cook session context node =
   match Sop.Session.cook session ~context node with
@@ -139,5 +138,3 @@ let () =
           assert ((Sop.Session.stats session).misses = misses))
         [ (c42, seeded42); (c999, seeded999) ]);
   print_endline "Lisp noise_displace SOP cache, context-seed dependency and relabel identity pass"
-
-let () = Atomic.set Flow.Eval.inline_nodes inline

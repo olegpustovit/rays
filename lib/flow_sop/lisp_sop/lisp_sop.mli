@@ -9,6 +9,10 @@ val node_result : ?with_:(string * Sop.Node.t) list -> string -> (Sop.Node.t, st
     an image-typed external. Both kinds retain the original node and its inputs without cooking it
     during checking or lowering. *)
 
+val root : Flow_sop.Lower.t -> Flow_sop.Lower.graph -> (Sop.Node.t, string) result
+(** A graph's result: a card's factory node ({!Flow_sop.Lower.t.card_node}) when it is a Lisp call,
+    otherwise its compiled node. *)
+
 val node : ?with_:(string * Sop.Node.t) list -> string -> Sop.Node.t
 (** As {!node_result}; a lowering error fails the test with its message. *)
 

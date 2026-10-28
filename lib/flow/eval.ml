@@ -1533,7 +1533,28 @@ and card c ~form (d : W.node_definition) parameters ~vals v =
         kind = card_kind;
         ty = Ty.geometry;
         args =
-          [ ("value", v); ("kind", Text d.kind.qualified); ("parameters", Record parameters) ]
+          [
+            ("value", v);
+            ("kind", Text d.kind.qualified);
+            ("parameters", Record parameters);
+            (* the plan ids of the call's cooked slot inputs, as ints (not references: the marker
+               reads only its value), for the host's factory node of the card *)
+            ( "slots",
+              Record
+                (List.map
+                   (fun (s : Catalog.slot) ->
+                     let rec ids = function
+                       | Deferred (ty, id) when Ty.is_cooked ty -> [ Int id ]
+                       | List xs -> List.concat_map ids (Array.to_list xs)
+                       | _ -> []
+                     in
+                     ( s.name,
+                       List
+                         (Array.of_list
+                            (List.concat_map (fun (n, v) -> if n = s.name then ids v else []) vals))
+                     ))
+                   d.slots) );
+          ]
           (* the call's functions, which the host's field probes sample *)
           @ List.filter (fun (_, v) -> match v with Fn _ -> true | _ -> false) vals;
       }

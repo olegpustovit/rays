@@ -129,6 +129,10 @@ type t = {
       (** Scratch viewport network for a plan node at its iteration tuple. A geometry-loop template
           previews the selected element, with its captures, live arguments and fold snapshot. The
           authored network is unchanged. *)
+  card_node : node:int -> (Sop.Node.t, string) result;
+      (** The factory node of the card with this compiled id (the node menu's and inspector's: its
+          parameter schema, rebuilds and facts), over the nodes its call's slots name, with the
+          call's parameters. It keeps the card's id. A card with function arguments has none yet. *)
 }
 
 val source_context : t -> node:int -> (image_context, Diagnostic.t) result
