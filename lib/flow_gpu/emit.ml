@@ -42,6 +42,7 @@ TraceHit trace_scene(|} ^ pick "instance_acceleration_structure" "primitive_acce
     device const float4* spheres, uint sphere_count, |} ^ pick "device const float* instances, " "" ^ {|float3 o, float3 d, float tmin, float tmax) {
   intersector<triangle_data|} ^ pick ", instancing" "" ^ {|> query;
   query.assume_geometry_type(geometry_type::triangle);
+  query.force_opacity(forced_opacity::opaque);
   intersection_result<triangle_data|} ^ pick ", instancing" "" ^ {|> hit = query.intersect(ray(o, normalize(d), tmin, tmax), scene);
   TraceHit h = {0.0f, -1.0f, 0.0f, 0.0f, float3(0.0f), 0.0f, -1.0f};
   if (hit.type == intersection_type::triangle) {
@@ -64,6 +65,24 @@ TraceHit trace_scene(|} ^ pick "instance_acceleration_structure" "primitive_acce
     }
   }
   return h;
+}
+float trace_occluded(|} ^ pick "instance_acceleration_structure" "primitive_acceleration_structure" ^ {| scene, device const packed_float3* vertices,
+    device const float4* spheres, uint sphere_count, |} ^ pick "device const float* instances, " "" ^ {|float3 o, float3 d, float tmin, float tmax) {
+  intersector<|} ^ pick "instancing" "" ^ {|> query;
+  query.assume_geometry_type(geometry_type::triangle);
+  query.force_opacity(forced_opacity::opaque);
+  query.accept_any_intersection(true);
+  if (query.intersect(ray(o, normalize(d), tmin, tmax), scene).type == intersection_type::triangle) return 1.0f;
+  float3 dn = normalize(d);
+  for (uint k = 0; k < sphere_count; k++) {
+    float4 s = spheres[k]; float3 oc = o - s.xyz;
+    float b = dot(oc, dn); float3 q = oc - b*dn; float disc = s.w*s.w - dot(q, q);
+    if (disc >= 0.0f) {
+      float root = sqrt(disc), t = (-b - root >= tmin) ? -b - root : -b + root;
+      if (t >= tmin && t <= tmax) return 1.0f;
+    }
+  }
+  return 0.0f;
 }
 |}
 let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
@@ -100,11 +119,16 @@ let checked projection expression = match projection with
 let wrap_integer value = "(as_type<long>(ulong(" ^ value ^ ")<<1)>>1)"
 (* Integer registers occupy 64 bits; Int operations wrap in the signed 63-bit domain. *)
 let integer_status indentation operation b = match operation with
-  | Flow.Packed_ops.Idiv | Imod ->
-      Printf.sprintf "%sif(%s==0) atomic_fetch_or_explicit(status,2u,memory_order_relaxed);\n" indentation b
-  | Ishl | Ishr -> Printf.sprintf
-      "%sif(%s<0 || %s>62) atomic_fetch_or_explicit(status,4u,memory_order_relaxed);\n" indentation b b
+  | Flow.Packed_ops.Idiv | Imod -> Printf.sprintf "%ssb|=(%s==0)?2u:0u;\n" indentation b
+  | Ishl | Ishr -> Printf.sprintf "%ssb|=(%s<0 || %s>62)?4u:0u;\n" indentation b b
   | _ -> ""
+(* The status bits gather in the thread's [sb] and reach the shared word once, at the end or an early
+   return: an atomic per operation serializes the kernel and stops the compiler moving arithmetic. *)
+let flush_status = "if(sb!=0u) atomic_fetch_or_explicit(status,sb,memory_order_relaxed);"
+module Scope = Flow_ir.Kernel_layout.Scope
+let scope = Scope.create and indent = Scope.indent
+let enter = Scope.enter ~opening:(fun condition selected ->
+  Printf.sprintf "if(r%d%s0.0f) {" condition (if selected then "!=" else "=="))
 let integer operation a b = wrap_integer (match operation with
   | Flow.Packed_ops.Iadd -> "(ulong(" ^ a ^ ")+ulong(" ^ b ^ "))"
   | Isub -> "(ulong(" ^ a ^ ")-ulong(" ^ b ^ "))"
@@ -144,10 +168,23 @@ let kernel ?(fast=false) ?(instanced=false) program = try
     Printf.sprintf "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])"
       k (int_of index) gather_lengths.(k) width component in
   let hits = Hashtbl.create 4 in
-  let body = Buffer.create 4096 in
+  (* a ray whose only read field is [hit] is an occlusion test: any intersection answers it *)
+  let fields = Hashtbl.create 4 in
+  Array.iteri (fun slot instruction -> match snd (guarded [] instruction) with
+    | P.Trace (field, r) when used.(slot) -> Hashtbl.replace fields (Array.to_list r)
+        (field = 7 && Option.value (Hashtbl.find_opt fields (Array.to_list r)) ~default:true)
+    | _ -> ()) view.code;
+  let root = scope 0 in
+  let scopes = ref [root] in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
     if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
+    let current = List.hd !scopes in
     let guards,instruction=guarded [] instruction in
+    let ty, zero = if integer_register slot then "long", "0" else "float", "0.0f" in
+    let constant = match instruction with P.Const _ | Int_const _ -> not finite_checks.(slot) | _ -> false in
+    (* a guarded constant is declared with its value: consumers fold it, and an unselected value is never read *)
+    if not constant then enter current guards;
+    let body = current.Scope.code and indentation = indent current in
     let expression = match instruction with
       | P.Const value ->
           Printf.sprintf "as_type<float>(0x%lxu)" (Int32.bits_of_float value)
@@ -181,56 +218,67 @@ let kernel ?(fast=false) ?(instanced=false) program = try
       | Convert (Round,a) -> "long(round(" ^ float_of a ^ "))"
       | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> fail "Text kernels stay on the CPU."
       | Trace (field, r) ->
-          let key = Array.to_list r in
+          let rays = Array.to_list r in
+          let occlusion = Hashtbl.find fields rays and key = (current.Scope.id, guards, rays) in
           let hit = match Hashtbl.find_opt hits key with Some name -> name | None ->
             let name = Printf.sprintf "hit%d" slot and a k = float_of r.(k) in
-            Printf.bprintf body "  TraceHit %s=trace_scene(scene,scene_vertices,scene_spheres,uniforms[%d],%sfloat3(%s,%s,%s),float3(%s,%s,%s),%s,%s);\n"
-              name (Option.get scene_spheres) (if scene_instances = None then "" else "scene_instances,") (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) (a 8);
+            Printf.bprintf current.Scope.decls "  %s %s;\n" (if occlusion then "float" else "TraceHit") name;
+            Printf.bprintf body "%s%s=%s(scene,scene_vertices,scene_spheres,uniforms[%d],%sfloat3(%s,%s,%s),float3(%s,%s,%s),%s,%s);\n"
+              indentation name (if occlusion then "trace_occluded" else "trace_scene")
+              (Option.get scene_spheres) (if scene_instances = None then "" else "scene_instances,") (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) (a 8);
             Hashtbl.add hits key name; name in
-          hit ^ [| ".t"; ".prim"; ".u"; ".v"; ".n.x"; ".n.y"; ".n.z"; ".hit"; ".inst" |].(field)
+          if occlusion then hit else hit ^ [| ".t"; ".prim"; ".u"; ".v"; ".n.x"; ".n.y"; ".n.z"; ".hit"; ".inst" |].(field)
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
           (register x) (register y) (register z) octaves (table seed)
       | Loop_result (loop,component,_) -> register (loop+1+component)
       | _ -> fail "Integer instructions and conversions are not supported by the Metal kernel target." in
-    let indentation=if guards=[] then "  " else "    " in
-    let ty, zero = if integer_register slot then "long", "0" else "float", "0.0f" in
-    if guards=[] then Printf.bprintf body "  %s r%d=%s;\n" ty slot expression else begin
-      Printf.bprintf body "  %s r%d=%s;\n" ty slot zero;
-      Printf.bprintf body "  if(%s) {\n" (String.concat "&&" (List.map(fun(condition,selected)->
-        Printf.sprintf "r%d%s0.0f" condition (if selected then "!=" else "=="))guards));
-      Printf.bprintf body "    r%d=%s;\n" slot expression
+    if constant then Printf.bprintf current.Scope.decls "  %s r%d=%s;\n" ty slot expression
+    else if current.Scope.opened=[] then Printf.bprintf body "%s%s r%d=%s;\n" indentation ty slot expression else begin
+      Printf.bprintf current.Scope.decls "  %s r%d=%s;\n" ty slot zero;
+      Printf.bprintf body "%sr%d=%s;\n" indentation slot expression
     end;
     if finite_checks.(slot) && not (integer_register slot) then
-      Printf.bprintf body "%sif(!isfinite(r%d)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);\n" indentation slot;
+      Printf.bprintf body "%ssb|=!isfinite(r%d);\n" indentation slot;
     (match instruction with
      | P.Int_binary (operation, _, b) ->
          Buffer.add_string body (integer_status indentation operation (int_of b))
-     | _ -> ());
-    if guards<>[] then Buffer.add_string body "  }\n"
+     | _ -> ())
     end) ~loop:(fun header control ~next ~stop ~body:emit_body -> if used.(header)then begin
+      let outer = List.hd !scopes in
       let guards,_=guarded [] view.code.(header)in
       let ty slot=if integer_register slot then "long" else "float"in
-      Printf.bprintf body "  long r%d=0;\n" header;
+      Printf.bprintf outer.Scope.decls "  long r%d=0;\n" header;
       Array.iteri(fun component _->let slot=header+1+component in
-        Printf.bprintf body "  %s r%d=0;\n" (ty slot)slot)control.initial;
-      if guards<>[]then Printf.bprintf body "  if(%s) {\n" (String.concat "&&"
-        (List.map(fun(condition,selected)->Printf.sprintf "%s%s0.0f" (float_of condition)
-          (if selected then "!=" else "=="))guards));
+        Printf.bprintf outer.Scope.decls "  %s r%d=0;\n" (ty slot)slot)control.initial;
+      enter outer guards;
+      let body = outer.Scope.code and indentation = indent outer in
       Option.iter(fun limit->Printf.bprintf body
-        "  if(r%d>r%d && ulong(r%d-r%d)>%duL){atomic_fetch_or_explicit(status,1u,memory_order_relaxed);return;}\n"
-        control.last control.first control.last control.first limit)control.limit;
-      Array.iteri(fun component initial->Printf.bprintf body "  r%d=r%d;\n" (header+1+component)initial)control.initial;
-      Printf.bprintf body "  for(r%d=r%d;r%d<r%d;r%d++){\n" header control.first header control.last header;
+        "%sif(r%d>r%d && ulong(r%d-r%d)>%duL){sb|=1u;%sreturn;}\n" indentation
+        control.last control.first control.last control.first limit flush_status)control.limit;
+      Array.iteri(fun component initial->Printf.bprintf body "%sr%d=r%d;\n" indentation (header+1+component)initial)control.initial;
+      Printf.bprintf body "%sfor(r%d=r%d;r%d<r%d;r%d++){\n" indentation header control.first header control.last header;
+      let inner = scope header in
+      scopes := inner :: !scopes;
       emit_body();
+      enter inner [];
+      scopes := List.tl !scopes;
+      Buffer.add_buffer body inner.Scope.decls;
+      Buffer.add_buffer body inner.Scope.code;
       Option.iter(fun source->Printf.bprintf body "  bool stop%d=%s!=0.0f;\n" header (float_of source))stop;
       Array.iteri(fun component source->Printf.bprintf body "  %s next%d_%d=r%d;\n"
         (ty source)header component source)next;
       Array.iteri(fun component _->Printf.bprintf body "  r%d=next%d_%d;\n" (header+1+component)header component)next;
       Option.iter(fun _->Printf.bprintf body "  if(stop%d)break;\n" header)stop;
-      Buffer.add_string body "  }\n";
-      if guards<>[]then Buffer.add_string body "  }\n"
+      Printf.bprintf body "%s}\n" indentation
     end);
+  enter root [];
+  let body = Buffer.create 4096 in
+  Buffer.add_buffer body root.Scope.decls;
+  Buffer.add_buffer body root.Scope.code;
+  if layout.output_checks then Array.iter (Array.iter (fun slot -> if not (integer_register slot) then
+    Printf.bprintf body "  sb|=!isfinite(r%d);\n" slot)) view.outputs;
+  Printf.bprintf body "  %s\n" flush_status;
   let outputs = Array.length view.outputs in
   let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
@@ -265,7 +313,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
     | Some o -> let w = o/4 in Printf.sprintf
         "  uint n=uniforms[0];\n  if(uniforms[%d]!=0u) n=min(n,count_in[0]*uniforms[%d]/uniforms[%d]);\n  if(i==0){count_out[0]=n;count_out[1]=6u*n;count_out[2]=1u;count_out[3]=0u;count_out[4]=0u;count_out[5]=0u;}\n  if(i>=n) return;\n"
         (w+2) w (w+1) in
-  let body = guard ^ "  if(i==0) atomic_fetch_or_explicit(status,0u,memory_order_relaxed);\n" ^ Buffer.contents body in
+  let body = guard ^ "  if(i==0) atomic_fetch_or_explicit(status,0u,memory_order_relaxed);\n  uint sb=0u;\n" ^ Buffer.contents body in
   let digest = Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
   let entry = "kernel_" ^ digest in
   let source = prefix ^ "kernel void " ^ entry ^ "(\n  " ^ signature ^ ") {\n" ^ body ^ "}\n" in

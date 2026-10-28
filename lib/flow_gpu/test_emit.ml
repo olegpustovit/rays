@@ -7,8 +7,8 @@ let () =
     let program=Test_program.compile source in
     let msl=Test_program.ok(Flow_gpu.Emit.kernel ~fast:true program)
     and wgsl=Test_program.ok(Flow_web.Wgsl.kernel_fast program)in
-    assert(contains msl.source ("atomic_fetch_or_explicit(status,"^flag^"u"));
-    assert(contains wgsl.source ("atomicOr(&status, "^flag^"u)")))[
+    assert(contains msl.source ("?"^flag^"u:0u;"));
+    assert(contains wgsl.source ("sb |= "^flag^"u;")))[
       ("(map (fn [(x : int)] (float (int/div x (int/sub (frame/index) (frame/index))))) (array/range 8 :type int))","2");
       ("(map (fn [(x : int)] (float (int/shr x (int/add 63 (int/mod (frame/index) 1))))) (array/range 8 :type int))","4")]
 
@@ -83,7 +83,7 @@ let () =
         let assignment=Printf.sprintf "    r%d="slot in
         let rec check=function
           |line::next::_ when String.starts_with ~prefix:assignment line->
-              assert(next=Printf.sprintf "    if(!isfinite(r%d)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);"slot)
+              assert(next=Printf.sprintf "    sb|=!isfinite(r%d);"slot)
           |_::rest->check rest|[]->assert false in check lines
     |_->())view.code;
   assert !guarded;
@@ -215,8 +215,7 @@ let () =
   let lines=String.split_on_char '\n' hidden.source in
   List.iteri(fun index line->if String.starts_with ~prefix:"  float r" line then
     let slot=Scanf.sscanf line "  float r%d=" Fun.id in
-    let guard=Printf.sprintf
-      "  if(!isfinite(r%d)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);" slot in
+    let guard=Printf.sprintf "  sb|=!isfinite(r%d);" slot in
     if not (match (Flow_ir.Packed.Private.view program).code.(slot)with Guarded _->true|_->false)then
       assert((List.nth lines(index+1)=guard)=checks.(slot)))lines;
   print_endline "GPU emitter: shared operations, golden arithmetic/select/seeded fBm and typed ordered-loop refusals passed"

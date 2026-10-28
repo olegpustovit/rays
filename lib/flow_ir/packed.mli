@@ -106,8 +106,10 @@ module Private : sig
   val ordered_add : t -> bool
   (** Recognizes the exact component-wise non-collecting ordered-add program. *)
 
-  val output_reachable : t -> bool array
-  (** Fresh instruction mask used by GPU qualification and code generation. *)
+  val output_reachable : ?whole_loops:bool -> t -> bool array
+  (** Fresh instruction mask used by GPU qualification and code generation. [whole_loops] (the
+      default) keeps every instruction of a reached loop body, for per-operation finite checks;
+      [false] keeps only what reaches the outputs, a loop's next values or its stop. *)
 
   val finite_checks : t -> bool array
   (** After [gpu_refusals] succeeds, instructions whose result needs a finite

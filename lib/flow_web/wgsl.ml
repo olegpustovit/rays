@@ -75,10 +75,16 @@ let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" 
 let register index = "r" ^ string_of_int index
 let integer_status operation b = match operation with
   | Flow.Packed_ops.Idiv | Imod ->
-      Printf.sprintf "if (all(%s == vec2<u32>(0u))) { atomicOr(&status, 2u); }\n" b
+      Printf.sprintf "if (all(%s == vec2<u32>(0u))) { sb |= 2u; }\n" b
   | Ishl | Ishr -> Printf.sprintf
-      "if (%s.y != 0u || %s.x > 62u) { atomicOr(&status, 4u); }\n" b b
+      "if (%s.y != 0u || %s.x > 62u) { sb |= 4u; }\n" b b
   | _ -> ""
+(* As the Metal printer: status bits gather in [sb] and reach the shared word once; guarded
+   instructions share blocks per scope (Flow_ir.Kernel_layout.Scope). *)
+let flush_status = "if (sb != 0u) { atomicOr(&status, sb); }"
+module Scope = Flow_ir.Kernel_layout.Scope
+let enter condition = Scope.enter ~opening:(fun slot selected ->
+  Printf.sprintf "if (%s %s 0.0) {" (condition slot) (if selected then "!=" else "=="))
 let rec guarded guards = function
   | P.Guarded (more, body) -> guarded (guards @ more) body
   | instruction -> guards, instruction
@@ -119,10 +125,12 @@ let kernel ?(image = false) program = try
   let word index = Printf.sprintf "uniforms[%d].%c" (index/4) "xyzw".[index mod 4] in
   let has operation = Array.exists Fun.id (Array.mapi (fun slot instruction -> used.(slot) && operation (snd(guarded [] instruction))) view.code) in
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
-  let body = Buffer.create 4096 in
+  let root = Scope.create 0 in
   Array.iteri (fun slot instruction ->
     if used.(slot) then begin
     let guards,instruction=guarded [] instruction in
+    enter register root guards;
+    let body = root.code and indentation = Scope.indent root in
     let expression = match instruction with
       | P.Const value -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float value)
       | Input (_,_,component) when image ->
@@ -143,17 +151,18 @@ let kernel ?(image = false) program = try
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "wfbm(vec3<f32>(%s, %s, %s), %d, %d)"
           (register x) (register y) (register z) octaves (table seed)
       | _ -> fail "Integer instructions and conversions are not supported by the WGSL kernel target." in
-    let indentation=if guards=[] then "  " else "    " in
-    if guards=[] then Printf.bprintf body "  let r%d: f32 = %s;\n" slot expression else begin
-      Printf.bprintf body "  var r%d: f32 = 0.0;\n" slot;
-      Printf.bprintf body "  if (%s) {\n" (String.concat " && " (List.map(fun(condition,selected)->
-        Printf.sprintf "r%d %s 0.0" condition (if selected then "!=" else "=="))guards));
-      Printf.bprintf body "    r%d = %s;\n" slot expression
+    if guards=[] then Printf.bprintf body "%slet r%d: f32 = %s;\n" indentation slot expression else begin
+      Printf.bprintf root.decls "  var r%d: f32 = 0.0;\n" slot;
+      Printf.bprintf body "%sr%d = %s;\n" indentation slot expression
     end;
     if finite_checks.(slot) then
-      Printf.bprintf body "%sif (!wfinite(r%d)) { atomicOr(&status, 1u); }\n" indentation slot;
-    if guards<>[] then Buffer.add_string body "  }\n"
+      Printf.bprintf body "%sif (!wfinite(r%d)) { sb |= 1u; }\n" indentation slot
     end) view.code;
+  enter register root [];
+  let body = Buffer.create 4096 in
+  Buffer.add_buffer body root.decls;
+  Buffer.add_buffer body root.code;
+  Printf.bprintf body "  %s\n" flush_status;
   let output_name k = if outputs = 1 then "outbuf" else "outbuf" ^ string_of_int k in
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     Printf.bprintf body "  %s[i * %du + %du] = r%d;\n"
@@ -176,7 +185,7 @@ let kernel ?(image = false) program = try
     ^ (if has (function P.Binary (P.Pow,_,_) -> true | _ -> false) then power else "")
     ^ (if table_seeds=[||] then "" else perlin) in
   let signature = "(@builtin(global_invocation_id) gid: vec3<u32>)" in
-  let body = "  let i = gid.x;\n  if (i >= uniforms[0].x) { return; }\n"
+  let body = "  let i = gid.x;\n  if (i >= uniforms[0].x) { return; }\n  var sb: u32 = 0u;\n"
     ^ (if image then Printf.sprintf "  let image_width = u32(bitcast<f32>(%s));\n" (word image_width) else "")
     ^ Buffer.contents body in
   let entry = "kernel_" ^ Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
@@ -292,10 +301,15 @@ let kernel_fast program = try
     let k = gather_index prepared in
     Printf.sprintf "gather%d[u32(clamp(i32(%s), 0, max(i32(%s) - 1, 0))) * %du + %du]"
       k (float_of index) (word gather_lengths.(k)) width component in
-  let body = Buffer.create 4096 in
+  let root = Scope.create 0 in
+  let scopes = ref [root] in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
     if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
+    let current = List.hd !scopes in
     let guards,instruction=guarded [] instruction in
+    let constant = match instruction with P.Const _ | Int_const _ -> not finite_checks.(slot) | _ -> false in
+    if not constant then enter float_of current guards;
+    let body = current.code and indentation = Scope.indent current in
     let expression = match instruction with
       | P.Const value -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float value)
       | Input (input,width,component) -> Printf.sprintf "input%d[i * %du + %du]" input width component
@@ -343,46 +357,55 @@ let kernel_fast program = try
       | Loop_result(loop,component,_) -> register(loop+1+component)
       | _ -> fail "This instruction is not supported by the WGSL fast kernel target." in
     let ty, zero = if integer slot then "vec2<u32>", "vec2<u32>(0u, 0u)" else "f32", "0.0" in
-    let indentation=if guards=[] then "  " else "    " in
-    if guards=[] then Printf.bprintf body "  let r%d: %s = %s;\n" slot ty expression else begin
-      Printf.bprintf body "  var r%d: %s = %s;\n" slot ty zero;
-      Printf.bprintf body "  if (%s) {\n" (String.concat " && " (List.map(fun(condition,selected)->
-        Printf.sprintf "%s %s 0.0" (float_of condition) (if selected then "!=" else "=="))guards));
-      Printf.bprintf body "    r%d = %s;\n" slot expression
+    if constant then Printf.bprintf current.decls "  let r%d: %s = %s;\n" slot ty expression
+    else if current.opened=[] then Printf.bprintf body "%slet r%d: %s = %s;\n" indentation slot ty expression else begin
+      Printf.bprintf current.decls "  var r%d: %s = %s;\n" slot ty zero;
+      Printf.bprintf body "%sr%d = %s;\n" indentation slot expression
     end;
     if finite_checks.(slot) && not (integer slot) then
-      Printf.bprintf body "%sif (!wfinite(r%d)) { atomicOr(&status, 1u); }\n" indentation slot;
+      Printf.bprintf body "%sif (!wfinite(r%d)) { sb |= 1u; }\n" indentation slot;
     (match instruction with
      | Int_binary (operation, _, b) ->
-         Buffer.add_string body (integer_status operation (int_of b))
-     | _ -> ());
-    if guards<>[] then Buffer.add_string body "  }\n"
+         Buffer.add_string body (indentation ^ integer_status operation (int_of b))
+     | _ -> ())
     end) ~loop:(fun header control ~next ~stop ~body:emit_body ->if used.(header)then begin
+      let outer = List.hd !scopes in
       let guards,_=guarded [] view.code.(header)in
       let ty slot=if integer slot then "vec2<u32>" else "f32"in
       let zero slot=if integer slot then "vec2<u32>(0u, 0u)" else "0.0"in
-      Printf.bprintf body "  var r%d: vec2<u32> = vec2<u32>(0u, 0u);\n" header;
+      Printf.bprintf outer.decls "  var r%d: vec2<u32> = vec2<u32>(0u, 0u);\n" header;
       Array.iteri(fun component _->let slot=header+1+component in
-        Printf.bprintf body "  var r%d: %s = %s;\n" slot (ty slot)(zero slot))control.initial;
-      if guards<>[]then Printf.bprintf body "  if (%s) {\n" (String.concat " && "
-        (List.map(fun(condition,selected)->Printf.sprintf "%s %s 0.0" (float_of condition)
-          (if selected then "!=" else "=="))guards));
+        Printf.bprintf outer.decls "  var r%d: %s = %s;\n" slot (ty slot)(zero slot))control.initial;
+      enter float_of outer guards;
+      let body = outer.code and indentation = Scope.indent outer in
       Option.iter(fun limit->let bound=Int64.of_int limit in Printf.bprintf body
-        "  if (i64_lt(r%d, r%d) && i64_lt(vec2<u32>(%Luu, %Luu), i64_sub(r%d, r%d))) { atomicOr(&status, 1u); return; }\n"
-        control.first control.last (Int64.logand bound 0xffffffffL)(Int64.shift_right_logical bound 32)
-        control.last control.first)control.limit;
-      Array.iteri(fun component initial->Printf.bprintf body "  r%d = r%d;\n" (header+1+component)initial)control.initial;
-      Printf.bprintf body "  for (r%d = r%d; i64_lt(r%d, r%d); r%d = i64_add(r%d, vec2<u32>(1u, 0u))) {\n"
-        header control.first header control.last header header;
+        "%sif (i64_lt(r%d, r%d) && i64_lt(vec2<u32>(%Luu, %Luu), i64_sub(r%d, r%d))) { sb |= 1u; %s return; }\n"
+        indentation control.first control.last (Int64.logand bound 0xffffffffL)(Int64.shift_right_logical bound 32)
+        control.last control.first flush_status)control.limit;
+      Array.iteri(fun component initial->Printf.bprintf body "%sr%d = r%d;\n" indentation (header+1+component)initial)control.initial;
+      Printf.bprintf body "%sfor (r%d = r%d; i64_lt(r%d, r%d); r%d = i64_add(r%d, vec2<u32>(1u, 0u))) {\n"
+        indentation header control.first header control.last header header;
+      let inner = Scope.create header in
+      scopes := inner :: !scopes;
       emit_body();
+      enter float_of inner [];
+      scopes := List.tl !scopes;
+      Buffer.add_buffer body inner.decls;
+      Buffer.add_buffer body inner.code;
       Option.iter(fun source->Printf.bprintf body "  let stop%d = %s != 0.0;\n" header (float_of source))stop;
       Array.iteri(fun component source->Printf.bprintf body "  let next%d_%d: %s = r%d;\n"
         header component (ty source)source)next;
       Array.iteri(fun component _->Printf.bprintf body "  r%d = next%d_%d;\n" (header+1+component)header component)next;
       Option.iter(fun _->Printf.bprintf body "  if (stop%d) { break; }\n" header)stop;
-      Buffer.add_string body "  }\n";
-      if guards<>[]then Buffer.add_string body "  }\n"
+      Printf.bprintf body "%s}\n" indentation
     end);
+  enter float_of root [];
+  let body = Buffer.create 4096 in
+  Buffer.add_buffer body root.decls;
+  Buffer.add_buffer body root.code;
+  if layout.output_checks then Array.iter (Array.iter (fun slot -> if not (integer slot) then
+    Printf.bprintf body "  if (!wfinite(r%d)) { sb |= 1u; }\n" slot)) view.outputs;
+  Printf.bprintf body "  %s\n" flush_status;
   let output_name k = if outputs = 1 then "outbuf" else "outbuf" ^ string_of_int k in
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     Printf.bprintf body "  %s[i * %du + %du] = %s;\n"
@@ -409,7 +432,7 @@ let kernel_fast program = try
   let signature = "(@builtin(global_invocation_id) gid: vec3<u32>)" in
   let w = counts/4 in
   let body = Printf.sprintf
-    "  let i = gid.x;\n  var n = uniforms[0].x;\n  if (%s != 0u) { n = min(n, count_in[0] * %s / %s); }\n  if (i == 0u) { count_out[0] = n; count_out[1] = 6u * n; count_out[2] = 1u; count_out[3] = 0u; count_out[4] = 0u; count_out[5] = 0u; count_out[6] = 6u; count_out[7] = n; count_out[8] = 0u; count_out[9] = 0u; }\n  if (i >= n) { return; }\n"
+    "  let i = gid.x;\n  var n = uniforms[0].x;\n  if (%s != 0u) { n = min(n, count_in[0] * %s / %s); }\n  if (i == 0u) { count_out[0] = n; count_out[1] = 6u * n; count_out[2] = 1u; count_out[3] = 0u; count_out[4] = 0u; count_out[5] = 0u; count_out[6] = 6u; count_out[7] = n; count_out[8] = 0u; count_out[9] = 0u; }\n  if (i >= n) { return; }\n  var sb: u32 = 0u;\n"
     (word (w+2)) (word w) (word (w+1)) ^ Buffer.contents body in
   let entry = "kernel_" ^ Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
   let source = prefix ^ "@compute @workgroup_size(64)\nfn " ^ entry ^ signature ^ " {\n" ^ body ^ "}\n" in

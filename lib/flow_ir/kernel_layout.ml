@@ -2,6 +2,7 @@ type t = {
   view : Packed.Private.view;
   used : bool array;
   finite_checks : bool array;
+  output_checks : bool;
   uniforms : int array;
   frames : int array;
   image_width : int option;
@@ -64,8 +65,12 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
   in
   let image_width = if image then Some (uniform "image:width" 1) else None in
   let image_height = if image then Some (uniform "image:height" 1) else None in
-  let used = Packed.Private.output_reachable program in
-  let finite_checks = Packed.Private.finite_checks program in
+  (* fast kernels check only their outputs (specification/gpu-codegen.md): dead loop code is not kept *)
+  let used = Packed.Private.output_reachable ~whole_loops:(not fast) program in
+  (* fast checks its inputs (a resident producer's buffer is not scanned on the host) and outputs *)
+  let finite_checks =
+    if fast then Array.map (fun i -> match guarded i with Packed.Input _ -> true | _ -> false) view.code
+    else Packed.Private.finite_checks program in
   let table_seeds =
     Array.to_list (Array.mapi (fun index instruction -> index, guarded instruction) view.code)
     |> List.filter_map (function
@@ -107,7 +112,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
       | Packed.Input (input, _, _) | Packed.Int_input input when used.(slot) && not image -> input_used.(input) <- true
       | _ -> ())
     view.code;
-  { view; used; finite_checks; uniforms; frames; image_width; image_height; table_seeds; gathers; gather_lengths;
+  { view; used; finite_checks; output_checks = fast; uniforms; frames; image_width; image_height; table_seeds; gathers; gather_lengths;
     input_count = count; output_count = outputs;
     input_used; uniform_layout = List.rev !uniform_layout; uniform_bytes = !offset;
     uniform_binding; status_binding; table_binding;
@@ -131,3 +136,23 @@ let iter plan ~instruction ~loop =
       | _ ->instruction !slot code.(!slot);incr slot
     done in
   visit 0 (Array.length code)
+
+module Scope = struct
+  type t = { id : int; decls : Buffer.t; code : Buffer.t; mutable opened : (int * bool) list }
+
+  let create id = { id; decls = Buffer.create 1024; code = Buffer.create 4096; opened = [] }
+  let indent scope = String.make (2 * (1 + List.length scope.opened)) ' '
+
+  let enter scope ~opening guards =
+    let rec common = function x :: a, y :: b when x = y -> 1 + common (a, b) | _ -> 0 in
+    let kept = common (scope.opened, guards) in
+    for depth = List.length scope.opened downto kept + 1 do
+      Buffer.add_string scope.code (String.make (2 * depth) ' ' ^ "}\n")
+    done;
+    List.iteri
+      (fun depth (condition, selected) ->
+        if depth >= kept then
+          Printf.bprintf scope.code "%s%s\n" (String.make (2 * (depth + 1)) ' ') (opening condition selected))
+      guards;
+    scope.opened <- guards
+end

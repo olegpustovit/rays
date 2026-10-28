@@ -844,6 +844,8 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     (fun output values ->
       Array.iteri
         (fun component register ->
+          if layout.output_checks && not (integer register) then
+            mark_invalid e invalid (non_finite e (float_of register));
           store e outputs.(output)
             (offset e index (Array.length values) component)
             (float_of register))
