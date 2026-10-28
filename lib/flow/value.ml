@@ -151,6 +151,33 @@ let rec show_with conc v =
   | Residual _ -> "?"
   | v -> Ty.to_string (ty_of v)
 
+(* A packed array of more than 4,096 elements keys by its digest, not its bytes: a key is hashed and
+   compared, and a million-point grid's planes are 8 MB each. Arrays are immutable values, so the
+   digest is remembered by physical identity: a replayed evaluation hands a lowering the same
+   arrays, which then cost a lookup.
+   ponytail: 32 slots, a linear scan under a lock; a table if lowerings key many large arrays. *)
+let digests = Array.make 32 (Obj.repr 0, "")
+and next_digest = ref 0
+and digests_lock = Mutex.create ()
+
+let array_key tag (xs : 'a array) =
+  if Array.length xs <= 4096 then tag ^ Marshal.to_string xs []
+  else
+    let key = Obj.repr xs in
+    Mutex.protect digests_lock (fun () ->
+        match Array.find_opt (fun (k, _) -> k == key) digests with
+        | Some (_, digest) -> digest
+        | None ->
+            let digest =
+              tag ^ "#"
+              ^ string_of_int (Array.length xs)
+              ^ ":"
+              ^ Digest.to_hex (Digest.string (Marshal.to_string xs []))
+            in
+            digests.(!next_digest) <- (key, digest);
+            next_digest := (!next_digest + 1) mod Array.length digests;
+            digest)
+
 let rec key_of ~residual = function
   | Int n -> "i" ^ string_of_int n
   | Float f -> Printf.sprintf "f%h" f
@@ -160,12 +187,12 @@ let rec key_of ~residual = function
   | Vec3 (a, b, c) -> Printf.sprintf "v%h,%h,%h" a b c
   | Vec4 (a, b, c, d) -> Printf.sprintf "v4:%h,%h,%h,%h" a b c d
   | List xs -> "[" ^ String.concat "," (List.map (key_of ~residual) (Array.to_list xs)) ^ "]"
-  | Int_array xs -> "AI" ^ Marshal.to_string xs []
-  | Text_array xs -> "AT" ^ Marshal.to_string xs []
-  | Float_array xs -> "A" ^ Marshal.to_string xs []
-  | Vec2_array xs -> "V2" ^ Marshal.to_string xs []
-  | Vec3_array xs -> "V" ^ Marshal.to_string xs []
-  | Vec4_array xs -> "V4" ^ Marshal.to_string xs []
+  | Int_array xs -> array_key "AI" xs
+  | Text_array xs -> array_key "AT" xs
+  | Float_array xs -> array_key "A" xs
+  | Vec2_array xs -> array_key "V2" xs
+  | Vec3_array xs -> array_key "V" xs
+  | Vec4_array xs -> array_key "V4" xs
   | Record fs ->
       "{" ^ String.concat "," (List.map (fun (n, v) -> n ^ "=" ^ key_of ~residual v) fs) ^ "}"
   | Deferred (Ty.Named "geometry", n) -> "g" ^ string_of_int n
