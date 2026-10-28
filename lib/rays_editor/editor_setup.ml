@@ -109,5 +109,5 @@ let create ?gpu ?settings
       let value = with_pane value (fun pane -> { pane with views = Option.fold ~none:Level_map.empty ~some:(start_views doc level) (graph_path value) }) in
       let value = follow_hosts value ~focus_path:on (panel_hosts value) in
       follow_start value)
-    (Cook.create ~prepare ~seed ~grain ?domains ?await ~max_entries
+    (Cook.create ~prepare ~seed ~grain ?domains ?await ~clock ~max_entries
       ~max_payload_bytes ()))

@@ -163,7 +163,7 @@ val changes : Port.parameter -> Flow.Eval.value -> ((string * Param.value) list,
 
 val workspace :
   factories:Sop.Edit_graph.factory list -> ?extra:Catalog.descriptor list ->
-  ?reference:bool -> ?gpu:Flow_ir.Gpu.config -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
+  ?reference:bool -> ?gpu:Flow_ir.Gpu.config -> ?clock:(unit -> float) -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
   ?compiled_ids:int Path_map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   Flow.Syntax.t list -> (t, Diagnostic.t) result
@@ -176,7 +176,7 @@ val of_checked :
   factories:Sop.Edit_graph.factory list ->
   ?provenance_tags:bool ->
   ?reference:bool ->
-  ?gpu:Flow_ir.Gpu.config -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
+  ?gpu:Flow_ir.Gpu.config -> ?clock:(unit -> float) -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
   ?compiled_ids:int Path_map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   Flow.Workspace.t -> (t, Diagnostic.t) result

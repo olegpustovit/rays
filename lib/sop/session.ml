@@ -50,6 +50,7 @@ module Entry_cache = Lru.Make (String)
 type payload_pool = { refs : (int, int * int) Hashtbl.t; mutable bytes : int }
 
 type t = {
+  mutable clock : unit -> float;
   max_entries : int;
   max_payload_bytes : int;
   cache : entry Entry_cache.t;
@@ -91,7 +92,7 @@ let create ~max_entries ~max_payload_bytes =
   else
     let payload = { refs = Hashtbl.create (min (max_entries * 4) 4096); bytes = 0 } in
     Ok {
-    max_entries; max_payload_bytes;
+    clock = Unix.gettimeofday; max_entries; max_payload_bytes;
     cache = Entry_cache.create max_entries
         ~release:(fun _ entry -> release_components payload entry.components);
     payload;
@@ -101,6 +102,9 @@ let create ~max_entries ~max_payload_bytes =
     last_node = None; times = Hashtbl.create 64; times_lock = Mutex.create (); closed = false; materialized = [];
     journal = None; parallel_override = None; fanouts = 0;
   }
+
+let set_clock session clock = session.clock <- clock
+let now session = session.clock ()
 
 let insert session key entry =
   (match session.journal with None -> () | Some events ->
@@ -603,14 +607,14 @@ and evaluate_uncached memo session context node =
             session.misses <- session.misses + 1;
             if volatile then session.volatile_misses <- session.volatile_misses + 1;
             session.cooks <- session.cooks + 1;
-            let started = Unix.gettimeofday () in
+            let started = session.clock () in
             let cooked =
               node_result (fun () ->
                 match cook_node memo session context node geometries with
                 | Error _ as error -> error
                 | Ok cooked -> Ok (cooked, delta node geometries cooked))
             in
-            let seconds = max 0. (Unix.gettimeofday () -. started) in
+            let seconds = max 0. (session.clock () -. started) in
             let points = match cooked with Ok (output, _) -> Payload.element_count output.payload | Error _ -> 0 in
             let sample = timing node ~geometries ~points ~seconds ~cache_hit:false in
             session.last_node <- Some sample;

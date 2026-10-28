@@ -1,5 +1,5 @@
 type t
-val create : unit -> t
+val create : ?clock:(unit -> float) -> unit -> t
 val config : ?fast:bool -> t -> Flow_ir.Gpu.config
 val with_backend : ?fast:bool -> t -> (Flow_ir.Gpu.config -> 'a) -> 'a
 val pump : t -> unit

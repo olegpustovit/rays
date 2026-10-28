@@ -41,6 +41,7 @@ let close_image stats sink =
   Flow_gpu.Image_sink.close sink
 
 type t = {
+  clock : unit -> float;
   mutable owner : (X.gpu * H.t) option;
   mark_sets : P.gpu_marks Slots.t;
   images : Flow_gpu.Image_sink.t Images.t;
@@ -59,9 +60,10 @@ type t = {
   entries : (Flow_ir.Packed.instruction array * bool, string option) Entries.t;
 }
 
-let create () =
+let create ?(clock = Unix.gettimeofday) () =
   let image_stats = { created = 0; closed = 0; buffers = 0; textures = 0 } in
   {
+    clock;
     owner = None;
     mark_sets = Slots.create ~release:(fun _ -> P.close_gpu_marks) 64;
     images = Images.create ~release:(fun _ -> close_image image_stats) 64;
@@ -99,7 +101,7 @@ let owner t =
     | None ->
         Result.map
           (fun gpu ->
-            let owner = (gpu, H.create ~clock:Unix.gettimeofday gpu) in
+            let owner = (gpu, H.create ~clock:t.clock gpu) in
             t.owner <- Some owner;
             owner)
           (native (X.acquire_gpu ()))
@@ -152,10 +154,10 @@ let measure t ~fast packed ~count =
                         }
                       in
                       let once () =
-                        let start = Unix.gettimeofday () in
+                        let start = t.clock () in
                         match kernel.run inputs with
                         | Error _ -> None
-                        | Ok _ -> Some (Unix.gettimeofday () -. start)
+                        | Ok _ -> Some (t.clock () -. start)
                       in
                       match once () with
                       | None -> None

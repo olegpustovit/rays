@@ -307,7 +307,7 @@ module Private : sig
       framed : bounds option option;
     }
     val create : prepare:(Settings.t -> Sop.Session.output -> ('a, string) result) ->
-      seed:int64 -> grain:int -> ?domains:int -> ?await:bool -> max_entries:int ->
+      seed:int64 -> grain:int -> ?domains:int -> ?await:bool -> ?clock:(unit -> float) -> max_entries:int ->
       max_payload_bytes:int -> unit -> ('a t, string) result
     (** [await] (default: false) makes [update] block on
         the cook it submits, so a fixed-step run shows exactly frame n. *)
