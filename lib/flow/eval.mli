@@ -218,6 +218,11 @@ type t = {
           inspection beyond the recording cap. *)
 }
 
+val inline_nodes : bool Atomic.t
+(** Step A switch of the single-program design (default off): a Lisp node with no validators,
+    normalizers, context operators or callable slots evaluates its body in the calling program
+    instead of lowering as its own workspace. *)
+
 val static :
   ?record:bool ->
   ?inputs:(string * (string * value) list) list ->

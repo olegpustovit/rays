@@ -965,6 +965,7 @@ let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
 
 module Private = struct
   let cache_hits = Atomic.make 0
+  let nested_lowerings = Atomic.make 0
   let clear_cache () = Mutex.protect build_lock (fun () -> Build_cache.clear build_cache)
 end
 
@@ -1837,6 +1838,7 @@ struct
     in
     let record_profile profile = Option.iter (fun record -> record profile) on_profile in
     let lower_nested ~gpu ~kernel_bindings ~factories ~inputs checked =
+      Atomic.incr Private.nested_lowerings;
       lower_checked ~reference ~gpu ~strict_body:true ~defer_body_errors:true ~kernel_bindings
         ?on_profile ~factories ~inputs checked
     in

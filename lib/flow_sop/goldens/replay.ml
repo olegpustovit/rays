@@ -1089,7 +1089,14 @@ let benchmark_inputs directory rounds =
     ((Gc.allocated_bytes () -. allocated) /. 1_000_000.)
 
 let () =
-  match Array.to_list Sys.argv with
+  (* --inline-nodes: step A of the single-program design, simple Lisp nodes inline in the caller *)
+  match
+    match Array.to_list Sys.argv with
+    | program :: "--inline-nodes" :: rest ->
+        Atomic.set Flow.Eval.inline_nodes true;
+        program :: rest
+    | argv -> argv
+  with
   | [ _; "--self-test" ] -> self_test ()
   | _ :: "--update" :: directory :: nodes when nodes <> [] -> update directory nodes
   | [ _; "--update-all"; directory ] -> update directory []
