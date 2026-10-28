@@ -13,10 +13,10 @@ let sy t gy = float t.y +. t.pan_y +. gy *. t.zoom
 
 let left_button (s : Ui.signal) = s.button = Some Input.LeftButton
 
-(* the number field of a row, the kit's ([Editor_core.Number], as [Pxui_shell.Kit.number]): the kind
+(* the number field of a row, the kit's ([Param.Number], as [Pxui_shell.Kit.number]): the kind
    is the row's type, and only a literal with no typed row behind it is read by its spelling *)
 let num_field ui ~at ~w ~h ?size ?kind ?range ?(nonfinite = false) label text =
-  let module N = Editor_core.Number in
+  let module N = Param.Number in
   let nonfinite = nonfinite && kind <> Some N.Int && range = None in
   let kind = match kind with
     | Some kind -> kind
@@ -25,14 +25,13 @@ let num_field ui ~at ~w ~h ?size ?kind ?range ?(nonfinite = false) label text =
   let valid s = match Flow.Syntax.number_value s with
     | Some f -> Float.is_finite f || nonfinite
     | None -> false in
-  let text', _ = Ui.value_field ui ~at ~w ~h ?size ?fraction:(Option.bind range (fun r -> N.fraction r text))
-      ~scrub:(N.scrub kind ?range) ~valid label text in
+  let text' = Ui.number_field ui ~at ~w ~h ?size ~kind ?range ~valid label text in
   if text' <> text && valid text' then Some text' else None
 
 (* what a row's field is: its type's kind (a vector's cells are floats) and its soft range *)
 let kind_of (r : P.row) = match r.ty with
-  | Some (Ty.Float | Ty.Vec2 | Ty.Vec3 | Ty.Vec4) -> Some Editor_core.Number.Float
-  | Some Ty.Int -> Some Editor_core.Number.Int
+  | Some (Ty.Float | Ty.Vec2 | Ty.Vec3 | Ty.Vec4) -> Some Param.Number.Float
+  | Some Ty.Int -> Some Param.Number.Int
   | _ -> None
 let range_of (r : P.row) = match r.control with P.Range (lo, hi) -> Some (lo, hi) | _ -> None
 

@@ -271,7 +271,7 @@ applied values for the graph and inspector. The gate forbids
 the SOP catalog, editor or GPU libraries.
 `editor_document` owns the UI-free saved overlay, while `pxui_graph` and
 `pxui_shell` are presentation adapters over it. The PXUI engine depends directly
-on `rays` and `rays_math` for UI values and shared hashing; `pxui_shell`
+on `rays`, `rays_math` and `param` for UI values, shared hashing and the number field's model; `pxui_shell`
 depends on `rays`, `rays_math`, `editor_core` and `pxui`. `editor_core`,
 `editor_document`, `pxui_graph` and `rays_editor` name math values from
 `rays_math` directly. `rays_editor` applies their typed requests and schedules

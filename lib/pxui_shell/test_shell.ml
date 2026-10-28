@@ -559,7 +559,7 @@ let () =
   (match floats (edits 1234567.89 (drag (-2.))) with
    | v :: _ when Float.abs (v -. 1234567.69) < 1e-6 -> ()
    | _ -> failwith "a scrub of 1234567.89 lost its digits");
-  let module N = Editor_core.Number in
+  let module N = Param.Number in
   assert (N.scrub N.Float "1" 10. false = "1.5" && N.scrub N.Float "1" 0.04 false = "1"
           && N.scrub N.Float "1234567.89" 2. false = "1234567.99" && N.scrub N.Int "3" 12. false = "5"
           && N.scrub N.Float ~range:(0., 2.) "1" 500. false = "2.0" && N.scrub N.Int ~range:(0., 5.) "9" 6. false = "9"

@@ -153,7 +153,7 @@ let only =
     "ogpu_metal_native", ["ogpu_core"; "metal"; "lru"];
     "ogpu_metal", ["ogpu_metal_native"; "metal"];
     "scene_execution_fixtures", ["renderer"; "ogpu"];
-    "pxui", ["rays"; "rays_math"];
+    "pxui", ["rays"; "rays_math"; "param"];
     "pxui_shell", ["rays"; "rays_math"; "editor_core"; "pxui"];
     "sop_catalog", ["rays_math"; "rdk"; "sop"];
     "flow_gpu", ["flow"; "flow_ir"; "param"; "rays_math"; "ogpu_core"; "ogpu"; "renderer"; "lru"; "parallel"];

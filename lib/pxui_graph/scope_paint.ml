@@ -151,7 +151,7 @@ let number_words text = (* "[0 1 0]" as its numbers *)
   else None
 
 let fraction_of (r : P.row) text = match r.control with
-  | P.Range (lo, hi) -> Editor_core.Number.fraction (lo, hi) text
+  | P.Range (lo, hi) -> Param.Number.fraction (lo, hi) text
   | _ -> None
 
 (* a field painted without the live editor: a value on a line-2 hairline, label-size text *)

@@ -626,6 +626,12 @@ val value_field : t -> at:float * float -> w:float -> h:float ->
     shown in ink-3 where an empty value would be.
     Only valid text commits; the boolean reports an open text editor. *)
 
+val number_field : t -> at:float * float -> w:float -> h:float -> ?size:int -> ?display:string ->
+  ?edit:bool -> ?left:bool -> ?trail:string * Rays_math.Color.t -> kind:Param.Number.kind ->
+  ?range:float * float -> ?valid:(string -> bool) -> string -> string -> string
+(** A {!value_field} over {!Param.Number}: a drag scrubs the text by the step of [kind] and soft
+    [range], so a click writes nothing.  The new text; [valid] defaults to the kind's. *)
+
 type pick = [ `None | `Pick of int | `Delete of int | `Submit | `Back | `Cancel ]
 
 val fuzzy_match : query:string -> string -> bool

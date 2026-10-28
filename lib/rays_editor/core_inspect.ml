@@ -662,8 +662,8 @@ let input_inspector ~graph ~width ~(scope : Flow_graph.Projection.scope) ~path u
                  (Pxui_graph.Scope.num_field ui ~at:(cx, cy) ~w:cw ~h:20.
                     (* the input's type decides the step: a float written [1] scrubs by fractions *)
                     ?kind:(match input.ty with
-                      | Flow.Ty.Int -> Some Editor_core.Number.Int
-                      | Flow.Ty.Float -> Some Editor_core.Number.Float | _ -> None)
+                      | Flow.Ty.Int -> Some Param.Number.Int
+                      | Flow.Ty.Float -> Some Param.Number.Float | _ -> None)
                     "ws-input-default-field" shown)
            | _ ->
                fst (Pxui.Ui.value_field ui ~at:(cx, cy) ~w:cw ~h:20.
@@ -897,7 +897,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
                (* what the drive gives now: the node's value at the probe *)
                live = (match parameter.fields with
                  | [ { Param.current = Param.Int_value i; _ } ] -> Some (string_of_int i)
-                 | [ { current = Param.Float_value f; _ } ] -> Some (Editor_core.Number.show f)
+                 | [ { current = Param.Float_value f; _ } ] -> Some (Param.Number.show f)
                  | [ { current = Param.Bool_value b; _ } ] -> Some (string_of_bool b)
                  | _ -> None) }) parameters in
            let expanded = List.filter_map (fun (f : Param.field_view) ->

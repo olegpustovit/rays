@@ -3062,6 +3062,12 @@ let text_field ui text value =
 
 (* A search field at a place: [text_field]'s editing, a hairline for the control and its
    [placeholder] while empty; Enter, Shift-Enter, Down and Up answer a step, Escape a close. *)
+let number_field ui ~at ~w ~h ?size ?display ?edit ?left ?trail ~kind ?range ?valid key text =
+  let module N = Param.Number in
+  let valid = Option.value valid ~default:(N.valid kind) in
+  fst (value_field ui ~at ~w ~h ?size ?display ?fraction:(Option.bind range (fun r -> N.fraction r text))
+    ~scrub:(N.scrub kind ?range) ?edit ?left ?trail ~valid key text)
+
 let line_field ui ~at ~w ~h ?(grab = false) ?(placeholder = "") label value =
   let field = box ui ~flags:(clickable lor focusable lor blocking lor focus_mark) ~at ~w:(Px w) ~h:(Px h) label in
   if grab then focus ui field;

@@ -77,21 +77,21 @@ open Rays
         (* the kit's number field: a drag changes the value from the one it had, by the step of its
            kind and soft range (a vector's cell has none), so a click without a drag writes nothing *)
         let range = if ranged then range else None in
-        let changed = Kit.number ui ~key ~at:(x, y) ~w ~kind ?range ?display ~edit ~left:(expression text)
+        let changed = Ui.number_field ui ~at:(x, y) ~w ~h:20. ~kind ?range ?display ~edit ~left:(expression text)
             ?trail:(Option.map (fun unit -> unit, ink_3) field.Param.unit)
-            ~valid:(fun text -> Editor_core.Number.valid kind text || expression text) text in
+            ~valid:(fun text -> Param.Number.valid kind text || expression text) key text in
         if changed = text then [] else if expression changed then
           [Expression (path, changed)]
         else Option.fold ~none:[] ~some:(fun value -> [Edited (field.Param.name, value)])
             (convert changed) in
       match field.Param.kind, field.current with
       | Param.Integer_view range, Param.Int_value value ->
-          numeric Editor_core.Number.Int ~range:(float range.soft_min, float range.soft_max) (string_of_int value)
+          numeric Param.Number.Int ~range:(float range.soft_min, float range.soft_max) (string_of_int value)
             (fun text -> Option.map (fun n -> Param.Int_value n) (int_of_string_opt text))
       | Param.Floating_view range, Param.Float_value value ->
           (* the text is the value in full, so a scrub starts from what is stored; it is shown short *)
-          numeric Editor_core.Number.Float ~range:(range.soft_min, range.soft_max)
-            ~display:(Editor_core.Number.show value) (Flow.Lisp.float value)
+          numeric Param.Number.Float ~range:(range.soft_min, range.soft_max)
+            ~display:(Param.Number.show value) (Flow.Lisp.float value)
             (fun text -> Option.map (fun n -> Param.Float_value n) (float_of_string_opt text))
       | Param.Text_view, Param.Text_value value ->
           (* an empty group means every element of its owner *)

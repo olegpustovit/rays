@@ -180,11 +180,10 @@ removes the item, and Delete over a hovered item removes it whatever it holds. A
 the nodes the selection (`Selected`, and the selected wire is dropped). `with_scope` ends the letter hints and
 the context menu when the scope it is given is a new one.
 
-A number field is `num_field` over `Editor_core.Number` (G13), the model `Pxui_shell.Kit.number` gives the inspector:
-the kind is the row's type (`kind_of`; a vector's cells are floats), the soft range sets the step and the position
-line, the text written is `Flow.Lisp.float`, a drag shorter than a step returns the text it began with. The pane
-cannot call `Kit.number` itself (the gate keeps `pxui_graph` off `pxui_shell`), so both are the same few lines over
-that one model.
+A number field is `num_field`, a wrapper over `Pxui.Ui.number_field` (the one field the inspector also uses) on
+`Param.Number` (G13): the kind is the row's type (`kind_of`; a vector's cells are floats), the soft range sets the
+step and the position line, the text written is `Param.float_text`, a drag shorter than a step returns the text it
+began with.
 
 ## G3 gestures
 

@@ -151,8 +151,8 @@ val scope_point : t -> scope:path -> float * float -> (float * float) option
 
 val num_field :
   Pxui.Ui.t -> at:float * float -> w:float -> h:float -> ?size:int ->
-  ?kind:Editor_core.Number.kind -> ?range:float * float -> ?nonfinite:bool -> string -> string -> string option
-(** The pane's number field ({!Pxui.Ui.value_field} driven by {!Editor_core.Number}, as the
+  ?kind:Param.Number.kind -> ?range:float * float -> ?nonfinite:bool -> string -> string -> string option
+(** The pane's number field ({!Pxui.Ui.value_field} driven by {!Param.Number}, as the
     inspector's [Pxui_shell.Kit.number]): dragged sideways it scrubs by the step of its [kind] and soft
     [range], Option-click types, a click writes nothing.  [kind] is the parameter's type; without one the
     literal's spelling decides. [nonfinite] admits explicit non-finite literals only when

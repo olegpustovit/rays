@@ -2,7 +2,7 @@
  (name pxui)
  (public_name rays.pxui)
  (modules pxui theme ui)
- (libraries rays rays_math))
+ (libraries rays rays_math param))
 
 (executable
  (enabled_if (= %{system} macosx))
