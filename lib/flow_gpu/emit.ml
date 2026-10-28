@@ -128,6 +128,25 @@ let integer_status ?(unsigned=false) indentation operation b = match operation w
    Thread 0 always publishes, so the status binding stays referenced. *)
 let flush_status = "if(sb!=0u||i==0) atomic_fetch_or_explicit(status,sb,memory_order_relaxed);"
 module Scope = Flow_ir.Kernel_layout.Scope
+(* A scope's declarations, consecutive ones of one type on one line (at most twelve), as written by hand *)
+let declarations decls =
+  let out = Buffer.create (Buffer.length decls) in
+  let flush = function
+    | [] -> ()
+    | (ty, _) :: _ as group -> Printf.bprintf out "  %s %s;\n" ty (String.concat "," (List.rev_map snd group)) in
+  let split line = (* "  T item;" into (T, item) *)
+    if not (String.starts_with ~prefix:"  " line && String.ends_with ~suffix:";" line) then None else
+    let rest = String.sub line 2 (String.length line - 3) in
+    match String.index_opt rest ' ' with
+    | Some j when j > 0 -> Some (String.sub rest 0 j, String.sub rest (j + 1) (String.length rest - j - 1))
+    | _ -> None in
+  let group = List.fold_left (fun group line -> match split line, group with
+    | Some (ty, item), (t, _) :: _ when t = ty && List.length group < 12 -> (ty, item) :: group
+    | Some (ty, item), _ -> flush group; [ (ty, item) ]
+    | None, _ -> flush group; if line <> "" then Buffer.add_string out (line ^ "\n"); [])
+    [] (String.split_on_char '\n' (Buffer.contents decls)) in
+  flush group;
+  Buffer.contents out
 let scope = Scope.create and indent = Scope.indent
 let enter = Scope.enter ~opening:(fun condition selected ->
   Printf.sprintf "if(r%d%s0.0f) {" condition (if selected then "!=" else "=="))
@@ -330,7 +349,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
       context := (inner.Scope.id, []);
       blocks := Scope.stack inner;
       scopes := List.tl !scopes;
-      Buffer.add_buffer body inner.Scope.decls;
+      Buffer.add_string body (declarations inner.Scope.decls);
       Buffer.add_buffer body inner.Scope.code;
       Option.iter(fun source->Printf.bprintf body "  bool stop%d=%s!=0.0f;\n" header (float_of source))stop;
       Array.iteri(fun component source->let slot=header+1+component in
@@ -343,7 +362,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
   context := (0, []);
   blocks := [];
   let body = Buffer.create 4096 in
-  Buffer.add_buffer body root.Scope.decls;
+  Buffer.add_string body (declarations root.Scope.decls);
   Buffer.add_buffer body root.Scope.code;
   if layout.output_checks then Array.iter (Array.iter (fun slot -> if not (integer_register slot) then
     Printf.bprintf body "  sb|=!isfinite(r%d);\n" slot)) view.outputs;

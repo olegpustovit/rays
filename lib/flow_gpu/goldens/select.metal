@@ -1,6 +1,6 @@
 #include <metal_stdlib>
 using namespace metal;
-kernel void kernel_12a0249949dc2fd4a2b7fd17773caed9(
+kernel void kernel_f82fb77d488dbc95724ea22e58cab2c4(
   device const float* input0 [[buffer(0)]],
   device float* output [[buffer(1)]],
   constant uint* uniforms [[buffer(2)]],
@@ -8,8 +8,7 @@ kernel void kernel_12a0249949dc2fd4a2b7fd17773caed9(
   uint i [[thread_position_in_grid]]) {
   if(i>=uniforms[0]) return;
   uint sb=0u;
-  float r4=0.0f;
-  float r6=0.0f;
+  float r4=0.0f,r6=0.0f;
   float r0=input0[i*1+0];
   sb|=!isfinite(r0);
   float r1=as_type<float>(uniforms[1]);

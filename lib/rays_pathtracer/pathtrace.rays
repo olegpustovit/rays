@@ -84,10 +84,42 @@
          fu (min 0.9999 (max 0. (/ (- x2 c0) (max (- c1 c0) 0.000000000001))))
          d (world-dir (/ (+ (float i) fu) (float w)) (/ (+ (float j) fv) (float h)))]
     {:d d :pdf (texel-pdf cdf w h i j (sqrt (max 0. (- 1. (* d.y d.y)))))}))
+; Round corners (pathtrace.metal's bevel): probe rays through a disk of [radius] along N (half the samples) or a
+; tangent, every surface met within the sphere weighted by the inverse projection pdf; the normalized sum is the
+; area-weighted mean normal there. One probe walks through at most four surfaces.
+(defn probe-step :context value [(w : {:o vec3 :tmax float :sum vec3 :go bool}) (pos : (array vec3)) (axis : vec3) (p : vec3) (n : vec3) (bt : vec3) (bb : vec3) (radius : float)]
+  (let* [hit (scene/trace 1 w.o axis 0. w.tmax 0.)]
+    (if (not hit.hit)
+      {:o w.o :tmax w.tmax :sum w.sum :go false}
+      (let* [base (int/mul hit.prim 3)
+             p0 (array/nth pos base) p1 (array/nth pos (int/add base 1)) p2 (array/nth pos (int/add base 2))
+             hn0 (normalize (cross (- p1 p0) (- p2 p0)))
+             hn (if (< (dot hn0 n) 0.) (- [0. 0. 0.] hn0) hn0)
+             hp (+ w.o (* axis hit.t)) off (- hp p)
+             pdf (+ (+ (* 0.5 (abs (dot hn n))) (* 0.25 (abs (dot hn bt)))) (* 0.25 (abs (dot hn bb))))
+             total (if (< (dot off off) (* radius radius)) (+ w.sum (/ hn (max pdf 0.001))) w.sum)
+             advance (+ hit.t (* radius 0.001))
+             tmax (- w.tmax advance)]
+        {:o (+ w.o (* axis advance)) :tmax tmax :sum total :go (> tmax 0.)}))))
+(defn round-corners :context value [(pos : (array vec3)) (rng : int) (p : vec3) (n : vec3) (radius : float) (samples : int)]
+  (let* [bs (basis n)
+         acc (fold [a {:rng rng :sum [0. 0. 0.]}] [i (range samples)]
+               (let* [d1 (draw a.rng) d2 (draw d1.next) d3 (draw d2.next)
+                      normal (< d1.v 0.5) side (< d1.v 0.75)
+                      axis (if normal n (if side bs.tan bs.b))
+                      eu (if normal bs.tan (if side bs.b n))
+                      ev (if normal bs.b (if side n bs.tan))
+                      rd (* radius (sqrt d2.v)) phi (* 6.28318530717959 d3.v)
+                      o (- (+ (+ p (* eu (* rd (cos phi)))) (* ev (* rd (sin phi)))) (* axis radius))
+                      walk (iterate 4 {:o o :tmax (* 2. radius) :sum a.sum :go true}
+                             (fn [w] (if w.go (probe-step w pos axis p n bs.tan bs.b radius) w))
+                             :until (fn [prev next] (not next.go)))]
+                 {:rng d3.next :sum walk.sum}))]
+    {:rng acc.rng :n (if (< (dot acc.sum acc.sum) 0.000000000001) n (normalize acc.sum))}))
 (defn no-hit :context value [] {:t 0. :prim -1 :u 0. :v 0. :normal [0. 0. 0.] :hit false :instance -1})
 ; One bounce. With a World the estimate splits like pathtrace.metal's: [rad] takes camera-visible emitters and the
 ; light reaching the first hit, [ind] the rest, which alone is firefly-clamped.
-(defn bounce-step :context value [(st : {:rng int :o vec3 :d vec3 :thr vec3 :rad vec3 :ind vec3 :cov float :last-pdf float :b int :alive bool}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float))]
+(defn bounce-step :context value [(st : {:rng int :o vec3 :d vec3 :thr vec3 :rad vec3 :ind vec3 :cov float :last-pdf float :b int :alive bool}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float :round float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float))]
   (let* [o st.o d st.d use-map (> u.world 0) at-eye (int/eq st.b 0) zero [0. 0. 0.]
          hit (scene/trace 1 o d 0.0001 1000000000000. 0.)
          tmax (if hit.hit hit.t 1000000000000.)
@@ -130,7 +162,11 @@
              flip (< (dot ng0 v) 0.)
              ng (if flip (- zero ng0) ng0)
              ns1 (if flip (- zero ns0) ns0)
-             ns (if (<= (dot ns1 v) 0.) ng ns1)
+             bevel (if (and (> mat.round 0.) (int/lt st.b 2))
+                     (round-corners pos st.rng hitp ns1 mat.round
+                       (if at-eye u.round-samples (max (int/div u.round-samples 4) 1)))
+                     {:rng st.rng :n ns1})
+             ns (if (<= (dot bevel.n v) 0.) ng bevel.n)
              cov (if (and use-map at-eye) (+ st.cov 1.) st.cov)
              emitted (* st.thr mat.emit)
              early (or (not use-map) (int/le st.b 1))
@@ -145,7 +181,7 @@
              lift (+ hitp (* ng 0.001))
              ; next-event estimation on one rect light picked uniformly: three draws when there are lights
              nee (if (> u.lights 0)
-                   (let* [n1d (draw st.rng) n2d (draw n1d.next) n3d (draw n2d.next)
+                   (let* [n1d (draw bevel.rng) n2d (draw n1d.next) n3d (draw n2d.next)
                           l (light-at lights (min (int (* n1d.v (float u.lights))) (int/sub u.lights 1)))
                           ls (light-sample l.lo l.lu l.lv l.one-sided hitp n2d.v n3d.v)
                           cos-s (dot ns ls.wi)
@@ -157,7 +193,7 @@
                            (* (* (* (* st.thr l.rad) (eval-brdf ns v ls.wi diffuse f0 a2)) cos-s)
                               (/ (power-weight pdf-l (bsdf-pdf ns v ls.wi a2 ps)) pdf-l))
                            zero)})
-                   {:rng st.rng :e zero})
+                   {:rng bevel.rng :e zero})
              ; World: the lighting map through its CDF (two draws), then the sun cone (two draws when it shines)
              wnee (if use-map
                     (let* [x1 (draw nee.rng) x2 (draw x1.next)
@@ -223,7 +259,7 @@
          :b next-b :alive (and ok survive) :rad rad3 :ind ind2 :cov cov})))))
 (defn firefly :context value [(c : vec3)]
   (let* [lum (dot c [0.2126 0.7152 0.0722])] (if (> lum 8.) (* c (/ 8. lum)) c)))
-(defn sample-step :context value [(acc : {:rng int :sum vec3 :cov float}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float)) (gx : int) (gy : int)]
+(defn sample-step :context value [(acc : {:rng int :sum vec3 :cov float}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float :round float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float)) (gx : int) (gy : int)]
   (let* [jx (draw acc.rng) jy (draw jx.next)
          px (- (* (/ (+ (float gx) jx.v) (float u.width)) 2.) 1.)
          py (- 1. (* (/ (+ (float gy) jy.v) (float u.height)) 2.))
@@ -239,7 +275,7 @@
     {:rng start.rng :sum (+ acc.sum sample) :cov (+ acc.cov start.cov)}))
 ; The film sample of one pixel for one frame: the sum of spp radiance samples (the caller adds the accumulated
 ; frames and divides by the sample count) and, for a transparent World background, the covered samples.
-(defn trace-pixel :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float)) (pixel : int)]
+(defn trace-pixel :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float :round float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float)) (pixel : int)]
   (let* [gx (int/mod pixel u.width) gy (int/div pixel u.width)]
     (fold [acc {:rng (pixel-seed pixel u.frame) :sum [0. 0. 0.] :cov 0.}] [s (range u.spp)]
       (sample-step acc u lights mat pos nrm pan wmap cdf gx gy))))

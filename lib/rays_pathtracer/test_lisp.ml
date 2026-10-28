@@ -50,7 +50,7 @@ let positions, normals =
   let corners = Array.to_list view.indices in
   List.map (at view.vertices) corners, List.map (at (Option.get view.normals)) corners
 let triangles = Array.of_list positions
-let material = P.material ~roughness:0.5 ~metallic:0.2 (color 0.7 0.5 0.3)
+let material = P.material ~roughness:0.5 ~metallic:0.2 ~round:0.3 (color 0.7 0.5 0.3)
 let light = { P.at = Rays_math.Vec3.create 0.5 0.8 2.; target = Rays_math.Vec3.create 0.5 0.8 0.; size = (1.5, 1.); color = color 1. 1. 1.; intensity = 6. }
 let panel = { P.direction = Rays_math.Vec3.create 0.3 0.6 0.74; width = 0.5; height = 0.35; softness = 0.2; color = color 1. 0.9 0.8; intensity = 3. }
 let environment = { P.sky = color 0.5 0.6 0.8; ground = color 0.2 0.2 0.2; panels = [ panel ] }
@@ -142,13 +142,13 @@ let scenario label (world : W.baked option) =
         let s = sin (sun.angular_radius /. 2.) in let one_minus_cos = 2. *. s *. s in
         normalize (triple sun.direction), one_minus_cos, rgb sun.radiance, 1. /. (2. *. Float.pi *. one_minus_cos)
     | _ -> (0., 0., 0.), 0., (0., 0., 0.), 0. in
-  let mat_lit = Printf.sprintf "{:albedo %s :rough %s :emit %s :metal %s}" (vec (rgb material.albedo)) (num material.roughness)
-    (vec (rgb material.emission)) (num material.metallic) in
+  let mat_lit = Printf.sprintf "{:albedo %s :rough %s :emit %s :metal %s :round %s}" (vec (rgb material.albedo)) (num material.roughness)
+    (vec (rgb material.emission)) (num material.metallic) (num material.round) in
   let tables = String.concat " " [ table "pos" vec "[0. 0. 0.]" positions; table "nrm" vec "[0. 0. 0.]" normals;
     table "pan" vec "[0. 0. 0.]" panels; table "lights" vec "[0. 0. 0.]" lights; table "wmap" vec "[0. 0. 0.]" maps;
     table "cdf" num "0." cdf ] in
   let program_of frame =
-    let u = Printf.sprintf "{:eye %s :lens 0. :fwd %s :rgt %s :up %s :tan-half %s :aspect %s :focus 1. :width %d :height %d :spp %d :bounces %d :frame %d :sky %s :ground %s :panels %d :lights %d :world %d :background %d :map-w %d :map-h %d :bg %s :sun-dir %s :sun-cos %s :sun-rad %s :sun-pdf %s}"
+    let u = Printf.sprintf "{:eye %s :lens 0. :fwd %s :rgt %s :up %s :tan-half %s :aspect %s :focus 1. :width %d :height %d :spp %d :bounces %d :frame %d :sky %s :ground %s :panels %d :lights %d :world %d :background %d :map-w %d :map-h %d :bg %s :sun-dir %s :sun-cos %s :sun-rad %s :sun-pdf %s :round-samples 4}"
       (vec eye) (vec forward) (vec right) (vec up) (num (tan (0.9 /. 2.))) (num (float width /. float height)) width height spp bounces frame
       (vec (rgb environment.sky)) (vec (rgb environment.ground)) (List.length panels / 3) (List.length lights / 5)
       (if world = None then 0 else 1) background map_w map_h (vec bg) (vec sun_dir) (num sun_cos) (vec sun_rad) (num sun_pdf) in
