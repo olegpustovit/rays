@@ -15,7 +15,7 @@ let state:Scene_execution.state={viewport=(0,0,64,64);scissor=(0,0,64,64);
   depth_load=Load;depth_clear=1.;transform_uniforms=None}
 
 let mesh index:Scene_execution.mesh=
-  let vertices=Bytes.make 48 '\000'and indices=Bytes.make 12 '\000'in
+  let vertices=Scene_execution_fixtures.scene2_plain_vertices ()and indices=Bytes.make 12 '\000'in
   Bytes.set_int32_le indices 4 1l;Bytes.set_int32_le indices 8 2l;
   {key=Host(Printf.sprintf"scratch-%03d"index);vertices;vertex_count=3;
    indices;index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
@@ -56,13 +56,15 @@ let run () =
    |_->failwith"prepared scratch accepted more than 65,536 draws"));
   with_renderer driver"segments"(fun renderer->
   let first={Scene_execution.mesh=mesh 70_000;state}
-  and second={Scene_execution.mesh=mesh 70_001;
-    state={state with depth_write=true}}in
+  and scene3_mesh,attributes=Scene_execution_fixtures.scene3_mesh~color:0x4080bfffl"scratch-70001"in
+  let second={Scene_execution.mesh=scene3_mesh;
+    state={state with depth_write=true;
+      transform_uniforms=Some(Scene_execution_fixtures.scene3_surface())}}in
   let stable=[{Scene_execution.family=Scene2;blend=Ogpu.Pipeline.Replace;
     texture=None;auxiliary=None;vertex_attributes=None;samples=1;draw=first};
     {Scene_execution.family=Scene3;blend=Ogpu.Pipeline.Replace;
-    texture=None;auxiliary=None;vertex_attributes=Some("scratch-attributes",Bytes.make 36 '\000');samples=1;
-    draw={second with mesh={second.mesh with vertices=Bytes.make 72 '\000'}}}]in
+    texture=None;auxiliary=None;vertex_attributes=Some attributes;samples=1;
+    draw=second}]in
   let render ~border draws=
     require(get(Scene_execution.submit renderer draws))
       "mixed Scene2/Scene3 frame was skipped";
@@ -147,8 +149,9 @@ let run () =
       max_anisotropy=1};gpu=None}in
   List.iteri(fun index(x,expected,label)->
     require(get(Scene_execution.submit~clear:(0.,0.,0.,1.)renderer
-      [sampled~texture:halves Scene_execution.Scene2 Ogpu.Pipeline.Replace
-        {mesh=mesh(2+index);state={state with viewport=(x,0,128,64)}}]))
+      [sampled~texture:halves Scene_execution.Scene2_textured Ogpu.Pipeline.Replace
+        {mesh={(mesh(2+index)) with vertices=Scene_execution_fixtures.scene2_vertices~uv:(fun x _->(x+.1.)/.2.,0.)()};
+         state={state with viewport=(x,0,128,64)}}]))
       "overhanging viewport frame was skipped";
     let pixels=read()in
     for y=0 to 63 do for x=0 to 63 do

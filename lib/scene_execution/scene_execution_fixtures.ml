@@ -75,5 +75,53 @@ let make device family blend samples =
       fragment = Some fragment; fragment_entry = Some fragment_entry; color_format = Rgba8_unorm;
       depth_format; sample_count = samples }
 
+(* The production pipelines (generated shaders, production binding slots), so a
+   Metal test cannot drift from what the renderer binds. *)
 let create_offscreen driver configuration =
-  Scene_execution.create ~offscreen:true driver configuration make
+  Renderer_pipeline.create_renderer ~backend:"metal" ~offscreen:true ~driver ~configuration ()
+
+(* Production-ABI geometry covering the whole target with one triangle.
+   Scene2_textured: 68-byte records (doubles x, y at 0, 8; colour word at 48; uv doubles at 52, 60). *)
+let corners = [ (-1., -1.); (3., -1.); (-1., 3.) ]
+let indices = let b = Bytes.make 12 '\000' in Bytes.set_int32_le b 4 1l; Bytes.set_int32_le b 8 2l; b
+let mesh key vertices : Scene_execution.mesh =
+  { key = Host key; vertices; vertex_count = 3; indices; index_count = 3; primitive = Ogpu.Render_pass.Triangle_list }
+
+let scene2_vertices ?(color = 0xffffffffl) ?(uv = fun _ _ -> (0., 0.)) () =
+  let b = Bytes.make (68 * 3) '\000' in
+  let double at x = Bytes.set_int64_le b at (Int64.bits_of_float x) in
+  List.iteri (fun i (x, y) ->
+    let o = i * 68 in
+    double o x; double (o + 8) y; Bytes.set_int32_le b (o + 48) color;
+    let u, v = uv x y in double (o + 52) u; double (o + 60) v) corners;
+  b
+
+(* A plain [Scene2] draw carries 16-byte records (float x, y, colour word) that the renderer expands. *)
+let scene2_plain_vertices ?(color = 0xffffffffl) () =
+  let b = Bytes.make (16 * 3) '\000' in
+  List.iteri (fun i (x, y) ->
+    Bytes.set_int32_le b (i * 16) (Int32.bits_of_float x);
+    Bytes.set_int32_le b (i * 16 + 4) (Int32.bits_of_float y);
+    Bytes.set_int32_le b (i * 16 + 8) color) corners;
+  b
+
+let scene2_mesh ?color ?uv key = mesh key (scene2_vertices ?color ?uv ())
+
+(* Scene3: 24-byte records (position, normal as floats) plus the 12-byte attribute record
+   (colour word, uv floats) a vertex. *)
+let scene3_mesh ?(color = 0xffffffffl) ?(uv = (0., 0.)) key =
+  let v = Bytes.make (24 * 3) '\000' and a = Bytes.make (12 * 3) '\000' in
+  let float b at x = Bytes.set_int32_le b at (Int32.bits_of_float x) in
+  List.iteri (fun i (x, y) ->
+    float v (i * 24) x; float v (i * 24 + 4) y; float v (i * 24 + 20) 1.;
+    Bytes.set_int32_le a (i * 12) color; float a (i * 12 + 4) (fst uv); float a (i * 12 + 8) (snd uv)) corners;
+  mesh key v, (key ^ ":attributes", a)
+
+(* A Scene3 block: identity transforms, unlit white material, so a draw shows its vertex colour times texel. *)
+let scene3_surface () =
+  let b = Bytes.make 5456 '\000' in
+  let set i x = Bytes.set_int32_le b (i * 4) (Int32.bits_of_float x) in
+  for m = 0 to 2 do for d = 0 to 3 do set ((m * 16) + (d * 5)) 1. done done;
+  List.iter (fun i -> set i 1.) [ 52; 53; 54; 55; 59; 69; 70; 71; 72 ];
+  set 50 (-1.);
+  b

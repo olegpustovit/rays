@@ -26,7 +26,7 @@ let run () =
       let indices=Bytes.make 12 '\000' in
       Bytes.set_int32_le indices 4 1l; Bytes.set_int32_le indices 8 2l;
       let mesh : Scene_execution.mesh =
-        {key=Host "offscreen-fullscreen";vertices=Bytes.make 48 '\000';
+        {key=Host "offscreen-fullscreen";vertices=Scene_execution_fixtures.scene2_plain_vertices ();
          vertex_count=3;indices;index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
       and state : Scene_execution.state =
         {viewport=(0,0,4,4);scissor=(0,0,4,4);
