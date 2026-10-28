@@ -13,9 +13,6 @@ and kernel = Links | RenderMan | Hart
 type unmatched = Keep_target | Default_value
 type falloff = Linear | Smoothstep | Uniform of float
 type surface_falloff = falloff
-type surface_vertex_selection = Surface_index.vertex_selection =
-  | All_triangle_vertices
-  | Any_triangle_vertex
 let owner_count geometry = function
   | Attribute.Point -> Geometry.point_count geometry
   | Attribute.Vertex -> Geometry.vertex_count geometry
@@ -559,7 +556,7 @@ let surface_attribute ?into ~owner name =
 let transfer_surface ?cancel ?(grain = 16_384) ?max_distance
     ?(blend_width = 0.) ?(falloff = Smoothstep) ?(unmatched = Keep_target)
     ?(target_owner = Attribute.Point) ?distance_attribute ?source_primitives
-    ?source_vertices ?(source_vertex_selection = All_triangle_vertices)
+    ?source_vertices ?(source_vertex_selection = Surface_index.All_triangle_vertices)
     ?target_elements
     ~attributes ~source ~target () =
   Error.guard ~cancelled:"surface attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer_surface"

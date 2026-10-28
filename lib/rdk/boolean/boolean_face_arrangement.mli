@@ -1,11 +1,10 @@
 (** Exact planar splitting of one face's non-coplanar Boolean constraints. *)
 
-type side = Boolean_constraints.side = Left | Right
 type t
 
 val build :
   ?cancel:Cancel.t -> ?coplanar:Boolean_coplanar.t ->
-  Boolean_constraints.t -> side:side -> triangle:int ->
+  Boolean_constraints.t -> side:Boolean_constraints.side -> triangle:int ->
   (t, Error.t) result
 (** Insert exact T-junction and proper segment/segment intersections, using a
     TPI, line-plane, or projected line-line construction for crossings, then

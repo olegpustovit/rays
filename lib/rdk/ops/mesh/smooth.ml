@@ -48,7 +48,7 @@ let remap_error error =
 
 let run ?cancel ?(grain = 16_384) ?constrained_points
     ?(boundary = Smooth_free) ?(iterations = 1)
-    ?(mode = Attribute_ops.Laplacian 0.5)
+    ?(mode = Attribute_blur.Laplacian 0.5)
     ?(recompute_normals = true)
     ~attributes geometry =
   try

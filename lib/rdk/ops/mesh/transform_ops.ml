@@ -1,9 +1,4 @@
 
-type deform_selection = Deform.selection =
-  | Selected_points of Group.t
-  | Selected_vertices of Group.t
-  | Selected_primitives of Group.t
-  | Selected_edges of Edge_group.t
 
 type transform_order =
   | Transform_srt | Transform_str | Transform_rst

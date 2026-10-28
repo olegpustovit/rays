@@ -9,7 +9,7 @@ type params = {
   split_connectivity : bool;
   clip_attribute : string;
   distance : float;
-  selection : Deform.selection option;
+  selection : Element_selection.t option;
   replace_existing_groups : bool;
   clipped_edge_group : string option;
   cap_group : string option;

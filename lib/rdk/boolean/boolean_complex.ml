@@ -1,4 +1,3 @@
-type side = Boolean_constraints.side = Left | Right
 
 type t = {
   constraints : Boolean_constraints.t;
@@ -32,7 +31,7 @@ let facet_vertex value facet local = match local with
 let facet_member_range value facet =
   value.member_offsets.(facet), value.member_offsets.(facet + 1)
 let member_side value member =
-  if Bytes.unsafe_get value.member_sides member = '\000' then Left else Right
+  if Bytes.unsafe_get value.member_sides member = '\000' then Boolean_constraints.Left else Boolean_constraints.Right
 let member_face value member = value.member_faces.(member)
 let member_triangle value member = value.member_triangles.(member)
 let member_winding value member =
@@ -366,7 +365,7 @@ let build ?cancel constraints refinement =
           allocate_local point in
     let append side face point_index point_token orientation =
       let facet = !raw in
-      if side = Right then Bytes.unsafe_set raw_sides facet '\001';
+      if side = Boolean_constraints.Right then Bytes.unsafe_set raw_sides facet '\001';
       raw_faces.(facet) <- face;
       raw_triangles.(facet) <- point_index;
       if orientation < 0 then Bytes.unsafe_set raw_orientations facet '\001';
@@ -403,9 +402,9 @@ let build ?cancel constraints refinement =
                 orientation
             done
       done in
-    append_side Left left_faces Boolean_refinement.left_face
+    append_side Boolean_constraints.Left left_faces Boolean_refinement.left_face
       Boolean_constraints.View.left_triangle_point;
-    append_side Right right_faces Boolean_refinement.right_face
+    append_side Boolean_constraints.Right right_faces Boolean_refinement.right_face
       Boolean_constraints.View.right_triangle_point;
     token_count := !next_token;
     let merge_orders first second =

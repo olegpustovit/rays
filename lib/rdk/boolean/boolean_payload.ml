@@ -623,8 +623,8 @@ let copy_points_and_vertices ?cancel ~grain ~point_conflict ~point_tolerance anc
 
 let selected_primitive ancestry left right primitive =
   match Boolean_extract.primitive_side ancestry primitive with
-  | Boolean_complex.Left -> left, Boolean_extract.primitive_face ancestry primitive
-  | Boolean_complex.Right -> right, Boolean_extract.primitive_face ancestry primitive
+  | Boolean_constraints.Left -> left, Boolean_extract.primitive_face ancestry primitive
+  | Boolean_constraints.Right -> right, Boolean_extract.primitive_face ancestry primitive
 
 let make_attribute pair storage =
   match Attribute.create_owned ~name:pair.name ~owner:Attribute.Primitive storage with
@@ -750,8 +750,8 @@ let copy_primitives ?cancel ~grain ancestry =
           let key primitive =
             let face = Boolean_extract.primitive_face ancestry primitive in
             match Boolean_extract.primitive_side ancestry primitive with
-            | Boolean_complex.Left -> 0, left_ranks.(face), primitive
-            | Boolean_complex.Right -> 1, right_ranks.(face), primitive in
+            | Boolean_constraints.Left -> 0, left_ranks.(face), primitive
+            | Boolean_constraints.Right -> 1, right_ranks.(face), primitive in
           Group.iter (fun primitive ->
             keyed.(!next) <- key primitive; incr next) group;
           Array.sort Stdlib.compare keyed;

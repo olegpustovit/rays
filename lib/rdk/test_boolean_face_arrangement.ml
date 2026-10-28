@@ -38,7 +38,7 @@ let sorted_points arrangement =
 
 let test_proper_crossing () =
   let arrangement = Arrangement.build (crossing_plan ())
-      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
+      ~side:Constraints.Left ~triangle:0 |> get_rdk in
   check (Arrangement.point_count arrangement = 5)
     "proper crossing did not add one exact TPI";
   check (Arrangement.segment_count arrangement = 4)
@@ -71,7 +71,7 @@ let test_single_segment () =
   and right = geometry
       [|0.5,-0.5,-1.; 0.5,1.5,1.; 0.5,1.5,-1.|] [|0;1;2|] in
   let plan = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
-  let arrangement = Arrangement.build plan ~side:Arrangement.Left ~triangle:0
+  let arrangement = Arrangement.build plan ~side:Constraints.Left ~triangle:0
       |> get_rdk in
   check (Arrangement.point_count arrangement = 2
       && Arrangement.segment_count arrangement = 1)
@@ -86,7 +86,7 @@ let test_multiway_crossing () =
         -1.6,-1.6,-1.; 1.6,1.6,-1.; 0.,0.,1.|]
       [|0;1;2; 3;4;5; 6;7;8|] in
   let plan = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
-  let arrangement = Arrangement.build plan ~side:Arrangement.Left ~triangle:0
+  let arrangement = Arrangement.build plan ~side:Constraints.Left ~triangle:0
       |> get_rdk in
   check (Arrangement.point_count arrangement = 7)
     "three-way crossing did not deduplicate the shared TPI";
@@ -113,13 +113,13 @@ let test_coplanar_overlay () =
   let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
   let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
   let arrangement = Arrangement.build ~coplanar constraints
-      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
+      ~side:Constraints.Left ~triangle:0 |> get_rdk in
   check (Arrangement.point_count arrangement = 6)
     "coplanar polygon points did not enter the source-face arrangement";
   check (Arrangement.segment_count arrangement = 6)
     "coplanar polygon boundary did not enter the source-face arrangement";
   let right_arrangement = Arrangement.build ~coplanar constraints
-      ~side:Arrangement.Right ~triangle:0 |> get_rdk in
+      ~side:Constraints.Right ~triangle:0 |> get_rdk in
   check (sorted_points arrangement = sorted_points right_arrangement)
     "two sides of a coplanar pair received different exact boundaries"
 
@@ -135,7 +135,7 @@ let test_mixed_coplanar_noncoplanar_crossing () =
     "mixed fixture lost its coplanar pair";
   let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
   let arrangement = Arrangement.build ~coplanar constraints
-      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
+      ~side:Constraints.Left ~triangle:0 |> get_rdk in
   check (Arrangement.point_count arrangement = 9)
     "mixed overlap did not construct the exact edge/plane crossing";
   check (Arrangement.segment_count arrangement = 9)
@@ -189,7 +189,7 @@ let test_sparse_sweep_and_point_candidates () =
       let left,right = many_parallel_plan ~count ~point_contact in
       let constraints = Constraints.build ~grain:7 ~left ~right () |> get_rdk in
       Arrangement.build constraints
-        ~side:Arrangement.Left ~triangle:0 |> get_rdk) in
+        ~side:Constraints.Left ~triangle:0 |> get_rdk) in
   let plain = run 1 false in
   check (Arrangement.point_count plain = count * 2
       && Arrangement.segment_count plain = count)
@@ -223,7 +223,7 @@ let test_dense_multiway_sweep () =
   let run domains =
     Parallel.run ~domains (fun () ->
       Arrangement.build (multiway_plan count)
-        ~side:Arrangement.Left ~triangle:0 |> get_rdk) in
+        ~side:Constraints.Left ~triangle:0 |> get_rdk) in
   let arrangement = run 1 in
   check (Arrangement.point_count arrangement = (count * 2) + 1
       && Arrangement.segment_count arrangement = count * 2)
@@ -235,7 +235,7 @@ let test_cancellation () =
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
   match Arrangement.build ~cancel (crossing_plan ())
-      ~side:Arrangement.Left ~triangle:0 with
+      ~side:Constraints.Left ~triangle:0 with
   | Error error when Error.code error = "cancelled" -> ()
   | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
   | Ok _ -> failf "cancelled face arrangement completed"

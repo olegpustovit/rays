@@ -102,9 +102,9 @@ let build ?cancel complex radial =
       for member = first to last - 1 do
         let winding = Boolean_complex.member_winding complex member in
         match Boolean_complex.member_side complex member with
-        | Boolean_complex.Left ->
+        | Boolean_constraints.Left ->
             left_winding.(facet) <- left_winding.(facet) + winding
-        | Boolean_complex.Right ->
+        | Boolean_constraints.Right ->
             right_winding.(facet) <- right_winding.(facet) + winding
       done
     done;

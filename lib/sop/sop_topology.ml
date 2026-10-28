@@ -970,16 +970,16 @@ module Boolean_seam = struct
       "Coincident patches", Rdk.Boolean.Coincident_patches;
     ]
   let treatment_parameter = Param.choice ~equal:( = ) [
-      "Solid", Rdk.Boolean.Solid; "Surface", Rdk.Boolean.Surface;
+      "Solid", Rdk.Boolean_solid.Solid; "Surface", Rdk.Boolean_solid.Surface;
     ]
 
   type parameters = {
     output : Rdk.Boolean.seam_output [@sop.default Rdk.Boolean.Seam_curves]
       [@sop.label "Output"] [@sop.kind output_parameter];
-    left_treatment : Rdk.Boolean.treatment [@sop.default Rdk.Boolean.Solid]
+    left_treatment : Rdk.Boolean_solid.treatment [@sop.default Rdk.Boolean_solid.Solid]
       [@sop.label "A treatment"] [@sop.folder "Operands"]
       [@sop.kind treatment_parameter];
-    right_treatment : Rdk.Boolean.treatment [@sop.default Rdk.Boolean.Solid]
+    right_treatment : Rdk.Boolean_solid.treatment [@sop.default Rdk.Boolean_solid.Solid]
       [@sop.label "B treatment"] [@sop.folder "Operands"]
       [@sop.kind treatment_parameter];
     resolve_left_self_intersections : bool [@sop.default false]
@@ -1130,22 +1130,22 @@ end
 
 module Boolean_fracture = struct
   let detriangulation_parameter = Param.choice ~equal:( = ) [
-      "Triangles", Rdk.Boolean.Triangles;
-      "Unchanged polygons", Rdk.Boolean.Unchanged_polygons;
-      "All polygons", Rdk.Boolean.All_polygons;
+      "Triangles", Rdk.Boolean_materialization.Triangles;
+      "Unchanged polygons", Rdk.Boolean_materialization.Unchanged_polygons;
+      "All polygons", Rdk.Boolean_materialization.All_polygons;
     ]
 
   let conflict_parameter = Param.choice ~equal:( = ) [
-    "Reject conflict", Rdk.Boolean.Reject; "Promote to vertex", Rdk.Boolean.Promote_to_vertex;
+    "Reject conflict", Rdk.Boolean_payload.Reject; "Promote to vertex", Rdk.Boolean_payload.Promote_to_vertex;
   ]
   type parameters = {
-    point_conflict : Rdk.Boolean.point_conflict [@sop.default Rdk.Boolean.Promote_to_vertex]
+    point_conflict : Rdk.Boolean_payload.point_conflict [@sop.default Rdk.Boolean_payload.Promote_to_vertex]
       [@sop.label "Point attribute conflicts"] [@sop.folder "Attributes"] [@sop.kind conflict_parameter];
     assume_flat : bool [@sop.default false] [@sop.label "Assume flat"] [@sop.folder "Output"];
     resolve_cutter_self_intersections : bool [@sop.default false]
       [@sop.label "Resolve cutter self-intersections"];
-    detriangulation : Rdk.Boolean.detriangulation
-      [@sop.default Rdk.Boolean.Triangles]
+    detriangulation : Rdk.Boolean_materialization.detriangulation
+      [@sop.default Rdk.Boolean_materialization.Triangles]
       [@sop.label "Polygons"] [@sop.kind detriangulation_parameter];
     require_closed : bool [@sop.default true] [@sop.label "Require closed"];
     piece_attribute : string [@sop.default "piece"]
@@ -1189,8 +1189,8 @@ module Boolean_fracture = struct
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|source;cutters|]
       (fun ~node_id:_ context inputs ->
         match Rdk.Boolean.run { cancel = Some (Context.cancel_token context); grain = (Context.grain context);
-    operation = Rdk.Boolean.Difference; left_treatment = Rdk.Boolean.Solid;
-    right_treatment = Rdk.Boolean.Surface; resolve_left_self_intersections = false;
+    operation = Rdk.Boolean_solid.Difference; left_treatment = Rdk.Boolean_solid.Solid;
+    right_treatment = Rdk.Boolean_solid.Surface; resolve_left_self_intersections = false;
     resolve_right_self_intersections = resolve_cutter_self_intersections; point_conflict;
     point_tolerance; tiny_seam_threshold; cleanup_max_batches; strict_cleanup;
     seam_points = Rdk.Boolean.Shared_seam_points; detriangulation; assume_flat;
@@ -1285,8 +1285,8 @@ module Fuse = struct
       "Near points", Fuse_near_points; "Specified points", Fuse_specified_points;
     ]
   let using_parameter = Param.choice ~equal:( = ) [
-      "Least target point", Rdk.Fuse_grid.Least_target_point;
-      "Closest target point", Rdk.Fuse_grid.Closest_target_point;
+      "Least target point", Rdk.Point_snap.Least_target_point;
+      "Closest target point", Rdk.Point_snap.Closest_target_point;
     ]
   let position_parameter = Param.choice ~equal:( = ) [
       "First", Rdk.Fuse_reduce.First_position;
@@ -1306,16 +1306,16 @@ module Fuse = struct
       "Maximum weight", Rdk.Fuse_reduce.Maximum_weight_position;
     ]
   let attributes_parameter = Param.choice ~equal:( = ) [
-      "Keep first", Rdk.Fuse_reduce.Keep_first;
-      "Average numeric", Rdk.Fuse_reduce.Average_numeric;
+      "Keep first", Rdk.Fuse_rules.Keep_first;
+      "Average numeric", Rdk.Fuse_rules.Average_numeric;
     ]
   let metric_parameter = Param.choice ~equal:( = ) [
       "Euclidean", Rdk.Fuse_grid.Euclidean;
       "Componentwise", Rdk.Fuse_grid.Componentwise;
     ]
   let condition_parameter = Param.choice ~equal:( = ) [
-      "Equal", Rdk.Fuse_grid.Equal_attribute_values;
-      "Unequal", Rdk.Fuse_grid.Unequal_attribute_values;
+      "Equal", Rdk.Point_snap.Equal_attribute_values;
+      "Unequal", Rdk.Point_snap.Unequal_attribute_values;
     ]
 
   type parameters = {
@@ -1325,7 +1325,7 @@ module Fuse = struct
       [@sop.label "Targeting"] [@sop.kind targeting_parameter];
     target_attribute : string [@sop.default "targetpoint"]
       [@sop.label "Target point attribute"];
-    using : Rdk.Fuse_grid.fuse_using [@sop.default Rdk.Fuse_grid.Least_target_point]
+    using : Rdk.Point_snap.using [@sop.default Rdk.Point_snap.Least_target_point]
       [@sop.label "Use target"] [@sop.kind using_parameter];
     tolerance : float [@sop.default 0.001] [@sop.label "Snap distance"]
       [@sop.min 0.] [@sop.max 10.] [@sop.hard_min 0.];
@@ -1334,7 +1334,7 @@ module Fuse = struct
       [@sop.kind position_parameter];
     weight_attribute : string [@sop.default ""]
       [@sop.label "Weight attribute"] [@sop.folder "Fuse"];
-    attributes : Rdk.Fuse_reduce.attributes [@sop.default Rdk.Fuse_reduce.Keep_first]
+    attributes : Rdk.Fuse_rules.default_attributes [@sop.default Rdk.Fuse_rules.Keep_first]
       [@sop.label "Attributes"] [@sop.folder "Fuse"]
       [@sop.kind attributes_parameter];
 
@@ -1353,8 +1353,8 @@ module Fuse = struct
       [@sop.label "Radius attribute"] [@sop.folder "Matching"];
     match_attribute : string [@sop.default ""]
       [@sop.label "Match attribute"] [@sop.folder "Matching"];
-    match_condition : Rdk.Fuse_grid.fuse_match_condition
-      [@sop.default Rdk.Fuse_grid.Equal_attribute_values]
+    match_condition : Rdk.Point_snap.match_condition
+      [@sop.default Rdk.Point_snap.Equal_attribute_values]
       [@sop.label "Match condition"] [@sop.folder "Matching"]
       [@sop.kind condition_parameter];
     match_tolerance : float [@sop.default 0.] [@sop.label "Match tolerance"]
@@ -1381,7 +1381,7 @@ module Fuse = struct
       if not (Float.is_finite parameters.tolerance && Float.is_finite parameters.match_tolerance)
           || parameters.tolerance < 0. || parameters.match_tolerance < 0. then refuse "tolerances must be finite and nonnegative";
       if parameters.targeting = Fuse_specified_points && String.trim parameters.target_attribute = "" then refuse "specified targets require an attribute name";
-      if String.trim parameters.match_attribute = "" && (parameters.match_condition <> Rdk.Fuse_grid.Equal_attribute_values
+      if String.trim parameters.match_attribute = "" && (parameters.match_condition <> Rdk.Point_snap.Equal_attribute_values
           || parameters.match_tolerance <> 0.) then refuse "match condition and tolerance require a match attribute";
       if parameters.targeting = Fuse_specified_points && (String.trim parameters.radius_attribute <> ""
           || String.trim parameters.match_attribute <> "") then refuse "specified targets do not accept radius or match attributes";
@@ -1426,8 +1426,8 @@ module Fuse = struct
     let remove_degenerate_primitives = parameters.remove_degenerate_primitives in
     let remove_unused_points_from_degenerate_primitives = parameters.remove_unused_points_from_degenerate_primitives in
     let remove_all_unused_points = parameters.remove_all_unused_points in
-    let targeting = match targeting with Fuse_near_points -> Rdk.Fuse_grid.Near_points
-      | Fuse_specified_points -> Rdk.Fuse_grid.Specified_points target_attribute in
+    let targeting = match targeting with Fuse_near_points -> Rdk.Point_snap.Near_points
+      | Fuse_specified_points -> Rdk.Point_snap.Specified_points target_attribute in
     let group = optional_text group and target_group = optional_text target_group
     and weight_attribute = optional_text weight_attribute and radius_attribute = optional_text radius_attribute
     and match_attribute = optional_text match_attribute and snapped_group = optional_text snapped_group
@@ -1663,28 +1663,28 @@ end
 module Boolean = struct
 
   let operation_parameter = Param.choice ~equal:( = ) [
-      "Union", Rdk.Boolean.Union;
-      "Intersection", Rdk.Boolean.Intersection;
-      "Subtract B from A", Rdk.Boolean.Difference;
-      "Subtract A from B", Rdk.Boolean.Reverse_difference;
-      "Exclusive or", Rdk.Boolean.Xor;
-      "Shatter", Rdk.Boolean.Shatter;
+      "Union", Rdk.Boolean_solid.Union;
+      "Intersection", Rdk.Boolean_solid.Intersection;
+      "Subtract B from A", Rdk.Boolean_solid.Difference;
+      "Subtract A from B", Rdk.Boolean_solid.Reverse_difference;
+      "Exclusive or", Rdk.Boolean_solid.Xor;
+      "Shatter", Rdk.Boolean_solid.Shatter;
     ]
   let treatment_parameter = Param.choice ~equal:( = ) [
-      "Solid", Rdk.Boolean.Solid; "Surface", Rdk.Boolean.Surface;
+      "Solid", Rdk.Boolean_solid.Solid; "Surface", Rdk.Boolean_solid.Surface;
     ]
   let conflict_parameter = Param.choice ~equal:( = ) [
-      "Reject conflict", Rdk.Boolean.Reject;
-      "Promote to vertex", Rdk.Boolean.Promote_to_vertex;
+      "Reject conflict", Rdk.Boolean_payload.Reject;
+      "Promote to vertex", Rdk.Boolean_payload.Promote_to_vertex;
     ]
   let seam_points_parameter = Param.choice ~equal:( = ) [
       "Shared", Rdk.Boolean.Shared_seam_points;
       "Split", Rdk.Boolean.Split_seam_points;
     ]
   let detriangulation_parameter = Param.choice ~equal:( = ) [
-      "Triangles", Rdk.Boolean.Triangles;
-      "Unchanged polygons", Rdk.Boolean.Unchanged_polygons;
-      "All polygons", Rdk.Boolean.All_polygons;
+      "Triangles", Rdk.Boolean_materialization.Triangles;
+      "Unchanged polygons", Rdk.Boolean_materialization.Unchanged_polygons;
+      "All polygons", Rdk.Boolean_materialization.All_polygons;
     ]
   let closed_parameter = Param.choice ~equal:( = ) [
       "Operation default", Closed_default;
@@ -1693,20 +1693,20 @@ module Boolean = struct
     ]
 
   type parameters = {
-    operation : Rdk.Boolean.operation [@sop.default Rdk.Boolean.Union]
+    operation : Rdk.Boolean_solid.operation [@sop.default Rdk.Boolean_solid.Union]
       [@sop.label "Operation"] [@sop.kind operation_parameter];
-    left_treatment : Rdk.Boolean.treatment [@sop.default Rdk.Boolean.Solid]
+    left_treatment : Rdk.Boolean_solid.treatment [@sop.default Rdk.Boolean_solid.Solid]
       [@sop.label "A treatment"] [@sop.folder "Operands"]
       [@sop.kind treatment_parameter];
-    right_treatment : Rdk.Boolean.treatment [@sop.default Rdk.Boolean.Solid]
+    right_treatment : Rdk.Boolean_solid.treatment [@sop.default Rdk.Boolean_solid.Solid]
       [@sop.label "B treatment"] [@sop.folder "Operands"]
       [@sop.kind treatment_parameter];
     resolve_left_self_intersections : bool [@sop.default false]
       [@sop.label "Resolve A self-intersections"] [@sop.folder "Operands"];
     resolve_right_self_intersections : bool [@sop.default false]
       [@sop.label "Resolve B self-intersections"] [@sop.folder "Operands"];
-    point_conflict : Rdk.Boolean.point_conflict
-      [@sop.default Rdk.Boolean.Promote_to_vertex]
+    point_conflict : Rdk.Boolean_payload.point_conflict
+      [@sop.default Rdk.Boolean_payload.Promote_to_vertex]
       [@sop.label "Point attribute conflicts"] [@sop.folder "Attributes"]
       [@sop.kind conflict_parameter];
     point_tolerance : float [@sop.default 0.] [@sop.label "Point tolerance"]
@@ -1724,8 +1724,8 @@ module Boolean = struct
       [@sop.default Rdk.Boolean.Shared_seam_points]
       [@sop.label "Seam points"] [@sop.folder "Output"]
       [@sop.kind seam_points_parameter];
-    detriangulation : Rdk.Boolean.detriangulation
-      [@sop.default Rdk.Boolean.Triangles]
+    detriangulation : Rdk.Boolean_materialization.detriangulation
+      [@sop.default Rdk.Boolean_materialization.Triangles]
       [@sop.label "Polygons"] [@sop.folder "Output"]
       [@sop.kind detriangulation_parameter];
     assume_flat : bool [@sop.default false] [@sop.label "Assume flat"]
@@ -1748,8 +1748,8 @@ module Boolean = struct
       if not (Float.is_finite parameters.point_tolerance && Float.is_finite parameters.tiny_seam_threshold)
           || parameters.point_tolerance < 0. || parameters.tiny_seam_threshold < 0. then refuse "tolerances must be finite and nonnegative";
       if parameters.cleanup_max_batches < 1 then refuse "cleanup batches must be positive";
-      if parameters.operation = Rdk.Boolean.Shatter then (
-        if parameters.left_treatment <> Rdk.Boolean.Solid || parameters.right_treatment <> Rdk.Boolean.Solid then
+      if parameters.operation = Rdk.Boolean_solid.Shatter then (
+        if parameters.left_treatment <> Rdk.Boolean_solid.Solid || parameters.right_treatment <> Rdk.Boolean_solid.Solid then
           refuse "shatter requires two solid operands";
         let names = List.filter_map optional_text [parameters.left_piece_group;parameters.overlap_piece_group;parameters.right_piece_group] in
         if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "shatter group names must be distinct")]
@@ -2050,7 +2050,7 @@ module Triangulate_2d = struct
           | None -> Ok None
           | Some name ->
               (match Rdk.Geometry.find_group ~owner:Rdk.Group.Point name geometry with
-               | Some group -> Ok (Some (Rdk.Transform_ops.Selected_points group))
+               | Some group -> Ok (Some (Rdk.Element_selection.Selected_points group))
                | None -> Error (Diagnostic.error ~code:"missing_group"
                    (Printf.sprintf
                       "triangulate_2d could not find point group %S" name))) in

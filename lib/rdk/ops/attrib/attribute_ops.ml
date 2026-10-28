@@ -1,16 +1,6 @@
 
 
-type rename_conflict = Attribute_lifecycle.rename_conflict =
-  | Attribute_rename_skip
-  | Attribute_rename_error
-  | Attribute_rename_overwrite
 
-type rename_rule = Attribute_lifecycle.rename_rule = {
-  rename_attribute_owner : Attribute.owner option;
-  rename_attribute_pattern : string;
-  rename_attribute_replacement : string;
-  rename_attribute_conflict : rename_conflict;
-}
 
 let delete ?cancel ?reference ?delete_non_selected ?point_pattern
     ?vertex_pattern ?primitive_pattern ?detail_pattern geometry =
@@ -29,17 +19,7 @@ let rename ?cancel ~rules geometry =
   with Cancel.Cancelled -> Error (Error.make ~operation:"attribute_rename"
       ~code:"cancelled" "attribute renaming was cancelled")
 
-type swap_method = Attribute_lifecycle.swap_method =
-  | Attribute_swap
-  | Attribute_move
-  | Attribute_copy
 
-type swap_rule = Attribute_lifecycle.swap_rule = {
-  swap_attribute_owner : Attribute.owner;
-  swap_attribute_source : string;
-  swap_attribute_destination : string;
-  swap_attribute_method : swap_method;
-}
 
 let swap ?cancel ~rules geometry =
   try Result.map_error
@@ -48,24 +28,8 @@ let swap ?cancel ~rules geometry =
   with Cancel.Cancelled -> Error (Error.make ~operation:"attribute_swap"
       ~code:"cancelled" "attribute swap was cancelled")
 
-type transfer_mode = Attribute_transfer.mode =
-  | Nearest
-  | Inverse_distance of { neighbors : int; power : float }
-  | Kernel of { neighbors : int; radius : float; kernel : transfer_kernel }
-and transfer_kernel = Attribute_transfer.kernel = Links | RenderMan | Hart
 
-type unmatched = Attribute_transfer.unmatched = Keep_target | Default_value
-type transfer_falloff = Attribute_transfer.falloff =
-  | Linear | Smoothstep | Uniform of float
-type surface_falloff = transfer_falloff
-type surface_vertex_selection = Surface_index.vertex_selection =
-  | All_triangle_vertices | Any_triangle_vertex
 
-type copy_rule = Attribute_copy.rule = {
-  copy_owner : Attribute.owner;
-  copy_pattern : string;
-  copy_into : string option;
-}
 type interpolate_attribute = {
   interpolate_owner : Attribute.owner;
   interpolate_source : string;
@@ -93,54 +57,6 @@ type interpolate_computed = {
   computed_numbers_attribute : string;
   computed_weights_attribute : string;
 }
-type blur_mode = Attribute_blur.mode =
-  | Laplacian of float | Custom_steps of { odd : float; even : float }
-type numeric_value = Attribute_generate.numeric_value =
-  | Scalar of float
-  | Vec2 of Rays_math.Vec2.t
-  | Vec3 of Rays_math.Vec3.t
-  | Vec4 of float * float * float * float
-type noise_location = Attribute_generate.noise_location =
-  | Noise_position
-  | Noise_element_number
-  | Noise_attribute of string
-type noise_range = Attribute_generate.noise_range =
-  | Noise_positive
-  | Noise_zero_centered
-  | Noise_min_max of numeric_value * numeric_value
-type random_distribution = Attribute_generate.random_distribution =
-  | Random_constant of numeric_value
-  | Random_two_values of {
-      a : numeric_value;
-      b : numeric_value;
-      probability_b : float;
-    }
-  | Random_uniform of { min : numeric_value; max : numeric_value }
-  | Random_uniform_discrete of {
-      min : numeric_value;
-      max : numeric_value;
-      step : numeric_value;
-    }
-  | Random_normal of { middle : numeric_value; scale : numeric_value }
-  | Random_exponential of { median : numeric_value }
-  | Random_log_normal of { median : numeric_value; stddev : numeric_value }
-  | Random_cauchy of { median : numeric_value; scale : numeric_value }
-  | Random_direction of {
-      direction : numeric_value;
-      cone_angle : float;
-    }
-  | Random_inside_sphere of { dimensions : int }
-  | Random_inside_sphere_cone of {
-      direction : numeric_value;
-      cone_angle : float;
-    }
-  | Random_custom_ramp of {
-      ramp : (float * float) list;
-      fit_min : numeric_value;
-      fit_max : numeric_value;
-    }
-  | Random_custom_discrete of (numeric_value * float) list
-  | Random_custom_discrete_text of (string * float) list
 
 
 let blur_points = Attribute_blur.run
@@ -213,7 +129,7 @@ type params = {
   normalize_weights : bool option;
   threshold : float option;
   blend : float option;
-  unmatched : unmatched;
+  unmatched : Attribute_transfer.unmatched;
   target_owner : Attribute.owner;
   attributes : interpolate_attribute list;
   source : Geometry.t;
@@ -294,11 +210,6 @@ let interpolate ({ cancel; grain; selection; driver; compute_weights; point_patt
   | Invalid_argument message -> Error (Error.make
       ~operation:"attribute_interpolate" ~code:"invalid_parameter" message)
 
-type surface_attribute = Attribute_transfer.surface_attribute = {
-  source_owner : Attribute.owner;
-  source_name : string;
-  target_name : string;
-}
 let transfer_points = Attribute_transfer.transfer_points
 let transfer_primitives = Attribute_transfer.transfer_primitives
 let transfer_detail = Attribute_transfer.transfer_detail

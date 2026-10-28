@@ -67,8 +67,8 @@ let test_solid_products () =
   let left = tetra ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(0.5,0.2,0.2) 2. in
   let run domains = Parallel.run ~domains (fun () ->
-      [|Boolean.Union; Boolean.Intersection; Boolean.Difference;
-        Boolean.Reverse_difference; Boolean.Xor|]
+      [|Boolean_solid.Union; Boolean_solid.Intersection; Boolean_solid.Difference;
+        Boolean_solid.Reverse_difference; Boolean_solid.Xor|]
       |> Array.map (fun operation ->
         Boolean.run ~grain:1 ~operation ~right left |> get |> signature)) in
   let products = run 1 in
@@ -82,15 +82,15 @@ let test_surface_cut_and_payload () =
   and right = triangles
       [|-1.,1.,0.5; 3.,1.,0.5; -1.,1.,1.5; 3.,1.,1.5|]
       [|0;1;2; 1;3;2|] |> with_point_weight 2. in
-  let output = Boolean.run ~grain:1 ~operation:Boolean.Difference
-      ~right_treatment:Boolean.Surface ~right left |> get in
+  let output = Boolean.run ~grain:1 ~operation:Boolean_solid.Difference
+      ~right_treatment:Boolean_solid.Surface ~right left |> get in
   check (Geometry.primitive_count output > 12)
     "public solid-minus-surface Boolean lost its cut walls";
   check (Geometry.find_attribute ~owner:Attribute.Point "weight" output = None
       && Geometry.find_attribute ~owner:Attribute.Vertex "weight" output <> None)
     "public Boolean did not promote conflicting point payload";
-  (match Boolean.run ~grain:1 ~operation:Boolean.Difference
-      ~right_treatment:Boolean.Surface ~point_conflict:Boolean.Reject
+  (match Boolean.run ~grain:1 ~operation:Boolean_solid.Difference
+      ~right_treatment:Boolean_solid.Surface ~point_conflict:Boolean_payload.Reject
       ~right left with
    | Error error when Error.code error = "point_payload_conflict" -> ()
    | Error error -> fail "unexpected public point conflict: %s"
@@ -105,8 +105,8 @@ let test_normal_payload_orientation () =
       [|0;1;2; 1;3;2|]
       |> with_vertex_normals in
   let run domains = Parallel.run ~domains (fun () ->
-      Boolean.run ~grain:1 ~operation:Boolean.Difference
-        ~right_treatment:Boolean.Surface ~right left |> get) in
+      Boolean.run ~grain:1 ~operation:Boolean_solid.Difference
+        ~right_treatment:Boolean_solid.Surface ~right left |> get) in
   let output = run 1 and parallel = run 4 in
   let normal_storage geometry =
     Geometry.find_attribute ~owner:Attribute.Vertex "N" geometry
@@ -168,8 +168,8 @@ let test_surface_fracture_pieces () =
       [|-1.,1.,-1.; 3.,1.,-1.; -1.,1.,3.; 3.,1.,3.|]
       [|0;1;2; 1;3;2|] in
   let run domains = Parallel.run ~domains (fun () ->
-      Boolean.run ~grain:1 ~operation:Boolean.Difference
-        ~right_treatment:Boolean.Surface
+      Boolean.run ~grain:1 ~operation:Boolean_solid.Difference
+        ~right_treatment:Boolean_solid.Surface
         ~piece_attribute:"piece" ~require_closed:true ~right left
       |> get) in
   let output = run 1 in
@@ -214,7 +214,7 @@ let test_shatter () =
   let left = tetra ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(0.5,0.2,0.2) 2. in
   let run domains = Parallel.run ~domains (fun () ->
-      let output = Boolean.run ~grain:1 ~operation:Boolean.Shatter ~right left
+      let output = Boolean.run ~grain:1 ~operation:Boolean_solid.Shatter ~right left
           |> get in
       let groups = [|"boolean_left"; "boolean_overlap"; "boolean_right"|]
           |> Array.map (fun name ->
@@ -233,14 +233,14 @@ let test_shatter () =
       signature output, groups) in
   check (run 1 = run 4)
     "public Boolean shatter differs between one and four domains";
-  (match Boolean.run ~grain:1 ~operation:Boolean.Shatter
+  (match Boolean.run ~grain:1 ~operation:Boolean_solid.Shatter
       ~left_piece_group:(Some "same") ~overlap_piece_group:(Some "same")
       ~right left with
    | Error error when Error.code error = "invalid_parameter" -> ()
    | Error error -> fail "unexpected shatter-name error: %s" (Error.to_string error)
    | Ok _ -> fail "public Boolean shatter accepted duplicate group names");
-  (match Boolean.run ~grain:1 ~operation:Boolean.Shatter
-      ~right_treatment:Boolean.Surface ~right left with
+  (match Boolean.run ~grain:1 ~operation:Boolean_solid.Shatter
+      ~right_treatment:Boolean_solid.Surface ~right left with
    | Error error when Error.code error = "invalid_parameter" -> ()
    | Error error -> fail "unexpected surface-shatter error: %s"
        (Error.to_string error)
@@ -249,7 +249,7 @@ let test_shatter () =
 let test_shatter_scale () =
   let left = tetra_batch 16 0. and right = tetra_batch 16 0.5 in
   let run domains = Parallel.run ~domains (fun () ->
-      let output = Boolean.run ~grain:1 ~operation:Boolean.Shatter
+      let output = Boolean.run ~grain:1 ~operation:Boolean_solid.Shatter
           ~right left |> get in
       let groups = [|"boolean_left"; "boolean_overlap"; "boolean_right"|]
           |> Array.map (fun name ->
@@ -265,7 +265,7 @@ let test_shatter_scale () =
 let test_output_policies () =
   let left = cube_quads ~origin:(0.,0.,0.) 1.
   and right = tetra ~origin:(10.,0.,0.) 1. in
-  let polygons = Boolean.run ~grain:1 ~detriangulation:Boolean.Unchanged_polygons
+  let polygons = Boolean.run ~grain:1 ~detriangulation:Boolean_materialization.Unchanged_polygons
       ~right left |> get in
   check (Geometry.primitive_count polygons = 10)
     "public Boolean unchanged-polygon detriangulation has wrong cardinality";
@@ -282,8 +282,8 @@ let test_output_policies () =
       ~center:(Rays_math.Vec3.create 0.85 0. 0.)
       ~rotation:(Rays_math.Vec3.create 0.35 0.42 0.12)
       ~connectivity:Box_generator.Box_quads ~consolidate_points:true () |> get in
-  let cut = Boolean.run ~grain:1 ~operation:Boolean.Difference
-      ~detriangulation:Boolean.All_polygons ~right:cutter host |> get in
+  let cut = Boolean.run ~grain:1 ~operation:Boolean_solid.Difference
+      ~detriangulation:Boolean_materialization.All_polygons ~right:cutter host |> get in
   ignore (Triangulate.run ~grain:1 cut |> get)
 
 let test_errors () =

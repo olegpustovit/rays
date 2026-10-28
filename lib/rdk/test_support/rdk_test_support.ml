@@ -246,7 +246,7 @@ let triangulate2d ?cancel ?(grain = 16_384) ?selection ?constraint_edges
 (* [Ray.run] with the defaults tests rely on; the SOP declaration owns the real ones. *)
 let ray ?cancel ?(grain = 16_384) ?selection ?collision_primitives
     ?(method_ = Ray.Ray_project) ?(direction = Ray.Ray_normal)
-    ?(direction_mode = Ray.Ray_forward) ?(surface_hit = Ray.Ray_first_surface)
+    ?(direction_mode = Surface_index.Ray_forward) ?(surface_hit = Surface_index.Ray_first_surface)
     ?(samples = 1) ?(jitter_scale = 1.) ?(seed = 0) ?(combine = Ray.Ray_average)
     ?(min_distance = 0.) ?max_distance ?(tolerance = 0.) ?(scale = 1.)
     ?(lift = 0.) ?distance_attribute ?primitive_attribute
@@ -351,13 +351,13 @@ end
 module Fuse_grid = struct
   include Rdk.Fuse_grid
   let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
-      ?(targeting = Near_points) ?(using = Least_target_point)
+      ?(targeting = Rdk.Point_snap.Near_points) ?(using = Rdk.Point_snap.Least_target_point)
       ?(tolerance = 1e-6) ?(position = Rdk_ops.Fuse_reduce.Average_position)
-      ?weight_attribute ?(attributes = Rdk_ops.Fuse_reduce.Keep_first) ?(attribute_rules = [])
+      ?weight_attribute ?(attributes = Rdk_ops.Fuse_rules.Keep_first) ?(attribute_rules = [])
       ?(group_rules = []) ?(metric = Euclidean)
       ?(inclusive = true)
       ?(match_attributes = false) ?radius_attribute ?match_attribute
-      ?(match_condition = Equal_attribute_values) ?(match_tolerance = 0.)
+      ?(match_condition = Rdk.Point_snap.Equal_attribute_values) ?(match_tolerance = 0.)
       ?(modify_target = false) ?(fuse_points = true)
       ?(keep_fused_points = false) ?snapped_group
       ?snapped_destination_attribute ?(remove_degenerate_primitives = false)
@@ -385,14 +385,14 @@ end
 
 module Boolean = struct
   include Rdk.Boolean
-  let run ?cancel ?(grain = 16_384) ?(operation = Union)
-      ?(left_treatment = Solid) ?(right_treatment = Solid)
+  let run ?cancel ?(grain = 16_384) ?(operation = Rdk.Boolean_solid.Union)
+      ?(left_treatment = Rdk.Boolean_solid.Solid) ?(right_treatment = Rdk.Boolean_solid.Solid)
       ?(resolve_left_self_intersections = false)
       ?(resolve_right_self_intersections = false)
-      ?(point_conflict = Promote_to_vertex) ?(point_tolerance = 0.)
+      ?(point_conflict = Rdk.Boolean_payload.Promote_to_vertex) ?(point_tolerance = 0.)
       ?(tiny_seam_threshold = 0.) ?(cleanup_max_batches = 8)
       ?(strict_cleanup = true)
-      ?(seam_points = Shared_seam_points) ?(detriangulation = Triangles)
+      ?(seam_points = Shared_seam_points) ?(detriangulation = Rdk.Boolean_materialization.Triangles)
       ?(assume_flat = false) ?require_closed
       ?piece_attribute
       ?(left_piece_group = Some "boolean_left")
@@ -454,7 +454,7 @@ module Attribute_ops = struct
       ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
       ?(match_groups = false)
       ?pre_scale ?normalize_weights ?threshold ?blend
-      ?(unmatched = Keep_target) ~target_owner ~attributes ~source ~target () =
+      ?(unmatched = Rdk.Attribute_transfer.Keep_target) ~target_owner ~attributes ~source ~target () =
     Rdk.Attribute_ops.interpolate {
       cancel; grain; selection; driver; compute_weights; point_pattern; vertex_pattern; primitive_pattern; detail_pattern; match_groups; pre_scale; normalize_weights; threshold; blend; unmatched; target_owner; attributes; source; target } ()
 end

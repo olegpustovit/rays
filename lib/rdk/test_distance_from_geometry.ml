@@ -61,7 +61,7 @@ let test_surface_and_affected () =
   let reference = Plane_generators.grid ~columns:2 ~rows:2 ~size:10. () |> get_ok in
   let affected = point_group "affected" 3 (fun point -> point <> 1) in
   let output = Transform_ops.distance_from_geometry ~grain:1
-      ~affected:(Transform_ops.Selected_points affected)
+      ~affected:(Element_selection.Selected_points affected)
       ~reference_kind:Transform_ops.Distance_reference_primitives
       ~radius:Transform_ops.Distance_maximum ~mask_attribute:"mask"
       ~reference source |> get_ok in
@@ -73,14 +73,14 @@ let test_surface_and_affected () =
   let all_primitives = primitive_group "surface"
       (Geometry.primitive_count reference) (fun _ -> true) in
   let selected = Transform_ops.distance_from_geometry ~grain:1
-      ~reference_selection:(Transform_ops.Selected_primitives all_primitives)
+      ~reference_selection:(Element_selection.Selected_primitives all_primitives)
       ~reference_kind:Transform_ops.Distance_reference_primitives
       ~reference source |> get_ok in
   check (same_float_array (float_attribute "distance" selected) [|1.; 2.; 3.|])
     "Distance From Geometry primitive reference selection";
   let empty = point_group "empty" (Geometry.point_count reference) (fun _ -> false) in
   let missed = Transform_ops.distance_from_geometry ~grain:1
-      ~reference_selection:(Transform_ops.Selected_points empty)
+      ~reference_selection:(Element_selection.Selected_points empty)
       ~reference_kind:Transform_ops.Distance_reference_points ~mask_attribute:"mask"
       ~reference source |> get_ok in
   check (same_float_array (float_attribute "distance" missed) [|-1.; -1.; -1.|]
@@ -154,7 +154,7 @@ let test_errors_cancellation_and_parallel () =
     "Distance From Geometry wrong output storage";
   let malformed = point_group "malformed" 3 (fun point -> point = 0) in
   expect_invalid (fun () -> Transform_ops.distance_from_geometry
-      ~affected:(Transform_ops.Selected_points malformed) ~reference source)
+      ~affected:(Element_selection.Selected_points malformed) ~reference source)
     "Distance From Geometry malformed source selection";
   let nonfinite = Line_geometry.points [|Float.nan, 0., 0.|] in
   expect_invalid (fun () -> Transform_ops.distance_from_geometry ~reference nonfinite)
@@ -176,7 +176,7 @@ let test_errors_cancellation_and_parallel () =
   let affected = point_group "affected" count (fun point -> point mod 3 <> 0) in
   let run kind domains = Parallel.run ~domains (fun () ->
       Transform_ops.distance_from_geometry ~grain:257
-        ~affected:(Transform_ops.Selected_points affected) ~reference_kind:kind
+        ~affected:(Element_selection.Selected_points affected) ~reference_kind:kind
         ~falloff:Transform_ops.Soft_cubic ~radius:(Transform_ops.Distance_fixed 4.)
         ~mask_attribute:"mask" ~reference:surface dense |> get_ok) in
   List.iter (fun kind ->

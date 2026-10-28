@@ -92,10 +92,10 @@ let relative_location cells weiler facet side =
   and positive = Boolean_weiler.half_facet_shell weiler
       (Boolean_weiler.half_facet facet Boolean_weiler.Positive) in
   let negative_winding, positive_winding = match side with
-    | Boolean_complex.Left ->
+    | Boolean_constraints.Left ->
         Boolean_cells.left_winding cells negative,
         Boolean_cells.left_winding cells positive
-    | Boolean_complex.Right ->
+    | Boolean_constraints.Right ->
         Boolean_cells.right_winding cells negative,
         Boolean_cells.right_winding cells positive in
   if negative_winding = 0 && positive_winding = 0 then Outside
@@ -121,7 +121,7 @@ let extract_mixed_with_ancestry ?cancel ?defer_rounded_slivers
     ~solid_side ~surface_side value =
   let surface_location facet =
     relative_location value.cells value.weiler facet solid_side in
-  let surface_is_left = surface_side = Boolean_complex.Left in
+  let surface_is_left = surface_side = Boolean_constraints.Left in
   let keep_surface facet = match operation, surface_location facet with
     | Union, Outside -> true
     | Intersection, (Inside | Boundary) -> true
@@ -136,8 +136,8 @@ let extract_mixed_with_ancestry ?cancel ?defer_rounded_slivers
     | _ -> false in
   let volume_present = match operation, solid_side with
     | (Union | Xor), _ -> true
-    | Difference, Boolean_complex.Left -> true
-    | Reverse_difference, Boolean_complex.Right -> true
+    | Difference, Boolean_constraints.Left -> true
+    | Reverse_difference, Boolean_constraints.Right -> true
     | _ -> false in
   let volume_selection = Bytes.make (Boolean_complex.facet_count value.complex)
       '\000' in
@@ -149,8 +149,8 @@ let extract_mixed_with_ancestry ?cancel ?defer_rounded_slivers
         and positive = Boolean_weiler.half_facet_shell value.weiler
             (Boolean_weiler.half_facet facet Boolean_weiler.Positive) in
         let winding shell = match solid_side with
-          | Boolean_complex.Left -> Boolean_cells.left_winding value.cells shell
-          | Boolean_complex.Right -> Boolean_cells.right_winding value.cells shell in
+          | Boolean_constraints.Left -> Boolean_cells.left_winding value.cells shell
+          | Boolean_constraints.Right -> Boolean_cells.right_winding value.cells shell in
         let negative_inside = winding negative <> 0
         and positive_inside = winding positive <> 0 in
         if negative_inside <> positive_inside then
@@ -185,30 +185,30 @@ let extract_surface_pair_with_ancestry ?cancel ?defer_rounded_slivers
     ?(corner_payload = true) ~operation value =
   let has facet side = first_member_on_side value.complex facet side >= 0 in
   let choose_left facet = match operation with
-    | Union -> has facet Boolean_complex.Left
-    | Intersection -> has facet Boolean_complex.Left && has facet Boolean_complex.Right
-    | Difference -> has facet Boolean_complex.Left && not (has facet Boolean_complex.Right)
+    | Union -> has facet Boolean_constraints.Left
+    | Intersection -> has facet Boolean_constraints.Left && has facet Boolean_constraints.Right
+    | Difference -> has facet Boolean_constraints.Left && not (has facet Boolean_constraints.Right)
     | Reverse_difference -> false
     | Xor ->
-        has facet Boolean_complex.Left <> has facet Boolean_complex.Right
+        has facet Boolean_constraints.Left <> has facet Boolean_constraints.Right
     | Shatter -> invalid_arg "Shatter has no single product expression" in
   let choose_right facet = match operation with
-    | Union -> not (has facet Boolean_complex.Left) && has facet Boolean_complex.Right
+    | Union -> not (has facet Boolean_constraints.Left) && has facet Boolean_constraints.Right
     | Intersection | Difference -> false
     | Reverse_difference ->
-        has facet Boolean_complex.Right && not (has facet Boolean_complex.Left)
-    | Xor -> not (has facet Boolean_complex.Left) && has facet Boolean_complex.Right
+        has facet Boolean_constraints.Right && not (has facet Boolean_constraints.Left)
+    | Xor -> not (has facet Boolean_constraints.Left) && has facet Boolean_constraints.Right
     | Shatter -> invalid_arg "Shatter has no single product expression" in
-  let left = source_oriented_selection value.complex Boolean_complex.Left choose_left
-  and right = source_oriented_selection value.complex Boolean_complex.Right choose_right in
+  let left = source_oriented_selection value.complex Boolean_constraints.Left choose_left
+  and right = source_oriented_selection value.complex Boolean_constraints.Right choose_right in
   let barycentric_cache = Boolean_extract.View.barycentric_cache
       ~capacity:(if corner_payload then
         3 * (selected_count left + selected_count right) else 0) in
   bind (extract_selection ?cancel ?defer_rounded_slivers ~barycentric_cache
       ~corner_payload value
-      Boolean_complex.Left left) (fun left ->
+      Boolean_constraints.Left left) (fun left ->
     bind (extract_selection ?cancel ?defer_rounded_slivers ~barycentric_cache
-        ~corner_payload value Boolean_complex.Right right) (fun right ->
+        ~corner_payload value Boolean_constraints.Right right) (fun right ->
       Boolean_extract.View.concatenate_ancestries ?cancel [|left; right|]))
 
 let extract_product_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
@@ -222,11 +222,11 @@ let extract_product_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
     | Solid, Surface ->
         extract_mixed_with_ancestry ?cancel ?defer_rounded_slivers
           ~corner_payload ~operation
-          ~solid_side:Boolean_complex.Left ~surface_side:Boolean_complex.Right value
+          ~solid_side:Boolean_constraints.Left ~surface_side:Boolean_constraints.Right value
     | Surface, Solid ->
         extract_mixed_with_ancestry ?cancel ?defer_rounded_slivers
           ~corner_payload ~operation
-          ~solid_side:Boolean_complex.Right ~surface_side:Boolean_complex.Left value
+          ~solid_side:Boolean_constraints.Right ~surface_side:Boolean_constraints.Left value
     | Surface, Surface -> extract_surface_pair_with_ancestry ?cancel
         ?defer_rounded_slivers ~corner_payload ~operation value in
   match result, require_closed, value.left_treatment, value.right_treatment with

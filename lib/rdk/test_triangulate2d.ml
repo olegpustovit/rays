@@ -57,7 +57,7 @@ let test_projected_output_positions () =
       [|0.,0.,10.;2.,0.,20.;2.,2.,30.;0.,2.,40.;9.,9.,9.|]
       |> Geometry.with_group selected |> Result.get_ok in
   let xy = triangulate2d ~grain:1
-      ~selection:(Transform_ops.Selected_points selected)
+      ~selection:(Element_selection.Selected_points selected)
       ~projection:Triangulate2d.Plane_xy
       ~restore_original_point_positions:false xy |> get in
   let x,y,z = position_signature xy in
@@ -139,7 +139,7 @@ let test_attribute_and_selection () =
   let group = Group.ordered ~owner:Group.Point ~name:"four" ~length:5
       [|0;1;2;3|] |> Result.get_ok in
   let output = triangulate2d
-      ~selection:(Transform_ops.Selected_points group)
+      ~selection:(Element_selection.Selected_points group)
       ~projection:(Triangulate2d.Point_attribute "planar") input |> get in
   check (Geometry.primitive_count output = 2) "attribute/selection cardinality";
   let topology = Topology.View.view (Geometry.topology output) in
@@ -628,12 +628,12 @@ let test_remove_duplicate_points () =
       |> Geometry.with_group selected |> Result.get_ok
       |> Geometry.with_group markers |> Result.get_ok in
   let ordinary = triangulate2d ~projection:Triangulate2d.Plane_xy
-      ~selection:(Transform_ops.Selected_points selected) input |> get in
+      ~selection:(Element_selection.Selected_points selected) input |> get in
   check (Geometry.point_count ordinary = 6)
     "projected duplicate was removed without the output policy";
   let run domains = Parallel.run ~domains (fun () ->
       triangulate2d ~grain:1 ~projection:Triangulate2d.Plane_xy
-        ~selection:(Transform_ops.Selected_points selected) ~remove_duplicate_points:true
+        ~selection:(Element_selection.Selected_points selected) ~remove_duplicate_points:true
         input |> get) in
   let output = run 1 and parallel = run 4 in
   check (Geometry.point_count output = 5 && Geometry.primitive_count output = 2)
@@ -907,7 +907,7 @@ let test_projected_silhouette () =
   let partial = Group.init ~owner:Group.Point ~name:"partial" 9
       (fun point -> point = 4 || point = 5 || point = 7) in
   (match triangulate2d ~projection:Triangulate2d.Plane_xy
-      ~selection:(Transform_ops.Selected_points partial) ~silhouette_constraints:true input with
+      ~selection:(Element_selection.Selected_points partial) ~silhouette_constraints:true input with
    | Error _ -> ()
    | Ok _ -> fail "silhouette accepted a partially selected polygon");
   let flat_positions = Packed.Float3.View.of_owned_exn

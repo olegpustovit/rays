@@ -280,7 +280,7 @@ let test_destination_owners_group_blend_and_misses () =
       ~source target ~attributes:[spec Attribute.Point "weight"] in
   if float_values ~owner:Attribute.Point "weight" kept
       <> [|100.;55.;100.;60.|] then fail "grouped blend/keep miss";
-  let defaulted = interpolate ~selection ~unmatched:Attribute_ops.Default_value
+  let defaulted = interpolate ~selection ~unmatched:Attribute_transfer.Default_value
       ~target_owner:Attribute.Point ~source target
       ~attributes:[spec Attribute.Point "weight"] in
   if float_values ~owner:Attribute.Point "weight" defaulted
@@ -458,7 +458,7 @@ let test_array_field_row_selection () =
       |> add (Attribute.Int_array (int_rows [|[|9|]|]))
            ~owner:Attribute.Point ~name:"neighbors" in
   let defaulted = Attribute_ops.interpolate
-      ~unmatched:Attribute_ops.Default_value ~target_owner:Attribute.Point
+      ~unmatched:Attribute_transfer.Default_value ~target_owner:Attribute.Point
       ~attributes:[spec Attribute.Point "neighbors"]
       ~source ~target:missed () |> get_ok in
   if Packed.Int_array.get

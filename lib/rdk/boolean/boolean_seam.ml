@@ -22,7 +22,7 @@ let kind_of_code = function
 let curve_kind value curve =
   kind_of_code (Char.code (Bytes.unsafe_get value.curve_kinds curve))
 
-let side_bit = function Boolean_complex.Left -> 1 | Boolean_complex.Right -> 2
+let side_bit = function Boolean_constraints.Left -> 1 | Boolean_constraints.Right -> 2
 
 let facet_mask complex facet =
   let first, last = Boolean_complex.facet_member_range complex facet in
@@ -41,10 +41,10 @@ let native_edge (view : Topology_index.View.view) primitive first second =
 
 let source_native_edge constraints index side triangle first second =
   let surface, triangle_point = match side with
-    | Boolean_complex.Left ->
+    | Boolean_constraints.Left ->
         Boolean_constraints.View.left_surface constraints,
         Boolean_constraints.View.left_triangle_point
-    | Boolean_complex.Right ->
+    | Boolean_constraints.Right ->
         Boolean_constraints.View.right_surface constraints,
         Boolean_constraints.View.right_triangle_point in
   let source = Boolean_constraints.View.source constraints in
@@ -432,11 +432,11 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
             else if !mask = 1 && last - first > 2
                 && Option.is_some left_index
                 && is_self_edge complex constraints (Option.get left_index)
-                     Boolean_complex.Left edge then Some Left_self
+                     Boolean_constraints.Left edge then Some Left_self
             else if !mask = 2 && last - first > 2
                 && Option.is_some right_index
                 && is_self_edge complex constraints (Option.get right_index)
-                     Boolean_complex.Right edge then Some Right_self
+                     Boolean_constraints.Right edge then Some Right_self
             else None in
           match kind with
           | None -> ()

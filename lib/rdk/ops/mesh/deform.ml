@@ -1,9 +1,4 @@
 
-type selection = Element_selection.t =
-  | Selected_points of Group.t
-  | Selected_vertices of Group.t
-  | Selected_primitives of Group.t
-  | Selected_edges of Edge_group.t
 
 type planes = {
   x : float array;
@@ -13,33 +8,33 @@ type planes = {
 
 let validate_selection topology = function
   | None -> Ok ()
-  | Some (Selected_points group) ->
+  | Some (Element_selection.Selected_points group) ->
       if Group.owner group <> Group.Point then Error
           "Rdk.Deform: point selection must own points"
       else if Group.length group <> Topology.point_count topology then Error
           "Rdk.Deform: point selection length does not match point count"
       else Ok ()
-  | Some (Selected_vertices group) ->
+  | Some (Element_selection.Selected_vertices group) ->
       if Group.owner group <> Group.Vertex then Error
           "Rdk.Deform: vertex selection must own vertices"
       else if Group.length group <> Topology.vertex_count topology then Error
           "Rdk.Deform: vertex selection length does not match vertex count"
       else Ok ()
-  | Some (Selected_primitives group) ->
+  | Some (Element_selection.Selected_primitives group) ->
       if Group.owner group <> Group.Primitive then Error
           "Rdk.Deform: primitive selection must own primitives"
       else if Group.length group <> Topology.primitive_count topology then Error
           "Rdk.Deform: primitive selection length does not match primitive count"
       else Ok ()
-  | Some (Selected_edges group) ->
+  | Some (Element_selection.Selected_edges group) ->
       if Edge_group.topology_data_id group <> Topology.data_id topology then Error
           "Rdk.Deform: edge selection belongs to different topology"
       else Ok ()
 
 let[@inline] point_selected selection index point = match selection with
   | None -> true
-  | Some (Selected_points group) -> Group.mem point group
-  | Some (Selected_vertices group) ->
+  | Some (Element_selection.Selected_points group) -> Group.mem point group
+  | Some (Element_selection.Selected_vertices group) ->
       let index = Option.get index in
       let count = Topology_index.point_incidence_count index point in
       let local = ref 0 and found = ref false in
@@ -49,7 +44,7 @@ let[@inline] point_selected selection index point = match selection with
         incr local
       done;
       !found
-  | Some (Selected_primitives group) ->
+  | Some (Element_selection.Selected_primitives group) ->
       let index = Option.get index in
       let count = Topology_index.point_incidence_count index point in
       let local = ref 0 and found = ref false in
@@ -59,7 +54,7 @@ let[@inline] point_selected selection index point = match selection with
         incr local
       done;
       !found
-  | Some (Selected_edges group) ->
+  | Some (Element_selection.Selected_edges group) ->
       let index = Option.get index in
       let count = Topology_index.point_edge_count index point in
       let local = ref 0 and found = ref false in
@@ -160,7 +155,7 @@ let resolve_directions ?cancel ~grain geometry =
              | None -> geometric_point_vectors ?cancel ~grain geometry))
 
 let with_point_normals ?cancel ~grain ?primitives geometry =
-  let selection = Option.map (fun group -> Selected_primitives group) primitives in
+  let selection = Option.map (fun group -> Element_selection.Selected_primitives group) primitives in
   Ok (Error.get (Normal_ops.run ?cancel ~grain ?selection ?primitives
     ~owner:Attribute.Point ~weighting:Normal_ops.Face_area geometry))
 

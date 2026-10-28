@@ -116,10 +116,10 @@ let build_component_tree ?cancel min_x min_y min_z max_x max_y max_z =
 
 let build_components ?cancel constraints side =
   let triangle_count, triangle_point = match side with
-    | Boolean_complex.Left ->
+    | Boolean_constraints.Left ->
         Boolean_constraints.left_triangle_count constraints,
         Boolean_constraints.View.left_triangle_point
-    | Boolean_complex.Right ->
+    | Boolean_constraints.Right ->
         Boolean_constraints.right_triangle_count constraints,
         Boolean_constraints.View.right_triangle_point in
   let parent = Array.init triangle_count Fun.id in
@@ -260,9 +260,9 @@ let query_components_indexed components query =
 let classify_operand ?cancel constraints components side query axis
     ~positive skip =
   let triangle_point = match side with
-    | Boolean_complex.Left ->
+    | Boolean_constraints.Left ->
         Boolean_constraints.View.left_triangle_point
-    | Boolean_complex.Right ->
+    | Boolean_constraints.Right ->
         Boolean_constraints.View.right_triangle_point in
   let source = Boolean_constraints.View.source constraints
   and axis = axis_index axis and winding = ref 0 and ambiguous = ref false in
@@ -296,9 +296,9 @@ type symbolic_operand_classification =
 let classify_operand_symbolic ?cancel constraints components side query
     skip =
   let triangle_point = match side with
-    | Boolean_complex.Left ->
+    | Boolean_constraints.Left ->
         Boolean_constraints.View.left_triangle_point
-    | Boolean_complex.Right ->
+    | Boolean_constraints.Right ->
         Boolean_constraints.View.right_triangle_point in
   let source = Boolean_constraints.View.source constraints
   and winding = ref 0 and boundary = ref (-1) and degenerate = ref (-1) in
@@ -342,9 +342,9 @@ let build ?cancel
     and facets = Boolean_complex.facet_count complex in
     let left_components, right_components = Parallel.both
         (fun () -> if track_left then
-          Some (build_components ?cancel constraints Boolean_complex.Left) else None)
+          Some (build_components ?cancel constraints Boolean_constraints.Left) else None)
         (fun () -> if track_right then
-          Some (build_components ?cancel constraints Boolean_complex.Right) else None) in
+          Some (build_components ?cancel constraints Boolean_constraints.Right) else None) in
     let unknown = min_int and left = Array.make shells min_int
     and right = Array.make shells min_int in
     let counts = Array.make shells 0 in
@@ -428,13 +428,13 @@ let build ?cancel
         | [] ->
             (match (if track_left then
                       classify_operand_symbolic ?cancel constraints
-                        (Option.get left_components) Boolean_complex.Left query
-                        (skip Boolean_complex.Left)
+                        (Option.get left_components) Boolean_constraints.Left query
+                        (skip Boolean_constraints.Left)
                     else Symbolic_winding 0),
                   (if track_right then
                      classify_operand_symbolic ?cancel constraints
-                       (Option.get right_components) Boolean_complex.Right query
-                       (skip Boolean_complex.Right)
+                       (Option.get right_components) Boolean_constraints.Right query
+                       (skip Boolean_constraints.Right)
                    else Symbolic_winding 0) with
              | Symbolic_winding left_value, Symbolic_winding right_value ->
                  let normal = Implicit_point.normal_dot_symbolic a b c in
@@ -473,14 +473,14 @@ let build ?cancel
               match (if track_left then
                        classify_operand ?cancel constraints
                          (Option.get left_components)
-                         Boolean_complex.Left query axis ~positive
-                         (skip Boolean_complex.Left)
+                         Boolean_constraints.Left query axis ~positive
+                         (skip Boolean_constraints.Left)
                      else Some 0),
                     (if track_right then
                        classify_operand ?cancel constraints
                          (Option.get right_components)
-                         Boolean_complex.Right query axis ~positive
-                         (skip Boolean_complex.Right)
+                         Boolean_constraints.Right query axis ~positive
+                         (skip Boolean_constraints.Right)
                      else Some 0) with
               | Some left_value, Some right_value ->
                   let side = if (normal = Predicates.Positive) = positive

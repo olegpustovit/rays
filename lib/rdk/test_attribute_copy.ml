@@ -5,7 +5,7 @@ open Rdk_test_support
 module Attribute_ops = struct
   include Attribute_ops
   let copy_rule ?into ~owner pattern =
-    { copy_owner = owner; copy_pattern = pattern; copy_into = into }
+    { Attribute_copy.copy_owner = owner; copy_pattern = pattern; copy_into = into }
 end
 
 let add storage ~owner ~name geometry =

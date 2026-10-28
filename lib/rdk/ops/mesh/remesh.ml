@@ -1699,7 +1699,7 @@ let run ({ cancel; grain; iterations; smoothing; project; use_input_points_only;
                    (Geometry.point_count !current) in
                (match Smooth.run ?cancel ~grain ~constrained_points:constrained
                    ~boundary:Smooth.Smooth_unshared ~iterations:1
-                   ~mode:(Attribute_ops.Laplacian smoothing)
+                   ~mode:(Attribute_blur.Laplacian smoothing)
                    ~recompute_normals:false ~attributes:"P" !current with
                 | Error error when Error.code error = "cancelled" ->
                     raise Cancel.Cancelled

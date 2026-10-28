@@ -1,16 +1,6 @@
 (** Attribute ownership and reduction operations over packed topology. *)
 
-type rename_conflict =
-  | Attribute_rename_skip
-  | Attribute_rename_error
-  | Attribute_rename_overwrite
 
-type rename_rule = {
-  rename_attribute_owner : Attribute.owner option;
-  rename_attribute_pattern : string;
-  rename_attribute_replacement : string;
-  rename_attribute_conflict : rename_conflict;
-}
 
 val delete :
   ?cancel:Cancel.t ->
@@ -38,7 +28,7 @@ val delete :
 
 val rename :
   ?cancel:Cancel.t ->
-  rules:rename_rule list ->
+  rules:Attribute_lifecycle.rename_rule list ->
   Geometry.t ->
   (Geometry.t, Error.t) result
 (** Apply ordered wildcard-capture rename rules to ordinary attributes.
@@ -52,21 +42,11 @@ val rename :
     Metadata-scale work deliberately stays sequential because domain dispatch
     costs more than name matching. *)
 
-type swap_method =
-  | Attribute_swap
-  | Attribute_move
-  | Attribute_copy
 
-type swap_rule = {
-  swap_attribute_owner : Attribute.owner;
-  swap_attribute_source : string;
-  swap_attribute_destination : string;
-  swap_attribute_method : swap_method;
-}
 
 val swap :
   ?cancel:Cancel.t ->
-  rules:swap_rule list ->
+  rules:Attribute_lifecycle.swap_rule list ->
   Geometry.t ->
   (Geometry.t, Error.t) result
 (** Apply ordered owner-specific copy, move, or swap pairs. Source and
@@ -83,37 +63,9 @@ val swap :
     O(A * R), auxiliary metadata is O(A + generated attributes), and payload
     storage is O(1). Metadata-scale work stays sequential. *)
 
-type transfer_mode =
-  | Nearest
-  | Inverse_distance of { neighbors : int; power : float }
-  | Kernel of {
-      neighbors : int;
-      radius : float;
-      kernel : transfer_kernel;
-    }
 
-and transfer_kernel = Links | RenderMan | Hart
-(** Spatial source-combination policy. [Kernel] uses the exact compact-support
-    formulas published by SideFX for its corresponding metaball models,
-    normalizes nonzero rows, and falls back to the stable nearest sample when
-    [radius=0] or every candidate has zero support. [neighbors] is the maximum
-    sample count. *)
 
-type unmatched = Keep_target | Default_value
-type transfer_falloff = Linear | Smoothstep | Uniform of float
-(* Influence across a transfer blend band. [Uniform bias] applies one fixed
-    influence in the band; the bias must be finite and in the closed unit
-    interval. *)
-type surface_falloff = transfer_falloff
-type surface_vertex_selection = Surface_index.vertex_selection =
-  | All_triangle_vertices
-  | Any_triangle_vertex
 
-type copy_rule = {
-  copy_owner : Attribute.owner;
-  copy_pattern : string;
-  copy_into : string option;
-}
 
 type interpolate_attribute = {
   interpolate_owner : Attribute.owner;
@@ -150,75 +102,13 @@ type interpolate_computed = {
     coordinates. The resulting pair can drive a later weighted interpolation
     with equivalent coefficients. *)
 
-type blur_mode = Laplacian of float | Custom_steps of { odd : float; even : float }
-type numeric_value =
-  | Scalar of float
-  | Vec2 of Rays_math.Vec2.t
-  | Vec3 of Rays_math.Vec3.t
-  | Vec4 of float * float * float * float
-type noise_location =
-  | Noise_position
-  | Noise_element_number
-  | Noise_attribute of string
-type noise_range =
-  | Noise_positive
-  | Noise_zero_centered
-  | Noise_min_max of numeric_value * numeric_value
-type random_distribution =
-  | Random_constant of numeric_value
-  | Random_two_values of {
-      a : numeric_value;
-      b : numeric_value;
-      probability_b : float;
-    }
-  | Random_uniform of { min : numeric_value; max : numeric_value }
-  | Random_uniform_discrete of {
-      min : numeric_value;
-      max : numeric_value;
-      step : numeric_value;
-    }
-  | Random_normal of { middle : numeric_value; scale : numeric_value }
-  | Random_exponential of { median : numeric_value }
-  | Random_log_normal of { median : numeric_value; stddev : numeric_value }
-  | Random_cauchy of { median : numeric_value; scale : numeric_value }
-  | Random_direction of {
-      direction : numeric_value;
-      cone_angle : float;
-    }
-  | Random_inside_sphere of { dimensions : int }
-  | Random_inside_sphere_cone of {
-      direction : numeric_value;
-      cone_angle : float;
-    }
-  | Random_custom_ramp of {
-      ramp : (float * float) list;
-      fit_min : numeric_value;
-      fit_max : numeric_value;
-    }
-  | Random_custom_discrete of (numeric_value * float) list
-  | Random_custom_discrete_text of (string * float) list
-(** [Random_direction] samples uniform unit vectors in two or three dimensions
-    and unit orientation quaternions in four. [cone_angle] is radians; for a
-    quaternion it denotes rotation angle, so its corresponding 4D spherical
-    cap has half that angle. [Random_inside_sphere] is uniform by volume in
-    two through four dimensions; [Random_inside_sphere_cone] restricts that
-    volume around a non-zero direction. [direction_bias] may be greater than
-    -1 for either directional mode: zero is uniform, positive values favor the
-    axis, and negative values favor the cone boundary. [Random_custom_ramp]
-    interprets its strictly
-    ordered endpoint-complete ramp as an inverse CDF before fitting each
-    component. [Random_custom_discrete] selects a complete scalar/tuple value
-    from finite non-negative unnormalized weights;
-    [Random_custom_discrete_text] applies the same stable weighted selection to
-    immutable strings. Multidimensional [Random_cauchy] is the rotationally
-    symmetric multivariate distribution and requires equal scale components. *)
 
 val blur_points :
   ?cancel:Cancel.t ->
   ?grain:int ->
   ?selection:Group.t ->
   ?iterations:int ->
-  ?mode:blur_mode ->
+  ?mode:Attribute_blur.mode ->
   pattern:string ->
   Geometry.t ->
   (Geometry.t, Error.t) result
@@ -247,7 +137,7 @@ type params = {
   normalize_weights : bool option;
   threshold : float option;
   blend : float option;
-  unmatched : unmatched;
+  unmatched : Attribute_transfer.unmatched;
   target_owner : Attribute.owner;
   attributes : interpolate_attribute list;
   source : Geometry.t;
@@ -291,7 +181,7 @@ val interpolate : params -> unit -> (Geometry.t, Error.t) result
     blending. Duplicate destinations are
     rejected atomically.
     Standard float3 [N] is normalized before blending. Invalid primitive
-    numbers follow [unmatched]; [selection] restricts destination writes.
+    numbers follow [Attribute_transfer.unmatched]; [selection] restricts destination writes.
 
     For [d] selected destinations, [a] attributes, [c] source corners per
     referenced primitive, and [r] copied array values, work is O(d*c*a + r),
@@ -305,11 +195,11 @@ val transfer_points :
   ?grain:int ->
   ?names:string list ->
   ?pattern:string ->
-  ?mode:transfer_mode ->
+  ?mode:Attribute_transfer.mode ->
   ?max_distance:float ->
   ?blend_width:float ->
-  ?falloff:transfer_falloff ->
-  ?unmatched:unmatched ->
+  ?falloff:Attribute_transfer.falloff ->
+  ?unmatched:Attribute_transfer.unmatched ->
   ?source_points:Group.t ->
   ?target_points:Group.t ->
   source:Geometry.t ->
@@ -354,11 +244,11 @@ val transfer_primitives :
   ?grain:int ->
   ?names:string list ->
   ?pattern:string ->
-  ?mode:transfer_mode ->
+  ?mode:Attribute_transfer.mode ->
   ?max_distance:float ->
   ?blend_width:float ->
-  ?falloff:transfer_falloff ->
-  ?unmatched:unmatched ->
+  ?falloff:Attribute_transfer.falloff ->
+  ?unmatched:Attribute_transfer.unmatched ->
   ?source_primitives:Group.t ->
   ?target_primitives:Group.t ->
   source:Geometry.t ->
@@ -387,26 +277,21 @@ val transfer_detail :
     payload storage is shared without copying, and all selected metadata is
     committed in one immutable table rebuild. *)
 
-type surface_attribute = {
-  source_owner : Attribute.owner;
-  source_name : string;
-  target_name : string;
-}
 
 val transfer_surface :
   ?cancel:Cancel.t ->
   ?grain:int ->
   ?max_distance:float ->
   ?blend_width:float ->
-  ?falloff:surface_falloff ->
-  ?unmatched:unmatched ->
+  ?falloff:Attribute_transfer.falloff ->
+  ?unmatched:Attribute_transfer.unmatched ->
   ?target_owner:Attribute.owner ->
   ?distance_attribute:string ->
   ?source_primitives:Group.t ->
   ?source_vertices:Group.t ->
-  ?source_vertex_selection:surface_vertex_selection ->
+  ?source_vertex_selection:Surface_index.vertex_selection ->
   ?target_elements:Group.t ->
-  attributes:surface_attribute list ->
+  attributes:Attribute_transfer.surface_attribute list ->
   source:Geometry.t ->
   target:Geometry.t ->
   unit ->
@@ -433,7 +318,7 @@ val transfer_surface :
     Zero blend width uses direct writes and allocates no influence plane.
 
     Source geometry must contain finite, non-degenerate simple polygons.
-    [unmatched] and [max_distance] follow {!transfer_points}. Equal-distance
+    [Attribute_transfer.unmatched] and [max_distance] follow {!transfer_points}. Equal-distance
     triangles select the lower source primitive and then stable internal
     triangle. Ear clipping is O(sum(c²)) for polygon corner counts [c]; BVH
     construction is O(s log s) time/O(s) storage over emitted triangles.
@@ -447,11 +332,11 @@ val transfer_vertices :
   ?pattern:string ->
   ?max_distance:float ->
   ?blend_width:float ->
-  ?falloff:transfer_falloff ->
-  ?unmatched:unmatched ->
+  ?falloff:Attribute_transfer.falloff ->
+  ?unmatched:Attribute_transfer.unmatched ->
   ?source_primitives:Group.t ->
   ?source_vertices:Group.t ->
-  ?source_vertex_selection:surface_vertex_selection ->
+  ?source_vertex_selection:Surface_index.vertex_selection ->
   ?target_vertices:Group.t ->
   source:Geometry.t ->
   target:Geometry.t ->
@@ -470,11 +355,11 @@ val transfer_all :
   ?vertex_pattern:string ->
   ?primitive_pattern:string ->
   ?detail_pattern:string ->
-  ?mode:transfer_mode ->
+  ?mode:Attribute_transfer.mode ->
   ?max_distance:float ->
   ?blend_width:float ->
-  ?falloff:transfer_falloff ->
-  ?unmatched:unmatched ->
+  ?falloff:Attribute_transfer.falloff ->
+  ?unmatched:Attribute_transfer.unmatched ->
   source:Geometry.t ->
   target:Geometry.t ->
   unit ->

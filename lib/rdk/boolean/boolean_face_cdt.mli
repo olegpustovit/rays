@@ -10,7 +10,7 @@ val build :
   ?cancel:Cancel.t -> ?workspace:workspace ->
   Boolean_constraints.t ->
   Boolean_face_arrangement.t ->
-  side:Boolean_face_arrangement.side -> triangle:int ->
+  side:Boolean_constraints.side -> triangle:int ->
   (t, Error.t) result
 (** Insert the arrangement's exact-unique points, recover every constraint,
     and canonicalize unconstrained diagonals with exact incircle predicates.

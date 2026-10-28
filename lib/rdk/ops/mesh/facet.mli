@@ -2,7 +2,7 @@
 type params = {
   cancel : Cancel.t option;
   grain : int option;
-  selection : Deform.selection option;
+  selection : Element_selection.t option;
   pre_compute_normals : bool option;
   make_normals_unit_length : bool option;
   unique_points : bool option;

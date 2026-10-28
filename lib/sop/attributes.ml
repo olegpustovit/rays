@@ -455,8 +455,8 @@ module Attribute_transfer_all = struct
     uniform_bias : float [@sop.default 0.5] [@sop.label "Uniform bias"]
       [@sop.folder "Distance"] [@sop.min 0.] [@sop.max 1.]
       [@sop.hard_min 0.] [@sop.hard_max 1.];
-    unmatched : Rdk.Attribute_ops.unmatched
-      [@sop.default Rdk.Attribute_ops.Keep_target] [@sop.label "Unmatched"]
+    unmatched : Rdk.Attribute_transfer.unmatched
+      [@sop.default Rdk.Attribute_transfer.Keep_target] [@sop.label "Unmatched"]
       [@sop.kind transfer_unmatched_parameter];
   } [@@sop.node_key "attribute_transfer_all"]
     [@@sop.node_label "Attribute Transfer All"]
@@ -533,8 +533,8 @@ end
 
 module Attribute_transfer_surface = struct
   let vertex_selection_parameter = Param.choice ~equal:( = ) [
-      "All triangle vertices", Rdk.Attribute_ops.All_triangle_vertices;
-      "Any triangle vertex", Rdk.Attribute_ops.Any_triangle_vertex;
+      "All triangle vertices", Rdk.Surface_index.All_triangle_vertices;
+      "Any triangle vertex", Rdk.Surface_index.Any_triangle_vertex;
     ]
   type parameters = {
     target_owner : Rdk.Attribute.owner [@sop.default Rdk.Attribute.Point]
@@ -556,8 +556,8 @@ module Attribute_transfer_surface = struct
     uniform_bias : float [@sop.default 0.5] [@sop.label "Uniform bias"]
       [@sop.folder "Distance"] [@sop.min 0.] [@sop.max 1.]
       [@sop.hard_min 0.] [@sop.hard_max 1.];
-    unmatched : Rdk.Attribute_ops.unmatched
-      [@sop.default Rdk.Attribute_ops.Keep_target] [@sop.label "Unmatched"]
+    unmatched : Rdk.Attribute_transfer.unmatched
+      [@sop.default Rdk.Attribute_transfer.Keep_target] [@sop.label "Unmatched"]
       [@sop.kind transfer_unmatched_parameter];
     distance_attribute : string [@sop.default ""]
       [@sop.label "Distance attribute"] [@sop.folder "Output"];
@@ -570,8 +570,8 @@ module Attribute_transfer_surface = struct
     source_vertex_group_pattern : string [@sop.default ""]
       [@sop.label "Source vertex group pattern"]
       [@sop.folder "Groups/Source"];
-    source_vertex_selection : Rdk.Attribute_ops.surface_vertex_selection
-      [@sop.default Rdk.Attribute_ops.All_triangle_vertices]
+    source_vertex_selection : Rdk.Surface_index.vertex_selection
+      [@sop.default Rdk.Surface_index.All_triangle_vertices]
       [@sop.label "Vertex selection"] [@sop.folder "Groups/Source"]
       [@sop.kind vertex_selection_parameter];
     target_group : string [@sop.default ""] [@sop.label "Target group"]
@@ -585,7 +585,7 @@ module Attribute_transfer_surface = struct
       let refuse message = invalid_arg ("sop/attribute_transfer_surface: " ^ message) in
       if parameters.target_owner = Rdk.Attribute.Detail then refuse "detail target is not spatial";
       let attributes = decode_surface_attributes parameters.attributes in
-      let names = List.map (fun (attribute : Rdk.Attribute_ops.surface_attribute) -> attribute.target_name) attributes in
+      let names = List.map (fun (attribute : Rdk.Attribute_transfer.surface_attribute) -> attribute.target_name) attributes in
       if List.length names <> List.length (List.sort_uniq String.compare names) then refuse "target attribute names must be distinct";
       if parameters.target_owner = Rdk.Attribute.Point && List.mem "P" names then refuse "target P is not an ordinary attribute";
       let distance = optional_text parameters.distance_attribute in
@@ -685,8 +685,8 @@ end
 
 module Attribute_transfer = struct
   let vertex_selection_parameter = Param.choice ~equal:( = ) [
-      "All triangle vertices", Rdk.Attribute_ops.All_triangle_vertices;
-      "Any triangle vertex", Rdk.Attribute_ops.Any_triangle_vertex;
+      "All triangle vertices", Rdk.Surface_index.All_triangle_vertices;
+      "Any triangle vertex", Rdk.Surface_index.Any_triangle_vertex;
     ]
   let decode_names text = parameter_table_rows "sop/attribute_transfer" text
     |> List.map (function [name] -> name | _ ->
@@ -722,8 +722,8 @@ module Attribute_transfer = struct
     uniform_bias : float [@sop.default 0.5] [@sop.label "Uniform bias"]
       [@sop.folder "Distance"] [@sop.min 0.] [@sop.max 1.]
       [@sop.hard_min 0.] [@sop.hard_max 1.];
-    unmatched : Rdk.Attribute_ops.unmatched
-      [@sop.default Rdk.Attribute_ops.Keep_target] [@sop.label "Unmatched"]
+    unmatched : Rdk.Attribute_transfer.unmatched
+      [@sop.default Rdk.Attribute_transfer.Keep_target] [@sop.label "Unmatched"]
       [@sop.kind transfer_unmatched_parameter];
     source_group : string [@sop.default ""] [@sop.label "Source group"]
       [@sop.folder "Groups/Source"];
@@ -733,8 +733,8 @@ module Attribute_transfer = struct
       [@sop.label "Source vertex group"] [@sop.folder "Groups/Source"];
     source_vertex_group_pattern : string [@sop.default ""]
       [@sop.label "Source vertex pattern"] [@sop.folder "Groups/Source"];
-    source_vertex_selection : Rdk.Attribute_ops.surface_vertex_selection
-      [@sop.default Rdk.Attribute_ops.All_triangle_vertices]
+    source_vertex_selection : Rdk.Surface_index.vertex_selection
+      [@sop.default Rdk.Surface_index.All_triangle_vertices]
       [@sop.label "Vertex selection"] [@sop.folder "Groups/Source"]
       [@sop.kind vertex_selection_parameter];
     target_group : string [@sop.default ""] [@sop.label "Target group"]

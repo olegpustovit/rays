@@ -21,7 +21,7 @@ let transfer ~geometry ~triangle_geometry =
       |> get_ok in
   let transferred domains = Parallel.run ~domains (fun () ->
       Attribute_ops.transfer_points ~grain:1 ~max_distance:3.
-        ~mode:(Attribute_ops.Inverse_distance { neighbors = 2; power = 1. })
+        ~mode:(Attribute_transfer.Inverse_distance { neighbors = 2; power = 1. })
         ~source:transfer_source ~target:transfer_target () |> get_ok) in
   let transfer_one = transferred 1 and transfer_many = transferred 4 in
   check (geometry_bytes transfer_one = geometry_bytes transfer_many
@@ -71,7 +71,7 @@ let transfer ~geometry ~triangle_geometry =
       ~topology:(Tb.freeze primitive_target_topology) () |> get_ok in
   let primitive_transferred domains = Parallel.run ~domains (fun () ->
       Attribute_ops.transfer_primitives ~grain:1
-        ~mode:(Attribute_ops.Inverse_distance { neighbors = 2; power = 1. })
+        ~mode:(Attribute_transfer.Inverse_distance { neighbors = 2; power = 1. })
         ~source:primitive_source ~target:primitive_target_geometry () |> get_ok) in
   let primitive_one = primitive_transferred 1
   and primitive_many = primitive_transferred 4 in
@@ -222,7 +222,7 @@ let transfer ~geometry ~triangle_geometry =
   let target_first = Group.init ~owner:Group.Point ~name:"first" 2
       (fun point -> point = 0) in
   let surface_attributes = List.map (fun (source_owner, source_name, target_name) ->
-    Attribute_ops.{source_owner;source_name;target_name}) Attribute.[
+    Attribute_transfer.{source_owner;source_name;target_name}) Attribute.[
       Point,"weight","sampled_weight";
       Vertex,"corner_value","sampled_corner";
       Primitive,"piece","sampled_piece"] in
@@ -247,7 +247,7 @@ let transfer ~geometry ~triangle_geometry =
   let restricted_sample domains = Parallel.run ~domains (fun () ->
     Attribute_ops.transfer_surface ~grain:1 ~source_primitives:source_second
       ~target_elements:target_first
-      ~attributes:[Attribute_ops.{source_owner=Attribute.Primitive;
+      ~attributes:[Attribute_transfer.{source_owner=Attribute.Primitive;
         source_name="piece";target_name="sampled_piece"}]
       ~source:restricted_source ~target:restricted_target () |> get_ok) in
   let restricted_one = restricted_sample 1
@@ -347,7 +347,7 @@ let transfer ~geometry ~triangle_geometry =
    | Error error when Error.code error = "invalid_transfer" -> ()
    | _ -> fail "attribute transfer accepted incompatible target storage");
   (match Attribute_ops.transfer_points
-      ~mode:(Attribute_ops.Inverse_distance { neighbors = 0; power = 1. })
+      ~mode:(Attribute_transfer.Inverse_distance { neighbors = 0; power = 1. })
       ~source:transfer_source ~target:transfer_target () with
    | Error error when Error.code error = "invalid_transfer" -> ()
    | _ -> fail "attribute transfer accepted invalid neighbor count");

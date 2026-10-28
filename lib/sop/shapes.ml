@@ -454,13 +454,13 @@ module Ray = struct
       "Attribute", Direction_attribute;
     ]
   let direction_mode_parameter = Param.choice ~equal:( = ) [
-      "Forward", Rdk.Ray.Ray_forward; "Reverse", Rdk.Ray.Ray_reverse;
-      "Bidirectional closest", Rdk.Ray.Ray_bidirectional_closest;
-      "Bidirectional farthest", Rdk.Ray.Ray_bidirectional_farthest;
+      "Forward", Rdk.Surface_index.Ray_forward; "Reverse", Rdk.Surface_index.Ray_reverse;
+      "Bidirectional closest", Rdk.Surface_index.Ray_bidirectional_closest;
+      "Bidirectional farthest", Rdk.Surface_index.Ray_bidirectional_farthest;
     ]
   let surface_parameter = Param.choice ~equal:( = ) [
-      "First surface", Rdk.Ray.Ray_first_surface;
-      "Last surface", Rdk.Ray.Ray_last_surface;
+      "First surface", Rdk.Surface_index.Ray_first_surface;
+      "Last surface", Rdk.Surface_index.Ray_last_surface;
     ]
   let combine_parameter = Param.choice ~equal:( = ) [
       "Average", Rdk.Ray.Ray_average; "Median", Rdk.Ray.Ray_median;
@@ -486,12 +486,12 @@ module Ray = struct
       [@sop.folder "Ray/Vector"] [@sop.min (-1.)] [@sop.max 1.]; [@sop.vec3 "direction_vector"]
     direction_attribute : string [@sop.default "N"]
       [@sop.label "Direction attribute"] [@sop.folder "Ray"];
-    direction_mode : Rdk.Ray.direction_mode
-      [@sop.default Rdk.Ray.Ray_forward]
+    direction_mode : Rdk.Surface_index.ray_direction_mode
+      [@sop.default Rdk.Surface_index.Ray_forward]
       [@sop.label "Direction mode"] [@sop.folder "Ray"]
       [@sop.kind direction_mode_parameter];
-    surface_hit : Rdk.Ray.surface_hit
-      [@sop.default Rdk.Ray.Ray_first_surface]
+    surface_hit : Rdk.Surface_index.ray_surface_hit
+      [@sop.default Rdk.Surface_index.Ray_first_surface]
       [@sop.label "Surface hit"] [@sop.folder "Ray"]
       [@sop.kind surface_parameter];
     samples : int [@sop.default 1] [@sop.label "Samples"]

@@ -22,10 +22,10 @@ type numeric_kind = Numeric_scalar | Numeric_vec2 | Numeric_vec3 | Numeric_vec4
 let numeric_kind_parameter = Param.choice ~equal:( = )
     ["Scalar", Numeric_scalar; "Vector 2", Numeric_vec2; "Vector 3", Numeric_vec3; "Vector 4", Numeric_vec4]
 let numeric_value kind x y z w = match kind with
-  | Numeric_scalar -> Rdk.Attribute_ops.Scalar x
-  | Numeric_vec2 -> Rdk.Attribute_ops.Vec2 (Rays_math.Vec2.create x y)
-  | Numeric_vec3 -> Rdk.Attribute_ops.Vec3 (Rays_math.Vec3.create x y z)
-  | Numeric_vec4 -> Rdk.Attribute_ops.Vec4 (x, y, z, w)
+  | Numeric_scalar -> Rdk.Attribute_generate.Scalar x
+  | Numeric_vec2 -> Rdk.Attribute_generate.Vec2 (Rays_math.Vec2.create x y)
+  | Numeric_vec3 -> Rdk.Attribute_generate.Vec3 (Rays_math.Vec3.create x y z)
+  | Numeric_vec4 -> Rdk.Attribute_generate.Vec4 (x, y, z, w)
 type remap_range = Remap_automatic | Remap_explicit
 
 let decode_parameter_ramp ?(allow_single = false) name text =
@@ -104,22 +104,22 @@ let resolve_element_group ~operation selection geometry = match selection with
   | None -> Ok None
   | Some (Point_group name) ->
       (match Rdk.Geometry.find_group ~owner:Rdk.Group.Point name geometry with
-       | Some group -> Ok (Some (Rdk.Transform_ops.Selected_points group))
+       | Some group -> Ok (Some (Rdk.Element_selection.Selected_points group))
        | None -> Error (Diagnostic.error ~code:"missing_group"
            (Printf.sprintf "%s could not find point group %S" operation name)))
   | Some (Vertex_group name) ->
       (match Rdk.Geometry.find_group ~owner:Rdk.Group.Vertex name geometry with
-       | Some group -> Ok (Some (Rdk.Transform_ops.Selected_vertices group))
+       | Some group -> Ok (Some (Rdk.Element_selection.Selected_vertices group))
        | None -> Error (Diagnostic.error ~code:"missing_group"
            (Printf.sprintf "%s could not find vertex group %S" operation name)))
   | Some (Primitive_group name) ->
       (match Rdk.Geometry.find_group ~owner:Rdk.Group.Primitive name geometry with
-       | Some group -> Ok (Some (Rdk.Transform_ops.Selected_primitives group))
+       | Some group -> Ok (Some (Rdk.Element_selection.Selected_primitives group))
        | None -> Error (Diagnostic.error ~code:"missing_group"
            (Printf.sprintf "%s could not find primitive group %S" operation name)))
   | Some (Edge_group name) ->
       (match Rdk.Geometry.find_edge_group name geometry with
-       | Some group -> Ok (Some (Rdk.Transform_ops.Selected_edges group))
+       | Some group -> Ok (Some (Rdk.Element_selection.Selected_edges group))
        | None -> Error (Diagnostic.error ~code:"missing_group"
            (Printf.sprintf "%s could not find edge group %S" operation name)))
 
@@ -184,7 +184,7 @@ let boundary_attributes_parameter = Param.encoded ~equal:( = )
     ~encode:encode_boundary_attributes ~decode:decode_boundary_attributes
 
 let fuse_attribute_methods =
-  let open Rdk.Fuse_reduce in
+  let open Rdk.Fuse_rules in
   ["average", Attribute_average; "least", Attribute_least_point;
    "greatest", Attribute_greatest_point; "maximum", Attribute_maximum;
    "minimum", Attribute_minimum; "mode", Attribute_mode; "median", Attribute_median;
@@ -195,7 +195,7 @@ let fuse_attribute_methods =
    "concatenate_weight_order", Attribute_concatenate_weight_order]
 
 let fuse_group_methods =
-  let open Rdk.Fuse_reduce in
+  let open Rdk.Fuse_rules in
   ["least", Group_least_point; "greatest", Group_greatest_point;
    "union", Group_union; "intersection", Group_intersection; "most_common", Group_most_common]
 
@@ -222,12 +222,12 @@ let decode_fuse_attribute_rules name text = List.map (function
       let method_ = fuse_rule_method name fuse_attribute_methods method_ in
       let weight_attribute = optional_text weight in
       let needs_weight = match method_ with
-        | Rdk.Fuse_reduce.Attribute_weighted_average | Attribute_weighted_sum
+        | Rdk.Fuse_rules.Attribute_weighted_average | Attribute_weighted_sum
         | Attribute_minimum_weight | Attribute_maximum_weight | Attribute_concatenate_weight_order -> true
         | _ -> false in
       if needs_weight && weight_attribute = None then
         invalid_arg (name ^ ": weighted reduction requires a weight attribute");
-      { Rdk.Fuse_reduce.pattern; method_; weight_attribute }
+      { Rdk.Fuse_rules.pattern; method_; weight_attribute }
   | _ -> invalid_arg (name ^ ": attribute rule needs pattern, method and weight columns"))
     (parameter_table_rows name text)
 
@@ -235,7 +235,7 @@ let decode_fuse_group_rules name text = List.map (function
   | [group_pattern; method_] ->
       validate_parameter_pattern name group_pattern;
       let group_method = fuse_rule_method name fuse_group_methods method_ in
-      { Rdk.Fuse_reduce.group_pattern; group_method }
+      { Rdk.Fuse_rules.group_pattern; group_method }
   | _ -> invalid_arg (name ^ ": group rule needs pattern and method columns"))
     (parameter_table_rows name text)
 
@@ -253,10 +253,10 @@ let decode_curve_join_picks text =
           invalid_arg "sop/join_curves: duplicate picked primitive";
         Hashtbl.add seen primitive ();
         let end_ = match String.trim end_ with
-          | "start" -> Rdk.Curve_topology.Join_curve_start
-          | "end" -> Rdk.Curve_topology.Join_curve_end
+          | "start" -> Rdk.Curve_join.Join_curve_start
+          | "end" -> Rdk.Curve_join.Join_curve_end
           | _ -> invalid_arg "sop/join_curves: picked end must be start or end" in
-        { Rdk.Curve_topology.primitive; end_ }
+        { Rdk.Curve_join.primitive; end_ }
     | _ -> invalid_arg "sop/join_curves: picks must be comma-separated primitive:start/end pairs")
       |> Array.of_list in
   Some picks
@@ -543,22 +543,22 @@ let transfer_falloff_parameter = Param.choice ~equal:( = ) [
     "Uniform", Transfer_uniform;
   ]
 let transfer_unmatched_parameter = Param.choice ~equal:( = ) [
-    "Keep target", Rdk.Attribute_ops.Keep_target;
-    "Default value", Rdk.Attribute_ops.Default_value;
+    "Keep target", Rdk.Attribute_transfer.Keep_target;
+    "Default value", Rdk.Attribute_transfer.Default_value;
   ]
 let transfer_mode mode neighbors power radius = match mode with
-  | Transfer_nearest -> Rdk.Attribute_ops.Nearest
-  | Transfer_inverse -> Rdk.Attribute_ops.Inverse_distance { neighbors; power }
-  | Transfer_links -> Rdk.Attribute_ops.Kernel {
-      neighbors; radius; kernel = Rdk.Attribute_ops.Links }
-  | Transfer_renderman -> Rdk.Attribute_ops.Kernel {
-      neighbors; radius; kernel = Rdk.Attribute_ops.RenderMan }
-  | Transfer_hart -> Rdk.Attribute_ops.Kernel {
-      neighbors; radius; kernel = Rdk.Attribute_ops.Hart }
+  | Transfer_nearest -> Rdk.Attribute_transfer.Nearest
+  | Transfer_inverse -> Rdk.Attribute_transfer.Inverse_distance { neighbors; power }
+  | Transfer_links -> Rdk.Attribute_transfer.Kernel {
+      neighbors; radius; kernel = Rdk.Attribute_transfer.Links }
+  | Transfer_renderman -> Rdk.Attribute_transfer.Kernel {
+      neighbors; radius; kernel = Rdk.Attribute_transfer.RenderMan }
+  | Transfer_hart -> Rdk.Attribute_transfer.Kernel {
+      neighbors; radius; kernel = Rdk.Attribute_transfer.Hart }
 let transfer_falloff falloff bias = match falloff with
-  | Transfer_linear -> Rdk.Attribute_ops.Linear
-  | Transfer_smoothstep -> Rdk.Attribute_ops.Smoothstep
-  | Transfer_uniform -> Rdk.Attribute_ops.Uniform bias
+  | Transfer_linear -> Rdk.Attribute_transfer.Linear
+  | Transfer_smoothstep -> Rdk.Attribute_transfer.Smoothstep
+  | Transfer_uniform -> Rdk.Attribute_transfer.Uniform bias
 
 type extract_point_cut = Extract_point_constant | Extract_point_primitive_attribute | Extract_point_current_time
 
@@ -582,7 +582,7 @@ let decode_surface_attributes text = List.map (function
         invalid_arg "sop/attribute_transfer_surface: attribute names must be nonblank";
       if source_owner = Rdk.Attribute.Point && source_name = "P" then
         invalid_arg "sop/attribute_transfer_surface: source P is not an ordinary attribute";
-      { Rdk.Attribute_ops.source_owner; source_name; target_name }
+      { Rdk.Attribute_transfer.source_owner; source_name; target_name }
   | _ -> invalid_arg "sop/attribute_transfer_surface: attributes need owner, source and target columns")
     (parameter_table_rows "sop/attribute_transfer_surface" text)
 
@@ -640,7 +640,7 @@ let decode_copy_rules text =
          | None -> validate_parameter_pattern "sop/attribute_copy" copy_pattern
          | Some replacement -> match Rdk.Attribute_pattern.compile_rewrite ~pattern:copy_pattern ~replacement with
              | Ok _ -> () | Error message -> invalid_arg ("sop/attribute_copy: " ^ message));
-        {Rdk.Attribute_ops.copy_owner;copy_pattern;copy_into}
+        {Rdk.Attribute_copy.copy_owner;copy_pattern;copy_into}
     | _ -> invalid_arg "sop/attribute_copy: rules need owner, pattern and destination columns")
       (parameter_table_rows "sop/attribute_copy" text) in
   if rules = [] then invalid_arg "sop/attribute_copy: at least one copy rule is required";
@@ -661,19 +661,19 @@ type triangulate_2d_projection = Triangulate_best_fit | Triangulate_xy | Triangu
 
 module Quaternion_noise_encoding = struct
   let encode_location = function
-    | Rdk.Attribute_ops.Noise_position -> "position"
+    | Rdk.Attribute_generate.Noise_position -> "position"
     | Noise_element_number -> "element-number"
     | Noise_attribute name -> "attribute:" ^ name
 
   let decode_location = function
-    | "position" -> Ok Rdk.Attribute_ops.Noise_position
+    | "position" -> Ok Rdk.Attribute_generate.Noise_position
     | "element-number" -> Ok Noise_element_number
     | value when String.starts_with ~prefix:"attribute:" value ->
         Ok (Noise_attribute (String.sub value 10 (String.length value - 10)))
     | _ -> Error "location must be position, element-number, or attribute:name"
 
   let encode_numeric value = String.concat "," (match value with
-    | Rdk.Attribute_ops.Scalar x -> ["scalar"; Param.float_text x]
+    | Rdk.Attribute_generate.Scalar x -> ["scalar"; Param.float_text x]
     | Vec2 value -> ["vec2"; Param.float_text value.Rays_math.Vec2.x;
         Param.float_text value.y]
     | Vec3 value -> ["vec3"; Param.float_text value.Rays_math.Vec3.x;
@@ -682,7 +682,7 @@ module Quaternion_noise_encoding = struct
         Param.float_text y; Param.float_text z; Param.float_text w])
 
   let decode_numeric value = match String.split_on_char ',' value with
-    | ["scalar"; x] -> Option.map (fun x -> Rdk.Attribute_ops.Scalar x)
+    | ["scalar"; x] -> Option.map (fun x -> Rdk.Attribute_generate.Scalar x)
         (float_of_string_opt x)
     | ["vec2"; x; y] ->
         (match float_of_string_opt x, float_of_string_opt y with
@@ -700,14 +700,14 @@ module Quaternion_noise_encoding = struct
     | _ -> None
 
   let encode_range = function
-    | Rdk.Attribute_ops.Noise_positive -> "positive"
+    | Rdk.Attribute_generate.Noise_positive -> "positive"
     | Noise_zero_centered -> "zero-centered"
     | Noise_min_max (minimum, maximum) ->
         String.concat ";" ["min-max"; encode_numeric minimum;
           encode_numeric maximum]
 
   let decode_range value = match String.split_on_char ';' value with
-    | ["positive"] -> Ok Rdk.Attribute_ops.Noise_positive
+    | ["positive"] -> Ok Rdk.Attribute_generate.Noise_positive
     | ["zero-centered"] -> Ok Noise_zero_centered
     | ["min-max"; minimum; maximum] ->
         (match decode_numeric minimum, decode_numeric maximum with
@@ -738,7 +738,7 @@ let random_distribution_value ~distribution ~kind ~a ~a_w ~b ~b_w ~step ~step_w
   let rows text = match decode_table text with
     | Ok rows -> rows | Error message -> invalid_arg ("sop/attribute_randomize: " ^ message) in
   match distribution with
-  | Random_constant -> Rdk.Attribute_ops.Random_constant a
+  | Random_constant -> Rdk.Attribute_generate.Random_constant a
   | Random_two_values -> Random_two_values {a;b;probability_b}
   | Random_uniform -> Random_uniform {min=a;max=b}
   | Random_uniform_discrete -> Random_uniform_discrete {min=a;max=b;step}
@@ -756,7 +756,7 @@ let random_distribution_value ~distribution ~kind ~a ~a_w ~b ~b_w ~step ~step_w
       | weight :: components ->
           let components = List.rev components |> List.map finite in
           let value = match kind,components with
-            | Numeric_scalar,[x] -> Rdk.Attribute_ops.Scalar x
+            | Numeric_scalar,[x] -> Rdk.Attribute_generate.Scalar x
             | Numeric_vec2,[x;y] -> Vec2 (Rays_math.Vec2.create x y)
             | Numeric_vec3,[x;y;z] -> Vec3 (Rays_math.Vec3.create x y z)
             | Numeric_vec4,[x;y;z;w] -> Vec4 (x,y,z,w)
@@ -770,7 +770,7 @@ let random_distribution_value ~distribution ~kind ~a ~a_w ~b ~b_w ~step ~step_w
 let validate_random_distribution ~direction_bias distribution =
   let refuse message = invalid_arg ("sop/attribute_randomize: " ^ message) in
   let components = function
-    | Rdk.Attribute_ops.Scalar x -> [x]
+    | Rdk.Attribute_generate.Scalar x -> [x]
     | Vec2 v -> [v.Rays_math.Vec2.x;v.y]
     | Vec3 v -> [v.Rays_math.Vec3.x;v.y;v.z]
     | Vec4 (x,y,z,w) -> [x;y;z;w] in
@@ -792,10 +792,10 @@ let validate_random_distribution ~direction_bias distribution =
     if not (Float.is_finite total) || total <= 0. then refuse "weight sum must be finite and positive" in
   if direction_bias <= -1. then refuse "direction bias must be greater than -1";
   (match distribution with
-   | Rdk.Attribute_ops.Random_direction _ | Random_inside_sphere_cone _ -> ()
+   | Rdk.Attribute_generate.Random_direction _ | Random_inside_sphere_cone _ -> ()
    | _ -> if direction_bias <> 0. then refuse "direction bias requires Direction or Inside sphere cone");
   match distribution with
-  | Rdk.Attribute_ops.Random_constant _ -> ()
+  | Rdk.Attribute_generate.Random_constant _ -> ()
   | Random_two_values {probability_b;_} ->
       if probability_b < 0. || probability_b > 1. then refuse "probability must be in [0,1]"
   | Random_uniform {min;max} -> if not (ordered min max) then refuse "bounds must be ordered"

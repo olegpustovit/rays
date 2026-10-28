@@ -56,9 +56,9 @@ let group_owner text = match String.lowercase_ascii (String.trim text) with
   | "any" | "*" -> Ok None
   | _ -> error "E_GROUP_OWNER" (Printf.sprintf "Unknown group owner %S." text)
 let attr_conflict text = match String.lowercase_ascii (String.trim text) with
-  | "skip" -> Ok Rdk.Attribute_ops.Attribute_rename_skip
-  | "error" -> Ok Rdk.Attribute_ops.Attribute_rename_error
-  | "overwrite" -> Ok Rdk.Attribute_ops.Attribute_rename_overwrite
+  | "skip" -> Ok Rdk.Attribute_lifecycle.Attribute_rename_skip
+  | "error" -> Ok Rdk.Attribute_lifecycle.Attribute_rename_error
+  | "overwrite" -> Ok Rdk.Attribute_lifecycle.Attribute_rename_overwrite
   | _ -> error "E_METADATA_CONFLICT" (Printf.sprintf "Unknown attribute rename conflict %S." text)
 let group_conflict text = match String.lowercase_ascii (String.trim text) with
   | "skip" -> Ok Rdk.Group_ops.Rename_skip
@@ -81,7 +81,7 @@ let node operation parameters inputs cook =
 let key cells = Flow.Lisp.flat (Flow.Syntax.make (Vec (List.map (fun cell -> Flow.Syntax.make (Str cell)) cells)))
 let rename ~owner ~pattern ~replacement ~conflict input =
   let owner=checked (attribute_owner owner) and conflict=checked (attr_conflict conflict) in
-  let rule=Rdk.Attribute_ops.{rename_attribute_owner=owner;rename_attribute_pattern=pattern;
+  let rule=Rdk.Attribute_lifecycle.{rename_attribute_owner=owner;rename_attribute_pattern=pattern;
     rename_attribute_replacement=replacement;rename_attribute_conflict=conflict} in
   node "flow.rename_attr" (key [pattern;replacement;(match owner with None->"any"|Some A.Point->"point"|Some Vertex->"vertex"|Some Primitive->"primitive"|Some Detail->"detail");
       (match conflict with Attribute_rename_skip->"skip"|Attribute_rename_error->"error"|Attribute_rename_overwrite->"overwrite")])
@@ -91,9 +91,9 @@ let swap ~owner ~source ~destination ~method_ input =
   let owner=match checked (attribute_owner owner) with Some owner->owner
     |None->Flow.Value.fail "E_ATTR_OWNER" "Attribute swap requires one owner." in
   let method_=match String.lowercase_ascii (String.trim method_) with
-    |"swap"->Rdk.Attribute_ops.Attribute_swap|"move"->Attribute_move|"copy"->Attribute_copy
+    |"swap"->Rdk.Attribute_lifecycle.Attribute_swap|"move"->Attribute_move|"copy"->Attribute_copy
     |_->Flow.Value.fail "E_METADATA_METHOD" "Attribute method is swap, move or copy." in
-  let rule=Rdk.Attribute_ops.{swap_attribute_owner=owner;swap_attribute_source=source;
+  let rule=Rdk.Attribute_lifecycle.{swap_attribute_owner=owner;swap_attribute_source=source;
     swap_attribute_destination=destination;swap_attribute_method=method_} in
   node "flow.swap_attr" (key [source;destination;(match owner with A.Point->"point"|Vertex->"vertex"|Primitive->"primitive"|Detail->"detail");
     (match method_ with Attribute_swap->"swap"|Attribute_move->"move"|Attribute_copy->"copy")]) [input]

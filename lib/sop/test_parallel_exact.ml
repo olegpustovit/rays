@@ -1590,13 +1590,13 @@ fun migration_input ->
        "Curve Join keep-original/substituted-edge ancestry"
    | None -> fail "Curve Join dropped native edge group");
   let picked_ends = Array.init 64 (fun order -> {
-      Curve_topology.primitive = (order * 13) mod 64;
-      end_ = if order land 1 = 0 then Curve_topology.Join_curve_start
-        else Curve_topology.Join_curve_end;
+      Curve_join.primitive = (order * 13) mod 64;
+      end_ = if order land 1 = 0 then Curve_join.Join_curve_start
+        else Curve_join.Join_curve_end;
     }) in
   let picked_curves = merge_of joined_curve_parts
       |> then_ (Printf.sprintf {|(sop/join_curves :use_group_size true :picked_ends %S :group_size 11 :keep_originals true)|}
-           ((Array.to_list picked_ends |> List.map (fun pick -> Printf.sprintf "%d:%s" pick.Rdk.Curve_topology.primitive (match pick.end_ with Rdk.Curve_topology.Join_curve_start -> "start" | Join_curve_end -> "end")) |> String.concat ","))) in
+           ((Array.to_list picked_ends |> List.map (fun pick -> Printf.sprintf "%d:%s" pick.Rdk.Curve_join.primitive (match pick.end_ with Rdk.Curve_join.Join_curve_start -> "start" | Join_curve_end -> "end")) |> String.concat ","))) in
   let one = cook 1 picked_curves and many = cook 4 picked_curves in
   check (equal_geometry one many)
     "one-domain and four-domain picked-end Curve Join geometry differ";

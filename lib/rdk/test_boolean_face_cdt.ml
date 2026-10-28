@@ -28,7 +28,7 @@ let crossing_input () =
       [|0;1;2; 3;4;5|] in
   let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
   let arrangement = Arrangement.build constraints
-      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
+      ~side:Constraints.Left ~triangle:0 |> get_rdk in
   constraints, arrangement
 
 let edge_present triangulation first second =
@@ -52,7 +52,7 @@ let coplanar_input () =
   let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
   let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
   let arrangement = Arrangement.build ~coplanar constraints
-      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
+      ~side:Constraints.Left ~triangle:0 |> get_rdk in
   constraints, arrangement
 
 let many_constraint_input count =
@@ -71,14 +71,14 @@ let many_constraint_input count =
   let right = geometry points triangles in
   let constraints = Constraints.build ~grain:7 ~left ~right () |> get_rdk in
   let arrangement = Arrangement.build constraints
-      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
+      ~side:Constraints.Left ~triangle:0 |> get_rdk in
   constraints,arrangement
 
 let test_cancellation () =
   let constraints, arrangement = crossing_input () in
   let cancel = Cancel.create () in Cancel.cancel cancel;
   match Triangulation.build ~cancel constraints arrangement
-      ~side:Arrangement.Left ~triangle:0 with
+      ~side:Constraints.Left ~triangle:0 with
   | Error error when Error.code error = "cancelled" -> ()
   | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
   | Ok _ -> failf "cancelled face CDT completed"

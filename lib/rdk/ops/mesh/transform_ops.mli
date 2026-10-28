@@ -1,8 +1,3 @@
-type deform_selection = Deform.selection =
-  | Selected_points of Group.t
-  | Selected_vertices of Group.t
-  | Selected_primitives of Group.t
-  | Selected_edges of Edge_group.t
 
 type transform_order =
   | Transform_srt | Transform_str | Transform_rst
@@ -33,14 +28,14 @@ val compose_transform :
   (Rays_math.Mat4.t, Error.t) result
 
 val soft_transform :
-  ?cancel:Cancel.t -> ?grain:int -> ?selection:deform_selection ->
+  ?cancel:Cancel.t -> ?grain:int -> ?selection:Element_selection.t ->
   ?metric:soft_transform_metric -> ?falloff:soft_transform_falloff ->
   ?radius:float -> ?falloff_attribute:string -> ?recompute_normals:bool ->
   Rays_math.Mat4.t -> Geometry.t -> (Geometry.t, Error.t) result
 
 val distance_from_geometry :
-  ?cancel:Cancel.t -> ?grain:int -> ?affected:deform_selection ->
-  ?reference_selection:deform_selection ->
+  ?cancel:Cancel.t -> ?grain:int -> ?affected:Element_selection.t ->
+  ?reference_selection:Element_selection.t ->
   ?reference_kind:distance_from_geometry_reference ->
   ?falloff:soft_transform_falloff -> ?radius:distance_along_radius ->
   ?distance_attribute:string option -> ?mask_attribute:string ->
