@@ -14,6 +14,10 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
   let ws = value.doc.Document.workspace.ws in
   let document = objects value in
   let selected_ids = Selection.selected_nodes selection in
+  let target = match selected_ids with
+    | [ id ] when not (match pane_level value with Document.Inside g -> kind value g = Some "geometry" | Scene -> false) ->
+        Editor_scope.scene_target value id
+    | _ -> None in
   let lowered_level = match pane_level value with
     | Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
   (* a row of a geometry object's list selects its node in the pane: the inspector follows it *)
@@ -104,6 +108,14 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
               "Made from the graph's text. Select the node in the graph pane to edit its arguments.";
             [], []) in
       None, requests, [], value.live_cook, moves, List.rev !drops
+  | [_] when Option.is_some target ->
+      (* a scene object or World layer the text binds: the one inspector, over the projection of
+         its graph (the pane's own, or one made for the sheet) *)
+      let laid, path = Option.get target in
+      let requests, moves = inspector_panel ui bounds (fun () ->
+        workspace_inspector ~image ~window ~laid value ui ~width:(float (let _, _, w, _ = bounds in max 1 w)) path ~resized
+          ~follows:(fun path -> follow_target ~path value)) in
+      None, requests, [], value.live_cook, moves, []
   | [node_id] ->
       let fields, label, kind = match Kind_graph.find document node_id with
         | Some node -> Kind_graph.fields node, node.label, node.kind

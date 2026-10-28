@@ -240,3 +240,29 @@ let sync_scope value =
             evaluated; summaries; executions; time; records; force; scope; targets; stamp; gap; fresh_last = fresh } })
       end
   | _ -> value
+
+(* The inspector's subject for a scene object or World layer: the graph projection of the graph
+   the text binds it in, and its path there.  The pane's own projection when it shows that graph,
+   else one made for the inspector alone (ponytail: laid out again each frame the inspector shows
+   such an object; the scene graphs are small). [None] for what the text does not bind by name
+   (a host object, a loop's copy, an inline call): those keep the derived-node sheet. *)
+let scene_target value id =
+  let homes = value.doc.Document.homes in
+  let home = List.assoc_opt id (match pane_level value with
+    | Document.Scene -> homes.objects | Inside _ -> homes.layers) in
+  match home, Lazy.force value.flow_catalog with
+  | Some (Document.Bound_at (graph :: _ :: _ as path)), Some catalog ->
+      let laid = match pane_laid value with
+        | Some k when k.graph = graph -> Some k
+        | _ ->
+            let ws = value.doc.Document.workspace.ws in
+            let evaluated = value.doc.Document.workspace.lowered.evaluated in
+            Some { ws; probe_map = value.probes; graph; evaluated = Some evaluated; summaries = [];
+                   time = None; executions = [];
+                   records = Some (Flow_graph.Probe.make ~state:value.cook.state evaluated);
+                   force = probe_force (); targets = []; stamp = 0.; gap = 0.; fresh_last = false;
+                   scope = Flow_graph.Projection.of_graph catalog ws.checked graph
+                     ~folded:(fun p -> Layout_by_path.Path_map.find_opt p ws.layout.collapsed <> Some false) } in
+      Option.bind laid (fun (k : scope_key) ->
+        Option.map (fun _ -> k, path) (Flow_graph.Projection.find k.scope path))
+  | _ -> None

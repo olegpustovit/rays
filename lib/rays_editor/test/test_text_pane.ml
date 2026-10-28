@@ -581,7 +581,7 @@ let paste () =
 
 let lisp_text () =
   let module L = Rays_editor__.Lisp_text in
-  let indent text = String.length (L.indent text (String.length text)) in
+  let indent text = String.length (Flow.Lisp_scan.indent text (String.length text)) in
   check (indent "(let* [a 1" = 7) "a vector's elements line up under the first";
   check (indent "(graph g :context sop" = 2) "a body form indents two in";
   check (indent "  (let* [a 1]" = 4) "let* is a body form";

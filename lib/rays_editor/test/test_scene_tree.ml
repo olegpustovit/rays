@@ -205,12 +205,10 @@ let run () =
   let env = undo env in
   check (List.length (E.lights env) = lights_before) "undo did not show the light again";
   check (not (contains (source env) ":visible false")) "undo left the hidden flag in the text";
-  (* Nor does dragging an object transform slider in the inspector (undo
-     itself re-cooks, so let that settle first): rows are 24 points; the head is 118 tall at the
-     test's 11 points (12, a 24 chips row, 4, the 41-point name, 4, 24 of detail, 8, the hairline),
-     then the Inputs section (4 + 24) and its row (24), the Transform section (16 + 24) and the
-     translate row, whose x field starts at the control column: 12 + 6 + 8 + 56 + 8 = 90 points in
-     the 180-wide panel. *)
+  (* Nor does dragging an object transform slider in the inspector (undo itself re-cooks, so let
+     that settle first).  A scene object is inspected over the projection of the graph that binds
+     it, as any graph node is: at the test's 11 points its translate row's x field is 100 points
+     in and 346 under the panel top. *)
   let env = List.fold_left (fun env _ -> step env []) env (List.init 40 Fun.id) in
   let cooked = Atomic.get cooks in
   let rec select_up name env tries =
@@ -221,9 +219,7 @@ let run () =
   let env = step env [] in
   preview_scene env;
   let ix, iy, _, _ = (E.panes env (frame 0)).inspector in
-  (* the translate row: the 118-point head, then the Inputs (4 + 24 + the row), Geometry (16 + 24 + two rows)
-     and Transform (16 + 24) sections, 12 into its row to the middle of the x field *)
-  let slider x = ix + 100 + x, iy + 118 + (4 + 24 + 24) + (16 + 24 + 48) + (16 + 24) + 12 in
+  let slider x = ix + 100 + x, iy + 346 in
   let at (x, y) = float x, float y in
   let translate_x env = Option.bind (E.selected_node env) (fun node ->
       List.find_map (fun (field : Param.field_view) ->
@@ -238,7 +234,7 @@ let run () =
   check (before <> None && translate_x env <> before)
     "dragging the Translate X slider did not edit geo1";
   check (contains (source env) ":translate [") "the Translate X drag did not reach the text";
-  check (E.undo_label env = Some "Set translate_x") "the slider drag is not one entry named for the field";
+  check (E.undo_label env = Some "Edit value") "the slider drag is not one \"Edit value\" entry";
   check (List.map fst (E.objects env) <> [Rays_math.Mat4.identity]) "the transform did not reach objects";
   let env = List.fold_left (fun env _ -> step env []) env (List.init 20 Fun.id) in
   check (Atomic.get cooks = cooked) "an object transform edit re-cooked SOPs";

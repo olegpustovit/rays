@@ -721,12 +721,12 @@ let expression_inspector ~width ~value ~row_subject ui =
       |> List.filter_map (arg_request ~source:(value.doc.workspace.ws).source h ~arg_row:(arg_row_in entries)))) in
   requests, []
 
-let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun _ _ -> ()) ?(resized = fun _ _ ->
+let workspace_inspector ?(image=fun _->None) ?laid ?(window = false) ?(on_choice = fun _ _ -> ()) ?(resized = fun _ _ ->
   None) ?(follows = fun _ -> None) value ui ~width path =
   let module P = Flow_graph.Projection in
   let module Probe = Flow_graph.Probe in
   let module S = Flow.Syntax in
-  match pane_laid value, value.doc.Document.workspace with
+  match (match laid with Some _ -> laid | None -> pane_laid value), value.doc.Document.workspace with
   | Some { scope; records = Some records; graph; _ }, _ ->
       (* [holder @ [":" ^ label]]: a row of a node that is an operator call (the pane's expression chip) *)
       let row_subject = match List.rev path with
