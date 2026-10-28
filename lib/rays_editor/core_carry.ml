@@ -66,7 +66,7 @@ let carry_targets value (c : _ carry) =
    object; else the selected camera object (by its binding name); else the graph the pane's
    selected node references; else the open scene graph (a viewport shows it). *)
 let carry_payload value =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let context name = Option.map (fun (g : Flow.Workspace.graph) -> g.context)
     (List.find_opt (fun (g : Flow.Workspace.graph) -> g.name = name) ws.checked.graphs) in
   let payload kind name = Ok { Carry.kind; value = "(ref " ^ name ^ ")" } in
@@ -114,7 +114,7 @@ let carry_cancel value (c : _ carry) ~notice =
   Pxui.Ui.cancel_carry value.ui;
   let doc = c.original in
   let level = Document.resolve_level doc value.level in
-  if doc != value.doc then Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (snd doc.workspace));
+  if doc != value.doc then Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (doc.workspace.lowered));
   { value with carry = None; doc; level; notice = Some notice;
     workspace = unrestore value.doc doc value.workspace }
 
@@ -202,7 +202,7 @@ let carry_step value ~text_focus (frame : Frame.t) =
           let shown = carry_shown c in
           if shown == value.doc then value, taken, false
           else begin
-            Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (snd shown.workspace));
+            Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (shown.workspace.lowered));
             let level = Document.resolve_level shown value.level in
             { value with doc = shown; level; lisp_vocab = vocabulary_for value shown;
               workspace = unrestore value.doc shown value.workspace },

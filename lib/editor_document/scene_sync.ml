@@ -170,7 +170,7 @@ let holder source : Document.home -> (Document.home * int) option = function
    changes: the other copies keep their iteration tuples, so their ids, cache keys and
    provenance stay. *)
 let delete_loops st (before : Document.t) gone =
-  let source = (fst before.workspace).source in
+  let source = (before.workspace.ws).source in
   let deleted id = List.mem_assoc id gone in
   let made (key, t) = List.filter (fun (_, h) ->
     List.exists (fun (k, u) -> k = key && u = t) (levels h)) before.homes.objects in
@@ -207,7 +207,7 @@ let object_edits ~before ~after id nb na =
   name @ under @ differing ~before:nb na
 
 let homed (doc : Document.t) id = match List.assoc_opt id doc.homes.objects with
-  | Some Document.Looped -> Contexts.graph_of (fst doc.workspace) Flow.Context.scene <> None
+  | Some Document.Looped -> Contexts.graph_of (doc.workspace.ws) Flow.Context.scene <> None
   | Some _ -> true
   | None -> false
 
@@ -228,7 +228,7 @@ let rec refs name (e : S.t) = match e.node with
    a World's layer graph *)
 let source_graph_of (doc : Document.t) id =
   Option.bind (List.assoc_opt id doc.homes.objects) (fun home ->
-    Option.bind (Document.syntax_of (fst doc.workspace).source home) (fun (e : S.t) ->
+    Option.bind (Document.syntax_of (doc.workspace.ws).source home) (fun (e : S.t) ->
       match e.node with
       | S.List ({ node = S.Sym ("scene/geometry" | "scene/world"); _ } :: args) ->
           List.find_map (fun (a : S.t) -> match a.node with
@@ -252,7 +252,7 @@ let delete_objects st (before : Document.t) gone =
   List.iter (function
     | Document.Inline_in (parent, (F.Pos _ as key)) ->
         apply st (F.Disconnect { node = bind st parent; key; fallback = None })
-    | home -> stop "Made by %s; edit the text." (Document.describe (fst before.workspace).source home))
+    | home -> stop "Made by %s; edit the text." (Document.describe (before.workspace.ws).source home))
     (List.sort (fun x y -> compare (position y) (position x)) inline);
   List.iter (function
     | Document.Bound_at path -> apply st (F.Delete_nodes { nodes = [ path ] })
@@ -524,7 +524,7 @@ let in_text doc level node = field_home doc level node <> None
    given the home the edit was written to. *)
 let template_note (doc : Document.t) home =
   Option.map (fun loop -> Printf.sprintf "Edited the loop template (%s); %d copies change."
-                (Document.describe (fst doc.workspace).source loop) (Document.copies doc home)) (Document.loop_of home)
+                (Document.describe (doc.workspace.ws).source loop) (Document.copies doc home)) (Document.loop_of home)
 
 let first notes = List.find_map Fun.id notes
 
@@ -605,7 +605,7 @@ let write_edit st (doc : Document.t) level = function
        | Some root, Some camera when List.mem camera ids -> set st root [ "camera", None ]
        | _ -> ());
       List.find_map (fun (_, home) -> Option.map (fun loop ->
-        Printf.sprintf "Removed a copy from the loop (%s)." (Document.describe (fst doc.workspace).source loop))
+        Printf.sprintf "Removed a copy from the loop (%s)." (Document.describe (doc.workspace.ws).source loop))
         (Document.loop_of home)) (List.rev gone)
   | Layers (network, values) ->
       (match level with
@@ -658,7 +658,7 @@ let write ~factories (doc : Document.t) level edit =
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
       (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
-  let st = { catalog; workspace = fst doc.workspace; unfolded = []; adopted = false } in
+  let st = { catalog; workspace = doc.workspace.ws; unfolded = []; adopted = false } in
   try
     let note = write_edit st doc level edit in
     (* what the text does not say is the document's; what it says is lowered over this *)
@@ -677,9 +677,9 @@ let write ~factories (doc : Document.t) level edit =
            | Some network -> Document.prune (Document.with_network doc level { network with graph = without network.graph })
            | None -> doc)
       | Fields _ | Rename _ | Restack _ | Layers _ | Reparent _ | Outdent _ -> doc in
-    if st.workspace == fst doc.workspace then Ok (Some (doc, note))
-    else if st.workspace.source == (fst doc.workspace).source then
-      Ok (Some ({ doc with workspace = st.workspace, snd doc.workspace }, note))
+    if st.workspace == doc.workspace.ws then Ok (Some (doc, note))
+    else if st.workspace.source == (doc.workspace.ws).source then
+      Ok (Some ({ doc with workspace = { doc.workspace with ws = st.workspace } }, note))
     else Result.map (fun doc -> Some (doc, note)) (Contexts.of_workspace ~factories ~previous:doc st.workspace
                                                    |> Result.map_error Diagnostic.to_string)
   with Stop message -> Error message
@@ -706,11 +706,11 @@ let run ~factories ~adopt (before : Document.t) (after : Document.t) =
     let ( let* ) = Result.bind in
     let* catalog = Result.map_error Diagnostic.to_string
         (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
-    let st = { catalog; workspace = fst before.workspace; unfolded = []; adopted = false } in
+    let st = { catalog; workspace = before.workspace.ws; unfolded = []; adopted = false } in
     try
       object_changes st before (Document.scene_graph after);
       if adopt && unhomed_changes before after then adopt_objects st after;
-      if st.workspace == fst before.workspace then Ok after
+      if st.workspace == before.workspace.ws then Ok after
       else Contexts.of_workspace ~factories ~previous:after st.workspace
            |> Result.map_error Diagnostic.to_string
     with Stop message -> Error message
@@ -724,7 +724,7 @@ let adopt ~factories (doc : Document.t) =
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
       (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
-  let st = { catalog; workspace = fst doc.workspace; unfolded = []; adopted = false } in
+  let st = { catalog; workspace = doc.workspace.ws; unfolded = []; adopted = false } in
   try
     adopt_objects st doc;
     Contexts.of_workspace ~factories ~previous:doc st.workspace |> Result.map_error Diagnostic.to_string
@@ -736,10 +736,10 @@ let bind_home ~factories (doc : Document.t) home =
   let ( let* ) = Result.bind in
   let* catalog = Result.map_error Diagnostic.to_string
       (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
-  let st = { catalog; workspace = fst doc.workspace; unfolded = []; adopted = false } in
+  let st = { catalog; workspace = doc.workspace.ws; unfolded = []; adopted = false } in
   try
     let path = bind st home in
-    if st.workspace == fst doc.workspace then Ok (doc, path)
+    if st.workspace == doc.workspace.ws then Ok (doc, path)
     else
       Result.map (fun doc -> doc, path)
         (Contexts.of_workspace ~factories ~previous:doc st.workspace
@@ -755,7 +755,7 @@ let scene_name (workspace : Workspace_doc.t) =
    input; [~existing] reuses a SOP graph (two objects share it and it cooks once).  The ops make
    one gesture: apply them together. *)
 let add_geometry (doc : Document.t) ~existing =
-  let workspace = fst doc.workspace in
+  let workspace = doc.workspace.ws in
   let used = ref (owned workspace) in
   let graph_ops, graph = match existing with
     | Some g -> [], g
@@ -775,7 +775,7 @@ let add_geometry (doc : Document.t) ~existing =
 let add_world (doc : Document.t) =
   if Objects.ids "world" (Document.scene_graph doc) <> [] then Error "The scene already has a World."
   else
-    let workspace = fst doc.workspace in
+    let workspace = doc.workspace.ws in
     let used = ref (owned workspace) in
     let g = F.fresh_among used "sky" in
     let body = mk (S.List [ sym "world/sun"; mk (S.List [ sym "world/sky" ]) ]) in

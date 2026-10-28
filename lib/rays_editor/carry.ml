@@ -55,11 +55,11 @@ let parse payload =
   | _ -> Error "A carried value is one form"
 
 let find_graph (doc : Document.t) name =
-  List.find_opt (fun (g : W.graph) -> g.name = name) (fst doc.workspace).checked.graphs
+  List.find_opt (fun (g : W.graph) -> g.name = name) (doc.workspace.ws).checked.graphs
 
 (* the lowered SOP graph a geometry object instantiates, by its network *)
 let graph_of_object (doc : Document.t) id =
-  let _, lowered = doc.workspace in
+  let lowered = doc.workspace.lowered in
   Option.bind (Document.Int_map.find_opt id doc.networks) (fun (n : Document.network) ->
     List.find_map (fun (g : Flow_sop.Lower.graph) ->
       if g.network == n.graph || (match g.root, Edit_graph.root n.graph.geometry with
@@ -80,7 +80,7 @@ let shared doc graph =
   match readers doc graph with n when n > 1 -> Printf.sprintf " · %d objects read it" n | _ -> ""
 
 let scope_of ~catalog (doc : Document.t) graph =
-  try Some (P.of_graph catalog (fst doc.workspace).checked graph) with Invalid_argument _ -> None
+  try Some (P.of_graph catalog (doc.workspace.ws).checked graph) with Invalid_argument _ -> None
 
 (* a [sop/material] that has no group: it paints everything that reaches it *)
 let whole_material (n : P.node) =
@@ -109,7 +109,7 @@ let material_on_graph ~catalog doc graph expr material =
                      Ok ([ E.Set_arg { node = n.path; key = E.Kw "material"; sub = []; value = expr } ],
                          Printf.sprintf ":material (ref %s) in graph %s%s" material graph (shared doc graph))
                  | _ ->
-                     let fresh = E.fresh_name (fst doc.workspace).source ~root:graph "material" in
+                     let fresh = E.fresh_name (doc.workspace.ws).source ~root:graph "material" in
                      Ok ([ E.Add_node { scope = [ graph ]; name = fresh;
                              expr = S.make (S.List [ S.make (S.Sym "sop/material"); S.make (S.Sym name);
                                                      S.make (S.Kw "material"); expr ]) };
@@ -146,7 +146,7 @@ let on_viewport ~factories ~catalog (doc : Document.t) payload expr name key =
     | Some path -> Ok path
     | None -> Error "That viewport is not part of the editor graph's layout" in
   let* bound, node = Editor_document.Document_edit.panel_node ~factories doc path in
-  let source = (fst bound.workspace).source in
+  let source = (bound.workspace.ws).source in
   let shown = Option.bind (E.arg_text source node (E.Pos 0)) name_of in
   if payload.kind = "scene" then
     (match find_graph doc name with
@@ -216,7 +216,7 @@ let plan ~factories ~catalog (doc : Document.t) payload place =
       let line = 1 + String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 (String.sub text 0 byte) in
       let what = Printf.sprintf "%s at line %d of the text" payload.value line in
       let inserted = insert_at text byte payload.value in
-      let source = (fst doc.workspace).source in
+      let source = (doc.workspace.ws).source in
       let message (d : Diagnostic.t) = d.message in
       (match target with
        | Drafted -> Error "The text has an unapplied draft: apply or discard it first"

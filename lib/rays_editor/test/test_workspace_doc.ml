@@ -253,7 +253,7 @@ let part_preset () =
     check (not (has text "{\"") && not (has text "\"version\"")) "no JSON";
     (* it loads: same source, same comments *)
     let loaded = Preset.load ~path ~factories ~settings:Editor_document.Settings.none () |> Result.get_ok in
-    let ws = fst (loaded.doc.workspace) in
+    let ws = loaded.doc.workspace.ws in
     check (Doc.to_text ws = Doc.to_text (E3.workspace e)) "save then load round trip";
     check (Preset.list ~directory |> List.map fst = [ name ]) "listed";
     (* load through / b: one undo entry *)
@@ -293,7 +293,7 @@ let part_pane_layout () =
   let module M = Layout.Path_map in
   let doc = of_text still in
   let opened = Editor_document.Contexts.of_workspace ~factories doc |> function Ok d -> d | Error m -> fail (Diagnostic.to_string m) in
-  let ws = fst (opened.workspace) in
+  let ws = opened.workspace.ws in
   let ws = { ws with layout = { ws.layout with at = M.add [ "g"; "a" ] (40., 60.) ws.layout.at;
                                                collapsed = M.add [ "g"; "b" ] true ws.layout.collapsed;
                                                level = M.add [ "g"; "gone" ] Flow_graph.Projection.Full ws.layout.level;

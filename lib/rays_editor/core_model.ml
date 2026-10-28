@@ -301,14 +301,14 @@ type ('prepared, 'panel) update = {
 }
 
 let vocabulary factories (doc : Document.t) = lazy (
-  Lisp_text.vocab ~ops:(fst doc.workspace).checked.ops
+  Lisp_text.vocab ~ops:(doc.workspace.ws).checked.ops
     (Flow_sop.Catalog.with_library
-       (List.map Flow_sop.Catalog.descriptor (factories @ (snd doc.workspace).factories))
+       (List.map Flow_sop.Catalog.descriptor (factories @ (doc.workspace.lowered).factories))
       @ Contexts.descriptors))
 
 let vocabulary_for value (doc : Document.t) =
-  let previous = (fst value.doc.Document.workspace).checked
-  and next = (fst doc.workspace).checked in
+  let previous = (value.doc.Document.workspace.ws).checked
+  and next = (doc.workspace.ws).checked in
   if previous.ops == next.ops && (previous.nodes == next.nodes ||
     List.equal (fun (a : Flow.Workspace.node_definition) (b : Flow.Workspace.node_definition) ->
       a.kind = b.kind && a.fields = b.fields && a.label = b.label && a.category = b.category)

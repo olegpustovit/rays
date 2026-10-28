@@ -132,8 +132,8 @@ let follow_start value =
 (* The lowered sop graph a geometry object instantiates, by its network. *)
 let graph_of_object value id = Document.object_graph value.doc id
 
-let graph_name value = match value.doc.Document.workspace with
-  | ws, _ ->
+let graph_name value = match value.doc.Document.workspace.ws with
+  | ws ->
       let exists name = List.exists (fun (g : Flow.Workspace.graph) -> g.name = name) ws.checked.graphs
         || (String.length name > 4 && String.sub name 0 4 = "def:"
             && List.exists (fun (g : Flow.Workspace.graph) -> "def:" ^ g.name = name) ws.checked.defs) in
@@ -192,7 +192,7 @@ let go value graph =
 (* What the selected node of the graph pane references: the graph its [(ref name)] names, the
    [:material] of a sop/material first (a material node follows to its surface). *)
 let follow_target ?path value =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let module S = Flow.Syntax in
   let exists name = List.exists (fun (g : Flow.Workspace.graph) -> g.name = name) ws.checked.graphs in
   let reference (e : S.t) = match e.node with
@@ -223,7 +223,7 @@ let peek_target value =
 (* [i] in a viewport with nothing selected follows to the scene it shows: the graph its
    [(ref scene)] names, else the first scene graph. *)
 let viewport_target value =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   match value.focus with
   | Pxui_shell.Layout.View key when Selection.selected value.selection = None ->
       let named = Option.bind value.doc.Document.shell (fun shell ->
@@ -258,9 +258,9 @@ let scope_node value =
 
 
 let lit_tags value =
-  match value.doc.Document.workspace, value.scope_key,
+  match value.doc.Document.workspace.lowered, value.scope_key,
         Pxui_graph.Scope.selected value.scope_view with
-  | (_, lowered), Some { scope; _ }, [ site ] when scope_name value <> None ->
+  | lowered, Some { scope; _ }, [ site ] when scope_name value <> None ->
       (match value.lit with
        | Some c when c.site = site && c.at == value.probes && c.lowered == lowered
            && c.scope == scope -> c.tags, value.lit

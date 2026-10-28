@@ -90,6 +90,9 @@ type shell = {
   switch : switch option;  (* the first [ui/switch]: every layout it holds, and the active one *)
 }
 
+(* The authored document, its lowering and the window's precision, read once with the lowering. *)
+type workspace = { ws : Workspace_doc.t; lowered : Flow_sop.Lower.t; fast : bool Lazy.t }
+
 type t = {
   scene : network;  (* objects: input 0 is the parent *)
   networks : network Int_map.t;  (* by object id: SOP networks, the World's layers *)
@@ -108,7 +111,7 @@ type t = {
   scene_drives : (string * (Flow_sop.Port.parameter * Flow.Eval.value) list) Int_map.t;
   scene_textures : Flow.Eval.value Int_map.t;
   (* Residual light fields, resolved for composition; never written into history. *)
-  workspace : Workspace_doc.t * Flow_sop.Lower.t;
+  workspace : workspace;
   (* the authored document and its lowering: [scene] and [networks] are that lowering, one
      geometry object per [sop] graph; the lowering (compiled ids, volatile set) is history
      state so undo restores both *)
@@ -204,7 +207,7 @@ let prune value =
    across lowerings while the lowering is rebuilt, so identity alone is not enough: the compiled
    root still names the graph. *)
 let object_graph value id =
-  let _, (lowered : Flow_sop.Lower.t) = value.workspace in
+  let lowered = value.workspace.lowered in
   Option.bind (Int_map.find_opt id value.networks) (fun (n : network) ->
     List.find_map (fun (g : Flow_sop.Lower.graph) ->
       if g.network == n.graph || (match g.root, Edit_graph.root n.graph.geometry with

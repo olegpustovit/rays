@@ -91,12 +91,7 @@ open Rays
   let switch ui ~key ~at:(sx, sy) on =
     let box = Ui.box ui ~flags:Ui.(clickable + blocking) ~w:(Ui.Px 28.) ~h:(Ui.Px 14.) ~at:(sx, sy) key in
     let signal = Ui.signal ui box in
-    Ui.draw ui box (fun paint (x, y, w, h) ->
-      let theme = Ui.theme ui in
-      Ui.Paint.fill paint ~x ~y ~w ~h (if on then theme.input else theme.track);
-      Ui.Paint.stroke paint ~x:(x +. 0.5) ~y:(y +. 0.5) ~w:(w -. 1.) ~h:(h -. 1.) (Pxui.Theme.border theme);
-      Ui.Paint.fill paint ~x:(x +. (if on then 17. else 3.)) ~y:(y +. 3.) ~w:8. ~h:8.
-        (if on then theme.accent else Pxui.Theme.ink_3 theme));
+    Ui.draw ui box (fun paint (x, y, _, _) -> Ui.paint_switch paint (Ui.theme ui) ~x ~y on);
     signal.clicked
 
   (* Text tabs: the one in use is ink with a 1-point underline, the others ink-3.  Laid out

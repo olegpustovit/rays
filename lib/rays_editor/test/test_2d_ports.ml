@@ -40,7 +40,7 @@ let save_roundtrip name workspace =
     Out_channel.with_open_bin file(fun channel->output_string channel source);
     let editor=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace ~await:true ~domains:1
       ~presets:(Filename.concat directory "presets")
-      ~source:(Rays_editor.Source.at ~file ~digest:(Editor_document.Contexts.sha256 source))
+      ~source:(Rays_editor.Source.at ~file ~digest:(Editor_document.Contexts.digest source))
       ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Scene.D3.empty)()))in
     Fun.protect ~finally:(fun()->Editor.close !editor)(fun()->
       editor:=Editor.update !editor(frame ~synthetic:false name 0);

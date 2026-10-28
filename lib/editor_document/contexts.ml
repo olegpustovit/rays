@@ -191,19 +191,10 @@ let window (workspace : Workspace_doc.t) =
 (* The same window from a document's own lowering, whose plan is the one [window] evaluates: a
    host that opens the document does not evaluate the workspace again to size its window. *)
 let document_window (doc : Document.t) =
-  let workspace, (lowered : Flow_sop.Lower.t) = doc.workspace in
-  plan_window workspace lowered.plan
+  plan_window doc.workspace.ws doc.workspace.lowered.plan
 
-(* The precision of a document's workspace, asked every frame: the last answer is kept, by the
-   identity of the lowering it was read from.  Capacity 1. *)
-let last_fast = Atomic.make None
-let fast (doc : Document.t) =
-  let lowered = snd doc.workspace in
-  match Atomic.get last_fast with
-  | Some (l, fast) when l == lowered -> fast
-  | _ ->
-      let fast = match document_window doc with Ok w -> w.fast | Error _ -> true in
-      Atomic.set last_fast (Some (lowered, fast)); fast
+(* The precision of a document's workspace, read once with its lowering. *)
+let fast (doc : Document.t) = Lazy.force doc.workspace.fast
 
 (* ---- where things are written ---- *)
 
@@ -874,16 +865,16 @@ let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
 
 let of_workspace ~factories ?gpu ?previous (workspace : Workspace_doc.t) =
   let gpu = Option.value gpu ~default:(match previous with
-    | Some (doc : Document.t) -> (snd doc.Document.workspace).gpu
+    | Some (doc : Document.t) -> (doc.Document.workspace.lowered).gpu
     | None -> Flow_ir.Gpu.default) in
   let compiled_ids, sites = match previous with
     | Some (doc : Document.t) ->
-        let _, (lowered : Flow_sop.Lower.t) = doc.workspace in
+        let (lowered : Flow_sop.Lower.t) = doc.workspace.lowered in
         Some lowered.compiled_ids, Some lowered.sites
     | None -> None, None in
   let old_homes = match previous with Some doc -> doc.Document.homes | None -> Document.no_homes in
   let previous_literal = Option.bind previous (fun (doc : Document.t) ->
-    let old, lowered = doc.workspace in
+    let old = doc.workspace.ws and lowered = doc.workspace.lowered in
     Option.bind (if same_gpu gpu lowered.Flow_sop.Lower.gpu then
       Workspace_doc.literal_changes ~previous:old workspace else None) (fun changes ->
       List.fold_left (fun result change -> Option.bind result (fun result ->
@@ -1075,7 +1066,9 @@ let of_workspace ~factories ?gpu ?previous (workspace : Workspace_doc.t) =
        shell = Option.map (fun e -> { Document.tree = e.tree; origins = e.origins;
                                       named = e.named; repeated = e.repeated; follows = e.follows; start = e.start; views; canvases = e.canvases; preview_sources = e.preview_sources;
                                       switch = e.switch }) editor;
-       view_worlds; view_roots; homes; workspace = (workspace, lowered) }
+       view_worlds; view_roots; homes;
+       workspace = { Document.ws = workspace; lowered;
+                     fast = lazy (match plan_window workspace lowered.plan with Ok w -> w.fast | Error _ -> true) } }
 
 (* Only the recorded live fields run; SOP networks, source and panel identities
    stay untouched. Errors leave the caller's last successful picture available. *)
@@ -1107,4 +1100,4 @@ let resolve_scene ?previous ?state ?live (document : Document.t) ~time =
     document.scene_drives (document.scene.graph.geometry, []) in
   graph, List.rev errors
 
-let sha256 s = Digestif.SHA256.(to_hex (digest_string s))
+let digest s = Digest.to_hex (Digest.string s)

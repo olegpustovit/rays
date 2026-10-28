@@ -22,14 +22,14 @@ let panel_title value (leaf : Pxui_shell.Layout.leaf) =
         let scene_name =
           Option.value ~default:"" (List.find_map (fun (g : Flow.Workspace.graph) ->
             if g.context = Flow.Context.scene then Some g.name else None)
-            (fst value.doc.Document.workspace).checked.graphs) in
+            (value.doc.Document.workspace.ws).checked.graphs) in
         let camera = Option.bind value.doc.Document.active_camera (fun id ->
           Option.map Node.label (Edit_graph.find (scene value) ~node_id:id)) in
         String.concat " / " (List.filter (( <> ) "") [ scene_name; Option.value ~default:"" camera ])
     | Graph -> "Graph", if graph = "" then "" else
         let context = List.find_map (fun (g : Flow.Workspace.graph) ->
           if g.name = graph then Some (Flow.Workspace.context_name g.context) else None)
-          (fst value.doc.Document.workspace).checked.graphs in
+          (value.doc.Document.workspace.ws).checked.graphs in
         (if value.back = [] then graph
          else String.concat " / " (List.map String.trim (String.split_on_char '>' (route value))))
         ^ Option.fold ~none:"" ~some:(fun c -> " / " ^ c) context
@@ -55,13 +55,13 @@ let panel_title value (leaf : Pxui_shell.Layout.leaf) =
   let name = if sub = "" then name else name ^ "\t" ^ sub in
   match Option.bind value.doc.Document.shell (fun s ->
       if value.workspace.restored then None else List.assoc_opt leaf.path s.origins) with
-  | Some (Document.Loop (from, _)) -> name ^ " · from loop " ^ Document.describe (fst value.doc.Document.workspace).source from
+  | Some (Document.Loop (from, _)) -> name ^ " · from loop " ^ Document.describe (value.doc.Document.workspace.ws).source from
   | _ -> name
 
 (* Make a reusable function from the selected nodes: the names they read from outside are typed from the
    graph pane's projection, the context is the result's (a geometry is [sop], anything else [value]). *)
 let defn_change value paths =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let scope = Option.map (fun (k : scope_key) -> k.scope) value.scope_key in
   let rec ty_text : Flow.Ty.t -> string option = function
     | (Flow.Ty.Named "geometry") -> Some "geometry" | Float -> Some "float" | Int -> Some "int" | Bool -> Some "bool"
@@ -139,7 +139,7 @@ let outline_objects value : Navigator.obj list =
   else List.map snd rows
 
 let navigator_params value : Navigator.params =
-  let ws = fst value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let active = graph_name value in
   let here = match value.scope_key, active with
     | Some k, Some name when k.graph = name -> Some k | _ -> None in
@@ -200,7 +200,7 @@ let panel_kind : Pxui_shell.Layout.panel -> string = function
    editor graph (written from the layout shown first, when the document has none). *)
 let layout_actions value (workspace : shell) ~(leaf : Pxui_shell.Layout.leaf option) actions =
   let graph = Option.map (fun (g : Flow.Workspace.graph) -> g.name)
-    (Workspace_doc.editor_graph (fst value.doc.Document.workspace)) in
+    (Workspace_doc.editor_graph (value.doc.Document.workspace.ws)) in
   let edit make = match graph with
     | _ when workspace.restored ->
         [ Declined "The default layout is showing. / z returns to the editor graph." ]
@@ -208,7 +208,7 @@ let layout_actions value (workspace : shell) ~(leaf : Pxui_shell.Layout.leaf opt
     | None ->
         let scene = Option.value ~default:"scene" (List.find_map (fun (g : Flow.Workspace.graph) ->
           if g.context = Flow.Context.scene then Some g.name else None)
-          (fst value.doc.Document.workspace).checked.graphs) in
+          (value.doc.Document.workspace.ws).checked.graphs) in
         let text, _ = Bars.tree_text ~name:"editor" ~scene (shell_tree value { workspace with live = None }) in
         (match Flow.Syntax.parse text with
          | Ok [ form ] -> [ Syntax_batch (Flow_graph.Flow_edit.label (make "editor"),
@@ -242,7 +242,7 @@ let layout_actions value (workspace : shell) ~(leaf : Pxui_shell.Layout.leaf opt
 let layout_intents value (workspace : shell) intents =
   let base = shell_tree value { workspace with live = None } in
   let editor = Option.map (fun (g : Flow.Workspace.graph) -> g.name)
-    (Workspace_doc.editor_graph (fst value.doc.Document.workspace)) in
+    (Workspace_doc.editor_graph (value.doc.Document.workspace.ws)) in
   let shell = if workspace.restored then None else value.doc.Document.shell in
   let edit path make = match editor, shell with
     | Some graph, Some s ->
@@ -255,7 +255,7 @@ let layout_intents value (workspace : shell) intents =
               | Flow_graph.Flow_edit.Set_panel_kind { kind; _ } ->
                   [ Syntax_inline { home; key; make = (fun p ->
                       Flow_graph.Flow_edit.Set_panel_kind { node = p @ [ "@result" ]; kind }) } ]
-              | _ -> [ Declined ("These panels are copies made by a loop in " ^ Document.describe (fst value.doc.Document.workspace).source home
+              | _ -> [ Declined ("These panels are copies made by a loop in " ^ Document.describe (value.doc.Document.workspace.ws).source home
                   ^ ": retype them (/ o), or edit the loop in the editor graph.") ])
          | None -> [ Declined "This panel is not part of the editor graph's tree." ])
     | _ when workspace.restored ->
@@ -264,7 +264,7 @@ let layout_intents value (workspace : shell) intents =
         (* no editor graph: the layout shown is written as one first, then edited *)
         let scene = Option.value ~default:"scene" (List.find_map (fun (g : Flow.Workspace.graph) ->
           if g.context = Flow.Context.scene then Some g.name else None)
-          (fst value.doc.Document.workspace).checked.graphs) in
+          (value.doc.Document.workspace.ws).checked.graphs) in
         let text, name_of = Bars.tree_text ~name:"editor" ~scene base in
         (match Flow.Syntax.parse text, name_of path with
          | Ok [ form ], Some leaf ->
@@ -276,7 +276,7 @@ let layout_intents value (workspace : shell) intents =
     let prefix = if editor <> None then [] else
       let scene = Option.value ~default:"scene" (List.find_map (fun (g : Flow.Workspace.graph) ->
         if g.context = Flow.Context.scene then Some g.name else None)
-        (fst value.doc.Document.workspace).checked.graphs) in
+        (value.doc.Document.workspace.ws).checked.graphs) in
       let text, _ = Bars.tree_text ~name:"editor" ~scene base in
       match Flow.Syntax.parse text with
       | Ok [form] -> [Syntax_edit (Flow_graph.Flow_edit.Set_graph {name = "editor"; form})]
@@ -315,7 +315,7 @@ let layout_intents value (workspace : shell) intents =
 
 let dock_panels ~factories (doc : Document.t) source target side =
   let ( let* ) = Result.bind in
-  let states = (fst doc.workspace).layout.panels in
+  let states = (doc.workspace.ws).layout.panels in
   let source_key = panel_key doc source and target_key = panel_key doc target in
   let saved key = Option.value ~default:Editor_core.Panels.default_state (Layout_by_path.Path_map.find_opt key states) in
   let bind doc path = Editor_document.Document_edit.panel_node ~factories
@@ -324,7 +324,7 @@ let dock_panels ~factories (doc : Document.t) source target side =
   let* doc, target = bind doc target in
   let* doc = Editor_document.Document_edit.syntax_edit ~factories doc (Flow_graph.Flow_edit.Dock_panel {node; target; side}) in
   let copy_pos = if side = `Left || side = `Top then 3 else 2 in
-  let copy = match Flow_graph.Flow_edit.arg_text (fst doc.workspace).source target (Pos copy_pos) with
+  let copy = match Flow_graph.Flow_edit.arg_text (doc.workspace.ws).source target (Pos copy_pos) with
     | Some {Flow.Syntax.node = Sym name; _} -> List.rev (name :: List.tl (List.rev target))
     | _ -> target in
   Ok (Editor_document.Document_edit.layout_edit doc (fun layout ->
@@ -350,7 +350,7 @@ let apply_change (document, error, effects) = function
 (* Command-C / X: the selected bindings as Lisp pairs ("name expr" per line) on the clipboard,
    the text a let* vector or the Lisp pane takes. *)
 let copy_bindings value paths =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let lines = List.filter_map (fun path -> match Text_pane.binding ws.source path with
     | Some (_, v) -> Some (List.nth path (List.length path - 1) ^ " " ^ String.trim (fst (Flow.Lisp.print [ v ])))
     | None -> None) paths in
@@ -374,7 +374,7 @@ let paste_bindings value =
   | None, _ -> [ Declined "Open a graph to paste into" ]
   | Some _, Error message -> [ Declined ("Clipboard: " ^ message) ]
   | Some (graph, _), Ok text ->
-      let ws, _ = value.doc.Document.workspace in
+      let ws = value.doc.Document.workspace.ws in
       let scope = match Pxui_graph.Scope.selected value.scope_view with
         | [ path ] when List.length path >= 2 -> List.take (List.length path - 1) path
         | _ -> [ graph ] in

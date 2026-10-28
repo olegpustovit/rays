@@ -192,7 +192,7 @@ let preview_identity () =
   let keys doc = Editor_core.Panels.leaves (shell doc).tree |> List.filter_map
     (function _, Editor_core.Panels.View key -> Some key | _ -> None) in
   let edit doc op =
-    let ws = D.Workspace_doc.edit catalog (fst doc.D.Document.workspace) op |> Result.get_ok in
+    let ws = D.Workspace_doc.edit catalog (doc.D.Document.workspace.ws) op |> Result.get_ok in
     D.Contexts.of_workspace ~factories ~previous:doc ws |> Result.get_ok in
   let names = keys doc in
   check (List.length names = 3 && List.length (List.sort_uniq String.compare names) = 3)
@@ -218,8 +218,8 @@ let preview_identity () =
     target = ["editor"; "main"]; side = `Right}) in
   check (List.sort String.compare (keys docked) = List.sort String.compare names)
     ("docking changed named viewport identity: " ^ String.concat "," (keys docked)
-     ^ "\n" ^ D.Workspace_doc.to_text (fst docked.workspace));
-  let reloaded = build (workspace (D.Workspace_doc.to_text (fst docked.workspace))) in
+     ^ "\n" ^ D.Workspace_doc.to_text (docked.workspace.ws));
+  let reloaded = build (workspace (D.Workspace_doc.to_text (docked.workspace.ws))) in
   check (keys reloaded = keys docked) "reload changed named viewport identity";
   let renamed = edit docked (F.Rename {node = ["editor"; "comparison"]; to_ = "alternate"}) in
   check (List.mem "v:\"editor\"/\"alternate\"" (keys renamed) && not (List.mem comparison (keys renamed)))

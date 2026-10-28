@@ -27,7 +27,7 @@ let geometry_objects value =
   (* a workspace without a scene graph shows each graph the lowering made a network of; an image
      graph is one (the canvas previews its nodes) but its payload is not geometry, so the geometry
      cook never takes it (Flow_native.Workspace_images cooks images) *)
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let image_graph node = List.exists (fun (g : Flow.Workspace.graph) ->
     g.name = Node.label node && Flow.Context.result g.context = Flow.Ty.image) ws.checked.graphs in
   List.filter_map (fun id ->

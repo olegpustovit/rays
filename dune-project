@@ -20,7 +20,6 @@
  (depends
   (ocaml (>= 5.3))
   (dune (>= 3.21))
-  digestif
   dune-configurator
   ppxlib
   (odoc :with-doc)

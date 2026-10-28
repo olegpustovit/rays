@@ -17,7 +17,7 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
         (* a picture's frame is its pane: frame/width and frame/height read the canvas, not the window *)
         let input = {input with Input.size = (w, h)} in
         let drawing = Option.bind core.doc.Document.shell (fun shell -> List.assoc_opt key shell.canvases) in
-        let _, lowered = core.doc.workspace in
+        let lowered = core.doc.workspace.lowered in
         let preview = core.Core_model.canvas_viewed in
         let drawing = match preview with
           | Some (ty, id) when ty = Flow.Ty.drawing -> Some (Flow.Eval.Deferred (ty, id))
@@ -51,7 +51,7 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
              let prepared = match previous with
                | Some {prepared = Some p; preview = held; _} when same_plan && held = preview -> Ok p
                | _ -> Flow_native.Drawing.prepare ~gpu ~profile:lowered.profile
-                   ~approx:(fst core.doc.workspace).checked.approx ~states:lowered.states lowered.plan drawing in
+                   ~approx:(core.doc.workspace.ws).checked.approx ~states:lowered.states lowered.plan drawing in
              (match Result.bind prepared (fun p -> Result.map (fun scene -> p, scene)
                  (Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu(fun gpu->Flow_native.Drawing.render_prepared ~state:core.cook.state
                    ~gpu:(Flow_native.Workspace_gpu.marks value.host.gpu) ?resident:(Flow_native.Workspace_gpu.resident gpu value.host.gpu)
@@ -81,7 +81,7 @@ let update_with value frame ~inspector =
     (* a handle is where the picture shows its point: in the view's film, not its pane *)
     V.handles ui ~selected ~scene:(Core_inspect.scene value.core) ~space (view_camera value)
       extra ~bounds:(V.film extra ~key:(focus_key value) bounds) in
-  let _,lowered=value.core.doc.workspace in
+  let lowered = value.core.doc.workspace.lowered in
   Flow_native.Workspace_images.bind value.host.images lowered;
   let image_gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast value.core.doc) value.host.gpu and live={(Flow_native.Live_frame.of_frame frame) with t=Timeline.time(Core_list.timeline value.core)}in
   let image_errors=ref [] in
@@ -310,7 +310,7 @@ let update_with value frame ~inspector =
     composed = Some (composition_key core scene); resolved = Some (core.doc, input, scene);
     context_error; canvases; baked; baked_from; baked_views; map; world_drag; pick_press;
     pending_render; render_status; extra; source } raw_frame in
-  let workspace,lowered=value.core.doc.workspace in
+  let workspace = value.core.doc.workspace.ws and lowered = value.core.doc.workspace.lowered in
   let value=match Flow_native.Workspace_host.update value.host ~state:value.core.cook.state
       ~live:input workspace lowered.plan with
     |Ok()->value|Error diagnostic->{value with context_error=Some(Diagnostic.to_string diagnostic)}in

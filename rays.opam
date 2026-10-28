@@ -11,8 +11,7 @@ homepage: "https://github.com/olegpustovit/rays"
 bug-reports: "https://github.com/olegpustovit/rays/issues"
 depends: [
   "ocaml" {>= "5.3"}
-  "dune" {>= "3.17" & >= "3.21"}
-  "digestif"
+  "dune" {>= "3.21" & >= "3.21"}
   "dune-configurator"
   "ppxlib"
   "odoc" {with-doc}
@@ -38,3 +37,4 @@ build: [
   ]
 ]
 dev-repo: "git+https://github.com/olegpustovit/rays.git"
+x-maintenance-intent: ["(latest)"]

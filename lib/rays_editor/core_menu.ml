@@ -15,7 +15,7 @@ let scene_entries value =
   :: List.map (fun c -> entry ("newgraph:" ^ c) ("New graph: " ^ c) [ "Graph" ]) Navigator.new_graph_contexts
   @ List.filter_map (fun (g : Flow.Workspace.graph) ->
        if g.context = Flow.Context.sop then Some (entry ("of:" ^ g.name) g.name [ "Object"; "Geometry of..." ])
-       else None) (fst value.doc.Document.workspace).checked.graphs
+       else None) (value.doc.Document.workspace.ws).checked.graphs
 
 (* In a SOP graph: a sop/material of each material graph, after the selection *)
 let material_entries value =
@@ -24,7 +24,7 @@ let material_entries value =
       Some { Pxui_graph.Node_menu.key = "of-material:" ^ g.name; label = g.name;
              category = [ "Material of..." ]; arity = 1; context = "sop"; output = Flow.Ty.geometry;
              off = None }
-    else None) (fst value.doc.Document.workspace).checked.graphs
+    else None) (value.doc.Document.workspace.ws).checked.graphs
 
 (* The graph a menu entry is for, as the entries name it *)
 let context_name = Flow.Workspace.context_name
@@ -37,7 +37,7 @@ let open_menu ?scope_view value (x, y) =
   match add_target value with
   | Some (_, context) ->
       let module M = Pxui_graph.Node_menu in
-      let extra = (fst value.doc.workspace).checked.ops in
+      let extra = (value.doc.workspace.ws).checked.ops in
       let factories context = List.map (fun (d : Flow_sop.Catalog.descriptor) -> M.{
         key = d.key; label = d.label; category = d.category;
         arity = List.length d.slots - List.length d.keyword_inputs;

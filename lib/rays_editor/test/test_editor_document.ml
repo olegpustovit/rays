@@ -46,7 +46,7 @@ let run () =
   let gpu : Flow_ir.Gpu.config = { backend = Some backend; fast = true;
     policy = Flow_ir.Gpu.Qualification } in
   let carries_gpu doc =
-    let lowered = (snd doc.Document.workspace).Flow_sop.Lower.gpu in
+    let lowered = (doc.Document.workspace.lowered).Flow_sop.Lower.gpu in
     lowered.fast && lowered.policy = Flow_ir.Gpu.Qualification
     && Option.fold ~none:false ~some:(fun actual -> actual == backend) lowered.backend in
   let gpu_doc = match Editor_document.Contexts.of_workspace ~factories ~gpu workspace with
@@ -75,7 +75,7 @@ let run () =
   let saved = Preset.save ~directory ~name:"round" ~doc ~view:(Flow.Syntax.make (Flow.Syntax.Map [])) |> Result.get_ok in
   (match Preset.load ~gpu ~path:saved ~factories ~settings:doc.settings () with
    | Ok loaded ->
-       check (Editor_document.Workspace_doc.to_text (fst loaded.doc.workspace)
+       check (Editor_document.Workspace_doc.to_text (loaded.doc.workspace.ws)
               = Editor_document.Workspace_doc.to_text workspace
               && List.length (Document.Int_map.bindings loaded.doc.networks)
                  = List.length (Document.Int_map.bindings doc.networks))

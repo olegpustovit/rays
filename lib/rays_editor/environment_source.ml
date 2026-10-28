@@ -75,7 +75,7 @@ let reload_source value (update : (_, _) Core_model.update) ~now = match value.s
               (fun imports -> Core_host.reload ~imports core ~name text) with
             | Ok core ->
                 { value with source = Some (Source_file.with_imports (Source_file.accepted file text)
-                    (Editor_document.Workspace_doc.import_texts (fst core.Core_model.doc.workspace))); held = None; refused = None },
+                    (Editor_document.Workspace_doc.import_texts (core.Core_model.doc.workspace.ws))); held = None; refused = None },
                 { update with core; scene_changed = true }
             | Error diagnostics ->
                 { value with held = None; refused = Some text },

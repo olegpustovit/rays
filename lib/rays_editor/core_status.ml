@@ -56,7 +56,7 @@ let status_text ?(brief = false) value =
          | None, Some error, _ -> "Cook rejected: " ^ error
          | None, None, _ when value.notice <> None -> snd (Option.get value.notice)
          | None, None, Some seconds ->
-             (match Flow_sop.Lower.status (snd value.doc.Document.workspace) ~seconds with
+             (match Flow_sop.Lower.status (value.doc.Document.workspace.lowered) ~seconds with
               | Some text -> text
               | None -> Printf.sprintf "checked · cooked %.3f s" seconds)
          | None, None, None -> "Waiting for first cook") in
@@ -124,7 +124,7 @@ let status_box value ui (frame : Frame.t) ~render_status ~error_status ~context 
     List.find_map (fun (l : Pxui_shell.Layout.leaf) ->
       if l.path = path then Some (Editor_core.Panels.name l.panel) else None) g.leaves) in
   let floating = List.length (List.filter (fun (l : Pxui_shell.Layout.leaf) -> l.floating) g.leaves) in
-  let graphs = List.length (fst value.doc.Document.workspace).checked.graphs in
+  let graphs = List.length (value.doc.Document.workspace.ws).checked.graphs in
   (* the end follows the sheet's context: floating windows give their count alone; a graph that is
      the only docked pane (graph.html) gives its counts and zoom in place of layout and fps; any
      other layout keeps the layout summary and the frame rate *)

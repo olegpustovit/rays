@@ -112,7 +112,7 @@ let world_id value = match Objects.ids "world" (scene value) with
 let edit_node value level node_id values ~label =
   if value.carry <> None then value else
   let written doc =
-    Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (snd doc.Document.workspace));
+    Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (doc.Document.workspace.lowered));
     { value with doc;
       history = commit ~label ~merge:(Gesture (parameter_gesture label level node_id values)) doc value.history } in
   (* an object the text declares takes the values in its text; one only the host made is edited
@@ -143,7 +143,7 @@ let edit_node value level node_id values ~label =
 (* The graph of a [shop_materialpath]: the material graph of that name, else the one whose
    [:name] it is. *)
 let material_graph value path =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let materials = List.filter_map (fun (g : Flow.Workspace.graph) ->
     if g.context = Flow.Context.material then Some g.name else None) ws.checked.graphs in
   if List.mem path materials then Some path
@@ -178,7 +178,7 @@ let pick ?view ?(alt = false) value ~origin ~direction =
             | Some graph -> go value graph
             | None -> { value with notice = Some (Refusal, "No material graph for " ^ path) })
        | _ -> value)
-  | (ws, lowered), Some { scope; _ } when scope_name value <> None ->
+  | { Document.ws; lowered; _ }, Some { scope; _ } when scope_name value <> None ->
       let nearest = nearest_by Cook.pick in
       let hit = Option.bind nearest (fun (_, tag, owner) ->
         let original = Flow_sop.Lower.origin lowered tag in
@@ -240,7 +240,7 @@ let reload_failed value ~name text diagnostics =
         | Some line -> Printf.sprintf ": line %d, %s" line d.Diagnostic.message
         | None -> ": " ^ d.Diagnostic.message) in
   { value with notice = Some (Refusal, Printf.sprintf "%s not reloaded%s" name first);
-    text = { value.text with tab = Text_pane.Document; draft = Some text; doc_base = Some (fst value.doc.workspace); doc_errors = { at = text; found = diagnostics } } }
+    text = { value.text with tab = Text_pane.Document; draft = Some text; doc_base = Some (value.doc.workspace.ws); doc_errors = { at = text; found = diagnostics } } }
 
 (* The carry's hovered viewport has been looked at by the host: the surface under the pointer
    (the object it belongs to and the material graph its primitive reads) is where a material goes,
@@ -267,7 +267,7 @@ let carry_over_surface ?view value ~origin ~direction =
             (* nothing under the pointer: a SOP graph goes to the scene, a material has no place *)
             (match List.find_map (fun (g : Flow.Workspace.graph) ->
                if g.context = Flow.Context.scene then Some g.name else None)
-               (fst value.doc.Document.workspace).checked.graphs with
+               (value.doc.Document.workspace.ws).checked.graphs with
              | Some graph when c.payload.kind = "sop" -> Carry.Graph graph
              | _ -> Carry.Viewport "") in
       { value with carry = Some { c with report = Some { over = place; dropped } } }

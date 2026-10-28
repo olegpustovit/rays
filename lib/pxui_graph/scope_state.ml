@@ -119,6 +119,7 @@ type t = {
   carry_hot : (path * bool) option;  (* the place under the pointer, and whether it takes the payload *)
   failed : (path * string) list;  (* nodes a cook or the checker refused, with the diagnostic's code *)
   hinting : hinting option;
+  held : Input.key list * bool;  (* keys and any button held last frame: a press is a change *)
   back : (path * P.level) list;  (* the level a node had before [p] pointed it *)
   measure : int -> string -> float;  (* text width in points, from the last built frame *)
   tags : bool;  (* a long wire is a named tag at its use site, unless its chain is lit (flow.md 6.4) *)
@@ -142,7 +143,7 @@ let create ?(width = 640) ?(height = 360) () = {
   layout = { P.placed = []; w = 0.; h = 0. }; geo = empty_geo; geo_fs = 13; pan_x = 12.; pan_y = 12.; zoom = 1.;
   selected = Path_set.empty; selected_wire = None; panning_grab = false;
   hovered_row = None; highlighted = []; drag = None; editing = None; context = None; stats = no_stats; switches = [];
-  carry_lit = []; carry_hot = None; failed = []; hinting = None; back = [];
+  carry_lit = []; carry_hot = None; failed = []; hinting = None; held = [], false; back = [];
   measure = (fun size s -> 0.6 *. float (size * String.length s)); tags = true; chain = ref None }
 
 (* the nodes upstream and downstream of the selection (it included), along the wires; [None] with

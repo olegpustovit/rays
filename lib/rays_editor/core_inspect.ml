@@ -25,7 +25,7 @@ let level_key = function
 let catalog value context =
   if context = Flow.Context.scene then Objects.catalog
   else if context = Flow.Context.world then Layers.catalog
-  else if context = Flow.Context.sop then value.factories @ (snd value.doc.workspace).factories else []
+  else if context = Flow.Context.sop then value.factories @ (value.doc.workspace.lowered).factories else []
 
 (* [catalog] as descriptors, plus the library nodes this document does not use yet: a workspace
    lowers only the library definitions it reaches. *)
@@ -78,12 +78,12 @@ let compiled_node value node_id =
   match owned with
   | Some _ -> owned
   | None -> List.find_map (fun (g : Flow_sop.Lower.graph) -> Edit_graph.find g.network.geometry ~node_id)
-      (snd value.doc.workspace).graphs
+      (value.doc.workspace.lowered).graphs
 
 (* A new material graph: a free name and its Set_graph ([Material] in the add menu, "new material"
    in the inspector). *)
 let new_material value =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let taken n = List.exists (fun (g : Flow.Workspace.graph) -> g.name = n) (ws.checked.graphs @ ws.checked.defs) in
   let rec pick i = let n = if i = 1 then "material" else "material_" ^ string_of_int i in
     if taken n then pick (i + 1) else n in
@@ -100,7 +100,7 @@ let new_material value =
    (the context's, then [_2] ...) and a body that checks and cooks.  A scene reads the first SOP
    graph, if any, and has a camera and a light, so it renders in a viewport. *)
 let new_graph value context =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let taken n = List.exists (fun (g : Flow.Workspace.graph) -> g.name = n) (ws.checked.graphs @ ws.checked.defs) in
   let rec pick i = let n = if i = 1 then context else context ^ "_" ^ string_of_int i in
     if taken n then pick (i + 1) else n in
@@ -156,7 +156,7 @@ let kind_label head =
    fields a node would give: the checked kind's parameters, valued by what is written in [authored]. *)
 let kind_fields value graph head authored =
   let module S = Flow.Syntax in
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
   let context = Option.map (fun (g : Flow.Workspace.graph) -> g.context)
     (List.find_opt (fun (g : Flow.Workspace.graph) -> g.name = graph)
       (ws.checked.graphs @ ws.checked.defs)) in
@@ -220,7 +220,7 @@ let probes_of value chains path =
 
 let compiled_at value chains records path =
   Option.bind (Flow_graph.Probe.plan_node records path ~probes:(probes_of value chains path)) (fun plan ->
-    Flow_sop.Network.Int_map.find_opt plan (snd value.doc.Document.workspace).compiled)
+    Flow_sop.Network.Int_map.find_opt plan (value.doc.Document.workspace.lowered).compiled)
 
 (* A nested operator call in a wired row (the call `* 0.2 (sin ...)` in row b): one sub-row per leaf of its
    tree, addressed by [Set_arg]'s [sub] (child indices; the head is child 0).  Depth 4, 12 rows.  They are
@@ -427,13 +427,13 @@ Flow.Syntax.make (Flow.Syntax.Num (Flow.Lisp.float f)) in
             Syntax_edit (Flow_graph.Flow_edit.Set_layout_size { node = n.path; size }))
             (Array.find_index (( = ) chosen) size_names)
       | (Pxui_shell.Inspector.Edited (name, _) | Pxui_shell.Inspector.Expression (name, _) | Pxui_shell.Inspector.Follow name) as ev
-        when String.starts_with ~prefix:arg_prefix name -> arg_request ~source:(fst value.doc.workspace).source n ~arg_row ev
+        when String.starts_with ~prefix:arg_prefix name -> arg_request ~source:(value.doc.workspace.ws).source n ~arg_row ev
       | Pxui_shell.Inspector.Follow path ->
           let row = match row_of path with Some _ as row -> row | None ->
             List.find_map (fun suffix ->
               if String.ends_with ~suffix path then row_of (String.sub path 0 (String.length path - 2))
               else None) [".x"; ".y"; ".z"; ".w"] in
-          Option.bind row (follow_row (fst value.doc.workspace).source n)
+          Option.bind row (follow_row (value.doc.workspace.ws).source n)
       | Pxui_shell.Inspector.Reset path when String.starts_with ~prefix:arg_prefix path -> None
       | Pxui_shell.Inspector.Edited (name, edited) ->
           (match List.find_opt (fun (r, _) -> ("@ref:" ^ r.Flow_graph.Projection.label) = name) ref_rows with
@@ -573,7 +573,7 @@ let reference_rows ~value ~(n : Flow_graph.Projection.node) () =
      | _ -> false)
     || r.ty = Some Flow.Ty.material
     || (r.ty = Some Flow.Ty.geometry && String.starts_with ~prefix:"scene/" n.head) in
-  let doc, _ = value.doc.Document.workspace in
+  let doc = value.doc.Document.workspace.ws in
   let sop_graphs = List.filter_map (fun (g : Flow.Workspace.graph) ->
     if g.context = Flow.Context.sop then Some g.name else None) doc.checked.graphs in
   let material_graphs = List.filter_map (fun (g : Flow.Workspace.graph) ->
@@ -619,7 +619,7 @@ let readout_rows ~(n : Flow_graph.Projection.node) ~value ~(footer : Flow_graph.
     List.iter (fun (label, text) ->
       Pxui.Ui.inspector_readout ui ~width ~key:("ws-" ^ label) ~label text)
       (List.filter (fun (label, _) -> List.mem label ["tier"; "execution group"; "group time"]) readouts);
-  let checked = (fst value.doc.Document.workspace).checked in
+  let checked = (value.doc.Document.workspace.ws).checked in
   (if Flow.Workspace.Paths.mem n.path checked.approx then
     Pxui.Ui.inspector_readout ui ~width ~key:"ws-precision" ~label:"precision" "approximable"
   else match List.assoc_opt n.path checked.approx_reasons with
@@ -691,7 +691,7 @@ let expression_inspector ~width ~value ~row_subject ui =
     unfold @ (if entries = [] then [] else
       Pxui_shell.Inspector.flow_fields ui ~width ~kind_label:(kind_label op)
         (List.map (fun (_, _, _, ir) -> ir) entries)
-      |> List.filter_map (arg_request ~source:(fst value.doc.workspace).source h ~arg_row:(arg_row_in entries)))) in
+      |> List.filter_map (arg_request ~source:(value.doc.workspace.ws).source h ~arg_row:(arg_row_in entries)))) in
   requests, []
 
 let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun _ _ -> ()) ?(resized = fun _ _ -> None) ?(follows = fun _ -> None) value ui ~width path =
@@ -767,7 +767,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
            (* the docked column under ~340 points (workspace.html) has no number and no bar; the
               window follows windows.html (no bar); the 380 column (inspector.html) has both *)
            let narrow = width < 340. in
-           let doc_layout = (fst value.doc.Document.workspace).layout in
+           let doc_layout = (value.doc.Document.workspace.ws).layout in
            let pin_of (r : P.row) = Option.bind (Layout_by_path.Path_map.find_opt n.path doc_layout.rows)
              (Layout_by_path.String_map.find_opt r.label) in
            let row_of path = List.find_opt (fun (r : P.row) -> r.key = Flow_graph.Flow_edit.Kw path) n.rows in

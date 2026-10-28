@@ -74,7 +74,7 @@ let create ?gpu ?settings
       let guide = match read_preferences preferences with
         | Ok values -> Option.value ~default:true (Editor_core.Store.Settings.bool values "guide")
         | Error _ -> true in
-      let state_name = Contexts.sha256 state_key in
+      let state_name = Contexts.digest state_key in
       let value = { preferences; text_size = ui_text_size; guide; hud = None; presets; state_name; name; prompt = None; notice = None; notice_at = 0.;
         doc; gpu; filed = doc; level;
         projections = Level_map.empty; text = Text_pane.initial; map_view = false;
@@ -99,8 +99,8 @@ let create ?gpu ?settings
         list_at = None; text_at = None; outline_at = None; locals = [];
         started = { on = None; views = []; tabs = [] };
         framing = None; carry = None; carry_budget; traces = []; view_tools = None; gates = []; selected_box = None;
-        file = (fst doc.Document.workspace).checked.name ^ ".rays" } in
-      Cook.set_volatile cook (Flow_sop.Lower.is_volatile (snd doc.workspace));
+        file = (doc.Document.workspace.ws).checked.name ^ ".rays" } in
+      Cook.set_volatile cook (Flow_sop.Lower.is_volatile (doc.workspace.lowered));
       (* the panels open as their start keywords say; the first graph pane (the focused leaf, else
          the first) opens on the graph it pins *)
       let on = match Option.bind doc.Document.shell (fun s -> s.start.focus) with

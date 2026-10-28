@@ -185,6 +185,6 @@ let () =
     Out_channel.with_open_bin path (fun oc -> output_string oc (D.to_text (E.workspace !host)));
     let loaded = Editor_document.Preset.load_with_ops ~ops:host_ops ~path ~factories:Sop_catalog.Editor.factories
       ~settings:Editor_document.Settings.none () |> Result.get_ok in
-    check (Array.length (snd loaded.doc.workspace).evaluated.plan.nodes = 3)
+    check (Array.length (loaded.doc.workspace.lowered).evaluated.plan.nodes = 3)
       "preset reload discarded custom operators");
   print_endline (Printf.sprintf "open domain: %d checks passed" !checks)

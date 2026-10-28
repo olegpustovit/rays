@@ -37,7 +37,7 @@ let steady_equal (a : Input.t) (b : Input.t) =
   Input.equal (steady a) (steady b)
 
 let sync_views value =
-  let lowered = snd value.doc.Document.workspace in
+  let lowered = value.doc.Document.workspace.lowered in
   match value.view_key with
   | Some (previous, probes, previews, canvas) when previous == lowered && probes == value.probes
       && previews == value.previews && canvas == value.canvas_preview -> value
@@ -73,7 +73,7 @@ let view_node value path =
       let probes = List.map (fun path -> Option.value ~default:0
         (Layout_by_path.Path_map.find_opt path value.probes)) chain in
       let node = Option.bind key.records (fun records -> Flow_graph.Probe.plan_node records path ~probes) in
-      let lowered = snd value.doc.workspace in
+      let lowered = value.doc.workspace.lowered in
       let owner = Option.bind node (fun node ->
         let owns id = Option.bind (Document.Int_map.find_opt id value.doc.networks)
           (fun network -> lowered.preview ~node ~probes network.graph) <> None in
@@ -102,7 +102,7 @@ let sync_scope value =
     | Some key -> { value with scope_view = Pxui_graph.Scope.with_display (viewed_path value key.scope) value.scope_view }
     | None -> value in
   match graph_name value, value.doc.Document.workspace, Lazy.force value.flow_catalog with
-  | Some name, (ws, lowered), Some catalog ->
+  | Some name, { Document.ws; lowered; _ }, Some catalog ->
       let module M = Layout_by_path.Path_map in
       let previous = value.scope_key in
       let arguments = Option.bind previous (fun k -> if k.graph <> name || k.ws.layout.collapsed != ws.layout.collapsed then None else
@@ -159,7 +159,7 @@ let sync_scope value =
           let display = viewed_path value scope in
           let layouts = match value.doc.Document.shell with
             | Some { switch = Some _; _ } when Option.map (fun (g : Flow.Workspace.graph) -> g.name)
-                (Workspace_doc.editor_graph (fst value.doc.Document.workspace)) = Some name -> List.map fst (layouts value)
+                (Workspace_doc.editor_graph (value.doc.Document.workspace.ws)) = Some name -> List.map fst (layouts value)
             | _ -> [] in
           Flow.Phase_timer.measure "layout" (fun () -> Pxui_graph.Scope.with_scope ~layouts ~key:name scope value.scope_view
             ~imported:(Workspace_doc.imported_file ws)

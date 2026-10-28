@@ -84,7 +84,7 @@ let prompt_panel ~(value : _ t) ~focus ~keymap ~(frame : Frame.t) ~workspace ~te
   | Some (Jumping query) ->
       (* every graph, grouped like the outline *)
       let graphs = List.map (fun (name, group) -> name, group, Go name)
-        (Navigator.jump_rows (fst value.doc.Document.workspace).checked) in
+        (Navigator.jump_rows (value.doc.Document.workspace.ws).checked) in
       (* and every node of the graph the pane shows: picking one selects it and frames it *)
       let rec nodes (s : Flow_graph.Projection.scope) = List.concat_map (fun (n : Flow_graph.Projection.node) ->
         (if n.synthetic then [] else [ Flow_graph.Projection.title n, "node · " ^ n.head, Find_node n.path ])
@@ -345,7 +345,7 @@ let draw_inspectors ~(value : _ t) ~workspace ~image ~camera_panel ~inspector_vi
   let resized node how = match node, value.doc.Document.shell with
     | [ graph; name ], Some shell when not workspace.restored
         && Option.map (fun (g : Flow.Workspace.graph) -> g.name)
-             (Workspace_doc.editor_graph (fst value.doc.Document.workspace)) = Some graph ->
+             (Workspace_doc.editor_graph (value.doc.Document.workspace.ws)) = Some graph ->
         Option.bind (List.find_map (fun (path, origin) ->
           if origin = Document.Bound name then Some path else None) shell.origins) (fun path ->
           Option.map (fun splitter -> Pxui_shell.Layout.resized splitter how)
@@ -430,7 +430,7 @@ let menu, command_changes =
 
 (* what each text pane shows: its state and what it is showing *)
 let text_state ~(value : _ t) ~actions ~pane_of ~text_hosts =
-  let ws, _ = value.doc.Document.workspace in
+  let ws = value.doc.Document.workspace.ws in
 let text_of state ((_, _, panel, _) as host) =
   let pane = pane_of host in
   let graph = match graph_name pane with
@@ -442,7 +442,7 @@ let text_of state ((_, _, panel, _) as host) =
     (* while a payload is carried the text is the document it was picked up from: the preview is
        not drawn here, so the byte under the pointer does not move when a put is previewed *)
     let shown_ws = match value.carry with
-      | Some c -> fst c.original.Document.workspace
+      | Some c -> c.original.Document.workspace.ws
       | None -> ws in
     Text_pane.shown state ~workspace:shown_ws ~source:shown_ws.source ~graph ~selected) graph in
 let text_host = List.find_opt (fun (key, _, _, _) -> Some key = value.text_at) text_hosts in

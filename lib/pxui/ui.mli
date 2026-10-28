@@ -503,6 +503,9 @@ val paint_button_ground :
 (** The ground {!button} paints (fill on press, hover or [on]; a line-3 edge for [primary]) over a
     rectangle, so a button placed by hand looks the same. *)
 
+val paint_switch : Paint.t -> Theme.t -> x:float -> y:float -> bool -> unit
+(** The kit's 28 x 14 switch at a point, on or off: what {!toggle} paints. *)
+
 val toggle : t -> string -> bool -> bool
 
 val text_field : t -> string -> string -> string
