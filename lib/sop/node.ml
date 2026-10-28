@@ -116,7 +116,15 @@ let apply_parameters value changes = match value.parameterization with
         with Invalid_argument message -> Error message)
 
 module Private = struct
-  include Private_types
+  type input_policy = Private_types.input_policy = All | Only of int
+  type cooked = Private_types.cooked = {
+    payload : Payload.t;
+    instances : Rays_math.Mat4.t array option;
+  }
+  type geometry_cooked = Private_types.geometry_cooked = {
+    geometry : Rdk.Geometry.t;
+    instances : Rays_math.Mat4.t array option;
+  }
 
   let parameterize_with_key = parameterize_with_key
 
