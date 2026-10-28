@@ -38,7 +38,11 @@
  (action
   (progn
    (run %{exe:test_workspace_gpu_native.exe})
-   (run %{exe:test_grid_gpu_native.exe}))))
+   (run %{exe:test_grid_gpu_native.exe})
+   (setenv
+    GRID_SIDE
+    512
+    (run %{exe:test_chain_gpu_native.exe})))))
 
 (rule
  (enabled_if

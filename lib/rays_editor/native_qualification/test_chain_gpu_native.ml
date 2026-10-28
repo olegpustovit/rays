@@ -1,4 +1,5 @@
-(* On the real device: grid 1000 x 1000 Points > attribute_noise > transform, the fused write of noise,
+(* On the real device: grid 1000 x 1000 Points (GRID_SIDE; 512 in @runtest-native, the smallest
+   grid the cost model places) > attribute_noise > transform, the fused write of noise,
    P and N, cooked on the CPU and with the workspace GPU in fast precision (Executor.record_on_device).
    The device cook takes at most two dispatches, its noise and P agree with the CPU within float32
    tolerance and N exactly (a translation keeps it); CPU and GPU cook times are printed, median of 5. *)
@@ -85,7 +86,8 @@ let () =
             }
           in
           let placed = node ~gpu:counted () in
-          ignore (cook placed);
+          (* the first cook compiles the kernel and uploads every source *)
+          let _, first_seconds = cook placed in
           dispatches := 0;
           let device, _ = cook placed in
           let per_cook = !dispatches in
@@ -111,7 +113,7 @@ let () =
               failwith "GPU N differs from CPU"
           done;
           Printf.printf
-            "grid > attribute_noise > transform, %d points: CPU cook %.3f s, GPU cook %.3f s, %d \
-             dispatch(es), largest difference %.2e\n\
+            "grid > attribute_noise > transform, %d points: CPU cook %.3f s, GPU cook %.3f s \
+             (first %.3f s), %d dispatch(es), largest difference %.2e\n\
              %!"
-            count cpu_seconds gpu_seconds per_cook !worst))
+            count cpu_seconds gpu_seconds first_seconds per_cook !worst))

@@ -506,6 +506,7 @@ module Executor = struct
     sink : sink option;
     mutable gpu_kernel : (Gpu.backend * bool * Packed.t * Gpu.kernel) option;
     record_region : (string list * Packed.t) option Lazy.t;
+    mutable resident : float array array; (* the last device inputs, by bits *)
   }
 
   let compile ?trace ?profile ?(strict = false) ?(approx = W.Paths.empty) ?sink
@@ -623,6 +624,7 @@ module Executor = struct
           approx;
           sink;
           gpu_kernel = None;
+          resident = [||];
           record_region =
             lazy
               (match v with
@@ -640,7 +642,8 @@ module Executor = struct
                   else
                     Option.map
                       (fun merged -> (List.map fst regions, merged))
-                      (Core_fuse.merge (List.map snd regions))
+                      (Option.map Core_fuse.compact_sources
+                         (Core_fuse.merge (List.map snd regions)))
               | _ -> None);
         })
       checked
@@ -1280,6 +1283,22 @@ module Executor = struct
         let ( let* ) = Result.bind in
         let device =
           let* inputs = Packed.Host.prepare ~fast:true ?state ?resolve merged ~live in
+          (* an input equal to the last cook's is that array, which the device keeps: a recook over
+             unchanged geometry uploads nothing. Inputs are finite (prepare checks), so float
+             equality is the bits but a zero's sign, which fast precision does not keep apart. *)
+          let same (a : float array) (b : float array) = a = b in
+          let inputs =
+            if Array.length program.resident <> Array.length inputs.arrays then inputs
+            else
+              {
+                inputs with
+                arrays =
+                  Array.map2
+                    (fun old next -> if old == next || same old next then old else next)
+                    program.resident inputs.arrays;
+              }
+          in
+          program.resident <- inputs.arrays;
           if not (Cost.sop_device gpu.policy merged ~count:inputs.count) then Ok None
           else
             let* kernel =

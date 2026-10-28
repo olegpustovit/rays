@@ -293,3 +293,88 @@ let merge (regions : Core.Region.t list) : Core.Region.t option =
             ()
           |> Result.to_option
         with Core_region.Unsupported -> None)
+
+(* A device region binds what varies. A source that fills one constant ([array/int n 1], a static
+   vector) becomes that constant, and sources that read the same attribute ([sop/attr g :P] bound
+   twice) are one upload. *)
+let rec resolved (residual, (term : W.term)) =
+  match term.node with
+  | W.Ref_binding (name, []) -> (
+      match List.assoc_opt name (E.Residual.residual_view residual).bindings with
+      | Some (E.Residual r) -> resolved (r, (E.Residual.residual_view r).term)
+      | Some value -> `Value value
+      | None -> `Term (residual, term))
+  | _ -> `Term (residual, term)
+
+let fill source width =
+  match resolved source with
+  | `Term (residual, { node = W.Op { op; args; _ }; _ }) -> (
+      let value =
+        match List.assoc_opt "value" args with
+        | Some { node = W.Lit (Param.Int_value n); _ } -> Some (E.Int n)
+        | Some { node = W.Lit (Param.Float_value x); _ } -> Some (E.Float x)
+        | Some ({ node = W.Ref_binding (_, []); _ } as t) -> (
+            match resolved (residual, t) with `Value v -> Some v | `Term _ -> None)
+        | _ -> None
+      in
+      match (op, value, width) with
+      | "array/int", Some (E.Int n), 1 -> Some [| Int_const n |]
+      | "array/float", Some (E.Float x), 1 -> Some [| Const x |]
+      | "array/float", Some (E.Int n), 1 -> Some [| Const (float n) |]
+      | "array/vec3", Some (E.Vec3 (x, y, z)), 3 -> Some [| Const x; Const y; Const z |]
+      | "array/vec4", Some (E.Vec4 (x, y, z, w)), 4 -> Some [| Const x; Const y; Const z; Const w |]
+      | _ -> None)
+  | _ -> None
+
+let attribute_read source =
+  match resolved source with
+  | `Value ((E.Struct ("sop/attr", _, fields) | E.Source ("sop/attr", _, fields)) as v)
+    when List.for_all (fun (_, f) -> match f with E.Residual _ -> false | _ -> true) fields ->
+      Some (Flow.Value.key_of ~residual:E.Residual.residual_id v)
+  | _ -> None
+
+let compact_sources (t : Core.Region.t) =
+  let n = Array.length t.sources in
+  let fills = Array.mapi (fun i source -> fill source t.widths.(i)) t.sources in
+  let reads = Array.map attribute_read t.sources in
+  let canonical =
+    Array.init n (fun i ->
+        let rec find j =
+          if j >= i then i
+          else if
+            fills.(j) = None
+            && reads.(i) <> None
+            && reads.(j) = reads.(i)
+            && t.widths.(j) = t.widths.(i)
+          then j
+          else find (j + 1)
+        in
+        if fills.(i) <> None then i else find 0)
+  in
+  let changed =
+    Array.exists Option.is_some fills || Array.exists2 ( <> ) canonical (Array.init n Fun.id)
+  in
+  if t.iteration <> Zip || (not changed) || Array.for_all Option.is_some fills then t
+  else
+    try
+      let b = builder () in
+      let slots = Array.make n (-1) in
+      Array.iteri
+        (fun i source ->
+          if fills.(i) = None && canonical.(i) = i then
+            slots.(i) <- b.append_source source t.widths.(i))
+        t.sources;
+      let registers =
+        Array.init n (fun i ->
+            match fills.(i) with
+            | Some constants -> Array.map b.emit constants
+            | None ->
+                let j = canonical.(i) in
+                Array.init t.widths.(i) (fun component ->
+                    b.emit (source_input (snd t.sources.(j)) slots.(j) t.widths.(j) component)))
+      in
+      let uniform = b.append_uniforms t.uniforms in
+      let outputs = b.append_code t (fun i _ component -> registers.(i).(component)) uniform in
+      let sources, widths, uniforms, code = b.finish () in
+      Core.Region.rebuild t ~sources ~widths ~uniforms ~code ~outputs () |> Result.value ~default:t
+    with Core_region.Unsupported -> t
