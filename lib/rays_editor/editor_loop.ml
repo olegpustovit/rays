@@ -344,7 +344,7 @@ let scene value frame =
    summary of the view state and undo history. *)
 let crash_dump value directory =
   let core = value.core in
-  let write name text = match Runtime_resources.write_text ~filename:(Filename.concat directory name) text with
+  let write name text = match Editor_core.Store.write_text ~filename:(Filename.concat directory name) text with
     | Ok () -> () | Error message -> failwith message in
   (* document.txt is the text of any document; document.rays is the
      loadable preset, written for workspace documents *)

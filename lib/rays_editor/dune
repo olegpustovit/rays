@@ -6,4 +6,4 @@
   editor_text editor_panels editor_menu editor_carry editor_reduce editor_host editor_inspector_pane editor_viewport_pane editor_frame world_map
   loop_view loop_model loop_source editor_loop
   viewport renderer)
-(libraries editor_document flow_native rays rays_math input rdk_rays rays_pathtracer sop flow flow_ir flow_sop flow_graph editor_core pxui pxui_shell pxui_graph lru runtime_resources unix))
+(libraries editor_document flow_native rays rays_math input rdk_rays rays_pathtracer sop flow flow_ir flow_sop flow_graph editor_core pxui pxui_shell pxui_graph lru unix))
