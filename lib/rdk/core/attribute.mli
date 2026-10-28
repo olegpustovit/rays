@@ -50,3 +50,10 @@ module Private : sig
       returned arrays must never be mutated or retained beyond the immutable
       attribute's lifetime. *)
 end
+
+val float_planes : storage -> float array array option
+(** Borrowed component planes of a [Float]..[Float4] storage (one to four, in
+    x y z w order); [None] for other storages. Never mutate them. *)
+
+val of_float_planes : like:storage -> float array array -> storage
+(** Owned planes rebuilt as the same storage kind as [like]. *)

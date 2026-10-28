@@ -106,3 +106,23 @@ let kind_name value = match value.storage with
 module Private = struct
   let storage value = value.storage
 end
+
+let float_planes = function
+  | Float values -> Some [| values |]
+  | Float2 v -> let v = Packed.Float2.Private.view v in Some [| v.x; v.y |]
+  | Float3 v -> let v = Packed.Float3.Private.view v in Some [| v.x; v.y; v.z |]
+  | Float4 v -> let v = Packed.Float4.Private.view v in Some [| v.x; v.y; v.z; v.w |]
+  | Int _ | Int_array _ | Float_array _ | Text _ -> None
+
+let of_float_planes ~like planes = match like with
+  | Float _ -> Float planes.(0)
+  | Float2 _ ->
+      Float2 (Result.get_ok (Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)))
+  | Float3 _ ->
+      Float3 (Packed.Float3.Private.of_owned_exn ~x:planes.(0) ~y:planes.(1)
+        ~z:planes.(2))
+  | Float4 _ ->
+      Float4 (Result.get_ok (Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1)
+        ~z:planes.(2) ~w:planes.(3)))
+  | Int _ | Int_array _ | Float_array _ | Text _ ->
+      invalid_arg "Attribute.of_float_planes: not a float storage"

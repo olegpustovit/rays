@@ -148,69 +148,38 @@ let initial_text ?selection unmatched target_attribute count =
        | _ -> assert false)
   | Keep_target, None | Default_value, _ -> Array.make count ""
 
-let initial_float2 ?selection unmatched target_attribute count =
-  match unmatched, target_attribute with
-  | Keep_target, Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values ->
-           let values = Packed.Float2.Private.view values in
-           Array.copy values.x, Array.copy values.y
-       | _ -> assert false)
-  | Default_value, Some attribute when selection <> None ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values ->
-           let values = Packed.Float2.Private.view values in
-           let x = Array.copy values.x and y = Array.copy values.y in
-           reset_selected selection (fun element ->
-             x.(element) <- 0.; y.(element) <- 0.);
-           x, y
-       | _ -> assert false)
-  | Keep_target, None | Default_value, _ -> Array.make count 0., Array.make count 0.
+(* Output planes for a Float..Float4 storage [like]: copies of the existing
+   target's planes (selected elements zeroed for [Default_value]) or zeros. *)
+let initial_planes ?selection unmatched target_attribute like count =
+  let existing = match unmatched, target_attribute with
+    | Keep_target, Some attribute -> Attribute.float_planes (Attribute.Private.storage attribute)
+    | Default_value, Some attribute when selection <> None ->
+        Attribute.float_planes (Attribute.Private.storage attribute)
+    | _ -> None in
+  match existing with
+  | Some planes ->
+      let planes = Array.map Array.copy planes in
+      if unmatched = Default_value then
+        reset_selected selection (fun element ->
+          Array.iter (fun plane -> plane.(element) <- 0.) planes);
+      planes
+  | None ->
+      Array.map (fun _ -> Array.make count 0.) (Option.get (Attribute.float_planes like))
 
-let initial_float3 ?selection unmatched target_attribute count =
-  match unmatched, target_attribute with
-  | Keep_target, Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values ->
-           let values = Packed.Float3.Private.view values in
-           Array.copy values.x, Array.copy values.y, Array.copy values.z
-       | _ -> assert false)
-  | Default_value, Some attribute when selection <> None ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values ->
-           let values = Packed.Float3.Private.view values in
-           let x = Array.copy values.x and y = Array.copy values.y
-           and z = Array.copy values.z in
-           reset_selected selection (fun element ->
-             x.(element) <- 0.; y.(element) <- 0.; z.(element) <- 0.);
-           x, y, z
-       | _ -> assert false)
-  | Keep_target, None | Default_value, _ ->
-      Array.make count 0., Array.make count 0., Array.make count 0.
-
-let initial_float4 ?selection unmatched target_attribute count =
-  match unmatched, target_attribute with
-  | Keep_target, Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float4 values ->
-           let values = Packed.Float4.Private.view values in
-           Array.copy values.x, Array.copy values.y, Array.copy values.z,
-           Array.copy values.w
-       | _ -> assert false)
-  | Default_value, Some attribute when selection <> None ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float4 values ->
-           let values = Packed.Float4.Private.view values in
-           let x = Array.copy values.x and y = Array.copy values.y
-           and z = Array.copy values.z and w = Array.copy values.w in
-           reset_selected selection (fun element ->
-             x.(element) <- 0.; y.(element) <- 0.; z.(element) <- 0.;
-             w.(element) <- 0.);
-           x, y, z, w
-       | _ -> assert false)
-  | Keep_target, None | Default_value, _ ->
-      Array.make count 0., Array.make count 0., Array.make count 0.,
-      Array.make count 0.
+(* Renormalize the xyz planes of the elements [keep] accepts. *)
+let normalize_selected ~grain count keep planes =
+  if count > 0 then
+    Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1) (fun element ->
+      if keep element then begin
+        let x = planes.(0) and y = planes.(1) and z = planes.(2) in
+        let length = sqrt ((x.(element) *. x.(element))
+          +. (y.(element) *. y.(element)) +. (z.(element) *. z.(element))) in
+        if length > 1e-20 then begin
+          x.(element) <- x.(element) /. length;
+          y.(element) <- y.(element) /. length;
+          z.(element) <- z.(element) /. length
+        end
+      end)
 
 let group_owner_of_attribute = function
   | Attribute.Point -> Group.Point
@@ -495,11 +464,18 @@ let transfer_spatial_raw ?cancel ?(grain = 16_384) ?names ?pattern
           let name = Attribute.name source_attribute in
           let existing = Geometry.find_attribute ~owner name target in
           let storage = match Attribute.Private.storage source_attribute with
-            | Attribute.Float source_values ->
-                let output = initial_float ?selection:target_elements
-                    unmatched existing target_count in
-                transfer_plane source_values output;
-                Attribute.Float output
+            | (Attribute.Float _ | Attribute.Float2 _ | Attribute.Float3 _
+              | Attribute.Float4 _) as like ->
+                let source = Option.get (Attribute.float_planes like) in
+                let output = initial_planes ?selection:target_elements
+                    unmatched existing like target_count in
+                Array.iteri (fun i plane -> transfer_plane plane output.(i)) source;
+                if String.equal name "N" && Array.length output = 3 then
+                  normalize_selected ~grain target_count (fun element ->
+                    neighbor_counts.(element) > 0
+                    && (match influence with None -> true
+                        | Some values -> values.(element) > 0.)) output;
+                Attribute.of_float_planes ~like output
             | Attribute.Int source_values ->
                 let output = initial_int ?selection:target_elements
                     unmatched existing target_count in
@@ -510,42 +486,6 @@ let transfer_spatial_raw ?cancel ?(grain = 16_384) ?names ?pattern
                     unmatched existing target_count in
                 transfer_discrete source_values output;
                 Attribute.Text output
-            | Attribute.Float2 source_values ->
-                let source_values = Packed.Float2.Private.view source_values in
-                let x, y = initial_float2 ?selection:target_elements
-                    unmatched existing target_count in
-                transfer_plane source_values.x x; transfer_plane source_values.y y;
-                Attribute.Float2 (Packed.Float2.of_owned ~x ~y |> Result.get_ok)
-            | Attribute.Float3 source_values ->
-                let source_values = Packed.Float3.Private.view source_values in
-                let x, y, z = initial_float3 ?selection:target_elements
-                    unmatched existing target_count in
-                transfer_plane source_values.x x; transfer_plane source_values.y y;
-                transfer_plane source_values.z z;
-                if String.equal name "N" && target_count > 0 then
-                  Parallel.for_ ~chunk_size:grain ~start:0
-                    ~finish:(target_count - 1) (fun target_element ->
-                      if neighbor_counts.(target_element) > 0
-                          && (match influence with None -> true
-                              | Some values -> values.(target_element) > 0.) then begin
-                        let length = sqrt ((x.(target_element) *. x.(target_element))
-                          +. (y.(target_element) *. y.(target_element))
-                          +. (z.(target_element) *. z.(target_element))) in
-                        if length > 1e-20 then begin
-                          x.(target_element) <- x.(target_element) /. length;
-                          y.(target_element) <- y.(target_element) /. length;
-                          z.(target_element) <- z.(target_element) /. length
-                        end
-                      end);
-                Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
-            | Attribute.Float4 source_values ->
-                let source_values = Packed.Float4.Private.view source_values in
-                let x, y, z, w = initial_float4 ?selection:target_elements
-                    unmatched existing target_count in
-                transfer_plane source_values.x x; transfer_plane source_values.y y;
-                transfer_plane source_values.z z; transfer_plane source_values.w w;
-                Attribute.Float4 (Packed.Float4.of_owned ~x ~y ~z ~w
-                  |> Result.get_ok)
             | Attribute.Int_array _ | Attribute.Float_array _ -> assert false in
           Attribute.create_owned ~name ~owner storage
         in
@@ -738,25 +678,14 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
       let existing = Geometry.find_attribute ~owner:target_owner
           specification.target_name target in
       let storage = match Attribute.Private.storage source_attribute with
-        | Attribute.Float _ -> Attribute.Float
-            (initial_float ?selection:target_elements unmatched existing target_count)
+        | (Attribute.Float _ | Attribute.Float2 _ | Attribute.Float3 _
+          | Attribute.Float4 _) as like ->
+            Attribute.of_float_planes ~like (initial_planes
+              ?selection:target_elements unmatched existing like target_count)
         | Attribute.Int _ -> Attribute.Int
             (initial_int ?selection:target_elements unmatched existing target_count)
         | Attribute.Text _ -> Attribute.Text
             (initial_text ?selection:target_elements unmatched existing target_count)
-        | Attribute.Float2 _ ->
-            let x, y = initial_float2 ?selection:target_elements unmatched existing
-                target_count in
-            Attribute.Float2 (Packed.Float2.of_owned ~x ~y |> Result.get_ok)
-        | Attribute.Float3 _ ->
-            let x, y, z = initial_float3 ?selection:target_elements unmatched existing
-                target_count in
-            Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
-        | Attribute.Float4 _ ->
-            let x, y, z, w = initial_float4 ?selection:target_elements unmatched
-                existing target_count in
-            Attribute.Float4
-              (Packed.Float4.of_owned ~x ~y ~z ~w |> Result.get_ok)
         | Attribute.Int_array _ | Attribute.Float_array _ -> assert false in
       Attribute.create_owned ~name:specification.target_name ~owner:target_owner storage in
     let attribute_count = Array.length specifications
@@ -854,10 +783,18 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
             specification.target_name target in
         let owner = specification.source_owner in
         let storage = match Attribute.Private.storage source_attribute with
-          | Attribute.Float values ->
-              let output = initial_float ?selection:target_elements
-                  unmatched existing target_count in
-              transfer_numeric owner values output; Attribute.Float output
+          | (Attribute.Float _ | Attribute.Float2 _ | Attribute.Float3 _
+            | Attribute.Float4 _) as like ->
+              let source = Option.get (Attribute.float_planes like) in
+              let output = initial_planes ?selection:target_elements
+                  unmatched existing like target_count in
+              Array.iteri (fun i plane -> transfer_numeric owner plane output.(i)) source;
+              if String.equal specification.source_name "N" && Array.length output = 3 then
+                normalize_selected ~grain target_count (fun point ->
+                  primitives.(point) >= 0
+                  && (match influence with None -> true
+                      | Some values -> values.(point) > 0.)) output;
+              Attribute.of_float_planes ~like output
           | Attribute.Int values ->
               let output = initial_int ?selection:target_elements
                   unmatched existing target_count in
@@ -866,37 +803,6 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
               let output = initial_text ?selection:target_elements
                   unmatched existing target_count in
               transfer_discrete owner values output; Attribute.Text output
-          | Attribute.Float2 values ->
-              let values = Packed.Float2.Private.view values in
-              let x, y = initial_float2 ?selection:target_elements
-                  unmatched existing target_count in
-              transfer_numeric owner values.x x; transfer_numeric owner values.y y;
-              Attribute.Float2 (Packed.Float2.of_owned ~x ~y |> Result.get_ok)
-          | Attribute.Float3 values ->
-              let values = Packed.Float3.Private.view values in
-              let x, y, z = initial_float3 ?selection:target_elements
-                  unmatched existing target_count in
-              transfer_numeric owner values.x x; transfer_numeric owner values.y y;
-              transfer_numeric owner values.z z;
-              if String.equal specification.source_name "N" && target_count > 0 then
-                Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(target_count - 1)
-                  (fun point -> if primitives.(point) >= 0
-                      && (match influence with None -> true
-                          | Some values -> values.(point) > 0.) then begin
-                    let length = sqrt ((x.(point) *. x.(point))
-                      +. (y.(point) *. y.(point)) +. (z.(point) *. z.(point))) in
-                    if length > 1e-20 then begin x.(point) <- x.(point) /. length;
-                      y.(point) <- y.(point) /. length; z.(point) <- z.(point) /. length end
-                  end);
-              Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
-          | Attribute.Float4 values ->
-              let values = Packed.Float4.Private.view values in
-              let x, y, z, w = initial_float4 ?selection:target_elements
-                  unmatched existing target_count in
-              transfer_numeric owner values.x x; transfer_numeric owner values.y y;
-              transfer_numeric owner values.z z; transfer_numeric owner values.w w;
-              Attribute.Float4 (Packed.Float4.of_owned ~x ~y ~z ~w
-                |> Result.get_ok)
           | Attribute.Int_array _ | Attribute.Float_array _ -> assert false in
         Attribute.create_owned ~name:specification.target_name
           ~owner:target_owner storage in
