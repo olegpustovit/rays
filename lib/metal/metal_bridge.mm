@@ -426,9 +426,6 @@ enum class Handle_kind : std::uint32_t {
   Compute_pass_descriptor,
   Compute_sample_attachment,
   Compute_sample_attachment_array,
-  Function_handle,
-  Visible_function_table,
-  Intersection_function_table,
   Fence,
   Metal_layer,
   Metal_drawable,
@@ -587,9 +584,7 @@ NS_RETURNS_RETAINED id<MTLResource> resource_of_handle(value raw,
   auto *handle = handle_of_value(raw);
   std::lock_guard<std::mutex> lock(handle_mutex);
   if (handle->kind != Handle_kind::Buffer &&
-      handle->kind != Handle_kind::Texture &&
-      handle->kind != Handle_kind::Visible_function_table &&
-      handle->kind != Handle_kind::Intersection_function_table) {
+      handle->kind != Handle_kind::Texture) {
     caml_failwith("Metal custom handle is not a resource");
   }
   if (handle->object == nullptr) {
@@ -599,17 +594,6 @@ NS_RETURNS_RETAINED id<MTLResource> resource_of_handle(value raw,
     *actual_kind = handle->kind;
   }
   return (__bridge id<MTLResource>)handle->object;
-}
-
-std::vector<id<MTLFunction>> functions_of_array(value raw_array) {
-  const mlsize_t count = Wosize_val(raw_array);
-  std::vector<id<MTLFunction>> functions;
-  functions.reserve(count);
-  for (mlsize_t index = 0; index < count; ++index) {
-    functions.push_back(
-        object_of_handle(Field(raw_array, index), Handle_kind::Function));
-  }
-  return functions;
 }
 
 std::vector<id<MTLDynamicLibrary>> dynamic_libraries_of_array(
@@ -3643,24 +3627,8 @@ caml_rays_metal_compute_pipeline_create_descriptor(
               "Metal compute-pipeline label is not valid UTF-8"));
         }
       }
-      std::vector<id<MTLFunction>> linked_functions =
-          functions_of_array(Field(raw_descriptor, 2));
-      NSMutableSet<NSString *> *linked_names = [NSMutableSet set];
-      NSMutableArray<id<MTLFunction>> *linked_array =
-          [NSMutableArray arrayWithCapacity:linked_functions.size()];
-      for (id<MTLFunction> linked : linked_functions) {
-        if (linked.device.registryID != device.registryID ||
-            (linked.functionType != MTLFunctionTypeVisible &&
-             linked.functionType != MTLFunctionTypeIntersection) ||
-            [linked_names containsObject:linked.name]) {
-          CAMLreturn(result_error_text(
-              "Metal linked function is incompatible or duplicated"));
-        }
-        [linked_names addObject:linked.name];
-        [linked_array addObject:linked];
-      }
       std::vector<id<MTLDynamicLibrary>> preloaded_libraries =
-          dynamic_libraries_of_array(Field(raw_descriptor, 3));
+          dynamic_libraries_of_array(Field(raw_descriptor, 2));
       NSMutableArray<id<MTLDynamicLibrary>> *preloaded_array =
           [NSMutableArray arrayWithCapacity:preloaded_libraries.size()];
       NSMutableSet<NSString *> *install_names = [NSMutableSet set];
@@ -3676,7 +3644,7 @@ caml_rays_metal_compute_pipeline_create_descriptor(
         [preloaded_array addObject:library];
       }
       std::vector<id<MTLBinaryArchive>> binary_archives =
-          binary_archives_of_array(Field(raw_descriptor, 4));
+          binary_archives_of_array(Field(raw_descriptor, 3));
       NSMutableArray<id<MTLBinaryArchive>> *archive_array =
           [NSMutableArray arrayWithCapacity:binary_archives.size()];
       NSMutableSet<id<MTLBinaryArchive>> *archive_set = [NSMutableSet set];
@@ -3689,7 +3657,7 @@ caml_rays_metal_compute_pipeline_create_descriptor(
         [archive_set addObject:archive];
         [archive_array addObject:archive];
       }
-      const bool fail_on_archive_miss = Bool_val(Field(raw_descriptor, 5));
+      const bool fail_on_archive_miss = Bool_val(Field(raw_descriptor, 4));
       if (fail_on_archive_miss && archive_array.count == 0) {
         CAMLreturn(result_error_text(
             "Metal fail-on-archive-miss has no binary archive"));
@@ -3700,11 +3668,6 @@ caml_rays_metal_compute_pipeline_create_descriptor(
       if (expected_label != nil) {
         descriptor.label = expected_label;
       }
-      if (linked_array.count != 0) {
-        MTLLinkedFunctions *linked = [MTLLinkedFunctions linkedFunctions];
-        linked.functions = linked_array;
-        descriptor.linkedFunctions = linked;
-      }
       descriptor.preloadedLibraries = preloaded_array;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -3714,8 +3677,8 @@ caml_rays_metal_compute_pipeline_create_descriptor(
           descriptor.insertLibraries.count == preloaded_array.count;
 #pragma clang diagnostic pop
       descriptor.binaryArchives = archive_array;
-      descriptor.supportIndirectCommandBuffers = Bool_val(Field(raw_descriptor, 6));
-      value raw_buffer_mutabilities = Field(raw_descriptor, 7);
+      descriptor.supportIndirectCommandBuffers = Bool_val(Field(raw_descriptor, 5));
+      value raw_buffer_mutabilities = Field(raw_descriptor, 6);
       if (Wosize_val(raw_buffer_mutabilities) != static_cast<mlsize_t>(31)) {
         CAMLreturn(result_error_text(
             "Metal compute pipeline buffer mutability snapshot must have 31 slots"));
@@ -3737,7 +3700,7 @@ caml_rays_metal_compute_pipeline_create_descriptor(
           !checked_insert_libraries ||
           checked_buffers == nil ||
           descriptor.binaryArchives.count != archive_array.count ||
-          descriptor.supportIndirectCommandBuffers != Bool_val(Field(raw_descriptor, 6))) {
+          descriptor.supportIndirectCommandBuffers != Bool_val(Field(raw_descriptor, 5))) {
         CAMLreturn(result_error_text(
             "Metal changed checked compute-pipeline descriptor properties"));
       }
@@ -3881,26 +3844,6 @@ static_assert(sizeof(MTLAccelerationStructureInstanceDescriptor) == 64);
 static_assert(offsetof(MTLAccelerationStructureInstanceDescriptor, options) == 48);
 static_assert(offsetof(MTLAccelerationStructureInstanceDescriptor, mask) == 52);
 static_assert(offsetof(MTLAccelerationStructureInstanceDescriptor, accelerationStructureIndex) == 60);
-
-extern "C" CAMLprim value
-caml_rays_metal_compute_pipeline_intersection_function_table(
-    value raw_pipeline, value raw_count) {
-  CAMLparam2(raw_pipeline, raw_count);
-  CAMLlocal1(raw);
-  @autoreleasepool {
-    id<MTLComputePipelineState> pipeline =
-        object_of_handle(raw_pipeline, Handle_kind::Compute_pipeline);
-    MTLIntersectionFunctionTableDescriptor *descriptor =
-        [MTLIntersectionFunctionTableDescriptor intersectionFunctionTableDescriptor];
-    descriptor.functionCount = Int64_val(raw_count);
-    id<MTLIntersectionFunctionTable> table =
-        [pipeline newIntersectionFunctionTableWithDescriptor:descriptor];
-    if (table == nil)
-      CAMLreturn(result_error_text("Metal failed to allocate intersection function table"));
-    raw = allocate_handle(table, Handle_kind::Intersection_function_table);
-  }
-  CAMLreturn(result_ok(raw));
-}
 
 NS_RETURNS_RETAINED static id optional_object(value raw, Handle_kind kind) {
   return Is_block(raw) ? object_of_handle(Field(raw, 0), kind) : nil;
@@ -4612,7 +4555,7 @@ extern "C" CAMLprim value caml_rays_metal_argument_encoder_snapshot(value raw){C
 
 extern "C" CAMLprim value caml_rays_metal_argument_encoder_set_buffer(value raw,value buffer,value offset,value start,value element){CAMLparam5(raw,buffer,offset,start,element); Autorelease_pool pool;@try{id<MTLArgumentEncoder>e=object_of_handle(raw,Handle_kind::Shader_argument_encoder);id<MTLBuffer>b=object_of_handle(buffer,Handle_kind::Buffer);int64_t o=Int64_val(offset),s=Int64_val(start),a=Int64_val(element);if(o<0||s<0||a<0||(uint64_t)o>b.length||!rays_argument_same_device(e,b))CAMLreturn(result_error_text("argument buffer range or device mismatch"));if(a==0)[e setArgumentBuffer:b offset:o];else[e setArgumentBuffer:b startOffset:s arrayElement:a];CAMLreturn(result_unit());}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}
 
-extern "C" CAMLprim value caml_rays_metal_argument_encoder_single(value raw,value tag,value object,value offset,value index){CAMLparam5(raw,tag,object,offset,index); Autorelease_pool pool;int64_t o=Int64_val(offset),i=Int64_val(index);if(o<0||i<0)CAMLreturn(result_error_text("negative argument offset or index"));@try{id<MTLArgumentEncoder>e=object_of_handle(raw,Handle_kind::Shader_argument_encoder);id x=nil;switch(Long_val(tag)){case 0:x=object_of_handle(object,Handle_kind::Buffer);break;case 1:x=object_of_handle(object,Handle_kind::Texture);break;case 2:x=object_of_handle(object,Handle_kind::Sampler);break;case 3:x=object_of_handle(object,Handle_kind::Acceleration_structure);break;case 4:x=object_of_handle(object,Handle_kind::Indirect_command_buffer);break;case 5:x=object_of_handle(object,Handle_kind::Visible_function_table);break;case 6:x=object_of_handle(object,Handle_kind::Intersection_function_table);break;case 7:x=object_of_handle(object,Handle_kind::Render_pipeline);break;case 8:x=object_of_handle(object,Handle_kind::Compute_pipeline);break;case 9:x=object_of_handle(object,Handle_kind::Depth_stencil);break;default:CAMLreturn(result_error_text("unknown argument binding kind"));}if(!rays_argument_same_device(e,x))CAMLreturn(result_error_text("argument binding device mismatch"));switch(Long_val(tag)){case 0:[e setBuffer:x offset:o atIndex:i];break;case 1:[e setTexture:x atIndex:i];break;case 2:[e setSamplerState:x atIndex:i];break;case 3:[e setAccelerationStructure:x atIndex:i];break;case 4:[e setIndirectCommandBuffer:x atIndex:i];break;case 5:[e setVisibleFunctionTable:x atIndex:i];break;case 6:[e setIntersectionFunctionTable:x atIndex:i];break;case 7:[e setRenderPipelineState:x atIndex:i];break;case 8:[e setComputePipelineState:x atIndex:i];break;case 9:[e setDepthStencilState:x atIndex:i];break;}CAMLreturn(result_unit());}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}
+extern "C" CAMLprim value caml_rays_metal_argument_encoder_single(value raw,value tag,value object,value offset,value index){CAMLparam5(raw,tag,object,offset,index); Autorelease_pool pool;int64_t o=Int64_val(offset),i=Int64_val(index);if(o<0||i<0)CAMLreturn(result_error_text("negative argument offset or index"));@try{id<MTLArgumentEncoder>e=object_of_handle(raw,Handle_kind::Shader_argument_encoder);id x=nil;switch(Long_val(tag)){case 0:x=object_of_handle(object,Handle_kind::Buffer);break;case 1:x=object_of_handle(object,Handle_kind::Texture);break;case 2:x=object_of_handle(object,Handle_kind::Sampler);break;case 3:x=object_of_handle(object,Handle_kind::Acceleration_structure);break;case 4:x=object_of_handle(object,Handle_kind::Indirect_command_buffer);break;case 7:x=object_of_handle(object,Handle_kind::Render_pipeline);break;case 8:x=object_of_handle(object,Handle_kind::Compute_pipeline);break;case 9:x=object_of_handle(object,Handle_kind::Depth_stencil);break;default:CAMLreturn(result_error_text("unknown argument binding kind"));}if(!rays_argument_same_device(e,x))CAMLreturn(result_error_text("argument binding device mismatch"));switch(Long_val(tag)){case 0:[e setBuffer:x offset:o atIndex:i];break;case 1:[e setTexture:x atIndex:i];break;case 2:[e setSamplerState:x atIndex:i];break;case 3:[e setAccelerationStructure:x atIndex:i];break;case 4:[e setIndirectCommandBuffer:x atIndex:i];break;case 7:[e setRenderPipelineState:x atIndex:i];break;case 8:[e setComputePipelineState:x atIndex:i];break;case 9:[e setDepthStencilState:x atIndex:i];break;}CAMLreturn(result_unit());}@catch(NSException*x){CAMLreturn(result_error(x.reason));}}
 
 /* Missing18 callable IDs complement the existing build/refit/copy/compact
    encoder methods. Every array is fully kind/device validated before mutation. */
@@ -4713,19 +4656,6 @@ class RaysLogHandlerGate {
 struct RaysLogHandlerState{std::shared_ptr<RaysLogHandlerGate>gate=std::make_shared<RaysLogHandlerGate>();value*root=nullptr;};
 struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
 
-/* FunctionHandle8 isolated snapshot. A single exact-kind read materializes all
-   four SDK properties; method/property companion IDs share these direct typed
-   selectors without exposing Device handles or native strings. */
-
-/* LinkedFunctions9 isolated shard. The safe owner supplies its authoritative
-   pipeline device ID. Every nullable array/dictionary edge is decoded,
-   kind/device checked, and copied before the first descriptor mutation. */
-
-/* Handwritten enabling constructor for the LinkedFunctions9 safe graph.
-   MTLLinkedFunctions is a descriptor-like retained object with no device
-   property.  The safe OCaml owner therefore records the authoritative device
-   separately and passes its registry ID to every function-bearing setter. */
-
 /* MTL4CommandQueue8 isolated tail. Every call is compile/runtime gated and
    receives a live-state witness from the safe queue owner. */
 
@@ -4742,26 +4672,6 @@ struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
 
 /* Descriptor-array immutable snapshots: descriptor kind 0 render, 1 mesh,
    2 tile; array kind 0 colors, then stage buffer arrays in header order. */
-
-/* RenderPipeline93 linked-function graph closure (exact 12 SDK IDs).
-
-   MTLLinkedFunctions properties are copied by the descriptor.  Setters accept
-   an exact-kind handle, while getters return a fresh owned snapshot handle.
-   The handwritten safe layer must retain its source graph until replacement
-   and must validate every referenced function against the pipeline device.
-
-   Mesh lanes: 0 object, 1 mesh, 2 fragment.  Tile has one linked-functions
-   lane.  A missing OCaml option maps to nil and remains a valid graph reset. */
-
-/* RenderPipeline93 pipeline-state function lookup closure (exact 3 IDs).
-   Results are nullable and become independently owned Function_handle values.
-   The safe layer validates liveness, same-device identity, one exact stage bit,
-   UTF-8/NUL-free names, and retains the source function through this call. */
-
-/* RenderPipeline93 function-table allocation closure (exact 2 IDs).
-   The public safe API supplies a checked positive capacity and exact stage;
-   this native layer constructs the SDK descriptor locally, avoiding exposure
-   of a mutable descriptor handle, then returns one owned table handle. */
 
 /* RenderPipeline93 functions-descriptor closure (exact 10 IDs): class plus
    getter/setter/property triples for vertex, fragment and tile additional
@@ -4783,10 +4693,6 @@ struct RaysLogHandlerToken{std::shared_ptr<RaysLogHandlerState>state;};
    six-field value snapshots (name,index,type,access,active,array-length). */
 
 #pragma clang diagnostic pop
-
-/* IntersectionFunctionTable8 isolated shard. Function-handle entries carry
-   authoritative safe-owner registry IDs because MTLFunctionHandle exposes no
-   device property. All arrays are decoded before the first table write. */
 
 /* StageInputOutputDescriptor10 isolated ownership shard. Attribute replacement
    is decoded before mutation; returned child arrays/descriptors are retained
@@ -4870,18 +4776,16 @@ static NSArray<MTLMotionKeyframeData *> *accel_keyframes_of_ocaml(value raw) {
 }
 
 static void accel_geometry_common(MTLAccelerationStructureGeometryDescriptor *geometry,
-                                  value opaque, value duplicate, value table_offset) {
+                                  value opaque, value duplicate) {
   geometry.opaque = Bool_val(opaque);
   geometry.allowDuplicateIntersectionFunctionInvocation = Bool_val(duplicate);
-  geometry.intersectionFunctionTableOffset = Int64_val(table_offset);
 }
 
 static MTLAccelerationStructureGeometryDescriptor *accel_geometry_of_ocaml(value g) {
   switch (Tag_val(g)) {
   case 0: {
     /* Raw_triangles: vertex, vertex_offset, vertex_stride, triangle_count,
-       index option, index_offset, index_uint16, keyframes, opaque, allow_dup,
-       table_offset */
+       index option, index_offset, index_uint16, keyframes, opaque, allow_dup */
     value keyframes = Field(g, 7);
     id<MTLBuffer> index =
         Is_block(Field(g, 4)) ? object_of_handle(Field(Field(g, 4), 0), Handle_kind::Buffer)
@@ -4899,7 +4803,7 @@ static MTLAccelerationStructureGeometryDescriptor *accel_geometry_of_ocaml(value
         d.indexBufferOffset = Int64_val(Field(g, 5));
         d.indexType = index_type;
       }
-      accel_geometry_common(d, Field(g, 8), Field(g, 9), Field(g, 10));
+      accel_geometry_common(d, Field(g, 8), Field(g, 9));
       return d;
     }
     MTLAccelerationStructureMotionTriangleGeometryDescriptor *d =
@@ -4912,12 +4816,12 @@ static MTLAccelerationStructureGeometryDescriptor *accel_geometry_of_ocaml(value
       d.indexBufferOffset = Int64_val(Field(g, 5));
       d.indexType = index_type;
     }
-    accel_geometry_common(d, Field(g, 8), Field(g, 9), Field(g, 10));
+    accel_geometry_common(d, Field(g, 8), Field(g, 9));
     return d;
   }
   case 1: {
     /* Raw_boxes: boxes, box_offset, box_stride, box_count, keyframes, opaque,
-       allow_dup, table_offset */
+       allow_dup */
     value keyframes = Field(g, 4);
     if (Wosize_val(keyframes) == 0) {
       MTLAccelerationStructureBoundingBoxGeometryDescriptor *d =
@@ -4926,7 +4830,7 @@ static MTLAccelerationStructureGeometryDescriptor *accel_geometry_of_ocaml(value
       d.boundingBoxBufferOffset = Int64_val(Field(g, 1));
       d.boundingBoxStride = Int64_val(Field(g, 2));
       d.boundingBoxCount = Int64_val(Field(g, 3));
-      accel_geometry_common(d, Field(g, 5), Field(g, 6), Field(g, 7));
+      accel_geometry_common(d, Field(g, 5), Field(g, 6));
       return d;
     }
     MTLAccelerationStructureMotionBoundingBoxGeometryDescriptor *d =
@@ -4934,14 +4838,14 @@ static MTLAccelerationStructureGeometryDescriptor *accel_geometry_of_ocaml(value
     d.boundingBoxBuffers = accel_keyframes_of_ocaml(keyframes);
     d.boundingBoxStride = Int64_val(Field(g, 2));
     d.boundingBoxCount = Int64_val(Field(g, 3));
-    accel_geometry_common(d, Field(g, 5), Field(g, 6), Field(g, 7));
+    accel_geometry_common(d, Field(g, 5), Field(g, 6));
     return d;
   }
   default: {
     /* Raw_curves: control, control_offset, control_stride, control_count,
        radius, radius_offset, radius_stride, index, index_offset, index_uint16,
        segment_count, segment_control_points, curve_type, basis, end_caps,
-       control_keyframes, radius_keyframes, opaque, allow_dup, table_offset */
+       control_keyframes, radius_keyframes, opaque, allow_dup */
     value control_keyframes = Field(g, 15);
     MTLCurveType type = Long_val(Field(g, 12)) == 0 ? MTLCurveTypeRound : MTLCurveTypeFlat;
     MTLCurveBasis basis = MTLCurveBasisBSpline;
@@ -4978,7 +4882,7 @@ static MTLAccelerationStructureGeometryDescriptor *accel_geometry_of_ocaml(value
       d.curveType = type;
       d.curveBasis = basis;
       d.curveEndCaps = caps;
-      accel_geometry_common(d, Field(g, 17), Field(g, 18), Field(g, 19));
+      accel_geometry_common(d, Field(g, 17), Field(g, 18));
       return d;
     }
     MTLAccelerationStructureMotionCurveGeometryDescriptor *d =
@@ -4998,7 +4902,7 @@ static MTLAccelerationStructureGeometryDescriptor *accel_geometry_of_ocaml(value
     d.curveType = type;
     d.curveBasis = basis;
     d.curveEndCaps = caps;
-    accel_geometry_common(d, Field(g, 17), Field(g, 18), Field(g, 19));
+    accel_geometry_common(d, Field(g, 17), Field(g, 18));
     return d;
   }
   }
@@ -5148,49 +5052,46 @@ static_assert(offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, userID)
 static_assert(sizeof(MTLPackedFloat4x3) == 48);
 
 /* Byte layout of one instance descriptor record for the given kind:
-   [size; transform; options; mask; table_offset; structure_index; user_id;
+   [size; transform; options; mask; structure_index; user_id;
     transforms_start; transforms_count; start_border; end_border; start_time;
     end_time], -1 where the kind lacks the field. */
 extern "C" CAMLprim value caml_rays_metal_accel_instance_layout(value raw_kind) {
   CAMLparam1(raw_kind);
   CAMLlocal1(layout);
-  long values[13];
-  for (int i = 0; i < 13; i++) values[i] = -1;
+  long values[12];
+  for (int i = 0; i < 12; i++) values[i] = -1;
   switch (Long_val(raw_kind)) {
   case 1:
     values[0] = sizeof(MTLAccelerationStructureUserIDInstanceDescriptor);
     values[1] = offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, transformationMatrix);
     values[2] = offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, options);
     values[3] = offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, mask);
-    values[4] = offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, intersectionFunctionTableOffset);
-    values[5] = offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, accelerationStructureIndex);
-    values[6] = offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, userID);
+    values[4] = offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, accelerationStructureIndex);
+    values[5] = offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, userID);
     break;
   case 2:
     values[0] = sizeof(MTLAccelerationStructureMotionInstanceDescriptor);
     values[2] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, options);
     values[3] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, mask);
-    values[4] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, intersectionFunctionTableOffset);
-    values[5] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, accelerationStructureIndex);
-    values[6] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, userID);
-    values[7] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionTransformsStartIndex);
-    values[8] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionTransformsCount);
-    values[9] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionStartBorderMode);
-    values[10] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionEndBorderMode);
-    values[11] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionStartTime);
-    values[12] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionEndTime);
+    values[4] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, accelerationStructureIndex);
+    values[5] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, userID);
+    values[6] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionTransformsStartIndex);
+    values[7] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionTransformsCount);
+    values[8] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionStartBorderMode);
+    values[9] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionEndBorderMode);
+    values[10] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionStartTime);
+    values[11] = offsetof(MTLAccelerationStructureMotionInstanceDescriptor, motionEndTime);
     break;
   default:
     values[0] = sizeof(MTLAccelerationStructureInstanceDescriptor);
     values[1] = offsetof(MTLAccelerationStructureInstanceDescriptor, transformationMatrix);
     values[2] = offsetof(MTLAccelerationStructureInstanceDescriptor, options);
     values[3] = offsetof(MTLAccelerationStructureInstanceDescriptor, mask);
-    values[4] = offsetof(MTLAccelerationStructureInstanceDescriptor, intersectionFunctionTableOffset);
-    values[5] = offsetof(MTLAccelerationStructureInstanceDescriptor, accelerationStructureIndex);
+    values[4] = offsetof(MTLAccelerationStructureInstanceDescriptor, accelerationStructureIndex);
     break;
   }
-  layout = caml_alloc(13, 0);
-  for (int i = 0; i < 13; i++) Store_field(layout, i, Val_long(values[i]));
+  layout = caml_alloc(12, 0);
+  for (int i = 0; i < 12; i++) Store_field(layout, i, Val_long(values[i]));
   CAMLreturn(layout);
 }
 

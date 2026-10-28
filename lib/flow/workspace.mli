@@ -167,10 +167,13 @@ val body_context_ops : string list
 (** Operators a defnode body reads from its cook context ([sop/context_seed], [sop/provenance_base],
     [sop/context_frame], [sop/context_time]); a body elsewhere is [E_NODE_CONTEXT]. *)
 
-val check : ?ops:Op.t list -> ?library:bool -> Catalog.catalog -> Syntax.t list -> t option * Diagnostic.t list
+val check : ?ops:Op.t list -> ?library:bool -> ?call_sites:bool -> Catalog.catalog -> Syntax.t list -> t option * Diagnostic.t list
 (** Check one [(workspace name ...)] form.  The workspace is returned only
     without errors; warnings never block it. [library] allows definitions and
-    macros without a runnable graph, for editing imported source libraries. *)
+    macros without a runnable graph, for editing imported source libraries.
+    [call_sites] types a [defn] body only where it is called (and on its own when it is
+    named as a function value), not on its own as well: for a host's embedded declarations,
+    which a test checks whole. An unused [defn] then goes unchecked. *)
 
 val skip_tuples : Syntax.t -> int list list option
 (** The tuples of a [:skip] value (register L16): a list of tuples of non-negative integers, a bare

@@ -32,12 +32,12 @@ let run () =
   ignore(ok(Ogpu.Acceleration.create d1 ~ray_tracing:true(Tlas{instances=range;instance_stride=44;instance_count=1;instance_kind=Motion_instances;structures=[Ogpu.Acceleration.handle value]})));
   expect Ogpu.Error.Invalid_argument(Ogpu.Acceleration.create d1 ~ray_tracing:true(Tlas{instances=range;instance_stride=64;instance_count=1;instance_kind=User_id_instances;structures=[Ogpu.Acceleration.handle value]}));
   (* Packing follows the driver layout exactly. *)
-  let layout=[|68;0;48;52;56;60;64;-1;-1;-1;-1;-1;-1|]in
-  let packed=Ogpu.Acceleration.pack_instances layout[|[|1.;0.;0.;5.;0.;1.;0.;6.;0.;0.;1.;7.|],0xff,2,3,9|]in
-  if Bytes.length packed<>68||Bytes.get_int32_le packed 52<>0xffl||Bytes.get_int32_le packed 56<>3l||Bytes.get_int32_le packed 60<>2l||Bytes.get_int32_le packed 64<>9l
+  let layout=[|68;0;48;52;60;64;-1;-1;-1;-1;-1;-1|]in
+  let packed=Ogpu.Acceleration.pack_instances layout[|[|1.;0.;0.;5.;0.;1.;0.;6.;0.;0.;1.;7.|],0xff,2,9|]in
+  if Bytes.length packed<>68||Bytes.get_int32_le packed 52<>0xffl||Bytes.get_int32_le packed 56<>0l||Bytes.get_int32_le packed 60<>2l||Bytes.get_int32_le packed 64<>9l
      ||Int32.float_of_bits(Bytes.get_int32_le packed 36)<>5. then fail"instance record packing drift";
-  let motion_layout=[|44;-1;8;12;16;20;24;0;4;28;32;36;40|]in
-  let packed=Ogpu.Acceleration.pack_motion_instances motion_layout[|(0xff,1,0,4),(2,3),(0,1),(0.25,0.75)|]in
+  let motion_layout=[|44;-1;8;12;20;24;0;4;28;32;36;40|]in
+  let packed=Ogpu.Acceleration.pack_motion_instances motion_layout[|(0xff,1,4),(2,3),(0,1),(0.25,0.75)|]in
   if Bytes.length packed<>44||Bytes.get_int32_le packed 0<>2l||Bytes.get_int32_le packed 4<>3l||Bytes.get_int32_le packed 12<>0xffl||Bytes.get_int32_le packed 24<>4l||Bytes.get_int32_le packed 32<>1l
      ||Int32.float_of_bits(Bytes.get_int32_le packed 40)<>0.75 then fail"motion instance packing drift";
   print_endline"OGPU acceleration lifecycle validation passed"

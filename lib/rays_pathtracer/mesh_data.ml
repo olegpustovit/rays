@@ -160,7 +160,7 @@ let put_transform_record bytes base (transform, normal) =
    transform records, and the per-instance (first triangle, material) table. *)
 let layout_mesh ?(objects = [||]) ?(placed = [||]) ?(locals = [||]) base parts placements =
   let count = Array.length placements in
-  let records = Array.make count { B.instance = { transform = [||]; mask = 0; structure_index = 0 }; user_id = 0; table_offset = 0 }
+  let records = Array.make count { B.instance = { transform = [||]; mask = 0; structure_index = 0 }; user_id = 0 }
   and shader_bytes = Bytes.create (count * 84)
   and table = Bytes.create (count * 8) in
   let rec pack index =
@@ -169,7 +169,7 @@ let layout_mesh ?(objects = [||]) ?(placed = [||]) ?(locals = [||]) base parts p
       let matrix, part, material = placements.(index) in
       let* columns = transform_columns matrix in
       records.(index) <-
-        { B.instance = { transform = fst columns; mask = 0xFFFF_FFFF; structure_index = part }; user_id = 0; table_offset = 0 };
+        { B.instance = { transform = fst columns; mask = 0xFFFF_FFFF; structure_index = part }; user_id = 0 };
       put_transform_record shader_bytes (index * 84) columns;
       put_u32 table (index * 8) (match parts.(part) with Triangle_part (first, _) -> first / 3);
       put_u32 table ((index * 8) + 4) material;
@@ -192,7 +192,7 @@ let mesh ~extras ~materials source_meshes =
 let pack_instances ~materials ~motion transforms =
     let count = Array.length transforms in
     let stride = if motion = None then 84 else 168 in
-    let records = Array.make count { B.instance = { transform = [||]; mask = 0; structure_index = 0 }; user_id = 0; table_offset = 0 }
+    let records = Array.make count { B.instance = { transform = [||]; mask = 0; structure_index = 0 }; user_id = 0 }
     and shader_bytes = Bytes.create (count * stride)
     and motion_transforms = Array.make (2 * count) [||] in
     let rec pack instance =
@@ -202,7 +202,7 @@ let pack_instances ~materials ~motion transforms =
         let* finish = match motion with None -> Ok start | Some ends -> transform_columns ends.(instance) in
         records.(instance) <-
           { B.instance = { transform = fst start; mask = 0xFFFF_FFFF; structure_index = 0 }
-          ; user_id = (if materials = 0 then 0 else 1 + instance); table_offset = 0 };
+          ; user_id = (if materials = 0 then 0 else 1 + instance) };
         put_transform_record shader_bytes (instance * stride) start;
         if motion <> None then put_transform_record shader_bytes ((instance * stride) + 84) finish;
         motion_transforms.(2 * instance) <- fst start;

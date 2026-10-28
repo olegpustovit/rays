@@ -2,9 +2,9 @@ lib/flow/op.ml	all#1	312
 lib/flow_graph/edit_ops.ml	rewrite#1	529
 lib/flow_ir/core_region.ml	lower#1	428
 lib/flow_ir/packed.ml	run_typed#1	503
-lib/metal/gen/registry.ml	entries#1	428
-lib/ogpu/conformance/conformance.ml	run#1	952
-lib/ogpu_metal/backend.ml	create#1	1018
+lib/metal/gen/registry.ml	entries#1	420
+lib/ogpu/conformance/conformance.ml	run#1	928
+lib/ogpu_metal/backend.ml	create#1	919
 lib/rdk/boolean/boolean_complex.ml	build#1	309
 lib/rdk/boolean/boolean_extract.ml	build_internal#1	410
 lib/rdk/boolean/boolean_face_arrangement.ml	build#3	446

@@ -28,10 +28,10 @@ val built : t -> bool
 val descriptor : t -> descriptor
 
 (** Byte layout of one instance record: [size; transform; options; mask;
-    table_offset; structure_index; user_id; transforms_start; transforms_count;
+    structure_index; user_id; transforms_start; transforms_count;
     start_border; end_border; start_time; end_time], -1 where absent. *)
 type instance_layout = int array
-val pack_instances : instance_layout -> (float array * int * int * int * int) array -> bytes
+val pack_instances : instance_layout -> (float array * int * int * int) array -> bytes
 val pack_motion_instances : instance_layout ->
-  ((int * int * int * int) * (int * int) * (int * int) * (float * float)) array -> bytes
+  ((int * int * int) * (int * int) * (int * int) * (float * float)) array -> bytes
 val pack_transforms : float array array -> bytes

@@ -18,7 +18,6 @@ type t = {
   resource : int64 -> resource option;
   pipeline : int64 -> Pipeline.t option;
   sampler : int64 -> Sampler.t option;
-  table : int64 -> (Metal.Intersection_function_table.t, Ogpu_core.Error.t) result;
   icb : int64 -> Metal.Indirect_command_buffer.t option;
   depth_state : Ogpu_core.Backend.depth_state -> (Metal.Depth_stencil.t, Ogpu_core.Error.t) result;
 }

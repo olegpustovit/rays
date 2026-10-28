@@ -50,7 +50,6 @@ let system_default () =
              ; compute_pipeline = true
              ; render_pipeline = true
              ; ray_tracing = info.raytracing
-             ; function_tables = info.raytracing
              ; ray_tracing_curves = info.raytracing && curves
              ; ray_tracing_motion = info.raytracing }
            in

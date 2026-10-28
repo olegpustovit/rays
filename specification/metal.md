@@ -139,8 +139,7 @@ for lifecycle checks.
 
 The safe API covers device and capability queries, buffers and mapped ranges,
 textures, samplers, libraries and functions, compute and render pipelines,
-command encoders and buffers, acceleration structures and intersection function
-tables, and presentation: what `ogpu_metal` calls, no more. Metal 4
+command encoders and buffers, acceleration structures, and presentation: what `ogpu_metal` calls, no more. Metal 4
 operations check their availability before use. `ogpu_metal` owns the portable
 capability profile and returns typed `Unsupported` for unavailable features.
 

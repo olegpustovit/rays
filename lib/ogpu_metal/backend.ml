@@ -9,13 +9,6 @@ type icb_entry = {
 
 type active_queue = { presentations : Surface.Private.pending_presentation array }
 
-type table_entry = {
-  table : Metal.Intersection_function_table.t;
-  mutable table_handles : Metal.Function_handle.t list;
-  mutable table_uses : int;
-  mutable table_destroy_requested : bool;
-}
-
 (* Objects retained by in-flight commands: destruction while used is
    deferred to the last release. *)
 
@@ -33,7 +26,6 @@ type control = {
   resources : (int64, resource) Hashtbl.t;
 
   pipeline_tokens : (int64, Pipeline.t) Hashtbl.t;
-  tables : (int64, table_entry) Hashtbl.t;
   active_queues : (int64, active_queue) Hashtbl.t;
   libraries : (int64, Library.t) Hashtbl.t;
   accels : (int64, Acceleration.t) Hashtbl.t;
@@ -72,7 +64,6 @@ let create () =
       resources = Hashtbl.create 32;
 
       pipeline_tokens = Hashtbl.create 16;
-      tables = Hashtbl.create 4;
       active_queues = Hashtbl.create 4;
       libraries = Hashtbl.create 4;
       accels = Hashtbl.create 8;
@@ -220,96 +211,12 @@ let create () =
             create_texture_format ~format:Texture.Depth32_float ~host_read:false descriptor
           in
           let native_resource token = Hashtbl.find_opt c.resources token in
-          let finish_table_destroy entry =
-            let operation = "Ogpu_metal.Backend.destroy_table" in
-            (* The table holds a dependent on every function handle it binds,
-               so it goes first and releases them for destruction. *)
-            let destroyed = Metal.Intersection_function_table.destroy entry.table in
-            let handles = entry.table_handles in
-            entry.table_handles <- [];
-            let released =
-              List.fold_left
-                (fun result handle ->
-                  match (result, Metal.Function_handle.destroy handle) with
-                  | Ok (), Error e -> Error (Device.of_metal_error ~operation e)
-                  | result, _ -> result)
-                (Ok ()) handles
-            in
-            match (destroyed, released) with
-            | Error e, _ -> Error (Device.of_metal_error ~operation e)
-            | Ok (), (Error _ as e) -> e
-            | Ok (), Ok () -> Ok ()
-          in
-          let create_table pipeline ~capacity =
-            let operation = "Ogpu_metal.Backend.create_table" in
-            match Pipeline.Private.native pipeline with
-            | Render _ ->
-                error operation Ogpu_core.Error.Invalid_argument
-                  "function tables belong to compute pipelines"
-            | Compute compute -> (
-                match Metal.Intersection_function_table.create ~pipeline:compute ~capacity with
-                | Error e -> Error (Device.of_metal_error ~operation e)
-                | Ok table ->
-                    let id = token c in
-                    let entry =
-                      { table; table_handles = []; table_uses = 0
-                      ; table_destroy_requested = false }
-                    in
-                    Hashtbl.add c.tables id entry;
-                    let handle_of name =
-                      match Pipeline.Private.linked_function pipeline name with
-                      | None ->
-                          error operation Ogpu_core.Error.Invalid_argument
-                            "function is not linked into the table's pipeline"
-                      | Some function_ -> (
-                          match Metal.Function_handle.create ~pipeline:compute ~function_ with
-                          | Error e -> Error (Device.of_metal_error ~operation e)
-                          | Ok handle ->
-                              entry.table_handles <- handle :: entry.table_handles;
-                              Ok handle)
-                    in
-                    Ok
-                      {
-                        Ogpu_core.Backend.table_token = id;
-                        table_set_function =
-                          (fun ~index name ->
-                            match handle_of name with
-                            | Error _ as e -> e
-                            | Ok handle ->
-                                let set = Metal.Intersection_function_table.set_function table ~index (Some handle) in
-                                Result.map_error (Device.of_metal_error ~operation) set);
-                        table_set_buffer =
-                          (fun ~index buffer_token ~offset ->
-                            match native_resource buffer_token with
-                            | Some (Buffer buffer) ->
-                                Result.map_error (Device.of_metal_error ~operation)
-                                  (Metal.Intersection_function_table.set_buffer table ~index ~offset
-                                     (Some (Buffer.Private.metal buffer)))
-                            | _ ->
-                                error operation Ogpu_core.Error.Invalid_argument
-                                  "table buffer graph is incomplete");
-                        destroy_table =
-                          (fun () ->
-                            if entry.table_uses > 0 then begin
-                              entry.table_destroy_requested <- true;
-                              Hashtbl.remove c.tables id;
-                              Ok ()
-                            end
-                            else
-                              match finish_table_destroy entry with
-                              | Error _ as e -> e
-                              | Ok () ->
-                                  Hashtbl.remove c.tables id;
-                                  Ok ());
-                      })
-          in
           let own_pipeline pipeline =
             let id = token c in
             Hashtbl.add c.pipeline_tokens id pipeline;
             Ok
               {
                 Ogpu_core.Backend.pipeline_token = id; max_threads = max_threads pipeline;
-                create_table = create_table pipeline;
                 destroy_pipeline =
                   (fun () ->
                     match Pipeline.destroy pipeline with
@@ -329,9 +236,9 @@ let create () =
                   {
 
                     Ogpu_core.Backend.create_compute_pipeline_in =
-                      (fun ~entry ~constants ~interface ~linked ->
+                      (fun ~entry ~constants ~interface ->
                         match
-                          Pipeline.create_compute_from_library ~linked device library ~entry ~constants
+                          Pipeline.create_compute_from_library device library ~entry ~constants
                             ~interface
                         with
                         | Error _ as failure -> failure
@@ -392,7 +299,7 @@ let create () =
                  | Ogpu_core.Backend.User_id_instances -> Metal.Acceleration_structure.Build.User_id_instances
                  | Motion_instances -> Motion_instances)
             in
-            [| layout.size; layout.transform; layout.options; layout.mask; layout.table_offset
+            [| layout.size; layout.transform; layout.options; layout.mask
              ; layout.structure_index; layout.user_id; layout.transforms_start; layout.transforms_count
              ; layout.start_border_offset; layout.end_border_offset; layout.start_time_offset
              ; layout.end_time_offset |]
@@ -823,20 +730,6 @@ let create () =
                             | None -> None);
                           pipeline = (fun token -> Hashtbl.find_opt c.pipeline_tokens token);
                           sampler = (fun token -> Hashtbl.find_opt c.sampler_tokens token);
-                          table = (fun token ->
-                            match Hashtbl.find_opt c.tables token with
-                            | None -> error operation Ogpu_core.Error.Invalid_argument
-                                "function table graph is incomplete"
-                            | Some entry ->
-                                (match keep
-                                  (fun () -> entry.table_uses <- entry.table_uses + 1; Ok ())
-                                  (fun () ->
-                                    entry.table_uses <- entry.table_uses - 1;
-                                    if entry.table_uses = 0 && entry.table_destroy_requested then
-                                      ignore (finish_table_destroy entry))
-                                with
-                                | Error _ as failure -> failure
-                                | Ok () -> Ok entry.table));
                           icb = (fun token -> Option.map (fun entry -> entry.icb) (Hashtbl.find_opt c.icbs token));
                           depth_state = depth_state_for;
                         }

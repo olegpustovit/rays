@@ -393,7 +393,7 @@ let skip_tuples (v : S.t) : int list list option =
 (* The checker proper: the names, types, macro and defnode tables of one workspace check and the
    mutually recursive inference over them (infer .. graph_info), then the form-level [driver]. *)
 module Checker (P : sig
-  val ops : Op.t list val library : bool val catalog : Catalog.catalog val forms : S.t list
+  val ops : Op.t list val library : bool val call_sites : bool val catalog : Catalog.catalog val forms : S.t list
 end) = struct
   open P
   let find_op = Op.find ~extra:ops
@@ -604,6 +604,8 @@ end) = struct
     List.fold_left (fun env n -> Smap.add n poison env) env (pat_names pat)
   let graph_terms : (string, graph) Hashtbl.t = Hashtbl.create 8
   let def_terms : (string, graph) Hashtbl.t = Hashtbl.create 8
+  (* [call_sites]: a [defn] named as a function value is checked on its own when it is met *)
+  let check_def = ref (fun (_ : string) -> ())
   let ginfo : (string, v) Hashtbl.t = Hashtbl.create 8
   let gstack = ref []
   let def_defaults : (string * string, term * v) Hashtbl.t = Hashtbl.create 8
@@ -1225,7 +1227,9 @@ end) = struct
     let (t, v) = match x.node with
       | S.Sym s when x.meta = [] && (not (String.contains s '.')) && (not (Smap.mem s cx.env)) && not (reserved s) ->
           (match resolve_head cx s with
-           | `Def _ -> (tm x (Ty.Fn None) (Fn_ref s), { (leaf (Ty.Fn None)) with fn = Some (Def_fn s) })
+           | `Def _ ->
+               if call_sites then !check_def s;
+               (tm x (Ty.Fn None) (Fn_ref s), { (leaf (Ty.Fn None)) with fn = Some (Def_fn s) })
            | `Op o -> (tm x (Ty.Fn None) (Fn_ref s), { (leaf (Ty.Fn None)) with fn = Some (Op_fn o.name) })
            | `Kind k ->
                let slots = k.slots in
@@ -2100,15 +2104,20 @@ end) = struct
           else (Hashtbl.replace sigs n sg; def_order := n :: !def_order)
       | None -> ()) items;
     let graph_order = List.rev !graph_order and def_order = List.rev !def_order in
-    List.iter (fun n ->
+    (* With [call_sites] a body is typed where it is called (each call site checks it again with its
+       arguments); its own term is a placeholder no call reaches, every call carrying its checked body. *)
+    let checked = Hashtbl.create 8 in
+    let def ~own n =
       let d = Hashtbl.find sigs n in
       let env = List.fold_left (fun env (pn, ty, _) -> Smap.add pn (leaf ty) env) Smap.empty d.sparams in
       let cx = { env; ctx = d.sctx; scope = "ƒ " ^ n; path = [ "def:" ^ n ]; in_def = true;
                  stack = [ n ]; depth = 0; zone = 0; zbody = false } in
       let inputs = List.map (fun (pn, ty, _) ->
         (pn, ty, Option.map fst (def_default d pn))) d.sparams in
-      let (bt, _) = body cx d.sbody in
-      Hashtbl.replace def_terms n { name = n; context = d.sctx; inputs; body = bt; form = d.sform }) def_order;
+      let bt = if own then (Hashtbl.replace checked n (); fst (body cx d.sbody)) else tm d.sbody Ty.Any Nil in
+      Hashtbl.replace def_terms n { name = n; context = d.sctx; inputs; body = bt; form = d.sform } in
+    check_def := (fun n -> if Hashtbl.mem sigs n && not (Hashtbl.mem checked n) then def ~own:true n);
+    List.iter (fun n -> if not (Hashtbl.mem checked n) then def ~own:(not call_sites) n) def_order;
     List.iter (fun (head,n,_) -> if head="defnode" then
       Option.iter (fun (d:Defnode.t) ->
         let env=List.fold_left (fun env (pn,ty,_) -> Smap.add pn (leaf ty) env) Smap.empty d.inputs in
@@ -2153,10 +2162,10 @@ end) = struct
     (graph_order, def_order)
 end
 
-let check ?(ops = []) ?(library = false) catalog forms =
+let check ?(ops = []) ?(library = false) ?(call_sites = false) catalog forms =
   Phase_timer.measure "check" (fun () ->
   match Op.validate ops with Some error -> None, [error] | None ->
-  let module K = Checker (struct let ops = ops let library = library let catalog = catalog let forms = forms end) in
+  let module K = Checker (struct let ops = ops let library = library let call_sites = call_sites let catalog = catalog let forms = forms end) in
   let open K in
   let outcome =
     match forms with

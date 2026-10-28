@@ -25,8 +25,6 @@ type error = private
 
 type acceleration_structure
 type indirect_command_buffer
-type visible_function_table
-type intersection_function_table
 type render_pipeline
 type compute_pipeline
 type depth_stencil
@@ -94,7 +92,6 @@ module Device : sig
     ; raytracing : bool
     ; raytracing_from_render : bool
     ; dynamic_libraries : bool
-    ; function_pointers : bool
     }
 
   val system_default : unit -> (t, error) result
@@ -159,8 +156,7 @@ module Acceleration_structure : sig
       ; start_border : border; end_border : border }
     type index = { index_buffer : Buffer.t; index_offset : int64; index_uint16 : bool }
     type common =
-      { opaque : bool; allow_duplicate_intersection : bool
-      ; intersection_function_table_offset : int }
+      { opaque : bool; allow_duplicate_intersection : bool }
     val default_common : common
     type curve_type = Round | Flat
     type curve_basis = Bspline | Catmull_rom | Linear | Bezier
@@ -183,7 +179,7 @@ module Acceleration_structure : sig
         lacks the field. [transform] is a packed 4x3 (48 bytes), [user_id] and
         the motion fields exist for the user-id and motion kinds. *)
     type instance_layout =
-      { size : int; transform : int; options : int; mask : int; table_offset : int
+      { size : int; transform : int; options : int; mask : int
       ; structure_index : int; user_id : int; transforms_start : int; transforms_count : int
       ; start_border_offset : int; end_border_offset : int; start_time_offset : int
       ; end_time_offset : int }
@@ -599,8 +595,6 @@ and Shader_argument_encoder : sig
     | Buffer of Buffer.t | Texture of Texture.t | Sampler of Sampler.t
     | Acceleration_structure of acceleration_structure
     | Indirect_command_buffer of indirect_command_buffer
-    | Visible_function_table of visible_function_table
-    | Intersection_function_table of intersection_function_table
     | Render_pipeline of render_pipeline
     | Compute_pipeline of compute_pipeline | Depth_stencil of depth_stencil
   val encoded_length : t -> int64
@@ -615,7 +609,6 @@ module Compute_pipeline : sig
 
   val create :
     ?label:string ->
-    ?linked_functions:Function.t list ->
     ?reflection:bool -> Function.t ->
     (t, error) result
   val bindings : t -> Binding.t list option
@@ -626,20 +619,6 @@ end
 
 module Vertex_descriptor : sig
 
-end
-
-module Function_handle : sig
-  type t
-  val create : pipeline:Compute_pipeline.t -> function_:Function.t -> (t, error) result
-  val destroy : t -> (unit, error) result
-end
-
-module Intersection_function_table : sig
-  type t
-  val create : pipeline:Compute_pipeline.t -> capacity:int -> (t, error) result
-  val set_function : t -> index:int -> Function_handle.t option -> (unit, error) result
-  val set_buffer : t -> index:int -> ?offset:int64 -> Buffer.t option -> (unit, error) result
-  val destroy : t -> (unit, error) result
 end
 
 module Render_pipeline : sig
@@ -861,7 +840,6 @@ module Compute_encoder : sig
     t -> index:int -> offset:int64 -> Buffer.t -> (unit, error) result
   val set_texture : t -> index:int -> Texture.t -> (unit, error) result
   val set_acceleration_structure : t -> index:int -> Acceleration_structure.t option -> (unit,error) result
-  val set_intersection_function_table : t -> index:int -> Intersection_function_table.t option -> (unit,error) result
   val set_bytes : t -> index:int -> bytes -> (unit,error) result
 
   (** [useResource:usage:MTLResourceUsageRead] on each structure: an instance

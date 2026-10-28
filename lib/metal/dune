@@ -96,7 +96,7 @@
 (executable
  (enabled_if (= %{system} macosx))
  (name test_main)
- (modules test_main test_metal_support test_metal_device_safe test_metal_texture_safe test_metal_sampler_safe test_metal_function_constants_safe test_metal_render_pipeline_safe test_metal_argument_reflection_snapshot test_metal_resource_bounds test_metal_blit_safe test_metal_device_library_safe test_metal_device_queue_safe test_metal_function_tables_safe test_metal_render_encoder_safe test_metal_compute_encoder_safe test_metal_command_buffer_safe test_metal_compute_pipeline_safe test_metal_render_icb_argument)
+ (modules test_main test_metal_support test_metal_device_safe test_metal_texture_safe test_metal_sampler_safe test_metal_function_constants_safe test_metal_render_pipeline_safe test_metal_argument_reflection_snapshot test_metal_resource_bounds test_metal_blit_safe test_metal_device_library_safe test_metal_device_queue_safe test_metal_render_encoder_safe test_metal_compute_encoder_safe test_metal_command_buffer_safe test_metal_compute_pipeline_safe test_metal_render_icb_argument)
  (libraries metal unix))
 
 (rule
@@ -113,7 +113,6 @@
    (run %{exe:test_main.exe} test_metal_blit_safe)
    (run %{exe:test_main.exe} test_metal_device_library_safe)
    (run %{exe:test_main.exe} test_metal_device_queue_safe)
-   (run %{exe:test_main.exe} test_metal_function_tables_safe)
    (run %{exe:test_main.exe} test_metal_render_encoder_safe)
    (run %{exe:test_main.exe} test_metal_compute_encoder_safe)
    (run %{exe:test_main.exe} test_metal_command_buffer_safe)
@@ -129,7 +128,6 @@
 (rule (enabled_if (= %{system} macosx)) (alias test_metal_blit_safe) (action (run %{exe:test_main.exe} test_metal_blit_safe)))
 (rule (enabled_if (= %{system} macosx)) (alias test_metal_device_library_safe) (action (run %{exe:test_main.exe} test_metal_device_library_safe)))
 (rule (enabled_if (= %{system} macosx)) (alias test_metal_device_queue_safe) (action (run %{exe:test_main.exe} test_metal_device_queue_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_function_tables_safe) (action (run %{exe:test_main.exe} test_metal_function_tables_safe)))
 (rule (enabled_if (= %{system} macosx)) (alias test_metal_render_encoder_safe) (action (run %{exe:test_main.exe} test_metal_render_encoder_safe)))
 (rule (enabled_if (= %{system} macosx)) (alias test_metal_compute_encoder_safe) (action (run %{exe:test_main.exe} test_metal_compute_encoder_safe)))
 (rule (enabled_if (= %{system} macosx)) (alias test_metal_command_buffer_safe) (action (run %{exe:test_main.exe} test_metal_command_buffer_safe)))

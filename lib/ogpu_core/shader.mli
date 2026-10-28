@@ -1,6 +1,6 @@
 type stage = Vertex | Fragment | Compute
 type binding_kind = Uniform_buffer | Storage_buffer | Sampled_texture | Storage_texture | Sampler
-  | Acceleration_structure | Intersection_table
+  | Acceleration_structure
 type entry_point = { name : string; stage : stage }
 type binding =
   { group : int; binding : int; kind : binding_kind; visibility : stage list }

@@ -28,7 +28,6 @@ let feature_name : Ogpu_core.Caps.feature -> string =
   | Compute_pipeline -> "compute_pipeline" | Render_pipeline -> "render_pipeline"
   | Queue -> "queue" | Surface -> "surface"
   | Ray_tracing -> "ray_tracing" | Ray_tracing_curves -> "ray_tracing_curves" | Ray_tracing_motion -> "ray_tracing_motion"
-  | Function_tables -> "function_tables"
   | Unknown name -> name
 
 let feature_map : (Ogpu_core.Caps.feature * sdk_type list) list =
@@ -43,7 +42,6 @@ let feature_map : (Ogpu_core.Caps.feature * sdk_type list) list =
   ; Ray_tracing, [ Protocol "MTLAccelerationStructure" ]
   ; Ray_tracing_curves, [ Class "MTLAccelerationStructureCurveGeometryDescriptor" ]
   ; Ray_tracing_motion, [ Class "MTLMotionKeyframeData" ]
-  ; Function_tables, [ Protocol "MTLIntersectionFunctionTable" ]
   ]
 
 type entry =
@@ -299,8 +297,6 @@ let entries : entry list =
              ; access = Get; ocaml = "device_supports_raytracing_from_render"; since = None; feature = C.Ray_tracing }
   ; Property { recv = "Device"; objc = "id<MTLDevice>"; name = "supportsDynamicLibraries"; ty = Scalar Bool
              ; access = Get; ocaml = "device_supports_dynamic_libraries"; since = None; feature = C.Buffer }
-  ; Property { recv = "Device"; objc = "id<MTLDevice>"; name = "supportsFunctionPointers"; ty = Scalar Bool
-             ; access = Get; ocaml = "device_supports_function_pointers"; since = None; feature = C.Function_tables }
 
   ; Method { recv = "Device"; objc = "id<MTLDevice>"; sel = "supportsTextureSampleCount:"; args = [ Scalar Nsuint ]
            ; ret = Some (Scalar Bool); error = false; ocaml = "device_supports_texture_sample_count"; since = None
@@ -455,7 +451,6 @@ let entries : entry list =
 
   ; Native { ocaml = "library_function_names"; signature = "handle -> string array"; primitives = [ "caml_rays_metal_library_function_names" ]; reason = "array/aggregate marshalling and native validation" }
   ; Native { ocaml = "function_find"; signature = "handle -> string -> (handle, string) result"; primitives = [ "caml_rays_metal_function_find" ]; reason = "checked function name/device identity after SDK lookup" }
-  ; Property { recv = "Function"; objc = "id<MTLFunction>"; name = "name"; ty = Str; access = Get; ocaml = "function_name"; since = None; feature = C.Compute_pipeline }
   ; Property { recv = "Function"; objc = "id<MTLFunction>"; name = "functionType"; ty = Enum_of "MTLFunctionType"; access = Get; ocaml = "function_kind"; since = None; feature = C.Compute_pipeline }
   ; Native { ocaml = "function_specialize"; signature = "handle ->\n  string ->\n    function_constant_value array -> string option -> (handle, string) result"; primitives = [ "caml_rays_metal_function_specialize" ]; reason = "array/aggregate marshalling and native validation" }
 
@@ -474,12 +469,8 @@ let entries : entry list =
   ; Method { recv = "Device"; objc = "id<MTLDevice>"; sel = "newAccelerationStructureWithSize:"; args = [ Scalar Nsuint ]; ret = Some (Obj "Acceleration_structure"); error = false; ocaml = "acceleration_structure_create"; since = None; feature = C.Ray_tracing ; pool = true }
 
   ; Method { recv = "Acceleration_encoder"; objc = "id<MTLAccelerationStructureCommandEncoder>"; sel = "copyAndCompactAccelerationStructure:toAccelerationStructure:"; args = [ Obj "Acceleration_structure"; Obj "Acceleration_structure" ]; ret = None; error = false; ocaml = "acceleration_encoder_copy_and_compact"; since = None; feature = C.Ray_tracing ; pool = true }
-  ; Method { recv = "Compute_pipeline"; objc = "id<MTLComputePipelineState>"; sel = "functionHandleWithFunction:"; args = [ Obj "Function" ]; ret = Some (Obj "Function_handle"); error = false; ocaml = "compute_pipeline_function_handle"; since = None; feature = C.Function_tables ; pool = true }
 
-  ; Native { ocaml = "compute_pipeline_intersection_function_table"; signature = "handle -> int64 -> (handle, string) result"; primitives = [ "caml_rays_metal_compute_pipeline_intersection_function_table" ]; reason = "descriptor construction and checked object graphs" }
 
-  ; Method { recv = "Intersection_function_table"; objc = "id<MTLIntersectionFunctionTable>"; sel = "setFunction:atIndex:"; args = [ Opt_obj "Function_handle"; Scalar Nsuint_int ]; ret = None; error = false; ocaml = "intersection_function_table_set_function"; since = None; feature = C.Function_tables ; pool = true }
-  ; Method { recv = "Intersection_function_table"; objc = "id<MTLIntersectionFunctionTable>"; sel = "setBuffer:offset:atIndex:"; args = [ Opt_obj "Buffer"; Scalar Nsuint; Scalar Nsuint_int ]; ret = None; error = false; ocaml = "intersection_function_table_set_buffer"; since = None; feature = C.Function_tables ; pool = true }
 
   ; Native { ocaml = "command_buffer_render_encoder_attachments"; signature = "handle ->\n  handle ->\n    handle option ->\n      handle option ->\n        (float * float * float * float) -> (handle, string) result"; primitives = [ "caml_rays_metal_command_buffer_render_encoder_attachments_bytecode"; "caml_rays_metal_command_buffer_render_encoder_attachments" ]; reason = "temporary render-pass descriptor graph and attachment ownership" }
 
@@ -511,7 +502,6 @@ let entries : entry list =
   ; Method { recv = "Compute_encoder"; objc = "id<MTLComputeCommandEncoder>"; sel = "dispatchThreads:threadsPerThreadgroup:"; args = [ Tuple "Mtl_size_int"; Tuple "Mtl_size_int" ]; ret = None; error = false; ocaml = "compute_encoder_dispatch"; since = None; feature = C.Compute_pipeline ; pool = false }
   ; Method { recv = "Compute_encoder"; objc = "id<MTLComputeCommandEncoder>"; sel = "setAccelerationStructure:atBufferIndex:"; args = [ Opt_obj "Acceleration_structure"; Scalar Nsuint ]; ret = None; error = false; ocaml = "compute35_acceleration"; since = None; feature = C.Ray_tracing ; pool = false }
 
-  ; Method { recv = "Compute_encoder"; objc = "id<MTLComputeCommandEncoder>"; sel = "setIntersectionFunctionTable:atBufferIndex:"; args = [ Opt_obj "Intersection_function_table"; Scalar Nsuint ]; ret = None; error = false; ocaml = "compute35_intersection"; since = None; feature = C.Function_tables ; pool = false }
 
   ; Native { ocaml = "compute35_bytes_plain"; signature = "handle -> bytes -> int64 -> (unit, string) result"; primitives = [ "caml_rays_metal_compute35_bytes_plain" ]; reason = "byte buffers/native memory and checked ranges" }
 

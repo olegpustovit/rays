@@ -396,7 +396,7 @@ let build_scene ?caps gpu d =
       let blas = List.map (fun (first, count) -> accel (B.Blas {geometries=[triangles_at first count]})) prototypes in
       let records = Array.mapi (fun k i ->
         let structure_index = Option.get (List.find_index ((=) (i.first, i.triangles)) prototypes) in
-        {B.instance={transform=start i; mask=0xFFFF_FFFF; structure_index}; user_id=k; table_offset=0}) d.instances in
+        {B.instance={transform=start i; mask=0xFFFF_FFFF; structure_index}; user_id=k}) d.instances in
       let count = Array.length d.instances in
       let records, kind, motion_transforms = if motion then
           get (B.pack_motion_instances device (Array.mapi (fun k record -> {B.record; transforms_start=2*k;

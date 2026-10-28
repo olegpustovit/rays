@@ -1,25 +1,20 @@
 type token=int64
 type receipt={epoch:int64}
 type driver_resource={token:token;write:int64->bytes->(unit,Error.t)result;read:int64->int->(bytes,Error.t)result;read_into:int64->bytes->int->int->(unit,Error.t)result;destroy:unit->(unit,Error.t)result}
-type driver_table={table_token:token;
-  table_set_function:index:int->string->(unit,Error.t)result;
-  table_set_buffer:index:int->token->offset:int64->(unit,Error.t)result;
-  destroy_table:unit->(unit,Error.t)result}
 type driver_pipeline={pipeline_token:token;max_threads:int;
-  create_table:capacity:int->(driver_table,Error.t)result;
   destroy_pipeline:unit->(unit,Error.t)result}
 type driver_frame={frame_token:token}
 type gpu_timing={gpu_seconds:float}
 type driver_library={
   create_compute_pipeline_in:entry:string->constants:(string*Shader.constant_value)list->
-    interface:Shader.binding list->linked:string list->(driver_pipeline,Error.t)result;
+    interface:Shader.binding list->(driver_pipeline,Error.t)result;
   destroy_library:unit->(unit,Error.t)result}
 type accel_sizes={structure_size:int64;build_scratch_size:int64}
 type driver_keyframe=token*int64
 type driver_geometry=
   |Driver_triangles of{vertices:token;offset:int64;length:int64;vertex_stride:int;vertex_count:int}
   |Driver_motion_triangles of{keyframes:driver_keyframe array;vertex_stride:int;vertex_count:int}
-  |Driver_boxes of{boxes:driver_keyframe array;stride:int;count:int;opaque:bool;duplicate:bool;table_offset:int}
+  |Driver_boxes of{boxes:driver_keyframe array;stride:int;count:int;opaque:bool;duplicate:bool}
   |Driver_curves of{control:driver_keyframe array;control_stride:int;control_count:int;radii:driver_keyframe array;radius_stride:int;indices:token;index_offset:int64;segment_count:int;per_segment:int;curve_type:int;basis:int;caps:int}
 type driver_motion={motion_keyframes:int;motion_start:float;motion_end:float;motion_start_border:int;motion_end_border:int}
 type instance_kind=Acceleration.instance_kind=User_id_instances|Motion_instances
@@ -35,7 +30,6 @@ type driver_compute_encoder={
   set_bytes:index:int->bytes->(unit,Error.t)result;
   set_texture:index:int->token->(unit,Error.t)result;
   set_accel:index:int->token->(unit,Error.t)result;
-  set_table:index:int->token->(unit,Error.t)result;
   dispatch_threads:threads:int*int*int->threadgroup:int*int*int->(unit,Error.t)result;
 
   compute_use_accels:token list->(unit,Error.t)result;
@@ -123,7 +117,7 @@ type device={raw:driver_device;handle:Handle.device;mutable children:int;mutable
 and resource={raw:driver_resource;handle:unit Handle.t;device:device;mutable dead:bool}
 and buffer={resource:resource;buffer_descriptor:Types.buffer_descriptor;memory:Types.memory}
 and texture={resource:resource;texture_descriptor:Types.texture_descriptor}
-and pipeline={pipeline_driver:driver_pipeline;device:device;pipeline_library:library option;pipeline_indirect:bool;pipeline_linked:string list;
+and pipeline={pipeline_driver:driver_pipeline;device:device;pipeline_library:library option;pipeline_indirect:bool;
   pipeline_shape:pipeline_shape;mutable dead:bool}
 and pipeline_shape=Vertex_shape|Compute_shape
 and library={library_raw:driver_library;library_device:device;mutable library_dead:bool;mutable library_pipelines:int}
@@ -227,8 +221,8 @@ type keyframe={buffer:buffer;offset:int64}
 type curve_type=Round_curve|Flat_curve
 type curve_basis=Bspline|Catmull_rom|Linear_basis|Bezier
 type curve_caps=No_caps|Disk_caps|Sphere_caps
-type geometry_options={opaque:bool;duplicate_intersection:bool;table_offset:int}
-let default_geometry_options={opaque=false;duplicate_intersection=false;table_offset=0}
+type geometry_options={opaque:bool;duplicate_intersection:bool}
+let default_geometry_options={opaque=false;duplicate_intersection=false}
 type geometry=
   |Triangles of{vertices:buffer;offset:int64;length:int64;vertex_stride:int;vertex_count:int}
   |Motion_triangles of{keyframes:keyframe list;vertex_stride:int;vertex_count:int}
@@ -241,9 +235,8 @@ type accel_descriptor=
   |Motion_blas of{geometries:geometry list;motion:motion}
   |Tlas_of of{instances:buffer;offset:int64;instance_count:int;kind:instance_kind;structures:accel list;motion_transforms:(buffer*int64*int)option}
   |Sized of{size:int64;template:accel}
-type instance_record={instance:instance;user_id:int;table_offset:int}
+type instance_record={instance:instance;user_id:int}
 type motion_instance={record:instance_record;transforms_start:int;transforms_count:int;start_time:float;end_time:float;start_border:border;end_border:border}
-type function_table={table_raw:driver_table;table_device:device;table_pipeline:pipeline;table_capacity:int;mutable table_dead:bool}
 let valid_name value=value<>""&&not(String.contains value '\000')
 let create_library device shader=
   let op="Backend.create_library"in
@@ -251,7 +244,7 @@ let create_library device shader=
   match device.raw.create_library shader with Error _ as e->e|Ok raw->
   device.children<-device.children+1;
   Ok{library_raw=raw;library_device=device;library_dead=false;library_pipelines=0}
-let create_compute_pipeline_from (library:library) ~entry ?(constants=[]) ~interface ?(linked=[]) ()=
+let create_compute_pipeline_from (library:library) ~entry ?(constants=[]) ~interface ()=
   let op="Backend.create_compute_pipeline_from"in
   if library.library_dead then error op Error.Stale_handle"library is destroyed"
   else match live op library.library_device with Error _ as e->e|Ok()->
@@ -260,11 +253,9 @@ let create_compute_pipeline_from (library:library) ~entry ?(constants=[]) ~inter
   if not(valid_name entry)then error op Error.Invalid_argument"entry name is empty or contains NUL"
   else match Shader.validate_bindings interface with Error _ as e->e|Ok()->
   match Shader.validate_constants constants with Error _ as e->e|Ok()->
-  if not(List.for_all valid_name linked)||List.sort_uniq compare linked<>List.sort compare linked then error op Error.Invalid_argument"linked function names must be nonempty and unique"
-  else if linked<>[]&&not(Caps.has device.raw.capabilities Caps.Function_tables) then error op Error.Unsupported"function tables are unavailable on this adapter profile"
-  else match library.library_raw.create_compute_pipeline_in ~entry ~constants ~interface ~linked with Error _ as e->e|Ok pipeline_driver->
+  match library.library_raw.create_compute_pipeline_in ~entry ~constants ~interface with Error _ as e->e|Ok pipeline_driver->
   device.children<-device.children+1;library.library_pipelines<-library.library_pipelines+1;
-  Ok{pipeline_driver;device;pipeline_library=Some library;pipeline_indirect=false;pipeline_linked=linked;pipeline_shape=Compute_shape;dead=false}
+  Ok{pipeline_driver;device;pipeline_library=Some library;pipeline_indirect=false;pipeline_shape=Compute_shape;dead=false}
 let destroy_library (library:library)=
   let op="Backend.destroy_library"in
   if library.library_dead then Ok()
@@ -276,14 +267,14 @@ let max_total_threads (pipeline:pipeline)=pipeline.pipeline_driver.max_threads
 let instance_stride_of (device:device) kind=(device.raw.instance_layout kind).(0)
 let finite value=Float.is_finite value&&Float.abs value<=3.402823466e38
 let valid_instance (i:instance)=Array.length i.transform=12&&Array.for_all finite i.transform&&i.mask>=0&&i.mask<=0xFFFF_FFFF&&i.structure_index>=0
-let valid_record (r:instance_record)=valid_instance r.instance&&r.user_id>=0&&r.user_id<=0xFFFF_FFFF&&r.table_offset>=0
+let valid_record (r:instance_record)=valid_instance r.instance&&r.user_id>=0&&r.user_id<=0xFFFF_FFFF
 let border_code=function Clamp->0|Vanish->1
 let pack_instance_records (device:device) records=
   let op="Backend.pack_instance_records"in
   if Array.length records=0 then error op Error.Invalid_argument"instance array is empty"
-  else if not(Array.for_all valid_record records)then error op Error.Invalid_argument"instance transform, mask, index, user id, or table offset is invalid"
+  else if not(Array.for_all valid_record records)then error op Error.Invalid_argument"instance transform, mask, index, or user id is invalid"
   else Ok(Acceleration.pack_instances(device.raw.instance_layout User_id_instances)
-    (Array.map(fun(r:instance_record)->r.instance.transform,r.instance.mask,r.instance.structure_index,r.table_offset,r.user_id)records))
+    (Array.map(fun(r:instance_record)->r.instance.transform,r.instance.mask,r.instance.structure_index,r.user_id)records))
 let pack_motion_instances (device:device) instances=
   let op="Backend.pack_motion_instances"in
   if Array.length instances=0 then error op Error.Invalid_argument"instance array is empty"
@@ -291,7 +282,7 @@ let pack_motion_instances (device:device) instances=
   then error op Error.Invalid_argument"motion instance record, transform range, or time range is invalid"
   else Ok(Acceleration.pack_motion_instances(device.raw.instance_layout Motion_instances)
     (Array.map(fun(m:motion_instance)->
-      (m.record.instance.mask,m.record.instance.structure_index,m.record.table_offset,m.record.user_id),
+      (m.record.instance.mask,m.record.instance.structure_index,m.record.user_id),
       (m.transforms_start,m.transforms_count),(border_code m.start_border,border_code m.end_border),
       (m.start_time,m.end_time))instances))
 let pack_transforms transforms=
@@ -371,7 +362,7 @@ let create_accel device descriptor=
   let driver_geometry=function
     |Triangles{vertices;offset;length;vertex_stride;vertex_count}->Driver_triangles{vertices=tok vertices;offset;length;vertex_stride;vertex_count}
     |Motion_triangles{keyframes=k;vertex_stride;vertex_count}->Driver_motion_triangles{keyframes=keyframes k;vertex_stride;vertex_count}
-    |Bounding_boxes{boxes;stride;count;options}->Driver_boxes{boxes=keyframes boxes;stride;count;opaque=options.opaque;duplicate=options.duplicate_intersection;table_offset=options.table_offset}
+    |Bounding_boxes{boxes;stride;count;options}->Driver_boxes{boxes=keyframes boxes;stride;count;opaque=options.opaque;duplicate=options.duplicate_intersection}
     |Curves{control_points;control_stride;control_point_count;radii;radius_stride;indices;index_offset;segment_count;control_points_per_segment;curve_type;basis;caps}->
         Driver_curves{control=keyframes control_points;control_stride;control_count=control_point_count;radii=keyframes radii;radius_stride;indices=tok indices;index_offset;segment_count;per_segment=control_points_per_segment;
           curve_type=(match curve_type with Round_curve->0|Flat_curve->1);basis=(match basis with Bspline->0|Catmull_rom->1|Linear_basis->2|Bezier->3);caps=(match caps with No_caps->0|Disk_caps->1|Sphere_caps->2)}in
@@ -443,43 +434,6 @@ let set_accel (encoder:compute_encoder) ~index (accel:accel)=
   match check_accel op (commands_device encoder.compute_commands) accel with Error _ as e->e|Ok()->
   if not(Acceleration.built accel.portable)then error op Error.Invalid_state"acceleration structure has no encoded build"
   else encoder.compute_raw.set_accel ~index accel.accel_raw.accel_token
-let create_intersection_table (pipeline:pipeline) ~capacity=
-  let op="Backend.create_intersection_table"in
-  if pipeline.dead then error op Error.Stale_handle"pipeline is destroyed"
-  else match live op pipeline.device with Error _ as e->e|Ok()->
-  match Caps.require ~operation:op pipeline.device.raw.capabilities Caps.Function_tables with Error _ as e->e|Ok()->
-  if capacity<=0||capacity>65536 then error op Error.Invalid_argument"table capacity must be in [1,65536]"
-  else if pipeline.pipeline_linked=[]then error op Error.Invalid_argument"pipeline has no linked functions"
-  else match pipeline.pipeline_driver.create_table ~capacity with Error _ as e->e|Ok table_raw->
-  pipeline.device.children<-pipeline.device.children+1;
-  Ok{table_raw;table_device=pipeline.device;table_pipeline=pipeline;table_capacity=capacity;table_dead=false}
-let live_table op (table:function_table)=
-  if table.table_dead then error op Error.Stale_handle"function table is destroyed"
-  else if table.table_pipeline.dead then error op Error.Stale_handle"table pipeline is destroyed"
-  else Ok()
-let table_set_function (table:function_table) ~index name=
-  let op="Backend.table_set_function"in
-  match live_table op table with Error _ as e->e|Ok()->
-  if index<0||index>=table.table_capacity then error op Error.Invalid_argument"table index exceeds its capacity"
-  else if not(List.mem name table.table_pipeline.pipeline_linked)then error op Error.Invalid_argument"function is not linked into the table's pipeline"
-  else table.table_raw.table_set_function ~index name
-let table_set_buffer (table:function_table) ~index (buffer:buffer)=
-  let op="Backend.table_set_buffer"in
-  match live_table op table with Error _ as e->e|Ok()->
-  match check_resource op table.table_device buffer.resource with Error _ as e->e|Ok()->
-  if index<0||index>=table.table_capacity then error op Error.Invalid_argument"table index exceeds its capacity"
-  else if buffer.buffer_descriptor.size<=0L then error op Error.Invalid_argument"buffer is empty"
-  else table.table_raw.table_set_buffer ~index buffer.resource.raw.token ~offset:0L
-let destroy_table (table:function_table)=
-  if table.table_dead then Ok()
-  else match table.table_raw.destroy_table()with Error _ as e->e|Ok()->
-    table.table_dead<-true;table.table_device.children<-table.table_device.children-1;Ok()
-let set_table (encoder:compute_encoder) ~index (table:function_table)=
-  let op="Backend.set_table"in
-  match open_compute op encoder with Error _ as e->e|Ok()->match valid_slot op index with Error _ as e->e|Ok()->
-  match live_table op table with Error _ as e->e|Ok()->
-  if table.table_device!=commands_device encoder.compute_commands then error op Error.Cross_device"function table belongs to another device"
-  else encoder.compute_raw.set_table ~index table.table_raw.table_token
 let dispatch op (encoder:compute_encoder) grid threadgroup dispatch=
   match open_compute op encoder with Error _ as e->e|Ok()->
   if not encoder.pipeline_set then error op Error.Invalid_state"no compute pipeline is set"
@@ -594,7 +548,7 @@ let create_render_pipeline ?(blend=Pipeline.Replace) ?(topology=Render_pass.Tria
     error op Error.Invalid_argument"pipeline topology class must be triangles or points"
   else match device.raw.create_render_pipeline{blend;topology;indirect}descriptor with Error _ as e->e|Ok pipeline_driver->
     device.children<-device.children+1;
-    Ok{pipeline_driver;device;pipeline_library=None;pipeline_indirect=indirect;pipeline_linked=[];pipeline_shape=Vertex_shape;dead=false}
+    Ok{pipeline_driver;device;pipeline_library=None;pipeline_indirect=indirect;pipeline_shape=Vertex_shape;dead=false}
 let pipeline_indirect (value:pipeline)=value.pipeline_indirect
 let create_icb device ~max_commands=
   let op="Backend.create_icb"in

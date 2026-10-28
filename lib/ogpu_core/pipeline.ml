@@ -10,7 +10,7 @@ type render_descriptor =
 let invalid operation message = Error (Error.make operation Error.Invalid_argument message)
 let valid_text value = value <> "" && not (String.contains value '\000')
 let binding_kind = function
-  | Shader.Uniform_buffer | Storage_buffer | Intersection_table -> Binding.Buffer
+  | Shader.Uniform_buffer | Storage_buffer -> Binding.Buffer
   | Sampled_texture | Storage_texture -> Binding.Texture
   | Sampler -> Binding.Sampler
   | Acceleration_structure -> Binding.Acceleration_structure

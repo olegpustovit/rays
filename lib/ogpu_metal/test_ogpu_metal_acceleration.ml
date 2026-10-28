@@ -26,7 +26,7 @@ let run () =
     get(Acceleration.encode_build encoder device structure~scratch~scratch_offset:0L);
     let instances=get(Buffer.create device~memory:Buffer.Shared{Ogpu.Types.size=68L;usage=[Storage];label=Some"instances"})in
     Hashtbl.add buffers 2L instances;
-    get(Buffer.write_bytes device instances~dst_offset:0L(Ogpu.Acceleration.pack_instances[|68;0;48;52;56;60;64;-1;-1;-1;-1;-1;-1|][|[|1.;0.;0.;0.;0.;1.;0.;0.;0.;0.;1.;0.|],0xFFFF_FFFF,0,0,7|]));
+    get(Buffer.write_bytes device instances~dst_offset:0L(Ogpu.Acceleration.pack_instances[|68;0;48;52;60;64;-1;-1;-1;-1;-1;-1|][|[|1.;0.;0.;0.;0.;1.;0.;0.;0.;0.;1.;0.|],0xFFFF_FFFF,0,7|]));
     let top=get(create(Driver_tlas{instances=2L;offset=0L;instance_count=1;kind=User_id_instances;structures=[|10L|];motion_transforms=None}))in
     Hashtbl.add structures 11L top;
     expect Ogpu.Error.Invalid_argument(create(Driver_tlas{instances=2L;offset=0L;instance_count=1;kind=User_id_instances;structures=[|11L|];motion_transforms=None}));

@@ -1,6 +1,6 @@
 type stage = Vertex | Fragment | Compute
 type binding_kind = Uniform_buffer | Storage_buffer | Sampled_texture | Storage_texture | Sampler
-  | Acceleration_structure | Intersection_table
+  | Acceleration_structure
 type entry_point = { name : string; stage : stage }
 type binding =
   { group : int; binding : int; kind : binding_kind; visibility : stage list }
@@ -35,7 +35,7 @@ let validate_entries entries =
 (* Buffers (including inline constants and acceleration structures), textures
    and samplers occupy separate index spaces, as in Metal's argument tables. *)
 let index_space = function
-  | Uniform_buffer | Storage_buffer | Acceleration_structure | Intersection_table -> 0
+  | Uniform_buffer | Storage_buffer | Acceleration_structure -> 0
   | Sampled_texture | Storage_texture -> 1
   | Sampler -> 2
 
