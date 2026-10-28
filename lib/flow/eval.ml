@@ -1556,7 +1556,15 @@ and card c ~form (d : W.node_definition) parameters ~vals v =
                    d.slots) );
           ]
           (* the call's functions, which the host's field probes sample *)
-          @ List.filter (fun (_, v) -> match v with Fn _ -> true | _ -> false) vals;
+          @ List.filter
+              (fun (_, v) ->
+                let rec callable = function
+                  | Fn _ -> true
+                  | List xs -> Array.exists callable xs
+                  | _ -> false
+                in
+                callable v)
+              vals;
       }
     in
     st.nodes <- n :: st.nodes;
@@ -2262,7 +2270,6 @@ and graph_value ?(rec_ = true) c name over =
 (* ---- entry points ---- *)
 
 let diagnostic code msg span = Diagnostic.error ?span ~code msg
-let inline_nodes = Atomic.make true
 
 let inline_parameters =
   Atomic.make (fun _ (d : W.node_definition) ->
@@ -2297,11 +2304,10 @@ let new_state ?(budget = max_steps) ~record ws =
     kind_fns = ws.W.kind_fns;
     node_defs =
       (let t = Hashtbl.create 8 in
-       if Atomic.get inline_nodes then
-         List.iter
-           (fun (d : W.node_definition) ->
-             Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
-           ws.W.nodes;
+       List.iter
+         (fun (d : W.node_definition) ->
+           Hashtbl.replace t d.kind.qualified (lazy (Atomic.get inline_parameters ws d)))
+         ws.W.nodes;
        t);
     ops = ws.ops;
     find_op = Op.finder ws.ops;

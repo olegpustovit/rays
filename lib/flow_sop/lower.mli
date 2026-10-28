@@ -132,7 +132,8 @@ type t = {
   card_node : node:int -> (Sop.Node.t, string) result;
       (** The factory node of the card with this compiled id (the node menu's and inspector's: its
           parameter schema, rebuilds and facts), over the nodes its call's slots name, with the
-          call's parameters. It keeps the card's id. A card with function arguments has none yet. *)
+          call's parameters and functions. It keeps the card's id and tags; its cook is one inlined
+          call of the kind over its inputs. *)
 }
 
 val source_context : t -> node:int -> (image_context, Diagnostic.t) result

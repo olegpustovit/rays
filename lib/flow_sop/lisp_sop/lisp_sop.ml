@@ -52,17 +52,8 @@ let root (lowered : Flow_sop.Lower.t) (graph : Flow_sop.Lower.graph) =
   else Sop.Edit_graph.compile_node graph.network.geometry ~node_id:root
 
 (* A Lisp call lowers as its factory node (the node menu's and inspector's), whose parameters,
-   facts and rebuilds these helpers' callers check.
-   ponytail: still the global switch; Lower.t.card_node gives the same node for cards without
-   function arguments, but a merge's tags and list-valued rest slots differ from it (handoff E5). *)
-let as_node f =
-  let inline = Atomic.exchange Flow.Eval.inline_nodes false in
-  Fun.protect ~finally:(fun () -> Atomic.set Flow.Eval.inline_nodes inline) f
-
-let rec workspace_node_result ?with_ source =
-  as_node (fun () -> workspace_node_inline ?with_ source)
-
-and workspace_node_inline ?(with_ = []) source =
+   facts and rebuilds these helpers' callers check. *)
+let workspace_node_result ?(with_ = []) source =
   let image_name name =
     if String.starts_with ~prefix:"image/" name then
       Some (String.sub name 6 (String.length name - 6))
@@ -125,9 +116,7 @@ and workspace_node_inline ?(with_ = []) source =
           with
           | None -> Error "the workspace has no SOP graph"
           | Some { root = None; _ } -> Error "the graph has no result"
-          | Some { root = Some root; network; _ } ->
-              Result.map (restore with_)
-                (Sop.Edit_graph.compile_node network.geometry ~node_id:root)))
+          | Some graph -> Result.map (restore with_) (root lowered graph)))
 
 let workspace_node ?with_ text =
   match workspace_node_result ?with_ text with

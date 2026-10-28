@@ -218,11 +218,6 @@ type t = {
           inspection beyond the recording cap. *)
 }
 
-val inline_nodes : bool Atomic.t
-(** Switch of the single-program design (default on): a Lisp node call evaluates its body in the
-    calling program instead of lowering as its own workspace, unless {!inline_parameters} keeps it a
-    node. *)
-
 val inline_parameters :
   (Workspace.t ->
   Workspace.node_definition ->
