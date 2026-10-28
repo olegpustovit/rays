@@ -175,7 +175,8 @@ let world_white : Renderer.Scene_execution.sampled_texture =
   }
 
 let maps_of (baked : World.baked) =
-  let cache_key = (baked.specular, baked.camera.pixels) in
+  let specular = Lazy.force baked.specular in
+  let cache_key = (specular, baked.camera.pixels) in
   let cache = Domain.DLS.get current_world_cache in
   let existing = Option.bind cache (fun context -> World_maps.peek context.world_maps cache_key) in
   match existing with
@@ -184,13 +185,13 @@ let maps_of (baked : World.baked) =
       let key = Printf.sprintf "world:%d:" (fresh_resource_id ()) in
       let maps =
         {
-          specular_maps = baked.specular;
+          specular_maps = specular;
           camera_pixels = baked.camera.pixels;
           specular =
             {
               key = key ^ "specular";
-              levels = Array.map half_level baked.specular;
-              sampler = world_sampler (Array.length baked.specular);
+              levels = Array.map half_level specular;
+              sampler = world_sampler (Array.length specular);
               gpu = None;
             };
           camera =
@@ -347,7 +348,7 @@ let world_of (baked : World.baked) sun =
         put (index + 1) (c.g *. k);
         put (index + 2) (c.b *. k)
       in
-      Array.iteri (fun k c -> rgb (k * 3) c 1.) baked.sh9;
+      Array.iteri (fun k c -> rgb (k * 3) c 1.) (Lazy.force baked.sh9);
       put 27 (2. ** baked.exposure);
       Option.iter
         (fun (sun : World.sun) ->

@@ -19,8 +19,9 @@ let same_baked (a : World.baked) (b : World.baked) =
   && same_bits a.cdf.conditional b.cdf.conditional
   && Array.for_all2
        (fun (x : World.map) (y : World.map) -> same_bits x.pixels y.pixels)
-       a.specular b.specular
-  && a.sh9 = b.sh9 && a.lights = b.lights && a.sun = b.sun
+       (Lazy.force a.specular) (Lazy.force b.specular)
+  && Lazy.force a.sh9 = Lazy.force b.sh9
+  && a.lights = b.lights && a.sun = b.sun
 
 let entry layer = { World.name = "layer"; layer; visible = true }
 let with_layers layers = { World.default with layers = List.map entry layers }
@@ -76,7 +77,7 @@ let irradiance (baked : World.baked) (n : Rays_math.Vec3.t) =
     |]
   in
   let sum = ref 0. in
-  Array.iteri (fun k (c : World.rgb) -> sum := !sum +. (c.r *. basis.(k))) baked.sh9;
+  Array.iteri (fun k (c : World.rgb) -> sum := !sum +. (c.r *. basis.(k))) (Lazy.force baked.sh9);
   !sum
 
 let sh9 () =
