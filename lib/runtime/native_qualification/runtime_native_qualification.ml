@@ -150,7 +150,8 @@ let run scenario =
   in
   let live_stats = get (Renderer.stats runtime) in
   get (Renderer.destroy runtime);
-  let dead_stats = get (Renderer.stats runtime) in
+  if Result.is_ok (Renderer.stats runtime) then failwith "native qualification: a destroyed renderer still reports stats";
+  let handles_after_destroy = live_handles () in
   let expected extent =
     match frozen_software_hash scenario ~extent with
     | Some hash -> hash
@@ -186,7 +187,7 @@ let run scenario =
       ("prepared_upload_bytes", `Int uploaded);
       ("reported_upload_bytes", `String (Int64.to_string live_stats.uploaded_bytes));
       ("pipeline_cache_entries_live", `Int live_stats.pipeline_cache_entries);
-      ("pipeline_cache_entries_after_destroy", `Int dead_stats.pipeline_cache_entries);
+      ("live_handles_after_destroy", `Int handles_after_destroy);
       ( "initial_logical_drawable",
         `List
           [
