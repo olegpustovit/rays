@@ -221,6 +221,9 @@ module Private : sig
       frame's samples, a vec4 per pixel in row order. Scene traces go to the [Flow.Ray_host] of scene 1. *)
   val lisp_kernel : t -> string -> (int * string, string) result
   (** A Lisp kernel of the current scene shape ("trace", "preview", ...): its pipeline's thread limit and its MSL. *)
+  val kernel_cache : string option ref
+  (** The directory a later process reads the kernels' front-end results from (default the user's
+      Library/Caches/rays/kernels; None compiles every kernel). *)
   val check_library : unit -> (unit, string) result
   (** Checks pathtrace.rays and its helpers whole; the tracer types them only where its kernels call them. *)
   val check_sketch : unit -> (unit, string) result

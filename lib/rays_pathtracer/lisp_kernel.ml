@@ -86,8 +86,6 @@ type kernel = {
   msl : Flow_gpu.Emit.msl;
   base : Flow_ir.Packed.Host.inputs;
   slots : (string * Flow.Ty.t) option array;  (* the placeholder each uniform reads *)
-  zeros : float array array;  (* a bound table's length stand-in: its gather clamp reads the array length *)
-  mutable indices : float array;  (* the pixel input's length stand-in; the device buffer holds the indices *)
 }
 
 type t = {
@@ -115,15 +113,14 @@ let functions f ~preview =
   List.fold_right (fun name acc -> let* acc = acc in let* f = fn name in Ok (f :: acc))
     (if preview then previews else [ "trace"; "geometry"; "resolve" ]) (Ok [])
 
-(* The accumulation set now, the preview set on its first use. *)
+(* A set's functions on the first use of one of its kernels that the disk cache does not hold. *)
 let compile f =
-  let* fns = functions f ~preview:false in
-  Ok { facts = f; fns; values = List.map (fun (name, ty) -> name, (ty, placeholder ty)) (uniforms @ tables);
+  Ok { facts = f; fns = []; values = List.map (fun (name, ty) -> name, (ty, placeholder ty)) (uniforms @ tables);
        pixels = E.Int_array [| 0 |]; kernels = [] }
 
 let fn t name =
   let* () = if List.mem_assoc name t.fns then Ok ()
-    else Result.map (fun fns -> t.fns <- t.fns @ fns) (functions t.facts ~preview:true) in
+    else Result.map (fun fns -> t.fns <- t.fns @ fns) (functions t.facts ~preview:(List.mem name previews)) in
   Option.to_result ~none:("no path tracer kernel " ^ name) (List.assoc_opt name t.fns)
 
 let check_library () =
@@ -142,30 +139,73 @@ let check_sketch () =
   | Ok syntax -> match Flow.Workspace.check ~ops ~call_sites:true { Flow.Catalog.version = 1; kinds = [] } syntax with
     | Some _, [] -> Ok () | _, ds -> Error (diagnostics ds)
 
+(* The front end's result for one kernel: its MSL, its inputs, and the placeholder each uniform reads. *)
+type front = Flow_gpu.Emit.msl * Flow_ir.Packed.Host.inputs * (string * Flow.Ty.t) option array
+
+let front t name =
+  let* fn = fn t name in
+  let bound = Flow.Eval.Host.map_function_bindings (function
+    | Flow.Value.Source (n, _, []) when String.starts_with ~prefix:"pt/" n ->
+        snd (List.assoc (String.sub n 3 (String.length n - 3)) t.values)
+    | value -> value) fn in
+  let inputs = if name = "trace" then [ t.pixels; t.pixels ] else [ t.pixels ] in
+  let* residual = match Flow.Eval.Host.map_function ~signature:{ params = List.map (fun _ -> Flow.Ty.Int) inputs; result = Vec4 }
+                          bound inputs with
+    | Ok (E.Residual r) -> Ok r | Ok _ -> Error "path tracer kernel did not defer"
+    | Error d -> Error (name ^ ": " ^ Diagnostic.to_string d) in
+  let* template = Option.to_result ~none:("path tracer kernel " ^ name ^ " has no device template")
+      (Packed.compile_template residual (E.Residual.residual_view residual).term) in
+  let* msl = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_gpu.Emit.kernel ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion ?curves:t.facts.curves template) in
+  let* base = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_ir.Packed.Host.prepare ~fast:true template ~live:(Input.at_time 0.)) in
+  let slots = Array.map (function
+    | Flow_ir.Packed.Host.Value v ->
+        Option.map (fun (n, (ty, _)) -> n, ty) (List.find_opt (fun (_, (_, p)) -> p == v) t.values)
+    | _ -> None) (Flow_ir.Packed.Host.uniform_shapes template) in
+  Ok ((msl, base, slots) : front)
+
+(* A later process of the same executable skips the front end (the old handwritten kernel had none): each
+   kernel's result is a file under [cache_dir] (the user cache directory; None disables it), named by
+   the digest of the executable's identity and the kernel's text, holding a digest of its marshalled payload.
+   A torn or unreadable entry is recompiled and rewritten; past [cache_files] the oldest are removed. *)
+let cache_files = 64
+let cache_dir = ref (Option.map (fun home -> Filename.concat home "Library/Caches/rays/kernels") (Sys.getenv_opt "HOME"))
+let executable = lazy (match Unix.stat Sys.executable_name with
+  | s -> Some (Printf.sprintf "%s\000%d\000%.9f" Sys.executable_name s.st_size s.st_mtime)
+  | exception Unix.Unix_error _ -> None)
+
+let rec mkdir_p dir = if not (Sys.file_exists dir) then begin
+  mkdir_p (Filename.dirname dir); try Sys.mkdir dir 0o755 with Sys_error _ -> () end
+
+let store dir file (value : front) =
+  mkdir_p dir;
+  let payload = Marshal.to_string value [] in
+  let temp = Filename.temp_file ~temp_dir:dir "kernel" ".part" in
+  Out_channel.with_open_bin temp (fun out -> output_string out (Digest.string payload); output_string out payload);
+  Sys.rename temp file;
+  let entries = Array.map (fun f -> let f = Filename.concat dir f in (Unix.stat f).st_mtime, f) (Sys.readdir dir) in
+  Array.sort compare entries;
+  Array.iteri (fun i (_, f) -> if i < Array.length entries - cache_files then Sys.remove f) entries
+
+let cached t name =
+  match !cache_dir, Lazy.force executable with
+  | None, _ | _, None -> front t name
+  | Some dir, Some executable ->
+      let text = text t.facts ~preview:(List.mem name previews) in
+      let file = Filename.concat dir (Digest.to_hex (Digest.string (String.concat "\000" [ executable; name; text ]))) in
+      match In_channel.with_open_bin file In_channel.input_all with
+      | data when String.length data > 16 && String.sub data 0 16 = Digest.substring data 16 (String.length data - 16) ->
+          Ok (Marshal.from_string data 16 : front)
+      | _ | exception Sys_error _ ->
+          let* value = front t name in
+          (try store dir file value with Sys_error _ | Unix.Unix_error _ -> ());
+          Ok value
+
 let kernel t ~lease ~pipelines name =
   match List.assoc_opt name t.kernels with
   | Some k -> Ok k
   | None ->
-      let* fn = fn t name in
-      let bound = Flow.Eval.Host.map_function_bindings (function
-        | Flow.Value.Source (n, _, []) when String.starts_with ~prefix:"pt/" n ->
-            snd (List.assoc (String.sub n 3 (String.length n - 3)) t.values)
-        | value -> value) fn in
-      let inputs = if name = "trace" then [ t.pixels; t.pixels ] else [ t.pixels ] in
-      let* residual = match Flow.Eval.Host.map_function ~signature:{ params = List.map (fun _ -> Flow.Ty.Int) inputs; result = Vec4 }
-                              bound inputs with
-        | Ok (E.Residual r) -> Ok r | Ok _ -> Error "path tracer kernel did not defer"
-        | Error d -> Error (name ^ ": " ^ Diagnostic.to_string d) in
-      let* template = Option.to_result ~none:("path tracer kernel " ^ name ^ " has no device template")
-          (Packed.compile_template residual (E.Residual.residual_view residual).term) in
-      let* msl = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_gpu.Emit.kernel ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion ?curves:t.facts.curves template) in
-      let* base = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_ir.Packed.Host.prepare ~fast:true template ~live:(Input.at_time 0.)) in
-      let slots = Array.map (function
-        | Flow_ir.Packed.Host.Value v ->
-            Option.map (fun (n, (ty, _)) -> n, ty) (List.find_opt (fun (_, (_, p)) -> p == v) t.values)
-        | _ -> None) (Flow_ir.Packed.Host.uniform_shapes template) in
-      let k = { runner = Flow_gpu.Run.create lease pipelines msl; msl; base; slots; zeros = Array.copy base.tables;
-                indices = [||] } in
+      let* msl, base, slots = cached t name in
+      let k = { runner = Flow_gpu.Run.create lease pipelines msl; msl; base; slots } in
       t.kernels <- (name, k) :: t.kernels;
       Ok k
 
@@ -173,21 +213,16 @@ let kernel t ~lease ~pipelines name =
    value and [table n] the buffer and element count bound for table [n]. *)
 let dispatch t ~lease ~pipelines ~commands ~count ~pixels ?slots ~cell ~into ?scene ?extras ?resident ~words ~table name =
   let* k = kernel t ~lease ~pipelines name in
-  if Array.length k.indices <> count then k.indices <- Array.make count 0.;
-  let tables = Array.mapi (fun u zeros -> match k.slots.(u) with
-    | Some (n, (Flow.Ty.Array _ as ty)) ->
-        let length = snd (table n) * width ty in
-        if Array.length zeros <> length then k.zeros.(u) <- Array.make length 0.;
-        k.zeros.(u)
-    | _ -> zeros) k.zeros in
   let uniforms = Array.mapi (fun u old -> match k.slots.(u) with
     | Some (n, ty) when (match ty with Flow.Ty.Array _ -> false | _ -> true) -> words n
     | _ -> old) k.base.uniforms in
-  let inputs = { k.base with uniforms; tables; arrays = Array.map (fun _ -> k.indices) k.base.arrays; count } in
+  let inputs = { k.base with uniforms; arrays = Array.map (fun _ -> [||]) k.base.arrays; count } in
   Result.map_error Diagnostic.to_string
     (Result.map ignore (Flow_gpu.Run.dispatch ~commands ~reset_status:false ~into:(into, cell) ?scene ?extras ?resident
        ~bound:(fun i -> if i = 0 then Some pixels else slots)
-       ~bound_table:(fun u -> match k.slots.(u) with Some (n, Flow.Ty.Array _) -> Some (fst (table n)) | _ -> None)
+       ~bound_table:(fun u -> match k.slots.(u) with
+         | Some (n, (Flow.Ty.Array _ as ty)) -> let buffer, count = table n in Some (buffer, count * width ty)
+         | _ -> None)
        k.runner inputs))
 
 let max_total_threads t ~lease ~pipelines name =
