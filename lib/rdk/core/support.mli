@@ -39,6 +39,9 @@ val get_ok : ('a, string) result -> 'a
 val ceiling_div : int -> int -> int
 (** Quotient rounded up, for a non-negative value and a positive divisor. *)
 
+val run_indexed_ranges : grain:int -> int -> (range:int -> first:int -> last:int -> unit) -> unit
+(** [run_ranges] that also passes the range index, for per-range output slots. *)
+
 val run_ranges : ?grain:int -> int -> (first:int -> last:int -> unit) -> unit
 (** [run_ranges ~grain count work] runs [work ~first ~last] over consecutive half-open ranges of at most [grain], one task per range. Raises [Invalid_argument] when [grain <= 0]. *)
 

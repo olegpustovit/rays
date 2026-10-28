@@ -128,10 +128,7 @@ let create ?cancel ?(grain = 16_384) ?primitives geometry =
   and piece_max_z = Array.make piece_count 0. in
   let piece_ranges = Support.ceiling_div piece_count grain in
   let errors = Array.make piece_ranges None in
-  if piece_ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(piece_ranges - 1) (fun range ->
-    let first_piece = range * grain
-    and last_piece = min piece_count ((range + 1) * grain) in
+  if piece_ranges > 0 then Support.run_indexed_ranges ~grain piece_count (fun ~range ~first:first_piece ~last:last_piece ->
     for piece = first_piece to last_piece - 1 do
       Cancel.poll cancel piece 4095;
       if errors.(range) = None then begin

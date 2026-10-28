@@ -270,8 +270,7 @@ let write_points ?cancel ~grain ~selection ~keep_original_zero ~reverse
   let count = Array.length output.x in
   let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
   let errors = Array.make ranges (-1) in
-  Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-    let first = range * grain and last = min count ((range + 1) * grain) in
+  Support.run_indexed_ranges ~grain count (fun ~range ~first ~last ->
     for point = first to last - 1 do
       Cancel.poll cancel point 4095;
       if match selection with None -> true | Some group -> Group.mem point group then begin
@@ -305,8 +304,7 @@ let write_smooth_vertices ?cancel ~grain ~selection ~keep_original_zero ~reverse
   let count = Array.length source.vertex_points in
   let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
   let errors = Array.make ranges (-1) in
-  Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-    let first = range * grain and last = min count ((range + 1) * grain) in
+  Support.run_indexed_ranges ~grain count (fun ~range ~first ~last ->
     for vertex = first to last - 1 do
       Cancel.poll cancel vertex 4095;
       if match selection with None -> true | Some group -> Group.mem vertex group then
@@ -339,8 +337,7 @@ let write_cusped_vertices ?cancel ~grain ~weighting ~cusp_angle ~selection
   let cosine = cos cusp_angle in
   let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
   let errors = Array.make ranges (-1) in
-  Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-    let first = range * grain and last = min count ((range + 1) * grain) in
+  Support.run_indexed_ranges ~grain count (fun ~range ~first ~last ->
     for vertex = first to last - 1 do
       Cancel.poll cancel vertex 4095;
       if match selection with None -> true | Some group -> Group.mem vertex group then begin
@@ -422,8 +419,7 @@ let fast_point_area ?cancel ~grain geometry =
       let point_ranges = if point_count = 0 then 0
         else (point_count + grain - 1) / grain in
       let point_errors = Array.make point_ranges (-1) in
-      Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(point_ranges - 1) (fun range ->
-        let first = range * grain and last = min point_count ((range + 1) * grain) in
+      Support.run_indexed_ranges ~grain point_count (fun ~range ~first ~last ->
         for point = first to last - 1 do
           Cancel.poll cancel point 4095;
           let vx = x.(point) and vy = y.(point) and vz = z.(point) in
@@ -522,8 +518,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?primitives
                  then existing else None) in
             let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
             let errors = Array.make ranges (-1) in
-            Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-              let first = range * grain and last = min count ((range + 1) * grain) in
+            Support.run_indexed_ranges ~grain count (fun ~range ~first ~last ->
               for primitive = first to last - 1 do
                 Cancel.poll cancel primitive 4095;
                 if match effective_selection with None -> true

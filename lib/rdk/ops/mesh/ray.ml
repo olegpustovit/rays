@@ -234,9 +234,7 @@ let raycast_samples_into ?cancel ?selection ~grain value ~queries ~directions
     | _ -> invalid_arg "Surface_index: sampled ray normal arrays must be supplied together" in
   let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(range_count - 1) (fun range ->
-    let first = range * grain and last = min query_count ((range + 1) * grain) in
+  if range_count > 0 then Support.run_indexed_ranges ~grain query_count (fun ~range ~first ~last ->
     let result_count = samples * 2 in
     let scratch = Array.make 8 0. and node_stack = Array.make 65 0
     and integer_results = Array.make (result_count * 2) (-1)
@@ -344,9 +342,7 @@ let raycast_average_drivers_into ?cancel ?selection ~grain value ~queries
     invalid_arg "Surface_index: average ray driver arrays are inconsistent";
   let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(range_count - 1) (fun range ->
-    let first = range * grain and last = min query_count ((range + 1) * grain) in
+  if range_count > 0 then Support.run_indexed_ranges ~grain query_count (fun ~range ~first ~last ->
     let scratch = Array.make 8 0. and node_stack = Array.make 65 0
     and integer_results = Array.make 2 (-1)
     and float_results = Array.make 4 0. and direction = Array.make 3 0. in
@@ -558,9 +554,7 @@ let run ?cancel { grain; selection; collision_primitives; method_; direction;
     let range_count = if point_count = 0 then 0 else
         (point_count + grain - 1) / grain in
     let errors = Array.make range_count (-1) and changed = Array.make range_count false in
-    if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-        ~finish:(range_count - 1) (fun range ->
-      let first = range * grain and last = min point_count ((range + 1) * grain) in
+    if range_count > 0 then Support.run_indexed_ranges ~grain point_count (fun ~range ~first ~last ->
       let normal = Array.make 3 0. in
       for point = first to last - 1 do
         Cancel.poll cancel point 4095;

@@ -14,9 +14,7 @@ let polygon_area_vector ?cancel ~grain ~need_inverse ~first_failure ?primitives
   let inverse_length = if need_inverse then Array.make count 0. else [||] in
   let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
   let errors = Array.make ranges (-1) in
-  Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-    let first_primitive = range * grain
-    and last_primitive = min count ((range + 1) * grain) in
+  Support.run_indexed_ranges ~grain count (fun ~range ~first:first_primitive ~last:last_primitive ->
     for primitive = first_primitive to last_primitive - 1 do
       Cancel.poll cancel primitive 4095;
       if (match primitives with None -> true | Some group -> Group.mem primitive group)
