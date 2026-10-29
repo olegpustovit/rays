@@ -35,6 +35,7 @@ type kept = {
   kept_epoch : int64;
   settled : bool Atomic.t;  (** completed, its status read: CPU readers may read it *)
   readers : int Atomic.t;  (** conversions in progress: its buffer is not reused under them *)
+  mutable bounds_memo : float array option option;  (** its box once reduced: it never changes *)
   mutable thaw : unit -> unit;  (** materialise it (initial domain), so its buffer can be reused *)
   pressure : device_pressure; [@warning "-69"]  (** the buffer's size, told to the GC; never read *)
 }
@@ -99,6 +100,7 @@ type t = {
   counted : slot;
   uniforms : bytes;
   mutable closed : bool;
+  mutable bounds_out : B.buffer option;  (** the reduction's lanes, made once and reused *)
   mutable creations : int;
   mutable input_uploads : int;
   mutable input_uploaded_bytes : int;
@@ -202,6 +204,7 @@ let create_owned ?pool:shared device queue pipelines (msl : Emit.msl) =
     counted = slot ();
     uniforms = Bytes.create msl.uniform_bytes;
     closed = false;
+    bounds_out = None;
     creations = 0;
     input_uploads = 0;
     input_uploaded_bytes = 0;
@@ -890,7 +893,7 @@ let materialise t kept =
 (* A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): one group of
    1,024 lanes, each lane's min and max (of every 1,024th element) read back (24 KB at most) and finished here. On the
    owner's domain; [None] elsewhere, once read (its planes are then the host's to scan) or on any
-   device failure. *)
+   device failure. Reduced once per output, into one buffer the runner keeps. *)
 let bounds_of t kept =
   if
     kept.kept_width <> 3 || kept.kept_count = 0 || t.closed
@@ -900,64 +903,76 @@ let bounds_of t kept =
     || not (Atomic.get kept.settled)
   then None
   else
-    let n = kept.kept_count in
-    let lanes = min n 1024 in
-    try
-      let compiled =
-        match Pipelines.get t.pipelines Emit.bounds with
-        | Ok compiled -> compiled
-        | Error error -> raise (Diagnostic.Error error)
-      in
-      let out =
-        get
-          (B.create_buffer t.device
-             {
-               label = Some "Flow bounds";
-               size = Int64.of_int (lanes * 24);
-               usage = [ Storage; Copy_src ];
-             })
-      in
-      Fun.protect
-        ~finally:(fun () -> ignore (B.destroy_buffer out))
-        (fun () ->
-          let count = Bytes.create 4 in
-          Bytes.set_int32_le count 0 (Int32.of_int n);
-          let commands = get (B.begin_commands t.queue) in
-          let committed = ref false in
-          let receipt =
-            Fun.protect
-              ~finally:(fun () -> if not !committed then ignore (B.abandon commands))
-              (fun () ->
-                let encoder = get (B.compute_encoder commands) in
-                Fun.protect
-                  ~finally:(fun () -> ignore (B.end_compute encoder))
-                  (fun () ->
-                    get (B.set_pipeline encoder compiled.pipeline);
-                    get (B.set_buffer encoder ~index:0 kept.kept_buffer);
-                    get (B.set_buffer encoder ~index:1 out);
-                    get (B.set_bytes encoder ~index:2 count);
-                    get (B.dispatch_threads encoder ~threads:(1024, 1, 1) ~threadgroup:(1024, 1, 1)));
-                let receipt = get (B.commit commands) in
-                committed := true;
-                receipt)
-          in
-          get (B.complete_through t.queue receipt.epoch);
-          let lane, finite =
-            unpack_array (get (B.read_buffer out ~offset:0L ~length:(lanes * 24))) (lanes * 6)
-          in
-          t.readback_bytes <- t.readback_bytes + (lanes * 24);
-          if not finite then None
-          else begin
-            let b = Array.sub lane 0 6 in
-            for l = 1 to lanes - 1 do
-              for c = 0 to 2 do
-                b.(c) <- Float.min b.(c) lane.((l * 6) + c);
-                b.(c + 3) <- Float.max b.(c + 3) lane.((l * 6) + c + 3)
-              done
-            done;
-            Some b
-          end)
-    with Diagnostic.Error _ -> None
+    match kept.bounds_memo with
+    | Some box -> box
+    | None -> (
+        let n = kept.kept_count in
+        let lanes = min n 1024 in
+        let box =
+          try
+            let compiled =
+              match Pipelines.get t.pipelines Emit.bounds with
+              | Ok compiled -> compiled
+              | Error error -> raise (Diagnostic.Error error)
+            in
+            let out =
+              match t.bounds_out with
+              | Some out -> out
+              | None ->
+                  let out =
+                    get
+                      (B.create_buffer t.device
+                         {
+                           label = Some "Flow bounds";
+                           size = Int64.of_int (1024 * 24);
+                           usage = [ Storage; Copy_src ];
+                         })
+                  in
+                  t.bounds_out <- Some out;
+                  out
+            in
+            let count = Bytes.create 4 in
+            Bytes.set_int32_le count 0 (Int32.of_int n);
+            let commands = get (B.begin_commands t.queue) in
+            let committed = ref false in
+            let receipt =
+              Fun.protect
+                ~finally:(fun () -> if not !committed then ignore (B.abandon commands))
+                (fun () ->
+                  let encoder = get (B.compute_encoder commands) in
+                  Fun.protect
+                    ~finally:(fun () -> ignore (B.end_compute encoder))
+                    (fun () ->
+                      get (B.set_pipeline encoder compiled.pipeline);
+                      get (B.set_buffer encoder ~index:0 kept.kept_buffer);
+                      get (B.set_buffer encoder ~index:1 out);
+                      get (B.set_bytes encoder ~index:2 count);
+                      get
+                        (B.dispatch_threads encoder ~threads:(1024, 1, 1) ~threadgroup:(1024, 1, 1)));
+                  let receipt = get (B.commit commands) in
+                  committed := true;
+                  receipt)
+            in
+            get (B.complete_through t.queue receipt.epoch);
+            let lane, finite =
+              unpack_array (get (B.read_buffer out ~offset:0L ~length:(lanes * 24))) (lanes * 6)
+            in
+            t.readback_bytes <- t.readback_bytes + (lanes * 24);
+            if not finite then None
+            else begin
+              let b = Array.sub lane 0 6 in
+              for l = 1 to lanes - 1 do
+                for c = 0 to 2 do
+                  b.(c) <- Float.min b.(c) lane.((l * 6) + c);
+                  b.(c + 3) <- Float.max b.(c + 3) lane.((l * 6) + c + 3)
+                done
+              done;
+              Some b
+            end
+          with Diagnostic.Error _ -> None
+        in
+        kept.bounds_memo <- Some box;
+        box)
 
 let next_kept = Atomic.make 0
 
@@ -1012,6 +1027,7 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
             kept_epoch = output.epoch;
             settled = Atomic.make false;
             readers = Atomic.make 0;
+            bounds_memo = None;
             thaw = ignore;
             pressure = device_pressure slot.capacity;
           }
@@ -1145,6 +1161,8 @@ let close ?(discard = false) t =
           (Weak.get weak 0))
       t.kept;
     t.kept <- [];
+    Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) t.bounds_out;
+    t.bounds_out <- None;
     if t.own_pool then close_pool t.pool;
     Array.iter
       (fun slot ->

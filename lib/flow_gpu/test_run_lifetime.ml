@@ -16,7 +16,7 @@ let () =
   let live = Ogpu.Impl.live_handles in
   let fail = ref false and pipelines = ref 0 and submitted = ref 0 and invalid_output = ref false in
   let fail_table = ref false and table_writes = ref 0 in
-  let fail_input = ref false and input_writes = ref 0 in
+  let fail_input = ref false and input_writes = ref 0 and creates = ref 0 in
   (* This driver checks ownership and failed-command lifetimes only. It does
      not execute a shader or stand in for native numerical qualification. *)
   let driver =
@@ -31,6 +31,7 @@ let () =
                   capabilities = { raw.capabilities with compute_pipeline = true };
                   create_buffer =
                     (fun memory descriptor ->
+                      incr creates;
                       Result.map
                         (fun (resource : B.driver_resource) ->
                           {
@@ -245,7 +246,37 @@ let () =
           ignore (Test_program.ok (R.dispatch noise values));
           assert (!table_writes = 2);
           ignore (Test_program.ok (R.dispatch noise values));
-          assert (!table_writes = 2)));
+          assert (!table_writes = 2));
+      (* a resident vec3's bounds: the reduction's lanes are one buffer made once, and a box is
+         read back once per output however often it is asked *)
+      let packed = Test_program.compile "(map (fn [x] [x t 0.0]) (array/range 1024))" in
+      let sea =
+        R.Private.create_owned device queue cache (Test_program.ok (Flow_gpu.Emit.kernel packed))
+      in
+      Fun.protect
+        ~finally:(fun () -> R.close sea)
+        (fun () ->
+          let values =
+            Test_program.ok (Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 1.))
+          in
+          let settled () =
+            let planes = Test_program.ok (R.keep (Test_program.ok (R.dispatch sea values))) in
+            ignore (Test_program.ok (planes.settle ()));
+            planes
+          in
+          let first = settled () in
+          let c0 = !creates in
+          ignore (first.bounds ());
+          let read = R.Private.readback_bytes sea in
+          assert (!creates - c0 = 1 && read = 1024 * 24);
+          ignore (first.bounds ());
+          assert (R.Private.readback_bytes sea = read);
+          let second = settled () in
+          let c1 = !creates in
+          ignore (second.bounds ());
+          assert (!creates = c1 && R.Private.readback_bytes sea = 2 * read);
+          first.release ~held:false;
+          second.release ~held:false));
   assert (live () = 0 && !pipelines = 0);
   print_endline
     "GPU output lifetimes: failed completion/reallocation invalidation, float32 input bounds, \
