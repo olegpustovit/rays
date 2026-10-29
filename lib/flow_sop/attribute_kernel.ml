@@ -1606,6 +1606,16 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
         @ Option.to_list (Option.map (fun value -> ("default", value)) default))
   in
   let program = prepare ?profile ?approx ~sink:Flow_ir.Sop_input ~strict ~sources inputs data in
+  (* a lone write as a one-field record, for the device (Flow_ir.Executor.record_on_device) *)
+  let lone_record =
+    match gpu with
+    | Some { Flow_ir.Gpu.fast = true; backend = Some _; _ }
+      when prior = [] && (not selected) && not reference ->
+        Some
+          (prepare ?profile ?approx ~sink:Flow_ir.Sop_input ~strict ~sources inputs
+             (E.Record [ ("values", values) ]))
+    | _ -> None
+  in
   let owned_fields =
     if strict && (not reference) && List.mem kind [ "float_array"; "int_array" ] then
       Result.fold ~ok:Flow_ir.Executor.fresh_csr_fields ~error:(fun _ -> []) program
@@ -1665,51 +1675,62 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
             error "E_CANCELLED" "Attribute kernel cancelled."
           else
             Result.bind guarded @@ fun guarded ->
+            let live = Sop.Context.input context in
+            let grain = Sop.Context.grain context in
+            let writes =
+              List.mapi (fun i (name, kind, _) -> ("w" ^ string_of_int i, name, kind)) prior
+              @ [ ("values", name, kind) ]
+            in
+            let write geometry install =
+              List.fold_left
+                (fun geometry (key, name, kind) -> Result.bind geometry (install key name kind))
+                (Ok geometry) writes
+            in
+            (* the record's outputs kept on the device, installed as deferred storage; [None]
+               leaves it to the CPU *)
+            let on_device program =
+              let device =
+                if reference || elems <> None || Sop.Context.device_refused context node_id then
+                  Ok None
+                else
+                  Flow_ir.Executor.record_on_device ?state ~resolve
+                    ~resident:(resident_read ~geometry) ?gpu program ~live
+              in
+              Result.bind device (function
+                | None -> Ok None
+                | Some fields ->
+                    (* in flight: the session settles the dispatch before a CPU reader, and
+                       recooks this write on the CPU if its status fails *)
+                    (match fields with
+                    | (_, kept) :: _ -> Sop.Context.defer context ~node:node_id kept.settle
+                    | [] -> ());
+                    Result.map Option.some
+                      (write geometries.(0) (fun key name kind geometry ->
+                           let kept = List.assoc key fields in
+                           let count = owner_count geometry owner in
+                           if width kind = kept.width && kept.count = count then
+                             install_deferred ~owner ~kind name kept geometry
+                           else
+                             let planes =
+                               ignore (kept.settle ());
+                               kept.materialise ()
+                             in
+                             write_storage ~owned_fields:[] ~grain ~owner ~kind name
+                               (match (kind, planes) with
+                               | "int", [| p |] -> E.Int_array (Array.map int_of_float p)
+                               | _, [| p |] -> E.Float_array p
+                               | _ -> E.Record [])
+                               geometry)))
+            in
+            (* a lone write over data the device holds (a gather of a resident P) stays there *)
+            let lone () =
+              match lone_record with Some (Ok program) -> on_device program | _ -> Ok None
+            in
             if not guarded then Ok geometries.(0)
             else if prior <> [] then
               Result.bind program (fun program ->
-                  let live = Sop.Context.input context in
-                  let device =
-                    if reference || elems <> None || Sop.Context.device_refused context node_id then
-                      Ok None
-                    else
-                      Flow_ir.Executor.record_on_device ?state ~resolve
-                        ~resident:(resident_read ~geometry) ?gpu program ~live
-                  in
-                  let grain = Sop.Context.grain context in
-                  let writes =
-                    List.mapi (fun i (name, kind, _) -> ("w" ^ string_of_int i, name, kind)) prior
-                    @ [ ("values", name, kind) ]
-                  in
-                  let write geometry install =
-                    List.fold_left
-                      (fun geometry (key, name, kind) ->
-                        Result.bind geometry (install key name kind))
-                      (Ok geometry) writes
-                  in
-                  Result.bind device (function
-                    | Some fields ->
-                        (* in flight: the session settles the dispatch before a CPU reader, and
-                           recooks this write on the CPU if its status fails *)
-                        (match fields with
-                        | (_, kept) :: _ -> Sop.Context.defer context ~node:node_id kept.settle
-                        | [] -> ());
-                        write geometries.(0) (fun key name kind geometry ->
-                            let kept = List.assoc key fields in
-                            let count = owner_count geometry owner in
-                            if width kind = kept.width && kept.count = count then
-                              install_deferred ~owner ~kind name kept geometry
-                            else
-                              let planes =
-                                ignore (kept.settle ());
-                                kept.materialise ()
-                              in
-                              write_storage ~owned_fields:[] ~grain ~owner ~kind name
-                                (match (kind, planes) with
-                                | "int", [| p |] -> E.Int_array (Array.map int_of_float p)
-                                | _, [| p |] -> E.Float_array p
-                                | _ -> E.Record [])
-                                geometry)
+                  Result.bind (on_device program) (function
+                    | Some geometry -> Ok geometry
                     | None ->
                         Result.bind
                           (Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve program
@@ -1774,39 +1795,43 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                                 "Selected writes require both selection and default.")
                       | _ -> error "E_ATTR_TYPE" "Selected write data must be a record.")
                   else
-                    Result.bind
-                      (write_source ~geometry ~owner ~kind name values geometries.(0))
-                      (fun borrowed ->
+                    Result.bind (lone ()) @@ function
+                    | Some geometry -> Ok geometry
+                    | None ->
                         Result.bind
-                          (match borrowed with
-                          | Some _ -> Ok borrowed
-                          | None ->
-                              if reference then Ok None
-                              else
-                                Result.bind
-                                  (write_constant ?state ?elems ~resolve ~owner ~kind ~name constant
-                                     geometries.(0) ~live)
-                                  (function
-                                    | Some geometry -> Ok (Some geometry)
-                                    | None ->
-                                        write_planes ?state ?elems ?gpu ~strict ~resolve ~geometry
-                                          ~owner ~kind ~name program geometries.(0) ~live))
-                          (fun direct ->
-                            if Sop.Context.cancelled context then
-                              error "E_CANCELLED" "Attribute kernel cancelled."
-                            else
-                              match direct with
-                              | Some geometry -> Ok geometry
+                          (write_source ~geometry ~owner ~kind name values geometries.(0))
+                          (fun borrowed ->
+                            Result.bind
+                              (match borrowed with
+                              | Some _ -> Ok borrowed
                               | None ->
-                                  Result.bind
-                                    (Flow_ir.Executor.force ?state ?elems ~reference ~strict
-                                       ~resolve program ~live) (fun values ->
-                                      if Sop.Context.cancelled context then
-                                        error "E_CANCELLED" "Attribute kernel cancelled."
-                                      else
-                                        write_storage ~owned_fields
-                                          ~grain:(Sop.Context.grain context) ~owner ~kind name
-                                          values geometries.(0)))))
+                                  if reference then Ok None
+                                  else
+                                    Result.bind
+                                      (write_constant ?state ?elems ~resolve ~owner ~kind ~name
+                                         constant geometries.(0) ~live)
+                                      (function
+                                        | Some geometry -> Ok (Some geometry)
+                                        | None ->
+                                            write_planes ?state ?elems ?gpu ~strict ~resolve
+                                              ~geometry ~owner ~kind ~name program geometries.(0)
+                                              ~live))
+                              (fun direct ->
+                                if Sop.Context.cancelled context then
+                                  error "E_CANCELLED" "Attribute kernel cancelled."
+                                else
+                                  match direct with
+                                  | Some geometry -> Ok geometry
+                                  | None ->
+                                      Result.bind
+                                        (Flow_ir.Executor.force ?state ?elems ~reference ~strict
+                                           ~resolve program ~live) (fun values ->
+                                          if Sop.Context.cancelled context then
+                                            error "E_CANCELLED" "Attribute kernel cancelled."
+                                          else
+                                            write_storage ~owned_fields
+                                              ~grain:(Sop.Context.grain context) ~owner ~kind name
+                                              values geometries.(0)))))
         in
         let result =
           if deletes = [] then result

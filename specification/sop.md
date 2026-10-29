@@ -614,9 +614,65 @@ Tried and stopped (2026-10-29), with what each still needs:
   only be the device's form, which brings back (1). Measured now (`bench_chain_frames`,
   `CONNECTIVITY=Triangles`, `XDRIVE=":shear_xy (* (get (frame/input) :t) 0.5) :recompute_normals
   true"`, M1 at load 5-6): 0.53 s a frame at 512 squared, 2.0 s at 1M (the normals 1.83 s of it),
-  all on the CPU.
+  all on the CPU. Done since, below.
 - A device-generated `sop/grid` P: done, above (the attempt's two dispatches had two causes, a
   count with no origin and a range built per prepare).
+
+**Recomputed normals on the device** (2026-10-29). The four blockers, as resolved. (2) The owner's
+decision: `sop/transform :recompute_normals` recomputes at every matrix, an identity one included,
+and writes N where it is (`transform_recomputed`: point N in place when the input has it, else
+vertex N, the other owners' N deleted, each by `:when`: what dev's call did, whose `sop/normals`
+on the point N deleted every other owner's N in `normals_install`, so a vertex N beside a point N
+was never recomputed; an N that is not vec3 fails with `sop/normals`' storage error;
+`test_lisp_inline` compares each against dev's body written out), for a static and a live matrix alike, so a
+driven call inlines with one live structure: its P write folds into the chain before it (P
+resident) and the N write follows it. The `:when` tests count `moved`, not `in0`: a capture of
+`in0` counted as a second use of the chain's last write and kept it apart. Golden change: in a
+recomputed call N keeps its slot instead of moving to the end (no Lisp-output golden recomputes
+normals in a transform, so none changed; the manifest's transform entry no longer `calls`
+`sop/normals`). (1) No native node: the normals are the transform's own Lisp, `transform_area_normal`,
+a gather per point (a vertex write maps its points' values) of `sop/normals`' face-area sums: a fold
+over the point's CSR (`sop/adjacency`) of each incident polygon's fan cross products, from +0 in
+ascending vertex order, the scatter's order, so the CPU bytes are `sop/normals`'
+(`test_lisp_inline` compares the bytes on quads, triangles, a sphere's pole fans and vertex N). It
+is fast enough to be the CPU's form too, after two interpreter fixes: a loop's lanes now step
+together over the block (`Packed.execute_loop`: each iteration runs the body over the spans of
+lanes still looping; a block that raises is redone lane-major, as before, so the first error in
+lane order is kept), and a gather over resolved tables runs in parallel (`run_typed`'s `settled`
+forced every capture's components, which refuses an array, so every such region ran on one
+domain). (3) No check form was needed: `sop/normals`' non-finite checks never decide (its reductions
+and kernels raise `E_NONFINITE` first, for any input P), and the gather's own nonfinite result fails
+the write's checks, on the device through its status (the session recooks the write on the CPU,
+which reports the error). (4) A lone write is tried as a one-field record (`Attribute_kernel.node`,
+`lone_record`, only with a fast device) through `record_on_device`; `Cost.sop_device ~resident`
+places a region that reads data the device holds (its source or table answered by `resident`),
+which the CPU would read back first. Topology and adjacency arrays are kept per topology
+(`Topology_kernel_impl.kept`, by the topology's identity): each read copied them, so the device
+uploaded the CSR every frame. A bound map (`(exact displaced)`, `noise_displace`) is now a direct
+region, so a noise displacement is placed too. The CPU cost of the gather: about six incident
+triangles a point, each a fan term over three gathered points.
+
+Measured (`bench_chain_frames`, `CONNECTIVITY=Triangles`, `XDRIVE=":shear_xy (* (get (frame/input)
+:t) 0.5) :recompute_normals true"`, M1 at load 4-5, medians of 11 frames after the first): 512
+squared, 0.0043 s a frame on the device (two dispatches, nothing compiled, uploaded or read back,
+P and N resident) and 0.175 s on the CPU (`CPU=1`), against 0.53 s; 1M, 0.016 s (0.010-0.067, the
+spikes are fresh buffers while earlier results are uncollected) and 0.57-0.62 s on the CPU,
+against 2.0 s. The first frame uploads the CSR and the grid's N once (24 MB at 512 squared). A
+static transform recomputing after a driven noise: 0.0028 s on the device, 0.16 s on the CPU,
+against dev's 0.47 s. `test_chain_frames_native` (fifth case: a noise-displaced triangle grid, its
+N given back by a map over P, sheared and translated by frame, frame 0 an identity) fails unless
+every frame after the first is two dispatches with nothing compiled, uploaded or read back, P
+resident and drawn from the device; its N is within 1.64e-7 of the face-area normals of the
+device's own float32 P, and 4.4e-5 of the CPU's (binary64 P: the float32 rounding of P over edges
+of 1/512, not the gather's arithmetic). `sop_gallery` (five interleaved rounds against dev,
+`BENCH_PHASES=1`, load 4-5): cook median 0.839 s against 0.838 s, lower 0.355 against 0.378 s,
+edit to cook 0.496 against 0.502 s, check 0.257 against 0.251 s; again after the storage check:
+check 0.256 against 0.249 s (+2.7%), lower 0.363 against 0.373, cook 0.834 against 0.843, edit to
+cook 0.500 against 0.505. The check is the transform's three new helpers: `Catalog.check_workspace`
+splices every library definition the workspace reaches and checks it with each workspace check, so
+a shared node file would be checked as often (sop_gallery already reached `sop/normals`' helpers
+through its own normals); keeping checked library definitions across checks is the fix, a checker
+change, not made here.
 
 **Display binding.** A displayed point cloud whose P (and N, if it has one) the device still holds,
 or a triangle mesh (every primitive a triangle) whose P and point N it holds, with no colour, uv,

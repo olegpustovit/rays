@@ -103,6 +103,64 @@
           (if (or kept (int/eq chosen 0)) n (transform_normal normal_matrix preserve n)))
           (sop/attr geo "N" :owner owner :type vec3) selected))
         :owner owner :type vec3 :when present)))))
+;; A point's normal as sop/normals :owner "Point" :weighting "Face area" makes it, gathered: the point
+;; folds the fan cross products of its incident primitives (the CSR of sop/adjacency) in ascending
+;; vertex order, the order the scatter adds them in, from +0, so the CPU bytes are the scatter's. One
+;; point at a time, so a device runs it over a P it holds; a nonfinite sum fails the write's own check.
+; The fan cross product of vertices first, j and j + 1 (normals_faces' contribution at j).
+(defn transform_fan :context value [(positions : (array vec3)) (vp : (array int)) (a : vec3) (j : int)]
+  (let* [u (- (array/nth positions (array/nth vp j)) a)
+         v (- (array/nth positions (array/nth vp (int/add j 1))) a)]
+    [(fma (* -1.0 u.z) v.y (* u.y v.z))
+     (fma (* -1.0 u.x) v.z (* u.z v.x))
+     (fma (* -1.0 u.y) v.x (* u.x v.y))]))
+(defn transform_area_normal :context value
+  [(positions : (array vec3)) (vp : (array int)) (offsets : (array int)) (kinds : (array int))
+   (pov : (array int)) (pvo : (array int)) (pv : (array int)) (point : int)]
+  (let* [total (fold [acc [0.0 0.0 0.0]] [k (range (array/nth pvo point) (array/nth pvo (int/add point 1)))]
+               (let* [prim (array/nth pov (array/nth pv k))
+                      first (array/nth offsets prim)
+                      corners (int/sub (array/nth offsets (int/add prim 1)) first)
+                      a (array/nth positions (array/nth vp first))]
+                 (if (and (int/eq (array/nth kinds prim) 0) (int/ge corners 3))
+                   (+ acc (fold [f [0.0 0.0 0.0]] [j (range (int/add first 1) (int/add first (int/sub corners 1)))]
+                            (+ f (transform_fan positions vp a j))))
+                   acc)))
+         scale (max (abs total.x) (max (abs total.y) (abs total.z)))
+         sc (/ total (if (= scale 0.0) 1.0 scale))]
+    (if (> scale 0.0) (* sc (/ 1.0 (sqrt (fused_dot sc sc)))) [0.0 0.0 0.0])))
+;; Recomputed normals (sop/normals by face area on the owner that has N, point first) written where N
+;; is, the other owners' N deleted, for a static or a live matrix alike: one structure for every frame,
+;; an identity one included (it recomputes too). Nothing selected keeps the input's N.
+(defn transform_recomputed :context sop [(moved : geometry) (changed : bool)]
+  (let* [point_n (sop/has_attr moved "N" :owner "point")
+         vertex_n (and (not point_n) (sop/has_attr moved "N" :owner "vertex"))
+         ; an N that is not vec3 fails as sop/normals fails (its storage check)
+         wrong (or (and point_n (not (sop/has_attr moved "N" :owner "point" :type vec3)))
+                   (and vertex_n (not (sop/has_attr moved "N" :owner "vertex" :type vec3))))]
+    (cond
+      ; (only then may changed, a cooked count, decide the structure)
+      (and (not (live? wrong)) wrong)
+        (if changed (normals_error (str (if point_n "point" "vertex") " N must have float3 storage"))
+          moved)
+      (and (and (not (live? point_n)) (not point_n)) (and (not (live? vertex_n)) (not vertex_n))) moved
+      :else
+      (let* [topo (sop/topology moved)
+             adjacency (sop/adjacency moved)
+             positions (sop/attr moved :P)
+             ; bound: the range then counts moved's points, the write's origin
+             points (sop/count moved :points)
+             normal (fn [(point : int)]
+                      (transform_area_normal positions topo.vertex_points topo.primitive_offsets topo.kinds
+                        adjacency.primitive_of_vertex adjacency.point_vertex_offsets adjacency.point_vertices point))
+             pointed (sop/with_attr moved "N"
+                       (exact (map normal (array/range points :type int)))
+                       :owner "point" :type vec3 :when (and changed point_n))
+             vertexed (sop/with_attr pointed "N" (exact (map normal topo.vertex_points))
+                        :owner "vertex" :type vec3 :when (and changed vertex_n))
+             written (and changed (or point_n vertex_n))]
+        (sop/delete_attr (sop/delete_attr (sop/delete_attr vertexed "N" :owner "vertex" :when (and changed point_n))
+          "N" :owner "primitive" :when written) "N" :owner "detail" :when written)))))
 (defnode sop/transform :label "Transform" :category "Modify"
   :facts {:elementwise points :reads ["P" "N"] :writes ["P" "N"] :topology preserved :exact false}
   :validate (transform_valid mode {:r0 [m00 m01 m02 m03] :r1 [m10 m11 m12 m13] :r2 [m20 m21 m22 m23] :r3 [m30 m31 m32 m33]}
@@ -199,6 +257,21 @@
                    cleared (and singular (not (int/eq chosen 0)))]
               (sop/delete_attr (sop/delete_attr turned "N" :owner "point" :when cleared)
                 "N" :owner "vertex" :when cleared))
+          recompute_normals
+            (let* [all (text/blank? group_name)
+                   positions (sop/attr in0 :P)
+                   moved (if all
+                           (sop/with_attr in0 :P
+                             (exact (map (fn [(p : vec3)] (if identity p (transform_point_fused matrix p)))
+                                         positions)))
+                           (sop/with_attr in0 :P
+                             (exact (map (fn [(p : vec3) (chosen : int)]
+                                           (if (or identity (int/eq chosen 0)) p (transform_point_fused matrix p)))
+                                         positions selection))))]
+              ; every point: a count of moved, so the :when tests capture nothing of in0 (they would
+              ; keep it apart from the write chain)
+              (if all (transform_recomputed moved (not (int/eq (sop/count moved :points) 0)))
+                (transform_recomputed moved (not (int/eq selected_count 0)))))
           identity in0
           :else
           ; positions is bound, not read inside the map, so the write folds over an earlier one
@@ -213,12 +286,6 @@
                                        positions selection))))
                  inverse (mat4_inverse matrix)]
             (cond
-              recompute_normals
-                (if (int/eq selected_count 0) in0
-                  (let* [pointed (if (sop/has_attr moved "N" :owner "point")
-                                   (sop/normals moved :owner "Point" :weighting "Face area") moved)]
-                    (if (sop/has_attr pointed "N" :owner "vertex")
-                      (sop/normals pointed :owner "Vertex" :weighting "Face area") pointed)))
               (= (count inverse) 0)
                 (if (int/eq selected_count 0) in0
                   (sop/delete_attr (sop/delete_attr moved "N" :owner "point") "N" :owner "vertex"))

@@ -14,7 +14,10 @@
    equal the host display's under the same World. Removing the node (its scenes draw no display)
    releases every binding two Workspace_gpu.frames later, without a collection, and once its results
    die the pool holds no buffer. The median frame on the CPU and the GPU, and the median device
-   display (lowering and drawing a 256 x 256 canvas) are printed. *)
+   display (lowering and drawing a 256 x 256 canvas) are printed. A fifth case recomputes the
+   normals of a displaced triangle grid in the driven transform: after the first frame two
+   dispatches (the transform's P, the normals' gather of it), nothing compiled, uploaded or read
+   back, N within 1e-6 of the face-area normals of the device's own P. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 let frames = 8
@@ -44,15 +47,40 @@ let cases =
         ( ":offset [0.5 0.0 0.0]",
           ":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5)",
           "Triangles" );
+        (* recomputed normals: a gather of the resident P over the topology's incident faces, a
+           second dispatch (frame 0 is an identity, which recomputes N in place too) *)
+        ( ":offset [0.5 0.0 0.0]",
+          ":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5) \
+           :recompute_normals true",
+          "Triangles" );
       ]
 
 let run (drive, xdrive, connectivity) =
-  let text =
+  let recompute =
+    let key = "recompute_normals" in
+    let n = String.length key in
+    let rec has i = i + n <= String.length xdrive && (String.sub xdrive i n = key || has (i + 1)) in
+    has 0
+  in
+  let grid =
     Printf.sprintf
-      "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
-       %S :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) (sop/transform \
-       %s))))"
-      connectivity side side drive xdrive
+      "(sop/grid :counts \"Point counts\" :connectivity %S :columns %d :rows %d) \
+       (sop/attribute_noise :name \"noise\" :seed 7 %s)"
+      connectivity side side drive
+  in
+  let text =
+    if recompute then
+      (* recomputed normals of a displaced surface (a sheared plane's are all one normal); the
+         displacement drops N, and a map over P gives it back (a fill is no region, so it would
+         keep the chain on the CPU) *)
+      Printf.sprintf
+        "(workspace chain (graph g :context sop (let* [d (-> %s (sop/noise_displace :amplitude 0.2 \
+         :frequency 3.0)) n (sop/with_attr d \"N\" (exact (map (fn [(p : vec3)] [0.0 1.0 0.0]) \
+         (sop/attr d :P))) :owner \"point\" :type vec3)] (sop/transform n %s))))"
+        grid xdrive
+    else
+      Printf.sprintf "(workspace chain (graph g :context sop (-> %s (sop/transform %s))))" grid
+        xdrive
   in
   (* [cook frame] cooks the chain at that frame, as the editor does *)
   let animate ?gpu () =
@@ -178,6 +206,8 @@ let run (drive, xdrive, connectivity) =
   let trace_tolerance = 0 in
   let trace_times = ref [] and host_trace_times = ref [] in
   let count = side * side in
+  (* the chain's dispatch; with recomputed normals, the transform's and the normals' gather *)
+  let per_frame = if recompute then 2 else 1 in
   let cpu_cook, cpu_close = animate () in
   let gpu = Flow_native.Workspace_gpu.create () in
   Fun.protect
@@ -216,7 +246,11 @@ let run (drive, xdrive, connectivity) =
           in
           let gpu_cook, gpu_close = animate ~gpu:counted () in
           Fun.protect ~finally:gpu_close (fun () ->
-              let worst = ref 0. and cpu_times = ref [] and gpu_times = ref [] in
+              let worst = ref 0.
+              and normals = ref 0.
+              and drift = ref 0.
+              and cpu_times = ref []
+              and gpu_times = ref [] in
               let canvas = Rays.Canvas.create_exn ~width:256 ~height:256
               and host_canvas = Rays.Canvas.create_exn ~width:256 ~height:256
               and display_times = ref []
@@ -228,13 +262,15 @@ let run (drive, xdrive, connectivity) =
                 let fail what = failwith (Printf.sprintf "frame %d: %s" frame what) in
                 (* the grid's P is made on the device from the element index: the first frame
                    uploads its N alone (count float32 vec3s), in the one dispatch *)
-                if frame = 0 then begin
+                (* (with recomputed normals the static displaced chain cooks once, at frame 0,
+                   a dispatch of its own) *)
+                if frame = 0 && not recompute then begin
                   if after.input_uploaded_bytes - before.input_uploaded_bytes <> count * 12 then
                     fail
                       (Printf.sprintf "%d bytes uploaded, not the grid's N alone"
                          (after.input_uploaded_bytes - before.input_uploaded_bytes));
-                  if !dispatches - calls <> 1 then
-                    fail (Printf.sprintf "%d dispatches, not one" (!dispatches - calls))
+                  if !dispatches - calls <> per_frame then
+                    fail (Printf.sprintf "%d dispatches, not %d" (!dispatches - calls) per_frame)
                 end;
                 if frame > 0 then begin
                   gpu_times := seconds :: !gpu_times;
@@ -244,8 +280,8 @@ let run (drive, xdrive, connectivity) =
                     fail
                       (Printf.sprintf "%d sources were uploaded"
                          (after.input_uploads - before.input_uploads));
-                  if !dispatches - calls <> 1 then
-                    fail (Printf.sprintf "%d dispatches, not one" (!dispatches - calls))
+                  if !dispatches - calls <> per_frame then
+                    fail (Printf.sprintf "%d dispatches, not %d" (!dispatches - calls) per_frame)
                 end;
                 if
                   after.readback_bytes <> before.readback_bytes
@@ -374,6 +410,61 @@ let run (drive, xdrive, connectivity) =
                 let cpu, cpu_seconds = cpu_cook frame in
                 if frame > 0 then cpu_times := cpu_seconds :: !cpu_times;
                 let close a b = worst := Float.max !worst (Float.abs (a -. b)) in
+                (if recompute then
+                   let normal g =
+                     match Rdk.Geometry.find_attribute ~owner:Point "N" g with
+                     | Some a -> (
+                         match Rdk.Attribute.View.storage a with
+                         | Rdk.Attribute.Float3 v -> v
+                         | _ -> fail "N is not vec3 storage")
+                     | None -> fail "no point N"
+                   in
+                   let a = normal cpu and b = normal device in
+                   (* face-area normals of the device's own (float32) P, in binary64: what the
+                      device computed, without the rounding of P *)
+                   let own =
+                     let t = Rdk.Topology.View.view (Rdk.Geometry.topology device)
+                     and q = Rdk.Geometry.positions device in
+                     let sums = Array.make (3 * count) 0. in
+                     for prim = 0 to Bytes.length t.primitive_kinds - 1 do
+                       let first = t.primitive_offsets.(prim)
+                       and last = t.primitive_offsets.(prim + 1) in
+                       let ax, ay, az = Rdk.Packed.Float3.get q t.vertex_points.(first) in
+                       let fx = ref 0. and fy = ref 0. and fz = ref 0. in
+                       for j = first + 1 to last - 2 do
+                         let bx, by, bz = Rdk.Packed.Float3.get q t.vertex_points.(j)
+                         and cx, cy, cz = Rdk.Packed.Float3.get q t.vertex_points.(j + 1) in
+                         let ux = bx -. ax
+                         and uy = by -. ay
+                         and uz = bz -. az
+                         and vx = cx -. ax
+                         and vy = cy -. ay
+                         and vz = cz -. az in
+                         fx := !fx +. ((uy *. vz) -. (uz *. vy));
+                         fy := !fy +. ((uz *. vx) -. (ux *. vz));
+                         fz := !fz +. ((ux *. vy) -. (uy *. vx))
+                       done;
+                       for v = first to last - 1 do
+                         let p = t.vertex_points.(v) in
+                         sums.(3 * p) <- sums.(3 * p) +. !fx;
+                         sums.((3 * p) + 1) <- sums.((3 * p) + 1) +. !fy;
+                         sums.((3 * p) + 2) <- sums.((3 * p) + 2) +. !fz
+                       done
+                     done;
+                     sums
+                   in
+                   for i = 0 to count - 1 do
+                     let x, y, z = Rdk.Packed.Float3.get a i
+                     and gx, gy, gz = Rdk.Packed.Float3.get b i in
+                     let ox = own.(3 * i) and oy = own.((3 * i) + 1) and oz = own.((3 * i) + 2) in
+                     let l = Float.sqrt ((ox *. ox) +. (oy *. oy) +. (oz *. oz)) in
+                     List.iter
+                       (fun d -> normals := Float.max !normals (Float.abs d))
+                       [ (ox /. l) -. gx; (oy /. l) -. gy; (oz /. l) -. gz ];
+                     List.iter
+                       (fun d -> drift := Float.max !drift (Float.abs d))
+                       [ x -. gx; y -. gy; z -. gz ]
+                   done);
                 let p = Rdk.Geometry.positions cpu and q = Rdk.Geometry.positions device in
                 let n = noise cpu and m = noise device in
                 for i = 0 to count - 1 do
@@ -412,6 +503,12 @@ let run (drive, xdrive, connectivity) =
                      (stats ()).held_buffers);
               (* float32 rounding of positions within [-0.5, 1.5] and of noise in [0, 1] *)
               if !worst > 1e-5 then failwith (Printf.sprintf "GPU differs from CPU by %.3e" !worst);
+              (* unit normals of float32 face sums, against the normals of the device's own P; the
+                 CPU's (of binary64 P) differ by the float32 rounding of P over edges of 1/512 *)
+              if !normals > 1e-6 then
+                failwith (Printf.sprintf "GPU normals differ from their P's by %.3e" !normals);
+              if !drift > 1e-4 then
+                failwith (Printf.sprintf "GPU normals differ from CPU by %.3e" !drift);
               ignore (Rays.Canvas.destroy canvas);
               ignore (Rays.Canvas.destroy host_canvas);
               Printf.printf
@@ -421,9 +518,10 @@ let run (drive, xdrive, connectivity) =
                 count connectivity (median !display_times) (median !host_times) (frames - 1);
               Printf.printf
                 "animated grid > attribute_noise %s > transform %s, %d points: frame CPU %.4f s, \
-                 GPU %.4f s (medians of %d), one dispatch, nothing compiled, uploaded or read \
-                 back, largest difference %.2e\n\
+                 GPU %.4f s (medians of %d), %d dispatches, nothing compiled, uploaded or read \
+                 back, largest difference %.2e (N %.2e of its P, %.2e of the CPU's)\n\
                  %!"
-                drive xdrive count (median !cpu_times) (median !gpu_times) (frames - 1) !worst)))
+                drive xdrive count (median !cpu_times) (median !gpu_times) (frames - 1) per_frame
+                !worst !normals !drift)))
 
 let () = List.iter run cases

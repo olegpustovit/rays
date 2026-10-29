@@ -108,9 +108,9 @@ module Cost : sig
   val packed : count:int -> tier
   (** The same measured CPU decision used at placement and force time. *)
 
-  val sop_device : Gpu.policy -> Core.Region.t -> count:int -> bool
+  val sop_device : Gpu.policy -> Core.Region.t -> count:int -> resident:bool -> bool
   (** A fused SOP write's region goes to the device: [Qualification], or [count] of at least 2^18
-      elements and noise in its code. *)
+      elements and noise in its code or a read of data the device holds ([resident]). *)
 end
 
 type sink = Display of string | Sop_input
