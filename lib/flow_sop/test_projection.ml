@@ -345,7 +345,8 @@ let place (l : P.layout) =
         (p.path, (ax, ay, p.w, p.h))
         ::
         (match (p.inner, p.item) with
-        | Some inner, P.Item n -> go (ax +. P.zone_pad_x) (ay +. P.rail_top n) inner
+        | Some inner, P.Item ({ zone = Some z; _ } as n) ->
+            go (ax +. P.zone_pad_in z) (ay +. P.rail_top n) inner
         | _ -> []))
       l.placed
   in
@@ -373,7 +374,11 @@ let rec check_layout name (l : P.layout) =
         (fun (inner : P.layout) ->
           (* the zone's body has room for its whole inner layout, between its padding *)
           check
-            (P.zone_pad_x +. inner.w +. P.zone_pad_x <= p.w
+            ((match p.item with
+               | P.Item { zone = Some z; _ } -> P.zone_pad_in z
+               | _ -> P.zone_pad_x)
+             +. inner.w +. P.zone_pad_x
+             <= p.w
             && P.rail_top (match p.item with P.Item n -> n | _ -> fail "item") +. inner.h <= p.h)
             (name ^ ": a zone is smaller than its body");
           check_layout name inner)
@@ -736,4 +741,15 @@ let run () =
   rows ();
   flags ();
   layout ();
+  (* a graph input sits one column left of its first reader, not at the far left *)
+  let w =
+    workspace_of
+      "(workspace n (graph g :context value [(k : float 2.0)] (let* [a (+ t 1.0) b (* a 2.0) c (+ \
+       b k)] c)))"
+  in
+  let l = P.layout (scope w "g") in
+  let col path = (fun (x, _, _, _) -> x) (List.assoc path (place l)) in
+  check
+    (col [ "g"; ":k" ] > col [ "g"; "a" ] && col [ "g"; ":k" ] < col [ "g"; "c" ])
+    "an input sits just left of its reader";
   print_endline "projection tests passed"

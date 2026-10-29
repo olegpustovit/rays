@@ -259,6 +259,7 @@ val lattice : float
 
 val snap : float -> float
 val zone_pad_x : float
+val zone_pad_in : zone -> float
 val point_size : float
 val row_height : float
 val head_height : float

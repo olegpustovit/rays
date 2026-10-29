@@ -33,7 +33,7 @@ Card rule (kit rev 3): a Card is the header plus its wired or written rows, with
 level it was given (`shown`; the zoom never reduces a card to a chip or a point): a point's box is as wide as its name at the zoom's font (re-measured when the font
 changes), a chip is the header, and ports, wire ends and hit boxes all read that box. Columns sit on a
 288-point pitch (196 + 92 gap on the 24-point lattice). Wires are sampled cubic curves, derived from their ports;
-loop-variable wires leave downward along the begin bar. Curve samples and hit boxes are built on the
+loop-variable wires (not a function's parameters, which are plain curves; its cards start 96 points in) leave downward along the begin bar. Graph inputs sit one column left of their first reader. Curve samples and hit boxes are built on the
 `with_scope` hot path (`dune exec test/test_main.exe -- bench_scope_big`).
 
 Rules that hold throughout:

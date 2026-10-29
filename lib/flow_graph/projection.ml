@@ -1079,8 +1079,10 @@ let node_width = 196.
 let lattice = 24. (* the dot grid: cards sit on it, columns and rows of cards share its pitch *)
 let point_size = 14.
 let zone_pad_x = 48.
-(* a zone's cards start this far inside its edge: the begin and end bars at 20, then a channel for their wires *)
 
+(* a zone's cards start this far inside its edge: the begin and end bars at 20, then a channel for their wires *)
+(* a function's parameters leave as plain wires, which need room to bend: its cards start further in *)
+let zone_pad_in (z : zone) = if z.kind = Fn then 96. else zone_pad_x
 let zone_pad_top = 52. (* and this far below its top (the label row and 28 points of air) *)
 let zone_pad_bottom = 8.
 
@@ -1162,7 +1164,7 @@ let rec size ~foot ~at ~collapsed ~lens ~level ~pin (it : item) :
           [||] )
       else
         let (l : layout) = layout ~foot ~at ~collapsed ~lens ~level ~pin ~inner:true z.scope in
-        ( zone_pad_x +. Float.max l.w 72. +. zone_pad_x,
+        ( zone_pad_in z +. Float.max l.w 72. +. zone_pad_x,
           rail_top n +. Float.max l.h row_height +. zone_pad_bottom,
           false,
           Some l,
@@ -1270,6 +1272,24 @@ and layout ?(foot = false) ?(at = fun _ -> None) ?(prev = fun _ -> None)
         | None -> ())
     | _ -> ()
   done;
+  (* a graph input sits one column left of its first reader, not at the far left: its wires stay
+     short, and a long one would be drawn as a tag with no visible source *)
+  Array.iteri
+    (fun k (it, _, _, names, _) ->
+      match it with
+      | Input _ ->
+          let first =
+            Array.fold_left
+              (fun m (j, (_, _, deps, _, _)) ->
+                if j <> k && List.exists (fun d -> List.mem (root_of d) names) deps then
+                  min m lvl.(j)
+                else m)
+              max_int
+              (Array.mapi (fun j a -> (j, a)) arr)
+          in
+          if first < max_int then lvl.(k) <- max 0 (first - 1)
+      | _ -> ())
+    arr;
   let cols = Array.fold_left max 0 lvl + 1 in
   (* column 0 is ordered by the first item that reads each of its items (a node before an input on a
      tie, then as written), so what feeds one consumer stacks together and the chains stay level *)

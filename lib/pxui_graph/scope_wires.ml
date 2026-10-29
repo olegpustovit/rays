@@ -270,8 +270,9 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
         items := (p, ax, ay) :: !items;
         match (p.inner, p.item) with
         | Some inner, P.Item n ->
-            origins := (n.path, (ax +. P.zone_pad_x, ay +. P.rail_top n)) :: !origins;
-            walk (ax +. P.zone_pad_x) (ay +. P.rail_top n) inner
+            let pad = match n.zone with Some z -> P.zone_pad_in z | None -> P.zone_pad_x in
+            origins := (n.path, (ax +. pad, ay +. P.rail_top n)) :: !origins;
+            walk (ax +. pad) (ay +. P.rail_top n) inner
         | _ -> ())
       l.placed
   in
@@ -494,7 +495,9 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
                           (ax +. bx, ay +. by)
                         in
                         let s = { pos; ty = r.ty; owner = Some n.path } in
-                        Hashtbl.replace bars pos ();
+                        (* a loop's variables leave down the bar; a function's parameters are
+                           ordinary left-to-right wires *)
+                        if z.kind <> P.Fn then Hashtbl.replace bars pos ();
                         List.iter (fun name -> Hashtbl.replace rail name s) r.names
                       end)
                     z.rail;

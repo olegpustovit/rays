@@ -926,7 +926,24 @@ let scope_curve () =
     (List.exists
        (fun i -> down (Scope.Inspect.wire_points view i))
        (List.init (Scope.Inspect.wire_count view) Fun.id))
-    "no begin-bar wire leaves its port downward"
+    "no begin-bar wire leaves its port downward";
+  (* a function's parameter wires are ordinary curves: they leave level, not down the bar *)
+  let w =
+    ( Editor_document.Workspace_doc.of_text scope_catalog
+        "(workspace f (graph g :context value (let* [f (fn [(p : float)] (+ p 1.0)) m (map f (list \
+         1.0 2.0))] (sum [x m] x))))"
+    |> function
+      | Ok d -> d
+      | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d)) )
+      .checked
+  in
+  let view = fst (scope_step (fst (scope_view w "g")) (frame ())) in
+  check
+    (not
+       (List.exists
+          (fun i -> down (Scope.Inspect.wire_points view i))
+          (List.init (Scope.Inspect.wire_count view) Fun.id)))
+    "a function parameter's wire leaves down the begin bar"
 
 (* a formula in a record field opens as a binding: a field holds no nested card (it raised before) *)
 let scope_field_formula () =
