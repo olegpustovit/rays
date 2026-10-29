@@ -86,7 +86,7 @@ let snapshot =
   [
     ( "bloom",
       [
-        ("flower", (12, 1, 84));
+        ("flower", (13, 1, 86));
         ("scene", (6, 0, 60));
         ("world", (2, 0, 11));
         ("settings", (2, 0, 7));
@@ -94,17 +94,17 @@ let snapshot =
         ("half", (1, 0, 2));
         ("petal", (2, 0, 53));
       ] );
-    ("facade", [ ("facade", (14, 2, 89)) ]);
-    ("garland", [ ("garland", (19, 5, 90)); ("ring", (6, 1, 45)) ]);
+    ("facade", [ ("facade", (18, 2, 97)) ]);
+    ("garland", [ ("garland", (23, 5, 98)); ("ring", (7, 1, 47)) ]);
     (* inline functions and nested maps *)
-    ("kit", [ ("kit", (16, 2, 112)); ("window", (3, 0, 30)) ]);
+    ("kit", [ ("kit", (17, 2, 114)); ("window", (5, 0, 34)) ]);
     ("orrery", [ ("orrery", (21, 1, 117)) ]);
     (* conditional arms are inputs, not scopes *)
     ("rosette", [ ("rosette", (4, 0, 32)) ]);
     ("sunflower", [ ("sunflower", (9, 1, 36)) ]);
-    ("tiles", [ ("tiles", (10, 1, 70)) ]);
+    ("tiles", [ ("tiles", (17, 1, 84)) ]);
     ("tree", [ ("tree", (9, 1, 184)) ]);
-    ("tunnel", [ ("rings", (4, 1, 61)) ]);
+    ("tunnel", [ ("rings", (5, 1, 63)) ]);
     ("variations", [ ("garden", (6, 0, 70)); ("scene", (1, 0, 9)); ("editor", (8, 0, 22)) ]);
     ("wave", [ ("wave", (7, 2, 46)) ]);
   ]
@@ -157,10 +157,10 @@ let rows () =
   check
     (i.key = Some (E.Bv (1, 1)) && flat i.expr = "(range petals)" && i.ty = Some Flow.Ty.Int)
     "the loop variable edits its collection through Bv";
-  (* the four bindings, the two calls nested in them, and the result last *)
+  (* the four bindings, the three calls nested in them, and the result last *)
   check
-    (List.length z.scope.nodes = 7
-    && (List.nth z.scope.nodes 6).synthetic
+    (List.length z.scope.nodes = 8
+    && (List.nth z.scope.nodes 7).synthetic
     && z.scope.result = P.Node [ "flower"; "ring"; "@result" ])
     "the body's result is a synthetic node";
   let names = List.map (fun (n : P.node) -> n.name) z.scope.nodes in

@@ -943,7 +943,25 @@ let scope_curve () =
        (List.exists
           (fun i -> down (Scope.Inspect.wire_points view i))
           (List.init (Scope.Inspect.wire_count view) Fun.id)))
-    "a function parameter's wire leaves down the begin bar"
+    "a function parameter's wire leaves down the begin bar";
+  (* a call in a vector's cell is a card wired to the row, the wire ending at that cell *)
+  let w =
+    ( Editor_document.Workspace_doc.of_text scope_catalog
+        "(workspace f (graph g :context host (let* [a (+ [0.0 (* 2.0 3.0)] [1.0 1.0])] a)))"
+    |> function
+      | Ok d -> d
+      | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d)) )
+      .checked
+  in
+  let view, scope = scope_view w "g" in
+  let view = fst (scope_step view (frame ())) in
+  check (P.find scope [ "g"; "a#0#c1" ] <> None) "the call in a vector cell is not a card";
+  check
+    (List.exists
+       (fun i ->
+         Scope.Inspect.wire_target view i = Some ([ "g"; "a#0" ], Flow_graph.Flow_edit.Cell 1))
+       (List.init (Scope.Inspect.wire_count view) Fun.id))
+    "no wire ends at the vector's cell"
 
 (* a formula in a record field opens as a binding: a field holds no nested card (it raised before) *)
 let scope_field_formula () =
@@ -1850,15 +1868,15 @@ let run_scope () =
         (Printf.sprintf "%s/%s: pane counts %d/%d/%d" name graph s.nodes s.zones s.rows);
       check (s.drawn_items > 0 && s.drawn_zones <= s.zones) (name ^ ": nothing drawn"))
     [
-      ("bloom", "flower", 12, 1, 84);
+      ("bloom", "flower", 13, 1, 86);
       ("sunflower", "sunflower", 9, 1, 36);
       ("orrery", "orrery", 21, 1, 117);
-      ("facade", "facade", 14, 2, 89);
-      ("kit", "kit", 16, 2, 112);
+      ("facade", "facade", 18, 2, 97);
+      ("kit", "kit", 17, 2, 114);
       ("tree", "tree", 9, 1, 184);
-      ("garland", "garland", 19, 5, 90);
+      ("garland", "garland", 23, 5, 98);
       ("wave", "wave", 7, 2, 46);
-      ("tiles", "tiles", 10, 1, 70);
+      ("tiles", "tiles", 17, 1, 84);
     ];
   (* the iteration selector: buttons and track are hit-tested boxes *)
   let w = load_workspace "sunflower" in

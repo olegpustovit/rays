@@ -32,7 +32,7 @@ let unfold_in ~used ?name s leaf key sub =
 (* a wire never deletes a node: the nested node an input held stays, as a binding nothing reads *)
 let keep_nested ?(pick = fun a -> node_call a || value_call a) ~used s leaf key =
   match key with
-  | Pos _ | Kw _ | Arm _ -> (
+  | Pos _ | Kw _ | Arm _ | Cell _ -> (
       match arg_get (get_node s leaf) key with
       | Some a when pick a -> fst (unfold_in ~used s leaf key [])
       | _ -> s)

@@ -31,6 +31,9 @@ type arg_key =
   | Field of string  (** field of a [{...}] record *)
   | Bv of int * int  (** child [j] of child [i], for a zone's binding vectors *)
   | Arm of int  (** Conditional arm: zero-based then arm, [-1] for else. *)
+  | Cell of int
+      (** Element of a [[...]] vector literal, so a call written in one is a node of its own (leaf
+          [holder#key#c1]). *)
 
 type loop =
   | For

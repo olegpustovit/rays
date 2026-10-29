@@ -2,7 +2,16 @@ module S = Flow.Syntax
 module W = Flow.Workspace
 
 type path = W.path
-type arg_key = Whole | Pos of int | Kw of string | Field of string | Bv of int * int | Arm of int
+
+type arg_key =
+  | Whole
+  | Pos of int
+  | Kw of string
+  | Field of string
+  | Bv of int * int
+  | Arm of int
+  | Cell of int
+
 type loop = For | Fold | If | Map | Filter
 
 type op =
@@ -293,6 +302,7 @@ let arg_get (e : S.t) key =
   | Pos i, S.List (_ :: args) ->
       List.nth_opt (positional (S.attribute_args (Option.value ~default:"" (S.head e)) args)) i
   | Kw k, S.List (_ :: args) -> kw_get args k
+  | Cell i, S.Vec l -> List.nth_opt l i
   | _ -> None
 
 let set_pair ps k v =
@@ -342,6 +352,9 @@ let arg_set (e : S.t) key (v : S.t option) : S.t =
       | Some c -> set_child e i (set_child c j v)
       | None -> fail "This form has no part %d." i)
   | Bv _, _, None -> fail "A loop clause cannot be removed."
+  | Cell i, S.Vec l, Some v ->
+      { e with node = S.Vec (List.mapi (fun j c -> if j = i then keep_notes c v else c) l) }
+  | Cell _, _, None -> fail "A vector cell cannot be removed."
   | Field k, S.Map l, _ -> { e with node = S.Map (flat_pairs (set_pair (pairs l) k v)) }
   | Pos i, S.List (({ S.node = S.Sym "scene/merge"; _ } as h) :: args), None ->
       { e with node = S.List (h :: skip_after_removal (with_pos args i None) [ i ]) }
@@ -414,6 +427,7 @@ let key_segment = function
   | Pos i -> string_of_int i
   | Kw k -> ":" ^ k
   | Arm i -> if i < 0 then "else" else if i = 0 then "then" else "then~" ^ string_of_int (i + 1)
+  | Cell i -> "c" ^ string_of_int i
   | Whole | Field _ | Bv _ -> fail "Only an input of a call holds a nested node."
 
 let nested_leaf leaf key = leaf ^ "#" ^ key_segment key
@@ -428,6 +442,11 @@ let split_leaf leaf =
             else if k = "then" then Arm 0
             else if String.starts_with ~prefix:"then~" k then
               Arm (int_of_string (String.sub k 5 (String.length k - 5)) - 1)
+            else if
+              String.length k > 1
+              && k.[0] = 'c'
+              && int_of_string_opt (String.sub k 1 (String.length k - 1)) <> None
+            then Cell (int_of_string (String.sub k 1 (String.length k - 1)))
             else if String.length k > 0 && k.[0] = ':' then
               Kw (String.sub k 1 (String.length k - 1))
             else

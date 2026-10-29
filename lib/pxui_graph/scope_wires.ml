@@ -441,6 +441,19 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
                         let target = Some (n.path, r.key, fallback r) in
                         List.iter
                           (fun name ->
+                            (* a call in a vector's cell: the wire ends at that cell of the
+                               vector, so taking it off sets the cell and nothing else *)
+                            let target =
+                              match List.find_opt (fun (_, leaf) -> leaf = name) r.cells with
+                              | Some (i, _) ->
+                                  Some
+                                    ( List.rev_append
+                                        (List.tl (List.rev n.path))
+                                        [ E.nested_leaf n.name r.key ],
+                                      E.Cell i,
+                                      Some (S.make (S.Num "0.0")) )
+                              | None -> target
+                            in
                             match resolve chain name with
                             | Some { owner = Some o; _ } when o = n.path -> ()
                             | src ->

@@ -20,6 +20,7 @@ type row = {
   control : control;
   folder : string;
   head : bool;
+  cells : (int * string) list;
 }
 
 type zone_kind = For | Fold | Scan | Sum | Let | Fn | State | Branch
@@ -193,7 +194,20 @@ let chip c (e : S.t option) =
 
 let row c ?ty ?default ?(socket = true) ?(kind = Arg) ?(control = Plain) ?(folder = "") ?primary:_
     ?(head = false) label key expr =
-  { label; key; ty; expr; chip = chip c expr; default; socket; kind; control; folder; head }
+  {
+    label;
+    key;
+    ty;
+    expr;
+    chip = chip c expr;
+    default;
+    socket;
+    kind;
+    control;
+    folder;
+    head;
+    cells = [];
+  }
 
 let add c label key ?(socket = true) ty = row c ?ty ~socket ~kind:Add label key None
 
@@ -827,6 +841,27 @@ and node_of c ~visible ?(expr = false) ?nested (scope_path : path) (pat : S.t op
                 @ node_of c ~visible
                     ~expr:(E.value_call a || E.context_sym a)
                     ~nested:leaf scope_path None a )
+          (* a call written in a cell of a vector literal is a node of its own too; the row keeps its
+             literal cells and is wired from the card *)
+          | Some { S.node = S.Vec cs; _ }, (E.Pos _ | E.Kw _ | E.Arm _)
+            when (r.kind = Arg || r.kind = Rest) && macro = None -> (
+              let lifted =
+                List.filter_map
+                  (fun (i, a) ->
+                    let leaf = E.nested_leaf (E.nested_leaf name r.key) (E.Cell i) in
+                    (* no glyph opens a cell, so a call in one is always a card *)
+                    if E.node_call a || E.value_call a then Some (i, leaf, a) else None)
+                  (List.mapi (fun i a -> (i, a)) cs)
+              in
+              match lifted with
+              | [] -> (r :: rows, inner)
+              | _ ->
+                  ( { r with cells = List.map (fun (i, leaf, _) -> (i, leaf)) lifted } :: rows,
+                    inner
+                    @ List.concat_map
+                        (fun (_, leaf, a) ->
+                          node_of c ~visible ~expr:(E.value_call a) ~nested:leaf scope_path None a)
+                        lifted ))
           | _ -> (r :: rows, inner))
         ([], [])
         (if nested <> None && E.context_sym e then [] else rows_of c e)
@@ -877,6 +912,13 @@ let sources (r : row) =
   | Name leaf, _ when E.nested leaf -> [ leaf ]
   | _, Some { S.node = S.Sym ("t" | "pi" | "true" | "false" | "nil"); _ } ->
       [] (* constants, not wires *)
+  | _, Some { S.node = S.Vec l; _ } when r.cells <> [] ->
+      (* a call written in a cell is a card of its own, wired from its leaf *)
+      List.concat
+        (List.mapi
+           (fun i c ->
+             match List.assoc_opt i r.cells with Some leaf -> [ leaf ] | None -> E.free_names c)
+           l)
   | _, Some e -> E.free_names e
   | _, None -> []
 
@@ -1079,8 +1121,8 @@ let node_width = 196.
 let lattice = 24. (* the dot grid: cards sit on it, columns and rows of cards share its pitch *)
 let point_size = 14.
 let zone_pad_x = 48.
-
 (* a zone's cards start this far inside its edge: the begin and end bars at 20, then a channel for their wires *)
+
 (* a function's parameters leave as plain wires, which need room to bend: its cards start further in *)
 let zone_pad_in (z : zone) = if z.kind = Fn then 96. else zone_pad_x
 let zone_pad_top = 52. (* and this far below its top (the label row and 28 points of air) *)

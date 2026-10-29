@@ -55,6 +55,9 @@ type row = {
   folder : string;  (** the schema folder the row sits in (shown at level [Full]); empty for none *)
   head : bool;
       (** the first geometry slot of a node kind: the header's in-port, not a row of the body *)
+  cells : (int * string) list;
+      (** the cells of a vector literal that hold a call: each is a node of its own (the leaf
+          named), wired to the row, which keeps its literal cells *)
 }
 
 type zone_kind = For | Fold | Scan | Sum | Let | Fn | State | Branch

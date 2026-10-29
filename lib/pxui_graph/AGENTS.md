@@ -72,7 +72,7 @@ step, in `Scope` view state, not the document) is part of the card's height and 
 through `Projection.layout ~lens`, so opening it re-lays the graph out for the next frame
 (the frame that opened it is painted with the old geometry). Its buttons are `Ui.box`es
 in the tile: step buttons choose the printed step, "Replace call with expansion" is
-`Syntax_edit (Inline_macro ...)`. A node call written in an input (a `->` step) is a card of its
+`Syntax_edit (Inline_macro ...)`. A call written in a cell of a vector literal (`[0.0 (* h k) 0.0]`, leaf `holder#key#c1`, `Flow_edit.Cell`) is a card too: the row keeps its literal cells (`Projection.row.cells`), the wire ends at the cell, and taking it off is `Disconnect` on `holder#key` with `Cell i`. A node call written in an input (a `->` step) is a card of its
 own (`Projection.anonymous`, titled by its kind, wired through `Projection.sources`): never draw it
 as a chip, and take a wire off its row with `Scope_pane.unwire` (Unfold, then Disconnect) so the
 node stays. A call whose first input fits its result

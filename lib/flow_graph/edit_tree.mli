@@ -12,6 +12,7 @@ type arg_key = Edit_base.arg_key =
   | Field of string
   | Bv of int * int
   | Arm of int
+  | Cell of int
 
 (** {1 Failing} *)
 

@@ -138,3 +138,40 @@ let () =
          { node = [ "g"; "s#0" ]; key = Pos 0; fallback = Some (List.hd (ok (Syntax.parse "0.5"))) })
   in
   assert (has (text off) "(sin (* 0.5 0.5))")
+
+let () =
+  (* a call written in a cell of a vector literal is a node of its own, wired to the row *)
+  let src = source "[a (+ [0.0 (* 2.0 3.0)] [1.0 1.0])] a" in
+  let w = match Workspace.check catalog src with Some w, [] -> w | _ -> failwith "check" in
+  let scope = Projection.of_graph catalog w "g" in
+  let a = Option.get (Projection.find scope [ "g"; "a" ]) in
+  let row = List.hd a.rows in
+  assert (row.cells = [ (1, "a#0#c1") ] && Projection.sources row = [ "a#0#c1" ]);
+  let mul = Option.get (Projection.find scope [ "g"; "a#0#c1" ]) in
+  assert (mul.head = "*" && mul.expr);
+  (* the call's own inputs edit in place *)
+  let set =
+    edit src
+      (Set_arg
+         {
+           node = [ "g"; "a#0#c1" ];
+           key = Pos 0;
+           sub = [];
+           value = List.hd (ok (Syntax.parse "7.0"));
+         })
+  in
+  assert (has (text set) "[0.0 (* 7.0 3.0)]");
+  (* taking the wire off sets the cell and keeps the call as a binding *)
+  let off =
+    edit src
+      (Disconnect
+         {
+           node = [ "g"; "a#0" ];
+           key = Cell 1;
+           fallback = Some (List.hd (ok (Syntax.parse "0.5")));
+         })
+  in
+  assert (has (text off) "[0.0 0.5]" && has (text off) "(* 2.0 3.0)");
+  (* naming it binds it where the vector read it *)
+  let named = edit src (Rename { node = [ "g"; "a#0#c1" ]; to_ = "twice" }) in
+  assert (has (text named) "twice (* 2.0 3.0)" && has (text named) "[0.0 twice]")

@@ -1014,6 +1014,7 @@ let key_text = function
   | Kw k | Field k -> k
   | Bv (i, j) -> Printf.sprintf "%d.%d" i j
   | Arm i -> if i < 0 then "else" else Printf.sprintf "then%d" i
+  | Cell i -> "cell" ^ string_of_int i
 
 let gesture = function
   | Set_arg { node; key; sub; _ } ->
