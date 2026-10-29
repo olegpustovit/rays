@@ -546,7 +546,23 @@ of vertices (the path tracer, a centroid) gets that copy, the raster lowering
 reads only the mesh's own arrays (`Mesh.View.unread`). Its indices are packed once per topology (8
 kept by the corners array's identity) and the renderer keeps them under their own key
 (`Gpu_vertices "borrow\nindices"`), so a frame's new borrow neither repacks, rehashes nor reuploads
-them. The World sun's depth pass reads a device mesh's positions as the colour pass does.
+them. The World sun's depth pass reads a device mesh's positions as the colour pass does, and the
+World-lit colour pass (`Scene3_world`) binds them as the plain one (it had refused a device mesh's
+borrow as a malformed layout, so a World-lit view of a resident mesh failed to draw).
+`test_chain_frames_native` (`CONNECTIVITY Triangles`) draws the resident lit mesh under a World
+sun: the sun's fit reads the device bounds (at most 24 KB), nothing is materialised (the host copy,
+which reads P, is never made) and the pixels equal the host display's under the same World.
+
+A display is released when the editor stops drawing it: each frame `Editor_loop` calls
+`Workspace_gpu.frame`, with the device keys its drawn scenes name (`Loop_model.display_keys`) when
+they changed, and a binding left out (its node removed, its mesh recooked) or whose mesh was
+collected is unregistered and unpinned two frames later (one presented frame stays in flight), so
+its buffers return to the pool. It had waited for its mesh's collection (a one-word token, no GC
+pressure) and then three more bound displays: removing the last displayed node kept its buffers
+pinned until close, and a dropped one could be freed while the frame that drew it was in flight.
+`test_chain_frames_native` removes the node and fails unless every binding is released two frames
+later without a collection and, once its results die, the pool holds no buffer (16 stayed held
+without the release).
 Anything else (lit triangles without N, quads, a host device, a closed runner) builds the host mesh
 as before, reading P. The cooked bounds a piece keeps are read when asked (framing, the
 selected box), not per cook, and never read P while the device holds it (below). Measured (`test_chain_frames_native`, M1, 2026-10-29): every frame of
@@ -600,9 +616,31 @@ body goes on as if the check passed, and the card cooks them with its cook's inp
 the diagnostic the written-out call refuses or fails with (a refusal is `E_LOWER`, at cook rather
 than lowering). A write folded through a card with checks takes them (`$guards`), so they still
 run when the card itself is not cooked. A body whose structure follows a per-frame argument
-otherwise, or whose live argument a strict kernel cannot take as data (a noise lacunarity or gain,
-a region constant; `Flow.Eval.live_kernels` asks the host), keeps the card a node of its own,
+otherwise, or whose live argument a strict kernel cannot take as data (a noise seed or octave
+count, a region constant; `Flow.Eval.live_kernels` asks the host), keeps the card a node of its own,
 rebuilt per frame.
+
+A noise's lacunarity and gain are registers of its `Noise3` (`Core.Region.fractal`: `Fixed` a
+constant, `Live` a float register), so driven ones are uniforms of the one compiled kernel, as the
+noise offset is: `attribute_noise :lacunarity (+ 1.5 t) :roughness (+ 0.25 (* t 0.5))` inlines and
+its write stays one dispatch on the device, nothing compiled, uploaded or read back after the first
+frame (`test_chain_frames_native` under `DRIVE`, largest difference from the CPU 3.0e-7 for 512
+squared, 3.4e-7 for 1M). The device inlines `noise-fbm-fractal` (`lib/flow_gpu/noise.rays`) for any
+other than 2 and 0.5, WGSL `wfbm_fractal` (`gpu_check` in Chrome: 1.6e-6 from the JS region); both
+give NaN where `noise3` refuses the values, so the status hands the region to the CPU, which checks
+each live pair as `noise3` does (`Flow.Op.check_noise_fractal`, `test_rand_at`: bytes and the
+refusal equal the walker's). A constant pair prints and emits as before (2 and 0.5 keep `noise-fbm`
+and `wfbm`, so no golden moved), and the GPU now places constant non-default pairs too (it refused
+them). Measured (M1, load 3-4, 2026-10-29, medians of 7 frames): 1M points 0.0038 s a frame on the
+device against 0.12 s on the CPU, where a driven lacunarity had cooked every frame (a node rebuilt
+per frame, the GPU refusing any lacunarity but 2); 512 squared 0.0014 s against 0.039 s.
+The octave count stays a constant: it is an Int the region checks while lowering (1 to 64 on the
+CPU, 1 to 32 on the device), the CPU block kernels dispatch on it (one octave is `sample3_into` and
+the two streaming forms), and the device helper is compiled per count with its fold over a static
+`range`; a uniform count would need the inliner's fold over a register range with a static maximum
+(`Loop_begin.limit`) through the helper, an Int uniform in the fast MSL and WGSL printers and those
+range checks at dispatch, for a value a slider steps through a few integers. A driven count keeps
+the card a node rebuilt per frame, as before.
 
 A body can pick a form for a live value: `(live? x)` is true while lowering when `x` is decided per
 frame or by cooked data (a residual, a data source), false for a value at hand and wherever a
@@ -644,6 +682,9 @@ separate nodes and walks), and about 0.8 ms of the first delete is waiting for t
 `sop_gallery` with this and the device bounds (`bench_sop_cook ":seed 2026" ":seed 2027" 3`, five
 rounds interleaved with dev, medians, 2026-10-29): check 0.252 s against 0.252, lower 0.373 against
 0.373, cook 0.846 against 0.840, edit to cook 0.501 against 0.503.
+With live noise lacunarity/gain, World-lit device meshes and the frame release (same command, five
+rounds interleaved with dev e89a2b9a, medians, load 3-4, 2026-10-29): check 0.251 s against 0.250,
+lower 0.375 against 0.374, cook 0.843 against 0.875, edit to cook 0.506 against 0.521.
 
 A transform whose group the cook decides (a native group node upstream) is a body cooked behind its
 card: its normals' writes read every owner's N eagerly there, so a mesh without vertex N failed
