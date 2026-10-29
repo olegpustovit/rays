@@ -136,46 +136,70 @@ let wire_scene scene =
     scene;
   Scene.D3.create ~samples:1 (List.rev !nodes)
 
+(* The scene's one drawing when it is a device mesh in place (one batch, no instances, no texture,
+   identity transform): the tracer reads it where the device holds it (Rays_pathtracer.mesh), never
+   converted or cached, so a deforming mesh refits its structure instead of being read back. *)
+let device_drawing scene =
+  let batches = ref [] in
+  Scene.D3.Walk.iter_batches
+    (fun drawing transforms -> batches := (drawing, transforms) :: !batches)
+    scene;
+  match !batches with
+  | [ ((drawing : Scene.D3.Walk.drawing), None) ]
+    when drawing.texture = None
+         && Mesh.View.device drawing.mesh <> None
+         && Rays_math.Mat4.nearly_equal drawing.transform Rays_math.Mat4.identity ~eps:0. ->
+      Some drawing
+  | _ -> None
+
 (* The cache keeps at most 64 converted source meshes. Placement remains in the
-   tracer's instance structure, so an orbit does not convert or upload geometry. *)
+   tracer's instance structure, so an orbit does not convert or upload geometry. The scene's mesh
+   and material a new tracer starts from come with it. *)
 let traced_scene meshes scene =
   let ( let* ) = Result.bind in
-  let cache = Mesh_cache.copy ~release:(fun _ _ -> ()) meshes and result = ref (Ok []) in
-  Scene.D3.Walk.iter_batches
-    (fun (drawing : Scene.D3.Walk.drawing) transforms ->
-      result :=
-        let* placed = !result in
-        let* () =
-          if drawing.texture = None then Ok ()
-          else Error "Path tracing textured meshes is not supported."
-        in
-        let* cached =
-          match Mesh_cache.peek cache (drawing.mesh, drawing.material) with
-          | Some cached -> Ok cached
-          | None ->
-              let* geometry =
-                Result.map_error Rdk_rays.Geometry_view.error_string
-                  (Rdk_rays.Rays_mesh.of_mesh drawing.mesh)
-              in
-              let* trace_mesh =
-                Result.map_error Rdk_rays.Geometry_view.error_string
-                  (Rdk_rays.Rays_mesh.to_trace_mesh geometry)
-              in
-              let* traced = P.mesh [ (trace_mesh, traced_material drawing.material) ] in
-              let cached = { trace_source = trace_mesh; traced } in
-              Mesh_cache.add cache (drawing.mesh, drawing.material) cached;
-              Ok cached
-        in
-        let* mesh =
-          match transforms with
-          | None -> Ok cached.traced
-          | Some transforms -> P.mesh_instanced ~prototype:cached.traced transforms
-        in
-        Ok ((drawing.transform, mesh) :: placed))
-    scene;
-  let* placed = !result in
-  let* mesh = P.scene_mesh (List.rev placed) in
-  Ok (cache, mesh)
+  match device_drawing scene with
+  | Some drawing ->
+      let first = (drawing.mesh, traced_material drawing.material) in
+      let* mesh = P.mesh [ first ] in
+      Ok (meshes, mesh, first)
+  | None ->
+      let cache = Mesh_cache.copy ~release:(fun _ _ -> ()) meshes and result = ref (Ok []) in
+      Scene.D3.Walk.iter_batches
+        (fun (drawing : Scene.D3.Walk.drawing) transforms ->
+          result :=
+            let* placed = !result in
+            let* () =
+              if drawing.texture = None then Ok ()
+              else Error "Path tracing textured meshes is not supported."
+            in
+            let* cached =
+              match Mesh_cache.peek cache (drawing.mesh, drawing.material) with
+              | Some cached -> Ok cached
+              | None ->
+                  let* geometry =
+                    Result.map_error Rdk_rays.Geometry_view.error_string
+                      (Rdk_rays.Rays_mesh.of_mesh drawing.mesh)
+                  in
+                  let* trace_mesh =
+                    Result.map_error Rdk_rays.Geometry_view.error_string
+                      (Rdk_rays.Rays_mesh.to_trace_mesh geometry)
+                  in
+                  let* traced = P.mesh [ (trace_mesh, traced_material drawing.material) ] in
+                  let cached = { trace_source = trace_mesh; traced } in
+                  Mesh_cache.add cache (drawing.mesh, drawing.material) cached;
+                  Ok cached
+            in
+            let* mesh =
+              match transforms with
+              | None -> Ok cached.traced
+              | Some transforms -> P.mesh_instanced ~prototype:cached.traced transforms
+            in
+            Ok ((drawing.transform, mesh) :: placed))
+        scene;
+      let* placed = !result in
+      let* mesh = P.scene_mesh (List.rev placed) in
+      let (_, source_material), cached = Option.get (Mesh_cache.head cache) in
+      Ok (cache, mesh, (cached.trace_source, traced_material source_material))
 
 (* Viewports asking for the same traced picture share one tracer: the same scene, camera, film
    and setting. *)
@@ -344,19 +368,24 @@ let update state ~mode ~custom ~focus views =
               let* cache, mesh =
                 if prior.scene == scene && prior.tracer <> None then Ok (!meshes, None)
                 else
-                  Result.map (fun (cache, mesh) -> (cache, Some mesh)) (traced_scene !meshes scene)
+                  Result.map
+                    (fun (cache, mesh, first) -> (cache, Some (mesh, first)))
+                    (traced_scene !meshes scene)
               in
               meshes := cache;
               let* tracer =
                 match prior.tracer with
                 | Some tracer -> Ok tracer
                 | None ->
-                    let (_, source_material), cached = Option.get (Mesh_cache.head cache) in
+                    let* first =
+                      Option.to_result ~none:"Path tracing needs a scene mesh."
+                        (Option.map (fun (_, first) -> first) mesh)
+                    in
                     let* tracer =
                       P.create ~bounces:setting.bounces ~round_samples:setting.round_samples ~width
                         ~height
                         {
-                          P.objects = [ (cached.trace_source, traced_material source_material) ];
+                          P.objects = [ first ];
                           spheres = [];
                           strands = [];
                           environment =
@@ -372,7 +401,7 @@ let update state ~mode ~custom ~focus views =
                     Ok tracer
               in
               let submitted =
-                match mesh with None -> Ok () | Some mesh -> P.queue_mesh tracer mesh
+                match mesh with None -> Ok () | Some (mesh, _) -> P.queue_mesh tracer mesh
               in
               let* () = submitted in
               let* () = P.resize tracer ~width ~height in

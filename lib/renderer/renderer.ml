@@ -1713,6 +1713,14 @@ let create_gpu_marks = Native.create_gpu_marks
 let gpu_marks = Native.gpu_marks
 let next_gpu_positions = Atomic.make 0
 
+let gpu_positions gpu key =
+  if gpu.gpu_released then None
+  else
+    match Scene_execution.Private.find_gpu_vertices gpu.gpu_owner.scene_vertices key with
+    | Some (positions, (([] | [ _ ]) as extra), count) ->
+        Some (positions, List.nth_opt extra 0, count)
+    | Some _ | None -> None
+
 let register_gpu_positions gpu ~positions ?normals ~count ~valid () =
   let operation = "Renderer.register_gpu_positions" in
   if gpu.gpu_released then fail operation Ogpu.Error.Stale_handle "GPU lease is released"

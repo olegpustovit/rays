@@ -439,6 +439,90 @@ let close t =
   List.iter (fun (_, k) -> Flow_gpu.Run.close k.runner) t.kernels;
   t.kernels <- []
 
+(* A device mesh's triangle corners: each corner's vec3 from a device's packed float3 [src] (positions or
+   normals) at its vertex index, the input (a float per corner, uploaded once per topology), written
+   packed into the tracer's per-corner buffer that the structure and the [nrm] table read. *)
+type gather = { gather_runner : Flow_gpu.Run.t; gather_base : Packed.Host.inputs; src_slot : int }
+
+let gather_kernel ~lease ~pipelines =
+  let src = E.Vec3_array (Array.make 3 0.) in
+  let text =
+    "(workspace pt (graph g :context value (let* [src (pt/src) gather (fn [(v : int)] (array/nth \
+     src v))] 0.0)))"
+  in
+  let src_op =
+    {
+      (List.hd ops) with
+      Flow.Op.name = "pt/src";
+      out = (fun _ -> Flow.Ty.Array Vec3);
+      body = (fun ~live:_ ~node:_ _ -> Flow.Value.Source ("pt/src", Flow.Ty.Array Vec3, []));
+    }
+  in
+  let* syntax = Result.map_error Diagnostic.to_string (Flow.Syntax.parse text) in
+  let* ws =
+    match
+      Flow.Workspace.check ~ops:[ src_op ] ~call_sites:true
+        { Flow.Catalog.version = 1; kinds = [] }
+        syntax
+    with
+    | Some ws, [] -> Ok ws
+    | _, ds -> Error (diagnostics ds)
+  in
+  let* evaluated = Result.map_error Diagnostic.to_string (E.static ~record:true ws) in
+  let* fn =
+    match List.assoc_opt [ "g"; "gather" ] evaluated.records with
+    | Some ((_, E.Fn fn) :: _) -> Ok fn
+    | _ -> Error "path tracer gather is not a function"
+  in
+  let bound =
+    Flow.Eval.Host.map_function_bindings
+      (function Flow.Value.Source ("pt/src", _, []) -> src | value -> value)
+      fn
+  in
+  let* residual =
+    match
+      Flow.Eval.Host.map_function
+        ~signature:{ params = [ Flow.Ty.Int ]; result = Vec3 }
+        bound [ E.Int_array [| 0 |] ]
+    with
+    | Ok (E.Residual r) -> Ok r
+    | Ok _ -> Error "path tracer gather did not defer"
+    | Error d -> Error (Diagnostic.to_string d)
+  in
+  let* template =
+    Option.to_result ~none:"path tracer gather has no device template"
+      (Packed.compile_template residual (E.Residual.residual_view residual).term)
+  in
+  let* msl = Result.map_error Diagnostic.to_string (Flow_gpu.Emit.kernel ~fast:true template) in
+  let* base =
+    Result.map_error Diagnostic.to_string
+      (Packed.Host.prepare ~fast:true template ~live:(Input.at_time 0.))
+  in
+  let* src_slot =
+    Option.to_result ~none:"path tracer gather reads no source table"
+      (Array.find_index
+         (function Packed.Host.Value v -> v == src | _ -> false)
+         (Packed.Host.uniform_shapes template))
+  in
+  Ok
+    {
+      gather_runner = Flow_gpu.Run.create lease pipelines msl;
+      gather_base = { base with arrays = Array.map (fun _ -> [||]) base.arrays };
+      src_slot;
+    }
+
+(* Encodes the gather of [count] corners whose vertex indices [indices] holds, from [src] ([vertices]
+   packed float3) into [into]. *)
+let gather g ~commands ~cell ~indices ~count ~src ~vertices ~into =
+  Result.map_error Diagnostic.to_string
+    (Result.map ignore
+       (Flow_gpu.Run.dispatch ~commands ~reset_status:false ~into:(into, cell)
+          ~bound:(fun i -> if i = 0 then Some indices else None)
+          ~bound_table:(fun u -> if u = g.src_slot then Some (src, 3 * vertices) else None)
+          g.gather_runner { g.gather_base with count }))
+
+let close_gather g = Flow_gpu.Run.close g.gather_runner
+
 (* The CPU walker's run of kernel [name] over [pixels] (the oracle a device film is checked against): [words n]
    gives uniform [n] and [value n] table [n] as host values. *)
 let cpu t ~words ~value ~pixels name =

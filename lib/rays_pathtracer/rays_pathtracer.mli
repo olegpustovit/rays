@@ -101,7 +101,13 @@ val mesh :
   ?strands:strand list ->
   (Rays.Mesh.t * material) list ->
   (mesh, string) result
-(** Triangles become one primitive structure; spheres and strands are traced beside it. *)
+(** Triangles become one primitive structure; spheres and strands are traced beside it. A lone
+    triangle device mesh with normals ({!Rays.Mesh.View.create_device}, below 2^24 vertices) is
+    traced where the device holds it: the tracer gathers its corners from the registered positions
+    and normals on the device (never reading them back or making the host copy) into a refittable
+    structure, and a later mesh of the same topology (the same corners array, vertex count and
+    materials) refits that structure in place ({!Ogpu.Backend.refit_accel}) instead of rebuilding
+    it. Such a mesh cannot join {!mesh_instanced} or {!scene_mesh}. *)
 
 val mesh_instanced :
   prototype:mesh ->
@@ -223,6 +229,9 @@ module Private : sig
   val lisp_kernel : t -> string -> (int * string, string) result
   (** A Lisp kernel of the current scene shape ("trace", "preview", ...): its pipeline's thread
       limit and its MSL. *)
+
+  val refits : t -> int
+  (** Device mesh updates that refit the installed structure in place (same topology). *)
 
   val kernel_cache : string option ref
   (** The directory a later process reads the kernels' front-end results from (default the user's

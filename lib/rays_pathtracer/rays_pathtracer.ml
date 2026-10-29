@@ -108,6 +108,8 @@ type t = {
   convert : Flow_gpu.Image_sink.t; (* Flow's RGBA8 film conversion *)
   cell : B.buffer; (* the Lisp kernels' count word, never read *)
   mutable kernels : (Lisp_kernel.facts * Lisp_kernel.t) list; (* newest first, at most four *)
+  mutable gather : Lisp_kernel.gather option; (* a device mesh's corner gather, made on first use *)
+  mutable refits : int; (* device mesh updates refit in place *)
   mutable from_accum : bool; (* the last frame accumulated, so the film is a preview's history *)
   mutable gpu : gpu_mesh;
   mutable building : mesh_build option;
@@ -237,6 +239,18 @@ let prepare_extras ~first_material spheres strands =
       strand_segments = !segments;
     }
 
+(* A lone triangle device mesh with normals ({!Rays.Mesh.View.create_device}) is traced from the
+   device: its corners are gathered there, never read back. Vertex indices travel as float32, exact
+   below 2^24. *)
+let device_of (m : Rays.Mesh.t) =
+  match Rays.Mesh.View.device m with
+  | Some (key, true) when Rays.Mesh.mode m = Triangles ->
+      let corners = (Rays.Mesh.View.unread m).indices and vertex_count = Rays.Mesh.vertex_count m in
+      if Array.length corners > 0 && Array.length corners mod 3 = 0 && vertex_count <= 1 lsl 24 then
+        Some { Mesh_data.key; vertex_count; corners; holder = m }
+      else None
+  | Some _ | None -> None
+
 let mesh ?(spheres = []) ?(strands = []) (objects : (Rays.Mesh.t * material) list) =
   let* extras = prepare_extras ~first_material:(List.length objects) spheres strands in
   let materials =
@@ -244,7 +258,21 @@ let mesh ?(spheres = []) ?(strands = []) (objects : (Rays.Mesh.t * material) lis
     @ List.map (fun sphere -> sphere.sphere_material) spheres
     @ List.map (fun strand -> strand.strand_material) strands
   in
-  Mesh_data.mesh ~extras ~materials (List.map fst objects)
+  match (spheres, strands, List.map (fun (m, _) -> device_of m) objects) with
+  | [], [], [ Some device ] ->
+      Ok
+        {
+          device = Some device;
+          mesh_positions = Bytes.empty;
+          mesh_normals = Bytes.empty;
+          mesh_ids = Bytes.empty;
+          triangles = Array.length device.corners / 3;
+          mesh_materials = materials;
+          instances = None;
+          extras;
+          scene = None;
+        }
+  | _ -> Mesh_data.mesh ~extras ~materials (List.map fst objects)
 
 let mesh_instanced = Mesh_data.mesh_instanced
 let scene_mesh = Mesh_data.scene_mesh
@@ -380,8 +408,8 @@ let available () =
       Renderer.release_gpu lease;
       reason
 
-let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsdf_only = false)
-    ?(profile = false) ~width ~height (scene : scene) =
+let create_tracer ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4)
+    ?(bsdf_only = false) ?(profile = false) ~width ~height (scene : scene) =
   if width <= 0 || height <= 0 then Error "path tracer size must be positive"
   else if spp <= 0 || bounces <= 0 then Error "path tracer spp and bounces must be positive"
   else
@@ -396,7 +424,20 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
           (Ogpu.Caps.require ~operation:"Rays_pathtracer.create" (B.capabilities device) Ray_tracing)
       in
       let* mesh = mesh ~spheres:scene.spheres ~strands:scene.strands scene.objects in
-      let* gpu_mesh = upload_mesh device queue mesh in
+      (* a device mesh is installed by [replace_mesh] once the tracer exists, over a stand-in *)
+      let* gpu_mesh =
+        upload_mesh device queue
+          (if Option.is_none mesh.device then mesh
+           else
+             {
+               mesh with
+               device = None;
+               mesh_positions = Bytes.make 36 '\000';
+               mesh_normals = Bytes.make 36 '\000';
+               mesh_ids = Bytes.make 4 '\000';
+               triangles = 1;
+             })
+      in
       let* panels =
         shared device ~label:"pathtracer-panels" (panel_bytes scene.environment.panels)
       in
@@ -422,6 +463,8 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
           convert;
           cell;
           kernels = [];
+          gather = None;
+          refits = 0;
           from_accum = false;
           gpu = gpu_mesh;
           building = None;
@@ -611,13 +654,178 @@ let move_async t (moved : mesh) =
       started
   | _ -> Error "path tracer move does not match the installed scene"
 
+(* A device mesh's update (Mesh_data.device): its corners gathered from the device's positions and
+   normals into the tracer's per-corner buffers (one compute pass each), then its structure. The same
+   topology (the corners array, vertex count and materials of the installed device mesh) refits the
+   installed structure in place, ordered on the queue before every later frame: [None], nothing to
+   install. Anything else builds a refittable structure over fresh buffers, installed when done.
+   ponytail: the structure is not compacted (a refit needs the uncompacted one). *)
+let device_async t (mesh : mesh) (d : Mesh_data.device) =
+  let* positions, normals =
+    match Renderer.gpu_positions t.lease d.key with
+    | Some (positions, Some normals, count) when count = d.vertex_count -> Ok (positions, normals)
+    | Some _ | None -> Error "path tracer device mesh is stale or carries no normals"
+  in
+  let* gather =
+    match t.gather with
+    | Some g -> Ok g
+    | None ->
+        let* g = Lisp_kernel.gather_kernel ~lease:t.lease ~pipelines:t.flow_pipelines in
+        t.gather <- Some g;
+        Ok g
+  in
+  let corners = Array.length d.corners and material_key = material_bytes mesh.mesh_materials in
+  let encode_gather commands ~vix ~into_positions ~into_normals =
+    let gather src into =
+      Lisp_kernel.gather gather ~commands ~cell:t.cell ~indices:vix ~count:corners ~src
+        ~vertices:d.vertex_count ~into
+    in
+    let* () = gather positions into_positions in
+    gather normals into_normals
+  in
+  let triangles soup =
+    B.Blas
+      {
+        geometries =
+          [
+            B.Triangles
+              {
+                vertices = soup;
+                offset = 0L;
+                length = Int64.of_int (12 * corners);
+                vertex_stride = 12;
+                vertex_count = corners;
+              };
+          ];
+      }
+  in
+  match t.gpu.device with
+  | Some installed
+    when installed.corners == d.corners
+         && installed.vertex_count = d.vertex_count
+         && Bytes.equal installed.material_key material_key ->
+      (* the last gather read the previous mesh's buffers: done before that mesh is let go *)
+      let* () = wait t.queue installed.receipt in
+      let* commands = gpu (B.begin_commands t.queue) in
+      let encoded =
+        let* () =
+          encode_gather commands ~vix:installed.vix ~into_positions:t.gpu.positions
+            ~into_normals:t.gpu.normals
+        in
+        let* encoder = gpu (B.accel_encoder commands) in
+        let* () =
+          gpu
+            (B.refit_accel encoder t.gpu.structure (triangles t.gpu.positions)
+               ~scratch:installed.refit_scratch ())
+        in
+        let* () = gpu (B.end_accel encoder) in
+        gpu (B.commit commands)
+      in
+      (match encoded with
+      | Ok receipt ->
+          installed.source <- d.holder;
+          installed.receipt <- receipt;
+          t.refits <- t.refits + 1;
+          edited t
+      | Error _ -> ignore (B.abandon commands));
+      Result.map (fun _ -> None) encoded
+  | Some _ | None -> (
+      let owned = ref [] and structure = ref None and commands = ref None in
+      let keep result =
+        Result.map
+          (fun value ->
+            owned := value :: !owned;
+            value)
+          result
+      in
+      let local ~label size = keep (buffer ~memory:Ogpu.Types.Device_local t.device ~label size) in
+      let built =
+        let* vix =
+          keep
+            (shared t.device ~label:"pathtracer-corners"
+               (floats (Array.map float_of_int d.corners)))
+        in
+        let* soup_positions = local ~label:"pathtracer-positions" (12 * corners) in
+        let* soup_normals = local ~label:"pathtracer-normals" (12 * corners) in
+        let* materials = keep (shared t.device ~label:"pathtracer-materials" material_key) in
+        let* tables =
+          upload_tables ~material_data:material_key t.device
+            { mesh with mesh_ids = Bytes.make (4 * (corners / 3)) '\000' }
+        in
+        owned := table_buffers tables @ !owned;
+        let* blas = gpu (B.create_accel ~refit:true t.device (triangles soup_positions)) in
+        structure := Some blas;
+        let sizes = B.accel_sizes blas in
+        let* work = local ~label:"pathtracer-scratch" (Int64.to_int sizes.build_scratch_size) in
+        let* refit_scratch =
+          local ~label:"pathtracer-refit-scratch" (Int64.to_int sizes.refit_scratch_size)
+        in
+        let* c = gpu (B.begin_commands t.queue) in
+        commands := Some c;
+        let* () = encode_gather c ~vix ~into_positions:soup_positions ~into_normals:soup_normals in
+        let* encoder = gpu (B.accel_encoder c) in
+        let* () = gpu (B.build_accel encoder blas ~scratch:work ()) in
+        let* () = gpu (B.end_accel encoder) in
+        let* receipt = gpu (B.commit c) in
+        commands := None;
+        Ok
+          {
+            gpu =
+              {
+                device =
+                  Some
+                    {
+                      corners = d.corners;
+                      vertex_count = d.vertex_count;
+                      material_key;
+                      vix;
+                      refit_scratch;
+                      source = d.holder;
+                      receipt;
+                    };
+                positions = soup_positions;
+                normals = soup_normals;
+                materials;
+                curves = None;
+                structure = blas;
+                primitive = None;
+                instance_buffer = None;
+                motion_buffer = None;
+                prototype_key = None;
+                scene_blas = [];
+                tables;
+                owns_prototype = true;
+                shape = mesh_shape mesh;
+              };
+            scratch = work;
+            extra_scratch = None;
+            size_buffer = None;
+            uncompacted = None;
+            stage = Compacting receipt;
+            instance_count = 0;
+          }
+      in
+      match built with
+      | Ok build -> Ok (Some build)
+      | Error _ as failure ->
+          Option.iter (fun c -> ignore (B.abandon c)) !commands;
+          Option.iter (fun blas -> ignore (B.destroy_accel blas)) !structure;
+          List.iter (fun value -> ignore (B.destroy_buffer value)) !owned;
+          Result.map (fun _ -> None) failure)
+
+(* The build a queued mesh starts: [None] for a device refit, already in place. *)
+let build_async t (mesh : mesh) =
+  match mesh.device with
+  | Some d -> device_async t mesh d
+  | None -> Result.map Option.some (upload_mesh_async ~reuse:t.gpu t.device t.queue mesh)
+
 (* A build or move can start only while no frame band holds a queue slot. *)
 let start_queued t =
   match t.queued_mesh with
   | Some (Full mesh) ->
       t.queued_mesh <- None;
-      let* next = upload_mesh_async ~reuse:t.gpu t.device t.queue mesh in
-      t.building <- Some next;
+      let* next = build_async t mesh in
+      t.building <- next;
       Ok ()
   | Some (Move moved) ->
       t.queued_mesh <- None;
@@ -653,8 +861,8 @@ let poll_build t =
           | Some (Full latest) ->
               t.queued_mesh <- None;
               (match built with Ok gpu -> destroy_gpu gpu | Error _ -> ());
-              let* next = upload_mesh_async ~reuse:t.gpu t.device t.queue latest in
-              t.building <- Some next;
+              let* next = build_async t latest in
+              t.building <- next;
               Ok ()
           | Some (Move moved) ->
               (* The move places the BLASes just built, so they install first. *)
@@ -1036,9 +1244,15 @@ let render t (camera : camera) =
 let replace_mesh t mesh =
   List.iter (fun pending -> pending.stale <- true) t.pending;
   let* () = flush t in
-  let* build = upload_mesh_async ~reuse:t.gpu t.device t.queue mesh in
-  let* gpu = finish_build t.device t.queue build in
-  install_gpu t gpu;
+  let* build = build_async t mesh in
+  let* () =
+    match build with
+    | Some build ->
+        let* gpu = finish_build t.device t.queue build in
+        install_gpu t gpu;
+        Ok ()
+    | None -> Ok ()
+  in
   t.latest <- mesh;
   Ok ()
 
@@ -1115,6 +1329,7 @@ let destroy t =
   release (fun () -> flush t);
   release (fun () -> Rays.Image.destroy t.image);
   List.iter (fun (_, kernels) -> Lisp_kernel.close kernels) t.kernels;
+  Option.iter Lisp_kernel.close_gather t.gather;
   Flow_gpu.Pipelines.close t.flow_pipelines;
   Flow_gpu.Image_sink.close t.convert;
   destroy_gpu t.gpu;
@@ -1123,6 +1338,18 @@ let destroy t =
     [ t.panels; t.lights; t.world_buffer; t.cdf_buffer; t.cell ];
   destroy_film t.film;
   Renderer.release_gpu t.lease
+
+let create ?spp ?bounces ?exposure ?round_samples ?bsdf_only ?profile ~width ~height scene =
+  let* t =
+    create_tracer ?spp ?bounces ?exposure ?round_samples ?bsdf_only ?profile ~width ~height scene
+  in
+  if Option.is_none t.latest.device then Ok t
+  else
+    match replace_mesh t t.latest with
+    | Ok () -> Ok t
+    | Error _ as failure ->
+        destroy t;
+        Result.map (fun () -> t) failure
 
 module Private = struct
   let cpu_trace t camera ~accum =
@@ -1163,6 +1390,7 @@ module Private = struct
     let* source = Lisp_kernel.source kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
     Ok (threads, source)
 
+  let refits t = t.refits
   let kernel_cache = Lisp_kernel.cache_dir
   let check_library = Lisp_kernel.check_library
   let check_sketch = Lisp_kernel.check_sketch

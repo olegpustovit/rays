@@ -36,6 +36,7 @@
   sop
   rdk
   rdk_rays
+  rays_pathtracer
   parallel))
 
 (rule

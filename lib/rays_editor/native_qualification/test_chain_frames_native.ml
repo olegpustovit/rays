@@ -126,6 +126,57 @@ let run (drive, xdrive, connectivity) =
               };
         }
   in
+  (* the one mesh a displayed surface draws, and the path tracer over it: created on the first
+     frame, its mesh replaced on later ones (a device mesh of the same topology refits in place),
+     then one full-quality frame traced and waited for; its pixels and the seconds the update and
+     the trace took *)
+  let trace_mesh scene =
+    let found = ref None in
+    Rays.Scene.D3.Walk.iter_batches
+      (fun (drawing : Rays.Scene.D3.Walk.drawing) _ -> found := Some drawing.mesh)
+      scene;
+    Option.get !found
+  in
+  let module P = Rays_pathtracer in
+  let traced = function Ok value -> value | Error message -> failwith message in
+  let material = P.material (P.Linear_color.rgb 0.8 0.7 0.6) in
+  let device_tracer = ref None and host_tracer = ref None in
+  let trace tracer mesh =
+    let start = Unix.gettimeofday () in
+    let t =
+      match !tracer with
+      | Some t ->
+          traced (P.replace_mesh t (traced (P.mesh [ (mesh, material) ])));
+          t
+      | None ->
+          let t =
+            traced
+              (P.create ~width:128 ~height:128
+                 {
+                   P.objects = [ (mesh, material) ];
+                   spheres = [];
+                   strands = [];
+                   environment =
+                     {
+                       sky = P.Linear_color.rgb 0.6 0.7 0.9;
+                       ground = P.Linear_color.rgb 0.3 0.3 0.3;
+                       panels = [];
+                     };
+                   lights = [];
+                 })
+          in
+          tracer := Some t;
+          t
+    in
+    P.reset t;
+    traced (P.render t camera);
+    traced (P.flush t);
+    let seconds = Unix.gettimeofday () -. start in
+    (Bytes.copy (traced (Rays.Image.pixels (P.image t))), seconds)
+  in
+  (* both trace the same float32 corners and normals through the same kernel *)
+  let trace_tolerance = 0 in
+  let trace_times = ref [] and host_trace_times = ref [] in
   let count = side * side in
   let cpu_cook, cpu_close = animate () in
   let gpu = Flow_native.Workspace_gpu.create () in
@@ -244,6 +295,54 @@ let run (drive, xdrive, connectivity) =
                       (world, lit))
                     world
                 in
+                (* path traced from the device: the corners gathered where P and N are and the
+                   structure refit (rebuilt on the first frame), nothing read back and no host copy
+                   made; then traced as today, from the host copy the editor converts *)
+                if connectivity = "Triangles" then begin
+                  let device_mesh =
+                    trace_mesh
+                      (Rdk_rays.Surface.scene3
+                         ~device:(Flow_native.Workspace_gpu.display gpu)
+                         (Rdk_rays.Surface.of_geometry device |> Result.get_ok))
+                  in
+                  if Rays.Mesh.View.device device_mesh = None then fail "no device mesh to trace";
+                  let before = stats () in
+                  let device_pixels, device_seconds = trace device_tracer device_mesh in
+                  let traced = stats () in
+                  let tracer = Option.get !device_tracer in
+                  if P.Private.refits tracer <> frame then
+                    fail
+                      (Printf.sprintf "%d refits after %d frames of one topology"
+                         (P.Private.refits tracer) frame);
+                  let lit = ref 0 in
+                  Bytes.iteri
+                    (fun i c -> if i mod 4 <> 3 && Char.code c > 8 then incr lit)
+                    device_pixels;
+                  if !lit < Bytes.length device_pixels / 8 then fail "the trace shows nothing";
+                  if
+                    traced.readback_bytes <> before.readback_bytes
+                    || traced.materialisations <> before.materialisations
+                    || not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions device))
+                  then fail "path tracing the device mesh read P back or made its host copy";
+                  let host_mesh =
+                    Rdk_rays.Rays_mesh.of_mesh device_mesh
+                    |> Result.get_ok |> Rdk_rays.Rays_mesh.to_trace_mesh |> Result.get_ok
+                  in
+                  let host_pixels, host_seconds = trace host_tracer host_mesh in
+                  let largest = ref 0 in
+                  Bytes.iteri
+                    (fun i c ->
+                      largest :=
+                        max !largest (abs (Char.code c - Char.code (Bytes.get host_pixels i))))
+                    device_pixels;
+                  if !largest > trace_tolerance then
+                    fail
+                      (Printf.sprintf "the device trace differs from the host copy's by %d" !largest);
+                  if frame > 0 then begin
+                    trace_times := device_seconds :: !trace_times;
+                    host_trace_times := host_seconds :: !host_trace_times
+                  end
+                end;
                 (* the same geometry read back and drawn from the host: the same pixels *)
                 let host, seconds = picture host_canvas device in
                 (* min and max are exact in float32: the device's box is the host scan's, bit for bit *)
@@ -289,6 +388,15 @@ let run (drive, xdrive, connectivity) =
               done;
               (* the node removed: its scenes draw no display, so two frames later every binding is
                  released (no collection needed), and once its results die the pool holds nothing *)
+              Option.iter P.destroy !device_tracer;
+              Option.iter P.destroy !host_tracer;
+              if !trace_times <> [] then
+                Printf.printf
+                  "path traced %d resident points (128 x 128, 1 spp): update and trace %.4f s a \
+                   frame from the device (corners gathered, structure refit, nothing read back) \
+                   against %.4f s from the host copy (medians of %d)\n\
+                   %!"
+                  count (median !trace_times) (median !host_trace_times) (frames - 1);
               if Flow_native.Workspace_gpu.held_displays gpu = 0 then failwith "no display is held";
               for _ = 0 to 2 do
                 Flow_native.Workspace_gpu.frame ~keep:[] gpu

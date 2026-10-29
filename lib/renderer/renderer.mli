@@ -143,6 +143,11 @@ val register_gpu_positions :
     unregistration (initial domain). The producer keeps the buffers while [valid]; a draw of a
     registration no longer valid is refused as stale. At most 128 borrowed sources are live. *)
 
+val gpu_positions : gpu -> string -> (Ogpu.Backend.buffer * Ogpu.Backend.buffer option * int) option
+(** The packed float3 positions, normals (if registered) and count that the valid registration under
+    [key] borrows, for another consumer of the same device (the path tracer); the producer keeps
+    them while the device mesh naming [key] lives. Initial domain. *)
+
 module Native : sig
   val runtime : t -> Runtime.t
   (** The borrowed SDL/runtime shell; its lifetime remains owned by [t]. *)

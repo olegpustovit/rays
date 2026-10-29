@@ -52,7 +52,14 @@ type extras = {
   strand_segments : int;
 }
 
+(* A device mesh's triangles ({!Rays.Mesh.View.create_device}): the registration [key] names its
+   packed float3 positions and normals on the device, [corners] its topology (three vertex indices
+   per triangle, kept by identity), [holder] the mesh that keeps them alive. The host arrays of the
+   mesh it is part of stay empty: the tracer gathers the corners on the device. *)
+type device = { key : string; vertex_count : int; corners : int array; holder : Rays.Mesh.t }
+
 type 'material t = {
+  device : device option;
   mesh_positions : bytes;
   mesh_normals : bytes;
   mesh_ids : bytes;
@@ -116,6 +123,7 @@ let flat_mesh ~extras ~materials source_meshes =
   in
   Ok
     {
+      device = None;
       mesh_positions;
       mesh_normals;
       mesh_ids;
@@ -275,7 +283,7 @@ let pack_instances ~materials ~motion transforms =
 
 let mesh_instanced ~(prototype : 'material t) ?(materials = [||]) ?motion transforms =
   if
-    prototype.scene <> None || prototype.instances <> None
+    prototype.scene <> None || prototype.instances <> None || Option.is_some prototype.device
     || prototype.extras.sphere_count <> 0
     || prototype.extras.strand_segments <> 0
   then Error "path tracer instancing needs one prepared triangle mesh"
@@ -326,6 +334,7 @@ let scene_mesh (objects : (Rays_math.Mat4.t * 'material t) list) =
   let input (matrix, (m : 'material t)) =
     let whole = [| Triangle_part (0, Bytes.length m.mesh_positions / 12) |] in
     match (m.scene, m.instances) with
+    | _ when Option.is_some m.device -> Error "path tracer scene_mesh objects are host meshes"
     | _ when m.extras.sphere_count > 0 || m.extras.strand_segments > 0 ->
         (* ponytail: spheres and strands would need per-instance bases in the
            intersection function; scene objects are triangle meshes. *)
@@ -408,6 +417,7 @@ let scene_mesh (objects : (Rays_math.Mat4.t * 'material t) list) =
       ~placed:(Array.of_list placed)
       ~locals:(Array.of_list (List.rev !locals))
       {
+        device = None;
         mesh_positions = Stdlib.Buffer.to_bytes positions;
         mesh_normals = Stdlib.Buffer.to_bytes normals;
         mesh_ids = Stdlib.Buffer.to_bytes ids;

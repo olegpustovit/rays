@@ -417,8 +417,18 @@ function tables or linked functions. `compute_use_accels` declares
 the built bottom-level structures an instance structure references as read by
 a dispatch (Metal `useResource:usage:`; they are otherwise evicted over time).
 `Caps` is the live set: `Compute_pipeline`, `Render_pipeline`, `Ray_tracing`,
-`Ray_tracing_motion`, and `Ray_tracing_curves` (Metal: Apple9 and later; the M1
+`Ray_tracing_motion`, `Ray_tracing_refit`, and `Ray_tracing_curves` (Metal: Apple9 and later; the M1
 answers curves with typed `Unsupported`).
+Refit (`Ray_tracing_refit`, the path tracer's device meshes): `create_accel ~refit:true` builds a
+primitive structure that can be updated (Metal `MTLAccelerationStructureUsageRefit`, Vulkan
+`ALLOW_UPDATE`), `accel_sizes.refit_scratch_size` is the update's scratch (Metal's refit scratch,
+Vulkan's `updateScratchSize`), and `refit_accel encoder accel descriptor ~scratch` updates it in place
+from a `Blas`/`Motion_blas` of the same geometries in kind, count and stride over new buffers or
+contents (Metal `refitAccelerationStructure:` with a nil destination, Vulkan an update-mode build with
+src = dst). The portable state machine refuses a structure not created refittable, unbuilt or
+compacted (`Invalid_state`) and another shape (`Invalid_argument`); the mock has no ray tracing and
+answers `Unsupported`. No unified-memory assumption: the new vertex data may be device-local and
+device-written, ordered by the queue.
 A colour attachment's `store` is honoured: `Store` keeps the contents (and
 also resolves when a resolve texture is given), `Resolve` writes only the
 resolve texture, `Discard` keeps nothing and is rejected with a resolve
@@ -432,8 +442,7 @@ capability flags, because no product code called them: placement heaps and
 aliasing, residency sets, intra-queue fences, timeline events, stage-boundary
 timestamps, mesh and tile pipelines, dynamic libraries, binary archives,
 sparse textures, the MetalFX upscaler, visible and intersection function
-tables with linked functions and the instance table offset, refit and
-structure copy, precompiled metallib shaders, the encoded buffer copy, fill,
+tables with linked functions and the instance table offset, structure copy, precompiled metallib shaders, the encoded buffer copy, fill,
 texture copy and texture-to-buffer blits, and the portable `Memory`, `Sync`,
 and `Diagnostics` modules. A capability returns through the
 `add-ogpu-feature` workflow with its first caller. Shared conformance covers
@@ -616,7 +625,18 @@ no window exists), owns one queue on it, and builds its acceleration
 structures, library, pipelines, and frames through OGPU encoders. Its
 packed-mesh path builds one bottom-level structure and a top-level instance
 structure; unchanged prototypes retain their GPU buffers and bottom-level
-structure across transform edits. It hands results back to Rays only as
+structure across transform edits. A device mesh (a resident P and N a fused SOP write holds,
+registered by `Workspace_gpu.display`) is traced without a readback: `Renderer.gpu_positions` hands
+the tracer the registration's buffers (same device, initial domain), a Flow-emitted gather kernel
+(`Lisp_kernel.gather`, `(array/nth src v)` over the corners' vertex indices, uploaded once per topology
+as floats) writes the per-corner positions and normals the trace kernel and its `scene/trace`
+geometric normal read (a corner soup: the shared emitter's `scene_vertices[prim*3+c]` and `nrm`
+reads stay unindexed), and the structure over that buffer is built refittable once per topology and
+refit in place each frame after (`refit_accel`), in one command buffer ordered before the next frame.
+The tracer keeps the device mesh it last gathered from until that gather's receipt completes. An
+indexed triangle geometry would build from the device P directly but the trace kernel's corner reads
+would need an index table in the shared emitter (MSL, SPIR-V and the CPU walker), so it is not
+done. It hands results back to Rays only as
 an ordinary `Image.t` with a stable identity. It imports neither `metal` nor
 the runtime, and nothing below it imports it. See `specification/pathtracer.md`.
 

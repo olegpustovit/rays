@@ -31,7 +31,22 @@ type tables = {
     * bool (* some material is metallic, emissive, round: the kernel folds what none is *);
 }
 
+(* A device mesh's gathered corners ([positions] and [normals] of its gpu_mesh, device-written): the
+   topology they were made for ([corners] by identity, [materials] the material bytes), the corners'
+   vertex indices as floats, the refittable structure's scratch, and the device mesh whose buffers the
+   last gather read, kept until the gather's [receipt] completes. *)
+type device_gpu = {
+  corners : int array;
+  vertex_count : int;
+  material_key : bytes;
+  vix : B.buffer;
+  refit_scratch : B.buffer;
+  mutable source : Rays.Mesh.t;
+  mutable receipt : B.receipt;
+}
+
 type gpu_mesh = {
+  device : device_gpu option;
   positions : B.buffer;
   normals : B.buffer;
   materials : B.buffer;
@@ -83,6 +98,11 @@ let destroy_gpu gpu =
   Option.iter (fun motion -> ignore (B.destroy_buffer motion)) gpu.motion_buffer;
   Option.iter (fun instances -> ignore (B.destroy_buffer instances)) gpu.instance_buffer;
   if gpu.owns_prototype then begin
+    Option.iter
+      (fun d ->
+        ignore (B.destroy_buffer d.vix);
+        ignore (B.destroy_buffer d.refit_scratch))
+      gpu.device;
     Option.iter (fun primitive -> ignore (B.destroy_accel primitive)) gpu.primitive;
     List.iter
       (fun value -> ignore (B.destroy_buffer value))
@@ -469,6 +489,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
     scratch := Some work;
     let gpu_mesh =
       {
+        device = None;
         positions;
         normals;
         materials;

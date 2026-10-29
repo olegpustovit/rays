@@ -48,9 +48,14 @@ type driver_library = {
   destroy_library : unit -> (unit, Error.t) result;
 }
 
-type accel_sizes = { structure_size : int64; build_scratch_size : int64; refit_scratch_size : int64 }
+type accel_sizes = {
+  structure_size : int64;
+  build_scratch_size : int64;
+  refit_scratch_size : int64;
+}
 (** [refit_scratch_size]: the scratch {!refit_accel} needs (Metal's refit scratch, Vulkan's update
     scratch). *)
+
 type driver_keyframe = token * int64
 
 type driver_geometry =
@@ -514,6 +519,7 @@ val pack_transforms : float array array -> (bytes, Error.t) result
 val create_accel : ?refit:bool -> device -> accel_descriptor -> (accel, Error.t) result
 (** [refit] (default false; [Caps.Ray_tracing_refit]) builds a primitive structure that
     {!refit_accel} can update in place. *)
+
 val accel_sizes : accel -> accel_sizes
 val destroy_accel : accel -> (unit, Error.t) result
 val begin_commands : queue -> (commands, Error.t) result

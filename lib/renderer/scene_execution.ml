@@ -3193,6 +3193,13 @@ module Private = struct
   let gpu_vertices_owner value = value.gpu_vertices
   let register_gpu_vertices = register_gpu_vertices
   let unregister_gpu_vertices = unregister_gpu_vertices
+
+  let find_gpu_vertices owner key =
+    match Hashtbl.find_opt owner.gpu_vertex_registry key with
+    | Some source when gpu_vertices_valid source ->
+        Some (source.gpu_buffer, source.gpu_extra, source.gpu_vertex_count)
+    | Some _ | None -> None
+
   let gpu_vertex_count_for_test owner = Hashtbl.length owner.gpu_vertex_registry
   let cache_count_for_report value = String_table.length value.cache
 

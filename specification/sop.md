@@ -628,8 +628,19 @@ buffers, `Renderer.register_gpu_positions` registers them, `Rays.Mesh.View.creat
 mesh, with the topology's corners as its indices; specification/backend.md). The mesh keeps the
 borrow: once collected, the registration and pins are released. A device mesh also carries how to
 make its host copy (`create_device ?host`: `Rays_mesh.to_mesh`, reading P back, once): a reader
-of vertices (the path tracer, a centroid) gets that copy, the raster lowering
-reads only the mesh's own arrays (`Mesh.View.unread`). Its indices are packed once per topology (8
+of vertices (a centroid) gets that copy, the raster lowering
+reads only the mesh's own arrays (`Mesh.View.unread`). The path tracer does not: a lone triangle
+device mesh with N (the editor's traced scene of one batch at the identity, no instances, no
+texture) is traced where the device holds it (`Rays_pathtracer.mesh`, specification/backend.md):
+its corners are gathered on the device and its structure refit in place each frame its topology
+(the corners array) stays, rebuilt when it changes. `test_chain_frames_native` (`CONNECTIVITY
+Triangles`) traces the deforming resident mesh every frame: nothing is read back or materialised,
+every frame after the first refits, and the pixels equal the trace of the host copy the editor
+used to convert, exactly. Measured (M1, load 3, 128 x 128 at 1 spp, update and trace waited for,
+medians of 7 frames): 512 squared 4.8 ms a frame against 119-138 ms from the host copy (the
+readback, `Rays_mesh.of_mesh`/`to_trace_mesh`, the upload and a compacted rebuild); 1M points
+16.3 ms against 570 ms. A device mesh that is not alone (several objects, instances, a transform)
+still traces from its host copy. Its indices are packed once per topology (8
 kept by the corners array's identity) and the renderer keeps them under their own key
 (`Gpu_vertices "borrow\nindices"`), so a frame's new borrow neither repacks, rehashes nor reuploads
 them. The World sun's depth pass reads a device mesh's positions as the colour pass does, and the

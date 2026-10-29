@@ -180,6 +180,11 @@ module Private : sig
       (word 80 clear: the normal is (0, 0, 1)). *)
 
   val unregister_gpu_vertices : gpu_vertices -> unit
+
+  val find_gpu_vertices :
+    gpu_vertices_owner -> string -> (Ogpu.Backend.buffer * Ogpu.Backend.buffer list * int) option
+  (** A live, valid registration's buffer, extra buffers and vertex count (initial domain). *)
+
   val gpu_vertex_count_for_test : gpu_vertices_owner -> int
   val cache_count_for_report : t -> int
   val coalesced_draws_for_test : sampled_draw list -> int

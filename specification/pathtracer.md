@@ -136,7 +136,13 @@ file-backed HDRIs (a baked `Rays.World` is the environment; see World path).
    staged: the primitive build writes its compacted size, the next poll
    compacts it into a right-sized structure, then the TLAS (user-id or motion
    instance records) builds over the compacted one and the uncompacted
-   structure is released; `render` never waits on any stage.
+   structure is released; `render` never waits on any stage. A lone device
+   mesh (resident P and N, `Rays.Mesh.View.create_device`) is never read
+   back: its corners are gathered on the device by a Flow-emitted kernel
+   (`Lisp_kernel.gather`) into the tracer's per-corner positions and normals,
+   its structure is built refittable and uncompacted, and a later mesh of the
+   same topology refits it in place (`Ogpu.Backend.refit_accel`) in one
+   command buffer before the next frame (specification/backend.md).
 2. The kernels are Rays Lisp: `pathtrace.rays` (with `pathtrace_helpers.rays`
    and `resolve_preview.rays`, embedded by a Dune rule) printed to MSL by
    `Flow_gpu.Emit` (`Lisp_kernel`). A kernel set is compiled per scene shape:
