@@ -59,27 +59,35 @@ let status_text ?(brief = false) value =
   match value.carry with
   | Some c -> carry_line c
   | None ->
+      let playing = Timeline.mode value.timeline = Timeline.Playing in
+      let idle () =
+        match (value.edit_error, value.cook.error, value.cook.seconds) with
+        | _ when projection value = Text_view && Text_pane.first_error value.text <> None ->
+            "Text rejected: " ^ Diagnostic.to_string (Option.get (Text_pane.first_error value.text))
+        | Some error, _, _ -> "Graph edit rejected: " ^ error
+        | None, Some error, _ -> "Cook rejected: " ^ error
+        | None, None, _ when value.notice <> None -> snd (Option.get value.notice)
+        | None, None, Some seconds -> (
+            match Flow_sop.Lower.status value.doc.Document.workspace.lowered ~seconds with
+            | Some text -> text
+            | None -> Printf.sprintf "checked · cooked %.3f s" seconds)
+        | None, None, None -> "Waiting for first cook"
+      in
       let cook =
         match Cook.status value.cook with
-        | Async_cook.Cooking { seconds; queued = true; _ }
-          when Timeline.mode value.timeline = Timeline.Playing ->
+        | Async_cook.Cooking { seconds; queued = true; _ } when playing ->
             (* playing and a newer frame is already waiting: frames are skipped *)
             Printf.sprintf "cook %d ms · skipping frames" (int_of_float (seconds *. 1000.))
+        | Async_cook.Cooking _
+          when playing
+               && fst (Flow_sop.Lower.counts value.doc.Document.workspace.lowered) > 0
+               && value.cook.seconds <> None ->
+            (* a frame-driven graph recooks every frame, so one is nearly always in flight: say what
+               the last one took, not how long the current one has run *)
+            idle ()
         | Async_cook.Cooking { seconds; queued; _ } ->
             Printf.sprintf "Cooking… %.1fs%s" seconds (if queued then " · latest queued" else "")
-        | Idle -> (
-            match (value.edit_error, value.cook.error, value.cook.seconds) with
-            | _ when projection value = Text_view && Text_pane.first_error value.text <> None ->
-                "Text rejected: "
-                ^ Diagnostic.to_string (Option.get (Text_pane.first_error value.text))
-            | Some error, _, _ -> "Graph edit rejected: " ^ error
-            | None, Some error, _ -> "Cook rejected: " ^ error
-            | None, None, _ when value.notice <> None -> snd (Option.get value.notice)
-            | None, None, Some seconds -> (
-                match Flow_sop.Lower.status value.doc.Document.workspace.lowered ~seconds with
-                | Some text -> text
-                | None -> Printf.sprintf "checked · cooked %.3f s" seconds)
-            | None, None, None -> "Waiting for first cook")
+        | Idle -> idle ()
       in
       let phases = Flow.Phase_timer.summary value.edit_phases in
       let cook = cook ^ if phases = "" then "" else " · " ^ phases in
