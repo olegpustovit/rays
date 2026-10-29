@@ -262,6 +262,11 @@ val lattice : float
 
 val snap : float -> float
 val zone_pad_x : float
+
+val cell_wire : node -> row -> int -> path * Flow_edit.arg_key * Flow.Syntax.t option
+(** The target of the wire from cell [i] of the row's vector literal ([row.cells]): the vector's
+    leaf, [Cell i], and the 0.0 a taken-off wire leaves. *)
+
 val zone_pad_in : zone -> float
 val point_size : float
 val row_height : float

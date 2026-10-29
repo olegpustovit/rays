@@ -165,7 +165,11 @@ down to it, then the binding name. Reserved segments: `:x` a loop variable or pa
 `@result` a body result, `~for` / `~let` / `~fn` an unbound inline form (a second one under
 the same binding is `~for~1`, then `~for~2`). A nested node has no binding: its leaf is the
 holder's leaf, `#`, and the input (`result#0`, `result#0#:cutters`;
-`Flow_edit.nested_leaf`). Inline higher-order calls and their function inputs use
+`Flow_edit.nested_leaf`). A call written in a cell of a vector literal input is a nested node
+too: its leaf adds `#c<i>` (`a#0#c1` is the call in cell 1 of input 0 of `a`; `Flow_edit.Cell`).
+The row keeps its literal cells (`Projection.row.cells` lists the calls), the card is wired to the
+row, the wire ends at the cell (target `holder#key`, `Cell i`), and taking it off (`Disconnect`,
+from the wire or the row's port) sets that cell to `0.0` and keeps the call as a binding. Inline higher-order calls and their function inputs use
 these same leaves: `result#2#0` is the function in input 0 of the map in input 2,
 and `result#2#0/shift` is a binding in its body. Selection, probes and layout are keyed by path, so they survive
 every edit that keeps the path; `Flow_edit.remap` says where a key goes after a rename or a
@@ -354,6 +358,9 @@ Bypass on `if` selects its then arm; `cond` and `case` cannot be bypassed.
   the selection included) and the wires between them stay at full ink and thicker; every
   other card and wire recedes. A wire is lit when both its ends are on the same side
   (`Scope_state.chains_of`); sibling branches stay dim. Open zone frames are not dimmed.
+- **Routing.** A wire that would run over a card it neither leaves nor enters goes round it, level
+  over the top or under the bottom of the card, whichever side its line passes (`Scope_wires.route`;
+  zones are not obstacles). A function's parameters leave as ordinary wires, not down a begin bar.
 - **Tags.** A wire whose ends are more than three columns (864 points) apart is not drawn:
   a 14-point stub at each end and the source's title in ink-2 left of the input (a
   *tag*). Selecting either end lights the chain and draws the real wire. A tagged wire has no

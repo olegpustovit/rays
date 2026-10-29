@@ -922,6 +922,13 @@ let sources (r : row) =
   | _, Some e -> E.free_names e
   | _, None -> []
 
+(* the wire of cell [i] of a row's vector literal ends at the vector, which a nested leaf names:
+   the edit that takes it off sets that cell to 0.0 *)
+let cell_wire (n : node) (r : row) i =
+  ( List.rev_append (List.tl (List.rev n.path)) [ E.nested_leaf n.name r.key ],
+    E.Cell i,
+    Some (S.make (S.Num "0.0")) )
+
 let with_arguments changes scope =
   let edits = Hashtbl.create (List.length changes) in
   List.iter

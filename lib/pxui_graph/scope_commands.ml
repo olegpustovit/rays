@@ -74,13 +74,21 @@ let last_value t (n : P.node) (r : P.row) =
   | _ -> None
 
 let unwire t (n : P.node) (r : P.row) =
-  let fallback =
-    match last_value t n r with Some _ as v when r.kind <> P.Rest -> v | _ -> fallback r
-  in
-  (match r.chip with
-    | P.Name leaf when E.nested leaf -> [ E.Unfold { node = n.path; key = r.key; sub = [] } ]
-    | _ -> [])
-  @ [ E.Disconnect { node = n.path; key = r.key; fallback } ]
+  if r.cells <> [] then
+    (* the calls in a vector's cells: each cell is set, the vector's other cells stay *)
+    List.map
+      (fun (i, _) ->
+        let node, key, fallback = P.cell_wire n r i in
+        E.Disconnect { node; key; fallback })
+      r.cells
+  else
+    let fallback =
+      match last_value t n r with Some _ as v when r.kind <> P.Rest -> v | _ -> fallback r
+    in
+    (match r.chip with
+      | P.Name leaf when E.nested leaf -> [ E.Unfold { node = n.path; key = r.key; sub = [] } ]
+      | _ -> [])
+    @ [ E.Disconnect { node = n.path; key = r.key; fallback } ]
 
 (* the edits that take the wires off these inputs *)
 let unwire_at t inputs =
@@ -91,7 +99,12 @@ let unwire_at t inputs =
             Option.map (fun r -> (n, r)) (List.find_opt (fun (r : P.row) -> r.key = key) n.rows))
       with
       | Some (n, r) -> unwire t n r
-      | None -> [])
+      | None -> (
+          (* the end of a wire from a vector's cell: its holder is no node *)
+          match key with
+          | E.Cell _ ->
+              [ E.Disconnect { node = path; key; fallback = Some (S.make (S.Num "0.0")) } ]
+          | _ -> []))
     inputs
 
 (* ---------------------------------------------------------------- frames *)

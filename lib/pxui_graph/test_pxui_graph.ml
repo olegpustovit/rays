@@ -961,7 +961,82 @@ let scope_curve () =
        (fun i ->
          Scope.Inspect.wire_target view i = Some ([ "g"; "a#0" ], Flow_graph.Flow_edit.Cell 1))
        (List.init (Scope.Inspect.wire_count view) Fun.id))
-    "no wire ends at the vector's cell"
+    "no wire ends at the vector's cell";
+  (* taking the wire off from the row's own port disconnects just that cell *)
+  let a_node = Option.get (P.find scope [ "g"; "a" ]) in
+  let k = Option.get (List.find_index (fun (r : P.row) -> r.cells <> []) a_node.rows) in
+  let rx, ry = Option.get (Scope.Inspect.row_center view [ "g"; "a" ] k) in
+  let at = (int_of_float rx, int_of_float ry) in
+  let hovered, _ = scope_step view (frame ~mouse:at ~events:[ mouse_move at ] ()) in
+  check
+    (match snd (Scope.run_command hovered Scope.Delete) with
+    | [
+     Scope.Syntax_edit
+       (Flow_graph.Flow_edit.Disconnect
+          { node = [ "g"; "a#0" ]; key = Flow_graph.Flow_edit.Cell 1; fallback = Some _ });
+    ] ->
+        true
+    | _ -> false)
+    "Delete over a vector row with a wired cell is not a Disconnect of that cell";
+  (* every card inside a function's zone lies inside the zone's rectangle, cell cards included *)
+  let w =
+    ( Editor_document.Workspace_doc.of_text scope_catalog
+        "(workspace f (graph g :context host (let* [f (fn [(p : vec3) (h : float)] (+ p [0.0 (* \
+         2.0 h) 0.0])) m (map f (list [0.0 0.0 0.0]) (list 1.0))] m)))"
+    |> function
+      | Ok d -> d
+      | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d)) )
+      .checked
+  in
+  let view, scope = scope_view w "g" in
+  let view = fst (scope_step view (frame ())) in
+  let zone = Option.get (Scope.Inspect.box_of view [ "g"; "f" ]) in
+  let zx, zy, zw, zh = zone in
+  let inner =
+    List.filter
+      (fun (n : P.node) -> List.length n.path = 3)
+      (P.zones scope |> List.concat_map (fun (z : P.node) -> (Option.get z.zone).scope.nodes))
+  in
+  check (List.length inner >= 2) "the function's body has its cards";
+  List.iter
+    (fun (n : P.node) ->
+      let x, y, w, h = Option.get (Scope.Inspect.box_of view n.path) in
+      check
+        (x >= zx -. 0.5 && y >= zy -. 0.5 && x +. w <= zx +. zw +. 0.5 && y +. h <= zy +. zh +. 0.5)
+        (Printf.sprintf "%s leaves its zone" (String.concat "/" n.path)))
+    inner;
+  (* a wire does not run over a card it neither leaves nor enters *)
+  let cards =
+    List.filter_map
+      (fun (n : P.node) ->
+        if n.zone <> None then None else Option.map (fun b -> b) (Scope.Inspect.box_of view n.path))
+      (scope.nodes @ inner)
+  in
+  let inside (x, y) (bx, by, bw, bh) =
+    x > bx -. 0.5 && x < bx +. bw +. 0.5 && y > by -. 0.5 && y < by +. bh +. 0.5
+  in
+  let shrunk (bx, by, bw, bh) = (bx +. 3., by +. 3., bw -. 6., bh -. 6.) in
+  List.iter
+    (fun i ->
+      let pts = Scope.Inspect.wire_points view i in
+      let ends = [ List.hd pts; List.nth pts (List.length pts - 1) ] in
+      let rec walk = function
+        | (x0, y0) :: ((x1, y1) :: _ as rest) ->
+            List.iter
+              (fun b ->
+                if not (List.exists (fun e -> inside e b) ends) then
+                  for k = 0 to 20 do
+                    let t = float k /. 20. in
+                    check
+                      (not (inside (x0 +. ((x1 -. x0) *. t), y0 +. ((y1 -. y0) *. t)) (shrunk b)))
+                      "a wire runs over a card it does not enter"
+                  done)
+              cards;
+            walk rest
+        | _ -> ()
+      in
+      walk pts)
+    (List.init (Scope.Inspect.wire_count view) Fun.id)
 
 (* a formula in a record field opens as a binding: a field holds no nested card (it raised before) *)
 let scope_field_formula () =

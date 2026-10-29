@@ -285,6 +285,73 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
   let at path : (P.placed * float * float) option =
     Option.map (fun i -> items.(i)) (Paths.find_opt slot path)
   in
+  let tiles =
+    index_of (Array.length items) (fun i ->
+        let (p : P.placed), ax, ay = items.(i) in
+        (ax, ay, ax +. p.w, ay +. p.h))
+  in
+  (* a wire that would run over a card it neither leaves nor enters goes round it: over the top or
+     under the bottom, whichever side the wire's line passes on.  Zones are not obstacles (they
+     hold both ends), nor is any card holding an end. *)
+  let route (ax, ay) (bx, by) ~from ~into =
+    let inside (x, y) (p : P.placed) cx cy =
+      x >= cx && x <= cx +. p.w && y >= cy && y <= cy +. p.h
+    in
+    let blockers =
+      List.filter_map
+        (fun i ->
+          let (p : P.placed), cx, cy = items.(i) in
+          let own = function Some o -> path_equal o p.path | None -> false in
+          if
+            p.inner <> None || own from || own into
+            || inside (ax, ay) p cx cy
+            || inside (bx, by) p cx cy
+            || P.(match p.item with Return -> true | _ -> false)
+          then None
+          else
+            let pts = curve_points (ax, ay) (bx, by) in
+            let rec hit = function
+              | u :: (v :: _ as rest) -> clip_segment u v (cx, cy, p.w, p.h) <> None || hit rest
+              | _ -> false
+            in
+            if hit pts then Some (cx, cy, p.w, p.h) else None)
+        (index_query tiles (Float.min ax bx, Float.min ay by, Float.max ax bx, Float.max ay by))
+    in
+    (* cards stacked in the same columns are one obstacle *)
+    let merged =
+      List.fold_left
+        (fun acc (cx, cy, w, h) ->
+          match acc with
+          | (px, py, pw, ph) :: rest when cx < px +. pw ->
+              let x1 = Float.max (px +. pw) (cx +. w) and y1 = Float.max (py +. ph) (cy +. h) in
+              let y0 = Float.min py cy in
+              (px, y0, x1 -. px, y1 -. y0) :: rest
+          | _ -> (cx, cy, w, h) :: acc)
+        []
+        (List.sort (fun (x, _, _, _) (y, _, _, _) -> compare x y) blockers)
+      |> List.rev
+    in
+    match merged with
+    | [] -> curve_points (ax, ay) (bx, by)
+    | bs ->
+        let way =
+          List.concat_map
+            (fun (cx, cy, w, h) ->
+              let mx = cx +. (w /. 2.) in
+              let line = if bx = ax then ay else ay +. ((by -. ay) *. (mx -. ax) /. (bx -. ax)) in
+              let y = if line <= cy +. (h /. 2.) then cy -. 12. else cy +. h +. 12. in
+              (* level past both sides of the card *)
+              [ (cx -. 12., y); (cx +. w +. 12., y) ])
+            bs
+          (* a stop behind an end would send the wire back *)
+          |> List.filter (fun (x, _) -> x > ax +. 12. && x < bx -. 12.)
+        in
+        let rec chain from = function
+          | [] -> curve_points from (bx, by)
+          | w :: rest -> curve_points from w @ List.tl (chain w rest)
+        in
+        chain (ax, ay) way
+  in
   (* a card or function stacked above the card it feeds (Projection.layout's chain column) is
      joined to it by a spine: straight down from its bottom, along the card's left edge, into the
      input's socket, not a wire out of its right side and back across it *)
@@ -324,7 +391,11 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
           }
           :: !wires
     | Some s, None ->
-        let pts = curve_points ~drop:(Hashtbl.mem bars s.pos) s.pos b in
+        let drop = Hashtbl.mem bars s.pos in
+        let pts =
+          if drop || abs_float (fst b -. fst s.pos) > tag_span then curve_points ~drop s.pos b
+          else route s.pos b ~from:s.owner ~into:(match into with i :: _ -> Some i | [] -> None)
+        in
         wires :=
           {
             a = s.pos;
@@ -445,13 +516,7 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
                                vector, so taking it off sets the cell and nothing else *)
                             let target =
                               match List.find_opt (fun (_, leaf) -> leaf = name) r.cells with
-                              | Some (i, _) ->
-                                  Some
-                                    ( List.rev_append
-                                        (List.tl (List.rev n.path))
-                                        [ E.nested_leaf n.name r.key ],
-                                      E.Cell i,
-                                      Some (S.make (S.Num "0.0")) )
+                              | Some (i, _) -> Some (P.cell_wire n r i)
                               | None -> target
                             in
                             match resolve chain name with
@@ -560,11 +625,6 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
           Hashtbl.replace inside zone (i :: Option.value ~default:[] (Hashtbl.find_opt inside zone))
       | _ -> ())
     wires;
-  let tiles =
-    index_of (Array.length items) (fun i ->
-        let (p : P.placed), ax, ay = items.(i) in
-        (ax, ay, ax +. p.w, ay +. p.h))
-  in
   let reach =
     index_of (Array.length wires) (fun i ->
         List.fold_left
