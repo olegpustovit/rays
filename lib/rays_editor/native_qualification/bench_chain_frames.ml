@@ -66,6 +66,7 @@ let () =
             let resolved =
               Flow_sop.Value_lane.resolve ~gpu:config ~live lane ~time graph.network |> ok
             in
+            let resolve_seconds = Unix.gettimeofday () -. start in
             let node =
               Sop.Edit_graph.compile_node resolved.geometry ~node_id:(Option.get graph.root)
               |> Result.get_ok
@@ -79,16 +80,31 @@ let () =
             let geometry = Result.get_ok (Sop.Payload.geometry output.payload) in
             let seconds = Unix.gettimeofday () -. start in
             let after = stats () in
+            (if Sys.getenv_opt "NODES" <> None then
+               let rec walk n =
+                 Option.iter
+                   (fun s ->
+                     Printf.printf "  node %d %s %s: %.4f\n" (Sop.Node.id n) (Sop.Node.label n)
+                       (Sop.Node.operation n) s)
+                   (Sop.Session.node_seconds session (Sop.Node.id n));
+                 List.iter walk (Sop.Node.inputs n)
+               in
+               walk node);
             let resident = Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry) in
             let start = Unix.gettimeofday () in
             ignore (Rdk_rays.Geometry_view.bounds geometry);
             let bounds_seconds = Unix.gettimeofday () -. start in
             let bounded = stats () in
+            let start = Unix.gettimeofday () in
+            ignore (Rdk.Packed.Float3.get (Rdk.Geometry.positions geometry) 0);
+            let read_seconds = Unix.gettimeofday () -. start in
             Printf.printf
-              "frame %2d: %.4f s, %d dispatches, %d uploads (%d bytes), %d compiled, P %s, bounds \
-               %.4f s (%d bytes, %d outputs read), noise[1] %.4f\n\
+              "frame %2d: %.4f s (resolve %.4f s), %d dispatches, %d buffers, %d uploads (%d \
+               bytes), %d compiled, P %s, bounds %.4f s (%d bytes, %d outputs read), read P %.4f \
+               s, noise[1] %.4f\n\
                %!"
-              frame seconds (!dispatches - calls)
+              frame seconds resolve_seconds (!dispatches - calls)
+              (after.buffer_creations - before.buffer_creations)
               (after.input_uploads - before.input_uploads)
               (after.input_uploaded_bytes - before.input_uploaded_bytes)
               (after.pipeline_compilations - before.pipeline_compilations)
@@ -96,6 +112,7 @@ let () =
               bounds_seconds
               (bounded.readback_bytes - after.readback_bytes)
               (bounded.materialisations - after.materialisations)
+              read_seconds
               (match Rdk.Geometry.find_attribute ~owner:Point "noise" geometry with
               | Some a -> (
                   match Rdk.Attribute.View.storage a with
