@@ -15,8 +15,10 @@ let lower ?(reference = false) text =
       let graph = List.find (fun (graph : Flow_sop.Lower.graph) -> graph.default) lowered.graphs in
       ok (Lisp_sop.root lowered graph)
 
+(* 128 entries: a test cooks many graphs in one session, and their working set must fit the cache
+   (a grid is three cached nodes) for a recook to hit *)
 let with_session fn =
-  let session = ok (Sop.Session.create ~max_entries:64 ~max_payload_bytes:10_000_000) in
+  let session = ok (Sop.Session.create ~max_entries:128 ~max_payload_bytes:10_000_000) in
   Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () -> fn session)
 
 let cook session ?(domains = 1) ?(grain = 97) ?(seed = 0L) node =

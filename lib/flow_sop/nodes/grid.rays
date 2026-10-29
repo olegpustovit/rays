@@ -172,30 +172,22 @@
                  (let* [x (float/fma_checked vert.x dv center_x) y (float/fma_checked vert.y dv center_y)
                         z (float/fma_checked vert.z dv center_z)]
                    (if (and x.valid (and y.valid z.valid)) 0 1))) dv_values))
-               ; The point planes are one float-index kernel per axis, row-major, with the arithmetic of the
-               ; row and column arrays above, so the CPU bytes are those of the native grid. Float index, mod
-               ; and checked fma keep the kernel placeable on the GPU, where the SOP input reads it back.
                fu_count (float u_count) fu_cells (float u_cells) fv_cells (float v_cells)
                u_single (int/eq u_count 1) v_single (int/eq v_count 1)
-               point_indices (array/range point_count)
-               plane_x (exact (map (fn [(i : float)]
+               zeros (array/float point_count 0.0)
+               ; P is a map over the points' float index, row-major, with the arithmetic of the row
+               ; and column arrays above, so the CPU bytes are those of the native grid. It is written
+               ; at cook over zero planes: a device write it folds into makes P from the element index
+               ; (float index, mod and checked fma are device forms), so nothing of P is uploaded.
+               grid_point (fn [(i : float)]
                  (let* [col (mod i fu_count) row (/ (- i col) fu_count)
                         du (* (- (if u_single 0.5 (/ col fu_cells)) 0.5) effective_width)
                         dv (* (- (if v_single 0.5 (/ row fv_cells)) 0.5) effective_height)
-                        base (float/fma_checked vert.x dv center_x)
-                        value (float/fma_checked h.x du base.value)] value.value)) point_indices))
-               plane_y (exact (map (fn [(i : float)]
-                 (let* [col (mod i fu_count) row (/ (- i col) fu_count)
-                        du (* (- (if u_single 0.5 (/ col fu_cells)) 0.5) effective_width)
-                        dv (* (- (if v_single 0.5 (/ row fv_cells)) 0.5) effective_height)
-                        base (float/fma_checked vert.y dv center_y)
-                        value (float/fma_checked h.y du base.value)] value.value)) point_indices))
-               plane_z (exact (map (fn [(i : float)]
-                 (let* [col (mod i fu_count) row (/ (- i col) fu_count)
-                        du (* (- (if u_single 0.5 (/ col fu_cells)) 0.5) effective_width)
-                        dv (* (- (if v_single 0.5 (/ row fv_cells)) 0.5) effective_height)
-                        base (float/fma_checked vert.z dv center_z)
-                        value (float/fma_checked h.z du base.value)] value.value)) point_indices))
+                        bx (float/fma_checked vert.x dv center_x) by (float/fma_checked vert.y dv center_y)
+                        bz (float/fma_checked vert.z dv center_z)
+                        x (float/fma_checked h.x du bx.value) y (float/fma_checked h.y du by.value)
+                        z (float/fma_checked h.z du bz.value)]
+                   [x.value y.value z.value]))
                invalid_rows (exact (for [row v_indices du du_values]
                  (if (int/eq (array/nth row_flags row) 1) 1
                    (let* [x (float/fma_checked h.x du (array/nth row_x row))
@@ -230,12 +222,14 @@
                      (int/add point_count (int/mul (int/sub index v_count) v_count)))
                    :else (int/mul index (if quads 4 3)))) (array/range (int/add primitive_count 1) :type int)))
                kinds (array/int primitive_count (if lines 1 0))
-               geo (sop/mesh_planes :points {:x plane_x :y plane_y :z plane_z}
+               geo (sop/mesh_planes :points {:x zeros :y zeros :z zeros}
                        :vertex_points vertices :primitive_offsets offsets :kinds kinds)
                actual_count (sop/count geo :points)
-               with_normals (sop/with_attr geo :N
+               normals (sop/with_attr geo :N
                  {:x (array/float actual_count normal.x) :y (array/float actual_count normal.y)
                   :z (array/float actual_count normal.z)})
+               with_normals (sop/with_attr normals :P
+                 (exact (map grid_point (array/range actual_count))))
                uv_name (text/trim uv_attribute)]
           (if (text/blank? uv_name) with_normals
             (sop/with_attr with_normals uv_name

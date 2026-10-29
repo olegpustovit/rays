@@ -175,6 +175,16 @@ let run (drive, xdrive, connectivity) =
                 let device, seconds = gpu_cook frame in
                 let after = stats () in
                 let fail what = failwith (Printf.sprintf "frame %d: %s" frame what) in
+                (* the grid's P is made on the device from the element index: the first frame
+                   uploads its N alone (count float32 vec3s), in the one dispatch *)
+                if frame = 0 then begin
+                  if after.input_uploaded_bytes - before.input_uploaded_bytes <> count * 12 then
+                    fail
+                      (Printf.sprintf "%d bytes uploaded, not the grid's N alone"
+                         (after.input_uploaded_bytes - before.input_uploaded_bytes));
+                  if !dispatches - calls <> 1 then
+                    fail (Printf.sprintf "%d dispatches, not one" (!dispatches - calls))
+                end;
                 if frame > 0 then begin
                   gpu_times := seconds :: !gpu_times;
                   if after.pipeline_compilations <> before.pipeline_compilations then

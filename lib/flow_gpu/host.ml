@@ -159,6 +159,36 @@ let output t (value : G.value) =
               (fun () -> Some output)
               (Run.Private.check_status runner.run ~epoch:(Run.epoch output)))
 
+(* the index buffer of a range source: grown geometrically, kept by the host *)
+let iota t length =
+  match t.iota with
+  | Some (buffer, capacity) when capacity >= length -> Some buffer
+  | old -> (
+      let capacity = max length (2 * Option.fold ~none:0 ~some:snd old) in
+      let bytes = Bytes.create (capacity * 4) in
+      for k = 0 to capacity - 1 do
+        Bytes.set_int32_le bytes (k * 4) (Int32.bits_of_float (float k))
+      done;
+      match
+        Ogpu.Backend.create_buffer (Renderer.gpu_device t.gpu)
+          {
+            label = Some "Flow resident indices";
+            size = Int64.of_int (capacity * 4);
+            usage = [ Storage; Copy_dst ];
+          }
+      with
+      | Error _ -> None
+      | Ok buffer ->
+          if Result.is_error (Ogpu.Backend.write_buffer buffer ~offset:0L bytes) then (
+            ignore (Ogpu.Backend.destroy_buffer buffer);
+            None)
+          else begin
+            (* the old buffer may still be read by work in flight: keep it until the host closes *)
+            Option.iter (fun (old, _) -> t.retired_buffers <- old :: t.retired_buffers) old;
+            t.iota <- Some (buffer, capacity);
+            Some buffer
+          end)
+
 let backend t : G.backend =
   {
     cost = (fun ~fast:_ _ ~count:_ -> None);
@@ -166,6 +196,8 @@ let backend t : G.backend =
       (fun ~fast packed ->
         if not (live t) then error "GPU host is closed or called from another domain."
         else
+          (* a range source ([Packed.Host.index_sources]) is the host's index buffer, never uploaded *)
+          let index = Flow_ir.Packed.Host.index_sources packed in
           Result.bind (Emit.kernel ~fast packed) (fun msl ->
               Result.map
                 (fun _compiled ->
@@ -214,7 +246,9 @@ let backend t : G.backend =
                                       stamp = runner.stamp;
                                       gpu_seconds = Run.gpu_seconds output;
                                     })
-                                (Run.dispatch ~wait:(not fast) runner.run inputs)));
+                                (Run.dispatch ~wait:(not fast)
+                                   ~bound:(fun i -> if index.(i) then iota t inputs.count else None)
+                                   runner.run inputs)));
                     readback =
                       (fun value ->
                         match output t value with
@@ -312,36 +346,7 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
     table := { key = Option.get (raw v); kind; buffer; length; cell } :: !table;
     v
   in
-  (* the index buffer of a range source: grown geometrically, kept by the host *)
-  let iota length =
-    match t.iota with
-    | Some (buffer, capacity) when capacity >= length -> Some buffer
-    | old -> (
-        let capacity = max length (2 * Option.fold ~none:0 ~some:snd old) in
-        let bytes = Bytes.create (capacity * 4) in
-        for k = 0 to capacity - 1 do
-          Bytes.set_int32_le bytes (k * 4) (Int32.bits_of_float (float k))
-        done;
-        match
-          Ogpu.Backend.create_buffer (Renderer.gpu_device t.gpu)
-            {
-              label = Some "Flow resident indices";
-              size = Int64.of_int (capacity * 4);
-              usage = [ Storage; Copy_dst ];
-            }
-        with
-        | Error _ -> None
-        | Ok buffer ->
-            if Result.is_error (Ogpu.Backend.write_buffer buffer ~offset:0L bytes) then (
-              ignore (Ogpu.Backend.destroy_buffer buffer);
-              None)
-            else begin
-              (* the old buffer may still be read by work in flight: keep it until the host closes *)
-              Option.iter (fun (old, _) -> t.retired_buffers <- old :: t.retired_buffers) old;
-              t.iota <- Some (buffer, capacity);
-              Some buffer
-            end)
-  in
+  let iota = iota t in
   let bound v = Option.map (fun p -> fst p.buffer) (find v) in
   let give_back (b, bytes) =
     Hashtbl.replace t.buffers bytes

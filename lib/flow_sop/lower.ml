@@ -1452,7 +1452,32 @@ let fused_entries args =
         | _ -> fail "E_LOWER" "A fused write's earlier writes are attribute/type/values records")
   | _ -> []
 
-let fold_writes (plan : E.plan) =
+(* whether a write's values map an index ([array/range]): a generated attribute (a grid's P) *)
+let indexed value =
+  let seen = Hashtbl.create 16 in
+  let rec term (t : Workspace.term) =
+    match t.node with
+    | Op { op = "array/range"; _ } -> true
+    | _ -> List.exists term (Workspace.children t)
+  and visit = function
+    | E.Residual r ->
+        let id = E.Residual.residual_id r in
+        (not (Hashtbl.mem seen id))
+        && begin
+          Hashtbl.add seen id ();
+          let view = E.Residual.residual_view r in
+          term view.term || List.exists (fun (_, v) -> visit v) view.bindings
+        end
+    | E.Record fs -> List.exists (fun (_, v) -> visit v) fs
+    | E.List vs -> Array.exists visit vs
+    | _ -> false
+  in
+  visit value
+
+(* [device]: a fused write may run on a device. Without one an indexed earlier write (a grid's P)
+   is not folded: the CPU would compute it again with every recook of the chain, where its own
+   node is cooked once and cached; a device makes it from the element index instead of an upload. *)
+let fold_writes ~device (plan : E.plan) =
   let nodes = Array.copy plan.nodes in
   let count = Array.length nodes in
   let uses = Array.make count 0 and templ = Array.make count false in
@@ -1588,6 +1613,7 @@ let fold_writes (plan : E.plan) =
     | Some (E.Deferred (_, g)), Some name when point_write w -> (
         match back name g [] [] with
         | None -> ()
+        | Some (u, _, _, _) when (not device) && indexed (List.assoc "values" u.args) -> ()
         | Some (u, base, chain, dels) ->
             let deleted = List.filter_map pattern dels
             and reads = Attribute_kernel.reads (List.assoc "values" w.args) in
@@ -2624,7 +2650,9 @@ struct
       ~reference ~profile ~approx:checked.approx ~kernel_source:(kernel_source_of node) ?state
       ?elems ~args ~sources inputs
 
-  let plan = if reference then evaluated.plan else fold_writes evaluated.plan
+  let plan =
+    if reference then evaluated.plan
+    else fold_writes ~device:(gpu.fast && gpu.backend <> None) evaluated.plan
 
   let external_kernel fn =
     List.find_map

@@ -1316,7 +1316,9 @@ module Executor = struct
         let ( let* ) = Result.bind in
         let device =
           (* a source another write keeps on this device is bound there, not read back *)
-          let* inputs = Packed.Host.prepare ~fast:true ?state ?resolve ?resident merged ~live in
+          let* inputs =
+            Packed.Host.prepare ~fast:true ~index:true ?state ?resolve ?resident merged ~live
+          in
           if not (Cost.sop_device gpu.policy merged ~count:inputs.count) then Ok None
           else
             let* kernel =

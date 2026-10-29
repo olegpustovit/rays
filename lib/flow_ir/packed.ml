@@ -3191,6 +3191,19 @@ module Host = struct
 
   let source_shapes (t : t) = Array.map (fun (r, term) -> shape r term) t.sources
 
+  (* [array/range n] as floats (through bindings): 0., 1., ... a device makes from the element index *)
+  let rec index_range residual (term : W.term) =
+    match term.node with
+    | W.Ref_binding (name, []) -> (
+        match List.assoc_opt name (E.Residual.residual_view residual).bindings with
+        | Some (E.Residual r) -> index_range r (E.Residual.residual_view r).term
+        | _ -> None)
+    | Op { op = "array/range"; args = [ ("count", n) ]; _ } when term.ty = Ty.Array Ty.Float ->
+        Some (residual, n)
+    | _ -> None
+
+  let index_sources (t : t) = Array.map (fun (r, term) -> index_range r term <> None) t.sources
+
   let uniform_shapes (t : t) =
     Array.map
       (function E.Residual r -> shape r (E.Residual.residual_view r).term | v -> Value v)
@@ -3225,7 +3238,7 @@ module Host = struct
               | _ -> false)
             p.outputs.(0))
 
-  let prepare_values ?state ?resolve ?measure ?(lengths = fun _ -> None) ?resident
+  let prepare_values ?state ?resolve ?measure ?(lengths = fun _ -> None) ?(index = false) ?resident
       ?(source = fun _ _ -> None) (t : t) ~live =
     let state = match state with Some state -> state | None -> E.create_state () in
     E.transaction state (fun () ->
@@ -3283,7 +3296,20 @@ module Host = struct
           in
           let empty_product = ref false in
           (* a source whose length the caller knows (a range it binds on the device) is not built *)
-          let known = Array.mapi (fun i _ -> lengths i) t.sources in
+          let known =
+            Array.mapi
+              (fun i (residual, term) ->
+                match (lengths i, index) with
+                | (Some _ as n), _ | (None as n), false -> n
+                | None, true ->
+                    Option.map
+                      (fun (residual, n) ->
+                        match get (E.Residual.eval_term ~state ?resolve residual n ~live) with
+                        | E.Int n -> max 0 n
+                        | _ -> raise Unsupported)
+                      (index_range residual term))
+              t.sources
+          in
           let arrays =
             Array.mapi
               (fun i (residual, term) ->
@@ -3434,12 +3460,13 @@ module Host = struct
 
   (* A device kernel's inputs as 32-bit floats: integer arrays and scalars travel as floats (exact to
      2^24, the fast precision's contract), an array-valued uniform as the table a gather reads. *)
-  let prepare ?(fast = false) ?state ?resolve ?measure ?resident ?source (t : t) ~live =
+  let prepare ?(fast = false) ?state ?resolve ?measure ?index ?resident ?source (t : t) ~live =
     if Array.exists Core.Region.text_register t.code || (integer_program t && not fast) then
       Error
         (Diagnostic.error ~code:"E_GPU_FORM"
            (if Array.exists Core.Region.text_register t.code then "Text kernels stay on the CPU."
             else "Integer sources, uniforms and instructions stay on the CPU."))
     else
-      Result.map device_inputs (prepare_values ?state ?resolve ?measure ?resident ?source t ~live)
+      Result.map device_inputs
+        (prepare_values ?state ?resolve ?measure ?index ?resident ?source t ~live)
 end

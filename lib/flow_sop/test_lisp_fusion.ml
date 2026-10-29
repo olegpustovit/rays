@@ -223,8 +223,9 @@ let () =
     let root = compiled l in
     let bytes = Session.cook session ~context:(context ~domains) root |> geometry in
     Session.close session;
-    (* the writes the root cooks: Cd, P and P fold into one; the guarded N writes are decided
-       statically (Lower.static_attributes) *)
+    (* the writes the root cooks: Cd, P and P fold into one, beside the grid's own N and P writes
+       (under the structural soft_transform); the guarded N writes are decided statically
+       (Lower.static_attributes) *)
     let writes =
       List.length
         (List.filter
@@ -238,7 +239,7 @@ let () =
     (fun domains ->
       let bytes, writes = cook_root domains in
       assert (bytes = expected);
-      if writes <> 2 then
+      if writes <> 3 then
         failwith (Printf.sprintf "mixed chain: %d writes cooked, %d unfolded" writes unfolded))
     [ 1; 4 ];
   print_endline
@@ -271,6 +272,6 @@ let () =
   in
   let expected, unfolded = cook ~reference:true and bytes, writes = cook ~reference:false in
   assert (bytes = expected);
-  (* the fused write and the grid's own N write, under the structural soft_transform *)
-  if writes <> 2 then failwith (Printf.sprintf "lazy reads: %d writes, %d unfolded" writes unfolded);
+  (* the fused write and the grid's own N and P writes, under the structural soft_transform *)
+  if writes <> 3 then failwith (Printf.sprintf "lazy reads: %d writes, %d unfolded" writes unfolded);
   print_endline "Lisp fusion: a map reading the chain in its term folds, as the unfolded bytes"

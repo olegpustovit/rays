@@ -247,12 +247,14 @@ module Host : sig
      caller holds on the device: its placeholder array and element count. A source that is exactly
      such a read is that placeholder (counted as its count), never built; one that computes over it
      is evaluated again with [resolve]. [source] lets the caller supply an immutable cached
-     source; its storage type is checked as usual. *)
+     source; its storage type is checked as usual. [index] (false): an {!index_sources} source is
+     not built either, its length is its count (for a device that makes it from the element index). *)
   val prepare_values :
     ?state:Flow.Eval.state ->
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
     ?measure:(unit -> float) * (t -> seconds:float -> reference:bool -> unit) ->
     ?lengths:(int -> int option) ->
+    ?index:bool ->
     ?resident:(Flow.Eval.value -> (Flow.Eval.value * int) option) ->
     ?source:(Flow.Eval.residual -> Flow.Workspace.term -> Flow.Eval.value option) ->
     t ->
@@ -268,6 +270,10 @@ module Host : sig
      over [div]; or a term over the listed values ([None]: a form not traversed). A resident fold
      keeps an array's count on the device when every read of it is one of the first two. *)
   val source_shapes : t -> shape array
+
+  val index_sources : t -> bool array
+  (** Sources that are [array/range n] as floats, [0., 1., ...]: a device binds its index buffer. *)
+
   val uniform_shapes : t -> shape array
   val device_inputs : value_inputs -> inputs
 
@@ -277,6 +283,7 @@ module Host : sig
     ?state:Flow.Eval.state ->
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
     ?measure:(unit -> float) * (t -> seconds:float -> reference:bool -> unit) ->
+    ?index:bool ->
     ?resident:(Flow.Eval.value -> (Flow.Eval.value * int) option) ->
     ?source:(Flow.Eval.residual -> Flow.Workspace.term -> Flow.Eval.value option) ->
     t ->

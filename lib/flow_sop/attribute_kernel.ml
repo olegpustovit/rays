@@ -1245,13 +1245,16 @@ let prepare ?profile ?strict ?approx ?sink ~sources inputs values =
                   | _ -> None)
               | _ -> None)
         in
-        (* a fill of one value per point ([array/int (sop/count g :points) v]) counts g's points *)
+        (* a fill of one value per point ([array/int (sop/count g :points) v]) or its index
+           ([array/range (sop/count g :points)]) counts g's points *)
         let rec filled residual (term : Flow.Workspace.term) =
           let bindings = (E.Residual.residual_view residual).bindings in
           match term.node with
           | Op
               {
-                op = "array/int" | "array/float" | "array/vec2" | "array/vec3" | "array/vec4";
+                op =
+                  ( "array/int" | "array/float" | "array/vec2" | "array/vec3" | "array/vec4"
+                  | "array/range" );
                 args;
                 _;
               } -> (
