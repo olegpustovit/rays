@@ -527,10 +527,35 @@ each fused write gets a new program, a new runner (fresh buffers, every input up
 its emission; deterministic return only recycles within a runner, so a host-wide pool of released
 buffers by capacity is the next step; (2) extending the display binding (below) to lit triangles
 without N (normals made from P on the device: the host's are float64 sums, so the pixels would
-differ) and to colours or uv a device holds; (3)
-grid planes and `array/range` generated from the thread
-index (a new element-index instruction across the CPU blocks, MSL, SPIR-V and WGSL, and the grid's
-point map fused into the write); fills bound as uniforms.
+differ) and to colours or uv a device holds; (3) the index as an instruction (the thread index
+printed in MSL, SPIR-V and WGSL, counted in the CPU blocks) instead of the host's index buffer
+below; fills bound as uniforms.
+
+**Device-generated grid P** (2026-10-29). `sop/grid` writes P at cook, as a map over the points'
+float index (`(sop/with_attr g :P (exact (map grid_point (array/range (sop/count g :points)))))`)
+over zero planes, after its planar N write; the arithmetic is the earlier plane maps', so the CPU
+bytes (and every golden) are unchanged. A fused write that follows folds it (`fold_writes`) when the
+lowering has a fast device (`~device`: `gpu.fast` and a backend); without one the write stays its
+own node, cooked once and cached, since a fold would compute the grid again with every recook of a
+driven chain on the CPU. A range of `(sop/count g :points)` counts g's points (`Attribute_kernel`'s
+count source, as a fill does), so the folded record is one region. A float `array/range` source
+(`Packed.Host.index_sources`) is not built for a device record (`prepare ~index`: its length is its
+count) and the host binds its index buffer (`Host.iota`, 0., 1., ... grown geometrically, written
+once per host and kept), so it is never uploaded. Why the first attempt (below) was two dispatches
+uploading 24 MB a frame: its range's count was written inline, not a captured `sop/count`, so the
+P write's region had no origin and the record could not merge into one region; and each range was
+an array built by every prepare (a fresh array each frame, so the runner's identity check uploaded
+it again; two sources read it, two uploads). Measured (`bench_chain_frames`, 1M points, Points,
+M1 at load 4-5, five interleaved runs against dev): the first frame uploads 12 MB (N alone) instead
+of 24 MB (P and N), one dispatch, P resident, noise as before; later frames upload nothing, 3.6-4.0
+ms against 2.9-4.5 ms (the kernel now makes P: three planes of checked fma). The first frame shows
+0.08-0.15 s against 0.065-0.095 s because the GPU lease (about 26 ms headless) is now taken by the
+frame's prepare, not by the lowering's plane maps; a whole run (lowering and first frame) is
+6.13-6.25 s against 6.26-6.53 s. `test_chain_frames_native` fails unless the first frame uploads
+N's bytes alone in one dispatch; GPU against CPU P and noise 2.3-3.4e-7 (512 squared, four
+drives). CPU frames 0.032-0.040 s, as before. `sop_gallery` (five interleaved rounds,
+`BENCH_PHASES=1`): cook 0.815-0.842 s against 0.828-0.856 s, lower 0.371-0.381 against
+0.368-0.379 s, edit to cook 0.493-0.508 against 0.503-0.507 s.
 
 Tried and stopped (2026-10-29), with what each still needs:
 
@@ -557,18 +582,8 @@ Tried and stopped (2026-10-29), with what each still needs:
   `Float3.deferred` as `?bounds` is, a compute stage beside `bounds.rays`, its own settle and
   release), keeps the CPU as it is but is its own lifecycle. A driven transform with recomputed normals
   stays a card rebuilt per frame on the CPU.
-- A device-generated `sop/grid` P. The write's P is a read of the grid's geometry, built by
-  `sop/mesh_planes` (a node, not a write), and the chain stops at the grid's N write, a planar record
-  `point_write` refuses as a fold point. Writing the grid's P as `(sop/with_attr shape :P (exact (map
-  ... (array/range (sop/count shape :points)))))` over zero planes, N as a map of the constant, and
-  counting a range of `(sop/count g :points)` as g's points (`Attribute_kernel`'s count source) does
-  fold the grid into the chain (`test_settle`: one settled dispatch), but the folded record's P was
-  not resident and on the device the chain became two dispatches uploading 24 MB a frame (1M points,
-  `bench_chain_frames`) where it had been one uploading nothing; that needs understanding before the
-  element index (a source `array/range` of the region's count printed as the thread index in MSL and
-  SPIR-V, counted in the CPU blocks, so nothing is built or uploaded) is worth adding. The grid change
-  also turns its remembered N fill into a kernel output. Both reverted; nothing of either is in the
-  code.
+- A device-generated `sop/grid` P: done, above (the attempt's two dispatches had two causes, a
+  count with no origin and a range built per prepare).
 
 **Display binding.** A displayed point cloud whose P (and N, if it has one) the device still holds,
 or a triangle mesh (every primitive a triangle) whose P and point N it holds, with no colour, uv,
