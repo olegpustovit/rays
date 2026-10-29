@@ -1244,6 +1244,10 @@ intended change is accepted with `dune promote`. `Flow.Catalog.catalog_of_manife
 `lib/rays_editor/test/test_sop_catalog.ml` proves it equals the live catalog. The editor and `rays`
 check against the live catalog (`Editor_document.Lowering.catalog`): `rays` interprets a `.rays` file,
 so nothing is generated and nothing can be stale.
+The Lisp node library (`lib/flow_sop/nodes/*.rays`) is fixed: the definitions a workspace reaches are
+checked once on their own and kept (`Flow.Workspace.prelude`, eight reachable subsets), so a check
+of `sop_gallery` takes 0.045 s against 0.272 s when they were checked with every workspace check
+(`specification/sop.md`, "Kept library checks").
 
 `bin/rays.ml` is `rays`:
 

@@ -236,10 +236,36 @@ let library_bases sources =
   in
   go library_base sources
 
+let embedded_override = function
+  | None -> true
+  | Some supplied -> (
+      match sources () with Ok embedded -> supplied == embedded | Error _ -> false)
+
+(* The embedded library is fixed, so its checked definitions are kept between workspace checks, keyed
+   on the reachable subset (by fixed position), the catalog (by value: hosts rebuild it), the
+   operators (by identity) and the library flag. Eight subsets, most recent first. *)
+let preludes = ref []
+let prelude_checks = ref 0
+
+let prelude_cached ~ops ~library ~catalog ~positions make =
+  let hit (o, l, c, p, _) =
+    Option.equal ( == ) o ops && l = library && p = positions && c = catalog
+  in
+  match List.find_opt hit !preludes with
+  | Some ((_, _, _, _, value) as entry) ->
+      preludes := entry :: List.filter (fun e -> e != entry) !preludes;
+      value
+  | None ->
+      incr prelude_checks;
+      let value = make () in
+      preludes := (ops, library, catalog, positions, value) :: List.take 7 !preludes;
+      value
+
 module Private = struct
   let reachable_sources = reachable
   let definitions_of_sources = definitions_of_sources
   let library_bases = library_bases
+  let library_checks () = !prelude_checks
 end
 
 let check_workspace_raw ?ops ?library ?sources:override catalog forms =
@@ -312,40 +338,31 @@ let check_workspace_raw ?ops ?library ?sources:override catalog forms =
       in
       if sources = [] then Flow.Workspace.check ?ops ?library catalog forms
       else
-        let authored = forms in
-        let sources =
-          List.map
-            (fun source -> fst (Flow.Syntax.renumber (List.assq source bases) source))
-            sources
+        let positions = List.map (fun source -> List.assq source bases) sources in
+        let prelude () =
+          let catalog =
+            {
+              catalog with
+              Flow.Catalog.kinds =
+                List.filter
+                  (fun (kind : Flow.Catalog.kind) ->
+                    not
+                      (List.exists
+                         (fun (node : Flow.Defnode.t) -> node.kind.qualified = kind.qualified)
+                         nodes))
+                  catalog.Flow.Catalog.kinds;
+            }
+          in
+          let sources =
+            List.map2 (fun source base -> fst (Flow.Syntax.renumber base source)) sources positions
+          in
+          (catalog, Flow.Workspace.prelude ?ops ?library catalog sources)
         in
-        let forms =
-          List.map
-            (fun (form : Flow.Syntax.t) ->
-              match form.node with
-              | Flow.Syntax.List
-                  (({ node = Flow.Syntax.Sym "workspace"; _ } as head) :: name :: children) ->
-                  { form with node = Flow.Syntax.List ((head :: name :: sources) @ children) }
-              | _ -> form)
-            forms
+        let catalog, prelude =
+          if not (embedded_override override) then prelude ()
+          else prelude_cached ~ops ~library ~catalog ~positions prelude
         in
-        let catalog =
-          {
-            catalog with
-            Flow.Catalog.kinds =
-              List.filter
-                (fun (kind : Flow.Catalog.kind) ->
-                  not
-                    (List.exists
-                       (fun (node : Flow.Defnode.t) -> node.kind.qualified = kind.qualified)
-                       nodes))
-                catalog.Flow.Catalog.kinds;
-          }
-        in
-        let workspace, diagnostics = Flow.Workspace.check ?ops ?library catalog forms in
-        ( Option.map
-            (fun (workspace : Flow.Workspace.t) -> { workspace with source = authored })
-            workspace,
-          diagnostics )
+        Flow.Workspace.check ?ops ?library ~prelude catalog forms
 
 let check_workspace ?ops ?library ?sources catalog forms =
   match check_workspace_raw ?ops ?library ?sources catalog forms with

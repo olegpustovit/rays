@@ -170,10 +170,20 @@ val body_context_ops : string list
 (** Operators a defnode body reads from its cook context ([sop/context_seed], [sop/provenance_base],
     [sop/context_frame], [sop/context_time]); a body elsewhere is [E_NODE_CONTEXT]. *)
 
+type prelude
+(** A library's definitions, checked once on their own: {!check} with it checks only its own forms,
+    as if the library's came first in the workspace. *)
+
+val prelude :
+  ?ops:Op.t list -> ?library:bool -> ?call_sites:bool -> Catalog.catalog -> Syntax.t list -> prelude
+(** Check library forms (the children of a workspace: [defn], [defnode], [defmacro]). The [ops],
+    [library], [call_sites] and catalog are those of every {!check} that uses it. *)
+
 val check :
   ?ops:Op.t list ->
   ?library:bool ->
   ?call_sites:bool ->
+  ?prelude:prelude ->
   Catalog.catalog ->
   Syntax.t list ->
   t option * Diagnostic.t list

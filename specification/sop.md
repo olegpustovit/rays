@@ -668,11 +668,23 @@ of 1/512, not the gather's arithmetic). `sop_gallery` (five interleaved rounds a
 `BENCH_PHASES=1`, load 4-5): cook median 0.839 s against 0.838 s, lower 0.355 against 0.378 s,
 edit to cook 0.496 against 0.502 s, check 0.257 against 0.251 s; again after the storage check:
 check 0.256 against 0.249 s (+2.7%), lower 0.363 against 0.373, cook 0.834 against 0.843, edit to
-cook 0.500 against 0.505. The check is the transform's three new helpers: `Catalog.check_workspace`
-splices every library definition the workspace reaches and checks it with each workspace check, so
-a shared node file would be checked as often (sop_gallery already reached `sop/normals`' helpers
-through its own normals); keeping checked library definitions across checks is the fix, a checker
-change, not made here.
+cook 0.500 against 0.505. The check was the transform's three new helpers: `Catalog.check_workspace`
+checked every library definition the workspace reaches with each workspace check (214 of sop_gallery's
+241 ms of checker time).
+
+**Kept library checks.** The embedded library is fixed (form ids 2^40 + position), so
+`Catalog.check_workspace` checks the definitions a workspace reaches once, on their own
+(`Flow.Workspace.prelude`: the checker's state after them), and every later check of a workspace
+reaching the same subset starts from a copy of that state and checks only its own forms. The kept
+checks are keyed on the reachable subset (by position), the catalog (by value), the operators (by
+identity) and the library flag, eight subsets, most recent first; a caller-supplied library is
+checked afresh each time the same way. A library's forms are checked before the workspace's, as
+when they were spliced first, so diagnostics (codes, spans, messages) are dev's: `test_node_sources`
+pins an `E_NAME`, an `E_TYPE` and seven `E_FIELD`s inside `afi_channel`'s body and counts no second
+library check, and `rays check sketches/*.rays` (40 files, 14.7 s either way: each file is its own
+subset) prints dev's output byte for byte. `sop_gallery` (five interleaved rounds against dev, load
+6-7): check median 0.045 s against 0.272 s (warm; a process's first check of a subset is dev's),
+edit to cook 0.289 against 0.526 s, lower 0.377 against 0.383 s, cook 0.828 against 0.861 s.
 
 **Display binding.** A displayed point cloud whose P (and N, if it has one) the device still holds,
 or a triangle mesh (every primitive a triangle) whose P and point N it holds, with no colour, uv,

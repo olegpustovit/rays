@@ -224,3 +224,49 @@ let () =
   let keyword_tree = parse keyword_manifest |> List.hd in
   assert (has "keyword-inputs" "image" keyword_tree);
   assert (has "slot" "field" keyword_tree)
+
+let () =
+  (* Library diagnostics keep their codes, spans and messages, and a second check of the same
+     workspace reuses the kept library check instead of checking the library again. *)
+  let catalog =
+    Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version Sop.Nodes.factories |> ok
+  in
+  let check text =
+    let _, diagnostics =
+      Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all catalog (parse text)
+    in
+    List.map
+      (fun (d : Diagnostic.t) ->
+        let start, finish =
+          Option.fold ~none:(0, 0) ~some:(fun s -> Diagnostic.(s.start, s.finish)) d.span
+        in
+        Printf.sprintf "%d-%d %s" start finish (Diagnostic.to_string d))
+      diagnostics
+  in
+  let text =
+    {|(workspace kept
+    (defn afi_lerp :context value [(a : float)] a)
+    (graph g :context value (afi_channel "r" "not a vec4")))|}
+  in
+  (* dev's diagnostics before library checks were kept: the E_FIELDs sit in afi_channel's body *)
+  let expected =
+    "20-66 E_NAME: Invalid, reserved or duplicate name: afi_lerp."
+    :: "112-124 E_TYPE: afi_channel :c: expected vec4, got text."
+    :: List.map
+         (fun (span, f) ->
+           Printf.sprintf
+             "%s E_FIELD: c has no output %s. A vec3 has .x .y .z; a record has its fields." span f)
+         [
+           ("1210-1213", "x");
+           ("1243-1246", "y");
+           ("1276-1279", "z");
+           ("1309-1312", "w");
+           ("1339-1342", "z");
+           ("1355-1358", "y");
+           ("1369-1372", "x");
+         ]
+  in
+  assert (check text = expected);
+  let before = Flow_sop.Catalog.Private.library_checks () in
+  assert (check text = expected);
+  assert (Flow_sop.Catalog.Private.library_checks () = before)

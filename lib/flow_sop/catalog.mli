@@ -43,6 +43,10 @@ module Private : sig
 
   val library_bases : Flow.Syntax.t list -> (Flow.Syntax.t * int) list
   (** Each source's fixed first form id ({!library_base}), in the whole library given. *)
+
+  val library_checks : unit -> int
+  (** How many times the embedded library's reachable definitions were checked (kept checks
+      excluded). *)
 end
 
 val check_workspace :

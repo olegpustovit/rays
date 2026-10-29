@@ -418,6 +418,36 @@ type signature = {
 
 exception Budget
 
+(* The checker's state after a library's forms: a check that starts from it checks only its own
+   forms (Checker [start]). Tables are copied in, never shared. *)
+type snapshot = {
+  s_diags : Diagnostic.t list;
+  s_live : Paths.t;
+  s_invariant : Paths.t;
+  s_roots : (path, packed_form) Hashtbl.t;
+  s_links : (path, Paths.t) Hashtbl.t;
+  s_root_forms : (int, (S.t * path) list) Hashtbl.t;
+  s_steps : int;
+  s_zones : int;
+  s_body_memo : (string * string list * int * v list, term * v) Hashtbl.t;
+  s_kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
+  s_inline_seen : (path, int) Hashtbl.t;
+  s_input_paths : (path * string * int, path) Hashtbl.t;
+  s_names : (string, unit) Hashtbl.t;
+  s_sigs : (string, signature) Hashtbl.t;
+  s_macro_tbl : (string, S.t) Hashtbl.t;
+  s_macro_forms : S.t list;
+  s_node_sources : (string, Defnode.t) Hashtbl.t;
+  s_node_terms : node_definition list;
+  s_def_terms : (string, graph) Hashtbl.t;
+  s_def_defaults : (string * string, term * v) Hashtbl.t;
+  s_items : (string * string * S.t) list;
+  s_checked : (string, unit) Hashtbl.t;
+  s_def_order : string list;
+  s_count : int;
+  s_budget : bool;
+}
+
 let leaf ?(live = false) ?(vary = []) ?(groups = []) ?len ty =
   {
     ty;
@@ -712,20 +742,23 @@ module Checker (P : sig
   val library : bool
   val call_sites : bool
   val catalog : Catalog.catalog
-  val forms : S.t list
+  val children : int
+  val start : snapshot option
 end) =
 struct
   open P
 
+  let from f empty = match start with Some s -> f s | None -> empty
+  let table f n = match start with Some s -> Hashtbl.copy (f s) | None -> Hashtbl.create n
   let find_op = Op.find ~extra:ops
-  let diags = ref []
+  let diags = ref (from (fun s -> s.s_diags) [])
 
-  let live = ref Paths.empty
-  and invariant = ref Paths.empty
+  let live = ref (from (fun s -> s.s_live) Paths.empty)
+  and invariant = ref (from (fun s -> s.s_invariant) Paths.empty)
 
-  let roots = Hashtbl.create 32
-  and links = Hashtbl.create 64
-  and root_forms = Hashtbl.create 32
+  let roots = table (fun s -> s.s_roots) 32
+  and links = table (fun s -> s.s_links) 64
+  and root_forms = table (fun s -> s.s_root_forms) 32
 
   let link path producers =
     if not (Paths.is_empty producers) then
@@ -793,17 +826,14 @@ struct
             Option.iter visit body
         | _ -> ())
 
-  let steps = ref 0
-  and zones = ref 0
+  let steps = ref (from (fun s -> s.s_steps) 0)
+  and zones = ref (from (fun s -> s.s_zones) 0)
 
-  let body_memo = Hashtbl.create 64
+  let body_memo = table (fun s -> s.s_body_memo) 64
 
   (* The budget is per top-level definition: library node bodies are spliced into the
      workspace (all of them for the node manifest), so a fixed total grows too small. *)
-  let max_steps =
-    match forms with
-    | [ { S.node = S.List (_ :: _ :: children); _ } ] -> max_steps * max 1 (List.length children)
-    | _ -> max_steps
+  let max_steps = max_steps * max 1 (from (fun s -> s.s_count) 0 + children)
 
   let add sev (x : S.t) code msg =
     let span = if x.span.start = 0 && x.span.finish = 0 then None else Some x.span in
@@ -849,9 +879,9 @@ struct
 
   (* the path of a let*, zone or fn written inline: [~for], then [~for~1], ... under one path,
      so two of them in one expression never share compiled ids *)
-  let kind_fns = ref []
-  let inline_seen = Hashtbl.create 16
-  let input_paths = Hashtbl.create 16
+  let kind_fns = ref (from (fun s -> s.s_kind_fns) [])
+  let inline_seen = table (fun s -> s.s_inline_seen) 16
+  let input_paths = table (fun s -> s.s_input_paths) 16
 
   let inline cx segment =
     let key = cx.path @ [ segment ] in
@@ -859,13 +889,13 @@ struct
     Hashtbl.replace inline_seen key (n + 1);
     if n = 0 then key else cx.path @ [ Printf.sprintf "%s~%d" segment n ]
 
-  let names : (string, unit) Hashtbl.t = Hashtbl.create 16
-  let sigs : (string, signature) Hashtbl.t = Hashtbl.create 8
+  let names = table (fun s -> s.s_names) 16
+  let sigs = table (fun s -> s.s_sigs) 8
   let gsigs : (string, signature) Hashtbl.t = Hashtbl.create 8
-  let macro_tbl : (string, S.t) Hashtbl.t = Hashtbl.create 8
-  let macro_forms = ref []
-  let node_sources : (string, Defnode.t) Hashtbl.t = Hashtbl.create 8
-  let node_terms = ref []
+  let macro_tbl = table (fun s -> s.s_macro_tbl) 8
+  let macro_forms = ref (from (fun s -> s.s_macro_forms) [])
+  let node_sources = table (fun s -> s.s_node_sources) 8
+  let node_terms = ref (from (fun s -> s.s_node_terms) [])
   let kind_memo = Hashtbl.create 64
 
   let kind_of ctx head =
@@ -1052,13 +1082,13 @@ struct
     List.fold_left (fun env n -> Smap.add n poison env) env (pat_names pat)
 
   let graph_terms : (string, graph) Hashtbl.t = Hashtbl.create 8
-  let def_terms : (string, graph) Hashtbl.t = Hashtbl.create 8
+  let def_terms = table (fun s -> s.s_def_terms) 8
 
   (* [call_sites]: a [defn] named as a function value is checked on its own when it is met *)
   let check_def = ref (fun (_ : string) -> ())
   let ginfo : (string, v) Hashtbl.t = Hashtbl.create 8
   let gstack = ref []
-  let def_defaults : (string * string, term * v) Hashtbl.t = Hashtbl.create 8
+  let def_defaults = table (fun s -> s.s_def_defaults) 8
 
   let unbound cx x s =
     let bound = List.map fst (Smap.bindings cx.env) in
@@ -3363,7 +3393,9 @@ struct
           v
         end
 
-  let items = ref []
+  let items = ref (from (fun s -> s.s_items) [])
+  let checked = table (fun s -> s.s_checked) 8
+  let def_order = ref (from (fun s -> s.s_def_order) [])
 
   let parse_sig head n (f : S.t) : signature option =
     let shape_error () =
@@ -3450,19 +3482,19 @@ struct
                 Some { sname = n; sctx = ctx; sparams; sbody = b; sform = f }))
     | _ -> shape_error ()
 
-  let driver (ws : S.t) wname children =
-    ignore wname;
-    (* metadata is for expressions ([^:bypass]); the build's [^:allow-warnings] sits on the workspace *)
-    let unknown_meta (f : S.t) allowed =
-      List.iter
-        (fun m ->
-          if not (List.mem m allowed) then
-            add Diagnostic.Warning f "W_UNKNOWN_META"
-              (Printf.sprintf "Unknown metadata ^:%s here; it is ignored." m))
-        f.meta
-    in
-    unknown_meta ws [ "allow-warnings" ];
+  (* metadata is for expressions ([^:bypass]); the build's [^:allow-warnings] sits on the workspace *)
+  let unknown_meta (f : S.t) allowed =
+    List.iter
+      (fun m ->
+        if not (List.mem m allowed) then
+          add Diagnostic.Warning f "W_UNKNOWN_META"
+            (Printf.sprintf "Unknown metadata ^:%s here; it is ignored." m))
+      f.meta
+
+  (* Declares and checks [children] after those already checked (a library's, from [start]). *)
+  let phase children =
     List.iter (fun f -> unknown_meta f []) children;
+    let fresh = ref [] in
     List.iter
       (fun (f : S.t) ->
         match f.node with
@@ -3479,10 +3511,11 @@ struct
             then err f "E_NAME" (Printf.sprintf "Invalid, reserved or duplicate name: %s." n)
             else (
               Hashtbl.add names n ();
-              items := (head, n, f) :: !items)
+              fresh := (head, n, f) :: !fresh)
         | _ -> err f "E_FORM" "Workspace children are graph, defn, defnode and defmacro forms.")
       children;
-    let items = List.rev !items in
+    items := !fresh @ !items;
+    let items = List.rev !fresh in
     List.iter
       (fun (head, n, f) ->
         if head = "defnode" then
@@ -3502,7 +3535,7 @@ struct
           | Error _ -> ()
         end)
       items;
-    let graph_order = ref [] and def_order = ref [] in
+    let graph_order = ref [] and defs = ref [] in
     List.iter
       (fun (head, n, f) ->
         if head <> "defmacro" && head <> "defnode" then
@@ -3513,13 +3546,13 @@ struct
                 graph_order := n :: !graph_order)
               else (
                 Hashtbl.replace sigs n sg;
-                def_order := n :: !def_order)
+                defs := n :: !defs)
           | None -> ())
       items;
-    let graph_order = List.rev !graph_order and def_order = List.rev !def_order in
+    def_order := !defs @ !def_order;
+    let graph_order = List.rev !graph_order and defs = List.rev !defs in
     (* With [call_sites] a body is typed where it is called (each call site checks it again with its
        arguments); its own term is a placeholder no call reaches, every call carrying its checked body. *)
-    let checked = Hashtbl.create 8 in
     let def ~own n =
       let d = Hashtbl.find sigs n in
       let env =
@@ -3550,7 +3583,7 @@ struct
       Hashtbl.replace def_terms n { name = n; context = d.sctx; inputs; body = bt; form = d.sform }
     in
     (check_def := fun n -> if Hashtbl.mem sigs n && not (Hashtbl.mem checked n) then def ~own:true n);
-    List.iter (fun n -> if not (Hashtbl.mem checked n) then def ~own:(not call_sites) n) def_order;
+    List.iter (fun n -> if not (Hashtbl.mem checked n) then def ~own:(not call_sites) n) defs;
     List.iter
       (fun (head, n, _) ->
         if head = "defnode" then
@@ -3647,6 +3680,42 @@ struct
                 :: !node_terms)
             (Hashtbl.find_opt node_sources n))
       items;
+    graph_order
+
+  let snapshot ~count ~budget =
+    {
+      s_diags = !diags;
+      s_live = !live;
+      s_invariant = !invariant;
+      s_roots = roots;
+      s_links = links;
+      s_root_forms = root_forms;
+      s_steps = !steps;
+      s_zones = !zones;
+      s_body_memo = body_memo;
+      s_kind_fns = !kind_fns;
+      s_inline_seen = inline_seen;
+      s_input_paths = input_paths;
+      s_names = names;
+      s_sigs = sigs;
+      s_macro_tbl = macro_tbl;
+      s_macro_forms = !macro_forms;
+      s_node_sources = node_sources;
+      s_node_terms = !node_terms;
+      s_def_terms = def_terms;
+      s_def_defaults = def_defaults;
+      s_items = !items;
+      s_checked = checked;
+      s_def_order = !def_order;
+      s_count = from (fun s -> s.s_count) 0 + count;
+      s_budget = budget;
+    }
+
+  let driver (ws : S.t) wname children =
+    ignore wname;
+    unknown_meta ws [ "allow-warnings" ];
+    let graph_order = phase children in
+    let items = List.rev !items in
     let visited = Hashtbl.create (List.length !node_terms) in
     let rec acyclic stack (d : node_definition) =
       if List.mem d.kind.qualified stack then
@@ -3666,20 +3735,41 @@ struct
     List.iter (fun n -> ignore (graph_info (Hashtbl.find gsigs n).sform n)) graph_order;
     if (not library) && graph_order = [] && not (List.exists (fun (h, _, _) -> h = "graph") items)
     then err ws "E_NO_GRAPH" "A workspace needs at least one graph.";
-    (graph_order, def_order)
+    (graph_order, List.rev !def_order)
 end
 
-let check ?(ops = []) ?(library = false) ?(call_sites = false) catalog forms =
+type prelude = snapshot
+
+let prelude ?(ops = []) ?(library = false) ?(call_sites = false) catalog children =
+  let module K = Checker (struct
+    let ops = ops
+    let library = library
+    let call_sites = call_sites
+    let catalog = catalog
+    let children = List.length children
+    let start = None
+  end) in
+  let budget = match K.phase children with _ -> false | exception Budget -> true in
+  K.snapshot ~count:(List.length children) ~budget
+
+let check ?(ops = []) ?(library = false) ?(call_sites = false) ?prelude catalog forms =
   Phase_timer.measure "check" (fun () ->
       match Op.validate ops with
       | Some error -> (None, [ error ])
       | None -> (
+          let start = prelude in
           let module K = Checker (struct
             let ops = ops
             let library = library
             let call_sites = call_sites
             let catalog = catalog
-            let forms = forms
+
+            let children =
+              match forms with
+              | [ { S.node = S.List (_ :: _ :: children); _ } ] -> List.length children
+              | _ -> 0
+
+            let start = start
           end) in
           let open K in
           let outcome =
@@ -3694,6 +3784,7 @@ let check ?(ops = []) ?(library = false) ?(call_sites = false) catalog forms =
             ]
               when Macro.valid_name wname -> (
                 try
+                  if Option.fold ~none:false ~some:(fun s -> s.s_budget) start then raise Budget;
                   let go, dos = driver ws wname children in
                   Some (wname, ws, go, dos)
                 with Budget ->
