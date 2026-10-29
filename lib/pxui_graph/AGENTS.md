@@ -140,7 +140,10 @@ The pane's structure is `graph.html`'s, not only its card internals:
   strip inside the left edge under the rails, the body's result wires into the strip inside the right edge, and no
   feedback wire crosses the body (the end bar's label says `next ↺`). A plain `for` keeps its label port at (12, 36).
 - **Chains.** `Projection.layout` stacks a card's chain input (its first positional nested node call) right above
-  it in its column; `compute` draws that link as a spine between the two cards' left strips (`spine`), not a routed wire.
+  it in its column; `compute` draws that link as an elbow from the source's out-port to the target's input port (`spine`, rounded by `rounded`):
+  every wire starts at a port, none starts in empty space. A zone a wire does not enter is an obstacle for `route`,
+  kept 12 points clear. While an open zone is in view `Inspect.footer_paths` holds every geometry node (a zone's run
+  count reads the geometry its calls take).
 - **Failed node.** `Scope.with_failed` paths with codes; the host (`Core.failed_nodes`) maps a failed cook's node id to
   paths through the probe plan. **Letter hints.** `w` (`Show_hints`) labels every node the selected output can connect
   to; `f` frames the selection (all with none selected).

@@ -221,6 +221,30 @@ let curve_points ?(drop = false) (ax, ay) (bx, by) =
     in
     if lead = 0. then cubic else ((ax, ay) :: cubic) @ [ (bx, by) ]
 
+(* a polyline of axis-aligned legs with its corners rounded (radius 8, less on short legs) *)
+let rounded pts =
+  let len (x0, y0) (x1, y1) = Float.hypot (x1 -. x0) (y1 -. y0) in
+  let toward (x0, y0) (x1, y1) d =
+    let l = len (x0, y0) (x1, y1) in
+    (x0 +. ((x1 -. x0) *. d /. l), y0 +. ((y1 -. y0) *. d /. l))
+  in
+  let rec go = function
+    | p :: c :: n :: rest ->
+        let r = Float.min 8. (Float.min (len p c) (len c n) /. 2.) in
+        let i = toward c p r and o = toward c n r in
+        let arc =
+          List.init 5 (fun k ->
+              let t = float k /. 4. in
+              let u = 1. -. t in
+              ( (u *. u *. fst i) +. (2. *. u *. t *. fst c) +. (t *. t *. fst o),
+                (u *. u *. snd i) +. (2. *. u *. t *. snd c) +. (t *. t *. snd o) ))
+        in
+        arc @ go (o :: n :: rest)
+    | _ :: rest -> rest
+    | [] -> []
+  in
+  match pts with [] -> [] | p :: _ -> p :: go pts
+
 (* where a card's out-port wire starts, a node's rows are read and a zone's rail rows end *)
 let out_anchor (p : P.placed) ax ay =
   if p.shown = P.Point then (ax +. p.w, ay +. (P.point_size /. 2.))
@@ -303,18 +327,21 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
           let (p : P.placed), cx, cy = items.(i) in
           let own = function Some o -> path_equal o p.path | None -> false in
           if
-            p.inner <> None || own from || own into
+            own from || own into
             || inside (ax, ay) p cx cy
             || inside (bx, by) p cx cy
             || P.(match p.item with Return -> true | _ -> false)
           then None
           else
+            (* a zone a wire does not enter is an obstacle too, kept a lattice step clear *)
+            let m = if p.inner <> None then 12. else 0. in
+            let box = (cx -. m, cy -. m, p.w +. (2. *. m), p.h +. (2. *. m)) in
             let pts = curve_points (ax, ay) (bx, by) in
             let rec hit = function
               | u :: (v :: _ as rest) -> clip_segment u v (cx, cy, p.w, p.h) <> None || hit rest
               | _ -> false
             in
-            if hit pts then Some (cx, cy, p.w, p.h) else None)
+            if hit pts then Some box else None)
         (index_query tiles (Float.min ax bx, Float.min ay by, Float.max ax bx, Float.max ay by))
     in
     (* cards stacked in the same columns are one obstacle *)
@@ -353,8 +380,8 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
         chain (ax, ay) way
   in
   (* a card or function stacked above the card it feeds (Projection.layout's chain column) is
-     joined to it by a spine: straight down from its bottom, along the card's left edge, into the
-     input's socket, not a wire out of its right side and back across it *)
+     joined to it by an elbow from the source's out-port to the input's socket, not a curve back
+     across the card *)
   let spine (s : src) into (bx, by) =
     match (s.owner, into) with
     | Some o, [ i ] -> (
@@ -364,13 +391,12 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
                && bx <= ox +. op.w -. 24.
                && iy >= oy +. op.h
                && iy -. (oy +. op.h) <= 3. *. P.lattice ->
-            (* into the first row along the edge; lower, 12 points out, clear of the sockets above,
-                and round into the row *)
-            if by <= iy +. P.body_top +. P.row_height then Some [ (bx, oy +. op.h); (bx, by) ]
-            else
-              let x = bx -. 12. in
-              Some
-                [ (x, oy +. op.h); (x, by -. 6.); (x +. 1.8, by -. 1.8); (x +. 6., by); (bx, by) ]
+            (* an elbow: out of the source's port 12 points, down its right side to the gap
+               between the cards, back along the gap, down the target's left side 12 points out and
+               into the row; corners rounded *)
+            let ax, ay = s.pos in
+            let x1 = ax +. 12. and x2 = bx -. 12. and gy = (oy +. op.h +. iy) /. 2. in
+            Some (rounded [ (ax, ay); (x1, ay); (x1, gy); (x2, gy); (x2, by); (bx, by) ])
         | _ -> None)
     | _ -> None
   in

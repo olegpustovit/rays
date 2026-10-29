@@ -1094,13 +1094,83 @@ let scope_spine () =
         | _ -> None)
       (List.init (Scope.Inspect.wire_count view) Fun.id)
   in
+  (* the wire leaves the function zone's out-port on its right edge and enters map's f on its
+     left edge: every connection starts at a port *)
+  let zx, zy, zw, zh = Option.get (Scope.Inspect.box_of view [ "g"; "ys#0" ]) in
+  let mx, my, _, _ = Option.get (Scope.Inspect.box_of view [ "g"; "ys" ]) in
   check
     (match into_f with
     | [ ((x0, y0) :: _ as pts) ] ->
         let x1, y1 = List.nth pts (List.length pts - 1) in
-        Float.abs (x1 -. x0) < 0.5 && y1 > y0
+        Float.abs (x0 -. (zx +. zw)) < 1.
+        && y0 >= zy
+        && y0 <= zy +. zh
+        && Float.abs (x1 -. mx) < 1.
+        && y1 > my
     | _ -> false)
-    "a map's stacked function is not wired straight down into its f socket"
+    "a map's stacked function is not wired from its out-port into map's f socket";
+  (* zones are obstacles for a wire that does not enter them: [k] feeds [t], right of the zone *)
+  let w =
+    ( Editor_document.Workspace_doc.of_text scope_catalog
+        "(workspace s (graph g :context value (let* [k 2.0 ys (map (fn [i] (* i k)) (array/range \
+         3)) r (+ (array/nth ys 0) k)] r)))"
+    |> function
+      | Ok d -> d
+      | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d)) )
+      .checked
+  in
+  let at = function
+    | [ "g"; "k" ] -> Some (0., 0.)
+    | [ "g"; "ys#0" ] -> Some (300., 96.)
+    | [ "g"; "ys" ] -> Some (300., 336.)
+    | [ "g"; "r" ] -> Some (1000., 360.)
+    | _ -> None
+  in
+  let view = fst (scope_step (fst (scope_view ~at w "g")) (frame ())) in
+  let zx, zy, zw, zh = Option.get (Scope.Inspect.box_of view [ "g"; "ys#0" ]) in
+  let kx, ky, kw, _ = Option.get (Scope.Inspect.box_of view [ "g"; "k" ]) in
+  let rx, ry, _, _ = Option.get (Scope.Inspect.box_of view [ "g"; "r" ]) in
+  (* the straight line between the two ends passes through the zone *)
+  let line x = ky +. 12. +. ((ry -. ky) *. (x -. (kx +. kw)) /. (rx -. kx -. kw)) in
+  check
+    (line (zx +. (zw /. 2.)) > zy && line (zx +. (zw /. 2.)) < zy +. zh)
+    "the zone is off the line";
+  List.iter
+    (fun i ->
+      match Scope.Inspect.wire_target view i with
+      | Some ([ "g"; "r" ], _) ->
+          List.iter
+            (fun (x, y) ->
+              check
+                (not (x > zx +. 1. && x < zx +. zw -. 1. && y > zy +. 1. && y < zy +. zh -. 1.))
+                "a wire that does not enter a zone runs through it")
+            (Scope.Inspect.wire_points view i)
+      | _ -> ())
+    (List.init (Scope.Inspect.wire_count view) Fun.id)
+
+(* a zone's run count reads the geometry its calls take: while an open zone is in view the
+   footer paths hold every geometry node, off screen or not *)
+let scope_zone_footer_paths () =
+  let w =
+    ( Editor_document.Workspace_doc.of_text scope_catalog
+        "(workspace z (graph g :context sop (let* [a (sop/box) b (sop/with_attr a :P (exact (map \
+         (fn [(p : vec3)] p) (sop/attr a :P))))] b)))"
+    |> function
+      | Ok d -> d
+      | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d)) )
+      .checked
+  in
+  let view = fst (scope_step (fst (scope_view w "g")) (frame ())) in
+  let mouse = (990, 350) in
+  let view =
+    fst
+      (scope_step view
+         (frame ~mouse ~events:[ mouse_move mouse; Input.Pinched (2.5 /. Scope.zoom view) ] ()))
+  in
+  let view = fst (scope_step view (frame ~mouse ~events:[] ())) in
+  let ax, _, aw, _ = Option.get (Scope.Inspect.box_of view [ "g"; "a" ]) in
+  check (ax +. aw < 0.) "the geometry node is meant to be off screen";
+  check (List.mem [ "g"; "a" ] (Scope.Inspect.footer_paths view)) "a zone in view lost its geometry"
 
 module G = struct
   module E = Flow_graph.Flow_edit
@@ -2326,6 +2396,7 @@ let run_scope () =
   scope_curve ();
   scope_field_formula ();
   scope_spine ();
+  scope_zone_footer_paths ();
   scope_carry ();
   scope_connection_hover ();
   scope_levels ();

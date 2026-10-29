@@ -441,12 +441,16 @@ rows after the `fn`'s parameters. Every function and loop zone starts open, its 
 one, and the fold is saved in the layout); `i` or a double click on a collapsed zone opens it in place.
 
 A chain is a column: the first node call a card reads in a positional input (its chain input) stacks
-right above it in the same column, the source on top (`Projection.layout`), and the two are joined by a
-spine instead of a wire back across the card (`Scope_wires.compute`): straight down from the source's
-bottom along the card's left edge into the input's socket when that is the first row, else 12 points
-out from the edge, clear of the sockets above, rounding into the row. It holds while the card sits
-anywhere under the source with at most three lattice rows between them.
-A `map`'s inline function zone stacks above the `map` card the same way. A name read inside a formula
+right above it in the same column, the source on top (`Projection.layout`), and the two are joined by an
+elbow instead of a wire back across the card (`Scope_wires.compute`). Like every wire it leaves the
+source's out-port and enters the target's input port: out of the port 12 points, down the source's
+right side to the middle of the gap between the cards, back along the gap, down 12 points left of the
+target's edge and level into the row, corners rounded. It holds while the card sits anywhere under the
+source with at most three lattice rows between them. A `map`'s inline function zone stacks above the
+`map` card the same way and its wire leaves the zone's out-port. A wire that does not enter a zone goes
+round it, a lattice step clear of its edge (zones are obstacles, like cards). A zone's run count
+(`1 / 1000000`) reads the geometry its calls take, so while an open zone is in view the footers' targets
+include every geometry node of the scope (`Scope.Inspect.footer_paths`). A name read inside a formula
 (not the value a row takes) is wired thin and faint, and in full while either end is selected or the wire is hovered.
 
 ### 7.2 Keys

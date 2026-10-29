@@ -2025,23 +2025,39 @@ module Inspect = struct
   let tagged_wires t = Array.fold_left (fun n w -> if tagged t w then n + 1 else n) 0 t.geo.wires
   let wire_count t = Array.length t.geo.wires
 
-  (* the nodes whose footer the pane draws: in view and not too small to read *)
+  (* the nodes whose footer the pane draws: in view and not too small to read.  A zone's run count
+     reads the geometry its calls take (a map over [sop/attr waves]), so while an open zone is in
+     view every geometry node of the scope is counted, on screen or not. *)
   let footer_paths t =
     if t.zoom < 0.4 then []
     else
       let z = t.zoom in
-      List.filter_map
-        (fun i ->
-          match t.geo.items.(i) with
-          | { P.item = P.Item n; collapsed; _ }, _, _
-            when match n.zone with Some _ -> collapsed | None -> true ->
-              Some n.path
-          | _ -> None)
-        (index_query t.geo.tiles
-           ( -.t.pan_x /. z,
-             -.t.pan_y /. z,
-             (float t.width -. t.pan_x) /. z,
-             (float t.height -. t.pan_y) /. z ))
+      let zone_open = ref false in
+      let seen =
+        List.filter_map
+          (fun i ->
+            match t.geo.items.(i) with
+            | { P.item = P.Item n; collapsed; _ }, _, _
+              when match n.zone with Some _ -> collapsed | None -> true ->
+                Some n.path
+            | { P.item = P.Item { zone = Some _; _ }; _ }, _, _ ->
+                zone_open := true;
+                None
+            | _ -> None)
+          (index_query t.geo.tiles
+             ( -.t.pan_x /. z,
+               -.t.pan_y /. z,
+               (float t.width -. t.pan_x) /. z,
+               (float t.height -. t.pan_y) /. z ))
+      in
+      if not !zone_open then seen
+      else
+        Array.fold_left
+          (fun acc -> function
+            | { P.item = P.Item ({ zone = None; _ } as n); _ }, _, _ when n.ty = Flow.Ty.geometry ->
+                n.path :: acc
+            | _ -> acc)
+          seen t.geo.items
 
   let wire_points t i =
     if i < 0 || i >= Array.length t.geo.wires then []
