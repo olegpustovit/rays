@@ -621,7 +621,10 @@ Tried and stopped (2026-10-29), with what each still needs:
 **Recomputed normals on the device** (2026-10-29). The four blockers, as resolved. (2) The owner's
 decision: `sop/transform :recompute_normals` recomputes at every matrix, an identity one included,
 and writes N where it is (`transform_recomputed`: point N in place when the input has it, else
-vertex N, the other owners' N deleted, each by `:when`), for a static and a live matrix alike, so a
+vertex N, the other owners' N deleted, each by `:when`: what dev's call did, whose `sop/normals`
+on the point N deleted every other owner's N in `normals_install`, so a vertex N beside a point N
+was never recomputed; an N that is not vec3 fails with `sop/normals`' storage error;
+`test_lisp_inline` compares each against dev's body written out), for a static and a live matrix alike, so a
 driven call inlines with one live structure: its P write folds into the chain before it (P
 resident) and the N write follows it. The `:when` tests count `moved`, not `in0`: a capture of
 `in0` counted as a second use of the chain's last write and kept it apart. Golden change: in a
@@ -663,7 +666,13 @@ resident and drawn from the device; its N is within 1.64e-7 of the face-area nor
 device's own float32 P, and 4.4e-5 of the CPU's (binary64 P: the float32 rounding of P over edges
 of 1/512, not the gather's arithmetic). `sop_gallery` (five interleaved rounds against dev,
 `BENCH_PHASES=1`, load 4-5): cook median 0.839 s against 0.838 s, lower 0.355 against 0.378 s,
-edit to cook 0.496 against 0.502 s, check 0.257 against 0.251 s (the transform's longer body).
+edit to cook 0.496 against 0.502 s, check 0.257 against 0.251 s; again after the storage check:
+check 0.256 against 0.249 s (+2.7%), lower 0.363 against 0.373, cook 0.834 against 0.843, edit to
+cook 0.500 against 0.505. The check is the transform's three new helpers: `Catalog.check_workspace`
+splices every library definition the workspace reaches and checks it with each workspace check, so
+a shared node file would be checked as often (sop_gallery already reached `sop/normals`' helpers
+through its own normals); keeping checked library definitions across checks is the fix, a checker
+change, not made here.
 
 **Display binding.** A displayed point cloud whose P (and N, if it has one) the device still holds,
 or a triangle mesh (every primitive a triangle) whose P and point N it holds, with no colour, uv,

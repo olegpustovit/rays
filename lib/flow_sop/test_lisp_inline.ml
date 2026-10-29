@@ -291,7 +291,43 @@ let () =
       ("(sop/normals (sop/uv_sphere) :owner \"Point\")", "point");
       ("(sop/normals (sop/grid :rows 5 :columns 7) :owner \"Vertex\")", "vertex");
     ];
-  print_endline "inline cards: recomputed normals are sop/normals' face-area bytes, in place"
+  print_endline "inline cards: recomputed normals are sop/normals' face-area bytes, in place";
+  (* dev's recompute, written out: sop/normals on the point N (which deletes every other owner's
+     N), else on the vertex N; with point N last the in-place write is its attribute order too *)
+  let dev =
+    "(let* [m (sop/transform g :shear_xy 0.25) p (if (sop/has_attr m \"N\" :owner \"point\") \
+     (sop/normals m :owner \"Point\" :weighting \"Face area\") m)] (if (sop/has_attr p \"N\" \
+     :owner \"vertex\") (sop/normals p :owner \"Vertex\" :weighting \"Face area\") p))"
+  and grid = "(sop/grid :rows 5 :columns 7)" in
+  let point_last b =
+    Printf.sprintf
+      "b %s g (sop/with_attr b \"N\" (array/vec3 (sop/count b :points) [0.0 1.0 0.0]) :owner \
+       \"point\" :type vec3)"
+      b
+  in
+  List.iter
+    (fun (name, bindings) ->
+      let text body =
+        Printf.sprintf "(workspace x (graph g :context sop (let* [%s] %s)))" bindings body
+      in
+      match
+        ( outcome (text "(sop/transform g :shear_xy 0.25 :recompute_normals true)"),
+          outcome (text dev) )
+      with
+      | Ok a, Ok b when a = b -> ()
+      | Error a, Error b when a = b -> ()
+      | _ -> failwith ("recomputed normals differ from dev's: " ^ name))
+    [
+      ("point and vertex N", point_last ("(sop/normals " ^ grid ^ " :owner \"Vertex\")"));
+      ("point and primitive N", point_last ("(sop/normals " ^ grid ^ " :owner \"Primitive\")"));
+      ("point and detail N", point_last ("(sop/normals " ^ grid ^ " :owner \"Detail\")"));
+      ( "float point N",
+        Printf.sprintf
+          "b (sop/delete_attr %s \"N\" :owner \"point\") g (sop/with_attr b \"N\" (array/float \
+           (sop/count b :points) 1.0) :owner \"point\" :type float)"
+          grid );
+    ];
+  print_endline "inline cards: recomputed normals keep dev's owners and storage errors"
 
 (* Step E2: a cooked-data argument (a count of the cooked input) inlines; the body reads it as a
    value resolved once per cook, so the card cooks as the same call with that value written out

@@ -134,8 +134,17 @@
 ;; an identity one included (it recomputes too). Nothing selected keeps the input's N.
 (defn transform_recomputed :context sop [(moved : geometry) (changed : bool)]
   (let* [point_n (sop/has_attr moved "N" :owner "point")
-         vertex_n (and (not point_n) (sop/has_attr moved "N" :owner "vertex"))]
-    (if (and (and (not (live? point_n)) (not point_n)) (and (not (live? vertex_n)) (not vertex_n))) moved
+         vertex_n (and (not point_n) (sop/has_attr moved "N" :owner "vertex"))
+         ; an N that is not vec3 fails as sop/normals fails (its storage check)
+         wrong (or (and point_n (not (sop/has_attr moved "N" :owner "point" :type vec3)))
+                   (and vertex_n (not (sop/has_attr moved "N" :owner "vertex" :type vec3))))]
+    (cond
+      ; (only then may changed, a cooked count, decide the structure)
+      (and (not (live? wrong)) wrong)
+        (if changed (normals_error (str (if point_n "point" "vertex") " N must have float3 storage"))
+          moved)
+      (and (and (not (live? point_n)) (not point_n)) (and (not (live? vertex_n)) (not vertex_n))) moved
+      :else
       (let* [topo (sop/topology moved)
              adjacency (sop/adjacency moved)
              positions (sop/attr moved :P)
