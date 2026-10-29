@@ -263,9 +263,35 @@ let () =
       ( grid,
         ":recompute_normals true :shear_xy (* t 2.0)",
         ":recompute_normals true :shear_xy 0.25",
-        false );
+        true );
     ];
   print_endline "inline cards: a driven transform's identity and singular frames as the call"
+
+(* Recomputed normals are sop/normals' face-area bytes, gathered per point (or vertex), written
+   where N was: quads, triangles, a sphere's pole fans, vertex N. *)
+let () =
+  List.iter
+    (fun (input, owner) ->
+      let moved = "(sop/transform " ^ input ^ " :shear_xy 0.25 :rotate [0.3 0.0 0.0])" in
+      let recomputed =
+        "(sop/transform " ^ input ^ " :shear_xy 0.25 :rotate [0.3 0.0 0.0] :recompute_normals true)"
+      and scattered =
+        Printf.sprintf
+          "(sop/with_attr %s \"N\" (sop/attr (sop/normals %s :owner %S :weighting \"Face area\") \
+           \"N\" :owner %S :type vec3) :owner %S :type vec3)"
+          moved moved (String.capitalize_ascii owner) owner owner
+      in
+      let text body = Printf.sprintf "(workspace x (graph g :context sop %s))" body in
+      match (outcome (text recomputed), outcome (text scattered)) with
+      | Ok a, Ok b when a = b -> ()
+      | _ -> failwith ("recomputed normals differ from sop/normals: " ^ input))
+    [
+      ("(sop/grid :rows 5 :columns 7)", "point");
+      ("(sop/grid :rows 5 :columns 7 :connectivity \"Triangles\")", "point");
+      ("(sop/normals (sop/uv_sphere) :owner \"Point\")", "point");
+      ("(sop/normals (sop/grid :rows 5 :columns 7) :owner \"Vertex\")", "vertex");
+    ];
+  print_endline "inline cards: recomputed normals are sop/normals' face-area bytes, in place"
 
 (* Step E2: a cooked-data argument (a count of the cooked input) inlines; the body reads it as a
    value resolved once per cook, so the card cooks as the same call with that value written out

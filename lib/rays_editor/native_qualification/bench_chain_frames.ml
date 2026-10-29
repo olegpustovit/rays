@@ -1,7 +1,8 @@
 (* An animated chain: grid > attribute_noise (offset driven by frame/input's t) > transform, 1M
    points (GRID_SIDE), cooked frame after frame as the editor does (Value_lane.resolve, then one
    session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments; FRAMES (12);
-   CONNECTIVITY (Points) the grid's.
+   CONNECTIVITY (Points) the grid's; TEXT replaces the whole workspace; CPU=1 lowers without the
+   device.
    Prints per frame: seconds (and the resolve's), dispatches, buffers created, uploads, pipelines
    compiled, whether P is resident, the seconds and bytes read back of P's bounds (the selected box
    and framing, Geometry_view.bounds), the seconds reading P, and noise[1] (a read back); NODES=1
@@ -20,6 +21,7 @@ let text =
     (Option.value (Sys.getenv_opt "CONNECTIVITY") ~default:"Points")
     side side drive
     (Option.value (Sys.getenv_opt "XDRIVE") ~default:"")
+  |> fun text -> Option.value (Sys.getenv_opt "TEXT") ~default:text
 
 let () =
   let gpu = Flow_native.Workspace_gpu.create () in
@@ -51,7 +53,12 @@ let () =
                   };
             }
           in
-          let lowered = Flow_sop.Lower.workspace ~gpu:config (Flow.Syntax.parse text |> ok) |> ok in
+          let lowered =
+            Flow_sop.Lower.workspace
+              ?gpu:(if Sys.getenv_opt "CPU" = None then Some config else None)
+              (Flow.Syntax.parse text |> ok)
+            |> ok
+          in
           let graph = List.hd lowered.graphs in
           let lane = Flow_sop.Value_lane.create () in
           let session =
@@ -67,7 +74,10 @@ let () =
             let start = Unix.gettimeofday () in
             let live = Input.at_time time in
             let resolved =
-              Flow_sop.Value_lane.resolve ~gpu:config ~live lane ~time graph.network |> ok
+              Flow_sop.Value_lane.resolve
+                ?gpu:(if Sys.getenv_opt "CPU" = None then Some config else None)
+                ~live lane ~time graph.network
+              |> ok
             in
             let resolve_seconds = Unix.gettimeofday () -. start in
             let node =

@@ -3,6 +3,25 @@ module G = Rdk.Geometry
 
 let error code message = Error (Diagnostic.error ~code message)
 
+(* A topology's component arrays, remembered by the topology's identity (both immutable): a recook
+   over the same topology reads the same arrays, so a device converts and uploads its tables once. *)
+let kept_components : Rdk.Topology.t -> (unit -> (string, E.value) Hashtbl.t * Mutex.t) -> _ =
+  Flow.Value.remember ()
+
+let kept geometry kind component make =
+  let table, lock =
+    kept_components (G.topology geometry) (fun () -> (Hashtbl.create 8, Mutex.create ()))
+  in
+  let key = kind ^ component in
+  match Mutex.protect lock (fun () -> Hashtbl.find_opt table key) with
+  | Some value -> Ok value
+  | None ->
+      Result.map
+        (fun value ->
+          Mutex.protect lock (fun () -> Hashtbl.replace table key value);
+          value)
+        (make geometry component)
+
 let topology geometry component =
   let view = Rdk.Topology.View.view (G.topology geometry) in
   match component with
@@ -267,7 +286,7 @@ let resolve ~geometry = function
                       "Count element is points, vertices, primitives or edges."
               else if name = "sop/topology" then
                 match List.assoc_opt "component" args with
-                | Some (E.Text component) -> topology geometry component
+                | Some (E.Text component) -> kept geometry "topology:" component topology
                 | _ ->
                     error "E_DATA_SOURCE"
                       "Topology source requires vertex_points, primitive_offsets or kinds."
@@ -278,7 +297,7 @@ let resolve ~geometry = function
                 | _ -> error "E_DATA_SOURCE" "Triangles source requires a component name."
               else if name = "sop/adjacency" then
                 match List.assoc_opt "component" args with
-                | Some (E.Text component) -> adjacency geometry component
+                | Some (E.Text component) -> kept geometry "adjacency:" component adjacency
                 | _ -> error "E_DATA_SOURCE" "Adjacency source requires a component name."
               else
                 let index =

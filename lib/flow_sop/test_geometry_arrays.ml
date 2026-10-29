@@ -240,15 +240,20 @@ let () =
   let expected = E.Record (List.tl (fields original)) in
   let result = E.Host.force_reference ~resolve:resolver queried ~live |> flow in
   check (result = expected) "C1 topology kind codes or plane order differ";
+  (* the query's arrays are copies (kept per topology, as immutable Flow values), never the
+     geometry's own storage *)
+  let native = Topology.View.view (Geometry.topology original) in
   (match result with
   | E.Record fields ->
       List.iter
-        (function _, E.Int_array a -> Array.fill a 0 (Array.length a) 99 | _ -> assert false)
+        (function
+          | _, E.Int_array a ->
+              check
+                (a != native.vertex_points && a != native.primitive_offsets)
+                "C1 topology query aliases native storage"
+          | _ -> assert false)
         fields
   | _ -> assert false);
-  check
-    (E.Host.force_reference ~resolve:resolver queried ~live |> flow = expected)
-    "C1 topology query mutated native storage";
   let source = Lisp_sop.snapshot original in
   let origins =
     List.map

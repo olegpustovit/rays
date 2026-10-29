@@ -114,19 +114,22 @@ module Cost = struct
   (* A fused SOP write on the device (fast precision; specification/sop.md, "Device placement"):
      a region of at least 2^18 elements that samples noise. Upload, dispatch and readback cost about
      what a light arithmetic map costs on the CPU blocks, so only noise (about 0.1 microseconds an
-     element and octave on the CPU) pays for the trip. [Qualification] places every legal region. *)
-  let sop_device policy (region : Core.Region.t) ~count =
+     element and octave on the CPU) pays for the trip; so does a region that reads data the device
+     holds ([resident]), which the CPU would first read back. [Qualification] places every legal
+     region. *)
+  let sop_device policy (region : Core.Region.t) ~count ~resident =
     policy = Gpu.Qualification
     || count >= 1 lsl 18
-       && Array.exists
-            (fun instruction ->
-              let rec noise = function
-                | Core.Region.Noise3 _ -> true
-                | Guarded (_, body) -> noise body
-                | _ -> false
-              in
-              noise instruction)
-            region.code
+       && (resident
+          || Array.exists
+               (fun instruction ->
+                 let rec noise = function
+                   | Core.Region.Noise3 _ -> true
+                   | Guarded (_, body) -> noise body
+                   | _ -> false
+                 in
+                 noise instruction)
+               region.code)
 end
 
 (* A static packed map of more than 4,096 elements runs as the kernel it would be at frame rate
@@ -517,6 +520,11 @@ module Executor = struct
             Option.map
               (fun packed -> (packed, false))
               (Packed.compile ?trace ?through_exact ~count_source residual term)
+        (* a bound map ([(exact displaced)], noise_displace) is the map it names *)
+        | Ref_binding (name, []) -> (
+            match List.assoc_opt name (E.Residual.residual_view residual).bindings with
+            | Some (E.Residual nested) -> find seen nested (E.Residual.residual_view nested).term
+            | _ -> None)
         | _ -> None
     in
     match value with
@@ -1316,10 +1324,20 @@ module Executor = struct
         let ( let* ) = Result.bind in
         let device =
           (* a source another write keeps on this device is bound there, not read back *)
+          let held = ref false in
+          let resident =
+            Option.map
+              (fun resident value ->
+                let found = resident value in
+                if found <> None then held := true;
+                found)
+              resident
+          in
           let* inputs =
             Packed.Host.prepare ~fast:true ~index:true ?state ?resolve ?resident merged ~live
           in
-          if not (Cost.sop_device gpu.policy merged ~count:inputs.count) then Ok None
+          if not (Cost.sop_device gpu.policy merged ~count:inputs.count ~resident:!held) then
+            Ok None
           else
             let* kernel =
               match program.gpu_kernel with

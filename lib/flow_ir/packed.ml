@@ -478,42 +478,64 @@ let execute_loop s ~(execute : ?dependent:bool -> int -> int -> int -> int -> un
   match unguarded code.(loop.finish) with
   | Loop_end (_, next, stop) ->
       let count = Array.length loop.initial in
+      (* Lanes step together: each iteration runs the body over the spans of lanes still looping,
+         each lane's values in its own order, so they equal a lane-at-a-time run's; a block that
+         raises is redone lane-major by its caller (the first error in lane order). *)
+      let lanes = last - first in
+      let lows = Array.make lanes 0 and lengths = Array.make lanes 0 in
       for lane = first to last - 1 do
         let lo = s.integer.((loop.first * s.block_size) + lane)
         and hi = s.integer.((loop.last * s.block_size) + lane) in
-        let length =
-          try Flow.Op.range_length ~limit:(Option.value ~default:max_int loop.limit) lo hi
-          with Diagnostic.Error d -> V.raise_diagnostic { d with span = Some loop.span }
-        in
+        lows.(lane - first) <- lo;
+        lengths.(lane - first) <-
+          (try Flow.Op.range_length ~limit:(Option.value ~default:max_int loop.limit) lo hi
+           with Diagnostic.Error d -> V.raise_diagnostic { d with span = Some loop.span });
         for component = 0 to count - 1 do
           copy_loop s loop.initial.(component) (header + 1 + component) lane
-        done;
-        let iteration = ref 0 and finished = ref false in
-        while !iteration < length && not !finished do
-          s.integer.((header * s.block_size) + lane) <- lo + !iteration;
-          execute (header + 1 + count) loop.finish lane (lane + 1);
-          (finished :=
-             match stop with
-             | None -> false
-             | Some slot -> s.floats.((slot * s.block_size) + lane) <> 0.);
-          for component = 0 to count - 1 do
-            let target = header + 1 + component and value = next.(component) in
-            if s.text_offsets.(target) >= 0 then
-              s.next_text.(component) <- s.texts.((s.text_offsets.(value) * s.block_size) + lane)
-            else if s.banks.(target) then
-              s.next_int.(component) <- s.integer.((value * s.block_size) + lane)
-            else s.next_float.(component) <- s.floats.((value * s.block_size) + lane)
-          done;
-          for component = 0 to count - 1 do
-            let target = header + 1 + component in
-            if s.text_offsets.(target) >= 0 then
-              s.texts.((s.text_offsets.(target) * s.block_size) + lane) <- s.next_text.(component)
-            else if s.banks.(target) then
-              s.integer.((target * s.block_size) + lane) <- s.next_int.(component)
-            else s.floats.((target * s.block_size) + lane) <- s.next_float.(component)
-          done;
-          incr iteration
         done
+      done;
+      (* until every lane has run its count or stopped *)
+      let iteration = ref 0 in
+      while Array.exists (fun length -> !iteration < length) lengths do
+        let active lane = !iteration < lengths.(lane - first) in
+        let lane = ref first in
+        while !lane < last do
+          while !lane < last && not (active !lane) do
+            incr lane
+          done;
+          let span = !lane in
+          while !lane < last && active !lane do
+            s.integer.((header * s.block_size) + !lane) <- lows.(!lane - first) + !iteration;
+            incr lane
+          done;
+          if span < !lane then execute (header + 1 + count) loop.finish span !lane
+        done;
+        for lane = first to last - 1 do
+          if active lane then begin
+            (* a lane that stops commits these next values and leaves the loop *)
+            (match stop with
+            | Some slot when s.floats.((slot * s.block_size) + lane) <> 0. ->
+                lengths.(lane - first) <- 0
+            | _ -> ());
+            for component = 0 to count - 1 do
+              let target = header + 1 + component and value = next.(component) in
+              if s.text_offsets.(target) >= 0 then
+                s.next_text.(component) <- s.texts.((s.text_offsets.(value) * s.block_size) + lane)
+              else if s.banks.(target) then
+                s.next_int.(component) <- s.integer.((value * s.block_size) + lane)
+              else s.next_float.(component) <- s.floats.((value * s.block_size) + lane)
+            done;
+            for component = 0 to count - 1 do
+              let target = header + 1 + component in
+              if s.text_offsets.(target) >= 0 then
+                s.texts.((s.text_offsets.(target) * s.block_size) + lane) <- s.next_text.(component)
+              else if s.banks.(target) then
+                s.integer.((target * s.block_size) + lane) <- s.next_int.(component)
+              else s.floats.((target * s.block_size) + lane) <- s.next_float.(component)
+            done
+          end
+        done;
+        incr iteration
       done
   | _ -> assert false
 
@@ -1506,16 +1528,23 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
           (* Lazy captures cannot be forced from a worker domain. The first chunk runs
          here, in reference order, and forces whichever captures its lanes select;
          when every capture is then a value the remaining chunks run in parallel. *)
+          (* a table (an array capture) is read through [prepare], never as components: forcing
+             its components failed, which kept every gather over a resolved table sequential *)
+          let table i =
+            match V.ty_of (Lazy.force uniforms.(i)) with Ty.Array _ -> true | _ -> false
+          in
           let settled () =
             Array.for_all (fun lazy_value -> Lazy.is_val lazy_value) uniforms
             && (try
                   Array.iteri
-                    (fun i lazy_value ->
-                      if Lazy.is_val lazy_value then ignore (Lazy.force uniform_components.(i)))
+                    (fun i _ -> if not (table i) then ignore (Lazy.force uniform_components.(i)))
                     uniforms;
                   true
                 with Diagnostic.Error _ | Invalid_argument _ | Not_found | Failure _ -> false)
-            && Array.for_all (fun lazy_value -> Lazy.is_val lazy_value) uniform_components
+            && Array.for_all Fun.id
+                 (Array.mapi
+                    (fun i components -> table i || Lazy.is_val components)
+                    uniform_components)
           in
           let first_chunk =
             if chunks = 0 || Array.for_all concrete t.uniforms then 0
