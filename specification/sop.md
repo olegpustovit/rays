@@ -652,7 +652,10 @@ Checked by `test_rand_at` (bytes at counts 1, 3 and 32 and the refusal at 65 equ
 `test_chain_frames_native` (`DRIVE` octaves 2 to 9 over the frames: after the first frame one
 dispatch, nothing compiled, uploaded or read back, P resident). Measured (M1, load 4, 2026-10-29,
 medians of 7 frames): 1M points 0.0044 s a frame on the device against 0.14 s on the CPU, largest
-difference 2.7e-7; 512 squared 0.0020 s against 0.046 s (2.8e-7).
+difference 2.7e-7; 512 squared 0.0020 s against 0.046 s (2.8e-7). Dev (`bench_chain_frames` with the
+same `DRIVE`, 1M) cooked each frame on the CPU, a card rebuilt per frame: 0.13-0.17 s, now
+0.0035-0.0089 s; the CPU-only cook of a live count (the typed path, 0.14 s) is no slower than dev's
+rebuilt node.
 
 A body can pick a form for a live value: `(live? x)` is true while lowering when `x` is decided per
 frame or by cooked data (a residual, a data source), false for a value at hand and wherever a
