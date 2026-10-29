@@ -269,8 +269,24 @@ type inline_entry = {
   e_guards : (value * bool * Diagnostic.t) list; (* the body's deferred checks *)
 }
 
-(* ponytail: a whole-table clear at 256 entries; an entry retains its evaluation's state *)
+(* An entry retains its evaluation's state (nodes, values, a packed grid's arrays: megabytes), and a
+   scrub makes a new key per value. So the table is bounded twice: 256 entries (a whole-table clear),
+   and [inline_variants] per call site, the newest kept, so a scrub's stale values are let go. *)
 let inline_memo : (string, inline_entry) Hashtbl.t = Hashtbl.create 64
+let inline_variants = 8
+let inline_sites : (W.path * int list * int, string list) Hashtbl.t = Hashtbl.create 64
+
+let inline_store ~form key entry =
+  let site = (entry.e_site, entry.e_iter, form) in
+  if Hashtbl.length inline_memo >= 256 then begin
+    Hashtbl.reset inline_memo;
+    Hashtbl.reset inline_sites
+  end;
+  let keys = Option.value ~default:[] (Hashtbl.find_opt inline_sites site) in
+  let keys = if List.mem key keys then keys else key :: keys in
+  List.iteri (fun i k -> if i >= inline_variants then Hashtbl.remove inline_memo k) keys;
+  Hashtbl.replace inline_sites site (List.filteri (fun i _ -> i < inline_variants) keys);
+  Hashtbl.replace inline_memo key entry
 let inline_lock = Mutex.create ()
 
 type live = Input.t
@@ -1854,8 +1870,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
                 }
               in
               Mutex.protect inline_lock (fun () ->
-                  if Hashtbl.length inline_memo >= 256 then Hashtbl.reset inline_memo;
-                  Hashtbl.replace inline_memo key entry)
+                  inline_store ~form:d.body.body.form.id key entry)
           | _ -> ());
           card c ~form d parameters ~vals ~guards v
       | exception Needs_t ->

@@ -1306,10 +1306,12 @@ let build_call ~gpu ~lower_call ~record_profile ~checked ~(definition : Workspac
              with Diagnostic.Error diagnostic ->
                lisp_body_failed ~checked ~definition ~inputs ~parameters diagnostic))
 
-(* 2048 inlined-body kernel nodes, by cook identity (Lowerer.reuse); every access under the lock. *)
+(* 64 inlined-body kernel nodes, by cook identity (Lowerer.reuse); every access under the lock. A scrub
+   makes a key per value, and a node retains its evaluation (megabytes on a large grid), so the
+   capacity is the bound on a scrub's residue (2048 held 2-3 GB after a minute of scrubbing). *)
 module Built = Lru.Make (String)
 
-let built = Built.create 2048
+let built = Built.create 64
 let built_lock = Mutex.create ()
 
 let geo_of args =
