@@ -532,6 +532,44 @@ grid planes and `array/range` generated from the thread
 index (a new element-index instruction across the CPU blocks, MSL, SPIR-V and WGSL, and the grid's
 point map fused into the write); fills bound as uniforms.
 
+Tried and stopped (2026-10-29), with what each still needs:
+
+- A driven `sop/transform :recompute_normals true` on the device. A deterministic scatter-add is out
+  (`array/scatter_add` is CPU only), so the form is a gather: per point, a fold over its incident
+  primitives (`sop/adjacency`'s `point_vertex_offsets`/`point_vertices`/`primitive_of_vertex`, a
+  CSR made once per topology) of each primitive's fan cross products (`sop/topology`), normalised by
+  the largest component as `Normal_ops.fast_point_area`; in CSR order the float64 sums are the
+  native's, so the CPU bytes would equal it. Five pieces are missing, none a local change. (a) A
+  gather table is a uniform, and `Packed.Host.prepare_values` evaluates uniforms with the cook's
+  resolve: a P the device holds is read back to become the table (only an elementwise source is
+  answered by `resident`); the speculative resident resolve, and `Run.dispatch` binding a held
+  placeholder table (`bound_table` through `held_input`, with the held length for the gather
+  count), are needed. (b) `device_inputs` converts every Int table with `Array.map float_of_int`
+  per prepare, a fresh array the runner's identity check uploads again: the CSR (about 9M ints at
+  1M points) would upload every frame; the conversion has to be remembered by the table's identity.
+  (c) Only a fused write (with `$writes`) is placed, and the normals write cannot fold into the chain
+  that wrote P: a table read of a written attribute is not a fold (`fold_writes`' retarget refuses
+  any read but `(map f (sop/attr in0 :P))`), so it stays a lone write, never on the device.
+  (d) `Cost.sop_device` places only regions with noise. (e) The CPU (exact precision, no device,
+  every refusal) runs the same record program: the gather in the typed interpreter (an integer
+  program) instead of `fast_point_area`, and no Lisp form can pick by device (`live?` is about the
+  frame); the alternative, a device path inside the native normals node over a resident P (a hook on
+  `Float3.deferred` as `?bounds` is, a compute stage beside `bounds.rays`, its own settle and
+  release), keeps the CPU as it is but is its own lifecycle. A driven transform with recomputed normals
+  stays a card rebuilt per frame on the CPU.
+- A device-generated `sop/grid` P. The write's P is a read of the grid's geometry, built by
+  `sop/mesh_planes` (a node, not a write), and the chain stops at the grid's N write, a planar record
+  `point_write` refuses as a fold point. Writing the grid's P as `(sop/with_attr shape :P (exact (map
+  ... (array/range (sop/count shape :points)))))` over zero planes, N as a map of the constant, and
+  counting a range of `(sop/count g :points)` as g's points (`Attribute_kernel`'s count source) does
+  fold the grid into the chain (`test_settle`: one settled dispatch), but the folded record's P was
+  not resident and on the device the chain became two dispatches uploading 24 MB a frame (1M points,
+  `bench_chain_frames`) where it had been one uploading nothing; that needs understanding before the
+  element index (a source `array/range` of the region's count printed as the thread index in MSL and
+  SPIR-V, counted in the CPU blocks, so nothing is built or uploaded) is worth adding. The grid change
+  also turns its remembered N fill into a kernel output. Both reverted; nothing of either is in the
+  code.
+
 **Display binding.** A displayed point cloud whose P (and N, if it has one) the device still holds,
 or a triangle mesh (every primitive a triangle) whose P and point N it holds, with no colour, uv,
 vertex N, piece or material to show, is drawn from the device: `Rdk_rays.Surface`
