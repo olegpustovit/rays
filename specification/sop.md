@@ -693,7 +693,9 @@ medians of 7 frames): 1M points 0.0044 s a frame on the device against 0.14 s on
 difference 2.7e-7; 512 squared 0.0020 s against 0.046 s (2.8e-7). Dev (`bench_chain_frames` with the
 same `DRIVE`, 1M) cooked each frame on the CPU, a card rebuilt per frame: 0.13-0.17 s, now
 0.0035-0.0089 s; the CPU-only cook of a live count (the typed path, 0.14 s) is no slower than dev's
-rebuilt node.
+rebuilt node. `sop_gallery` (`bench_sop_cook ":seed 2026" ":seed 2027" 3`, five rounds interleaved
+with dev 3f1520dc, medians, load 4, 2026-10-29): check 0.259 s against 0.250, lower 0.374 against
+0.376, cook 0.870 against 0.877, edit to cook 0.501 against 0.508.
 
 A body can pick a form for a live value: `(live? x)` is true while lowering when `x` is decided per
 frame or by cooked data (a residual, a data source), false for a value at hand and wherever a
