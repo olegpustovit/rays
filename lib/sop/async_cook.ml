@@ -62,8 +62,7 @@ let execute session request =
               | None -> (
                   match Session.node_seconds session (Node.id node) with
                   | Some seconds when seconds > 0.002 -> None
-                  | _ ->
-                      Result.to_option (Session.cook session ~context:request.context node)))
+                  | _ -> Result.to_option (Session.cook session ~context:request.context node)))
             request.optional
         in
         match request.prepare outputs optional with
