@@ -386,9 +386,9 @@ let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
     match (s.owner, into) with
     | Some o, [ i ] -> (
         match (at o, at i) with
-        | Some ((op : P.placed), ox, oy), Some (_, _, iy)
-          when bx >= ox -. 1.
-               && bx <= ox +. op.w -. 24.
+        | Some ((op : P.placed), ox, oy), Some (ip, ix, iy)
+          when ix < ox +. op.w -. 24.
+               && ix +. ip.w > ox +. 24.
                && iy >= oy +. op.h
                && iy -. (oy +. op.h) <= 3. *. P.lattice ->
             (* an elbow: out of the source's port 12 points, down its right side to the gap

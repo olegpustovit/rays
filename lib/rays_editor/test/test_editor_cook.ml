@@ -135,7 +135,42 @@ let run () =
           Cook.geometry !current ~object_id:1 ~node_id <> None);
       check
         (List.for_all2 ( == ) pieces (Cook.pieces !current) && Atomic.get prepares = 5)
-        "counting a footer re-prepared the displayed objects");
+        "counting a footer re-prepared the displayed objects";
+      (* a scrub counts no footer: neither the edit's display cook nor the recook a live document
+         makes the next frame carries any; the counts arrive once, after the edits settle *)
+      let scrubbed i =
+        network 1
+          (Lisp_sop.node
+             ~with_:[ ("source", source) ]
+             (Printf.sprintf {|(sop/transform (sop/ext_source) :mode "Matrix" :m03 %d.0)|} i))
+      in
+      let objects = [ scrubbed 0; List.nth objects 1 ] in
+      let update ~recook objects =
+        let update =
+          Cook.update ~live:true ~probes !current ~settings:b ~objects ~edit_error:None
+            ~effects:{ Param.no_effects with cook = recook } ~timeline_changes:[] ~timeline:stopped
+            ~frame ~frame_request:None
+        in
+        current := update.cook;
+        update
+      in
+      let before = (!current).Cook.summaries in
+      for i = 1 to 5 do
+        let objects = [ scrubbed i; List.nth objects 1 ] in
+        let run ~recook =
+          let first = ref true in
+          await (fun () ->
+              let u = update ~recook:(recook && !first) objects in
+              first := false;
+              check ((!current).Cook.summaries == before) "a scrub step counted footers";
+              u.prepared_changed && Cook.status !current = Async_cook.Idle)
+        in
+        run ~recook:false;
+        run ~recook:true
+      done;
+      await (fun () ->
+          ignore (update ~recook:false objects);
+          (!current).Cook.summaries != before));
   let dependencies = Context.Dependencies.(union (one Time) (one Frame)) in
   let dynamic =
     Sop.Custom.plain ~operation:"editor_cook_clock" ~dependencies [ source ] (fun ~context inputs ->

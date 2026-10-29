@@ -1072,6 +1072,45 @@ let scope_field_formula () =
   in
   check unfolded "the formula glyph of a record field did not unfold it"
 
+(* a chain elbow leaves the source's out-port rightwards and never hooks left of the target's
+   entry, whatever the cards' widths and columns *)
+let scope_elbow () =
+  let w =
+    ( Editor_document.Workspace_doc.of_text scope_catalog
+        "(workspace s (graph g :context value (let* [a (array/range 3) b (map (fn [i] (* i 2.0)) a) c \
+         (array/nth b 0)] c)))"
+    |> function
+      | Ok d -> d
+      | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d)) )
+      .checked
+  in
+  (* c sits 40 points left of its column and b 30 to the right: the elbow still leaves and enters cleanly *)
+  let view =
+    fst
+      (scope_step
+         (fst
+            (scope_view
+               ~at:(fun p ->
+                 if p = [ "g"; "c" ] then Some (-40., 250.)
+                 else if p = [ "g"; "b" ] then Some (30., 100.)
+                 else if p = [ "g"; "a" ] then Some (0., 0.)
+                 else None)
+               w "g"))
+         (frame ()))
+  in
+  let wires = List.init (Scope.Inspect.wire_count view) (Scope.Inspect.wire_points view) in
+  check (wires <> []) "no wires";
+  List.iter
+    (function
+      | ((x0, _) :: (x1, _) :: _ as pts) ->
+          let xe, _ = List.nth pts (List.length pts - 1) in
+          check (x1 >= x0) "an elbow leaves its port leftwards";
+          check
+            (List.for_all (fun (x, _) -> x >= Float.min x0 xe -. 13.) pts)
+            "an elbow hooks left of its cards"
+      | _ -> ())
+    wires
+
 (* a map's function stacked above it is wired by a spine straight down into the f socket, not a
    wire out of the zone's right side and back across it *)
 let scope_spine () =
@@ -1109,7 +1148,7 @@ let scope_spine () =
         && y1 > my
     | _ -> false)
     "a map's stacked function is not wired from its out-port into map's f socket";
-  (* zones are obstacles for a wire that does not enter them: [k] feeds [t], right of the zone *)
+    (* zones are obstacles for a wire that does not enter them: [k] feeds [t], right of the zone *)
   let w =
     ( Editor_document.Workspace_doc.of_text scope_catalog
         "(workspace s (graph g :context value (let* [k 2.0 ys (map (fn [i] (* i k)) (array/range \
@@ -2396,6 +2435,7 @@ let run_scope () =
   scope_curve ();
   scope_field_formula ();
   scope_spine ();
+  scope_elbow ();
   scope_zone_footer_paths ();
   scope_carry ();
   scope_connection_hover ();

@@ -58,6 +58,7 @@ type t = {
   displayed : (int * int) list; (* the display node each graph compiles *)
   probe_job : bool; (* the job in flight only counts footers: a display cook may supersede it *)
   probing : (int * int) list; (* the (object, node) pairs the last submission asked to summarise *)
+  quiet : int; (* updates since the last edit: footers are counted once an edit settles *)
   summaries : summary list;
   sources : ((int * int) * Rdk_rays.Geometry_view.t) list;
       (* same bounded optional cook targets as summaries *)
@@ -151,6 +152,7 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
         displayed = [];
         probe_job = false;
         probing = [];
+        quiet = 0;
         summaries = [];
         sources = [];
       })
@@ -368,9 +370,15 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
          first, and the probe job follows when the worker is idle.  A live recook carries the
          probes only when the visible set changed. *)
       let split = not value.await in
-      let inline = submit && ((not split) || ((not changed) && probes <> value.probing)) in
+      (* Footers wait for the edit to settle: a probed node is cooked on its own (a chain of GPU
+         kernels is not a cache hit for its intermediate nodes), so during a scrub every step would
+         pay for it again.  A scrub's steps carry no probes; the first quiet moment counts them once. *)
+      let quiet = if changed then 0 else value.quiet + 1 in
+      let settled = quiet >= 8 in
+      let inline = submit && ((not split) || ((not changed) && settled && probes <> value.probing)) in
       let probe_only =
-        split && (not submit) && probes <> [] && probes <> value.probing && framing = None
+        split && settled && (not submit) && probes <> [] && probes <> value.probing
+        && framing = None
         && ((not (busy value)) || value.probe_job)
       in
       let probed =
@@ -584,6 +592,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
             graphs;
             displayed;
             probe_job = probe_only;
+            quiet;
             probing =
               (if inline || probe_only then probes
                else if submit && (changed || value.probe_job) then []
