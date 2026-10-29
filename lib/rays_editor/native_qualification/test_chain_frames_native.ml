@@ -19,94 +19,113 @@ let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string 
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 let frames = 8
 
-(* DRIVE and XDRIVE replace the noise's and the transform's arguments (in @runtest-native DRIVE
-   also drives lacunarity and roughness, and the octave count (2 to 9 over the frames), uniforms of
-   the one kernel, and XDRIVE shear and translate: identity at frame 0, then a live matrix) *)
-let drive =
-  Option.value (Sys.getenv_opt "DRIVE") ~default:":offset [(get (frame/input) :t) 0.0 0.0]"
+(* DRIVE, XDRIVE and CONNECTIVITY give one case; without DRIVE the four @runtest-native cases run
+   in one process, sharing the loaded catalog: the offset driven; lacunarity and roughness
+   driven; the octave count driven (2 to 9 over the frames), uniforms of the one kernel; and a lit
+   mesh whose transform shears and translates (identity at frame 0, then a live matrix) *)
+let cases =
+  match Sys.getenv_opt "DRIVE" with
+  | Some drive ->
+      [
+        ( drive,
+          Option.value (Sys.getenv_opt "XDRIVE") ~default:":translate [0.0 1.0 0.0]",
+          Option.value (Sys.getenv_opt "CONNECTIVITY") ~default:"Points" );
+      ]
+  | None ->
+      [
+        (":offset [(get (frame/input) :t) 0.0 0.0]", ":translate [0.0 1.0 0.0]", "Points");
+        ( ":octaves 3 :lacunarity (+ 1.5 (get (frame/input) :t)) :roughness (+ 0.25 (* (get \
+           (frame/input) :t) 0.5))",
+          ":translate [0.0 1.0 0.0]",
+          "Points" );
+        ( ":octaves (int (+ 2.0 (* (get (frame/input) :t) 60.0))) :roughness 0.6",
+          ":translate [0.0 1.0 0.0]",
+          "Points" );
+        ( ":offset [0.5 0.0 0.0]",
+          ":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5)",
+          "Triangles" );
+      ]
 
-let xdrive = Option.value (Sys.getenv_opt "XDRIVE") ~default:":translate [0.0 1.0 0.0]"
-let connectivity = Option.value (Sys.getenv_opt "CONNECTIVITY") ~default:"Points"
-
-let text =
-  Printf.sprintf
-    "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
-     %S :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) (sop/transform \
-     %s))))"
-    connectivity side side drive xdrive
-
-(* [cook frame] cooks the chain at that frame, as the editor does *)
-let animate ?gpu () =
-  let lowered = Flow_sop.Lower.workspace ?gpu (Flow.Syntax.parse text |> ok) |> ok in
-  let graph = List.hd lowered.graphs in
-  let lane = Flow_sop.Value_lane.create () in
-  let session = Sop.Session.create ~max_entries:64 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok in
-  let cook frame =
-    let time = float frame /. 60. in
-    let live = Input.at_time time in
-    let start = Unix.gettimeofday () in
-    let resolved = Flow_sop.Value_lane.resolve ?gpu ~live lane ~time graph.network |> ok in
-    let node =
-      Sop.Edit_graph.compile_node resolved.geometry ~node_id:(Option.get graph.root)
-      |> Result.get_ok
-    in
-    let output =
-      Sop.Session.cook session
-        ~context:(Sop.Context.create ~time ~input:live () |> Result.get_ok)
-        node
-      |> ok
-    in
-    (Result.get_ok (Sop.Payload.geometry output.payload), Unix.gettimeofday () -. start)
+let run (drive, xdrive, connectivity) =
+  let text =
+    Printf.sprintf
+      "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
+       %S :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) (sop/transform \
+       %s))))"
+      connectivity side side drive xdrive
   in
-  (cook, fun () -> Sop.Session.close session)
-
-let noise geometry =
-  match Rdk.Geometry.find_attribute ~owner:Point "noise" geometry with
-  | Some attribute -> (
-      match Rdk.Attribute.View.storage attribute with
-      | Rdk.Attribute.Float data -> data
-      | _ -> failwith "noise is not float storage")
-  | None -> failwith "no noise attribute"
-
-let median times = List.nth (List.sort compare times) (List.length times / 2)
-
-let camera =
-  Rays.Camera.perspective
-    ~at:(Rays_math.Vec3.create 0.4 2.2 1.3)
-    ~target:(Rays_math.Vec3.create 0. 1. 0.) ()
-
-(* the picture of a display, as the editor draws a cooked object, and the seconds it took to
+  (* [cook frame] cooks the chain at that frame, as the editor does *)
+  let animate ?gpu () =
+    let lowered = Flow_sop.Lower.workspace ?gpu (Flow.Syntax.parse text |> ok) |> ok in
+    let graph = List.hd lowered.graphs in
+    let lane = Flow_sop.Value_lane.create () in
+    let session =
+      Sop.Session.create ~max_entries:64 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok
+    in
+    let cook frame =
+      let time = float frame /. 60. in
+      let live = Input.at_time time in
+      let start = Unix.gettimeofday () in
+      let resolved = Flow_sop.Value_lane.resolve ?gpu ~live lane ~time graph.network |> ok in
+      let node =
+        Sop.Edit_graph.compile_node resolved.geometry ~node_id:(Option.get graph.root)
+        |> Result.get_ok
+      in
+      let output =
+        Sop.Session.cook session
+          ~context:(Sop.Context.create ~time ~input:live () |> Result.get_ok)
+          node
+        |> ok
+      in
+      (Result.get_ok (Sop.Payload.geometry output.payload), Unix.gettimeofday () -. start)
+    in
+    (cook, fun () -> Sop.Session.close session)
+  in
+  let noise geometry =
+    match Rdk.Geometry.find_attribute ~owner:Point "noise" geometry with
+    | Some attribute -> (
+        match Rdk.Attribute.View.storage attribute with
+        | Rdk.Attribute.Float data -> data
+        | _ -> failwith "noise is not float storage")
+    | None -> failwith "no noise attribute"
+  in
+  let median times = List.nth (List.sort compare times) (List.length times / 2) in
+  let camera =
+    Rays.Camera.perspective
+      ~at:(Rays_math.Vec3.create 0.4 2.2 1.3)
+      ~target:(Rays_math.Vec3.create 0. 1. 0.) ()
+    (* the picture of a display, as the editor draws a cooked object, and the seconds it took to
    prepare and draw (not to read the picture) *)
-let picture canvas ?device ?world geometry =
-  let start = Unix.gettimeofday () in
-  let surface = Rdk_rays.Surface.of_geometry geometry |> Result.get_ok in
-  let scene = Rdk_rays.Surface.scene3 ?device surface in
-  let scene = Option.fold ~none:scene ~some:(fun w -> Rays.Scene.D3.with_world w scene) world in
-  (match
-     Rays.Canvas.render canvas Rays.Scene.[ clear Rays_math.Color.black; view3d ~camera scene ]
-   with
-  | Ok () -> ()
-  | Error message -> failwith message);
-  let seconds = Unix.gettimeofday () -. start in
-  (Rays.Canvas.pixels canvas |> Result.get_ok, seconds)
-
-(* a World with a sun, for a lit mesh: its shadow fit reads the device mesh's bounds *)
-let world =
-  if connectivity <> "Triangles" then None
-  else
-    Some
-      {
-        (Rays.World.bake ~domains:1 ~width:64 ~height:32 Rays.World.default) with
-        sun =
-          Some
-            {
-              direction = Rays_math.Vec3.normalize (Rays_math.Vec3.create 0.3 1. 0.2);
-              radiance = Rays.World.rgb 4. 4. 4.;
-              angular_radius = 0.01;
-            };
-      }
-
-let () =
+  in
+  let picture canvas ?device ?world geometry =
+    let start = Unix.gettimeofday () in
+    let surface = Rdk_rays.Surface.of_geometry geometry |> Result.get_ok in
+    let scene = Rdk_rays.Surface.scene3 ?device surface in
+    let scene = Option.fold ~none:scene ~some:(fun w -> Rays.Scene.D3.with_world w scene) world in
+    (match
+       Rays.Canvas.render canvas Rays.Scene.[ clear Rays_math.Color.black; view3d ~camera scene ]
+     with
+    | Ok () -> ()
+    | Error message -> failwith message);
+    let seconds = Unix.gettimeofday () -. start in
+    (Rays.Canvas.pixels canvas |> Result.get_ok, seconds)
+    (* a World with a sun, for a lit mesh: its shadow fit reads the device mesh's bounds *)
+  in
+  let world =
+    if connectivity <> "Triangles" then None
+    else
+      Some
+        {
+          (Rays.World.bake ~domains:1 ~width:64 ~height:32 Rays.World.default) with
+          sun =
+            Some
+              {
+                direction = Rays_math.Vec3.normalize (Rays_math.Vec3.create 0.3 1. 0.2);
+                radiance = Rays.World.rgb 4. 4. 4.;
+                angular_radius = 0.01;
+              };
+        }
+  in
   let count = side * side in
   let cpu_cook, cpu_close = animate () in
   let gpu = Flow_native.Workspace_gpu.create () in
@@ -288,3 +307,5 @@ let () =
                  back, largest difference %.2e\n\
                  %!"
                 drive xdrive count (median !cpu_times) (median !gpu_times) (frames - 1) !worst)))
+
+let () = List.iter run cases

@@ -45,31 +45,13 @@
  (action
   (progn
    (run %{exe:test_workspace_gpu_native.exe})
-   (run %{exe:test_grid_gpu_native.exe})
    (setenv
     GRID_SIDE
     512
     (progn
+     (run %{exe:test_grid_gpu_native.exe})
      (run %{exe:test_chain_gpu_native.exe})
-     (run %{exe:test_chain_frames_native.exe})
-     (setenv
-      DRIVE
-      ":octaves 3 :lacunarity (+ 1.5 (get (frame/input) :t)) :roughness (+ 0.25 (* (get (frame/input) :t) 0.5))"
-      (run %{exe:test_chain_frames_native.exe}))
-     (setenv
-      DRIVE
-      ":octaves (int (+ 2.0 (* (get (frame/input) :t) 60.0))) :roughness 0.6"
-      (run %{exe:test_chain_frames_native.exe}))
-     (setenv
-      DRIVE
-      ":offset [0.5 0.0 0.0]"
-      (setenv
-       XDRIVE
-       ":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5)"
-       (setenv
-        CONNECTIVITY
-        Triangles
-        (run %{exe:test_chain_frames_native.exe})))))))))
+     (run %{exe:test_chain_frames_native.exe}))))))
 
 (rule
  (enabled_if
