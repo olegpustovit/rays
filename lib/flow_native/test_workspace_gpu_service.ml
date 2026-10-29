@@ -171,6 +171,28 @@ let () =
   Flow_native.Workspace_gpu.close closing;
   let cancelled = Domain.join waiting in
   assert (Option.fold ~none:false ~some:(fun d -> d.Diagnostic.code = "E_GPU") cancelled);
+  (* A pump that served a request waits briefly for the worker's next one, but never takes one
+     that blocks on the device (a settle): that waits for the next pump, so the frame never stalls
+     on the GPU. The settle is sent only after the first request returns, so no pump can find both
+     queued. *)
+  let chained = Flow_native.Workspace_gpu.create () in
+  let first = Atomic.make false and settled = Atomic.make false in
+  let worker =
+    Domain.spawn (fun () ->
+        Flow_native.Workspace_gpu.Private.on_owner_for_test chained (fun () ->
+            Atomic.set first true);
+        Flow_native.Workspace_gpu.Private.on_owner_for_test ~waits:true chained (fun () ->
+            Atomic.set settled true))
+  in
+  while not (Atomic.get first) do
+    Flow_native.Workspace_gpu.pump chained
+  done;
+  assert (not (Atomic.get settled));
+  while not (Atomic.get settled) do
+    Flow_native.Workspace_gpu.pump chained
+  done;
+  Domain.join worker;
+  Flow_native.Workspace_gpu.close chained;
   print_endline
     "Workspace GPU service: worker cook is pumped by its owner, selects CPU when slower, and reads \
-     back when cheaper"
+     back when cheaper; a pump never takes a settle as a follow-up"

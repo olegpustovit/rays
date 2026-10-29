@@ -24,6 +24,7 @@ type job = {
   cancel : Diagnostic.t -> unit;
   mutable finished : bool;
   mutable error : exn option;
+  waits : bool;
 }
 
 type image_stats = {
@@ -202,7 +203,7 @@ let install_test_backend t backend =
   t.backend <- Some backend;
   t.proxy <- None
 
-let route t f =
+let route ?(waits = false) t f =
   if Domain.is_main_domain () then f ()
   else begin
     let result = ref None in
@@ -211,6 +212,7 @@ let route t f =
         run = (fun () -> result := Some (Ok (f ())));
         cancel = (fun diagnostic -> result := Some (Error (Diagnostic.Error diagnostic)));
         finished = false;
+        waits;
         error = None;
       }
     in
@@ -266,7 +268,9 @@ let proxy t =
                                      {
                                        planes with
                                        settle =
-                                         (fun () -> route_result (fun () -> route t planes.settle));
+                                         (fun () ->
+                                           route_result (fun () ->
+                                               route ~waits:true t planes.settle));
                                        bounds =
                                          (fun () ->
                                            try route t planes.bounds
@@ -281,23 +285,54 @@ let proxy t =
       t.proxy <- Some proxy;
       proxy
 
+(* A cook's requests come in chains (a dispatch, its planes, the next dispatch), each sent a fraction
+   of a millisecond after the last returns. The pump serves what is queued, then waits [follow_up]
+   for the next link, so a chain takes one pump rather than a frame per request. A settle is not
+   waited for: it blocks until the GPU finishes, which by the next pump it usually has. *)
+let follow_up = 0.0005
+
 let pump t =
   if not (Domain.is_main_domain ()) then invalid_arg "Workspace_gpu.pump: initial domain required";
-  let rec drain () =
+  let take ~chained =
     Mutex.lock t.jobs_lock;
-    let job = Queue.take_opt t.jobs in
+    let job =
+      match Queue.peek_opt t.jobs with
+      | Some job when chained && job.waits -> None
+      | Some _ -> Queue.take_opt t.jobs
+      | None -> None
+    in
     Mutex.unlock t.jobs_lock;
-    match job with
-    | None -> ()
-    | Some job ->
-        (try job.run () with exn -> job.error <- Some exn);
-        Mutex.lock t.jobs_lock;
-        job.finished <- true;
-        Condition.broadcast t.jobs_ready;
-        Mutex.unlock t.jobs_lock;
-        drain ()
+    job
   in
-  drain ()
+  let serve job =
+    (try job.run () with exn -> job.error <- Some exn);
+    Mutex.lock t.jobs_lock;
+    job.finished <- true;
+    Condition.broadcast t.jobs_ready;
+    Mutex.unlock t.jobs_lock
+  in
+  let rec drain served =
+    match take ~chained:false with
+    | Some job ->
+        serve job;
+        drain true
+    | None -> if served then follow (Unix.gettimeofday () +. follow_up) 1
+  (* the wait reads the queue without its lock (a racy emptiness check; the take locks) and the
+     clock every 64 spins, so it neither contends with the worker nor allocates *)
+  and follow until spins =
+    if not (Queue.is_empty t.jobs) then
+      match take ~chained:true with
+      | Some job ->
+          serve job;
+          follow (Unix.gettimeofday () +. follow_up) 1
+      | None -> ()
+    else if spins land 63 = 0 && Unix.gettimeofday () >= until then ()
+    else begin
+      Domain.cpu_relax ();
+      follow until (spins + 1)
+    end
+  in
+  drain false
 
 (* The frame is the pump: cook workers queue device requests, served here between frames' work. *)
 let config ?(fast = false) t : G.config = { backend = Some (proxy t); fast; policy = t.policy }

@@ -57,5 +57,7 @@ val image_stats : t -> Flow_gpu.Host.stats * int * int * int * int
 
 module Private : sig
   val install_test_backend : t -> Flow_ir.Gpu.backend -> unit
-  val on_owner_for_test : t -> (unit -> 'a) -> 'a
+
+  val on_owner_for_test : ?waits:bool -> t -> (unit -> 'a) -> 'a
+  (** [waits]: the request blocks on the device, as a settle does. *)
 end
