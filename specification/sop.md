@@ -527,14 +527,7 @@ each fused write gets a new program, a new runner (fresh buffers, every input up
 its emission; deterministic return only recycles within a runner, so a host-wide pool of released
 buffers by capacity is the next step; (2) extending the display binding (below) to lit triangles
 without N (normals made from P on the device: the host's are float64 sums, so the pixels would
-differ) and to colours or uv a device holds, and cooked bounds without reading P (the selected
-object's box, framing and the World sun fit of a device mesh read it when asked: the sun fit takes
-the device mesh's host copy). The plan: a Lisp compute stage `lib/flow_gpu/shaders/bounds.rays`
-beside `compact.rays` (each of a workgroup's lanes the min and max of its chunk of the packed
-float3 P, stored at lane x 6; printed by `test_raster.exe --write lib`), `Run.bounds` dispatching it
-over a held output like `Run.compact` and reading back the lanes' 6 floats each (24 KB, finished on
-the host), offered by `Gpu.planes` beside `materialise`, carried by `Rdk.Packed.Float3.deferred
-?bounds` and answered by `Geometry_view.bounds` while P is unread; (3)
+differ) and to colours or uv a device holds; (3)
 grid planes and `array/range` generated from the thread
 index (a new element-index instruction across the CPU blocks, MSL, SPIR-V and WGSL, and the grid's
 point map fused into the write); fills bound as uniforms.
@@ -549,18 +542,36 @@ buffers, `Renderer.register_gpu_positions` registers them, `Rays.Mesh.View.creat
 mesh, with the topology's corners as its indices; specification/backend.md). The mesh keeps the
 borrow: once collected, the registration and pins are released. A device mesh also carries how to
 make its host copy (`create_device ?host`: `Rays_mesh.to_mesh`, reading P back, once): a reader
-of vertices (the path tracer, the World sun fit, a centroid) gets that copy, the raster lowering
+of vertices (the path tracer, a centroid) gets that copy, the raster lowering
 reads only the mesh's own arrays (`Mesh.View.unread`). Its indices are packed once per topology (8
 kept by the corners array's identity) and the renderer keeps them under their own key
 (`Gpu_vertices "borrow\nindices"`), so a frame's new borrow neither repacks, rehashes nor reuploads
 them. The World sun's depth pass reads a device mesh's positions as the colour pass does.
 Anything else (lit triangles without N, quads, a host device, a closed runner) builds the host mesh
 as before, reading P. The cooked bounds a piece keeps are read when asked (framing, the
-selected box), not per cook. Measured (`test_chain_frames_native`, M1, 2026-10-29): every frame of
+selected box), not per cook, and never read P while the device holds it (below). Measured (`test_chain_frames_native`, M1, 2026-10-29): every frame of
 the animated 1M chain displays with nothing read back and the host display's pixels exactly,
 preparing and drawing a 256 x 256 canvas in 0.010 s against 0.142 s reading P back (0.0031 s
 against 0.025 s for 512 squared). A lit triangle grid (`CONNECTIVITY Triangles`, N transformed on
 the device) the same way, pixels equal.
+
+**Device bounds.** The box of a P the device holds (the selected object's box, framing, the World
+sun fit) is reduced where P is: `lib/flow_gpu/shaders/bounds.rays`, a compute stage beside
+`compact.rays` printed by `test_raster.exe --write lib` (MSL, SPIR-V), runs one group of 1,024
+lanes, lane l taking the min and max of elements l, l + 1,024, ... (neighbouring lanes read
+neighbouring elements) and storing six floats at l x 6; the host reads back those 24 KB (not 12 MB
+of P) and finishes over the lanes. `Gpu.planes.bounds` offers it for a settled, unread vec3 output
+(`Run` on the owner's domain; `Workspace_gpu` routes a cook worker's call there), the write passes
+it to `Rdk.Packed.Float3.deferred ?bounds`, and `Float3.bounds` answers from it while P is unread
+(otherwise, or when the device cannot, it scans the planes), so `Geometry_view.bounds` never
+materialises P. A device mesh takes the same answer (`create_device ?bounds`, `Mesh.bounds`), which
+the sun fit reads instead of the host copy; its caster scan had read a device mesh's mode through
+`Mesh.View.view`, which made the host copy every frame a World sun lit one. min and max of float32
+values are exact, so the box equals the host scan's bit for bit (`test_chain_frames_native` fails
+otherwise, or if the bounds read more than 24 KB or materialise anything; `test_settle` checks the
+mock device's answer leaves P resident). Measured (`bench_chain_frames.exe`, 1M points, M1,
+2026-10-29, frames 1-7): the bounds of a frame's resident P took 31-59 ms reading P back, now
+1.0-1.3 ms (2.5-2.8 ms with each lane on a contiguous chunk, uncoalesced).
 
 Where a device display's frame went (1M points, `test_chain_frames_native`, M1, 2026-10-29): of
 the 10.8 ms a cloud took, 6 ms was the host side of the mesh, not the renderer: a fresh identity
