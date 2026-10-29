@@ -279,6 +279,9 @@ type t = {
   mutable last_step_draws : draw list;
   mutable last_step_prepared : Scene_execution.sampled_draw list;
   retained_views : (Scene_execution.prepared_scene3, retained_view) Lru.Identity_list.t;
+  retain_after : int ref;
+      (* the sights of a layer before it gets a target: [retain_soon], or [retain_live] after a
+         target was dropped before it paid for itself (a layer that changes every few frames) *)
 }
 
 (* A 3D layer that kept the same prepared identity on consecutive frames: its draws render once
@@ -291,6 +294,8 @@ and retained_view = {
   view_drawable : int * int;
   mutable view_target : retained_target option;
   mutable view_failed : bool;
+  mutable view_seen : int; (* sights before its target, then the frames the target served *)
+  view_retain_after : int ref; (* its owner's [retain_after] *)
 }
 
 and retained_target = {
@@ -309,6 +314,14 @@ and submission = {
 and batch = { batch_owner : submission; batch_draws : draw list }
 
 let retained_view_capacity = 4
+
+(* A target costs an offscreen execution (its pipelines, its uploads) and pays back by later frames
+   compositing it. A live layer, a new one every few frames (a time-driven SOP), never pays: once a
+   target is dropped having served fewer than [retain_live] frames, layers wait [retain_live]
+   sights for one, until a target serves that many. ponytail: two fixed thresholds, a measured
+   break-even if they misjudge. *)
+let retain_soon = 2
+let retain_live = 8
 let release_retained_view = ref (fun (_ : retained_view) -> ())
 
 (* ponytail: one active native window; pass an explicit renderer token if sketches
@@ -398,6 +411,7 @@ let finish_create ?(shared_device_lease = false) ?(owns_device_lease = false) gp
       Lru.Identity_list.create ~equal:( == )
         ~release:(fun _ view -> !release_retained_view view)
         retained_view_capacity;
+    retain_after = ref retain_soon;
   }
 
 let create (configuration : configuration) =
@@ -1331,6 +1345,7 @@ let rec destroy value =
 and release_view view =
   match view.view_target with
   | Some target ->
+      view.view_retain_after := if view.view_seen < retain_live then retain_live else retain_soon;
       view.view_target <- None;
       ignore (Runtime_resources.Canvas.destroy target.target_canvas);
       ignore (destroy target.target_exec)
@@ -1417,13 +1432,19 @@ let adopt_retained_view submission ~density ~layer draws =
                 view_drawable = drawable;
                 view_target = None;
                 view_failed = false;
+                view_seen = 1;
+                view_retain_after = value.retain_after;
               };
             direct ()
         | Some view -> (
+            view.view_seen <- view.view_seen + 1;
             (match view.view_target with
-            | None when not view.view_failed -> (
+            | None when (not view.view_failed) && view.view_seen >= !(value.retain_after) -> (
                 match make_retained_target f draws with
-                | Some target -> view.view_target <- Some target
+                | Some target ->
+                    view.view_target <- Some target;
+                    (* from here [view_seen] counts the frames the target serves *)
+                    view.view_seen <- 0
                 | None -> view.view_failed <- true)
             | _ -> ());
             match view.view_target with

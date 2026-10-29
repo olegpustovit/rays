@@ -727,7 +727,10 @@ Retained 3D views: a window execution keeps up to four prepared 3D layers (`adop
 keyed by the identity of the immutable prepared layer).  A layer seen on two consecutive frames is
 rendered once into an offscreen execution the size of the window and later frames composite that
 texture as a Canvas image, so a frame that only changes the UI does not shade the 3D view again.
-The window's drawable size is checked on every use; a different layer, a resize or any failure
+A target costs an offscreen execution (its pipelines and uploads, a million-point mesh's indices
+among them) and pays back only over later frames: once a view is dropped having composited fewer
+than eight frames (a live, time-driven layer replaced every few frames), later layers wait eight
+sights for a target, until one serves eight frames. The window's drawable size is checked on every use; a different layer, a resize or any failure
 falls back to drawing the layer directly, and `destroy` releases the views before the device-lease
 check.  Scenes the engine does not cache (textured, `Scene.D3.Private.cacheable` false) never repeat
 an identity, so they are never retained.  `Scene` stays pure data; this is invisible to it.
@@ -1070,7 +1073,10 @@ Flow IR accepts an explicit renderer-neutral `Gpu.config`: backend callbacks,
 precision and placement policy are immutable data, with no ambient installed
 backend. The same configuration follows startup, lowering, cooking and deferred
 attribute execution. `Flow_native.Workspace_gpu` owns each workspace's worker
-proxy, mailbox, cancellation and initial-domain pump. Its proxy remains usable
+proxy, mailbox, cancellation and initial-domain pump. A cook's requests come in chains (a
+dispatch, its planes, the next dispatch), so a pump that served one waits 0.5 ms for the next
+rather than leaving each link to the next frame; a settle, which blocks until the device finishes,
+is never taken that way. Its proxy remains usable
 by worker cooks between frame scopes, and closing the owner cancels pending
 requests. Pre-window cost queries decline until that owner has entered its pump
 loop, avoiding count-sized GPU calibration during static startup. Compiled
