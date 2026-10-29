@@ -133,6 +133,6 @@ val readouts : t -> Projection.node -> probes:int list -> (string * string) list
 val iterations : t -> Projection.node -> probes:int list -> string array
 (** The inspector's textual summary of each recorded iteration. *)
 
-val geometry_targets : t -> Projection.scope -> probe:(path -> int) -> int list
-(** The plan nodes of every geometry node of the scope at its probes: what a footer wants the cook
-    to count. *)
+val geometry_targets : t -> Projection.scope -> probe:(path -> int) -> (path * int) list
+(** The plan nodes of every geometry node of the scope at its probes, with the node's path: what a
+    footer wants the cook to count. *)

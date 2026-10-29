@@ -35,7 +35,8 @@ type scope_key = {
   records : Flow_graph.Probe.t option;
   force : Flow_graph.Probe.force;
   scope : Flow_graph.Projection.scope;
-  targets : (int * int) list; (* (object, compiled node) the cook is asked to count *)
+  targets : (Flow.Workspace.path * (int * int)) list;
+      (* every geometry node with its (object, compiled node): what a footer could ask the cook to count *)
   stamp : float; (* when the probes were last forced *)
   gap : float;
       (* the quiet time a moving clock alone must leave after that: a few frames of the cost *)

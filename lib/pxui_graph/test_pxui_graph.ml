@@ -266,6 +266,11 @@ let scope_zoom_geometry () =
       check
         (bh > ((P.head_height +. P.row_height) *. Scope.zoom view) -. 0.01)
         (Printf.sprintf "zoom %.2f: a card lost its rows" (Scope.zoom view));
+      (* footers are drawn (so counted) only for cards in view and not too small to read *)
+      check
+        ((Scope.zoom view < 0.4 && Scope.Inspect.footer_paths view = [])
+        || List.mem [ "g"; "b" ] (Scope.Inspect.footer_paths view))
+        (Printf.sprintf "zoom %.2f: footer paths" (Scope.zoom view));
       (* a click on a node's box, at whatever level it is shown, selects it *)
       if Scope.zoom view < 0.5 then
         List.iter

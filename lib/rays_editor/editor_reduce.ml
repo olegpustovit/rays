@@ -1375,7 +1375,15 @@ let reduce ?gpu ?(pump = fun () -> Unix.sleepf 0.0005) (input : _ Frame_input.t)
             || Flow_sop.Network.Int_map.mem id roots)
       end;
       let probes =
-        match pane_laid value' with Some k when scope_name value' <> None -> k.targets | _ -> []
+        match pane_laid value' with
+        | Some k when scope_name value' <> None ->
+            (* only the footers drawn and the selection are counted, not every node of the graph *)
+            let view = pane_view value' in
+            let shown = Pxui_graph.Scope.Inspect.footer_paths view @ Pxui_graph.Scope.selected view in
+            List.filter_map
+              (fun (path, target) -> if List.mem path shown then Some target else None)
+              k.targets
+        | _ -> []
       in
       let lit, lit_cache = lit_tags value' in
       let cooked =

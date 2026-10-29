@@ -1585,7 +1585,10 @@ let workspace_inspector ?(image = fun _ -> None) ?laid ?(window = false)
                              count g.points (if g.points = 1 then "point" else "points");
                              count g.prims (if g.prims = 1 then "prim" else "prims");
                            ]
-                          @ Option.to_list (Option.map (Printf.sprintf "cooked %.3f s") g.seconds))
+                          @ Option.to_list (Option.map
+                                  (fun s ->
+                                    if s = 0. then "cached" else Printf.sprintf "host %.3f s" s)
+                                  g.seconds))
                     | None -> (
                         match scene_state with
                         | Some state -> n.head ^ " · " ^ state

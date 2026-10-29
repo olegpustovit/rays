@@ -2025,6 +2025,22 @@ module Inspect = struct
   let tagged_wires t = Array.fold_left (fun n w -> if tagged t w then n + 1 else n) 0 t.geo.wires
   let wire_count t = Array.length t.geo.wires
 
+  (* the nodes whose footer the pane draws: in view and not too small to read *)
+  let footer_paths t =
+    if t.zoom < 0.4 then []
+    else
+      let z = t.zoom in
+      List.filter_map
+        (fun i ->
+          match t.geo.items.(i) with
+          | { P.item = P.Item n; collapsed; _ }, _, _
+            when match n.zone with Some _ -> collapsed | None -> true ->
+              Some n.path
+          | _ -> None)
+        (index_query t.geo.tiles
+           ( -.t.pan_x /. z, -.t.pan_y /. z, (float t.width -. t.pan_x) /. z,
+             (float t.height -. t.pan_y) /. z ))
+
   let wire_points t i =
     if i < 0 || i >= Array.length t.geo.wires then []
     else List.map (fun (x, y) -> (sx t x, sy t y)) t.geo.wires.(i).pts

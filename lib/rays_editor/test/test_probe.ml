@@ -177,7 +177,7 @@ let live () =
   check (live_count > 0 && cached > 0) "orrery has live and cached nodes";
   check
     (Lower.status lowered ~seconds:0.0013
-    = Some (Printf.sprintf "t %d live · %d cached · cook 1.3 ms" live_count cached))
+    = Some (Printf.sprintf "t %d live · %d cached · frame cook 1.3 ms" live_count cached))
     "viewport header text";
   let lowered =
     Result.get_ok

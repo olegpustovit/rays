@@ -45,6 +45,10 @@ it. Selection, navigation, cooking and history policy belong to the host. Root r
   on the first explicit edit) and for the fields of a camera that follows the viewport
   (`~adopt:false`). A new kind of edit is a case of `edit`, never a derived edit for `reconcile`
   to diff, and never a third write-back.
+- **Literal fast path.** `Literal_edit.lower` patches a same-type literal of a native plan node, or the
+  `Source`/`Struct` value of a scene, World or settings object (a following camera's every frame),
+  without lowering. It refuses inside a `fn` body or where a `fn` reads a binding of the path; a
+  card inlined from a Lisp node relowers.
 - **Surgical edits.** A deleted or moved World layer is an edit of its binding: the graph's
   inputs, expressions, comments and names stay. A graph is written whole only when it gains
   layers it did not have. A name two objects would share is refused (`:parent` reads names).

@@ -257,6 +257,7 @@ module Inspect : sig
 
   (* the wires drawn as a name tag at the use site: longer than three columns and not in a lit chain *)
   val wire_count : t -> int
+  val footer_paths : t -> path list
   val wire_points : t -> int -> (float * float) list
   val wire_target : t -> int -> (path * Flow_graph.Flow_edit.arg_key) option
   val wire_midpoint : t -> int -> (float * float) option

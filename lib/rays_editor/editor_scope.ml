@@ -337,10 +337,12 @@ let sync_scope value =
               k.targets
           | Some records, _ ->
               List.filter_map
-                (fun id ->
+                (fun (path, id) ->
                   Option.bind (Flow_sop.Network.Int_map.find_opt id lowered.compiled)
                     (fun node_id ->
-                      Option.map (fun object_id -> (object_id, node_id)) (node_owner value node_id)))
+                      Option.map
+                        (fun object_id -> (path, (object_id, node_id)))
+                        (node_owner value node_id)))
                 (Flow_graph.Probe.geometry_targets records scope ~probe:(fun path ->
                      Option.value ~default:0 (M.find_opt path value.probes)))
           | None, _ -> []
