@@ -1125,7 +1125,7 @@ let close_pool pool =
   List.iter (fun (buffer, _, _) -> ignore (B.destroy_buffer buffer)) pool.free;
   pool.free <- []
 
-let close t =
+let close ?(discard = false) t =
   if Domain.self () <> t.domain then invalid_arg "Run.close: creating domain required";
   if not t.closed then begin
     (* a holder still alive reads its planes now, while its buffer exists (a finalised holder's
@@ -1137,7 +1137,7 @@ let close t =
           (fun kept ->
             match Hashtbl.find_opt t.pool.held kept.id with
             | Some (buffer, _, _, _) ->
-                (try ignore (materialise t kept) with Diagnostic.Error _ -> ());
+                if not discard then (try ignore (materialise t kept) with Diagnostic.Error _ -> ());
                 Mutex.protect kept.lock (fun () -> kept.destroyed <- true);
                 Hashtbl.remove t.pool.held kept.id;
                 ignore (B.destroy_buffer buffer)

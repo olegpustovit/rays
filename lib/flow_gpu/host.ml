@@ -75,6 +75,7 @@ type t = {
   buffers : (int, Ogpu.Backend.buffer list) Hashtbl.t;
       (* resident buffers by byte size, reused each draw *)
   mutable closed : bool;
+  discarding : bool ref;  (** set by [close]: its runners' outputs are not read back *)
   domain : Domain.id;
   shared : Run.pool;  (** the kept outputs' buffers of every runner, recycled across edits *)
   tables : (int array, Ogpu.Backend.buffer list option) Lru.Identity_list.t;
@@ -85,13 +86,13 @@ let next = Atomic.make 1
 
 let create ~clock gpu =
   if not (Domain.is_main_domain ()) then invalid_arg "Host.create: initial domain required";
-  let created = ref 0 and retired = ref zero in
+  let created = ref 0 and retired = ref zero and discarding = ref false in
   {
     gpu;
     pipelines = Pipelines.create ~clock (Renderer.gpu_device gpu);
     created;
     retired;
-    sites = Lru.Identity_list.create ~equal:( == ) ~release:(fun _ -> Option.iter Run.close) 32;
+    sites = Lru.Identity_list.create ~equal:( == ) ~release:(fun _ -> Option.iter (fun r -> Run.close ~discard:!discarding r)) 32;
     flight = [];
     pool = Hashtbl.create 16;
     iota = None;
@@ -101,11 +102,12 @@ let create ~clock gpu =
       Cache.create
         ~release:(fun _ runner ->
           runner.output <- None;
-          Run.close runner.run;
+          Run.close ~discard:!discarding runner.run;
           retired :=
             { (add_run !retired runner.run) with runners_released = !retired.runners_released + 1 })
         64;
     closed = false;
+    discarding;
     domain = Domain.self ();
     shared = Run.pool ();
     tables =
@@ -616,6 +618,7 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
 let close t =
   if Domain.self () <> t.domain then invalid_arg "Host.close: creating domain required";
   if not t.closed then begin
+    t.discarding := true;
     Cache.clear t.runners;
     Run.close_pool t.shared;
     Lru.Identity_list.clear t.sites;
