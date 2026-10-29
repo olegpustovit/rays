@@ -55,8 +55,7 @@ let node ?state ?(reference = false) ?elems ~identity ~signature ~fn ~sources in
           elems
       ^ Option.fold ~none:"" ~some:E.state_stamp state)
     ~cook_mode:Sop.Node.Generic
-    ~dependencies:
-      (Attribute_kernel.input_reads (E.Fn fn))
+    ~dependencies:(Attribute_kernel.input_reads (E.Fn fn))
     ~inputs:(Array.of_list inputs)
     (fun ~node_id:_ _ payloads ->
       let geometry_capture id =

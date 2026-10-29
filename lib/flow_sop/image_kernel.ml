@@ -77,8 +77,7 @@ let node ?state t =
       (Printf.sprintf "%d:%d:%d" t.identity t.width t.height
       ^ Option.fold ~none:"" ~some:E.state_stamp state)
     ~cook_mode:P.Node.Generator
-    ~dependencies:
-      (Attribute_kernel.input_reads (E.Fn t.fn))
+    ~dependencies:(Attribute_kernel.input_reads (E.Fn t.fn))
     ~inputs:(Array.of_list t.inputs)
     (fun ~node_id:_ context payloads ->
       let resolve =

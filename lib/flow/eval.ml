@@ -1003,7 +1003,7 @@ let any_of note f l =
   if note = None then List.exists f l else List.fold_left (fun found x -> f x || found) false l
 
 let rec dependent ?note frame = function
-  | Residual r when (match note with Some (_, seen) -> Hashtbl.mem seen r.rid | None -> false) ->
+  | Residual r when match note with Some (_, seen) -> Hashtbl.mem seen r.rid | None -> false ->
       false
   | Residual r ->
       Option.iter (fun (_, seen) -> Hashtbl.replace seen r.rid ()) note;
@@ -1035,8 +1035,12 @@ and term_dependent ?note frame st env (term : W.term) =
     | None -> Option.fold ~none:false ~some:(dependent ?note frame) (Smap.find_opt name env)
   in
   match term.node with
-  | W.Time -> hit "time"; frame
-  | W.State _ -> hit "state"; true
+  | W.Time ->
+      hit "time";
+      frame
+  | W.State _ ->
+      hit "state";
+      true
   | W.Ref_binding (name, _) ->
       Option.fold ~none:false ~some:(dependent ?note frame) (Smap.find_opt name env)
   | W.Op { op; args; _ } ->
@@ -1078,6 +1082,7 @@ let frame_reads v =
   in
   ignore (dependent ~note true v);
   List.rev !found
+
 let state_dependent = dependent false
 
 (* A deferred check's test reads frame facts only: no cooked data, fold state or zone element, so

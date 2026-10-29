@@ -3387,8 +3387,8 @@ struct
       ~report:(fun elements ->
         Atomic.set z.count (Array.length elements);
         Atomic.set z.positions (Array.map (fun (e : Zone.element) -> e.position) elements))
-      ~live:z.live ~reads:z.reads ~stamp ~kind:z.kind ?key:z.key ?select ~source_attribute ~source_base:z.base
-      ~inputs
+      ~live:z.live ~reads:z.reads ~stamp ~kind:z.kind ?key:z.key ?select ~source_attribute
+      ~source_base:z.base ~inputs
       ~body:(fun ~inputs ~context ->
         instantiate ?state ~outer ~live:(Sop.Context.input context) z ~inputs)
       ()
@@ -4282,7 +4282,9 @@ struct
            let add v =
              found := Sop.Context.Dependencies.union !found (Attribute_kernel.input_reads v)
            in
-           Array.iter (fun (n : E.node) -> List.iter (fun (_, v) -> add v) n.args) evaluated.plan.nodes;
+           Array.iter
+             (fun (n : E.node) -> List.iter (fun (_, v) -> add v) n.args)
+             evaluated.plan.nodes;
            List.iter add evaluated.states;
            !found);
       states = evaluated.states;

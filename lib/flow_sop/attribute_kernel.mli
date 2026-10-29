@@ -15,8 +15,8 @@ val context_label : string
 (** {!Operators.context_label}. *)
 
 val dependencies : Flow.Eval.value -> Sop.Context.Dependencies.t
-(** What a kernel over this data reads of its cook context: the input slices {!input_reads} names, the
-    seed, frame and time an inlined body's context sources read. *)
+(** What a kernel over this data reads of its cook context: the input slices {!input_reads} names,
+    the seed, frame and time an inlined body's context sources read. *)
 
 val input_reads : Flow.Eval.value -> Sop.Context.Dependencies.t
 (** The host-input slices a frame-dependent value reads ([Time] for [t], [Pointer], [Keys], [Size],

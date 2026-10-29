@@ -4,8 +4,18 @@ module Dependencies = struct
   type fact = Frame | Time | Seed | Domains | Grain | Input | Pointer | Keys | Size | Step
   type t = int
 
-  let bit = function Frame -> 1 | Time -> 2 | Seed -> 4 | Domains -> 8 | Grain -> 16 | Input -> 32
-    | Pointer -> 64 | Keys -> 128 | Size -> 256 | Step -> 512
+  let bit = function
+    | Frame -> 1
+    | Time -> 2
+    | Seed -> 4
+    | Domains -> 8
+    | Grain -> 16
+    | Input -> 32
+    | Pointer -> 64
+    | Keys -> 128
+    | Size -> 256
+    | Step -> 512
+
   let static = 0
   let one fact = bit fact
   let union = ( lor )
@@ -125,7 +135,9 @@ let input_part (fact : Dependencies.fact) (i : Input.t) =
 let input_changed dependencies a b =
   List.exists
     (fun (fact : Dependencies.fact) -> input_part fact a <> input_part fact b)
-    (List.filter (fun f -> Dependencies.mem f dependencies) Dependencies.[ Time; Pointer; Keys; Size; Step; Input ])
+    (List.filter
+       (fun f -> Dependencies.mem f dependencies)
+       Dependencies.[ Time; Pointer; Keys; Size; Step; Input ])
 
 let cache_projection dependencies value =
   if dependencies = Dependencies.static then ""

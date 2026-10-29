@@ -186,8 +186,8 @@ let sync_scope value =
               (k.evaluated == evaluated && k.summaries == summaries
               && Flow_native.Probe_run.same_count k.executions executions
               && (Option.equal
-                        (fun a b -> not (Sop.Context.input_changed (Lazy.force lowered.reads) a b))
-                        k.time time
+                    (fun a b -> not (Sop.Context.input_changed (Lazy.force lowered.reads) a b))
+                    k.time time
                  || (now -. k.stamp < k.gap && Option.is_some k.time = Option.is_some time)))
         | None -> true
       in

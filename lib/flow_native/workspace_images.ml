@@ -229,8 +229,10 @@ let prepare_source ?gpu t request ~state ~live plan id =
       in
       if
         source.state_stamp <> state_stamp
-        || (source.cone.states <> []
-           && P.Context.input_changed (Flow_sop.Value_lane.dependencies source.cone) source.live live)
+        || source.cone.states <> []
+           && P.Context.input_changed
+                (Flow_sop.Value_lane.dependencies source.cone)
+                source.live live
       then begin
         source.lane <- Flow_sop.Value_lane.create ~state:(E.fork_state state) ();
         source.state_stamp <- state_stamp
@@ -432,8 +434,8 @@ let image_dependencies plan root =
   let rec visit value =
     stateful := !stateful || E.state_dependent value;
     reads := P.Context.Dependencies.union !reads (Flow_sop.Attribute_kernel.input_reads value);
-    if E.is_live value && not (E.frame_dependent value) then
-      reads := P.Context.Dependencies.(union !reads (one Input));
+    (if E.is_live value && not (E.frame_dependent value) then
+       reads := P.Context.Dependencies.(union !reads (one Input)));
     match value with
     | E.Deferred (ty, id) when Flow.Ty.is_geometry ty -> ids := id :: !ids
     | E.Deferred (_, id) when id >= 0 && id < Array.length nodes && not nodes.(id) ->
@@ -592,7 +594,8 @@ let prepare t plan =
           let dependencies =
             Array.map
               (fun (n : E.node) ->
-                if n.ty = Flow.Ty.image then image_dependencies plan n.id else ([], (false, P.Context.Dependencies.static)))
+                if n.ty = Flow.Ty.image then image_dependencies plan n.id
+                else ([], (false, P.Context.Dependencies.static)))
               plan.nodes
           in
           t.source_ids <- Array.map fst dependencies;

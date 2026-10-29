@@ -3,9 +3,20 @@
 module Cancel = Rdk.Cancel
 
 module Dependencies : sig
-  type fact = Frame | Time | Seed | Domains | Grain | Input | Pointer | Keys | Size | Step
-  (** [Input] is the whole host frame (events, [frame/input]); [Pointer], [Keys], [Size] and
-      [Step] (dt, tick, frame index) are the slices a graph can read alone. *)
+  type fact =
+    | Frame
+    | Time
+    | Seed
+    | Domains
+    | Grain
+    | Input
+    | Pointer
+    | Keys
+    | Size
+    | Step
+        (** [Input] is the whole host frame (events, [frame/input]); [Pointer], [Keys], [Size] and
+            [Step] (dt, tick, frame index) are the slices a graph can read alone. *)
+
   type t
 
   val static : t

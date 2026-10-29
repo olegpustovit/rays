@@ -583,8 +583,9 @@ let update_with value frame ~inspector =
   in
   let scene, context_error =
     match value.resolved with
-    | Some (doc, at, scene) when same_context doc core.Editor_model.doc
-                                  && not (Sop.Context.input_changed (Lowering.scene_reads doc) at input) ->
+    | Some (doc, at, scene)
+      when same_context doc core.Editor_model.doc
+           && not (Sop.Context.input_changed (Lowering.scene_reads doc) at input) ->
         (scene, value.context_error)
     | _ ->
         let previous =

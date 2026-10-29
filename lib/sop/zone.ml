@@ -111,7 +111,8 @@ let element_node element =
     ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _ _ -> Ok Node.Build.{ geometry; instances = None })
 
-let node ?(report : element array -> unit = ignore) ?(live = false) ?(reads = Context.Dependencies.one Context.Dependencies.Input) ?(stamp = "") ~kind ?key ?select
+let node ?(report : element array -> unit = ignore) ?(live = false)
+    ?(reads = Context.Dependencies.one Context.Dependencies.Input) ?(stamp = "") ~kind ?key ?select
     ~source_attribute ~source_base ~body ~inputs () =
   let parameters =
     Printf.sprintf "kind=%s;key=%S;source=%S;base=%d;inputs=%d;live=%b"
@@ -123,8 +124,7 @@ let node ?(report : element array -> unit = ignore) ?(live = false) ?(reads = Co
   in
   let parameters = if stamp = "" then parameters else parameters ^ ";frame-state=" ^ stamp in
   Node.Build.make_geometry ~operation:"zone" ~version:1 ~parameters ~cook_mode:Node.Generic
-    ~dependencies:
-      (if live then reads else Context.Dependencies.static)
+    ~dependencies:(if live then reads else Context.Dependencies.static)
     ~inputs
     ~expand:(fun context nodes geometries ->
       match elements kind ?key geometries.(0) with

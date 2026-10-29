@@ -136,8 +136,7 @@ let test_timeline_and_schedule () =
     Rays_editor__.Schedule.step schedule ~graphs:[ dynamic_graph ] ~effects:Param.no_effects
       ~context_changed:false ~force:false ~busy:false ~frame:(timeline_frame ())
   in
-  if not fire then fail "cook scheduler lost the latest held dynamic request"
-  ;
+  if not fire then fail "cook scheduler lost the latest held dynamic request";
   (* an input slice nobody reads never recooks: a t-only graph ignores the pointer, keys and size,
      a pointer graph follows the pointer and ignores the clock's absence *)
   let reading fact =
@@ -158,8 +157,7 @@ let test_timeline_and_schedule () =
       (List.fold_left
          (fun (schedule, cooks) input ->
            let schedule, fire =
-             Rays_editor__.Schedule.step ~input schedule ~graphs:[ graph ]
-               ~effects:Param.no_effects
+             Rays_editor__.Schedule.step ~input schedule ~graphs:[ graph ] ~effects:Param.no_effects
                ~context_changed:(input.Input.t <> (Option.get schedule.input).Input.t)
                ~force:false ~busy:false ~frame:(timeline_frame ())
            in
