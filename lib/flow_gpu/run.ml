@@ -1137,7 +1137,7 @@ let close ?(discard = false) t =
           (fun kept ->
             match Hashtbl.find_opt t.pool.held kept.id with
             | Some (buffer, _, _, _) ->
-                if not discard then (try ignore (materialise t kept) with Diagnostic.Error _ -> ());
+                (if not discard then try ignore (materialise t kept) with Diagnostic.Error _ -> ());
                 Mutex.protect kept.lock (fun () -> kept.destroyed <- true);
                 Hashtbl.remove t.pool.held kept.id;
                 ignore (B.destroy_buffer buffer)

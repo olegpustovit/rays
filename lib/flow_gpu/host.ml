@@ -92,7 +92,10 @@ let create ~clock gpu =
     pipelines = Pipelines.create ~clock (Renderer.gpu_device gpu);
     created;
     retired;
-    sites = Lru.Identity_list.create ~equal:( == ) ~release:(fun _ -> Option.iter (fun r -> Run.close ~discard:!discarding r)) 32;
+    sites =
+      Lru.Identity_list.create ~equal:( == )
+        ~release:(fun _ -> Option.iter (fun r -> Run.close ~discard:!discarding r))
+        32;
     flight = [];
     pool = Hashtbl.create 16;
     iota = None;

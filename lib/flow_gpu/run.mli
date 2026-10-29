@@ -89,7 +89,8 @@ val keep : ?index:int -> output -> (Flow_ir.Gpu.planes, Diagnostic.t) result
     collected, or when the pool reads it to bound memory. [release ~held:false] (never handed out,
     and not retired before) frees it: its buffer comes back at once and a later read raises. The
     runner takes a recycled or fresh buffer for its next dispatch; {!close} first materialises every
-    holder still alive (unless [~discard:true], at a host's shutdown: nobody reads them, a later read raises). [resident] is the output's placeholder, an array of [width] zeros: a later
+    holder still alive (unless [~discard:true], at a host's shutdown: nobody reads them, a later
+    read raises). [resident] is the output's placeholder, an array of [width] zeros: a later
     {!dispatch} (of any runner) whose input is that array binds the held buffer instead, while it is
     held and unread. *)
 
