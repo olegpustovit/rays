@@ -1,8 +1,9 @@
 (* An animated chain: grid > attribute_noise (offset driven by frame/input's t) > transform, 1M
    points (GRID_SIDE), cooked frame after frame as the editor does (Value_lane.resolve, then one
    session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments; FRAMES (12). Prints
-   per frame: seconds, dispatches, uploads, pipelines compiled, whether P is resident, and noise[1]
-   (a read back). *)
+   per frame: seconds, dispatches, uploads, pipelines compiled, whether P is resident, the seconds
+   and bytes read back of P's bounds (the selected box and framing, Geometry_view.bounds), and
+   noise[1] (a read back). *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 
@@ -78,16 +79,23 @@ let () =
             let geometry = Result.get_ok (Sop.Payload.geometry output.payload) in
             let seconds = Unix.gettimeofday () -. start in
             let after = stats () in
+            let resident = Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry) in
+            let start = Unix.gettimeofday () in
+            ignore (Rdk_rays.Geometry_view.bounds geometry);
+            let bounds_seconds = Unix.gettimeofday () -. start in
+            let bounded = stats () in
             Printf.printf
-              "frame %2d: %.4f s, %d dispatches, %d uploads (%d bytes), %d compiled, P %s, \
-               noise[1] %.4f\n\
+              "frame %2d: %.4f s, %d dispatches, %d uploads (%d bytes), %d compiled, P %s, bounds \
+               %.4f s (%d bytes, %d outputs read), noise[1] %.4f\n\
                %!"
               frame seconds (!dispatches - calls)
               (after.input_uploads - before.input_uploads)
               (after.input_uploaded_bytes - before.input_uploaded_bytes)
               (after.pipeline_compilations - before.pipeline_compilations)
-              (if Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry) then "resident"
-               else "host")
+              (if resident then "resident" else "host")
+              bounds_seconds
+              (bounded.readback_bytes - after.readback_bytes)
+              (bounded.materialisations - after.materialisations)
               (match Rdk.Geometry.find_attribute ~owner:Point "noise" geometry with
               | Some a -> (
                   match Rdk.Attribute.View.storage a with
