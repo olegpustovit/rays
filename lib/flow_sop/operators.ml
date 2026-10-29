@@ -370,6 +370,30 @@ let adjacency : Flow.Op.t =
              adjacency_fields));
   }
 
+let fans_fields = [ "first"; "corners" ]
+
+(* Per incident corner (the slots of sop/adjacency's point_vertices): the first vertex of its face and
+   the corners the face's fan covers, 0 unless the face is a polygon of three corners or more. *)
+let fans : Flow.Op.t =
+  {
+    edges with
+    name = "sop/fans";
+    out =
+      (fun _ ->
+        Flow.Ty.Record (List.map (fun name -> (name, Flow.Ty.Array Flow.Ty.Int)) fans_fields));
+    body =
+      (fun ~live:_ ~node:_ args ->
+        Flow.Value.Record
+          (List.map
+             (fun component ->
+               ( component,
+                 Flow.Value.Source
+                   ( "sop/fans",
+                     Flow.Ty.Array Flow.Ty.Int,
+                     args @ [ ("component", Flow.Value.Text component) ] ) ))
+             fans_fields));
+  }
+
 let triangles_fields = [ "offsets"; "ok"; "primitive"; "a"; "b"; "c" ]
 
 let triangles : Flow.Op.t =
@@ -1298,6 +1322,7 @@ let all =
     edges;
     topology;
     adjacency;
+    fans;
     triangles;
     components;
     shortest_paths;

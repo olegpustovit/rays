@@ -114,18 +114,19 @@
     [(fma (* -1.0 u.z) v.y (* u.y v.z))
      (fma (* -1.0 u.x) v.z (* u.z v.x))
      (fma (* -1.0 u.y) v.x (* u.x v.y))]))
+; ff, fc: per incident corner k (the CSR slots of sop/adjacency, as sop/fans gives them), the first vertex of
+; k's face and the corners its fan covers, 0 where the face is not a polygon of three corners or more.
+; They follow the topology alone, which a device keeps across frames while only P moves.
 (defn transform_area_normal :context value
-  [(positions : (array vec3)) (vp : (array int)) (offsets : (array int)) (kinds : (array int))
-   (pov : (array int)) (pvo : (array int)) (pv : (array int)) (point : int)]
+  [(positions : (array vec3)) (vp : (array int)) (ff : (array int)) (fc : (array int))
+   (pvo : (array int)) (point : int)]
   (let* [total (fold [acc [0.0 0.0 0.0]] [k (range (array/nth pvo point) (array/nth pvo (int/add point 1)))]
-               (let* [prim (array/nth pov (array/nth pv k))
-                      first (array/nth offsets prim)
-                      corners (int/sub (array/nth offsets (int/add prim 1)) first)
-                      a (array/nth positions (array/nth vp first))]
-                 (if (and (int/eq (array/nth kinds prim) 0) (int/ge corners 3))
-                   (+ acc (fold [f [0.0 0.0 0.0]] [j (range (int/add first 1) (int/add first (int/sub corners 1)))]
-                            (+ f (transform_fan positions vp a j))))
-                   acc)))
+               (let* [first (array/nth ff k)
+                      corners (array/nth fc k)]
+                 (if (int/eq corners 0) acc
+                   (let* [a (array/nth positions (array/nth vp first))]
+                     (+ acc (fold [f [0.0 0.0 0.0]] [j (range (int/add first 1) (int/add first (int/sub corners 1)))]
+                              (+ f (transform_fan positions vp a j))))))))
          scale (max (abs total.x) (max (abs total.y) (abs total.z)))
          sc (/ total (if (= scale 0.0) 1.0 scale))]
     (if (> scale 0.0) (* sc (/ 1.0 (sqrt (fused_dot sc sc)))) [0.0 0.0 0.0])))
@@ -147,12 +148,13 @@
       :else
       (let* [topo (sop/topology moved)
              adjacency (sop/adjacency moved)
+             fans (sop/fans moved)
              positions (sop/attr moved :P)
              ; bound: the range then counts moved's points, the write's origin
              points (sop/count moved :points)
              normal (fn [(point : int)]
-                      (transform_area_normal positions topo.vertex_points topo.primitive_offsets topo.kinds
-                        adjacency.primitive_of_vertex adjacency.point_vertex_offsets adjacency.point_vertices point))
+                      (transform_area_normal positions topo.vertex_points fans.first fans.corners
+                        adjacency.point_vertex_offsets point))
              pointed (sop/with_attr moved "N"
                        (exact (map normal (array/range points :type int)))
                        :owner "point" :type vec3 :when (and changed point_n))

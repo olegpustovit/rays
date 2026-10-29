@@ -54,6 +54,28 @@ let adjacency geometry component =
   | "point_edges" -> array (view ()).point_edges
   | _ -> error "E_DATA_SOURCE" "Unknown adjacency component."
 
+(* [sop/fans]: per slot of the adjacency's point_vertices, the face's first vertex and the corners its
+   fan covers (0 unless a polygon of three corners or more): what a point's area-normal gather reads
+   in one load each, kept with the topology like the adjacency. *)
+let fans geometry component =
+  let t = Rdk.Topology.View.view (G.topology geometry) in
+  let p = Rdk.Point_index.View.view (Rdk.Point_index.create (G.topology geometry)) in
+  let slots pick =
+    Ok
+      (E.Int_array
+         (Array.map
+            (fun vertex ->
+              let primitive = p.primitive_of_vertex.(vertex) in
+              let first = t.primitive_offsets.(primitive) in
+              let corners = t.primitive_offsets.(primitive + 1) - first in
+              pick first (Bytes.get t.primitive_kinds primitive = '\000' && corners >= 3) corners)
+            p.point_vertices))
+  in
+  match component with
+  | "first" -> slots (fun first _ _ -> first)
+  | "corners" -> slots (fun _ polygon corners -> if polygon then corners else 0)
+  | _ -> error "E_DATA_SOURCE" "Fans component is first or corners."
+
 (* The union-find of [Analysis.classify_connectivity]: [over] edges labels
    points, [over] points labels primitives; a 0/1 mask keeps the labelled
    elements (-1 elsewhere, not counted). *)
@@ -273,7 +295,7 @@ let count geometry = function
 let resolve ~geometry = function
   | E.Source
       ( (( "sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/components"
-         | "sop/triangles" ) as name),
+         | "sop/triangles" | "sop/fans" ) as name),
         _,
         args ) -> (
       match List.assoc_opt "geometry" args with
@@ -298,6 +320,10 @@ let resolve ~geometry = function
                 match List.assoc_opt "component" args with
                 | Some (E.Text component) -> triangles geometry component
                 | _ -> error "E_DATA_SOURCE" "Triangles source requires a component name."
+              else if name = "sop/fans" then
+                match List.assoc_opt "component" args with
+                | Some (E.Text component) -> kept geometry "fans:" component fans
+                | _ -> error "E_DATA_SOURCE" "Fans source requires a component name."
               else if name = "sop/adjacency" then
                 match List.assoc_opt "component" args with
                 | Some (E.Text component) -> kept geometry "adjacency:" component adjacency
