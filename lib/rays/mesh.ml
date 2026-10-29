@@ -229,6 +229,9 @@ let plane ~width ~height () =
   | Ok mesh -> mesh
   | Error message -> invalid_arg message
 
+let device_identity = Atomic.make [||]
+let device_checked = Atomic.make ([||], 0)
+
 module View = struct
   type vec3_view = Vec3_buffer.t = { x : float array; y : float array; z : float array }
 
@@ -290,10 +293,30 @@ module View = struct
                     mesh))
         host
     in
-    let indices = Option.value indices ~default:(Array.init count Fun.id) in
+    (* a frame's device mesh has the last one's indices: the same cloud identity, the same
+       topology's corners, so neither is made or checked again *)
+    let indices =
+      match indices with
+      | Some indices -> indices
+      | None -> (
+          match Atomic.get device_identity with
+          | identity when Array.length identity = count -> identity
+          | _ ->
+              let identity = Array.init count Fun.id in
+              Atomic.set device_identity identity;
+              identity)
+    in
+    let checked =
+      match Atomic.get device_checked with
+      | known, n when known == indices && n = count -> None
+      | _ ->
+          let bad = Array.find_opt (fun index -> index < 0 || index >= count) indices in
+          if bad = None then Atomic.set device_checked (indices, count);
+          bad
+    in
     if key = "" || count <= 0 then Error "Mesh.create_device: a device mesh has vertices"
     else
-      match Array.find_opt (fun index -> index < 0 || index >= count) indices with
+      match checked with
       | Some index ->
           Error (Printf.sprintf "Mesh.create_device: index %d is outside the vertex array" index)
       | None -> (

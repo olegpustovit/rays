@@ -16,13 +16,25 @@ type t = {
 (* The display reads nothing of a point cloud or a triangle mesh but P, N and the topology: with P
    and N on the device (a cloud may have no N; lit triangles without N take normals made from P on
    the host) and no colour, uv, piece or material, it binds them there. *)
+(* whether every primitive is a triangle, the last topology's answer kept: a deforming mesh's frames
+   share their topology *)
+let last_topology = Atomic.make None
+
+let triangles topology =
+  match Atomic.get last_topology with
+  | Some (known, answer) when known == topology -> answer
+  | _ ->
+      let answer = Topology.all_triangles topology in
+      Atomic.set last_topology (Some (topology, answer));
+      answer
+
 let device_points geometry =
   Packed.Float3.resident (Geometry.positions geometry)
   && Geometry.point_count geometry > 0
   && (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
     | None -> Geometry.primitive_count geometry = 0
     | Some n -> Attribute.resident n)
-  && (Geometry.primitive_count geometry = 0 || Topology.all_triangles (Geometry.topology geometry))
+  && (Geometry.primitive_count geometry = 0 || triangles (Geometry.topology geometry))
   && List.for_all
        (fun (owner, name) -> Geometry.find_attribute ~owner name geometry = None)
        [

@@ -554,8 +554,17 @@ selected box), not per cook. Measured (`test_chain_frames_native`, M1, 2026-10-2
 the animated 1M chain displays with nothing read back and the host display's pixels exactly,
 preparing and drawing a 256 x 256 canvas in 0.010 s against 0.142 s reading P back (0.0031 s
 against 0.025 s for 512 squared). A lit triangle grid (`CONNECTIVITY Triangles`, N transformed on
-the device) the same way: 1M points in 0.024 s against 0.125 s, 512 squared in 0.0069 s against
-0.035 s, pixels equal.
+the device) the same way, pixels equal.
+
+Where a device display's frame went (1M points, `test_chain_frames_native`, M1, 2026-10-29): of
+the 10.8 ms a cloud took, 6 ms was the host side of the mesh, not the renderer: a fresh identity
+index array and its bounds check every frame (a device mesh now takes the last frame's: the same
+cloud identity, the same topology's corners, made and checked once), and for a triangle mesh also a
+scan of every primitive for `all_triangles` (kept for the last topology); the renderer's per-frame
+upload and MD5 of the indices under a new borrow key was the rest of the waste (now kept under the
+indices' own key). Now a frame prepares and draws 1M points in 0.0037 s (0.0013 s for 512 squared)
+and a 1M-point lit triangle grid in 0.0027 s (0.0011 s), against 0.08-0.14 s reading P back; what
+is left is the draw and its completion wait.
 
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's
