@@ -719,15 +719,33 @@ let prepared_bytes prepared =
       + Option.fold ~none:0 ~some:Bytes.length entry.draw.state.transform_uniforms)
     0 prepared.Renderer.Scene_execution.entries
 
+(* A layer drawing a device's vertices (a live cook's display) is one frame's: the next cook's
+   display is a new mesh, so an older layer is never asked for again, and cached it holds its
+   scene, the geometry and the device outputs under it. A cache keeps at most this many (one per
+   viewport showing one), the newest; layers of host meshes are bounded only by the cache. *)
+let device_layer_capacity = 4
+
+let borrows_device prepared =
+  Array.exists
+    (fun (entry : Renderer.Scene_execution.scene3_entry) ->
+      match entry.draw.mesh.key with Gpu_vertices _ -> true | Host _ -> false)
+    prepared.Renderer.Scene_execution.entries
+
 let trim_prepared_cache
     (prepared_cache :
       (Scene3.t * Camera.t * (int * int * int * int), prepared_cache_entry) Prepared_cache.t) =
-  let count = ref 0 and bytes = ref 0 in
+  let count = ref 0 and bytes = ref 0 and devices = ref 0 in
   Prepared_cache.filter prepared_cache (fun _ (cached : prepared_cache_entry) ->
       let size = prepared_bytes cached.prepared in
-      if !count < prepared_cache_capacity && size <= retained_payload_byte_capacity - !bytes then begin
+      let device = borrows_device cached.prepared in
+      if
+        !count < prepared_cache_capacity
+        && size <= retained_payload_byte_capacity - !bytes
+        && ((not device) || !devices < device_layer_capacity)
+      then begin
         incr count;
         bytes := !bytes + size;
+        if device then incr devices;
         true
       end
       else false)

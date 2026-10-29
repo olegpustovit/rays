@@ -242,3 +242,44 @@ let device_host () =
   print_endline "device meshes: host copy made once, for a reader of vertices"
 
 let () = device_host ()
+
+(* A live cook's display is a new device mesh each frame: the staging caches keep the newest few
+   and let the older frames go (each holds its scene, its geometry and the device outputs under
+   it), and the newest staged again is a hit. *)
+let device_frames () =
+  Scene.Layer.with_cache_context (Scene.Layer.create_cache_context ()) (fun () ->
+      let camera =
+        Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.)
+          ~target:Rays_math.Vec3.zero ()
+      in
+      let meshes = Weak.create 12 in
+      let frame i =
+        let mesh =
+          Mesh.View.create_device ~indices:[| 0; 1; 2 |]
+            ~host:(fun () -> Test_meshes.box ~width:1. ~height:1. ~depth:1. ())
+            ~bounds:(fun () -> None)
+            ~key:("frame " ^ string_of_int i)
+            ~normals:true ~keep:ignore 3
+          |> Result.get_ok
+        in
+        Weak.set meshes i (Some mesh);
+        [ Scene.view3d ~camera (Scene.D3.create [ Scene.D3.mesh mesh ]) ]
+      in
+      let stage frame = Result.get_ok (Scene.Layer.stage_native ~width:16 ~height:16 frame) in
+      let newest = ref [] in
+      for i = 0 to 11 do
+        newest := frame i;
+        ignore (stage !newest)
+      done;
+      if stage !newest != stage !newest then failwith "the newest device frame was not cached";
+      Gc.full_major ();
+      let alive = ref 0 in
+      for i = 0 to 11 do
+        if Weak.check meshes i then incr alive
+      done;
+      if !alive > Scene3_native_lowering.device_layer_capacity then
+        failwith (Printf.sprintf "staging kept %d of 12 device frames alive" !alive);
+      ignore (Sys.opaque_identity !newest));
+  print_endline "native Scene3 lowering: older device frames are let go, the newest is a hit"
+
+let () = device_frames ()

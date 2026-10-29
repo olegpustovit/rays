@@ -458,6 +458,14 @@ collected within a few cooks and its buffer comes back without a read; past 2 Gi
 still unread (all alive), the oldest is read into owned planes (same values) and its buffer reused,
 which bounds device memory. The pool never `Weak.get`s a retired holder it does not read: a get
 while the GC marks keeps the holder alive another cycle, which had kept every dead result alive.
+Nor does a settle: it marks the dispatch's other outputs through the epoch and settled flag the
+runner records beside each weak holder (a settle that got every live holder, once per cook, kept
+every live graph's outputs alive forever: `sketches/gpu_sea.rays` read two back per frame to free a
+buffer; `test_run_lifetime` retires 24 cooks and fails unless their buffers are reused unread). The
+same holds for `Flow.Value.remember`, which queries only a slot whose key hashes alike. A drawn
+result is held by its display's staging too: the native stage and prepared-layer caches keep at
+most four layers that draw a device's vertices (`Scene3_native_lowering.device_layer_capacity`),
+so a live cook's older frames, a new mesh each, are let go (`test_scene3_native_lowering`).
 Measured (`bench_chain_recook.exe`, 1M points, one session toggling an edit, 32 warm and 32
 measured cooks, medians of three interleaved rounds, loaded M1, 2026-10-28): results that die, 1.5-3.2
 ms against dev's 6.0-12.1 ms (and 42-69 ms for the earlier read-the-oldest pool); the last 16 results

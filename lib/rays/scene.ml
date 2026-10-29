@@ -1107,10 +1107,18 @@ module Layer = struct
     cached_resource_stamp : int;
     cached_aggregate : bool;
     cached_stage : staged_native;
+    cached_device : bool; (* it draws a device's vertices ({!borrows_device}) *)
   }
 
   let native_stage_cache_capacity = 16
   let native_stage_cache_byte_capacity = 256 * 1024 * 1024
+
+  (* a stage drawing a device's vertices: at most {!Scene3_native_lowering.device_layer_capacity}
+     are cached, as layers are *)
+  let borrows_device stage =
+    List.exists
+      (function Scene3_layer prepared -> Scene3_native_lowering.borrows_device prepared | _ -> false)
+      stage.layers
 
   module Native_stage_key = struct
     type t = node list * bool * int * int * int
@@ -1300,8 +1308,20 @@ module Layer = struct
                     cached_resource_stamp = native_resource_stamp stage;
                     cached_aggregate = aggregate;
                     cached_stage = stage;
+                    cached_device = borrows_device stage;
                   }
                 in
+                if entry.cached_device then begin
+                  let devices = ref [] in
+                  Native_stage_table.iter context.native_stages (fun key cached ->
+                      if cached.cached_device then devices := key :: !devices);
+                  (* newest first: what is past the capacity, with room for this one, goes *)
+                  List.iteri
+                    (fun i key ->
+                      if i >= Scene3_native_lowering.device_layer_capacity - 1 then
+                        Native_stage_table.remove context.native_stages key)
+                    !devices
+                end;
                 Native_stage_table.add context.native_stages ~bytes:(native_stage_bytes stage) key
                   entry;
                 Ok stage))
