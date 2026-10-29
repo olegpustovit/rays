@@ -641,6 +641,9 @@ binding are made once now: 1.4-1.5 ms, and the frame 7.2 ms -> 4.4 ms (`test_cha
 with `XDRIVE`: 0.0044 s for 512 squared, 0.0057 s for 1M, was 0.0071 and 0.0086). Left: each delete
 guard walks the matrix and its inverse again (0.6 ms each; the two guards are one residual, but
 separate nodes and walks), and about 0.8 ms of the first delete is waiting for the dispatch.
+`sop_gallery` with this and the device bounds (`bench_sop_cook ":seed 2026" ":seed 2027" 3`, five
+rounds interleaved with dev, medians, 2026-10-29): check 0.252 s against 0.252, lower 0.373 against
+0.373, cook 0.846 against 0.840, edit to cook 0.501 against 0.503.
 
 A transform whose group the cook decides (a native group node upstream) is a body cooked behind its
 card: its normals' writes read every owner's N eagerly there, so a mesh without vertex N failed
