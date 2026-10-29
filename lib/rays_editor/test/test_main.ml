@@ -23,6 +23,7 @@ let tests =
         Test_scene_sync.run_nested_loops ();
         Test_scene_sync.run_compose ();
         Test_scene_sync.run_instances () );
+    ("test_fast_path", Test_fast_path.run);
     ("test_scene_sync_root", Test_scene_sync.run_root);
     ("test_sop_catalog", fun () -> Test_sop_catalog.run ());
     ("test_sop_catalog_inputs", Test_sop_catalog.run_inputs);

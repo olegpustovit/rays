@@ -11,6 +11,8 @@ type change = {
   field : string;
   kind : string;
   authored : int;
+  in_fn : bool;  (** inside a [fn] body: closures keep the old literal *)
+  captured : bool;  (** a [fn] body reads a binding on its path: a closure may hold the value *)
   before : E.value;
   after : E.value;
   expr : S.t;
@@ -91,37 +93,49 @@ let rec child form = function
   | index :: rest ->
       Option.bind (List.nth_opt (S.children form) index) (fun form -> child form rest)
 
-let rec find_argument field id (term : W.term) =
+let term_children (node : W.node) =
+  match node with
+  | Call call -> List.map snd call.args
+  | Op call -> List.map snd call.args
+  | Call_fn call -> call.args
+  | Graph_ref call -> List.map snd call.inputs
+  | Let (bindings, body) -> body :: List.map snd bindings
+  | State state -> [ state.init; state.step ]
+  | Loop loop -> (loop.body :: List.map snd loop.accs) @ List.map snd loop.clauses
+  | With_error (a, b) -> [ a; b ]
+  | Error_rows { rows = a; mapper = b; _ } -> [ a; b ]
+  | If (a, b, c) -> [ a; b; c ]
+  | Cond (arms, last) -> last :: List.concat_map (fun (a, b) -> [ a; b ]) arms
+  | Case (value, arms, last) -> value :: last :: List.map snd arms
+  | Fn fn -> [ fn.body ]
+  | Hof (_, args) | Vec args | List_lit args | Str args | List_op (_, args) -> args
+  | Record args -> List.map snd args
+  | Assoc (value, args) -> value :: List.map snd args
+  | Get (value, _) | Bypass value -> [ value ]
+  | Expanded macro -> [ macro.body ]
+  | Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _ -> []
+
+let rec find_argument ?(in_fn = false) field id (term : W.term) =
   match term.node with
   | Call { kind; ctx; args }
     when Option.fold ~none:false
            ~some:(fun (arg : W.term) -> arg.form.id = id)
            (List.assoc_opt field args) ->
-      Some (kind, ctx, term.form.id, List.assoc field args)
+      Some (kind, ctx, term.form.id, List.assoc field args, in_fn)
   | node ->
-      let children =
-        match node with
-        | Call call -> List.map snd call.args
-        | Op call -> List.map snd call.args
-        | Call_fn call -> call.args
-        | Graph_ref call -> List.map snd call.inputs
-        | Let (bindings, body) -> body :: List.map snd bindings
-        | State state -> [ state.init; state.step ]
-        | Loop loop -> (loop.body :: List.map snd loop.accs) @ List.map snd loop.clauses
-        | With_error (a, b) -> [ a; b ]
-        | Error_rows { rows = a; mapper = b; _ } -> [ a; b ]
-        | If (a, b, c) -> [ a; b; c ]
-        | Cond (arms, last) -> last :: List.concat_map (fun (a, b) -> [ a; b ]) arms
-        | Case (value, arms, last) -> value :: last :: List.map snd arms
-        | Fn fn -> [ fn.body ]
-        | Hof (_, args) | Vec args | List_lit args | Str args | List_op (_, args) -> args
-        | Record args -> List.map snd args
-        | Assoc (value, args) -> value :: List.map snd args
-        | Get (value, _) | Bypass value -> [ value ]
-        | Expanded macro -> [ macro.body ]
-        | Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _ -> []
-      in
-      List.find_map (find_argument field id) children
+      let in_fn = in_fn || match node with Fn _ -> true | _ -> false in
+      List.find_map (find_argument ~in_fn field id) (term_children node)
+
+(* names a [fn] body reads: a closure may hold the value bound to one of them *)
+let fn_names graphs =
+  let names = Hashtbl.create 16 in
+  let rec go inside (term : W.term) =
+    (match term.node with Ref_binding (name, _) when inside -> Hashtbl.replace names name () | _ -> ());
+    let inside = inside || match term.node with Fn _ -> true | _ -> false in
+    List.iter (go inside) (term_children term.node)
+  in
+  List.iter (fun (g : W.graph) -> go false g.body) graphs;
+  names
 
 let rec plain (form : S.t) =
   form.notes = [] && form.tail = [] && List.for_all plain (S.children form)
@@ -204,7 +218,7 @@ let patch catalog (workspace : W.t) op =
                         (fun (graph : W.graph) -> find_argument field expr.id graph.body)
                         (workspace.graphs @ workspace.defs)
                     in
-                    Option.bind call (fun (kind, ctx, authored, argument) ->
+                    Option.bind call (fun (kind, ctx, authored, argument, in_fn) ->
                         let head =
                           Option.bind
                             (Flow_graph.Flow_edit.arg_text workspace.source path Whole)
@@ -283,6 +297,10 @@ let patch catalog (workspace : W.t) op =
                                             field;
                                             kind;
                                             authored;
+                                            in_fn;
+                                            captured =
+                                              (let names = fn_names (workspace.graphs @ workspace.defs) in
+                                               List.exists (Hashtbl.mem names) path);
                                             before = old_value;
                                             after = new_value;
                                             expr = argument.form;
@@ -291,27 +309,14 @@ let patch catalog (workspace : W.t) op =
                 | _ -> None))
   | _ -> None
 
-let lower (lowered : L.t) change =
-  let rec has_fn : E.value -> bool = function
-    | Fn _ -> true
-    | List values -> Array.exists has_fn values
-    | Record fields | Struct (_, _, fields) -> List.exists (fun (_, value) -> has_fn value) fields
-    | _ -> false
-  in
-  (* ponytail: recorded closures keep checked bodies; rebind their captures before
-     extending parameter-only reuse to edits inside retained functions. *)
-  let captures =
-    List.exists
-      (fun (_, values) -> List.exists (fun (_, value) -> has_fn value) values)
-      lowered.evaluated.records
-  in
+let lower_nodes (lowered : L.t) change =
   let targets =
     Array.to_list lowered.plan.nodes
     |> List.filter (fun (node : E.node) ->
         lowered.evaluated.authored.(node.id) = change.authored && node.kind = change.kind)
   in
   if
-    change.authored = 0 || captures || lowered.states <> [] || targets = []
+    change.authored = 0 || change.in_fn || lowered.states <> [] || targets = []
     || List.exists
          (fun (node : E.node) ->
            List.assoc_opt change.field node.args <> Some change.before
@@ -369,3 +374,72 @@ let lower (lowered : L.t) change =
            let plan = { lowered.plan with nodes } in
            { lowered with graphs; plan; evaluated = { lowered.evaluated with plan } })
          result)
+
+(* A scene, world or settings object is a [Source]/[Struct] value, not a plan node: swap its field
+   in the values the evaluation recorded at the path, keeping every other value physically. *)
+let lower_value (lowered : L.t) change =
+  if change.in_fn || change.captured || lowered.states <> [] then None
+  else
+    let targets =
+      Option.value ~default:[] (List.assoc_opt change.path lowered.evaluated.records)
+    in
+    let hit = ref false and swapped = ref [] in
+    let is_target (v : E.value) =
+      List.exists (fun (_, t) -> t == v) targets
+      &&
+      match v with
+      | Source (kind, _, fields) | Struct (kind, _, fields) -> (
+          kind = change.kind
+          && match List.assoc_opt change.field fields with
+             | Some old -> (try old = change.before with Invalid_argument _ -> false)
+             | None -> false)
+      | _ -> false
+    in
+    let same_list a b = List.for_all2 (fun (_, x) (_, y) -> x == y) a b in
+    let rec rw (v : E.value) : E.value =
+      if is_target v then (
+        hit := true;
+        (* one new value per old one, so every place that shared it still does *)
+        match List.assq_opt v !swapped with
+        | Some next -> next
+        | None ->
+            let next : E.value =
+              match v with
+              | Source (k, ty, fs) -> E.Source (k, ty, set fs)
+              | Struct (k, ty, fs) -> E.Struct (k, ty, set fs)
+              | v -> v
+            in
+            swapped := (v, next) :: !swapped;
+            next)
+      else
+        match v with
+        | List a ->
+            let b = Array.map rw a in
+            if Array.for_all2 ( == ) a b then v else E.List b
+        | Record fs -> fields v fs (fun fs -> E.Record fs)
+        | Struct (k, ty, fs) -> fields v fs (fun fs -> E.Struct (k, ty, fs))
+        | Source (k, ty, fs) -> fields v fs (fun fs -> E.Source (k, ty, fs))
+        | v -> v
+    and set fs = List.map (fun (f, x) -> if f = change.field then (f, change.after) else (f, x)) fs
+    and fields v fs build =
+      let fs' = List.map (fun (f, x) -> (f, rw x)) fs in
+      if same_list fs fs' then v else build fs'
+    in
+    let named l = List.map (fun (n, v) -> (n, rw v)) l in
+    let results = named lowered.evaluated.results in
+    let records =
+      List.map (fun (path, vs) -> (path, List.map (fun (i, v) -> (i, rw v)) vs))
+        lowered.evaluated.records
+    in
+    let instances =
+      Array.map
+        (fun (i : E.instance) -> { i with inputs = named i.inputs; result = rw i.result })
+        lowered.plan.instances
+    in
+    if not !hit then None
+    else
+      let plan = { lowered.plan with instances } in
+      Some (Ok { lowered with plan; evaluated = { lowered.evaluated with plan; results; records } })
+
+let lower lowered change =
+  match lower_nodes lowered change with Some r -> Some r | None -> lower_value lowered change

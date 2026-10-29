@@ -773,7 +773,9 @@ let geometry_targets t (s : P.scope) ~probe =
         match n.zone with
         | Some z -> go z.scope
         | None when n.ty = Flow.Ty.geometry ->
-            Option.to_list (plan_node t n.path ~probes:(List.map probe (Hashtbl.find chain n.path)))
+            List.map
+              (fun id -> (n.path, id))
+              (Option.to_list (plan_node t n.path ~probes:(List.map probe (Hashtbl.find chain n.path))))
         | None -> [])
       s.nodes
   in

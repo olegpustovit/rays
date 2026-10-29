@@ -4355,7 +4355,7 @@ let status lowered ~seconds =
   match counts lowered with
   | 0, _ -> None
   | live, cached ->
-      Some (Printf.sprintf "t %d live · %d cached · cook %.1f ms" live cached (seconds *. 1000.))
+      Some (Printf.sprintf "t %d live · %d cached · frame cook %.1f ms" live cached (seconds *. 1000.))
 
 let origin lowered tag =
   match Network.Int_map.find_opt tag lowered.provenance with

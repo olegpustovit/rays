@@ -70,14 +70,14 @@ let status_text ?(brief = false) value =
         | None, None, Some seconds -> (
             match Flow_sop.Lower.status value.doc.Document.workspace.lowered ~seconds with
             | Some text -> text
-            | None -> Printf.sprintf "checked · cooked %.3f s" seconds)
+            | None -> Printf.sprintf "checked · frame cook %.0f ms" (seconds *. 1000.))
         | None, None, None -> "Waiting for first cook"
       in
       let cook =
         match Cook.status value.cook with
         | Async_cook.Cooking { seconds; queued = true; _ } when playing ->
             (* playing and a newer frame is already waiting: frames are skipped *)
-            Printf.sprintf "cook %d ms · skipping frames" (int_of_float (seconds *. 1000.))
+            Printf.sprintf "frame cook %d ms · skipping frames" (int_of_float (seconds *. 1000.))
         | Async_cook.Cooking _
           when playing
                && fst (Flow_sop.Lower.counts value.doc.Document.workspace.lowered) > 0

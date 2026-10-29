@@ -231,5 +231,5 @@ val counts : t -> int * int
 (** (live, cached) node counts. *)
 
 val status : t -> seconds:float -> string option
-(** The viewport header [t N live · M cached · cook X ms] ([t] for the study's ◷, which
+(** The viewport header [t N live · M cached · frame cook X ms] ([t] for the study's ◷, which
     DepartureMono lacks); [None] when nothing is live. *)

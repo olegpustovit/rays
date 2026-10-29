@@ -27,6 +27,8 @@ type summary = (int * int) * Flow_graph.Probe.geometry
 
 type cooked =
   | Displayed of piece list * summary list * ((int * int) * Rdk_rays.Geometry_view.t) list
+  | Probed of piece list * summary list * ((int * int) * Rdk_rays.Geometry_view.t) list
+      (* the footers' counts alone: the displayed objects are cache hits *)
   | Framed of bounds option
 
 type t = {
@@ -54,6 +56,7 @@ type t = {
   applied : Flow_sop.Value_lane.resolved Document.Int_map.t;
   graphs : (int * Node.t) list;
   displayed : (int * int) list; (* the display node each graph compiles *)
+  probe_job : bool; (* the job in flight only counts footers: a display cook may supersede it *)
   probing : (int * int) list; (* the (object, node) pairs the last submission asked to summarise *)
   summaries : summary list;
   sources : ((int * int) * Rdk_rays.Geometry_view.t) list;
@@ -146,6 +149,7 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
         state = Flow.Eval.create_state ();
         applied = Document.Int_map.empty;
         displayed = [];
+        probe_job = false;
         probing = [];
         summaries = [];
         sources = [];
@@ -291,9 +295,15 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
         match completion with
         | None -> (value.pieces, value.error, value.seconds, false, None, value.framing, false)
         | Some { Async_cook.result = Ok (Displayed (pieces, found, data)); seconds; _ } ->
+            (* a display cook that counted nothing keeps the counts it has *)
+            if found <> [] then (
+              summaries := found;
+              sources := data);
+            (pieces, None, Some seconds, true, None, None, false)
+        | Some { result = Ok (Probed (pieces, found, data)); _ } ->
             summaries := found;
             sources := data;
-            (pieces, None, Some seconds, true, None, None, false)
+            (pieces, value.error, value.seconds, true, None, None, false)
         | Some { result = Ok (Framed bounds); _ } ->
             (value.pieces, value.error, value.seconds, false, Some bounds, None, resume)
         | Some { result = Error _; _ } when value.framing <> None ->
@@ -322,9 +332,9 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
         Schedule.step ?live value.schedule ~graphs:(List.map snd graphs) ~effects
           ~context_changed:(Timeline.changed_context timeline_changes)
           ~force:
-            (changed || value.force || probes <> value.probing
+            (changed || value.force || (value.await && probes <> value.probing)
             || not (Option.fold ~none:false ~some:(( == ) settings) value.settings))
-          ~busy:(busy value || framing <> None)
+          ~busy:((busy value && not value.probe_job) || framing <> None)
           ~frame
       in
       (* Unchanged objects keep their prepared value: the worker only cooks
@@ -342,8 +352,17 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
         | None ->
             Option.bind (List.assoc_opt object_id graphs) (fun graph -> Node.find graph ~node_id)
       in
+      (* Footers are counted after the display cook, not with it: a changed graph is displayed
+         first, and the probe job follows when the worker is idle.  A live recook carries the
+         probes only when the visible set changed. *)
+      let split = not value.await in
+      let inline = submit && ((not split) || ((not changed) && probes <> value.probing)) in
+      let probe_only =
+        split && (not submit) && probes <> [] && probes <> value.probing && framing = None
+        && ((not (busy value)) || value.probe_job)
+      in
       let probed =
-        if not submit then []
+        if not (inline || probe_only) then []
         else
           List.filter_map
             (fun key -> Option.map (fun node -> (key, node)) (node_of key))
@@ -389,7 +408,9 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
         in
         let rec loop reversed graphs outputs =
           match (graphs, outputs) with
-          | [], [] -> Ok (Displayed (List.rev reversed, found, data))
+          | [], [] ->
+              let pieces = List.rev reversed in
+              Ok (if probe_only then Probed (pieces, found, data) else Displayed (pieces, found, data))
           | (id, graph) :: graphs, (output : Session.output) :: outputs -> (
               let projection = Context.cache_projection (Node.graph_dependencies graph) context in
               let reused =
@@ -430,7 +451,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
         loop [] graphs outputs
       in
       let error, framing =
-        if submit then
+        if submit || probe_only then
           match
             Result.bind (context value timeline frame) (fun context ->
                 Async_cook.submit_some value.worker ~context ~nodes:(List.map snd graphs)
@@ -439,6 +460,9 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
           | Ok _ -> (None, None)
           | Error message -> (Some message, None)
         else (error, framing)
+      in
+      (* the job a probe-only submission replaced shows no error of its own *)
+      let error, framing = if probe_only then (value.error, value.framing) else (error, framing)
       in
       (* A fixed-step run waits for the cook it just submitted, serving the device meanwhile: a cook
      whose regions run on the GPU queues them for this (the initial) domain, so a blocking await
@@ -462,7 +486,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
                 None,
                 Some awaited.seconds,
                 true )
-          | Ok (Framed _) -> (pieces, error, seconds, prepared_changed)
+          | Ok (Framed _ | Probed _) -> (pieces, error, seconds, prepared_changed)
           | Error failure ->
               value.failure := failure_of failure;
               ( pieces,
@@ -547,7 +571,11 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
             applied;
             graphs;
             displayed;
-            probing = (if submit then probes else value.probing);
+            probe_job = probe_only;
+            probing =
+              (if inline || probe_only then probes
+               else if submit && (changed || value.probe_job) then []
+               else value.probing);
             summaries = !summaries;
             sources = !sources;
           };

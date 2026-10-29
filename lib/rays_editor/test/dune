@@ -123,6 +123,7 @@
   test_editor_consistency
   test_scene_tree
   test_scene_sync
+  test_fast_path
   test_sop_catalog
   test_packed_pieces
   test_terminal_boolean_normals
@@ -537,6 +538,15 @@
   (glob_files_rec ../../../sketches/*.rays))
  (action
   (run %{exe:test_main.exe} test_scene_sync_root)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_scene_sync)
+ (deps
+  (glob_files_rec ../../../sketches/*.rays))
+ (action
+  (run %{exe:test_main.exe} test_fast_path)))
 
 (rule
  (enabled_if

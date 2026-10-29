@@ -6,6 +6,8 @@ type change = {
   field : string;
   kind : string;
   authored : int;
+  in_fn : bool;
+  captured : bool;
   before : Flow.Eval.value;
   after : Flow.Eval.value;
   expr : Flow.Syntax.t;

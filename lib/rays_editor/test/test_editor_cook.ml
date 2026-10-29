@@ -62,9 +62,9 @@ let with_cook ?(domains = 1) prepare run =
     ~finally:(fun () -> Cook.close !current)
     (fun () ->
       let step ?(settings = Settings.none) ?(timeline = stopped) ?(changes = []) ?(buttons = [])
-          ?frame_request objects =
+          ?frame_request ?probes objects =
         let update =
-          Cook.update ~live:false !current ~settings ~objects ~edit_error:None
+          Cook.update ~live:false ?probes !current ~settings ~objects ~edit_error:None
             ~effects:Param.no_effects ~timeline_changes:changes ~timeline
             ~frame:{ frame with input = { frame.input with buttons } }
             ~frame_request
@@ -125,7 +125,17 @@ let run () =
       for _ = 1 to 5 do
         ignore (step ~settings:b [ changed; List.nth objects 1 ])
       done;
-      check (Atomic.get prepares = 5) "idle frames resubmitted static objects");
+      check (Atomic.get prepares = 5) "idle frames resubmitted static objects";
+      (* footers are counted by a job of their own after the display: the pieces stay, nothing is
+         prepared again, and the counts arrive *)
+      let pieces = Cook.pieces !current and node_id = (fun (_, _, id) -> id) (List.hd objects) in
+      let probes = [ (1, node_id) ] in
+      await (fun () ->
+          ignore (step ~settings:b ~probes [ changed; List.nth objects 1 ]);
+          Cook.geometry !current ~object_id:1 ~node_id <> None);
+      check
+        (List.for_all2 ( == ) pieces (Cook.pieces !current) && Atomic.get prepares = 5)
+        "counting a footer re-prepared the displayed objects");
   let dependencies = Context.Dependencies.(union (one Time) (one Frame)) in
   let dynamic =
     Sop.Custom.plain ~operation:"editor_cook_clock" ~dependencies [ source ] (fun ~context inputs ->
