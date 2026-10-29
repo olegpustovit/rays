@@ -34,21 +34,24 @@ let topology geometry component =
                 Char.code (Bytes.get view.primitive_kinds i))))
   | _ -> error "E_DATA_SOURCE" "Topology source requires vertex_points, primitive_offsets or kinds."
 
+(* The point incidence (CSR of vertices by point) is the Point_index's, without the edges a
+   Topology_index hashes: a million-cell grid's normals ask only for it. *)
 let adjacency geometry component =
-  let view = Rdk.Topology_index.View.view (Rdk.Topology_index.create (G.topology geometry)) in
   let array a = Ok (E.Int_array (Array.copy a)) in
+  let points () = Rdk.Point_index.View.view (Rdk.Point_index.create (G.topology geometry)) in
+  let view () = Rdk.Topology_index.View.view (Rdk.Topology_index.create (G.topology geometry)) in
   match component with
-  | "primitive_of_vertex" -> array view.primitive_of_vertex
-  | "next_vertex" -> array view.next_vertex
-  | "previous_vertex" -> array view.previous_vertex
-  | "edge_of_vertex" -> array view.edge_of_vertex
-  | "opposite_vertex" -> array view.opposite_vertex
-  | "edge_a" -> array view.edge_a
-  | "edge_b" -> array view.edge_b
-  | "point_edge_offsets" -> array view.point_edge_offsets
-  | "point_edges" -> array view.point_edges
-  | "point_vertex_offsets" -> array view.point_offsets
-  | "point_vertices" -> array view.point_vertices
+  | "primitive_of_vertex" -> array (points ()).primitive_of_vertex
+  | "point_vertex_offsets" -> array (points ()).point_offsets
+  | "point_vertices" -> array (points ()).point_vertices
+  | "next_vertex" -> array (view ()).next_vertex
+  | "previous_vertex" -> array (view ()).previous_vertex
+  | "edge_of_vertex" -> array (view ()).edge_of_vertex
+  | "opposite_vertex" -> array (view ()).opposite_vertex
+  | "edge_a" -> array (view ()).edge_a
+  | "edge_b" -> array (view ()).edge_b
+  | "point_edge_offsets" -> array (view ()).point_edge_offsets
+  | "point_edges" -> array (view ()).point_edges
   | _ -> error "E_DATA_SOURCE" "Unknown adjacency component."
 
 (* The union-find of [Analysis.classify_connectivity]: [over] edges labels

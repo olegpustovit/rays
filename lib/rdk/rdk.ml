@@ -7,6 +7,7 @@ module Error = Rdk_core.Error
 module Cancel = Rdk_core.Cancel
 module Packed = Rdk_core.Packed
 module Topology = Rdk_core.Topology
+module Point_index = Rdk_core.Point_index
 module Topology_index = Rdk_core.Topology_index
 module Spatial_index = Rdk_geom.Spatial_index
 module Attribute = Rdk_core.Attribute
