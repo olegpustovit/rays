@@ -99,6 +99,7 @@ val carry_line : t -> string option
 val level : t -> string option
 val scene_document : t -> Editor_document.Kind_graph.t
 val same_context : Editor_document.Document.t -> Editor_document.Document.t -> bool
+val resolved_scene : t -> Editor_document.Kind_graph.t
 val lights : t -> Rays.Light.t list
 val world : t -> Rays.World.baked option
 val objects : t -> (Rays_math.Mat4.t * Cook.prepared) list

@@ -57,6 +57,10 @@ val of_workspace :
     and editor structs are refused with [E_CONTEXT_TIME], naming the graph and field. Geometry
     references with live SOP parameters are supported. *)
 
+val scene_reads : Document.t -> Sop.Context.Dependencies.t
+(** The host-input slices the recorded live scene fields read: {!resolve_scene} gives the same scene
+    while none of them differs. *)
+
 val resolve_scene :
   ?previous:Kind_graph.t ->
   ?state:Flow.Eval.state ->

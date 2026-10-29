@@ -94,6 +94,7 @@ module Editor = struct
       let resources = value.Loop_model.host.resources in
       (resources.images_created, resources.images_destroyed)
 
+    let resolved_scene = Loop_model.resolved_scene
     let status_text value = Editor_status.status_text value.Loop_model.core
     let live_frame value = value.Loop_model.core.live_frame
     let inspector_subject value = Editor_panels.inspector_subject value.Loop_model.core

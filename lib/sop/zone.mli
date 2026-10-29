@@ -34,6 +34,7 @@ val element_node : element -> Node.t
 val node :
   ?report:(element array -> unit) ->
   ?live:bool ->
+  ?reads:Context.Dependencies.t ->
   ?stamp:string ->
   kind:kind ->
   ?key:string ->

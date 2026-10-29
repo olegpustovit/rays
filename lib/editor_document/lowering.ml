@@ -1137,6 +1137,15 @@ let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?previous (workspace : 
 
 (* Only the recorded live fields run; SOP networks, source and panel identities
    stay untouched. Errors leave the caller's last successful picture available. *)
+let scene_reads (document : Document.t) =
+  Document.Int_map.fold
+    (fun _ (_, args) found ->
+      List.fold_left
+        (fun found (_, value) ->
+          Sop.Context.Dependencies.union found (Flow_sop.Attribute_kernel.input_reads value))
+        found args)
+    document.scene_drives Sop.Context.Dependencies.static
+
 let resolve_scene ?previous ?state ?live (document : Document.t) ~time =
   let live = Option.value ~default:(Input.at_time time) live in
   let graph, errors =

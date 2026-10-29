@@ -96,6 +96,7 @@ module Editor : sig
     val gpu_qualification : t -> unit
     (** Explicit native benchmark selection. Production requires measured GPU costs. *)
 
+    val resolved_scene : t -> Editor_document.Kind_graph.t
     val status_text : t -> string
     (** The status strip's text: a cook or edit error reads "Cook rejected: ..." in it. *)
 

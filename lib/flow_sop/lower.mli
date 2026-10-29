@@ -118,6 +118,8 @@ type t = {
   image_sites : Flow.Workspace.path option array;
       (** Authored image/map producers, indexed by plan node; missing or conflicting observations
           stay [None]. Runtime sites retain named-call prefixes. *)
+  reads : Sop.Context.Dependencies.t Lazy.t;
+      (** the host-input slices any value of the plan reads *)
   states : Flow.Eval.value list;
   evaluated : Flow.Eval.t;  (** recording evaluation shared with graph probes *)
   approx : Flow.Workspace.Paths.t;  (** qualified actual packed specializations *)

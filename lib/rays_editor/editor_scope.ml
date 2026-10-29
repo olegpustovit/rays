@@ -14,15 +14,6 @@ let picture_node records path ~probes =
 (* Probe inputs use the same exact frame/region compiler as the canvas. *)
 let probe_force = Flow_native.Probe_run.force
 
-(* The probes of a live graph are forced again only when what a frame can change in them did: its
-   time, size, pointer and buttons.  [tick], [dt] and the key and event lists change every frame, so
-   comparing them re-ran every probe of an open graph on each frame of a drag or a scroll
-   (measured at about 100 ms a frame on recursive_rectangles).  ponytail: a graph that reads
-   frame/tick or frame/dt shows a stale probe while the timeline is paused; its canvas still animates. *)
-let steady_equal (a : Input.t) (b : Input.t) =
-  let steady (f : Input.t) = { f with tick = 0; dt = 0.; keys = []; events = [] } in
-  Input.equal (steady a) (steady b)
-
 let sync_views value =
   let lowered = value.doc.Document.workspace.lowered in
   match value.view_key with
@@ -194,7 +185,9 @@ let sync_scope value =
             not
               (k.evaluated == evaluated && k.summaries == summaries
               && Flow_native.Probe_run.same_count k.executions executions
-              && (Option.equal steady_equal k.time time
+              && (Option.equal
+                        (fun a b -> not (Sop.Context.input_changed (Lazy.force lowered.reads) a b))
+                        k.time time
                  || (now -. k.stamp < k.gap && Option.is_some k.time = Option.is_some time)))
         | None -> true
       in

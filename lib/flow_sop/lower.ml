@@ -51,6 +51,7 @@ type t = {
   volatile : unit Network.Int_map.t;
   plan : E.plan;
   image_sites : Workspace.path option array;
+  reads : Sop.Context.Dependencies.t Lazy.t;
   states : E.value list;
   evaluated : E.t;
   approx : Workspace.Paths.t;
@@ -138,6 +139,7 @@ and zinfo = {
   root : int;
   order : int list;
   live : bool;
+  reads : Sop.Context.Dependencies.t; (* the input slices the zone's arguments read *)
   stateful : bool;
   captures : int list;
   ekey : string option;
@@ -2835,6 +2837,16 @@ struct
           in
           any lo
         in
+        let reads =
+          let found = ref Sop.Context.Dependencies.static in
+          for id = lo to hi - 1 do
+            List.iter
+              (fun (_, v) ->
+                found := Sop.Context.Dependencies.union !found (Attribute_kernel.input_reads v))
+              plan.nodes.(id).args
+          done;
+          !found
+        in
         let stateful =
           let rec any id =
             id < hi
@@ -2850,6 +2862,7 @@ struct
             preview = None;
             root;
             live;
+            reads;
             stateful;
             order = Hashtbl.fold (fun id () l -> id :: l) seen [] |> List.sort Int.compare;
             captures = List.rev !caps;
@@ -3374,7 +3387,7 @@ struct
       ~report:(fun elements ->
         Atomic.set z.count (Array.length elements);
         Atomic.set z.positions (Array.map (fun (e : Zone.element) -> e.position) elements))
-      ~live:z.live ~stamp ~kind:z.kind ?key:z.key ?select ~source_attribute ~source_base:z.base
+      ~live:z.live ~reads:z.reads ~stamp ~kind:z.kind ?key:z.key ?select ~source_attribute ~source_base:z.base
       ~inputs
       ~body:(fun ~inputs ~context ->
         instantiate ?state ~outer ~live:(Sop.Context.input context) z ~inputs)
@@ -4263,6 +4276,15 @@ struct
       volatile = !volatile_nodes;
       plan = evaluated.plan;
       image_sites;
+      reads =
+        lazy
+          (let found = ref Sop.Context.Dependencies.static in
+           let add v =
+             found := Sop.Context.Dependencies.union !found (Attribute_kernel.input_reads v)
+           in
+           Array.iter (fun (n : E.node) -> List.iter (fun (_, v) -> add v) n.args) evaluated.plan.nodes;
+           List.iter add evaluated.states;
+           !found);
       states = evaluated.states;
       evaluated;
       approx = checked.approx;

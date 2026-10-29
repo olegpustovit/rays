@@ -2577,7 +2577,7 @@ let run_idle_follow () =
   (graph scene :context scene
     (let* [s (scene/geometry (ref sea) :name "Sea")
            camera (scene/camera :eye [7.0 4.0 7.0] :target [0 0 0] :fov 40 :follow_viewport true)
-           key (scene/light :name "Key" :translate [4 8 2])]
+           key (scene/light :name "Key" :translate [4 8 2] :intensity (+ 40.0 (* 10.0 (sin t))))]
       (scene/root (scene/merge s camera key) :width 960 :height 640 :renderer "Path traced" :max_spp 64)))
   (graph editor :context editor (ui/workspace (ui/split "horizontal" (ui/graph "scene") (ui/inspector)))))|})
   and count = ref 0 in
@@ -2593,10 +2593,12 @@ let run_idle_follow () =
     step []
   done;
   let doc = E3.workspace !e and prepared = E3.prepared !e and status = E3.Private.status_text !e in
+  let scene = E3.Private.resolved_scene !e in
   (* the graph reads only [t]: a roaming pointer over the picture is no reason to cook *)
   for i = 1 to 20 do
     step ~at:(450. +. float i, 300. -. float i) []
   done;
+  check (E3.Private.resolved_scene !e == scene) "a roaming pointer re-resolved the scene";
   check (E3.workspace !e == doc) "an idle frame wrote the document";
   check (Option.equal ( == ) (E3.prepared !e) prepared) "an idle frame cooked a new displayed mesh";
   check

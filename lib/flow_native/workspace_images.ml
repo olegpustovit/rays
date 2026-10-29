@@ -67,7 +67,7 @@ type t = {
   source_cache : source Sources.t;
   capture_cache : (int * captured) Sources.t;
   mutable source_ids : int list array;
-  mutable freshness : (bool * bool) array;
+  mutable freshness : (bool * P.Context.Dependencies.t) array;
   mutable qualification :
     (E.plan * Flow.Workspace.Paths.t * Flow.Workspace.path option array) option;
   mutable arguments : I.program option array;
@@ -426,12 +426,14 @@ let image_dependencies plan root =
   let nodes = Array.make (Array.length plan.E.nodes) false
   and ids = ref []
   and stateful = ref false
-  and dynamic = ref false
+  and reads = ref P.Context.Dependencies.static
   and functions = Functions.create 8
   and residuals = Residuals.create 8 in
   let rec visit value =
     stateful := !stateful || E.state_dependent value;
-    dynamic := !dynamic || E.is_live value || E.frame_dependent value;
+    reads := P.Context.Dependencies.union !reads (Flow_sop.Attribute_kernel.input_reads value);
+    if E.is_live value && not (E.frame_dependent value) then
+      reads := P.Context.Dependencies.(union !reads (one Input));
     match value with
     | E.Deferred (ty, id) when Flow.Ty.is_geometry ty -> ids := id :: !ids
     | E.Deferred (_, id) when id >= 0 && id < Array.length nodes && not nodes.(id) ->
@@ -448,7 +450,7 @@ let image_dependencies plan root =
     | _ -> ()
   in
   visit (E.Deferred (Flow.Ty.image, root));
-  (List.sort_uniq Int.compare !ids, (!stateful, !dynamic || !stateful))
+  (List.sort_uniq Int.compare !ids, (!stateful, !reads))
 
 let current ?(sources = []) t ~state ~live plan (node : E.node) (old : stamp) =
   if
@@ -457,7 +459,7 @@ let current ?(sources = []) t ~state ~live plan (node : E.node) (old : stamp) =
     || node.id >= Array.length t.freshness
   then false
   else
-    let stateful, dynamic = t.freshness.(node.id) in
+    let stateful, reads = t.freshness.(node.id) in
     let prepared =
       match node.kind with
       | "image/map" -> old.serial = t.serial && Option.is_some t.maps.(node.id)
@@ -472,8 +474,8 @@ let current ?(sources = []) t ~state ~live plan (node : E.node) (old : stamp) =
       | _ -> true
     in
     prepared && old.sources = sources
-    && ((not dynamic)
-       || Input.equal live old.frame
+    && (reads = P.Context.Dependencies.static
+       || (not (P.Context.input_changed reads old.frame live))
           && old.state_stamp = if stateful then E.state_stamp state else "")
 
 let bind t (lowered : Flow_sop.Lower.t) =
@@ -590,7 +592,7 @@ let prepare t plan =
           let dependencies =
             Array.map
               (fun (n : E.node) ->
-                if n.ty = Flow.Ty.image then image_dependencies plan n.id else ([], (false, false)))
+                if n.ty = Flow.Ty.image then image_dependencies plan n.id else ([], (false, P.Context.Dependencies.static)))
               plan.nodes
           in
           t.source_ids <- Array.map fst dependencies;
