@@ -88,6 +88,7 @@ module View : sig
     ?tex_coords:Rays_math.Vec2.t array ->
     ?host:(unit -> t) ->
     ?bounds:(unit -> (Rays_math.Vec3.t * Rays_math.Vec3.t) option) ->
+    ?derived:bool ->
     key:string ->
     normals:bool ->
     keep:(unit -> unit) ->
@@ -109,6 +110,11 @@ module View : sig
 
   val device : t -> (string * bool) option
   (** A device mesh's key and whether it carries normals. *)
+
+  val derived_normals : t -> bool
+  (** Whether a device mesh's normals were made from its positions for display ([~derived]): it has
+      none of its own, so a path tracer reads its host copy and cusps it as any mesh without
+      normals. *)
 
   val triangle_count : t -> int
 end

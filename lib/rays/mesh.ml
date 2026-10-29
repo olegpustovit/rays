@@ -41,6 +41,9 @@ type device = {
   key : string;
   count : int;
   device_normals : bool;
+  derived : bool;
+      (* its normals made from its positions for display (it has none of its own): a tracer, which
+         cusps a mesh without normals, reads the host copy *)
   keep : unit -> unit;
   host : (unit -> t) option;
       (* the mesh as the host builds it (reading the positions back), made once, for a reader of
@@ -298,8 +301,8 @@ module View = struct
   let create_packed_owned = create_packed_owned
   let create_packed_shared = create_packed_owned
 
-  let create_device ?(mode = Triangles) ?indices ?colors ?tex_coords ?host ?bounds ~key ~normals
-      ~keep count =
+  let create_device ?(mode = Triangles) ?indices ?colors ?tex_coords ?host ?bounds
+      ?(derived = false) ~key ~normals ~keep count =
     let host =
       Option.map
         (fun make ->
@@ -356,11 +359,20 @@ module View = struct
                   tex_coords;
                   device =
                     Some
-                      { key; count; device_normals = normals; keep; host; device_bounds = bounds };
+                      {
+                        key;
+                        count;
+                        device_normals = normals;
+                        derived;
+                        keep;
+                        host;
+                        device_bounds = bounds;
+                      };
                 }
           | Error message, _ | _, Error message -> Error message)
 
   let device (mesh : t) = Option.map (fun d -> (d.key, d.device_normals)) mesh.device
+  let derived_normals (mesh : t) = match mesh.device with Some d -> d.derived | None -> false
 
   let triangle_count (mesh : t) =
     match mesh.mode with

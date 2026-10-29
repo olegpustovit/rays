@@ -137,7 +137,7 @@ let wire_scene scene =
   Scene.D3.create ~samples:1 (List.rev !nodes)
 
 (* The scene's one drawing when it is a device mesh in place (one batch, no instances, no texture,
-   identity transform): the tracer reads it where the device holds it (Rays_pathtracer.mesh), never
+   identity transform, normals of its own): the tracer reads it where the device holds it (Rays_pathtracer.mesh), never
    converted or cached, so a deforming mesh refits its structure instead of being read back. *)
 let device_drawing scene =
   let batches = ref [] in
@@ -148,6 +148,7 @@ let device_drawing scene =
   | [ ((drawing : Scene.D3.Walk.drawing), None) ]
     when drawing.texture = None
          && Mesh.View.device drawing.mesh <> None
+         && (not (Mesh.View.derived_normals drawing.mesh))
          && Rays_math.Mat4.nearly_equal drawing.transform Rays_math.Mat4.identity ~eps:0. ->
       Some drawing
   | _ -> None

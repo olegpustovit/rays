@@ -215,6 +215,9 @@ let scene3 ?explosion ?device surface =
                     (Mesh.View.create_device ~mode ?indices
                        ~host:(fun () -> host geometry)
                        ~bounds:(fun () -> Geometry_view.bounds geometry)
+                       ~derived:
+                         (mode = Mesh.Triangles
+                         && Geometry.find_attribute ~owner:Point "N" geometry = None)
                        ~key ~normals ~keep count)))
         with
         | Some mesh -> mesh
