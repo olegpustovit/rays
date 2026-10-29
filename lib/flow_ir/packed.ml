@@ -3191,14 +3191,16 @@ module Host = struct
 
   let source_shapes (t : t) = Array.map (fun (r, term) -> shape r term) t.sources
 
-  (* [array/range n] as floats (through bindings): 0., 1., ... a device makes from the element index *)
+  (* [array/range n] (through bindings): 0, 1, ... a device makes from the element index (as
+     floats, the device's integers) *)
   let rec index_range residual (term : W.term) =
     match term.node with
     | W.Ref_binding (name, []) -> (
         match List.assoc_opt name (E.Residual.residual_view residual).bindings with
         | Some (E.Residual r) -> index_range r (E.Residual.residual_view r).term
         | _ -> None)
-    | Op { op = "array/range"; args = [ ("count", n) ]; _ } when term.ty = Ty.Array Ty.Float ->
+    | Op { op = "array/range"; args = ("count", n) :: _; _ }
+      when term.ty = Ty.Array Ty.Float || term.ty = Ty.Array Ty.Int ->
         Some (residual, n)
     | _ -> None
 
@@ -3408,13 +3410,24 @@ module Host = struct
                 if Array.for_all2 ( == ) items made then value else E.List made
             | _ -> value
           in
+          (* a table that is one read of data the device holds ([sop/attr g :P] gathered by
+             index) is its placeholder, bound there as the table, never read back *)
+          let held value =
+            match (resident, value) with
+            | Some resident, (E.Source _ | E.Struct (_, Ty.Array _, _)) ->
+                Option.map fst (resident value)
+            | _ -> None
+          in
           let uniforms =
             Array.map
               (fun value ->
-                get
-                  (force_values ~state ?resolve ~live
-                     ~residual:(fun residual -> Ok (uniform residual))
-                     value))
+                match held value with
+                | Some placeholder -> placeholder
+                | None ->
+                    get
+                      (force_values ~state ?resolve ~live
+                         ~residual:(fun residual -> Ok (uniform residual))
+                         value))
               t.uniforms
           in
           let frame =
@@ -3441,11 +3454,26 @@ module Host = struct
         | Out_of_memory ->
             Error (Diagnostic.error ~code:"E_ARRAY_MEMORY" "Frame data exceeds available memory."))
 
+  (* An integer array's float copy, kept by the array's identity (8 arrays): a source or table made
+     once per topology (a CSR, a selection) is converted once, and stays the array a device's
+     identity check finds uploaded, instead of a fresh copy uploaded with every prepare. *)
+  let int_floats =
+    let cache = Lru.Identity_list.create ~equal:( == ) 8 and lock = Mutex.create () in
+    fun (values : int array) ->
+      Mutex.protect lock (fun () ->
+          match Lru.Identity_list.find cache values with
+          | Some floats -> floats
+          | None ->
+              let floats = Array.map float_of_int values in
+              Lru.Identity_list.add cache values floats;
+              floats)
+
   let device_inputs (values : value_inputs) =
     let floats = function
       | E.Float_array values | Vec2_array values | Vec3_array values | Vec4_array values ->
           Some values
-      | E.Int_array values -> Some (Array.map float_of_int values)
+      | E.Int_array [||] -> Some [||]
+      | E.Int_array values -> Some (int_floats values)
       | _ -> None
     in
     ({

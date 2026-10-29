@@ -246,7 +246,8 @@ module Host : sig
      array is then empty. [resident v], for a host source [v] the resolve would answer, is data the
      caller holds on the device: its placeholder array and element count. A source that is exactly
      such a read is that placeholder (counted as its count), never built; one that computes over it
-     is evaluated again with [resolve]. [source] lets the caller supply an immutable cached
+     is evaluated again with [resolve]; a uniform that is exactly such a read (a table gathered by
+     index) is that placeholder too. [source] lets the caller supply an immutable cached
      source; its storage type is checked as usual. [index] (false): an {!index_sources} source is
      not built either, its length is its count (for a device that makes it from the element index). *)
   val prepare_values :
@@ -272,7 +273,8 @@ module Host : sig
   val source_shapes : t -> shape array
 
   val index_sources : t -> bool array
-  (** Sources that are [array/range n] as floats, [0., 1., ...]: a device binds its index buffer. *)
+  (** Sources that are [array/range n] ([0, 1, ...], float or int): a device binds its index buffer.
+  *)
 
   val uniform_shapes : t -> shape array
   val device_inputs : value_inputs -> inputs

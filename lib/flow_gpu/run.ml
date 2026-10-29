@@ -68,22 +68,23 @@ let pool () =
 (* Kept outputs a later dispatch may bind by their placeholder, on the initial domain. *)
 let bindable : (float array * kept Weak.t) list ref = ref []
 
-(* The held buffer a placeholder stands for, while its holder has not read it back (its buffer is
-   then released) and it covers [length] floats. *)
-let held_input array ~length =
+(* The held buffer a placeholder stands for and the floats it holds, while its holder has not read
+   it back (its buffer is then released). *)
+let held array =
   bindable := List.filter (fun (_, w) -> Weak.check w 0) !bindable;
   List.find_map
     (fun (p, w) ->
       if p != array then None
       else
         Option.bind (Weak.get w 0) (fun kept ->
-            if
-              Atomic.get kept.planes = None
-              && (not kept.destroyed)
-              && kept.kept_count * kept.kept_width >= length
-            then Some kept.kept_buffer
+            if Atomic.get kept.planes = None && not kept.destroyed then
+              Some (kept.kept_buffer, kept.kept_count * kept.kept_width)
             else None))
     !bindable
+
+(* ... as an input, when it covers [length] floats *)
+let held_input array ~length =
+  Option.bind (held array) (fun (buffer, floats) -> if floats >= length then Some buffer else None)
 
 type t = {
   device : B.device;
@@ -332,6 +333,14 @@ let msl_scene t = t.msl.Emit.scene
 let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(bound = fun _ -> None)
     ?(bound_table = fun _ -> None) ?scene ?(extras = no_extras) ?(resident = []) t
     (values : P.Host.inputs) =
+  (* a table another runner keeps on the device (its placeholder) is bound to its buffer *)
+  let bound_table u =
+    match bound_table u with
+    | Some _ as b -> b
+    | None when u < Array.length values.tables && Array.length values.tables.(u) <= 4 ->
+        held values.tables.(u)
+    | None -> None
+  in
   (* a source another runner keeps on the device (its placeholder) is bound to its buffer *)
   let bound index =
     match bound index with

@@ -1182,3 +1182,21 @@ let () =
   match varying with
   | E.Residual r -> assert (Result.is_error (P.compile_result r (E.Residual.residual_view r).term))
   | _ -> assert false
+
+(* an integer source or table made once (a CSR) converts to the same float array each prepare, so a
+   device's identity check does not upload it again *)
+let () =
+  let csr = Array.init 4096 Fun.id in
+  let inputs () =
+    P.Host.device_inputs
+      {
+        arrays = [| E.Int_array csr |];
+        uniforms = [| E.Int_array csr |];
+        frame = [||];
+        count = 4096;
+      }
+  in
+  let a = inputs () and b = inputs () in
+  assert (a.arrays.(0) == b.arrays.(0) && a.tables.(0) == b.tables.(0));
+  assert (a.arrays.(0).(4095) = 4095.);
+  print_endline "integer sources and tables convert once per array"

@@ -6,7 +6,9 @@
    its noise and P agree with the CPU within float32 tolerance and N exactly (a translation keeps
    it). Two consecutive fused writes run on the device with nothing uploaded or read back on a
    recook (the second binds the first's resident P), and reading the second's P materialises one
-   output. Once the geometries are collected no buffer is held. CPU and GPU cook times are
+   output. A fused write that gathers the first's P by index binds it as its table where the device
+   holds it (and its Int range as the host's index buffer): its recook uploads and reads nothing,
+   and its values agree with the CPU. Once the geometries are collected no buffer is held. CPU and GPU cook times are
    printed, median of 5. A session that drops the first write (one entry) frees its unread outputs
    at once, since it never handed them out. One session toggles an edit (two lowerings) with every
    result kept: nothing is uploaded or read back, a result 15 cooks old reads as the latest, and
@@ -30,6 +32,19 @@ let consecutive =
      (sop/transform :translate [0.0 1.0 0.0])) b (-> a (sop/attribute_noise :name \"n2\" :seed 3) \
      (sop/transform :translate [1.0 0.0 0.0]))] (sop/merge b (sop/attribute_noise a :name \
      \"n2\")))))"
+    side side
+
+(* A fused write over the first that gathers its P by index ([q] is P reversed): the gather's table
+   is the first's resident P, bound where the device holds it, and the index an Int range the host's
+   index buffer makes. *)
+let gathered =
+  Printf.sprintf
+    "(workspace chain (graph g :context sop (let* [a (-> (sop/grid :counts \"Point counts\" \
+     :connectivity \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7) \
+     (sop/transform :translate [0.0 1.0 0.0])) n (sop/count a :points) pa (sop/attr a :P) b (-> a \
+     (sop/with_attr \"q\" (exact (map (fn [(i : int)] (array/nth pa (int/sub n (int/add i 1)))) \
+     (array/range n :type int)))) (sop/attribute_noise :name \"n2\" :seed 3) (sop/transform \
+     :translate [1.0 0.0 0.0]))] (sop/merge b (sop/attribute_noise a :name \"n2\")))))"
     side side
 
 (* the root, or with [~after] the first write of N after the first write of [after]: the last
@@ -228,6 +243,49 @@ let () =
           Printf.printf
             "two consecutive fused writes: GPU recook %.3f s, largest difference %.2e\n%!"
             chained_seconds !worst;
+          (* a gather by index of the first write's P: its table is bound where the device holds
+             it, nothing is uploaded or read back on a recook *)
+          let gather = node ~gpu:counted ~text:gathered ~after:"q" () in
+          let reference, _ = cook (node ~text:gathered ~after:"q" ()) in
+          ignore (cook gather);
+          dispatches := 0;
+          let before = stats () in
+          let table, _ = cook gather in
+          let after = stats () in
+          if !dispatches <> 2 then
+            failwith (Printf.sprintf "the gathered chain took %d dispatches" !dispatches);
+          if
+            after.input_uploads <> before.input_uploads
+            || after.readback_bytes <> before.readback_bytes
+            || after.materialisations <> before.materialisations
+          then
+            failwith
+              (Printf.sprintf "the gathered table moved data: %d uploads, %d bytes, %d read"
+                 (after.input_uploads - before.input_uploads)
+                 (after.readback_bytes - before.readback_bytes)
+                 (after.materialisations - before.materialisations));
+          let q_of geometry =
+            match Rdk.Geometry.find_attribute ~owner:Point "q" geometry with
+            | Some a -> (
+                match Rdk.Attribute.View.storage a with
+                | Rdk.Attribute.Float3 d -> d
+                | _ -> failwith "q is not vec3")
+            | None -> failwith "no q"
+          in
+          let expected = q_of reference and got = q_of table in
+          let worst = ref 0. in
+          for i = 0 to count - 1 do
+            let x, y, z = Rdk.Packed.Float3.get expected i
+            and gx, gy, gz = Rdk.Packed.Float3.get got i in
+            worst :=
+              Float.max !worst
+                (Float.max
+                   (Float.abs (x -. gx))
+                   (Float.max (Float.abs (y -. gy)) (Float.abs (z -. gz))))
+          done;
+          if !worst > 1e-5 then
+            failwith (Printf.sprintf "the gathered q differs from the CPU by %.3e" !worst);
+          Printf.printf "a gather of a resident P by index: largest difference %.2e\n%!" !worst;
           (* one entry: the second write evicts the first, whose P and N no one was handed (the
              second keeps its noise), so they are freed at the cook's end, not collected *)
           let session =

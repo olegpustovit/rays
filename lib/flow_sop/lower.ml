@@ -1452,7 +1452,8 @@ let fused_entries args =
         | _ -> fail "E_LOWER" "A fused write's earlier writes are attribute/type/values records")
   | _ -> []
 
-(* whether a write's values map an index ([array/range]): a generated attribute (a grid's P) *)
+(* whether a write's values map an index ([array/range]); one that reads no attribute too is a
+   generated attribute (a grid's P) *)
 let indexed value =
   let seen = Hashtbl.create 16 in
   let rec term (t : Workspace.term) =
@@ -1627,7 +1628,8 @@ let fold_writes ~device (plan : E.plan) =
   let indexed_fold (u : E.node) id =
     (* a fused write's indexed entries were decided when they folded into it *)
     List.mem_assoc fused_chain u.args
-    || (not (indexed (List.assoc "values" u.args)))
+    || (let values = List.assoc "values" u.args in
+        not (indexed values && Attribute_kernel.reads values = []))
     || (device && List.mem (text u "attribute") (List.map Option.some (writes_from id)))
   in
   let fold id (w : E.node) =
