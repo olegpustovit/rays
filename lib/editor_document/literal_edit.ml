@@ -49,8 +49,17 @@ let rec literal (form : S.t) =
         | _ -> None)
     | _ -> None
 
+(* [f] over every term, bottom up; a term whose children and [f] leave it as it is stays physically,
+   so a patched workspace shares what the edit did not touch (the library's terms, a graph before
+   the literal) *)
 let rec map_term f (term : W.term) =
-  let go = map_term f and named = List.map (fun (name, t) -> (name, map_term f t)) in
+  let changed = ref false in
+  let go t =
+    let t' = map_term f t in
+    if t' != t then changed := true;
+    t'
+  in
+  let named = List.map (fun (name, t) -> (name, go t)) in
   let node : W.node =
     match term.node with
     | Call call -> Call { call with args = named call.args }
@@ -86,7 +95,7 @@ let rec map_term f (term : W.term) =
     | Expanded macro -> Expanded { macro with body = go macro.body }
     | (Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _) as node -> node
   in
-  f { term with node }
+  f (if !changed then { term with node } else term)
 
 let rec child form = function
   | [] -> Some form
@@ -244,6 +253,7 @@ let patch catalog (workspace : W.t) op =
                                   if term.form.id = before.id then
                                     let ty, _, node = Option.get (literal form) in
                                     { term with ty; node; form }
+                                  else if form == term.form then term
                                   else { term with form }
                                 in
                                 let argument = map_term update argument in

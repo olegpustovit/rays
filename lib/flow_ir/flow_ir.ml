@@ -547,6 +547,40 @@ module Executor = struct
     record_region : (string list * Packed.t) option Lazy.t;
   }
 
+  (* A residual is immutable: its strict lowering, and the captures that lowering took in, are kept
+     for its next strict compile (a write's check, its program and its device record compile one
+     value three times) *)
+  module Strict = Ephemeron.K1.Make (struct
+    type t = E.residual
+
+    let equal = ( == )
+    let hash = E.Residual.residual_id
+  end)
+
+  let stricts = Domain.DLS.new_key (fun () -> Strict.create 64)
+
+  let strict_lower ?trace residual =
+    let lower () =
+      let inline = ref [] in
+      let core =
+        Core_lower.lower ?trace ~strict:true
+          ~lowered:(fun r -> inline := E.Residual.residual_id r :: !inline)
+          residual
+      in
+      (core, !inline)
+    in
+    if trace <> None then lower ()
+    else
+      let table = Domain.DLS.get stricts in
+      match Strict.find_opt table residual with
+      | Some kept -> kept
+      | None ->
+          let kept = lower () in
+          (* ponytail: a whole clear at 4096 residuals, as Eval's free-name memo *)
+          if Strict.length table >= 4096 then Strict.clear table;
+          Strict.replace table residual kept;
+          kept
+
   let compile ?trace ?profile ?(strict = false) ?(approx = W.Paths.empty) ?sink
       ?(count_source = fun _ _ -> None) v =
     let rec unsupported_source residual (term : W.term) =
@@ -614,11 +648,9 @@ module Executor = struct
       in
       if view.previous || element_capture || E.state_dependent (E.Residual residual) then Ok ()
       else
-        match
-          Core_lower.lower ?trace ~strict:true
-            ~lowered:(fun r -> Hashtbl.replace inline (E.Residual.residual_id r) ())
-            residual
-        with
+        let core, lowered = strict_lower ?trace residual in
+        List.iter (fun id -> Hashtbl.replace inline id ()) lowered;
+        match core with
         | Ok core when Array.find_map unsupported_packed_source core.Core.regions = None -> Ok ()
         | Ok _ ->
             Error
