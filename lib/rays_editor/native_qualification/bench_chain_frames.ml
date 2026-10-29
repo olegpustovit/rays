@@ -1,9 +1,10 @@
 (* An animated chain: grid > attribute_noise (offset driven by frame/input's t) > transform, 1M
    points (GRID_SIDE), cooked frame after frame as the editor does (Value_lane.resolve, then one
-   session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments; FRAMES (12). Prints
-   per frame: seconds, dispatches, uploads, pipelines compiled, whether P is resident, the seconds
-   and bytes read back of P's bounds (the selected box and framing, Geometry_view.bounds), and
-   noise[1] (a read back). *)
+   session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments; FRAMES (12).
+   Prints per frame: seconds (and the resolve's), dispatches, buffers created, uploads, pipelines
+   compiled, whether P is resident, the seconds and bytes read back of P's bounds (the selected box
+   and framing, Geometry_view.bounds), the seconds reading P, and noise[1] (a read back); NODES=1
+   also each node's own seconds in the session. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 

@@ -632,6 +632,15 @@ s per frame (0.0071 s for 512 squared) against 0.151 s on the CPU (was a card re
 on the CPU each frame), largest difference 2.6e-7. Of the 7 ms at 512 squared, about 1.6 ms is the
 dispatch as the noise-driven chain's; the rest is the matrix's Lisp evaluation per frame (its
 uniforms, the deferred validation and the two delete guards, each evaluating the matrix).
+Profiled (`bench_chain_frames.exe` with `NODES=1`, per-node session timings, 512 squared): the
+fused write took 4.9 ms, of which 3.7-4.0 ms was making its ten uniforms
+(`Packed.Host.prepare`): the live matrix is a record whose rows are residuals, and only a
+uniform's top-level residual bindings were made once, so every uniform that read the matrix (its
+four rows, the identity test, the inverse) walked all four rows again. Rows inside a record or list
+binding are made once now: 1.4-1.5 ms, and the frame 7.2 ms -> 4.4 ms (`test_chain_frames_native`
+with `XDRIVE`: 0.0044 s for 512 squared, 0.0057 s for 1M, was 0.0071 and 0.0086). Left: each delete
+guard walks the matrix and its inverse again (0.6 ms each; the two guards are one residual, but
+separate nodes and walks), and about 0.8 ms of the first delete is waiting for the dispatch.
 
 A transform whose group the cook decides (a native group node upstream) is a body cooked behind its
 card: its normals' writes read every owner's N eagerly there, so a mesh without vertex N failed
