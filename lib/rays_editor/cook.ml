@@ -186,7 +186,7 @@ let force value = { value with force = true }
 
 (* [objects] are the visible geometry objects as (id, network graph,
    display node); [frame_request] is (object, node) to frame. *)
-let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun () -> ()) value
+let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun () -> Unix.sleepf 0.0005) value
     ~settings ~objects ~edit_error ~effects ~timeline_changes ~timeline ~frame ~frame_request =
   Flow.Phase_timer.measure "cook" (fun () ->
       if
@@ -442,7 +442,8 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
       in
       (* A fixed-step run waits for the cook it just submitted, serving the device meanwhile: a cook
      whose regions run on the GPU queues them for this (the initial) domain, so a blocking await
-     would deadlock. ponytail: a 0.5 ms poll, a condition both sides signal if this ever shows up *)
+     would deadlock. [pump] serves and then sleeps: on a queued request (the editor's, a pipe) or
+     at most 0.5 ms, which is what bounds noticing the cook's own completion. *)
       let pieces, error, seconds, prepared_changed =
         if submit && Option.is_none error && value.await then (
           let rec settle () =
@@ -450,7 +451,6 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
             | Some completion -> completion
             | None ->
                 pump ();
-                Unix.sleepf 0.0005;
                 settle ()
           in
           let awaited = settle () in

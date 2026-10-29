@@ -54,6 +54,8 @@ type t = {
   mutable measurement_ready : bool;
   jobs_lock : Mutex.t;
   jobs_ready : Condition.t;
+  wake : Unix.file_descr * Unix.file_descr;
+      (** a byte per queued request: {!wait} sleeps on it, so the owner wakes at once, not at a poll *)
   jobs : job Queue.t;
   mutable mailbox_closed : bool;
   measured : (string * int, float option) Measurements.t;
@@ -84,6 +86,11 @@ let create ?(clock = Unix.gettimeofday) () =
     policy = G.Measured;
     jobs_lock = Mutex.create ();
     jobs_ready = Condition.create ();
+    wake =
+      (let r, w = Unix.pipe ~cloexec:true () in
+       Unix.set_nonblock r;
+       Unix.set_nonblock w;
+       (r, w));
     jobs = Queue.create ();
     mailbox_closed = false;
     measured = Measurements.create ~equal:(fun (a, n) (b, m) -> String.equal a b && n = m) 64;
@@ -222,6 +229,8 @@ let route ?(waits = false) t f =
       raise (Diagnostic.Error (error "The workspace GPU service is closed."))
     end;
     Queue.add job t.jobs;
+    (try ignore (Unix.single_write_substring (snd t.wake) "." 0 1)
+     with Unix.Unix_error _ -> () (* a full pipe is already a wake *));
     while not job.finished do
       Condition.wait t.jobs_ready t.jobs_lock
     done;
@@ -289,9 +298,9 @@ let proxy t =
    of a millisecond after the last returns. The pump serves what is queued, then waits [follow_up]
    for the next link, so a chain takes one pump rather than a frame per request. A settle is not
    waited for: it blocks until the GPU finishes, which by the next pump it usually has. *)
-let follow_up = 0.0005
+let follow_up_seconds = 0.0005
 
-let pump t =
+let pump ?(follow_up = true) t =
   if not (Domain.is_main_domain ()) then invalid_arg "Workspace_gpu.pump: initial domain required";
   let take ~chained =
     Mutex.lock t.jobs_lock;
@@ -316,7 +325,7 @@ let pump t =
     match take ~chained:false with
     | Some job ->
         serve job;
-        follow (Unix.gettimeofday () +. follow_up) 1
+        if follow_up then follow (Unix.gettimeofday () +. follow_up_seconds) 1 else drain ()
     | None -> ()
   (* the wait reads the queue without its lock (a racy emptiness check; the take locks) and the
      clock every 64 spins, so it neither contends with the worker nor allocates *)
@@ -325,7 +334,7 @@ let pump t =
       match take ~chained:true with
       | Some job ->
           serve job;
-          follow (Unix.gettimeofday () +. follow_up) 1
+          follow (Unix.gettimeofday () +. follow_up_seconds) 1
       | None -> ()
     else if spins land 63 = 0 && Unix.gettimeofday () >= until then ()
     else begin
@@ -334,6 +343,19 @@ let pump t =
     end
   in
   drain ()
+
+(* The owner sleeps until a request is queued or [timeout] seconds pass (the cook finishing signals
+   nothing here, so a caller waiting on that passes a short timeout). *)
+let wait t ~timeout =
+  if not (Domain.is_main_domain ()) then invalid_arg "Workspace_gpu.wait: initial domain required";
+  if Mutex.protect t.jobs_lock (fun () -> Queue.is_empty t.jobs) then begin
+    (match Unix.select [ fst t.wake ] [] [] timeout with
+    | [], _, _ -> ()
+    | _ -> (
+        let drained = Bytes.create 64 in
+        try while Unix.read (fst t.wake) drained 0 64 = 64 do () done with Unix.Unix_error _ -> ())
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> ())
+  end
 
 (* The frame is the pump: cook workers queue device requests, served here between frames' work. *)
 let config ?(fast = false) t : G.config = { backend = Some (proxy t); fast; policy = t.policy }
@@ -566,6 +588,8 @@ let close t =
     Hashtbl.reset t.bound;
     List.iter (fun (_, release) -> release ()) t.releasing;
     t.releasing <- [];
+    Unix.close (fst t.wake);
+    Unix.close (snd t.wake);
     Slots.clear t.mark_sets;
     Images.clear t.images;
     Option.iter

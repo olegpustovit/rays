@@ -193,6 +193,22 @@ let () =
   done;
   Domain.join worker;
   Flow_native.Workspace_gpu.close chained;
+  (* [wait] sleeps until a request is queued: a request sent while the owner waits wakes it long
+     before a 10 s timeout, and a stale wake byte only makes one wait return early. *)
+  let sleeper = Flow_native.Workspace_gpu.create () in
+  let sent = Atomic.make false in
+  let sender =
+    Domain.spawn (fun () ->
+        Unix.sleepf 0.05;
+        Flow_native.Workspace_gpu.Private.on_owner_for_test sleeper (fun () -> Atomic.set sent true))
+  in
+  let start = Unix.gettimeofday () in
+  Flow_native.Workspace_gpu.wait sleeper ~timeout:10.;
+  assert (Unix.gettimeofday () -. start < 5.);
+  Flow_native.Workspace_gpu.pump ~follow_up:false sleeper;
+  assert (Atomic.get sent);
+  Domain.join sender;
+  Flow_native.Workspace_gpu.close sleeper;
   print_endline
     "Workspace GPU service: worker cook is pumped by its owner, selects CPU when slower, and reads \
      back when cheaper; a pump never takes a settle as a follow-up"

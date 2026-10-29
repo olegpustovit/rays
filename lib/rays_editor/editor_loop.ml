@@ -437,7 +437,9 @@ let update_with value frame ~inspector =
           (Flow_native.Workspace_images.payload value.host.images)
           (fun () ->
             Editor_frame.update ~gpu
-              ~pump:(fun () -> Flow_native.Workspace_gpu.pump value.host.gpu)
+              ~pump:(fun () ->
+                Flow_native.Workspace_gpu.pump ~follow_up:false value.host.gpu;
+                Flow_native.Workspace_gpu.wait value.host.gpu ~timeout:0.0005)
               ~image:(Flow_native.Workspace_images.peek value.host.images lowered.plan)
               ~host_events:(Flow_native.Workspace_host.take_events value.host)
               value.core ~all_ui_visible:visible ~text_focus:(Pxui.Ui.text_input_focused ui)

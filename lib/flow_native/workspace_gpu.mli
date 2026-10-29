@@ -9,8 +9,13 @@ val create : ?clock:(unit -> float) -> unit -> t
 val config : ?fast:bool -> t -> Flow_ir.Gpu.config
 val with_backend : ?fast:bool -> t -> (Flow_ir.Gpu.config -> 'a) -> 'a
 
-val pump : t -> unit
-(** Serve this workspace's queued GPU requests on the initial domain. *)
+val pump : ?follow_up:bool -> t -> unit
+(** Serve this workspace's queued GPU requests on the initial domain. [follow_up] (default true)
+    spins 0.5 ms after a request for the worker's next link of the chain; a caller that {!wait}s
+    passes false. *)
+
+val wait : t -> timeout:float -> unit
+(** Sleep on the initial domain until a request is queued or [timeout] seconds pass. *)
 
 val resident : Flow_ir.Gpu.config -> t -> Flow_ir.Core_exec.resident option
 

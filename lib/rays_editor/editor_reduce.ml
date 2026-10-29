@@ -897,7 +897,7 @@ module Frame_input = struct
   }
 end
 
-let reduce ?gpu ?(pump = fun () -> ()) (input : _ Frame_input.t) value (result : _ frame_result) =
+let reduce ?gpu ?(pump = fun () -> Unix.sleepf 0.0005) (input : _ Frame_input.t) value (result : _ frame_result) =
   let Frame_input.
         {
           carry_changed;
