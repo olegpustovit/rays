@@ -392,7 +392,9 @@ validity closure (a close destroys the buffer: a draw of it is then refused as s
 Scene3 vertex stage reads a device mesh at a stride of three floats from buffer 0 (normals from
 buffer 1, or (0, 0, 1)) when the draw's uniform word 79 (and 80) says so, the 24-byte record
 otherwise; indices and the 12-byte colour/uv record stay host bytes (for a plain point cloud the
-same bytes every frame). Ordering is explicit: the display binds only a settled output (its
+same bytes every frame; a triangle mesh's indices are packed once per topology and cached by the
+renderer under a key of their own, the `Gpu_vertices "borrow\nindices"` name). The World sun's
+depth pass binds the borrowed positions and reads them at word 79's stride too. Ordering is explicit: the display binds only a settled output (its
 dispatch completed, on the producer's queue), and a dropped display's buffers are released three
 bound displays later, not when the presenting queue completes. ponytail: that needs the renderer's
 completion epoch exposed to the producer, which a discrete backend will want anyway. The buffers

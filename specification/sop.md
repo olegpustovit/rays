@@ -525,26 +525,37 @@ relowering.
 Not yet, in order of value: (1) runners shared by equal programs: an edit relowers the workspace, so
 each fused write gets a new program, a new runner (fresh buffers, every input uploaded once) and
 its emission; deterministic return only recycles within a runner, so a host-wide pool of released
-buffers by capacity is the next step; (2) extending the display binding (below) to triangle meshes (they
-need a resident N or have their normals computed from P) and for colours or uv a device holds, and
-cooked bounds without reading P (the selected object's box and framing read it when asked); (3)
+buffers by capacity is the next step; (2) extending the display binding (below) to lit triangles
+without N (normals made from P on the device: the host's are float64 sums, so the pixels would
+differ) and to colours or uv a device holds, and cooked bounds without reading P (the selected
+object's box and framing read it when asked); (3)
 grid planes and `array/range` generated from the thread
 index (a new element-index instruction across the CPU blocks, MSL, SPIR-V and WGSL, and the grid's
 point map fused into the write); fills bound as uniforms.
 
 **Display binding.** A displayed point cloud whose P (and N, if it has one) the device still holds,
-with no colour, uv, piece or material to show, is drawn from the device: `Rdk_rays.Surface`
+or a triangle mesh (every primitive a triangle) whose P and point N it holds, with no colour, uv,
+vertex N, piece or material to show, is drawn from the device: `Rdk_rays.Surface`
 keeps it as a device preview on the cook worker (nothing read), and `Surface.scene3` binds it on
 the initial domain through the editor's `Flow_native.Workspace_gpu.display`
 (`Attribute_kernel.resident_vec3` finds the placeholders, `Flow_gpu.Run.pin` borrows the held
 buffers, `Renderer.register_gpu_positions` registers them, `Rays.Mesh.View.create_device` is the
-mesh; specification/backend.md). The mesh keeps the borrow: once collected, the registration and
-pins are released. Anything else (a triangle mesh, a host device, a closed runner) builds the host
-mesh as before, reading P. The cooked bounds a piece keeps are read when asked (framing, the
+mesh, with the topology's corners as its indices; specification/backend.md). The mesh keeps the
+borrow: once collected, the registration and pins are released. A device mesh also carries how to
+make its host copy (`create_device ?host`: `Rays_mesh.to_mesh`, reading P back, once): a reader
+of vertices (the path tracer, the World sun fit, a centroid) gets that copy, the raster lowering
+reads only the mesh's own arrays (`Mesh.View.unread`). Its indices are packed once per topology (8
+kept by the corners array's identity) and the renderer keeps them under their own key
+(`Gpu_vertices "borrow\nindices"`), so a frame's new borrow neither repacks, rehashes nor reuploads
+them. The World sun's depth pass reads a device mesh's positions as the colour pass does.
+Anything else (lit triangles without N, quads, a host device, a closed runner) builds the host mesh
+as before, reading P. The cooked bounds a piece keeps are read when asked (framing, the
 selected box), not per cook. Measured (`test_chain_frames_native`, M1, 2026-10-29): every frame of
 the animated 1M chain displays with nothing read back and the host display's pixels exactly,
 preparing and drawing a 256 x 256 canvas in 0.010 s against 0.142 s reading P back (0.0031 s
-against 0.025 s for 512 squared).
+against 0.025 s for 512 squared). A lit triangle grid (`CONNECTIVITY Triangles`, N transformed on
+the device) the same way: 1M points in 0.024 s against 0.125 s, 512 squared in 0.0069 s against
+0.035 s, pixels equal.
 
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's

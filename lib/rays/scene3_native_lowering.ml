@@ -868,35 +868,71 @@ let find_packed predicate =
     (Domain.DLS.get current_packed_cache);
   !found
 
-(* A device mesh's point draw: its identity indices and plain attribute record depend only on its
-   count, so frame after frame they are the same bytes (the renderer uploads them once). *)
-let device_points = Atomic.make None
+(* A device mesh's draw: its indices follow its topology (a triangle mesh's corners, the same array
+   frame after frame while the topology is; a cloud's count) and its plain attribute record its
+   count, so they are packed once, and the renderer keeps the indices under their own key, not per
+   borrow of the positions (Scene_execution's [Gpu_vertices "borrow\nindices"]). *)
+let device_indices = Atomic.make []
+let device_attributes = Atomic.make None
 
 let packed_of_device mode mesh (key, normals) =
-  let source = Mesh.View.packed_view mesh in
+  let source = Mesh.View.unread mesh in
   let count = Mesh.vertex_count mesh in
   let points = mode = Scene3.Vertices || source.mode = Mesh.Points in
   let plain = source.colors = None && source.tex_coords = None in
-  let indices, attributes =
-    match Atomic.get device_points with
-    | Some (n, indices, attributes) when n = count && plain -> (indices, Ok attributes)
-    | _ ->
-        let indices = pack_indices (Array.init count Fun.id)
-        and attributes = pack_attributes ~count source in
-        (match attributes with
-        | Ok attributes when plain -> Atomic.set device_points (Some (count, indices, attributes))
-        | _ -> ());
-        (indices, attributes)
+  let same (corners, m, n, _) =
+    m = mode && n = count && if points then corners == [||] else corners == source.indices
   in
-  match attributes with
-  | Ok attributes when points && count > 0 ->
+  let native =
+    match List.find_opt same (Atomic.get device_indices) with
+    | Some (_, _, _, packed) -> Some packed
+    | None ->
+        let made =
+          if points then Some (Ogpu.Render_pass.Point_list, Array.init count Fun.id)
+          else
+            Option.map
+              (fun indices ->
+                if mode = Scene3.Wireframe then
+                  (Ogpu.Render_pass.Line_list, unique_triangle_edges indices)
+                else (Ogpu.Render_pass.Triangle_list, indices))
+              (triangle_indices source.mode source.indices)
+        in
+        Option.map
+          (fun (primitive, indices) ->
+            let packed =
+              ( primitive,
+                pack_indices indices,
+                Array.length indices,
+                Printf.sprintf "scene3:device-indices:%d" (fresh_resource_id ()) )
+            in
+            Atomic.set device_indices
+              (List.filteri
+                 (fun i _ -> i < 8)
+                 (((if points then [||] else source.indices), mode, count, packed)
+                 :: Atomic.get device_indices));
+            packed)
+          made
+  in
+  let attributes =
+    match Atomic.get device_attributes with
+    | Some (n, attributes) when n = count && plain -> Ok attributes
+    | _ ->
+        let attributes = pack_attributes ~count source in
+        (match attributes with
+        | Ok attributes when plain -> Atomic.set device_attributes (Some (count, attributes))
+        | _ -> ());
+        attributes
+  in
+  match (native, attributes) with
+  | Some (primitive, indices, index_count, indices_key), Ok attributes
+    when count > 0 && index_count > 0 ->
       Ok
         {
           mesh;
           source;
           mode;
-          primitive = Ogpu.Render_pass.Point_list;
-          key;
+          primitive;
+          key = key ^ "\n" ^ indices_key;
           vertices = Bytes.empty;
           indices;
           vertex_attributes =
@@ -904,7 +940,7 @@ let packed_of_device mode mesh (key, normals) =
                else Printf.sprintf "scene3:attributes:%d" (fresh_resource_id ())),
               attributes );
           vertex_count = count;
-          index_count = count;
+          index_count;
           opaque =
             Option.fold ~none:true
               ~some:(Array.for_all (fun (c : Rays_math.Color.t) -> c.a = 255))

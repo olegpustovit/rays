@@ -58,7 +58,10 @@
       (setenv
        XDRIVE
        ":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5)"
-       (run %{exe:test_chain_frames_native.exe}))))))))
+       (setenv
+        CONNECTIVITY
+        Triangles
+        (run %{exe:test_chain_frames_native.exe})))))))))
 
 (rule
  (enabled_if

@@ -214,3 +214,27 @@ let run_native () =
       if delta > 32_768L then
         failwith (Printf.sprintf "camera orbit reuploaded Scene3 vertices (%Ld bytes)" delta));
   print_endline "native Scene3 lowering: camera orbit preserves uploaded geometry"
+
+(* A device mesh's host copy is made once, only for a reader of vertices: the raster lowering reads
+   its own arrays (unread), a path tracer or sun fit its host copy. *)
+let device_host () =
+  let made = ref 0 in
+  let host () =
+    incr made;
+    Test_meshes.box ~width:1. ~height:1. ~depth:1. ()
+  in
+  let mesh =
+    Mesh.View.create_device ~indices:[| 0; 1; 2 |] ~host ~key:"k" ~normals:true ~keep:ignore 3
+    |> Result.get_ok
+  in
+  let unread = Mesh.View.unread mesh in
+  if !made <> 0 || Array.length unread.vertices.x <> 0 || unread.indices <> [| 0; 1; 2 |] then
+    failwith "a device mesh's own arrays made its host copy";
+  if Array.length (Mesh.View.view mesh).vertices <> 24 || !made <> 1 then
+    failwith "a device mesh's view is not its host copy";
+  ignore (Mesh.View.packed_view mesh);
+  ignore (Mesh.centroid mesh);
+  if !made <> 1 then failwith "a device mesh made its host copy twice";
+  print_endline "device meshes: host copy made once, for a reader of vertices"
+
+let () = device_host ()

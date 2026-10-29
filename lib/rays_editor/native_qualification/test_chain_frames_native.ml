@@ -1,12 +1,13 @@
 (* On the real device: the animated chain of bench_chain_frames as assertions. grid (GRID_SIDE
-   squared Points; 512 in @runtest-native) > attribute_noise with its offset driven by frame/input's
+   squared Points, or CONNECTIVITY Triangles: a lit mesh with its point N; 512 in @runtest-native) >
+   attribute_noise with its offset driven by frame/input's
    t > transform, cooked frame after frame as the editor does (Value_lane.resolve, one session
    cook). The frame-driven offset is the fused write's data, a frame input of its one region: after
    the first frame no pipeline is compiled and no source uploaded, each frame is one dispatch whose
    P stays on the device and nothing is read back while it cooks; its noise and P agree with the CPU
    cook of the same frame within float32 tolerance. Each frame is then displayed as the editor
-   does (Surface.of_geometry, Surface.scene3 with Workspace_gpu.display, a Scene3 points draw) with
-   P bound where the device holds it: nothing is read back, and its pixels equal the host display
+   does (Surface.of_geometry, Surface.scene3 with Workspace_gpu.display, a Scene3 points or
+   triangles draw) with P (and N) bound where the device holds them: nothing is read back, and its pixels equal the host display
    of the same geometry read back. The median frame on the CPU and the GPU, and the median device
    display (lowering and drawing a 256 x 256 canvas) are printed. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
@@ -19,13 +20,14 @@ let drive =
   Option.value (Sys.getenv_opt "DRIVE") ~default:":offset [(get (frame/input) :t) 0.0 0.0]"
 
 let xdrive = Option.value (Sys.getenv_opt "XDRIVE") ~default:":translate [0.0 1.0 0.0]"
+let connectivity = Option.value (Sys.getenv_opt "CONNECTIVITY") ~default:"Points"
 
 let text =
   Printf.sprintf
     "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
-     \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) \
-     (sop/transform %s))))"
-    side side drive xdrive
+     %S :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) (sop/transform \
+     %s))))"
+    connectivity side side drive xdrive
 
 (* [cook frame] cooks the chain at that frame, as the editor does *)
 let animate ?gpu () =
@@ -188,10 +190,10 @@ let () =
               ignore (Rays.Canvas.destroy canvas);
               ignore (Rays.Canvas.destroy host_canvas);
               Printf.printf
-                "device display of %d resident points, nothing read back, the host display's \
+                "device display of %d resident points (%s), nothing read back, the host display's \
                  pixels: %.4f s a frame against %.4f s reading P back (medians of %d)\n\
                  %!"
-                count (median !display_times) (median !host_times) (frames - 1);
+                count connectivity (median !display_times) (median !host_times) (frames - 1);
               Printf.printf
                 "animated grid > attribute_noise %s > transform %s, %d points: frame CPU %.4f s, \
                  GPU %.4f s (medians of %d), one dispatch, nothing compiled, uploaded or read \

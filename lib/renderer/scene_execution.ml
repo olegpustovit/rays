@@ -70,10 +70,20 @@ let unregister_gpu_vertices value =
     value.gpu_active <- false;
     Hashtbl.remove value.gpu_owner.gpu_vertex_registry value.gpu_key)
 
-(* A borrowed GPU vertex stream is named apart from every host-owned mesh. *)
+(* A borrowed GPU vertex stream is named apart from every host-owned mesh. A name
+   ["borrow\nindices"] keeps its host payload (the indices) under [indices], the same while its
+   topology is, whatever buffer each frame borrows. *)
 type mesh_key = Host of string | Gpu_vertices of string
 
-let mesh_key_string = function Host k -> k | Gpu_vertices k -> "gpu:vertices:" ^ k
+let borrowed name =
+  match String.index_opt name '\n' with Some i -> String.sub name 0 i | None -> name
+
+let mesh_key_string = function
+  | Host k -> k
+  | Gpu_vertices k -> (
+      match String.index_opt k '\n' with
+      | Some i -> "gpu:indices:" ^ String.sub k (i + 1) (String.length k - i - 1)
+      | None -> "gpu:vertices:" ^ k)
 
 type mesh = {
   key : mesh_key;
@@ -415,7 +425,7 @@ let resolve_gpu_vertices value (entry : sampled_draw) =
   match mesh.key with
   | Host _ -> Ok None
   | Gpu_vertices name -> (
-      match Hashtbl.find_opt value.gpu_vertices.gpu_vertex_registry name with
+      match Hashtbl.find_opt value.gpu_vertices.gpu_vertex_registry (borrowed name) with
       | Some source when gpu_vertices_valid source ->
           if source.gpu_device != value.device then
             error "Renderer.submit" Ogpu.Error.Cross_device "GPU vertices belong to another device"
@@ -2333,8 +2343,14 @@ let render_sun value scratch =
                 match uniforms with
                 | None -> draw (index + 1)
                 | Some (buffer, offset, instances_offset) ->
-                    (* scene.rays sun-vertex: records as floats 0 (slot 1 unused), the World block 2, surface 3, instances 4 *)
-                    let* () = Ogpu.Backend.set_stage_buffer encoder Vertex ~index:0 item.buffer in
+                    (* scene.rays sun-vertex: records as floats 0 (slot 1 unused), the World block 2,
+                       surface 3, instances 4; a device mesh's borrowed positions at 0 *)
+                    let* () =
+                      Ogpu.Backend.set_stage_buffer encoder Vertex ~index:0
+                        (match slot.slot_gpu_vertices with
+                        | Some source -> source.gpu_buffer
+                        | None -> item.buffer)
+                    in
                     let* () =
                       Ogpu.Backend.set_stage_buffer encoder Vertex ~index:2 world.auxiliary_buffer
                     in

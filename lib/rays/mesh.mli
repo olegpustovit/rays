@@ -81,6 +81,7 @@ module View : sig
     ?indices:int array ->
     ?colors:Rays_math.Color.t array ->
     ?tex_coords:Rays_math.Vec2.t array ->
+    ?host:(unit -> t) ->
     key:string ->
     normals:bool ->
     keep:(unit -> unit) ->
@@ -91,7 +92,13 @@ module View : sig
       coordinates and indices stay host arrays. Its {!vertices} are empty: nothing reads the
       positions on the host. Without normals a vertex's normal is (0, 0, 1), as a host mesh's
       without them, so a lit triangle mesh needs [normals]. [keep] is held by the mesh: its producer
-      releases the buffers when it is collected. *)
+      releases the buffers when it is collected. [host] makes the mesh as the host builds it
+      (reading the positions back), once, for a reader of vertices ({!view}, {!packed_view},
+      {!vertices}, {!centroid}: a path tracer, a sun fit); without it those see no vertices. *)
+
+  val unread : t -> packed_view
+  (** The mesh's own arrays: a device mesh's indices, colours and texture coordinates with no
+      vertices, its host copy never made. *)
 
   val device : t -> (string * bool) option
   (** A device mesh's key and whether it carries normals. *)

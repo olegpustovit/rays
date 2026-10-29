@@ -37,9 +37,17 @@ module Vec3_buffer = struct
     { x; y; z }
 end
 
-type device = { key : string; count : int; device_normals : bool; keep : unit -> unit }
+type device = {
+  key : string;
+  count : int;
+  device_normals : bool;
+  keep : unit -> unit;
+  host : (unit -> t) option;
+      (* the mesh as the host builds it (reading the positions back), made once, for a reader of
+         vertices (a path tracer, a sun fit, a centroid) *)
+}
 
-type t = {
+and t = {
   mode : mode;
   vertices : Vec3_buffer.t;
   indices : int array;
@@ -50,6 +58,9 @@ type t = {
       (* positions (and normals) a device holds: [vertices] is then empty; [keep] stays with the
          mesh, which its producer watches to release its buffers *)
 }
+
+(* a device mesh's host copy where a reader needs vertices; any other mesh itself *)
+let readable mesh = match mesh.device with Some { host = Some host; _ } -> host () | _ -> mesh
 
 let validate_attribute_array name vertex_count = function
   | None -> Ok None
@@ -108,7 +119,7 @@ let create_packed_owned ?(mode = Triangles) ?indices ?normals ?colors ?tex_coord
       | Error message, _, _ | _, Error message, _ | _, _, Error message -> Error message)
 
 let mode (mesh : t) = mesh.mode
-let vertices (mesh : t) = Vec3_buffer.to_list mesh.vertices
+let vertices (mesh : t) = Vec3_buffer.to_list (readable mesh).vertices
 
 let vertex_count (mesh : t) =
   match mesh.device with Some d -> d.count | None -> Vec3_buffer.length mesh.vertices
@@ -116,6 +127,7 @@ let vertex_count (mesh : t) =
 let index_count (mesh : t) = Array.length mesh.indices
 
 let centroid (mesh : t) =
+  let mesh = readable mesh in
   let count = Vec3_buffer.length mesh.vertices in
   if count = 0 then None
   else
@@ -129,6 +141,7 @@ let centroid (mesh : t) =
     Some (Rays_math.Vec3.create (!x *. inverse) (!y *. inverse) (!z *. inverse))
 
 let vertex index (mesh : t) =
+  let mesh = readable mesh in
   if index < 0 || index >= Vec3_buffer.length mesh.vertices then None
   else Some (Vec3_buffer.get mesh.vertices index)
 
@@ -228,6 +241,7 @@ module View = struct
   }
 
   let view (mesh : t) =
+    let mesh = readable mesh in
     {
       mode = mesh.mode;
       vertices = Vec3_buffer.to_array mesh.vertices;
@@ -245,7 +259,7 @@ module View = struct
     tex_coords : Rays_math.Vec2.t array option;
   }
 
-  let packed_view (mesh : t) =
+  let unread (mesh : t) =
     {
       mode = mesh.mode;
       vertices = mesh.vertices;
@@ -255,11 +269,27 @@ module View = struct
       tex_coords = mesh.tex_coords;
     }
 
+  let packed_view mesh = unread (readable mesh)
   let create_owned ?mode ?indices vertices = create_owned ?mode ?indices vertices
   let create_packed_owned = create_packed_owned
   let create_packed_shared = create_packed_owned
 
-  let create_device ?(mode = Triangles) ?indices ?colors ?tex_coords ~key ~normals ~keep count =
+  let create_device ?(mode = Triangles) ?indices ?colors ?tex_coords ?host ~key ~normals ~keep count
+      =
+    let host =
+      Option.map
+        (fun make ->
+          let lock = Mutex.create () and made = ref None in
+          fun () ->
+            Mutex.protect lock (fun () ->
+                match !made with
+                | Some mesh -> mesh
+                | None ->
+                    let mesh = make () in
+                    made := Some mesh;
+                    mesh))
+        host
+    in
     let indices = Option.value indices ~default:(Array.init count Fun.id) in
     if key = "" || count <= 0 then Error "Mesh.create_device: a device mesh has vertices"
     else
@@ -280,7 +310,7 @@ module View = struct
                   normals = None;
                   colors;
                   tex_coords;
-                  device = Some { key; count; device_normals = normals; keep };
+                  device = Some { key; count; device_normals = normals; keep; host };
                 }
           | Error message, _ | _, Error message -> Error message)
 

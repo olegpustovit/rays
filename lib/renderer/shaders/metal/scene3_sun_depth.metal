@@ -14,49 +14,51 @@ vertex sun_vertex_out sun_vertex(
     device const float* buffer4 [[buffer(4)]]) {
   sun_vertex_out o;
   uint sb=0u;
-  uint r6=6u,r9=1u,r12=2u;
-  float r15=as_type<float>(0x3f800000u);
-  uint r17=48u,r23=16u,r25=3u,r28=2u,r31=1u;
-  float r38=0.0f;
-  uint r39=4u;
-  float r51=0.0f;
-  uint r52=8u;
-  float r64=0.0f;
-  uint r65=12u;
-  float r77=0.0f,r89=0.0f,r101=0.0f,r113=0.0f,r125=0.0f;
-  uint r7=(uint((long(vid)))*r6);
-  float r8=buffer0[r7*1+0];
-  float r11=buffer0[((r7+r9))*1+0];
-  float r14=buffer0[((r7+r12))*1+0];
-  float r22=((buffer3[(83u)*1+0])>(as_type<float>(0x3f000000u)));
-  if(r22!=0.0f) {
-    uint r24=(((uint((long(iid)))*r17))+r23);
-    r38=fma(r15,(buffer4[((r24+r25))*1+0]),(fma(r14,(buffer4[((r24+r28))*1+0]),(fma(r11,(buffer4[((r24+r31))*1+0]),((r8*(buffer4[r24*1+0]))))))));
-    uint r40=(r24+r39);
-    r51=fma(r15,(buffer4[((r40+r25))*1+0]),(fma(r14,(buffer4[((r40+r28))*1+0]),(fma(r11,(buffer4[((r40+r31))*1+0]),((r8*(buffer4[r40*1+0]))))))));
-    uint r53=(r24+r52);
-    r64=fma(r15,(buffer4[((r53+r25))*1+0]),(fma(r14,(buffer4[((r53+r28))*1+0]),(fma(r11,(buffer4[((r53+r31))*1+0]),((r8*(buffer4[r53*1+0]))))))));
-    uint r66=(r24+r65);
-    r77=fma(r15,(buffer4[((r66+r25))*1+0]),(fma(r14,(buffer4[((r66+r28))*1+0]),(fma(r11,(buffer4[((r66+r31))*1+0]),((r8*(buffer4[r66*1+0]))))))));
+  float r8=as_type<float>(0x3f000000u);
+  uint r15=1u,r18=2u;
+  float r21=as_type<float>(0x3f800000u);
+  uint r23=48u,r28=16u,r30=3u,r33=2u,r36=1u;
+  float r43=0.0f;
+  uint r44=4u;
+  float r56=0.0f;
+  uint r57=8u;
+  float r69=0.0f;
+  uint r70=12u;
+  float r82=0.0f,r94=0.0f,r106=0.0f,r118=0.0f,r130=0.0f;
+  uint r12=((((buffer3[(79u)*1+0])>r8))!=0.0f?(3u):(6u));
+  uint r13=(uint((long(vid)))*r12);
+  float r14=buffer0[r13*1+0];
+  float r17=buffer0[((r13+r15))*1+0];
+  float r20=buffer0[((r13+r18))*1+0];
+  float r27=((buffer3[(83u)*1+0])>r8);
+  if(r27!=0.0f) {
+    uint r29=(((uint((long(iid)))*r23))+r28);
+    r43=fma(r21,(buffer4[((r29+r30))*1+0]),(fma(r20,(buffer4[((r29+r33))*1+0]),(fma(r17,(buffer4[((r29+r36))*1+0]),((r14*(buffer4[r29*1+0]))))))));
+    uint r45=(r29+r44);
+    r56=fma(r21,(buffer4[((r45+r30))*1+0]),(fma(r20,(buffer4[((r45+r33))*1+0]),(fma(r17,(buffer4[((r45+r36))*1+0]),((r14*(buffer4[r45*1+0]))))))));
+    uint r58=(r29+r57);
+    r69=fma(r21,(buffer4[((r58+r30))*1+0]),(fma(r20,(buffer4[((r58+r33))*1+0]),(fma(r17,(buffer4[((r58+r36))*1+0]),((r14*(buffer4[r58*1+0]))))))));
+    uint r71=(r29+r70);
+    r82=fma(r21,(buffer4[((r71+r30))*1+0]),(fma(r20,(buffer4[((r71+r33))*1+0]),(fma(r17,(buffer4[((r71+r36))*1+0]),((r14*(buffer4[r71*1+0]))))))));
   }
-  if(r22==0.0f) {
-    r89=fma(r15,(buffer3[(19u)*1+0]),(fma(r14,(buffer3[(18u)*1+0]),(fma(r11,(buffer3[(17u)*1+0]),((r8*(buffer3[(16u)*1+0]))))))));
-    r101=fma(r15,(buffer3[(23u)*1+0]),(fma(r14,(buffer3[(22u)*1+0]),(fma(r11,(buffer3[(21u)*1+0]),((r8*(buffer3[(20u)*1+0]))))))));
-    r113=fma(r15,(buffer3[(27u)*1+0]),(fma(r14,(buffer3[(26u)*1+0]),(fma(r11,(buffer3[(25u)*1+0]),((r8*(buffer3[(24u)*1+0]))))))));
-    r125=fma(r15,(buffer3[(31u)*1+0]),(fma(r14,(buffer3[(30u)*1+0]),(fma(r11,(buffer3[(29u)*1+0]),((r8*(buffer3[(28u)*1+0]))))))));
+  if(r27==0.0f) {
+    r94=fma(r21,(buffer3[(19u)*1+0]),(fma(r20,(buffer3[(18u)*1+0]),(fma(r17,(buffer3[(17u)*1+0]),((r14*(buffer3[(16u)*1+0]))))))));
+    r106=fma(r21,(buffer3[(23u)*1+0]),(fma(r20,(buffer3[(22u)*1+0]),(fma(r17,(buffer3[(21u)*1+0]),((r14*(buffer3[(20u)*1+0]))))))));
+    r118=fma(r21,(buffer3[(27u)*1+0]),(fma(r20,(buffer3[(26u)*1+0]),(fma(r17,(buffer3[(25u)*1+0]),((r14*(buffer3[(24u)*1+0]))))))));
+    r130=fma(r21,(buffer3[(31u)*1+0]),(fma(r20,(buffer3[(30u)*1+0]),(fma(r17,(buffer3[(29u)*1+0]),((r14*(buffer3[(28u)*1+0]))))))));
   }
-  float r126=(r22!=0.0f?r38:r89);
-  float r127=(r22!=0.0f?r51:r101);
-  float r128=(r22!=0.0f?r64:r113);
-  float r129=(r22!=0.0f?r77:r125);
-  float r141=fma(r129,(buffer2[(43u)*1+0]),(fma(r128,(buffer2[(42u)*1+0]),(fma(r127,(buffer2[(41u)*1+0]),((r126*(buffer2[(40u)*1+0]))))))));
-  float r153=fma(r129,(buffer2[(47u)*1+0]),(fma(r128,(buffer2[(46u)*1+0]),(fma(r127,(buffer2[(45u)*1+0]),((r126*(buffer2[(44u)*1+0]))))))));
-  float r164=fma(r129,(buffer2[(51u)*1+0]),(fma(r128,(buffer2[(50u)*1+0]),(fma(r127,(buffer2[(49u)*1+0]),((r126*(buffer2[r17*1+0]))))))));
-  float r176=fma(r129,(buffer2[(55u)*1+0]),(fma(r128,(buffer2[(54u)*1+0]),(fma(r127,(buffer2[(53u)*1+0]),((r126*(buffer2[(52u)*1+0]))))))));
-  o.position.x=r141;
-  o.position.y=r153;
-  o.position.z=r164;
-  o.position.w=r176;
+  float r131=(r27!=0.0f?r43:r94);
+  float r132=(r27!=0.0f?r56:r106);
+  float r133=(r27!=0.0f?r69:r118);
+  float r134=(r27!=0.0f?r82:r130);
+  float r146=fma(r134,(buffer2[(43u)*1+0]),(fma(r133,(buffer2[(42u)*1+0]),(fma(r132,(buffer2[(41u)*1+0]),((r131*(buffer2[(40u)*1+0]))))))));
+  float r158=fma(r134,(buffer2[(47u)*1+0]),(fma(r133,(buffer2[(46u)*1+0]),(fma(r132,(buffer2[(45u)*1+0]),((r131*(buffer2[(44u)*1+0]))))))));
+  float r169=fma(r134,(buffer2[(51u)*1+0]),(fma(r133,(buffer2[(50u)*1+0]),(fma(r132,(buffer2[(49u)*1+0]),((r131*(buffer2[r23*1+0]))))))));
+  float r181=fma(r134,(buffer2[(55u)*1+0]),(fma(r133,(buffer2[(54u)*1+0]),(fma(r132,(buffer2[(53u)*1+0]),((r131*(buffer2[(52u)*1+0]))))))));
+  o.position.x=r146;
+  o.position.y=r158;
+  o.position.z=r169;
+  o.position.w=r181;
   return o;
 }
 fragment float4 sun_fragment(

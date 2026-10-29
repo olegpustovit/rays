@@ -3,7 +3,8 @@ open Rdk_core
 open Rdk_ops
 open Rdk_ops
 
-(* [Device]: a point cloud whose positions (and normals) a device holds, drawn from there *)
+(* [Device]: a point cloud or triangle mesh whose positions (and normals) a device holds, drawn
+   from there *)
 type preview = Pieces of Packed_pieces.t | Mesh of Mesh.t | Device of Geometry.t
 
 type t = {
@@ -12,15 +13,16 @@ type t = {
   batches : (Material.t * int array) list;
 }
 
-(* The display reads nothing of a point cloud but P and N: with both on the device (or no N) and
-   no colour, uv, piece or material, it binds them there. *)
+(* The display reads nothing of a point cloud or a triangle mesh but P, N and the topology: with P
+   and N on the device (a cloud may have no N; lit triangles without N take normals made from P on
+   the host) and no colour, uv, piece or material, it binds them there. *)
 let device_points geometry =
   Packed.Float3.resident (Geometry.positions geometry)
-  && Geometry.primitive_count geometry = 0
   && Geometry.point_count geometry > 0
   && (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
-    | None -> true
+    | None -> Geometry.primitive_count geometry = 0
     | Some n -> Attribute.resident n)
+  && (Geometry.primitive_count geometry = 0 || Topology.all_triangles (Geometry.topology geometry))
   && List.for_all
        (fun (owner, name) -> Geometry.find_attribute ~owner name geometry = None)
        [
@@ -176,6 +178,12 @@ and of_host ?instances geometry =
   in
   Ok { preview; transforms = instances; batches }
 
+(* the host mesh of a device preview, reading P back *)
+let host geometry =
+  match Rays_mesh.to_mesh geometry with
+  | Ok mesh -> mesh
+  | Error _ -> Mesh.View.create_owned ~mode:Mesh.Points [||] |> Result.get_ok
+
 let scene3 ?explosion ?device surface =
   let mesh =
     match surface.preview with
@@ -183,18 +191,23 @@ let scene3 ?explosion ?device surface =
     | Pieces pieces -> Packed_pieces.mesh_for_explosion explosion pieces
     | Device geometry -> (
         let count = Geometry.point_count geometry in
+        (* a triangle mesh's corners, as the host mesh's indices *)
+        let mode, indices =
+          if Geometry.primitive_count geometry = 0 then (Mesh.Points, None)
+          else (Mesh.Triangles, Some (Topology.View.view (Geometry.topology geometry)).vertex_points)
+        in
         match
           Option.bind device (fun device ->
               Option.bind (device geometry) (fun (key, normals, keep) ->
                   Result.to_option
-                    (Mesh.View.create_device ~mode:Mesh.Points ~key ~normals ~keep count)))
+                    (Mesh.View.create_device ~mode ?indices
+                       ~host:(fun () -> host geometry)
+                       ~key ~normals ~keep count)))
         with
         | Some mesh -> mesh
-        | None -> (
+        | None ->
             (* no device to bind (another renderer, a closed runner): the host copy *)
-            match Rays_mesh.to_mesh geometry with
-            | Ok mesh -> mesh
-            | Error _ -> Mesh.View.create_owned ~mode:Mesh.Points [||] |> Result.get_ok))
+            host geometry)
   in
   let draw material mesh =
     match surface.transforms with

@@ -144,7 +144,7 @@
 (defn sun-vertex :context value
   [(vid : int) (input : (array float)) (input-words : (array int)) (sun : (array float))
    (surface : (array float)) (instances : (array float))]
-  (let* [at (int/mul vid 6)
+  (let* [at (int/mul vid (if (> (array/nth surface 79) 0.5) 3 6))
          local [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.]
          base (int/mul (gpu/instance-id) 48)
          world (if (> (array/nth surface 83) 0.5) (transform instances (int/add base 16) local) (transform surface 16 local))]

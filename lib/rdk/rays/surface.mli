@@ -9,7 +9,8 @@ val scene3 :
   ?device:(Rdk_core.Geometry.t -> (string * bool * (unit -> unit)) option) ->
   t ->
   Rays.Scene.D3.t
-(** On the initial domain. A point cloud whose P (and N) a device holds, with nothing else to show,
-    is drawn from the device: [device] registers its buffers with the renderer
-    ({!Rays.Mesh.View.create_device}: the key, whether N is bound, what the mesh keeps). Without
-    [device], or when it returns [None], the host mesh is built (reading P back). *)
+(** On the initial domain. A point cloud whose P (and N) a device holds, or a triangle mesh whose P
+    and point N it holds, with nothing else to show, is drawn from the device: [device] registers
+    its buffers with the renderer ({!Rays.Mesh.View.create_device}: the key, whether N is bound,
+    what the mesh keeps). Without [device], or when it returns [None], the host mesh is built
+    (reading P back). *)
