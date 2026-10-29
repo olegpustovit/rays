@@ -264,7 +264,7 @@ let write_crash ?crash_dir ~title ~dump ~recent exn backtrace =
 
 let run_state_internal ?(config = default_config) ?max_frames ?crash_dir ?(profile = false)
     ?(high_density = true) ?(after_present = fun model _ -> model) ?(crash_dump = fun _ _ -> ())
-    ~init ~update ~view ?(on_stop = fun _ -> ()) () =
+    ?idle ~init ~update ~view ?(on_stop = fun _ -> ()) () =
   if config.width <= 0 || config.height <= 0 then
     startup_error "Sketch.run_state" Ogpu.Error.Invalid_argument "dimensions must be positive";
   Option.iter
@@ -631,21 +631,35 @@ let run_state_internal ?(config = default_config) ?max_frames ?crash_dir ?(profi
                     with_run_caches one_frame;
                     (* an unchanged frame skipped vsync: wait a frame for input, and after half a second of
            the same picture up to 100 ms, so a still window costs a few ticks a second *)
-                    if !quiet > 0 then
-                      Input_state.wait input ~timeout_ms:(if !quiet > 30 then 100 else 16)
+                    if !quiet > 0 then begin
+                      let timeout_ms = if !quiet > 30 then 100 else 16 in
+                      match idle with
+                      | Some idle when idle !model ->
+                          (* work for the main domain is in flight (a cook's device requests): serve it
+                             as it arrives instead of at the next frame *)
+                          let deadline = Unix.gettimeofday () +. (float timeout_ms /. 1000.) in
+                          while
+                            idle !model
+                            && Unix.gettimeofday () < deadline
+                            && not (Input_state.wait input ~timeout_ms:1)
+                          do
+                            ()
+                          done
+                      | _ -> ignore (Input_state.wait input ~timeout_ms)
+                    end
                     else Time.limit_frame_rate time
                   done;
                   !model))))
 
 let run_state ?config ?max_frames ?crash_dir ?profile ~init ~update ~view ?after_present ?crash_dump
-    ?on_stop () =
+    ?idle ?on_stop () =
   try
     Ok
       (Parallel.run
          ?domains:(Option.bind config (fun value -> value.domains))
          (fun () ->
            run_state_internal ?config ?max_frames ?crash_dir ?profile ?after_present ?crash_dump
-             ~init ~update ~view ?on_stop ()))
+             ?idle ~init ~update ~view ?on_stop ()))
   with Startup_error error -> Error error
 
 let export_state ?(config = default_config) ?(fps = 60) ?(prefix = "frame") ~directory ~frames ~init

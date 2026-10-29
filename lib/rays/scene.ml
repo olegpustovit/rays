@@ -334,7 +334,8 @@ and same_node a b =
   | Display_list x, Display_list y -> eq x.segment y.segment && res x.resources y.resources
   | Ui x, Ui y -> eq x.ui y.ui && res x.ui_resources y.ui_resources
   | Shapes x, Shapes y -> eq x y
-  | View3d x, View3d y -> x.viewport = y.viewport && eq x.camera y.camera && eq x.scene y.scene
+  | View3d x, View3d y ->
+      x.viewport = y.viewport && eq x.camera y.camera && Scene3.same x.scene y.scene
   | Region (a, b, c, d, e, f), Region (a', b', c', d', e', f') ->
       a = a' && b = b' && c = c' && d = d' && e = e' && f = f'
   | Layer_break, Layer_break -> true

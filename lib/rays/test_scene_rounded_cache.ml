@@ -45,9 +45,28 @@ let same_picture () =
     (not (Scene.Layer.same (picture "a") (picture "b")))
     "a changed label counts as the same picture"
 
+(* a 3D view is the same picture when its meshes are the same arrays, decided without walking them *)
+let same_view3d () =
+  let scene mesh = Scene3.create [ Scene3.mesh mesh ] in
+  let view mesh =
+    Scene.
+      [
+        view3d
+          ~camera:
+            (Camera.orthographic ~height:2. ~at:Rays_math.Vec3.zero ~target:Rays_math.Vec3.unit_z ())
+          (scene mesh);
+      ]
+  in
+  let plane = Mesh.plane ~width:1. ~height:1. () in
+  require (Scene.Layer.same (view plane) (view plane)) "a view of the same mesh counts as changed";
+  require
+    (not (Scene.Layer.same (view plane) (view (Mesh.plane ~width:1. ~height:1. ()))))
+    "a view of a rebuilt mesh counts as the same picture"
+
 let run () =
   Scene.Layer.with_cache_context (Scene.Layer.create_cache_context ()) (fun () ->
       same_picture ();
+      same_view3d ();
       let make x y =
         Scene.
           [

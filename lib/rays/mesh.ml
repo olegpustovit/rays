@@ -64,6 +64,25 @@ and t = {
          mesh, which its producer watches to release its buffers *)
 }
 
+(* The same mesh by identity: its packed arrays physically, a device mesh by its key. O(1): a
+   structural compare walks every index of a mesh a live cook replaced. *)
+let same a b =
+  a == b
+  || a.mode = b.mode
+     && (a.vertices == b.vertices
+        || a.vertices.x == b.vertices.x && a.vertices.y == b.vertices.y
+           && a.vertices.z == b.vertices.z)
+     && a.indices == b.indices && a.normals == b.normals && a.colors == b.colors
+     && a.tex_coords == b.tex_coords
+     &&
+     match (a.device, b.device) with
+     | None, None -> true
+     | Some x, Some y ->
+         String.equal x.key y.key && x.count = y.count
+         && x.device_normals = y.device_normals
+         && x.derived = y.derived
+     | _ -> false
+
 (* a device mesh's host copy where a reader needs vertices; any other mesh itself *)
 let readable mesh = match mesh.device with Some { host = Some host; _ } -> host () | _ -> mesh
 

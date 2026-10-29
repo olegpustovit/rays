@@ -27,6 +27,7 @@ val run_state :
   view:('model -> Frame.t -> Scene.t) ->
   ?after_present:('model -> Frame.t -> 'model) ->
   ?crash_dump:('model -> string -> unit) ->
+  ?idle:('model -> bool) ->
   ?on_stop:('model -> unit) ->
   unit ->
   ('model, error) result
@@ -40,7 +41,10 @@ val run_state :
     [max_frames] keeps one runtime alive for exactly that many frames unless [quit] is requested
     first (the process environment is never read; bin/rays.ml passes RAYS_MAX_FRAMES, RAYS_CRASH_DIR
     and RAYS_PROFILE). [after_present] runs after the native frame is rendered, can capture that
-    frame, and returns the model for the next frame and [on_stop]. *)
+    frame, and returns the model for the next frame and [on_stop]. [idle model] runs about every
+    millisecond while an unchanged picture waits for the next frame (input, or at most 16 ms): it
+    serves background work for the main domain (a cook's device requests, which otherwise wait for
+    the next frame) and answers whether more is in flight; the wait ends when it answers [false]. *)
 
 val export :
   ?config:config ->

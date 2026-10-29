@@ -220,7 +220,12 @@ let () =
       assert (R.Private.materialisations run = thaws);
       assert (R.Private.held_buffers run <= 2);
       assert (R.Private.buffer_creations run - creations <= 4);
-      R.close run;
+      (* a host's shutdown closes with [~discard:true]: a live holder is not read back *)
+      let live = Test_program.ok (R.keep (Test_program.ok (R.dispatch run values))) in
+      ignore (Test_program.ok (live.settle ()));
+      R.close ~discard:true run;
+      assert (R.Private.materialisations run = thaws);
+      assert (match live.materialise () with _ -> false | exception Invalid_argument _ -> true);
       R.close run;
       assert (R.buffer fresh = None);
       let packed = List.assoc "noise" (Test_program.fixtures 1024) in

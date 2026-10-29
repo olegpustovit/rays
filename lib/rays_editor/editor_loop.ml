@@ -833,6 +833,10 @@ let run ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?lights ?camera ?
     | Ok () -> value
     | Error message -> { value with render_status = Some ("Cursor: " ^ message) }
   in
+  let idle value =
+    Flow_native.Workspace_gpu.pump value.host.gpu;
+    Cook.busy value.core.cook
+  in
   Sketch.run_state ~config ?max_frames ?crash_dir ?profile ~init ~update ~view:scene ~after_present
-    ~crash_dump ~on_stop:close ()
+    ~crash_dump ~idle ~on_stop:close ()
   |> Result.map (fun _ -> ())

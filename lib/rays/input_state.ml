@@ -67,7 +67,8 @@ let set_visible state visible =
 
 type polled = { events : Input.event list; window_changed : bool; visible : bool }
 
-let wait _state ~timeout_ms = ignore (Runtime_input_sdl3.wait ~timeout_ms)
+let wait _state ~timeout_ms =
+  match Runtime_input_sdl3.wait ~timeout_ms with Ok any -> any | Error _ -> false
 
 let poll state =
   state.delta <- (0., 0.);
