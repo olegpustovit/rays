@@ -21,14 +21,17 @@ val spirv :
 (** The same pipeline as Vulkan SPIR-V vertex and fragment modules (entry [main]); varyings are at
     locations in the vertex result's leaf order. *)
 
-val compute_msl : size:int -> declarations:string -> entry:string -> (string, Diagnostic.t) result
+val compute_msl :
+  grid:bool -> size:int -> declarations:string -> entry:string -> (string, Diagnostic.t) result
 (** The Metal kernel of a compute stage, the [entry] defn of [declarations] run by one threadgroup
     of [size] threads ([lid]): its first parameter is the thread's index in the group, its array
     parameters the bound buffers in order (writable when it stores into them with [gpu/store]) and
     its last the group size, given as the constant [size]; [gpu/group-scan] is a threadgroup scan
-    between barriers. Its result is discarded. *)
+    between barriers. Its result is discarded. With [grid] the first parameter is the thread's index
+    in the whole dispatch instead (any number of threadgroups; no scan). *)
 
-val compute_spirv : size:int -> declarations:string -> entry:string -> (bytes, Diagnostic.t) result
+val compute_spirv :
+  grid:bool -> size:int -> declarations:string -> entry:string -> (bytes, Diagnostic.t) result
 (** The same stage as a Vulkan GLCompute module (entry [main], LocalSize [size]): Workgroup memory
     and OpControlBarrier for the scan. *)
 

@@ -53,9 +53,16 @@ let cases =
           ":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5) \
            :recompute_normals true",
           "Triangles" );
+        (* lit without N: the display's normals made from the resident P on the device *)
+        ( ":offset [0.5 0.0 0.0]",
+          ":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5)",
+          "Bare" );
       ]
 
 let run (drive, xdrive, connectivity) =
+  (* Bare: a noise-displaced triangle grid without N (the displacement drops it) *)
+  let bare = connectivity = "Bare" in
+  let connectivity = if bare then "Triangles" else connectivity in
   let recompute =
     let key = "recompute_normals" in
     let n = String.length key in
@@ -77,6 +84,11 @@ let run (drive, xdrive, connectivity) =
         "(workspace chain (graph g :context sop (let* [d (-> %s (sop/noise_displace :amplitude 0.2 \
          :frequency 3.0)) n (sop/with_attr d \"N\" (exact (map (fn [(p : vec3)] [0.0 1.0 0.0]) \
          (sop/attr d :P))) :owner \"point\" :type vec3)] (sop/transform n %s))))"
+        grid xdrive
+    else if bare then
+      Printf.sprintf
+        "(workspace chain (graph g :context sop (-> %s (sop/noise_displace :amplitude 0.2 \
+         :frequency 3.0) (sop/transform %s))))"
         grid xdrive
     else
       Printf.sprintf "(workspace chain (graph g :context sop (-> %s (sop/transform %s))))" grid
@@ -204,6 +216,9 @@ let run (drive, xdrive, connectivity) =
   in
   (* both trace the same float32 corners and normals through the same kernel *)
   let trace_tolerance = 0 in
+  (* the host display's own normals, of the same float32 P in binary64: without N the device's are
+     float32 sums, so a pixel may differ by this much *)
+  let pixel_tolerance = if bare then 1 else 0 and pixel_worst = ref 0 in
   let trace_times = ref [] and host_trace_times = ref [] in
   let count = side * side in
   (* the chain's dispatch; with recomputed normals, the transform's and the normals' gather *)
@@ -264,7 +279,9 @@ let run (drive, xdrive, connectivity) =
                    uploads its N alone (count float32 vec3s), in the one dispatch *)
                 (* (with recomputed normals the static displaced chain cooks once, at frame 0,
                    a dispatch of its own) *)
-                if frame = 0 && not recompute then begin
+                if bare && Rdk.Geometry.find_attribute ~owner:Point "N" device <> None then
+                  fail "the displaced grid has an N";
+                if frame = 0 && not (recompute || bare) then begin
                   if after.input_uploaded_bytes - before.input_uploaded_bytes <> count * 12 then
                     fail
                       (Printf.sprintf "%d bytes uploaded, not the grid's N alone"
@@ -360,24 +377,27 @@ let run (drive, xdrive, connectivity) =
                     || traced.materialisations <> before.materialisations
                     || not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions device))
                   then fail "path tracing the device mesh read P back or made its host copy";
-                  let host_mesh =
-                    Rdk_rays.Rays_mesh.of_mesh device_mesh
-                    |> Result.get_ok |> Rdk_rays.Rays_mesh.to_trace_mesh |> Result.get_ok
-                  in
-                  let host_pixels, host_seconds = trace host_tracer host_mesh in
-                  let largest = ref 0 in
-                  Bytes.iteri
-                    (fun i c ->
-                      largest :=
-                        max !largest (abs (Char.code c - Char.code (Bytes.get host_pixels i))))
-                    device_pixels;
-                  if !largest > trace_tolerance then
-                    fail
-                      (Printf.sprintf "the device trace differs from the host copy's by %d" !largest);
-                  if frame > 0 then begin
-                    trace_times := device_seconds :: !trace_times;
-                    host_trace_times := host_seconds :: !host_trace_times
-                  end
+                  (* (without N the host copy traces cusped vertex normals, the device the
+                     display's point normals: no parity to check, so no host trace) *)
+                  if not bare then begin
+                    let host_mesh =
+                      Rdk_rays.Rays_mesh.of_mesh device_mesh
+                      |> Result.get_ok |> Rdk_rays.Rays_mesh.to_trace_mesh |> Result.get_ok
+                    in
+                    let host_pixels, host_seconds = trace host_tracer host_mesh in
+                    let largest = ref 0 in
+                    Bytes.iteri
+                      (fun i c ->
+                        largest :=
+                          max !largest (abs (Char.code c - Char.code (Bytes.get host_pixels i))))
+                      device_pixels;
+                    if !largest > trace_tolerance then
+                      fail
+                        (Printf.sprintf "the device trace differs from the host copy's by %d"
+                           !largest);
+                    if frame > 0 then host_trace_times := host_seconds :: !host_trace_times
+                  end;
+                  if frame > 0 then trace_times := device_seconds :: !trace_times
                 end;
                 (* the same geometry read back and drawn from the host: the same pixels *)
                 let host, seconds = picture host_canvas device in
@@ -399,11 +419,26 @@ let run (drive, xdrive, connectivity) =
                          Rays_math.Vec3.create hi.(0) hi.(1) hi.(2) )
                 then fail "the device's bounds differ from the host's";
                 if frame > 0 then host_times := seconds :: !host_times;
-                if host <> shown then fail "the device display differs from the host display";
+                let compare what a b =
+                  let d = ref 0 in
+                  Array.iteri
+                    (fun i (p : Rays_math.Color.t) ->
+                      let q : Rays_math.Color.t = b.(i) in
+                      d :=
+                        max !d
+                          (max
+                             (max (abs (p.r - q.r)) (abs (p.g - q.g)))
+                             (max (abs (p.b - q.b)) (abs (p.a - q.a)))))
+                    a;
+                  pixel_worst := max !pixel_worst !d;
+                  if !d > pixel_tolerance then
+                    fail
+                      (Printf.sprintf "the %s device display differs from the host's by %d" what !d)
+                in
+                compare "lit" host shown;
                 Option.iter
                   (fun (world, lit) ->
-                    if fst (picture host_canvas ~world device) <> lit then
-                      fail "the sunlit device display differs from the host display")
+                    compare "sunlit" (fst (picture host_canvas ~world device)) lit)
                   sunlit;
                 if Array.for_all (fun c -> c = Rays_math.Color.black) shown then
                   fail "the display drew nothing";
@@ -481,7 +516,7 @@ let run (drive, xdrive, connectivity) =
                  released (no collection needed), and once its results die the pool holds nothing *)
               Option.iter P.destroy !device_tracer;
               Option.iter P.destroy !host_tracer;
-              if !trace_times <> [] then
+              if !host_trace_times <> [] then
                 Printf.printf
                   "path traced %d resident points (128 x 128, 1 spp): update and trace %.4f s a \
                    frame from the device (corners gathered, structure refit, nothing read back) \
@@ -512,10 +547,13 @@ let run (drive, xdrive, connectivity) =
               ignore (Rays.Canvas.destroy canvas);
               ignore (Rays.Canvas.destroy host_canvas);
               Printf.printf
-                "device display of %d resident points (%s), nothing read back, the host display's \
-                 pixels: %.4f s a frame against %.4f s reading P back (medians of %d)\n\
+                "device display of %d resident points (%s%s), nothing read back, the host \
+                 display's pixels within %d: %.4f s a frame against %.4f s reading P back (medians \
+                 of %d)\n\
                  %!"
-                count connectivity (median !display_times) (median !host_times) (frames - 1);
+                count connectivity
+                (if bare then ", no N" else "")
+                !pixel_worst (median !display_times) (median !host_times) (frames - 1);
               Printf.printf
                 "animated grid > attribute_noise %s > transform %s, %d points: frame CPU %.4f s, \
                  GPU %.4f s (medians of %d), %d dispatches, nothing compiled, uploaded or read \

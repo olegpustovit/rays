@@ -77,6 +77,8 @@ type t = {
   mutable closed : bool;
   domain : Domain.id;
   shared : Run.pool;  (** the kept outputs' buffers of every runner, recycled across edits *)
+  tables : (int array, Ogpu.Backend.buffer list option) Lru.Identity_list.t;
+      (* a triangle mesh's corners and per-point corner CSR on the device, by its corners array *)
 }
 
 let next = Atomic.make 1
@@ -106,6 +108,11 @@ let create ~clock gpu =
     closed = false;
     domain = Domain.self ();
     shared = Run.pool ();
+    tables =
+      Lru.Identity_list.create ~equal:( == )
+        ~release:(fun _ ->
+          Option.iter (List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b))))
+        8;
   }
 
 let live t = (not t.closed) && Domain.self () = t.domain
@@ -622,9 +629,143 @@ let close t =
       (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
       t.buffers;
     Hashtbl.reset t.buffers;
+    Lru.Identity_list.clear t.tables;
     Pipelines.close t.pipelines;
     t.closed <- true
   end
+
+(* A triangle mesh's display normals from its resident P (shaders/normals.rays), on the host's queue
+   and waited for. The corners and each point's corners in ascending order (a counting sort: the
+   CSR) are uploaded once per corners array; the normals buffer comes from the host's buffers by
+   size and goes back at its release. *)
+let normals t ~positions ~count ~corners =
+  let module B = Ogpu.Backend in
+  let ( let* ) = Option.bind in
+  let device = Renderer.gpu_device t.gpu and queue = Renderer.gpu_queue t.gpu in
+  let upload label values =
+    let bytes = Bytes.create (4 * max 1 (Array.length values)) in
+    Array.iteri (fun i v -> Bytes.set_int32_le bytes (i * 4) (Int32.of_int v)) values;
+    let* buffer =
+      Result.to_option
+        (B.create_buffer device
+           {
+             label = Some label;
+             size = Int64.of_int (Bytes.length bytes);
+             usage = [ Storage; Copy_dst ];
+           })
+    in
+    if Result.is_ok (B.write_buffer buffer ~offset:0L bytes) then Some buffer
+    else (
+      ignore (B.destroy_buffer buffer);
+      None)
+  in
+  let tables () =
+    let offsets = Array.make (count + 1) 0 in
+    Array.iter (fun p -> offsets.(p + 1) <- offsets.(p + 1) + 1) corners;
+    (* the stage's loop stops at 4,096 corners a point *)
+    if Array.exists (fun n -> n > 4096) offsets then None
+    else begin
+      for p = 1 to count do
+        offsets.(p) <- offsets.(p) + offsets.(p - 1)
+      done;
+      let next = Array.sub offsets 0 count and vertices = Array.make (Array.length corners) 0 in
+      Array.iteri
+        (fun v p ->
+          vertices.(next.(p)) <- v;
+          next.(p) <- next.(p) + 1)
+        corners;
+      let made =
+        List.map
+          (fun (label, a) -> upload label a)
+          [
+            ("Flow display corners", corners);
+            ("Flow display point offsets", offsets);
+            ("Flow display point corners", vertices);
+          ]
+      in
+      if List.for_all Option.is_some made then Some (List.map Option.get made)
+      else (
+        List.iter (Option.iter (fun b -> ignore (B.destroy_buffer b))) made;
+        None)
+    end
+  in
+  let bytes = count * 12 in
+  let give_back out =
+    let free = Option.value ~default:[] (Hashtbl.find_opt t.buffers bytes) in
+    if live t && List.length free < 4 then Hashtbl.replace t.buffers bytes (out :: free)
+    else ignore (B.destroy_buffer out)
+  in
+  let run out corners offsets vertices =
+    let* compiled = Result.to_option (Pipelines.get t.pipelines Emit.normals) in
+    let* commands = Result.to_option (B.begin_commands queue) in
+    let encoded =
+      let* encoder = Result.to_option (B.compute_encoder commands) in
+      let n = Bytes.create 4 in
+      Bytes.set_int32_le n 0 (Int32.of_int count);
+      let set =
+        List.for_all Result.is_ok
+          [
+            B.set_pipeline encoder compiled.pipeline;
+            B.set_buffer encoder ~index:0 positions;
+            B.set_buffer encoder ~index:1 corners;
+            B.set_buffer encoder ~index:2 offsets;
+            B.set_buffer encoder ~index:3 vertices;
+            B.set_buffer encoder ~index:4 out;
+            B.set_bytes encoder ~index:5 n;
+          ]
+        && Result.is_ok (B.dispatch_threads encoder ~threads:(count, 1, 1) ~threadgroup:(256, 1, 1))
+      in
+      if Result.is_ok (B.end_compute encoder) && set then Some () else None
+    in
+    match encoded with
+    | None ->
+        ignore (B.abandon commands);
+        None
+    | Some () ->
+        let* receipt = Result.to_option (B.commit commands) in
+        Result.to_option (B.complete_through queue receipt.epoch)
+  in
+  if (not (live t)) || count <= 0 || Array.length corners mod 3 <> 0 then None
+  else
+    let tables =
+      match Lru.Identity_list.find t.tables corners with
+      | Some tables -> tables
+      | None ->
+          let made = tables () in
+          Lru.Identity_list.add t.tables corners made;
+          made
+    in
+    match tables with
+    | Some [ corners; offsets; vertices ] -> (
+        let out =
+          match Hashtbl.find_opt t.buffers bytes with
+          | Some (b :: rest) ->
+              Hashtbl.replace t.buffers bytes rest;
+              Some b
+          | _ ->
+              Result.to_option
+                (B.create_buffer device
+                   {
+                     label = Some "Flow display normals";
+                     size = Int64.of_int bytes;
+                     usage = [ Storage ];
+                   })
+        in
+        let* out = out in
+        match run out corners offsets vertices with
+        | Some () ->
+            let released = ref false in
+            Some
+              ( out,
+                fun () ->
+                  if not !released then begin
+                    released := true;
+                    give_back out
+                  end )
+        | None ->
+            give_back out;
+            None)
+    | _ -> None
 
 let stats t =
   if Domain.self () <> t.domain then invalid_arg "Host.stats: creating domain required";

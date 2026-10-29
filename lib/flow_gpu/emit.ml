@@ -1007,3 +1007,27 @@ let bounds =
             })
         [ 0; 1; 2 ];
   }
+
+(* A triangle mesh's display normals from its resident P (shaders/normals.rays, one thread a point
+   over groups of 256). Buffers: P, the corners, the CSR offsets and corners of each point, the
+   normals, the count. *)
+let normals =
+  {
+    compaction with
+    source = Normals_source.source;
+    entry = "point_normal";
+    uniform_bytes = 4;
+    output_widths = [| 3 |];
+    input_widths = [| 3 |];
+    interface =
+      List.map
+        (fun binding ->
+          S.
+            {
+              group = 0;
+              binding;
+              kind = (if binding = 5 then Uniform_buffer else Storage_buffer);
+              visibility = [ Compute ];
+            })
+        [ 0; 1; 2; 3; 4; 5 ];
+  }

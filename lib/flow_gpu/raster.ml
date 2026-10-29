@@ -232,6 +232,7 @@ let spirv ~declarations ~vertex ~fragment =
         inputs = [||];
         buffers = buffers v;
         workgroup = None;
+        grid = false;
         outputs =
           Array.of_list
             (List.map
@@ -250,6 +251,7 @@ let spirv ~declarations ~vertex ~fragment =
         inputs = Array.of_list inputs;
         buffers = buffers f;
         workgroup = None;
+        grid = false;
         outputs =
           Array.of_list
             (List.map
@@ -297,7 +299,7 @@ let compute_stage ~size ~declarations ~entry =
           size)
     "compute-entry"
 
-let compute_msl ~size ~declarations ~entry =
+let compute_msl ~grid ~size ~declarations ~entry =
   let* c = compute_stage ~size ~declarations ~entry in
   let* body =
     Emit.stage_body
@@ -329,7 +331,12 @@ let compute_msl ~size ~declarations ~entry =
        [
          "#include <metal_stdlib>\nusing namespace metal;\n";
          Printf.sprintf "kernel void %s(\n    %s) {\n" (identifier entry)
-           (String.concat ",\n    " (arguments @ [ "uint lid [[thread_position_in_threadgroup]]" ]));
+           (String.concat ",\n    "
+              (arguments
+              @ [
+                  (if grid then "uint lid [[thread_position_in_grid]]"
+                   else "uint lid [[thread_position_in_threadgroup]]");
+                ]));
          body;
          "}\n";
        ])
@@ -351,7 +358,7 @@ let compute_program ~size ~declarations ~entry =
                 | _ -> None)
               c.program.uniforms)) )
 
-let compute_spirv ~size ~declarations ~entry =
+let compute_spirv ~grid ~size ~declarations ~entry =
   let* program, buffers = compute_program ~size ~declarations ~entry in
   Spirv.stage
     {
@@ -359,6 +366,7 @@ let compute_spirv ~size ~declarations ~entry =
       inputs = [||];
       outputs = [||];
       workgroup = Some size;
+      grid;
       buffers = List.map (fun (u, binding, words, _) -> (u, binding, words)) buffers;
     }
     program

@@ -15,6 +15,18 @@ val resident : fast:bool -> t -> Flow_ir.Core_exec.resident
 (** A drawing's resident fold on this host, in fast precision only: keeps a loop's region arrays on
     the device and reads them back as the loop ends. One per drawing. *)
 
+val normals :
+  t ->
+  positions:Ogpu.Backend.buffer ->
+  count:int ->
+  corners:int array ->
+  (Ogpu.Backend.buffer * (unit -> unit)) option
+(** A triangle mesh's display normals (packed float3: [Rays.Mesh.recalculate_normals] in float32)
+    from the [count] packed float3 [positions] the device holds and the triangles' [corners],
+    computed on the device and waited for (initial domain). The buffer is the caller's until the
+    release. The corner tables are kept by the [corners] array's identity (8). [None] when the
+    device cannot, or a point has more than 4,096 corners. *)
+
 val close : t -> unit
 (** Close before releasing the caller's GPU lease. *)
 

@@ -9,6 +9,7 @@
   noise_source
   compact_source
   bounds_source
+  normals_source
   emit
   spirv
   pipelines
@@ -25,6 +26,7 @@
   noise_source
   compact_source
   bounds_source
+  normals_source
   image_rgba8_source)
  (foreign_stubs
   (language c)
@@ -81,6 +83,19 @@
    (progn
     (echo "let source = {msl|")
     (cat shaders/metal/bounds.metal)
+    (echo "|msl}\n")))))
+
+; a triangle mesh's display normals, generated from shaders/normals.rays (test_raster.exe --write lib)
+
+(rule
+ (target normals_source.ml)
+ (deps shaders/metal/normals.metal)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {msl|")
+    (cat shaders/metal/normals.metal)
     (echo "|msl}\n")))))
 
 ; the image sink's stages, generated from ../renderer/shaders/image.rays (test_raster.exe --write)

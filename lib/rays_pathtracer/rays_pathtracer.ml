@@ -1183,8 +1183,14 @@ let render t (camera : camera) =
       t.moving <- true
     end;
     (* ponytail: the queue holds three command buffers, one of which a mesh
-       build may hold; more bands would need lazy submission from [poll]. *)
-    let free_slots = 3 - if t.building = None then 0 else 1 in
+       build may hold and one a device mesh's refit not yet waited for; more
+       bands would need lazy submission from [poll]. *)
+    let refitting =
+      match t.gpu.device with
+      | Some installed when installed.receipt.epoch > B.completed_epoch t.queue -> 1
+      | _ -> 0
+    in
+    let free_slots = 3 - (if t.building = None then 0 else 1) - refitting in
     let bands = if t.moving then 1 else max 1 (min t.bands (min t.height free_slots)) in
     let rows_per_band = (t.height + bands - 1) / bands in
     let slot = t.next_output_slot in

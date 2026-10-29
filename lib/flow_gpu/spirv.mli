@@ -26,12 +26,14 @@ type stage = {
   outputs : output array;
   buffers : (int * int * bool) list;
   workgroup : int option;
+  grid : bool;
 }
 (** A raster stage's interface: [inputs.(k)] is element [k]'s (location, width, flat); [outputs.(k)]
     is output [k]'s role ([Varying (location, flat)]); [buffers] are (array uniform, binding, uint
     words). [workgroup] [Some n] makes it a compute stage of one workgroup of [n] threads
     (GLCompute, LocalSize n): its element is LocalInvocationIndex, its outputs are discarded and it
-    may store into its buffers. *)
+    may store into its buffers. [grid] makes its element GlobalInvocationId.x instead, a stage
+    dispatched over any number of workgroups. *)
 
 val stage : stage -> Flow_ir.Packed.t -> (bytes, Diagnostic.t) result
 (** A Vulkan vertex or fragment module (entry [main]) of a raster stage program (Flow_gpu.Raster).

@@ -33,9 +33,10 @@ val marks : t -> Marks_scene.gpu
 val display : t -> Rdk.Geometry.t -> (string * bool * (unit -> unit)) option
 (** {!Rdk_rays.Surface.scene3}'s [device]: a point cloud's P (and N) this workspace's device holds,
     settled and unread, pinned in its pool and registered as the renderer's device positions (the
-    key, whether N is bound, and what the mesh keeps). It is released two {!frame}s after it is
-    dropped: its key left out of [keep], or its mesh collected. [None] (draw the host copy)
-    otherwise. Initial domain. *)
+    key, whether N is bound, and what the mesh keeps). A triangle mesh without N binds the normals
+    the host display would compute, made from P on the device ({!Flow_gpu.Host.normals}). It is
+    released two {!frame}s after it is dropped: its key left out of [keep], or its mesh collected.
+    [None] (draw the host copy) otherwise. Initial domain. *)
 
 val frame : ?keep:string list -> t -> unit
 (** One presented frame (initial domain): [keep] is every display key the frame's scenes still draw,

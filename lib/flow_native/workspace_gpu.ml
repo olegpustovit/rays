@@ -424,14 +424,15 @@ let frame ?keep t =
 
 let held_displays t = Hashtbl.length t.bound + List.length t.releasing
 
-(* A point cloud's resident P (and N) as the renderer's device positions: pinned in the pool and
+(* A point cloud's or a triangle mesh's resident P (and N; a mesh without N takes normals made from
+   P on the device, {!Flow_gpu.Host.normals}) as the renderer's device positions: pinned in the pool and
    registered while the mesh that keeps the returned closure lives. Initial domain, after the cook
    settled (its dispatch completed: explicit, not unified-memory, ordering). *)
 let display t geometry =
   if t.closed || not (Domain.is_main_domain ()) then None
   else begin
     match (t.owner, Flow_sop.Attribute_kernel.resident_vec3 geometry "P") with
-    | Some (gpu, _), Some positions -> (
+    | Some (gpu, host), Some positions -> (
         let count = Rdk.Geometry.point_count geometry in
         let pin placeholder =
           match Flow_gpu.Run.pin placeholder with
@@ -441,15 +442,34 @@ let display t geometry =
               None
           | None -> None
         in
+        let pinned = pin positions in
         let normals =
           match Rdk.Geometry.find_attribute ~owner:Point "N" geometry with
-          | None -> Ok None
+          | None when Rdk.Geometry.primitive_count geometry = 0 -> Ok None
+          | None -> (
+              (* lit triangles without N: the host display's normals, made from P on the device *)
+              match
+                Option.bind pinned (fun (buffer, _, _) ->
+                    H.normals host ~positions:buffer ~count
+                      ~corners:
+                        (Rdk.Topology.View.view (Rdk.Geometry.topology geometry)).vertex_points)
+              with
+              | Some (buffer, release) ->
+                  let live = ref true in
+                  Ok
+                    (Some
+                       ( buffer,
+                         (fun () -> !live),
+                         fun () ->
+                           live := false;
+                           release () ))
+              | None -> Error ())
           | Some _ -> (
               match Option.bind (Flow_sop.Attribute_kernel.resident_vec3 geometry "N") pin with
               | Some pinned -> Ok (Some pinned)
               | None -> Error ())
         in
-        match (pin positions, normals) with
+        match (pinned, normals) with
         | Some (buffer, valid, unpin), Ok normals -> (
             let unpin_all () =
               unpin ();

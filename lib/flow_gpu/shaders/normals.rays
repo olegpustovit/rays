@@ -1,0 +1,24 @@
+; A triangle mesh's display normals from its resident P (Flow_gpu.Host.normals): one lane a point, over
+; as many groups as it takes. Lane i sums the cross products (b - a) x (c - a) of the triangles at its
+; corners (offsets and vertices: the point's corners in ascending order, a CSR; corner v is triangle
+; v / 3's) and stores the sum over its length at i x 3, zero at a length at most 1e-18: what the host
+; display computes for a mesh without N (Rays.Mesh.recalculate_normals), in its order of addition,
+; in float32. The point count is bound[0].
+(defn at3 :context value [(p : (array float)) (k : int)]
+  [(array/nth p (int/mul k 3)) (array/nth p (int/add (int/mul k 3) 1)) (array/nth p (int/add (int/mul k 3) 2))])
+(defn point-normal :context value [(id : int) (p : (array float)) (corners : (array int)) (offsets : (array int))
+                                   (vertices : (array int)) (out : (array float)) (bound : (array int))
+                                   (size : int)]
+  (if (int/lt id (int/and (array/nth bound 0) 1073741823))
+    (let* [total (fold [acc [0.0 0.0 0.0]] [k (range (array/nth offsets id) (array/nth offsets (int/add id 1)))]
+                   (let* [first (int/mul (int/div (array/nth vertices k) 3) 3)
+                          a (at3 p (array/nth corners first))
+                          u (- (at3 p (array/nth corners (int/add first 1))) a)
+                          v (- (at3 p (array/nth corners (int/add first 2))) a)]
+                     (+ acc [(- (* u.y v.z) (* u.z v.y)) (- (* u.z v.x) (* u.x v.z)) (- (* u.x v.y) (* u.y v.x))])))
+           length (sqrt (+ (+ (* total.x total.x) (* total.y total.y)) (* total.z total.z)))
+           unit (if (<= length 1e-18) [0.0 0.0 0.0] (/ total length))
+           at (int/mul id 3)]
+      (int/add (int/add (gpu/store out at unit.x) (gpu/store out (int/add at 1) unit.y))
+               (gpu/store out (int/add at 2) unit.z)))
+    0))

@@ -29,6 +29,11 @@ val bounds : msl
     the array, the lanes' floats (lane l's min x y z, max x y z of the elements l, l + 1,024, ... at
     l x 6; a lane at or past the count stores nothing) and the count (uint). *)
 
+val normals : msl
+(** A triangle mesh's display normals from its resident packed float3 P (shaders/normals.rays, one
+    thread a point, groups of 256): buffers P, the corners (uint), each point's CSR offsets and
+    corners (uint), the normals (packed float3) and the count (uint). *)
+
 val kernel :
   ?fast:bool ->
   ?instanced:bool ->

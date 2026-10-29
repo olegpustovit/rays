@@ -1131,6 +1131,7 @@ type stage = {
   outputs : output array;
   buffers : (int * int * bool) list;
   workgroup : int option;
+  grid : bool;
 }
 
 (* A raster stage as a Vulkan vertex or fragment module, entry [main] (Raster's placement of
@@ -1329,8 +1330,12 @@ let stage (s : stage) program =
         int_input =
           (fun _ ->
             to_long
-              (result e uint 61
-                 [ (match vertex_index with Some id -> id | None -> builtin uint 29) ]));
+              (match vertex_index with
+              | Some id -> result e uint 61 [ id ]
+              | None when s.grid ->
+                  let v3 = typ 23 [ uint; 3 ] in
+                  result e uint 81 [ result e v3 61 [ builtin v3 28 ]; 0 ]
+              | None -> result e uint 61 [ builtin uint 29 ]));
         gather =
           (fun u at width component ->
             let var, w = List.assoc u buffers in
