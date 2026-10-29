@@ -51,9 +51,19 @@ let execute session request =
     match cook [] request.nodes with
     | Error error -> Error error
     | Ok outputs -> (
+        (* a footer reads what the cooks left in the cache.  A node nobody cached is cooked for it
+           only while it is known to be cheap: one that took over 2 ms of its own (a chain fused
+           into a kernel, run again on its own) is never cooked just to be counted. *)
         let optional =
           List.map
-            (fun node -> Result.to_option (Session.cook session ~context:request.context node))
+            (fun node ->
+              match Session.cached session ~context:request.context node with
+              | Some _ as hit -> hit
+              | None -> (
+                  match Session.node_seconds session (Node.id node) with
+                  | Some seconds when seconds > 0.002 -> None
+                  | _ ->
+                      Result.to_option (Session.cook session ~context:request.context node)))
             request.optional
         in
         match request.prepare outputs optional with

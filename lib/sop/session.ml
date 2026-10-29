@@ -627,6 +627,13 @@ let costly predictions memo session context node =
       visit node;
       enough ()
 
+let cached session ~context node =
+  if session.closed then None
+  else
+    match cached_output (Hashtbl.create 16) (Hashtbl.create 1) session context node with
+    | Known output -> Some output
+    | Deferred_refresh | Missing -> None
+
 let rec evaluate memo session context node =
   match memo_find memo node with
   | Some (_, result) -> result

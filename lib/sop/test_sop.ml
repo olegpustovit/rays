@@ -2890,6 +2890,33 @@ let test_async_volatile_on_worker () =
     "the next request did not install the new volatile predicate on the worker";
   Async_cook.close worker
 
+(* a footer's optional node is taken from the cache; one nobody cached is cooked only while cheap *)
+let test_async_footer_reads_cache () =
+  let worker = Async_cook.create ~max_entries:8 ~max_payload_bytes:4_000_000 |> get_ok in
+  let source = Lisp_sop.snapshot (Rdk.Line_geometry.points [| (0., 0., 0.) |]) in
+  let runs = Atomic.make 0 in
+  let slow parameters =
+    custom ~operation:"footer_slow" ~parameters [ source ] (fun ~context:_ inputs ->
+        Atomic.incr runs;
+        Unix.sleepf 0.01;
+        Ok inputs.(0))
+  in
+  let first = slow "a" in
+  let second = Node.Build.adopt_identity ~source:first (slow "b") in
+  let counted optional =
+    ignore
+      (Async_cook.submit_some worker ~context:(context ()) ~nodes:[ source ] ~optional
+         ~prepare:(fun _ found -> Ok (List.map Option.is_some found))
+      |> get_ok);
+    match (Async_cook.await worker).result with
+    | Ok found -> found
+    | Error _ -> failwith "the footer request failed"
+  in
+  check (counted [ first ] = [ true ] && Atomic.get runs = 1) "a never-run node was not counted";
+  check (counted [ second ] = [ false ] && Atomic.get runs = 1) "a costly uncached node was cooked";
+  check (counted [ first ] = [ true ] && Atomic.get runs = 1) "a cached node was cooked again";
+  Async_cook.close worker
+
 let test_async_await () =
   let worker = Async_cook.create ~max_entries:4 ~max_payload_bytes:4_000_000 |> get_ok in
   let node = Lisp_sop.snapshot (Rdk.Line_geometry.points [| (0., 0., 0.); (1., 0., 0.) |]) in
@@ -2928,6 +2955,7 @@ let test_async_await () =
 
 let run () =
   test_volatile_slots ();
+  test_async_footer_reads_cache ();
   test_async_await ();
   test_async_volatile_on_worker ();
   test_async_cook_latest_request ();

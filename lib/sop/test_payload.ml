@@ -100,6 +100,15 @@ let () =
       let second = ok (Session.cook one ~context:(context 1) node) in
       assert (second.payload == first.payload);
       assert ((Session.stats one).hits = 1 && (Session.stats one).cooks = 1);
+      (* a footer peeks: the cached output itself, nothing cooked, nothing counted; an uncooked
+         node has none *)
+      let before = Session.stats one in
+      (match Session.cached one ~context:(context 1) node with
+      | Some peeked -> assert (peeked.payload == first.payload)
+      | None -> failwith "a cooked node had no cached output");
+      let other = noise [ ("width", Param.Int_value 5); ("height", Param.Int_value 5) ] in
+      assert (Session.cached one ~context:(context 1) other = None);
+      assert (Session.stats one = before);
       ignore
         (ok
            (Session.cook one ~context:(context 1)

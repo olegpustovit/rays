@@ -52,6 +52,11 @@ val set_volatile : t -> (int -> bool) -> unit
 
 val cook : t -> context:Context.t -> Node.t -> (output, Diagnostic.t) result
 
+val cached : t -> context:Context.t -> Node.t -> output option
+(** What [cook] would answer from the cache for this node under [context], without cooking,
+    materialising or reading anything back: [None] when any node on the way is not cached (a node
+    fused into a kernel has no output of its own). Same caller rule as [cook]. *)
+
 val node_seconds : t -> int -> float option
 (** The seconds node [id] took the last time it was really cooked (its own work, not its inputs'; a
     cache hit leaves it). Safe to read from another domain; at most 4,096 nodes are kept. *)

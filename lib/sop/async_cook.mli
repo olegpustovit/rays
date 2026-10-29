@@ -31,9 +31,10 @@ val submit_some :
   optional:Node.t list ->
   prepare:(Session.output list -> Session.output option list -> ('a, string) result) ->
   (int, string) result
-(** A batch cook with [optional] nodes cooked after the required ones: a node that fails (or was
-    cancelled) is [None] and never fails the request. The editor asks for the nodes its footers
-    count this way. *)
+(** A batch cook with [optional] nodes taken after the required ones from what the session cached
+    ({!Session.cached}); one with no cached output is cooked only if its last real cook took at most
+    2 ms of its own (or it never ran). A node that fails, was skipped as costly or was cancelled is
+    [None] and never fails the request. The editor asks for the nodes its footers count this way. *)
 
 val set_volatile : 'a t -> (int -> bool) -> unit
 (** [Session.set_volatile] on the worker's session, applied by the worker before the next request it
