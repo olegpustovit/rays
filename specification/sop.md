@@ -528,7 +528,13 @@ its emission; deterministic return only recycles within a runner, so a host-wide
 buffers by capacity is the next step; (2) extending the display binding (below) to lit triangles
 without N (normals made from P on the device: the host's are float64 sums, so the pixels would
 differ) and to colours or uv a device holds, and cooked bounds without reading P (the selected
-object's box and framing read it when asked); (3)
+object's box, framing and the World sun fit of a device mesh read it when asked: the sun fit takes
+the device mesh's host copy). The plan: a Lisp compute stage `lib/flow_gpu/shaders/bounds.rays`
+beside `compact.rays` (each of a workgroup's lanes the min and max of its chunk of the packed
+float3 P, stored at lane x 6; printed by `test_raster.exe --write lib`), `Run.bounds` dispatching it
+over a held output like `Run.compact` and reading back the lanes' 6 floats each (24 KB, finished on
+the host), offered by `Gpu.planes` beside `materialise`, carried by `Rdk.Packed.Float3.deferred
+?bounds` and answered by `Geometry_view.bounds` while P is unread; (3)
 grid planes and `array/range` generated from the thread
 index (a new element-index instruction across the CPU blocks, MSL, SPIR-V and WGSL, and the grid's
 point map fused into the write); fills bound as uniforms.
@@ -603,7 +609,9 @@ the matrix and its inverse are evaluated once, not per field); a fold over a lis
 uniform (the inverse's pivots) is value work, made by reference. Kernel validation lowers each
 residual of a shared DAG once (it lowered every binding's subtree again: 2-30 s for a 35-point
 driven transform, 0.3 s now). Recomputed normals or a group the cook decides keep the card a node,
-as before. Bytes equal the written-out call's (`test_lisp_inline`: identity, singular with point or
+as before. `sop_gallery` (`bench_sop_cook ":seed 2026" ":seed 2027" 3`, five rounds interleaved
+with dev, medians): check 0.283 s against 0.274, lower 0.395 against 0.403, cook 0.904 against
+0.894, edit to cook 0.544 against 0.547. Bytes equal the written-out call's (`test_lisp_inline`: identity, singular with point or
 vertex N, empty and cooked groups).
 
 Measured (`test_chain_frames_native` with `XDRIVE`, M1, 2026-10-29): `grid > attribute_noise >
