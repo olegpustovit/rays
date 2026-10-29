@@ -109,7 +109,10 @@ type t = {
   mutable table_ready : bool;
   domain : Domain.id;
   mutable last_epoch : int64;
-  mutable kept : kept Weak.t list;  (** live holders, materialised at close *)
+  mutable kept : (int64 * bool Atomic.t * kept Weak.t) list;
+      (** live holders, materialised at close, with each one's epoch and settled flag: a cook's
+          settle marks its siblings through those, never [Weak.get] (a get while the GC marks keeps
+          the holder alive that cycle, and every cook settles: no holder would ever be collected) *)
   pool : pool;
   own_pool : bool;  (** made for this runner alone: closed with it *)
   materialised : int Atomic.t;
@@ -242,7 +245,7 @@ let drain_pool pool =
 
 let drain t =
   drain_pool t.pool;
-  t.kept <- List.filter (fun w -> Weak.check w 0) t.kept
+  t.kept <- List.filter (fun (_, _, w) -> Weak.check w 0) t.kept
 
 let take_free pool length =
   match
@@ -838,11 +841,7 @@ let settle t kept =
       (fun () ->
         (* every output of the dispatch: its status covered them all *)
         List.iter
-          (fun w ->
-            Option.iter
-              (fun other ->
-                if other.kept_epoch = kept.kept_epoch then Atomic.set other.settled true)
-              (Weak.get w 0))
+          (fun (epoch, settled, _) -> if epoch = kept.kept_epoch then Atomic.set settled true)
           t.kept;
         Atomic.set kept.settled true)
       (check_status t ~epoch:kept.kept_epoch)
@@ -1024,7 +1023,7 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
         slot.uploaded <- None;
         let weak = Weak.create 1 in
         Weak.set weak 0 (Some kept);
-        t.kept <- weak :: t.kept;
+        t.kept <- (kept.kept_epoch, kept.settled, weak) :: t.kept;
         kept.thaw <- (fun () -> ignore (materialise t kept));
         Hashtbl.replace t.pool.held kept.id (buffer, floats, capacity, kept.readers);
         (* any domain, any allocation: only name the holder; after close nothing drains it *)
@@ -1133,7 +1132,7 @@ let close t =
        weak entry can outlive it: only those still holding count) *)
     drain t;
     List.iter
-      (fun weak ->
+      (fun (_, _, weak) ->
         Option.iter
           (fun kept ->
             match Hashtbl.find_opt t.pool.held kept.id with

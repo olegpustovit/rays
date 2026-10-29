@@ -202,6 +202,25 @@ let () =
       invalid.arrays.(0).(0) <- 3.5e38;
       assert (Result.is_error (R.dispatch run invalid));
       assert (R.buffer fresh = None);
+      (* A live graph's cooks: each keeps its output, settles it (as Sop.Session does), hands it
+         out and retires it (a root a caller took), and drops it. A dropped holder is collected
+         by the next major cycle and its buffer comes back to the pool, so the pool holds only
+         the newest and nothing is read back to make room. Settling reaches the earlier holders'
+         flags without a Weak.get, which during marking would keep every one of them alive. *)
+      let values = Test_program.ok (Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 1.)) in
+      let creations = R.Private.buffer_creations run
+      and thaws = R.Private.materialisations run in
+      for _ = 1 to 24 do
+        let output = Test_program.ok (R.dispatch run values) in
+        let planes = Test_program.ok (R.keep output) in
+        ignore (Test_program.ok (planes.settle ()));
+        planes.release ~held:true;
+        Gc.major ()
+      done;
+      Gc.major ();
+      assert (R.Private.materialisations run = thaws);
+      assert (R.Private.held_buffers run <= 2);
+      assert (R.Private.buffer_creations run - creations <= 4);
       R.close run;
       R.close run;
       assert (R.buffer fresh = None);
@@ -225,5 +244,5 @@ let () =
           assert (!table_writes = 2)));
   assert (live () = 0 && !pipelines = 0);
   print_endline
-    "GPU output lifetimes: failed completion/reallocation invalidation, float32 input bounds and \
-     creating-domain close passed"
+    "GPU output lifetimes: failed completion/reallocation invalidation, float32 input bounds, \
+     retired holders collected and reused unread, and creating-domain close passed"
