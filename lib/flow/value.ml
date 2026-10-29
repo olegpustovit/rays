@@ -152,18 +152,21 @@ let rec show_with conc v =
   | v -> Ty.to_string (ty_of v)
 
 (* A fact about an immutable value remembered by its physical identity, weakly: a ring of 32
-   ephemerons, so an entry never keeps its key alive. [f] runs outside the lock; a raise is not
-   remembered.
+   ephemerons, so an entry never keeps its key alive. Only a slot whose key has the same hash is
+   queried: a query reads its key, and a key read while the GC marks survives that cycle, so
+   querying every slot on every call would keep all 32 keys (and their values) alive for as long as
+   the memo is used. [f] runs outside the lock; a raise is not remembered.
    ponytail: a linear scan of 32 slots under a lock; a table if callers remember many values. *)
 let remember () =
   let slots = Array.make 32 None and next = ref 0 and lock = Mutex.create () in
   fun key f ->
+    let hash = Hashtbl.hash key in
     let found =
       Mutex.protect lock (fun () ->
           Array.fold_left
             (fun found slot ->
               match (found, slot) with
-              | None, Some e -> Ephemeron.K1.query e key
+              | None, Some (h, e) when h = hash -> Ephemeron.K1.query e key
               | found, _ -> found)
             None slots)
     in
@@ -172,7 +175,7 @@ let remember () =
     | None ->
         let value = f () in
         Mutex.protect lock (fun () ->
-            slots.(!next) <- Some (Ephemeron.K1.make key value);
+            slots.(!next) <- Some (hash, Ephemeron.K1.make key value);
             next := (!next + 1) mod Array.length slots);
         value
 

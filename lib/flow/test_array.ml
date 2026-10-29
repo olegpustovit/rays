@@ -300,3 +300,25 @@ let () =
   print_endline
     "Text arrays: exact UTF-8 values, empty operations and interpreter map/for/scan/fold/reduce \
      beyond 4,096 pass"
+
+(* A remembered key no one holds is collected while the memo answers other keys: a lookup reads
+   only the slots whose key hashes alike, since a key read while the GC marks survives the cycle. *)
+let () =
+  let memo = Value.remember () in
+  let dropped = Weak.create 16 in
+  for i = 0 to 15 do
+    let key = Array.make 8 (float (i + 2)) in
+    Weak.set dropped i (Some key);
+    assert (memo key (fun () -> i) = i)
+  done;
+  (* in the slot after them: each lookup of it passes theirs *)
+  let held = Array.make 8 1. in
+  ignore (memo held (fun () -> 0));
+  for _ = 1 to 3 do
+    assert (memo held (fun () -> -1) = 0);
+    Gc.major ()
+  done;
+  for i = 0 to 15 do
+    assert (not (Weak.check dropped i))
+  done;
+  print_endline "Remembered facts: a key no one holds is collected while the memo is in use"
