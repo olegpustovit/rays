@@ -210,7 +210,9 @@ module Acceleration_structure : sig
 
     type t
 
-    val primitive : Device.t -> ?motion:motion -> geometry list -> (t, error) result
+    val primitive : Device.t -> ?motion:motion -> ?refit:bool -> geometry list -> (t, error) result
+    (** [refit] builds with [MTLAccelerationStructureUsageRefit], so the structure can be
+        {!Acceleration_encoder.refit_with} updated in place. *)
 
     val instances :
       Device.t ->
@@ -873,6 +875,17 @@ module Acceleration_encoder : sig
     (unit, error) result
   (** Build or refit through a generic descriptor; the destination(s) must fit the descriptor's
       sizes and the scratch range its build/refit scratch. *)
+
+  val refit_with :
+    t ->
+    source:Acceleration_structure.t ->
+    descriptor:Acceleration_structure.Build.t ->
+    scratch:Buffer.t ->
+    scratch_offset:int64 ->
+    (unit, error) result
+  (** Refits [source] in place from [descriptor] (same geometry shape, new vertex data); [source]
+      must have been built from a [~refit:true] descriptor, and the scratch range must hold the
+      descriptor's refit scratch. *)
 
   val copy_and_compact :
     t ->

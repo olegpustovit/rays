@@ -47,7 +47,9 @@ let run () =
       { vertices = 1L; offset = 0L; length = 36L; vertex_stride = 12; vertex_count = 3 }
   in
   if (Device.capabilities device).Ogpu.Caps.ray_tracing then begin
-    let structure = get (create (Driver_blas { geometries = [| triangles |]; motion = None })) in
+    let structure =
+      get (create (Driver_blas { geometries = [| triangles |]; motion = None; refit = false }))
+    in
     Hashtbl.add structures 10L structure;
     expect Ogpu.Error.Invalid_argument
       (create
@@ -65,6 +67,7 @@ let run () =
                     };
                 |];
               motion = None;
+              refit = false;
             }));
     let scratch =
       get
@@ -77,6 +80,17 @@ let run () =
     expect Ogpu.Error.Cross_device
       (Acceleration.encode_build encoder other structure ~scratch ~scratch_offset:0L);
     get (Acceleration.encode_build encoder device structure ~scratch ~scratch_offset:0L);
+    let refit_descriptor =
+      Ogpu.Backend.Driver_blas { geometries = [| triangles |]; motion = None; refit = true }
+    in
+    let refittable = get (create refit_descriptor) in
+    get (Acceleration.encode_build encoder device refittable ~scratch ~scratch_offset:0L);
+    expect Ogpu.Error.Invalid_argument
+      (Acceleration.encode_refit encoder device refittable refit_descriptor ~resolve_buffer ~scratch
+         ~scratch_offset:1048832L);
+    get
+      (Acceleration.encode_refit encoder device refittable refit_descriptor ~resolve_buffer ~scratch
+         ~scratch_offset:0L);
     let instances =
       get
         (Buffer.create device ~memory:Buffer.Shared
@@ -130,13 +144,14 @@ let run () =
     get (Acceleration.destroy sized);
     get (Acceleration.destroy top);
     get (Acceleration.destroy structure);
+    get (Acceleration.destroy refittable);
     get (Buffer.destroy instances);
     get (Buffer.destroy scratch);
     get (Queue.destroy queue)
   end
   else begin
     expect Ogpu.Error.Unsupported
-      (create (Driver_blas { geometries = [| triangles |]; motion = None }))
+      (create (Driver_blas { geometries = [| triangles |]; motion = None; refit = false }))
   end;
   get (Buffer.destroy vertices);
   get (Device.destroy device);
@@ -145,5 +160,5 @@ let run () =
   let after = get_metal (Metal.Release_queue.stats ()) in
   if after.live_handles <> before.live_handles - 2 then failwith "acceleration live-handle delta";
   print_endline
-    "ogpu_metal acceleration: generic build for primitives and user-id instances, typed \
-     rejections, zero delta ok"
+    "ogpu_metal acceleration: generic build for primitives and user-id instances, in-place refit, \
+     typed rejections, zero delta ok"

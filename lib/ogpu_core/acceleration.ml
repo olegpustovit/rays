@@ -29,7 +29,7 @@ type descriptor =
   | Sized of { size : int64; template : unit Handle.t }
 
 type state = Empty | Built | Compacted
-type t = { handle : unit Handle.t; descriptor : descriptor; mutable state : state }
+type t = { handle : unit Handle.t; descriptor : descriptor; refit : bool; mutable state : state }
 
 let invalid op text = Error (Error.make op Error.Invalid_argument text)
 
@@ -149,12 +149,14 @@ let validate_descriptor device = function
       if size <= 0L then invalid "Ogpu.Acceleration.create" "structure size must be positive"
       else Handle.validate_for ~operation:"Ogpu.Acceleration.create" device template
 
-let create device ~ray_tracing descriptor =
+let create device ~ray_tracing ?(refit = false) descriptor =
   if not ray_tracing then
     Error (Error.make "Ogpu.Acceleration.create" Error.Unsupported "ray tracing is unsupported")
+  else if refit && match descriptor with Blas _ -> false | Tlas _ | Sized _ -> true then
+    invalid "Ogpu.Acceleration.create" "only a primitive structure is refittable"
   else
     Result.bind (validate_descriptor device descriptor) (fun () ->
-        Ok { handle = Handle.create ~device; descriptor; state = Empty })
+        Ok { handle = Handle.create ~device; descriptor; refit; state = Empty })
 
 let check op device value = Handle.validate_for ~operation:op device value.handle
 
@@ -170,6 +172,42 @@ let build device value =
           Ok ()
       | _, (Built | Compacted) ->
           Error (Error.make op Error.Invalid_state "structure has already been built"))
+
+(* A refit keeps the structure's shape: the same geometries in kind, count and stride (and motion
+   keyframes); only their buffers and contents change. *)
+let same_shape a b =
+  match (a, b) with
+  | Blas a, Blas b ->
+      a.motion_keyframes = b.motion_keyframes
+      && Array.length a.geometries = Array.length b.geometries
+      && Array.for_all2
+           (fun x y ->
+             match (x, y) with
+             | Triangles x, Triangles y ->
+                 x.vertex_stride = y.vertex_stride && x.vertex_count = y.vertex_count
+             | Motion_triangles x, Motion_triangles y ->
+                 x.vertex_stride = y.vertex_stride && x.vertex_count = y.vertex_count
+             | Bounding_boxes x, Bounding_boxes y -> x.stride = y.stride && x.count = y.count
+             | Curves x, Curves y ->
+                 x.control_stride = y.control_stride
+                 && x.control_point_count = y.control_point_count
+                 && x.radius_stride = y.radius_stride && x.segment_count = y.segment_count
+                 && x.control_points_per_segment = y.control_points_per_segment
+             | _ -> false)
+           a.geometries b.geometries
+  | _ -> false
+
+let refit device value descriptor =
+  let op = "Ogpu.Acceleration.refit" in
+  Result.bind (check op device value) (fun () ->
+      if not value.refit then
+        Error (Error.make op Error.Invalid_state "structure was not created refittable")
+      else if value.state <> Built then
+        Error (Error.make op Error.Invalid_state "refit requires a built, uncompacted structure")
+      else
+        Result.bind (validate_descriptor device descriptor) (fun () ->
+            if same_shape value.descriptor descriptor then Ok ()
+            else invalid op "refit geometry differs in kind, count or stride from the build"))
 
 let compact_into device ~source ~destination =
   let op = "Ogpu.Acceleration.compact" in

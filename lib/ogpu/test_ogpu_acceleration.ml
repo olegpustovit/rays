@@ -63,8 +63,26 @@ let run () =
       }
   in
   expect Ogpu.Error.Unsupported (Ogpu.Acceleration.create d1 ~ray_tracing:false descriptor);
+  (* Refit: only a built refittable primitive structure, from a descriptor of its shape. *)
+  let refittable = ok (Ogpu.Acceleration.create d1 ~ray_tracing:true ~refit:true descriptor) in
+  expect Ogpu.Error.Invalid_state (Ogpu.Acceleration.refit d1 refittable descriptor);
+  ok (Ogpu.Acceleration.build d1 refittable);
+  ok (Ogpu.Acceleration.refit d1 refittable descriptor);
+  ok (Ogpu.Acceleration.refit d1 refittable descriptor);
+  expect Ogpu.Error.Invalid_argument
+    (Ogpu.Acceleration.refit d1 refittable
+       (Blas
+          {
+            geometries = [| Triangles { vertices = range; vertex_stride = 12; vertex_count = 3 } |];
+            motion_keyframes = None;
+          }));
+  expect Ogpu.Error.Cross_device (Ogpu.Acceleration.refit d2 refittable descriptor);
   let value = ok (Ogpu.Acceleration.create d1 ~ray_tracing:true descriptor) in
   ok (Ogpu.Acceleration.build d1 value);
+  expect Ogpu.Error.Invalid_state (Ogpu.Acceleration.refit d1 value descriptor);
+  expect Ogpu.Error.Invalid_argument
+    (Ogpu.Acceleration.create d1 ~ray_tracing:true ~refit:true
+       (Sized { size = 512L; template = Ogpu.Acceleration.handle value }));
   expect Ogpu.Error.Cross_device (Ogpu.Acceleration.compacted_size d2 value);
   let sized =
     ok

@@ -4,10 +4,10 @@ module Build = Metal.Acceleration_structure.Build
 
 type t = {
   device : Device.t;
-  descriptor : Build.t option;
+  mutable descriptor : Build.t option;
   metal : Metal.Acceleration_structure.t;
   sizes : Metal.Acceleration_structure.sizes;
-  buffers : Buffer.t list;
+  mutable buffers : Buffer.t list;
   structures : t list;
   mutable dead : bool;
   mutable submission_uses : int;
@@ -162,6 +162,39 @@ let build_geometry (geometry : Ogpu_core.Backend.driver_geometry)
               @ [ indices ] )
       | Error e, _, _ | _, Error e, _ | _, _, Error e -> Error e)
 
+(* A primitive descriptor and the buffers it reads. *)
+let primitive_build operation device (descriptor : Ogpu_core.Backend.driver_accel_descriptor)
+    ~resolve_buffer =
+  match descriptor with
+  | Driver_tlas _ | Driver_sized _ ->
+      error operation Ogpu_core.Error.Invalid_argument "a primitive descriptor is required"
+  | Driver_blas { geometries; motion; refit } -> (
+      let rec convert acc buffers = function
+        | [] -> Ok (List.rev acc, buffers)
+        | geometry :: rest -> (
+            match build_geometry geometry ~resolve:resolve_buffer with
+            | Error _ as e -> e
+            | Ok (g, bs) -> convert (g :: acc) (buffers @ bs) rest)
+      in
+      match convert [] [] (Array.to_list geometries) with
+      | Error _ as e -> e
+      | Ok (geometries, buffers) -> (
+          let motion =
+            Option.map
+              (fun (m : Ogpu_core.Backend.driver_motion) : Build.motion ->
+                {
+                  keyframe_count = m.motion_keyframes;
+                  start_time = m.motion_start;
+                  end_time = m.motion_end;
+                  start_border = (if m.motion_start_border = 0 then Build.Clamp else Build.Vanish);
+                  end_border = (if m.motion_end_border = 0 then Build.Clamp else Build.Vanish);
+                })
+              motion
+          in
+          match Build.primitive (Device.Private.metal device) ?motion ~refit geometries with
+          | Error metal -> Error (Device.of_metal_error ~operation metal)
+          | Ok build -> Ok (build, buffers)))
+
 let create device (descriptor : Ogpu_core.Backend.driver_accel_descriptor)
     ~(resolve_buffer : int64 -> (Buffer.t, Ogpu_core.Error.t) result)
     ~(resolve_structure : int64 -> (t, Ogpu_core.Error.t) result) =
@@ -174,38 +207,15 @@ let create device (descriptor : Ogpu_core.Backend.driver_accel_descriptor)
       Result.map_error (Device.of_metal_error ~operation) (Build.sizes ~device:native build)
     in
     match descriptor with
-    | Driver_blas { geometries; motion } -> (
-        let rec convert acc buffers = function
-          | [] -> Ok (List.rev acc, buffers)
-          | geometry :: rest -> (
-              match build_geometry geometry ~resolve:resolve_buffer with
-              | Error _ as e -> e
-              | Ok (g, bs) -> convert (g :: acc) (buffers @ bs) rest)
-        in
-        match convert [] [] (Array.to_list geometries) with
+    | Driver_blas _ -> (
+        match primitive_build operation device descriptor ~resolve_buffer with
         | Error _ as e -> e
-        | Ok (geometries, buffers) -> (
-            let motion =
-              Option.map
-                (fun (m : Ogpu_core.Backend.driver_motion) : Build.motion ->
-                  {
-                    keyframe_count = m.motion_keyframes;
-                    start_time = m.motion_start;
-                    end_time = m.motion_end;
-                    start_border = (if m.motion_start_border = 0 then Build.Clamp else Build.Vanish);
-                    end_border = (if m.motion_end_border = 0 then Build.Clamp else Build.Vanish);
-                  })
-                motion
-            in
-            match Build.primitive native ?motion geometries with
-            | Error metal -> Error (Device.of_metal_error ~operation metal)
-            | Ok build -> (
-                match sizes_of build with
-                | Error _ as e ->
-                    ignore (Build.destroy build);
-                    e
-                | Ok sizes -> allocate operation device (Some build) sizes ~buffers ~structures:[]))
-        )
+        | Ok (build, buffers) -> (
+            match sizes_of build with
+            | Error _ as e ->
+                ignore (Build.destroy build);
+                e
+            | Ok sizes -> allocate operation device (Some build) sizes ~buffers ~structures:[]))
     | Driver_tlas { instances; offset; instance_count; kind; structures; motion_transforms } -> (
         match resolve_buffer instances with
         | Error _ as e -> e
@@ -305,6 +315,31 @@ let encode_build encoder device value ~scratch ~scratch_offset =
             (Device.of_metal_error ~operation)
             (Metal.Acceleration_encoder.build_with encoder ~destination:value.metal ~descriptor
                ~scratch:(Buffer.Private.metal scratch) ~scratch_offset))
+
+(* The structure keeps the refit's descriptor (its buffers are the ones a later refit replaces). *)
+let encode_refit encoder device value descriptor ~resolve_buffer ~scratch ~scratch_offset =
+  let operation = "Ogpu_metal.Acceleration.encode_refit" in
+  match
+    validate_scratch operation device value scratch scratch_offset
+      value.sizes.refit_scratch_buffer_size
+  with
+  | Error _ as failure -> failure
+  | Ok () -> (
+      match primitive_build operation device descriptor ~resolve_buffer with
+      | Error _ as failure -> failure
+      | Ok (build, buffers) -> (
+          match
+            Metal.Acceleration_encoder.refit_with encoder ~source:value.metal ~descriptor:build
+              ~scratch:(Buffer.Private.metal scratch) ~scratch_offset
+          with
+          | Error metal ->
+              ignore (Build.destroy build);
+              Error (Device.of_metal_error ~operation metal)
+          | Ok () ->
+              Option.iter (fun old -> ignore (Build.destroy old)) value.descriptor;
+              value.descriptor <- Some build;
+              value.buffers <- buffers;
+              Ok ()))
 
 let encode_pair operation encoder device ~src ~dst encode =
   match validate operation device src with

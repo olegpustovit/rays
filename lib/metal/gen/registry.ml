@@ -32,6 +32,7 @@ let feature_name : Ogpu_core.Caps.feature -> string =
   | Ray_tracing -> "ray_tracing"
   | Ray_tracing_curves -> "ray_tracing_curves"
   | Ray_tracing_motion -> "ray_tracing_motion"
+  | Ray_tracing_refit -> "ray_tracing_refit"
   | Unknown name -> name
 
 let feature_map : (Ogpu_core.Caps.feature * sdk_type list) list =
@@ -47,6 +48,7 @@ let feature_map : (Ogpu_core.Caps.feature * sdk_type list) list =
     (Ray_tracing, [ Protocol "MTLAccelerationStructure" ]);
     (Ray_tracing_curves, [ Class "MTLAccelerationStructureCurveGeometryDescriptor" ]);
     (Ray_tracing_motion, [ Class "MTLMotionKeyframeData" ]);
+    (Ray_tracing_refit, [ Protocol "MTLAccelerationStructureCommandEncoder" ]);
   ]
 
 type entry =
@@ -1342,6 +1344,13 @@ let entries : entry list =
         ocaml = "accel_encoder_build_descriptor";
         signature = "handle -> handle -> handle -> handle -> int64 -> (unit, string) result";
         primitives = [ "caml_rays_metal_accel_encoder_build_descriptor" ];
+        reason = "descriptor construction and checked object graphs";
+      };
+    Native
+      {
+        ocaml = "accel_encoder_refit_descriptor";
+        signature = "handle -> handle -> handle -> handle -> int64 -> (unit, string) result";
+        primitives = [ "caml_rays_metal_accel_encoder_refit_descriptor" ];
         reason = "descriptor construction and checked object graphs";
       };
     Native

@@ -5088,6 +5088,29 @@ extern "C" CAMLprim value caml_rays_metal_accel_encoder_build_descriptor(
   }
 }
 
+/* An in-place refit (destination nil) of a structure built with MTLAccelerationStructureUsageRefit,
+   from a descriptor of the same shape over new vertex data. */
+extern "C" CAMLprim value caml_rays_metal_accel_encoder_refit_descriptor(
+    value raw_encoder, value raw_source, value raw_descriptor, value raw_scratch,
+    value raw_scratch_offset) {
+  CAMLparam5(raw_encoder, raw_source, raw_descriptor, raw_scratch, raw_scratch_offset);
+  @autoreleasepool {
+    @try {
+      id<MTLAccelerationStructureCommandEncoder> encoder =
+          object_of_handle(raw_encoder, Handle_kind::Acceleration_encoder);
+      [encoder refitAccelerationStructure:object_of_handle(raw_source,
+                                                           Handle_kind::Acceleration_structure)
+                               descriptor:accel_build_descriptor_of_handle(raw_descriptor)
+                              destination:nil
+                            scratchBuffer:object_of_handle(raw_scratch, Handle_kind::Buffer)
+                      scratchBufferOffset:Int64_val(raw_scratch_offset)];
+      CAMLreturn(result_unit());
+    } @catch (NSException *exception) {
+      CAMLreturn(result_error(exception.reason));
+    }
+  }
+}
+
 static_assert(sizeof(MTLAccelerationStructureUserIDInstanceDescriptor) == 68);
 static_assert(offsetof(MTLAccelerationStructureUserIDInstanceDescriptor, userID) == 64);
 static_assert(sizeof(MTLPackedFloat4x3) == 48);

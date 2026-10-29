@@ -48,7 +48,9 @@ type driver_library = {
   destroy_library : unit -> (unit, Error.t) result;
 }
 
-type accel_sizes = { structure_size : int64; build_scratch_size : int64 }
+type accel_sizes = { structure_size : int64; build_scratch_size : int64; refit_scratch_size : int64 }
+(** [refit_scratch_size]: the scratch {!refit_accel} needs (Metal's refit scratch, Vulkan's update
+    scratch). *)
 type driver_keyframe = token * int64
 
 type driver_geometry =
@@ -97,7 +99,11 @@ type driver_motion = {
 type instance_kind = Acceleration.instance_kind = User_id_instances | Motion_instances
 
 type driver_accel_descriptor =
-  | Driver_blas of { geometries : driver_geometry array; motion : driver_motion option }
+  | Driver_blas of {
+      geometries : driver_geometry array;
+      motion : driver_motion option;
+      refit : bool;
+    }
   | Driver_tlas of {
       instances : token;
       offset : int64;
@@ -135,6 +141,14 @@ type driver_accel_encoder = {
   build : token -> scratch:token -> scratch_offset:int64 -> (unit, Error.t) result;
   compact : src:token -> dst:token -> (unit, Error.t) result;
   write_compacted_size : token -> dst:token -> offset:int64 -> (unit, Error.t) result;
+  refit :
+    token ->
+    driver_accel_descriptor ->
+    scratch:token ->
+    scratch_offset:int64 ->
+    (unit, Error.t) result;
+      (** An in-place update of a structure built with [refit] from a descriptor of the same shape
+          (Metal's [refitAccelerationStructure:], Vulkan's update-mode build with src = dst). *)
   end_accel : unit -> (unit, Error.t) result;
 }
 
@@ -497,7 +511,9 @@ val pack_motion_instances : device -> motion_instance array -> (bytes, Error.t) 
 val pack_transforms : float array array -> (bytes, Error.t) result
 (** Row-major 3×4 transforms packed into 48-byte keyframe records. *)
 
-val create_accel : device -> accel_descriptor -> (accel, Error.t) result
+val create_accel : ?refit:bool -> device -> accel_descriptor -> (accel, Error.t) result
+(** [refit] (default false; [Caps.Ray_tracing_refit]) builds a primitive structure that
+    {!refit_accel} can update in place. *)
 val accel_sizes : accel -> accel_sizes
 val destroy_accel : accel -> (unit, Error.t) result
 val begin_commands : queue -> (commands, Error.t) result
@@ -524,6 +540,20 @@ val build_accel :
   ?scratch_offset:int64 ->
   unit ->
   (unit, Error.t) result
+
+val refit_accel :
+  accel_encoder ->
+  accel ->
+  accel_descriptor ->
+  scratch:buffer ->
+  ?scratch_offset:int64 ->
+  unit ->
+  (unit, Error.t) result
+(** Updates a built structure created with [~refit:true] in place from [descriptor]: a [Blas] or
+    [Motion_blas] of the same geometries in kind, count and stride, over new buffers or contents
+    (moved vertices, same topology). [scratch] holds [refit_scratch_size] bytes from
+    [scratch_offset]. [Unsupported] without [Caps.Ray_tracing_refit]; [Invalid_state] for a
+    structure not created refittable, unbuilt or compacted; [Invalid_argument] for another shape. *)
 
 val compact_accel : accel_encoder -> src:accel -> dst:accel -> (unit, Error.t) result
 

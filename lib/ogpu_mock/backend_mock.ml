@@ -159,6 +159,7 @@ let create () =
       ray_tracing = false;
       ray_tracing_curves = false;
       ray_tracing_motion = false;
+      ray_tracing_refit = false;
     }
   in
   let run_ops ops =

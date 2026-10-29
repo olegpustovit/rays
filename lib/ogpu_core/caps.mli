@@ -9,6 +9,7 @@ type feature =
   | Ray_tracing
   | Ray_tracing_curves
   | Ray_tracing_motion
+  | Ray_tracing_refit
   | Unknown of string
 
 type limits = {
@@ -25,6 +26,7 @@ type t = {
   ray_tracing : bool;
   ray_tracing_curves : bool;
   ray_tracing_motion : bool;
+  ray_tracing_refit : bool;
 }
 
 val minimum_m1 : t

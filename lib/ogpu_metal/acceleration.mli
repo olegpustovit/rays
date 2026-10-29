@@ -20,6 +20,18 @@ val encode_build :
   scratch_offset:int64 ->
   (unit, Ogpu_core.Error.t) result
 
+val encode_refit :
+  Metal.Acceleration_encoder.t ->
+  Device.t ->
+  t ->
+  Ogpu_core.Backend.driver_accel_descriptor ->
+  resolve_buffer:(int64 -> (Buffer.t, Ogpu_core.Error.t) result) ->
+  scratch:Buffer.t ->
+  scratch_offset:int64 ->
+  (unit, Ogpu_core.Error.t) result
+(** Refits a structure built refittable in place from a primitive descriptor of the same shape; the
+    structure then keeps that descriptor and its buffers. *)
+
 val encode_compact :
   Metal.Acceleration_encoder.t -> Device.t -> src:t -> dst:t -> (unit, Ogpu_core.Error.t) result
 

@@ -1602,7 +1602,7 @@ module Acceleration_structure = struct
       ignore operation;
       Ok value
 
-    let primitive (device : Device.t) ?motion geometries =
+    let primitive (device : Device.t) ?motion ?(refit = false) geometries =
       let operation = "Metal.Acceleration_structure.Build.primitive" in
       on_main operation (fun () ->
           let* () = ensure_live operation device.lifetime in
@@ -1640,7 +1640,7 @@ module Acceleration_structure = struct
                         end_border = (match m.end_border with Clamp -> 0 | Vanish -> 1);
                       })
                     motion;
-                primitive_refit = false;
+                primitive_refit = refit;
                 fast_build = false;
               }
             in
@@ -4529,6 +4529,16 @@ module Acceleration_encoder = struct
       ~destinations:[ destination ]
       (fun () ->
         Metal_raw.accel_encoder_build_descriptor value.raw destination.raw
+          descriptor.Acceleration_structure.Build.raw scratch.raw scratch_offset)
+
+  let refit_with (value : t) ~(source : Acceleration_structure.t) ~descriptor ~scratch
+      ~scratch_offset =
+    with_descriptor "Metal.Acceleration_encoder.refit_with" value ~descriptor ~scratch
+      ~scratch_offset
+      ~required:(fun _ refit -> refit)
+      ~destinations:[ source ]
+      (fun () ->
+        Metal_raw.accel_encoder_refit_descriptor value.raw source.raw
           descriptor.Acceleration_structure.Build.raw scratch.raw scratch_offset)
 
   let validate_acceleration operation (device : device) (value : acceleration_structure) =

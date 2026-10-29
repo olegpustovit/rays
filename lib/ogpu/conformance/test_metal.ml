@@ -22,5 +22,5 @@ let () =
          (padded rows, inset origin), Rgba8/Rgba16_float/Rgba32_float level-0 round trips, \
          Rgba16_float linear LOD sampling, library constants, encoders, abandoned commands, \
          ray-query hits, bounding boxes resolved in the traversal loop, curves or their typed \
-         rejection, motion primitives and instances, user-id masks, compaction, render path \
-         (batch, indirect, argument buffers, depth), lifetime, zero handles"
+         rejection, motion primitives and instances, user-id masks, compaction, in-place refit, \
+         render path (batch, indirect, argument buffers, depth), lifetime, zero handles"

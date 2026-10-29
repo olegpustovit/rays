@@ -307,6 +307,7 @@ let create () =
                       {
                         structure_size = sizes.acceleration_structure_size;
                         build_scratch_size = sizes.build_scratch_buffer_size;
+                        refit_scratch_size = sizes.refit_scratch_buffer_size;
                       };
                     destroy_accel =
                       (fun () ->
@@ -742,6 +743,21 @@ let create () =
                                             | Ok (), Ok () ->
                                                 Acceleration.encode_compacted_size encoder device
                                                   structure ~destination ~offset));
+                                    refit =
+                                      (fun token descriptor ~scratch ~scratch_offset ->
+                                        operate
+                                          (fun encoder device structure ~scratch ~scratch_offset ->
+                                            Acceleration.encode_refit encoder device structure
+                                              descriptor
+                                              ~resolve_buffer:(fun token ->
+                                                match find_buffer token with
+                                                | Error _ as e -> e
+                                                | Ok buffer ->
+                                                    Result.map
+                                                      (fun () -> buffer)
+                                                      (keep_buffer buffer))
+                                              ~scratch ~scratch_offset)
+                                          token ~scratch ~scratch_offset);
                                     end_accel =
                                       (fun () ->
                                         open_encoder := None;

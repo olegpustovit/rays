@@ -750,6 +750,90 @@ let run driver =
     require (hit1 = 1 && prim1 = 1 && inst1 = 0 && close t1 2.) "instance 0 primitive 1 hit differs";
     require (hit2 = 1 && prim2 = 0 && inst2 = 1 && close t2 2.) "instance 1 primitive 0 hit differs";
     require (hit3 = 1 && prim3 = 1 && inst3 = 1 && close t3 2.) "instance 1 primitive 1 hit differs";
+    (* Refit: a refittable structure updated in place from new vertex data of the same shape (the
+       triangles moved to z = 1, so the rays from z = 2 hit at t = 1). *)
+    if Caps.has profile Caps.Ray_tracing_refit then begin
+      let refittable = get (Backend.create_accel ~refit:true device blas_descriptor) in
+      let moved =
+        get
+          (Backend.create_buffer device
+             { label = Some "ray-vertices-moved"; size = 72L; usage = [ Storage; Copy_dst ] })
+      in
+      get (Backend.write_buffer moved ~offset:0L (vertex_bytes 1.));
+      let moved_descriptor =
+        Backend.Blas
+          {
+            geometries =
+              [
+                Backend.Triangles
+                  {
+                    vertices = moved;
+                    offset = 0L;
+                    length = 72L;
+                    vertex_stride = 12;
+                    vertex_count = 6;
+                  };
+              ];
+          }
+      in
+      let refit_scratch =
+        get
+          (Backend.create_buffer ~memory:Types.Device_local device
+             {
+               label = Some "refit-scratch";
+               size =
+                 Int64.max 256L
+                   (Int64.max (Backend.accel_sizes refittable).build_scratch_size
+                      (Backend.accel_sizes refittable).refit_scratch_size);
+               usage = [ Storage ];
+             })
+      in
+      let commands = get (Backend.begin_commands queue) in
+      let encoder = get (Backend.accel_encoder commands) in
+      (match Backend.refit_accel encoder refittable moved_descriptor ~scratch:refit_scratch () with
+      | Error { Error.kind = Invalid_state; _ } -> ()
+      | _ -> failwith "an unbuilt structure was refit");
+      get (Backend.build_accel encoder refittable ~scratch:refit_scratch ());
+      (match Backend.refit_accel encoder blas moved_descriptor ~scratch:refit_scratch () with
+      | Error { Error.kind = Invalid_state; _ } -> ()
+      | _ -> failwith "a structure built without refit was refit");
+      (match
+         Backend.refit_accel encoder refittable
+           (Backend.Blas
+              {
+                geometries =
+                  [
+                    Backend.Triangles
+                      {
+                        vertices = moved;
+                        offset = 0L;
+                        length = 36L;
+                        vertex_stride = 12;
+                        vertex_count = 3;
+                      };
+                  ];
+              })
+           ~scratch:refit_scratch ()
+       with
+      | Error { Error.kind = Invalid_argument; _ } -> ()
+      | _ -> failwith "a refit of another shape was accepted");
+      get (Backend.refit_accel encoder refittable moved_descriptor ~scratch:refit_scratch ());
+      get (Backend.end_accel encoder);
+      query commands trace refittable;
+      poll_epoch (get (Backend.commit commands)) 1000;
+      let refit_hits = read_hits () in
+      let hit0, prim0, _, t0 = refit_hits.(0) and hit1, prim1, _, t1 = refit_hits.(1) in
+      require (hit0 = 1 && prim0 = 0 && close t0 1.) "refit primitive 0 hit differs";
+      require (hit1 = 1 && prim1 = 1 && close t1 1.) "refit primitive 1 hit differs";
+      get (Backend.destroy_accel refittable);
+      get (Backend.destroy_buffer refit_scratch);
+      get (Backend.destroy_buffer moved)
+    end
+    else begin
+      match Backend.create_accel ~refit:true device blas_descriptor with
+      | Error { Error.kind = Unsupported; _ } -> ()
+      | _ -> failwith "a refittable structure was created without Ray_tracing_refit"
+    end;
     (* Bounding boxes resolved in the kernel's traversal loop, curves,
        motion keyframes, user-id instances with masks, and compaction. *)
     let extra_source =
@@ -1289,6 +1373,9 @@ let run driver =
     (match Backend.create_accel device blas_descriptor with
     | Error { Error.kind = Unsupported; _ } -> ()
     | _ -> failwith "unsupported acceleration structure was created");
+    (match Backend.create_accel ~refit:true device blas_descriptor with
+    | Error { Error.kind = Unsupported; _ } -> ()
+    | _ -> failwith "unsupported refittable structure was created");
     let commands = get (Backend.begin_commands queue) in
     (match Backend.accel_encoder commands with
     | Error { Error.kind = Unsupported; _ } -> ()

@@ -65,6 +65,7 @@ let system_default () =
                   ray_tracing = info.raytracing;
                   ray_tracing_curves = info.raytracing && curves;
                   ray_tracing_motion = info.raytracing;
+                  ray_tracing_refit = info.raytracing;
                 }
               in
               match Ogpu_core.Caps.validate capabilities with

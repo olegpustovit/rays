@@ -38,7 +38,12 @@ type driver_library = {
   destroy_library : unit -> (unit, Error.t) result;
 }
 
-type accel_sizes = { structure_size : int64; build_scratch_size : int64 }
+type accel_sizes = {
+  structure_size : int64;
+  build_scratch_size : int64;
+  refit_scratch_size : int64;
+}
+
 type driver_keyframe = token * int64
 
 type driver_geometry =
@@ -87,7 +92,11 @@ type driver_motion = {
 type instance_kind = Acceleration.instance_kind = User_id_instances | Motion_instances
 
 type driver_accel_descriptor =
-  | Driver_blas of { geometries : driver_geometry array; motion : driver_motion option }
+  | Driver_blas of {
+      geometries : driver_geometry array;
+      motion : driver_motion option;
+      refit : bool;
+    }
   | Driver_tlas of {
       instances : token;
       offset : int64;
@@ -122,6 +131,12 @@ type driver_accel_encoder = {
   build : token -> scratch:token -> scratch_offset:int64 -> (unit, Error.t) result;
   compact : src:token -> dst:token -> (unit, Error.t) result;
   write_compacted_size : token -> dst:token -> offset:int64 -> (unit, Error.t) result;
+  refit :
+    token ->
+    driver_accel_descriptor ->
+    scratch:token ->
+    scratch_offset:int64 ->
+    (unit, Error.t) result;
   end_accel : unit -> (unit, Error.t) result;
 }
 
@@ -945,12 +960,184 @@ let descriptor_structures = function
   | Tlas_of { structures; _ } -> structures
   | Sized { template; _ } -> [ template ]
 
-let create_accel device descriptor =
+let portable_of device descriptor =
+  let range (b : buffer) offset length =
+    {
+      Acceleration.buffer = b.resource.handle;
+      buffer_size = b.buffer_descriptor.size;
+      offset;
+      length;
+    }
+  in
+  let span stride count =
+    if count <= 0 || stride <= 0 || count > max_int / stride then 0L
+    else Int64.of_int (count * stride)
+  in
+  let keyframe_ranges stride count keyframes =
+    List.map (fun (k : keyframe) -> range k.buffer k.offset (span stride count)) keyframes
+  in
+  let portable_geometry = function
+    | Triangles { vertices; offset; length; vertex_stride; vertex_count } ->
+        Acceleration.Triangles
+          { vertices = range vertices offset length; vertex_stride; vertex_count }
+    | Motion_triangles { keyframes; vertex_stride; vertex_count } ->
+        Acceleration.Motion_triangles
+          {
+            keyframes = keyframe_ranges vertex_stride vertex_count keyframes;
+            vertex_stride;
+            vertex_count;
+          }
+    | Bounding_boxes { boxes; stride; count; _ } ->
+        Acceleration.Bounding_boxes { boxes = keyframe_ranges stride count boxes; stride; count }
+    | Curves
+        {
+          control_points;
+          control_stride;
+          control_point_count;
+          radii;
+          radius_stride;
+          indices;
+          index_offset;
+          segment_count;
+          control_points_per_segment;
+          _;
+        } ->
+        Acceleration.Curves
+          {
+            control_points = keyframe_ranges control_stride control_point_count control_points;
+            control_stride;
+            control_point_count;
+            radii = keyframe_ranges radius_stride control_point_count radii;
+            radius_stride;
+            indices = range indices index_offset (span 4 segment_count);
+            segment_count;
+            control_points_per_segment;
+          }
+  in
+  let motion_option = function
+    | Blas _ -> None
+    | Motion_blas { motion; _ } -> Some motion.keyframes
+    | _ -> None
+  in
+  let portable_descriptor =
+    match descriptor with
+    | Blas { geometries } | Motion_blas { geometries; _ } ->
+        Acceleration.Blas
+          {
+            geometries = Array.of_list (List.map portable_geometry geometries);
+            motion_keyframes = motion_option descriptor;
+          }
+    | Tlas_of { instances; offset; instance_count; kind; structures; _ } ->
+        let stride = instance_stride_of device kind in
+        Acceleration.Tlas
+          {
+            instances = range instances offset (span stride instance_count);
+            instance_stride = stride;
+            instance_count;
+            instance_kind = kind;
+            structures = List.map (fun (a : accel) -> Acceleration.handle a.portable) structures;
+          }
+    | Sized { size; template } ->
+        Acceleration.Sized { size; template = Acceleration.handle template.portable }
+  in
+  portable_descriptor
+
+let driver_of ~refit descriptor =
+  let tok (b : buffer) = b.resource.raw.token in
+  let keyframes keyframes =
+    Array.of_list (List.map (fun (k : keyframe) -> (tok k.buffer, k.offset)) keyframes)
+  in
+  let driver_geometry = function
+    | Triangles { vertices; offset; length; vertex_stride; vertex_count } ->
+        Driver_triangles { vertices = tok vertices; offset; length; vertex_stride; vertex_count }
+    | Motion_triangles { keyframes = k; vertex_stride; vertex_count } ->
+        Driver_motion_triangles { keyframes = keyframes k; vertex_stride; vertex_count }
+    | Bounding_boxes { boxes; stride; count; options } ->
+        Driver_boxes
+          {
+            boxes = keyframes boxes;
+            stride;
+            count;
+            opaque = options.opaque;
+            duplicate = options.duplicate_intersection;
+          }
+    | Curves
+        {
+          control_points;
+          control_stride;
+          control_point_count;
+          radii;
+          radius_stride;
+          indices;
+          index_offset;
+          segment_count;
+          control_points_per_segment;
+          curve_type;
+          basis;
+          caps;
+        } ->
+        Driver_curves
+          {
+            control = keyframes control_points;
+            control_stride;
+            control_count = control_point_count;
+            radii = keyframes radii;
+            radius_stride;
+            indices = tok indices;
+            index_offset;
+            segment_count;
+            per_segment = control_points_per_segment;
+            curve_type = (match curve_type with Round_curve -> 0 | Flat_curve -> 1);
+            basis =
+              (match basis with Bspline -> 0 | Catmull_rom -> 1 | Linear_basis -> 2 | Bezier -> 3);
+            caps = (match caps with No_caps -> 0 | Disk_caps -> 1 | Sphere_caps -> 2);
+          }
+  in
+  let driver_descriptor =
+    match descriptor with
+    | Blas { geometries } ->
+        Driver_blas
+          { geometries = Array.of_list (List.map driver_geometry geometries); motion = None; refit }
+    | Motion_blas { geometries; motion } ->
+        Driver_blas
+          {
+            geometries = Array.of_list (List.map driver_geometry geometries);
+            motion =
+              Some
+                {
+                  motion_keyframes = motion.keyframes;
+                  motion_start = motion.start_time;
+                  motion_end = motion.end_time;
+                  motion_start_border = border_code motion.start_border;
+                  motion_end_border = border_code motion.end_border;
+                };
+            refit;
+          }
+    | Tlas_of { instances; offset; instance_count; kind; structures; motion_transforms } ->
+        Driver_tlas
+          {
+            instances = tok instances;
+            offset;
+            instance_count;
+            kind;
+            structures =
+              Array.of_list (List.map (fun (a : accel) -> a.accel_raw.accel_token) structures);
+            motion_transforms = Option.map (fun (b, o, c) -> (tok b, o, c)) motion_transforms;
+          }
+    | Sized { size; template } -> Driver_sized { size; template = template.accel_raw.accel_token }
+  in
+  driver_descriptor
+
+let create_accel ?(refit = false) device descriptor =
   let op = "Backend.create_accel" in
   match live op device with
   | Error _ as e -> e
   | Ok () -> (
-      match Caps.require ~operation:op device.raw.capabilities Caps.Ray_tracing with
+      match
+        Result.bind (Caps.require ~operation:op device.raw.capabilities Caps.Ray_tracing) (fun () ->
+            if refit then Caps.require ~operation:op device.raw.capabilities Caps.Ray_tracing_refit
+            else Ok ())
+      with
       | Error _ as e -> e
       | Ok () -> (
           let uses_curves =
@@ -998,99 +1185,7 @@ let create_accel device descriptor =
                       match check_structures structures with
                       | Error _ as e -> e
                       | Ok () -> (
-                          let range (b : buffer) offset length =
-                            {
-                              Acceleration.buffer = b.resource.handle;
-                              buffer_size = b.buffer_descriptor.size;
-                              offset;
-                              length;
-                            }
-                          in
-                          let span stride count =
-                            if count <= 0 || stride <= 0 || count > max_int / stride then 0L
-                            else Int64.of_int (count * stride)
-                          in
-                          let keyframe_ranges stride count keyframes =
-                            List.map
-                              (fun (k : keyframe) -> range k.buffer k.offset (span stride count))
-                              keyframes
-                          in
-                          let portable_geometry = function
-                            | Triangles { vertices; offset; length; vertex_stride; vertex_count } ->
-                                Acceleration.Triangles
-                                  {
-                                    vertices = range vertices offset length;
-                                    vertex_stride;
-                                    vertex_count;
-                                  }
-                            | Motion_triangles { keyframes; vertex_stride; vertex_count } ->
-                                Acceleration.Motion_triangles
-                                  {
-                                    keyframes = keyframe_ranges vertex_stride vertex_count keyframes;
-                                    vertex_stride;
-                                    vertex_count;
-                                  }
-                            | Bounding_boxes { boxes; stride; count; _ } ->
-                                Acceleration.Bounding_boxes
-                                  { boxes = keyframe_ranges stride count boxes; stride; count }
-                            | Curves
-                                {
-                                  control_points;
-                                  control_stride;
-                                  control_point_count;
-                                  radii;
-                                  radius_stride;
-                                  indices;
-                                  index_offset;
-                                  segment_count;
-                                  control_points_per_segment;
-                                  _;
-                                } ->
-                                Acceleration.Curves
-                                  {
-                                    control_points =
-                                      keyframe_ranges control_stride control_point_count
-                                        control_points;
-                                    control_stride;
-                                    control_point_count;
-                                    radii = keyframe_ranges radius_stride control_point_count radii;
-                                    radius_stride;
-                                    indices = range indices index_offset (span 4 segment_count);
-                                    segment_count;
-                                    control_points_per_segment;
-                                  }
-                          in
-                          let motion_option = function
-                            | Blas _ -> None
-                            | Motion_blas { motion; _ } -> Some motion.keyframes
-                            | _ -> None
-                          in
-                          let portable_descriptor =
-                            match descriptor with
-                            | Blas { geometries } | Motion_blas { geometries; _ } ->
-                                Acceleration.Blas
-                                  {
-                                    geometries =
-                                      Array.of_list (List.map portable_geometry geometries);
-                                    motion_keyframes = motion_option descriptor;
-                                  }
-                            | Tlas_of { instances; offset; instance_count; kind; structures; _ } ->
-                                let stride = instance_stride_of device kind in
-                                Acceleration.Tlas
-                                  {
-                                    instances = range instances offset (span stride instance_count);
-                                    instance_stride = stride;
-                                    instance_count;
-                                    instance_kind = kind;
-                                    structures =
-                                      List.map
-                                        (fun (a : accel) -> Acceleration.handle a.portable)
-                                        structures;
-                                  }
-                            | Sized { size; template } ->
-                                Acceleration.Sized
-                                  { size; template = Acceleration.handle template.portable }
-                          in
+                          let portable_descriptor = portable_of device descriptor in
                           let motion_valid =
                             match descriptor with
                             | Motion_blas { motion; _ } ->
@@ -1108,139 +1203,12 @@ let create_accel device descriptor =
                               "motion keyframes, time range, or transform range is invalid"
                           else
                             match
-                              Acceleration.create device.handle ~ray_tracing:true
+                              Acceleration.create device.handle ~ray_tracing:true ~refit
                                 portable_descriptor
                             with
                             | Error _ as e -> e
                             | Ok portable -> (
-                                let tok (b : buffer) = b.resource.raw.token in
-                                let keyframes keyframes =
-                                  Array.of_list
-                                    (List.map
-                                       (fun (k : keyframe) -> (tok k.buffer, k.offset))
-                                       keyframes)
-                                in
-                                let driver_geometry = function
-                                  | Triangles
-                                      { vertices; offset; length; vertex_stride; vertex_count } ->
-                                      Driver_triangles
-                                        {
-                                          vertices = tok vertices;
-                                          offset;
-                                          length;
-                                          vertex_stride;
-                                          vertex_count;
-                                        }
-                                  | Motion_triangles { keyframes = k; vertex_stride; vertex_count }
-                                    ->
-                                      Driver_motion_triangles
-                                        { keyframes = keyframes k; vertex_stride; vertex_count }
-                                  | Bounding_boxes { boxes; stride; count; options } ->
-                                      Driver_boxes
-                                        {
-                                          boxes = keyframes boxes;
-                                          stride;
-                                          count;
-                                          opaque = options.opaque;
-                                          duplicate = options.duplicate_intersection;
-                                        }
-                                  | Curves
-                                      {
-                                        control_points;
-                                        control_stride;
-                                        control_point_count;
-                                        radii;
-                                        radius_stride;
-                                        indices;
-                                        index_offset;
-                                        segment_count;
-                                        control_points_per_segment;
-                                        curve_type;
-                                        basis;
-                                        caps;
-                                      } ->
-                                      Driver_curves
-                                        {
-                                          control = keyframes control_points;
-                                          control_stride;
-                                          control_count = control_point_count;
-                                          radii = keyframes radii;
-                                          radius_stride;
-                                          indices = tok indices;
-                                          index_offset;
-                                          segment_count;
-                                          per_segment = control_points_per_segment;
-                                          curve_type =
-                                            (match curve_type with
-                                            | Round_curve -> 0
-                                            | Flat_curve -> 1);
-                                          basis =
-                                            (match basis with
-                                            | Bspline -> 0
-                                            | Catmull_rom -> 1
-                                            | Linear_basis -> 2
-                                            | Bezier -> 3);
-                                          caps =
-                                            (match caps with
-                                            | No_caps -> 0
-                                            | Disk_caps -> 1
-                                            | Sphere_caps -> 2);
-                                        }
-                                in
-                                let driver_descriptor =
-                                  match descriptor with
-                                  | Blas { geometries } ->
-                                      Driver_blas
-                                        {
-                                          geometries =
-                                            Array.of_list (List.map driver_geometry geometries);
-                                          motion = None;
-                                        }
-                                  | Motion_blas { geometries; motion } ->
-                                      Driver_blas
-                                        {
-                                          geometries =
-                                            Array.of_list (List.map driver_geometry geometries);
-                                          motion =
-                                            Some
-                                              {
-                                                motion_keyframes = motion.keyframes;
-                                                motion_start = motion.start_time;
-                                                motion_end = motion.end_time;
-                                                motion_start_border =
-                                                  border_code motion.start_border;
-                                                motion_end_border = border_code motion.end_border;
-                                              };
-                                        }
-                                  | Tlas_of
-                                      {
-                                        instances;
-                                        offset;
-                                        instance_count;
-                                        kind;
-                                        structures;
-                                        motion_transforms;
-                                      } ->
-                                      Driver_tlas
-                                        {
-                                          instances = tok instances;
-                                          offset;
-                                          instance_count;
-                                          kind;
-                                          structures =
-                                            Array.of_list
-                                              (List.map
-                                                 (fun (a : accel) -> a.accel_raw.accel_token)
-                                                 structures);
-                                          motion_transforms =
-                                            Option.map
-                                              (fun (b, o, c) -> (tok b, o, c))
-                                              motion_transforms;
-                                        }
-                                  | Sized { size; template } ->
-                                      Driver_sized
-                                        { size; template = template.accel_raw.accel_token }
-                                in
+                                let driver_descriptor = driver_of ~refit descriptor in
                                 match device.raw.create_accel driver_descriptor with
                                 | Error _ as e ->
                                     Acceleration.destroy portable;
@@ -1493,6 +1461,27 @@ let build_accel encoder accel ~scratch ?(scratch_offset = 0L) () =
       (fun () ->
         encoder.accel_encoder_raw.build accel.accel_raw.accel_token
           ~scratch:scratch.resource.raw.token ~scratch_offset)
+
+let refit_accel encoder (accel : accel) descriptor ~scratch ?(scratch_offset = 0L) () =
+  let op = "Backend.refit_accel" in
+  let device = commands_device encoder.accel_commands in
+  match Caps.require ~operation:op device.raw.capabilities Caps.Ray_tracing_refit with
+  | Error _ as e -> e
+  | Ok () -> (
+      match descriptor with
+      | Tlas_of _ | Sized _ -> error op Error.Invalid_argument "only a primitive structure refits"
+      | Blas _ | Motion_blas _ -> (
+          match check_all op device (descriptor_buffers descriptor) with
+          | Error _ as e -> e
+          | Ok () ->
+              accel_operation op encoder accel scratch scratch_offset
+                (accel_sizes accel).refit_scratch_size
+                (fun () ->
+                  Acceleration.refit device.handle accel.portable (portable_of device descriptor))
+                (fun () ->
+                  encoder.accel_encoder_raw.refit accel.accel_raw.accel_token
+                    (driver_of ~refit:true descriptor)
+                    ~scratch:scratch.resource.raw.token ~scratch_offset)))
 
 let accel_pair op (encoder : accel_encoder) ~(src : accel) ~(dst : accel) transition encode =
   match open_accel op encoder with

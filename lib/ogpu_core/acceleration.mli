@@ -33,8 +33,14 @@ type descriptor =
 
 type t
 
-val create : Handle.device -> ray_tracing:bool -> descriptor -> (t, Error.t) result
+val create :
+  Handle.device -> ray_tracing:bool -> ?refit:bool -> descriptor -> (t, Error.t) result
+(** [refit] (a [Blas] only) allows {!refit} after the build. *)
 val build : Handle.device -> t -> (unit, Error.t) result
+val refit : Handle.device -> t -> descriptor -> (unit, Error.t) result
+(** An in-place update of a built refittable structure from [descriptor]: the same geometries in
+    kind, count and stride, over new buffers or contents. *)
+
 val compact_into : Handle.device -> source:t -> destination:t -> (unit, Error.t) result
 val compacted_size : Handle.device -> t -> (unit, Error.t) result
 val destroy : t -> unit
