@@ -540,6 +540,7 @@ module Lowerer (P : sig
   val region_allowed : C.Region.t -> bool
   val draw : (draw_context -> unit) option
   val root : E.residual Lazy.t
+  val lowered : E.residual -> unit
 end) =
 struct
   open P
@@ -934,6 +935,7 @@ struct
               else term statements cache source env view.term
             in
             Hashtbl.add cache key value;
+            lowered r;
             value)
 
   and descriptor statements cache source = function
@@ -2844,7 +2846,7 @@ struct
     | Diagnostic.Error _ | Not_found | Invalid_argument _ | Failure _ -> Error "constant"
 end
 
-let lower_with ?trace ?budget ~strict ~region_allowed ~draw root =
+let lower_with ?trace ?budget ?(lowered = ignore) ~strict ~region_allowed ~draw root =
   let module L = Lowerer (struct
     let trace = trace
     let budget = budget
@@ -2852,11 +2854,14 @@ let lower_with ?trace ?budget ~strict ~region_allowed ~draw root =
     let region_allowed = region_allowed
     let draw = draw
     let root = root
+    let lowered = lowered
   end) in
   L.result
 
-let lower ?trace ?(strict = false) ?budget root =
-  lower_with ?trace ?budget ~strict ~region_allowed:(fun _ -> true) ~draw:None (Lazy.from_val root)
+let lower ?trace ?(strict = false) ?budget ?lowered root =
+  lower_with ?trace ?budget ?lowered ~strict
+    ~region_allowed:(fun _ -> true)
+    ~draw:None (Lazy.from_val root)
 
 let lower_draw ?(region_allowed = fun _ -> true) ~root build =
   lower_with ~strict:false ~region_allowed ~draw:(Some build) root

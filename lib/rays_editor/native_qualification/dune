@@ -9,7 +9,8 @@
   test_chain_gpu_native
   bench_chain_recook
   bench_chain_frames
-  test_chain_frames_native)
+  test_chain_frames_native
+  test_scrub_gpu_native)
  (modules
   test_workspace_gpu_native
   test_workspace_gpu_marks
@@ -18,7 +19,8 @@
   test_chain_gpu_native
   bench_chain_recook
   bench_chain_frames
-  test_chain_frames_native)
+  test_chain_frames_native
+  test_scrub_gpu_native)
  (libraries
   rays
   rays_math
@@ -37,12 +39,20 @@
   rdk
   rdk_rays
   rays_pathtracer
+  rays_editor
+  editor_document
+  flow_graph
+  lisp_sop
+  rdk_test_support
+  str
+  unix
   parallel))
 
 (rule
  (enabled_if
   (= %{system} macosx))
  (alias runtest-native)
+ (deps ../../../sketches/gpu_sea.rays)
  (action
   (progn
    (run %{exe:test_workspace_gpu_native.exe})
@@ -52,7 +62,19 @@
     (progn
      (run %{exe:test_grid_gpu_native.exe})
      (run %{exe:test_chain_gpu_native.exe})
-     (run %{exe:test_chain_frames_native.exe}))))))
+     (run %{exe:test_chain_frames_native.exe})
+     (run %{exe:test_scrub_gpu_native.exe}))))))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_scrub_gpu_native)
+ (deps ../../../sketches/gpu_sea.rays)
+ (action
+  (setenv
+   GRID_SIDE
+   512
+   (run %{exe:test_scrub_gpu_native.exe}))))
 
 (rule
  (enabled_if

@@ -213,9 +213,11 @@ and st = {
       (* Lisp nodes whose bodies evaluate inline in the calling program, with the host's key of
          their declaration and canonicalization of their call parameters *)
   ops : Op.t list;
+  authored_defs : string Lazy.t; (* [authored_key] of the checked workspace *)
   find_op : string -> Context.t -> Op.t option;
       (* [Op.finder ops]: [ops] is a list, the whole SOP catalog in the editor *)
-  mutable terms : ((int, W.term) Hashtbl.t * (string, unit) Hashtbl.t) option;
+  mutable terms :
+    ((int * W.path option * int * Ty.t, W.term) Hashtbl.t * (string, unit) Hashtbl.t) option;
       (* helper and inlined node terms by form id, for a replayed body (built on its first
          replay), and the node kinds indexed *)
   mutable inlined : string list; (* the node kinds inlined so far, newest first *)
@@ -263,6 +265,8 @@ type inline_entry = {
   e_site : W.path;
   e_iter : int list;
   e_kinds : string list; (* the node kinds the body inlined, itself included *)
+  e_parameters : value; (* the call's parameters: a replay puts its own live ones in their place *)
+  e_guards : (value * bool * Diagnostic.t) list; (* the body's deferred checks *)
 }
 
 (* ponytail: a whole-table clear at 256 entries; an entry retains its evaluation's state *)
@@ -621,6 +625,118 @@ let card_kind = "$card"
 (* the argument naming an inlined card's cook label on its context operators *)
 let context_label = "$label"
 
+(* A value's structure: what forcing it computes, without the ids an evaluation numbers its residuals
+   and functions by, so an equal argument of a later evaluation has the same key. A term is its form
+   id, path and type; an authored one (below [Syntax.library_base], whose ids restart across imports
+   and reparses) and a generated one (id 0) are spelled out as well. Each residual and closure is
+   written once, then referred to by its index: captures are shared. What an authored term may call
+   is not here: a caller adds [authored_key]. *)
+let structure v =
+  let b = Buffer.create 256 in
+  let add = Buffer.add_string b in
+  let str s =
+    add (string_of_int (String.length s));
+    Buffer.add_char b ':';
+    add s
+  in
+  let seen = Hashtbl.create 16 and count = ref 0 in
+  let once id x write =
+    match List.find_opt (fun (y, _) -> y == x) (Hashtbl.find_all seen id) with
+    | Some (_, i) ->
+        add "#";
+        add (string_of_int i)
+    | None ->
+        Hashtbl.add seen id (x, !count);
+        incr count;
+        write ()
+  in
+  let path p = str (String.concat "/" p) in
+  let rec term (t : W.term) =
+    add "t";
+    add (string_of_int t.form.id);
+    path (Option.value ~default:[ "-" ] t.path);
+    str (Ty.to_string t.ty);
+    if t.form.id < Syntax.library_base then begin
+      str (Lisp.flat t.form);
+      if t.form.id = 0 then begin
+        add (string_of_int (Obj.tag (Obj.repr t.node)));
+        add "(";
+        List.iter term (W.children t);
+        add ")"
+      end
+    end
+  in
+  let ctx (c : ctx) =
+    add (string_of_int c.inst);
+    path c.prefix;
+    path c.base;
+    path c.route;
+    str (String.concat "," (List.map string_of_int c.iter));
+    add (string_of_int c.depth);
+    List.iter
+      (fun f -> add (if f then "1" else "0"))
+      [ c.rec_; c.data; c.geometry; c.host; c.kernel_requests ];
+    str (Option.value ~default:"-" c.card)
+  in
+  let rec value = function
+    | Residual r ->
+        once r.rid (Obj.repr r) (fun () ->
+            add (if r.previous then "P" else "R");
+            term r.rterm;
+            ctx r.rc;
+            env r.renv)
+    | Fn (Closure cl as f) ->
+        once cl.fid (Obj.repr f) (fun () ->
+            add "C";
+            str (Marshal.to_string cl.params []);
+            term cl.body;
+            path cl.zone;
+            ctx cl.at;
+            env cl.env)
+    | Fn (Named n) ->
+        add "N";
+        str n.name
+    | List xs ->
+        add "[";
+        Array.iter value xs;
+        add "]"
+    | Record fs -> fields "{" fs
+    | Struct (n, ty, fs) ->
+        str n;
+        str (Ty.to_string ty);
+        fields "S" fs
+    | Source (n, ty, fs) ->
+        str n;
+        str (Ty.to_string ty);
+        fields "Q" fs
+    | v -> str (Value.key_of ~residual:(fun _ -> assert false) v)
+  and fields tag fs =
+    add tag;
+    List.iter
+      (fun (n, v) ->
+        str n;
+        value v)
+      fs;
+    add "}"
+  and env e =
+    Smap.iter
+      (fun n v ->
+        str n;
+        value v)
+      e
+  in
+  value v;
+  Digest.string (Buffer.contents b)
+
+(* What an authored term may call that its structure does not spell: the authored definitions,
+   macros and node declarations *)
+let authored_key (ws : W.t) =
+  List.map (fun (g : W.graph) -> g.form) ws.defs
+  @ ws.macros
+  @ List.map (fun (d : W.node_definition) -> d.body.form) ws.nodes
+  |> List.filter (fun (f : Syntax.t) -> f.id < Syntax.library_base)
+  |> List.map Lisp.flat |> String.concat "\000" |> Digest.string
+
 (* The cooked inputs of an inlined call, in argument order. *)
 let inline_inputs parameters vals =
   let rec ids = function
@@ -631,8 +747,10 @@ let inline_inputs parameters vals =
   List.concat_map (fun (name, v) -> if List.mem_assoc name parameters then [] else ids v) vals
 
 (* What an inline body's evaluation is a function of: the declaration (the host's key), the
-   canonical parameters and the shape of the inputs (cooked handles by type, not identity). None
-   for a live or non-data argument, or outside the static evaluation. *)
+   canonical parameters and the shape of the inputs (cooked handles by type, not identity). A live
+   parameter is its structure, with the authored definitions it may call: a replay takes the new
+   argument in the old one's place. None for a function argument, a non-data input, or outside the
+   static evaluation. *)
 let inline_key c ~key parameters vals =
   if c.st.time <> None || c.data then None
   else
@@ -643,9 +761,20 @@ let inline_key c ~key parameters vals =
       | Source _ | Struct _ | Record _ | Fn _ | Residual _ -> raise Exit
       | v -> "=" ^ Value.key_of ~residual:(fun _ -> raise Exit) v
     in
+    let rec has_fn = function
+      | Fn _ -> true
+      | List xs -> Array.exists has_fn xs
+      | Record fs | Struct (_, _, fs) | Source (_, _, fs) -> List.exists (fun (_, v) -> has_fn v) fs
+      | _ -> false
+    in
+    let parameters_key () =
+      if List.exists (fun (_, v) -> has_fn v) parameters then raise Exit
+      else if List.exists (fun (_, v) -> is_live v) parameters then
+        "L" ^ structure (Record parameters) ^ Lazy.force c.st.authored_defs
+      else Value.key_of ~residual:(fun _ -> raise Exit) (Record parameters)
+    in
     match
-      Value.key_of ~residual:(fun _ -> raise Exit) (Record parameters)
-      ^ "\000"
+      parameters_key () ^ "\000"
       ^ String.concat "\001"
           (List.filter_map
              (fun (name, v) ->
@@ -658,8 +787,13 @@ let inline_key c ~key parameters vals =
              (Lazy.force key ^ "\000" ^ k ^ string_of_bool c.geometry ^ string_of_bool c.host))
     | exception _ -> None
 
-(* The terms of the workspace's definitions (helpers and inlined node bodies, as evaluated) by
-   form id, built once per evaluation. *)
+(* The terms of the workspace's definitions (helpers and inlined node bodies, as evaluated) by form
+   id, path, node kind and type (what a replayed term is found by), built once per evaluation. A
+   form checks to a term at each call of its helper; those with one key are the same term, so the
+   first is kept and the others are not walked (walking each, and testing membership among them,
+   was quadratic: 40k terms, 548 per form id, 88 ms of a gpu_sea replay). *)
+let term_key (t : W.term) = (t.form.id, t.path, Obj.tag (Obj.repr t.node), t.ty)
+
 let term_index st kinds =
   let index, indexed =
     match st.terms with
@@ -670,11 +804,13 @@ let term_index st kinds =
         terms
   in
   let rec walk (x : W.term) =
-    if x.form.id <> 0 && not (List.memq x (Hashtbl.find_all index x.form.id)) then begin
-      Hashtbl.add index x.form.id x;
-      List.iter walk (W.children x)
-    end
-    else if x.form.id = 0 then List.iter walk (W.children x)
+    if x.form.id = 0 then List.iter walk (W.children x)
+    else
+      let key = term_key x in
+      if not (Hashtbl.mem index key) then begin
+        Hashtbl.add index key x;
+        List.iter walk (W.children x)
+      end
   in
   let graph (g : W.graph) =
     walk g.body;
@@ -690,7 +826,9 @@ let term_index st kinds =
           Option.iter
             (fun inlined ->
               let (d : W.node_definition), _, _ = Lazy.force inlined in
-              graph d.body)
+              graph d.body;
+              (* a deferred check's test is a validation's *)
+              List.iter (fun (t, _, _) -> walk t) d.validations)
             (Hashtbl.find_opt st.node_defs kind)
       end)
     kinds;
@@ -699,7 +837,7 @@ let term_index st kinds =
 (* An inline body's kept evaluation, in this evaluation: its nodes at the next ids over these
    inputs, its residuals and functions at the next ids, its sites and iterations under this
    call's, its kernels offered again. The value equals what evaluating the body here gives. *)
-let replay_inline c (e : inline_entry) inputs =
+let replay_inline c (e : inline_entry) ~parameters inputs =
   let st = c.st in
   let lo = st.nnodes and rid0 = st.rids and fid0 = st.nfns in
   let site' = site c and iter' = c.iter in
@@ -742,17 +880,30 @@ let replay_inline c (e : inline_entry) inputs =
   let index = term_index st e.e_kinds in
   let term (t : W.term) =
     if t.form.id = 0 then t
-    else
-      match
-        List.find_opt
-          (fun (n : W.term) ->
-            n.path = t.path && Obj.tag (Obj.repr n.node) = Obj.tag (Obj.repr t.node))
-          (Hashtbl.find_all index t.form.id)
-      with
-      | Some n -> n
-      | None -> raise Exit
+    else match Hashtbl.find_opt index (term_key t) with Some n -> n | None -> raise Exit
   in
   let residuals = Hashtbl.create 16 and functions = Hashtbl.create 16 in
+  (* the call's live arguments are this call's: the kept ones (equal in structure, the key) map to
+     them, captures and all *)
+  let rec pair old next =
+    match (old, next) with
+    | Residual a, Residual b ->
+        if not (List.exists (fun (o, _) -> o == a) (Hashtbl.find_all residuals a.rid)) then begin
+          Hashtbl.add residuals a.rid (a, b);
+          Smap.iter (fun name v -> pair v (Smap.find name b.renv)) a.renv
+        end
+    | Fn (Closure a as f), Fn (Closure b as g) ->
+        if not (List.exists (fun (o, _) -> o == f) (Hashtbl.find_all functions a.fid)) then begin
+          Hashtbl.add functions a.fid (f, g);
+          Smap.iter (fun name v -> pair v (Smap.find name b.env)) a.env
+        end
+    | List xs, List ys -> Array.iter2 pair xs ys
+    | ( (Record xs | Struct (_, _, xs) | Source (_, _, xs)),
+        (Record ys | Struct (_, _, ys) | Source (_, _, ys)) ) ->
+        List.iter2 (fun (_, x) (_, y) -> pair x y) xs ys
+    | _ -> ()
+  in
+  pair e.e_parameters parameters;
   let rec value = function
     | Deferred (ty, n) -> Deferred (ty, id n)
     | List xs -> List (Array.map value xs)
@@ -817,10 +968,13 @@ let replay_inline c (e : inline_entry) inputs =
           })
         e.e_nodes
     in
-    (nodes, List.map residual e.e_observed, value e.e_value)
+    ( nodes,
+      List.map residual e.e_observed,
+      value e.e_value,
+      List.map (fun (test, fails, d) -> (value test, fails, d)) e.e_guards )
   with
   | exception Exit -> None
-  | nodes, observed, v ->
+  | nodes, observed, v, guards ->
       List.iter2
         (fun n form ->
           st.nodes <- n :: st.nodes;
@@ -838,7 +992,7 @@ let replay_inline c (e : inline_entry) inputs =
               st.watching)
         e.e_kinds;
       List.iter (fun r -> Effect.perform (Residual_effect.Observe_kernel r)) observed;
-      Some v
+      Some (v, guards)
 
 (* Residuals are shared and immutable: each remembers its answer, or a let-bound array read by many later
    bindings is walked once per reader and the walk is exponential in the depth of the sharing, and the
@@ -1567,10 +1721,13 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
     Option.bind key (fun key ->
         Mutex.protect inline_lock (fun () -> Hashtbl.find_opt inline_memo key))
   in
-  match Option.bind replay (fun entry -> replay_inline c entry (inline_inputs parameters vals)) with
-  | Some v ->
+  match
+    Option.bind replay (fun entry ->
+        replay_inline c entry ~parameters:(Record parameters) (inline_inputs parameters vals))
+  with
+  | Some (v, guards) ->
       st.steps <- steps;
-      card c ~form d parameters ~vals v
+      card c ~form d parameters ~vals ~guards v
   | None -> (
       let inlined0 = st.inlined in
       st.inlined <- d.kind.qualified :: st.inlined;
@@ -1666,7 +1823,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
       | v ->
           st.steps <- steps;
           (match key with
-          | Some key when !cacheable && st.states == states && st.cells == cells && guards = [] ->
+          | Some key when !cacheable && st.states == states && st.cells == cells ->
               let count = st.nnodes - nnodes in
               let rec take n l = if n = 0 then [] else List.hd l :: take (n - 1) (List.tl l) in
               let entry =
@@ -1692,6 +1849,8 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
                      in
                      since st.inlined
                      @ Hashtbl.fold (fun name () kinds -> ("def:" ^ name) :: kinds) helpers []);
+                  e_parameters = Record parameters;
+                  e_guards = guards;
                 }
               in
               Mutex.protect inline_lock (fun () ->
@@ -2532,6 +2691,7 @@ let new_state ?(budget = max_steps) ~record ws =
          ws.W.nodes;
        t);
     ops = ws.ops;
+    authored_defs = lazy (authored_key ws);
     find_op = Op.finder ws.ops;
     terms = None;
     inlined = [];

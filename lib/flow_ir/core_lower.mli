@@ -2,6 +2,7 @@ val lower :
   ?trace:((Packed.t, Diagnostic.t list) result -> unit) ->
   ?strict:bool ->
   ?budget:int ->
+  ?lowered:(Flow.Eval.residual -> unit) ->
   Flow.Eval.residual ->
   (Core.program, string) result
 (** Frame lowering: literals, captured reads, scalar operations, vectors, patterned lets, branches,
@@ -10,7 +11,8 @@ val lower :
     forms/operators are named; no opaque operation survives. *)
 (* [budget] is the lowered-term limit (default 2048; cook-time interpreted geometry folds raise it).
    [strict] requires every packed numeric subterm to qualify as a region;
-   structured scalar control and bounded list work remain compiled core. *)
+   structured scalar control and bounded list work remain compiled core. [lowered] is told each
+   residual the program lowers (the root and the captures it reads), once. *)
 
 type draw_context = {
   value : Core.source -> Flow.Eval.value -> int;

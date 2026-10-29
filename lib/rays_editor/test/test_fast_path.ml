@@ -113,39 +113,59 @@ let run_cameras () =
   same_as_full "second camera write" saved
 
 (* A card inlined from a Lisp node relowers (its literal is part of the one program): the result is
-   the one a lowering from the new text gives, node for node (residual ids are numbered by the
-   evaluation that made them, and a replayed card numbers them differently). Repeated scrubs are cheap because the
-   evaluation checks each residual of a live argument once ([guardable]), not once per path. *)
+   the one a lowering from the new text gives, node for node and residual for residual
+   ([Flow.Eval.structure]: residual ids are numbered by the evaluation that made them, and a
+   replayed card numbers them differently). A card with a live argument (gpu_sea's transform, the
+   orrery's sun) replays its kept body with the new argument in place, and a value scrubbed back
+   replays the first one's. *)
 let plan_key (doc : Document.t) =
   Array.to_list doc.workspace.lowered.plan.nodes
   |> List.map (fun (n : Flow.Eval.node) ->
-      (n.kind, n.site, Flow.Value.key_of ~residual:(fun _ -> 0) (Flow.Eval.Record n.args)))
+      (n.kind, n.site, n.iter, Flow.Eval.structure (Flow.Eval.Record n.args)))
 
-let run_inline () =
-  let sea = In_channel.with_open_bin "../../../sketches/gpu_sea.rays" In_channel.input_all in
-  let sdoc = lower (Ws_fixture.of_text sea) in
-  let scrub doc node key value =
+let scrubs file steps =
+  let text = In_channel.with_open_bin ("../../../sketches/" ^ file) In_channel.input_all in
+  let scrub doc (node, key, sub, value) =
     let op =
       E.Set_arg
-        { node; key = Kw key; sub = []; value = List.hd (Result.get_ok (Flow.Syntax.parse value)) }
+        { node; key = Kw key; sub; value = List.hd (Result.get_ok (Flow.Syntax.parse value)) }
     in
     let ws = Workspace_doc.edit catalog doc.Document.workspace.ws op |> Result.get_ok in
     lower ~previous:doc ws
   in
-  let doc =
-    List.fold_left
-      (fun doc (key, value) ->
-        let next = scrub doc [ "sea"; "waves" ] key value in
-        let full = lower (Ws_fixture.of_text (source next)) in
-        check
-          (plan_key next = plan_key full)
-          ("inline card " ^ key ^ ": plan differs from a full lowering");
-        same_as_full ("inline card " ^ key) next;
-        next)
-      sdoc
-      [ ("seed", "9"); ("octaves", "5"); ("seed", "11") ]
-  in
-  ignore doc
+  ignore
+    (List.fold_left
+       (fun doc ((_, key, _, value) as step) ->
+         let next = scrub doc step in
+         let full = lower (Ws_fixture.of_text (source next)) in
+         let what = file ^ " " ^ key ^ " " ^ value in
+         check (plan_key next = plan_key full) (what ^ ": plan differs from a full lowering");
+         same_as_full what next;
+         next)
+       (lower (Ws_fixture.of_text text))
+       steps)
+
+let run_inline () =
+  let waves = [ "sea"; "waves" ] in
+  scrubs "gpu_sea.rays"
+    [
+      (waves, "seed", [], "9");
+      (waves, "octaves", [], "5");
+      (waves, "seed", [], "11");
+      (waves, "seed", [], "9");
+      (* a literal inside a live argument *)
+      (waves, "lacunarity", [ 1 ], "2.25");
+      ([ "sea"; E.nested_leaf "waves" (Pos 0) ], "width", [], "7.5");
+    ];
+  let base = [ "orrery"; "base" ] and sun = [ "orrery"; "sun" ] in
+  scrubs "ws_orrery.rays"
+    [
+      (base, "amplitude", [], "0.07");
+      (sun, "segments", [], "18");
+      (base, "amplitude", [], "0.05");
+      (sun, "segments", [], "16");
+      ([ "orrery"; "glow" ], "color", [ 1; 1 ], "0.1");
+    ]
 
 let run () =
   run_cameras ();

@@ -7,6 +7,10 @@ type id = int
 (** Unique per form within one parse ([parse] numbers forms 0, 1, ... in reading order); [renumber]
     gives another tree a disjoint range. *)
 
+val library_base : id
+(** The ids of the embedded library's forms start here, fixed by their place in the library; an
+    authored form's id is below it and may restart across imports and reparses. *)
+
 type quote_kind = Plain | Quasi | Unquote | Splice  (** ['] [`] [~] [~@] *)
 
 type t = {

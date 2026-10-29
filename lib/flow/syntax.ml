@@ -1,4 +1,7 @@
 type id = int
+
+let library_base = 1 lsl 40
+
 type quote_kind = Plain | Quasi | Unquote | Splice
 
 type t = {

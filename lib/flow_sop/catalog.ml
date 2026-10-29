@@ -224,7 +224,7 @@ let reachable sources forms =
 (* Each library form has a fixed id, from its position in the whole library above any authored id:
    a library definition checks to the same form ids whatever the authored text or the reachable
    subset, so a kept evaluation of its body (Flow.Eval) finds its terms again. *)
-let library_base = 1 lsl 40
+let library_base = Flow.Syntax.library_base
 
 let library_bases sources =
   let rec size (form : Flow.Syntax.t) =

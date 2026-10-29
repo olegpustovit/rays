@@ -601,6 +601,7 @@ module Executor = struct
           List.find_map (fun (_, value) -> unsupported_captured value) fields
       | _ -> None
     in
+    let inline = Hashtbl.create 16 in
     let validate_residual residual =
       let view = E.Residual.residual_view residual in
       (* Per-element Vec3 placeholders are runtime uniforms, not nested kernels. *)
@@ -613,7 +614,11 @@ module Executor = struct
       in
       if view.previous || element_capture || E.state_dependent (E.Residual residual) then Ok ()
       else
-        match Core_lower.lower ?trace ~strict:true residual with
+        match
+          Core_lower.lower ?trace ~strict:true
+            ~lowered:(fun r -> Hashtbl.replace inline (E.Residual.residual_id r) ())
+            residual
+        with
         | Ok core when Array.find_map unsupported_packed_source core.Core.regions = None -> Ok ()
         | Ok _ ->
             Error
@@ -624,14 +629,18 @@ module Executor = struct
               (Diagnostic.error ~span:view.term.form.span ~code:"E_KERNEL_FORM"
                  "Numeric node bodies must compile to packed kernels.")
     in
-    (* a residual shared by many (a matrix several bindings read) is validated once *)
+    (* a residual shared by many (a matrix several bindings read) is validated once, and one a
+       strict lowering took into its program (a capture it reads) was lowered there: a capture's
+       own lowering repeated its readers' (gpu_sea's noise: 37 lowerings, 7 ms) *)
     let validated = Hashtbl.create 16 in
     let rec validate_value = function
       | E.Residual residual when Hashtbl.mem validated (E.Residual.residual_id residual) -> Ok ()
       | E.Residual residual ->
           Hashtbl.replace validated (E.Residual.residual_id residual) ();
-          Result.bind (validate_residual residual) (fun () ->
-              validate_fields (E.Residual.residual_view residual).bindings)
+          Result.bind
+            (if Hashtbl.mem inline (E.Residual.residual_id residual) then Ok ()
+             else validate_residual residual)
+            (fun () -> validate_fields (E.Residual.residual_view residual).bindings)
       | E.List values -> validate_array values 0
       | E.Record fields | E.Struct (_, _, fields) | E.Source (_, _, fields) ->
           validate_fields fields

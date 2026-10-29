@@ -272,8 +272,10 @@ let specialize ?(provenance = -1) ~context ~label graph =
     graph
 
 (* Forms reachable from [start]: [leading], then other reached node bodies, helpers, graphs and
-   macros, then dispatched macro expansions. [skip] names a node whose body is already in [leading]. *)
+   macros, then dispatched macro expansions. [skip] names a node whose body is already in [leading].
+   A library definition is not walked: what it reaches is fixed with it (its id, {!forms_digest}). *)
 let scoped_forms (checked : W.t) ~leading ~skip ~start =
+  let library (form : Flow.Syntax.t) = form.id >= Flow.Syntax.library_base in
   let nodes = Hashtbl.create 8
   and defs = Hashtbl.create 8
   and graphs = Hashtbl.create 4
@@ -283,14 +285,16 @@ let scoped_forms (checked : W.t) ~leading ~skip ~start =
     let name = definition.kind.qualified in
     if not (Hashtbl.mem nodes name) then begin
       Hashtbl.add nodes name ();
-      graph definition.body;
-      List.iter (fun (t, _, _) -> term definition t) definition.validations;
-      List.iter (fun (_, t) -> term definition t) definition.normalizers
+      if not (library definition.body.form) then begin
+        graph definition.body;
+        List.iter (fun (t, _, _) -> term definition t) definition.validations;
+        List.iter (fun (_, t) -> term definition t) definition.normalizers
+      end
     end
   and definition table (g : W.graph) =
     if not (Hashtbl.mem table g.name) then begin
       Hashtbl.add table g.name ();
-      graph g
+      if not (library g.form) then graph g
     end
   and named name =
     Option.iter (definition defs) (List.find_opt (fun (g : W.graph) -> g.name = name) checked.defs);
@@ -301,7 +305,7 @@ let scoped_forms (checked : W.t) ~leading ~skip ~start =
       Option.iter
         (fun form ->
           Hashtbl.add macros name ();
-          syntax form)
+          if not (library form) then syntax form)
         (List.find_opt
            (fun form ->
              match Flow.Syntax.children form with
@@ -332,7 +336,8 @@ let scoped_forms (checked : W.t) ~leading ~skip ~start =
         expanded := e.body.form :: !expanded
     | _ -> ());
     t
-  and graph (g : W.graph) = ignore (map transform g)
+  (* a helper call's body is its definition's, walked once by name *)
+  and graph (g : W.graph) = ignore (map ~helpers:false transform g)
   and term (definition : W.node_definition) t =
     graph { definition.body with body = t; inputs = [] }
   in
@@ -359,7 +364,8 @@ let scoped_forms (checked : W.t) ~leading ~skip ~start =
   in
   forms @ List.rev !expanded
 
-(* cache key: length-prefixed dump of spelling, comments and flags, no ids or spans *)
+(* cache key: length-prefixed dump of spelling, comments and flags, no ids or spans; a library form is
+   its id, fixed with the binary *)
 let forms_digest forms =
   let buffer = Buffer.create 4096 in
   let str s =
@@ -377,6 +383,8 @@ let forms_digest forms =
     str s
   in
   let rec form (x : Flow.Syntax.t) =
+    if x.id >= Flow.Syntax.library_base then atom 'L' (string_of_int x.id) else library_free x
+  and library_free (x : Flow.Syntax.t) =
     if x.notes <> [] then strs x.notes;
     if x.meta <> [] then strs x.meta;
     (match x.node with

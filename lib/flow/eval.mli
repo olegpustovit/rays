@@ -307,6 +307,15 @@ val element_key : Workspace.path -> string
 val is_live : value -> bool
 (** A residual anywhere inside. *)
 
+val structure : value -> string
+(** A digest of what forcing the value computes, free of the ids an evaluation numbers residuals and
+    functions by: an equal argument of a later evaluation (of an edited text) has the same one.
+    Terms are their form ids, paths and types, an authored or generated one with its spelling too;
+    what an authored term calls is {!authored_key}'s. *)
+
+val authored_key : Workspace.t -> string
+(** A digest of the workspace's authored definitions, macros and node declarations. *)
+
 val frame_dependent : value -> bool
 (** Reads a frame fact; element-only residuals return false. *)
 

@@ -1963,32 +1963,42 @@ struct
     | None -> false
 
   (* An inlined body's kernels key on its card (declaration cone and canonical parameters), not on
-     the whole authored source, so an edit elsewhere keeps them cached, as the card was. A card
-     whose parameters are not plain data (a live argument) keys on the whole source. *)
+     the whole authored source, so an edit elsewhere keeps them cached, as the card was. A live
+     parameter is its structure, with the authored definitions it may call. *)
   let card_sources =
     lazy
-      (let table = Hashtbl.create 16 in
+      (let table = Hashtbl.create 16 and authored = lazy (E.authored_key checked) in
        Array.iter
          (fun (n : E.node) ->
            if n.kind = E.card_kind then
              match (List.assoc_opt "kind" n.args, List.assoc_opt "parameters" n.args) with
              | Some (E.Text kind), Some parameters -> (
                  match
-                   ( List.find_opt
-                       (fun (d : Workspace.node_definition) -> d.kind.qualified = kind)
-                       checked.nodes,
-                     Flow.Value.key_of ~residual:(fun _ -> raise Exit) parameters )
+                   List.find_opt
+                     (fun (d : Workspace.node_definition) -> d.kind.qualified = kind)
+                     checked.nodes
                  with
-                 | Some definition, key ->
-                     let source =
-                       cached_digest checked [ definition ] (fun () ->
-                           Context_kernel.declaration_source checked definition)
+                 | Some definition ->
+                     (* terms (a live argument's, a closure's: not just "fn") are their structure
+                        and what authored code they may call *)
+                     let rec terms = function
+                       | E.Residual _ | E.Fn _ -> true
+                       | E.List xs -> Array.exists terms xs
+                       | E.Record fs | E.Struct (_, _, fs) | E.Source (_, _, fs) ->
+                           List.exists (fun (_, v) -> terms v) fs
+                       | _ -> false
+                     in
+                     let key () =
+                       if terms parameters then E.structure parameters ^ Lazy.force authored
+                       else Flow.Value.key_of ~residual:(fun _ -> assert false) parameters
                      in
                      Hashtbl.add table
                        (n.site @ [ "node:" ^ kind ])
-                       (n.iter, lazy (Digest.to_hex (Digest.string (source ^ key))))
-                 | None, _ -> ()
-                 | exception Exit -> ())
+                       ( n.iter,
+                         lazy
+                           (Digest.to_hex
+                              (Digest.string (declaration_key checked definition ^ key ()))) )
+                 | None -> ())
              | _ -> ())
          evaluated.plan.nodes;
        table)
@@ -2041,35 +2051,46 @@ struct
     | _ -> kernel_source
 
   (* An inlined body's kernel node, built once for its card: an edit elsewhere relowers the program
-     but takes the node it built (over its new inputs). The
-     key is the node's cook identity (the card's key, the data, the inputs'). *)
+     but takes the node it built (over its new inputs), and a device keeps the kernels it compiled
+     for it. The key is what the build reads: the card's key, the data's structure, and of each input
+     its id and the facts along its pass-throughs ([Attribute_kernel.source_origins]); a node built
+     for a device is taken only for that device. *)
   let reuse ?node ?state ?elems what data inputs build =
+    let rec input_key input =
+      let facts = Sop.Node.facts input and inputs = Sop.Node.Build.input_array input in
+      string_of_int (Sop.Node.id input)
+      ^ Marshal.to_string facts []
+      ^
+      match facts.cook_mode with
+      | (Duplicate_input i | In_place i | Instance_input i | Passthrough i)
+        when i >= 0 && i < Array.length inputs ->
+          "<" ^ input_key inputs.(i)
+      | _ -> ""
+    in
     let key () =
       String.concat "\000"
         ([
            Lazy.force (kernel_source_of node);
            what;
-           Flow.Value.key_of ~residual:E.Residual.residual_id data;
+           E.structure data;
            string_of_bool reference;
            string_of_bool strict_body;
            string_of_bool gpu.fast;
          ]
-        @ List.map
-            (fun input -> string_of_int (Sop.Node.id input) ^ Sop.Node.Build.cache_parameters input)
-            inputs)
+        @ List.map input_key inputs)
     in
     let card = match node with Some (n : E.node) -> n.kind = E.card_kind | None -> false in
-    if (not (inlined node || card)) || state <> None || elems <> None || gpu.backend <> None then
-      build ()
+    if (not (inlined node || card)) || state <> None || elems <> None then build ()
     else
       match key () with
       | exception _ -> build ()
       | key -> (
           match Mutex.protect built_lock (fun () -> Built.find_opt built key) with
-          | Some node -> Sop.Node.Build.rebuild_with_inputs node (Array.of_list inputs)
-          | None ->
+          | Some (backend, node) when backend == gpu.backend ->
+              Sop.Node.Build.rebuild_with_inputs node (Array.of_list inputs)
+          | _ ->
               let node = build () in
-              Mutex.protect built_lock (fun () -> Built.add built key node);
+              Mutex.protect built_lock (fun () -> Built.add built key (gpu.backend, node));
               node)
 
   let geometry_arrays_node ?node ?(strict_body = strict_body) ?host ?state ?elems ~operation ~args
