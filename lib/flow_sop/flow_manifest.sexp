@@ -1,6 +1,6 @@
 (flow_manifest
   (version 202609)
-  (digest "be68d282f201886f4fcdf022477d205c")
+  (digest "9b1b27747653a3e4dd5828e40280f753")
   (kinds
     (kind "sop/switch"
       (key "switch")
@@ -3362,7 +3362,7 @@
       (outputs (output "geo" geometry))
       (facts (cook-mode generic) (elementwise points) (reads "P" "N") (writes "P" "N") (topology preserved) (exact false))
       (body lisp)
-      (calls "sop/normals"))
+      (calls))
     (kind "sop/tube"
       (key "tube")
       (operation "tube")
