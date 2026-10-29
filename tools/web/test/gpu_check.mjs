@@ -17,12 +17,12 @@ const [kernelsPath, gpuPath, goldenDir] = process.argv.slice(2);
 if (!goldenDir) { console.error('usage: node gpu_check.mjs KERNELS_JSON GPU_JS GOLDEN_DIR'); process.exit(2); }
 if (!chromeAvailable()) { console.log('gpu_check: skipped (Google Chrome not found)'); process.exit(0); }
 
-const GOLDENS = ['arithmetic', 'noise', 'select', 'two_outputs'], NAMES = [...GOLDENS, 'ops'];   // ops: CPU region carried in the table
+const GOLDENS = ['arithmetic', 'noise', 'select', 'two_outputs'], NAMES = [...GOLDENS, 'ops', 'noise_fractal'];   // ops, noise_fractal: CPU regions carried in the table
 const pageScript = `
 import { createGpu } from './gpu.js';
 import { noise3 } from './prims.js';
 const names = ${JSON.stringify(NAMES)}, T = 1.5;
-const tolerance = { noise: [0, 1e-4] };   // [relative, absolute]
+const tolerance = { noise: [0, 1e-4], noise_fractal: [0, 1e-4] };   // [relative, absolute]
 const text = async p => (await fetch(p)).text();
 window.__result = (async () => {
   const report = { adapter: null, kernels: {}, errors: [] };

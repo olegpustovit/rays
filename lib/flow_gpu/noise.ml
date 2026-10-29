@@ -6,14 +6,22 @@ module P = Flow_ir.Packed
 let variants = Hashtbl.create 4
 and lock = Mutex.create ()
 
-let helper octaves =
+(* the helper of an octave count, [fractal] taking its lacunarity and gain as inputs 3 and 4 *)
+let helper ~fractal octaves =
   Mutex.protect lock (fun () ->
-      match Hashtbl.find_opt variants octaves with
+      match Hashtbl.find_opt variants (octaves, fractal) with
       | Some compiled -> compiled
       | None ->
           let declarations =
             Noise_source.source
-            ^ Printf.sprintf
+            ^
+            if fractal then
+              Printf.sprintf
+                "(defn noise-entry :context value [(table : (array int)) (x : float) (y : float) \
+                 (z : float) (l : float) (g : float)] (noise-fbm-fractal table [x y z] %d l g))"
+                octaves
+            else
+              Printf.sprintf
                 "(defn noise-entry :context value [(table : (array int)) (x : float) (y : float) \
                  (z : float)] (noise-fbm table [x y z] %d))"
                 octaves
@@ -23,7 +31,7 @@ let helper octaves =
               (fun (stage : Lisp_stage.stage) -> stage.program)
               (Lisp_stage.compile ~declarations "noise-entry")
           in
-          Hashtbl.replace variants octaves compiled;
+          Hashtbl.replace variants (octaves, fractal) compiled;
           compiled)
 
 (* The program with each Noise3 replaced by its helper, and [back] as Trace.expand's but naming the
@@ -49,14 +57,20 @@ let expand (program : P.t) =
       Array.iteri
         (fun slot instruction ->
           match Trace.flat [] instruction with
-          | guards, P.Noise3 (x, y, z, seed, octaves, _, _) ->
+          | guards, P.Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
+              let fractal = lacunarity <> P.Fixed 2. || gain <> P.Fixed 0.5 in
               let helper =
-                match helper octaves with
+                match helper ~fractal octaves with
                 | Ok compiled -> compiled
                 | Error d -> raise (Diagnostic.Error d)
               in
-              let guards = List.map (fun (c, yes) -> (map.(c), yes)) guards
-              and operands = [| map.(x); map.(y); map.(z) |] in
+              let guards = List.map (fun (c, yes) -> (map.(c), yes)) guards in
+              let register = function P.Fixed v -> push (-1) (P.Const v) | Live r -> map.(r) in
+              let operands =
+                Array.append
+                  [| map.(x); map.(y); map.(z) |]
+                  (if fractal then [| register lacunarity; register gain |] else [||])
+              in
               let hm = Array.make (Array.length helper.code) (-1) in
               Array.iteri
                 (fun j i ->

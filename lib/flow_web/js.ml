@@ -296,8 +296,9 @@ let region ?(fast = false) program =
     | Select (c, yes, no) ->
         Printf.sprintf "%s !== 0 ? %s : %s" (numeric c) (numeric yes) (numeric no)
     | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
+        let fractal = function P.Fixed v -> number v | Live r -> numeric r in
         Printf.sprintf "noise(Float64Array.of(%s, %s, %s), %dn, %dn, %s, %s)" (numeric x)
-          (numeric y) (numeric z) seed octaves (number lacunarity) (number gain)
+          (numeric y) (numeric z) seed octaves (fractal lacunarity) (fractal gain)
     | Fma (a, b, c) -> Printf.sprintf "fused(%s, %s, %s)" (numeric a) (numeric b) (numeric c)
     | Checked_mul (p, a, b) ->
         Printf.sprintf "checked(%b, %s * %s)" (p = P.Valid) (numeric a) (numeric b)

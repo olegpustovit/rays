@@ -90,6 +90,42 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
 }
 |}
 
+(* a lacunarity or gain other than 2 and 0.5 (or live): NaN where noise3 would refuse it, so the
+   status sends the region to the CPU, which reports it *)
+let perlin_fractal =
+  {|fn wfbm_fractal(p: vec3<f32>, octaves: i32, o: i32, lacunarity: f32, gain: f32) -> f32 {
+  if (!(wfinite(lacunarity) && lacunarity > 0.0 && gain >= 0.0 && gain <= 1.0)) {
+    let nan = 0x7fc00000u;
+    return bitcast<f32>(nan);
+  }
+  var frequency: f32 = 1.0;
+  var amplitude: f32 = 1.0;
+  var sum: f32 = 0.0;
+  var weights: f32 = 0.0;
+  for (var octave: i32 = 0; octave < octaves; octave++) {
+    sum += wnoise(p * frequency, o) * amplitude;
+    weights += amplitude;
+    frequency *= lacunarity;
+    amplitude *= gain;
+  }
+  return select(sum / weights, 0.0, weights == 0.0);
+}
+|}
+
+let fractal_noise = function
+  | P.Noise3 (_, _, _, _, _, lacunarity, gain) -> lacunarity <> Fixed 2. || gain <> Fixed 0.5
+  | _ -> false
+
+(* the call of a noise3: [register] names a register, [number] prints a constant *)
+let noise_call ~register ~number ~table (x, y, z, seed, octaves, lacunarity, gain) =
+  let position = Printf.sprintf "vec3<f32>(%s, %s, %s)" (register x) (register y) (register z) in
+  if lacunarity = P.Fixed 2. && gain = P.Fixed 0.5 then
+    Printf.sprintf "wfbm(%s, %d, %d)" position octaves (table seed)
+  else
+    let fractal = function P.Fixed v -> number v | Live r -> register r in
+    Printf.sprintf "wfbm_fractal(%s, %d, %d, %s, %s)" position octaves (table seed)
+      (fractal lacunarity) (fractal gain)
+
 let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
 let register index = "r" ^ string_of_int index
 
@@ -229,9 +265,11 @@ let kernel ?(image = false) program =
             | Select (condition, yes, no) ->
                 Printf.sprintf "select(%s, %s, %s != 0.0)" (register no) (register yes)
                   (register condition)
-            | Noise3 (x, y, z, seed, octaves, _, _) ->
-                Printf.sprintf "wfbm(vec3<f32>(%s, %s, %s), %d, %d)" (register x) (register y)
-                  (register z) octaves (table seed)
+            | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
+                noise_call ~register
+                  ~number:(fun v -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float v))
+                  ~table
+                  (x, y, z, seed, octaves, lacunarity, gain)
             | _ ->
                 fail
                   "Integer instructions and conversions are not supported by the WGSL kernel \
@@ -291,7 +329,8 @@ let kernel ?(image = false) program =
       Buffer.contents declarations ^ finite
       ^ (if image then image_uv else "")
       ^ (if has (function P.Binary (P.Pow, _, _) -> true | _ -> false) then power else "")
-      ^ if table_seeds = [||] then "" else perlin
+      ^ (if table_seeds = [||] then "" else perlin)
+      ^ if has fractal_noise then perlin_fractal else ""
     in
     let signature = "(@builtin(global_invocation_id) gid: vec3<u32>)" in
     let body =
@@ -668,9 +707,11 @@ and fast_kernel ?compute program =
               | Select (condition, yes, no) ->
                   Printf.sprintf "select(%s, %s, %s != 0.0)" (register no) (register yes)
                     (register condition)
-              | Noise3 (x, y, z, seed, octaves, _, _) ->
-                  Printf.sprintf "wfbm(vec3<f32>(%s, %s, %s), %d, %d)" (register x) (register y)
-                    (register z) octaves (table seed)
+              | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
+                  noise_call ~register
+                    ~number:(fun v -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float v))
+                    ~table
+                    (x, y, z, seed, octaves, lacunarity, gain)
               | Loop_result (loop, component, _) -> register (loop + 1 + component)
               | _ -> fail "This instruction is not supported by the WGSL fast kernel target."
           in
@@ -858,7 +899,8 @@ and fast_kernel ?compute program =
         let prefix =
           Buffer.contents declarations ^ finite ^ int64
           ^ (if has (function P.Binary (P.Pow, _, _) -> true | _ -> false) then power else "")
-          ^ if table_seeds = [||] then "" else perlin
+          ^ (if table_seeds = [||] then "" else perlin)
+          ^ if has fractal_noise then perlin_fractal else ""
         in
         let signature = "(@builtin(global_invocation_id) gid: vec3<u32>)" in
         let w = counts / 4 in

@@ -50,9 +50,13 @@ let rec instruction : P.instruction -> string = function
           | Rsqrt -> "Rsqrt")
         a
   | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
+      let fractal = function
+        | P.Fixed v -> Printf.sprintf "%h" v
+        | Live r -> Printf.sprintf "r%d" r
+      in
       Printf.sprintf "Noise3 %d %d %d seed=%d octaves=%d%s" x y z seed octaves
-        (if lacunarity = 2. && gain = 0.5 then ""
-         else Printf.sprintf " lacunarity=%h gain=%h" lacunarity gain)
+        (if lacunarity = Fixed 2. && gain = Fixed 0.5 then ""
+         else Printf.sprintf " lacunarity=%s gain=%s" (fractal lacunarity) (fractal gain))
   | Stage (_, r) -> "Stage" ^ String.concat "" (List.map (Printf.sprintf " %d") (Array.to_list r))
   | Trace (field, r) ->
       Printf.sprintf "Trace %d%s" field

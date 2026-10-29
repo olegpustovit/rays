@@ -47,6 +47,7 @@ type conversion = Core.Region.conversion =
   | Integer_result of string
 
 type projection = Core.Region.projection = Value | Valid
+type fractal = Core.Region.fractal = Fixed of float | Live of int
 
 type loop = Core.Region.loop = {
   first : int;
@@ -65,7 +66,7 @@ type instruction = Core.Region.instruction =
   | Accumulator of int
   | Binary of binary * int * int
   | Unary of unary * int
-  | Noise3 of int * int * int * int * int * float * float
+  | Noise3 of int * int * int * int * int * fractal * fractal
   | Fma of int * int * int
   | Rand_at of int * int
   | Select of int * int * int
@@ -165,6 +166,12 @@ let[@inline always] unary_apply op x =
   | Log -> log x
   | Sign -> if x > 0. then 1. else if x < 0. then -1. else x
   | Rsqrt -> 1. /. sqrt (Float.abs x)
+
+(* a noise's lacunarity or gain at element [j]; a live one is checked as noise3 checks it *)
+let[@inline always] fractal_at value fractal j =
+  match fractal with Fixed v -> v | Live r -> value r j
+
+let live_fractal = function Fixed _, Fixed _ -> false | _ -> true
 
 let[@inline always] checked_projection projection value =
   let valid = Float.is_finite value in
@@ -281,13 +288,12 @@ let gpu_refusals ?(fused = false) ?(fast = false) (t : t) =
     (fun i instruction ->
       if used.(i) then
         match unguarded instruction with
-        | Noise3 (_, _, _, _, octaves, lacunarity, gain) ->
-            if octaves > 1 && (lacunarity <> 2. || gain <> 0.5) then bad_noise := true
-            else if not (Flow.Packed_ops.supported_gpu_noise_octaves octaves) then bad_noise := true
+        | Noise3 (_, _, _, _, octaves, _, _) ->
+            if not (Flow.Packed_ops.supported_gpu_noise_octaves octaves) then bad_noise := true
         | Const value -> if not (Flow.Packed_ops.finite_float32 value) then bad_constant := true
         | _ -> ())
     t.code;
-  if !bad_noise then refuse "GPU noise supports 1 to 32 octaves with lacunarity 2 and gain 0.5.";
+  if !bad_noise then refuse "GPU noise supports 1 to 32 octaves.";
   if !bad_constant then refuse "Nonfinite float32 shader constants require reference evaluation.";
   List.rev !reasons
 
@@ -1218,7 +1224,11 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
               floats.(at + j) <- finite (unary_apply op (numeric a j))
             done
         | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
+            let live = live_fractal (lacunarity, gain) in
             for j = first to last - 1 do
+              let lacunarity = fractal_at numeric lacunarity j
+              and gain = fractal_at numeric gain j in
+              if live then Flow.Op.check_noise_fractal lacunarity gain;
               floats.(at + j) <-
                 finite
                   (Rays_math.Noise.fbm3_with_scratch scratch (noise seed) ~octaves ~lacunarity ~gain
@@ -1703,7 +1713,7 @@ let detect_streaming (t : t) skip noise_scale collect_product =
       allowed.(noise) <- true;
       let x, y, z, frequency =
         match t.code.(noise) with
-        | Noise3 (x, y, z, _, 1, _, _) -> (
+        | Noise3 (x, y, z, _, 1, Fixed _, Fixed _) -> (
             match noise_scale.(noise) with
             | Some (a, b, c, f) ->
                 allowed.(x) <- true;
@@ -1796,7 +1806,7 @@ let detect_streaming (t : t) skip noise_scale collect_product =
       allowed.(noise) <- true;
       let x, y, z, f =
         match t.code.(noise) with
-        | Noise3 (x, y, z, _, 1, _, _) ->
+        | Noise3 (x, y, z, _, 1, Fixed _, Fixed _) ->
             let x, f = scaled x and y, h = scaled y in
             if f <> h then raise Not_streaming;
             let z =
@@ -2006,12 +2016,21 @@ let rec block_instruction r b slot instruction first last =
         | Some (x, y, z, f) -> (x, y, z, scratch.((f * block_size) + first))
         | None -> (x, y, z, 1.)
       in
-      if octaves = 1 then
+      let value r j = scratch.((r * block_size) + j) in
+      let live = live_fractal (lacunarity, gain) in
+      if octaves = 1 then begin
+        if live then
+          for j = first to last - 1 do
+            Flow.Op.check_noise_fractal (fractal_at value lacunarity j) (fractal_at value gain j)
+          done;
         Rays_math.Noise.sample3_into noise ~first ~last ~frequency ~x:scratch
           ~x_offset:(x * block_size) ~y:scratch ~y_offset:(y * block_size) ~z:scratch
           ~z_offset:(z * block_size) ~output:scratch ~output_offset:at ()
+      end
       else
         for j = first to last - 1 do
+          let lacunarity = fractal_at value lacunarity j and gain = fractal_at value gain j in
+          if live then Flow.Op.check_noise_fractal lacunarity gain;
           scratch.(at + j) <-
             Rays_math.Noise.fbm3_with_scratch noise_scratch noise ~octaves ~lacunarity ~gain
               ~x:(scratch.((x * block_size) + j) *. frequency)

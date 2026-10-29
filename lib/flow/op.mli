@@ -62,6 +62,10 @@ type t = {
 val all : t list
 val noise3 : t
 val noise_table : int -> Rays_math.Noise.t
+
+val check_noise_fractal : float -> float -> unit
+(** Refuses (E_NOISE_RANGE) a lacunarity or gain {!noise3} refuses. *)
+
 val noise_settings : (string * ('f, 'r) Value.t) list -> int * int * float * float
 val drawing_color : ('f, 'r) Value.t -> Rays_math.Color.t
 

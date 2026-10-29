@@ -205,8 +205,10 @@ let () =
       ( ":max [(+ t 1.0) 1.0 1.0] :range \"Minimum / maximum\"",
         ":max [1.125 1.0 1.0] :range \"Minimum / maximum\"",
         true );
-      (* a noise's lacunarity is a region constant: the card stays a node *)
-      (":lacunarity (+ t 1.0) :octaves 3", ":lacunarity 1.125 :octaves 3", false);
+      (* a noise's lacunarity and gain are the region's uniforms: the card inlines *)
+      ( ":lacunarity (+ t 1.0) :roughness (+ t 0.25) :octaves 3",
+        ":lacunarity 1.125 :roughness 0.375 :octaves 3",
+        true );
     ];
   (match outcome (text ":blend (* t 16.0)") with
   | Error ("cook", "E_LOWER", "sop/attribute_noise: blend must be in [0,1]", _) -> ()

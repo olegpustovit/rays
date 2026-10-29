@@ -1,7 +1,7 @@
 ; noise3 on the device. Flow_gpu.Noise inlines noise-fbm at each noise3 of a kernel, compiled once an
 ; octave count, over the seed's 512-entry permutation table (Rays_math.Noise.create, the kernel's table
 ; binding): Perlin's improved noise in float32, as Rays_math.Noise.fbm3, its CPU reference. A coordinate
-; that is not finite gives NaN; lacunarity is 2 and gain 0.5 (the GPU refuses any other).
+; that is not finite gives NaN. noise-fbm is lacunarity 2 and gain 0.5, noise-fbm-fractal any other.
 (defn noise-fade :context value [(s : float)] (* (* (* s s) s) (+ (* s (- (* s 6.) 15.)) 10.)))
 (defn noise-lerp :context value [(a : float) (b : float) (s : float)] (+ a (* s (- b a))))
 ; Every branch is a value already computed, so each if is a select, never a guarded block.
@@ -36,3 +36,13 @@
               :weights (+ acc.weights acc.amplitude)
               :frequency (* acc.frequency 2.) :amplitude (* acc.amplitude 0.5)})]
     (/ r.sum r.weights)))
+; Any other lacunarity and gain (or live ones, uniforms): NaN where noise3 refuses them, so the kernel's
+; status sends the region to the CPU, which reports it.
+(defn noise-fbm-fractal :context value
+  [(table : (array int)) (p : vec3) (octaves : int) (lacunarity : float) (gain : float)]
+  (let* [r (fold [acc {:sum 0. :weights 0. :frequency 1. :amplitude 1.}] [k (range octaves)]
+             {:sum (+ acc.sum (* (noise-sample table (* p acc.frequency)) acc.amplitude))
+              :weights (+ acc.weights acc.amplitude)
+              :frequency (* acc.frequency lacunarity) :amplitude (* acc.amplitude gain)})
+         valid (and (< lacunarity Infinity) (and (> lacunarity 0.) (and (>= gain 0.) (<= gain 1.))))]
+    (if valid (/ r.sum r.weights) NaN)))

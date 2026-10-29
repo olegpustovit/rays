@@ -46,6 +46,7 @@ type conversion = Core.Region.conversion =
   | Integer_result of string
 
 type projection = Core.Region.projection = Value | Valid
+type fractal = Core.Region.fractal = Fixed of float | Live of int
 
 type loop = Core.Region.loop = {
   first : int;
@@ -64,7 +65,7 @@ type instruction = Core.Region.instruction =
   | Accumulator of int
   | Binary of binary * int * int
   | Unary of unary * int
-  | Noise3 of int * int * int * int * int * float * float
+  | Noise3 of int * int * int * int * int * fractal * fractal
   | Fma of int * int * int
   | Rand_at of int * int
   | Select of int * int * int

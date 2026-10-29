@@ -656,12 +656,19 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards ~exp
           [| emit (Fma (a.registers.(0), b.registers.(0), c.registers.(0))) |]
       | Flow.Op.Convert conversion, [ a ] -> [| emit (Convert (conversion, a.registers.(0))) |]
       | Flow.Op.Noise3, a :: rest when Array.length a.registers = 3 ->
+          (* a live lacunarity or gain is a float register (a uniform: the kernel stays one
+             compiled program), checked where the noise runs; the seed picks a table and the octaves
+             a compiled helper, so they are constant *)
+          let live = ref [] in
           let configuration =
             List.map2
               (fun (name, _) expression ->
                 ( name,
                   match expression.constant with
                   | Some value -> value
+                  | None when name = "lacunarity" || name = "gain" ->
+                      live := (name, (as_float expression).registers.(0)) :: !live;
+                      E.Float (if name = "lacunarity" then 2. else 0.5)
                   | None ->
                       refuse ~at:t "E_PACKED_CONSTANT"
                         ("Noise configuration " ^ name ^ " must be constant.") ))
@@ -671,6 +678,10 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards ~exp
             try Flow.Op.noise_settings configuration
             with Diagnostic.Error d -> refuse ~at:t "E_PACKED_CONSTANT" d.message
           in
+          let fractal name value =
+            match List.assoc_opt name !live with Some r -> Live r | None -> Fixed value
+          in
+          let lacunarity = fractal "lacunarity" lacunarity and gain = fractal "gain" gain in
           if not (Flow.Packed_ops.supported_noise_octaves octaves) then
             refuse ~at:t "E_PACKED_CONSTANT"
               (Printf.sprintf "Packed noise octaves must be 1 to 64, got %d." octaves);

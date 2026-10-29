@@ -189,6 +189,9 @@ type state_slot = {
 module Region = struct
   type projection = Value | Valid
 
+  (** A noise's lacunarity or gain: a constant, or a float register (a uniform, a frame fact). *)
+  type fractal = Fixed of float | Live of int
+
   type conversion = Flow.Packed_ops.conversion =
     | To_float
     | Truncate
@@ -242,7 +245,7 @@ module Region = struct
     | Accumulator of int
     | Binary of Flow.Packed_ops.binary * int * int
     | Unary of Flow.Packed_ops.unary * int
-    | Noise3 of int * int * int * int * int * float * float
+    | Noise3 of int * int * int * int * int * fractal * fractal
     | Fma of int * int * int
     | Rand_at of int * int
     | Select of int * int * int
@@ -311,7 +314,9 @@ module Region = struct
         [ a; b ]
     | Trace (_, registers) | Stage (_, registers) -> Array.to_list registers
     | Unary (_, a) | Int_abs a | Convert (_, a) -> [ a ]
-    | Noise3 (a, b, c, _, _, _, _)
+    | Noise3 (a, b, c, _, _, lacunarity, gain) ->
+        let live = function Fixed _ -> [] | Live r -> [ r ] in
+        a :: b :: c :: (live lacunarity @ live gain)
     | Fma (a, b, c)
     | Select (a, b, c)
     | Int_select (a, b, c)
@@ -1299,9 +1304,13 @@ let pp fmt p =
         | Binary (op, a, b) -> out "%s(r%d r%d)" (primitive_name (Numeric op)) a b
         | Unary (op, a) -> out "%s(r%d)" (primitive_name (Math op)) a
         | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
+            let fractal = function
+              | Region.Fixed v -> Printf.sprintf "%h" v
+              | Live r -> Printf.sprintf "r%d" r
+            in
             out "noise3(r%d r%d r%d seed=%d octaves=%d%s)" x y z seed octaves
-              (if lacunarity = 2. && gain = 0.5 then ""
-               else Printf.sprintf " lacunarity=%h gain=%h" lacunarity gain)
+              (if lacunarity = Region.Fixed 2. && gain = Region.Fixed 0.5 then ""
+               else Printf.sprintf " lacunarity=%s gain=%s" (fractal lacunarity) (fractal gain))
         | Rand_at (seed, index) -> out "rand_at(r%d r%d)" seed index
         | Fma (a, b, c) -> out "fma(r%d r%d r%d)" a b c
         | Checked_mul (p, a, b) ->

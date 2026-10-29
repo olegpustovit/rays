@@ -106,6 +106,20 @@ let () =
       "(log (+ (+ x t) 1.0))";
       "(sign (- x t))";
     ];
+  (* a live lacunarity and gain: the fractal fBm over the region's registers, no refusal *)
+  (let fractal =
+     Test_program.compile
+       "(map (fn [x] (noise3 [x t 0.0] :seed 3 :octaves 4 :lacunarity (+ 1.7 t) :gain (- 0.62 t))) \
+        (array/range 1024))"
+   in
+   assert (Flow_ir.Packed.gpu_refusals fractal = []);
+   let source = (Test_program.ok (Flow_web.Wgsl.kernel fractal)).source in
+   let contains s sub =
+     let n = String.length sub in
+     let rec go i = i + n <= String.length s && (String.sub s i n = sub || go (i + 1)) in
+     go 0
+   in
+   assert (contains source "fn wfbm_fractal" && contains source "wfbm_fractal(vec3<f32>("));
   let hypot = Test_program.compile "(map (fn [x] (hypot x t)) (array/range 1024))" in
   (match Flow_web.Wgsl.kernel hypot with
   | Error d -> assert (d.code = "E_GPU_FORM")
@@ -266,6 +280,14 @@ let () =
         @ [
             kernel_json ~cpu:(Flow_web.Js.region ops) "ops"
               (Test_program.ok (Flow_web.Wgsl.kernel ops));
+            (* a live lacunarity and gain: wfbm_fractal over uniforms against the JS region *)
+            (let fractal =
+               Test_program.compile
+                 "(map (fn [x] (noise3 [(* x 0.37) t 0.0] :seed 451 :octaves 4 :lacunarity (+ 1.7 \
+                  t) :gain (- 0.62 (* t 0.2)))) (array/range 1024))"
+             in
+             kernel_json ~cpu:(Flow_web.Js.region fractal) "noise_fractal"
+               (Test_program.ok (Flow_web.Wgsl.kernel fractal)));
           ]
         @ List.map
             (fun (name, body) ->

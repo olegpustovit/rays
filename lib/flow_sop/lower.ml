@@ -643,7 +643,7 @@ let kernel_data (n : E.node) =
   | _ -> None
 
 (* an inlined call's live arguments stay its kernels' data only where a strict kernel takes them:
-   a noise's lacunarity or gain is a region constant, so such a call stays a node of its own *)
+   a noise's seed or octaves is a region constant, so such a call stays a node of its own *)
 let () =
   Atomic.set E.live_kernels
     (List.for_all (fun (n : E.node) ->

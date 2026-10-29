@@ -19,8 +19,9 @@ let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string 
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 let frames = 8
 
-(* DRIVE and XDRIVE replace the noise's and the transform's arguments (XDRIVE drives shear and
-   translate in @runtest-native: identity at frame 0, then a live matrix) *)
+(* DRIVE and XDRIVE replace the noise's and the transform's arguments (in @runtest-native DRIVE
+   also drives lacunarity and roughness, uniforms of the one kernel, and XDRIVE shear and translate:
+   identity at frame 0, then a live matrix) *)
 let drive =
   Option.value (Sys.getenv_opt "DRIVE") ~default:":offset [(get (frame/input) :t) 0.0 0.0]"
 

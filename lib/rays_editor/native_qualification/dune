@@ -54,6 +54,10 @@
      (run %{exe:test_chain_frames_native.exe})
      (setenv
       DRIVE
+      ":octaves 3 :lacunarity (+ 1.5 (get (frame/input) :t)) :roughness (+ 0.25 (* (get (frame/input) :t) 0.5))"
+      (run %{exe:test_chain_frames_native.exe}))
+     (setenv
+      DRIVE
       ":offset [0.5 0.0 0.0]"
       (setenv
        XDRIVE

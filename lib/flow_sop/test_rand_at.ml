@@ -398,7 +398,29 @@ let () =
       | exception Failure message when String.starts_with ~prefix:"E_NOISE_RANGE" message -> ()
       | _ -> failwith "out-of-range noise octaves accepted")
     [ 0; 65 ];
+  (* a live lacunarity and gain are the region's registers: one program whose bytes at each time,
+     and whose refusal, are the walker's *)
+  let input =
+    E.Vec3_array (Array.concat (Array.to_list (Array.map (fun (x, y, z) -> [| x; y; z |]) points)))
+  in
+  let mapped, program =
+    map Flow.Ty.Vec3 input "(noise3 i :seed 7 :octaves 5 :lacunarity (+ 1.7 t) :gain (- 0.62 t))"
+  in
+  List.iter
+    (fun time ->
+      let live = Input.at_time time in
+      match ok (E.Host.force_reference mapped ~live) with
+      | E.Float_array expected -> same expected (ok (P.force ~strict:true program ~live))
+      | _ -> assert false)
+    [ 0.; 0.25 ];
+  (let live = Input.at_time 0.75 in
+   match (E.Host.force_reference mapped ~live, P.force ~strict:true program ~live) with
+   | Error (a : Diagnostic.t), Error (b : Diagnostic.t)
+     when a.code = "E_NOISE_RANGE" && b.code = a.code ->
+       ()
+   | _ -> failwith "a live noise gain out of range is not refused as noise3 refuses it");
   Printf.printf
     "noise3: %d native/reference samples, %d native bit differences, max %.17g ULP; strict \
-     packed/reference bytes agree at one/eight domains for octaves1/4/32 and seeds0/1/42\n"
+     packed/reference bytes agree at one/eight domains for octaves1/4/32 and seeds0/1/42, live \
+     lacunarity/gain\n"
     !native_samples !native_bit_differences !native_max_ulps
