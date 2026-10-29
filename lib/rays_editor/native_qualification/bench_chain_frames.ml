@@ -15,8 +15,8 @@ let drive =
 let text =
   Printf.sprintf
     "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
-     %S :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) \
-     (sop/transform :translate [0.0 1.0 0.0] %s))))"
+     %S :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) (sop/transform \
+     :translate [0.0 1.0 0.0] %s))))"
     (Option.value (Sys.getenv_opt "CONNECTIVITY") ~default:"Points")
     side side drive
     (Option.value (Sys.getenv_opt "XDRIVE") ~default:"")
