@@ -228,7 +228,7 @@ let casters scene =
   Scene3.Walk.iter_batches
     (fun (drawing : Scene3.Walk.drawing) transforms ->
       let triangles =
-        match (Mesh.View.view drawing.mesh).mode with
+        match Mesh.mode drawing.mesh with
         | Triangles | Triangle_strip | Triangle_fan -> true
         | _ -> false
       in
@@ -286,29 +286,27 @@ let sun_fit scene (sun : World.sun) =
             hi.(axis) <- Float.max hi.(axis) d)
           [ side; up; f ]
       in
-      let pick op (a : Rays_math.Vec3.t) (b : Rays_math.Vec3.t) =
-        Rays_math.Vec3.create (op a.x b.x) (op a.y b.y) (op a.z b.z)
-      in
       List.iter
         (fun c ->
-          let vertices = (Mesh.View.view c.caster_mesh).vertices in
-          if Array.length vertices > 0 then
-            let a = Array.fold_left (pick Float.min) vertices.(0) vertices
-            and b = Array.fold_left (pick Float.max) vertices.(0) vertices in
-            let corners m =
-              for k = 0 to 7 do
-                add
-                  (Rays_math.Mat4.transform_point m
-                     (Rays_math.Vec3.create
-                        (if k land 1 = 0 then a.x else b.x)
-                        (if k land 2 = 0 then a.y else b.y)
-                        (if k land 4 = 0 then a.z else b.z)))
-              done
-            in
-            match c.caster_instances with
-            | None -> corners c.caster_transform
-            | Some transforms ->
-                Array.iter (fun t -> corners (Rays_math.Mat4.mul c.caster_transform t)) transforms)
+          (* a device mesh's box is reduced where its positions are, its host copy never made *)
+          match Mesh.bounds c.caster_mesh with
+          | None -> ()
+          | Some ((a : Rays_math.Vec3.t), (b : Rays_math.Vec3.t)) -> (
+              let corners m =
+                for k = 0 to 7 do
+                  add
+                    (Rays_math.Mat4.transform_point m
+                       (Rays_math.Vec3.create
+                          (if k land 1 = 0 then a.x else b.x)
+                          (if k land 2 = 0 then a.y else b.y)
+                          (if k land 4 = 0 then a.z else b.z)))
+                done
+              in
+              match c.caster_instances with
+              | None -> corners c.caster_transform
+              | Some transforms ->
+                  Array.iter (fun t -> corners (Rays_math.Mat4.mul c.caster_transform t)) transforms
+              ))
         casters;
       let fit =
         if not (Float.is_finite lo.(0)) then None

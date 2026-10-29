@@ -18,11 +18,17 @@ type msl = private {
    and is written as the 24-byte count record {n, 6n, 1, 0, 0, 0} to [count_out] (buffers after the
    gathers): from byte 4 it is the indexed indirect draw of n six-index quads. *)
 val names : string list
-val compaction : msl
 
-(* The kernel of a resident fold's [array/compact] (shaders/compact.rays, one threadgroup of 1,024):
-   buffers mask, kept (float indices), total (uint), (n, use) and count_in: the mask's count is n, or its
-   minimum with [count_in[0]] when use is set. *)
+val compaction : msl
+(** The kernel of a resident fold's [array/compact] (shaders/compact.rays, one threadgroup of
+    1,024): buffers mask, kept (float indices), total (uint), (n, use) and count_in: the mask's
+    count is n, or its minimum with [count_in[0]] when use is set. *)
+
+val bounds : msl
+(** A resident packed float3 array's bounds (shaders/bounds.rays, one threadgroup of 1,024): buffers
+    the array, the lanes' floats (each lane's min x y z, max x y z of its chunk, at lane x 6; a lane
+    with an empty chunk stores nothing) and the count (uint). *)
+
 val kernel :
   ?fast:bool ->
   ?instanced:bool ->

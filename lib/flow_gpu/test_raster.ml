@@ -1,7 +1,7 @@
 (* The raster shaders are generated: lib/OWNER/shaders/NAME.rays printed by Raster into
    shaders/metal/NAME.metal (which OWNER embeds) and shaders/spirv/NAME.{vert,frag}.spv (the Vulkan
    modules, validated by spirv-val when it is installed). OWNER is the renderer, or the Metal backend's
-   presentation blit; lib/flow_gpu/shaders/compact.rays is a compute stage. This checks the checked-in output is the printers'; [--write DIR] rewrites it
+   presentation blit; lib/flow_gpu/shaders/compact.rays and bounds.rays are compute stages. This checks the checked-in output is the printers'; [--write DIR] rewrites it
    there (DIR is the source lib). *)
 (* (output name, source, vertex entry, fragment entry, textures in argument buffers) *)
 let renderer =
@@ -86,6 +86,20 @@ let () =
           (ok "compact"
              (Flow_gpu.Raster.compute_spirv ~size:256 ~declarations ~entry:"compact-mask")) );
     ];
+  (* a resident P's bounds (Run.bounds), the same group sizes *)
+  let bounds = read (Filename.concat dir "bounds.rays") in
+  List.iter (check dir)
+    [
+      ( "metal/bounds.metal",
+        header "bounds"
+        ^ ok "bounds"
+            (Flow_gpu.Raster.compute_msl ~size:1024 ~declarations:bounds ~entry:"chunk-bounds") );
+      ( "spirv/bounds.comp.spv",
+        Bytes.to_string
+          (ok "bounds"
+             (Flow_gpu.Raster.compute_spirv ~size:256 ~declarations:bounds ~entry:"chunk-bounds"))
+      );
+    ];
   (* the web's, one workgroup of 256 (Flow_web.Wgsl.compaction) *)
   let program, buffers =
     ok "compact" (Flow_gpu.Raster.compute_program ~size:256 ~declarations ~entry:"compact-mask")
@@ -96,8 +110,8 @@ let () =
       ^ ok "compact" (Flow_web.Wgsl.compute ~size:256 ~name:"compact_mask" ~buffers program) );
   print_endline
     (if validator then
-       "raster: every renderer, image sink, presentation and compaction stage are their .rays, \
-        printed (MSL, SPIR-V spirv-val valid)"
+       "raster: every renderer, image sink, presentation, compaction and bounds stage are their \
+        .rays, printed (MSL, SPIR-V spirv-val valid)"
      else
-       "raster: every renderer, image sink, presentation and compaction stage are their .rays, \
-        printed (spirv-val unavailable)")
+       "raster: every renderer, image sink, presentation, compaction and bounds stage are their \
+        .rays, printed (spirv-val unavailable)")

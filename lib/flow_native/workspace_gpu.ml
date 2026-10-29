@@ -263,6 +263,10 @@ let proxy t =
                                        planes with
                                        settle =
                                          (fun () -> route_result (fun () -> route t planes.settle));
+                                       bounds =
+                                         (fun () ->
+                                           try route t planes.bounds
+                                           with Diagnostic.Error _ -> None);
                                      })
                                    (route t (fun () -> kernel.planes value))));
                        }

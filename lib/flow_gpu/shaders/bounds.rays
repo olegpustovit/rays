@@ -1,0 +1,31 @@
+; A resident packed float3 array's bounds (Flow_gpu.Run.bounds): one workgroup. Each lane takes the
+; min and max of its contiguous chunk of the array's count (bound[0]) elements and stores them at
+; lane x 6 (min x y z, max x y z); a lane whose chunk is empty stores nothing, and the host finishes
+; over the stored lanes. min and max of float32 values are exact, so the result is the host's scan.
+(defn imin :context value [(a : int) (b : int)] (if (int/lt a b) a b))
+(defn chunk-bounds :context value [(id : int) (p : (array float)) (out : (array float)) (bound : (array int))
+                                   (size : int)]
+  (let* [lane (int/and id 1023)
+         n (int/and (array/nth bound 0) 1073741823)
+         chunk (int/div (int/add n (int/sub size 1)) size)
+         lo (imin n (int/mul lane chunk))
+         hi (imin n (int/add lo chunk))]
+    (if (int/lt lo hi)
+      (let* [x (array/nth p (int/mul lo 3))
+             y (array/nth p (int/add (int/mul lo 3) 1))
+             z (array/nth p (int/add (int/mul lo 3) 2))
+             walk (iterate chunk {:i lo :ax x :ay y :az z :bx x :by y :bz z}
+                    (fn [w]
+                      (let* [k (int/mul w.i 3)
+                             px (array/nth p k)
+                             py (array/nth p (int/add k 1))
+                             pz (array/nth p (int/add k 2))]
+                        {:i (int/add w.i 1)
+                         :ax (min w.ax px) :ay (min w.ay py) :az (min w.az pz)
+                         :bx (max w.bx px) :by (max w.by py) :bz (max w.bz pz)}))
+                    :until (fn [prev next] (int/ge next.i hi)))
+             at (int/mul lane 6)]
+        (int/add (int/add (int/add (gpu/store out at walk.ax) (gpu/store out (int/add at 1) walk.ay))
+                          (int/add (gpu/store out (int/add at 2) walk.az) (gpu/store out (int/add at 3) walk.bx)))
+                 (int/add (gpu/store out (int/add at 4) walk.by) (gpu/store out (int/add at 5) walk.bz))))
+      0)))

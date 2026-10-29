@@ -14,23 +14,9 @@ let points_of_nothing = Rdk_ops.Line_geometry.points [||]
 let point_count = G.point_count
 
 let bounds geometry =
-  let points = G.positions geometry in
-  let count = P.Float3.length points in
-  if count = 0 then None
-  else begin
-    let x, y, z = P.Float3.get points 0 in
-    let lo = [| x; y; z |] and hi = [| x; y; z |] in
-    for index = 1 to count - 1 do
-      let x, y, z = P.Float3.get points index in
-      lo.(0) <- Float.min lo.(0) x;
-      lo.(1) <- Float.min lo.(1) y;
-      lo.(2) <- Float.min lo.(2) z;
-      hi.(0) <- Float.max hi.(0) x;
-      hi.(1) <- Float.max hi.(1) y;
-      hi.(2) <- Float.max hi.(2) z
-    done;
-    Some (Rays_math.Vec3.create lo.(0) lo.(1) lo.(2), Rays_math.Vec3.create hi.(0) hi.(1) hi.(2))
-  end
+  Option.map
+    (fun b -> (Rays_math.Vec3.create b.(0) b.(1) b.(2), Rays_math.Vec3.create b.(3) b.(4) b.(5)))
+    (P.Float3.bounds (G.positions geometry))
 
 type summary = {
   points : int;

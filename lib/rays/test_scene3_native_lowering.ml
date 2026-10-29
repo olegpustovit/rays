@@ -216,20 +216,24 @@ let run_native () =
   print_endline "native Scene3 lowering: camera orbit preserves uploaded geometry"
 
 (* A device mesh's host copy is made once, only for a reader of vertices: the raster lowering reads
-   its own arrays (unread), a path tracer or sun fit its host copy. *)
+   its own arrays (unread) and a sun fit its bounds, a path tracer its host copy. *)
 let device_host () =
   let made = ref 0 in
   let host () =
     incr made;
     Test_meshes.box ~width:1. ~height:1. ~depth:1. ()
   in
+  let box = Some (Rays_math.Vec3.create (-1.) 0. 0., Rays_math.Vec3.create 1. 2. 3.) in
+  let bounds () = box in
   let mesh =
-    Mesh.View.create_device ~indices:[| 0; 1; 2 |] ~host ~key:"k" ~normals:true ~keep:ignore 3
+    Mesh.View.create_device ~indices:[| 0; 1; 2 |] ~host ~bounds ~key:"k" ~normals:true ~keep:ignore
+      3
     |> Result.get_ok
   in
   let unread = Mesh.View.unread mesh in
   if !made <> 0 || Array.length unread.vertices.x <> 0 || unread.indices <> [| 0; 1; 2 |] then
     failwith "a device mesh's own arrays made its host copy";
+  if Mesh.bounds mesh <> box || !made <> 0 then failwith "a device mesh's bounds made its host copy";
   if Array.length (Mesh.View.view mesh).vertices <> 24 || !made <> 1 then
     failwith "a device mesh's view is not its host copy";
   ignore (Mesh.View.packed_view mesh);

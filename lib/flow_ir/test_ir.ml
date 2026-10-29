@@ -524,6 +524,7 @@ let () =
                       resident = None;
                       settle = (fun () -> Ok ());
                       release = (fun ~held:_ -> ());
+                      bounds = (fun () -> None);
                     });
             });
     }

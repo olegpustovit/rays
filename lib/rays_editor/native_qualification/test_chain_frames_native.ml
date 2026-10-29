@@ -8,7 +8,8 @@
    cook of the same frame within float32 tolerance. Each frame is then displayed as the editor
    does (Surface.of_geometry, Surface.scene3 with Workspace_gpu.display, a Scene3 points or
    triangles draw) with P (and N) bound where the device holds them: nothing is read back, and its pixels equal the host display
-   of the same geometry read back. The median frame on the CPU and the GPU, and the median device
+   of the same geometry read back; its bounds are reduced on the device (24 KB read, P unread) and
+   equal the host scan exactly. The median frame on the CPU and the GPU, and the median device
    display (lowering and drawing a 256 x 256 canvas) are printed. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
@@ -165,8 +166,32 @@ let () =
                 then fail "the display read P back";
                 if not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions device)) then
                   fail "the display materialised P";
+                (* its box (the selection box, framing) is reduced on the device: 24 KB read *)
+                let box = Rdk_rays.Geometry_view.bounds device and boxed = stats () in
+                if
+                  boxed.readback_bytes - drawn.readback_bytes > 24_576
+                  || boxed.materialisations <> drawn.materialisations
+                  || not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions device))
+                then fail "the bounds read P back";
                 (* the same geometry read back and drawn from the host: the same pixels *)
                 let host, seconds = picture host_canvas device in
+                (* min and max are exact in float32: the device's box is the host scan's, bit for bit *)
+                let p = Rdk.Geometry.positions device in
+                let lo = Array.make 3 Float.infinity and hi = Array.make 3 Float.neg_infinity in
+                for i = 0 to count - 1 do
+                  let x, y, z = Rdk.Packed.Float3.get p i in
+                  Array.iteri
+                    (fun c v ->
+                      lo.(c) <- Float.min lo.(c) v;
+                      hi.(c) <- Float.max hi.(c) v)
+                    [| x; y; z |]
+                done;
+                if
+                  box
+                  <> Some
+                       ( Rays_math.Vec3.create lo.(0) lo.(1) lo.(2),
+                         Rays_math.Vec3.create hi.(0) hi.(1) hi.(2) )
+                then fail "the device's bounds differ from the host's";
                 if frame > 0 then host_times := seconds :: !host_times;
                 if host <> shown then fail "the device display differs from the host display";
                 if Array.for_all (fun c -> c = Rays_math.Color.black) shown then

@@ -214,6 +214,7 @@ let scene3 ?explosion ?device surface =
                   Result.to_option
                     (Mesh.View.create_device ~mode ?indices
                        ~host:(fun () -> host geometry)
+                       ~bounds:(fun () -> Geometry_view.bounds geometry)
                        ~key ~normals ~keep count)))
         with
         | Some mesh -> mesh

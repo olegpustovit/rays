@@ -44,7 +44,9 @@ type device = {
   keep : unit -> unit;
   host : (unit -> t) option;
       (* the mesh as the host builds it (reading the positions back), made once, for a reader of
-         vertices (a path tracer, a sun fit, a centroid) *)
+         vertices (a path tracer, a centroid) *)
+  device_bounds : (unit -> (Rays_math.Vec3.t * Rays_math.Vec3.t) option) option;
+      (* its positions' bounds where they are, for a reader of only those (a sun fit) *)
 }
 
 and t = {
@@ -139,6 +141,25 @@ let centroid (mesh : t) =
     done;
     let inverse = 1. /. float_of_int count in
     Some (Rays_math.Vec3.create (!x *. inverse) (!y *. inverse) (!z *. inverse))
+
+let bounds (mesh : t) =
+  match mesh.device with
+  | Some { device_bounds = Some bounds; _ } -> bounds ()
+  | _ ->
+      let { Vec3_buffer.x; y; z } = (readable mesh).vertices in
+      if Array.length x = 0 then None
+      else
+        let lo = Array.make 3 Float.infinity and hi = Array.make 3 Float.neg_infinity in
+        Array.iteri
+          (fun i x ->
+            lo.(0) <- Float.min lo.(0) x;
+            lo.(1) <- Float.min lo.(1) y.(i);
+            lo.(2) <- Float.min lo.(2) z.(i);
+            hi.(0) <- Float.max hi.(0) x;
+            hi.(1) <- Float.max hi.(1) y.(i);
+            hi.(2) <- Float.max hi.(2) z.(i))
+          x;
+        Some (Rays_math.Vec3.create lo.(0) lo.(1) lo.(2), Rays_math.Vec3.create hi.(0) hi.(1) hi.(2))
 
 let vertex index (mesh : t) =
   let mesh = readable mesh in
@@ -277,8 +298,8 @@ module View = struct
   let create_packed_owned = create_packed_owned
   let create_packed_shared = create_packed_owned
 
-  let create_device ?(mode = Triangles) ?indices ?colors ?tex_coords ?host ~key ~normals ~keep count
-      =
+  let create_device ?(mode = Triangles) ?indices ?colors ?tex_coords ?host ?bounds ~key ~normals
+      ~keep count =
     let host =
       Option.map
         (fun make ->
@@ -333,7 +354,9 @@ module View = struct
                   normals = None;
                   colors;
                   tex_coords;
-                  device = Some { key; count; device_normals = normals; keep; host };
+                  device =
+                    Some
+                      { key; count; device_normals = normals; keep; host; device_bounds = bounds };
                 }
           | Error message, _ | _, Error message -> Error message)
 

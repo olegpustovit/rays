@@ -687,7 +687,7 @@ let install ~owner ~kind name planes geometry =
 type Rdk.Packed.Deferred.holder += Resident of E.value * int
 
 let install_deferred ~owner ~kind name
-    ({ count; materialise; resident; release; _ } : Flow_ir.Gpu.planes) geometry =
+    ({ count; materialise; resident; release; bounds; _ } : Flow_ir.Gpu.planes) geometry =
   let holder = Option.map (fun v -> Resident (v, count)) resident in
   Result.map_error
     (Diagnostic.error ~code:"E_ATTR_TYPE")
@@ -697,7 +697,9 @@ let install_deferred ~owner ~kind name
          if owner = A.Point && name = "P" then
            match like with
            | A.Float3 _ ->
-               G.with_positions (P.deferred ?holder ~release ~length:count materialise) geometry
+               G.with_positions
+                 (P.deferred ?holder ~release ~bounds ~length:count materialise)
+                 geometry
            | _ -> Error "Canonical point P requires vec3 storage."
          else
            Result.bind

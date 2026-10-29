@@ -29,6 +29,7 @@ module Gpu : sig
     resident : Flow.Eval.value option;
     settle : unit -> (unit, Diagnostic.t) result;
     release : held:bool -> unit;
+    bounds : unit -> float array option;
   }
   (** An output kept where it was computed, possibly still in flight. [settle] (on the initial
       domain, once per dispatch; every output of one dispatch settles it) waits for the dispatch and
@@ -39,7 +40,9 @@ module Gpu : sig
       reading it. [release ~held] says its owner dropped the result: the backend may reclaim the
       buffer. [held]: the owner handed it out, so it stays readable (read first if it is still
       reachable when the buffer is needed) and reads never fail; otherwise the buffer is reused at
-      once and nothing may read it again. *)
+      once and nothing may read it again. [bounds] (a vec3 output, settled and unread) reduces it
+      where it is to its per-component minima then maxima, six floats, equal to a scan of its
+      planes; [None] when the backend cannot (the reader then scans the planes). *)
 
   type kernel = {
     run : Packed.Host.inputs -> (value, Diagnostic.t) result;

@@ -879,6 +879,79 @@ let materialise t kept =
       end;
       Option.get (Atomic.get kept.planes)
 
+(* A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): one group of
+   1,024 lanes, each lane's chunk min and max read back (24 KB at most) and finished here. On the
+   owner's domain; [None] elsewhere, once read (its planes are then the host's to scan) or on any
+   device failure. *)
+let bounds_of t kept =
+  if
+    kept.kept_width <> 3 || kept.kept_count = 0 || t.closed
+    || Domain.self () <> t.domain
+    || kept.destroyed
+    || Atomic.get kept.planes <> None
+    || not (Atomic.get kept.settled)
+  then None
+  else
+    let n = kept.kept_count in
+    let chunk = (n + 1023) / 1024 in
+    let lanes = (n + chunk - 1) / chunk in
+    try
+      let compiled =
+        match Pipelines.get t.pipelines Emit.bounds with
+        | Ok compiled -> compiled
+        | Error error -> raise (Diagnostic.Error error)
+      in
+      let out =
+        get
+          (B.create_buffer t.device
+             {
+               label = Some "Flow bounds";
+               size = Int64.of_int (lanes * 24);
+               usage = [ Storage; Copy_src ];
+             })
+      in
+      Fun.protect
+        ~finally:(fun () -> ignore (B.destroy_buffer out))
+        (fun () ->
+          let count = Bytes.create 4 in
+          Bytes.set_int32_le count 0 (Int32.of_int n);
+          let commands = get (B.begin_commands t.queue) in
+          let committed = ref false in
+          let receipt =
+            Fun.protect
+              ~finally:(fun () -> if not !committed then ignore (B.abandon commands))
+              (fun () ->
+                let encoder = get (B.compute_encoder commands) in
+                Fun.protect
+                  ~finally:(fun () -> ignore (B.end_compute encoder))
+                  (fun () ->
+                    get (B.set_pipeline encoder compiled.pipeline);
+                    get (B.set_buffer encoder ~index:0 kept.kept_buffer);
+                    get (B.set_buffer encoder ~index:1 out);
+                    get (B.set_bytes encoder ~index:2 count);
+                    get (B.dispatch_threads encoder ~threads:(1024, 1, 1) ~threadgroup:(1024, 1, 1)));
+                let receipt = get (B.commit commands) in
+                committed := true;
+                receipt)
+          in
+          get (B.complete_through t.queue receipt.epoch);
+          let lane, finite =
+            unpack_array (get (B.read_buffer out ~offset:0L ~length:(lanes * 24))) (lanes * 6)
+          in
+          t.readback_bytes <- t.readback_bytes + (lanes * 24);
+          if not finite then None
+          else begin
+            let b = Array.sub lane 0 6 in
+            for l = 1 to lanes - 1 do
+              for c = 0 to 2 do
+                b.(c) <- Float.min b.(c) lane.((l * 6) + c);
+                b.(c + 3) <- Float.max b.(c + 3) lane.((l * 6) + c + 3)
+              done
+            done;
+            Some b
+          end)
+    with Diagnostic.Error _ -> None
+
 let next_kept = Atomic.make 0
 
 (* Its owner (a session dropping the result) no longer needs it, from any domain. [held] (it was
@@ -965,6 +1038,7 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
             resident = Some resident;
             settle = (fun () -> settle t kept);
             release = (fun ~held -> release_kept t kept ~held);
+            bounds = (fun () -> bounds_of t kept);
           }
     | _ ->
         (* an empty, unmapped or caller-encoded output is read now *)
@@ -977,6 +1051,7 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
               resident = None;
               settle = (fun () -> Ok ());
               release = (fun ~held:_ -> ());
+              bounds = (fun () -> None);
             })
           (planes ~index output)
 

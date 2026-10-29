@@ -91,12 +91,18 @@ module Float3 : sig
   val deferred :
     ?holder:Deferred.holder ->
     ?release:(held:bool -> unit) ->
+    ?bounds:(unit -> float array option) ->
     length:int ->
     (unit -> float array array) ->
     t
   (** Planes another owner holds (a device buffer): [materialise] runs once, from any domain, when a
       reader first needs them ([get], [View.view]) and returns three owned planes of [length].
-      Length, identity and payload size never materialise. *)
+      Length, identity and payload size never materialise; nor do {!bounds} while [bounds] answers
+      them where they are (min x y z, max x y z, equal to a scan of the planes). *)
+
+  val bounds : t -> float array option
+  (** [[| min x; min y; min z; max x; max y; max z |]], [None] when empty: a resident value's
+      [bounds] when it answers, otherwise a scan of the planes (materialising them). *)
 
   val resident : t -> bool
   (** Deferred and not yet materialised. *)

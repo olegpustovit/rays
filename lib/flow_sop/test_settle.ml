@@ -1,5 +1,5 @@
 (* A fused write placed on a mock device leaves its dispatch in flight: the session settles it at a
-   cook's end, a failed status recooks that write on the CPU (the result is the CPU cook's), and a
+   cook's end, P's bounds are the device's while P is unread, a failed status recooks that write on the CPU (the result is the CPU cook's), and a
    result the session drops (evicted by a later cook) releases its device outputs at the end of
    the first cook whose root, and the previous cook's, do not hold them. *)
 let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
@@ -13,6 +13,7 @@ let text y =
 
 let settles = ref 0
 and releases = ref 0
+and bounded = ref 0
 and fail = ref false
 
 (* every output reads as 42s: a device result is recognisable, a CPU one is not *)
@@ -49,6 +50,10 @@ let backend : Flow_ir.Gpu.backend =
                         if !fail then Error (Diagnostic.error ~code:"E_KERNEL" "mock status")
                         else Ok ());
                     release = (fun ~held:_ -> incr releases);
+                    bounds =
+                      (fun () ->
+                        incr bounded;
+                        if v.width = 3 then Some (Array.make 6 42.) else None);
                   });
           });
   }
@@ -80,7 +85,12 @@ let () =
   let s = session () in
   let placed = cook s (node ~gpu 1.0) in
   assert (!settles = 1 && Rdk.Packed.Float3.resident (Rdk.Geometry.positions placed));
+  (* its bounds are the device's, P left where it is; once read, a scan of the same values *)
+  let p = Rdk.Geometry.positions placed in
+  assert (Rdk.Packed.Float3.bounds p = Some (Array.make 6 42.) && !bounded = 1);
+  assert (Rdk.Packed.Float3.resident p);
   assert (Array.for_all (fun p -> p = (42., 42., 42.)) (positions placed));
+  assert (Rdk.Packed.Float3.bounds p = Some (Array.make 6 42.) && !bounded = 1);
   (* a toggled edit evicts the other write: its outputs are released once neither the cook's root
      nor the previous cook's holds them *)
   ignore (cook s (node ~gpu 2.0));

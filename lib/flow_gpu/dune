@@ -8,6 +8,7 @@
   noise
   noise_source
   compact_source
+  bounds_source
   emit
   spirv
   pipelines
@@ -23,6 +24,7 @@
   noise
   noise_source
   compact_source
+  bounds_source
   image_rgba8_source)
  (foreign_stubs
   (language c)
@@ -66,6 +68,19 @@
    (progn
     (echo "let source = {msl|")
     (cat shaders/metal/compact.metal)
+    (echo "|msl}\n")))))
+
+; a resident P's bounds, generated from shaders/bounds.rays (test_raster.exe --write lib)
+
+(rule
+ (target bounds_source.ml)
+ (deps shaders/metal/bounds.metal)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {msl|")
+    (cat shaders/metal/bounds.metal)
     (echo "|msl}\n")))))
 
 ; the image sink's stages, generated from ../renderer/shaders/image.rays (test_raster.exe --write)

@@ -28,6 +28,7 @@ module Gpu = struct
     resident : E.value option;
     settle : unit -> (unit, Diagnostic.t) result;
     release : held:bool -> unit;
+    bounds : unit -> float array option;
   }
 
   type kernel = {
@@ -52,6 +53,7 @@ module Gpu = struct
               resident = None;
               settle = (fun () -> Ok ());
               release = (fun ~held:_ -> ());
+              bounds = (fun () -> None);
             }
       | _ -> Error (Diagnostic.error ~code:"E_GPU" "GPU output is not a float array."))
 

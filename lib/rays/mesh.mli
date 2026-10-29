@@ -8,6 +8,11 @@ val vertices : t -> Rays_math.Vec3.t list
 val vertex_count : t -> int
 val index_count : t -> int
 val centroid : t -> Rays_math.Vec3.t option
+
+val bounds : t -> (Rays_math.Vec3.t * Rays_math.Vec3.t) option
+(** The vertices' box: a device mesh's [bounds] where it has them (its host copy is not made),
+    otherwise a scan of the vertices. *)
+
 val vertex : int -> t -> Rays_math.Vec3.t option
 val with_mode : mode -> t -> t
 
@@ -82,6 +87,7 @@ module View : sig
     ?colors:Rays_math.Color.t array ->
     ?tex_coords:Rays_math.Vec2.t array ->
     ?host:(unit -> t) ->
+    ?bounds:(unit -> (Rays_math.Vec3.t * Rays_math.Vec3.t) option) ->
     key:string ->
     normals:bool ->
     keep:(unit -> unit) ->
@@ -94,7 +100,8 @@ module View : sig
       without them, so a lit triangle mesh needs [normals]. [keep] is held by the mesh: its producer
       releases the buffers when it is collected. [host] makes the mesh as the host builds it
       (reading the positions back), once, for a reader of vertices ({!view}, {!packed_view},
-      {!vertices}, {!centroid}: a path tracer, a sun fit); without it those see no vertices. *)
+      {!vertices}, {!centroid}: a path tracer); without it those see no vertices. [bounds] answers
+      {!bounds} (a sun fit) where the positions are. *)
 
   val unread : t -> packed_view
   (** The mesh's own arrays: a device mesh's indices, colours and texture coordinates with no

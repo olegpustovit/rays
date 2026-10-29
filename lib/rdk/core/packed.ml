@@ -149,6 +149,8 @@ module Float3 = struct
     data_id : int;
     deferred : view Deferred.t option;
         (* device-resident planes, materialised when first read; [planes] is then unused *)
+    device_bounds : (unit -> float array option) option;
+        (* a resident value's bounds where it is (min x y z, max x y z), when the holder can *)
   }
 
   type buffer = t
@@ -168,6 +170,7 @@ module Float3 = struct
       length = Array.length x;
       data_id = Support.fresh_data_id ();
       deferred = None;
+      device_bounds = None;
     }
 
   let of_owned ~x ~y ~z =
@@ -178,7 +181,7 @@ module Float3 = struct
     | Ok (), Ok () -> Ok (make x y z)
     | Error message, _ | _, Error message -> Error message
 
-  let deferred ?holder ?release ~length materialise =
+  let deferred ?holder ?release ?bounds ~length materialise =
     if length < 0 then invalid_arg "Packed.Float3.deferred: negative length";
     {
       planes = { x = [||]; y = [||]; z = [||] };
@@ -193,11 +196,30 @@ module Float3 = struct
                  ->
                    { x; y; z }
                | _ -> invalid_arg "Packed.Float3.deferred: materialised planes changed shape"));
+      device_bounds = bounds;
     }
 
   let resident value = match value.deferred with Some d -> not (Deferred.forced d) | None -> false
   let holder value = Option.bind value.deferred Deferred.holder
   let releaser value = Option.bind value.deferred Deferred.releaser
+
+  let bounds value =
+    if value.length = 0 then None
+    else
+      match if resident value then Option.bind value.device_bounds (fun f -> f ()) else None with
+      | Some b -> Some b
+      | None ->
+          let { x; y; z } = planes value in
+          let b = [| x.(0); y.(0); z.(0); x.(0); y.(0); z.(0) |] in
+          for i = 1 to value.length - 1 do
+            b.(0) <- Float.min b.(0) x.(i);
+            b.(1) <- Float.min b.(1) y.(i);
+            b.(2) <- Float.min b.(2) z.(i);
+            b.(3) <- Float.max b.(3) x.(i);
+            b.(4) <- Float.max b.(4) y.(i);
+            b.(5) <- Float.max b.(5) z.(i)
+          done;
+          Some b
 
   module Builder = struct
     type nonrec t = { x : float array; y : float array; z : float array; mutable frozen : bool }

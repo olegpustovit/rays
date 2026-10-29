@@ -983,3 +983,27 @@ let compaction =
             })
         [ 0; 1; 2; 3; 4 ];
   }
+
+(* A resident packed float3 array's bounds: each lane of one threadgroup of 1,024 the min and max of
+   its chunk, at lane x 6, finished on the host (shaders/bounds.rays, printed as [compaction] is).
+   Buffers: the array, the lanes' floats, the count. *)
+let bounds =
+  {
+    compaction with
+    source = Bounds_source.source;
+    entry = "chunk_bounds";
+    uniform_bytes = 4;
+    output_widths = [| 6 |];
+    input_widths = [| 3 |];
+    interface =
+      List.map
+        (fun binding ->
+          S.
+            {
+              group = 0;
+              binding;
+              kind = (if binding = 2 then Uniform_buffer else Storage_buffer);
+              visibility = [ Compute ];
+            })
+        [ 0; 1; 2 ];
+  }
