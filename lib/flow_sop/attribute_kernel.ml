@@ -727,6 +727,16 @@ let resident_read ~geometry = function
       | _ -> None)
   | _ -> None
 
+let resident_vec3 geometry name =
+  let holder =
+    if name = "P" then P.holder (G.positions geometry)
+    else Option.bind (G.find_attribute ~owner:A.Point name geometry) A.holder
+  in
+  match holder with
+  | Some (Resident (E.Vec3_array placeholder, count)) when count = G.point_count geometry ->
+      Some placeholder
+  | _ -> None
+
 let borrowed_storage ~geometry values =
   let descriptor = function
     | E.Struct ("sop/attr", ty, args) | E.Source ("sop/attr", ty, args) -> Some (ty, args)

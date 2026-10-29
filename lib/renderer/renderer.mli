@@ -130,6 +130,19 @@ val gpu_marks :
 
 val close_gpu_marks : gpu_marks -> unit
 
+val register_gpu_positions :
+  gpu ->
+  positions:Ogpu.Backend.buffer ->
+  ?normals:Ogpu.Backend.buffer ->
+  count:int ->
+  valid:(unit -> bool) ->
+  unit ->
+  (string * (unit -> unit), error) result
+(** Borrows another producer's [count] packed float3 positions (and normals) for a Scene3 mesh drawn
+    from the device: the key a device mesh names ({!Rays.Mesh.View.create_device}) and its
+    unregistration (initial domain). The producer keeps the buffers while [valid]; a draw of a
+    registration no longer valid is refused as stale. At most 128 borrowed sources are live. *)
+
 module Native : sig
   val runtime : t -> Runtime.t
   (** The borrowed SDL/runtime shell; its lifetime remains owned by [t]. *)

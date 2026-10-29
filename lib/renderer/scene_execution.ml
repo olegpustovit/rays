@@ -29,12 +29,12 @@ let gpu_identity source =
 let gpu_vertices_valid value =
   value.gpu_active && value.gpu_domain = Domain.self () && value.gpu_valid ()
 
-let register_gpu_vertices owner ?(extra = []) ?indirect ~key ~device ~buffer ~vertex_count ~valid ()
-    =
+let register_gpu_vertices owner ?(extra = []) ?(stride = 16) ?indirect ~key ~device ~buffer
+    ~vertex_count ~valid () =
   let operation = "Scene_execution.register_gpu_vertices" in
   if
     key = "" || vertex_count <= 0 || vertex_count > 4_000_000
-    || (extra = [] && Ogpu.Backend.buffer_size buffer < Int64.of_int (vertex_count * 16))
+    || (extra = [] && Ogpu.Backend.buffer_size buffer < Int64.of_int (vertex_count * stride))
     || List.exists (fun b -> Ogpu.Backend.buffer_size b <= 0L) (buffer :: extra)
     || (match indirect with
       | Some (b, offset) -> offset < 0L || Int64.add offset 20L > Ogpu.Backend.buffer_size b
@@ -420,13 +420,16 @@ let resolve_gpu_vertices value (entry : sampled_draw) =
           if source.gpu_device != value.device then
             error "Renderer.submit" Ogpu.Error.Cross_device "GPU vertices belong to another device"
           else if
-            (match (entry.family, source.gpu_extra) with
-              | Ui, [] | Marks, [ _; _; _; _; _ ] -> false
-              | _ -> true)
-            || Bytes.length mesh.vertices <> 0
-            || mesh.vertex_count <> source.gpu_vertex_count
-            || mesh.vertex_count mod 4 <> 0
-            || mesh.index_count <> mesh.vertex_count / 4 * 6
+            match (entry.family, source.gpu_extra) with
+            | (Scene3 | Scene3_points), ([] | [ _ ]) ->
+                (* a device's packed float3 positions (and normals) *)
+                Bytes.length mesh.vertices <> 0 || mesh.vertex_count <> source.gpu_vertex_count
+            | Ui, [] | Marks, [ _; _; _; _; _ ] ->
+                Bytes.length mesh.vertices <> 0
+                || mesh.vertex_count <> source.gpu_vertex_count
+                || mesh.vertex_count mod 4 <> 0
+                || mesh.index_count <> mesh.vertex_count / 4 * 6
+            | _ -> true
           then error "Renderer.submit" Ogpu.Error.Invalid_argument "GPU shape layout is malformed"
           else Ok (Some source)
       | _ -> error "Renderer.submit" Ogpu.Error.Stale_handle "GPU vertices are stale or closed")
@@ -441,7 +444,9 @@ let valid_vertex_attributes (entry : sampled_draw) =
   | _, Some (key, bytes) ->
       key <> "" && entry.draw.mesh.vertex_count >= 0
       && entry.draw.mesh.vertex_count <= Sys.max_string_length / 24
-      && Bytes.length entry.draw.mesh.vertices = entry.draw.mesh.vertex_count * 24
+      && (match entry.draw.mesh.key with
+        | Gpu_vertices _ -> Bytes.length entry.draw.mesh.vertices = 0
+        | Host _ -> Bytes.length entry.draw.mesh.vertices = entry.draw.mesh.vertex_count * 24)
       && Bytes.length bytes = entry.draw.mesh.vertex_count * 12
 
 let valid_index_length (mesh : mesh) =
@@ -2482,6 +2487,8 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
                     match (family, source.gpu_extra) with
                     | Marks, [ _; fill; stroke; _; _ ] ->
                         [ (Ogpu.Backend.Vertex, 7, fill, 0L); (Ogpu.Backend.Vertex, 8, stroke, 0L) ]
+                    | (Scene3 | Scene3_points), [] ->
+                        [ (Ogpu.Backend.Vertex, 1, source.gpu_buffer, 0L) ]
                     | _ -> [])
               in
               Ok ((Ogpu.Backend.Vertex, 0, vertices, 0L) :: (extra @ buffers), textures, samplers)
@@ -2589,6 +2596,12 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
                 [ (1, 3) ]
                 [ (2, 4) ]
           | Scene2 | Scene2_textured -> regenerated [ ((Ogpu.Backend.Vertex, 6), [ 1 ]) ] [] []
+          | (Scene3 | Scene3_points) when Option.is_some slot.slot_gpu_vertices ->
+              (* a device's positions at 0 alone, its normals (or the positions again) at 1 *)
+              regenerated
+                (((Ogpu.Backend.Vertex, 0), [ 0 ]) :: List.tl scene3)
+                [ (1, 6) ]
+                [ (2, 7) ]
           | Scene3 | Scene3_points | Scene3_textured -> regenerated scene3 [ (1, 6) ] [ (2, 7) ]
           | Scene3_world ->
               regenerated
@@ -2987,7 +3000,12 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                                         draw.mesh with
                                         key =
                                           Host
-                                            ("gpu:indices:" ^ string_of_int draw.mesh.vertex_count);
+                                            ("gpu:indices:"
+                                            ^ string_of_int draw.mesh.vertex_count
+                                            ^
+                                            match family with
+                                            | Scene3 | Scene3_points -> ":scene3"
+                                            | _ -> "");
                                       }
                                 in
                                 match

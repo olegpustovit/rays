@@ -57,6 +57,12 @@ type t = {
   mutable mailbox_closed : bool;
   measured : (string * int, float option) Measurements.t;
   entries : (Flow_ir.Packed.instruction array * bool, string option) Entries.t;
+  dropped : (unit -> unit) list Atomic.t;
+      (* the releases of displays whose meshes were collected (any domain), run on the initial one *)
+  mutable displays : int;  (** device meshes bound so far *)
+  mutable releasing : (int * (unit -> unit)) list;
+      (* dropped displays, released once [displays] passes the count: a frame that drew one may be
+         in flight on the presenting queue, which this owner does not see *)
 }
 
 let create ?(clock = Unix.gettimeofday) () =
@@ -79,6 +85,9 @@ let create ?(clock = Unix.gettimeofday) () =
     mailbox_closed = false;
     measured = Measurements.create ~equal:(fun (a, n) (b, m) -> String.equal a b && n = m) 64;
     entries = Entries.create ~equal:(fun (a, fast) (b, other) -> a == b && fast = other) 64;
+    dropped = Atomic.make [];
+    displays = 0;
+    releasing = [];
   }
 
 let qualification t =
@@ -375,6 +384,81 @@ let marks t : Marks_scene.gpu =
               in
               native (X.gpu_marks ?indirect sink ~kind ~count (Array.map source attributes)))))
 
+let rec push cell value =
+  let old = Atomic.get cell in
+  if not (Atomic.compare_and_set cell old (value :: old)) then push cell value
+
+(* ponytail: a dropped display's buffers wait for three more bound displays (frames), not for the
+   presenting queue's completion, which needs the renderer's epoch; fine below triple buffering *)
+let release_displays ?(all = false) t =
+  t.releasing <-
+    List.map (fun release -> (t.displays + 3, release)) (Atomic.exchange t.dropped []) @ t.releasing;
+  let due, later = List.partition (fun (at, _) -> all || at <= t.displays) t.releasing in
+  t.releasing <- later;
+  List.iter (fun (_, release) -> release ()) due
+
+(* A point cloud's resident P (and N) as the renderer's device positions: pinned in the pool and
+   registered while the mesh that keeps the returned closure lives. Initial domain, after the cook
+   settled (its dispatch completed: explicit, not unified-memory, ordering). *)
+let display t geometry =
+  if t.closed || not (Domain.is_main_domain ()) then None
+  else begin
+    release_displays t;
+    match (t.owner, Flow_sop.Attribute_kernel.resident_vec3 geometry "P") with
+    | Some (gpu, _), Some positions -> (
+        let count = Rdk.Geometry.point_count geometry in
+        let pin placeholder =
+          match Flow_gpu.Run.pin placeholder with
+          | Some (buffer, n, valid, unpin) when n = count -> Some (buffer, valid, unpin)
+          | Some (_, _, _, unpin) ->
+              unpin ();
+              None
+          | None -> None
+        in
+        let normals =
+          match Rdk.Geometry.find_attribute ~owner:Point "N" geometry with
+          | None -> Ok None
+          | Some _ -> (
+              match Option.bind (Flow_sop.Attribute_kernel.resident_vec3 geometry "N") pin with
+              | Some pinned -> Ok (Some pinned)
+              | None -> Error ())
+        in
+        match (pin positions, normals) with
+        | Some (buffer, valid, unpin), Ok normals -> (
+            let unpin_all () =
+              unpin ();
+              Option.iter (fun (_, _, unpin) -> unpin ()) normals
+            in
+            match
+              X.register_gpu_positions gpu ~positions:buffer
+                ?normals:(Option.map (fun (b, _, _) -> b) normals)
+                ~count
+                ~valid:(fun () ->
+                  valid () && Option.fold ~none:true ~some:(fun (_, valid, _) -> valid ()) normals)
+                ()
+            with
+            | Error _ ->
+                unpin_all ();
+                None
+            | Ok (key, unregister) ->
+                t.displays <- t.displays + 1;
+                let token = ref () in
+                Gc.finalise
+                  (fun _ ->
+                    push t.dropped (fun () ->
+                        unregister ();
+                        unpin_all ()))
+                  token;
+                Some (key, normals <> None, fun () -> ignore (Sys.opaque_identity token)))
+        | pinned, normals ->
+            Option.iter (fun (_, _, unpin) -> unpin ()) pinned;
+            Result.iter (Option.iter (fun (_, _, unpin) -> unpin ())) normals;
+            None)
+    | _ -> None
+  end
+
+let displays t = t.displays
+
 let image_stats t =
   if not (Domain.is_main_domain ()) then
     invalid_arg "Workspace_gpu.image_stats: initial domain required";
@@ -398,6 +482,7 @@ let close t =
     done;
     Condition.broadcast t.jobs_ready;
     Mutex.unlock t.jobs_lock;
+    release_displays ~all:true t;
     Slots.clear t.mark_sets;
     Images.clear t.images;
     Option.iter

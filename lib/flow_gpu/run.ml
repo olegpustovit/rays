@@ -824,7 +824,19 @@ let settle t kept =
   if Atomic.get kept.settled || kept.destroyed then Ok ()
   else if Domain.self () <> t.domain then
     Error (Diagnostic.error ~code:"E_GPU" "A device output settles on its owner's domain.")
-  else Result.map (fun () -> Atomic.set kept.settled true) (check_status t ~epoch:kept.kept_epoch)
+  else
+    Result.map
+      (fun () ->
+        (* every output of the dispatch: its status covered them all *)
+        List.iter
+          (fun w ->
+            Option.iter
+              (fun other ->
+                if other.kept_epoch = kept.kept_epoch then Atomic.set other.settled true)
+              (Weak.get w 0))
+          t.kept;
+        Atomic.set kept.settled true)
+      (check_status t ~epoch:kept.kept_epoch)
 
 let materialise t kept =
   match Atomic.get kept.planes with
@@ -967,6 +979,27 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
               release = (fun ~held:_ -> ());
             })
           (planes ~index output)
+
+(* A display borrowing a settled kept output's buffer: a reader the pool waits for (no reuse, no
+   thaw) until [unpin]; [valid] while the buffer exists (a close destroys it). Initial domain. *)
+let pin placeholder =
+  bindable := List.filter (fun (_, w) -> Weak.check w 0) !bindable;
+  List.find_map
+    (fun (p, w) ->
+      if p != placeholder then None
+      else
+        Option.bind (Weak.get w 0) (fun kept ->
+            if kept.destroyed || not (Atomic.get kept.settled) then None
+            else begin
+              Atomic.incr kept.readers;
+              let pinned = Atomic.make true in
+              Some
+                ( kept.kept_buffer,
+                  kept.kept_count,
+                  (fun () -> Atomic.get pinned && not kept.destroyed),
+                  fun () -> if Atomic.exchange pinned false then Atomic.decr kept.readers )
+            end))
+    !bindable
 
 let buffer ?index output =
   let index = Option.value ~default:output.index index in

@@ -764,7 +764,7 @@ let framing_step ~(value : t) ~value' ~(doc : Document.t) ~(cooked : Cook.update
              (fun union (piece : Cook.piece) ->
                if not (view_wants value' view piece.id) then union
                else
-                 match (piece.bounds, union) with
+                 match (Lazy.force piece.bounds, union) with
                  | None, union -> union
                  | Some bounds, None -> Some (world_bounds piece.id bounds)
                  | Some bounds, Some box -> Some (Cook.union box (world_bounds piece.id bounds)))

@@ -67,7 +67,7 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
       (* Every pipeline is generated (shaders/*.rays) and binds in its Lisp declaration order: buffer 0
        and the vertex buffers, the one buffer both stages read, then the fragment's resources. *)
       let texture t = [ (t, `Texture); (t + 1, `Sampler) ] in
-      let scene3 = ([ 3; 4; 5 ], [ 2 ]) in
+      let scene3 = ([ 1; 3; 4; 5 ], [ 2 ]) in
       let source, (vertex_entry, fragment_entry), (vertex_buffers, shared), fragment_resources =
         match family with
         | Scene_execution.Scene2 | Scene2_textured ->
@@ -76,7 +76,8 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
               ("scene2_vertex", "scene2_fragment"),
               ([ 1 ], []),
               [ (2, `Buffer) ] )
-        (* records as floats 0 (slot 1 unused), surface 2, instances 3, attributes 4 and 5 *)
+        (* records as floats 0 (and normals 1: the records again, or a device's normals), surface 2,
+           instances 3, attributes 4 and 5 *)
         | Scene3 -> (source_scene3, ("scene3_vertex", "scene3_fragment"), scene3, [])
         | Scene3_points ->
             (source_scene3_points, ("scene3_points_vertex", "scene3_fragment"), scene3, [])

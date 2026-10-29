@@ -12,7 +12,9 @@ type piece = {
   id : int;
   graph : Node.t;
   prepared : prepared;
-  bounds : bounds option;
+  bounds : bounds option Lazy.t;
+      (* read on the initial domain when asked (framing, the selected box): a device's P stays
+         there until then *)
   settings : Settings.t;
   context : string; (* projection of the graph's declared context dependencies *)
   output : Session.output; (* what [prepared] was made from, before the tint *)
@@ -404,9 +406,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
                   let* geometry =
                     Payload.geometry output.payload |> Result.map_error Diagnostic.error_to_string
                   in
-                  let* bounds =
-                    output_bounds output |> Result.map_error Diagnostic.error_to_string
-                  in
+                  let bounds = lazy (Result.value ~default:None (output_bounds output)) in
                   let* tinted =
                     Pick.tint output lit |> Result.map_error Diagnostic.error_to_string
                   in
@@ -512,7 +512,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
                           = Context.cache_projection (Node.graph_dependencies graph) context)
                         ~error:(fun _ -> false)
                         (context value timeline frame) ->
-                (Some piece.bounds, framing)
+                (Some (Lazy.force piece.bounds), framing)
             | _ -> (
                 match
                   Option.map
@@ -602,9 +602,17 @@ let prepare (_ : Settings.t) (output : Session.output) =
     (fun surface -> { geometry; surface })
     (Rdk_rays.Surface.of_geometry ?instances:output.instances geometry)
 
+(* the editor's device positions binder ({!Flow_native.Workspace_gpu.display}) while it draws *)
+let display = Domain.DLS.new_key (fun () -> None)
+
+let with_display device f =
+  let previous = Domain.DLS.get display in
+  Domain.DLS.set display (Some device);
+  Fun.protect ~finally:(fun () -> Domain.DLS.set display previous) f
+
 let draw node ({ surface; _ } : prepared) =
   let explosion =
     Rdk_rays.Packed_pieces.explosion ~operation:(Node.operation node)
       ~fields:(Node.parameter_fields node)
   in
-  Rdk_rays.Surface.scene3 ?explosion surface
+  Rdk_rays.Surface.scene3 ?explosion ?device:(Domain.DLS.get display) surface

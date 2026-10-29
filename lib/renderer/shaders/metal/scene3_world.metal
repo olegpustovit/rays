@@ -12,127 +12,156 @@ vertex scene3_vertex_out scene3_vertex(
     uint vid [[vertex_id]],
     uint iid [[instance_id]],
     device const float* buffer0 [[buffer(0)]],
-    device const uint* buffer1 [[buffer(1)]],
+    device const float* buffer1 [[buffer(1)]],
     device const float* buffer2 [[buffer(2)]],
     device const float* buffer3 [[buffer(3)]],
     device const float* buffer4 [[buffer(4)]],
     device const uint* buffer5 [[buffer(5)]]) {
   scene3_vertex_out o;
   uint sb=0u;
-  uint r7=6u,r10=1u,r13=2u;
-  float r16=as_type<float>(0x3f800000u);
-  uint r17=3u,r20=4u,r23=5u;
-  float r26=as_type<float>(0x0u);
-  uint r32=48u,r34=3u,r37=2u,r40=1u;
-  float r47=0.0f;
-  uint r48=4u;
-  float r60=0.0f;
-  uint r61=8u;
-  float r73=0.0f;
-  uint r74=12u;
-  float r86=0.0f,r98=0.0f,r110=0.0f,r122=0.0f,r134=0.0f;
-  uint r139=16u;
-  float r151=0.0f,r163=0.0f,r175=0.0f,r199=0.0f,r211=0.0f,r223=0.0f;
-  uint r240=32u;
-  float r252=0.0f,r264=0.0f,r276=0.0f,r300=0.0f,r312=0.0f,r324=0.0f;
-  uint r343=24u,r345=255u;
-  float r348=as_type<float>(0x437f0000u);
-  uint r350=16u,r355=8u;
+  float r9=as_type<float>(0x3f000000u);
+  uint r12=3u,r16=1u,r19=2u;
+  float r22=as_type<float>(0x3f800000u),r26=0.0f,r27=0.0f;
+  uint r28=1u;
+  float r30=0.0f;
+  uint r31=2u;
+  float r33=0.0f,r35=as_type<float>(0x0u),r37=0.0f,r38=0.0f,r39=0.0f,r40=0.0f;
+  uint r41=3u;
+  float r43=0.0f;
+  uint r44=4u;
+  float r46=0.0f;
+  uint r47=5u;
+  float r49=0.0f;
+  uint r59=48u,r61=3u,r64=2u,r67=1u;
+  float r74=0.0f;
+  uint r75=4u;
+  float r87=0.0f;
+  uint r88=8u;
+  float r100=0.0f;
+  uint r101=12u;
+  float r113=0.0f,r125=0.0f,r137=0.0f,r149=0.0f,r161=0.0f;
+  uint r166=16u;
+  float r178=0.0f,r190=0.0f,r202=0.0f,r226=0.0f,r238=0.0f,r250=0.0f;
+  uint r267=32u;
+  float r279=0.0f,r291=0.0f,r303=0.0f,r327=0.0f,r339=0.0f,r351=0.0f;
+  uint r370=24u,r372=255u;
+  float r375=as_type<float>(0x437f0000u);
+  uint r377=16u,r382=8u;
   long r0=long(vid);
-  uint r8=(uint(r0)*r7);
-  float r9=buffer0[r8*1+0];
-  float r12=buffer0[((r8+r10))*1+0];
-  float r15=buffer0[((r8+r13))*1+0];
-  float r19=buffer0[((r8+r17))*1+0];
-  float r22=buffer0[((r8+r20))*1+0];
-  float r25=buffer0[((r8+r23))*1+0];
-  float r30=((buffer2[(83u)*1+0])>(as_type<float>(0x3f000000u)));
-  uint r33=(uint((long(iid)))*r32);
-  if(r30!=0.0f) {
-    r47=fma(r16,(buffer3[((r33+r34))*1+0]),(fma(r15,(buffer3[((r33+r37))*1+0]),(fma(r12,(buffer3[((r33+r40))*1+0]),((r9*(buffer3[r33*1+0]))))))));
-    uint r49=(r33+r48);
-    r60=fma(r16,(buffer3[((r49+r34))*1+0]),(fma(r15,(buffer3[((r49+r37))*1+0]),(fma(r12,(buffer3[((r49+r40))*1+0]),((r9*(buffer3[r49*1+0]))))))));
-    uint r62=(r33+r61);
-    r73=fma(r16,(buffer3[((r62+r34))*1+0]),(fma(r15,(buffer3[((r62+r37))*1+0]),(fma(r12,(buffer3[((r62+r40))*1+0]),((r9*(buffer3[r62*1+0]))))))));
-    uint r75=(r33+r74);
-    r86=fma(r16,(buffer3[((r75+r34))*1+0]),(fma(r15,(buffer3[((r75+r37))*1+0]),(fma(r12,(buffer3[((r75+r40))*1+0]),((r9*(buffer3[r75*1+0]))))))));
+  float r10=((buffer2[(79u)*1+0])>r9);
+  uint r13=(r10!=0.0f?r12:(6u));
+  uint r14=(uint(r0)*r13);
+  float r15=buffer0[r14*1+0];
+  float r18=buffer0[((r14+r16))*1+0];
+  float r21=buffer0[((r14+r19))*1+0];
+  if(r10!=0.0f) {
+    r26=((buffer2[(80u)*1+0])>(as_type<float>(0x3f000000u)));
+    if(r26!=0.0f) {
+      r27=buffer1[r14*1+0];
+      r30=buffer1[((r14+r28))*1+0];
+      r33=buffer1[((r14+r31))*1+0];
+    }
+    r37=(r26!=0.0f?r27:r35);
+    r38=(r26!=0.0f?r30:r35);
+    r39=(r26!=0.0f?r33:(as_type<float>(0x3f800000u)));
+    r40=(r26!=0.0f?(as_type<float>(0x0u)):r35);
   }
-  if(r30==0.0f) {
-    r98=fma(r16,(buffer2[(3u)*1+0]),(fma(r15,(buffer2[(2u)*1+0]),(fma(r12,(buffer2[(1u)*1+0]),((r9*(buffer2[(0u)*1+0]))))))));
-    r110=fma(r16,(buffer2[(7u)*1+0]),(fma(r15,(buffer2[(6u)*1+0]),(fma(r12,(buffer2[(5u)*1+0]),((r9*(buffer2[(4u)*1+0]))))))));
-    r122=fma(r16,(buffer2[(11u)*1+0]),(fma(r15,(buffer2[(10u)*1+0]),(fma(r12,(buffer2[(9u)*1+0]),((r9*(buffer2[(8u)*1+0]))))))));
-    r134=fma(r16,(buffer2[(15u)*1+0]),(fma(r15,(buffer2[(14u)*1+0]),(fma(r12,(buffer2[(13u)*1+0]),((r9*(buffer2[(12u)*1+0]))))))));
+  if(r10==0.0f) {
+    r43=buffer0[((r14+r41))*1+0];
+    r46=buffer0[((r14+r44))*1+0];
+    r49=buffer0[((r14+r47))*1+0];
   }
-  float r135=(r30!=0.0f?r47:r98);
-  float r136=(r30!=0.0f?r60:r110);
-  float r137=(r30!=0.0f?r73:r122);
-  float r138=(r30!=0.0f?r86:r134);
-  if(r30!=0.0f) {
-    uint r140=(r33+r139);
-    r151=fma(r16,(buffer3[((r140+r34))*1+0]),(fma(r15,(buffer3[((r140+r37))*1+0]),(fma(r12,(buffer3[((r140+r40))*1+0]),((r9*(buffer3[r140*1+0]))))))));
-    uint r152=(r140+r48);
-    r163=fma(r16,(buffer3[((r152+r34))*1+0]),(fma(r15,(buffer3[((r152+r37))*1+0]),(fma(r12,(buffer3[((r152+r40))*1+0]),((r9*(buffer3[r152*1+0]))))))));
-    uint r164=(r140+r61);
-    r175=fma(r16,(buffer3[((r164+r34))*1+0]),(fma(r15,(buffer3[((r164+r37))*1+0]),(fma(r12,(buffer3[((r164+r40))*1+0]),((r9*(buffer3[r164*1+0]))))))));
+  float r51=(r10!=0.0f?r37:r43);
+  float r52=(r10!=0.0f?r38:r46);
+  float r53=(r10!=0.0f?r39:r49);
+  float r54=(r10!=0.0f?r40:(as_type<float>(0x0u)));
+  float r57=((buffer2[(83u)*1+0])>r9);
+  uint r60=(uint((long(iid)))*r59);
+  if(r57!=0.0f) {
+    r74=fma(r22,(buffer3[((r60+r61))*1+0]),(fma(r21,(buffer3[((r60+r64))*1+0]),(fma(r18,(buffer3[((r60+r67))*1+0]),((r15*(buffer3[r60*1+0]))))))));
+    uint r76=(r60+r75);
+    r87=fma(r22,(buffer3[((r76+r61))*1+0]),(fma(r21,(buffer3[((r76+r64))*1+0]),(fma(r18,(buffer3[((r76+r67))*1+0]),((r15*(buffer3[r76*1+0]))))))));
+    uint r89=(r60+r88);
+    r100=fma(r22,(buffer3[((r89+r61))*1+0]),(fma(r21,(buffer3[((r89+r64))*1+0]),(fma(r18,(buffer3[((r89+r67))*1+0]),((r15*(buffer3[r89*1+0]))))))));
+    uint r102=(r60+r101);
+    r113=fma(r22,(buffer3[((r102+r61))*1+0]),(fma(r21,(buffer3[((r102+r64))*1+0]),(fma(r18,(buffer3[((r102+r67))*1+0]),((r15*(buffer3[r102*1+0]))))))));
   }
-  if(r30==0.0f) {
-    r199=fma(r16,(buffer2[(19u)*1+0]),(fma(r15,(buffer2[(18u)*1+0]),(fma(r12,(buffer2[(17u)*1+0]),((r9*(buffer2[(16u)*1+0]))))))));
-    r211=fma(r16,(buffer2[(23u)*1+0]),(fma(r15,(buffer2[(22u)*1+0]),(fma(r12,(buffer2[(21u)*1+0]),((r9*(buffer2[(20u)*1+0]))))))));
-    r223=fma(r16,(buffer2[(27u)*1+0]),(fma(r15,(buffer2[(26u)*1+0]),(fma(r12,(buffer2[(25u)*1+0]),((r9*(buffer2[(24u)*1+0]))))))));
+  if(r57==0.0f) {
+    r125=fma(r22,(buffer2[(3u)*1+0]),(fma(r21,(buffer2[(2u)*1+0]),(fma(r18,(buffer2[(1u)*1+0]),((r15*(buffer2[(0u)*1+0]))))))));
+    r137=fma(r22,(buffer2[(7u)*1+0]),(fma(r21,(buffer2[(6u)*1+0]),(fma(r18,(buffer2[(5u)*1+0]),((r15*(buffer2[(4u)*1+0]))))))));
+    r149=fma(r22,(buffer2[(11u)*1+0]),(fma(r21,(buffer2[(10u)*1+0]),(fma(r18,(buffer2[(9u)*1+0]),((r15*(buffer2[(8u)*1+0]))))))));
+    r161=fma(r22,(buffer2[(15u)*1+0]),(fma(r21,(buffer2[(14u)*1+0]),(fma(r18,(buffer2[(13u)*1+0]),((r15*(buffer2[(12u)*1+0]))))))));
   }
-  float r236=(r30!=0.0f?r151:r199);
-  float r237=(r30!=0.0f?r163:r211);
-  float r238=(r30!=0.0f?r175:r223);
-  if(r30!=0.0f) {
-    uint r241=(r33+r240);
-    r252=fma(r26,(buffer3[((r241+r34))*1+0]),(fma(r25,(buffer3[((r241+r37))*1+0]),(fma(r22,(buffer3[((r241+r40))*1+0]),((r19*(buffer3[r241*1+0]))))))));
-    uint r253=(r241+r48);
-    r264=fma(r26,(buffer3[((r253+r34))*1+0]),(fma(r25,(buffer3[((r253+r37))*1+0]),(fma(r22,(buffer3[((r253+r40))*1+0]),((r19*(buffer3[r253*1+0]))))))));
-    uint r265=(r241+r61);
-    r276=fma(r26,(buffer3[((r265+r34))*1+0]),(fma(r25,(buffer3[((r265+r37))*1+0]),(fma(r22,(buffer3[((r265+r40))*1+0]),((r19*(buffer3[r265*1+0]))))))));
+  float r162=(r57!=0.0f?r74:r125);
+  float r163=(r57!=0.0f?r87:r137);
+  float r164=(r57!=0.0f?r100:r149);
+  float r165=(r57!=0.0f?r113:r161);
+  if(r57!=0.0f) {
+    uint r167=(r60+r166);
+    r178=fma(r22,(buffer3[((r167+r61))*1+0]),(fma(r21,(buffer3[((r167+r64))*1+0]),(fma(r18,(buffer3[((r167+r67))*1+0]),((r15*(buffer3[r167*1+0]))))))));
+    uint r179=(r167+r75);
+    r190=fma(r22,(buffer3[((r179+r61))*1+0]),(fma(r21,(buffer3[((r179+r64))*1+0]),(fma(r18,(buffer3[((r179+r67))*1+0]),((r15*(buffer3[r179*1+0]))))))));
+    uint r191=(r167+r88);
+    r202=fma(r22,(buffer3[((r191+r61))*1+0]),(fma(r21,(buffer3[((r191+r64))*1+0]),(fma(r18,(buffer3[((r191+r67))*1+0]),((r15*(buffer3[r191*1+0]))))))));
   }
-  if(r30==0.0f) {
-    r300=fma(r26,(buffer2[(35u)*1+0]),(fma(r25,(buffer2[(34u)*1+0]),(fma(r22,(buffer2[(33u)*1+0]),((r19*(buffer2[(32u)*1+0]))))))));
-    r312=fma(r26,(buffer2[(39u)*1+0]),(fma(r25,(buffer2[(38u)*1+0]),(fma(r22,(buffer2[(37u)*1+0]),((r19*(buffer2[(36u)*1+0]))))))));
-    r324=fma(r26,(buffer2[(43u)*1+0]),(fma(r25,(buffer2[(42u)*1+0]),(fma(r22,(buffer2[(41u)*1+0]),((r19*(buffer2[(40u)*1+0]))))))));
+  if(r57==0.0f) {
+    r226=fma(r22,(buffer2[(19u)*1+0]),(fma(r21,(buffer2[(18u)*1+0]),(fma(r18,(buffer2[(17u)*1+0]),((r15*(buffer2[(16u)*1+0]))))))));
+    r238=fma(r22,(buffer2[(23u)*1+0]),(fma(r21,(buffer2[(22u)*1+0]),(fma(r18,(buffer2[(21u)*1+0]),((r15*(buffer2[(20u)*1+0]))))))));
+    r250=fma(r22,(buffer2[(27u)*1+0]),(fma(r21,(buffer2[(26u)*1+0]),(fma(r18,(buffer2[(25u)*1+0]),((r15*(buffer2[(24u)*1+0]))))))));
   }
-  float r337=(r30!=0.0f?r252:r300);
-  float r338=(r30!=0.0f?r264:r312);
-  float r339=(r30!=0.0f?r276:r324);
-  uint r341=(uint(r0)*r17);
-  long r342=long(buffer5[r341*1+0]);
-  long r344=(as_type<long>(ulong(long((ulong(r342)&0x7fffffffffffffffUL)>>(long(r343)&63)))<<1)>>1);
-  sb|=(r343>62u)?4u:0u;
-  float r349=(r348==0.0f?0.0f:(float(((uint(r344)&r345))))/r348);
-  long r351=(as_type<long>(ulong(long((ulong(r342)&0x7fffffffffffffffUL)>>(long(r350)&63)))<<1)>>1);
-  sb|=(r350>62u)?4u:0u;
-  float r354=(r348==0.0f?0.0f:(float(((uint(r351)&r345))))/r348);
-  long r356=(as_type<long>(ulong(long((ulong(r342)&0x7fffffffffffffffUL)>>(long(r355)&63)))<<1)>>1);
-  sb|=(r355>62u)?4u:0u;
-  float r359=(r348==0.0f?0.0f:(float(((uint(r356)&r345))))/r348);
-  float r362=(r348==0.0f?0.0f:(float(((uint(r342)&r345))))/r348);
-  float r364=buffer4[((r341+r10))*1+0];
-  float r366=buffer4[((r341+r13))*1+0];
-  float r370=rsqrt(fabs((fma(r339,r339,(fma(r338,r338,((r337*r337))))))));
-  float r371=(r337*r370);
-  float r372=(r338*r370);
-  float r373=(r339*r370);
-  o.position.x=r135;
-  o.position.y=r136;
-  o.position.z=r137;
-  o.position.w=r138;
-  o.color.x=r349;
-  o.color.y=r354;
-  o.color.z=r359;
-  o.color.w=r362;
-  o.uv.x=r364;
-  o.uv.y=r366;
-  o.world.x=r236;
-  o.world.y=r237;
-  o.world.z=r238;
-  o.normal.x=r371;
-  o.normal.y=r372;
-  o.normal.z=r373;
+  float r263=(r57!=0.0f?r178:r226);
+  float r264=(r57!=0.0f?r190:r238);
+  float r265=(r57!=0.0f?r202:r250);
+  if(r57!=0.0f) {
+    uint r268=(r60+r267);
+    r279=fma(r54,(buffer3[((r268+r61))*1+0]),(fma(r53,(buffer3[((r268+r64))*1+0]),(fma(r52,(buffer3[((r268+r67))*1+0]),((r51*(buffer3[r268*1+0]))))))));
+    uint r280=(r268+r75);
+    r291=fma(r54,(buffer3[((r280+r61))*1+0]),(fma(r53,(buffer3[((r280+r64))*1+0]),(fma(r52,(buffer3[((r280+r67))*1+0]),((r51*(buffer3[r280*1+0]))))))));
+    uint r292=(r268+r88);
+    r303=fma(r54,(buffer3[((r292+r61))*1+0]),(fma(r53,(buffer3[((r292+r64))*1+0]),(fma(r52,(buffer3[((r292+r67))*1+0]),((r51*(buffer3[r292*1+0]))))))));
+  }
+  if(r57==0.0f) {
+    r327=fma(r54,(buffer2[(35u)*1+0]),(fma(r53,(buffer2[(34u)*1+0]),(fma(r52,(buffer2[(33u)*1+0]),((r51*(buffer2[(32u)*1+0]))))))));
+    r339=fma(r54,(buffer2[(39u)*1+0]),(fma(r53,(buffer2[(38u)*1+0]),(fma(r52,(buffer2[(37u)*1+0]),((r51*(buffer2[(36u)*1+0]))))))));
+    r351=fma(r54,(buffer2[(43u)*1+0]),(fma(r53,(buffer2[(42u)*1+0]),(fma(r52,(buffer2[(41u)*1+0]),((r51*(buffer2[(40u)*1+0]))))))));
+  }
+  float r364=(r57!=0.0f?r279:r327);
+  float r365=(r57!=0.0f?r291:r339);
+  float r366=(r57!=0.0f?r303:r351);
+  uint r368=(uint(r0)*r12);
+  long r369=long(buffer5[r368*1+0]);
+  long r371=(as_type<long>(ulong(long((ulong(r369)&0x7fffffffffffffffUL)>>(long(r370)&63)))<<1)>>1);
+  sb|=(r370>62u)?4u:0u;
+  float r376=(r375==0.0f?0.0f:(float(((uint(r371)&r372))))/r375);
+  long r378=(as_type<long>(ulong(long((ulong(r369)&0x7fffffffffffffffUL)>>(long(r377)&63)))<<1)>>1);
+  sb|=(r377>62u)?4u:0u;
+  float r381=(r375==0.0f?0.0f:(float(((uint(r378)&r372))))/r375);
+  long r383=(as_type<long>(ulong(long((ulong(r369)&0x7fffffffffffffffUL)>>(long(r382)&63)))<<1)>>1);
+  sb|=(r382>62u)?4u:0u;
+  float r386=(r375==0.0f?0.0f:(float(((uint(r383)&r372))))/r375);
+  float r389=(r375==0.0f?0.0f:(float(((uint(r369)&r372))))/r375);
+  float r391=buffer4[((r368+r16))*1+0];
+  float r393=buffer4[((r368+r19))*1+0];
+  float r397=rsqrt(fabs((fma(r366,r366,(fma(r365,r365,((r364*r364))))))));
+  float r398=(r364*r397);
+  float r399=(r365*r397);
+  float r400=(r366*r397);
+  o.position.x=r162;
+  o.position.y=r163;
+  o.position.z=r164;
+  o.position.w=r165;
+  o.color.x=r376;
+  o.color.y=r381;
+  o.color.z=r386;
+  o.color.w=r389;
+  o.uv.x=r391;
+  o.uv.y=r393;
+  o.world.x=r263;
+  o.world.y=r264;
+  o.world.z=r265;
+  o.normal.x=r398;
+  o.normal.y=r399;
+  o.normal.z=r400;
   return o;
 }
 fragment float4 world_fragment(

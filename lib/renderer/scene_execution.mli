@@ -158,6 +158,7 @@ module Private : sig
   val register_gpu_vertices :
     gpu_vertices_owner ->
     ?extra:Ogpu.Backend.buffer list ->
+    ?stride:int ->
     ?indirect:Ogpu.Backend.buffer * int64 ->
     key:string ->
     device:Ogpu.Backend.device ->
@@ -173,7 +174,10 @@ module Private : sig
       destroying/reusing buffers; [valid] also guards every retained replay. At most 128 are live.
       With [indirect] [(buffer, offset)] the shape is drawn by [draw_indexed_indirect] from the five
       uints the producer's device wrote there, an index count of at most the registration's; such a
-      draw is never batched or recorded. *)
+      draw is never batched or recorded. A [Scene3] or [Scene3_points] draw of a device's packed
+      float3 positions (empty [vertices], host indices and attribute record, uniform word 79 set)
+      registers them as [buffer] with [stride] 12 and its normals as the one [extra] buffer, or none
+      (word 80 clear: the normal is (0, 0, 1)). *)
 
   val unregister_gpu_vertices : gpu_vertices -> unit
   val gpu_vertex_count_for_test : gpu_vertices_owner -> int

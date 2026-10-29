@@ -71,7 +71,7 @@ let prepared value = Option.map (fun (piece : Cook.piece) -> piece.prepared) (pi
    transform, its cooked bounds in its own space, and its name. *)
 let selected_bounds value =
   Option.bind (piece value) (fun (piece : Cook.piece) ->
-      Option.bind piece.bounds (fun bounds ->
+      Option.bind (Lazy.force piece.bounds) (fun bounds ->
           Option.map
             (fun (node : Kind_graph.node) ->
               (Objects.world (scene value) piece.id, bounds, node.label))

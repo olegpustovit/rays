@@ -30,6 +30,15 @@ val marks : t -> Marks_scene.gpu
 (* The [Marks]-family sources of the GPU mark sets of a frame, one per slot (at most 64), each
    owning the uploads of its CPU attributes and borrowing its GPU ones. *)
 
+val display : t -> Rdk.Geometry.t -> (string * bool * (unit -> unit)) option
+(** {!Rdk_rays.Surface.scene3}'s [device]: a point cloud's P (and N) this workspace's device holds,
+    settled and unread, pinned in its pool and registered as the renderer's device positions (the
+    key, whether N is bound, and what the mesh keeps: once it is collected the registration and pins
+    are released on a later call). [None] (draw the host copy) otherwise. Initial domain. *)
+
+val displays : t -> int
+(** Device meshes {!display} has bound. *)
+
 val close : t -> unit
 
 val image_stats : t -> Flow_gpu.Host.stats * int * int * int * int

@@ -3,7 +3,8 @@ open Rdk_core
 open Rdk_ops
 open Rdk_ops
 
-type preview = Pieces of Packed_pieces.t | Mesh of Mesh.t
+(* [Device]: a point cloud whose positions (and normals) a device holds, drawn from there *)
+type preview = Pieces of Packed_pieces.t | Mesh of Mesh.t | Device of Geometry.t
 
 type t = {
   preview : preview;
@@ -11,7 +12,37 @@ type t = {
   batches : (Material.t * int array) list;
 }
 
-let of_geometry ?instances geometry =
+(* The display reads nothing of a point cloud but P and N: with both on the device (or no N) and
+   no colour, uv, piece or material, it binds them there. *)
+let device_points geometry =
+  Packed.Float3.resident (Geometry.positions geometry)
+  && Geometry.primitive_count geometry = 0
+  && Geometry.point_count geometry > 0
+  && (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
+    | None -> true
+    | Some n -> Attribute.resident n)
+  && List.for_all
+       (fun (owner, name) -> Geometry.find_attribute ~owner name geometry = None)
+       [
+         (Attribute.Point, "Cd");
+         (Attribute.Point, "uv");
+         (Attribute.Vertex, "N");
+         (Attribute.Vertex, "Cd");
+         (Attribute.Vertex, "uv");
+         (Attribute.Primitive, "Cd");
+         (Attribute.Primitive, "piece");
+         (Attribute.Primitive, "material_color");
+         (Attribute.Primitive, "material_roughness");
+         (Attribute.Primitive, "material_emission");
+         (Attribute.Primitive, "material_round");
+       ]
+
+let rec of_geometry ?instances geometry =
+  if device_points geometry then
+    Ok { preview = Device geometry; transforms = instances; batches = [] }
+  else of_host ?instances geometry
+
+and of_host ?instances geometry =
   let ( let* ) = Result.bind in
   let needs_triangles =
     List.exists
@@ -145,11 +176,25 @@ let of_geometry ?instances geometry =
   in
   Ok { preview; transforms = instances; batches }
 
-let scene3 ?explosion surface =
+let scene3 ?explosion ?device surface =
   let mesh =
     match surface.preview with
     | Mesh mesh -> mesh
     | Pieces pieces -> Packed_pieces.mesh_for_explosion explosion pieces
+    | Device geometry -> (
+        let count = Geometry.point_count geometry in
+        match
+          Option.bind device (fun device ->
+              Option.bind (device geometry) (fun (key, normals, keep) ->
+                  Result.to_option
+                    (Mesh.View.create_device ~mode:Mesh.Points ~key ~normals ~keep count)))
+        with
+        | Some mesh -> mesh
+        | None -> (
+            (* no device to bind (another renderer, a closed runner): the host copy *)
+            match Rays_mesh.to_mesh geometry with
+            | Ok mesh -> mesh
+            | Error _ -> Mesh.View.create_owned ~mode:Mesh.Points [||] |> Result.get_ok))
   in
   let draw material mesh =
     match surface.transforms with

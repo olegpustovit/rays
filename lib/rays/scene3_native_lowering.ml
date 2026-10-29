@@ -625,6 +625,7 @@ type packed_mesh = {
   vertex_count : int;
   index_count : int;
   opaque : bool; (* no vertex color is translucent *)
+  gpu : (string * bool) option; (* a device mesh's key and whether it carries normals *)
 }
 
 let packed_mesh_capacity = 16
@@ -764,8 +765,8 @@ let pack_vertices ~allow_missing_normals (view : Mesh.View.packed_view) =
       done;
       if !finite then Ok bytes else Error Invalid_mesh
 
-let pack_attributes (view : Mesh.View.packed_view) =
-  let count = Array.length view.vertices.x in
+let pack_attributes ?(count = 0) (view : Mesh.View.packed_view) =
+  let count = max count (Array.length view.vertices.x) in
   let bytes = Bytes.make (count * 12) '\000' and finite = ref true in
   for index = 0 to count - 1 do
     Bytes.set_int32_le bytes (index * 12)
@@ -867,7 +868,57 @@ let find_packed predicate =
     (Domain.DLS.get current_packed_cache);
   !found
 
-let packed_of_mesh mode mesh =
+(* A device mesh's point draw: its identity indices and plain attribute record depend only on its
+   count, so frame after frame they are the same bytes (the renderer uploads them once). *)
+let device_points = Atomic.make None
+
+let packed_of_device mode mesh (key, normals) =
+  let source = Mesh.View.packed_view mesh in
+  let count = Mesh.vertex_count mesh in
+  let points = mode = Scene3.Vertices || source.mode = Mesh.Points in
+  let plain = source.colors = None && source.tex_coords = None in
+  let indices, attributes =
+    match Atomic.get device_points with
+    | Some (n, indices, attributes) when n = count && plain -> (indices, Ok attributes)
+    | _ ->
+        let indices = pack_indices (Array.init count Fun.id)
+        and attributes = pack_attributes ~count source in
+        (match attributes with
+        | Ok attributes when plain -> Atomic.set device_points (Some (count, indices, attributes))
+        | _ -> ());
+        (indices, attributes)
+  in
+  match attributes with
+  | Ok attributes when points && count > 0 ->
+      Ok
+        {
+          mesh;
+          source;
+          mode;
+          primitive = Ogpu.Render_pass.Point_list;
+          key;
+          vertices = Bytes.empty;
+          indices;
+          vertex_attributes =
+            ( (if plain then Printf.sprintf "scene3:device-attributes:%d" count
+               else Printf.sprintf "scene3:attributes:%d" (fresh_resource_id ())),
+              attributes );
+          vertex_count = count;
+          index_count = count;
+          opaque =
+            Option.fold ~none:true
+              ~some:(Array.for_all (fun (c : Rays_math.Color.t) -> c.a = 255))
+              source.colors;
+          gpu = Some (key, normals);
+        }
+  | _ -> Error Invalid_mesh
+
+let rec packed_of_mesh mode mesh =
+  match Mesh.View.device mesh with
+  | Some device -> packed_of_device mode mesh device
+  | None -> packed_of_host mode mesh
+
+and packed_of_host mode mesh =
   let source = Mesh.View.packed_view mesh in
   let cache = Domain.DLS.get current_packed_cache in
   let exact =
@@ -960,6 +1011,7 @@ let packed_of_mesh mode mesh =
                 Option.fold ~none:true
                   ~some:(Array.for_all (fun (c : Rays_math.Color.t) -> c.a = 255))
                   view.colors;
+              gpu = None;
             }
           in
           Option.iter
@@ -1036,7 +1088,9 @@ let prepare ~resources ~camera ~viewport:((x, y, width, height) as viewport) sce
                     | Ok texture -> (
                         let mesh : Renderer.Scene_execution.mesh =
                           {
-                            key = Host packed.key;
+                            key =
+                              (if packed.gpu = None then Host packed.key
+                               else Gpu_vertices packed.key);
                             vertices = packed.vertices;
                             vertex_count = packed.vertex_count;
                             indices = packed.indices;
@@ -1067,6 +1121,12 @@ let prepare ~resources ~camera ~viewport:((x, y, width, height) as viewport) sce
                           | None -> (family, texture, None)
                         in
                         let add transform_uniforms =
+                          (* a device mesh's packed positions (word 79) and normals (word 80) *)
+                          Option.iter
+                            (fun (_, normals) ->
+                              put32 transform_uniforms 79 1.;
+                              put32 transform_uniforms 80 (if normals then 1. else 0.))
+                            packed.gpu;
                           let state : Renderer.Scene_execution.state =
                             {
                               viewport = (x, y, width, height);

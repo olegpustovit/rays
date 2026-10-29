@@ -35,6 +35,7 @@
   ogpu_metal
   sop
   rdk
+  rdk_rays
   parallel))
 
 (rule

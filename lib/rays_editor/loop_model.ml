@@ -377,7 +377,10 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
                  && Option.equal ( == ) previous texture ->
               Document.Int_map.add piece.id (graph, prepared, rendered, texture) drawn
           | Some _ | None ->
-              let scene = value.draw piece.graph piece.prepared in
+              let scene =
+                Cook.with_display (Flow_native.Workspace_gpu.display value.host.gpu) (fun () ->
+                    value.draw piece.graph piece.prepared)
+              in
               let scene =
                 Option.fold ~none:scene
                   ~some:(fun texture ->

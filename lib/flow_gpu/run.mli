@@ -94,6 +94,14 @@ val keep : ?index:int -> output -> (Flow_ir.Gpu.planes, Diagnostic.t) result
     held and unread. *)
 
 val buffer : ?index:int -> output -> Ogpu.Backend.buffer option
+
+val pin : float array -> (Ogpu.Backend.buffer * int * (unit -> bool) * (unit -> unit)) option
+(** A display's borrow of the held buffer a settled output's placeholder ([keep]'s [resident])
+    stands for, while it is held: the buffer (packed float32, [width] per element, from offset 0),
+    its element count, [valid] (the buffer still exists: {!close} destroys it, read first) and
+    [unpin]. Until [unpin] the pool neither reuses nor reads back the buffer, also after its holder
+    is read or collected. [None] for an unsettled, freed or unknown output. Initial domain. *)
+
 val count_record : output -> Ogpu.Backend.buffer option
 
 (* A fast kernel's 24-byte count record {n, 6n, 1, 0, 0, 0} (see {!Emit.msl}); [None] for an exact

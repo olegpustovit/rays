@@ -37,6 +37,8 @@ module Vec3_buffer = struct
     { x; y; z }
 end
 
+type device = { key : string; count : int; device_normals : bool; keep : unit -> unit }
+
 type t = {
   mode : mode;
   vertices : Vec3_buffer.t;
@@ -44,6 +46,9 @@ type t = {
   normals : Vec3_buffer.t option;
   colors : Rays_math.Color.t array option;
   tex_coords : Rays_math.Vec2.t array option;
+  device : device option;
+      (* positions (and normals) a device holds: [vertices] is then empty; [keep] stays with the
+         mesh, which its producer watches to release its buffers *)
 }
 
 let validate_attribute_array name vertex_count = function
@@ -74,6 +79,7 @@ let create_owned ?(mode = Triangles) ?indices ?normals ?colors ?tex_coords verti
               normals = Option.map Vec3_buffer.of_array normals;
               colors;
               tex_coords;
+              device = None;
             }
       | Error message, _, _ | _, Error message, _ | _, _, Error message -> Error message)
 
@@ -98,12 +104,15 @@ let create_packed_owned ?(mode = Triangles) ?indices ?normals ?colors ?tex_coord
           validate_attribute_array "texture coordinate" vertex_count tex_coords )
       with
       | Ok normals, Ok colors, Ok tex_coords ->
-          Ok { mode; vertices; indices; normals; colors; tex_coords }
+          Ok { mode; vertices; indices; normals; colors; tex_coords; device = None }
       | Error message, _, _ | _, Error message, _ | _, _, Error message -> Error message)
 
 let mode (mesh : t) = mesh.mode
 let vertices (mesh : t) = Vec3_buffer.to_list mesh.vertices
-let vertex_count (mesh : t) = Vec3_buffer.length mesh.vertices
+
+let vertex_count (mesh : t) =
+  match mesh.device with Some d -> d.count | None -> Vec3_buffer.length mesh.vertices
+
 let index_count (mesh : t) = Array.length mesh.indices
 
 let centroid (mesh : t) =
@@ -125,7 +134,10 @@ let vertex index (mesh : t) =
 
 let with_mode mode mesh = { mesh with mode }
 
-let recalculate_normals mesh =
+let rec recalculate_normals mesh =
+  if Option.is_some mesh.device then mesh else recalculate_host_normals mesh
+
+and recalculate_host_normals mesh =
   let vertex_count = Vec3_buffer.length mesh.vertices in
   let nx = Array.make vertex_count 0.
   and ny = Array.make vertex_count 0.
@@ -246,6 +258,33 @@ module View = struct
   let create_owned ?mode ?indices vertices = create_owned ?mode ?indices vertices
   let create_packed_owned = create_packed_owned
   let create_packed_shared = create_packed_owned
+
+  let create_device ?(mode = Triangles) ?indices ?colors ?tex_coords ~key ~normals ~keep count =
+    let indices = Option.value indices ~default:(Array.init count Fun.id) in
+    if key = "" || count <= 0 then Error "Mesh.create_device: a device mesh has vertices"
+    else
+      match Array.find_opt (fun index -> index < 0 || index >= count) indices with
+      | Some index ->
+          Error (Printf.sprintf "Mesh.create_device: index %d is outside the vertex array" index)
+      | None -> (
+          match
+            ( validate_attribute_array "color" count colors,
+              validate_attribute_array "texture coordinate" count tex_coords )
+          with
+          | Ok colors, Ok tex_coords ->
+              Ok
+                {
+                  mode;
+                  vertices = { x = [||]; y = [||]; z = [||] };
+                  indices;
+                  normals = None;
+                  colors;
+                  tex_coords;
+                  device = Some { key; count; device_normals = normals; keep };
+                }
+          | Error message, _ | _, Error message -> Error message)
+
+  let device (mesh : t) = Option.map (fun d -> (d.key, d.device_normals)) mesh.device
 
   let triangle_count (mesh : t) =
     match mesh.mode with

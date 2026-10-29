@@ -76,5 +76,25 @@ module View : sig
       retains the supplied arrays and may share them with another immutable value. No holder may
       mutate the arrays afterward. *)
 
+  val create_device :
+    ?mode:mode ->
+    ?indices:int array ->
+    ?colors:Rays_math.Color.t array ->
+    ?tex_coords:Rays_math.Vec2.t array ->
+    key:string ->
+    normals:bool ->
+    keep:(unit -> unit) ->
+    int ->
+    (t, string) result
+  (** A mesh of [count] vertices whose packed float3 positions (and, with [normals], normals) a
+      device holds, registered under [key] ({!Renderer.register_gpu_positions}); colours, texture
+      coordinates and indices stay host arrays. Its {!vertices} are empty: nothing reads the
+      positions on the host. Without normals a vertex's normal is (0, 0, 1), as a host mesh's
+      without them, so a lit triangle mesh needs [normals]. [keep] is held by the mesh: its producer
+      releases the buffers when it is collected. *)
+
+  val device : t -> (string * bool) option
+  (** A device mesh's key and whether it carries normals. *)
+
   val triangle_count : t -> int
 end

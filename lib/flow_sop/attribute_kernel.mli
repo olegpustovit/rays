@@ -135,3 +135,7 @@ val node :
   sources:int list ->
   Sop.Node.t list ->
   Sop.Node.t
+
+val resident_vec3 : Rdk.Geometry.t -> string -> float array option
+(** The placeholder ({!Flow_ir.Gpu.planes}[.resident]) of point P or a point vec3 attribute [name]
+    that a device still holds unread, or [None]: asked without materialising it. *)
