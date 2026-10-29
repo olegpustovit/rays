@@ -616,11 +616,11 @@ body goes on as if the check passed, and the card cooks them with its cook's inp
 the diagnostic the written-out call refuses or fails with (a refusal is `E_LOWER`, at cook rather
 than lowering). A write folded through a card with checks takes them (`$guards`), so they still
 run when the card itself is not cooked. A body whose structure follows a per-frame argument
-otherwise, or whose live argument a strict kernel cannot take as data (a noise seed or octave
-count, a region constant; `Flow.Eval.live_kernels` asks the host), keeps the card a node of its own,
+otherwise, or whose live argument a strict kernel cannot take as data (a noise seed, a region
+constant; `Flow.Eval.live_kernels` asks the host), keeps the card a node of its own,
 rebuilt per frame.
 
-A noise's lacunarity and gain are registers of its `Noise3` (`Core.Region.fractal`: `Fixed` a
+A noise's lacunarity and gain are registers of its `Noise3` (`Core.Region.live`: `Fixed` a
 constant, `Live` a float register), so driven ones are uniforms of the one compiled kernel, as the
 noise offset is: `attribute_noise :lacunarity (+ 1.5 t) :roughness (+ 0.25 (* t 0.5))` inlines and
 its write stays one dispatch on the device, nothing compiled, uploaded or read back after the first
@@ -634,13 +634,25 @@ and `wfbm`, so no golden moved), and the GPU now places constant non-default pai
 them). Measured (M1, load 3-4, 2026-10-29, medians of 7 frames): 1M points 0.0038 s a frame on the
 device against 0.12 s on the CPU, where a driven lacunarity had cooked every frame (a node rebuilt
 per frame, the GPU refusing any lacunarity but 2); 512 squared 0.0014 s against 0.039 s.
-The octave count stays a constant: it is an Int the region checks while lowering (1 to 64 on the
-CPU, 1 to 32 on the device), the CPU block kernels dispatch on it (one octave is `sample3_into` and
-the two streaming forms), and the device helper is compiled per count with its fold over a static
-`range`; a uniform count would need the inliner's fold over a register range with a static maximum
-(`Loop_begin.limit`) through the helper, an Int uniform in the fast MSL and WGSL printers and those
-range checks at dispatch, for a value a slider steps through a few integers. A driven count keeps
-the card a node rebuilt per frame, as before.
+A live octave count is an Int register of the same `Noise3` (`Core.Region.live`: `Fixed` a
+constant, `Live` a register), an Int uniform of the one compiled kernel: `attribute_noise :octaves
+(int (+ 2.0 (* t 60.0)))` inlines (a live Int with hard bounds, `:octaves`' hard minimum 1, is
+clamped in the program as the node's parameters clamp it, `Lower.inline_parameters`; a literal
+out of range is still refused by the checker) and its write stays one dispatch. The device inlines
+`noise-fbm-live` (`lib/flow_gpu/noise.rays`, compiled once, not per count): the fold's bound is the
+register, `Loop_begin` with the static maximum every counted loop carries, and NaN outside the
+device's 1 to 32, so the status hands the region to the CPU; WGSL `wfbm_live` takes the count as its
+integer register pair (NaN outside 1 to 32), JS passes it to `noise3` as a BigInt. The CPU checks
+each element's count as `noise3` does (`Flow.Op.check_noise_octaves`, E_NOISE_RANGE past 64): a live
+count makes the region an integer program, so it runs on the typed path, not the block kernels. A
+constant count prints and emits as before (the SPIR-V golden only gains `fast_noise_octaves`).
+Checked by `test_rand_at` (bytes at counts 1, 3 and 32 and the refusal at 65 equal the walker's),
+`test_js` (JS region exact and fast against native), `test_wgsl` and `gpu_fast_check`
+(`noise_octaves` in Chrome, worst 7.0e-5 against the 1e-4 noise tolerance) and
+`test_chain_frames_native` (`DRIVE` octaves 2 to 9 over the frames: after the first frame one
+dispatch, nothing compiled, uploaded or read back, P resident). Measured (M1, load 4, 2026-10-29,
+medians of 7 frames): 1M points 0.0044 s a frame on the device against 0.14 s on the CPU, largest
+difference 2.7e-7; 512 squared 0.0020 s against 0.046 s (2.8e-7).
 
 A body can pick a form for a live value: `(live? x)` is true while lowering when `x` is decided per
 frame or by cooked data (a residual, a data source), false for a value at hand and wherever a

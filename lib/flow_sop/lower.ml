@@ -275,6 +275,41 @@ let () =
                   | _ -> [ (name, value) ])
               live
           in
+          (* a live Int with hard bounds is clamped in the program, as the node's parameters
+             clamp it (Param.clamp_int), so it stays a program input *)
+          let clamped = ref [] in
+          let live =
+            List.map
+              (fun (name, value) ->
+                match
+                  (List.find_opt (fun (f : Param.field_view) -> f.name = name) d.fields, value)
+                with
+                | Some { kind = Param.Integer_view { hard_min; hard_max; _ }; _ }, E.Residual r
+                  when (hard_min <> None || hard_max <> None)
+                       && not (List.mem_assoc name (Lazy.force normalizers)) ->
+                    let form = (E.Residual.residual_view r).term.form in
+                    let term ty node = { Workspace.path = None; ty; node; form } in
+                    let lit n = term Ty.Int (Workspace.Lit (Param.Int_value n)) in
+                    let bound op limit inner =
+                      match limit with
+                      | None -> inner
+                      | Some n ->
+                          let test =
+                            term Ty.Bool
+                              (Workspace.Op { op; args = [ ("a", inner); ("b", lit n) ]; skip = [] })
+                          in
+                          term Ty.Int (Workspace.If (test, lit n, inner))
+                    in
+                    let v = term Ty.Int (Workspace.Ref_binding ("$int", [])) in
+                    clamped := name :: !clamped;
+                    ( name,
+                      E.Residual
+                        (E.Residual.with_bindings r
+                           ~term:(bound "int/gt" hard_max (bound "int/lt" hard_min v))
+                           [ ("$int", value) ]) )
+                | _ -> (name, value))
+              live
+          in
           let changes =
             List.concat_map
               (fun (name, value) ->
@@ -305,6 +340,7 @@ let () =
                 &&
                 match f.kind with
                 | Param.Toggle_view -> true
+                | Integer_view _ when List.mem name !clamped -> true
                 | Integer_view { hard_min = None; hard_max = None; _ }
                 | Floating_view { hard_min = None; hard_max = None; _ } ->
                     true
@@ -643,7 +679,7 @@ let kernel_data (n : E.node) =
   | _ -> None
 
 (* an inlined call's live arguments stay its kernels' data only where a strict kernel takes them:
-   a noise's seed or octaves is a region constant, so such a call stays a node of its own *)
+   a noise's seed is a region constant, so such a call stays a node of its own *)
 let () =
   Atomic.set E.live_kernels
     (List.for_all (fun (n : E.node) ->

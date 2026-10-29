@@ -112,19 +112,39 @@ let perlin_fractal =
 }
 |}
 
+(* a live octave count, an integer register pair: NaN outside the device's 1 to 32 *)
+let perlin_live =
+  {|fn wfbm_live(p: vec3<f32>, octaves: vec2<u32>, o: i32, lacunarity: f32, gain: f32) -> f32 {
+  if (octaves.y != 0u || octaves.x < 1u || octaves.x > 32u) {
+    let nan = 0x7fc00000u;
+    return bitcast<f32>(nan);
+  }
+  return wfbm_fractal(p, i32(octaves.x), o, lacunarity, gain);
+}
+|}
+
+let live_noise = function P.Noise3 (_, _, _, _, Live _, _, _) -> true | _ -> false
+
 let fractal_noise = function
+  | P.Noise3 (_, _, _, _, Live _, _, _) -> true
   | P.Noise3 (_, _, _, _, _, lacunarity, gain) -> lacunarity <> Fixed 2. || gain <> Fixed 0.5
   | _ -> false
 
-(* the call of a noise3: [register] names a register, [number] prints a constant *)
-let noise_call ~register ~number ~table (x, y, z, seed, octaves, lacunarity, gain) =
+(* the call of a noise3: [register] names a register, [count] an integer register as a pair,
+   [number] prints a constant *)
+let noise_call ~register ~count ~number ~table (x, y, z, seed, octaves, lacunarity, gain) =
   let position = Printf.sprintf "vec3<f32>(%s, %s, %s)" (register x) (register y) (register z) in
-  if lacunarity = P.Fixed 2. && gain = P.Fixed 0.5 then
-    Printf.sprintf "wfbm(%s, %d, %d)" position octaves (table seed)
-  else
-    let fractal = function P.Fixed v -> number v | Live r -> register r in
-    Printf.sprintf "wfbm_fractal(%s, %d, %d, %s, %s)" position octaves (table seed)
-      (fractal lacunarity) (fractal gain)
+  let fractal = function P.Fixed v -> number v | Live r -> register r in
+  match octaves with
+  | P.Live r ->
+      Printf.sprintf "wfbm_live(%s, %s, %d, %s, %s)" position (count r) (table seed)
+        (fractal lacunarity) (fractal gain)
+  | Fixed octaves ->
+      if lacunarity = P.Fixed 2. && gain = P.Fixed 0.5 then
+        Printf.sprintf "wfbm(%s, %d, %d)" position octaves (table seed)
+      else
+        Printf.sprintf "wfbm_fractal(%s, %d, %d, %s, %s)" position octaves (table seed)
+          (fractal lacunarity) (fractal gain)
 
 let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
 let register index = "r" ^ string_of_int index
@@ -267,6 +287,8 @@ let kernel ?(image = false) program =
                   (register condition)
             | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
                 noise_call ~register
+                  ~count:(fun _ ->
+                    fail "Integer instructions are not supported by the WGSL kernel.")
                   ~number:(fun v -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float v))
                   ~table
                   (x, y, z, seed, octaves, lacunarity, gain)
@@ -708,7 +730,7 @@ and fast_kernel ?compute program =
                   Printf.sprintf "select(%s, %s, %s != 0.0)" (register no) (register yes)
                     (register condition)
               | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
-                  noise_call ~register
+                  noise_call ~register ~count:int_of
                     ~number:(fun v -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float v))
                     ~table
                     (x, y, z, seed, octaves, lacunarity, gain)
@@ -900,7 +922,8 @@ and fast_kernel ?compute program =
           Buffer.contents declarations ^ finite ^ int64
           ^ (if has (function P.Binary (P.Pow, _, _) -> true | _ -> false) then power else "")
           ^ (if table_seeds = [||] then "" else perlin)
-          ^ if has fractal_noise then perlin_fractal else ""
+          ^ (if has fractal_noise then perlin_fractal else "")
+          ^ if has live_noise then perlin_live else ""
         in
         let signature = "(@builtin(global_invocation_id) gid: vec3<u32>)" in
         let w = counts / 4 in

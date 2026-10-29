@@ -230,6 +230,9 @@ let carried =
         \      :flag (not s.flag) :text (if s.flag \"a\" \"b\")})]\n\
         \    [(float s.a) (float s.b) s.v.x (if s.flag 1. 0.)])" );
       ("carried guarded", "(if (> x t) (fold [a t] [i (range 2)] (+ a x)) x)");
+      (* a live octave count, an Int register *)
+      ( "noise live octaves",
+        "(noise3 [(* x 0.37) t 0.5] :seed 5 :octaves (int/add 3 (frame/index)))" );
       ("carried scope", "(let* [a (fold [s t] [i (range 2)] (+ s (+ x 1.)))] (+ a (+ x 1.)))");
       ( "iterate-empty-error",
         "(iterate -1 t (fn [a] (error \"E_EMPTY\" \"untaken body\"))\n\

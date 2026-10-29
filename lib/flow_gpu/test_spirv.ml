@@ -85,6 +85,9 @@ let fast_cases () =
       ( "fast_divide_by_zero",
         "(map (fn [(x : int)] (float (int/div x (int/sub (frame/index) (frame/index))))) \
          (array/range 16 :type int))" );
+      ( "fast_noise_octaves",
+        "(map (fn [x] (noise3 [x t 0.25] :seed 31 :octaves (int/add 2 (frame/index)))) \
+         (array/range 16))" );
       ( "fast_modulo_by_zero",
         "(map (fn [(x : int)] (float (int/mod x (int/sub (frame/index) (frame/index))))) \
          (array/range 16 :type int))" );

@@ -208,8 +208,9 @@ type state_slot = {
 module Region : sig
   type projection = Value | Valid
 
-  (** A noise's lacunarity or gain: a constant, or a float register (a uniform, a frame fact). *)
-  type fractal = Fixed of float | Live of int
+  (** A noise's octave count, lacunarity or gain: a constant, or a register (a uniform, a frame
+      fact; an Int register for the octaves, checked where the noise runs). *)
+  type 'a live = Fixed of 'a | Live of int
 
   type conversion = Flow.Packed_ops.conversion =
     | To_float
@@ -265,7 +266,7 @@ module Region : sig
     | Accumulator of int
     | Binary of Flow.Packed_ops.binary * int * int
     | Unary of Flow.Packed_ops.unary * int
-    | Noise3 of int * int * int * int * int * fractal * fractal
+    | Noise3 of int * int * int * int * int live * float live * float live
     | Fma of int * int * int
     | Rand_at of int * int
     | Select of int * int * int

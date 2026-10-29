@@ -276,6 +276,9 @@ let noise_table seed =
       cache := (seed, table) :: List.take 15 !cache;
       table
 
+let check_noise_octaves octaves =
+  if octaves < 1 || octaves > 64 then fail "E_NOISE_RANGE" "Noise octaves are 1 to 64."
+
 let check_noise_fractal lacunarity gain =
   if not (Float.is_finite lacunarity && lacunarity > 0.) then
     fail "E_NOISE_RANGE" "Noise lacunarity must be finite and positive.";
@@ -290,7 +293,7 @@ let noise_settings args =
   let number key default = Option.fold ~none:default ~some:num (List.assoc_opt key args) in
   let seed = integer "seed" 0 and octaves = integer "octaves" 1 in
   let lacunarity = number "lacunarity" 2. and gain = number "gain" 0.5 in
-  if octaves < 1 || octaves > 64 then fail "E_NOISE_RANGE" "Noise octaves are 1 to 64.";
+  check_noise_octaves octaves;
   check_noise_fractal lacunarity gain;
   (seed, octaves, lacunarity, gain)
 

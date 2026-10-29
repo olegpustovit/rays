@@ -297,8 +297,13 @@ let region ?(fast = false) program =
         Printf.sprintf "%s !== 0 ? %s : %s" (numeric c) (numeric yes) (numeric no)
     | Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
         let fractal = function P.Fixed v -> number v | Live r -> numeric r in
-        Printf.sprintf "noise(Float64Array.of(%s, %s, %s), %dn, %dn, %s, %s)" (numeric x)
-          (numeric y) (numeric z) seed octaves (fractal lacunarity) (fractal gain)
+        let octaves =
+          match octaves with
+          | P.Fixed n -> string_of_int n ^ "n"
+          | Live r -> if fast then "BigInt(" ^ numeric r ^ ")" else register r
+        in
+        Printf.sprintf "noise(Float64Array.of(%s, %s, %s), %dn, %s, %s, %s)" (numeric x) (numeric y)
+          (numeric z) seed octaves (fractal lacunarity) (fractal gain)
     | Fma (a, b, c) -> Printf.sprintf "fused(%s, %s, %s)" (numeric a) (numeric b) (numeric c)
     | Checked_mul (p, a, b) ->
         Printf.sprintf "checked(%b, %s * %s)" (p = P.Valid) (numeric a) (numeric b)

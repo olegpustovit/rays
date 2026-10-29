@@ -54,7 +54,8 @@ let rec instruction : P.instruction -> string = function
         | P.Fixed v -> Printf.sprintf "%h" v
         | Live r -> Printf.sprintf "r%d" r
       in
-      Printf.sprintf "Noise3 %d %d %d seed=%d octaves=%d%s" x y z seed octaves
+      Printf.sprintf "Noise3 %d %d %d seed=%d octaves=%s%s" x y z seed
+        (match octaves with P.Fixed n -> string_of_int n | Live r -> Printf.sprintf "r%d" r)
         (if lacunarity = Fixed 2. && gain = Fixed 0.5 then ""
          else Printf.sprintf " lacunarity=%s gain=%s" (fractal lacunarity) (fractal gain))
   | Stage (_, r) -> "Stage" ^ String.concat "" (List.map (Printf.sprintf " %d") (Array.to_list r))

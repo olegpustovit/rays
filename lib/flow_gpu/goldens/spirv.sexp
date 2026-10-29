@@ -26,6 +26,7 @@
 (fast_invalid_shift 3668 bc80c8483a14ee480239656e8f3221fc)
 (fast_negative_shift 3316 6a28b093e0e8574ca4b9170f15c8bbcd)
 (fast_divide_by_zero 3296 6acb1d95f87e71f5a883a230e85ec422)
+(fast_noise_octaves 56980 51f341e8d772832ec608d91dcfde9f3c)
 (fast_modulo_by_zero 3296 8758ae3694718f906ac114be96265f17)
 (loop-bounds 3864 02e2c85067512398ff1e489d4d59c1a6)
 (loop-empty 2992 ee2941446b63efe80df7066e3a6819ca)

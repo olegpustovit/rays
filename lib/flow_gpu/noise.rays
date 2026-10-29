@@ -46,3 +46,8 @@
               :frequency (* acc.frequency lacunarity) :amplitude (* acc.amplitude gain)})
          valid (and (< lacunarity Infinity) (and (> lacunarity 0.) (and (>= gain 0.) (<= gain 1.))))]
     (if valid (/ r.sum r.weights) NaN)))
+; A live octave count (an Int uniform): the fold's bound is the register, so one compiled kernel serves
+; every count; NaN outside 1 to 32 (the device's), so the status sends the region to the CPU.
+(defn noise-fbm-live :context value
+  [(table : (array int)) (p : vec3) (octaves : int) (lacunarity : float) (gain : float)]
+  (if (and (int/ge octaves 1) (int/le octaves 32)) (noise-fbm-fractal table p octaves lacunarity gain) NaN))

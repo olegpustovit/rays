@@ -102,7 +102,7 @@ let builder () =
           | Convert (op, a) -> Convert (op, at a)
           | Noise3 (a, b, c, seed, octaves, lacunarity, gain) ->
               let live = function Fixed v -> Fixed v | Live r -> Live (at r) in
-              Noise3 (at a, at b, at c, seed, octaves, live lacunarity, live gain)
+              Noise3 (at a, at b, at c, seed, live octaves, live lacunarity, live gain)
           | Rand_at (seed, index) -> Rand_at (at seed, at index)
           | Fma (a, b, c) -> Fma (at a, at b, at c)
           | Checked_mul (p, a, b) -> Checked_mul (p, at a, at b)

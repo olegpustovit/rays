@@ -63,6 +63,9 @@ val all : t list
 val noise3 : t
 val noise_table : int -> Rays_math.Noise.t
 
+val check_noise_octaves : int -> unit
+(** Refuses (E_NOISE_RANGE) an octave count {!noise3} refuses. *)
+
 val check_noise_fractal : float -> float -> unit
 (** Refuses (E_NOISE_RANGE) a lacunarity or gain {!noise3} refuses. *)
 

@@ -209,6 +209,11 @@ let () =
       ( ":lacunarity (+ t 1.0) :roughness (+ t 0.25) :octaves 3",
         ":lacunarity 1.125 :roughness 0.375 :octaves 3",
         true );
+      (* and a live octave count is an Int uniform, the fold's bound *)
+      (":octaves (int (+ 2.0 (* t 8.0)))", ":octaves 3", true);
+      (* clamped to its hard minimum as the node's parameters clamp it (a literal 0 is refused by
+         the checker) *)
+      (":octaves (int (- 0.0 t))", ":octaves 1", true);
     ];
   (match outcome (text ":blend (* t 16.0)") with
   | Error ("cook", "E_LOWER", "sop/attribute_noise: blend must be in [0,1]", _) -> ()

@@ -119,7 +119,15 @@ let () =
      let rec go i = i + n <= String.length s && (String.sub s i n = sub || go (i + 1)) in
      go 0
    in
-   assert (contains source "fn wfbm_fractal" && contains source "wfbm_fractal(vec3<f32>("));
+   assert (contains source "fn wfbm_fractal" && contains source "wfbm_fractal(vec3<f32>(");
+   (* a live octave count: the fast kernel's wfbm_live over an Int uniform, no refusal *)
+   let live =
+     Test_program.compile
+       "(map (fn [x] (noise3 [x t 0.0] :seed 3 :octaves (int (+ 2.0 t)))) (array/range 1024))"
+   in
+   assert (Flow_ir.Packed.gpu_refusals ~fast:true live = []);
+   let source = (Test_program.ok (Flow_web.Wgsl.kernel_fast live)).source in
+   assert (contains source "fn wfbm_live" && contains source "wfbm_live(vec3<f32>("));
   let hypot = Test_program.compile "(map (fn [x] (hypot x t)) (array/range 1024))" in
   (match Flow_web.Wgsl.kernel hypot with
   | Error d -> assert (d.code = "E_GPU_FORM")
@@ -160,6 +168,10 @@ let () =
       ( "noise_hash",
         "(map (fn [x] (+ (noise3 [(* x 0.37) t 0.0] :seed 451) (float (int/and (int/add (int/mul \
          (int x) 1103515245) 12345) 65535)))) (array/range (int/add 4097 (frame/index))))" );
+      (* a live octave count: an Int uniform bounding wfbm_live's fold *)
+      ( "noise_octaves",
+        "(map (fn [x] (noise3 [(* x 0.37) t 0.0] :seed 451 :octaves (int/add 2 (frame/index)) \
+         :lacunarity 1.9)) (array/range 4097))" );
     ]
   in
   let error_cases =

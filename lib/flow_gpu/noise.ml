@@ -6,7 +6,8 @@ module P = Flow_ir.Packed
 let variants = Hashtbl.create 4
 and lock = Mutex.create ()
 
-(* the helper of an octave count, [fractal] taking its lacunarity and gain as inputs 3 and 4 *)
+(* the helper of an octave count, [fractal] taking its lacunarity and gain as inputs 3 and 4; a
+   live count ([None]) is input 5, its fold's bound *)
 let helper ~fractal octaves =
   Mutex.protect lock (fun () ->
       match Hashtbl.find_opt variants (octaves, fractal) with
@@ -15,16 +16,23 @@ let helper ~fractal octaves =
           let declarations =
             Noise_source.source
             ^
-            if fractal then
-              Printf.sprintf
+            match octaves with
+            | None ->
                 "(defn noise-entry :context value [(table : (array int)) (x : float) (y : float) \
-                 (z : float) (l : float) (g : float)] (noise-fbm-fractal table [x y z] %d l g))"
-                octaves
-            else
-              Printf.sprintf
-                "(defn noise-entry :context value [(table : (array int)) (x : float) (y : float) \
-                 (z : float)] (noise-fbm table [x y z] %d))"
-                octaves
+                 (z : float) (l : float) (g : float) (o : int)] (noise-fbm-live table [x y z] o l \
+                 g))"
+            | Some octaves ->
+                if fractal then
+                  Printf.sprintf
+                    "(defn noise-entry :context value [(table : (array int)) (x : float) (y : \
+                     float) (z : float) (l : float) (g : float)] (noise-fbm-fractal table [x y z] \
+                     %d l g))"
+                    octaves
+                else
+                  Printf.sprintf
+                    "(defn noise-entry :context value [(table : (array int)) (x : float) (y : \
+                     float) (z : float)] (noise-fbm table [x y z] %d))"
+                    octaves
           in
           let compiled =
             Result.map
@@ -58,9 +66,10 @@ let expand (program : P.t) =
         (fun slot instruction ->
           match Trace.flat [] instruction with
           | guards, P.Noise3 (x, y, z, seed, octaves, lacunarity, gain) ->
-              let fractal = lacunarity <> P.Fixed 2. || gain <> P.Fixed 0.5 in
+              let count = match octaves with P.Fixed n -> Some n | Live _ -> None in
+              let fractal = count = None || lacunarity <> P.Fixed 2. || gain <> P.Fixed 0.5 in
               let helper =
-                match helper ~fractal octaves with
+                match helper ~fractal count with
                 | Ok compiled -> compiled
                 | Error d -> raise (Diagnostic.Error d)
               in
@@ -71,11 +80,16 @@ let expand (program : P.t) =
                   [| map.(x); map.(y); map.(z) |]
                   (if fractal then [| register lacunarity; register gain |] else [||])
               in
+              let operands =
+                match octaves with
+                | Fixed _ -> operands
+                | Live r -> Array.append operands [| map.(r) |]
+              in
               let hm = Array.make (Array.length helper.code) (-1) in
               Array.iteri
                 (fun j i ->
                   match Trace.flat [] i with
-                  | _, P.Input (k, _, _) -> hm.(j) <- operands.(k)
+                  | _, (P.Input (k, _, _) | Int_input k) -> hm.(j) <- operands.(k)
                   | _, P.Array_prepare _ -> ()
                   | inner, body ->
                       let body =

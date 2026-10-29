@@ -26,7 +26,7 @@ let rec remap f = function
   | Text_select (c, a, b) -> Text_select (f c, f a, f b)
   | Noise3 (a, b, c, seed, octaves, lacunarity, gain) ->
       let live = function P.Fixed v -> P.Fixed v | Live r -> Live (f r) in
-      Noise3 (f a, f b, f c, seed, octaves, live lacunarity, live gain)
+      Noise3 (f a, f b, f c, seed, live octaves, live lacunarity, live gain)
   | Rand_at (seed, index) -> Rand_at (f seed, f index)
   | Fma (a, b, c) -> Fma (f a, f b, f c)
   | Checked_mul (p, a, b) -> Checked_mul (p, f a, f b)

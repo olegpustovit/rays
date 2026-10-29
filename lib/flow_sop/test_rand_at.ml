@@ -419,8 +419,25 @@ let () =
      when a.code = "E_NOISE_RANGE" && b.code = a.code ->
        ()
    | _ -> failwith "a live noise gain out of range is not refused as noise3 refuses it");
+  (* a live octave count is an Int register: the bytes at each count, and the refusal, are the walker's *)
+  let mapped, program =
+    map Flow.Ty.Vec3 input "(noise3 i :seed 7 :octaves (int (+ 1.0 (* t 8.0))) :lacunarity 1.9)"
+  in
+  List.iter
+    (fun time ->
+      let live = Input.at_time time in
+      match ok (E.Host.force_reference mapped ~live) with
+      | E.Float_array expected -> same expected (ok (P.force ~strict:true program ~live))
+      | _ -> assert false)
+    [ 0.; 0.25; 3.875 ];
+  (let live = Input.at_time 8. in
+   match (E.Host.force_reference mapped ~live, P.force ~strict:true program ~live) with
+   | Error (a : Diagnostic.t), Error (b : Diagnostic.t)
+     when a.code = "E_NOISE_RANGE" && b.code = a.code ->
+       ()
+   | _ -> failwith "a live noise octave count out of range is not refused as noise3 refuses it");
   Printf.printf
     "noise3: %d native/reference samples, %d native bit differences, max %.17g ULP; strict \
      packed/reference bytes agree at one/eight domains for octaves1/4/32 and seeds0/1/42, live \
-     lacunarity/gain\n"
+     lacunarity/gain/octaves\n"
     !native_samples !native_bit_differences !native_max_ulps

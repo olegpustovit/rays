@@ -189,8 +189,9 @@ type state_slot = {
 module Region = struct
   type projection = Value | Valid
 
-  (** A noise's lacunarity or gain: a constant, or a float register (a uniform, a frame fact). *)
-  type fractal = Fixed of float | Live of int
+  (** A noise's octave count, lacunarity or gain: a constant, or a register (a uniform, a frame
+      fact; an Int register for the octaves, checked where the noise runs). *)
+  type 'a live = Fixed of 'a | Live of int
 
   type conversion = Flow.Packed_ops.conversion =
     | To_float
@@ -245,7 +246,7 @@ module Region = struct
     | Accumulator of int
     | Binary of Flow.Packed_ops.binary * int * int
     | Unary of Flow.Packed_ops.unary * int
-    | Noise3 of int * int * int * int * int * fractal * fractal
+    | Noise3 of int * int * int * int * int live * float live * float live
     | Fma of int * int * int
     | Rand_at of int * int
     | Select of int * int * int
@@ -314,9 +315,9 @@ module Region = struct
         [ a; b ]
     | Trace (_, registers) | Stage (_, registers) -> Array.to_list registers
     | Unary (_, a) | Int_abs a | Convert (_, a) -> [ a ]
-    | Noise3 (a, b, c, _, _, lacunarity, gain) ->
+    | Noise3 (a, b, c, _, octaves, lacunarity, gain) ->
         let live = function Fixed _ -> [] | Live r -> [ r ] in
-        a :: b :: c :: (live lacunarity @ live gain)
+        a :: b :: c :: (live octaves @ live lacunarity @ live gain)
     | Fma (a, b, c)
     | Select (a, b, c)
     | Int_select (a, b, c)
@@ -1308,7 +1309,8 @@ let pp fmt p =
               | Region.Fixed v -> Printf.sprintf "%h" v
               | Live r -> Printf.sprintf "r%d" r
             in
-            out "noise3(r%d r%d r%d seed=%d octaves=%d%s)" x y z seed octaves
+            out "noise3(r%d r%d r%d seed=%d octaves=%s%s)" x y z seed
+              (match octaves with Fixed n -> string_of_int n | Live r -> Printf.sprintf "r%d" r)
               (if lacunarity = Region.Fixed 2. && gain = Region.Fixed 0.5 then ""
                else Printf.sprintf " lacunarity=%s gain=%s" (fractal lacunarity) (fractal gain))
         | Rand_at (seed, index) -> out "rand_at(r%d r%d)" seed index
