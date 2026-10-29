@@ -82,7 +82,7 @@ let reads value =
           {
             op =
               ( "sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/components"
-              | "sop/triangles" | "sop/group" | "sop/group_names" | "sop/group_order"
+              | "sop/triangles" | "sop/fans" | "sop/group" | "sop/group_names" | "sop/group_order"
               | "sop/group_entries" );
             args;
             _;
@@ -137,7 +137,7 @@ let reads value =
   let rec visit safe = function
     | E.Source
         ( ( "sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/components"
-          | "sop/triangles" | "sop/group" | "sop/group_names" | "sop/group_order"
+          | "sop/triangles" | "sop/fans" | "sop/group" | "sop/group_names" | "sop/group_order"
           | "sop/group_entries" ),
           _,
           args ) -> (
@@ -621,7 +621,8 @@ let rec resolve ?context ~geometry value =
               Result.bind (concrete_args ?context ~geometry args) (fun args ->
                   Topology_kernel_impl.resolve ~geometry (E.Source (name, ty, args)))
           | E.Source
-              ( ("sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/triangles"),
+              ( ( "sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/triangles"
+                | "sop/fans" ),
                 _,
                 _ ) as source ->
               Topology_kernel_impl.resolve ~geometry source

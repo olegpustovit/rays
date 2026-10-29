@@ -90,7 +90,16 @@ let () =
              ("point_vertex_offsets", ints v.point_offsets);
              ("point_vertices", ints v.point_vertices);
            ]);
-      agree geometry "(get (sop/adjacency geo) :edge_a)" (ints v.edge_a))
+      agree geometry "(get (sop/adjacency geo) :edge_a)" (ints v.edge_a);
+      (* sop/fans: the face of each incident corner, as the gather of area normals folds it *)
+      let t = Rdk.Topology.View.view (G.topology geometry) in
+      let face f = Array.map (fun vertex -> f v.primitive_of_vertex.(vertex)) v.point_vertices in
+      agree geometry "(get (sop/fans geo) :first)" (ints (face (fun p -> t.primitive_offsets.(p))));
+      agree geometry "(get (sop/fans geo) :corners)"
+        (ints
+           (face (fun p ->
+                let corners = t.primitive_offsets.(p + 1) - t.primitive_offsets.(p) in
+                if Bytes.get t.primitive_kinds p = '\000' && corners >= 3 then corners else 0))))
     (fixtures ());
   let resolve = Flow_sop.Attribute_kernel.resolve ~geometry:(fun _ -> None) in
   List.iter
