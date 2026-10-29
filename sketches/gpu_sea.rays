@@ -1,0 +1,22 @@
+; A million-point sea that stays on the GPU: a triangle grid lifted by noise drifting with time,
+; swayed by a driven shear and lit with normals recomputed every frame. Positions never come back to
+; the host: the chain is compiled kernels run each frame, drawn (and path traced) from the device's
+; buffers. Lower `side` to compare a smaller grid; turn the shear's normals off to see the noise alone.
+(workspace sea
+
+  (graph sea :context sop [(side : int 1000) (height : float 0.5) (sway : float 0.15)]
+    (let* [waves (-> (sop/grid :counts "Point counts" :connectivity "Triangles" :columns side :rows side
+                               :width 8.0 :height 8.0)
+                     (sop/attribute_noise :name "wave" :seed 7 :octaves 4 :range "Zero centered"
+                       :offset [(* t 0.3) 0.0 (* t 0.2)]
+                       :lacunarity (+ 2.0 (* 0.3 (sin (* t 0.5))))))
+           lifted (sop/with_attr waves :P
+                    (exact (map (fn [(p : vec3) (h : float)] (+ p [0.0 (* height h) 0.0]))
+                                (sop/attr waves :P) (sop/attr waves "wave" :type float))))]
+      (sop/transform lifted :shear_xy (* sway (sin t)) :recompute_normals true)))
+
+  (graph scene :context scene
+    (let* [sea (scene/geometry (ref sea) :name "Sea")
+           camera (scene/camera :eye [7.0 4.0 7.0] :target [0 0 0] :fov 40 :follow_viewport true)
+           key (scene/light :name "Key" :shape "Area" :translate [4 8 2] :intensity 60 :width 4 :height 4)]
+      (scene/root (scene/merge sea camera key) :width 960 :height 640 :max_spp 64))))
