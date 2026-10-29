@@ -381,8 +381,23 @@ a later kernel's input without a readback: `keep` returns a one-element placehol
 `Run.dispatch` (any runner) binds an input that is physically that array to the held buffer while
 its holder has not read it back (the buffer is then released). On a discrete backend
 `invalidate_mapped` becomes the copy, so `materialise` turns into queue work on the initial domain
-(or a staging copy at the settle point); a display's vertex source binding a held buffer is still to
-do (specification/sop.md, Device placement).
+(or a staging copy at the settle point).
+
+A display draws a held buffer where it is. `Run.pin` (initial domain) borrows a settled holder's
+buffer by its placeholder: the pool counts the display as a reader, so it neither recycles nor
+reads back (`reclaim`'s thaw) the buffer until the display unpins, also after the holder is read or
+collected; settling a dispatch settles every output of it. `Renderer.register_gpu_positions`
+registers the borrowed packed float3 positions (and normals) under a `Gpu_vertices` key with a
+validity closure (a close destroys the buffer: a draw of it is then refused as stale), and the
+Scene3 vertex stage reads a device mesh at a stride of three floats from buffer 0 (normals from
+buffer 1, or (0, 0, 1)) when the draw's uniform word 79 (and 80) says so, the 24-byte record
+otherwise; indices and the 12-byte colour/uv record stay host bytes (for a plain point cloud the
+same bytes every frame). Ordering is explicit: the display binds only a settled output (its
+dispatch completed, on the producer's queue), and a dropped display's buffers are released three
+bound displays later, not when the presenting queue completes. ponytail: that needs the renderer's
+completion epoch exposed to the producer, which a discrete backend will want anyway. The buffers
+carry `Storage` usage only: the vertex stage pulls them as storage, so no vertex-input layout is
+assumed.
 
 Ray tracing: geometry variants are `Triangles`, `Motion_triangles` (one vertex
 buffer per keyframe), `Bounding_boxes`, and `Curves`; descriptors are `Blas`,
