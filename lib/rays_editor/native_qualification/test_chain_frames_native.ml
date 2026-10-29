@@ -9,7 +9,9 @@
    does (Surface.of_geometry, Surface.scene3 with Workspace_gpu.display, a Scene3 points or
    triangles draw) with P (and N) bound where the device holds them: nothing is read back, and its pixels equal the host display
    of the same geometry read back; its bounds are reduced on the device (24 KB read, P unread) and
-   equal the host scan exactly. The median frame on the CPU and the GPU, and the median device
+   equal the host scan exactly. A lit mesh is also drawn under a World sun: the sun's fit reads
+   the device mesh's bounds (24 KB), its host copy is never made (P stays unread), and its pixels
+   equal the host display's under the same World. The median frame on the CPU and the GPU, and the median device
    display (lowering and drawing a 256 x 256 canvas) are printed. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
@@ -72,10 +74,11 @@ let camera =
 
 (* the picture of a display, as the editor draws a cooked object, and the seconds it took to
    prepare and draw (not to read the picture) *)
-let picture canvas ?device geometry =
+let picture canvas ?device ?world geometry =
   let start = Unix.gettimeofday () in
   let surface = Rdk_rays.Surface.of_geometry geometry |> Result.get_ok in
   let scene = Rdk_rays.Surface.scene3 ?device surface in
+  let scene = Option.fold ~none:scene ~some:(fun w -> Rays.Scene.D3.with_world w scene) world in
   (match
      Rays.Canvas.render canvas Rays.Scene.[ clear Rays_math.Color.black; view3d ~camera scene ]
    with
@@ -83,6 +86,22 @@ let picture canvas ?device geometry =
   | Error message -> failwith message);
   let seconds = Unix.gettimeofday () -. start in
   (Rays.Canvas.pixels canvas |> Result.get_ok, seconds)
+
+(* a World with a sun, for a lit mesh: its shadow fit reads the device mesh's bounds *)
+let world =
+  if connectivity <> "Triangles" then None
+  else
+    Some
+      {
+        (Rays.World.bake ~domains:1 ~width:64 ~height:32 Rays.World.default) with
+        sun =
+          Some
+            {
+              direction = Rays_math.Vec3.normalize (Rays_math.Vec3.create 0.3 1. 0.2);
+              radiance = Rays.World.rgb 4. 4. 4.;
+              angular_radius = 0.01;
+            };
+      }
 
 let () =
   let count = side * side in
@@ -173,6 +192,26 @@ let () =
                   || boxed.materialisations <> drawn.materialisations
                   || not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions device))
                 then fail "the bounds read P back";
+                (* lit by a World sun: the sun's fit reads the device mesh's bounds (24 KB at
+                   most), never its host copy, which would read P back *)
+                let sunlit =
+                  Option.map
+                    (fun world ->
+                      let lit =
+                        fst
+                          (picture canvas
+                             ~device:(Flow_native.Workspace_gpu.display gpu)
+                             ~world device)
+                      and seen = stats () in
+                      if
+                        seen.readback_bytes - boxed.readback_bytes > 24_576
+                        || seen.materialisations <> boxed.materialisations
+                        || not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions device))
+                      then fail "the World sun's fit made the device mesh's host copy";
+                      if lit = shown then fail "the World did not light the display";
+                      (world, lit))
+                    world
+                in
                 (* the same geometry read back and drawn from the host: the same pixels *)
                 let host, seconds = picture host_canvas device in
                 (* min and max are exact in float32: the device's box is the host scan's, bit for bit *)
@@ -194,6 +233,11 @@ let () =
                 then fail "the device's bounds differ from the host's";
                 if frame > 0 then host_times := seconds :: !host_times;
                 if host <> shown then fail "the device display differs from the host display";
+                Option.iter
+                  (fun (world, lit) ->
+                    if fst (picture host_canvas ~world device) <> lit then
+                      fail "the sunlit device display differs from the host display")
+                  sunlit;
                 if Array.for_all (fun c -> c = Rays_math.Color.black) shown then
                   fail "the display drew nothing";
                 let cpu, cpu_seconds = cpu_cook frame in

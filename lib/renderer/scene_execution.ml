@@ -431,7 +431,7 @@ let resolve_gpu_vertices value (entry : sampled_draw) =
             error "Renderer.submit" Ogpu.Error.Cross_device "GPU vertices belong to another device"
           else if
             match (entry.family, source.gpu_extra) with
-            | (Scene3 | Scene3_points), ([] | [ _ ]) ->
+            | (Scene3 | Scene3_points | Scene3_world), ([] | [ _ ]) ->
                 (* a device's packed float3 positions (and normals) *)
                 Bytes.length mesh.vertices <> 0 || mesh.vertex_count <> source.gpu_vertex_count
             | Ui, [] | Marks, [ _; _; _; _; _ ] ->
@@ -2485,35 +2485,33 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
                     [ (Ogpu.Backend.Fragment, 2, sampler) ],
                     [] )
         in
+        let vertices =
+          match slot.slot_gpu_vertices with None -> item.buffer | Some source -> source.gpu_buffer
+        in
+        let extra =
+          match slot.slot_gpu_vertices with
+          | None -> []
+          | Some source -> (
+              List.mapi (fun i b -> (Ogpu.Backend.Vertex, i + 1, b, 0L)) source.gpu_extra
+              (* marks.rays reads the colour columns as words and as floats: bound twice *)
+              @
+              match (family, source.gpu_extra) with
+              | Marks, [ _; fill; stroke; _; _ ] ->
+                  [ (Ogpu.Backend.Vertex, 7, fill, 0L); (Ogpu.Backend.Vertex, 8, stroke, 0L) ]
+              | (Scene3 | Scene3_points | Scene3_world), [] ->
+                  [ (Ogpu.Backend.Vertex, 1, source.gpu_buffer, 0L) ]
+              | _ -> [])
+        in
         let* buffers, textures, samplers =
           match slot.slot_auxiliary with
           | None ->
-              let vertices =
-                match slot.slot_gpu_vertices with
-                | None -> item.buffer
-                | Some source -> source.gpu_buffer
-              in
-              let extra =
-                match slot.slot_gpu_vertices with
-                | None -> []
-                | Some source -> (
-                    List.mapi (fun i b -> (Ogpu.Backend.Vertex, i + 1, b, 0L)) source.gpu_extra
-                    (* marks.rays reads the colour columns as words and as floats: bound twice *)
-                    @
-                    match (family, source.gpu_extra) with
-                    | Marks, [ _; fill; stroke; _; _ ] ->
-                        [ (Ogpu.Backend.Vertex, 7, fill, 0L); (Ogpu.Backend.Vertex, 8, stroke, 0L) ]
-                    | (Scene3 | Scene3_points), [] ->
-                        [ (Ogpu.Backend.Vertex, 1, source.gpu_buffer, 0L) ]
-                    | _ -> [])
-              in
               Ok ((Ogpu.Backend.Vertex, 0, vertices, 0L) :: (extra @ buffers), textures, samplers)
           | Some (source, buffer, texture) ->
               let* sampler = sampler_for value source.texture.sampler in
               Ok
-                ( (Ogpu.Backend.Vertex, 0, item.buffer, 0L)
+                ( (Ogpu.Backend.Vertex, 0, vertices, 0L)
                   :: (Ogpu.Backend.Fragment, 3, buffer.auxiliary_buffer, 0L)
-                  :: buffers,
+                  :: (extra @ buffers),
                   (Ogpu.Backend.Fragment, 4, texture.texture) :: textures,
                   (Ogpu.Backend.Fragment, 5, sampler) :: samplers )
         in
@@ -2620,6 +2618,12 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
                 [ (2, 7) ]
           | Scene3 | Scene3_points | Scene3_textured -> regenerated scene3 [ (1, 6) ] [ (2, 7) ]
           | Scene3_world ->
+              (* a device's positions at 0 alone, its normals (or the positions again) at 1 *)
+              let scene3 =
+                if Option.is_some slot.slot_gpu_vertices then
+                  ((Ogpu.Backend.Vertex, 0), [ 0 ]) :: List.tl scene3
+                else scene3
+              in
               regenerated
                 (((Ogpu.Backend.Fragment, 3), [ 6 ]) :: scene3)
                 [ (1, 7); (4, 9); (8, 13); (9, 11) ]
