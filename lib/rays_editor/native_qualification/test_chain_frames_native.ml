@@ -11,7 +11,9 @@
    of the same geometry read back; its bounds are reduced on the device (24 KB read, P unread) and
    equal the host scan exactly. A lit mesh is also drawn under a World sun: the sun's fit reads
    the device mesh's bounds (24 KB), its host copy is never made (P stays unread), and its pixels
-   equal the host display's under the same World. The median frame on the CPU and the GPU, and the median device
+   equal the host display's under the same World. Removing the node (its scenes draw no display)
+   releases every binding two Workspace_gpu.frames later, without a collection, and once its results
+   die the pool holds no buffer. The median frame on the CPU and the GPU, and the median device
    display (lowering and drawing a 256 x 256 canvas) are printed. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
@@ -252,8 +254,24 @@ let () =
                   close y gy;
                   close z gz;
                   close n.(i) m.(i)
-                done
+                done;
+                Flow_native.Workspace_gpu.frame gpu
               done;
+              (* the node removed: its scenes draw no display, so two frames later every binding is
+                 released (no collection needed), and once its results die the pool holds nothing *)
+              if Flow_native.Workspace_gpu.held_displays gpu = 0 then failwith "no display is held";
+              for _ = 0 to 2 do
+                Flow_native.Workspace_gpu.frame ~keep:[] gpu
+              done;
+              if Flow_native.Workspace_gpu.held_displays gpu <> 0 then
+                failwith "a removed display is still bound two frames later";
+              gpu_close ();
+              Gc.full_major ();
+              Flow_native.Workspace_gpu.frame gpu;
+              if (stats ()).held_buffers <> 0 then
+                failwith
+                  (Printf.sprintf "%d buffers still held after the node's removal"
+                     (stats ()).held_buffers);
               (* float32 rounding of positions within [-0.5, 1.5] and of noise in [0, 1] *)
               if !worst > 1e-5 then failwith (Printf.sprintf "GPU differs from CPU by %.3e" !worst);
               ignore (Rays.Canvas.destroy canvas);

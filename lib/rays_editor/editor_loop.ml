@@ -603,6 +603,8 @@ let update_with value frame ~inspector =
   let rendered, views, drawn, texture_errors =
     compose { value with core } { update with core } ~baked ~baked_views ~scene
   in
+  Flow_native.Workspace_gpu.frame value.host.gpu
+    ?keep:(if drawn == value.drawn then None else Some (display_keys drawn));
   let context_error =
     if texture_errors = [] then context_error else Some (String.concat "; " texture_errors)
   in

@@ -394,9 +394,12 @@ buffer 1, or (0, 0, 1)) when the draw's uniform word 79 (and 80) says so, the 24
 otherwise; indices and the 12-byte colour/uv record stay host bytes (for a plain point cloud the
 same bytes every frame; a triangle mesh's indices are packed once per topology and cached by the
 renderer under a key of their own, the `Gpu_vertices "borrow\nindices"` name). The World sun's
-depth pass binds the borrowed positions and reads them at word 79's stride too. Ordering is explicit: the display binds only a settled output (its
-dispatch completed, on the producer's queue), and a dropped display's buffers are released three
-bound displays later, not when the presenting queue completes. ponytail: that needs the renderer's
+depth pass binds the borrowed positions and reads them at word 79's stride too, and a World-lit
+draw (`Scene3_world`) binds them as the plain one does. Ordering is explicit: the display binds only a settled output (its
+dispatch completed, on the producer's queue). A display is dropped when the editor's drawn scenes
+no longer name its key (`Workspace_gpu.frame ~keep`, once a frame, when they change) or its mesh is
+collected, and its buffers are unregistered and unpinned two frames later (the renderer keeps one
+presented frame in flight), not when the presenting queue completes. ponytail: that needs the renderer's
 completion epoch exposed to the producer, which a discrete backend will want anyway. The buffers
 carry `Storage` usage only: the vertex stage pulls them as storage, so no vertex-input layout is
 assumed.

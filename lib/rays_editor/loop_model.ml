@@ -317,6 +317,18 @@ let refresh_hidden value frame =
   in
   { value with hidden_scene_cache }
 
+(* the device display keys the drawn scenes draw: a display left out is released *)
+let display_keys drawn =
+  Document.Int_map.fold
+    (fun _ (_, _, scene, _) keys ->
+      let keys = ref keys in
+      Scene.D3.Walk.iter_batches
+        (fun (drawing : Scene.D3.Walk.drawing) _ ->
+          Option.iter (fun (key, _) -> keys := key :: !keys) (Mesh.View.device drawing.mesh))
+        scene;
+      !keys)
+    drawn []
+
 (* Recompose when a cook, the scene, or the World changed. Each object's
    drawing is reused while its graph and prepared value are physically the same, so
    moving an object only re-places it. *)

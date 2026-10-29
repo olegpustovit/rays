@@ -57,12 +57,14 @@ type t = {
   mutable mailbox_closed : bool;
   measured : (string * int, float option) Measurements.t;
   entries : (Flow_ir.Packed.instruction array * bool, string option) Entries.t;
-  dropped : (unit -> unit) list Atomic.t;
-      (* the releases of displays whose meshes were collected (any domain), run on the initial one *)
+  dropped : string list Atomic.t;
+      (* the keys of displays whose meshes were collected (any domain) *)
   mutable displays : int;  (** device meshes bound so far *)
+  bound : (string, unit -> unit) Hashtbl.t; (* each live display's release, by its key *)
+  mutable frames : int;
   mutable releasing : (int * (unit -> unit)) list;
-      (* dropped displays, released once [displays] passes the count: a frame that drew one may be
-         in flight on the presenting queue, which this owner does not see *)
+      (* dropped displays, released at a later {!frame}: one that drew them may be in flight on the
+         presenting queue, which this owner does not see *)
 }
 
 let create ?(clock = Unix.gettimeofday) () =
@@ -87,6 +89,8 @@ let create ?(clock = Unix.gettimeofday) () =
     entries = Entries.create ~equal:(fun (a, fast) (b, other) -> a == b && fast = other) 64;
     dropped = Atomic.make [];
     displays = 0;
+    bound = Hashtbl.create 8;
+    frames = 0;
     releasing = [];
   }
 
@@ -392,14 +396,33 @@ let rec push cell value =
   let old = Atomic.get cell in
   if not (Atomic.compare_and_set cell old (value :: old)) then push cell value
 
-(* ponytail: a dropped display's buffers wait for three more bound displays (frames), not for the
-   presenting queue's completion, which needs the renderer's epoch; fine below triple buffering *)
-let release_displays ?(all = false) t =
-  t.releasing <-
-    List.map (fun release -> (t.displays + 3, release)) (Atomic.exchange t.dropped []) @ t.releasing;
-  let due, later = List.partition (fun (at, _) -> all || at <= t.displays) t.releasing in
-  t.releasing <- later;
-  List.iter (fun (_, release) -> release ()) due
+let drop_display t key =
+  match Hashtbl.find_opt t.bound key with
+  | Some release ->
+      Hashtbl.remove t.bound key;
+      t.releasing <- (t.frames + 2, release) :: t.releasing
+  | None -> ()
+
+(* ponytail: a dropped display's buffers wait two frames, not for the presenting queue's completion,
+   which needs the renderer's epoch; the renderer keeps one presented frame in flight *)
+let frame ?keep t =
+  if (not t.closed) && Domain.is_main_domain () then begin
+    t.frames <- t.frames + 1;
+    List.iter (drop_display t) (Atomic.exchange t.dropped []);
+    Option.iter
+      (fun keep ->
+        let keep = Hashtbl.of_seq (Seq.map (fun key -> (key, ())) (List.to_seq keep)) in
+        Hashtbl.fold
+          (fun key _ dead -> if Hashtbl.mem keep key then dead else key :: dead)
+          t.bound []
+        |> List.iter (drop_display t))
+      keep;
+    let due, later = List.partition (fun (at, _) -> at <= t.frames) t.releasing in
+    t.releasing <- later;
+    List.iter (fun (_, release) -> release ()) due
+  end
+
+let held_displays t = Hashtbl.length t.bound + List.length t.releasing
 
 (* A point cloud's resident P (and N) as the renderer's device positions: pinned in the pool and
    registered while the mesh that keeps the returned closure lives. Initial domain, after the cook
@@ -407,7 +430,6 @@ let release_displays ?(all = false) t =
 let display t geometry =
   if t.closed || not (Domain.is_main_domain ()) then None
   else begin
-    release_displays t;
     match (t.owner, Flow_sop.Attribute_kernel.resident_vec3 geometry "P") with
     | Some (gpu, _), Some positions -> (
         let count = Rdk.Geometry.point_count geometry in
@@ -446,13 +468,11 @@ let display t geometry =
                 None
             | Ok (key, unregister) ->
                 t.displays <- t.displays + 1;
+                Hashtbl.replace t.bound key (fun () ->
+                    unregister ();
+                    unpin_all ());
                 let token = ref () in
-                Gc.finalise
-                  (fun _ ->
-                    push t.dropped (fun () ->
-                        unregister ();
-                        unpin_all ()))
-                  token;
+                Gc.finalise (fun _ -> push t.dropped key) token;
                 Some (key, normals <> None, fun () -> ignore (Sys.opaque_identity token)))
         | pinned, normals ->
             Option.iter (fun (_, _, unpin) -> unpin ()) pinned;
@@ -486,7 +506,10 @@ let close t =
     done;
     Condition.broadcast t.jobs_ready;
     Mutex.unlock t.jobs_lock;
-    release_displays ~all:true t;
+    Hashtbl.iter (fun _ release -> release ()) t.bound;
+    Hashtbl.reset t.bound;
+    List.iter (fun (_, release) -> release ()) t.releasing;
+    t.releasing <- [];
     Slots.clear t.mark_sets;
     Images.clear t.images;
     Option.iter

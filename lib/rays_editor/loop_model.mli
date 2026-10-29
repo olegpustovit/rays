@@ -121,6 +121,9 @@ val refresh_hidden : t -> Rays.Frame.t -> t
 val composition_key :
   Editor_model.t -> 'b -> 'b * Editor_document.Document.level * (string * int list) list
 
+val display_keys : ('a * 'b * V.rendered * 'c) Editor_document.Document.Int_map.t -> string list
+(** The device display keys the drawn scenes draw ({!Flow_native.Workspace_gpu.frame}'s [keep]). *)
+
 val compose :
   t ->
   'b Editor_model.update ->
