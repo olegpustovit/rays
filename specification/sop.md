@@ -555,9 +555,10 @@ ms against 2.9-4.5 ms (the kernel now makes P: three planes of checked fma). The
 frame's prepare, not by the lowering's plane maps; a whole run (lowering and first frame) is
 6.13-6.25 s against 6.26-6.53 s. `test_chain_frames_native` fails unless the first frame uploads
 N's bytes alone in one dispatch; GPU against CPU P and noise 2.3-3.4e-7 (512 squared, four
-drives). CPU frames 0.032-0.040 s, as before. `sop_gallery` (five interleaved rounds,
-`BENCH_PHASES=1`): cook 0.815-0.842 s against 0.828-0.856 s, lower 0.371-0.381 against
-0.368-0.379 s, edit to cook 0.493-0.508 against 0.503-0.507 s.
+drives). CPU frames 0.032-0.040 s, as before. `sop_gallery` (five interleaved rounds against dev,
+`BENCH_PHASES=1`, with the device tables below, load 4-5): cook median 0.877 s against 0.890 s
+(0.858-0.928 against 0.881-0.907), lower 0.387 against 0.406 s, edit to cook 0.541 against 0.535 s
+(0.524-0.572 against 0.527-0.545; the 0.572 is a round whose check also took 0.37 s, not 0.27).
 
 Tried and stopped (2026-10-29), with what each still needs:
 
