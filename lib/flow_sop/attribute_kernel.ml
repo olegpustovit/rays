@@ -494,9 +494,25 @@ let context_reads value =
   visit value;
   !found
 
-let dependencies value =
-  if E.frame_dependent value then Sop.Context.Dependencies.(union (context_reads value) (one Input))
-  else context_reads value
+(* the host-input slices a frame-dependent value reads: [t] is the clock, a fold steps with the
+   frame, and each live operator names its own slice *)
+let input_reads value =
+  let open Sop.Context.Dependencies in
+  List.fold_left
+    (fun found name ->
+      let fact =
+        match name with
+        | "time" -> Time
+        | "state" | "frame/dt" | "frame/index" -> Step
+        | "frame/width" | "frame/height" -> Size
+        | "key/down" -> Keys
+        | _ when String.starts_with ~prefix:"pointer/" name -> Pointer
+        | _ -> Input
+      in
+      union found (one fact))
+    static (E.frame_reads value)
+
+let dependencies value = Sop.Context.Dependencies.union (context_reads value) (input_reads value)
 
 (* The data with its context sources replaced by this cook context's values: a kernel over it
    compiles them as constants (a noise seed is a region immediate). *)

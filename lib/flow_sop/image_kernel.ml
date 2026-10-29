@@ -78,9 +78,7 @@ let node ?state t =
       ^ Option.fold ~none:"" ~some:E.state_stamp state)
     ~cook_mode:P.Node.Generator
     ~dependencies:
-      (if E.frame_dependent (E.Fn t.fn) || E.state_dependent (E.Fn t.fn) then
-         P.Context.Dependencies.one Input
-       else P.Context.Dependencies.static)
+      (Attribute_kernel.input_reads (E.Fn t.fn))
     ~inputs:(Array.of_list t.inputs)
     (fun ~node_id:_ context payloads ->
       let resolve =

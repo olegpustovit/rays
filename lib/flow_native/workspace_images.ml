@@ -229,7 +229,8 @@ let prepare_source ?gpu t request ~state ~live plan id =
       in
       if
         source.state_stamp <> state_stamp
-        || (source.cone.states <> [] && not (Input.equal source.live live))
+        || (source.cone.states <> []
+           && P.Context.input_changed (Flow_sop.Value_lane.dependencies source.cone) source.live live)
       then begin
         source.lane <- Flow_sop.Value_lane.create ~state:(E.fork_state state) ();
         source.state_stamp <- state_stamp

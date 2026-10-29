@@ -2581,9 +2581,9 @@ let run_idle_follow () =
       (scene/root (scene/merge s camera key) :width 960 :height 640 :renderer "Path traced" :max_spp 64)))
   (graph editor :context editor (ui/workspace (ui/split "horizontal" (ui/graph "scene") (ui/inspector)))))|})
   and count = ref 0 in
-  let step ?(keys = []) events =
+  let step ?(keys = []) ?(at = (450., 300.)) events =
     incr count;
-    e := E3.update !e (Test_editor_input.frame ~keys (450., 300.) events !count)
+    e := E3.update !e (Test_editor_input.frame ~keys at events !count)
   in
   for _ = 1 to 6 do
     step []
@@ -2593,8 +2593,9 @@ let run_idle_follow () =
     step []
   done;
   let doc = E3.workspace !e and prepared = E3.prepared !e and status = E3.Private.status_text !e in
-  for _ = 1 to 20 do
-    step []
+  (* the graph reads only [t]: a roaming pointer over the picture is no reason to cook *)
+  for i = 1 to 20 do
+    step ~at:(450. +. float i, 300. -. float i) []
   done;
   check (E3.workspace !e == doc) "an idle frame wrote the document";
   check (Option.equal ( == ) (E3.prepared !e) prepared) "an idle frame cooked a new displayed mesh";

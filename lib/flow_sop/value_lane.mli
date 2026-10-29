@@ -27,3 +27,7 @@ val resolve :
 (** Evaluate the live drives at [time] through prepared Flow IR programs; only changed SOP ports are
     applied while the literal graph is unchanged. Static networks reuse their successful or failed
     result without recomputation. *)
+
+val dependencies : Network.t -> Sop.Context.Dependencies.t
+(** The host-input slices (time, pointer, keys, size, step) the network's drives and folds read;
+    {!resolve} recomputes only when one of them differs. *)

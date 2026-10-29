@@ -1,15 +1,16 @@
 module Cancel = Rdk.Cancel
 
 module Dependencies = struct
-  type fact = Frame | Time | Seed | Domains | Grain | Input
+  type fact = Frame | Time | Seed | Domains | Grain | Input | Pointer | Keys | Size | Step
   type t = int
 
   let bit = function Frame -> 1 | Time -> 2 | Seed -> 4 | Domains -> 8 | Grain -> 16 | Input -> 32
+    | Pointer -> 64 | Keys -> 128 | Size -> 256 | Step -> 512
   let static = 0
   let one fact = bit fact
   let union = ( lor )
   let mem fact value = value land bit fact <> 0
-  let all = [ Frame; Time; Seed; Domains; Grain; Input ]
+  let all = [ Frame; Time; Seed; Domains; Grain; Input; Pointer; Keys; Size; Step ]
   let to_list value = List.filter (fun fact -> mem fact value) all
 
   let fact_name = function
@@ -19,6 +20,10 @@ module Dependencies = struct
     | Domains -> "domains"
     | Grain -> "grain"
     | Input -> "input"
+    | Pointer -> "pointer"
+    | Keys -> "keys"
+    | Size -> "size"
+    | Step -> "step"
 
   let to_string value =
     match to_list value with
@@ -106,6 +111,22 @@ let settle ?(all = false) value =
               Some node)
         (List.rev pending)
 
+let input_part (fact : Dependencies.fact) (i : Input.t) =
+  let bits = Marshal.to_string in
+  match fact with
+  | Time -> bits i.t []
+  | Pointer -> bits (i.pointer, i.buttons) []
+  | Keys -> bits i.keys []
+  | Size -> bits i.size []
+  | Step -> bits (i.dt, i.tick, i.frame) []
+  | Input -> Input.identity i
+  | Frame | Seed | Domains | Grain -> ""
+
+let input_changed dependencies a b =
+  List.exists
+    (fun (fact : Dependencies.fact) -> input_part fact a <> input_part fact b)
+    (List.filter (fun f -> Dependencies.mem f dependencies) Dependencies.[ Time; Pointer; Keys; Size; Step; Input ])
+
 let cache_projection dependencies value =
   if dependencies = Dependencies.static then ""
   else
@@ -122,4 +143,8 @@ let cache_projection dependencies value =
     if Dependencies.mem Domains dependencies then add 'd' (string_of_int value.domains);
     if Dependencies.mem Grain dependencies then add 'g' (string_of_int value.grain);
     if Dependencies.mem Input dependencies then add 'i' (Input.identity value.input);
+    List.iter
+      (fun (tag, fact) ->
+        if Dependencies.mem fact dependencies then add tag (input_part fact value.input))
+      Dependencies.[ ('p', Pointer); ('k', Keys); ('z', Size); ('e', Step) ];
     Buffer.contents buffer

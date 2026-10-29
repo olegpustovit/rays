@@ -33,13 +33,14 @@ let step ?(live = false) ?input value ~graphs ~effects ~context_changed ~force ~
         Context.Dependencies.static graphs
   in
   let dynamic =
-    (* a graph that reads the host input recooks when that input differs: a stopped clock and a
-       still pointer leave every idle frame the same *)
-    Context.Dependencies.mem Context.Dependencies.Input dependencies
-    && not
-         (match (input, value.input) with
-         | Some now, Some before -> Input.equal now before
-         | _ -> false)
+    (* a graph recooks when an input slice it reads differs: a stopped clock, a still pointer or an
+       unread key leave every idle frame the same *)
+    (match (input, value.input) with
+    | Some now, Some before -> Context.input_changed dependencies before now
+    | _ ->
+        List.exists
+          (fun fact -> Context.Dependencies.mem fact dependencies)
+          Context.Dependencies.[ Input; Pointer; Keys; Size; Step ])
     || context_changed
        && (Context.Dependencies.mem Context.Dependencies.Time dependencies
           || Context.Dependencies.mem Context.Dependencies.Frame dependencies)

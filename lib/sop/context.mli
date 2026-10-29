@@ -3,7 +3,9 @@
 module Cancel = Rdk.Cancel
 
 module Dependencies : sig
-  type fact = Frame | Time | Seed | Domains | Grain | Input
+  type fact = Frame | Time | Seed | Domains | Grain | Input | Pointer | Keys | Size | Step
+  (** [Input] is the whole host frame (events, [frame/input]); [Pointer], [Keys], [Size] and
+      [Step] (dt, tick, frame index) are the slices a graph can read alone. *)
   type t
 
   val static : t
@@ -55,6 +57,13 @@ val device_refused : t -> int -> bool
 
 val refusals : t -> int
 (** How many device failures this context has settled. *)
+
+val input_part : Dependencies.fact -> Input.t -> string
+(** The slice of the host input a fact reads ("" for a fact that is not an input slice); [Time] is
+    the clock. Exact bits. *)
+
+val input_changed : Dependencies.t -> Input.t -> Input.t -> bool
+(** Whether any input slice the dependencies read differs between two frames. *)
 
 val cache_projection : Dependencies.t -> t -> string
 (** Exact cache-key projection for the declared facts. Static dependencies always return the same

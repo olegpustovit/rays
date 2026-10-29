@@ -10,7 +10,21 @@ type plan = {
   late : late_target array;
   states : Flow_ir.Executor.program option;
   time_dependent : bool;
+  reads : Sop.Context.Dependencies.t;
 }
+
+(* the host-input slices the network's drives, folds and frame nodes read *)
+let dependencies (network : Network.t) =
+  let open Sop.Context.Dependencies in
+  let found =
+    Port.Map.fold
+      (fun _ value found -> union found (Attribute_kernel.input_reads value))
+      network.drives
+      (List.fold_left
+         (fun found value -> union found (Attribute_kernel.input_reads value))
+         static network.states)
+  in
+  if Network.Int_map.is_empty network.frame_nodes then found else union found (one Input)
 
 type resolved = {
   geometry : Sop.Edit_graph.t;
@@ -55,6 +69,7 @@ let prepare network =
             states;
             time_dependent =
               network.states <> [] || not (Network.Int_map.is_empty network.frame_nodes);
+            reads = dependencies network;
           }
       else
         Result.bind (Network.validate network) (fun () ->
@@ -118,6 +133,7 @@ let prepare network =
                          classified);
                   states;
                   time_dependent = true;
+                  reads = dependencies network;
                 })
               targets))
 
@@ -355,7 +371,8 @@ let resolve ?gpu ?live state ~time network =
   match state.previous with
   | Some previous
     when previous.plan.network == network && same_gpu previous.gpu gpu
-         && ((not previous.plan.time_dependent) || Input.equal previous.live live) ->
+         && ((not previous.plan.time_dependent)
+            || not (Sop.Context.input_changed previous.plan.reads previous.live live)) ->
       previous.result
   | previous ->
       let plan =

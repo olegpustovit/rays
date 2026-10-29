@@ -997,52 +997,67 @@ let replay_inline c (e : inline_entry) ~parameters inputs =
 (* Residuals are shared and immutable: each remembers its answer, or a let-bound array read by many later
    bindings is walked once per reader and the walk is exponential in the depth of the sharing, and the
    executor asks the same question of every region pair while fusing (Carve's plans). *)
-let rec dependent frame = function
+(* [note], when given, collects what a frame walk finds ("time", "state" or a live op's name): the
+   walk then visits every branch and every residual (no memo, no short circuit). *)
+let any_of note f l =
+  if note = None then List.exists f l else List.fold_left (fun found x -> f x || found) false l
+
+let rec dependent ?note frame = function
+  | Residual r when (match note with Some (_, seen) -> Hashtbl.mem seen r.rid | None -> false) ->
+      false
   | Residual r ->
-      let known = if frame then r.dep_frame else r.dep_state in
+      Option.iter (fun (_, seen) -> Hashtbl.replace seen r.rid ()) note;
+      let known = if note <> None then 0 else if frame then r.dep_frame else r.dep_state in
       if known <> 0 then known = 2
       else begin
-        let answer = term_dependent frame r.rc.st r.renv r.rterm in
-        if frame then r.dep_frame <- (if answer then 2 else 1)
+        let answer = term_dependent ?note frame r.rc.st r.renv r.rterm in
+        if note <> None then ()
+        else if frame then r.dep_frame <- (if answer then 2 else 1)
         else r.dep_state <- (if answer then 2 else 1);
         answer
       end
-  | List xs -> Array.exists (dependent frame) xs
+  | List xs -> any_of note (dependent ?note frame) (Array.to_list xs)
   | Record fs | Struct (_, _, fs) | Source (_, _, fs) ->
-      List.exists (fun (_, v) -> dependent frame v) fs
-  | Fn (Closure cl) -> term_dependent frame cl.at.st cl.env cl.body
+      any_of note (fun (_, v) -> dependent ?note frame v) fs
+  | Fn (Closure cl) -> term_dependent ?note frame cl.at.st cl.env cl.body
   | _ -> false
 
-and term_dependent frame st env (term : W.term) =
-  let term_dep = term_dependent frame st env in
-  let any = List.exists term_dep in
+and term_dependent ?note frame st env (term : W.term) =
+  let term_dep = term_dependent ?note frame st env in
+  let any = any_of note term_dep in
+  let hit what = Option.iter (fun (f, _) -> f what) note in
+  (* eager, so a collecting walk reaches both sides *)
+  let ( |+ ) a b = a || b in
   let fields fs = any (List.map snd fs) in
   let definition name =
     match Hashtbl.find_opt st.defs name with
     | Some g -> term_dep g.body
-    | None -> Option.fold ~none:false ~some:(dependent frame) (Smap.find_opt name env)
+    | None -> Option.fold ~none:false ~some:(dependent ?note frame) (Smap.find_opt name env)
   in
   match term.node with
-  | W.Time -> frame
-  | W.State _ -> true
+  | W.Time -> hit "time"; frame
+  | W.State _ -> hit "state"; true
   | W.Ref_binding (name, _) ->
-      Option.fold ~none:false ~some:(dependent frame) (Smap.find_opt name env)
-  | W.Op { op; args; _ } -> (frame && (Option.get (find_op st op)).live) || fields args
+      Option.fold ~none:false ~some:(dependent ?note frame) (Smap.find_opt name env)
+  | W.Op { op; args; _ } ->
+      let live = frame && (Option.get (find_op st op)).live in
+      if live then hit op;
+      live |+ fields args
   | W.Call { args; _ } | W.Record args -> fields args
   | W.Call_fn { fn; args; body } ->
-      definition fn || Option.fold ~none:false ~some:term_dep body || any args
+      definition fn |+ Option.fold ~none:false ~some:term_dep body |+ any args
   | W.Fn_ref name -> definition name
   | W.Graph_ref { graph; inputs } -> (
       fields inputs
-      ||
+      |+
       match Hashtbl.find_opt st.graphs graph with
       | Some g ->
           term_dep g.body
-          || List.exists (fun (_, _, d) -> Option.fold ~none:false ~some:term_dep d) g.inputs
+          |+ any_of note (fun (_, _, d) -> Option.fold ~none:false ~some:term_dep d) g.inputs
       | None -> false)
   | W.Vec ts | W.List_lit ts | W.Str ts | W.List_op (_, ts) | W.Hof (_, ts) -> any ts
-  | W.Let (bindings, body) -> any (List.map snd bindings) || term_dep body
-  | W.Loop { accs; clauses; body; _ } -> any (List.map snd (accs @ clauses)) || term_dep body
+  | W.Let (bindings, body) -> any (List.map snd bindings) |+ term_dep body
+  | W.Loop { accs; clauses; body; _ } -> any (List.map snd (accs @ clauses)) |+ term_dep body
   | W.With_error (a, b) -> any [ a; b ]
   | W.Error_rows { rows = a; mapper = b; _ } -> any [ a; b ]
   | W.If (c, a, b) -> any [ c; a; b ]
@@ -1051,10 +1066,18 @@ and term_dependent frame st env (term : W.term) =
   | W.Fn { capture = Some original; _ } -> term_dep original
   | W.Fn { body; _ } | W.Expanded { body; _ } | W.Get (body, _) -> term_dep body
   | W.Bypass call -> Option.fold ~none:false ~some:term_dep (W.bypass_input call)
-  | W.Assoc (r, args) -> term_dep r || fields args
+  | W.Assoc (r, args) -> term_dep r |+ fields args
   | W.Lit _ | W.Text _ | W.Nil -> false
 
 let frame_dependent = dependent true
+
+let frame_reads v =
+  let found = ref [] in
+  let note =
+    ((fun what -> if not (List.mem what !found) then found := what :: !found), Hashtbl.create 16)
+  in
+  ignore (dependent ~note true v);
+  List.rev !found
 let state_dependent = dependent false
 
 (* A deferred check's test reads frame facts only: no cooked data, fold state or zone element, so

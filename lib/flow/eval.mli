@@ -316,6 +316,10 @@ val structure : value -> string
 val authored_key : Workspace.t -> string
 (** A digest of the workspace's authored definitions, macros and node declarations. *)
 
+val frame_reads : value -> string list
+(** What a frame-dependent value reads: ["time"], ["state"] and the names of the live operators it
+    reaches (["pointer/x"], ["key/down"], ["frame/dt"], ...). Empty when it is not frame dependent. *)
+
 val frame_dependent : value -> bool
 (** Reads a frame fact; element-only residuals return false. *)
 

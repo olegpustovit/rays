@@ -137,6 +137,45 @@ let test_timeline_and_schedule () =
       ~context_changed:false ~force:false ~busy:false ~frame:(timeline_frame ())
   in
   if not fire then fail "cook scheduler lost the latest held dynamic request"
+  ;
+  (* an input slice nobody reads never recooks: a t-only graph ignores the pointer, keys and size,
+     a pointer graph follows the pointer and ignores the clock's absence *)
+  let reading fact =
+    Custom.plain ~operation:"reads" ~dependencies:(Context.Dependencies.one fact) [ static_graph ]
+      (fun ~context:_ inputs -> Ok inputs.(0))
+  in
+  let frame_at ?(t = 0.) ?(pointer = (0., 0.)) ?(keys = []) ?(size = (100, 100)) () =
+    { (Input.at_time t) with pointer; keys; size }
+  in
+  let count graph frames =
+    let first = List.hd frames in
+    let schedule, _ =
+      Rays_editor__.Schedule.step ~input:first Rays_editor__.Schedule.initial ~graphs:[ graph ]
+        ~effects:Param.no_effects ~context_changed:false ~force:false ~busy:false
+        ~frame:(timeline_frame ())
+    in
+    snd
+      (List.fold_left
+         (fun (schedule, cooks) input ->
+           let schedule, fire =
+             Rays_editor__.Schedule.step ~input schedule ~graphs:[ graph ]
+               ~effects:Param.no_effects
+               ~context_changed:(input.Input.t <> (Option.get schedule.input).Input.t)
+               ~force:false ~busy:false ~frame:(timeline_frame ())
+           in
+           (schedule, if fire then cooks + 1 else cooks))
+         (schedule, 0) (List.tl frames))
+  in
+  let moving = List.init 30 (fun i -> frame_at ~pointer:(float i, 1.) ~keys:[ Input.Space ] ()) in
+  let clock = List.init 30 (fun i -> frame_at ~t:(float i) ~pointer:(float i, 1.) ()) in
+  let time = reading Context.Dependencies.Time and pointer = reading Context.Dependencies.Pointer in
+  if count time (frame_at () :: moving) <> 0 then fail "a t-only graph recooked on pointer or keys";
+  if count time (frame_at () :: List.init 30 (fun i -> frame_at ~size:(i, 1) ())) <> 0 then
+    fail "a t-only graph recooked on a resize";
+  if count time (frame_at () :: clock) <> 29 then fail "a t-only graph missed a clock change";
+  if count pointer (frame_at () :: moving) <> 30 then fail "a pointer graph missed motion";
+  if count pointer (frame_at () :: List.init 30 (fun _ -> frame_at ())) <> 0 then
+    fail "a pointer graph recooked with a still pointer"
 
 (* The piece offsets of the two-triangle fixture through an Exploded View
    node with the given parameters, as the editor's terminal mesh builds them. *)

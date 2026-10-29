@@ -658,7 +658,11 @@ let guarded guards node =
     Sop.Node.Build.make ~label:(Sop.Node.label node) ~operation:(Sop.Node.operation node)
       ~version:(Sop.Node.version node) ~parameters:(Sop.Node.parameters node)
       ~cook_mode:(Sop.Node.facts node).cook_mode
-      ~dependencies:Sop.Context.Dependencies.(union (Sop.Node.dependencies node) (one Input))
+      ~dependencies:
+        (List.fold_left
+           (fun found guard ->
+             Sop.Context.Dependencies.union found (Attribute_kernel.input_reads guard))
+           (Sop.Node.dependencies node) guards)
       ~input_policy:(Sop.Node.Build.input_policy node)
       ~inputs:(Sop.Node.Build.input_array node)
       (fun ~node_id:_ context payloads ->
@@ -1183,9 +1187,7 @@ let build_call ~gpu ~lower_call ~record_profile ~checked ~(definition : Workspac
                  || not (Network.Int_map.is_empty graph.network.frame_nodes)
                in
                let dependencies =
-                 if driven then
-                   Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Input)
-                 else dependencies
+                 Sop.Context.Dependencies.union dependencies (Value_lane.dependencies graph.network)
                in
                let reached =
                  Context_kernel.context_ops_reached ~inputs:parameters ~defs:checked.defs
