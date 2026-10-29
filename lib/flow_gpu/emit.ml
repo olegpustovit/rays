@@ -985,7 +985,7 @@ let compaction =
   }
 
 (* A resident packed float3 array's bounds: each lane of one threadgroup of 1,024 the min and max of
-   its chunk, at lane x 6, finished on the host (shaders/bounds.rays, printed as [compaction] is).
+   every 1,024th element from it, at lane x 6, finished on the host (shaders/bounds.rays, printed as [compaction] is).
    Buffers: the array, the lanes' floats, the count. *)
 let bounds =
   {

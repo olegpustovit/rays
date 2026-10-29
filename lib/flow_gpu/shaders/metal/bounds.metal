@@ -7,75 +7,71 @@ kernel void chunk_bounds(
     device const uint* buffer2 [[buffer(2)]],
     uint lid [[thread_position_in_threadgroup]]) {
   uint sb=0u;
-  uint r4=1024u,r5=1023u,r7=0u,r9=1073741823u,r20=3u,r23=1u,r26=2u,r30=0,r31=0;
-  float r32=0,r33=0,r34=0,r35=0,r36=0,r37=0;
-  uint r65=6u,r77=4u,r80=5u,r84=0u;
+  uint r4=1024u,r5=1023u,r7=0u,r9=1073741823u,r14=3u,r17=1u,r20=2u,r24=0,r25=0;
+  float r26=0,r27=0,r28=0,r29=0,r30=0,r31=0;
+  uint r60=6u,r72=4u,r75=5u,r79=0u;
   uint r6=(uint((long(lid)))&r5);
   uint r10=(uint((long(buffer2[r7*1+0])))&r9);
   uint r12=(r4==0u?0u:((r10+r5))/r4);
   sb|=(r4==0)?2u:0u;
-  uint r13=(r6*r12);
-  uint r15=(((long(r10)<long(r13)?1.0f:0.0f))!=0.0f?r10:r13);
-  uint r16=(r15+r12);
-  uint r18=(((long(r10)<long(r16)?1.0f:0.0f))!=0.0f?r10:r16);
-  float r19=(long(r15)<long(r18)?1.0f:0.0f);
-  if(r19!=0.0f) {
-    uint r21=(r15*r20);
-    float r22=buffer0[r21*1+0];
-    float r25=buffer0[((r21+r23))*1+0];
-    float r28=buffer0[((r21+r26))*1+0];
-    r31=r15;
-    r32=r22;
-    r33=r25;
-    r34=r28;
-    r35=r22;
-    r36=r25;
-    r37=r28;
-    for(r30=(0u);r30<r12;r30++){
-  uint r38=3u,r41=1u,r44=2u,r47=0u;
-  float r48=0.0f,r49=0.0f,r50=0.0f,r51=0.0f,r52=0.0f,r53=0.0f,r56=0.0f;
-  if(r19!=0.0f) {
-    uint r39=(r31*r38);
-    float r40=buffer0[r39*1+0];
-    float r43=buffer0[((r39+r41))*1+0];
-    float r46=buffer0[((r39+r44))*1+0];
-    r47=(r31+r41);
-    r48=min(r32,r40);
-    r49=min(r33,r43);
-    r50=min(r34,r46);
-    r51=max(r35,r40);
-    r52=max(r36,r43);
-    r53=max(r37,r46);
-    r56=(((((long(r47)>=long(r18)?1.0f:0.0f))==0.0f))==0.0f);
+  float r13=(long(r6)<long(r10)?1.0f:0.0f);
+  if(r13!=0.0f) {
+    uint r15=(r6*r14);
+    float r16=buffer0[r15*1+0];
+    float r19=buffer0[((r15+r17))*1+0];
+    float r22=buffer0[((r15+r20))*1+0];
+    r25=r6;
+    r26=r16;
+    r27=r19;
+    r28=r22;
+    r29=r16;
+    r30=r19;
+    r31=r22;
+    for(r24=(0u);r24<r12;r24++){
+  uint r32=3u,r35=1u,r38=2u,r41=1024u,r42=0u;
+  float r43=0.0f,r44=0.0f,r45=0.0f,r46=0.0f,r47=0.0f,r48=0.0f,r51=0.0f;
+  if(r13!=0.0f) {
+    uint r33=(r25*r32);
+    float r34=buffer0[r33*1+0];
+    float r37=buffer0[((r33+r35))*1+0];
+    float r40=buffer0[((r33+r38))*1+0];
+    r42=(r25+r41);
+    r43=min(r26,r34);
+    r44=min(r27,r37);
+    r45=min(r28,r40);
+    r46=max(r29,r34);
+    r47=max(r30,r37);
+    r48=max(r31,r40);
+    r51=(((((long(r42)>=long(r10)?1.0f:0.0f))==0.0f))==0.0f);
   }
-  bool stop30=r56!=0.0f;
-  uint next30_0=r47;
-  float next30_1=r48;
-  float next30_2=r49;
-  float next30_3=r50;
-  float next30_4=r51;
-  float next30_5=r52;
-  float next30_6=r53;
-  r31=next30_0;
-  r32=next30_1;
-  r33=next30_2;
-  r34=next30_3;
-  r35=next30_4;
-  r36=next30_5;
-  r37=next30_6;
-  if(stop30)break;
+  bool stop24=r51!=0.0f;
+  uint next24_0=r42;
+  float next24_1=r43;
+  float next24_2=r44;
+  float next24_3=r45;
+  float next24_4=r46;
+  float next24_5=r47;
+  float next24_6=r48;
+  r25=next24_0;
+  r26=next24_1;
+  r27=next24_2;
+  r28=next24_3;
+  r29=next24_4;
+  r30=next24_5;
+  r31=next24_6;
+  if(stop24)break;
     }
-    uint r66=(r6*r65);
-    uint r67=(buffer1[r66]=(r32),1u);
-    uint r69=(buffer1[((r66+r23))]=(r33),1u);
-    uint r72=(buffer1[((r66+r26))]=(r34),1u);
-    uint r74=(buffer1[((r66+r20))]=(r35),1u);
-    uint r75=(r72+r74);
-    uint r79=(buffer1[((r66+r77))]=(r36),1u);
-    uint r82=(buffer1[((r66+r80))]=(r37),1u);
-    uint r83=(r79+r82);
-    r84=(((((r67+r69))+r75))+r83);
+    uint r61=(r6*r60);
+    uint r62=(buffer1[r61]=(r26),1u);
+    uint r64=(buffer1[((r61+r17))]=(r27),1u);
+    uint r67=(buffer1[((r61+r20))]=(r28),1u);
+    uint r69=(buffer1[((r61+r14))]=(r29),1u);
+    uint r70=(r67+r69);
+    uint r74=(buffer1[((r61+r72))]=(r30),1u);
+    uint r77=(buffer1[((r61+r75))]=(r31),1u);
+    uint r78=(r74+r77);
+    r79=(((((r62+r64))+r70))+r78);
   }
-  uint r85=(r19!=0.0f?r84:r7);
-  (void)float(r85);
+  uint r80=(r13!=0.0f?r79:r7);
+  (void)float(r80);
 }

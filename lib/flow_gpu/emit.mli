@@ -26,8 +26,8 @@ val compaction : msl
 
 val bounds : msl
 (** A resident packed float3 array's bounds (shaders/bounds.rays, one threadgroup of 1,024): buffers
-    the array, the lanes' floats (each lane's min x y z, max x y z of its chunk, at lane x 6; a lane
-    with an empty chunk stores nothing) and the count (uint). *)
+    the array, the lanes' floats (lane l's min x y z, max x y z of the elements l, l + 1,024, ... at
+    l x 6; a lane at or past the count stores nothing) and the count (uint). *)
 
 val kernel :
   ?fast:bool ->

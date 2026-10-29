@@ -880,7 +880,7 @@ let materialise t kept =
       Option.get (Atomic.get kept.planes)
 
 (* A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): one group of
-   1,024 lanes, each lane's chunk min and max read back (24 KB at most) and finished here. On the
+   1,024 lanes, each lane's min and max (of every 1,024th element) read back (24 KB at most) and finished here. On the
    owner's domain; [None] elsewhere, once read (its planes are then the host's to scan) or on any
    device failure. *)
 let bounds_of t kept =
@@ -893,8 +893,7 @@ let bounds_of t kept =
   then None
   else
     let n = kept.kept_count in
-    let chunk = (n + 1023) / 1024 in
-    let lanes = (n + chunk - 1) / chunk in
+    let lanes = min n 1024 in
     try
       let compiled =
         match Pipelines.get t.pipelines Emit.bounds with
