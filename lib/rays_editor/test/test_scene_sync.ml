@@ -1198,6 +1198,33 @@ let run_root () =
          ":renderer \"Path traced\" :width 1024 :height 600 :max_spp 64 :bounces 8")
     ("a root edit did not reach the text: " ^ source edited);
   check ((open_text (source edited)).root = edited.root) "a root edit did not round-trip Save";
+  (* Raster -> Wireframe -> Raster (the default: the keyword goes) displays what a fresh lowering does *)
+  let plain =
+    open_text
+      {|(workspace studio
+  (graph g :context sop (sop/box))
+  (graph scene :context scene
+    (let* [body (scene/geometry (ref g) :name "body")]
+      (scene/root body :width 800 :height 600 :max_spp 64))))|}
+  in
+  let wire = ok (write plain (Sync.Root { plain.root with renderer = R.Wireframe })) in
+  check (wire.root.renderer = R.Wireframe) "Wireframe was not shown";
+  let back = ok (write wire (Sync.Root { wire.root with renderer = R.Raster })) in
+  check
+    (back.root.renderer = R.Raster && (open_text (source back)).root = back.root)
+    ("Raster did not come back: " ^ source back);
+  let sea =
+    open_text (In_channel.with_open_bin "../../../sketches/gpu_sea.rays" In_channel.input_all)
+  in
+  check (sea.homes.root <> None) "gpu_sea has a root home";
+  let sea_w = ok (write sea (Sync.Root { sea.root with renderer = R.Wireframe })) in
+  let sea_r = ok (write sea_w (Sync.Root { sea_w.root with renderer = R.Raster })) in
+  check (sea_r.root.renderer = R.Raster) ("gpu_sea Raster: " ^ source sea_r);
+  let again = ok (write back (Sync.Root { back.root with renderer = R.Wireframe })) in
+  let again = ok (write again (Sync.Root { again.root with renderer = R.Raster })) in
+  check
+    (again.root.renderer = R.Raster && (open_text (source again)).root = again.root)
+    ("Raster did not come back the second time: " ^ source again);
   (* the printer keeps the camera, renderer, size, samples order *)
   let tidy = ok (write edited (Sync.Root { edited.root with round_samples = 2 })) in
   check
