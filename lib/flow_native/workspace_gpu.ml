@@ -311,12 +311,13 @@ let pump t =
     Condition.broadcast t.jobs_ready;
     Mutex.unlock t.jobs_lock
   in
-  let rec drain served =
+  (* only the pump's first take may be a settle; everything after it is a follow-up *)
+  let rec drain () =
     match take ~chained:false with
     | Some job ->
         serve job;
-        drain true
-    | None -> if served then follow (Unix.gettimeofday () +. follow_up) 1
+        follow (Unix.gettimeofday () +. follow_up) 1
+    | None -> ()
   (* the wait reads the queue without its lock (a racy emptiness check; the take locks) and the
      clock every 64 spins, so it neither contends with the worker nor allocates *)
   and follow until spins =
@@ -332,7 +333,7 @@ let pump t =
       follow until (spins + 1)
     end
   in
-  drain false
+  drain ()
 
 (* The frame is the pump: cook workers queue device requests, served here between frames' work. *)
 let config ?(fast = false) t : G.config = { backend = Some (proxy t); fast; policy = t.policy }
