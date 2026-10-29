@@ -591,10 +591,10 @@ Tried and stopped (2026-10-29), with what each still needs:
   reversed in a fused write: two dispatches, its recook uploads and reads nothing, 3.0e-8 from the
   CPU. An integer source or table converts to floats once per array (`device_inputs`, 8 arrays by
   identity), so a CSR or a selection the topology keeps is uploaded once. An Int `array/range` is
-  an index source too (the host's index buffer). The normals themselves stay on the CPU, blocked by four things, in
-  order. (1) `sop/normals` is a Lisp node (its body, not `Rdk.Normal_ops`), so there is no native
-  node to choose the device in, and a new native registration of a Lisp-expressible kind is
-  refused (`lib/flow_sop/AGENTS.md`). (2) The driven transform cannot inline with recompute: the
+  an index source too (the host's index buffer). The normals themselves stay on the CPU, blocked
+  by four things, in order. (1) `sop/normals` is a Lisp node (its body, not `Rdk.Normal_ops`), so
+  there is no native node to choose the device in, and a new native registration of a
+  Lisp-expressible kind is refused (`lib/flow_sop/AGENTS.md`). (2) The driven transform cannot inline with recompute: the
   static call returns its input at an identity matrix and otherwise `normals_install` (N deleted
   on every owner, point N appended), so its attribute order differs between identity and other
   frames; a fixed live structure matches one of them, and the inline contract (live equals the
