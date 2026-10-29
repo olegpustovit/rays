@@ -770,7 +770,7 @@ let readback ?index output =
           | _ -> Float_array values))
 
 (* [width] planes of [count] doubles from float32 contents, in parallel blocks *)
-let to_planes ?(checked = false) floats ~count ~width =
+let to_planes ?(checked = false) (floats : B.floats) ~count ~width =
   let finite = Atomic.make true in
   let planes = Array.init width (fun _ -> Array.create_float count) in
   (* 64K-element blocks over the shared pool; each block writes its own range of every plane *)
