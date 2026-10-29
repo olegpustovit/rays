@@ -584,6 +584,36 @@ Tried and stopped (2026-10-29), with what each still needs:
   `Float3.deferred` as `?bounds` is, a compute stage beside `bounds.rays`, its own settle and
   release), keeps the CPU as it is but is its own lifecycle. A driven transform with recomputed normals
   stays a card rebuilt per frame on the CPU.
+  Since (2026-10-29): (a) and (b) are built. A uniform that is exactly one read of data the device
+  holds (`(array/nth (sop/attr a :P) i)`, a table gathered by index) is that data's placeholder
+  (`Packed.Host.prepare_values ?resident`), and `Run.dispatch` binds a held placeholder table to its
+  buffer, with the held length as the gather count; `test_chain_gpu_native` gathers a resident P
+  reversed in a fused write: two dispatches, its recook uploads and reads nothing, 3.0e-8 from the
+  CPU. An integer source or table converts to floats once per array (`device_inputs`, 8 arrays by
+  identity), so a CSR or a selection the topology keeps is uploaded once. An Int `array/range` is
+  an index source too (the host's index buffer). The normals themselves stay on the CPU, blocked by four things, in
+  order. (1) `sop/normals` is a Lisp node (its body, not `Rdk.Normal_ops`), so there is no native
+  node to choose the device in, and a new native registration of a Lisp-expressible kind is
+  refused (`lib/flow_sop/AGENTS.md`). (2) The driven transform cannot inline with recompute: the
+  static call returns its input at an identity matrix and otherwise `normals_install` (N deleted
+  on every owner, point N appended), so its attribute order differs between identity and other
+  frames; a fixed live structure matches one of them, and the inline contract (live equals the
+  call each frame) fails at the other. Without inlining the card is rebuilt each frame on the CPU,
+  its moved P is a write in the card's body, so the chain before it does not fold and P is not
+  resident at all. Deciding that recompute recomputes at identity too (or keeps N where it is)
+  changes the Lisp-output goldens: the owner's call. (3) The normals body checks non-finite faces
+  and sums with CPU reductions (`normals_bad`, `if bad error`), which read faces and sums back; on
+  a device that check is its status, so the body needs a check form the device's status answers
+  (deferred like a fused write's guards) to keep its errors. (4) The normals write would be a lone
+  write (a table read of the chain's written P does not fold), and only fused writes are placed;
+  placement for a lone write whose source or table is resident, and `Cost.sop_device` beyond
+  noise, are needed. A gather form of the point sums (each point folds its vertices'
+  contributions in ascending vertex order, the scatter's order and adds, so the same bytes) was
+  tried on the CPU: 2.5 s a frame at 1M against 1.83 s for the scatter (one domain), so it can
+  only be the device's form, which brings back (1). Measured now (`bench_chain_frames`,
+  `CONNECTIVITY=Triangles`, `XDRIVE=":shear_xy (* (get (frame/input) :t) 0.5) :recompute_normals
+  true"`, M1 at load 5-6): 0.53 s a frame at 512 squared, 2.0 s at 1M (the normals 1.83 s of it),
+  all on the CPU.
 - A device-generated `sop/grid` P: done, above (the attempt's two dispatches had two causes, a
   count with no origin and a range built per prepare).
 
