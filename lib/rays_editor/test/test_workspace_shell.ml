@@ -2564,6 +2564,45 @@ let run_root_section () =
   check (E3.workspace !e == before) "one undo returns the root";
   E3.close !e
 
+(* A stopped, frame-driven sea whose camera follows the viewport: idle frames write nothing and cook
+   nothing, so the displayed mesh stays the same value and a path tracer would accumulate. *)
+let run_idle_follow () =
+  let e =
+    ref
+      (editor
+         {|(workspace sea
+  (graph sea :context sop [(side : int 8)]
+    (sop/transform (sop/grid :counts "Point counts" :connectivity "Triangles" :columns side :rows side)
+      :shear_xy (* 0.1 (sin t)) :recompute_normals true))
+  (graph scene :context scene
+    (let* [s (scene/geometry (ref sea) :name "Sea")
+           camera (scene/camera :eye [7.0 4.0 7.0] :target [0 0 0] :fov 40 :follow_viewport true)
+           key (scene/light :name "Key" :translate [4 8 2])]
+      (scene/root (scene/merge s camera key) :width 960 :height 640 :renderer "Path traced" :max_spp 64)))
+  (graph editor :context editor (ui/workspace (ui/split "horizontal" (ui/graph "scene") (ui/inspector)))))|})
+  and count = ref 0 in
+  let step ?(keys = []) events =
+    incr count;
+    e := E3.update !e (Test_editor_input.frame ~keys (450., 300.) events !count)
+  in
+  for _ = 1 to 6 do
+    step []
+  done;
+  step ~keys:[ Input.Space ] [ Input.Key_pressed Input.Space ];
+  for _ = 1 to 6 do
+    step []
+  done;
+  let doc = E3.workspace !e and prepared = E3.prepared !e and status = E3.Private.status_text !e in
+  for _ = 1 to 20 do
+    step []
+  done;
+  check (E3.workspace !e == doc) "an idle frame wrote the document";
+  check (Option.equal ( == ) (E3.prepared !e) prepared) "an idle frame cooked a new displayed mesh";
+  check
+    (E3.Private.status_text !e = status)
+    ("the status moved while idle: " ^ status ^ " -> " ^ E3.Private.status_text !e);
+  E3.close !e
+
 (* b on a scene object takes it out of the render without removing it (:visible), Alt-Down moves a
    merge's input, and each gesture prints what it wrote in the status strip. *)
 let run_hide_and_order () =
@@ -4319,6 +4358,7 @@ let run ?part () =
       ("run_copy_lisp", run_copy_lisp);
       ("run_hide_and_order", run_hide_and_order);
       ("run_root_section", run_root_section);
+      ("run_idle_follow", run_idle_follow);
       ("run_layouts", run_layouts);
       ("run_compose", run_compose);
       ("run_ref_picker", run_ref_picker);

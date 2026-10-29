@@ -203,7 +203,17 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
         match input with Some input -> input | None -> Flow_native.Live_frame.of_frame frame
       in
       let input =
-        { input with t = Timeline.time timeline; frame = Int64.to_int (Timeline.frame timeline) }
+        let frame = Int64.to_int (Timeline.frame timeline) in
+        (* a stopped clock is one frame, however many host frames pass: no step and no host count, or
+           every idle frame would differ and cook again *)
+        let still = Timeline.mode timeline <> Timeline.Playing in
+        {
+          input with
+          t = Timeline.time timeline;
+          frame;
+          dt = (if still then 0. else input.dt);
+          tick = (if still then frame else input.tick);
+        }
       in
       let objects, value_lanes, applied, resolve_error =
         List.fold_left
@@ -330,7 +340,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
         else (pieces, prepared_changed)
       in
       let schedule, submit =
-        Schedule.step ?live value.schedule ~graphs:(List.map snd graphs) ~effects
+        Schedule.step ?live ~input value.schedule ~graphs:(List.map snd graphs) ~effects
           ~context_changed:(Timeline.changed_context timeline_changes)
           ~force:
             (changed || value.force
