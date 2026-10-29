@@ -525,9 +525,8 @@ relowering.
 Not yet, in order of value: (1) runners shared by equal programs: an edit relowers the workspace, so
 each fused write gets a new program, a new runner (fresh buffers, every input uploaded once) and
 its emission; deterministic return only recycles within a runner, so a host-wide pool of released
-buffers by capacity is the next step; (2) extending the display binding (below) to lit triangles
-without N (normals made from P on the device: the host's are float64 sums, so the pixels would
-differ) and to colours or uv a device holds; (3) the index as an instruction (the thread index
+buffers by capacity is the next step; (2) extending the display binding (below) to colours or uv
+a device holds (lit triangles without N: done, below); (3) the index as an instruction (the thread index
 printed in MSL, SPIR-V and WGSL, counted in the CPU blocks) instead of the host's index buffer
 below; fills bound as uniforms.
 
@@ -687,7 +686,7 @@ subset) prints dev's output byte for byte. `sop_gallery` (five interleaved round
 edit to cook 0.289 against 0.526 s, lower 0.377 against 0.383 s, cook 0.828 against 0.861 s.
 
 **Display binding.** A displayed point cloud whose P (and N, if it has one) the device still holds,
-or a triangle mesh (every primitive a triangle) whose P and point N it holds, with no colour, uv,
+or a triangle mesh (every primitive a triangle) whose P and point N, if it has one, it holds, with no colour, uv,
 vertex N, piece or material to show, is drawn from the device: `Rdk_rays.Surface`
 keeps it as a device preview on the cook worker (nothing read), and `Surface.scene3` binds it on
 the initial domain through the editor's `Flow_native.Workspace_gpu.display`
@@ -728,8 +727,30 @@ pinned until close, and a dropped one could be freed while the frame that drew i
 `test_chain_frames_native` removes the node and fails unless every binding is released two frames
 later without a collection and, once its results die, the pool holds no buffer (16 stayed held
 without the release).
-Anything else (lit triangles without N, quads, a host device, a closed runner) builds the host mesh
-as before, reading P. The cooked bounds a piece keeps are read when asked (framing, the
+A lit triangle mesh without N (2026-10-29) is drawn with the normals the host display would make
+(`Rays.Mesh.recalculate_normals`: per triangle (b - a) x (c - a), a its first corner, added to its
+three points in triangle order, each sum over its length, zero at most 1e-18), made on the device
+from the resident P: `Flow_gpu.Host.normals` runs `lib/flow_gpu/shaders/normals.rays`, a compute
+stage of one lane a point over as many groups of 256 as it takes (`Raster.compute_msl ~grid`: the
+thread's index in the grid, GlobalInvocationId on SPIR-V), each lane folding the cross products of
+the triangles at its corners in ascending corner order (the order the host adds them) in float32.
+The point-to-corner CSR (a counting sort of the corners) and the corners are uploaded once per
+topology (8 kept by the corners array's identity), the normals buffer comes from the host's buffers
+by size and returns there when the display is released, and the dispatch is waited for before the
+draw (the host's queue is not the renderer's). Nothing is read back and no host copy is made. A
+point with more than 4,096 corners (the stage's loop bound) or a device failure falls back to the
+host mesh. The path tracer then traces the device mesh with these point normals (the host copy
+had traced its cusped vertex normals, `Rays_mesh.to_trace_mesh`), and counts an unwaited refit
+among its three queue slots: with three bands it had submitted a fourth command buffer and failed
+on a 1M displaced resident mesh (`recompute_normals` too, before this change). Pixels: equal to the
+host display's (float64 sums of the same float32 P) in every frame measured, so
+`test_chain_frames_native` (sixth case: a noise-displaced triangle grid without N, sheared and
+translated by frame) allows 1 in 8 bits; zeroing x of the stage's normals shows as 11. Measured (M1,
+load 5, 2026-10-29, medians of 7 frames, three runs, preparing and drawing a 256 x 256 canvas):
+512 squared 0.0021-0.0023 s a frame against 0.040-0.044 s reading P back and computing the normals
+on the host; 1M 0.0050 s against 0.109-0.136 s (the lit grid with its N: 0.0027 s, so the normals'
+dispatch and wait are about 2.3 ms).
+Anything else (quads, a host device, a closed runner) builds the host mesh as before, reading P. The cooked bounds a piece keeps are read when asked (framing, the
 selected box), not per cook, and never read P while the device holds it (below). Measured (`test_chain_frames_native`, M1, 2026-10-29): every frame of
 the animated 1M chain displays with nothing read back and the host display's pixels exactly,
 preparing and drawing a 256 x 256 canvas in 0.010 s against 0.142 s reading P back (0.0031 s
