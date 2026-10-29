@@ -104,16 +104,12 @@
     [(index : int) (u : int) (u_cells : int) (quads : bool) (reverse : bool) (alternate : bool)]
     (let* [slots (if quads 4 6) cell (int/div index slots) slot (int/mod index slots)
            row (int/div cell u_cells) column (int/mod cell u_cells)
-           a (int/add (int/mul row u) column) b (int/add a 1)
-           d (int/add a u) c (int/add d 1)
-           diagonal (or reverse (and alternate (int/eq (int/and (int/add row column) 1) 1)))]
-      (if quads
-        (cond (int/eq slot 0) a (int/eq slot 1) d (int/eq slot 2) c :else b)
-        (if diagonal
-          (cond (int/eq slot 0) a (int/eq slot 1) d (int/eq slot 2) b
-                (int/eq slot 3) b (int/eq slot 4) d :else c)
-          (cond (int/eq slot 0) a (int/eq slot 1) d (int/eq slot 2) c
-                (int/eq slot 3) a (int/eq slot 4) c :else b)))))
+           diagonal (or reverse (and alternate (int/eq (int/and (int/add row column) 1) 1)))
+           ; Bit [slot] of a mask steps the cell's corner a one column (x) or one row (y): quads
+           ; a d c b, triangles a d c / a c b, across the other diagonal a d b / b d c.
+           x_mask (cond quads 12 diagonal 44 :else 52) y_mask (cond quads 6 diagonal 50 :else 22)]
+      (int/add (int/add (int/mul row u) column)
+        (int/add (int/and (int/shr x_mask slot) 1) (int/mul (int/and (int/shr y_mask slot) 1) u)))))
 
   (defnode sop/grid :label "Grid" :version 2 :category ["Create" "Primitive"]
     :validate (grid_validate counts connectivity orientation columns rows size width height
@@ -158,25 +154,11 @@
                point_count (int/mul u_count v_count) cell_count (int/mul u_cells v_cells)
                effective_width (if (equal? width_mode "Auto") size width)
                effective_height (if (equal? height_mode "Auto") size height)
-               u_indices (array/range u_count :type int) v_indices (array/range v_count :type int)
-               u_values (exact (map (fn [(index : int)] (if (int/eq u_count 1) 0.5
-                           (/ (float index) (float u_cells)))) u_indices))
-               v_values (exact (map (fn [(index : int)] (if (int/eq v_count 1) 0.5
-                           (/ (float index) (float v_cells)))) v_indices))
-               du_values (exact (map (fn [(u : float)] (* (- u 0.5) effective_width)) u_values))
-               dv_values (exact (map (fn [(v : float)] (* (- v 0.5) effective_height)) v_values))
-               row_x (exact (map (fn [(dv : float)] (let* [value (float/fma_checked vert.x dv center_x)] value.value)) dv_values))
-               row_y (exact (map (fn [(dv : float)] (let* [value (float/fma_checked vert.y dv center_y)] value.value)) dv_values))
-               row_z (exact (map (fn [(dv : float)] (let* [value (float/fma_checked vert.z dv center_z)] value.value)) dv_values))
-               row_flags (exact (map (fn [(dv : float)]
-                 (let* [x (float/fma_checked vert.x dv center_x) y (float/fma_checked vert.y dv center_y)
-                        z (float/fma_checked vert.z dv center_z)]
-                   (if (and x.valid (and y.valid z.valid)) 0 1))) dv_values))
                fu_count (float u_count) fu_cells (float u_cells) fv_cells (float v_cells)
                u_single (int/eq u_count 1) v_single (int/eq v_count 1)
                zeros (array/float point_count 0.0)
-               ; P is a map over the points' float index, row-major, with the arithmetic of the row
-               ; and column arrays above, so the CPU bytes are those of the native grid. It is written
+               ; P is a map over the points' float index, row-major, with the arithmetic of the native
+               ; grid's row and column values, so the CPU bytes are those of the native grid. It is written
                ; at cook over zero planes: a device write it folds into makes P from the element index
                ; (float index, mod and checked fma are device forms), so nothing of P is uploaded.
                grid_point (fn [(i : float)]
@@ -188,13 +170,19 @@
                         x (float/fma_checked h.x du bx.value) y (float/fma_checked h.y du by.value)
                         z (float/fma_checked h.z du bz.value)]
                    [x.value y.value z.value]))
-               invalid_rows (exact (for [row v_indices du du_values]
-                 (if (int/eq (array/nth row_flags row) 1) 1
-                   (let* [x (float/fma_checked h.x du (array/nth row_x row))
-                          y (float/fma_checked h.y du (array/nth row_y row))
-                          z (float/fma_checked h.z du (array/nth row_z row))]
-                     (if (and x.valid (and y.valid z.valid)) 0 1)))))
-               checked_rows (error_rows invalid_rows
+               ; The finite check and the UV are maps over the point index too: a static map of that
+               ; size runs as one block kernel, where a nested for walks every point.
+               invalid_points (exact (map (fn [(i : float)]
+                 (let* [col (mod i fu_count) row (/ (- i col) fu_count)
+                        du (* (- (if u_single 0.5 (/ col fu_cells)) 0.5) effective_width)
+                        dv (* (- (if v_single 0.5 (/ row fv_cells)) 0.5) effective_height)
+                        bx (float/fma_checked vert.x dv center_x) by (float/fma_checked vert.y dv center_y)
+                        bz (float/fma_checked vert.z dv center_z)
+                        x (float/fma_checked h.x du bx.value) y (float/fma_checked h.y du by.value)
+                        z (float/fma_checked h.z du bz.value)]
+                   (if (and (and bx.valid (and by.valid bz.valid)) (and x.valid (and y.valid z.valid))) 0 1)))
+                 (array/range point_count)))
+               checked_rows (error_rows invalid_points
                  (fn [(index : int)] {:code "invalid_parameter"
                    :message "grid could not produce valid geometry"
                    :cause (list (str "grid [invalid_parameter]: Rdk.Plane_generators.grid: generated point "
@@ -207,15 +195,20 @@
                primitive_count (cond point_mode 0 row_mode v_count column_mode u_count
                                 both_mode (int/add v_count u_count) quads cell_count :else (int/mul cell_count 2))
                vertex_indices (array/range vertex_count :type int)
-               vertices (if point_mode (array/int 0)
-                 (exact (map (fn [(index : int)]
-                   (cond row_mode index
-                     column_mode (int/add (int/mul (int/mod index v_count) u_count) (int/div index v_count))
-                     both_mode (if (int/lt index point_count) index
-                       (let* [column_index (int/sub index point_count)]
-                         (int/add (int/mul (int/mod column_index v_count) u_count) (int/div column_index v_count))))
-                     :else (grid_polygon_vertex index u_count u_cells quads
-                       (equal? connectivity "Reverse triangles") (equal? connectivity "Alternating triangles")))) vertex_indices)))
+               ; The mode is chosen outside the map, so its kernel runs one mode's arithmetic.
+               vertices (cond point_mode (array/int 0)
+                 row_mode vertex_indices
+                 column_mode (exact (map (fn [(index : int)]
+                   (int/add (int/mul (int/mod index v_count) u_count) (int/div index v_count))) vertex_indices))
+                 both_mode (exact (map (fn [(index : int)]
+                   (if (int/lt index point_count) index
+                     (let* [column_index (int/sub index point_count)]
+                       (int/add (int/mul (int/mod column_index v_count) u_count) (int/div column_index v_count)))))
+                   vertex_indices))
+                 :else (exact (map (fn [(index : int)]
+                   (grid_polygon_vertex index u_count u_cells quads
+                     (equal? connectivity "Reverse triangles") (equal? connectivity "Alternating triangles")))
+                   vertex_indices)))
                offsets (exact (map (fn [(index : int)]
                  (cond row_mode (int/mul index u_count) column_mode (int/mul index v_count)
                    both_mode (if (int/le index v_count) (int/mul index u_count)
@@ -233,5 +226,8 @@
                uv_name (text/trim uv_attribute)]
           (if (text/blank? uv_name) with_normals
             (sop/with_attr with_normals uv_name
-              {:x (exact (for [v v_values u u_values] u))
-               :y (exact (for [v v_values u u_values] v))} :type vec2))))))
+              {:x (exact (map (fn [(i : float)] (if u_single 0.5 (/ (mod i fu_count) fu_cells)))
+                    (array/range actual_count)))
+               :y (exact (map (fn [(i : float)]
+                    (if v_single 0.5 (/ (/ (- i (mod i fu_count)) fu_count) fv_cells)))
+                    (array/range actual_count)))} :type vec2))))))

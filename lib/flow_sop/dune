@@ -82,6 +82,7 @@
   test_lisp_inline
   test_trace
   test_mesh_planes
+  test_grid_bulk
   test_settle)
  (deps
   nodes/prelude.rays

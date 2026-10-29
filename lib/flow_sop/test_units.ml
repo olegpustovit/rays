@@ -24,4 +24,5 @@ module _ = Test_lisp_fusion
 module _ = Test_lisp_inline
 module _ = Test_trace
 module _ = Test_mesh_planes
+module _ = Test_grid_bulk
 module _ = Test_settle
