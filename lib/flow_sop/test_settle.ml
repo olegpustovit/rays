@@ -1,7 +1,8 @@
 (* A fused write placed on a mock device leaves its dispatch in flight: the session settles it at a
-   cook's end, P's bounds are the device's while P is unread, a failed status recooks that write on the CPU (the result is the CPU cook's), and a
-   result the session drops (evicted by a later cook) releases its device outputs at the end of
-   the first cook whose root, and the previous cook's, do not hold them. *)
+   cook's end, P's bounds are the device's while P is unread, a failed status recooks that write on
+   the CPU (the result is the CPU cook's), and a result the session drops (evicted by a later cook)
+   releases its device outputs at the end of the first cook whose root, and the previous cook's, do
+   not hold them. *)
 let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
 
 let text y =
