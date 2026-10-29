@@ -47,7 +47,7 @@ let same_as_full what (doc : Document.t) =
   in
   check (view doc = view full) (what ^ ": differs from a full lowering")
 
-let run () =
+let run_cameras () =
   let doc = lower (Ws_fixture.of_text text) in
   let cam = (List.find (fun (n : KG.node) -> n.label = "cam") (scene doc)).id in
   let moved =
@@ -111,3 +111,42 @@ let run () =
   in
   check (n = 0) "the second camera write lowered or evaluated";
   same_as_full "second camera write" saved
+
+(* A card inlined from a Lisp node relowers (its literal is part of the one program): the result is
+   the one a lowering from the new text gives, node for node (residual ids are numbered by the
+   evaluation that made them, and a replayed card numbers them differently). Repeated scrubs are cheap because the
+   evaluation checks each residual of a live argument once ([guardable]), not once per path. *)
+let plan_key (doc : Document.t) =
+  Array.to_list doc.workspace.lowered.plan.nodes
+  |> List.map (fun (n : Flow.Eval.node) ->
+      ( n.kind,
+        n.site,
+        Flow.Value.key_of ~residual:(fun _ -> 0) (Flow.Eval.Record n.args) ))
+
+let run_inline () =
+  let sea = In_channel.with_open_bin "../../../sketches/gpu_sea.rays" In_channel.input_all in
+  let sdoc = lower (Ws_fixture.of_text sea) in
+  let scrub doc node key value =
+    let op =
+      E.Set_arg
+        { node; key = Kw key; sub = []; value = List.hd (Result.get_ok (Flow.Syntax.parse value)) }
+    in
+    let ws = Workspace_doc.edit catalog doc.Document.workspace.ws op |> Result.get_ok in
+    lower ~previous:doc ws
+  in
+  let doc =
+    List.fold_left
+      (fun doc (key, value) ->
+        let next = scrub doc [ "sea"; "waves" ] key value in
+        let full = lower (Ws_fixture.of_text (source next)) in
+        check (plan_key next = plan_key full) ("inline card " ^ key ^ ": plan differs from a full lowering");
+        same_as_full ("inline card " ^ key) next;
+        next)
+      sdoc
+      [ ("seed", "9"); ("octaves", "5"); ("seed", "11") ]
+  in
+  ignore doc
+
+let run () =
+  run_cameras ();
+  run_inline ()

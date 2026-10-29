@@ -906,8 +906,13 @@ let state_dependent = dependent false
 (* A deferred check's test reads frame facts only: no cooked data, fold state or zone element, so
    the card forces it with its cook's input alone *)
 let guardable v =
+  (* residual environments share values: each residual is walked once *)
+  let seen = Hashtbl.create 8 in
   let rec free = function
-    | Residual r -> Smap.for_all (fun _ v -> free v) r.renv && not (reads_elem r.rterm)
+    | Residual r ->
+        Hashtbl.mem seen r.rid
+        || (Hashtbl.replace seen r.rid ();
+            Smap.for_all (fun _ v -> free v) r.renv && not (reads_elem r.rterm))
     | Source _ | Struct (_, Ty.Array _, _) -> false
     | Deferred (ty, _) -> not (Ty.is_cooked ty)
     | List xs -> Array.for_all free xs
