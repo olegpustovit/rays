@@ -1,6 +1,7 @@
 (* An animated chain: grid > attribute_noise (offset driven by frame/input's t) > transform, 1M
    points (GRID_SIDE), cooked frame after frame as the editor does (Value_lane.resolve, then one
-   session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments; FRAMES (12).
+   session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments; FRAMES (12);
+   CONNECTIVITY (Points) the grid's.
    Prints per frame: seconds (and the resolve's), dispatches, buffers created, uploads, pipelines
    compiled, whether P is resident, the seconds and bytes read back of P's bounds (the selected box
    and framing, Geometry_view.bounds), the seconds reading P, and noise[1] (a read back); NODES=1
@@ -14,8 +15,9 @@ let drive =
 let text =
   Printf.sprintf
     "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
-     \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) \
+     %S :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) \
      (sop/transform :translate [0.0 1.0 0.0] %s))))"
+    (Option.value (Sys.getenv_opt "CONNECTIVITY") ~default:"Points")
     side side drive
     (Option.value (Sys.getenv_opt "XDRIVE") ~default:"")
 

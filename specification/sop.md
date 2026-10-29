@@ -537,7 +537,9 @@ over zero planes, after its planar N write; the arithmetic is the earlier plane 
 bytes (and every golden) are unchanged. A fused write that follows folds it (`fold_writes`) when the
 lowering has a fast device (`~device`: `gpu.fast` and a backend); without one the write stays its
 own node, cooked once and cached, since a fold would compute the grid again with every recook of a
-driven chain on the CPU. A range of `(sop/count g :points)` counts g's points (`Attribute_kernel`'s
+driven chain on the CPU; and only into a chain that writes P again (a look-ahead over the writes
+each would fold into): a chain that only adds an attribute would otherwise output P, a new array
+with every recook, and every reader of P (a transform's card) would cook again each frame. A range of `(sop/count g :points)` counts g's points (`Attribute_kernel`'s
 count source, as a fill does), so the folded record is one region. A float `array/range` source
 (`Packed.Host.index_sources`) is not built for a device record (`prepare ~index`: its length is its
 count) and the host binds its index buffer (`Host.iota`, 0., 1., ... grown geometrically, written

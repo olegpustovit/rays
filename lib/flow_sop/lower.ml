@@ -1476,7 +1476,8 @@ let indexed value =
 
 (* [device]: a fused write may run on a device. Without one an indexed earlier write (a grid's P)
    is not folded: the CPU would compute it again with every recook of the chain, where its own
-   node is cooked once and cached; a device makes it from the element index instead of an upload. *)
+   node is cooked once and cached; a device makes it from the element index instead of an upload
+   ([indexed_fold] below). *)
 let fold_writes ~device (plan : E.plan) =
   let nodes = Array.copy plan.nodes in
   let count = Array.length nodes in
@@ -1608,12 +1609,33 @@ let fold_writes ~device (plan : E.plan) =
         | _ -> None
       else None
   in
+  (* the write each write would fold into (a look-ahead: the read checks are not made) *)
+  let next = Array.make count (-1) in
+  Array.iteri
+    (fun id (w : E.node) ->
+      match (List.assoc_opt "geometry" w.args, text w "attribute") with
+      | Some (E.Deferred (_, g)), Some name when point_write w -> (
+          match back name g [] [] with Some (u, _, _, _) -> next.(u.id) <- id | None -> ())
+      | _ -> ())
+    nodes;
+  let rec writes_from id =
+    if id < 0 then [] else Option.to_list (text nodes.(id) "attribute") @ writes_from next.(id)
+  in
+  (* An indexed earlier write (a grid's P) folds only where a device makes it, and only into a chain
+     that writes its attribute again: otherwise the chain's output would carry it, a new array with
+     every recook (a driven noise would make P new each frame, and every reader of P cook again). *)
+  let indexed_fold (u : E.node) id =
+    (* a fused write's indexed entries were decided when they folded into it *)
+    List.mem_assoc fused_chain u.args
+    || (not (indexed (List.assoc "values" u.args)))
+    || (device && List.mem (text u "attribute") (List.map Option.some (writes_from id)))
+  in
   let fold id (w : E.node) =
     match (List.assoc_opt "geometry" w.args, text w "attribute") with
     | Some (E.Deferred (_, g)), Some name when point_write w -> (
         match back name g [] [] with
         | None -> ()
-        | Some (u, _, _, _) when (not device) && indexed (List.assoc "values" u.args) -> ()
+        | Some (u, _, _, _) when not (indexed_fold u id) -> ()
         | Some (u, base, chain, dels) ->
             let deleted = List.filter_map pattern dels
             and reads = Attribute_kernel.reads (List.assoc "values" w.args) in
