@@ -148,13 +148,13 @@ let run () =
       let update ~recook objects =
         let update =
           Cook.update ~live:true ~probes !current ~settings:b ~objects ~edit_error:None
-            ~effects:{ Param.no_effects with cook = recook } ~timeline_changes:[] ~timeline:stopped
-            ~frame ~frame_request:None
+            ~effects:{ Param.no_effects with cook = recook }
+            ~timeline_changes:[] ~timeline:stopped ~frame ~frame_request:None
         in
         current := update.cook;
         update
       in
-      let before = (!current).Cook.summaries in
+      let before = !current.Cook.summaries in
       for i = 1 to 5 do
         let objects = [ scrubbed i; List.nth objects 1 ] in
         let run ~recook =
@@ -162,7 +162,7 @@ let run () =
           await (fun () ->
               let u = update ~recook:(recook && !first) objects in
               first := false;
-              check ((!current).Cook.summaries == before) "a scrub step counted footers";
+              check (!current.Cook.summaries == before) "a scrub step counted footers";
               u.prepared_changed && Cook.status !current = Async_cook.Idle)
         in
         run ~recook:false;
@@ -170,7 +170,7 @@ let run () =
       done;
       await (fun () ->
           ignore (update ~recook:false objects);
-          (!current).Cook.summaries != before));
+          !current.Cook.summaries != before));
   let dependencies = Context.Dependencies.(union (one Time) (one Frame)) in
   let dynamic =
     Sop.Custom.plain ~operation:"editor_cook_clock" ~dependencies [ source ] (fun ~context inputs ->

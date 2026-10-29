@@ -375,7 +375,9 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
          pay for it again.  A scrub's steps carry no probes; the first quiet moment counts them once. *)
       let quiet = if changed then 0 else value.quiet + 1 in
       let settled = quiet >= 8 in
-      let inline = submit && ((not split) || ((not changed) && settled && probes <> value.probing)) in
+      let inline =
+        submit && ((not split) || ((not changed) && settled && probes <> value.probing))
+      in
       let probe_only =
         split && settled && (not submit) && probes <> [] && probes <> value.probing
         && framing = None

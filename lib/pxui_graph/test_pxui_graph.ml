@@ -1077,8 +1077,8 @@ let scope_field_formula () =
 let scope_elbow () =
   let w =
     ( Editor_document.Workspace_doc.of_text scope_catalog
-        "(workspace s (graph g :context value (let* [a (array/range 3) b (map (fn [i] (* i 2.0)) a) c \
-         (array/nth b 0)] c)))"
+        "(workspace s (graph g :context value (let* [a (array/range 3) b (map (fn [i] (* i 2.0)) \
+         a) c (array/nth b 0)] c)))"
     |> function
       | Ok d -> d
       | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d)) )
@@ -1102,7 +1102,7 @@ let scope_elbow () =
   check (wires <> []) "no wires";
   List.iter
     (function
-      | ((x0, _) :: (x1, _) :: _ as pts) ->
+      | (x0, _) :: (x1, _) :: _ as pts ->
           let xe, _ = List.nth pts (List.length pts - 1) in
           check (x1 >= x0) "an elbow leaves its port leftwards";
           check
@@ -1148,7 +1148,7 @@ let scope_spine () =
         && y1 > my
     | _ -> false)
     "a map's stacked function is not wired from its out-port into map's f socket";
-    (* zones are obstacles for a wire that does not enter them: [k] feeds [t], right of the zone *)
+  (* zones are obstacles for a wire that does not enter them: [k] feeds [t], right of the zone *)
   let w =
     ( Editor_document.Workspace_doc.of_text scope_catalog
         "(workspace s (graph g :context value (let* [k 2.0 ys (map (fn [i] (* i k)) (array/range \
