@@ -257,7 +257,9 @@ let sync_scope value =
                       (Layout_by_path.String_map.find_opt label))
                     (* a function or loop starts open, its body in view: c folds it *)
                   ~collapsed:(fun path -> M.find_opt path layout.collapsed = Some true)
-                  ~probe:(fun path -> Option.value ~default:0 (M.find_opt path value.probes))
+                  ~probe:
+                    (let probes = value.probes in
+                     fun path -> Option.value ~default:0 (M.find_opt path probes))
                   ~frames:(fun path ->
                     List.map
                       (fun (f : Layout_by_path.frame) -> (f.title, f.at, f.size))
@@ -265,10 +267,11 @@ let sync_scope value =
                   ?display)
           end
         in
+        (* the records outlive this frame: their closures take the owner and the cook, not [value] *)
+        let owner = node_owner_of value and cook = value.cook in
         let geometry id =
           Option.bind (Flow_sop.Network.Int_map.find_opt id lowered.compiled) (fun node_id ->
-              Option.bind (node_owner value node_id) (fun object_id ->
-                  Cook.geometry value.cook ~object_id ~node_id))
+              Option.bind (owner node_id) (fun object_id -> Cook.geometry cook ~object_id ~node_id))
         in
         (* a pick in another graph's geometry asked for its node to be selected here *)
         let scope_view, select_later =
@@ -284,8 +287,8 @@ let sync_scope value =
         let resolve =
           Flow_sop.Attribute_kernel.resolve ~geometry:(fun id ->
               Option.bind (Flow_sop.Network.Int_map.find_opt id lowered.compiled) (fun node_id ->
-                  Option.bind (node_owner value node_id) (fun object_id ->
-                      Cook.source value.cook ~object_id ~node_id)))
+                  Option.bind (owner node_id) (fun object_id ->
+                      Cook.source cook ~object_id ~node_id)))
         in
         let execution path ~probes =
           let instance =

@@ -94,18 +94,23 @@ let viewed_path value (scope : Flow_graph.Projection.scope) =
 
 (* A named pane or Navigator can show a SOP graph while the scene list is open. Its
    compiled nodes belong to an object's network, independent of the list's level. *)
-let node_owner value node_id =
+let node_owner_in ~level ~(networks : Document.network Document.Int_map.t) node_id =
   let owns (network : Document.network) = Edit_graph.find network.graph.geometry ~node_id <> None in
-  match pane_level value with
-  | Inside id
-    when Option.fold ~none:false ~some:owns (Document.Int_map.find_opt id value.doc.networks) ->
+  match level with
+  | Document.Inside id
+    when Option.fold ~none:false ~some:owns (Document.Int_map.find_opt id networks) ->
       Some id
   | _ ->
       (* ponytail: scan owners on this fallback; add an ownership index if large scenes need it. *)
       Document.Int_map.fold
         (fun id network found ->
           match found with Some _ -> found | None -> if owns network then Some id else None)
-        value.doc.networks None
+        networks None
+
+(* what a closure kept past this frame asks: the owner from the level and networks alone, never
+   the model (a kept closure over the model chains every earlier model, and their cooks, alive) *)
+let node_owner_of value = node_owner_in ~level:(pane_level value) ~networks:value.doc.networks
+let node_owner value node_id = node_owner_of value node_id
 
 let compiled_node value node_id =
   let owned =

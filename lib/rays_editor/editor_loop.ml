@@ -429,9 +429,11 @@ let update_with value frame ~inspector =
   let update =
     Flow_native.Workspace_gpu.with_backend value.host.gpu (fun gpu ->
         Flow_sop.Lower.with_images ~gpu
-          ~metadata:(fun plan id ->
-            Option.map Rays.Image.dimensions
-              (Flow_native.Workspace_images.peek value.host.images plan id))
+          ~metadata:
+            ((* the probe records keep this past the frame: the images, never [value] *)
+             let images = value.host.images in
+             fun plan id ->
+               Option.map Rays.Image.dimensions (Flow_native.Workspace_images.peek images plan id))
           (Flow_native.Workspace_images.payload value.host.images)
           (fun () ->
             Editor_frame.update ~gpu
