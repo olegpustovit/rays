@@ -119,9 +119,7 @@ let run_cameras () =
 let plan_key (doc : Document.t) =
   Array.to_list doc.workspace.lowered.plan.nodes
   |> List.map (fun (n : Flow.Eval.node) ->
-      ( n.kind,
-        n.site,
-        Flow.Value.key_of ~residual:(fun _ -> 0) (Flow.Eval.Record n.args) ))
+      (n.kind, n.site, Flow.Value.key_of ~residual:(fun _ -> 0) (Flow.Eval.Record n.args)))
 
 let run_inline () =
   let sea = In_channel.with_open_bin "../../../sketches/gpu_sea.rays" In_channel.input_all in
@@ -139,7 +137,9 @@ let run_inline () =
       (fun doc (key, value) ->
         let next = scrub doc [ "sea"; "waves" ] key value in
         let full = lower (Ws_fixture.of_text (source next)) in
-        check (plan_key next = plan_key full) ("inline card " ^ key ^ ": plan differs from a full lowering");
+        check
+          (plan_key next = plan_key full)
+          ("inline card " ^ key ^ ": plan differs from a full lowering");
         same_as_full ("inline card " ^ key) next;
         next)
       sdoc

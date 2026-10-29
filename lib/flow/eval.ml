@@ -911,8 +911,9 @@ let guardable v =
   let rec free = function
     | Residual r ->
         Hashtbl.mem seen r.rid
-        || (Hashtbl.replace seen r.rid ();
-            Smap.for_all (fun _ v -> free v) r.renv && not (reads_elem r.rterm))
+        ||
+        (Hashtbl.replace seen r.rid ();
+         Smap.for_all (fun _ v -> free v) r.renv && not (reads_elem r.rterm))
     | Source _ | Struct (_, Ty.Array _, _) -> false
     | Deferred (ty, _) -> not (Ty.is_cooked ty)
     | List xs -> Array.for_all free xs
