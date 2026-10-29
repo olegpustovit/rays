@@ -287,6 +287,7 @@ let inline_store ~form key entry =
   List.iteri (fun i k -> if i >= inline_variants then Hashtbl.remove inline_memo k) keys;
   Hashtbl.replace inline_sites site (List.filteri (fun i _ -> i < inline_variants) keys);
   Hashtbl.replace inline_memo key entry
+
 let inline_lock = Mutex.create ()
 
 type live = Input.t
@@ -1897,8 +1898,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
                   e_guards = guards;
                 }
               in
-              Mutex.protect inline_lock (fun () ->
-                  inline_store ~form:d.body.body.form.id key entry)
+              Mutex.protect inline_lock (fun () -> inline_store ~form:d.body.body.form.id key entry)
           | _ -> ());
           card c ~form d parameters ~vals ~guards v
       | exception Needs_t ->

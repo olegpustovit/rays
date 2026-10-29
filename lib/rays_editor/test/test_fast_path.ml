@@ -195,7 +195,8 @@ let run_bounded () =
   let doc = go doc 81 180 in
   let after = live () in
   ignore (Sys.opaque_identity doc);
-  check (after - before < 4_000_000)
+  check
+    (after - before < 4_000_000)
     (Printf.sprintf "100 scrubs kept %d more live words" (after - before))
 
 let run () =
