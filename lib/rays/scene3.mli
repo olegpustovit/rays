@@ -65,6 +65,9 @@ val with_depth : depth_state -> node list -> node
 val with_blend : blend -> node list -> node
 val plane : ?cull:cull -> width:float -> height:float -> unit -> node
 
+val same : t -> t -> bool
+(** The same scene by identity: meshes in constant time ({!Mesh.same}), the rest structurally. *)
+
 val with_world : World.baked -> t -> t
 (** Light the scene with a baked {!World} instead of Blinn-Phong: the camera map (or the World's
     background color) behind the geometry, image-based diffuse (SH9) and specular (prefiltered

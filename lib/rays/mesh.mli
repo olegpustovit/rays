@@ -4,6 +4,11 @@ type mode = Points | Lines | Line_strip | Line_loop | Triangles | Triangle_strip
 type t
 
 val mode : t -> mode
+
+val same : t -> t -> bool
+(** The same mesh by identity (the packed arrays physically, a device mesh by its key), in constant
+    time: unlike [=] it never walks the arrays. *)
+
 val vertices : t -> Rays_math.Vec3.t list
 val vertex_count : t -> int
 val index_count : t -> int

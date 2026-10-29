@@ -178,3 +178,24 @@ module Walk = struct
   let samples scene = scene.samples
   let world scene = scene.world
 end
+
+(* The same scene by identity, meshes in constant time ([Mesh.same]); the small rest structurally. A
+   value structural equality cannot read counts as different. *)
+let same a b =
+  let eq x y = x == y || try x = y with Invalid_argument _ -> false in
+  let rec node a b =
+    match (a, b) with
+    | Mesh (m, c, t, r, u, s), Mesh (m', c', t', r', u', s') ->
+        Mesh.same m m' && eq c c' && eq t t' && r = r' && u = u' && s = s'
+    | Instances (m, c, t, r, u, s, x), Instances (m', c', t', r', u', s', x') ->
+        Mesh.same m m' && eq c c' && eq t t' && r = r' && u = u' && s = s' && eq x x'
+    | Group x, Group y -> nodes x y
+    | Transform (m, x), Transform (m', y) -> eq m m' && nodes x y
+    | Depth_state (d, x), Depth_state (d', y) -> d = d' && nodes x y
+    | Blend_state (d, x), Blend_state (d', y) -> d = d' && nodes x y
+    | _ -> false
+  and nodes a b = a == b || (List.compare_lengths a b = 0 && List.for_all2 node a b) in
+  a == b
+  || nodes a.nodes b.nodes && eq a.lights b.lights && eq a.ambient b.ambient
+     && a.separate_specular = b.separate_specular
+     && a.samples = b.samples && eq a.world b.world
