@@ -167,6 +167,38 @@ let run_inline () =
       ([ "orrery"; "glow" ], "color", [ 1; 1 ], "0.1");
     ]
 
+(* A scrub makes a new key in every cache keyed by the card's value (the inline memo, the kernel
+   nodes of [Lower.built]); each entry retains its evaluation (about 0.2M words). Past their
+   capacities the live heap stops growing: 100 more scrubs of gpu_sea's seed add far less than one
+   retained evaluation each would. *)
+let run_bounded () =
+  let text = In_channel.with_open_bin "../../../sketches/gpu_sea.rays" In_channel.input_all in
+  let step doc i =
+    let op =
+      E.Set_arg
+        {
+          node = [ "sea"; "waves" ];
+          key = Kw "seed";
+          sub = [];
+          value = List.hd (Result.get_ok (Flow.Syntax.parse (string_of_int (100 + i))));
+        }
+    in
+    lower ~previous:doc (Workspace_doc.edit catalog doc.Document.workspace.ws op |> Result.get_ok)
+  in
+  let live () =
+    Gc.full_major ();
+    (Gc.stat ()).live_words
+  in
+  let rec go doc i until = if i > until then doc else go (step doc i) (i + 1) until in
+  let doc = go (lower (Ws_fixture.of_text text)) 1 80 in
+  let before = live () in
+  let doc = go doc 81 180 in
+  let after = live () in
+  ignore (Sys.opaque_identity doc);
+  check (after - before < 4_000_000)
+    (Printf.sprintf "100 scrubs kept %d more live words" (after - before))
+
 let run () =
   run_cameras ();
-  run_inline ()
+  run_inline ();
+  run_bounded ()
