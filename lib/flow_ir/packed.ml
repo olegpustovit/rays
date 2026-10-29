@@ -3313,7 +3313,9 @@ module Host = struct
           in
           (* a residual several uniforms read (a matrix, its inverse) is evaluated once: each
              uniform's live bindings are their values, made once per call; a binding that fails
-             made eagerly stays as it was, made only where the term reads it *)
+             made eagerly stays as it was, made only where the term reads it. So do the residuals
+             inside a record or list binding: a live matrix's rows, which every read of the matrix
+             (each row's uniform, the identity test, the inverse) made again, 2.4 ms a frame *)
           let made = Hashtbl.create 8 in
           let rec uniform residual =
             let id = E.Residual.residual_id residual in
@@ -3321,24 +3323,13 @@ module Host = struct
             | Some value -> value
             | None ->
                 let view = E.Residual.residual_view residual in
-                let changed = ref false in
                 let bindings =
-                  List.map
-                    (fun (name, value) ->
-                      match value with
-                      | E.Residual binding when not (E.state_dependent value) -> (
-                          match uniform binding with
-                          | made ->
-                              changed := true;
-                              (name, made)
-                          | exception (Diagnostic.Error _ | Unsupported | Invalid_argument _) ->
-                              (name, value))
-                      | _ -> (name, value))
-                    view.bindings
+                  List.map (fun (name, value) -> (name, binding value)) view.bindings
                 in
                 let residual =
-                  if !changed then E.Residual.with_bindings residual ~term:view.term bindings
-                  else residual
+                  if List.for_all2 (fun (_, a) (_, b) -> a == b) view.bindings bindings then
+                    residual
+                  else E.Residual.with_bindings residual ~term:view.term bindings
                 in
                 (* a uniform that is no bulk form is no kernel: it is made by reference *)
                 let value =
@@ -3349,6 +3340,19 @@ module Host = struct
                 in
                 Hashtbl.replace made id value;
                 value
+          and binding value =
+            match value with
+            | E.Residual residual when not (E.state_dependent value) -> (
+                try uniform residual
+                with Diagnostic.Error _ | Unsupported | Invalid_argument _ -> value)
+            | Record fields ->
+                let made = List.map (fun (name, v) -> (name, binding v)) fields in
+                if List.for_all2 (fun (_, a) (_, b) -> a == b) fields made then value
+                else E.Record made
+            | List items ->
+                let made = Array.map binding items in
+                if Array.for_all2 ( == ) items made then value else E.List made
+            | _ -> value
           in
           let uniforms =
             Array.map
