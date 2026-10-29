@@ -98,7 +98,7 @@ let snapshot =
     ("garland", [ ("garland", (19, 5, 90)); ("ring", (6, 1, 45)) ]);
     (* inline functions and nested maps *)
     ("kit", [ ("kit", (16, 2, 112)); ("window", (3, 0, 30)) ]);
-    ("orrery", [ ("orrery", (20, 1, 117)) ]);
+    ("orrery", [ ("orrery", (21, 1, 117)) ]);
     (* conditional arms are inputs, not scopes *)
     ("rosette", [ ("rosette", (4, 0, 32)) ]);
     ("sunflower", [ ("sunflower", (9, 1, 36)) ]);

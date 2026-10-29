@@ -608,6 +608,23 @@ let arg_request ~source (n : Flow_graph.Projection.node) ~arg_row = function
                 (Syntax_edit
                    (Flow_graph.Flow_edit.Set_arg { node = n.path; key = r.key; sub; value }))
           | Error message -> Some (Declined message))
+  | Pxui_shell.Inspector.Reset path ->
+      (* the x on a row that reads a name (a wire, a context symbol such as [t]) writes what the
+         wire's own x writes in the graph: the schema default, else a value of the row's type *)
+      Option.bind (arg_row path) (fun ((r : Flow_graph.Projection.row), sub) ->
+          if sub <> [] then None
+          else
+            let fallback =
+              match r.key with
+              | _ when r.kind = Flow_graph.Projection.Rest -> None
+              | Flow_graph.Flow_edit.Kw _ | Field _ ->
+                  Option.bind r.default (fun d ->
+                      match Flow.Syntax.parse d with Ok [ form ] -> Some form | _ -> None)
+              | _ -> Option.bind r.ty (fun ty -> Flow_graph.Flow_edit.default_for ty r.label)
+            in
+            Some
+              (Syntax_edit
+                 (Flow_graph.Flow_edit.Disconnect { node = n.path; key = r.key; fallback })))
   | _ -> None
 
 (* The inspector of the node selected in the workspace pane: its
@@ -755,7 +772,8 @@ let field_edits ~on_choice ~width ~expanded ~parameters ~ref_rows ~row_of ~arg_r
               (Array.find_index (( = ) chosen) size_names)
         | ( Pxui_shell.Inspector.Edited (name, _)
           | Pxui_shell.Inspector.Expression (name, _)
-          | Pxui_shell.Inspector.Follow name ) as ev
+          | Pxui_shell.Inspector.Follow name
+          | Pxui_shell.Inspector.Reset name ) as ev
           when String.starts_with ~prefix:arg_prefix name ->
             arg_request ~source:value.doc.workspace.ws.source n ~arg_row ev
         | Pxui_shell.Inspector.Follow path ->
@@ -771,7 +789,6 @@ let field_edits ~on_choice ~width ~expanded ~parameters ~ref_rows ~row_of ~arg_r
                     [ ".x"; ".y"; ".z"; ".w" ]
             in
             Option.bind row (follow_row value.doc.workspace.ws.source n)
-        | Pxui_shell.Inspector.Reset path when String.starts_with ~prefix:arg_prefix path -> None
         | Pxui_shell.Inspector.Edited (name, edited) -> (
             match
               List.find_opt (fun (r, _) -> "@ref:" ^ r.Flow_graph.Projection.label = name) ref_rows

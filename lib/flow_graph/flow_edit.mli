@@ -130,6 +130,10 @@ val value_call : Flow.Syntax.t -> bool
 (** A plain operator call ([(+ a b)]): a card of its own only while written in its reader, see
     {!Connect}. *)
 
+val context_sym : Flow.Syntax.t -> bool
+(** [t], the frame time: written in an input it is a value card (like {!value_call}) wired to the
+    row; disconnecting it writes the row's fallback literal. *)
+
 val value_base : string -> string
 (** The name a binding of this operator starts with: [+] is [sum], a comparison [test]. *)
 

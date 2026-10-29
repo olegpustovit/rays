@@ -126,8 +126,31 @@ let dynamic_schema () =
           assert ((Session.stats session).misses = before.misses)))
     [ 1; 4 ]
 
+(* the inspector's x on an operator row that reads the context symbol [t] disconnects it *)
+let reset_context_symbol () =
+  let open Flow in
+  let src =
+    match Syntax.parse "(workspace w (graph g :context host (let* [s (sin (* t 0.5))] s)))" with
+    | Ok src -> src
+    | Error d -> failwith (Diagnostic.to_string d)
+  in
+  let catalog = Catalog.{ version = 1; kinds = [] } in
+  let w = match Workspace.check catalog src with Some w, [] -> w | _ -> failwith "check" in
+  let scope = Flow_graph.Projection.of_graph ~folded:(fun _ -> false) catalog w "g" in
+  let n = Option.get (Flow_graph.Projection.find scope [ "g"; "s#0" ]) in
+  let a = List.hd n.rows in
+  match
+    Rays_editor__.Editor_inspect.arg_request ~source:src n
+      ~arg_row:(fun _ -> Some (a, []))
+      (Pxui_shell.Inspector.Reset "@arg:a")
+  with
+  | Some (Rays_editor__.Editor_model.Syntax_edit (Flow_graph.Flow_edit.Disconnect d)) ->
+      assert (d.node = n.path && d.key = a.key && d.fallback <> None)
+  | _ -> failwith "the x on a context-symbol row emitted no disconnect"
+
 let run () =
   dynamic_schema ();
+  reset_context_symbol ();
   let wire = Rays_editor.Renderer.wire_color in
   assert (wire (Rays_math.Color.rgb 250 250 250) = Rays_math.Color.hex_exn "#285f77");
   assert (wire (Rays_math.Color.rgb 8 8 10) = Rays_math.Color.hex_exn "#bed7e1");

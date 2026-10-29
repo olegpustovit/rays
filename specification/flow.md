@@ -565,6 +565,11 @@ selection it selects the first node.
   a binding first. Written inline it is a dashed `expr` card nested in the input like a node call, open
   or folded by its leaf's `collapsed` entry (folded by default; a `Connect` that inlines one opens it),
   and opening a call opens its whole tree.
+- **Context symbol `t`** (the frame time) written in an input of a call is a small card of its own, headed
+  `t`, with no rows and one output port wired to the row (`Flow_edit.context_sym`); the text still
+  reads `(* t 0.5)`. Disconnecting its wire writes the row's fallback literal, like any wire; the
+  inspector's x on a row that reads `t` does the same. Constants (`pi`, `true`, `false`, `nil`) stay
+  literals.
 - **Unfold** (`ƒ` on an expression row, `⇧U`): the nested call, loop or scope becomes its
   own binding in the same scope, named by `Flow_edit.fresh_name`.
 - **Fold** (`ƒ` on a wired row, `⇧F`): a binding used once is inlined into its use

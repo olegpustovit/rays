@@ -1835,7 +1835,7 @@ let run_scope () =
     [
       ("bloom", "flower", 12, 1, 84);
       ("sunflower", "sunflower", 9, 1, 36);
-      ("orrery", "orrery", 20, 1, 117);
+      ("orrery", "orrery", 21, 1, 117);
       ("facade", "facade", 14, 2, 89);
       ("kit", "kit", 16, 2, 112);
       ("tree", "tree", 9, 1, 184);

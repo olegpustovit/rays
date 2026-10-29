@@ -697,6 +697,9 @@ let value_call (e : S.t) =
   | Some h -> h <> "list" && h <> "let*" && List.mem h W.value_ops
   | None -> false
 
+(* the frame context symbol, drawn as a value card of its own while written in an input *)
+let context_sym (e : S.t) = match e.node with S.Sym "t" -> true | _ -> false
+
 (* still called what [fresh] would call it: the base, then maybe [_n] *)
 let auto_named name (e : S.t) =
   let b = sanitize (value_base (Option.get (head_sym e))) in

@@ -818,14 +818,18 @@ and node_of c ~visible ?(expr = false) ?nested (scope_path : path) (pat : S.t op
           | Some a, (E.Pos _ | E.Kw _ | E.Arm _)
             when (r.kind = Arg || r.kind = Rest)
                  && macro = None
-                 && (E.node_call a
+                 && (E.node_call a || E.context_sym a
                     || E.value_call a
                        && (expr || not (c.folded (scope_path @ [ E.nested_leaf name r.key ])))) ->
               let leaf = E.nested_leaf name r.key in
               ( { r with chip = Name leaf } :: rows,
-                inner @ node_of c ~visible ~expr:(E.value_call a) ~nested:leaf scope_path None a )
+                inner
+                @ node_of c ~visible
+                    ~expr:(E.value_call a || E.context_sym a)
+                    ~nested:leaf scope_path None a )
           | _ -> (r :: rows, inner))
-        ([], []) (rows_of c e)
+        ([], [])
+        (if nested <> None && E.context_sym e then [] else rows_of c e)
       |> fun (rows, inner) -> (List.rev rows, inner)
   in
   inner
@@ -838,7 +842,7 @@ and node_of c ~visible ?(expr = false) ?nested (scope_path : path) (pat : S.t op
           (match kind with
           | Some Let -> "let*"
           | Some _ -> Option.get (head_sym e)
-          | None -> head_label c e);
+          | None -> if nested <> None && E.context_sym e then "t" else head_label c e);
         rows;
         outputs = (if nested = None then outputs pat ty else []);
         ty;

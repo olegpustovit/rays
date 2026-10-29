@@ -113,3 +113,28 @@ let () =
          (Move_step { node = [ "g"; "@result#1#1" ]; earlier = true })));
   let gone = flat (text (ed (Delete_nodes { nodes = [ [ "g"; "@result#1" ] ] }))) in
   assert (has gone "(draw/translate [1 2 0] (draw/circle [0 0 0] 5))")
+
+let () =
+  (* the context symbol [t] written in an input is a card of its own, wired to the row; the
+     text is unchanged and disconnecting the wire writes the fallback literal *)
+  let src =
+    ok (Syntax.parse "(workspace w (graph g :context host (let* [s (sin (* t 0.5))] s)))")
+  in
+  let w =
+    match Workspace.check catalog src with
+    | Some w, [] -> w
+    | _, ds -> failwith (String.concat ";" (List.map Diagnostic.to_string ds))
+  in
+  let scope = Projection.of_graph ~folded:(fun _ -> false) catalog w "g" in
+  let t = Option.get (Projection.find scope [ "g"; "s#0#0" ]) in
+  assert (t.head = "t" && t.expr && t.rows = []);
+  let mul = Option.get (Projection.find scope [ "g"; "s#0" ]) in
+  let a = List.hd mul.rows in
+  assert (a.chip = Projection.Name "s#0#0" && Projection.sources a = [ "s#0#0" ]);
+  assert (has (text src) "(sin (* t 0.5))");
+  let off =
+    edit src
+      (Disconnect
+         { node = [ "g"; "s#0" ]; key = Pos 0; fallback = Some (List.hd (ok (Syntax.parse "0.5"))) })
+  in
+  assert (has (text off) "(sin (* 0.5 0.5))")

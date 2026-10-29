@@ -1001,3 +1001,39 @@ let () =
           slot)
       placed [ 100.; 150. ]
   done
+
+let () =
+  (* the status strip's rule between the lead and the labels: the lead takes the room the labels
+     and hints leave (not a quarter of the strip), and the rule drags to resize it *)
+  let ui = Pxui.Ui.create ~font_size:11 () in
+  let strip ?(mouse = (0., 0.)) events =
+    ignore
+      (Pxui.Ui.frame ui
+         { frame with input = { frame.input with events; pointer = mouse; size = (1000, 300) } }
+         (fun ui ->
+           Pxui_shell.Status_bar.guide ui ~bounds:(0, 272, 1000, 28) ~file:"a.rays"
+             ~text:"t 10 live, 4 cached, cook 380 ms and a status line that is long" ~kind:"Graph"
+             ~selection:"x" ~fps:60 ~context:Editor_core.Guide_context.Canvas ()))
+  in
+  let rule_x () =
+    let rec scan x =
+      if x > 999 then failwith "the status strip has no rule to drag"
+      else begin
+        let p = (float x, 285.) in
+        strip ~mouse:p [ Input.Pointer_moved p ];
+        strip ~mouse:p [];
+        if Pxui.Ui.cursor ui = Some `Horizontal_resize then x else scan (x + 1)
+      end
+    in
+    scan 0
+  in
+  let x0 = rule_x () in
+  if x0 < 300 then failwith "the status lead is cut at a quarter of the strip with room left";
+  let a = (float x0, 285.) and b = (float (x0 - 120), 285.) in
+  strip ~mouse:a [ Input.Pointer_pressed (Input.LeftButton, a) ];
+  strip ~mouse:b [ Input.Pointer_moved b ];
+  strip ~mouse:b [ Input.Pointer_released (Input.LeftButton, b) ];
+  let x1 = rule_x () in
+  if abs (x1 - (x0 - 120)) > 8 then
+    failwith (Printf.sprintf "the status rule did not follow the drag: %d to %d" x0 x1);
+  Pxui.Ui.destroy ui

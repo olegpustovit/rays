@@ -184,13 +184,55 @@ let guide ui ~bounds:(x, y, width, height) ?(file = "") ?(state = `Ok) ?(layout 
         let fx = float x and fw = float width in
         let limit = trail_start ui ~x:fx ~w:fw ~notes ~readout ~layout ~fps () in
         let has_lead = not (file = "" && text = "") in
-        let after_lead =
+        (* the lead (file, dot, status) takes what the labels and the key hints leave, at least a
+           quarter of the strip (320 at most); its rule drags it to a width kept in the strip's box
+           state, for the session *)
+        let labels_w = focus_end ui ~after:0. ?kind ?selection () in
+        let keys_w =
+          List.fold_left
+            (fun a (k, l) ->
+              a +. Ui.text_width ui ~size:(Kit.cap_size ui) k +. Ui.text_width ui l +. 16.)
+            0. keys
+        in
+        let max_w = Float.max 0. (limit -. labels_w -. 8. -. fx) in
+        let natural_limit =
+          Float.max (fx +. Float.min 320. (fw /. 4.)) (limit -. labels_w -. keys_w -. 8.)
+        in
+        let natural_end =
           if has_lead then
-            let _, _, _, _, after =
-              lead_plan ui ~x:fx ~file ~limit:(fx +. Float.min 320. (fw /. 4.)) text
-            in
+            let _, _, _, _, after = lead_plan ui ~x:fx ~file ~limit:natural_limit text in
             after
           else fx -. 5.
+        in
+        let stored () =
+          Option.bind (Ui.text_state ui bar) float_of_string_opt
+          |> Option.map (fun w -> Float.min w max_w)
+        in
+        let split =
+          Ui.box ui
+            ~flags:Ui.(clickable + blocking)
+            ~w:(Ui.Px 7.)
+            ~h:(Ui.Px (float height))
+            ~at:((match stored () with Some w -> fx +. w | None -> natural_end) +. 1., float y)
+            "workspace-guide-split"
+        in
+        let lead_limit, after_lead =
+          if not has_lead then (natural_limit, natural_end)
+          else begin
+            let sg = Ui.signal ui split in
+            let w = stored () in
+            (* the hit box sits on the rule: it follows the stored width once there is one *)
+            if sg.hovered || sg.held then Ui.request_cursor ui `Horizontal_resize;
+            if sg.pressed && w = None then
+              Ui.set_text_state ui bar (Some (string_of_float (natural_end -. fx)));
+            if sg.held then
+              Ui.set_text_state ui bar
+                (Some
+                   (string_of_float (Float.min max_w (Float.max 24. (fst sg.pointer -. 4. -. fx)))));
+            match stored () with
+            | Some w -> (fx +. w, fx +. w)
+            | None -> (natural_limit, natural_end)
+          end
         in
         let labels_end = focus_end ui ~after:after_lead ?kind ?selection () in
         let small = Kit.cap_size ui in
@@ -208,11 +250,10 @@ let guide ui ~bounds:(x, y, width, height) ?(file = "") ?(state = `Ok) ?(layout 
             let x, y, w, h = ground ui paint bounds in
             let limit = trail ui paint (x, y, w, h) ~notes ~readout ~layout ~fps () in
             ignore limit;
-            (* the file and its state take at most a quarter of the strip, then the labels *)
+            (* the file and its state, to the rule, then the labels *)
             if has_lead then begin
-              let after =
-                lead ui paint (x, y, h) ~file ~state ~limit:(x +. Float.min 320. (w /. 4.)) text
-              in
+              ignore (lead ui paint (x, y, h) ~file ~state ~limit:lead_limit text);
+              let after = after_lead in
               ignore (focus_labels ui paint (x, y, h) ~accent ~after ?kind ?selection ())
             end
             else
