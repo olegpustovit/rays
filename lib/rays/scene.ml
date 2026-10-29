@@ -1117,7 +1117,8 @@ module Layer = struct
      are cached, as layers are *)
   let borrows_device stage =
     List.exists
-      (function Scene3_layer prepared -> Scene3_native_lowering.borrows_device prepared | _ -> false)
+      (function
+        | Scene3_layer prepared -> Scene3_native_lowering.borrows_device prepared | _ -> false)
       stage.layers
 
   module Native_stage_key = struct

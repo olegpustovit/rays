@@ -208,8 +208,7 @@ let () =
          the newest and nothing is read back to make room. Settling reaches the earlier holders'
          flags without a Weak.get, which during marking would keep every one of them alive. *)
       let values = Test_program.ok (Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 1.)) in
-      let creations = R.Private.buffer_creations run
-      and thaws = R.Private.materialisations run in
+      let creations = R.Private.buffer_creations run and thaws = R.Private.materialisations run in
       for _ = 1 to 24 do
         let output = Test_program.ok (R.dispatch run values) in
         let planes = Test_program.ok (R.keep output) in
