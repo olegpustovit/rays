@@ -905,7 +905,7 @@ let bounds_of t kept =
   else
     match kept.bounds_memo with
     | Some box -> box
-    | None -> (
+    | None ->
         let n = kept.kept_count in
         let lanes = min n 1024 in
         let box =
@@ -972,7 +972,7 @@ let bounds_of t kept =
           with Diagnostic.Error _ -> None
         in
         kept.bounds_memo <- Some box;
-        box)
+        box
 
 let next_kept = Atomic.make 0
 

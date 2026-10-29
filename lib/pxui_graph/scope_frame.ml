@@ -2038,7 +2038,9 @@ module Inspect = struct
               Some n.path
           | _ -> None)
         (index_query t.geo.tiles
-           ( -.t.pan_x /. z, -.t.pan_y /. z, (float t.width -. t.pan_x) /. z,
+           ( -.t.pan_x /. z,
+             -.t.pan_y /. z,
+             (float t.width -. t.pan_x) /. z,
              (float t.height -. t.pan_y) /. z ))
 
   let wire_points t i =

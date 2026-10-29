@@ -897,7 +897,8 @@ module Frame_input = struct
   }
 end
 
-let reduce ?gpu ?(pump = fun () -> Unix.sleepf 0.0005) (input : _ Frame_input.t) value (result : _ frame_result) =
+let reduce ?gpu ?(pump = fun () -> Unix.sleepf 0.0005) (input : _ Frame_input.t) value
+    (result : _ frame_result) =
   let Frame_input.
         {
           carry_changed;
@@ -1379,7 +1380,9 @@ let reduce ?gpu ?(pump = fun () -> Unix.sleepf 0.0005) (input : _ Frame_input.t)
         | Some k when scope_name value' <> None ->
             (* only the footers drawn and the selection are counted, not every node of the graph *)
             let view = pane_view value' in
-            let shown = Pxui_graph.Scope.Inspect.footer_paths view @ Pxui_graph.Scope.selected view in
+            let shown =
+              Pxui_graph.Scope.Inspect.footer_paths view @ Pxui_graph.Scope.selected view
+            in
             List.filter_map
               (fun (path, target) -> if List.mem path shown then Some target else None)
               k.targets

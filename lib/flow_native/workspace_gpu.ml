@@ -55,7 +55,8 @@ type t = {
   jobs_lock : Mutex.t;
   jobs_ready : Condition.t;
   wake : Unix.file_descr * Unix.file_descr;
-      (** a byte per queued request: {!wait} sleeps on it, so the owner wakes at once, not at a poll *)
+      (** a byte per queued request: {!wait} sleeps on it, so the owner wakes at once, not at a poll
+      *)
   jobs : job Queue.t;
   mutable mailbox_closed : bool;
   measured : (string * int, float option) Measurements.t;
@@ -349,12 +350,16 @@ let pump ?(follow_up = true) t =
 let wait t ~timeout =
   if not (Domain.is_main_domain ()) then invalid_arg "Workspace_gpu.wait: initial domain required";
   if Mutex.protect t.jobs_lock (fun () -> Queue.is_empty t.jobs) then begin
-    (match Unix.select [ fst t.wake ] [] [] timeout with
+    match Unix.select [ fst t.wake ] [] [] timeout with
     | [], _, _ -> ()
     | _ -> (
         let drained = Bytes.create 64 in
-        try while Unix.read (fst t.wake) drained 0 64 = 64 do () done with Unix.Unix_error _ -> ())
-    | exception Unix.Unix_error (Unix.EINTR, _, _) -> ())
+        try
+          while Unix.read (fst t.wake) drained 0 64 = 64 do
+            ()
+          done
+        with Unix.Unix_error _ -> ())
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> ()
   end
 
 (* The frame is the pump: cook workers queue device requests, served here between frames' work. *)

@@ -130,7 +130,9 @@ let rec find_argument ?(in_fn = false) field id (term : W.term) =
 let fn_names graphs =
   let names = Hashtbl.create 16 in
   let rec go inside (term : W.term) =
-    (match term.node with Ref_binding (name, _) when inside -> Hashtbl.replace names name () | _ -> ());
+    (match term.node with
+    | Ref_binding (name, _) when inside -> Hashtbl.replace names name ()
+    | _ -> ());
     let inside = inside || match term.node with Fn _ -> true | _ -> false in
     List.iter (go inside) (term_children term.node)
   in
@@ -299,7 +301,9 @@ let patch catalog (workspace : W.t) op =
                                             authored;
                                             in_fn;
                                             captured =
-                                              (let names = fn_names (workspace.graphs @ workspace.defs) in
+                                              (let names =
+                                                 fn_names (workspace.graphs @ workspace.defs)
+                                               in
                                                List.exists (Hashtbl.mem names) path);
                                             before = old_value;
                                             after = new_value;
@@ -380,9 +384,7 @@ let lower_nodes (lowered : L.t) change =
 let lower_value (lowered : L.t) change =
   if change.in_fn || change.captured || lowered.states <> [] then None
   else
-    let targets =
-      Option.value ~default:[] (List.assoc_opt change.path lowered.evaluated.records)
-    in
+    let targets = Option.value ~default:[] (List.assoc_opt change.path lowered.evaluated.records) in
     let hit = ref false and swapped = ref [] in
     let is_target (v : E.value) =
       List.exists (fun (_, t) -> t == v) targets
@@ -390,9 +392,10 @@ let lower_value (lowered : L.t) change =
       match v with
       | Source (kind, _, fields) | Struct (kind, _, fields) -> (
           kind = change.kind
-          && match List.assoc_opt change.field fields with
-             | Some old -> (try old = change.before with Invalid_argument _ -> false)
-             | None -> false)
+          &&
+          match List.assoc_opt change.field fields with
+          | Some old -> ( try old = change.before with Invalid_argument _ -> false)
+          | None -> false)
       | _ -> false
     in
     let same_list a b = List.for_all2 (fun (_, x) (_, y) -> x == y) a b in
@@ -428,7 +431,8 @@ let lower_value (lowered : L.t) change =
     let named l = List.map (fun (n, v) -> (n, rw v)) l in
     let results = named lowered.evaluated.results in
     let records =
-      List.map (fun (path, vs) -> (path, List.map (fun (i, v) -> (i, rw v)) vs))
+      List.map
+        (fun (path, vs) -> (path, List.map (fun (i, v) -> (i, rw v)) vs))
         lowered.evaluated.records
     in
     let instances =

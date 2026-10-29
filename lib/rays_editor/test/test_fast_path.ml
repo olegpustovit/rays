@@ -51,22 +51,33 @@ let run () =
   let doc = lower (Ws_fixture.of_text text) in
   let cam = (List.find (fun (n : KG.node) -> n.label = "cam") (scene doc)).id in
   let moved =
-    { doc with
+    {
+      doc with
       scene =
         fst
           (Result.get_ok
              (KG.set_fields (scene doc) cam
-                [ ("eye_x", Param.Float_value 6.5); ("eye_y", Param.Float_value 3.25);
-                  ("eye_z", Param.Float_value 7.125) ])) }
+                [
+                  ("eye_x", Param.Float_value 6.5);
+                  ("eye_y", Param.Float_value 3.25);
+                  ("eye_z", Param.Float_value 7.125);
+                ]));
+    }
   in
-  let saved, n = work (fun () -> Result.get_ok (Sync.reconcile ~factories ~adopt:false doc moved)) in
+  let saved, n =
+    work (fun () -> Result.get_ok (Sync.reconcile ~factories ~adopt:false doc moved))
+  in
   check (n = 0) "a camera write lowered or evaluated";
   same_as_full "camera write" saved;
   (* a literal scrub of a card inside the closure-holding graph *)
   let op =
     E.Set_arg
-      { node = [ "g"; "b" ]; key = Kw "translate"; sub = [ 0 ];
-        value = List.hd (Result.get_ok (Flow.Syntax.parse "3")) }
+      {
+        node = [ "g"; "b" ];
+        key = Kw "translate";
+        sub = [ 0 ];
+        value = List.hd (Result.get_ok (Flow.Syntax.parse "3"));
+      }
   in
   let ws = Workspace_doc.edit catalog saved.workspace.ws op |> Result.get_ok in
   let scrubbed = lower ~previous:saved ws in
@@ -76,14 +87,27 @@ let run () =
   let sdoc = lower (Ws_fixture.of_text sea) in
   let cam = (List.find (fun (n : KG.node) -> n.label = "camera") (scene sdoc)).id in
   let moved =
-    { sdoc with
-      scene = fst (Result.get_ok (KG.set_fields (scene sdoc) cam [ ("eye_x", Param.Float_value 6.5) ])) }
+    {
+      sdoc with
+      scene =
+        fst (Result.get_ok (KG.set_fields (scene sdoc) cam [ ("eye_x", Param.Float_value 6.5) ]));
+    }
   in
-  let saved, n = work (fun () -> Result.get_ok (Sync.reconcile ~factories ~adopt:false sdoc moved)) in
+  let saved, n =
+    work (fun () -> Result.get_ok (Sync.reconcile ~factories ~adopt:false sdoc moved))
+  in
   check (n = 0) "gpu_sea camera write lowered or evaluated";
   same_as_full "gpu_sea camera write" saved;
   (* a second write finds the first one in every place the evaluation kept the camera *)
-  let again = { saved with scene = fst (Result.get_ok (KG.set_fields (scene saved) cam [ ("eye_x", Param.Float_value 5.5) ])) } in
-  let saved, n = work (fun () -> Result.get_ok (Sync.reconcile ~factories ~adopt:false saved again)) in
+  let again =
+    {
+      saved with
+      scene =
+        fst (Result.get_ok (KG.set_fields (scene saved) cam [ ("eye_x", Param.Float_value 5.5) ]));
+    }
+  in
+  let saved, n =
+    work (fun () -> Result.get_ok (Sync.reconcile ~factories ~adopt:false saved again))
+  in
   check (n = 0) "the second camera write lowered or evaluated";
   same_as_full "second camera write" saved

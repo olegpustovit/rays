@@ -28,7 +28,7 @@ type summary = (int * int) * Flow_graph.Probe.geometry
 type cooked =
   | Displayed of piece list * summary list * ((int * int) * Rdk_rays.Geometry_view.t) list
   | Probed of piece list * summary list * ((int * int) * Rdk_rays.Geometry_view.t) list
-      (* the footers' counts alone: the displayed objects are cache hits *)
+    (* the footers' counts alone: the displayed objects are cache hits *)
   | Framed of bounds option
 
 type t = {
@@ -190,8 +190,9 @@ let force value = { value with force = true }
 
 (* [objects] are the visible geometry objects as (id, network graph,
    display node); [frame_request] is (object, node) to frame. *)
-let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun () -> Unix.sleepf 0.0005) value
-    ~settings ~objects ~edit_error ~effects ~timeline_changes ~timeline ~frame ~frame_request =
+let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
+    ?(pump = fun () -> Unix.sleepf 0.0005) value ~settings ~objects ~edit_error ~effects
+    ~timeline_changes ~timeline ~frame ~frame_request =
   Flow.Phase_timer.measure "cook" (fun () ->
       if
         List.exists
@@ -332,7 +333,8 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
         Schedule.step ?live value.schedule ~graphs:(List.map snd graphs) ~effects
           ~context_changed:(Timeline.changed_context timeline_changes)
           ~force:
-            (changed || value.force || (value.await && probes <> value.probing)
+            (changed || value.force
+            || (value.await && probes <> value.probing)
             || not (Option.fold ~none:false ~some:(( == ) settings) value.settings))
           ~busy:((busy value && not value.probe_job) || framing <> None)
           ~frame
@@ -410,7 +412,8 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
           match (graphs, outputs) with
           | [], [] ->
               let pieces = List.rev reversed in
-              Ok (if probe_only then Probed (pieces, found, data) else Displayed (pieces, found, data))
+              Ok
+                (if probe_only then Probed (pieces, found, data) else Displayed (pieces, found, data))
           | (id, graph) :: graphs, (output : Session.output) :: outputs -> (
               let projection = Context.cache_projection (Node.graph_dependencies graph) context in
               let reused =
@@ -462,8 +465,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump = fun
         else (error, framing)
       in
       (* the job a probe-only submission replaced shows no error of its own *)
-      let error, framing = if probe_only then (value.error, value.framing) else (error, framing)
-      in
+      let error, framing = if probe_only then (value.error, value.framing) else (error, framing) in
       (* A fixed-step run waits for the cook it just submitted, serving the device meanwhile: a cook
      whose regions run on the GPU queues them for this (the initial) domain, so a blocking await
      would deadlock. [pump] serves and then sleeps: on a queued request (the editor's, a pipe) or
