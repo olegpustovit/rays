@@ -34,7 +34,7 @@ let glob_literal text =
       text;
     Ok (Buffer.contents out)
 
-let delete ~owner ~pattern input =
+let delete ?guard ~owner ~pattern input =
   let literal =
     pattern <> ""
     && not
@@ -61,13 +61,27 @@ let delete ~owner ~pattern input =
   Sop.Node.Build.make_geometry ~operation:"flow.delete_attr" ~version:1
     ~parameters:
       (Flow.Lisp.flat
-         (Flow.Syntax.make (Vec [ Flow.Syntax.make (Str owner); Flow.Syntax.make (Str pattern) ])))
-    ~cook_mode:(Sop.Node.Duplicate_input 0) ~dependencies:Sop.Context.Dependencies.static
-    ~inputs:[| input |]
+         (Flow.Syntax.make (Vec [ Flow.Syntax.make (Str owner); Flow.Syntax.make (Str pattern) ]))
+      ^ Option.fold ~none:"" ~some:(fun (key, _, _, _) -> ";when " ^ key) guard)
+    ~cook_mode:(Sop.Node.Duplicate_input 0)
+    ~dependencies:
+      (Option.fold ~none:Sop.Context.Dependencies.static
+         ~some:(fun (_, dependencies, _, _) -> dependencies)
+         guard)
+    ~inputs:
+      (Array.of_list (input :: Option.fold ~none:[] ~some:(fun (_, _, extra, _) -> extra) guard))
     (fun ~node_id:_ context inputs ->
-      match delete inputs.(0) (Sop.Context.cancel_token context) with
-      | Ok geometry -> Ok Sop.Node.Build.{ geometry; instances = None }
-      | Error error -> Error (Diagnostic.error ~code:"E_ATTR_DELETE" (Rdk.Error.to_string error)))
+      (* a guarded deletion decides as it cooks: the guard reads the frame or cooked data *)
+      match
+        Option.fold ~none:(Ok true) ~some:(fun (_, _, _, decide) -> decide context inputs) guard
+      with
+      | Error d -> Error d
+      | Ok false -> Ok Sop.Node.Build.{ geometry = inputs.(0); instances = None }
+      | Ok true -> (
+          match delete inputs.(0) (Sop.Context.cancel_token context) with
+          | Ok geometry -> Ok Sop.Node.Build.{ geometry; instances = None }
+          | Error error ->
+              Error (Diagnostic.error ~code:"E_ATTR_DELETE" (Rdk.Error.to_string error))))
   |> Sop.Node.Build.with_facts
        Sop.Node.
          {

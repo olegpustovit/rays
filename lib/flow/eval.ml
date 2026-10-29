@@ -1178,6 +1178,7 @@ and ev_raw c env (x : W.term) : value =
       match ev (sub c na) env a with
       | Bool v when v = (op = "or") -> Bool v
       | va -> apply_op c ~authored:x.form.id op [ (na, va); (nb, ev (sub c nb) env b) ])
+  | W.Op { op = "live?"; args = [ (na, a) ]; _ } -> Bool (is_live (ev (sub c na) env a))
   | W.Op { op; args; _ } -> apply_op c ~authored:x.form.id op (eval_named c env args)
   | W.Call_fn { fn; args; body } -> (
       let vals = evs c env "a" args in

@@ -13,12 +13,19 @@ let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string 
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 let frames = 8
 
+(* DRIVE and XDRIVE replace the noise's and the transform's arguments (XDRIVE drives shear and
+   translate in @runtest-native: identity at frame 0, then a live matrix) *)
+let drive =
+  Option.value (Sys.getenv_opt "DRIVE") ~default:":offset [(get (frame/input) :t) 0.0 0.0]"
+
+let xdrive = Option.value (Sys.getenv_opt "XDRIVE") ~default:":translate [0.0 1.0 0.0]"
+
 let text =
   Printf.sprintf
     "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
-     \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 :offset [(get \
-     (frame/input) :t) 0.0 0.0]) (sop/transform :translate [0.0 1.0 0.0]))))"
-    side side
+     \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) \
+     (sop/transform %s))))"
+    side side drive xdrive
 
 (* [cook frame] cooks the chain at that frame, as the editor does *)
 let animate ?gpu () =
@@ -186,8 +193,8 @@ let () =
                  %!"
                 count (median !display_times) (median !host_times) (frames - 1);
               Printf.printf
-                "animated grid > attribute_noise (offset t) > transform, %d points: frame CPU %.4f \
-                 s, GPU %.4f s (medians of %d), one dispatch, nothing compiled, uploaded or read \
+                "animated grid > attribute_noise %s > transform %s, %d points: frame CPU %.4f s, \
+                 GPU %.4f s (medians of %d), one dispatch, nothing compiled, uploaded or read \
                  back, largest difference %.2e\n\
                  %!"
-                count (median !cpu_times) (median !gpu_times) (frames - 1) !worst)))
+                drive xdrive count (median !cpu_times) (median !gpu_times) (frames - 1) !worst)))

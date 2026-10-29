@@ -213,6 +213,53 @@ let () =
   | _ -> failwith "frame arguments: a deferred validation does not fail the cook as refused");
   print_endline "inline cards: frame-driven vec3 groups and checks inline, failing as the call"
 
+(* A driven transform inlines: its identity and singular tests are the write's data (a point keeps
+   its P and N where they hold) and a singular matrix deletes N as the card cooks, unless nothing is
+   selected. Bytes equal the written-out call's at t = 0.125, including an identity frame (translate
+   t - 0.125) and singular ones (scale 0, with point or vertex N, an empty group). A group the cook
+   decides, and recomputed normals, keep the card a node, as before; that node cooks without the N
+   an owner lacks (it read every owner's N eagerly and failed). *)
+let () =
+  let text input call =
+    Printf.sprintf "(workspace x (graph g :context sop (sop/transform %s %s)))" input call
+  in
+  let grid = "(sop/grid :rows 5 :columns 7)" in
+  let vertex = "(sop/normals " ^ grid ^ " :owner \"Vertex\")"
+  and range = "(sop/group_range " ^ grid ^ " :start 3 :end_ 12)"
+  and empty = "(sop/group_range " ^ grid ^ " :range_mode \"Start and length\" :length 0)" in
+  List.iter
+    (fun (input, live, written, inlines) ->
+      let inline = ref false in
+      let live_outcome = outcome ~inline (text input live) in
+      if !inline <> inlines then failwith ("driven transform: " ^ live ^ " inlined wrongly");
+      match (live_outcome, outcome (text input written)) with
+      | Ok a, Ok b when a = b -> ()
+      | _ -> failwith ("driven transform: " ^ input ^ " " ^ live ^ " differs from " ^ written))
+    [
+      ( grid,
+        ":shear_xy (* t 2.0) :translate [0.0 t 0.0]",
+        ":shear_xy 0.25 :translate [0.0 0.125 0.0]",
+        true );
+      (grid, ":translate [(- t 0.125) 0.0 0.0]", "", true);
+      (grid, ":scale [(- t 0.125) 1.0 1.0]", ":scale [0.0 1.0 1.0]", true);
+      (vertex, ":shear_xz (* t 2.0)", ":shear_xz 0.25", true);
+      (vertex, ":scale [(- t 0.125) 1.0 1.0]", ":scale [0.0 1.0 1.0]", true);
+      (range, ":group \"range\" :shear_yz (* t 2.0)", ":group \"range\" :shear_yz 0.25", false);
+      ( range,
+        ":group \"range\" :scale [1.0 (- t 0.125) 1.0]",
+        ":group \"range\" :scale [1.0 0.0 1.0]",
+        false );
+      ( empty,
+        ":group \"range\" :scale [1.0 (- t 0.125) 1.0]",
+        ":group \"range\" :scale [1.0 0.0 1.0]",
+        false );
+      ( grid,
+        ":recompute_normals true :shear_xy (* t 2.0)",
+        ":recompute_normals true :shear_xy 0.25",
+        false );
+    ];
+  print_endline "inline cards: a driven transform's identity and singular frames as the call"
+
 (* Step E2: a cooked-data argument (a count of the cooked input) inlines; the body reads it as a
    value resolved once per cook, so the card cooks as the same call with that value written out
    (nested refused it, E_DATA_SOURCE), in time linear in the points. *)

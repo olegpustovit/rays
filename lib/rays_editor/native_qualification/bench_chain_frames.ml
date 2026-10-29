@@ -1,6 +1,6 @@
 (* An animated chain: grid > attribute_noise (offset driven by frame/input's t) > transform, 1M
    points (GRID_SIDE), cooked frame after frame as the editor does (Value_lane.resolve, then one
-   session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments. Prints
+   session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments; FRAMES (12). Prints
    per frame: seconds, dispatches, uploads, pipelines compiled, whether P is resident, and noise[1]
    (a read back). *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
@@ -57,7 +57,7 @@ let () =
             let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
             host
           in
-          for frame = 0 to 11 do
+          for frame = 0 to (try int_of_string (Sys.getenv "FRAMES") with Not_found -> 12) - 1 do
             let time = float frame /. 60. in
             let before = stats () and calls = !dispatches in
             let start = Unix.gettimeofday () in

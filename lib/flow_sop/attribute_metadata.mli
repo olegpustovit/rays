@@ -1,5 +1,16 @@
-val delete : owner:string -> pattern:string -> Sop.Node.t -> Sop.Node.t
-(** Topology-preserving attribute metadata operations over cooked geometry. *)
+val delete :
+  ?guard:
+    string
+    * Sop.Context.Dependencies.t
+    * Sop.Node.t list
+    * (Sop.Context.t -> Rdk.Geometry.t array -> (bool, Diagnostic.t) result) ->
+  owner:string ->
+  pattern:string ->
+  Sop.Node.t ->
+  Sop.Node.t
+(** Topology-preserving attribute metadata operations over cooked geometry. A [guard] (its cache
+    key, dependencies, further inputs and decision over every input) deletes only when it decides so
+    as the node cooks. *)
 
 val kind : owner:Rdk.Attribute.owner -> name:string -> Rdk.Geometry.t -> string option
 (** An attribute's type name (float, int, vec2-4, text, float_array, int_array), without reading its

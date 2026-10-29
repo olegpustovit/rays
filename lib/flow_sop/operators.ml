@@ -234,7 +234,7 @@ let delete_attr : Flow.Op.t =
   {
     attr with
     name = "sop/delete_attr";
-    signature = { attr.signature with kw = [ ("owner", Flow.Ty.Text) ] };
+    signature = { attr.signature with kw = [ ("owner", Flow.Ty.Text); ("when", Flow.Ty.Bool) ] };
     out = (fun _ -> Flow.Ty.geometry);
     out_args = None;
     shape = Flow.Op.Scalar;
@@ -256,7 +256,13 @@ let delete_attr : Flow.Op.t =
                 Flow.Value.fail "E_ATTR_OWNER"
                   "Attribute owner is point, vertex, primitive or detail.")
           (List.assoc_opt "owner" args));
-    body = (fun ~live:_ ~node args -> node "sop/delete_attr" args);
+    body =
+      (fun ~live:_ ~node args ->
+        (* [:when] as sop/with_attr's: a static guard decides here, a live or cooked one as it cooks *)
+        match List.assoc_opt "when" args with
+        | Some (Flow.Value.Bool false) -> List.assoc "geometry" args
+        | Some (Flow.Value.Bool true) -> node "sop/delete_attr" (List.remove_assoc "when" args)
+        | _ -> node "sop/delete_attr" args);
   }
 
 let count : Flow.Op.t =

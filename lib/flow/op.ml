@@ -1780,6 +1780,13 @@ let all =
               try Bool (List.assoc "a" args = List.assoc "b" args)
               with Invalid_argument _ -> fail "E_TYPE" "Functions cannot be compared.");
         };
+      (* whether a value is decided per frame or by cooked data (the evaluator answers while
+         lowering): a body picks a form its kernels take as data, the same value either way; a
+         value at hand is never live *)
+      mk ~category:"Compare" "live?"
+        [ ("value", Ty.Any) ]
+        (fun _ -> Ty.Bool)
+        { run = (fun ~name:_ ~node:_ _ -> Bool false) };
       mk ~category:"Text" "text/blank?"
         [ ("text", Ty.Text) ]
         (fun _ -> Ty.Bool)

@@ -73,8 +73,10 @@
   [(geo : geometry) (owner : text) (normal_matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4})
    (all : bool) (selected : (array int)) (preserve : bool)]
   ; :when, not if: the cooked test guards the write, so the card stays one program. The static
-  ; branch is outside the maps: a map captures what its term names, taken or not.
+  ; branch is outside the maps: a map captures what its term names, taken or not. A test at hand
+  ; (a body cooked behind its card) decides here: the write's arguments, read eagerly then, read N.
   (let* [present (sop/has_attr geo "N" :owner owner :type vec3)]
+    (if (and (not (live? present)) (not present)) geo
     (if all
       (sop/with_attr geo "N"
         (exact (map (fn [(n : vec3)] (transform_normal normal_matrix preserve n))
@@ -84,7 +86,23 @@
         (exact (map (fn [(n : vec3) (chosen : int)]
           (if (int/eq chosen 0) n (transform_normal normal_matrix preserve n)))
           (sop/attr geo "N" :owner owner :type vec3) selected))
-        :owner owner :type vec3 :when present))))
+        :owner owner :type vec3 :when present)))))
+;; transform_selected_normals where kept leaves every normal as it is (a live identity or singular matrix)
+(defn transform_kept_normals :context sop
+  [(geo : geometry) (owner : text) (normal_matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4}) (kept : bool)
+   (all : bool) (selected : (array int)) (preserve : bool)]
+  (let* [present (sop/has_attr geo "N" :owner owner :type vec3)]
+    (if (and (not (live? present)) (not present)) geo
+    (if all
+      (sop/with_attr geo "N"
+        (exact (map (fn [(n : vec3)] (if kept n (transform_normal normal_matrix preserve n)))
+          (sop/attr geo "N" :owner owner :type vec3)))
+        :owner owner :type vec3 :when present)
+      (sop/with_attr geo "N"
+        (exact (map (fn [(n : vec3) (chosen : int)]
+          (if (or kept (int/eq chosen 0)) n (transform_normal normal_matrix preserve n)))
+          (sop/attr geo "N" :owner owner :type vec3) selected))
+        :owner owner :type vec3 :when present)))))
 (defnode sop/transform :label "Transform" :category "Modify"
   :facts {:elementwise points :reads ["P" "N"] :writes ["P" "N"] :topology preserved :exact false}
   :validate (transform_valid mode {:r0 [m00 m01 m02 m03] :r1 [m10 m11 m12 m13] :r2 [m20 m21 m22 m23] :r3 [m30 m31 m32 m33]}
@@ -153,7 +171,36 @@
                                 (and (= matrix.r3.x 0.0) (and (= matrix.r3.y 0.0) (and (= matrix.r3.z 0.0) (= matrix.r3.w 1.0))))))]
         ; with nothing selected the write keeps every value, so only the branches that would not
         ; test the cooked count (it would make the card's structure follow cooked data)
-        (if identity in0
+        (cond
+          ; a live matrix (driven per frame, or by cooked data): the identity and singular tests are
+          ; the write's data (each point keeps its value where they hold), and a singular matrix
+          ; deletes N as the card cooks, so the structure is fixed and the write the kernels' own
+          (and (live? matrix) (not recompute_normals))
+            (let* [all (text/blank? group_name)
+                   inverse (mat4_inverse matrix)
+                   singular (= (count inverse) 0)
+                   kept (or identity singular)
+                   normal_matrix (mat4_transpose (if singular (mat4_identity) (nth inverse 0)))
+                   positions (sop/attr in0 :P)
+                   moved (if all
+                           (sop/with_attr in0 :P
+                             (exact (map (fn [(p : vec3)] (if identity p (transform_point_fused matrix p)))
+                                         positions)))
+                           (sop/with_attr in0 :P
+                             (exact (map (fn [(p : vec3) (chosen : int)]
+                                           (if (or identity (int/eq chosen 0)) p (transform_point_fused matrix p)))
+                                         positions selection))))
+                   topo (sop/topology moved)
+                   turned (transform_kept_normals
+                            (transform_kept_normals moved "point" normal_matrix kept all selection preserve_normal_length)
+                            "vertex" normal_matrix kept all (int_gather selection topo.vertex_points) preserve_normal_length)
+                   ; every point: a count of the input alone, which keeps no write chain apart
+                   chosen (if all (sop/count in0 :points) selected_count)
+                   cleared (and singular (not (int/eq chosen 0)))]
+              (sop/delete_attr (sop/delete_attr turned "N" :owner "point" :when cleared)
+                "N" :owner "vertex" :when cleared))
+          identity in0
+          :else
           ; positions is bound, not read inside the map, so the write folds over an earlier one
           (let* [all (text/blank? group_name)
                  positions (sop/attr in0 :P)

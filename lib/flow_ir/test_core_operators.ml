@@ -165,6 +165,7 @@ let cases =
     ("reverse", "(sum [x (reverse (list t 1 2))] (* x t))");
     ("take", "(sum [x (take 2 (list t 1 2))] (* x t))");
     ("drop", "(sum [x (drop 1 (list t 1 2))] (* x t))");
+    ("live?", "(+ t (if (live? 2.0) 1.0 0.0))");
   ]
 
 let times = [ -3.; -0.; 0.; 0.37; 1.; 1.9; 3.; 7.5 ]

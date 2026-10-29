@@ -614,8 +614,12 @@ module Executor = struct
               (Diagnostic.error ~span:view.term.form.span ~code:"E_KERNEL_FORM"
                  "Numeric node bodies must compile to packed kernels.")
     in
+    (* a residual shared by many (a matrix several bindings read) is validated once *)
+    let validated = Hashtbl.create 16 in
     let rec validate_value = function
+      | E.Residual residual when Hashtbl.mem validated (E.Residual.residual_id residual) -> Ok ()
       | E.Residual residual ->
+          Hashtbl.replace validated (E.Residual.residual_id residual) ();
           Result.bind (validate_residual residual) (fun () ->
               validate_fields (E.Residual.residual_view residual).bindings)
       | E.List values -> validate_array values 0

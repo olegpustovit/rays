@@ -563,9 +563,40 @@ body goes on as if the check passed, and the card cooks them with its cook's inp
 the diagnostic the written-out call refuses or fails with (a refusal is `E_LOWER`, at cook rather
 than lowering). A write folded through a card with checks takes them (`$guards`), so they still
 run when the card itself is not cooked. A body whose structure follows a per-frame argument
-otherwise (transform's identity and singular-matrix branches on a live shear), or whose live
-argument a strict kernel cannot take as data (a noise lacunarity or gain, a region constant;
-`Flow.Eval.live_kernels` asks the host), keeps the card a node of its own, rebuilt per frame.
+otherwise, or whose live argument a strict kernel cannot take as data (a noise lacunarity or gain,
+a region constant; `Flow.Eval.live_kernels` asks the host), keeps the card a node of its own,
+rebuilt per frame.
+
+A body can pick a form for a live value: `(live? x)` is true while lowering when `x` is decided per
+frame or by cooked data (a residual, a data source), false for a value at hand and wherever a
+program runs (the evaluator answers it; `Core_lower` folds it to false). Both forms must compute the
+same value. `sop/transform` uses it for a live matrix (shear, translate, scale, pivot driven): its
+identity test is per point (`(if identity p (M p))`, a uniform), the normal matrix is the inverse
+transpose or the identity when singular, each normal kept where the matrix is identity or singular,
+and N is deleted by `sop/delete_attr :when` (live or cooked, decided as the delete cooks; a static
+guard decides while lowering, as `sop/with_attr`'s) when singular and something is selected, so
+the structure is fixed and the P and N writes fold with the chain. A static matrix keeps the
+branches it had, so nothing static changes. A live record a kernel captures (the matrix) is one
+uniform per field, each that field of the one residual (`Core_region.field_residual`), and a
+kernel's uniforms are made once per dispatch from the residuals they share (`Packed.Host.prepare`:
+the matrix and its inverse are evaluated once, not per field); a fold over a list in a strict
+uniform (the inverse's pivots) is value work, made by reference. Kernel validation lowers each
+residual of a shared DAG once (it lowered every binding's subtree again: 2-30 s for a 35-point
+driven transform, 0.3 s now). Recomputed normals or a group the cook decides keep the card a node,
+as before. Bytes equal the written-out call's (`test_lisp_inline`: identity, singular with point or
+vertex N, empty and cooked groups).
+
+Measured (`test_chain_frames_native` with `XDRIVE`, M1, 2026-10-29): `grid > attribute_noise >
+transform :translate [0 t 0] :shear_xy (* t 0.5)` (identity at frame 0) is one fused write: after
+the first frame one dispatch, nothing compiled, uploaded or read back, P resident; 1M points 0.0086
+s per frame (0.0071 s for 512 squared) against 0.151 s on the CPU (was a card relowered and cooked
+on the CPU each frame), largest difference 2.6e-7. Of the 7 ms at 512 squared, about 1.6 ms is the
+dispatch as the noise-driven chain's; the rest is the matrix's Lisp evaluation per frame (its
+uniforms, the deferred validation and the two delete guards, each evaluating the matrix).
+
+A transform whose group the cook decides (a native group node upstream) is a body cooked behind its
+card: its normals' writes read every owner's N eagerly there, so a mesh without vertex N failed
+(`vertex attribute N is missing`); the guard now decides first where it is at hand (`live?`).
 
 Measured (`test_chain_frames_native`, M1, 2026-10-29): `grid > attribute_noise :offset [(get
 (frame/input) :t) 0 0] > transform` stays one fused write: after the first frame each frame is one

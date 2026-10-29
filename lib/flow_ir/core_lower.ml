@@ -1128,6 +1128,8 @@ struct
               List.fold_left (fun v name -> field statements cache source x.ty v name) start fields
             in
             if borrow then descriptor statements cache source value else value
+        (* a program runs over values at hand: nothing it reads is live *)
+        | Op { op = "live?"; _ } -> Known (V.Bool false)
         | Op { op; args; _ } -> (
             let o =
               match

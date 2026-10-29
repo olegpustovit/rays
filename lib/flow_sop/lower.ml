@@ -1350,7 +1350,7 @@ let static_attributes node id =
             | Some name, Some owner, Some kind when name <> "" ->
                 next "geometry" (`Write (owner, name, kind) :: acc)
             | _ -> List.rev (`Open :: acc))
-        | "sop/delete_attr" -> (
+        | "sop/delete_attr" when not (List.mem_assoc "when" n.args) -> (
             match (text n "attribute" "", text n "owner" "point") with
             | Some pattern, Some owner when pattern <> "" && literal_pattern pattern ->
                 next "geometry" (`Delete (owner, pattern) :: acc)
@@ -2246,13 +2246,13 @@ struct
                   (not catalog) && Option.is_none (Flow.Op.find ~extra:checked.ops name Context.sop)
                 then fail "E_DATA_SOURCE" "A host call has no checked operator.";
                 let guard =
-                  if catalog || name <> "sop/with_attr" then None
+                  if catalog || (name <> "sop/with_attr" && name <> "sop/delete_attr") then None
                   else
                     Option.map
                       (fun guard ->
                         match force_args [ ("when", guard) ] with
                         | [ (_, E.Bool b) ] -> b
-                        | _ -> fail "E_ATTR_TYPE" "sop/with_attr :when must be a bool")
+                        | _ -> fail "E_ATTR_TYPE" (name ^ " :when must be a bool"))
                       (List.assoc_opt "when" args)
                 in
                 if guard = Some false then Ok (List.assoc "geometry" args)
@@ -2664,6 +2664,12 @@ struct
       @ List.filter
           (fun id -> not (List.mem id direct))
           (Attribute_kernel.sources (geometry_arrays_data n.args))
+    else if n.kind = "sop/delete_attr" && List.mem_assoc "when" n.args then
+      let direct = geo_of [ ("geometry", List.assoc "geometry" n.args) ] in
+      direct
+      @ List.filter
+          (fun id -> not (List.mem id direct))
+          (Attribute_kernel.sources (List.assoc "when" n.args))
     else if n.kind = "sop/with_attr" || n.kind = "sop/with_group" then
       let geometry = List.assoc "geometry" n.args in
       let root =
@@ -3200,8 +3206,12 @@ struct
         let resource = is_resource node in
         (* a template node keeps its live arguments: each element forces them *)
         let args =
-          if template || kernel_data node <> None || resource || node.kind = E.card_kind then
-            node.args
+          if
+            template
+            || kernel_data node <> None
+            || resource || node.kind = E.card_kind
+            || (node.kind = "sop/delete_attr" && List.mem_assoc "when" node.args)
+          then node.args
           else List.map (fun (n, v) -> (n, at_zero v)) node.args
         in
         let args = material_args node.kind args in
@@ -3519,7 +3529,7 @@ struct
               (fun (i, source) -> if source < 0 then None else Some (i, source))
               (List.mapi (fun i source -> (i, source)) sources);
         });
-    reg Attribute_delete (fun (_node : E.node) args cid ->
+    reg Attribute_delete (fun (node : E.node) args cid ->
         let name =
           match List.assoc "attribute" args with
           | E.Text name -> name
@@ -3531,17 +3541,45 @@ struct
           | Some (E.Text owner) -> owner
           | Some _ -> fail "E_ATTR_OWNER" "An attribute owner must be text"
         in
-        let sources = geo_of args in
+        let guard = List.assoc_opt "when" args in
+        let sources = match guard with None -> geo_of args | Some _ -> deps node in
+        let arity = List.length sources in
+        (* a live or cooked [:when]: decided as the node cooks, from the frame and its sources *)
+        let guarded extra =
+          Option.map
+            (fun guard ->
+              ( Flow.Value.key_of ~residual:E.Residual.residual_id guard,
+                Attribute_kernel.dependencies guard,
+                extra,
+                fun context geometries ->
+                  let geometry id =
+                    Option.map
+                      (fun index -> geometries.(index))
+                      (List.find_index (( = ) id) sources)
+                  in
+                  Result.bind
+                    (E.Host.force_reference
+                       ~resolve:(Attribute_kernel.resolve ~context ~geometry)
+                       guard ~live:(Sop.Context.input context))
+                    (function
+                      | E.Bool b -> Ok b
+                      | _ ->
+                          Error
+                            (Diagnostic.error ~code:"E_ATTR_TYPE"
+                               "sop/delete_attr :when must be a bool")) ))
+            guard
+        in
         let factory =
-          Edit.factory ~key:"flow.delete_attr" ~label:"Delete attribute" ~category:[ "Flow" ]
-            ~arity:1 (function
-            | [ input ] -> Ok (Attribute_metadata.delete ~owner ~pattern:name input)
+          Edit.factory ~key:"flow.delete_attr" ~label:"Delete attribute" ~category:[ "Flow" ] ~arity
+            (function
+            | input :: extra when List.length extra = arity - 1 ->
+                Ok (Attribute_metadata.delete ?guard:(guarded extra) ~owner ~pattern:name input)
             | _ -> Error "Attribute deletion needs one geometry")
         in
         {
           cid;
           factory;
-          arity = 1;
+          arity;
           changes = [];
           dynamic = [];
           zone = None;

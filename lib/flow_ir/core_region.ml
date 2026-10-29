@@ -185,11 +185,27 @@ let canonical_range residual =
   | Some actual, Some builtin -> actual == builtin
   | _ -> false
 
+(* a field of a live record (a matrix chosen per frame): the field of the one residual; a live
+   vector's component stays a component of its one uniform *)
+let field_residual r value field =
+  let view = E.Residual.residual_view r in
+  let ty =
+    match view.term.ty with
+    | Ty.Record fs -> (
+        match List.assoc_opt field fs with Some ty -> ty | None -> raise Unsupported)
+    | _ -> raise Unsupported
+  in
+  let term =
+    { W.path = None; ty; node = W.Ref_binding ("$field", [ field ]); form = view.term.form }
+  in
+  E.Residual (E.Residual.with_bindings r ~term [ ("$field", value) ])
+
 let captured_value bindings name fields =
   let value = match List.assoc_opt name bindings with Some v -> v | None -> raise Unsupported in
   List.fold_left
     (fun value field ->
       match (value, field) with
+      | (E.Residual r as value), field -> field_residual r value field
       | E.Record fs, field | Struct (_, _, fs), field -> (
           match List.assoc_opt field fs with Some v -> v | None -> raise Unsupported)
       | E.Fn fn, field -> (
@@ -1063,6 +1079,17 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
                   constant = None;
                   fields = List.map (fun (key, _) -> (key, capture at name (fields @ [ key ]))) fs;
                 }
+            | E.Residual r -> (
+                (* a live record (a matrix chosen per frame) is a uniform per field *)
+                match (E.Residual.residual_view r).term.ty with
+                | Ty.Record fs ->
+                    {
+                      registers = [||];
+                      constant = None;
+                      fields =
+                        List.map (fun (key, _) -> (key, capture at name (fields @ [ key ]))) fs;
+                    }
+                | _ -> uniform at (name, fields) value)
             | _ -> uniform at (name, fields) value
           in
           Hashtbl.add captures (name, fields, !guards, !control_scope) e;

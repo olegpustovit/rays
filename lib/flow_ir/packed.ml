@@ -2617,6 +2617,12 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
           | Ok program -> force ~strict ~state ?elems ?resolve ?measure program ~live
           | Error _ -> (
               match (strict, term.node) with
+              (* a fold over a list (a matrix inverse's four pivots) is value work, not a body *)
+              | true, Loop { clauses; _ }
+                when List.for_all
+                       (fun (_, (c : W.term)) -> match c.ty with Ty.List _ -> true | _ -> false)
+                       clauses ->
+                  E.Residual.eval_term ~state ?elems ?resolve ?on_walk residual term ~live
               | true, (W.Hof ((`Map | `Reduce), _) | Loop _ | Op { op = "array/sum"; _ }) ->
                   Error
                     (Diagnostic.error ~code:"E_KERNEL_FORM"
@@ -3305,13 +3311,51 @@ module Host = struct
                    (0, if t.iteration = Zip then max_int else 1)
                    arrays)
           in
+          (* a residual several uniforms read (a matrix, its inverse) is evaluated once: each
+             uniform's live bindings are their values, made once per call; a binding that fails
+             made eagerly stays as it was, made only where the term reads it *)
+          let made = Hashtbl.create 8 in
+          let rec uniform residual =
+            let id = E.Residual.residual_id residual in
+            match Hashtbl.find_opt made id with
+            | Some value -> value
+            | None ->
+                let view = E.Residual.residual_view residual in
+                let changed = ref false in
+                let bindings =
+                  List.map
+                    (fun (name, value) ->
+                      match value with
+                      | E.Residual binding when not (E.state_dependent value) -> (
+                          match uniform binding with
+                          | made ->
+                              changed := true;
+                              (name, made)
+                          | exception (Diagnostic.Error _ | Unsupported | Invalid_argument _) ->
+                              (name, value))
+                      | _ -> (name, value))
+                    view.bindings
+                in
+                let residual =
+                  if !changed then E.Residual.with_bindings residual ~term:view.term bindings
+                  else residual
+                in
+                (* a uniform that is no bulk form is no kernel: it is made by reference *)
+                let value =
+                  match view.term.node with
+                  | W.Hof ((`Map | `Reduce), _) | Loop _ | Op { op = "array/sum"; _ } ->
+                      evaluate residual view.term
+                  | _ -> get (E.Residual.eval_term ~state ?resolve residual view.term ~live)
+                in
+                Hashtbl.replace made id value;
+                value
+          in
           let uniforms =
             Array.map
               (fun value ->
                 get
                   (force_values ~state ?resolve ~live
-                     ~residual:(fun residual ->
-                       Ok (evaluate residual (E.Residual.residual_view residual).term))
+                     ~residual:(fun residual -> Ok (uniform residual))
                      value))
               t.uniforms
           in

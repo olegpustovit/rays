@@ -71,7 +71,7 @@ let check (o : Op.t) args =
     with Diagnostic.Error d -> failwith (o.name ^ ": " ^ d.code ^ ": " ^ d.message)
 
 let () =
-  assert (List.length Op.all = 197);
+  assert (List.length Op.all = 198);
   for id = 0 to 9 do
     Ray_host.register id (fun _ -> Ray_host.miss)
   done;
