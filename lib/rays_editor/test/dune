@@ -403,6 +403,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_editor_consistency)
+ (deps ../../../sketches/gpu_sea.rays)
  (action
   (run %{exe:test_main.exe} test_editor_consistency)))
 
@@ -410,6 +411,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_editor_consistency_native)
+ (deps ../../../sketches/gpu_sea.rays)
  (locks smoke_window)
  (action
   (run %{exe:test_main.exe} test_editor_consistency_native)))

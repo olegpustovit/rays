@@ -128,9 +128,15 @@ let owner t =
           (native (X.acquire_gpu ()))
 
 (* The cost of a producer is measured on this device: pack, upload and one synchronized dispatch of the
-   program over zeroed inputs of the real shape, median of three after a warm-up. At most 64 programs
-   (by emitted kernel, and count) are kept; one that cannot run is unmeasured and keeps the CPU. *)
+   program over zeroed inputs of the real shape, median of three after a warm-up. A count is measured at
+   the power of two above it, an upper bound on its cost, so a count that drifts frame to frame (a fold's
+   survivors) reuses one measurement per size class instead of measuring again. At most 64 programs
+   (by emitted kernel, and size class) are kept; one that cannot run is unmeasured and keeps the CPU. *)
 let measure t ~fast packed ~count =
+  let count =
+    let rec up p = if p >= count then p else up (2 * p) in
+    up 1
+  in
   if not t.measurement_ready then None
   else
     (* a site's kernel entry, by its code: emitting it again (and digesting it) is per-draw work *)

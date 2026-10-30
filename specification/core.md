@@ -59,6 +59,15 @@ Each native drawing's display closure retains at most 16 literal Float
 dynamic counts and other source forms follow ordinary input evaluation.
 Uniforms and frame facts are prepared every frame.
 
+Drawing regions lower captured array producers explicitly, including stateless
+folds, so preparing a region cannot silently materialize its resident inputs on
+the CPU. Scalar-only captures retain the direct packed path and grouping.
+Immutable frame facts, including time, permit resident folds on both targets;
+they disable reuse of loop results across frames, not device residency.
+A resident fold sizes its arrays from earlier draws' counts; one a count may have outgrown
+raises `Core_exec.Resident_overflow` before the host reads it, and the loop runs again from
+its writes' values before it (`specification/gpu-codegen.md`, slots), on both targets.
+
 A **region** is a pure data loop over packed arrays. It has explicit input
 buffers, captured uniforms, an iteration domain, a checked body and output
 slots. Independent elements run in disjoint 1,024-element CPU blocks, through

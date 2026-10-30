@@ -57,23 +57,36 @@ let add_run stats run =
     held_buffers = stats.held_buffers;
   }
 
+(* A resident fold's slot: a site's Nth region in one fold run, with the compactions and retypings
+   of its array. Its buffers and placeholders come back to it as the run closes and serve the next
+   draw's run; what a run did not take (a size it outgrew) is destroyed then. [capacity] is the
+   smallest power of two above the largest count it has held, 0 before it held one: it never
+   shrinks while the site lives, so a count that falls back costs memory, never a cut. *)
+type slot = {
+  mutable capacity : int;
+  mutable kept : bool;  (** false once its site left the host: its things are destroyed at close *)
+  free : (int, Ogpu.Backend.buffer list) Hashtbl.t;  (** buffers by byte size *)
+  arrays : (int * int, Obj.t list) Hashtbl.t;  (** placeholders by (kind, length) *)
+}
+
+(* a region site's runner (None when the device refuses its form) and its slots by ordinal *)
+type site = { run : Run.t option; slots : slot Dynarray.t; mutable next : int }
+
 type t = {
   gpu : Renderer.gpu;
   pipelines : Pipelines.t;
   runners : runner Cache.t;
   created : int ref;
   retired : stats ref;
-  sites : (Flow_ir.Packed.instruction array, Run.t option) Lru.Identity_list.t;
-      (* resident fold runners by region site *)
+  sites : (Flow_ir.Packed.instruction array, site) Lru.Identity_list.t;
+      (* resident fold sites by their code *)
   mutable flight : int64 list; (* fast dispatches' epochs, newest first *)
-  pool : (int * int, Obj.t list) Hashtbl.t;
-      (* resident placeholders by (kind, length), reused each draw *)
   mutable iota : (Ogpu.Backend.buffer * int) option;
       (* 0., 1., 2., ... on the device, for range sources *)
   mutable retired_buffers : Ogpu.Backend.buffer list;
       (* outgrown index buffers, destroyed at close *)
   buffers : (int, Ogpu.Backend.buffer list) Hashtbl.t;
-      (* resident buffers by byte size, reused each draw *)
+      (* display normals' buffers by byte size *)
   mutable closed : bool;
   discarding : bool ref;  (** set by [close]: its runners' outputs are not read back *)
   domain : Domain.id;
@@ -83,6 +96,18 @@ type t = {
 }
 
 let next = Atomic.make 1
+
+(* a slot's idle things are destroyed: none is in flight, since a fold run's close waits for it *)
+let purge slot =
+  Hashtbl.iter
+    (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
+    slot.free;
+  Hashtbl.reset slot.free;
+  Hashtbl.reset slot.arrays
+
+let retire slot =
+  slot.kept <- false;
+  purge slot
 
 let create ~clock gpu =
   if not (Domain.is_main_domain ()) then invalid_arg "Host.create: initial domain required";
@@ -94,10 +119,11 @@ let create ~clock gpu =
     retired;
     sites =
       Lru.Identity_list.create ~equal:( == )
-        ~release:(fun _ -> Option.iter (fun r -> Run.close ~discard:!discarding r))
+        ~release:(fun _ site ->
+          Option.iter (Run.close ~discard:!discarding) site.run;
+          Dynarray.iter retire site.slots)
         32;
     flight = [];
-    pool = Hashtbl.create 16;
     iota = None;
     retired_buffers = [];
     buffers = Hashtbl.create 16;
@@ -278,23 +304,44 @@ let backend t : G.backend =
 
 (* A resident fold: from a region of 256 elements, a loop's regions and compactions are encoded level
    by level, committed without a wait, into buffers the fold owns; nothing is read until the loop ends.  A
-   region's value is a placeholder (zeros of its capacity, an upper bound) the table below maps,
+   region's value is a placeholder (an uninitialized array of its capacity, an upper bound) the table below maps,
    physically, to its buffer and to the count cell the device wrote, so the next region's count
    ([array/range] of an array's count) is taken on the device.  [finish] reads a count, then the
-   array. *)
+   array.
+
+   A counted region's capacity is its slot's from earlier draws when it has one (no wait), else the
+   bound. The kernel stops at its capacity and writes its count, so a count that reaches a capacity
+   below the bound may have been cut: [finish] then raises [Resident_overflow] and the loop runs
+   again, its regions from the first cut one on ([exact]) at their bounds. The device is
+   deterministic, so the ones before it repeat their uncut counts (were one cut, [exact] would move
+   before it, so the reruns end). The slots have grown at close. *)
 type placeholder = {
   key : Obj.t;
   kind : int;
   buffer : Ogpu.Backend.buffer * int;
   length : int;
   cell : (Ogpu.Backend.buffer * int) option;
+  slot : slot;
+  counted : bool;  (** its count is the device's: it sizes the slot *)
+  clamped : int;
+      (** with its length, the slot's capacity, below its bound, the run's number of its region;
+          else [max_int] *)
 }
+
+(* the smallest power of two above [n]: a count that fits leaves room, so reaching it means a cut *)
+let above n =
+  let rec go c = if c > n then c else go (2 * c) in
+  go 1
+
+(* a site keeps its first 64 ordinals' slots; a longer fold's later levels own theirs for one run *)
+let site_slots = 64
 
 let resident ~fast t : Flow_ir.Core_exec.resident =
   let module E = Flow.Eval in
   let module P = Flow_ir.Packed.Host in
   let queue = Renderer.gpu_queue t.gpu in
-  let table = ref [] and epoch = ref 0L and status_runs = ref [] in
+  let table = ref [] and epoch = ref 0L and status_runs = ref [] and scratch = ref [] in
+  let touched = ref [] and invoked = ref 0 and exact = ref max_int and cut = ref max_int in
   let pending = ref None in
   let commands () =
     match !pending with
@@ -330,22 +377,23 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
     | _ -> None
   in
   let find v = Option.bind (raw v) (fun key -> List.find_opt (fun p -> p.key == key) !table) in
-  (* a draw's capacities repeat the last draw's, so placeholders come from the host's pool *)
-  let pooled kind length make =
-    match Hashtbl.find_opt t.pool (kind, length) with
+  (* a slot's capacities repeat the last draw's, so its placeholders come back from it *)
+  let pooled slot kind length make =
+    match Hashtbl.find_opt slot.arrays (kind, length) with
     | Some (a :: rest) ->
-        Hashtbl.replace t.pool (kind, length) rest;
+        Hashtbl.replace slot.arrays (kind, length) rest;
         Obj.obj a
     | _ -> make ()
   in
-  let placeholder ty buffer cell length =
+  let placeholder ?(counted = false) ?(clamped = max_int) slot ty buffer cell length =
     let v : E.value =
       match ty with
-      | Flow.Ty.Array Flow.Ty.Int -> Int_array (pooled 0 length (fun () -> Array.make length 0))
-      | Array Float -> Float_array (pooled 1 length (fun () -> Array.make length 0.))
-      | Array Vec2 -> Vec2_array (pooled 2 length (fun () -> Array.make (2 * length) 0.))
-      | Array Vec3 -> Vec3_array (pooled 3 length (fun () -> Array.make (3 * length) 0.))
-      | _ -> Vec4_array (pooled 4 length (fun () -> Array.make (4 * length) 0.))
+      | Flow.Ty.Array Flow.Ty.Int ->
+          Int_array (pooled slot 0 length (fun () -> Array.make length 0))
+      | Array Float -> Float_array (pooled slot 1 length (fun () -> Array.create_float length))
+      | Array Vec2 -> Vec2_array (pooled slot 2 length (fun () -> Array.create_float (2 * length)))
+      | Array Vec3 -> Vec3_array (pooled slot 3 length (fun () -> Array.create_float (3 * length)))
+      | _ -> Vec4_array (pooled slot 4 length (fun () -> Array.create_float (4 * length)))
     in
     let kind =
       match v with
@@ -355,20 +403,21 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
       | Vec3_array _ -> 3
       | _ -> 4
     in
-    table := { key = Option.get (raw v); kind; buffer; length; cell } :: !table;
+    table :=
+      { key = Option.get (raw v); kind; buffer; length; cell; slot; counted; clamped } :: !table;
     v
   in
   let iota = iota t in
   let bound v = Option.map (fun p -> fst p.buffer) (find v) in
-  let give_back (b, bytes) =
-    Hashtbl.replace t.buffers bytes
-      (b :: Option.value ~default:[] (Hashtbl.find_opt t.buffers bytes))
+  let give_back slot (b, bytes) =
+    Hashtbl.replace slot.free bytes
+      (b :: Option.value ~default:[] (Hashtbl.find_opt slot.free bytes))
   in
-  (* a draw's buffer sizes repeat the last draw's; close hands them back *)
-  let alloc bytes =
-    match Hashtbl.find_opt t.buffers bytes with
+  (* a slot's buffer sizes repeat the last draw's; close hands them back *)
+  let alloc slot bytes =
+    match Hashtbl.find_opt slot.free bytes with
     | Some (b :: rest) ->
-        Hashtbl.replace t.buffers bytes rest;
+        Hashtbl.replace slot.free bytes rest;
         Ok (b, bytes)
     | _ ->
         Result.map
@@ -381,11 +430,11 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
                   usage = [ Storage; Copy_src; Copy_dst ];
                 }))
   in
-  (* a site's runner, or None when the device refuses its form; decided once per site *)
-  let run packed =
+  (* a site, its runner None when the device refuses its form; decided once per site *)
+  let site packed =
     let code = (P.view packed).code in
     match Lru.Identity_list.peek t.sites code with
-    | Some run -> run
+    | Some site -> site
     | None ->
         let ty = packed.term.ty in
         let run =
@@ -402,8 +451,22 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
                  (Emit.kernel ~fast:true packed))
         in
         (* the 32 most recent region sites are kept; a re-prepared drawing has new sites *)
-        Lru.Identity_list.add t.sites code run;
-        run
+        let site = { run; slots = Dynarray.create (); next = 0 } in
+        Lru.Identity_list.add t.sites code site;
+        site
+  in
+  (* the site's next slot in this run *)
+  let slot site =
+    if site.next = 0 then touched := site :: !touched;
+    let k = site.next in
+    site.next <- k + 1;
+    if k < Dynarray.length site.slots then Dynarray.get site.slots k
+    else
+      let slot =
+        { capacity = 0; kept = k < site_slots; free = Hashtbl.create 4; arrays = Hashtbl.create 4 }
+      in
+      if slot.kept then Dynarray.add_last site.slots slot;
+      slot
   in
   (* The device count bound of a region, if its sources allow the device to keep counts: [Error]
      when a source or uniform reads a placeholder in a form the host would evaluate over zeros or a
@@ -435,12 +498,15 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
   let invoke packed ~live =
     if (not (live_ok t)) || not fast then None
     else
-      match run packed with
+      let site = site packed in
+      match site.run with
       | None -> None
       | Some run -> (
           match device_count packed with
           | Error () -> None
           | Ok count -> (
+              let slot = slot site and order = !invoked in
+              incr invoked;
               let shapes = P.source_shapes packed in
               (* a range source is the device's index buffer: its length is known, it is not built *)
               let lengths i =
@@ -455,6 +521,30 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
               match P.prepare_values ~lengths packed ~live with
               | Error _ -> None
               | Ok values -> (
+                  (* the device sizes a counted dispatch's grid ([Run.dispatch ~count]), but bounds
+                     double each level while real counts level off, and placeholders and buffers are
+                     sized by the capacity: the slot's from earlier draws, or without one, past 256K
+                     the device count is read (4 bytes, one wait) and becomes the bound; the data
+                     stays put *)
+                  let values, clamped, length =
+                    match count with
+                    | Some _ when slot.capacity > 0 && order < !exact ->
+                        ( { values with count = min values.count slot.capacity },
+                          (if slot.capacity < values.count then order else max_int),
+                          slot.capacity )
+                    | Some (cell, mul, div) when values.count > 1 lsl 18 -> (
+                        match flush () with
+                        | Error d -> Flow.Value.raise_diagnostic d
+                        | Ok () -> (
+                            match Run.read_count queue cell ~epoch:!epoch with
+                            | Ok n ->
+                                let values =
+                                  { values with count = min values.count (n * mul / div) }
+                                in
+                                (values, max_int, values.count)
+                            | Error d -> Flow.Value.raise_diagnostic d))
+                    | _ -> (values, max_int, values.count)
+                  in
                   let resident_input = Array.exists (fun v -> find v <> None) in
                   (* from 256 elements a level's device work (no wait) is cheaper than the CPU's; a capacity past 4M
          (upper bounds double with each level) settles the counts on the host instead *)
@@ -497,9 +587,9 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
                           | Array Vec4 -> 4
                           | _ -> 1
                         in
-                        match (alloc (max 4 (values.count * width * 4)), alloc 24) with
+                        match (alloc slot (max 4 (length * width * 4)), alloc slot 24) with
                         | Error _, b | b, Error _ ->
-                            Result.iter give_back b;
+                            Result.iter (give_back slot) b;
                             None
                         | Ok output, Ok cell -> (
                             let reset_status = not (List.exists (( == ) run) !status_runs) in
@@ -514,64 +604,81 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
                                 run inputs
                             with
                             | Error diagnostic ->
-                                give_back output;
-                                give_back cell;
+                                give_back slot output;
+                                give_back slot cell;
                                 Flow.Value.raise_diagnostic diagnostic
                             | Ok _ ->
                                 if reset_status then status_runs := run :: !status_runs;
-                                Some (placeholder ty output (Some cell) values.count))))))
+                                Some
+                                  (placeholder ~counted:(count <> None) ~clamped slot ty output
+                                     (Some cell) length))))))
   in
   let compact mask =
     match find mask with
     | None -> None
     | Some p -> (
-        match (commands (), alloc (max 4 (p.length * 4)), alloc 4) with
-        | Error _, k, c ->
-            Result.iter give_back k;
-            Result.iter give_back c;
-            None
-        | _, Error _, c ->
-            Result.iter give_back c;
-            None
-        | _, k, Error _ ->
-            Result.iter give_back k;
-            None
-        | Ok commands, Ok kept, Ok total -> (
+        let kept = alloc p.slot (max 4 (p.length * 4))
+        and total = alloc p.slot 4
+        and blocks = alloc p.slot (Run.compact_blocks p.length)
+        and groups = alloc p.slot 12 in
+        let give_all () =
+          List.iter (Result.iter (give_back p.slot)) [ kept; total; blocks; groups ]
+        in
+        match (commands (), kept, total, blocks, groups) with
+        | Ok commands, Ok kept, Ok total, Ok blocks, Ok groups -> (
             match
               Run.compact commands t.pipelines ~mask:(fst p.buffer) ~count:p.length
                 ~count_in:(Option.map fst p.cell) ~kept:(fst kept) ~total:(fst total)
+                ~blocks:(fst blocks) ~groups:(fst groups)
             with
             | Error _ ->
-                give_back kept;
-                give_back total;
+                give_all ();
                 None
             | Ok () -> (
-                let v = placeholder (Flow.Ty.Array Flow.Ty.Int) kept (Some total) p.length in
-                match flush () with Ok () -> Some v | Error d -> Flow.Value.raise_diagnostic d)))
+                scratch := (p.slot, blocks) :: (p.slot, groups) :: !scratch;
+                let v = placeholder p.slot (Flow.Ty.Array Flow.Ty.Int) kept (Some total) p.length in
+                match flush () with Ok () -> Some v | Error d -> Flow.Value.raise_diagnostic d))
+        | _ ->
+            give_all ();
+            None)
   in
   (* the device keeps integers as floats, so a retyped placeholder shares its buffer and count *)
   let coerce ty v =
     match (ty, find v) with
     | Flow.Ty.Array Flow.Ty.Float, Some p ->
-        let v = E.Float_array (pooled 1 p.length (fun () -> Array.make p.length 0.)) in
+        let v = E.Float_array (pooled p.slot 1 p.length (fun () -> Array.create_float p.length)) in
         table := { p with key = Option.get (raw v); kind = 1 } :: !table;
         Some v
     | _ -> None
   in
   let get = function Ok x -> x | Error d -> Flow.Value.raise_diagnostic d in
+  let count p =
+    match p.cell with
+    | None -> p.length
+    | Some (cell, _) -> min p.length (get (Run.read_count queue cell ~epoch:!epoch))
+  in
   let finish v =
     match find v with
     | None -> v
     | Some p -> (
         get (flush ());
+        (* a count that reached a capacity below its bound may have been cut, and what the host
+           reads rests on every count before it: checked before the statuses a cut array may
+           raise *)
+        let first =
+          List.fold_left
+            (fun first p -> if p.clamped < first && count p = p.length then p.clamped else first)
+            max_int !table
+        in
+        if first < max_int then begin
+          cut := first;
+          status_runs := [];
+          raise Flow_ir.Core_exec.Resident_overflow
+        end;
         let runners = !status_runs in
         status_runs := [];
         List.iter (fun run -> get (Run.Private.check_status run ~epoch:!epoch)) runners;
-        let length =
-          match p.cell with
-          | None -> p.length
-          | Some (cell, _) -> min p.length (get (Run.read_count queue cell ~epoch:!epoch))
-        in
+        let length = count p in
         let width =
           match v with Vec2_array _ -> 2 | Vec3_array _ -> 3 | Vec4_array _ -> 4 | _ -> 1
         in
@@ -589,31 +696,53 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
     ignore (flush ());
     if !epoch > Ogpu.Backend.completed_epoch queue then
       ignore (Ogpu.Backend.complete_through queue !epoch);
-    (* the device is done with them: back to the pool (a retyped placeholder shares its buffers),
-       at most four per size and 64 sizes *)
-    if Hashtbl.length t.buffers > 64 then begin
-      Hashtbl.iter
-        (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
-        t.buffers;
-      Hashtbl.reset t.buffers
-    end;
-    List.iter
-      (fun (b, bytes) ->
-        let free = Option.value ~default:[] (Hashtbl.find_opt t.buffers bytes) in
-        if List.length free < 4 then Hashtbl.replace t.buffers bytes (b :: free)
-        else ignore (Ogpu.Backend.destroy_buffer b))
-      (List.fold_left
-         (fun bs (b, n) -> if List.exists (fun (b', _) -> b' == b) bs then bs else (b, n) :: bs)
-         []
-         (List.concat_map (fun p -> p.buffer :: Option.to_list p.cell) !table));
-    (* placeholders go back to the pool, at most four per (kind, length) and 64 shapes *)
-    if Hashtbl.length t.pool > 64 then Hashtbl.reset t.pool;
+    (* the device is done, so reading a counted slot's count waits for nothing: it is the slot's
+       history (a cut count is its capacity, so the slot doubles; the run that follows records the
+       rest) *)
     List.iter
       (fun p ->
-        let k = (p.kind, p.length) in
-        let free = Option.value ~default:[] (Hashtbl.find_opt t.pool k) in
-        if List.length free < 4 then Hashtbl.replace t.pool k (p.key :: free))
+        match p.cell with
+        | Some (cell, _) when p.counted -> (
+            match Run.read_count queue cell ~epoch:!epoch with
+            | Ok n -> p.slot.capacity <- max p.slot.capacity (above n)
+            | Error _ -> ())
+        | _ -> ())
       !table;
+    List.iter (fun site -> site.next <- 0) !touched;
+    touched := [];
+    invoked := 0;
+    exact := !cut;
+    cut := max_int;
+    (* back to their slots (a retyped placeholder shares its buffers), after what a slot kept and
+       this run did not take, a size it outgrew, is destroyed; a slot its site no longer keeps
+       destroys them *)
+    let buffers =
+      List.fold_left
+        (fun bs ((_, (b, _)) as x) ->
+          if List.exists (fun (_, (b', _)) -> b' == b) bs then bs else x :: bs)
+        []
+        (!scratch
+        @ List.concat_map
+            (fun p -> List.map (fun b -> (p.slot, b)) (p.buffer :: Option.to_list p.cell))
+            !table)
+    in
+    List.iter
+      purge
+      (List.fold_left
+         (fun slots (s, _) -> if s.kept && not (List.memq s slots) then s :: slots else slots)
+         [] buffers);
+    List.iter
+      (fun (slot, b) ->
+        if slot.kept then give_back slot b else ignore (Ogpu.Backend.destroy_buffer (fst b)))
+      buffers;
+    List.iter
+      (fun p ->
+        if p.slot.kept then
+          let k = (p.kind, p.length) in
+          Hashtbl.replace p.slot.arrays k
+            (p.key :: Option.value ~default:[] (Hashtbl.find_opt p.slot.arrays k)))
+      !table;
+    scratch := [];
     table := []
   in
   { invoke; compact; coerce; finish; close }
@@ -630,7 +759,6 @@ let close t =
       (Option.fold ~none:[] ~some:(fun (b, _) -> [ b ]) t.iota @ t.retired_buffers);
     t.iota <- None;
     t.retired_buffers <- [];
-    Hashtbl.reset t.pool;
     Hashtbl.iter
       (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
       t.buffers;
@@ -698,7 +826,13 @@ let normals t ~positions ~count ~corners =
   let bytes = count * 12 in
   let give_back out =
     let free = Option.value ~default:[] (Hashtbl.find_opt t.buffers bytes) in
-    if live t && List.length free < 4 then Hashtbl.replace t.buffers bytes (out :: free)
+    (* at most four per size and 64 sizes *)
+    if
+      live t
+      && List.length free < 4
+      && (Hashtbl.mem t.buffers bytes || Hashtbl.length t.buffers < 64)
+    then
+      Hashtbl.replace t.buffers bytes (out :: free)
     else ignore (B.destroy_buffer out)
   in
   let run out corners offsets vertices =

@@ -32,6 +32,10 @@ let run () =
         Bytes.set_int32_le initial (i * 4) (Int32.of_int (i * 10))
       done;
       get (Buffer.write_bytes buffer ~dst_offset:0L initial);
+      let arguments = get (Buffer.create ~device ~length:16L ~storage:Buffer.Shared ()) in
+      let groups = Bytes.make 16 (Char.chr 0) in
+      List.iteri (fun k v -> Bytes.set_int32_le groups (k * 4) v) [ 4l; 1l; 1l ];
+      get (Buffer.write_bytes arguments ~dst_offset:0L groups);
       let texture =
         get
           (Texture.create ~device
@@ -54,6 +58,13 @@ let run () =
       get (Compute_encoder.set_bytes encoder ~index:1 step);
       get (Compute_encoder.set_texture encoder ~index:0 texture);
       get (Compute_encoder.dispatch_threads encoder ~threads:(4, 1, 1) ~threadgroup:(1, 1, 1));
+      (* the same again, its four threadgroups of one read from a buffer *)
+      expect Invalid_argument
+        (Compute_encoder.dispatch_threadgroups_indirect encoder ~arguments ~offset:8L
+           ~threadgroup:(1, 1, 1));
+      get
+        (Compute_encoder.dispatch_threadgroups_indirect encoder ~arguments ~offset:0L
+           ~threadgroup:(1, 1, 1));
       get (Compute_encoder.end_encoding encoder);
       expect Destroyed
         (Compute_encoder.dispatch_threads encoder ~threads:(4, 1, 1) ~threadgroup:(1, 1, 1));
@@ -65,10 +76,11 @@ let run () =
       get (Command_buffer.destroy command);
       let bytes = get (Buffer.read_bytes buffer ~offset:0L ~length:16) in
       for i = 0 to 3 do
-        if Bytes.get_int32_le bytes (i * 4) <> Int32.of_int ((i * 10) + 3) then
+        if Bytes.get_int32_le bytes (i * 4) <> Int32.of_int ((i * 10) + 6) then
           fail "compute output mismatch"
       done;
       get (Buffer.destroy buffer);
+      get (Buffer.destroy arguments);
       get (Texture.destroy texture);
       get (Compute_pipeline.destroy pipeline);
       get (Function.destroy function_);

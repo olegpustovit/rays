@@ -1,8 +1,16 @@
 (library
  (name flow_web)
  (public_name rays.flow_web)
- (modules flow_web wgsl js target kernel_table text_literal compact_wgsl)
- (private_modules text_literal compact_wgsl)
+ (modules
+  flow_web
+  wgsl
+  js
+  target
+  kernel_table
+  text_literal
+  compact_wgsl
+  dispatch_wgsl)
+ (private_modules text_literal compact_wgsl dispatch_wgsl)
  (libraries flow flow_ir param rays_math scene_command parallel))
 
 ; the resident fold's compaction, generated from ../flow_gpu/shaders/compact.rays
@@ -17,6 +25,20 @@
    (progn
     (echo "let source = {wgsl|")
     (cat compact.wgsl)
+    (echo "|wgsl}\n")))))
+
+; a resident dispatch's workgroup counts, generated from ../flow_gpu/shaders/dispatch.rays
+; (lib/flow_gpu/test_raster.exe --write lib)
+
+(rule
+ (target dispatch_wgsl.ml)
+ (deps dispatch.wgsl)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {wgsl|")
+    (cat dispatch.wgsl)
     (echo "|wgsl}\n")))))
 
 (test

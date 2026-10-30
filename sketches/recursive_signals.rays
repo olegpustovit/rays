@@ -1,0 +1,217 @@
+; Full-bleed recursive rectangles. No rotation or text.
+; X lights a random selection of rectangles (reshuffled every second): all black at the left, all lit at the right.
+; Y goes from one rectangle to dense strips. Click cycles the eight color themes.
+; Pinch zooms in and out about the pointer; a two-finger scroll pans.
+; Space plays/pauses the split animation: cuts hold on a grid and snap between slots, staggered per tile.
+(workspace recursive_signals
+
+  ; Step motion: each cut holds on a 1/8 grid, then snaps to the next slot in a quick ease.
+  ; Keyed by the tile's id, not its position: a parent cut moving must not reshuffle its children's targets.
+  (defn field-slot :context value [(offset : float) (step : int)]
+    (/ (round (* 8 (noise3 [(* offset 131.7) (* step 1.37) 0.5] :seed 731))) 8))
+
+  (defn field :context value [(phase : float) (offset : float)]
+    (let* [; Per-tile tempo: some cuts tick fast, others rarely, so jumps scatter in time.
+           speed (+ 0.6 (* 4 (- (* offset 7.919) (floor (* offset 7.919)))))
+           local (+ (* phase speed) offset)
+           step (floor local)
+           blend (min 1 (* (- local step) 6))
+           ease (* (* blend blend) (- 3 (* 2 blend)))
+           from (field-slot offset step)]
+      (+ from (* (- (field-slot offset (+ step 1)) from) ease))))
+
+  (defn scheme-hash :context value [(scheme : int)]
+    (int/and (+ (int/mul (+ scheme 1) 1103515245) 12345) 4611686018427387903))
+
+  (defn palette-color :context value [(scheme : int) (tile : int)]
+    (let* [theme (mod scheme 8)
+           slot (mod (int/div (scheme-hash tile) 65536) 8)]
+      (cond
+        ; mono with one signal orange
+        (= theme 0)
+        (cond (< slot 3) (color/hsl 0 0 0.84)
+              (< slot 5) (color/hsl 0 0 0.45)
+              (= slot 5) (color/hsl 14 1.0 0.55)
+              (= slot 6) (color/hsl 0 0 0.16)
+              :else (color/hsl 0 0 0.98))
+        ; Every theme keeps one shape: a lead hue, a second hue, one hot accent, a deep shade, paper.
+        (= theme 1)
+        (cond (< slot 3) (color/hsl 22 1.0 0.54)
+              (< slot 5) (color/hsl 210 0.10 0.62)
+              (= slot 5) (color/hsl 50 1.0 0.58)
+              (= slot 6) (color/hsl 220 0.30 0.18)
+              :else (color/hsl 40 0.06 0.93))
+        (= theme 2)
+        (cond (< slot 3) (color/hsl 152 0.85 0.52)
+              (< slot 5) (color/hsl 176 0.70 0.40)
+              (= slot 5) (color/hsl 330 0.92 0.60)
+              (= slot 6) (color/hsl 168 0.55 0.15)
+              :else (color/hsl 90 0.08 0.91))
+        (= theme 3)
+        (cond (< slot 3) (color/hsl 218 1.0 0.58)
+              (< slot 5) (color/hsl 255 0.65 0.72)
+              (= slot 5) (color/hsl 345 0.95 0.60)
+              (= slot 6) (color/hsl 235 0.55 0.20)
+              :else (color/hsl 40 0.05 0.94))
+        ; blueprint
+        (= theme 4)
+        (cond (< slot 3) (color/hsl 212 0.85 0.46)
+              (< slot 5) (color/hsl 200 0.35 0.80)
+              (= slot 5) (color/hsl 50 1.0 0.55)
+              (= slot 6) (color/hsl 216 0.70 0.15)
+              :else (color/hsl 210 0.15 0.95))
+        ; cyan and amber
+        (= theme 5)
+        (cond (< slot 3) (color/hsl 190 0.95 0.60)
+              (< slot 5) (color/hsl 38 1.0 0.56)
+              (= slot 5) (color/hsl 8 0.95 0.53)
+              (= slot 6) (color/hsl 205 0.65 0.24)
+              :else (color/hsl 42 0.12 0.92))
+        ; dusk: violet and orange
+        (= theme 6)
+        (cond (< slot 3) (color/hsl 278 0.70 0.56)
+              (< slot 5) (color/hsl 26 1.0 0.60)
+              (= slot 5) (color/hsl 172 0.90 0.50)
+              (= slot 6) (color/hsl 265 0.55 0.18)
+              :else (color/hsl 35 0.30 0.92))
+        ; acid: yellow on charcoal
+        :else
+        (cond (< slot 3) (color/hsl 62 1.0 0.55)
+              (< slot 5) (color/hsl 0 0 0.24)
+              (= slot 5) (color/hsl 300 0.90 0.62)
+              (= slot 6) (color/hsl 0 0 0.09)
+              :else (color/hsl 60 0.15 0.94)))))
+
+  (defn split-level :context value [(boxes : (array vec3)) (depth : int) (density : float) (phase : float)]
+    (let* [raw (map (fn [i]
+                      (let* [parent (int/div (int i) 4)
+                             child (mod (int/div (int i) 2) 2)
+                             part (mod i 2)
+                             p (array/nth boxes (* parent 2))
+                             s (array/nth boxes (+ (* parent 2) 1))
+                             tile (int p.z)
+                             hash (int/and (int/xor (int/mul tile 73856093)
+                                                   (int/mul (int/mul tile tile) 19349663))
+                                           4611686018427387903)
+                             chance (/ (mod hash 10000) 10000)
+                             splitting (or (< depth 3) (< chance (+ 0.72 (* density 0.24))))
+                             split-x (>= s.x 4)
+                             split-y (>= s.y 4)
+                             ratio (+ 0.03 (* 0.94 (field phase chance)))
+                             orientation (/ (mod (int/div hash 10000) 65536) 65535)
+                             ; Favor long horizontal leaves, without imposing a column grid.
+                             horizontal (< orientation 0.30)
+                             first (int (max 2
+                                             (min (- (if horizontal s.x s.y) 2)
+                                                  (int (* (if horizontal s.x s.y) ratio)))))]
+                        (if (not (and splitting (if horizontal split-x split-y)))
+                            (if (= child 0)
+                                (if (= part 0) p s)
+                                (if (= part 0) p [-1 -1 0]))
+                            (if (= part 0)
+                                [(if (and horizontal (= child 1)) (+ p.x first) p.x) (if (and (not horizontal) (= child 1)) (+ p.y first) p.y) (+ (* p.z 2) child)]
+                                [(if horizontal (if (= child 0) first (- s.x first)) s.x) (if horizontal s.y (if (= child 0) first (- s.y first))) 0]))))
+                    (array/range (* (array/count boxes) 2)))
+           kept (filter (fn [i]
+                          (let* [s (array/nth raw (+ (* (int i) 2) 1))] (>= s.x 0)))
+                        (-> raw
+                            (array/count)
+                            (int/div 2)
+                            (array/range)))]
+      (map (fn [i]
+             (array/nth raw
+                        (+ (* (int (array/nth kept (int/div (int i) 2))) 2)
+                           (mod i 2))))
+           (array/range (* (array/count kept) 2)))))
+
+  (graph model :context host
+    (state [previous {:scheme 0 :control 0.5 :zoom 1.0 :x 0.0 :y 0.0}]
+           (let* [events (get (frame/input) :events)
+                  w (frame/width)
+                  h (frame/height)
+                  px (pointer/x)
+                  py (pointer/y)
+                  ; Pinch zooms about the pointer; a two-finger scroll (or a wheel) pans.
+                  view (fold [view {:zoom previous.zoom :x previous.x :y previous.y}]
+                             [event events]
+                         (cond
+                           (equal? event.kind "pinched")
+                           (let* [zoom (max 0.1 (min 64.0 (* view.zoom event.scale)))
+                                  f (/ zoom view.zoom)]
+                             {:zoom zoom
+                              :x (+ px (* (- view.x px) f))
+                              :y (+ py (* (- view.y py) f))})
+                           (equal? event.kind "scrolled")
+                           {:zoom view.zoom
+                            :x (- view.x (* event.delta.x 16))
+                            :y (+ view.y (* event.delta.y 16))}
+                           :else view))]
+             {:scheme (+ previous.scheme
+                         (if (fold [pressed false]
+                                   [event events]
+                               (or pressed
+                                   (and (equal? event.kind "pointer-pressed")
+                                        (equal? event.button "left"))))
+                             1
+                             0))
+              :control (/ (max 0 (min w px))
+                          (max 1 w))
+              ; Clamped so some of the picture always stays in the window.
+              :zoom view.zoom
+              :x (max (- 40 (* w view.zoom)) (min (- w 40) view.x))
+              :y (max (- 40 (* h view.zoom)) (min (- h 40) view.y))})))
+
+  (graph picture :context draw
+    (let* [model (ref model)
+           density (/ (max 0 (min (frame/height) (pointer/y)))
+                      (max 1 (frame/height)))
+           iterations (int (* density 32))
+           phase (* t 0.25)
+           boxes (fold [boxes (array/concat (array/vec3 1 [0 0 1])
+                                            (array/vec3 1 [(frame/width) (frame/height) 0]))]
+                       [depth (range iterations)]
+                   (split-level boxes depth density phase))
+           indices (-> boxes
+                       (array/count)
+                       (int/div 2)
+                       (array/range))
+           positions (map (fn [i]
+                            (let* [p (array/nth boxes (* (int i) 2))] [p.x p.y 0]))
+                          indices)
+           sizes (map (fn [i]
+                        (let* [s (array/nth boxes (+ (* (int i) 2) 1))]
+                          [(max 1 (- s.x 1)) (max 1 (- s.y 1)) 0]))
+                      indices)
+           palette (map (fn [i]
+                          (let* [p (array/nth boxes (* (int i) 2))]
+                            (palette-color model.scheme (int p.z))))
+                        indices)
+           ; Reshuffled every second: which tiles are lit flips on a hard tick.
+           second (floor t)
+           windows (map (fn [i]
+                          (let* [p (array/nth boxes (* (int i) 2))
+                                 ; masked to 31 bits: an unmasked 62-bit key overflows scheme-hash
+                                 hash (scheme-hash (int/and (int/xor (int/mul (int p.z) 73856093)
+                                                                     (int/mul (+ second 1) 19349663))
+                                                            2147483647))]
+                            (/ (mod (int/div hash 65536) 10000) 10000)))
+                        indices)
+           cutoff (- 1 model.control)
+           colors (map (fn [color window]
+                         (if (or (<= model.control 0)
+                                 (and (< model.control 1) (< window cutoff)))
+                             (color/hsl 0 0 0) color))
+                       palette windows)]
+      (draw/merge (draw/background "#000000")
+                  (draw/translate [model.x model.y 0]
+                                  (draw/scale model.zoom (draw/rects positions sizes :fill colors))))))
+
+  (graph actions :context host
+    (host/quit (or (key/down "escape") (key/down "q"))))
+
+  (graph editor :context editor
+    (ui/workspace (ui/canvas (ref picture) :focus true) :effects (ref actions)))
+
+  (graph window :context settings
+    (settings/config :title "Recursive Signals" :width 840 :height 1000)))
+

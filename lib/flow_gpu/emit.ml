@@ -957,14 +957,15 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
   with Diagnostic.Error diagnostic -> Error diagnostic
 
 (* Stream compaction for a resident fold: the indices of a mask's nonzero elements, in order, as
-   floats, and their count; one threadgroup of 1,024 threads. The kernel is shaders/compact.rays, a
-   compute stage printed by Raster.compute_msl (lib/flow_gpu/test_raster.exe --write lib). *)
+   floats, and their count; three dispatches over blocks of 1,024 (count, scan the counts, scatter).
+   The kernel is shaders/compact.rays, a compute stage printed by Raster.compute_msl
+   (lib/flow_gpu/test_raster.exe --write lib). *)
 let compaction =
   {
     source = Compact_source.source;
     entry = "compact_mask";
     uniform_layout = [];
-    uniform_bytes = 8;
+    uniform_bytes = 12;
     table_seeds = [||];
     output_widths = [| 1 |];
     input_widths = [| 1 |];
@@ -981,7 +982,28 @@ let compaction =
               kind = (if binding = 3 then Uniform_buffer else Storage_buffer);
               visibility = [ Compute ];
             })
-        [ 0; 1; 2; 3; 4 ];
+        [ 0; 1; 2; 3; 4; 5 ];
+  }
+
+(* A resident dispatch's threadgroup counts from a count cell, one thread (shaders/dispatch.rays,
+   printed as [compaction] is). Buffers: the cell, {capacity, mul, div, group}, the three counts. *)
+let dispatch_arguments =
+  {
+    compaction with
+    source = Dispatch_source.source;
+    entry = "dispatch_arguments";
+    uniform_bytes = 16;
+    interface =
+      List.map
+        (fun binding ->
+          S.
+            {
+              group = 0;
+              binding;
+              kind = (if binding = 1 then Uniform_buffer else Storage_buffer);
+              visibility = [ Compute ];
+            })
+        [ 0; 1; 2 ];
   }
 
 (* A resident packed float3 array's bounds: each lane of one threadgroup of 1,024 the min and max of

@@ -2,6 +2,9 @@ module C = Core
 module V = Flow.Value
 module E = Flow.Eval
 
+(* [finish] found a placeholder sized from an earlier draw too small: the loop runs again. *)
+exception Resident_overflow
+
 (* A resident fold's device: inside a qualifying top-level loop of a drawing, a region's array may stay
    on the GPU, standing in the locals as a placeholder (zeros of its capacity) the device knows. *)
 type resident = {
@@ -438,33 +441,35 @@ let builds statements =
    would see the counter as it was before the hit; no lowering shares a slot across statements today. *)
 (* what a region reads besides its Core arguments: a host source, or a residual over the frame or
    state, is an input the loop's key does not see *)
-let rec hidden = function
+let rec hidden ?(frame = false) = function
   | E.Source (name, _, _) -> name <> "$core/argument"
   | E.Residual r as v ->
-      E.frame_dependent v || E.state_dependent v
-      || List.exists (fun (_, v) -> hidden v) (E.Residual.residual_view r).bindings
+      ((not frame) && E.frame_dependent v) || E.state_dependent v
+      || List.exists (fun (_, v) -> hidden ~frame v) (E.Residual.residual_view r).bindings
   | E.Deferred _ -> true
-  | E.List xs -> Array.exists hidden xs
-  | E.Record fs | E.Struct (_, _, fs) -> List.exists (fun (_, v) -> hidden v) fs
+  | E.List xs -> Array.exists (hidden ~frame) xs
+  | E.Record fs | E.Struct (_, _, fs) -> List.exists (fun (_, v) -> hidden ~frame v) fs
   | _ -> false
 
-let footprint (program : C.program) (s : C.statement) =
+let loop_footprint ~frame (program : C.program) (s : C.statement) =
   let reads = ref [] and writes = ref [] in
   let rec frame_free = function
-    | C.Region.Frame _ | Int_frame _ | Rand_at _ -> false
+    | C.Region.Frame _ | Int_frame _ -> frame
+    | Rand_at _ -> false
     | Guarded (_, i) -> frame_free i
     | _ -> true
   in
   let validate (s : C.statement) =
     match s.node with
     | Assign (_, Prim ((Rand | Rand_at), _)) -> raise Exit
-    | Assign (_, (Frame _ | Source _ | Host_source _ | Source_descriptor _)) -> raise Exit
+    | Assign (_, Frame _) when not frame -> raise Exit
+    | Assign (_, (Source _ | Host_source _ | Source_descriptor _)) -> raise Exit
     | Invoke { region; _ } ->
         let r = program.regions.(region) in
         if
           (not (Array.for_all frame_free r.code))
-          || Array.exists hidden r.uniforms
-          || Array.exists (fun (residual, _) -> hidden (E.Residual residual)) r.sources
+          || Array.exists (hidden ~frame) r.uniforms
+          || Array.exists (fun (residual, _) -> hidden ~frame (E.Residual residual)) r.sources
         then raise Exit
     | Draw _ | State_read _ | State_peek _ | State_write _ -> raise Exit
     | _ -> ()
@@ -482,6 +487,8 @@ let footprint (program : C.program) (s : C.statement) =
             (List.filter (fun n -> not (List.mem n writes)) (List.sort_uniq compare !reads)),
           Array.of_list writes )
   | exception Exit -> None
+
+let footprint = loop_footprint ~frame:false
 
 (* Every local a statement mentions, its nested statements' included. *)
 let mentions acc (s : C.statement) =
@@ -525,11 +532,34 @@ let resident_loop (program : C.program) (s : C.statement) =
 
 (* A resident loop's writes that later statements read: the ones its end reads back. *)
 let resident_live (program : C.program) (s : C.statement) =
-  match footprint program s with
+  (* Frame facts are fixed during execution: they forbid loop memoization, not GPU residency. *)
+  match loop_footprint ~frame:true program s with
   | Some (_, writes) when resident_loop program s ->
       let outside = List.fold_left mentions [] (List.filter (fun t -> t != s) program.body) in
       Some (Array.of_list (List.filter (fun n -> List.mem n outside) (Array.to_list writes)))
   | _ -> None
+
+(* A resident loop's run: the arrays later statements read come back once, as it ends. An overflow
+   discards its work, and it runs again from its start, sized by its bounds from the cut region on. *)
+let resident_run r st run live =
+  let start = Array.copy st.values in
+  let rec attempt () =
+    st.resident_on <- true;
+    match
+      Fun.protect
+        ~finally:(fun () ->
+          st.resident_on <- false;
+          r.close ())
+        (fun () ->
+          run st;
+          Array.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) live)
+    with
+    | () -> ()
+    | exception Resident_overflow ->
+        Array.blit start 0 st.values 0 (Array.length start);
+        attempt ()
+  in
+  attempt ()
 
 (* the same input: a scalar by its bits (NaN and -0 stay distinct), a packed array up to 1M
    numbers by its bits (an array rebuilt each frame with the same contents), a list up to 4,096 items
@@ -910,23 +940,12 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
                -> (
                  let run = statement s in
                  let run =
-                   match footprint program s with
-                   | Some (_, _) when resident_loop program s -> (
-                       let live = Option.get (resident_live program s) in
+                   match resident_live program s with
+                   | Some live -> (
                        fun st ->
                          match st.resident with
                          | None -> run st
-                         | Some r ->
-                             st.resident_on <- true;
-                             Fun.protect
-                               ~finally:(fun () ->
-                                 st.resident_on <- false;
-                                 r.close ())
-                               (fun () ->
-                                 run st;
-                                 (* the loop's arrays that later statements read come back once, as it ends *)
-                                 Array.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) live)
-                       )
+                         | Some r -> resident_run r st run live)
                    | _ -> run
                  in
                  match footprint program s with Some f -> remember f run | None -> run)

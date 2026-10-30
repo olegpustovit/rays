@@ -14,10 +14,13 @@ let build ?previous ws = D.Lowering.of_workspace ~factories ?previous ws |> Resu
 let frame n = Test_editor_input.frame (450., 300.) [] n
 let step e n = E.update e (frame n)
 
-let create ?camera ?settings ?presets ?source ws =
-  E.create ~ui_text_size:11 ?camera ?settings ?presets ?source ~await:true ~workspace:ws
-    ~prepare:Editor_prepare.surface
-    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
+let create ?camera ?settings ?presets ?source ?(native = false) ws =
+  E.create ~ui_text_size:(if native then 13 else 11) ?camera ?settings ?presets ?source ~await:true
+    ~workspace:ws
+    ~prepare:(if native then E.prepare else Editor_prepare.surface)
+    ~draw:
+      (if native then E.draw
+       else fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
     ()
   |> Result.get_ok
 
@@ -25,9 +28,9 @@ let with_dir f =
   let dir = Filename.temp_dir "rays-consistency" "" in
   Fun.protect ~finally:(fun () -> Test_workspace_source.remove_tree dir) (fun () -> f dir)
 
-let with_editor ?camera ws f =
+let with_editor ?camera ?native ws f =
   with_dir (fun presets ->
-      let e = ref (create ?camera ~presets ws) in
+      let e = ref (create ?camera ?native ~presets ws) in
       Fun.protect
         ~finally:(fun () -> E.close !e)
         (fun () ->
@@ -1125,6 +1128,79 @@ let root_viewport () =
         (E.renderer !e = Rays_editor.Renderer.Wireframe)
         "without a root the viewport request stands")
 
+let render_mode_click ?(native = false) () =
+  let source =
+    In_channel.with_open_bin "../../../sketches/gpu_sea.rays" In_channel.input_all
+    |> fun s ->
+    Test_text_pane.replace s ~from:"(side : int 1000)" ~by:"(side : int 8)"
+    |> fun s ->
+    Test_text_pane.replace s ~from:":width 960" ~by:":renderer \"Path traced\" :width 960"
+  in
+  let ws = workspace source in
+  with_editor ~native ws (fun e ->
+      let count = ref 1 in
+      let input ?(buttons = []) point events =
+        incr count;
+        let frame = Test_editor_input.frame ~buttons point events !count in
+        { frame with input = { frame.input with size = (1800, 900) } }
+      in
+      let step ?buttons point events = e := E.update !e (input ?buttons point events) in
+      step (1400., 300.) [];
+      let gx, gy, _, _ = (E.panes !e (input (0., 0.) [])).graph in
+      let row = (float (gx + 60), float (gy + 24 + 12)) in
+      step row [];
+      step row
+        [ Input.Pointer_pressed (Input.LeftButton, row);
+          Input.Pointer_released (Input.LeftButton, row) ];
+      step row [ Input.Key_pressed (Input.KeyChar 'i') ];
+      step row [];
+      check (E.level !e <> None)
+        "mode regression did not open the SOP graph";
+      e := Rays_editor.Reduce.select_path !e
+        [ "sea"; Flow_graph.Flow_edit.nested_leaf "waves" (Pos 0) ];
+      step row [];
+      check (E.renderer !e = Rays_editor.Renderer.Path_traced)
+        "the mode test did not start traced";
+      if native then check (E.slot !e "main" <> None) "native mode test has no traced slot";
+      let view = (100., 300.) in
+      step view [];
+      step view [ Input.Pointer_pressed (Input.LeftButton, view);
+                  Input.Pointer_released (Input.LeftButton, view) ];
+      step view [];
+      let ui = Pxui.Ui.create ~font_size:(if native then 13 else 11) () in
+      Fun.protect ~finally:(fun () -> Pxui.Ui.destroy ui) (fun () ->
+          let x =
+            Pxui_shell.Chrome.tools_start ui ~focused:true ~floating:false ~collapsed:false
+              "Viewport\tscene / camera"
+          in
+          let _, vy, _, _ = (E.panes !e (input (0., 0.) [])).view in
+          let click label offset mode =
+            let point = (x +. offset +. 10., float vy -. 12.) in
+            step point [];
+            step ~buttons:[ Input.LeftButton ] point
+              [ Input.Pointer_pressed (Input.LeftButton, point) ];
+            step point [ Input.Pointer_released (Input.LeftButton, point) ];
+            step point [];
+            check (E.renderer !e = mode)
+              ("clicking " ^ label ^ " did not switch mode")
+          in
+          let wire = Pxui.Ui.text_width ui "Solid" +. 12. in
+          let traced = wire +. Pxui.Ui.text_width ui "Wire" +. 12. in
+          click "Wire" wire Rays_editor.Renderer.Wireframe;
+          let from = (200., 300.) and moved = (240., 320.) in
+          let before = Easy_camera.camera (E.camera !e) in
+          step ~buttons:[ Input.LeftButton ] from
+            [ Input.Pointer_pressed (Input.LeftButton, from) ];
+          step ~buttons:[ Input.LeftButton ] moved [ Input.Pointer_moved moved ];
+          step moved [ Input.Pointer_released (Input.LeftButton, moved) ];
+          check (Easy_camera.camera (E.camera !e) <> before) "mode regression did not orbit";
+          click "Solid" 0. Rays_editor.Renderer.Raster;
+          click "Wire" wire Rays_editor.Renderer.Wireframe;
+          click "Traced" traced Rays_editor.Renderer.Path_traced;
+          click "Solid" 0. Rays_editor.Renderer.Raster;
+          if native then
+            check (E.slot !e "main" = None) "Solid retained a native tracer"))
+
 let stale_inspector_draft () =
   with_dir (fun presets ->
       let factories = Test_editor_transactions.factory :: factories in
@@ -1249,6 +1325,11 @@ let failed_renderer_modes () =
             "switching mode did not recover the outputs and clear renderer errors"))
 
 let run_native () =
+  ignore
+    (Result.get_ok
+       (Sketch.run_state ~max_frames:1 ~config:Sketch.default_config
+          ~init:(fun _ -> render_mode_click ~native:true ())
+          ~update:(fun () _ -> ()) ~view:(fun () _ -> Scene.empty) ()));
   with_dir (fun directory ->
       let ws =
         workspace
@@ -1556,6 +1637,7 @@ let run () =
         ("named graph handles", named_handles);
         ("stale inspector draft", stale_inspector_draft);
         ("root renderer and render settings", root_viewport);
+        ("render mode header click", fun () -> render_mode_click ());
         ("renderer failure modes", failed_renderer_modes);
         ("overlapping renderers", overlapping_renderers);
         ("camera Enter and row menu", enter_camera);

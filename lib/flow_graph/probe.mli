@@ -40,6 +40,7 @@ type force =
 type t
 
 val make :
+  ?clock:(unit -> float) ->
   ?state:Flow.Eval.state ->
   ?live:Input.t ->
   ?time:float ->
@@ -64,7 +65,7 @@ val make :
     and a node inside such a loop reads its one template record at every element. [element zone k]
     names element [k] of that loop and gives its value (a point's position): the template's
     element-dependent values are then forced for it (without it they read [?]). [resolve] supplies
-    cooked packed sources. [force] lets the host use its compiler for live values and packed map
+    cooked packed sources. With [clock], a probe's evaluation stops after 8 ms and the records skip every later one (a footer reads [?], a count is missing) until the next cook's records. [force] lets the host use its compiler for live values and packed map
     inputs; selected function calls remain reference-recorded. Map selectors materialize their
     inputs once and reference-evaluate just the selected call, beyond the 4,096 recording cap. The
     selected call and all its body records share one bounded memo. Packed function sparklines sample

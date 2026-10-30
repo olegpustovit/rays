@@ -5632,6 +5632,39 @@ module Compute_encoder = struct
               in
               Ok ())
 
+  (* A dispatch whose threadgroup counts the device wrote: three uints at [offset] of [arguments],
+     read when the dispatch runs. *)
+  let dispatch_threadgroups_indirect (value : t) ~(arguments : Buffer.t) ~offset ~threadgroup =
+    let operation = "Metal.Compute_encoder.dispatch_threadgroups_indirect" in
+    on_main operation (fun () ->
+        let* () = ensure_live operation value.lifetime in
+        let* () = ensure_buffer_usable operation arguments in
+        let* () = ensure_same_device operation value.command_buffer.queue.device arguments.device in
+        match value.pipeline with
+        | None -> error operation Invalid_state "no compute pipeline is bound"
+        | Some pipeline ->
+            let tx, ty, tz = threadgroup in
+            if not (positive_size threadgroup) then
+              error operation Invalid_argument "threadgroup dimensions must be positive"
+            else if
+              offset < 0L || Int64.rem offset 4L <> 0L || Int64.add offset 12L > arguments.length
+            then error operation Invalid_argument "indirect arguments range is invalid"
+            else if
+              match product3 tx ty tz with
+              | None -> true
+              | Some product -> product > pipeline.max_total_threads
+            then
+              error operation Invalid_argument
+                "threadgroup exceeds the pipeline's maximum total thread count"
+            else
+              let* () =
+                native_result operation
+                  (Metal_raw.Registry.compute_encoder_dispatch_indirect value.raw arguments.raw
+                     offset threadgroup)
+              in
+              retain_command_buffer_buffer value.command_buffer arguments;
+              Ok ())
+
   let end_encoding (value : t) =
     on_main "Metal.Compute_encoder.end_encoding" (fun () ->
         let* () = ensure_live "Metal.Compute_encoder.end_encoding" value.lifetime in

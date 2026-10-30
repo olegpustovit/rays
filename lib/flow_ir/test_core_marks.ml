@@ -277,11 +277,15 @@ let nested_maps () =
     | Ok _ -> failwith "nested maps: the reference sum is not a float"
     | Error d -> failwith (Diagnostic.to_string d)
   in
-  let evaluation = ok (E.static (checked ("(let* [p " ^ boxes ^ "] (draw/points p))"))) in
+  let evaluation =
+    ok (E.static (checked ("(let* [p " ^ boxes ^ "] (draw/points (map (fn [v] [v.x v.y 0]) p)))")))
+  in
   let program, root =
     Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results))
   in
   let text = Format.asprintf "%a" Flow_ir.Core.pp program in
+  if not (List.mem "iterate" (String.split_on_char ' ' text)) then
+    failwith "nested maps: captured fold is hidden inside a packed source";
   let rec regions i =
     match String.index_from_opt text i '[' with
     | Some j when j >= 6 && String.sub text (j - 6) 6 = "region" -> 1 + regions (j + 1)
@@ -289,6 +293,14 @@ let nested_maps () =
     | None -> 0
   in
   if regions 0 < 2 then failwith "nested maps: the fold's maps are not packed regions";
+  let animated =
+    List.find
+      (fun (s : Flow_ir.Core.statement) ->
+        match s.node with Iterate _ -> true | _ -> false)
+      program.body
+  in
+  assert (Flow_ir.Core_exec.footprint program animated = None);
+  assert (Flow_ir.Core_exec.resident_live program animated <> None);
   List.iter
     (fun domains ->
       Parallel.run ~domains (fun () ->

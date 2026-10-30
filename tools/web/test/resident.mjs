@@ -16,6 +16,7 @@ const gpu = {
   dispatch() {}, compact() {},
   // every read is a new device result: the fold number in every element
   async read(items) { reads++; return items.map(it => new Float32Array(it.capacity * it.width).fill(reads)); },
+  async counts(cells) { return cells.map(() => 0); },
 };
 globalThis.GPUBufferUsage = { STORAGE: 1, COPY_DST: 2 };
 const rt = { gpu, counts: { gpu: 0 } };

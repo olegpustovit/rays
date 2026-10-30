@@ -926,6 +926,11 @@ module Compute_encoder : sig
   val dispatch_threads :
     t -> threads:int * int * int -> threadgroup:int * int * int -> (unit, error) result
 
+  val dispatch_threadgroups_indirect :
+    t -> arguments:Buffer.t -> offset:int64 -> threadgroup:int * int * int -> (unit, error) result
+  (** [dispatchThreadgroupsWithIndirectBuffer:]: the threadgroup counts are three uints the device
+      wrote at [offset] (4-aligned) of [arguments], read when the dispatch runs. *)
+
   val end_encoding : t -> (unit, error) result
 end
 

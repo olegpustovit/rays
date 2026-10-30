@@ -98,6 +98,7 @@ type t = {
   gathers : slot array;
   status : slot;
   counted : slot;
+  groups : slot;  (** a counted dispatch's threadgroup counts, written on the device *)
   uniforms : bytes;
   mutable closed : bool;
   mutable bounds_out : B.buffer option;  (** the reduction's lanes, made once and reused *)
@@ -202,6 +203,7 @@ let create_owned ?pool:shared device queue pipelines (msl : Emit.msl) =
     gathers = Array.map (fun _ -> slot ()) msl.gathers;
     status = slot ();
     counted = slot ();
+    groups = slot ();
     uniforms = Bytes.create msl.uniform_bytes;
     closed = false;
     bounds_out = None;
@@ -335,6 +337,26 @@ let ensure ?(mapped = false) t slot length =
    chains its regions and waits once.  [bound i] / [bound_table u] name a device buffer that already
    holds input [i] / the table of uniform [u] (and its length in floats), which is then not uploaded. *)
 let msl_scene t = t.msl.Emit.scene
+
+(* Encodes into [encoder] the threadgroup counts of a dispatch of at most [capacity] threads in
+   groups of [group] whose count is the uint in [cell] x mul / div (Emit.dispatch_arguments), into
+   [groups]: its grid is sized on the device, nothing is read back. The caller sets its pipeline
+   next. *)
+let dispatch_arguments encoder pipelines ~cell ~mul ~div ~capacity ~group ~groups =
+  let compiled =
+    match Pipelines.get pipelines Emit.dispatch_arguments with
+    | Ok compiled -> compiled
+    | Error error -> raise (Diagnostic.Error error)
+  in
+  let bound = Bytes.create 16 in
+  List.iteri
+    (fun k v -> Bytes.set_int32_le bound (4 * k) (Int32.of_int v))
+    [ capacity; mul; div; group ];
+  get (B.set_pipeline encoder compiled.pipeline);
+  get (B.set_buffer encoder ~index:0 cell);
+  get (B.set_bytes encoder ~index:1 bound);
+  get (B.set_buffer encoder ~index:2 groups);
+  get (B.dispatch_threads encoder ~threads:(1, 1, 1) ~threadgroup:(1, 1, 1))
 
 let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(bound = fun _ -> None)
     ?(bound_table = fun _ -> None) ?scene ?(extras = no_extras) ?(resident = []) t
@@ -586,6 +608,16 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
           Fun.protect
             ~finally:(fun () -> ignore (B.end_compute encoder))
             (fun () ->
+              (* a device count sizes the grid on the device: groups of 256 to it, not the capacity *)
+              let groups =
+                match (counted, count) with
+                | Some (cell, _), Some (_, mul, div) ->
+                    let groups = ensure t t.groups 12 in
+                    dispatch_arguments encoder t.pipelines ~cell ~mul ~div ~capacity:values.count
+                      ~group:256 ~groups;
+                    Some groups
+                | _ -> None
+              in
               get (B.set_pipeline encoder compiled.pipeline);
               Array.iteri (fun index buffer -> get (B.set_buffer encoder ~index buffer)) buffers;
               let index = Array.length buffers in
@@ -622,7 +654,13 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
                        ((accel :: Option.to_list extras.curves) @ resident)))
                 scene;
               get
-                (B.dispatch_threads encoder ~threads:(values.count, 1, 1) ~threadgroup:(256, 1, 1)))
+                (match groups with
+                | Some groups ->
+                    B.dispatch_threadgroups_indirect encoder groups ~offset:0L
+                      ~threadgroup:(256, 1, 1)
+                | None ->
+                    B.dispatch_threads encoder ~threads:(values.count, 1, 1)
+                      ~threadgroup:(256, 1, 1)))
         in
         match commands with
         | Some commands ->
@@ -1172,7 +1210,8 @@ let close ?(discard = false) t =
         slot.floats <- None;
         slot.capacity <- 0;
         slot.uploaded <- None)
-      (Array.concat [ t.inputs; t.outputs; t.gathers; [| t.table; t.status; t.counted |] ]);
+      (Array.concat
+         [ t.inputs; t.outputs; t.gathers; [| t.table; t.status; t.counted; t.groups |] ]);
     t.closed <- true
   end
 
@@ -1200,28 +1239,49 @@ module Private = struct
 end
 
 (* The device [array/compact] of a resident fold: the kept indices stay in [kept], the count is read
-   back (the one wait of a fold level). *)
-let compact commands pipelines ~mask ~count ~count_in ~kept ~total =
+   back (the one wait of a fold level). Three dispatches in order over blocks of 1,024: count each
+   block, scan the counts in one group, scatter each block from its first slot. With [count_in] the
+   first and last take their group count from it on the device, written into [groups] (12 bytes). *)
+let compact_blocks count = 8 * max 1 ((count + 1023) / 1024)
+
+let compact commands pipelines ~mask ~count ~count_in ~kept ~total ~blocks ~groups =
   try
     let compiled =
       match Pipelines.get pipelines Emit.compaction with
       | Ok compiled -> compiled
       | Error error -> raise (Diagnostic.Error error)
     in
-    let bound = Bytes.create 8 in
-    Bytes.set_int32_le bound 0 (Int32.of_int count);
-    Bytes.set_int32_le bound 4 (if count_in = None then 0l else 1l);
     let encoder = get (B.compute_encoder commands) in
     Fun.protect
       ~finally:(fun () -> ignore (B.end_compute encoder))
       (fun () ->
+        Option.iter
+          (fun cell ->
+            dispatch_arguments encoder pipelines ~cell ~mul:1 ~div:1 ~capacity:count ~group:1024
+              ~groups)
+          count_in;
         get (B.set_pipeline encoder compiled.pipeline);
         get (B.set_buffer encoder ~index:0 mask);
         get (B.set_buffer encoder ~index:1 kept);
         get (B.set_buffer encoder ~index:2 total);
-        get (B.set_bytes encoder ~index:3 bound);
         get (B.set_buffer encoder ~index:4 (Option.value ~default:total count_in));
-        get (B.dispatch_threads encoder ~threads:(1024, 1, 1) ~threadgroup:(1024, 1, 1)));
+        get (B.set_buffer encoder ~index:5 blocks);
+        List.iter
+          (fun pass ->
+            let bound = Bytes.create 12 in
+            Bytes.set_int32_le bound 0 (Int32.of_int count);
+            Bytes.set_int32_le bound 4 (if count_in = None then 0l else 1l);
+            Bytes.set_int32_le bound 8 (Int32.of_int pass);
+            get (B.set_bytes encoder ~index:3 bound);
+            get
+              (if pass <> 1 && count_in <> None then
+                 B.dispatch_threadgroups_indirect encoder groups ~offset:0L
+                   ~threadgroup:(1024, 1, 1)
+               else
+                 let groups = if pass = 1 then 1 else compact_blocks count / 8 in
+                 B.dispatch_threads encoder ~threads:(1024 * groups, 1, 1)
+                   ~threadgroup:(1024, 1, 1)))
+          [ 0; 1; 2 ]);
     Ok ()
   with Diagnostic.Error error -> Error error
 

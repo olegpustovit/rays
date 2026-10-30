@@ -103,6 +103,26 @@ exception Needs_t
 
 open Value
 
+(* A caller-owned stop for this domain's evaluation (a probe on the UI thread): checked every 1,024
+   steps and at each packed block, since packed blocks reset the step count. It fails as
+   cancellation, which no arm or error mapper swallows. *)
+let interrupt : ((unit -> bool) * bool ref) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let check_interrupt () =
+  match Domain.DLS.get interrupt with
+  | Some (expired, fired) when expired () ->
+      fired := true;
+      fail "cancelled" "Evaluation interrupted."
+  | _ -> ()
+
+let with_interrupt expired f =
+  let fired = ref false and outer = Domain.DLS.get interrupt in
+  Domain.DLS.set interrupt (Some (expired, fired));
+  Fun.protect
+    ~finally:(fun () -> Domain.DLS.set interrupt outer)
+    (fun () -> match f () with v -> if !fired then None else Some v | exception _ when !fired -> None)
+
 let hash = Value.hash
 let element_key zone = "$elem:" ^ String.concat "/" zone
 
@@ -1156,6 +1176,7 @@ and force_res c r =
 and ev c env (x : W.term) : value =
   let st = c.st in
   st.steps <- st.steps + 1;
+  if st.steps land 1023 = 0 then check_interrupt ();
   if st.steps > st.budget then
     failf "E_EVAL_BUDGET" "Evaluation budget exceeded (%d steps). Reduce iteration counts."
       st.budget;
@@ -2114,7 +2135,10 @@ and hof c env term kind f rest =
   let c = if packed then { c with data = true } else c in
   let saved_steps = c.st.steps and calls = ref 0 in
   let call fv values =
-    if packed && !calls mod packed_block_size = 0 then c.st.steps <- saved_steps;
+    if packed && !calls mod packed_block_size = 0 then begin
+      check_interrupt ();
+      c.st.steps <- saved_steps
+    end;
     incr calls;
     call_fn c fv values
   in
@@ -2462,7 +2486,10 @@ and loop c env ~out kind accs clauses skip body zone =
   let add a b = add_values (concrete c a) (concrete c b) in
   let rec go ci env items =
     if ci = n then begin
-      if packed && !k mod packed_block_size = 0 then c.st.steps <- saved_steps;
+      if packed && !k mod packed_block_size = 0 then begin
+        check_interrupt ();
+        c.st.steps <- saved_steps
+      end;
       if (not packed) && !k >= max_iterations then
         failf "E_ITER_BOUND" "%s runs more than 4,096 iterations." (path_text zone);
       let ci' = { cz with iter = c.iter @ [ !k ] } in

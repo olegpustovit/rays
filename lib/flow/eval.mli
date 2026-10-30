@@ -362,6 +362,10 @@ val bind_captures : (value -> value) -> fn -> fn
 (** {!Host.map_function_bindings}: the function with its captures replaced (a raster stage's
     buffers). *)
 
+val with_interrupt : (unit -> bool) -> (unit -> 'a) -> 'a option
+(** [with_interrupt expired f] runs [f], failing this domain's evaluation as cancelled once
+    [expired ()] holds (checked every 1,024 steps and packed block); [None] when it did. *)
+
 module Host : sig
   val static_with_requests :
     ?budget:int ->

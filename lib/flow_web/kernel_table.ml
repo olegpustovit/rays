@@ -33,4 +33,4 @@ let entry ?cpu ~id (w : Wgsl.wgsl) =
 
 let table entries =
   "{\"kernels\":[" ^ String.concat ",\n" entries ^ "],\n\"compaction\":"
-  ^ json_string Wgsl.compaction ^ "}\n"
+  ^ json_string Wgsl.compaction ^ ",\n\"dispatch\":" ^ json_string Wgsl.dispatch_arguments ^ "}\n"

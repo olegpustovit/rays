@@ -28,7 +28,7 @@ val compute_msl :
     parameters the bound buffers in order (writable when it stores into them with [gpu/store]) and
     its last the group size, given as the constant [size]; [gpu/group-scan] is a threadgroup scan
     between barriers. Its result is discarded. With [grid] the first parameter is the thread's index
-    in the whole dispatch instead (any number of threadgroups; no scan). *)
+    in the whole dispatch instead (any number of threadgroups, each scanning its own). *)
 
 val compute_spirv :
   grid:bool -> size:int -> declarations:string -> entry:string -> (bytes, Diagnostic.t) result

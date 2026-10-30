@@ -71,8 +71,8 @@ let () =
           ("spirv/" ^ name ^ ".frag.spv", Bytes.to_string frag);
         ])
     pipelines;
-  (* the compute stages: the resident fold's compaction, one threadgroup of 1,024 on Metal and a
-     portable workgroup of 256 on Vulkan and WebGPU *)
+  (* the compute stages: the resident fold's compaction, threadgroups of 1,024 on Metal and
+     portable workgroups of 256 on Vulkan and WebGPU *)
   let dir = Filename.concat lib "flow_gpu/shaders" in
   let declarations = read (Filename.concat dir "compact.rays") in
   List.iter (check dir)
@@ -80,12 +80,12 @@ let () =
       ( "metal/compact.metal",
         header "compact"
         ^ ok "compact"
-            (Flow_gpu.Raster.compute_msl ~grid:false ~size:1024 ~declarations ~entry:"compact-mask")
+            (Flow_gpu.Raster.compute_msl ~grid:true ~size:1024 ~declarations ~entry:"compact-mask")
       );
       ( "spirv/compact.comp.spv",
         Bytes.to_string
           (ok "compact"
-             (Flow_gpu.Raster.compute_spirv ~grid:false ~size:256 ~declarations
+             (Flow_gpu.Raster.compute_spirv ~grid:true ~size:256 ~declarations
                 ~entry:"compact-mask")) );
     ];
   (* a resident P's bounds (Run.bounds), the same group sizes *)
@@ -119,7 +119,22 @@ let () =
              (Flow_gpu.Raster.compute_spirv ~grid:true ~size:256 ~declarations:normals
                 ~entry:"point-normal")) );
     ];
-  (* the web's, one workgroup of 256 (Flow_web.Wgsl.compaction) *)
+  (* a resident dispatch's threadgroup counts from a count cell (Run.dispatch_arguments): one thread *)
+  let dispatch = read (Filename.concat dir "dispatch.rays") in
+  List.iter (check dir)
+    [
+      ( "metal/dispatch.metal",
+        header "dispatch"
+        ^ ok "dispatch"
+            (Flow_gpu.Raster.compute_msl ~grid:false ~size:1 ~declarations:dispatch
+               ~entry:"dispatch-arguments") );
+      ( "spirv/dispatch.comp.spv",
+        Bytes.to_string
+          (ok "dispatch"
+             (Flow_gpu.Raster.compute_spirv ~grid:false ~size:1 ~declarations:dispatch
+                ~entry:"dispatch-arguments")) );
+    ];
+  (* the web's, workgroups of 256 (Flow_web.Wgsl.compaction) *)
   let program, buffers =
     ok "compact" (Flow_gpu.Raster.compute_program ~size:256 ~declarations ~entry:"compact-mask")
   in
@@ -127,10 +142,20 @@ let () =
     ( "compact.wgsl",
       header "compact"
       ^ ok "compact" (Flow_web.Wgsl.compute ~size:256 ~name:"compact_mask" ~buffers program) );
+  (* and its dispatch arguments (Flow_web.Wgsl.dispatch_arguments) *)
+  let program, buffers =
+    ok "dispatch"
+      (Flow_gpu.Raster.compute_program ~size:1 ~declarations:dispatch ~entry:"dispatch-arguments")
+  in
+  check (Filename.concat lib "flow_web")
+    ( "dispatch.wgsl",
+      header "dispatch"
+      ^ ok "dispatch"
+          (Flow_web.Wgsl.compute ~size:1 ~name:"dispatch_arguments" ~buffers program) );
   print_endline
     (if validator then
-       "raster: every renderer, image sink, presentation, compaction, bounds and normals stage are \
+       "raster: every renderer, image sink, presentation, compaction, dispatch, bounds and normals stage are \
         their .rays, printed (MSL, SPIR-V spirv-val valid)"
      else
-       "raster: every renderer, image sink, presentation, compaction, bounds and normals stage are \
+       "raster: every renderer, image sink, presentation, compaction, dispatch, bounds and normals stage are \
         their .rays, printed (spirv-val unavailable)")

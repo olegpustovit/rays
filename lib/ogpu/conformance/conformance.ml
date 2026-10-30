@@ -439,6 +439,41 @@ let run driver =
     run triple 3;
     run double 2;
     run triple 3;
+    (* an indirect dispatch: one group of two, its count read from a buffer, doubles only the
+       first two words; a range past the buffer or misaligned is refused *)
+    let groups =
+      get
+        (Backend.create_buffer device
+           { label = Some "indirect-groups"; size = 16L; usage = [ Storage; Copy_dst ] })
+    in
+    let args = Bytes.make 16 '\000' in
+    List.iteri (fun k v -> Bytes.set_int32_le args (k * 4) v) [ 1l; 1l; 1l ];
+    get (Backend.write_buffer groups ~offset:0L args);
+    get (Backend.write_buffer words ~offset:0L (Bytes.make 16 '\000'));
+    let commands = get (Backend.begin_commands queue) in
+    let compute = get (Backend.compute_encoder commands) in
+    get (Backend.set_pipeline compute double);
+    get (Backend.set_buffer compute ~index:0 words);
+    get (Backend.set_bytes compute ~index:1 bias);
+    List.iter
+      (fun offset ->
+        match
+          Backend.dispatch_threadgroups_indirect compute groups ~offset ~threadgroup:(2, 1, 1)
+        with
+        | Error { Error.kind = Invalid_argument; _ } -> ()
+        | _ -> failwith "invalid indirect arguments range was accepted")
+      [ 8L; 2L; -4L ];
+    get (Backend.dispatch_threadgroups_indirect compute groups ~offset:0L ~threadgroup:(2, 1, 1));
+    get (Backend.end_compute compute);
+    poll_epoch (get (Backend.commit commands)) 1000;
+    let output = get (Backend.read_buffer words ~offset:0L ~length:16) in
+    List.iteri
+      (fun i expected ->
+        require
+          (Bytes.get_int32_le output (i * 4) = expected)
+          "indirect dispatch ran a group count other than its buffer's")
+      [ 5l; 5l; 0l; 0l ];
+    get (Backend.destroy_buffer groups);
     get (Backend.destroy_pipeline triple);
     get (Backend.destroy_pipeline double)
   end

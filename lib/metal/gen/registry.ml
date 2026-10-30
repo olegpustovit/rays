@@ -1649,6 +1649,19 @@ let entries : entry list =
       {
         recv = "Compute_encoder";
         objc = "id<MTLComputeCommandEncoder>";
+        sel = "dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:";
+        args = [ Obj "Buffer"; Scalar Nsuint; Tuple "Mtl_size_int" ];
+        ret = None;
+        error = false;
+        ocaml = "compute_encoder_dispatch_indirect";
+        since = None;
+        feature = C.Compute_pipeline;
+        pool = false;
+      };
+    Method
+      {
+        recv = "Compute_encoder";
+        objc = "id<MTLComputeCommandEncoder>";
         sel = "setAccelerationStructure:atBufferIndex:";
         args = [ Opt_obj "Acceleration_structure"; Scalar Nsuint ];
         ret = None;

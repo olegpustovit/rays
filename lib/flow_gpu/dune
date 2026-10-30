@@ -8,6 +8,7 @@
   noise
   noise_source
   compact_source
+  dispatch_source
   bounds_source
   normals_source
   emit
@@ -25,6 +26,7 @@
   noise
   noise_source
   compact_source
+  dispatch_source
   bounds_source
   normals_source
   image_rgba8_source)
@@ -70,6 +72,19 @@
    (progn
     (echo "let source = {msl|")
     (cat shaders/metal/compact.metal)
+    (echo "|msl}\n")))))
+
+; a resident dispatch's threadgroup counts, generated from shaders/dispatch.rays (test_raster.exe --write lib)
+
+(rule
+ (target dispatch_source.ml)
+ (deps shaders/metal/dispatch.metal)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {msl|")
+    (cat shaders/metal/dispatch.metal)
     (echo "|msl}\n")))))
 
 ; a resident P's bounds, generated from shaders/bounds.rays (test_raster.exe --write lib)
@@ -373,5 +388,6 @@
   (glob_files shaders/*.rays)
   (glob_files shaders/metal/*.metal)
   (glob_files shaders/spirv/*.spv)
-  ../flow_web/compact.wgsl)
+  ../flow_web/compact.wgsl
+  ../flow_web/dispatch.wgsl)
  (libraries test_support flow_gpu flow_web ogpu_mock))

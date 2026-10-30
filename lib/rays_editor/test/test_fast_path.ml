@@ -45,7 +45,7 @@ let same_as_full what (doc : Document.t) =
         (n.label, n.kind, List.map (fun (f : Param.field_view) -> (f.name, f.current)) (KG.fields n)))
       (scene d)
   in
-  check (view doc = view full) (what ^ ": differs from a full lowering")
+  check (view doc = view full && doc.root = full.root) (what ^ ": differs from a full lowering")
 
 let run_cameras () =
   let doc = lower (Ws_fixture.of_text text) in
@@ -69,6 +69,14 @@ let run_cameras () =
   in
   check (n = 0) "a camera write lowered or evaluated";
   same_as_full "camera write" saved;
+  (* Changed ancestors stay shared with their records, so the next root edit reaches the scene. *)
+  let resized =
+    Result.get_ok
+      (Sync.write ~factories saved Document.Scene (Root { saved.root with width = 640 }))
+    |> Option.get |> fst
+  in
+  check (resized.root.width = 640) "a camera write left the root's recorded value detached";
+  same_as_full "root edit after camera write" resized;
   (* a literal scrub of a card inside the closure-holding graph *)
   let op =
     E.Set_arg

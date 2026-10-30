@@ -8,7 +8,8 @@ kernel void point_normal(
     device const uint* buffer3 [[buffer(3)]],
     device float* buffer4 [[buffer(4)]],
     device const uint* buffer5 [[buffer(5)]],
-    uint lid [[thread_position_in_grid]]) {
+    uint gid [[thread_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]]) {
   uint sb=0u;
   uint r8=0u,r10=1073741823u;
   float r13=as_type<float>(0x0u);
@@ -16,7 +17,7 @@ kernel void point_normal(
   long r18=0;
   float r19=0,r20=0,r21=0,r80=0.0f,r81=as_type<float>(0x0u),r82=0.0f,r83=0.0f,r84=0.0f;
   uint r88=3u,r94=2u,r97=0u;
-  long r0=long(lid);
+  long r0=long(gid);
   float r12=(r0<long(((uint((long(buffer5[r8*1+0])))&r10)))?1.0f:0.0f);
   if(r12!=0.0f) {
     long r14=long(buffer2[r0*1+0]);

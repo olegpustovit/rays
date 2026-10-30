@@ -455,8 +455,9 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
    with [count_in[0] * mul / div] when use is set, and is written to the 40-byte count record
    [count_out] {n, 6n, 1, 0, 0, 0, 6, n, 0, 0}: native's six words, then from byte 24 WebGPU's
    [drawIndirect] of n six-vertex instances, which a mark set reads. *)
-(* A compute stage (Flow_gpu.Raster's): one workgroup of [size] threads ([lid], the entry's element), its
-   buffers [(array uniform, binding, u32 words, stored)], its result discarded. *)
+(* A compute stage (Flow_gpu.Raster's): workgroups of [size] threads, the global index the entry's
+   element and [lid] the scan's; its buffers [(array uniform, binding, u32 words, stored)], its
+   result discarded. *)
 type compute = { size : int; name : string; buffers : (int * int * bool * bool) list }
 
 let compute_buffer (c : compute) u =
@@ -652,7 +653,7 @@ and fast_kernel ?compute program =
             else
               match instruction with
               | P.Const value -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float value)
-              | Int_input _ when compute <> None -> "vec2<u32>(lid, 0u)"
+              | Int_input _ when compute <> None -> "vec2<u32>(gid.x, 0u)"
               | Stage (stage, r) when compute <> None -> "vec2<u32>(" ^ group stage r ^ ", 0u)"
               | Gather (prepared, index, width, component) when compute <> None ->
                   read prepared index width component
@@ -854,7 +855,8 @@ and fast_kernel ?compute program =
           declarations ^ Buffer.contents workgroup ^ int64
           ^ Printf.sprintf
               "@compute @workgroup_size(%d)\n\
-               fn %s(@builtin(local_invocation_index) lid: u32) {\n\
+               fn %s(@builtin(local_invocation_index) lid: u32, \
+               @builtin(global_invocation_id) gid: vec3<u32>) {\n\
               \  var sb: u32 = 0u;\n\
                %s}\n"
               size name (Buffer.contents body)
@@ -965,3 +967,7 @@ and fast_kernel ?compute program =
    one workgroup of 256 (the WebGPU default limit), generated into compact.wgsl by
    lib/flow_gpu/test_raster.exe --write lib. *)
 let compaction = Compact_wgsl.source
+
+(* A resident dispatch's workgroup counts on the web: Flow_gpu's shaders/dispatch.rays, one thread,
+   generated into dispatch.wgsl as [compaction] is. *)
+let dispatch_arguments = Dispatch_wgsl.source

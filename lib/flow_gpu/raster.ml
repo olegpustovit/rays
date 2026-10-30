@@ -306,7 +306,7 @@ let compute_msl ~grid ~size ~declarations ~entry =
       ~raster:
         {
           Emit.input = (fun _ _ -> "0.0f");
-          int_input = (fun _ -> "long(lid)");
+          int_input = (fun _ -> if grid then "long(gid)" else "long(lid)");
           buffer = buffer c.program;
           output = (fun _ _ value -> "(void)" ^ value ^ ";");
           builtin =
@@ -333,10 +333,8 @@ let compute_msl ~grid ~size ~declarations ~entry =
          Printf.sprintf "kernel void %s(\n    %s) {\n" (identifier entry)
            (String.concat ",\n    "
               (arguments
-              @ [
-                  (if grid then "uint lid [[thread_position_in_grid]]"
-                   else "uint lid [[thread_position_in_threadgroup]]");
-                ]));
+              @ (if grid then [ "uint gid [[thread_position_in_grid]]" ] else [])
+              @ [ "uint lid [[thread_position_in_threadgroup]]" ]));
          body;
          "}\n";
        ])

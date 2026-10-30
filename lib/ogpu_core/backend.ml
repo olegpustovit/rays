@@ -123,6 +123,8 @@ type driver_compute_encoder = {
   set_accel : index:int -> token -> (unit, Error.t) result;
   dispatch_threads :
     threads:int * int * int -> threadgroup:int * int * int -> (unit, Error.t) result;
+  dispatch_indirect :
+    token -> offset:int64 -> threadgroup:int * int * int -> (unit, Error.t) result;
   compute_use_accels : token list -> (unit, Error.t) result;
   end_compute : unit -> (unit, Error.t) result;
 }
@@ -1388,6 +1390,29 @@ let dispatch op (encoder : compute_encoder) grid threadgroup dispatch =
 let dispatch_threads encoder ~threads ~threadgroup =
   dispatch "Backend.dispatch_threads" encoder threads threadgroup (fun () ->
       encoder.compute_raw.dispatch_threads ~threads ~threadgroup)
+
+(* The threadgroup counts are three uints the device wrote at [offset], read when the dispatch runs. *)
+let dispatch_threadgroups_indirect (encoder : compute_encoder) (arguments : buffer) ~offset
+    ~threadgroup =
+  let op = "Backend.dispatch_threadgroups_indirect" in
+  dispatch op encoder (1, 1, 1) threadgroup (fun () ->
+      match check_resource op (commands_device encoder.compute_commands) arguments.resource with
+      | Error _ as e -> e
+      | Ok () -> (
+          if
+            offset < 0L
+            || Int64.rem offset 4L <> 0L
+            || Int64.add offset 12L > arguments.buffer_descriptor.size
+          then error op Error.Invalid_argument "indirect arguments range is invalid"
+          else
+            match
+              encoder.compute_raw.dispatch_indirect arguments.resource.raw.token ~offset
+                ~threadgroup
+            with
+            | Error _ as e -> e
+            | Ok () ->
+                mark_submitted encoder.compute_commands.commands_queue arguments.resource;
+                Ok ()))
 
 let end_compute (encoder : compute_encoder) =
   let op = "Backend.end_compute" in

@@ -30,7 +30,8 @@ let sync_views value =
       }
   | _ ->
       let records =
-        Flow_graph.Probe.make ~dynamic:(Flow_sop.Lower.zone_count lowered) lowered.evaluated
+        Flow_graph.Probe.make ~clock:value.clock ~dynamic:(Flow_sop.Lower.zone_count lowered)
+          lowered.evaluated
       in
       let probes_of (preview : preview) =
         List.map
@@ -303,7 +304,8 @@ let sync_scope value =
           if reuse <> None then reuse
           else
             Option.map
-              (Flow_graph.Probe.make ~force ~state:value.cook.state ?live:time ~geometry ~resolve
+              (Flow_graph.Probe.make ~clock:value.clock ~force ~state:value.cook.state ?live:time ~geometry
+                 ~resolve
                  ~execution
                  ~bulk_calls:
                    (Flow_sop.Lower.field_calls ~state:value.cook.state
@@ -394,7 +396,8 @@ let scene_target value id =
                 summaries = [];
                 time = None;
                 executions = Flow_native.Probe_run.no_reports;
-                records = Some (Flow_graph.Probe.make ~state:value.cook.state evaluated);
+                records =
+                  Some (Flow_graph.Probe.make ~clock:value.clock ~state:value.cook.state evaluated);
                 force = probe_force ();
                 targets = [];
                 stamp = 0.;

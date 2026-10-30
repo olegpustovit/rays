@@ -13,7 +13,9 @@ val output : t -> Flow_ir.Gpu.value -> (Run.output option, Diagnostic.t) result
 
 val resident : fast:bool -> t -> Flow_ir.Core_exec.resident
 (** A drawing's resident fold on this host, in fast precision only: keeps a loop's region arrays on
-    the device and reads them back as the loop ends. One per drawing. *)
+    the device and reads them back as the loop ends. One per drawing. Each region site's calls keep
+    their buffers, placeholders and counts on the host between drawings (64 calls a site, 32 sites)
+    and size its arrays by them; a count that outgrew one reruns the loop exactly. *)
 
 val normals :
   t ->

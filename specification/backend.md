@@ -333,7 +333,7 @@ separate index spaces, and `Acceleration_structure` is a binding kind). `max_tot
 registers (the Flow kernels' register-pressure gate, `Flow_gpu.Run.max_total_threads`;
 0 for a render pipeline). `begin_commands` records one command buffer through
 compute, acceleration, blit, and render encoders (`set_pipeline`, `set_buffer`,
-`set_bytes`, `set_texture`, `set_accel`, `dispatch_threads`,
+`set_bytes`, `set_texture`, `set_accel`, `dispatch_threads`, `dispatch_threadgroups_indirect`,
 `build_accel`, `write_compacted_size`, `compact_accel`, `buffer_to_texture`)
 and commits without blocking, so `Backend.status` and `gpu_duration`
 observe it through the queue's epochs. Buffers take a `Types.memory` class;
@@ -568,7 +568,11 @@ roots. `Backend.draw_indexed_indirect` (render pipelines; Metal
 `drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:`)
 reads an indexed draw's index and instance counts from five uints the device wrote; the mock has
 no render encoder and refuses it with the rest of rendering; conformance draws a triangle from
-device arguments and refuses a misaligned argument range. OGPU-Metal is the only layer that maps checked OGPU render values onto
+device arguments and refuses a misaligned argument range. `Backend.dispatch_threadgroups_indirect` (part of
+`Compute_pipeline`; Metal `dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:`,
+WebGPU `dispatchWorkgroupsIndirect`) reads a dispatch's threadgroup counts from three uints the
+device wrote; the mock has no compute encoder; conformance runs one group of two from a buffer
+and refuses a range past the buffer, misaligned or negative. OGPU-Metal is the only layer that maps checked OGPU render values onto
 that generic surface.
 
 `Scene.D3.instances_array` lowers each instance batch to one indexed Metal draw.

@@ -14,7 +14,7 @@ val footprint : Core.program -> Core.statement -> (int array * int array) option
 
 val resident_live : Core.program -> Core.statement -> int array option
 (** A top-level loop a resident fold may keep on the device (its body holds only regions, scalars,
-    ifs, compaction, retyping and counts, and it has a {!footprint}): the writes later statements
+    ifs, compaction, retyping, counts and immutable frame facts): the writes later statements
     read, which its end reads back; [None] for any other statement. The web printer uses the same
     rule. *)
 
@@ -55,6 +55,11 @@ type resident = {
     (an array of its length the device knows), [compact] and [coerce] work on placeholders, [finish]
     reads one back. A declined region gets its placeholder inputs back first; the loop's arrays are
     read back as it ends, then [close]. *)
+
+exception Resident_overflow
+(** Raised by [finish] when a placeholder's capacity (sized from an earlier draw) was too small for
+    its count: after [close], the loop's locals are restored and it runs again. The device makes
+    progress each time (fewer regions sized from history), so the reruns end. *)
 
 val draw :
   ?root:Flow.Eval.residual ->

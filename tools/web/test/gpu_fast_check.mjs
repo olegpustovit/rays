@@ -62,8 +62,8 @@ window.__result = (async () => {
   const u2 = {}; for (const [u] of gpu.kernels.get('compare').uniform_layout) { const m = /^frame:(\\d+):/.exec(u); if (m) u2[u] = c.frame[+m[1]]; }
   gpu.dispatch('compare', { count: 4000, inputs: c.inputs, uniforms: u2, encoder: enc, countIn: { buffer: cell, mul: 1, div: 2 }, into: { output: out, cell: cell2 } });
   // compaction of 'compare's output where it is nonzero-ish: mask = output itself
-  const kept = gpu.allocate(4 * 8192), total = gpu.allocate(24);
-  gpu.compact(enc, { mask: out, count: 4000, countIn: cell2, kept, total });
+  const kept = gpu.allocate(4 * 8192), total = gpu.allocate(24), blocks = gpu.allocate(8 * Math.ceil(4000 / 256));
+  gpu.compact(enc, { mask: out, count: 4000, countIn: cell2, kept, total, blocks });
   gpu.device.queue.submit([enc.finish()]);
   const [record, values, indices] = await gpu.read([{ buffer: cell2, cell: null, width: 1, capacity: 10 },
     { buffer: out, cell: cell2, width: 1, capacity: 4000 }, { buffer: kept, cell: total, width: 1, capacity: 4000 }]);

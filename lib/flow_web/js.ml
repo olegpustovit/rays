@@ -1371,6 +1371,30 @@ and frame_result ?store ?(fast = false) ?(kernel = fun _ -> None) ?(gpu = fun _ 
       kernel;
     }
   in
+  let names a = String.concat ", " (List.map local (Array.to_list a)) in
+  let resident_statement depth s =
+    match Flow_ir.Core_exec.resident_live program s with
+    | Some live when fast && not bindings && not internal ->
+        ctx.async <- true;
+        (* a cut capacity (native Core_exec.Resident_overflow) runs the loop again from its
+           writes' values before it *)
+        let writes = ref [] in
+        C.iter (fun s -> writes := C.writes s @ !writes) [ s ];
+        let writes = names (Array.of_list (List.sort_uniq compare !writes)) in
+        Printf.bprintf body
+          "    const r%d = [%s];\n    for (;;) {\n    rt.resident.begin();\n    try {\n" s.id
+          writes;
+        ctx.resident <- true;
+        statement ctx 3 s;
+        ctx.resident <- false;
+        Printf.bprintf body
+          "      [%s] = await rt.resident.finish([%s]);\n\
+          \      break;\n\
+          \    } catch (e) { if (e !== rt.resident.overflow) throw e; [%s] = r%d; }\n\
+          \    finally { rt.resident.end(); } }\n"
+          (names live) (names live) writes s.id
+    | _ -> statement ctx depth s
+  in
   (* A drawing's loop memory, as native [Core_exec.prepare ~remember_loops]: a top-level loop or
      region call whose reads repeat one of its last 4 keys hands back that run's writes. *)
   List.iter
@@ -1379,26 +1403,14 @@ and frame_result ?store ?(fast = false) ?(kernel = fun _ -> None) ?(gpu = fun _ 
       | (Iterate _ | Counted _ | Invoke _), Some (reads, writes)
         when (not bindings) && (not internal) && writes <> [||] ->
           ctx.remembered <- true;
-          let names a = String.concat ", " (List.map local (Array.to_list a)) in
           Printf.bprintf body "    { const k%d = [%s], h%d = rt.recall(M, %d, k%d);\n" s.id
             (names reads) s.id s.id s.id;
           Printf.bprintf body "    if (h%d) [%s] = h%d; else {\n" s.id (names writes) s.id;
           (* a resident fold (native Core_exec.resident_live): in fast precision its regions stay on
            the device and its live writes come back once, as it ends *)
-          (match Flow_ir.Core_exec.resident_live program s with
-          | Some live when fast ->
-              ctx.async <- true;
-              Printf.bprintf body "    rt.resident.begin();\n    try {\n";
-              ctx.resident <- true;
-              statement ctx 3 s;
-              ctx.resident <- false;
-              Printf.bprintf body
-                "      [%s] = await rt.resident.finish([%s]);\n\
-                \    } finally { rt.resident.end(); }\n"
-                (names live) (names live)
-          | _ -> statement ctx 3 s);
+          resident_statement 3 s;
           Printf.bprintf body "    rt.keep(M, %d, k%d, [%s]); } }\n" s.id s.id (names writes)
-      | _ -> statement ctx 2 s)
+      | _ -> resident_statement 2 s)
     program.body;
   let code = Buffer.contents body in
   let mentions name = Hashtbl.mem ctx.used name in

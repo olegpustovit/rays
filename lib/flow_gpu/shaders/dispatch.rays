@@ -1,0 +1,17 @@
+; A resident fold's dispatch arguments (Flow_gpu.Run.dispatch_arguments): one thread writes the
+; threadgroup counts of the next dispatch from a count cell, so its grid is sized on the device. The
+; consumer's count is n = min(capacity, count-in[0] x mul / div), bound = {capacity, mul, div, group},
+; and its groups ceil(n / group), at least one: a consumer's thread 0 writes its own count record, also
+; for n = 0, and every kernel returns past n. Counts are masked to their ranges (a fold's arrays stay
+; below 2^30 elements), so the device counts in 32-bit words; the product is 64-bit.
+(defn imin :context value [(a : int) (b : int)] (if (int/lt a b) a b))
+(defn word :context value [(words : (array int)) (k : int)] (int/and (array/nth words k) 1073741823))
+(defn dispatch-arguments :context value [(id : int) (count-in : (array int)) (bound : (array int))
+                                         (groups : (array int)) (size : int)]
+  (let* [n (imin (word bound 0) (int/div (int/mul (word count-in 0) (word bound 1)) (word bound 2)))
+         group (word bound 3)
+         blocks (int/div (int/add n (int/sub group 1)) group)]
+    (if (int/eq id 0)
+      (int/add (gpu/store-int groups 0 (if (int/lt blocks 1) 1 blocks))
+               (int/add (gpu/store-int groups 1 1) (gpu/store-int groups 2 1)))
+      0)))

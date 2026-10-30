@@ -1,35 +1,36 @@
-; A resident fold's array/compact (Flow_gpu.Run.compact): one workgroup. Each lane counts the nonzero
-; elements of its contiguous chunk of the mask, the group's exclusive scan of the counts is each chunk's
-; first slot, and each lane writes its chunk's kept indices there, as floats; lane 0 writes the total,
-; the kept array's count cell. The mask's count is bound[0], or at most count-in[0] when bound[1] is set.
-; Counts and lanes are masked to their ranges (a fold's arrays stay below 2^30 elements, a group at
-; most 1,024 lanes), so the device counts in 32-bit words. size is the group's, a constant of the target.
+; A resident fold's array/compact (Flow_gpu.Run.compact): three dispatches in order over blocks of a
+; group's size, bound[2] the pass. 0: each group counts its block's nonzero elements of the mask into
+; blocks[group]. 1: one group scans those counts, each lane a contiguous chunk of them, into each block's
+; first slot, blocks[g + block], and lane 0 writes the total, the kept array's count cell. 2: each group
+; scans its block of the mask and writes its kept indices from its block's first slot, as floats. The
+; mask's count is bound[0], g blocks of it dispatched, or at most count-in[0] when bound[1] is set; a
+; group past the count keeps nothing. Counts are masked to their ranges (a fold's arrays stay below 2^30
+; elements), so the device counts in 32-bit words. size is the group's, a constant of the target.
 (defn imin :context value [(a : int) (b : int)] (if (int/lt a b) a b))
 (defn word :context value [(words : (array int)) (k : int)] (int/and (array/nth words k) 1073741823))
-; the nonzero elements of mask in [lo, hi), at most passes of them
-(defn chunk-count :context value [(mask : (array float)) (lo : int) (hi : int) (passes : int)]
-  (if (int/lt lo hi)
-    (let* [walk (iterate passes {:i lo :n 0}
-                  (fn [w] {:i (int/add w.i 1) :n (if (= (array/nth mask w.i) 0.) w.n (int/add w.n 1))})
-                  :until (fn [prev next] (int/ge next.i hi)))]
-      walk.n)
-    0))
-; the indices of those elements stored into kept from slot at; the slot after them
-(defn chunk-store :context value [(mask : (array float)) (kept : (array float)) (lo : int) (hi : int) (passes : int) (at : int)]
-  (if (int/lt lo hi)
-    (let* [walk (iterate passes {:i lo :at at}
-                  (fn [w] {:i (int/add w.i 1)
-                           :at (if (= (array/nth mask w.i) 0.) w.at (int/add w.at (gpu/store kept w.at (float w.i))))})
-                  :until (fn [prev next] (int/ge next.i hi)))]
-      walk.at)
-    at))
+(defn blocks-of :context value [(n : int) (size : int)] (int/div (int/add n (int/sub size 1)) size))
 (defn compact-mask :context value [(id : int) (mask : (array float)) (kept : (array float)) (total : (array int))
-                                   (bound : (array int)) (count-in : (array int)) (size : int)]
-  (let* [lane (int/and id 1023)
+                                   (bound : (array int)) (count-in : (array int)) (blocks : (array int))
+                                   (size : int)]
+  (let* [group (int/div id size)
+         lane (int/sub id (int/mul group size))
+         pass (word bound 2)
          n (if (int/eq (word bound 1) 0) (word bound 0) (imin (word bound 0) (word count-in 0)))
-         chunk (int/div (int/add n (int/sub size 1)) size)
-         lo (imin n (int/mul lane chunk))
-         hi (imin n (int/add lo chunk))
-         prefix (gpu/group-scan (chunk-count mask lo hi chunk))
-         written (chunk-store mask kept lo hi chunk prefix.before)]
-    (int/add written (if (int/eq lane 0) (gpu/store-int total 0 prefix.total) 0))))
+         g (blocks-of (word bound 0) size)
+         b (blocks-of n size)
+         chunk (blocks-of b size)
+         lo (imin b (int/mul lane chunk))
+         hi (imin b (int/add lo chunk))
+         keep (if (int/lt id n) (if (= (array/nth mask id) 0.) 0 1) 0)
+         prefix (gpu/group-scan
+                  (if (int/eq pass 1) (fold [acc 0] [k (range lo hi)] (int/add acc (word blocks k))) keep))
+         first (int/eq lane 0)]
+    (if (int/eq pass 0)
+      (if first (gpu/store-int blocks group prefix.total) 0)
+      (if (int/eq pass 1)
+        (int/add (fold [at prefix.before] [k (range lo hi)]
+                   (int/add at (int/mul (word blocks k) (gpu/store-int blocks (int/add g k) at))))
+                 (if first (gpu/store-int total 0 prefix.total) 0))
+        (if (int/eq keep 1)
+          (gpu/store kept (int/add (word blocks (int/add g group)) prefix.before) (float id))
+          0)))))

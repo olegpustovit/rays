@@ -410,29 +410,29 @@ let lower_value (lowered : L.t) change =
     in
     let same_list a b = List.for_all2 (fun (_, x) (_, y) -> x == y) a b in
     let rec rw (v : E.value) : E.value =
-      if is_target v then (
-        hit := true;
-        (* one new value per old one, so every place that shared it still does *)
-        match List.assq_opt v !swapped with
-        | Some next -> next
-        | None ->
-            let next : E.value =
+      match List.assq_opt v !swapped with
+      | Some next -> next
+      | None ->
+          let next =
+            if is_target v then (
+              hit := true;
               match v with
               | Source (k, ty, fs) -> E.Source (k, ty, set fs)
               | Struct (k, ty, fs) -> E.Struct (k, ty, set fs)
+              | v -> v)
+            else
+              match v with
+              | List a ->
+                  let b = Array.map rw a in
+                  if Array.for_all2 ( == ) a b then v else E.List b
+              | Record fs -> fields v fs (fun fs -> E.Record fs)
+              | Struct (k, ty, fs) -> fields v fs (fun fs -> E.Struct (k, ty, fs))
+              | Source (k, ty, fs) -> fields v fs (fun fs -> E.Source (k, ty, fs))
               | v -> v
-            in
-            swapped := (v, next) :: !swapped;
-            next)
-      else
-        match v with
-        | List a ->
-            let b = Array.map rw a in
-            if Array.for_all2 ( == ) a b then v else E.List b
-        | Record fs -> fields v fs (fun fs -> E.Record fs)
-        | Struct (k, ty, fs) -> fields v fs (fun fs -> E.Struct (k, ty, fs))
-        | Source (k, ty, fs) -> fields v fs (fun fs -> E.Source (k, ty, fs))
-        | v -> v
+          in
+          (* Keep changed ancestors shared too: a later edit targets their recorded identity. *)
+          if next != v then swapped := (v, next) :: !swapped;
+          next
     and set fs = List.map (fun (f, x) -> if f = change.field then (f, change.after) else (f, x)) fs
     and fields v fs build =
       let fs' = List.map (fun (f, x) -> (f, rw x)) fs in

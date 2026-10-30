@@ -58,8 +58,8 @@ val compute :
   buffers:(int * int * bool * bool) list ->
   Flow_ir.Packed.t ->
   (string, Diagnostic.t) result
-(** A compute stage (Flow_gpu.Raster's) as the module of entry [name], one workgroup of [size]
-    ([@builtin(local_invocation_index)] is its element): [buffers] are (array uniform, binding, u32
+(** A compute stage (Flow_gpu.Raster's) as the module of entry [name], workgroups of [size]
+    ([@builtin(global_invocation_id)] is its element): [buffers] are (array uniform, binding, u32
     words, stored), read unclamped; [gpu/group-scan] is a [var<workgroup>] scan between
     [workgroupBarrier]s and [gpu/store] a statement. Its result is discarded. *)
 
@@ -67,3 +67,9 @@ val compaction : string
 (** The WGSL of a resident fold's [array/compact] (entry [compact_mask], one workgroup of 256),
     generated from Flow_gpu's shaders/compact.rays: bindings mask (f32), kept (f32 indices), total
     (the count cell), bound (u32 count, use) and count_in. *)
+
+val dispatch_arguments : string
+(** The WGSL of a resident dispatch's workgroup counts (entry [dispatch_arguments], one thread),
+    generated from Flow_gpu's shaders/dispatch.rays: bindings the count cell, bound (u32 capacity,
+    mul, div, group) and the three counts written for [dispatchWorkgroupsIndirect],
+    max(1, ceil(n / group)), 1, 1 for n = min(capacity, cell[0] x mul / div). *)

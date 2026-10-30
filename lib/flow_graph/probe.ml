@@ -37,6 +37,8 @@ type footer = {
 
 type t = {
   force : force;
+  guard : 'a. fallback:'a -> (unit -> 'a) -> 'a;
+      (* every evaluation a probe starts, stopped past its budget (see [make]) *)
   execution : path -> probes:int list -> execution option;
   live_frame : Input.t option;
   state : E.state option;
@@ -65,7 +67,11 @@ type t = {
   arms : (path * int list, int option) Hashtbl.t;
 }
 
-let make ?state ?live ?time ?resolve ?force ?(bulk_calls = fun _ _ -> [])
+(* What a probe reads once one ran over: the frame it ran on is the UI's. *)
+let stopped = Error (Diagnostic.error ~code:"cancelled" "Probe over its time budget.")
+let budget = 0.008
+
+let make ?clock ?state ?live ?time ?resolve ?force ?(bulk_calls = fun _ _ -> [])
     ?(execution = fun _ ~probes:_ -> None) ?(geometry = fun _ -> None) ?(image = fun _ -> None)
     ?(dynamic = fun _ -> None) ?(element = fun _ _ -> None) (eval : E.t) =
   let raw = Hashtbl.create 64 in
@@ -79,7 +85,26 @@ let make ?state ?live ?time ?resolve ?force ?(bulk_calls = fun _ _ -> [])
   let live_frame = match live with Some _ -> live | None -> Option.map Input.at_time time in
   let state = Option.map E.fork_state state in
   let force : force option = force in
+  (* With a [clock], one evaluation stops after [budget] seconds and every later one on these
+     records is skipped: a probe never holds a frame longer, whatever the graph (the next cook's
+     records try again). Without one (tests, exports) probes run to the end. *)
+  let over = ref false in
+  let guard ~fallback f =
+    match clock with
+    | None -> f ()
+    | Some _ when !over -> fallback
+    | Some clock -> (
+        let start = clock () in
+        match E.with_interrupt (fun () -> clock () -. start > budget) f with
+        | Some v -> v
+        | None ->
+            over := true;
+            fallback)
+  in
   let force = Option.value ~default:E.Host.force_reference force in
+  let force ?state ?elems ?resolve v ~live =
+    guard ~fallback:stopped (fun () -> force ?state ?elems ?resolve v ~live)
+  in
   let image id =
     let dimensions =
       match image id with
@@ -107,6 +132,7 @@ let make ?state ?live ?time ?resolve ?force ?(bulk_calls = fun _ _ -> [])
   in
   {
     force;
+    guard = (fun ~fallback f -> guard ~fallback f);
     live_frame;
     state;
     resolve;
@@ -315,18 +341,21 @@ let map_calls t zone outer =
               match value with
               | E.Record [ ("offset", E.Int offset); ("call", E.Residual call) ] -> (
                   match
-                    E.Host.map_probe ?state:t.state ?resolve:t.resolve ~offset call
-                      ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame)
+                    t.guard ~fallback:stopped (fun () ->
+                        E.Host.map_probe ?state:t.state ?resolve:t.resolve ~offset call
+                          ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame))
                   with
-                  | Ok (count, at) -> Some (offset, count, at)
+                  | Ok (count, at) ->
+                      Some (offset, count, fun k -> t.guard ~fallback:stopped (fun () -> at k))
                   | Error _ -> None)
               | _ -> None)
           (Option.value ~default:[] (Hashtbl.find_opt t.raw (zone @ [ "~calls" ])))
       in
       let base = List.fold_left (fun n (offset, count, _) -> max n (offset + count)) 0 calls in
       let bulk =
-        t.bulk_calls zone outer
+        t.guard ~fallback:[] (fun () -> t.bulk_calls zone outer)
         |> List.map (fun (offset, count, at) ->
+            let at k = t.guard ~fallback:stopped (fun () -> at k) in
             let at k =
               Result.map
                 (List.map (fun (path, values) ->

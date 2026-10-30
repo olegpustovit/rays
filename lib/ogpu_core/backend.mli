@@ -138,6 +138,8 @@ type driver_compute_encoder = {
   set_accel : index:int -> token -> (unit, Error.t) result;
   dispatch_threads :
     threads:int * int * int -> threadgroup:int * int * int -> (unit, Error.t) result;
+  dispatch_indirect :
+    token -> offset:int64 -> threadgroup:int * int * int -> (unit, Error.t) result;
   compute_use_accels : token list -> (unit, Error.t) result;
   end_compute : unit -> (unit, Error.t) result;
 }
@@ -535,6 +537,17 @@ val dispatch_threads :
   threads:int * int * int ->
   threadgroup:int * int * int ->
   (unit, Error.t) result
+
+val dispatch_threadgroups_indirect :
+  compute_encoder ->
+  buffer ->
+  offset:int64 ->
+  threadgroup:int * int * int ->
+  (unit, Error.t) result
+(** A dispatch whose threadgroup counts the device wrote: three uints at [offset] (4-aligned) of
+    the buffer (Metal's [dispatchThreadgroupsWithIndirectBuffer:], WebGPU's
+    [dispatchWorkgroupsIndirect]). Every thread of every group runs, so a kernel guards its own
+    count. Part of [Caps.Compute_pipeline]. *)
 
 val end_compute : compute_encoder -> (unit, Error.t) result
 val accel_encoder : commands -> (accel_encoder, Error.t) result

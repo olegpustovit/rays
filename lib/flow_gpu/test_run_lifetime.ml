@@ -138,6 +138,8 @@ let () =
                                               compute_use_accels = (fun _ -> assert false);
                                               dispatch_threads =
                                                 (fun ~threads:_ ~threadgroup:_ -> Ok ());
+                                              dispatch_indirect =
+                                                (fun _ ~offset:_ ~threadgroup:_ -> Ok ());
                                               end_compute = (fun () -> Ok ());
                                             });
                                     })

@@ -401,6 +401,34 @@ let skips () =
       | None -> fail "an iteration that ran has no plan node")
     [ 0; 2; 3 ]
 
+(* a probe with a clock stops past its budget: an expired clock leaves the map's count out at once
+   and the records skip the rest, where one without a clock runs the map to the end *)
+let budget () =
+  let w =
+    T.workspace_of
+      {|(workspace budget_probe
+    (graph g :context value
+      (let* [xs (map (fn [(x : float)] (+ x (frame/dt))) (array/float 5000 1.0))
+             ys (map (fn [(x : float)] (* x 2.0)) xs)]
+        (array/count ys))))|}
+  in
+  let evaluated = Flow.Eval.static ~record:true w |> Result.get_ok in
+  let scope = T.scope w "g" and live = Input.at_time 0.5 in
+  let count records = Probe.counts records scope ~probe:(fun _ -> 0) in
+  check
+    (List.mem ([ "g"; "ys#0" ], 5000) (count (Probe.make ~live evaluated)))
+    "an unbudgeted probe counts the map";
+  let now = ref 0. in
+  let clock () =
+    now := !now +. 1.;
+    !now
+  in
+  let records = Probe.make ~clock ~live evaluated in
+  check (not (List.mem_assoc [ "g"; "ys#0" ] (count records))) "an expired probe stops";
+  let before = !now in
+  ignore (count records);
+  check (!now = before) "the records skip evaluation once one ran over"
+
 let compiled_inputs () =
   let w =
     T.workspace_of
@@ -487,6 +515,7 @@ let run () =
     (List.assoc "g" result.results = Flow.Eval.Int 1)
     "a probe never advances the environment fold";
   compiled_inputs ();
+  budget ();
   skips ();
   off_display ();
   geometry_zone ();

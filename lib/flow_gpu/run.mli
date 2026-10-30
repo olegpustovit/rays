@@ -58,7 +58,9 @@ val dispatch :
 (** [~wait:false] leaves the dispatch in flight, without its status read; [~commands] only encodes
     it into the caller's command buffer (epoch 0 until the caller commits it); [~reset_status:false]
     keeps ORed error flags from earlier encodings on this runner. [~count:(cell, mul, div)] bounds a
-    fast kernel's count by [cell * mul / div] on the device; [~into:(output, cell)] writes a
+    fast kernel's count by [cell * mul / div] on the device, and its grid too: an indirect
+    dispatch of groups of 256 to that count, written on the device ({!Emit.dispatch_arguments}),
+    not to the capacity [inputs.count]; [~into:(output, cell)] writes a
     one-output fast kernel's output and count into the caller's buffers; [bound i] and
     [bound_table u] supply device buffers already holding input [i] or uniform [u]'s table (with the
     table's length in floats, which a gather clamps to); a bound input's array is not read.
@@ -124,11 +126,18 @@ val compact :
   count_in:Ogpu.Backend.buffer option ->
   kept:Ogpu.Backend.buffer ->
   total:Ogpu.Backend.buffer ->
+  blocks:Ogpu.Backend.buffer ->
+  groups:Ogpu.Backend.buffer ->
   (unit, Diagnostic.t) result
 
 (* Encodes into [commands] the indices of [mask]'s first elements that are nonzero, as floats into
    [kept], and their count into the cell [total]. The mask's count is [count], or at most the uint
-   in [count_in]. Nothing is committed or read. *)
+   in [count_in]; [blocks] is scratch of [compact_blocks count] bytes. With [count_in] the count and
+   scatter passes take their group count from it on the device, through [groups] (12 bytes).
+   Nothing is committed or read. *)
+
+val compact_blocks : int -> int
+
 val read_count :
   Ogpu.Backend.queue -> Ogpu.Backend.buffer -> epoch:int64 -> (int, Diagnostic.t) result
 

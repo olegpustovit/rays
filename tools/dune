@@ -214,6 +214,26 @@
   (system
    "if command -v node >/dev/null 2>&1; then FRAMES=12 FAST=1 POINTER='320,405;320,410;320,415;320,420;320,425;320,430;320,435;320,440;320,445;320,450;320,455;320,460' node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays; else echo 'fast present_e2e: skipped (node not found)'; fi")))
 
+; recursive_signals' resident fold as its density grows each frame: its counts outgrow the capacities the
+; last frames gave its slots, and the last frame, cut, runs again from its bounds (native parity).
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias qualification-web)
+ (deps
+  web/test/present_e2e.mjs
+  web/test/chrome.mjs
+  web/test/png.mjs
+  (glob_files ../lib/web_export/runtime/*.js)
+  ../lib/web_export/runtime/marks.wgsl
+  ../bin/rays.exe
+  marks_shot.exe
+  ../sketches/recursive_signals.rays)
+ (action
+  (system
+   "if command -v node >/dev/null 2>&1; then FRAMES=10 FAST=1 POINTER='320,200;320,230;320,260;320,290;320,320;320,350;320,380;320,410;320,440;320,470' node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_signals.rays; else echo 'fast present_e2e: skipped (node not found)'; fi")))
+
 ; The live page as a person uses it: index.html's rAF loop driven by real mouse events must animate, and once the
 ; pointer rests its picture matches native at the same pointer. Not part of runtest.
 

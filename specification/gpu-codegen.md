@@ -117,16 +117,48 @@ that the checked-in output is the printers'.
 - The Metal backend's presentation blit is `lib/ogpu_metal/shaders/present.rays`, a raster pipeline
   printed into `shaders/metal/present.metal` (embedded by `Presentation`; `ogpu_metal` never reaches Flow)
   and `shaders/spirv/present.{vert,frag}.spv`.
-- A **compute stage** is one workgroup (`Raster.compute_msl`, `Raster.compute_spirv`,
-  `Flow_web.Wgsl.compute`): the entry's first parameter is the lane, its array parameters the bound
+- A **compute stage** is one workgroup, or with `grid` any number (`Raster.compute_msl`,
+  `Raster.compute_spirv`; `Flow_web.Wgsl.compute` is always grid): the entry's first parameter is the
+  lane (with `grid` its index in the dispatch; the scan stays the group's), its array parameters the bound
   buffers in order, its last the group size (a constant of the target: 1,024 on Metal, 256 on Vulkan and
   WebGPU); its result is discarded. `(gpu/group-scan x)` is the exclusive prefix sum of an Int over the
   group with its total, in uniform control flow (a Hillis-Steele scan in threadgroup / `Workgroup` /
   `var<workgroup>` memory between `threadgroup_barrier` / `OpControlBarrier` / `workgroupBarrier`);
   `(gpu/store buffer index value)` and `gpu/store-int` write a bound buffer and are 1. The resident fold's
   compaction is `lib/flow_gpu/shaders/compact.rays`, printed into `shaders/metal/compact.metal`,
-  `shaders/spirv/compact.comp.spv` and `lib/flow_web/compact.wgsl`. Narrowing reads a store's and a
-  scan's operands as uint words, so the stage counts in 32 bits.
+  `shaders/spirv/compact.comp.spv` and `lib/flow_web/compact.wgsl`. It runs three dispatches over
+  blocks of the group size: each group counts its block, one group scans the block counts into first
+  slots (and writes the total), each group scatters its block's kept indices from its slot; the block
+  scratch comes from the capacity, the real count from count-in on the device, and so do the count and
+  scatter passes' group counts (below).
+- A **counted dispatch** (a resident region or compaction whose count is a device count cell x mul / div)
+  sizes its grid on the device: `lib/flow_gpu/shaders/dispatch.rays` (one thread, printed into
+  `shaders/metal/dispatch.metal`, `shaders/spirv/dispatch.comp.spv` and `lib/flow_web/dispatch.wgsl`)
+  writes max(1, ceil(n / group)), 1, 1 for n = min(capacity, cell[0] x mul / div) into a 12-byte buffer,
+  encoded before the dispatch in the same pass, which then runs as `Backend.dispatch_threadgroups_indirect`
+  (Metal `dispatchThreadgroupsWithIndirectBuffer:`) or `dispatchWorkgroupsIndirect`. At least one group
+  runs, so thread 0 writes the consumer's count record also for n = 0; every kernel keeps its `i >= n`
+  guard for the last, partial group. The capacity sizes the host's placeholders and the device buffers.
+  Narrowing reads a store's and a scan's operands as uint words, so the stage counts in 32 bits.
+- A **slot** is a resident region site's Nth call in one fold run (`Host.resident`, web `resident.js`;
+  a site's first 64 ordinals, the 32 latest sites). It owns its region's output and count cell, its
+  compactions' and retypings' buffers and the placeholders, which come back to it as the run closes and
+  serve the next draw's run; what it kept and a run did not take (a size it outgrew) is freed then, and a
+  site leaving the host frees its slots. A counted region whose slot has history takes the slot's
+  capacity, the smallest power of two above the largest count it has held (never shrinking while the
+  site lives), instead of its bound (the dispatch stops at the lesser), and no count is waited for. The
+  counts become history once the fold's device work is done: native reads them at close, after the
+  wait the run already made; the web copies them at the loop's end and records them when the map
+  resolves, never awaited. Without history (a new site, the first draw) the capacity is the bound, and
+  past 256K a native fold reads the device count once (one wait) and takes it as the bound (the web past
+  4M only, 65,535 groups of 64 being a dispatch's reach); past 4M a region settles on the host.
+- A slot's count that reaches a capacity below its bound may have been cut (the kernel stops at its
+  capacity). Before the host reads any resident array, `finish` reads every such count (after the wait
+  the read makes anyway) and raises `Core_exec.Resident_overflow` (web: throws `resident.overflow`): the
+  loop's writes are restored and it runs again, its regions from the first cut one on at their bounds.
+  Kernels are deterministic, so the regions before it repeat their uncut counts; were one cut, the
+  rerun would start earlier, so the reruns end. A cut run still records its counts (a cut one doubles
+  its slot) and the rerun the true ones, so a growing count costs one rerun per power of two.
 - `scene/trace` stays a host query on the CPU (`Flow.Ray_host`). A traced kernel instead inlines
   `lib/flow_gpu/trace.rays` (`Flow_gpu.Trace`): `trace-hit` (or `trace-occluded` for a ray whose only
   read field is its hit), compiled once a scene variant (instanced, motion, strands, spheres) and spliced

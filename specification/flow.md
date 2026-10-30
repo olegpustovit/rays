@@ -321,7 +321,10 @@ footer row only when the host has probe records (`Projection.layout ~foot`). Por
 - A **Card** is its header plus the rows of §5.1. A **value card** (a literal binding,
   `Projection.value_card`) is the header alone: name, the value field, the out-port.
 - The footer (value, sparkline, cook time, as in `1 204 pts · 0.003 s`) is drawn on Full
-  only; the cook time is `Probe.geometry.seconds`.
+  only; the cook time is `Probe.geometry.seconds`. Footers and zone counts are evaluated on
+  the UI thread, so the editor's probes carry a clock: one evaluation stops after 8 ms
+  (`Eval.with_interrupt`) and those records skip the rest, reading `?` or no count until the
+  next cook's records.
 - Boxes are laid out at the level the node was given (`shown`, never changed by the zoom): a
   point is as wide as its name at the zoom's font, a chip is the header. Ports, wire ends,
   obstacles and hit boxes all read that one box.

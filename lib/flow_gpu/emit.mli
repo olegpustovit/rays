@@ -20,9 +20,15 @@ type msl = private {
 val names : string list
 
 val compaction : msl
-(** The kernel of a resident fold's [array/compact] (shaders/compact.rays, one threadgroup of
-    1,024): buffers mask, kept (float indices), total (uint), (n, use) and count_in: the mask's
-    count is n, or its minimum with [count_in[0]] when use is set. *)
+(** The kernel of a resident fold's [array/compact] (shaders/compact.rays, threadgroups of
+    1,024 in three passes): buffers mask, kept (float indices), total (uint), (n, use, pass),
+    count_in and the blocks' counts and first slots (2 x ceil(n / 1,024) uints): the mask's count
+    is n, or its minimum with [count_in[0]] when use is set. *)
+
+val dispatch_arguments : msl
+(** A resident dispatch's threadgroup counts (shaders/dispatch.rays, one thread): buffers the
+    count cell, (capacity, mul, div, group) and the three counts written, max(1, ceil(n / group)),
+    1, 1 for n = min(capacity, cell[0] x mul / div). *)
 
 val bounds : msl
 (** A resident packed float3 array's bounds (shaders/bounds.rays, one threadgroup of 1,024): buffers

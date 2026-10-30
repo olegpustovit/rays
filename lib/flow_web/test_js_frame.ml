@@ -186,6 +186,18 @@ let draw_source name body =
   let evaluation = ok (E.static ws) in
   draw_of name evaluation (List.assoc "g" evaluation.results)
 
+let () =
+  let _, program, _ =
+    draw_source "animated_resident"
+      "(draw/points (fold [b (array/vec3 2 [0 0 0])] [d (range 2)] \
+       (map (fn [p] [(+ p.x t) 0 0]) b)))"
+  in
+  let code = ok (Flow_web.Js.frame ~fast:true program) in
+  assert
+    (List.exists
+       (fun line -> String.trim line = "rt.resident.begin();")
+       (String.split_on_char '\n' code))
+
 let pictures =
   List.mapi (fun i b -> draw_source (Printf.sprintf "draw_%02d" i) b) Core_fixtures.pictures
 

@@ -925,7 +925,21 @@ struct
               Names.of_seq (List.to_seq (List.map (fun (name, v) -> (name, Known v)) view.bindings))
             in
             let source = source_of_view view in
-            let packed = if view.previous then None else packed_region r view in
+            (* A draw's captured arrays need explicit producers, especially resident folds.
+               Scalar-only captures retain the direct packed path and its grouping. *)
+            let draw_arrays =
+              draw <> None
+              && List.exists
+                   (fun name ->
+                     match List.assoc_opt name view.bindings with
+                     | Some (V.Residual r) -> (
+                         match (E.Residual.residual_view r).term.ty with
+                         | Flow.Ty.Array _ -> true
+                         | _ -> false)
+                     | _ -> false)
+                   (E.Residual.free_names view.term)
+            in
+            let packed = if view.previous || draw_arrays then None else packed_region r view in
             let value =
               if Option.is_some packed then region statements (Option.get packed) view
               else if view.previous then

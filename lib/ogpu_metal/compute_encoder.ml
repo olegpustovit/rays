@@ -85,6 +85,17 @@ let create (context : Command_control.t) =
               dispatch_threads =
                 (fun ~threads ~threadgroup ->
                   native_of (Metal.Compute_encoder.dispatch_threads encoder ~threads ~threadgroup));
+              dispatch_indirect =
+                (fun token ~offset ~threadgroup ->
+                  match find_buffer token with
+                  | Error _ as failure -> failure
+                  | Ok buffer -> (
+                      match keep_buffer buffer with
+                      | Error _ as failure -> failure
+                      | Ok () ->
+                          native_of
+                            (Metal.Compute_encoder.dispatch_threadgroups_indirect encoder
+                               ~arguments:(Buffer.Private.metal buffer) ~offset ~threadgroup)));
               compute_use_accels =
                 (fun tokens ->
                   let rec collect acc = function
