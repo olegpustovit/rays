@@ -1,7 +1,7 @@
 type t = private {
   bytes : bytes;
   entry : string;
-  interface : Ogpu.Shader.binding list;
+  interface : Ogpu_core.Shader.binding list;
   layout : Flow_ir.Kernel_layout.t;
   uniform_bytes : int;
 }
@@ -36,5 +36,5 @@ type stage = {
     dispatched over any number of workgroups. *)
 
 val stage : stage -> Flow_ir.Packed.t -> (bytes, Diagnostic.t) result
-(** A Vulkan vertex or fragment module (entry [main]) of a raster stage program (Flow_gpu.Raster).
+(** A Vulkan vertex or fragment module (entry [main]) of a raster stage program (Flow_shader.Raster).
 *)

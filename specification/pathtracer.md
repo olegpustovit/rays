@@ -145,7 +145,7 @@ file-backed HDRIs (a baked `Rays.World` is the environment; see World path).
    command buffer before the next frame (specification/backend.md).
 2. The kernels are Rays Lisp: `pathtrace.rays` (with `pathtrace_helpers.rays`
    and `resolve_preview.rays`, embedded by a Dune rule) printed to MSL by
-   `Flow_gpu.Emit` (`Lisp_kernel`). A kernel set is compiled per scene shape:
+   `Flow_shader.Emit` (`Lisp_kernel`). A kernel set is compiled per scene shape:
    the facts (spp, bounces, round-corner probes, light and panel counts, World,
    background, map size, sun, `bsdf_only`, instanced, motion, strands native
    or in-loop, and whether any material is metallic, emissive or round) are

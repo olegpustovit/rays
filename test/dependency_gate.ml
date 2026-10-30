@@ -150,6 +150,7 @@ let upper =
     "flow";
     "flow_ir";
     "flow_web";
+    "flow_shader";
     "flow_gpu";
     "flow_graph";
     "flow_sop";
@@ -298,9 +299,19 @@ let only =
     ("scene_execution_fixtures", [ "renderer"; "ogpu" ]);
     ("pxui", [ "rays"; "rays_math"; "param" ]);
     ("pxui_shell", [ "rays"; "rays_math"; "editor_core"; "pxui" ]);
+    ("flow_shader", [ "flow"; "flow_ir"; "ogpu_core" ]);
     ( "flow_gpu",
       [
-        "flow"; "flow_ir"; "param"; "rays_math"; "ogpu_core"; "ogpu"; "renderer"; "lru"; "parallel";
+        "flow";
+        "flow_ir";
+        "flow_shader";
+        "param";
+        "rays_math";
+        "ogpu_core";
+        "ogpu";
+        "renderer";
+        "lru";
+        "parallel";
       ] );
     ("flow_web", [ "flow"; "flow_ir"; "param"; "rays_math"; "scene_command"; "parallel" ]);
     ( "web_export",

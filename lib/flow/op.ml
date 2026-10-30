@@ -1595,7 +1595,7 @@ let scene_trace =
     live = true;
   }
 
-(* Raster-stage intrinsics: a fragment placement prints them (Flow_gpu.Raster); a fragment's derivative
+(* Raster-stage intrinsics: a fragment placement prints them (Flow_shader.Raster); a fragment's derivative
    and a bound texture have no meaning on the CPU, so every evaluation refuses them. *)
 let stage_intrinsics =
   let stage name params out =
@@ -1622,7 +1622,7 @@ let stage_intrinsics =
     stage "gpu/depth" [] fl;
     stage "gpu/fragment-x" [] fl;
     stage "gpu/fragment-y" [] fl;
-    (* the device side of scene/trace (Flow_gpu.Trace, trace.rays): the ray queries over the bound
+    (* the device side of scene/trace (Flow_shader.Trace, trace.rays): the ray queries over the bound
        structures (the direction as given) and the scene's tables; an index is an instance, a primitive,
        a triangle corner, a sphere, a strand segment and its end, or an instance-table row *)
     stage "gpu/trace-triangles"
@@ -1649,7 +1649,7 @@ let stage_intrinsics =
     stage "gpu/scene-strand" [ ("strand", Ty.Int); ("end", Ty.Int) ] Ty.Vec4;
     stage "gpu/scene-spheres" [] Ty.Int;
     stage "gpu/scene-strands" [] Ty.Int;
-    (* a compute stage's workgroup (Flow_gpu.Raster.compute): the exclusive prefix sum of x over its
+    (* a compute stage's workgroup (Flow_shader.Raster.compute): the exclusive prefix sum of x over its
        threads in thread order with the total, and a store into a bound buffer (it returns 1) *)
     stage "gpu/group-scan" [ ("x", Ty.Int) ] (Ty.Record [ ("before", Ty.Int); ("total", Ty.Int) ]);
     stage "gpu/store" [ ("buffer", Ty.Array fl); ("index", Ty.Int); ("value", fl) ] Ty.Int;

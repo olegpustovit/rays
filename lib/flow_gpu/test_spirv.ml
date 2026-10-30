@@ -102,8 +102,8 @@ let () =
     (fun (name, fast, program) ->
       let instanced = String.ends_with ~suffix:"instanced" name
       and curves = String.ends_with ~suffix:"curves" name in
-      let emitted = Flow_gpu.Spirv.kernel ~fast ~instanced ~curves program |> Test_program.ok in
-      let again = Flow_gpu.Spirv.kernel ~fast ~instanced ~curves program |> Test_program.ok in
+      let emitted = Flow_shader.Spirv.kernel ~fast ~instanced ~curves program |> Test_program.ok in
+      let again = Flow_shader.Spirv.kernel ~fast ~instanced ~curves program |> Test_program.ok in
       assert (emitted.bytes = again.bytes);
       assert (Bytes.get_int32_le emitted.bytes 0 = 0x07230203l);
       assert (
@@ -121,7 +121,9 @@ let () =
       assert (Ogpu.Shader.validate_bindings emitted.interface = Ok ());
       assert (emitted.uniform_bytes = Flow_ir.Kernel_layout.uniform_words emitted.layout * 16);
       let metal =
-        Flow_gpu.Emit.kernel ~fast ~instanced ?curves:(if curves then Some `Loop else None) program
+        Flow_shader.Emit.kernel ~fast ~instanced
+          ?curves:(if curves then Some `Loop else None)
+          program
         |> Test_program.ok
       in
       assert (emitted.interface = metal.interface);
@@ -149,7 +151,7 @@ let () =
     @ List.map (fun (name, program) -> (name, true, program)) (fast_cases ()));
   (* a moving scene has no SPIR-V ray-query form: a typed refusal, never a static kernel *)
   (match
-     Flow_gpu.Spirv.kernel ~fast:true ~motion:true (List.assoc "fast_trace" (fast_cases ()))
+     Flow_shader.Spirv.kernel ~fast:true ~motion:true (List.assoc "fast_trace" (fast_cases ()))
    with
   | Error d -> assert (d.code = "E_GPU_FORM")
   | Ok _ -> assert false);

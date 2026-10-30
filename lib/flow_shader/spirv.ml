@@ -1,9 +1,10 @@
 module P = Flow_ir.Packed
+module Shader = Ogpu_core.Shader
 
 type t = {
   bytes : bytes;
   entry : string;
-  interface : Ogpu.Shader.binding list;
+  interface : Shader.binding list;
   layout : Flow_ir.Kernel_layout.t;
   uniform_bytes : int;
 }
@@ -340,7 +341,7 @@ let int_compare_opcode = function
 (* An in-loop analytic test after the ray query, over [count] records: [values] are the nine fields so far;
    the loop carries them through phis and [body index phis] returns whether record [index] is nearer and its
    fields. No inner branches. *)
-(* A ray query (Flow_gpu.Trace's gpu/trace-* intrinsics) over origin, direction, tmin and tmax: the
+(* A ray query (Flow_shader.Trace's gpu/trace-* intrinsics) over origin, direction, tmin and tmax: the
    committed triangle's t, primitive (uint), barycentrics, hit (bool) and instance (uint), or for an
    any-hit query (terminate on first hit) only hit; once a ray in a block. *)
 let query e r any =
@@ -926,7 +927,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     if layout.scene_motion then
       fail
         "scene/trace motion has no SPIR-V ray-query form; build the scene at the shutter midpoint \
-         (Run.build_scene without Ray_tracing_motion).";
+         (Flow_gpu.Run.build_scene without Ray_tracing_motion).";
     let words = Words.create () in
     let void = Words.declare words 19 []
     and boolean = Words.declare words 20 []
@@ -967,36 +968,36 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
       let id = variable pointer storage in
       Words.instruction words.annotations 71 [ id; 34; 0 ];
       Words.instruction words.annotations 71 [ id; 33; binding ];
-      interface := Ogpu.Shader.{ group = 0; binding; kind; visibility = [ Compute ] } :: !interface;
+      interface := Shader.{ group = 0; binding; kind; visibility = [ Compute ] } :: !interface;
       id
     in
     let inputs =
       Array.mapi
-        (fun index used -> if used then bind storage 12 index Ogpu.Shader.Storage_buffer else 0)
+        (fun index used -> if used then bind storage 12 index Shader.Storage_buffer else 0)
         layout.input_used
     in
     let outputs =
       Array.init layout.output_count (fun index ->
-          bind storage 12 (layout.input_count + index) Ogpu.Shader.Storage_buffer)
+          bind storage 12 (layout.input_count + index) Shader.Storage_buffer)
     in
-    let uniform_buffer = bind uniform_type 2 layout.uniform_binding Ogpu.Shader.Uniform_buffer
-    and status = bind uint_storage 12 layout.status_binding Ogpu.Shader.Storage_buffer in
+    let uniform_buffer = bind uniform_type 2 layout.uniform_binding Shader.Uniform_buffer
+    and status = bind uint_storage 12 layout.status_binding Shader.Storage_buffer in
     let table =
       Option.map
-        (fun binding -> bind uint_storage 12 binding Ogpu.Shader.Storage_buffer)
+        (fun binding -> bind uint_storage 12 binding Shader.Storage_buffer)
         layout.table_binding
     in
     let gathers =
       Array.of_list
         (List.mapi
-           (fun k _ -> bind uint_storage 12 (layout.gather_base + k) Ogpu.Shader.Storage_buffer)
+           (fun k _ -> bind uint_storage 12 (layout.gather_base + k) Shader.Storage_buffer)
            layout.gathers)
     in
     let counts =
       Option.map
         (fun _ ->
-          let input = bind uint_storage 12 layout.count_base Ogpu.Shader.Storage_buffer in
-          let output = bind uint_storage 12 (layout.count_base + 1) Ogpu.Shader.Storage_buffer in
+          let input = bind uint_storage 12 layout.count_base Shader.Storage_buffer in
+          let output = bind uint_storage 12 (layout.count_base + 1) Shader.Storage_buffer in
           (input, output))
         layout.counts
     in
@@ -1007,13 +1008,13 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
           let accel =
             bind
               (Words.declare words 32 [ 0; accel_type ])
-              0 binding Ogpu.Shader.Acceleration_structure
+              0 binding Shader.Acceleration_structure
           in
-          let vertices = bind storage 12 (binding + 1) Ogpu.Shader.Storage_buffer in
-          let spheres = bind storage 12 (binding + 2) Ogpu.Shader.Storage_buffer in
+          let vertices = bind storage 12 (binding + 1) Shader.Storage_buffer in
+          let spheres = bind storage 12 (binding + 2) Shader.Storage_buffer in
           let instances =
             Option.map
-              (fun _ -> bind storage 12 (binding + 3) Ogpu.Shader.Storage_buffer)
+              (fun _ -> bind storage 12 (binding + 3) Shader.Storage_buffer)
               layout.scene_instances
           in
           let query = variable (Words.declare words 32 [ 6; Words.declare words 4472 [] ]) 6 in
@@ -1029,7 +1030,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     in
     let strands =
       Option.map
-        (fun binding -> bind storage 12 binding Ogpu.Shader.Storage_buffer)
+        (fun binding -> bind storage 12 binding Shader.Storage_buffer)
         layout.scene_strands
     in
     let invocation = variable invocation_pointer 1 in

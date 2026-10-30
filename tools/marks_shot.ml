@@ -190,7 +190,7 @@ let () =
                       | None -> fail "Image has no packed kernel."
                     in
                     let run =
-                      Flow_gpu.Run.create gpu pipelines (get (Flow_gpu.Emit.kernel packed))
+                      Flow_gpu.Run.create gpu pipelines (get (Flow_shader.Emit.kernel packed))
                     in
                     let sink = get (Flow_gpu.Image_sink.create gpu) in
                     Fun.protect

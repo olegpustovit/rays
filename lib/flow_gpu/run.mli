@@ -59,7 +59,7 @@ val dispatch :
     it into the caller's command buffer (epoch 0 until the caller commits it); [~reset_status:false]
     keeps ORed error flags from earlier encodings on this runner. [~count:(cell, mul, div)] bounds a
     fast kernel's count by [cell * mul / div] on the device, and its grid too: an indirect
-    dispatch of groups of 256 to that count, written on the device ({!Emit.dispatch_arguments}),
+    dispatch of groups of 256 to that count, written on the device (Kernels.dispatch_arguments),
     not to the capacity [inputs.count]; [~into:(output, cell)] writes a
     one-output fast kernel's output and count into the caller's buffers; [bound i] and
     [bound_table u] supply device buffers already holding input [i] or uniform [u]'s table (with the

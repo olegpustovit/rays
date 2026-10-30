@@ -186,7 +186,7 @@ let () =
             (fun k program ->
               let runner =
                 Flow_gpu.Run.create lease pipelines
-                  (Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program))
+                  (Test_program.ok (Flow_shader.Emit.kernel ~fast:true program))
               in
               let values = Test_program.ok (Flow_ir.Packed.Host.prepare ~fast:true program ~live) in
               let gpu =

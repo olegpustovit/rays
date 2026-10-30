@@ -171,7 +171,7 @@ let text f ~preview:set =
 
 type kernel = {
   runner : Flow_gpu.Run.t;
-  msl : Flow_gpu.Emit.msl;
+  msl : Flow_shader.Emit.msl;
   base : Flow_ir.Packed.Host.inputs;
   slots : (string * Flow.Ty.t) option array; (* the placeholder each uniform reads *)
 }
@@ -276,7 +276,7 @@ let check_sketch () =
       | _, ds -> Error (diagnostics ds))
 
 (* The front end's result for one kernel: its MSL, its inputs, and the placeholder each uniform reads. *)
-type front = Flow_gpu.Emit.msl * Flow_ir.Packed.Host.inputs * (string * Flow.Ty.t) option array
+type front = Flow_shader.Emit.msl * Flow_ir.Packed.Host.inputs * (string * Flow.Ty.t) option array
 
 let front t name =
   let* fn = fn t name in
@@ -307,7 +307,7 @@ let front t name =
   let* msl =
     Result.map_error
       (fun d -> name ^ ": " ^ Diagnostic.to_string d)
-      (Flow_gpu.Emit.kernel ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion
+      (Flow_shader.Emit.kernel ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion
          ?curves:t.facts.curves ~spheres:t.facts.spheres template)
   in
   let* base =
@@ -433,7 +433,7 @@ let max_total_threads t ~lease ~pipelines name =
 
 let source t ~lease ~pipelines name =
   let* k = kernel t ~lease ~pipelines name in
-  Ok k.msl.Flow_gpu.Emit.source
+  Ok k.msl.Flow_shader.Emit.source
 
 let close t =
   List.iter (fun (_, k) -> Flow_gpu.Run.close k.runner) t.kernels;
@@ -493,7 +493,7 @@ let gather_kernel ~lease ~pipelines =
     Option.to_result ~none:"path tracer gather has no device template"
       (Packed.compile_template residual (E.Residual.residual_view residual).term)
   in
-  let* msl = Result.map_error Diagnostic.to_string (Flow_gpu.Emit.kernel ~fast:true template) in
+  let* msl = Result.map_error Diagnostic.to_string (Flow_shader.Emit.kernel ~fast:true template) in
   let* base =
     Result.map_error Diagnostic.to_string
       (Packed.Host.prepare ~fast:true template ~live:(Input.at_time 0.))

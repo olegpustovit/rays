@@ -94,7 +94,7 @@ let () =
           Fun.protect
             ~finally:(fun () -> Flow_gpu.Pipelines.close pipelines)
             (fun () ->
-              let msl = Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program) in
+              let msl = Test_program.ok (Flow_shader.Emit.kernel ~fast:true program) in
               let runner = Flow_gpu.Run.create gpu pipelines msl in
               Fun.protect
                 ~finally:(fun () -> Flow_gpu.Run.close runner)

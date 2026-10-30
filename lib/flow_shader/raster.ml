@@ -105,7 +105,7 @@ let buffer_arguments stage =
 (* A vertex entry's first parameter is the vertex id; its result has [:position] (clip space) and the
    varyings, those under [:flat] not interpolated. A fragment entry's elements are varyings by name
    and its result is the colour, or [{:color :discard}]. *)
-let msl ?(arguments = false) ~declarations ~vertex ~fragment () =
+let pipeline ~declarations ~vertex ~fragment =
   let* v = compile ~declarations vertex in
   let* f = compile ~shared:v.bindings ~declarations fragment in
   (* the discard test after the colour stores: measured faster on Apple GPUs than before them *)
@@ -114,17 +114,18 @@ let msl ?(arguments = false) ~declarations ~vertex ~fragment () =
       (fun (leaf, _) -> leaf.path <> [ "discard" ])
       (List.combine f.leaves (Array.to_list f.program.outputs))
   in
-  let* f =
-    match last with
-    | _, [] -> Ok f
-    | keep, discard ->
-        Result.map
-          (fun program -> { f with leaves = List.map fst (keep @ discard); program })
-          (Result.map_error List.hd
-             (Flow_ir.Core.Region.rebuild f.program
-                ~outputs:(Array.of_list (List.map snd (keep @ discard)))
-                ()))
-  in
+  match last with
+  | _, [] -> Ok (v, f)
+  | keep, discard ->
+      Result.map
+        (fun program -> (v, { f with leaves = List.map fst (keep @ discard); program }))
+        (Result.map_error List.hd
+           (Flow_ir.Core.Region.rebuild f.program
+              ~outputs:(Array.of_list (List.map snd (keep @ discard)))
+              ()))
+
+let msl ?(arguments = false) ~declarations ~vertex ~fragment () =
+  let* v, f = pipeline ~declarations ~vertex ~fragment in
   let out = identifier vertex ^ "_out" in
   let name leaf = identifier (List.nth leaf.path (List.length leaf.path - 1)) in
   let* fields =
@@ -368,3 +369,42 @@ let compute_spirv ~grid ~size ~declarations ~entry =
       buffers = List.map (fun (u, binding, words, _) -> (u, binding, words)) buffers;
     }
     program
+
+(* A pipeline's stages as data, for another target's printer ([Flow_web.Wgsl.raster]) *)
+type data = {
+  program : Flow_ir.Packed.t;
+  buffers : (int * string * int * bool) list;
+  elements : string list;
+  outputs : (string * Flow.Ty.t * bool) list;
+}
+
+let stages ~declarations ~vertex ~fragment =
+  let data (s : stage) =
+    {
+      program = s.program;
+      buffers =
+        List.filter_map Fun.id
+          (Array.to_list
+             (Array.mapi
+                (fun u value ->
+                  let named slot words =
+                    let name, _ = List.find (fun (_, b) -> b = slot) s.bindings in
+                    Some (u, name, slot, words)
+                  in
+                  match value with
+                  | E.Int_array a -> named (Array.length a - 1) true
+                  | E.Float_array a -> named (Array.length a - 1) false
+                  | _ -> None)
+                s.program.uniforms));
+      elements = List.map fst (List.filter (fun p -> not (is_buffer p)) s.params);
+      outputs =
+        List.map
+          (fun leaf ->
+            ( (match List.rev leaf.path with name :: _ -> name | [] -> "color"),
+              leaf.ty,
+              leaf.flat ))
+          s.leaves;
+    }
+  in
+  let* v, f = pipeline ~declarations ~vertex ~fragment in
+  Ok (data v, data f)

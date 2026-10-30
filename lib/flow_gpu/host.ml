@@ -836,7 +836,7 @@ let normals t ~positions ~count ~corners =
     else ignore (B.destroy_buffer out)
   in
   let run out corners offsets vertices =
-    let* compiled = Result.to_option (Pipelines.get t.pipelines Emit.normals) in
+    let* compiled = Result.to_option (Pipelines.get t.pipelines Kernels.normals) in
     let* commands = Result.to_option (B.begin_commands queue) in
     let encoded =
       let* encoder = Result.to_option (B.compute_encoder commands) in

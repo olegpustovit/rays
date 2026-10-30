@@ -356,7 +356,7 @@ val map_kernel :
   value list ->
   (value, Diagnostic.t) result
 (** {!Host.map_function}: a function mapped over packed columns, a residual for compilation (a
-    raster stage's elements, Flow_gpu.Raster). *)
+    raster stage's elements, Flow_shader.Raster). *)
 
 val bind_captures : (value -> value) -> fn -> fn
 (** {!Host.map_function_bindings}: the function with its captures replaced (a raster stage's

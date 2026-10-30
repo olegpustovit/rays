@@ -192,10 +192,12 @@
   web/test/gpu_fast_check.mjs
   web/test/chrome.mjs
   ../lib/web_export/runtime/gpu.js
+  ../lib/web_export/compact.wgsl
+  ../lib/web_export/dispatch.wgsl
   ../lib/flow_web/test_wgsl.exe)
  (action
   (system
-   "if command -v node >/dev/null 2>&1; then mkdir -p fkt && ../lib/flow_web/test_wgsl.exe --write-fast-table fkt && node web/test/gpu_fast_check.mjs fkt ../lib/web_export/runtime/gpu.js; else echo 'gpu_fast_check: skipped (node not found)'; fi")))
+   "if command -v node >/dev/null 2>&1; then mkdir -p fkt && ../lib/flow_web/test_wgsl.exe --write-fast-table fkt ../lib/web_export/compact.wgsl ../lib/web_export/dispatch.wgsl && node web/test/gpu_fast_check.mjs fkt ../lib/web_export/runtime/gpu.js; else echo 'gpu_fast_check: skipped (node not found)'; fi")))
 
 (rule
  (enabled_if
@@ -206,7 +208,7 @@
   web/test/chrome.mjs
   web/test/png.mjs
   (glob_files ../lib/web_export/runtime/*.js)
-  ../lib/web_export/runtime/marks.wgsl
+  ../lib/web_export/marks.wgsl
   ../bin/rays.exe
   marks_shot.exe
   ../sketches/recursive_rectangles.rays)
@@ -226,7 +228,7 @@
   web/test/chrome.mjs
   web/test/png.mjs
   (glob_files ../lib/web_export/runtime/*.js)
-  ../lib/web_export/runtime/marks.wgsl
+  ../lib/web_export/marks.wgsl
   ../bin/rays.exe
   marks_shot.exe
   ../sketches/recursive_signals.rays)
@@ -246,7 +248,7 @@
   web/test/chrome.mjs
   web/test/png.mjs
   (glob_files ../lib/web_export/runtime/*.js)
-  ../lib/web_export/runtime/marks.wgsl
+  ../lib/web_export/marks.wgsl
   ../bin/rays.exe
   marks_shot.exe
   ../sketches/recursive_rectangles.rays)
@@ -267,7 +269,7 @@
   web/test/chrome.mjs
   web/test/png.mjs
   (glob_files ../lib/web_export/runtime/*.js)
-  ../lib/web_export/runtime/marks.wgsl
+  ../lib/web_export/marks.wgsl
   ../bin/rays.exe
   marks_shot.exe
   ../sketches/flow_vectors.rays
@@ -275,7 +277,7 @@
   ../sketches/particles.rays)
  (action
   (system
-   "if command -v node >/dev/null 2>&1; then node web/test/present_check.mjs ../lib/web_export/runtime && node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/flow_vectors.rays sketches/basic.rays sketches/particles.rays; else echo 'present_check: skipped (node not found)'; fi")))
+   "if command -v node >/dev/null 2>&1; then node web/test/present_check.mjs ../lib/web_export/runtime ../lib/web_export/marks.wgsl && node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/flow_vectors.rays sketches/basic.rays sketches/particles.rays; else echo 'present_check: skipped (node not found)'; fi")))
 
 (executable
  (name shape2_fixtures)
@@ -328,7 +330,7 @@
   web/test/png.mjs
   web/test/chrome.mjs
   (glob_files ../lib/web_export/runtime/*.js)
-  ../lib/web_export/runtime/marks.wgsl
+  ../lib/web_export/marks.wgsl
   ../bin/rays.exe
   marks_shot.exe
   ../sketches/flow_particles_gpu.rays)
@@ -352,7 +354,7 @@
   web/test/png.mjs
   web/test/chrome.mjs
   (glob_files ../lib/web_export/runtime/*.js)
-  ../lib/web_export/runtime/marks.wgsl
+  ../lib/web_export/marks.wgsl
   ../bin/rays.exe
   marks_shot.exe
   ../sketches/flow_contours.rays
@@ -376,7 +378,7 @@
   web/test/chrome.mjs
   ../bin/rays.exe
   (glob_files ../lib/web_export/runtime/*.js)
-  ../lib/web_export/runtime/marks.wgsl
+  ../lib/web_export/marks.wgsl
   (source_tree ../sketches))
  (action
   (system

@@ -1,0 +1,39 @@
+(library
+ (name flow_shader)
+ (public_name rays.flow_shader)
+ (modules lisp_stage trace trace_source noise noise_source emit spirv raster)
+ (private_modules lisp_stage trace trace_source noise noise_source)
+ (libraries flow flow_ir ogpu_core))
+
+; the device side of scene/trace, compiled once a scene variant (Trace)
+
+(rule
+ (target trace_source.ml)
+ (deps trace.rays)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {rays|")
+    (cat trace.rays)
+    (echo "|rays}\n")))))
+
+; the device side of noise3, compiled once an octave count (Noise)
+
+(rule
+ (target noise_source.ml)
+ (deps noise.rays)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {rays|")
+    (cat noise.rays)
+    (echo "|rays}\n")))))
+
+; prints a library's shaders from their .rays at build time (renderer, ogpu_metal, flow_gpu, web)
+
+(executable
+ (name print_shader)
+ (modules print_shader)
+ (libraries flow_shader flow_web))

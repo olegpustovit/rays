@@ -1,4 +1,4 @@
-; scene/trace on the device. Flow_gpu.Trace inlines trace-hit (or trace-occluded, for a ray whose only
+; scene/trace on the device. Flow_shader.Trace inlines trace-hit (or trace-occluded, for a ray whose only
 ; read field is its hit) at each scene/trace of a traced kernel, specialised by the scene's static facts:
 ; instanced (an instance structure and its table, 16 words an instance or 32 with both keyframes),
 ; motion (the query's time: instance transforms, or vertex keyframes in a flat scene), strands (0 none,

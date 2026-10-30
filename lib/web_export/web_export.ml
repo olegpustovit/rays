@@ -707,7 +707,11 @@ let files (doc : Doc.t) (lowered : lowered) : (files, D.t) result =
     ([
        ("program.js", String.concat "" (List.rev !imports) ^ js ^ image_table);
        ("program.map", Flow_web.Js.frame_map lowered.program);
-       ("kernels.json", Flow_web.Kernel_table.table (List.map fst !kernels));
+       ( "kernels.json",
+         Flow_web.Kernel_table.table
+           ~compaction:(List.assoc "compact.wgsl" Web_shaders.files)
+           ~dispatch:(List.assoc "dispatch.wgsl" Web_shaders.files)
+           (List.map fst !kernels) );
        ("kernels.wgsl", String.concat "\n" (List.map snd !kernels));
        ("data.bin", Buffer.contents data);
        ("index.html", index_html name);

@@ -81,7 +81,8 @@ task plan are `specification/web-export/plan.md`.
 | `sop` | Immutable SOP graphs over `rdk` operations |
 | `flow` | UI-free workspace language over `diagnostic`, `param`, `input` and pure `rays_math`: reader, printer, macros, checker, evaluator, frame folds, packed arrays and typed deferred nodes |
 | `flow_ir` | Typed dataflow IR over `flow` evaluations with sharing, hoisting, pruning, fusion and precision passes, block-at-a-time CPU kernels, and bounded caches; uses `parallel`, `lru` and the `scene_command` marks contract as pure data; `flow` never depends on it |
-| `flow_gpu` | Metal and binary SPIR-V emission from `flow_ir` packed programs, a pipeline cache of 64 and owned native runners; depends on `flow`, `flow_ir`, `ogpu`, `renderer`, `rays_math`, `lru` and `parallel`; never reaches geometry or UI |
+| `flow_shader` | The shader printers (`Emit` MSL, `Spirv`, `Raster` stages) over `flow`, `flow_ir` and `ogpu_core`, and `print_shader.exe`, which prints `renderer`, `ogpu_metal` and `flow_gpu` shaders from their `.rays` at build time (none are checked in); never reaches GPU runners, geometry or UI |
+| `flow_gpu` | Runs `flow_shader`'s kernels: a pipeline cache of 64 and owned native runners; depends on `flow`, `flow_ir`, `flow_shader`, `ogpu`, `renderer`, `rays_math`, `lru` and `parallel`; never reaches geometry or UI |
 | `flow_web` | WGSL and JavaScript printers from `flow_ir` core programs for the web export; depends on `flow`, `flow_ir`, `param`, `rays_math`, `scene_command` and `parallel`; never reaches `rays`, geometry, GPU or UI libraries |
 | `web_export` | Static 2D workspace export and embedded web runtime assets; consumes the checked document and shared compiler, bundles loaded images through SDL3_image, and never reaches UI libraries |
 | `flow_graph` | Domain-neutral graph projection, checked text gestures, exposure and probes over `flow` and `param` |
@@ -135,7 +136,8 @@ libraries cannot reach.
   `pxui_graph` never reaches `sop` or `rdk`;
   `flow_graph` depends only on `flow` and `param`; `flow_ir` depends only on `flow`, `param`,
   `rays_math`, `scene_command`, `lru` and `parallel` and never reaches `rays`, `pxui*`, `sop`, `rdk` or `rays_editor`;
-  `flow_gpu` depends only on `flow`, `flow_ir`, `param`, `rays_math`,
+  `flow_shader` depends only on `flow`, `flow_ir` and `ogpu_core` (a build rule running its
+  `print_shader.exe` adds no library edge); `flow_gpu` depends only on `flow`, `flow_ir`, `flow_shader`, `param`, `rays_math`,
   `ogpu_core`, `ogpu`, `renderer`, `lru` and `parallel` and never reaches
   `sop`, `rdk`, `flow_sop` or any UI library; `flow_web` depends only on `flow`, `flow_ir`,
   `param`, `rays_math`, `scene_command` and `parallel` and never reaches `rays`, `sop`, `rdk`, `flow_sop`,

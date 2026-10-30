@@ -11,6 +11,8 @@ val entry : ?cpu:string -> id:string -> Wgsl.wgsl -> string
     widths. [id] is the name the program dispatches by and must be unique in a table. [cpu], when
     given, is the region's {!Js.region} source (golden fixtures carry one for the browser check). *)
 
-val table : string list -> string
-(** [{"kernels":[...], "compaction": ...}] over {!entry} objects, one per line, and the resident
-    fold's compaction ({!Wgsl.compaction}); newline-terminated. *)
+val table : compaction:string -> dispatch:string -> string list -> string
+(** [{"kernels":[...], "compaction": ..., "dispatch": ...}] over {!entry} objects, one per line, and
+    the resident fold's compaction and dispatch-arguments WGSL (printed from Flow_gpu's
+    shaders/compact.rays and dispatch.rays at build time, lib/flow_shader/print_shader.exe web);
+    newline-terminated. *)

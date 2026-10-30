@@ -1,0 +1,19 @@
+; The browser presenter's geometry and quad pipelines (lib/web_export/runtime/present.js), printed with
+; lib/renderer/shaders/marks.rays (its clip) into marks.wgsl beside the marks pipeline. affine holds a
+; draw's constants: the affine 0-5 (as marks'), the ink 8-11, the quad's rectangle 12-15 (x y w h).
+
+; indexed triangles of float2 positions, one ink
+(defn geometry-vertex :context value [(vid : int) (position : (array float)) (affine : (array float))]
+  (let* [at (int/mul vid 2)]
+    {:position (clip affine [(array/nth position at) (array/nth position (int/add at 1))])
+     :flat {:ink [(array/nth affine 8) (array/nth affine 9) (array/nth affine 10) (array/nth affine 11)]}}))
+(defn geometry-fragment :context value [(ink : vec4)] ink)
+
+; one rectangle, its texture 8 (sampler 9) tinted by the ink: text and images
+(defn quad-vertex :context value [(vid : int) (affine : (array float))]
+  (let* [corner (int/mod vid 4)
+         c [(if (or (int/eq corner 1) (int/eq corner 2)) 1. 0.) (if (int/ge corner 2) 1. 0.)]
+         p [(+ (array/nth affine 12) (* (array/nth affine 14) c.x)) (+ (array/nth affine 13) (* (array/nth affine 15) c.y))]]
+    {:position (clip affine p) :uv c
+     :flat {:ink [(array/nth affine 8) (array/nth affine 9) (array/nth affine 10) (array/nth affine 11)]}}))
+(defn quad-fragment :context value [(ink : vec4) (uv : vec2)] (* ink (gpu/sample 8 uv)))

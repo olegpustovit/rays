@@ -339,12 +339,12 @@ let ensure ?(mapped = false) t slot length =
 let msl_scene t = t.msl.Emit.scene
 
 (* Encodes into [encoder] the threadgroup counts of a dispatch of at most [capacity] threads in
-   groups of [group] whose count is the uint in [cell] x mul / div (Emit.dispatch_arguments), into
-   [groups]: its grid is sized on the device, nothing is read back. The caller sets its pipeline
+   groups of [group] whose count is the uint in [cell] x mul / div (Kernels.dispatch_arguments),
+   into [groups]: its grid is sized on the device, nothing is read back. The caller sets its pipeline
    next. *)
 let dispatch_arguments encoder pipelines ~cell ~mul ~div ~capacity ~group ~groups =
   let compiled =
-    match Pipelines.get pipelines Emit.dispatch_arguments with
+    match Pipelines.get pipelines Kernels.dispatch_arguments with
     | Ok compiled -> compiled
     | Error error -> raise (Diagnostic.Error error)
   in
@@ -949,7 +949,7 @@ let bounds_of t kept =
         let box =
           try
             let compiled =
-              match Pipelines.get t.pipelines Emit.bounds with
+              match Pipelines.get t.pipelines Kernels.bounds with
               | Ok compiled -> compiled
               | Error error -> raise (Diagnostic.Error error)
             in
@@ -1247,7 +1247,7 @@ let compact_blocks count = 8 * max 1 ((count + 1023) / 1024)
 let compact commands pipelines ~mask ~count ~count_in ~kept ~total ~blocks ~groups =
   try
     let compiled =
-      match Pipelines.get pipelines Emit.compaction with
+      match Pipelines.get pipelines Kernels.compaction with
       | Ok compiled -> compiled
       | Error error -> raise (Diagnostic.Error error)
     in

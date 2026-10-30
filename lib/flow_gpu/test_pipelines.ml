@@ -50,10 +50,11 @@ let () =
     (fun () ->
       let first = List.assoc "arithmetic" (Test_program.fixtures 1024) in
       let same = List.assoc "arithmetic" (Test_program.fixtures 65536) in
-      let first_msl = Test_program.ok (Flow_gpu.Emit.kernel first) in
+      let first_msl = Test_program.ok (Flow_shader.Emit.kernel first) in
       let first = Test_program.ok (Flow_gpu.Pipelines.get cache first_msl) in
       let same =
-        Test_program.ok (Flow_gpu.Pipelines.get cache (Test_program.ok (Flow_gpu.Emit.kernel same)))
+        Test_program.ok
+          (Flow_gpu.Pipelines.get cache (Test_program.ok (Flow_shader.Emit.kernel same)))
       in
       assert (first == same && Flow_gpu.Pipelines.Private.compilations cache = 1);
       for number = 1 to 65 do
@@ -63,7 +64,7 @@ let () =
         in
         ignore
           (Test_program.ok
-             (Flow_gpu.Pipelines.get cache (Test_program.ok (Flow_gpu.Emit.kernel program))))
+             (Flow_gpu.Pipelines.get cache (Test_program.ok (Flow_shader.Emit.kernel program))))
       done;
       assert (Flow_gpu.Pipelines.Private.count cache = 64);
       assert (Flow_gpu.Pipelines.Private.releases cache = 2);

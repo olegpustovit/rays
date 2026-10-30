@@ -2,118 +2,100 @@
  (name flow_gpu)
  (public_name rays.flow_gpu)
  (modules
-  lisp_stage
-  trace
-  trace_source
-  noise
-  noise_source
   compact_source
   dispatch_source
   bounds_source
   normals_source
-  emit
-  spirv
+  kernels
   pipelines
   run
   host
   image_sink
-  raster
   image_rgba8_source)
  (private_modules
-  lisp_stage
-  trace
-  trace_source
-  noise
-  noise_source
   compact_source
   dispatch_source
   bounds_source
   normals_source
+  kernels
   image_rgba8_source)
  (foreign_stubs
   (language c)
   (names flow_gpu_stubs))
- (libraries flow flow_ir ogpu renderer rays_math lru parallel))
+ (flags
+  (:standard -open Flow_shader))
+ (libraries flow flow_ir flow_shader ogpu renderer rays_math lru parallel))
 
-; the device side of scene/trace, compiled once a scene variant (Trace)
-
-(rule
- (target trace_source.ml)
- (deps trace.rays)
- (action
-  (with-stdout-to
-   %{target}
-   (progn
-    (echo "let source = {rays|")
-    (cat trace.rays)
-    (echo "|rays}\n")))))
-
-; the device side of noise3, compiled once an octave count (Noise)
+; the compute stages, printed from shaders/NAME.rays
 
 (rule
- (target noise_source.ml)
- (deps noise.rays)
+ (targets
+  compact.metal
+  compact.comp.spv
+  bounds.metal
+  bounds.comp.spv
+  normals.metal
+  normals.comp.spv
+  dispatch.metal
+  dispatch.comp.spv)
+ (deps
+  (glob_files shaders/*.rays))
  (action
-  (with-stdout-to
-   %{target}
-   (progn
-    (echo "let source = {rays|")
-    (cat noise.rays)
-    (echo "|rays}\n")))))
+  (run %{exe:../flow_shader/print_shader.exe} flow_gpu)))
 
-; the resident fold's compaction, generated from shaders/compact.rays (test_raster.exe --write lib)
+; the resident fold's compaction
 
 (rule
  (target compact_source.ml)
- (deps shaders/metal/compact.metal)
+ (deps compact.metal)
  (action
   (with-stdout-to
    %{target}
    (progn
     (echo "let source = {msl|")
-    (cat shaders/metal/compact.metal)
+    (cat compact.metal)
     (echo "|msl}\n")))))
 
-; a resident dispatch's threadgroup counts, generated from shaders/dispatch.rays (test_raster.exe --write lib)
+; a resident dispatch's threadgroup counts
 
 (rule
  (target dispatch_source.ml)
- (deps shaders/metal/dispatch.metal)
+ (deps dispatch.metal)
  (action
   (with-stdout-to
    %{target}
    (progn
     (echo "let source = {msl|")
-    (cat shaders/metal/dispatch.metal)
+    (cat dispatch.metal)
     (echo "|msl}\n")))))
 
-; a resident P's bounds, generated from shaders/bounds.rays (test_raster.exe --write lib)
+; a resident P's bounds
 
 (rule
  (target bounds_source.ml)
- (deps shaders/metal/bounds.metal)
+ (deps bounds.metal)
  (action
   (with-stdout-to
    %{target}
    (progn
     (echo "let source = {msl|")
-    (cat shaders/metal/bounds.metal)
+    (cat bounds.metal)
     (echo "|msl}\n")))))
 
-; a triangle mesh's display normals, generated from shaders/normals.rays (test_raster.exe --write lib)
+; a triangle mesh's display normals
 
 (rule
  (target normals_source.ml)
- (deps shaders/metal/normals.metal)
+ (deps normals.metal)
  (action
   (with-stdout-to
    %{target}
    (progn
     (echo "let source = {msl|")
-    (cat shaders/metal/normals.metal)
+    (cat normals.metal)
     (echo "|msl}\n")))))
 
-; the image sink's stages, generated from ../renderer/shaders/image.rays (test_raster.exe --write)
+; the image sink's stages, printed from ../renderer/shaders/image.rays
 
 (rule
  (target image_rgba8_source.ml)
@@ -122,7 +104,7 @@
    %{target}
    (run
     %{exe:../renderer/embed_shader.exe}
-    %{dep:../renderer/shaders/metal/image_rgba8.metal}))))
+    %{dep:../renderer/image_rgba8.metal}))))
 
 (test
  (name test_spirv)
@@ -379,15 +361,7 @@
  (name test_raster)
  (modules test_raster)
  (deps
-  (glob_files ../renderer/shaders/*.rays)
-  (glob_files ../renderer/shaders/metal/*.metal)
-  (glob_files ../renderer/shaders/spirv/*.spv)
-  (glob_files ../ogpu_metal/shaders/*.rays)
-  (glob_files ../ogpu_metal/shaders/metal/*.metal)
-  (glob_files ../ogpu_metal/shaders/spirv/*.spv)
-  (glob_files shaders/*.rays)
-  (glob_files shaders/metal/*.metal)
-  (glob_files shaders/spirv/*.spv)
-  ../flow_web/compact.wgsl
-  ../flow_web/dispatch.wgsl)
- (libraries test_support flow_gpu flow_web ogpu_mock))
+  (glob_files *.spv)
+  (glob_files ../renderer/*.spv)
+  (glob_files ../ogpu_metal/*.spv))
+ (libraries test_support))

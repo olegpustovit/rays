@@ -449,16 +449,31 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
 }
 |}
 
-(* The web counterpart of [Flow_gpu.Emit.kernel ~fast]: the same refusals, bindings and uniform
+(* The web counterpart of [Flow_shader.Emit.kernel ~fast]: the same refusals, bindings and uniform
    layout, gathers from bound tables (f32, clamped, their length a uniform word), 64-bit integer
    registers ([int64]), and the count words: the element count is the dispatch count, or its minimum
    with [count_in[0] * mul / div] when use is set, and is written to the 40-byte count record
    [count_out] {n, 6n, 1, 0, 0, 0, 6, n, 0, 0}: native's six words, then from byte 24 WebGPU's
    [drawIndirect] of n six-vertex instances, which a mark set reads. *)
-(* A compute stage (Flow_gpu.Raster's): workgroups of [size] threads, the global index the entry's
+(* A compute stage (Flow_shader.Raster's): workgroups of [size] threads, the global index the entry's
    element and [lid] the scan's; its buffers [(array uniform, binding, u32 words, stored)], its
    result discarded. *)
 type compute = { size : int; name : string; buffers : (int * int * bool * bool) list }
+
+(* A raster stage (Flow_shader.Raster.stages): its buffers (array uniform, binding, u32 words), element
+   parameters and result leaves (name, type, flat). *)
+type stage = {
+  entry : string;
+  program : P.t;
+  buffers : (int * int * bool) list;
+  elements : string list;
+  outputs : (string * Flow.Ty.t * bool) list;
+}
+
+(* a vertex stage (with [quads], of a six-vertex instanced draw) or a fragment stage of the struct named *)
+type placement = Compute of compute | Vertex of bool * stage | Fragment of string * stage
+
+let identifier name = String.map (fun c -> if c = '-' then '_' else c) name
 
 let compute_buffer (c : compute) u =
   match List.find_opt (fun (v, _, _, _) -> v = u) c.buffers with
@@ -498,9 +513,9 @@ let workgroup_intrinsic ~scans ~workgroup ~(compute : compute) ~(current : Scope
 let rec kernel_fast program = fast_kernel program
 
 and compute ~size ~name ~buffers program =
-  Result.map (fun w -> w.source) (fast_kernel ~compute:{ size; name; buffers } program)
+  Result.map (fun w -> w.source) (fast_kernel ~placement:(Compute { size; name; buffers }) program)
 
-and fast_kernel ?compute program =
+and fast_kernel ?placement program =
   try
     (match P.gpu_refusals ~fused:true ~fast:true program with
     | [] -> ()
@@ -553,7 +568,7 @@ and fast_kernel ?compute program =
       else "i64_from_f(" ^ register r ^ ")"
     in
     let float_of r = if integer r then "i64_to_f(" ^ int_of r ^ ")" else register r in
-    (* a register's low 32 bits as a u32 (as [Flow_gpu.Emit]'s narrow registers) *)
+    (* a register's low 32 bits as a u32 (as [Flow_shader.Emit]'s narrow registers) *)
     let low r = if narrow.(r) then register r else "(" ^ int_of r ^ ").x" in
     let narrow_integer operation a b =
       let shift operator =
@@ -572,7 +587,7 @@ and fast_kernel ?compute program =
       | Idiv -> Printf.sprintf "select(%s / %s, 0u, %s == 0u)" a (low b) (low b)
       | Imod -> Printf.sprintf "select(%s %% %s, 0u, %s == 0u)" a (low b) (low b)
     in
-    (* an integer-valued register as a 64-bit expression (as [Flow_gpu.Emit]'s) *)
+    (* an integer-valued register as a 64-bit expression (as [Flow_shader.Emit]'s) *)
     let rec whole r =
       if integer r then Some (int_of r)
       else
@@ -604,14 +619,54 @@ and fast_kernel ?compute program =
         (word gather_lengths.(k))
         width component
     in
-    (* a compute stage reads its bound buffers unclamped, as the Metal raster placement *)
+    let compute = match placement with Some (Compute c) -> Some c | _ -> None in
+    let placed = placement <> None and raster = placement <> None && compute = None in
+    let buffers =
+      match placement with
+      | Some (Compute c) -> c.buffers
+      | Some (Vertex (_, s) | Fragment (_, s)) -> List.map (fun (u, b, w) -> (u, b, w, false)) s.buffers
+      | None -> []
+    in
+    (* a placed stage reads its bound buffers unclamped, as the Metal raster placement; a float from a
+       binding of words is their bits *)
     let read prepared index width component =
       match snd (guarded [] view.code.(prepared)) with
-      | P.Array_prepare (u, _) ->
-          Printf.sprintf "%s[%s * %du + %du]"
-            (compute_buffer (Option.get compute) u)
-            (low index) width component
+      | P.Array_prepare (u, ty) ->
+          let binding =
+            match List.find_opt (fun (v, _, _, _) -> v = u) buffers with
+            | Some (_, b, _, _) -> b
+            | None -> fail "A placed stage reads an unbound table."
+          in
+          let value = Printf.sprintf "buffer%d[%s * %du + %du]" binding (low index) width component in
+          if ty <> Flow.Ty.Array Int && List.exists (fun (_, b, w, _) -> b = binding && w) buffers
+          then "bitcast<f32>(" ^ value ^ ")"
+          else value
       | _ -> fail "Gather without its table."
+    in
+    (* a fragment's varying, and its fwidth: read once at the top, before any branch (WGSL's derivative
+       uniformity) *)
+    let varying input width component =
+      match placement with
+      | Some (Fragment (_, s)) ->
+          "v." ^ identifier (List.nth s.elements input)
+          ^ if width = 1 then "" else "." ^ String.make 1 "xyzw".[component]
+      | _ -> fail "Only a fragment stage reads varyings."
+    in
+    let fwidths = Buffer.create 64 and hoisted = Hashtbl.create 4 in
+    let intrinsic stage (r : int array) =
+      match (stage, snd (guarded [] view.code.(r.(0)))) with
+      | Flow_ir.Core.Region.Fwidth, P.Input (input, width, component) ->
+          let name = Printf.sprintf "fw%d_%d" input component in
+          if not (Hashtbl.mem hoisted name) then begin
+            Hashtbl.add hoisted name ();
+            Printf.bprintf fwidths "  let %s = fwidth(%s);\n" name (varying input width component)
+          end;
+          name
+      | Fwidth, _ -> fail "On the web fwidth reads a varying (WGSL's derivative uniformity)."
+      | Sample (t, c), _ ->
+          Printf.sprintf "textureSample(texture%d, sampler%d, vec2<f32>(%s, %s)).%c" t (t + 1)
+            (float_of r.(0)) (float_of r.(1)) "xyzw".[c]
+      | _ -> fail "This raster-stage intrinsic has no WGSL form."
     in
     let scans = Hashtbl.create 1 and workgroup = Buffer.create 64 in
     let root = Scope.create 0 in
@@ -632,7 +687,7 @@ and fast_kernel ?compute program =
           if not constant then enter float_of current guards;
           let body = current.code and indentation = Scope.indent current in
           let group stage r =
-            workgroup_intrinsic ~scans ~workgroup ~compute:(Option.get compute) ~current ~guards
+            workgroup_intrinsic ~scans ~workgroup ~compute:(match compute with Some c -> c | None -> fail "A workgroup intrinsic runs only in a compute stage.") ~current ~guards
               ~body ~indentation
               ~table:(fun x ->
                 match snd (guarded [] view.code.(x)) with
@@ -653,11 +708,19 @@ and fast_kernel ?compute program =
             else
               match instruction with
               | P.Const value -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float value)
-              | Int_input _ when compute <> None -> "vec2<u32>(gid.x, 0u)"
+              | Int_input input -> (
+                  match placement with
+                  | Some (Compute _) -> "vec2<u32>(gid.x, 0u)"
+                  | Some (Vertex (true, _)) -> "vec2<u32>(iid * 4u + quad_corner[vid], 0u)"
+                  | Some (Vertex (false, _)) -> "vec2<u32>(vid, 0u)"
+                  | Some (Fragment _) -> "vec2<u32>(0u, 0u)"
+                  | None -> Printf.sprintf "i64_from_f(input%d[i])" input)
               | Stage (stage, r) when compute <> None -> "vec2<u32>(" ^ group stage r ^ ", 0u)"
-              | Gather (prepared, index, width, component) when compute <> None ->
+              | Stage (stage, r) when raster -> intrinsic stage r
+              | Input (input, width, component) when raster -> varying input width component
+              | Gather (prepared, index, width, component) when placed ->
                   read prepared index width component
-              | Int_gather (prepared, index) when compute <> None ->
+              | Int_gather (prepared, index) when placed ->
                   "vec2<u32>(" ^ read prepared index 1 0 ^ ", 0u)"
               | Input (input, width, component) ->
                   Printf.sprintf "input%d[i * %du + %du]" input width component
@@ -686,7 +749,6 @@ and fast_kernel ?compute program =
                   let n = Int64.of_int n in
                   Printf.sprintf "vec2<u32>(%Luu, %Luu)" (Int64.logand n 0xffffffffL)
                     (Int64.logand (Int64.shift_right_logical n 32) 0xffffffffL)
-              | Int_input input -> Printf.sprintf "i64_from_f(input%d[i])" input
               | Int_uniform index ->
                   Printf.sprintf "i64_from_f(bitcast<f32>(%s))" (word uniforms.(index))
               | Int_frame _ -> Printf.sprintf "i64_from_f(bitcast<f32>(%s))" (word frames.(slot))
@@ -750,7 +812,7 @@ and fast_kernel ?compute program =
             Printf.bprintf current.decls "  var r%d: %s = %s;\n" slot ty zero;
             Printf.bprintf body "%sr%d = %s;\n" indentation slot expression
           end;
-          if finite_checks.(slot) && not (integer slot) then
+          if finite_checks.(slot) && (not (integer slot)) && not raster then
             Printf.bprintf body "%sif (!wfinite(r%d)) { sb |= 1u; }\n" indentation slot;
           match instruction with
           | Int_binary (operation, _, b) ->
@@ -838,8 +900,53 @@ and fast_kernel ?compute program =
     let body = Buffer.create 4096 in
     Buffer.add_buffer body root.decls;
     Buffer.add_buffer body root.code;
-    match compute with
-    | Some { size; name; buffers } ->
+    match placement with
+    | Some (Vertex (_, s) | Fragment (_, s)) ->
+        let stores = Buffer.create 256 in
+        Array.iteri
+          (fun k registers ->
+            let name, _, _ = List.nth s.outputs k in
+            Array.iteri
+              (fun component slot ->
+                let c = String.make 1 "xyzw".[component] in
+                match placement with
+                | _ when name = "discard" ->
+                    Printf.bprintf stores "  if (%s != 0.0) { discard; }\n" (float_of slot)
+                | Some (Fragment _) -> Printf.bprintf stores "  colour.%s = %s;\n" c (float_of slot)
+                | _ ->
+                    Printf.bprintf stores "  o.%s%s = %s;\n" (identifier name)
+                      (if Array.length registers = 1 then "" else "." ^ c)
+                      (float_of slot))
+              registers)
+          view.outputs;
+        let entry = identifier s.entry in
+        let source =
+          match placement with
+          | Some (Fragment (out, _)) ->
+              Printf.sprintf
+                "@fragment\nfn %s(v: %s) -> @location(0) vec4<f32> {\n\
+                 %s  var sb: u32 = 0u;\n  var colour: vec4<f32>;\n%s%s  return colour;\n}\n"
+                entry out (Buffer.contents fwidths) (Buffer.contents body) (Buffer.contents stores)
+          | _ ->
+              Printf.sprintf
+                "@vertex\nfn %s(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u32) \
+                 -> %s_out {\n  var sb: u32 = 0u;\n  var o: %s_out;\n%s%s  return o;\n}\n"
+                entry entry entry (Buffer.contents body) (Buffer.contents stores)
+        in
+        Ok
+          {
+            source;
+            entry;
+            interface = [];
+            uniform_layout = [];
+            uniform_bytes = 0;
+            table_seeds = [||];
+            output_widths = [||];
+            input_widths = [||];
+            gathers = [||];
+            counts = None;
+          }
+    | Some (Compute { size; name; buffers }) ->
         let declarations =
           String.concat ""
             (List.map
@@ -963,11 +1070,74 @@ and fast_kernel ?compute program =
           }
   with Diagnostic.Error diagnostic -> Error diagnostic
 
-(* A resident fold's [array/compact] on the web: Flow_gpu's shaders/compact.rays as a compute stage of
-   one workgroup of 256 (the WebGPU default limit), generated into compact.wgsl by
-   lib/flow_gpu/test_raster.exe --write lib. *)
-let compaction = Compact_wgsl.source
-
-(* A resident dispatch's workgroup counts on the web: Flow_gpu's shaders/dispatch.rays, one thread,
-   generated into dispatch.wgsl as [compaction] is. *)
-let dispatch_arguments = Dispatch_wgsl.source
+(* Raster pipelines (quads, vertex, fragment) as one module: every resource in group 0 at its binding
+   (a binding of words declared [u32], a float binding [f32]), texture t with its sampler at t + 1,
+   the varyings at locations in the vertex result's leaf order ([@interpolate(flat)] under [:flat]). *)
+let raster pipelines =
+  let ( let* ) = Result.bind in
+  let ty = function
+    | Flow.Ty.Float | Bool -> "f32"
+    | Vec2 -> "vec2<f32>"
+    | Vec3 -> "vec3<f32>"
+    | Vec4 -> "vec4<f32>"
+    | ty -> "<" ^ Flow.Ty.to_string ty ^ ">"
+  in
+  let resources = Hashtbl.create 16 in
+  let rec functions = function
+    | [] -> Ok []
+    | (quads, (v : stage), (f : stage)) :: more ->
+        let out = identifier v.entry ^ "_out" in
+        let location = ref (-1) in
+        let fields =
+          List.map
+            (fun (name, t, flat) ->
+              if name = "position" then "  @builtin(position) position: vec4<f32>,\n"
+              else begin
+                incr location;
+                Printf.sprintf "  @location(%d) %s%s: %s,\n" !location
+                  (if flat then "@interpolate(flat) " else "")
+                  (identifier name) (ty t)
+              end)
+            v.outputs
+        in
+        List.iter
+          (fun (s : stage) ->
+            List.iter
+              (fun (_, b, w) ->
+                let words = w || Option.value ~default:false (Hashtbl.find_opt resources (`Buffer b)) in
+                Hashtbl.replace resources (`Buffer b) words)
+              s.buffers;
+            Array.iter
+              (fun i ->
+                match snd (guarded [] i) with
+                | P.Stage (Sample (t, _), _) -> Hashtbl.replace resources (`Texture t) true
+                | _ -> ())
+              s.program.Flow_ir.Core.Region.code)
+          [ v; f ];
+        let* vertex = fast_kernel ~placement:(Vertex (quads, v)) v.program in
+        let* fragment = fast_kernel ~placement:(Fragment (out, f)) f.program in
+        let* rest = functions more in
+        Ok
+          ((Printf.sprintf "struct %s {\n%s}\n" out (String.concat "" fields)
+           ^ vertex.source ^ fragment.source)
+          :: rest)
+  in
+  let* text = functions pipelines in
+  let declarations =
+    List.sort compare (Hashtbl.fold (fun key words acc -> (key, words) :: acc) resources [])
+    |> List.map (function
+      | `Buffer b, words ->
+          Printf.sprintf "@group(0) @binding(%d) var<storage, read> buffer%d: array<%s>;\n" b b
+            (if words then "u32" else "f32")
+      | `Texture t, _ ->
+          Printf.sprintf
+            "@group(0) @binding(%d) var texture%d: texture_2d<f32>;\n\
+             @group(0) @binding(%d) var sampler%d: sampler;\n"
+            t t (t + 1) (t + 1))
+  in
+  Ok
+    (String.concat "" declarations
+    ^ (if List.exists (fun (quads, _, _) -> quads) pipelines then
+         "const quad_corner = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);\n"
+       else "")
+    ^ int64 ^ power ^ String.concat "" text)

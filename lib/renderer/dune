@@ -39,71 +39,107 @@
  (name embed_shader)
  (modules embed_shader))
 
+; the pipelines' stages, printed from shaders/NAME.rays (image_rgba8 is flow_gpu's image sink)
+
+(rule
+ (targets
+  marks.metal
+  marks.vert.spv
+  marks.frag.spv
+  ui.metal
+  ui.vert.spv
+  ui.frag.spv
+  scene3.metal
+  scene3.vert.spv
+  scene3.frag.spv
+  scene3_points.metal
+  scene3_points.vert.spv
+  scene3_points.frag.spv
+  scene3_textured.metal
+  scene3_textured.vert.spv
+  scene3_textured.frag.spv
+  scene3_sun_depth.metal
+  scene3_sun_depth.vert.spv
+  scene3_sun_depth.frag.spv
+  scene3_world.metal
+  scene3_world.vert.spv
+  scene3_world.frag.spv
+  scene2_textured_argument.metal
+  scene2_textured_argument.vert.spv
+  scene2_textured_argument.frag.spv
+  image_rgba8.metal
+  image_rgba8.vert.spv
+  image_rgba8.frag.spv)
+ (deps
+  (glob_files shaders/*.rays))
+ (action
+  (run %{exe:../flow_shader/print_shader.exe} renderer)))
+
 (rule
  (target metal_scene2_textured_argument_source.ml)
- (deps shaders/metal/scene2_textured_argument.metal)
+ (deps scene2_textured_argument.metal)
  (action
   (with-stdout-to
    %{target}
    (run
     %{exe:embed_shader.exe}
-    %{dep:shaders/metal/scene2_textured_argument.metal}))))
+    %{dep:scene2_textured_argument.metal}))))
 
 (rule
  (target metal_ui_source.ml)
- (deps shaders/metal/ui.metal)
+ (deps ui.metal)
  (action
   (with-stdout-to
    %{target}
-   (run %{exe:embed_shader.exe} %{dep:shaders/metal/ui.metal}))))
+   (run %{exe:embed_shader.exe} %{dep:ui.metal}))))
 
 (rule
  (target metal_marks_source.ml)
- (deps shaders/metal/marks.metal)
+ (deps marks.metal)
  (action
   (with-stdout-to
    %{target}
-   (run %{exe:embed_shader.exe} %{dep:shaders/metal/marks.metal}))))
+   (run %{exe:embed_shader.exe} %{dep:marks.metal}))))
 
 (rule
  (target metal_scene3_source.ml)
- (deps shaders/metal/scene3.metal)
+ (deps scene3.metal)
  (action
   (with-stdout-to
    %{target}
-   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3.metal}))))
+   (run %{exe:embed_shader.exe} %{dep:scene3.metal}))))
 
 (rule
  (target metal_scene3_points_source.ml)
- (deps shaders/metal/scene3_points.metal)
+ (deps scene3_points.metal)
  (action
   (with-stdout-to
    %{target}
-   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_points.metal}))))
+   (run %{exe:embed_shader.exe} %{dep:scene3_points.metal}))))
 
 (rule
  (target metal_scene3_textured_source.ml)
- (deps shaders/metal/scene3_textured.metal)
+ (deps scene3_textured.metal)
  (action
   (with-stdout-to
    %{target}
-   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_textured.metal}))))
+   (run %{exe:embed_shader.exe} %{dep:scene3_textured.metal}))))
 
 (rule
  (target metal_scene3_world_source.ml)
- (deps shaders/metal/scene3_world.metal)
+ (deps scene3_world.metal)
  (action
   (with-stdout-to
    %{target}
-   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_world.metal}))))
+   (run %{exe:embed_shader.exe} %{dep:scene3_world.metal}))))
 
 (rule
  (target metal_scene3_sun_depth_source.ml)
- (deps shaders/metal/scene3_sun_depth.metal)
+ (deps scene3_sun_depth.metal)
  (action
   (with-stdout-to
    %{target}
-   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_sun_depth.metal}))))
+   (run %{exe:embed_shader.exe} %{dep:scene3_sun_depth.metal}))))
 
 (executable
  (name test_mock_backend)

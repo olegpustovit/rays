@@ -127,7 +127,7 @@ let qualify ~name (workspace : Editor_document.Workspace_doc.t) =
               (* the emitter's own predicate: GPU kernels contract FMAs (fused) *)
               let expected = I.Packed.gpu_refusals ~fused:true packed = [] in
               let emitted =
-                match Flow_gpu.Emit.kernel packed with Ok _ -> true | Error _ -> false
+                match Flow_shader.Emit.kernel packed with Ok _ -> true | Error _ -> false
               in
               if emitted <> expected then failwith (name ^ ": compiler/emitter form disagreement");
               emitted)

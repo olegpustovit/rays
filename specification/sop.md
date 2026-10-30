@@ -767,7 +767,7 @@ the device) the same way, pixels equal.
 
 **Device bounds.** The box of a P the device holds (the selected object's box, framing, the World
 sun fit) is reduced where P is: `lib/flow_gpu/shaders/bounds.rays`, a compute stage beside
-`compact.rays` printed by `test_raster.exe --write lib` (MSL, SPIR-V), runs one group of 1,024
+`compact.rays` printed at build time (MSL, SPIR-V), runs one group of 1,024
 lanes, lane l taking the min and max of elements l, l + 1,024, ... (neighbouring lanes read
 neighbouring elements) and storing six floats at l x 6; the host reads back those 24 KB (not 12 MB
 of P) and finishes over the lanes. `Gpu.planes.bounds` offers it for a settled, unread vec3 output
@@ -819,7 +819,7 @@ constant, `Live` a float register), so driven ones are uniforms of the one compi
 noise offset is: `attribute_noise :lacunarity (+ 1.5 t) :roughness (+ 0.25 (* t 0.5))` inlines and
 its write stays one dispatch on the device, nothing compiled, uploaded or read back after the first
 frame (`test_chain_frames_native` under `DRIVE`, largest difference from the CPU 3.0e-7 for 512
-squared, 3.4e-7 for 1M). The device inlines `noise-fbm-fractal` (`lib/flow_gpu/noise.rays`) for any
+squared, 3.4e-7 for 1M). The device inlines `noise-fbm-fractal` (`lib/flow_shader/noise.rays`) for any
 other than 2 and 0.5, WGSL `wfbm_fractal` (`gpu_check` in Chrome: 1.6e-6 from the JS region); both
 give NaN where `noise3` refuses the values, so the status hands the region to the CPU, which checks
 each live pair as `noise3` does (`Flow.Op.check_noise_fractal`, `test_rand_at`: bytes and the
@@ -833,7 +833,7 @@ constant, `Live` a register), an Int uniform of the one compiled kernel: `attrib
 (int (+ 2.0 (* t 60.0)))` inlines (a live Int with hard bounds, `:octaves`' hard minimum 1, is
 clamped in the program as the node's parameters clamp it, `Lower.inline_parameters`; a literal
 out of range is still refused by the checker) and its write stays one dispatch. The device inlines
-`noise-fbm-live` (`lib/flow_gpu/noise.rays`, compiled once, not per count): the fold's bound is the
+`noise-fbm-live` (`lib/flow_shader/noise.rays`, compiled once, not per count): the fold's bound is the
 register, `Loop_begin` with the static maximum every counted loop carries, and NaN outside the
 device's 1 to 32, so the status hands the region to the CPU; WGSL `wfbm_live` takes the count as its
 integer register pair (NaN outside 1 to 32), JS passes it to `noise3` as a BigInt. The CPU checks

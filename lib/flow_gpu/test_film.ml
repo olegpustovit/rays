@@ -41,7 +41,9 @@ let () =
           native (B.write_buffer film ~offset:0L (Bytes.make (n * 16) '\000'));
           let pipelines = G.Pipelines.create ~clock:Unix.gettimeofday device in
           let sink = get (G.Image_sink.create lease) in
-          let run program = G.Run.create lease pipelines (get (G.Emit.kernel ~fast:true program)) in
+          let run program =
+            G.Run.create lease pipelines (get (Flow_shader.Emit.kernel ~fast:true program))
+          in
           let accumulator = run accumulate and resolver = run resolve in
           let prepare program time =
             get (Flow_ir.Packed.Host.prepare ~fast:true program ~live:(Input.at_time time))

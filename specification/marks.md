@@ -358,7 +358,8 @@ vertex buffers at bindings 0 to 5, then the affine at 6 (24 bytes, as for `Ui`).
 vertex stage reads instance `vid / 4`. No texture, sampler, depth or argument buffer;
 blending is the draw's blend as for `Ui`. Instance `i` of an attribute is element
 `i * stride` of its buffer; **stride 0 is a constant** (element 0 for every instance), so
-a constant and a buffer take the same code. A later WGSL port mirrors this table.
+a constant and a buffer take the same code. The stages are `lib/renderer/shaders/marks.rays`; the web
+prints the same entries into `marks.wgsl` (below).
 
 | Binding | Attribute | Element | Rect | Circle | Line |
 | --- | --- | --- | --- | --- | --- |
@@ -382,5 +383,11 @@ only if a test shows a difference). A buffer shorter than `count * stride` eleme
 caller's error; the shader does not check.
 
 Routing, the device attributes and the cases that stay on the CPU are under "Routing (P4.9)"
-above. A WGSL port reads the same six buffers and the same `params`; the host binds the
-region's output as the attribute buffer, with its width as the stride.
+above. The web's `marks.wgsl` is printed at build time from the same `marks.rays` (`print_shader.exe web`,
+`Flow_web.Wgsl.raster`) and reads the same six buffers and the same `params`; the host binds the
+region's output as the attribute buffer, with its width as the stride. Three differences live in the
+printer's web placement and its bindings, not in the source: the vertex id is `instance_index * 4 + corner`
+of a non-indexed six-vertex draw per instance (so `vid / 4` is the instance, with no index buffer); fill
+and stroke are bound once (at 2 and 3, their floats read as the words' bits, inside WebGPU's eight storage
+buffers a stage) and the affine shares group 0 at 6; and `fwidth` of a varying is read once at the top of
+the fragment, before any branch, for WGSL's derivative uniformity.

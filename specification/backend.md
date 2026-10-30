@@ -55,11 +55,15 @@ gathers and binding offsets once for both Metal and WGSL; each backend owns only
 its instruction printer. CPU JavaScript regions call the imported `noise3` from
 `prims.js`, matching the shared web runtime primitive.
 `flow` never depends on `flow_ir` and retains an independently callable
-reference tree walker. `flow_gpu` sits above the numeric IR and the public OGPU API:
-it emits Metal source from borrowed immutable register programs, caches at
+reference tree walker. The printers (`flow_shader`: `Emit`, `Spirv`, `Raster`) sit above the numeric IR and depend
+directly only on `flow`, `flow_ir` and `ogpu_core` (`Shader.binding`, pure data); their
+`print_shader.exe` prints the renderer's, the Metal backend's and `flow_gpu`'s shaders at build
+time, a build action that adds no library edge (the gate reads `libraries` only).
+`flow_gpu` sits above them and the public OGPU API:
+it runs Metal source printed from borrowed immutable register programs, caches at
 most 64 library/pipeline pairs per device owner, and owns geometrically grown
 upload/output buffers per program. It depends directly only on `flow`,
-`flow_ir`, `rays_math`, `ogpu`, `renderer`, `lru` and `parallel`; it cannot reach
+`flow_ir`, `flow_shader`, `rays_math`, `ogpu`, `renderer`, `lru` and `parallel`; it cannot reach
 procedural geometry or editor/UI libraries. The dependency gate rejects an
 upward edge from `flow_ir` to `flow_gpu`. Native leases, pipeline compilation,
 uploads and dispatch remain initial-domain host work. Closing programs drops
@@ -456,7 +460,7 @@ motion primitives and motion instances at three shutter times, user-id masks,
 compaction hit parity, the render path, lifetime rejection, and zero leaked
 handles; the mock rejects what it cannot execute with typed `Unsupported` and
 reproduces the record layouts.
-The path tracer's kernels are Rays Lisp (`lib/rays_pathtracer/pathtrace.rays`), printed by `Flow_gpu.Emit`
+The path tracer's kernels are Rays Lisp (`lib/rays_pathtracer/pathtrace.rays`), printed by `Flow_shader.Emit`
 and dispatched through `Flow_gpu.Run` into the tracer's own buffers; `rays_pathtracer` depends on `flow`,
 `flow_ir`, `flow_gpu` and `input` (the frame facts a kernel is prepared with) for that. `Run.dispatch
 ?resident` declares an instance structure's BLASes read, as the path tracer always did. The M1

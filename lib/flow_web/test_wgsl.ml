@@ -205,7 +205,8 @@ let () =
       ]
   in
   (match Array.to_list Sys.argv with
-  | [ _; "--write-fast-table"; dir ] ->
+  | [ _; "--write-fast-table"; dir; compaction; dispatch ] ->
+      let read file = In_channel.with_open_bin file In_channel.input_all in
       let live = { (Input.at_time 1.) with frame = 3 } in
       let floats a =
         "[" ^ String.concat "," (List.map (Printf.sprintf "%.9g") (Array.to_list a)) ^ "]"
@@ -269,7 +270,9 @@ let () =
           error_cases
       in
       Out_channel.with_open_bin (Filename.concat dir "kernels.json") (fun c ->
-          output_string c (Flow_web.Kernel_table.table (List.map fst cases @ List.map fst errors)));
+          output_string c
+            (Flow_web.Kernel_table.table ~compaction:(read compaction) ~dispatch:(read dispatch)
+               (List.map fst cases @ List.map fst errors)));
       Out_channel.with_open_bin (Filename.concat dir "expected.json") (fun c ->
           output_string c ("{" ^ String.concat ",\n" (List.map snd cases) ^ "}\n"));
       Out_channel.with_open_bin (Filename.concat dir "errors.json") (fun c ->

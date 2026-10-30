@@ -1,7 +1,7 @@
 (library
  (name web_export)
- (modules web_export web_runtime)
- (private_modules web_runtime)
+ (modules web_export web_runtime web_shaders)
+ (private_modules web_runtime web_shaders)
  (libraries
   flow
   flow_ir
@@ -13,11 +13,32 @@
   scene_command
   sdl3_image))
 
+; the resident fold's compaction and dispatch arguments, printed from lib/flow_gpu/shaders at build time, and
+; the presenter's pipelines from lib/renderer/shaders/marks.rays and shaders/present.rays (served as runtime/marks.wgsl)
+
+(rule
+ (targets compact.wgsl dispatch.wgsl marks.wgsl)
+ (deps
+  ../flow_gpu/shaders/compact.rays
+  ../flow_gpu/shaders/dispatch.rays
+  ../renderer/shaders/marks.rays
+  shaders/present.rays)
+ (action
+  (run %{exe:../flow_shader/print_shader.exe} web)))
+
+(rule
+ (targets web_shaders.ml)
+ (deps compact.wgsl dispatch.wgsl)
+ (action
+  (with-stdout-to
+   web_shaders.ml
+   (run %{exe:../flow/embed.exe} %{deps}))))
+
 (rule
  (targets web_runtime.ml)
  (deps
   (glob_files runtime/*.js)
-  (glob_files runtime/*.wgsl))
+  marks.wgsl)
  (action
   (with-stdout-to
    web_runtime.ml

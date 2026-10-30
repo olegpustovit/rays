@@ -154,7 +154,7 @@ let () =
   let queue = get (B.create_queue device) in
   let cache = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday device in
   let packed = List.assoc "arithmetic" (Test_program.fixtures 1024) in
-  let msl = Test_program.ok (Flow_gpu.Emit.kernel packed) in
+  let msl = Test_program.ok (Flow_shader.Emit.kernel packed) in
   let run = R.Private.create_owned device queue cache msl in
   Fun.protect
     ~finally:(fun () ->
@@ -233,7 +233,7 @@ let () =
       assert (R.buffer fresh = None);
       let packed = List.assoc "noise" (Test_program.fixtures 1024) in
       let noise =
-        R.Private.create_owned device queue cache (Test_program.ok (Flow_gpu.Emit.kernel packed))
+        R.Private.create_owned device queue cache (Test_program.ok (Flow_shader.Emit.kernel packed))
       in
       Fun.protect
         ~finally:(fun () -> R.close noise)
@@ -253,7 +253,7 @@ let () =
          read back once per output however often it is asked *)
       let packed = Test_program.compile "(map (fn [x] [x t 0.0]) (array/range 1024))" in
       let sea =
-        R.Private.create_owned device queue cache (Test_program.ok (Flow_gpu.Emit.kernel packed))
+        R.Private.create_owned device queue cache (Test_program.ok (Flow_shader.Emit.kernel packed))
       in
       Fun.protect
         ~finally:(fun () -> R.close sea)

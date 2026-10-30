@@ -1,4 +1,4 @@
-; noise3 on the device. Flow_gpu.Noise inlines noise-fbm at each noise3 of a kernel, compiled once an
+; noise3 on the device. Flow_shader.Noise inlines noise-fbm at each noise3 of a kernel, compiled once an
 ; octave count, over the seed's 512-entry permutation table (Rays_math.Noise.create, the kernel's table
 ; binding): Perlin's improved noise in float32, as Rays_math.Noise.fbm3, its CPU reference. A coordinate
 ; that is not finite gives NaN. noise-fbm is lacunarity 2 and gain 0.5, noise-fbm-fractal any other.

@@ -29,19 +29,27 @@
   Render_encoder)
  (libraries ogpu_core metal lru))
 
-; the presentation blit, generated from shaders/present.rays (lib/flow_gpu/test_raster.exe --write lib)
+; the presentation blit, printed from shaders/present.rays (a build-time tool: the library never links Flow)
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (targets present.metal present.vert.spv present.frag.spv)
+ (deps shaders/present.rays)
+ (action
+  (run %{exe:../flow_shader/print_shader.exe} ogpu_metal)))
 
 (rule
  (enabled_if
   (= %{system} macosx))
  (target present_source.ml)
- (deps shaders/metal/present.metal)
+ (deps present.metal)
  (action
   (with-stdout-to
    %{target}
    (progn
     (echo "let source = {msl|")
-    (cat shaders/metal/present.metal)
+    (cat present.metal)
     (echo "|msl}\n")))))
 
 (library

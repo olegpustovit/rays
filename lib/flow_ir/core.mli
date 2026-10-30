@@ -248,14 +248,14 @@ module Region : sig
     | Store
     | Noise_table of int
         (** [fwidth x]; component c of texture t sampled at (u, v) (its sampler at t + 1); axis c of
-            texture t's size in texels. The device side of scene/trace (Flow_gpu.Trace): field k of
+            texture t's size in texels. The device side of scene/trace (Flow_shader.Trace): field k of
             a triangle query (0 t, 1 prim, 2 u, 3 v, 4 hit, 5 instance) or a curve query (0 t, 1
             prim, 2 u, 3 hit) over origin, direction, tmin, tmax (and time), an any-hit query, and
             component c of a scene table row: a triangle corner (of the shutter's end), an
             instance-table word, a sphere, a strand end. A compute stage's group scan of an Int
             register (0 the exclusive prefix, 1 the total), in uniform control flow, and a store of
             a value at an index of a bound buffer (its table register), which is 1. Entry [index] of
-            the seed's noise permutation table (Flow_gpu.Noise, noise.rays), an Int. Int-typed
+            the seed's noise permutation table (Flow_shader.Noise, noise.rays), an Int. Int-typed
             operands are integer registers. *)
 
   type instruction =
@@ -277,7 +277,7 @@ module Region : sig
             registers scene id, origin, direction, tmin, tmax, time. *)
     | Stage of stage * int array
         (** A raster-stage intrinsic over its operand registers: only a fragment placement
-            ({!Flow_gpu.Raster}) prints it; every other target refuses it. *)
+            ({!Flow_shader.Raster}) prints it; every other target refuses it. *)
     | Array_prepare of int * Flow.Ty.t
         (** Execution-local immutable table capture, resolved before its index. Its register is a
             private table handle and cannot be a scalar output. *)

@@ -77,7 +77,7 @@ let compare_runs ?caps ?(cpu_time = Fun.id) ?(tolerance = 1e-5) name lease id de
   let pipelines = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device lease) in
   let msl =
     ok
-      (Flow_gpu.Emit.kernel ~fast:true ~instanced:built.instanced ~motion:built.motion
+      (Flow_shader.Emit.kernel ~fast:true ~instanced:built.instanced ~motion:built.motion
          ?curves:built.curves program)
   in
   let runner = R.create lease pipelines msl in
@@ -213,7 +213,7 @@ let stranded lease =
     let pipelines =
       Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device lease)
     in
-    let msl = ok (Flow_gpu.Emit.kernel ~fast:true ~curves:`Native (program 13)) in
+    let msl = ok (Flow_shader.Emit.kernel ~fast:true ~curves:`Native (program 13)) in
     ignore (ok (Flow_gpu.Pipelines.get pipelines msl));
     Flow_gpu.Pipelines.close pipelines;
     print_endline

@@ -42,3 +42,17 @@ val compute_program :
   (Flow_ir.Packed.t * (int * int * bool * bool) list, Diagnostic.t) result
 (** The compute stage's program and its buffers (array uniform, binding, uint words, stored), for
     another target's printer ([Flow_web.Wgsl.compute]). *)
+
+type data = {
+  program : Flow_ir.Packed.t;
+  buffers : (int * string * int * bool) list;
+      (** (array uniform, parameter, binding, uint words) *)
+  elements : string list;  (** the element parameters, in order *)
+  outputs : (string * Flow.Ty.t * bool) list;
+      (** the result's leaves in output order: last field name (["color"] for a bare colour),
+          type, flat *)
+}
+
+val stages :
+  declarations:string -> vertex:string -> fragment:string -> (data * data, Diagnostic.t) result
+(** The pipeline {!msl} prints, as data for another target's printer ([Flow_web.Wgsl.raster]). *)

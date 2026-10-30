@@ -198,7 +198,7 @@ let () =
   let cache = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday device in
   let packed = List.assoc "vec4" (Test_program.vector_fixtures 195) in
   let run =
-    Flow_gpu.Run.Private.create_owned device queue cache (Flow_gpu.Emit.kernel packed |> get)
+    Flow_gpu.Run.Private.create_owned device queue cache (Flow_shader.Emit.kernel packed |> get)
   in
   let sink = S.Private.create_owned device queue |> get in
   Fun.protect
@@ -264,7 +264,7 @@ let () =
         Domain.join (Domain.spawn (fun () -> Result.is_error (S.Private.create_owned device queue))));
       let scalar = List.assoc "arithmetic" (Test_program.fixtures 195) in
       let scalar_run =
-        Flow_gpu.Run.Private.create_owned device queue cache (Flow_gpu.Emit.kernel scalar |> get)
+        Flow_gpu.Run.Private.create_owned device queue cache (Flow_shader.Emit.kernel scalar |> get)
       in
       Fun.protect
         ~finally:(fun () -> Flow_gpu.Run.close scalar_run)

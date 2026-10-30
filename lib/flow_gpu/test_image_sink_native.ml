@@ -59,7 +59,7 @@ let () =
           List.iter
             (fun (name, body) ->
               let p, program = packed ~width:65 ~height:3 body in
-              let run = G.Run.create gpu cache (G.Emit.kernel p |> get) in
+              let run = G.Run.create gpu cache (Flow_shader.Emit.kernel p |> get) in
               Fun.protect
                 ~finally:(fun () -> G.Run.close run)
                 (fun () ->
@@ -130,7 +130,7 @@ let () =
               ("clip", "[(- uv.x 1) (+ uv.y 1) -1 2]");
             ];
           let p, _ = packed ~width:17 ~height:5 "[uv.x uv.y t 1]" in
-          let run = G.Run.create gpu cache (G.Emit.kernel p |> get) in
+          let run = G.Run.create gpu cache (Flow_shader.Emit.kernel p |> get) in
           Fun.protect
             ~finally:(fun () -> G.Run.close run)
             (fun () ->
@@ -392,7 +392,7 @@ let () =
                 ]);
           let p, _ = packed ~width:17 ~height:5 "[uv.x uv.y t 1]" in
           let cache = G.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device gpu) in
-          let run = G.Run.create gpu cache (G.Emit.kernel p |> get) in
+          let run = G.Run.create gpu cache (Flow_shader.Emit.kernel p |> get) in
           Fun.protect
             ~finally:(fun () ->
               G.Run.close run;
@@ -435,7 +435,7 @@ let () =
         (fun () ->
           let produce width height time =
             let p, _ = packed ~width ~height "[uv.x uv.y t 1]" in
-            let run = G.Run.create gpu cache (G.Emit.kernel p |> get) in
+            let run = G.Run.create gpu cache (Flow_shader.Emit.kernel p |> get) in
             Fun.protect
               ~finally:(fun () -> G.Run.close run)
               (fun () ->

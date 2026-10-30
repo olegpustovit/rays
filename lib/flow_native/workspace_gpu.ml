@@ -148,8 +148,8 @@ let measure t ~fast packed ~count =
           let entry =
             Result.to_option
               (Result.map
-                 (fun (msl : Flow_gpu.Emit.msl) -> msl.entry)
-                 (Flow_gpu.Emit.kernel ~fast packed))
+                 (fun (msl : Flow_shader.Emit.msl) -> msl.entry)
+                 (Flow_shader.Emit.kernel ~fast packed))
           in
           Entries.add t.entries (code, fast) entry;
           entry

@@ -27,7 +27,7 @@ let () =
                   (fun count ->
                     List.iter
                       (fun (name, program) ->
-                        let msl = Test_program.ok (Flow_gpu.Emit.kernel program) in
+                        let msl = Test_program.ok (Flow_shader.Emit.kernel program) in
                         let compiled = Test_program.ok (Flow_gpu.Pipelines.get pipelines msl) in
                         assert (Test_program.ok (Flow_gpu.Pipelines.get pipelines msl) == compiled);
                         let runner = Flow_gpu.Run.create gpu pipelines msl in
@@ -99,7 +99,7 @@ let () =
                   (fun (name, program) ->
                     let runner =
                       Flow_gpu.Run.create gpu pipelines
-                        (Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program))
+                        (Test_program.ok (Flow_shader.Emit.kernel ~fast:true program))
                     in
                     Fun.protect
                       ~finally:(fun () -> Flow_gpu.Run.close runner)
@@ -129,7 +129,7 @@ let () =
                     let program = Test_program.compile source in
                     let runner =
                       Flow_gpu.Run.create gpu pipelines
-                        (Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program))
+                        (Test_program.ok (Flow_shader.Emit.kernel ~fast:true program))
                     in
                     Fun.protect
                       ~finally:(fun () -> Flow_gpu.Run.close runner)
@@ -257,7 +257,7 @@ let () =
                 let fresh = Test_program.compile "(map (fn [x] (+ x t)) (array/range 8))" in
                 let runner =
                   Flow_gpu.Run.create gpu pipelines
-                    (Test_program.ok (Flow_gpu.Emit.kernel ~fast:true fresh))
+                    (Test_program.ok (Flow_shader.Emit.kernel ~fast:true fresh))
                 in
                 Fun.protect
                   ~finally:(fun () -> Flow_gpu.Run.close runner)
@@ -301,7 +301,7 @@ let () =
                     in
                     let runner =
                       Flow_gpu.Run.create gpu pipelines
-                        (Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program))
+                        (Test_program.ok (Flow_shader.Emit.kernel ~fast:true program))
                     in
                     Fun.protect
                       ~finally:(fun () -> Flow_gpu.Run.close runner)
@@ -329,7 +329,7 @@ let () =
                  in
                  let runner =
                    Flow_gpu.Run.create gpu pipelines
-                     (Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program))
+                     (Test_program.ok (Flow_shader.Emit.kernel ~fast:true program))
                  in
                  Fun.protect
                    ~finally:(fun () -> Flow_gpu.Run.close runner)
@@ -368,7 +368,7 @@ let () =
                 (let program = Test_program.two_outputs () in
                  let runner =
                    Flow_gpu.Run.create gpu pipelines
-                     (Test_program.ok (Flow_gpu.Emit.kernel program))
+                     (Test_program.ok (Flow_shader.Emit.kernel program))
                  in
                  Fun.protect
                    ~finally:(fun () -> Flow_gpu.Run.close runner)
@@ -436,7 +436,7 @@ let () =
                     let hidden =
                       Test_program.compile ("(map (fn [x] " ^ body ^ ") (array/range 1024))")
                     in
-                    let msl = Test_program.ok (Flow_gpu.Emit.kernel hidden) in
+                    let msl = Test_program.ok (Flow_shader.Emit.kernel hidden) in
                     let runner = Flow_gpu.Run.create gpu pipelines msl in
                     Fun.protect
                       ~finally:(fun () -> Flow_gpu.Run.close runner)
@@ -637,7 +637,7 @@ let counted gpu =
     Test_program.ok (Flow_ir.Packed.Host.prepare ~fast:true packed ~live:(Input.at_time 1.))
   in
   let runner =
-    Flow_gpu.Run.create gpu pipelines (Test_program.ok (Flow_gpu.Emit.kernel ~fast:true packed))
+    Flow_gpu.Run.create gpu pipelines (Test_program.ok (Flow_shader.Emit.kernel ~fast:true packed))
   in
   let buffer bytes =
     get

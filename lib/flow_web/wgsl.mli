@@ -1,4 +1,4 @@
-(** WGSL compute kernels for packed regions: the web counterpart of [Flow_gpu.Emit], with the same
+(** WGSL compute kernels for packed regions: the web counterpart of [Flow_shader.Emit], with the same
     refusals ([Packed.gpu_refusals]), binding numbering and uniform layout. Nothing here is compiled
     by a WebGPU implementation in the test suite; the first real compile is the browser run. *)
 
@@ -41,7 +41,7 @@ val kernel : ?image:bool -> Flow_ir.Packed.t -> (wgsl, Diagnostic.t) result
     uniforms; output must be vec4. No UV storage buffer is allocated or uploaded. *)
 
 val kernel_fast : Flow_ir.Packed.t -> (wgsl, Diagnostic.t) result
-(** The web counterpart of [Flow_gpu.Emit.kernel ~fast] (a workspace's fast precision): the same
+(** The web counterpart of [Flow_shader.Emit.kernel ~fast] (a workspace's fast precision): the same
     refusals ([Packed.gpu_refusals ~fast:true]), bindings and uniform layout as Metal's. Integer
     registers are 64-bit ([vec2<u32>] low and high words: wrapping add, sub and mul, truncating
     division with [0] for a zero divisor, logical right shift, shifts by [n & 63]); integers travel
@@ -58,18 +58,25 @@ val compute :
   buffers:(int * int * bool * bool) list ->
   Flow_ir.Packed.t ->
   (string, Diagnostic.t) result
-(** A compute stage (Flow_gpu.Raster's) as the module of entry [name], workgroups of [size]
+(** A compute stage (Flow_shader.Raster's) as the module of entry [name], workgroups of [size]
     ([@builtin(global_invocation_id)] is its element): [buffers] are (array uniform, binding, u32
     words, stored), read unclamped; [gpu/group-scan] is a [var<workgroup>] scan between
     [workgroupBarrier]s and [gpu/store] a statement. Its result is discarded. *)
 
-val compaction : string
-(** The WGSL of a resident fold's [array/compact] (entry [compact_mask], one workgroup of 256),
-    generated from Flow_gpu's shaders/compact.rays: bindings mask (f32), kept (f32 indices), total
-    (the count cell), bound (u32 count, use) and count_in. *)
+type stage = {
+  entry : string;
+  program : Flow_ir.Packed.t;
+  buffers : (int * int * bool) list;  (** (array uniform, binding, u32 words) *)
+  elements : string list;  (** the element parameters, in order *)
+  outputs : (string * Flow.Ty.t * bool) list;  (** the result's leaves: name, type, flat *)
+}
+(** A raster stage, as [Flow_shader.Raster.stages] gives it. *)
 
-val dispatch_arguments : string
-(** The WGSL of a resident dispatch's workgroup counts (entry [dispatch_arguments], one thread),
-    generated from Flow_gpu's shaders/dispatch.rays: bindings the count cell, bound (u32 capacity,
-    mul, div, group) and the three counts written for [dispatchWorkgroupsIndirect],
-    max(1, ceil(n / group)), 1, 1 for n = min(capacity, cell[0] x mul / div). *)
+val raster : (bool * stage * stage) list -> (string, Diagnostic.t) result
+(** Raster pipelines [(quads, vertex, fragment)] as one WGSL module, entries named as the stages,
+    printed by {!kernel_fast}'s instruction printer in raster placements: every resource in group 0
+    at its binding (a binding that any stage reads as words is [array<u32>], its floats their bits),
+    texture [t] with its sampler at [t + 1], varyings at locations in the vertex result's leaf order.
+    The vertex id is [vertex_index], or with [quads] [instance_index * 4 + corner] of a non-indexed
+    six-vertex draw (native's [vid / 4] instance and [vid % 4] corner); a fragment's [fwidth] of a
+    varying is read once at the top, before any branch, for WGSL's derivative uniformity. *)

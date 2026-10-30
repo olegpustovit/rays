@@ -1,6 +1,6 @@
 // node present_check.mjs RUNTIME_DIR [EXPORT_DIR NATIVE_PNG_DIR ...]
 //
-// Real-Chrome check of the presenter (plan P6.4, P6.5): lib/web_export/runtime/present.js + marks.wgsl.
+// Real-Chrome check of the presenter (plan P6.4, P6.5): lib/web_export/runtime/present.js + the printed marks.wgsl.
 //  1. Hand-built mark tables (rect, circle, line, with and without stroke; constants and per-instance
 //     buffers; geometry; point set; transform; clip; blend; text; image; device pixel ratio 2) are drawn and
 //     the canvas pixels are read back. Interior probes avoid edges; fractional point probes pin native
@@ -11,8 +11,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromeAvailable, launch, serve } from './chrome.mjs';
 
-const [runtimeDir] = process.argv.slice(2);
-if (!runtimeDir) { console.error('usage: node present_check.mjs RUNTIME_DIR'); process.exit(2); }
+const [runtimeDir, marksWgsl] = process.argv.slice(2);
+if (!marksWgsl) { console.error('usage: node present_check.mjs RUNTIME_DIR MARKS_WGSL'); process.exit(2); }
 if (!chromeAvailable()) { console.log('present_check: skipped (Google Chrome not found)'); process.exit(0); }
 
 // 0xRRGGBBAA as the signed int32 the mark table carries.
@@ -145,7 +145,7 @@ const files = {
   '/': '<!doctype html><title>present check</title><body style="margin:0"><script type="module" src="page.js"></script>',
   '/page.js': pageScript,
   '/present.js': readFileSync(join(runtimeDir, 'present.js')),
-  '/marks.wgsl': readFileSync(join(runtimeDir, 'marks.wgsl')),
+  '/marks.wgsl': readFileSync(marksWgsl),
   '/gpu.js': readFileSync(join(runtimeDir, 'gpu.js')),   // present.js imports requestDevice from it
 };
 const server = await serve(files);

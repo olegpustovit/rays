@@ -31,6 +31,6 @@ let entry ?cpu ~id (w : Wgsl.wgsl) =
     (json_list (fun (u, width) -> Printf.sprintf "[%d,%d]" u width) (Array.to_list w.gathers))
     (match w.counts with Some o -> string_of_int o | None -> "null")
 
-let table entries =
-  "{\"kernels\":[" ^ String.concat ",\n" entries ^ "],\n\"compaction\":"
-  ^ json_string Wgsl.compaction ^ ",\n\"dispatch\":" ^ json_string Wgsl.dispatch_arguments ^ "}\n"
+let table ~compaction ~dispatch entries =
+  "{\"kernels\":[" ^ String.concat ",\n" entries ^ "],\n\"compaction\":" ^ json_string compaction
+  ^ ",\n\"dispatch\":" ^ json_string dispatch ^ "}\n"
