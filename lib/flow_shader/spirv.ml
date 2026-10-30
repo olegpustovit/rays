@@ -475,6 +475,7 @@ let stage_operands ~table_of ~low ~float_of ~integer stage a =
       match stage with
       | Flow_ir.Core.Region.Store when k = 0 -> table_of x
       | (Store | Group_scan _) when integer x -> low x
+      | Float_bits -> low x
       | _ -> float_of x)
     a
 
@@ -1347,6 +1348,7 @@ let stage (s : stage) program =
           (fun stage operands ->
             match stage with
             | Flow_ir.Core.Region.Fwidth -> result e float 209 [ operands.(0) ]
+            | Float_bits -> result e float 124 [ operands.(0) ]
             | Sample (t, c) | Sample_level (t, c) ->
                 let combined =
                   result e sampled 86

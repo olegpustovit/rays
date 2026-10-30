@@ -15,7 +15,8 @@ let raster = function
         ("scene3_textured", "scene", "scene3-vertex", "scene3-textured-fragment", false);
         ("scene3_sun_depth", "scene", "sun-vertex", "sun-fragment", false);
         ("scene3_world", "scene", "scene3-vertex", "world-fragment", false);
-        ("scene2_textured_argument", "scene", "scene2-vertex", "scene2-fragment", true);
+        ("geometry", "marks", "geometry-vertex", "geometry-fragment", false);
+        ("quad", "marks", "quad-vertex", "quad-fragment", true);
         ("image_rgba8", "image", "image-vertex", "image-fragment", false);
       ]
   | "ogpu_metal" -> [ ("present", "present", "present-vertex", "present-fragment", false) ]
@@ -77,18 +78,11 @@ let () =
         ("compact", "compact-mask", 256, "compact_mask");
         ("dispatch", "dispatch-arguments", 1, "dispatch_arguments");
       ];
-  (* the presenter's pipelines (present.js): native's marks, with the web's geometry and quad over
-     its clip. The web binds a buffer read as both words and floats once (WebGPU's eight storage
-     buffers a stage) and every draw's constants at 6. *)
+  (* the presenter's pipelines (present.js): native's marks, geometry and quad, every draw's
+     constants bound at 6 *)
   if owner = "web" then begin
     let marks = read "../renderer/shaders/marks.rays" in
-    let binding name slot =
-      match name with
-      | "affine" -> 6
-      | "fill-floats" -> 2
-      | "stroke-floats" -> 3
-      | _ -> slot
-    in
+    let binding name slot = if name = "affine" then 6 else slot in
     let stage entry (d : Flow_shader.Raster.data) =
       {
         Flow_web.Wgsl.entry;
@@ -102,14 +96,14 @@ let () =
       (ok "marks"
          (Flow_web.Wgsl.raster
             (List.map
-               (fun (quads, declarations, vertex, fragment) ->
+               (fun (quads, vertex, fragment) ->
                  let v, f =
-                   ok vertex (Flow_shader.Raster.stages ~declarations ~vertex ~fragment)
+                   ok vertex (Flow_shader.Raster.stages ~declarations:marks ~vertex ~fragment)
                  in
                  (quads, stage vertex v, stage fragment f))
                [
-                 (true, marks, "marks-vertex", "marks-fragment");
-                 (false, marks ^ source "present", "geometry-vertex", "geometry-fragment");
-                 (true, marks ^ source "present", "quad-vertex", "quad-fragment");
+                 (true, "marks-vertex", "marks-fragment");
+                 (false, "geometry-vertex", "geometry-fragment");
+                 (true, "quad-vertex", "quad-fragment");
                ])))
   end

@@ -139,7 +139,7 @@ let run () =
     [ 9; 16 ];
   let mesh_uv u v =
     Scene_execution_fixtures.scene2_mesh
-      ~uv:(fun _ _ -> (u, v))
+      ~uv:(u, v, u, v)
       (Printf.sprintf "textured-%g-%g" u v)
   in
   let mesh3_uv u v =

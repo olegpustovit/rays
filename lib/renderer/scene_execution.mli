@@ -112,9 +112,10 @@ val create :
   (t, Ogpu.Error.t) result
 (** Creates a renderer with one pipeline per family, blend, and supported sample count. The factory
     receives the renderer's device and returns owned OGPU render pipelines (see
-    [Ogpu.Backend.create_render_pipeline]); the renderer destroys them. Scene2 and Scene2_textured
-    draws both run through the Scene2_textured pipeline, which binds its texture and sampler through
-    a fragment argument buffer at index 2 and must be created with [~indirect:true].
+    [Ogpu.Backend.create_render_pipeline]); the renderer destroys them. Scene2 draws run
+    marks.rays' geometry pipeline (a vertex a float2 position and colour word) and Scene2_textured
+    its quad pipeline (a quad's 80 bytes of constants its vertices), which binds its texture and
+    sampler through a fragment argument buffer at index 7; both are created with [~indirect:true].
 
     With [~offscreen:true] the renderer owns a texture target without creating, acquiring, or
     presenting a platform surface. Submissions complete before the call returns, so exact readback

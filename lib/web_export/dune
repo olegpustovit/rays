@@ -14,15 +14,14 @@
   sdl3_image))
 
 ; the resident fold's compaction and dispatch arguments, printed from lib/flow_gpu/shaders at build time, and
-; the presenter's pipelines from lib/renderer/shaders/marks.rays and shaders/present.rays (served as runtime/marks.wgsl)
+; the presenter's pipelines from lib/renderer/shaders/marks.rays (served as runtime/marks.wgsl)
 
 (rule
  (targets compact.wgsl dispatch.wgsl marks.wgsl)
  (deps
   ../flow_gpu/shaders/compact.rays
   ../flow_gpu/shaders/dispatch.rays
-  ../renderer/shaders/marks.rays
-  shaders/present.rays)
+  ../renderer/shaders/marks.rays)
  (action
   (run %{exe:../flow_shader/print_shader.exe} web)))
 

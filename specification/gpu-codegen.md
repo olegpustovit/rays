@@ -79,16 +79,17 @@ gathers read the bound buffers without clamps, and there is no status word.
 
 - A stage's `(array float)` and `(array int)` parameters are the renderer's buffers. The vertex
   stage's bind in their order; a fragment buffer named like a vertex one shares its binding, any other
-  follows the vertex stage's (one binding namespace, as OGPU's layouts). A buffer read as floats and
-  as words is bound twice. Textures take the bindings the author names after them. The vertex
+  follows the vertex stage's (one binding namespace, as OGPU's layouts). A float column in a buffer of
+  words is read with `gpu/float-bits` (an Int's low 32 bits as a float: `as_type<float>`, `OpBitcast`,
+  `bitcast<f32>`), so each buffer is bound once. Textures take the bindings the author names after them. The vertex
   entry's first parameter is the vertex id.
 - The vertex result has `:position` (clip space), optionally `:point-size`, and the varyings; those
   under `:flat` are not interpolated. The fragment's other parameters are the varyings, by name, and its result is a colour
   or `{:color c :discard b}`.
-- Fragment intrinsics are `gpu/fwidth`, `gpu/sample`, `gpu/sample-level` (an explicit mip level),
+- Stage intrinsics are `gpu/float-bits` (either stage), `gpu/fwidth`, `gpu/sample`, `gpu/sample-level` (an explicit mip level),
   `gpu/read` (a whole texel at integer coordinates, no sampler) and `gpu/texture-size` (Region
   `Stage`); texture `t` is sampled with sampler `t + 1`. An argument-buffer pipeline
-  (`Raster.msl ~arguments:true`, Scene2's) holds texture `t` and its sampler in the argument buffer at
+  (`Raster.msl ~arguments:true`, Scene2's quad) holds texture `t` and its sampler in the argument buffer at
   buffer `t`. Built-in facts read like frame facts: `(gpu/instance-id)` in a vertex,
   `(gpu/front-facing)`, `(gpu/depth)` (window depth) and `(gpu/fragment-x)`/`(gpu/fragment-y)` (pixel
   position) in a fragment. The CPU and every other target
@@ -125,8 +126,8 @@ rule in the owner's dune (`renderer`, `ogpu_metal`, `flow_gpu`), whose embedding
 `.metal`. `print_shader.exe web`, run by `web_export`'s dune, prints `compact.rays` and `dispatch.rays`
 through `Flow_web.Wgsl.compute` into `compact.wgsl` and `dispatch.wgsl`, which `web_export` embeds and
 passes to `Flow_web.Kernel_table.table` (`flow_web` holds the printer, so it cannot embed them), and the
-presenter's pipelines (`lib/renderer/shaders/marks.rays` with the web's geometry and quad stages in
-`lib/web_export/shaders/present.rays`) through `Raster.stages` and `Flow_web.Wgsl.raster` into
+presenter's pipelines (`lib/renderer/shaders/marks.rays`: marks, geometry and quad, the ones native
+prints) through `Raster.stages` and `Flow_web.Wgsl.raster` into
 `marks.wgsl`, which the export serves as `runtime/marks.wgsl` (marks.md, "The Marks pipeline family"). It is a build-time tool: no
 library links it, so the owners' library graph is unchanged.
 `@lib/flow_gpu/runtest` (`test_raster.exe`) validates the printed SPIR-V with `spirv-val` when it is

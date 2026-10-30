@@ -663,6 +663,7 @@ and fast_kernel ?placement program =
           end;
           name
       | Fwidth, _ -> fail "On the web fwidth reads a varying (WGSL's derivative uniformity)."
+      | Float_bits, _ -> "bitcast<f32>(" ^ low r.(0) ^ ")"
       | Sample (t, c), _ ->
           Printf.sprintf "textureSample(texture%d, sampler%d, vec2<f32>(%s, %s)).%c" t (t + 1)
             (float_of r.(0)) (float_of r.(1)) "xyzw".[c]
@@ -1082,10 +1083,19 @@ let raster pipelines =
     | Vec4 -> "vec4<f32>"
     | ty -> "<" ^ Flow.Ty.to_string ty ^ ">"
   in
-  let resources = Hashtbl.create 16 in
+  let resources = Hashtbl.create 16 and words = Hashtbl.create 16 in
+  (* a binding any stage reads as words is words in every stage: its floats are their bits *)
+  List.iter
+    (fun (_, (v : stage), (f : stage)) ->
+      List.iter (fun (_, b, w) -> if w then Hashtbl.replace words b ()) (v.buffers @ f.buffers))
+    pipelines;
+  let shared (s : stage) =
+    { s with buffers = List.map (fun (u, b, w) -> (u, b, w || Hashtbl.mem words b)) s.buffers }
+  in
   let rec functions = function
     | [] -> Ok []
-    | (quads, (v : stage), (f : stage)) :: more ->
+    | (quads, v, f) :: more ->
+        let v = shared v and f = shared f in
         let out = identifier v.entry ^ "_out" in
         let location = ref (-1) in
         let fields =
@@ -1103,9 +1113,7 @@ let raster pipelines =
         List.iter
           (fun (s : stage) ->
             List.iter
-              (fun (_, b, w) ->
-                let words = w || Option.value ~default:false (Hashtbl.find_opt resources (`Buffer b)) in
-                Hashtbl.replace resources (`Buffer b) words)
+              (fun (_, b, w) -> Hashtbl.replace resources (`Buffer b) w)
               s.buffers;
             Array.iter
               (fun i ->

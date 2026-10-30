@@ -1,28 +1,29 @@
 ; The marks pipeline (Scene_command.Marks): one quad of four vertices per mark, its kind in q[0]
 ; (4 circle, 5 line, else a rectangle), q[1..5] the column strides and q[6..7] the colour modes
-; (0 packed RGBA words, else float RGB). A buffer read as both words and floats is bound twice.
+; (0 packed RGBA words, else float RGB, the words' bits read as floats).
 (defn unpack :context value [(w : int)]
   [(/ (float (int/and (int/shr w 24) 255)) 255.) (/ (float (int/and (int/shr w 16) 255)) 255.)
    (/ (float (int/and (int/shr w 8) 255)) 255.) (/ (float (int/and w 255)) 255.)])
-(defn channel :context value [(c : float)] (floor (+ (* (min (max c 0.) 1.) 255.) 0.5)))
-(defn colour :context value [(words : (array int)) (floats : (array float)) (at : int) (mode : int)]
+(defn channel :context value [(words : (array int)) (at : int)]
+  (floor (+ (* (min (max (gpu/float-bits (array/nth words at)) 0.) 1.) 255.) 0.5)))
+(defn colour :context value [(words : (array int)) (at : int) (mode : int)]
   (if (int/eq mode 0) (array/nth words at)
-    (int/or (int/or (int/shl (channel (array/nth floats at)) 24) (int/shl (channel (array/nth floats (int/add at 1))) 16))
-      (int/or (int/shl (channel (array/nth floats (int/add at 2))) 8) 255))))
+    (int/or (int/or (int/shl (channel words at) 24) (int/shl (channel words (int/add at 1)) 16))
+      (int/or (int/shl (channel words (int/add at 2)) 8) 255))))
 (defn clip :context value [(affine : (array float)) (p : vec2)]
   [(+ (+ (* (array/nth affine 0) p.x) (* (array/nth affine 1) p.y)) (array/nth affine 2))
    (+ (+ (* (array/nth affine 3) p.x) (* (array/nth affine 4) p.y)) (array/nth affine 5)) 0. 1.])
 
 (defn marks-vertex :context value
   [(vid : int) (position : (array float)) (extent : (array float)) (fill : (array int)) (stroke : (array int))
-   (width : (array float)) (q : (array int)) (affine : (array float)) (fill-floats : (array float)) (stroke-floats : (array float))]
+   (width : (array float)) (q : (array int)) (affine : (array float))]
   (let* [i (int/div vid 4) corner (int/mod vid 4)
          cx (if (or (int/eq corner 1) (int/eq corner 2)) 1. 0.) cy (if (int/ge corner 2) 1. 0.)
          kind (array/nth q 0)
          at (int/mul i (array/nth q 1)) wide (int/mul i (array/nth q 2))
          a [(array/nth position at) (array/nth position (int/add at 1))]
          sw (array/nth width (int/mul i (array/nth q 5)))
-         stroke-word (colour stroke stroke-floats (int/mul i (array/nth q 4)) (array/nth q 7))]
+         stroke-word (colour stroke (int/mul i (array/nth q 4)) (array/nth q 7))]
     (if (int/eq kind 5)
       (let* [b [(array/nth extent wide) (array/nth extent (int/add wide 1))]
              d (- b a) len (sqrt (+ (* d.x d.x) (* d.y d.y)))
@@ -38,7 +39,7 @@
              grow (+ 1. (* border 0.5))
              g [(- r.x grow) (- r.y grow) (+ r.z grow) (+ r.w grow)]
              p [(+ g.x (* (- g.z g.x) cx)) (+ g.y (* (- g.w g.y) cy))]]
-        {:position (clip affine p) :color (unpack (colour fill fill-floats (int/mul i (array/nth q 3)) (array/nth q 6)))
+        {:position (clip affine p) :color (unpack (colour fill (int/mul i (array/nth q 3)) (array/nth q 6)))
          :color2 (unpack stroke-word) :local p :flat {:box r :params [0. border 1. (float kind)] :extra [0. 0. 0. 0.]}}))))
 
 (defn len2 :context value [(v : vec2)] (sqrt (+ (* v.x v.x) (* v.y v.y))))
@@ -73,3 +74,29 @@
         {:discard false
          :color (if (<= border 0.) fill
                   (over [color2.x color2.y color2.z (* color2.w (unit (- 0.5 (/ (- (abs d) (* border 0.5)) px))))] fill))}))))
+
+; Scene2's and the presenter's (lib/web_export/runtime/present.js) geometry and quad pipelines. A
+; draw's constants (affine) hold the affine 0-5 (as marks'), the colour flag 6, the ink 8-11, the
+; quad's rectangle 12-15 (x y w h) and its texture's 16-19 (u0 v0 u1 v1).
+
+; indexed triangles of float2 positions in the ink, or with the colour flag of a position and its
+; colour word a vertex (a triangle takes its first vertex's)
+(defn geometry-vertex :context value [(vid : int) (vertices : (array int)) (affine : (array float))]
+  (let* [coloured (int/eq (int (array/nth affine 6)) 1) at (int/mul vid (if coloured 3 2))]
+    {:position (clip affine [(gpu/float-bits (array/nth vertices at)) (gpu/float-bits (array/nth vertices (int/add at 1)))])
+     :flat {:ink (if coloured (unpack (array/nth vertices (int/add at 2)))
+                   [(array/nth affine 8) (array/nth affine 9) (array/nth affine 10) (array/nth affine 11)])}}))
+(defn geometry-fragment :context value [(ink : vec4)] ink)
+
+; rectangles, their texture 7 (sampler 8) tinted by the ink: text, glyphs and images. Quad k's
+; constants are affine[20k..]: one quad a draw on the web, a run of them natively.
+(defn mix1 :context value [(a : float) (b : float) (c : float)] (+ (* a (- 1. c)) (* b c)))
+(defn at :context value [(a : (array float)) (base : int) (i : int)] (array/nth a (int/add base i)))
+(defn quad-vertex :context value [(vid : int) (affine : (array float))]
+  (let* [k (int/mod vid 4) q (int/mul (int/div vid 4) 20)
+         c [(if (or (int/eq k 1) (int/eq k 2)) 1. 0.) (if (int/ge k 2) 1. 0.)]
+         p [(+ (at affine q 12) (* (at affine q 14) c.x)) (+ (at affine q 13) (* (at affine q 15) c.y))]]
+    {:position [(+ (+ (* (at affine q 0) p.x) (* (at affine q 1) p.y)) (at affine q 2)) (+ (+ (* (at affine q 3) p.x) (* (at affine q 4) p.y)) (at affine q 5)) 0. 1.]
+     :uv [(mix1 (at affine q 16) (at affine q 18) c.x) (mix1 (at affine q 17) (at affine q 19) c.y)]
+     :flat {:ink [(at affine q 8) (at affine q 9) (at affine q 10) (at affine q 11)]}}))
+(defn quad-fragment :context value [(ink : vec4) (uv : vec2)] (* ink (gpu/sample 7 uv)))

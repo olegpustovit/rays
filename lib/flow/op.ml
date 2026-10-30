@@ -1612,6 +1612,8 @@ let stage_intrinsics =
   in
   [
     stage "gpu/fwidth" [ ("x", fl) ] fl;
+    (* an Int's low 32 bits read as a float (a float column in a buffer of words) *)
+    stage "gpu/float-bits" [ ("bits", Ty.Int) ] fl;
     stage "gpu/sample" [ ("texture", Ty.Int); ("uv", Ty.Vec2) ] Ty.Vec4;
     stage "gpu/sample-level" [ ("texture", Ty.Int); ("uv", Ty.Vec2); ("level", fl) ] Ty.Vec4;
     stage "gpu/read" [ ("texture", Ty.Int); ("texel", Ty.Vec2) ] Ty.Vec4;

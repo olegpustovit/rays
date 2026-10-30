@@ -21,29 +21,38 @@ let run () =
   match create_window 4 4 with
   | Error _ -> print_endline "runtime-next scene2 retained argument: skipped (no Metal device)"
   | Ok runtime ->
-      let vertices = Bytes.make (3 * 68) '\000' in
-      let indices = Bytes.make 12 '\000' in
-      let put index x y u v =
-        let offset = index * 68 in
-        Bytes.set_int64_le vertices offset (Int64.bits_of_float x);
-        Bytes.set_int64_le vertices (offset + 8) (Int64.bits_of_float y);
-        Bytes.set_int32_le vertices (offset + 48) Int32.minus_one;
-        Bytes.set_int64_le vertices (offset + 52) (Int64.bits_of_float u);
-        Bytes.set_int64_le vertices (offset + 60) (Int64.bits_of_float v)
+      (* a quad's constants (marks.rays): the identity affine, a white ink, the clip square and the
+         whole texture *)
+      let words values =
+        let bytes = Bytes.create (4 * List.length values) in
+        List.iteri (fun i v -> Bytes.set_int32_le bytes (i * 4) v) values;
+        bytes
       in
-      put 0 (-1.) (-1.) 0. 0.;
-      put 1 3. (-1.) 1. 0.;
-      put 2 (-1.) 3. 0. 1.;
-      Bytes.set_int32_le indices 4 1l;
-      Bytes.set_int32_le indices 8 2l;
+      let floats values = words (List.map Int32.bits_of_float values) in
       let mesh : Renderer.Scene_execution.mesh =
         {
           key = Host "scene2-retained-argument";
-          vertices;
-          vertex_count = 3;
-          indices;
-          index_count = 3;
+          vertices =
+            floats
+              [ 1.; 0.; 0.; 0.; 1.; 0.; 0.; 0.; 1.; 1.; 1.; 1.; -1.; -1.; 2.; 2.; 0.; 0.; 1.; 1. ];
+          vertex_count = 4;
+          indices = words [ 0l; 1l; 2l; 0l; 2l; 3l ];
+          index_count = 6;
           primitive = Ogpu.Render_pass.Triangle_list;
+        }
+      in
+      (* a full-screen triangle in the texture's colour: a float2 position and colour word each *)
+      let triangle : Renderer.Scene_execution.mesh =
+        {
+          mesh with
+          vertices =
+            words
+              (List.concat_map
+                 (fun (x, y) -> [ Int32.bits_of_float x; Int32.bits_of_float y; 0x112233ffl ])
+                 [ (-1., -1.); (3., -1.); (-1., 3.) ]);
+          vertex_count = 3;
+          indices = words [ 0l; 1l; 2l ];
+          index_count = 3;
         }
       in
       let state : Renderer.Scene_execution.state =
@@ -169,7 +178,9 @@ let run () =
              (Int64.sub churn.uploaded_bytes uploaded));
       if !peak_live <> Option.get !settled_release then
         failwith "managed-image churn grew native live-handle state";
-      let plain_mesh = { mesh with Renderer.Scene_execution.key = Host "scene2-retained-plain" } in
+      let plain_mesh =
+        { triangle with Renderer.Scene_execution.key = Host "scene2-retained-plain" }
+      in
       let plain_draw =
         {
           draw with
@@ -199,7 +210,7 @@ let run () =
         let identity = frame mod 80 in
         let mesh =
           {
-            mesh with
+            triangle with
             Renderer.Scene_execution.key = Host (Printf.sprintf "scene2-plan-churn-%02d" identity);
           }
         in
@@ -224,7 +235,7 @@ let run () =
       in
       let animated tx =
         let state = { state with Renderer.Scene_execution.transform_uniforms = Some (affine tx) } in
-        { draw with draw = { Renderer.Scene_execution.mesh; state } }
+        { plain_draw with draw = { Renderer.Scene_execution.mesh = plain_mesh; state } }
       in
       for frame = 0 to 19 do
         ignore (get (Renderer.draw runtime [ animated (if frame land 1 = 0 then 0. else 2.) ]))
@@ -275,7 +286,7 @@ let run () =
       let after = live_handles () in
       if after <> before then failwith "scene2 retained argument live-handle delta";
       Printf.printf
-        "runtime-next scene2 retained argument: indexed expansion + 1000 managed-image generations \
+        "runtime-next scene2 retained argument: indexed quad + 1000 managed-image generations \
          + 600 mixed plain/textured + 400 affine frames, %.0f allocated and %.0f promoted \
          bytes/frame, exact pixels, bounded release state, zero delta\n"
         allocated_per_frame promoted_per_frame

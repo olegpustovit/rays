@@ -696,7 +696,8 @@ returning to the older prepared scene. This guards against geometry vanishing
 or taking another scene's contents when a hover revisits an earlier scene.
 
 Dense Scene2 runs of more than 64 consecutive geometry commands pack directly
-into one native vertex/index mesh, including each primitive's RGBA values.
+into one native vertex/index mesh, including each primitive's RGBA values (12 bytes a vertex:
+the float2 position and colour word, marks.md "Geometry and quads").
 This avoids preparing and caching thousands of temporary draws only to copy
 them into a batch afterward. Clip, transform, blend, image, and text commands
 end a run; painter order is preserved. Packing takes two passes with

@@ -1,4 +1,4 @@
-; The scene pipelines: Scene3 (plain, points and textured), the sun's depth map and Scene2.
+; The scene pipelines: Scene3 (plain, points and textured) and the sun's depth map.
 ;
 ; Scene3: a vertex is a 24-byte packed record (position,
 ; normal as floats, colour and uv in the 12-byte attribute record), or with surface[79] set (a
@@ -24,15 +24,6 @@
 (defn unpack :context value [(w : int)]
   [(/ (float (int/and (int/shr w 24) 255)) 255.) (/ (float (int/and (int/shr w 16) 255)) 255.)
    (/ (float (int/and (int/shr w 8) 255)) 255.) (/ (float (int/and w 255)) 255.)])
-; an IEEE double from its two little-endian words, to float
-(defn double-at :context value [(w : (array int)) (at : int)]
-  (let* [lo (array/nth w at) hi (array/nth w (int/add at 1))
-         sign (if (int/eq (int/shr hi 31) 0) 1. -1.)
-         exponent (int/and (int/shr hi 20) 2047)
-         fraction (/ (float (int/or (int/shl (int/and hi 1048575) 32) lo)) 4503599627370496.)]
-    (if (int/eq exponent 0)
-      (* sign (ldexp fraction -1022.))
-      (* sign (ldexp (+ 1. fraction) (float (int/sub exponent 1023)))))))
 ; row [base] of a row-major 4x4 dotted with v, as MSL's dot(float4)
 (defn row :context value [(m : (array float)) (base : int) (v : vec4)]
   (fma v.w (array/nth m (int/add base 3)) (fma v.z (array/nth m (int/add base 2))
@@ -153,16 +144,6 @@
 (defn sun-fragment :context value []
   (let* [d (int (fma (min (max (gpu/depth) 0.) 1.) 16777215. 0.5))]
     [(byte-at d 16) (byte-at d 8) (byte-at d 0) 1.]))
-
-; Scene2: 68-byte records of doubles (position 0, colour word 48, uv 52) under the 2D affine, coloured
-; by texture 2 (its sampler beside it in the argument buffer at 2)
-(defn scene2-vertex :context value [(vid : int) (input-words : (array int)) (affine : (array float))]
-  (let* [at (int/mul vid 17) x (double-at input-words at) y (double-at input-words (int/add at 2))]
-    {:position [(+ (fma (array/nth affine 0) x (* (array/nth affine 1) y)) (array/nth affine 2))
-                (+ (fma (array/nth affine 3) x (* (array/nth affine 4) y)) (array/nth affine 5)) 0. 1.]
-     :color (unpack (array/nth input-words (int/add at 12)))
-     :uv [(double-at input-words (int/add at 13)) (double-at input-words (int/add at 15))]}))
-(defn scene2-fragment :context value [(color : vec4) (uv : vec2)] (* color (gpu/sample 2 uv)))
 
 ; Scene3_world: the World pipeline's physically based fragment over the Scene3 vertex. The surface
 ; buffer as Scene3's, the World block w (sun 28, sky 35, shadow 39-64, exposure 27, irradiance 0-26)

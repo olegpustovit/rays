@@ -74,13 +74,13 @@ let frozen_software_hash scenario ~extent =
   | _ -> None
 
 let put_vertex bytes index (x, y) color =
-  let offset = index * 16 in
+  let offset = index * 12 in
   Bytes.set_int32_le bytes offset (Int32.bits_of_float x);
   Bytes.set_int32_le bytes (offset + 4) (Int32.bits_of_float y);
   Bytes.set_int32_le bytes (offset + 8) color
 
 let mesh scenario index =
-  let vertices = Bytes.make 48 '\000' and indices = Bytes.make 12 '\000' in
+  let vertices = Bytes.make 36 '\000' and indices = Bytes.make 12 '\000' in
   Bytes.set_int32_le indices 4 1l;
   Bytes.set_int32_le indices 8 2l;
   let positions, color =

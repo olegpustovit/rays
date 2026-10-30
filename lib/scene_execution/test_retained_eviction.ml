@@ -26,19 +26,19 @@ let state : Scene_execution.state =
   }
 
 let mesh ?(plain = true) index : Scene_execution.mesh =
-  let indices = Bytes.make 12 '\000' in
-  Bytes.set_int32_le indices 4 1l;
-  Bytes.set_int32_le indices 8 2l;
-  {
-    key = Host (Printf.sprintf "eviction-%d" index);
-    vertices =
-      (if plain then Scene_execution_fixtures.scene2_plain_vertices ()
-       else Scene_execution_fixtures.scene2_vertices ());
-    vertex_count = 3;
-    indices;
-    index_count = 3;
-    primitive = Ogpu.Render_pass.Triangle_list;
-  }
+  if not plain then Scene_execution_fixtures.scene2_mesh (Printf.sprintf "eviction-%d" index)
+  else
+    let indices = Bytes.make 12 '\000' in
+    Bytes.set_int32_le indices 4 1l;
+    Bytes.set_int32_le indices 8 2l;
+    {
+      key = Host (Printf.sprintf "eviction-%d" index);
+      vertices = Scene_execution_fixtures.scene2_plain_vertices ();
+      vertex_count = 3;
+      indices;
+      index_count = 3;
+      primitive = Ogpu.Render_pass.Triangle_list;
+    }
 
 let texture index : Scene_execution.sampled_texture =
   {

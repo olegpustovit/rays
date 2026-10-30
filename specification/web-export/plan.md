@@ -29,7 +29,7 @@ meaning used by compiler parity tests.
 | Frame program | OCaml Core executor | Generated JavaScript |
 | CPU region | Packed blocks over Parallel | JavaScript workers over SharedArrayBuffer |
 | GPU region | Metal emitter through OGPU | WGSL emitter and WebGPU |
-| Drawing | Native mark pipeline | WebGPU mark pipeline, printed from the same `marks.rays` |
+| Drawing | Native mark, geometry and quad pipelines | The same pipelines in WebGPU, printed from the same `marks.rays` |
 
 The fixed runtime lives in `lib/web_export/runtime/`. The exporter lives in
 `lib/web_export/web_export.ml`; JavaScript and WGSL emitters live in

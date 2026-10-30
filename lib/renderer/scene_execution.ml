@@ -713,8 +713,7 @@ let content_hash (mesh : mesh) uniform_bytes =
    identity, other draws keep the exact source bytes they were uploaded from
    and compare them physically. Content hashing happens once per upload and
    only decides a same-key miss for fresh but equal bytes. *)
-let prepare value ~reserved ~uniforms ?(vertex_stable = false) ~nonindexed ~canonical_plain
-    (mesh : mesh) =
+let prepare value ~reserved ~uniforms ?(vertex_stable = false) (mesh : mesh) =
   let uniform_bytes = Option.value uniforms ~default:Bytes.empty in
   let valid_uniforms =
     Option.fold ~none:true
@@ -742,69 +741,14 @@ let prepare value ~reserved ~uniforms ?(vertex_stable = false) ~nonindexed ~cano
           !valid && lights >= 0. && lights <= 64. && Float.is_integer lights)
       uniforms
   in
-  let key =
-    mesh_key_string mesh.key
-    ^ if canonical_plain then ":canonical-scene2" else if nonindexed then ":nonindexed" else ""
-  in
+  let key = mesh_key_string mesh.key in
   let upload existing =
-    let vertex_stride =
-      if mesh.vertex_count = 0 then 0 else Bytes.length mesh.vertices / mesh.vertex_count
-    in
-    let index_at index = Int32.to_int (Bytes.get_int32_le mesh.indices (index * 4)) in
-    let valid_indices = ref (valid_index_length mesh) in
-    if nonindexed && vertex_stride > 0 && !valid_indices then
-      for index = 0 to mesh.index_count - 1 do
-        let source = index_at index in
-        if source < 0 || source >= mesh.vertex_count then valid_indices := false
-      done;
-    let vertices, indices, vertex_count, index_count =
-      if not nonindexed then (mesh.vertices, mesh.indices, mesh.vertex_count, mesh.index_count)
-      else if
-        vertex_stride <= 0
-        || Bytes.length mesh.vertices <> mesh.vertex_count * vertex_stride
-        || not !valid_indices
-      then (Bytes.empty, Bytes.empty, 0, 0)
-      else if canonical_plain then (
-        let expanded = Bytes.make (mesh.index_count * 68) '\000' in
-        for index = 0 to mesh.index_count - 1 do
-          let source = index_at index and target = index * 68 in
-          if vertex_stride >= 24 then begin
-            Bytes.set_int64_le expanded target
-              (Bytes.get_int64_le mesh.vertices (source * vertex_stride));
-            Bytes.set_int64_le expanded (target + 8)
-              (Bytes.get_int64_le mesh.vertices ((source * vertex_stride) + 8))
-          end
-          else begin
-            Bytes.set_int64_le expanded target
-              (Int64.bits_of_float
-                 (Int32.float_of_bits (Bytes.get_int32_le mesh.vertices (source * vertex_stride))));
-            Bytes.set_int64_le expanded (target + 8)
-              (Int64.bits_of_float
-                 (Int32.float_of_bits
-                    (Bytes.get_int32_le mesh.vertices ((source * vertex_stride) + 4))))
-          end;
-          Bytes.set_int32_le expanded (target + 48)
-            (if vertex_stride >= 24 then
-               Bytes.get_int32_le mesh.vertices ((source * vertex_stride) + 16)
-             else Bytes.get_int32_le mesh.vertices ((source * vertex_stride) + 8));
-          Bytes.set_int64_le expanded (target + 52) (Int64.bits_of_float 0.5);
-          Bytes.set_int64_le expanded (target + 60) (Int64.bits_of_float 0.5)
-        done;
-        (expanded, Bytes.empty, mesh.index_count, 0))
-      else
-        let expanded = Bytes.create (mesh.index_count * vertex_stride) in
-        for index = 0 to mesh.index_count - 1 do
-          let source = index_at index in
-          Bytes.blit mesh.vertices (source * vertex_stride) expanded (index * vertex_stride)
-            vertex_stride
-        done;
-        (expanded, Bytes.empty, mesh.index_count, 0)
-    in
+    let { vertices; indices; vertex_count; index_count; _ } = mesh in
     let total = Bytes.length vertices + Bytes.length indices + Bytes.length uniform_bytes in
     if
       mesh_key_string mesh.key = ""
       || vertex_count <= 0
-      || ((not nonindexed) && index_count <= 0)
+      || index_count <= 0
       || total = 0 || not valid_uniforms
     then
       error "Scene_execution.prepare" Ogpu.Error.Invalid_argument
@@ -930,21 +874,22 @@ let prepare value ~reserved ~uniforms ?(vertex_stable = false) ~nonindexed ~cano
 let uniform_page_byte_capacity = 256 * 1024 * 1024
 let align256 value = (value + 255) land lnot 255
 
-let scene2_identity_affine =
-  let bytes = Bytes.make 24 '\000' in
-  Bytes.set_int32_le bytes 0 (Int32.bits_of_float 1.);
-  Bytes.set_int32_le bytes 16 (Int32.bits_of_float 1.);
-  bytes
-
-let scene2_native_affine bytes =
-  if Bytes.length bytes = 24 then bytes
-  else
-    let native = Bytes.make 24 '\000' in
-    for index = 0 to 5 do
-      Bytes.set_int32_le native (index * 4)
-        (Int32.bits_of_float (Int64.float_of_bits (Bytes.get_int64_le bytes (index * 8))))
-    done;
-    native
+(* A Scene2 mesh's constants (marks.rays, geometry-vertex): its affine (24 bytes of floats or 48 of
+   doubles, none the identity) and the colour flag: each vertex carries its colour word *)
+let geometry_constants affine =
+  let constants = Bytes.make 32 '\000' in
+  let put index value = Bytes.set_int32_le constants (index * 4) (Int32.bits_of_float value) in
+  (match affine with
+  | None ->
+      put 0 1.;
+      put 4 1.
+  | Some bytes when Bytes.length bytes = 24 -> Bytes.blit bytes 0 constants 0 24
+  | Some bytes ->
+      for index = 0 to 5 do
+        put index (Int64.float_of_bits (Bytes.get_int64_le bytes (index * 8)))
+      done);
+  put 6 1.;
+  constants
 
 (* ponytail: a changed transform repacks the frame; use dirty ranges only if
    sparse-change profiles justify tracking them beside P3-2 scene identities. *)
@@ -1110,25 +1055,6 @@ let valid_texture (source : sampled_texture) =
              && Bytes.length level.bytes = level.width * level.height * texel)
            source.levels
          |> Array.for_all Fun.id
-
-let scene2_white_texture : sampled_texture =
-  {
-    key = "scene2:canonical-white";
-    levels = [| { width = 1; height = 1; bytes = Bytes.of_string "\255\255\255\255" } |];
-    gpu = None;
-    sampler =
-      {
-        label = Some "scene2-canonical-white";
-        min_filter = Nearest;
-        mag_filter = Nearest;
-        mip_filter = No_mip;
-        address_u = Clamp_to_edge;
-        address_v = Clamp_to_edge;
-        lod_min = 0.;
-        lod_max = 0.;
-        max_anisotropy = 1;
-      };
-  }
 
 let texture_upload_scratch value total =
   match value.texture_upload_scratch with
@@ -1916,7 +1842,7 @@ let argument_encoder variant =
   match variant.argument with
   | Some argument -> Ok argument
   | None -> (
-      match Ogpu.Backend.create_argument variant.pipeline Fragment ~index:2 with
+      match Ogpu.Backend.create_argument variant.pipeline Fragment ~index:7 with
       | Error _ as e -> e
       | Ok argument ->
           variant.argument <- Some argument;
@@ -2468,15 +2394,14 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
           | _ -> Ok ()
         in
         let scene2 = family = Scene2 || family = Scene2_textured in
-        let pipeline_family = if family = Scene2 then Scene2_textured else family in
-        let variant = Option.get (find_pipeline value pipeline_family blend samples) in
+        let variant = Option.get (find_pipeline value family blend samples) in
         let* buffers, textures, samplers, resident =
           match slot.slot_texture with
           | None -> Ok ([], [], [], [])
           | Some (source, cached) ->
-              if scene2 then
+              if family = Scene2_textured then
                 let* page, offset = argument_slice value variant cached.texture source.sampler in
-                Ok ([ (Ogpu.Backend.Fragment, 2, page, offset) ], [], [], [ cached.texture ])
+                Ok ([ (Ogpu.Backend.Fragment, 7, page, offset) ], [], [], [ cached.texture ])
               else
                 let* sampler = sampler_for value source.sampler in
                 Ok
@@ -2493,11 +2418,8 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
           | None -> []
           | Some source -> (
               List.mapi (fun i b -> (Ogpu.Backend.Vertex, i + 1, b, 0L)) source.gpu_extra
-              (* marks.rays reads the colour columns as words and as floats: bound twice *)
               @
               match (family, source.gpu_extra) with
-              | Marks, [ _; fill; stroke; _; _ ] ->
-                  [ (Ogpu.Backend.Vertex, 7, fill, 0L); (Ogpu.Backend.Vertex, 8, stroke, 0L) ]
               | (Scene3 | Scene3_points | Scene3_world), [] ->
                   [ (Ogpu.Backend.Vertex, 1, source.gpu_buffer, 0L) ]
               | _ -> [])
@@ -2574,8 +2496,9 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
         (* The generated pipelines bind in their Lisp declaration order (shaders/*.rays): ui.rays its records
          as floats 0 and words 1, the affine 2, the atlas 3 (sampler 4); scene.rays its records 0 and 1,
          surface 2, instances 3, attributes 4 and 5, the texture 6 (sampler 7), and for World its block 6,
-         image 7 (8), specular map 9 (10), camera map 11 (12) and sun map 13; Scene2 its records 0, the
-         affine 1 and the texture's argument buffer 2. *)
+         image 7 (8), specular map 9 (10), camera map 11 (12) and sun map 13;
+         marks.rays Scene2's vertex words 0 and constants 1, a quad's constants 0 and its texture's
+         argument buffer 7. *)
         let rebind slots stage slot =
           match List.assoc_opt (stage, slot) slots with Some s -> s | None -> [ slot ]
         in
@@ -2631,13 +2554,8 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
           | Marks -> (buffers, textures, samplers)
         in
         let index =
-          if scene2 then None
-          else
-            Some
-              ( Ogpu.Render_pass.Uint32,
-                item.buffer,
-                item.index_offset,
-                Int64.of_int item.index_count )
+          Some
+            (Ogpu.Render_pass.Uint32, item.buffer, item.index_offset, Int64.of_int item.index_count)
         in
         let instances =
           match (family, (slot_state slot).transform_uniforms) with
@@ -2893,6 +2811,11 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                   List.mem entry.samples [ 1; 4; 9; 16 ]
                   && valid_mesh entry.draw.mesh
                   && Option.fold ~none:true ~some:valid_texture entry.texture
+                  (* a Scene2 mesh is untextured, a Scene2 quad samples its texture *)
+                  && (match entry.family with
+                     | Scene2 -> entry.texture = None
+                     | Scene2_textured -> entry.texture <> None
+                     | _ -> true)
                   && valid_vertex_attributes entry
                   && Option.fold ~none:true
                        ~some:(fun (source : auxiliary_resource) ->
@@ -2960,13 +2883,11 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                                         && (Bytes.length bytes - 5456) mod 192 = 0)
                                       draw.state.transform_uniforms
                                in
-                               (* Scene2 always binds an affine through the argument-buffer pipeline. *)
+                               (* a Scene2 mesh binds constants; a quad's are its vertices *)
                                let source =
-                                 if scene2 then
-                                   Some
-                                     (match draw.state.transform_uniforms with
-                                     | None -> scene2_identity_affine
-                                     | Some bytes -> scene2_native_affine bytes)
+                                 if family = Scene2 then
+                                   Some (geometry_constants draw.state.transform_uniforms)
+                                 else if scene2 then None
                                  else if affine || scene3_transform then
                                    draw.state.transform_uniforms
                                  else None
@@ -3033,8 +2954,7 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                                     ~uniforms:
                                       (if scene2 || affine || scene3_transform then None
                                        else draw.state.transform_uniforms)
-                                    ~vertex_stable:scene3_transform ~nonindexed:scene2
-                                    ~canonical_plain:(family = Scene2) cpu_mesh
+                                    ~vertex_stable:scene3_transform cpu_mesh
                                 with
                                 | Error _ as result -> result
                                 | Ok mesh -> (
@@ -3048,11 +2968,6 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                                     | Error _ as result -> result
                                     | Ok attributes -> (
                                         let uniform = !uniform_slices.(scratch.scratch_length) in
-                                        let texture =
-                                          match (family, texture) with
-                                          | Scene2, None -> Some scene2_white_texture
-                                          | _ -> texture
-                                        in
                                         match texture with
                                         | Some source -> (
                                             match prepare_texture value ~defer source with

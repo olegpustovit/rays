@@ -385,9 +385,33 @@ caller's error; the shader does not check.
 Routing, the device attributes and the cases that stay on the CPU are under "Routing (P4.9)"
 above. The web's `marks.wgsl` is printed at build time from the same `marks.rays` (`print_shader.exe web`,
 `Flow_web.Wgsl.raster`) and reads the same six buffers and the same `params`; the host binds the
-region's output as the attribute buffer, with its width as the stride. Three differences live in the
-printer's web placement and its bindings, not in the source: the vertex id is `instance_index * 4 + corner`
-of a non-indexed six-vertex draw per instance (so `vid / 4` is the instance, with no index buffer); fill
-and stroke are bound once (at 2 and 3, their floats read as the words' bits, inside WebGPU's eight storage
-buffers a stage) and the affine shares group 0 at 6; and `fwidth` of a varying is read once at the top of
-the fragment, before any branch, for WGSL's derivative uniformity.
+region's output as the attribute buffer, with its width as the stride. A float colour (mode 1) is
+read from the same buffer as a word's bits (`gpu/float-bits`), so fill and stroke are bound once on both
+targets. Three differences live in the printer's web placement and its bindings, not in the source: the
+vertex id is `instance_index * 4 + corner` of a non-indexed six-vertex draw per instance (so `vid / 4` is
+the instance, with no index buffer); the affine shares group 0 at 6 with every draw's constants; and
+`fwidth` of a varying is read once at the top of the fragment, before any branch, for WGSL's derivative
+uniformity.
+
+### Geometry and quads (Scene2)
+
+`marks.rays` also holds the 2D `geometry` and `quad` pipelines, printed for native (`Scene2`,
+`Scene2_textured`) and into `marks.wgsl`. A draw's constants are 20 floats: the affine 0-5 (as the
+marks'), the colour flag 6, the ink 8-11, the quad's rectangle 12-15 (`x y w h`) and its texture's
+16-19 (`u0 v0 u1 v1`).
+
+- `geometry` draws indexed triangles. Its vertex buffer is words: with flag 0 (the web) a float2
+  position a vertex, in the ink; with flag 1 (native) 12 bytes a vertex, the float2 position and the
+  packed colour word, a triangle taking its first vertex's (one geometry has one colour, so a packed run
+  of them keeps its colours). Native binds the vertices at 0 and the constants at 1, the web at 0 and 6.
+- `quad` draws one textured rectangle tinted by the ink, texture 7 (sampler 8). Its constants are its
+  only buffer: quad `k` reads floats `20k..20k+19`, so natively a quad's 80 bytes of constants are its
+  mesh's vertices (four vertices, indices `0 1 2 0 2 3`) and a coalesced run of quads is one draw, its
+  texture in an argument buffer at 7; the web draws one quad an instance of six vertices, its constants
+  at 6. The texture coordinate is `u0 (1 - c) + u1 c` per corner `c`, exact at the corners.
+
+Native positions are binary32: the CPU narrows each vertex once (Scene2 meshes), and the affine
+(the projection composed with the transform, narrowed from binary64) runs on the GPU, so a quad's corners
+are `x + w` in binary32 under the affine, as the web's. A Scene2 vertex was a 68-byte record of doubles
+(position, colour word, uv) expanded per index; a mesh is now 12 bytes a vertex, indexed, and a quad 80
+bytes of constants (it was four, then six expanded, 68-byte records).

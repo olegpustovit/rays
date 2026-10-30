@@ -15,8 +15,6 @@ let default_state viewport scissor =
     transform_uniforms = None;
   }
 
-let put_float bytes offset value = Bytes.set_int64_le bytes offset (Int64.bits_of_float value)
-
 let identity_affine_uniforms =
   let bytes = Bytes.make 24 '\000' in
   Bytes.set_int32_le bytes 0 (Int32.bits_of_float 1.);
@@ -46,17 +44,19 @@ let identity_transform (transform : Command.transform) =
   transform.xx = 1. && transform.xy = 0. && transform.yx = 0. && transform.yy = 1.
   && transform.tx = 0. && transform.ty = 0.
 
-let scene2_vertex_stride = 24
+(* A Scene2 vertex (marks.rays, geometry-vertex): its float2 position and colour word *)
+let put_vertex vertices index x y color =
+  Bytes.set_int32_le vertices (index * 12) (Int32.bits_of_float x);
+  Bytes.set_int32_le vertices ((index * 12) + 4) (Int32.bits_of_float y);
+  Bytes.set_int32_le vertices ((index * 12) + 8) color
 
 let mesh_of_geometry number transform ~viewport clip (geometry : Command.geometry) =
   let count = Array.length geometry.vertices / 2 in
-  let vertices = Bytes.make (count * scene2_vertex_stride) '\000' in
+  let vertices = Bytes.create (count * 12) in
   for index = 0 to count - 1 do
-    let x = geometry.vertices.(index * 2) and y = geometry.vertices.((index * 2) + 1) in
-    let offset = index * scene2_vertex_stride in
-    put_float vertices offset x;
-    put_float vertices (offset + 8) y;
-    Bytes.set_int32_le vertices (offset + 16) geometry.color
+    put_vertex vertices index geometry.vertices.(index * 2)
+      geometry.vertices.((index * 2) + 1)
+      geometry.color
   done;
   let indices = Bytes.create (Array.length geometry.indices * 4) in
   Array.iteri
@@ -99,7 +99,7 @@ let mesh_of_geometry_run number transform ~viewport clip commands first stop =
         index_count := !index_count + Array.length g.indices
     | _ -> assert false
   done;
-  let vertices = Bytes.make (!vertex_count * scene2_vertex_stride) '\000'
+  let vertices = Bytes.create (!vertex_count * 12)
   and indices = Bytes.create (!index_count * 4) in
   let vertex_offset = ref 0 and index_offset = ref 0 in
   for i = first to stop - 1 do
@@ -107,10 +107,9 @@ let mesh_of_geometry_run number transform ~viewport clip commands first stop =
     | Scene_command.Render_ir.Geometry g ->
         let count = Array.length g.vertices / 2 in
         for j = 0 to count - 1 do
-          let offset = (!vertex_offset + j) * scene2_vertex_stride in
-          put_float vertices offset g.vertices.(j * 2);
-          put_float vertices (offset + 8) g.vertices.((j * 2) + 1);
-          Bytes.set_int32_le vertices (offset + 16) g.color
+          put_vertex vertices (!vertex_offset + j) g.vertices.(j * 2)
+            g.vertices.((j * 2) + 1)
+            g.color
         done;
         for j = 0 to Array.length g.indices - 1 do
           Bytes.set_int32_le indices
@@ -351,10 +350,6 @@ let lower_scene2 state ~(facts : Runtime.presentation_facts) ~density ~snapshot 
     state.out_slots.(i) <- draw;
     incr number
   in
-  let point transform x y =
-    ( (transform.Scene_command.Render_ir.xx *. x) +. (transform.yx *. y) +. transform.tx,
-      (transform.xy *. x) +. (transform.yy *. y) +. transform.ty )
-  in
   let clip_live () =
     let _, _, width, height = List.hd !clips in
     width > 0 && height > 0
@@ -372,27 +367,27 @@ let lower_scene2 state ~(facts : Runtime.presentation_facts) ~density ~snapshot 
           match Quad_payload_table.find state.quad_payload_cache payload_key with
           | cached -> (cached.payload_vertices, cached.payload_indices, cached.payload_mesh_key)
           | exception Not_found ->
-              let x0, y0 = point transform destination.Scene_command.Render_ir.x destination.y
-              and x1, y0' = point transform (destination.x +. destination.width) destination.y
-              and x1', y1 =
-                point transform
-                  (destination.x +. destination.width)
-                  (destination.y +. destination.height)
-              and x0', y1' = point transform destination.x (destination.y +. destination.height) in
-              let vertices = Bytes.make (68 * 4) '\000' in
-              let put index x y u v =
-                let offset = index * 68 in
-                put_float vertices offset x;
-                put_float vertices (offset + 8) y;
-                put_float vertices (offset + 40) 1.;
-                Bytes.set_int32_le vertices (offset + 48) 0xffffffffl;
-                put_float vertices (offset + 52) u;
-                put_float vertices (offset + 60) v
-              in
-              put 0 x0 y0 u0 v0;
-              put 1 x1 y0' u1 v0;
-              put 2 x1' y1 u1 v1;
-              put 3 x0' y1' u0 v1;
+              (* the quad's constants (marks.rays, quad-vertex): the affine, a white ink, the
+                 rectangle and its texture's *)
+              let vertices = Bytes.make 80 '\000' in
+              write_affine vertices transform;
+              List.iteri
+                (fun index value ->
+                  Bytes.set_int32_le vertices ((8 + index) * 4) (Int32.bits_of_float value))
+                [
+                  1.;
+                  1.;
+                  1.;
+                  1.;
+                  destination.Scene_command.Render_ir.x;
+                  destination.y;
+                  destination.width;
+                  destination.height;
+                  u0;
+                  v0;
+                  u1;
+                  v1;
+                ];
               let indices = Bytes.create 24 in
               List.iteri
                 (fun i n -> Bytes.set_int32_le indices (i * 4) (Int32.of_int n))

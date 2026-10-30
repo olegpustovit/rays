@@ -205,7 +205,7 @@ let narrow_registers (view : Packed.Host.view) used =
             add `Exact table;
             add `Bits index
         (* a store's index and Int value, a group scan's operand and a noise table index are uint words on every target *)
-        | Stage ((Store | Group_scan _ | Noise_table _), r) -> Array.iter (add `Bits) r
+        | Stage ((Store | Group_scan _ | Noise_table _ | Float_bits), r) -> Array.iter (add `Bits) r
         | instruction -> List.iter (add `Exact) (Core.Region.operands instruction))
     code;
   (* a compute stage's result is discarded: its stores are its effect *)

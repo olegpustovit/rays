@@ -654,6 +654,7 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
                 | Stage (stage, r) when raster = None -> scene_read stage r
                 | Stage (((Group_scan _ | Store) as stage), r) when raster <> None ->
                     "long(" ^ group (Option.get raster) current guards stage r ^ ")"
+                | Stage (Float_bits, r) when raster <> None -> "as_type<float>(" ^ low r.(0) ^ ")"
                 | Stage (stage, r) when raster <> None ->
                     stage_intrinsic stage (Array.map float_of r)
                 | Stage _ -> fail "A raster-stage intrinsic runs only in a fragment stage."

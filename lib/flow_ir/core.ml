@@ -213,6 +213,7 @@ module Region = struct
 
   type stage =
     | Fwidth
+    | Float_bits
     | Sample of int * int
     | Sample_level of int * int
     | Read of int * int
@@ -228,8 +229,9 @@ module Region = struct
     | Group_scan of int
     | Store
     | Noise_table of int
-        (** [fwidth x]; component c of texture t sampled at (u, v) (its sampler at t + 1); axis c of
-            texture t's size in texels. The device side of scene/trace (Flow_shader.Trace): field k of
+        (** [fwidth x]; an Int register's low 32 bits as a float; component c of texture t sampled
+            at (u, v) (its sampler at t + 1); axis c of texture t's size in texels. The device side
+            of scene/trace (Flow_shader.Trace): field k of
             a triangle query (0 t, 1 prim, 2 u, 3 v, 4 hit, 5 instance) or a curve query (0 t, 1
             prim, 2 u, 3 hit) over origin, direction, tmin, tmax (and time), an any-hit query, and
             component c of a scene table row: a triangle corner (of the shutter's end), an

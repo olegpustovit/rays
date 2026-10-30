@@ -17,12 +17,12 @@ let run () =
   match Renderer.create configuration with
   | Error _ -> print_endline "renderer: skipped (no window/Metal device)"
   | Ok renderer ->
-      let indices = Bytes.make 12 '\000' and vertices = Bytes.make 48 '\000' in
+      let indices = Bytes.make 12 '\000' and vertices = Bytes.make 36 '\000' in
       Bytes.set_int32_le indices 4 1l;
       Bytes.set_int32_le indices 8 2l;
       List.iteri
         (fun i (x, y) ->
-          let offset = i * 16 in
+          let offset = i * 12 in
           Bytes.set_int32_le vertices offset (Int32.bits_of_float x);
           Bytes.set_int32_le vertices (offset + 4) (Int32.bits_of_float y);
           Bytes.set_int32_le vertices (offset + 8) 0x4080BFFFl)

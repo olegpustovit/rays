@@ -201,6 +201,7 @@ let () =
                    "text/float";
                    "scene/trace";
                    "gpu/fwidth";
+                   "gpu/float-bits";
                    "gpu/sample";
                    "gpu/sample-level";
                    "gpu/read";

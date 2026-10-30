@@ -1,5 +1,4 @@
 val default_state : int * int * int * int -> int * int * int * int -> Scene_execution.state
-val put_float : bytes -> int -> float -> unit
 val write_affine : bytes -> Scene_command.Render_ir.transform -> unit
 val affine_uniforms : Scene_command.Render_ir.transform -> bytes
 val identity_transform : Scene_command.Render_ir.transform -> bool

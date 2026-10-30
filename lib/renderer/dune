@@ -11,7 +11,8 @@
   renderer_lowering
   scene_execution
   scene_attachment_pool
-  metal_scene2_textured_argument_source
+  metal_geometry_source
+  metal_quad_source
   metal_ui_source
   metal_marks_source
   metal_scene3_source
@@ -25,7 +26,8 @@
   renderer_leases
   renderer_lowering
   scene_attachment_pool
-  metal_scene2_textured_argument_source
+  metal_geometry_source
+  metal_quad_source
   metal_ui_source
   metal_marks_source
   metal_scene3_source
@@ -64,9 +66,12 @@
   scene3_world.metal
   scene3_world.vert.spv
   scene3_world.frag.spv
-  scene2_textured_argument.metal
-  scene2_textured_argument.vert.spv
-  scene2_textured_argument.frag.spv
+  geometry.metal
+  geometry.vert.spv
+  geometry.frag.spv
+  quad.metal
+  quad.vert.spv
+  quad.frag.spv
   image_rgba8.metal
   image_rgba8.vert.spv
   image_rgba8.frag.spv)
@@ -76,14 +81,20 @@
   (run %{exe:../flow_shader/print_shader.exe} renderer)))
 
 (rule
- (target metal_scene2_textured_argument_source.ml)
- (deps scene2_textured_argument.metal)
+ (target metal_geometry_source.ml)
+ (deps geometry.metal)
  (action
   (with-stdout-to
    %{target}
-   (run
-    %{exe:embed_shader.exe}
-    %{dep:scene2_textured_argument.metal}))))
+   (run %{exe:embed_shader.exe} %{dep:geometry.metal}))))
+
+(rule
+ (target metal_quad_source.ml)
+ (deps quad.metal)
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_shader.exe} %{dep:quad.metal}))))
 
 (rule
  (target metal_ui_source.ml)

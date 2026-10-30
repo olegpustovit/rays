@@ -555,6 +555,7 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards ~exp
     let stage s = { registers = [| emit (Stage (s, operands)) |]; constant = None; fields = [] } in
     match op with
     | "gpu/fwidth" -> stage Fwidth
+    | "gpu/float-bits" -> stage Float_bits
     | "gpu/trace-any" -> stage Trace_any
     | "gpu/trace-curves-any" -> stage Trace_curves_any
     | "gpu/trace-triangles" | "gpu/trace-curves" ->

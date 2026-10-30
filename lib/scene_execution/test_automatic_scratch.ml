@@ -218,13 +218,13 @@ let run () =
            (Scene_execution.submit ~after_prepare:release renderer
               [
                 {
-                  Scene_execution.family = Scene2;
+                  Scene_execution.family = Scene2_textured;
                   blend = Ogpu.Pipeline.Replace;
                   texture = Some texture;
                   auxiliary = None;
                   vertex_attributes = None;
                   samples = 1;
-                  draw = { mesh = mesh 0; state };
+                  draw = { mesh = Scene_execution_fixtures.scene2_mesh "scratch-000"; state };
                 };
               ]));
       require (!releases = 1) "post-upload release hook did not run exactly once";
@@ -233,13 +233,13 @@ let run () =
          Scene_execution.submit ~after_prepare:release renderer
            [
              {
-               Scene_execution.family = Scene2;
+               Scene_execution.family = Scene2_textured;
                blend = Ogpu.Pipeline.Replace;
                texture = Some malformed;
                auxiliary = None;
                vertex_attributes = None;
                samples = 1;
-               draw = { mesh = mesh 1; state };
+               draw = { mesh = Scene_execution_fixtures.scene2_mesh "scratch-001"; state };
              };
            ]
        with
@@ -315,13 +315,8 @@ let run () =
                     sampled ~texture:halves Scene_execution.Scene2_textured Ogpu.Pipeline.Replace
                       {
                         mesh =
-                          {
-                            (mesh (2 + index)) with
-                            vertices =
-                              Scene_execution_fixtures.scene2_vertices
-                                ~uv:(fun x _ -> ((x +. 1.) /. 2., 0.))
-                                ();
-                          };
+                          Scene_execution_fixtures.scene2_mesh ~uv:(0., 0., 1., 0.)
+                            (Printf.sprintf "scratch-%03d" (2 + index));
                         state = { state with viewport = (x, 0, 128, 64) };
                       };
                   ]))
@@ -364,7 +359,7 @@ let run () =
       Bytes.set_int32_le transforms.(1) 8 (Int32.bits_of_float 2.);
       ignore (get (render_blended renderer (uniform_draws ())));
       require
-        (Scene_execution.upload_bytes renderer = Int64.add uploaded 48L)
+        (Scene_execution.upload_bytes renderer = Int64.add uploaded 64L)
         "mutated input bytes were mistaken for the completed uniform page";
       for frame = 3 to 7 do
         Bytes.set_int32_le transforms.(1) 8 (Int32.bits_of_float (float frame));

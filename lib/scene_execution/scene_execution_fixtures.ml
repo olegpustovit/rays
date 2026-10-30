@@ -140,8 +140,8 @@ let make device family blend samples =
 let create_offscreen driver configuration =
   Renderer_pipeline.create_renderer ~backend:"metal" ~offscreen:true ~driver ~configuration ()
 
-(* Production-ABI geometry covering the whole target with one triangle.
-   Scene2_textured: 68-byte records (doubles x, y at 0, 8; colour word at 48; uv doubles at 52, 60). *)
+(* Production-ABI geometry covering the whole target with one triangle (Scene2, Scene3) or one quad
+   (Scene2_textured). *)
 let corners = [ (-1., -1.); (3., -1.); (-1., 3.) ]
 
 let indices =
@@ -160,33 +160,35 @@ let mesh key vertices : Scene_execution.mesh =
     primitive = Ogpu.Render_pass.Triangle_list;
   }
 
-let scene2_vertices ?(color = 0xffffffffl) ?(uv = fun _ _ -> (0., 0.)) () =
-  let b = Bytes.make (68 * 3) '\000' in
-  let double at x = Bytes.set_int64_le b at (Int64.bits_of_float x) in
-  List.iteri
-    (fun i (x, y) ->
-      let o = i * 68 in
-      double o x;
-      double (o + 8) y;
-      Bytes.set_int32_le b (o + 48) color;
-      let u, v = uv x y in
-      double (o + 52) u;
-      double (o + 60) v)
-    corners;
-  b
-
-(* A plain [Scene2] draw carries 16-byte records (float x, y, colour word) that the renderer expands. *)
+(* A plain [Scene2] draw carries 12 bytes a vertex: the float2 position and colour word. *)
 let scene2_plain_vertices ?(color = 0xffffffffl) () =
-  let b = Bytes.make (16 * 3) '\000' in
+  let b = Bytes.make (12 * 3) '\000' in
   List.iteri
     (fun i (x, y) ->
-      Bytes.set_int32_le b (i * 16) (Int32.bits_of_float x);
-      Bytes.set_int32_le b ((i * 16) + 4) (Int32.bits_of_float y);
-      Bytes.set_int32_le b ((i * 16) + 8) color)
+      Bytes.set_int32_le b (i * 12) (Int32.bits_of_float x);
+      Bytes.set_int32_le b ((i * 12) + 4) (Int32.bits_of_float y);
+      Bytes.set_int32_le b ((i * 12) + 8) color)
     corners;
   b
 
-let scene2_mesh ?color ?uv key = mesh key (scene2_vertices ?color ?uv ())
+(* A [Scene2_textured] quad over the clip square: its 80 bytes of constants (marks.rays: the
+   identity affine, a white ink, the rectangle and its texture's [u0 v0 u1 v1]) are its four
+   vertices. *)
+let scene2_mesh ?(uv = (0., 0., 1., 1.)) key : Scene_execution.mesh =
+  let u0, v0, u1, v1 = uv in
+  let b = Bytes.create 80 and quad = Bytes.create 24 in
+  List.iteri
+    (fun i x -> Bytes.set_int32_le b (i * 4) (Int32.bits_of_float x))
+    [ 1.; 0.; 0.; 0.; 1.; 0.; 0.; 0.; 1.; 1.; 1.; 1.; -1.; -1.; 2.; 2.; u0; v0; u1; v1 ];
+  List.iteri (fun i n -> Bytes.set_int32_le quad (i * 4) n) [ 0l; 1l; 2l; 0l; 2l; 3l ];
+  {
+    key = Host key;
+    vertices = b;
+    vertex_count = 4;
+    indices = quad;
+    index_count = 6;
+    primitive = Ogpu.Render_pass.Triangle_list;
+  }
 
 (* Scene3: 24-byte records (position, normal as floats) plus the 12-byte attribute record
    (colour word, uv floats) a vertex. *)

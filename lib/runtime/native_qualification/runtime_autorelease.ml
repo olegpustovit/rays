@@ -28,12 +28,12 @@ let create width height =
 let adopt_draws draws = List.map (Renderer.prepared_draw ~family:Renderer.Scene2) draws
 
 let draws extent =
-  let vertices = Bytes.make 48 '\000' and indices = Bytes.make 12 '\000' in
+  let vertices = Bytes.make 36 '\000' and indices = Bytes.make 12 '\000' in
   Bytes.set_int32_le indices 4 1l;
   Bytes.set_int32_le indices 8 2l;
   List.iteri
     (fun vertex (x, y) ->
-      let offset = vertex * 16 in
+      let offset = vertex * 12 in
       Bytes.set_int32_le vertices offset (Int32.bits_of_float x);
       Bytes.set_int32_le vertices (offset + 4) (Int32.bits_of_float y);
       Bytes.set_int32_le vertices (offset + 8) 0x4080BFFFl)
