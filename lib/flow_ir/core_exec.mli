@@ -18,6 +18,17 @@ val resident_live : Core.program -> Core.statement -> int array option
     read, which its end reads back; [None] for any other statement. The web printer uses the same
     rule. *)
 
+val resident_tail :
+  Core.program ->
+  Core.statement ->
+  mark:(int -> bool) ->
+  (int array * (int * (int * int)) list) option
+(** After a {!resident_live} loop, whether its arrays may stay on the device for the rest of the draw:
+    the later statements only count them, divide a count by a constant, make an [array/range] of it,
+    and pass these to regions, each a mark attribute ([mark region]) or one whose array result stays
+    under the same rule. The locals that may then hold device arrays, and each range local's source
+    array and divisor. The web printer uses the same rule. *)
+
 val prepare :
   ?remember_loops:bool -> ?approx:Flow.Workspace.Paths.t -> ?fast:bool -> Core.program -> prepared
 
@@ -43,18 +54,32 @@ val execute :
 module Buffers = Core_marks.Buffers
 
 type resident = {
-  invoke : Packed.t -> live:Input.t -> Flow.Eval.value option;
+  invoke :
+    Packed.t ->
+    Flow.Eval.value array ->
+    locals:Flow.Eval.value array ->
+    live:Input.t ->
+    Flow.Eval.value option;
   compact : Flow.Eval.value -> Flow.Eval.value option;
   coerce : Flow.Ty.t -> Flow.Eval.value -> Flow.Eval.value option;
   finish : Flow.Eval.value -> Flow.Eval.value;
   close : unit -> unit;
+  settle : unit -> unit;
+  range : Flow.Ty.t -> Flow.Eval.value -> div:int -> length:int -> Flow.Eval.value option;
 }
 (** A resident fold's device. Inside a top-level loop of a drawing whose body holds only regions,
     scalar statements, [array/compact], retyping and [array/count] ([~remember_loops] programs), a
     region's array may stay on the device: [invoke] runs a region there and returns a placeholder
     (an array of its length the device knows), [compact] and [coerce] work on placeholders, [finish]
     reads one back. A declined region gets its placeholder inputs back first; the loop's arrays are
-    read back as it ends, then [close]. *)
+    read back as it ends, then [close].
+
+    When the statements after such a loop only count its arrays, divide the count by a constant, make
+    an [array/range] of it and pass these to regions (a mark attribute, or a region whose array stays
+    under the same rule), the arrays stay: [settle] checks the loop's counts instead of reading back,
+    [range] gives the range as a device array, a region over them goes to [device] (a mark attribute)
+    or [invoke], and the draw closes the device as it ends. A region the device declines first gets
+    every kept array read back. *)
 
 exception Resident_overflow
 (** Raised by [finish] when a placeholder's capacity (sized from an earlier draw) was too small for

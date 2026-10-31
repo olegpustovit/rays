@@ -8,13 +8,19 @@ exception Resident_overflow
 (* A resident fold's device: inside a qualifying top-level loop of a drawing, a region's array may stay
    on the GPU, standing in the locals as a placeholder (zeros of its capacity) the device knows. *)
 type resident = {
-  invoke : Packed.t -> live:Input.t -> E.value option;
-      (* run on the device; None leaves it to the CPU *)
+  invoke : Packed.t -> E.value array -> locals:E.value array -> live:Input.t -> E.value option;
+      (* run the region with these arguments on the device ([locals]: the draw's, an array none
+         holds is free); None leaves it to the CPU *)
   compact : E.value -> E.value option; (* array/compact of a placeholder mask, on the device *)
   coerce : Flow.Ty.t -> E.value -> E.value option; (* a placeholder retyped, on the device *)
   finish : E.value -> E.value;
       (* the host array a placeholder stands for; any other value as it is *)
-  close : unit -> unit; (* the loop is over: forget its placeholders *)
+  close : unit -> unit; (* the loop (or the draw keeping its arrays) is over: forget its placeholders *)
+  settle : unit -> unit;
+      (* the loop is over and its arrays stay: check its counts (raising [Resident_overflow]) *)
+  range : Flow.Ty.t -> E.value -> div:int -> length:int -> E.value option;
+      (* after [settle], [array/range] (of type [ty]) of a placeholder's count over [div] ([length]
+         its capacity's) *)
 }
 
 type state = {
@@ -30,6 +36,8 @@ type state = {
   device : (Packed.t -> ((int * int * int) array option, Diagnostic.t) result) option;
   resident : resident option;
   mutable resident_on : bool;
+  mutable kept : int array;
+      (* after a resident loop, the locals that may hold its device arrays (Core_exec.resident_tail) *)
 }
 
 type scalar = {
@@ -539,25 +547,109 @@ let resident_live (program : C.program) (s : C.statement) =
       Some (Array.of_list (List.filter (fun n -> List.mem n outside) (Array.to_list writes)))
   | _ -> None
 
-(* A resident loop's run: the arrays later statements read come back once, as it ends. An overflow
-   discards its work, and it runs again from its start, sized by its bounds from the cut region on. *)
-let resident_run r st run live =
+(* After a resident loop, its arrays may stay on the device for the rest of the draw when the later
+   statements only count them, divide the count by a constant, make an [array/range] of it, and pass
+   them (and such ranges) to regions: one drawn as a mark attribute ([mark]) or one whose array result
+   stays there under the same rule. The locals that may hold device arrays, and each range local's
+   source array and divisor; [None] keeps today's read back as the loop ends. *)
+let resident_tail (program : C.program) (s : C.statement) ~mark =
+  match resident_live program s with
+  | None | Some [||] -> None
+  | Some live -> (
+      let device_array n =
+        match program.locals.(n) with
+        | Flow.Ty.Array (Float | Vec2 | Vec3 | Vec4) -> true
+        | _ -> false
+      in
+      let rec after = function [] -> [] | t :: rest -> if t == s then rest else after rest in
+      let held = Hashtbl.create 8
+      and counts = Hashtbl.create 4
+      and ranges = Hashtbl.create 4
+      and constants = Hashtbl.create 4 in
+      let tracked n = Hashtbl.mem held n || Hashtbl.mem counts n || Hashtbl.mem ranges n in
+      let step (t : C.statement) =
+        let reads = mentions [] t in
+        match t.node with
+        | Assign (n, Constant c) ->
+            (match program.constants.(c) with
+            | C.Int k when k > 0 -> Hashtbl.replace constants n k
+            | _ -> ());
+            not (tracked n)
+        | Assign (n, Prim (Array_count, [ (_, a) ])) when Hashtbl.mem held a ->
+            Hashtbl.replace counts n (a, 1);
+            true
+        | Assign (n, Prim (Integer Idiv, [ (_, a); (_, k) ]))
+          when Hashtbl.mem counts a && Hashtbl.mem constants k ->
+            let p, d = Hashtbl.find counts a in
+            Hashtbl.replace counts n (p, d * Hashtbl.find constants k);
+            true
+        | Assign (n, Prim (Array_range, [ (_, a) ])) when Hashtbl.mem counts a ->
+            Hashtbl.replace ranges n (Hashtbl.find counts a);
+            true
+        | Invoke { region; args; result } when List.exists tracked args ->
+            (not (List.exists (Hashtbl.mem counts) args))
+            && (mark region
+               || device_array result
+                  &&
+                  (Hashtbl.replace held result ();
+                   true))
+        | _ -> not (List.exists tracked reads)
+      in
+      (* its scalars need no device; an integer array (which the display path cannot bind) keeps the
+         read back *)
+      let live =
+        List.filter
+          (fun n -> match program.locals.(n) with Flow.Ty.Array _ -> true | _ -> false)
+          (Array.to_list live)
+      in
+      if live = [] || not (List.for_all device_array live) then None
+      else begin
+        List.iter (fun n -> Hashtbl.replace held n ()) live;
+        if List.for_all step (after program.body) then
+          let kept = List.of_seq (Seq.append (Hashtbl.to_seq_keys held) (Hashtbl.to_seq_keys ranges)) in
+          Some (Array.of_list kept, List.of_seq (Hashtbl.to_seq ranges))
+        else None
+      end)
+
+(* A kept tail goes back to the host when a region over it cannot run on the device, or another
+   resident loop needs the slots. *)
+let release_kept r st =
+  let kept = st.kept in
+  st.kept <- [||];
+  Array.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) kept
+
+(* A resident loop's run: the arrays later statements read come back once, as it ends, or with a
+   [tail] stay for the rest of the draw. An overflow discards its work, and it runs again from its
+   start, sized by its bounds from the cut region on. *)
+let resident_run r st run live tail =
+  if st.kept <> [||] then begin
+    release_kept r st;
+    r.close ()
+  end;
   let start = Array.copy st.values in
   let rec attempt () =
     st.resident_on <- true;
     match
-      Fun.protect
-        ~finally:(fun () ->
-          st.resident_on <- false;
-          r.close ())
-        (fun () ->
-          run st;
-          Array.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) live)
+      run st;
+      (match tail with
+      | Some kept ->
+          r.settle ();
+          st.kept <- kept
+      | None -> Array.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) live)
     with
-    | () -> ()
+    | () ->
+        st.resident_on <- false;
+        (* kept arrays stay until the draw ends ({!draw} closes) *)
+        if Option.is_none tail then r.close ()
     | exception Resident_overflow ->
+        st.resident_on <- false;
+        r.close ();
         Array.blit start 0 st.values 0 (Array.length start);
         attempt ()
+    | exception e ->
+        st.resident_on <- false;
+        r.close ();
+        raise e
   in
   attempt ()
 
@@ -610,15 +702,19 @@ let remember (reads, writes) run =
       4
   in
   fun st ->
-    let key = Array.map (fun n -> st.values.(n)) reads in
-    match Lru.Identity_list.peek table key with
-    | Some values -> Array.iteri (fun i n -> st.values.(n) <- values.(i)) writes
-    | None ->
-        run st;
-        let values = Array.map (fun n -> st.values.(n)) writes in
-        (* a region left on the GPU names a buffer of this draw's mark table, cleared by the next *)
-        if not (Array.exists Core_marks.is_device values) then
-          Lru.Identity_list.add table key values
+    (* a kept device array is a placeholder the next draw reuses: never a key *)
+    if st.kept <> [||] then run st
+    else
+      let key = Array.map (fun n -> st.values.(n)) reads in
+      match Lru.Identity_list.peek table key with
+      | Some values -> Array.iteri (fun i n -> st.values.(n) <- values.(i)) writes
+      | None ->
+          run st;
+          let values = Array.map (fun n -> st.values.(n)) writes in
+          (* a region left on the GPU names a buffer of this draw's mark table, cleared by the next; a
+             kept device array lives as long as the draw *)
+          if st.kept = [||] && not (Array.exists Core_marks.is_device values) then
+            Lru.Identity_list.add table key values
 
 let bind_arguments st packed args =
   Packed.Host.bind_arguments packed (Array.of_list (List.map (Array.get st.values) args))
@@ -626,6 +722,12 @@ let bind_arguments st packed args =
 let prepare_invoke packed ~args ~result ~on_device ~keep =
   let packed = if args = [] then Packed.Host.bind_arguments packed [||] else Ok packed in
   let kept = ref None in
+  (* the arguments a resident device binds itself, refilled per call *)
+  let argv = Array.make (List.length args) E.No_geo in
+  let arguments st =
+    List.iteri (fun i n -> argv.(i) <- st.values.(n)) args;
+    argv
+  in
   fun st ->
     if Array.length st.builders > 0 then st.builders.(result) <- None;
     match !kept with
@@ -643,20 +745,32 @@ let prepare_invoke packed ~args ~result ~on_device ~keep =
             | Ok p -> p
             | Error d -> fail d
         in
+        (* after a resident loop, a region over the arrays it kept runs on the device too: a mark
+           attribute through [device], any other region there, its array kept *)
+        let held = st.kept <> [||] && List.exists (fun n -> Array.mem n st.kept) args in
         let resident =
           match st.resident with
           | Some r when st.resident_on -> (
-              match r.invoke (bind ~validate:false packed) ~live:st.live with
+              match r.invoke packed (arguments st) ~locals:st.values ~live:st.live with
               | Some v ->
                   st.values.(result) <- v;
                   true
               | None ->
                   List.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) args;
                   false)
+          | Some r when held && not on_device -> (
+              match r.invoke packed (arguments st) ~locals:st.values ~live:st.live with
+              | Some v ->
+                  st.values.(result) <- v;
+                  true
+              | None ->
+                  release_kept r st;
+                  false)
           | _ -> false
         in
         if not resident then
-          let packed = bind packed in
+          let unbound = packed in
+          let packed = bind ?validate:(if held then Some false else None) packed in
           let device =
             match (st.device, st.marks) with
             | Some device, Some sink when on_device -> (
@@ -670,6 +784,13 @@ let prepare_invoke packed ~args ~result ~on_device ~keep =
             | _ -> false
           in
           if not device then
+            let packed =
+              match st.resident with
+              | Some r when held && st.kept <> [||] ->
+                  release_kept r st;
+                  bind unbound
+              | _ -> packed
+            in
             match
               match st.force with
               | Some force -> force packed
@@ -731,6 +852,17 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
         List.iter (fun region -> fused.(region) <- Some group) group.members)
     groups;
   let static_ok = Core_draw.static_invokes program in
+  (* the resident loops whose arrays may stay on the device after them, and their ranges *)
+  let tails =
+    if not remember_loops then []
+    else
+      List.filter_map
+        (fun s ->
+          Option.map (fun tail -> (s, tail)) (resident_tail program s ~mark:(Array.get device_ok)))
+        program.body
+  in
+  let tail_ranges = List.concat_map (fun (_, (_, ranges)) -> ranges) tails in
+  let tails = List.map (fun (s, (kept, _)) -> (s, kept)) tails in
   let constants = Array.map C.value_of_literal program.constants in
   let expression : C.expr -> state -> E.value = function
     | C.Constant n ->
@@ -945,7 +1077,7 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
                        fun st ->
                          match st.resident with
                          | None -> run st
-                         | Some r -> resident_run r st run live)
+                         | Some r -> resident_run r st run live (List.assq_opt s tails))
                    | _ -> run
                  in
                  match footprint program s with Some f -> remember f run | None -> run)
@@ -996,6 +1128,27 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
                     st.values.(arg) <- r.finish st.values.(arg);
                     value st)
             | _ -> value st)
+    | Assign (n, (Prim (Array_range, [ (_, count) ]) as e)) when List.mem_assoc n tail_ranges -> (
+        (* a range of a kept array's count: the device's index buffer while the array stays there,
+           else made from the array's count (a kept count is its capacity) *)
+        let value = expression e and source, div = List.assoc n tail_ranges in
+        fun st ->
+          match st.resident with
+          | None -> st.values.(n) <- value st
+          | Some r -> (
+              let made =
+                if not (Array.mem n st.kept) then None
+                else
+                  match st.values.(count) with
+                  | V.Int length -> r.range program.locals.(n) st.values.(source) ~div ~length
+                  | _ -> None
+              in
+              match made with
+              | Some v -> st.values.(n) <- v
+              | None ->
+                  if st.kept <> [||] then release_kept r st;
+                  st.values.(count) <- V.Int (V.array_length st.values.(source) / div);
+                  st.values.(n) <- value st))
     | Assign (n, (Prim (Array_count, [ (_, arg) ]) as e)) ->
         (* a resident array's length is a capacity: its count is the host array's *)
         let value = expression e in
@@ -1232,6 +1385,7 @@ and general_values root force resolve prepared live =
           device = None;
           resident = None;
           resident_on = false;
+          kept = [||];
         }
       in
       let result =
@@ -1314,10 +1468,13 @@ let draw ?root ?force ?resolve ?device ?resident ?image prepared ~live ~size ~bu
           device;
           resident;
           resident_on = false;
+          kept = [||];
         }
       in
+      (* a resident loop's kept arrays live until the draw ends (closing an idle one is a no-op) *)
+      let close () = Option.iter (fun r -> r.close ()) resident in
       try
-        prepared.body st;
+        Fun.protect ~finally:close (fun () -> prepared.body st);
         Ok (Core_marks.finish sink)
       with
       | Diagnostic.Error d -> Error d

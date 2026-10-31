@@ -45,6 +45,7 @@ val dispatch :
   ?wait:bool ->
   ?reset_status:bool ->
   ?commands:Ogpu.Backend.commands ->
+  ?encoder:Ogpu.Backend.compute_encoder ->
   ?count:Ogpu.Backend.buffer * int * int ->
   ?into:Ogpu.Backend.buffer * Ogpu.Backend.buffer ->
   ?bound:(int -> Ogpu.Backend.buffer option) ->
@@ -56,7 +57,9 @@ val dispatch :
   Flow_ir.Packed.Host.inputs ->
   (output, Diagnostic.t) result
 (** [~wait:false] leaves the dispatch in flight, without its status read; [~commands] only encodes
-    it into the caller's command buffer (epoch 0 until the caller commits it); [~reset_status:false]
+    it into the caller's command buffer (epoch 0 until the caller commits it), into its open compute
+    [encoder] when given (the caller ends it; a serial encoder orders the dispatches);
+    [~reset_status:false]
     keeps ORed error flags from earlier encodings on this runner. [~count:(cell, mul, div)] bounds a
     fast kernel's count by [cell * mul / div] on the device, and its grid too: an indirect
     dispatch of groups of 256 to that count, written on the device (Kernels.dispatch_arguments),
@@ -119,6 +122,7 @@ val max_total_threads : t -> (int, Diagnostic.t) result
 val close : ?discard:bool -> t -> unit
 
 val compact :
+  ?encoder:Ogpu.Backend.compute_encoder ->
   Ogpu.Backend.commands ->
   Pipelines.t ->
   mask:Ogpu.Backend.buffer ->

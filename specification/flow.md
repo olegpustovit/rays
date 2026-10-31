@@ -1513,7 +1513,24 @@ device (`Packed.Host.source_shapes`; the fast kernel's `count_in`, mul, div and 
 and a range source binds a shared index buffer instead of an upload; compaction reads its count
 from the mask's cell and writes its own. A level is committed when its compaction is encoded,
 without a wait (at most two in flight), so nothing is read until the loop ends; then the writes
-later statements read come back (count cell, then that many elements). A region whose source or
+later statements read come back (count cell, then that many elements). When the statements after
+the loop only count its arrays, divide a count by a constant, make an `array/range` of it and pass
+these to regions (mark attributes, or regions whose arrays stay by the same rule:
+`Core_exec.resident_tail`), nothing comes back: the loop's end checks its counts (`settle`), an
+`array/range` of a kept count is the index buffer counted by that array's cell over the divisor
+(`range`), a later region over them runs on the device at its bound (no slot capacity, so nothing is
+cut), and a mark attribute over them is dispatched by its site's own runner over their buffers with
+the device count and drawn indirect from its count record (`Host.show`, passed to
+`Drawing.render_prepared ?resident` with the fold); the draw closes the fold as it ends. A region the
+device declines first gets every kept array read back. A region site works out once, on its unbound
+region, how each source and uniform follows from its Core arguments (`Packed.Host.plan`), so a
+level binds and evaluates nothing; a site whose deeper levels ran on the device keeps its small
+levels there too; a site's slot is taken again once no local holds its arrays (ping-pong: about two
+sets of buffers a site, each sized by the largest count it held), its count cells kept per level
+for the end's check; one compute encoder records a level. `lib/flow_native/test_frame_alloc`
+(`@runtest-native`) guards it: recursive_signals at full depth, replaying times its warm-up drew,
+allocates at most a fixed byte budget a frame and creates no GPU buffer, and its picture equals the
+one drawn after reading the arrays back. A region whose source or
 uniform reads a placeholder in any other form, or that two cells would bound, is declined: its
 arguments are read back and it runs on the CPU, as does an `array/count` the host evaluates
 inside the loop. Capacities double with each level; past 4M elements a region is declined, which

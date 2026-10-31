@@ -20,7 +20,9 @@ val render_prepared :
   ?state:Flow.Eval.state ->
   ?image:(Flow.Eval.value -> (Rays.Image.t, Diagnostic.t) result) ->
   ?gpu:Marks_scene.gpu ->
-  ?resident:Flow_ir.Core_exec.resident ->
+  ?resident:
+    Flow_ir.Core_exec.resident
+    * (Flow_ir.Packed.t -> live:Input.t -> Flow_ir.Gpu.value option option) ->
   prepared ->
   live:Input.t ->
   size:int * int ->
@@ -29,4 +31,6 @@ val render_prepared :
     {!Marks_scene}; a lowering error is the diagnostic. With a configured GPU, a region that feeds
     only the positions, sizes, radius, from or to of a mark set stays on the GPU when its backend
     places it there, and that mark set is drawn by the [Marks] family with the region's buffer bound
-    directly. Without a configured GPU, or off the backend, nothing differs from the CPU path. *)
+    directly. Without a configured GPU, or off the backend, nothing differs from the CPU path.
+    [resident] is a resident fold and how a mark attribute over the arrays it kept after its loop is
+    drawn ({!Workspace_gpu.resident}): one host does both. *)

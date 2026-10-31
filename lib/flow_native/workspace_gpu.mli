@@ -17,9 +17,15 @@ val pump : ?follow_up:bool -> t -> unit
 val wait : t -> timeout:float -> unit
 (** Sleep on the initial domain until a request is queued or [timeout] seconds pass. *)
 
-val resident : Flow_ir.Gpu.config -> t -> Flow_ir.Core_exec.resident option
+val resident :
+  Flow_ir.Gpu.config ->
+  t ->
+  (Flow_ir.Core_exec.resident
+  * (Flow_ir.Packed.t -> live:Input.t -> Flow_ir.Gpu.value option option))
+  option
 
-(* Inside [with_backend ~fast:true], a resident fold for one drawing on this workspace's host. *)
+(* Inside [with_backend ~fast:true], a resident fold for one drawing on this workspace's host, and
+   its mark attributes over the arrays it keeps after its loop ({!Flow_gpu.Host.show}). *)
 val qualification : t -> unit
 
 val image :

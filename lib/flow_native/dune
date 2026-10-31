@@ -43,3 +43,27 @@
   ogpu_mock
   parallel
   unix))
+
+; zero-allocation frames: recursive_signals' fold into a draw, on Metal
+
+(executable
+ (enabled_if
+  (= %{system} macosx))
+ (name test_frame_alloc)
+ (modules test_frame_alloc)
+ (libraries
+  flow_native
+  web_export
+  flow
+  flow_sop
+  editor_document
+  ogpu_metal
+  input))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias runtest-native)
+ (deps ../../sketches/recursive_signals.rays)
+ (action
+  (run %{exe:test_frame_alloc.exe} ../../sketches/recursive_signals.rays)))

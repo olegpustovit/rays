@@ -381,7 +381,9 @@ let with_backend ?(fast = false) t run =
 
 let resident gpu t =
   if not gpu.G.fast then None
-  else Result.to_option (Result.map (fun (_, host) -> H.resident ~fast:gpu.fast host) (owner t))
+  else
+    Result.to_option
+      (Result.map (fun (_, host) -> (H.resident ~fast:gpu.fast host, H.show host)) (owner t))
 
 let image t ~key ~width ~height ~publish value =
   Result.bind (owner t) (fun (gpu, host) ->

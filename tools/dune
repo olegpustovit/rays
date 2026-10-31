@@ -395,3 +395,26 @@
  (name bench_check)
  (modules bench_check)
  (libraries flow sop flow_sop editor_document rays_pathtracer ogpu_metal))
+
+(executable
+ (name test_isogrid)
+ (modules test_isogrid)
+ (libraries flow flow_ir flow_gpu renderer ogpu_metal unix))
+
+(rule
+ (alias isogrid)
+ (deps ../sketches/isogrid.rays)
+ (action (run %{exe:test_isogrid.exe} ../sketches/isogrid.rays)))
+
+(alias
+ (name runtest)
+ (deps (alias isogrid)))
+
+(rule
+ (alias isogrid-native)
+ (deps ../sketches/isogrid.rays)
+ (action (run %{exe:test_isogrid.exe} ../sketches/isogrid.rays --gpu)))
+
+(alias
+ (name runtest-native)
+ (deps (alias isogrid-native)))

@@ -279,6 +279,24 @@ module Host : sig
   val uniform_shapes : t -> shape array
   val device_inputs : value_inputs -> inputs
 
+  val floats : Flow.Eval.value -> float array option
+  (** A numeric array as a device input's floats (an integer array's copy kept by its identity). *)
+
+  type argument = Argument of int | Argument_range of int * int * int
+
+  type plan = {
+    plan_sources : argument array;
+        (** each source: a Core argument, or [array/range] of one's count times [mul] over [div] *)
+    plan_uniforms : int array;  (** each uniform: a Core argument *)
+    plan_frames : (int * (Input.t -> float)) array;  (** frame instructions' values *)
+  }
+
+  val plan : t -> plan option
+  (** On an unbound region (its sources and uniforms still argument markers): its inputs as its Core
+      arguments decide them, worked out once, so a caller holding the arguments makes
+      {!device_inputs}' result without binding or evaluating; [None] when a source or uniform is any
+      other form (or the region has no sources, a static count or a product). *)
+
   (* [prepare]'s conversion of materialized inputs. *)
   val prepare :
     ?fast:bool ->

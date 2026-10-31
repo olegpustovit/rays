@@ -70,6 +70,7 @@ let prepare ?(gpu = Flow_ir.Gpu.default) ?profile ?(approx = Flow.Workspace.Path
 (* The draw program runs into a mark table which Marks_scene adapts. Retention is whole-program: a
    fully static draw graph is kept per size; the fold states still advance. *)
 let render_core (program, root, buffers) ~state ?image ?gpu ?resident prepared ~live ~size =
+  let show = Option.map snd resident and resident = Option.map fst resident in
   let ( let* ) = Result.bind in
   E.transaction state (fun () ->
       let* _ = I.force ~state prepared.states ~live in
@@ -107,7 +108,10 @@ let render_core (program, root, buffers) ~state ?image ?gpu ?resident prepared ~
                              incr ndevices;
                              (!ndevices - 1, v.count, width))
                            view.outputs))
-                    (prepared.display packed ~live))
+                    (* over a resident fold's kept arrays, its host draws it (or the CPU does) *)
+                    (match Option.bind show (fun show -> show packed ~live) with
+                    | Some shown -> Ok shown
+                    | None -> prepared.display packed ~live))
               gpu
           in
           (* in fast precision a region the drawing computes with may run on the GPU; a refusal or a

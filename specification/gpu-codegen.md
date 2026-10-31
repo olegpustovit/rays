@@ -159,8 +159,12 @@ installed.
   runs, so thread 0 writes the consumer's count record also for n = 0; every kernel keeps its `i >= n`
   guard for the last, partial group. The capacity sizes the host's placeholders and the device buffers.
   Narrowing reads a store's and a scan's operands as uint words, so the stage counts in 32 bits.
-- A **slot** is a resident region site's Nth call in one fold run (`Host.resident`, web `resident.js`;
-  a site's first 64 ordinals, the 32 latest sites). It owns its region's output and count cell, its
+- A **slot** is a resident region site's call in one fold run (`Host.resident`, web `resident.js`;
+  64 a site, the 32 latest sites). Inside the loop a call takes the site's first slot none of the
+  draw's locals holds an array of (ping-pong: a level reads the last one's, so two take turns, each
+  sized by the largest count it held), giving back at once what its last use made but its count
+  cell, which the loop's end still checks; after the loop a call takes its site's next slot. It
+  owns its region's output and count cell, its
   compactions' and retypings' buffers and the placeholders, which come back to it as the run closes and
   serve the next draw's run; what it kept and a run did not take (a size it outgrew) is freed then, and a
   site leaving the host frees its slots. A counted region whose slot has history takes the slot's

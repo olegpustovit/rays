@@ -87,6 +87,29 @@ let held array =
 let held_input array ~length =
   Option.bind (held array) (fun (buffer, floats) -> if floats >= length then Some buffer else None)
 
+(* a uniform layout entry, parsed once per runner: a dispatch only writes it *)
+type entry =
+  | Uniform_at of int * int * int  (** uniform, offset, width *)
+  | Gather_at of int * int  (** gather, offset *)
+  | Strands_at of int
+  | Spheres_at of int
+  | Frame_at of int * int  (** frame instruction, offset *)
+
+let entries (msl : Emit.msl) =
+  Array.of_list
+    (List.map
+       (fun (name, offset, width) ->
+         if String.starts_with ~prefix:"uniform:" name then
+           Uniform_at (int_of_string (String.sub name 8 (String.length name - 8)), offset, width)
+         else
+           match String.split_on_char ':' name with
+           | [ "gather"; k; _ ] -> Gather_at (int_of_string k, offset)
+           | [ "scene"; "strands" ] -> Strands_at offset
+           | [ "scene"; "spheres" ] -> Spheres_at offset
+           | [ "frame"; index; _ ] -> Frame_at (int_of_string index, offset)
+           | _ -> invalid_arg ("Run: uniform layout entry " ^ name))
+       msl.uniform_layout)
+
 type t = {
   device : B.device;
   queue : B.queue;
@@ -100,6 +123,8 @@ type t = {
   counted : slot;
   groups : slot;  (** a counted dispatch's threadgroup counts, written on the device *)
   uniforms : bytes;
+  layout : entry array;
+  arguments : bytes;  (** a counted dispatch's arguments to Kernels.dispatch_arguments *)
   mutable closed : bool;
   mutable bounds_out : B.buffer option;  (** the reduction's lanes, made once and reused *)
   mutable creations : int;
@@ -205,6 +230,8 @@ let create_owned ?pool:shared device queue pipelines (msl : Emit.msl) =
     counted = slot ();
     groups = slot ();
     uniforms = Bytes.create msl.uniform_bytes;
+    layout = entries msl;
+    arguments = Bytes.create 16;
     closed = false;
     bounds_out = None;
     creations = 0;
@@ -342,23 +369,25 @@ let msl_scene t = t.msl.Emit.scene
    groups of [group] whose count is the uint in [cell] x mul / div (Kernels.dispatch_arguments),
    into [groups]: its grid is sized on the device, nothing is read back. The caller sets its pipeline
    next. *)
-let dispatch_arguments encoder pipelines ~cell ~mul ~div ~capacity ~group ~groups =
+let dispatch_arguments ?(bound = Bytes.create 16) encoder pipelines ~cell ~mul ~div ~capacity ~group
+    ~groups =
   let compiled =
     match Pipelines.get pipelines Kernels.dispatch_arguments with
     | Ok compiled -> compiled
     | Error error -> raise (Diagnostic.Error error)
   in
-  let bound = Bytes.create 16 in
-  List.iteri
-    (fun k v -> Bytes.set_int32_le bound (4 * k) (Int32.of_int v))
-    [ capacity; mul; div; group ];
+  Bytes.set_int32_le bound 0 (Int32.of_int capacity);
+  Bytes.set_int32_le bound 4 (Int32.of_int mul);
+  Bytes.set_int32_le bound 8 (Int32.of_int div);
+  Bytes.set_int32_le bound 12 (Int32.of_int group);
   get (B.set_pipeline encoder compiled.pipeline);
   get (B.set_buffer encoder ~index:0 cell);
   get (B.set_bytes encoder ~index:1 bound);
   get (B.set_buffer encoder ~index:2 groups);
   get (B.dispatch_threads encoder ~threads:(1, 1, 1) ~threadgroup:(1, 1, 1))
 
-let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(bound = fun _ -> None)
+let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?into
+    ?(bound = fun _ -> None)
     ?(bound_table = fun _ -> None) ?scene ?(extras = no_extras) ?(resident = []) t
     (values : P.Host.inputs) =
   (* a table another runner keeps on the device (its placeholder) is bound to its buffer *)
@@ -409,11 +438,14 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
   then error "GPU scene binding changed."
   else if Array.length values.arrays <> Array.length t.inputs then error "GPU input arity changed."
   else if
-    Array.exists
-      (fun index ->
+    let short = ref false in
+    for index = 0 to Array.length t.inputs - 1 do
+      if
         bound index = None
-        && Array.length values.arrays.(index) < values.count * t.msl.input_widths.(index))
-      (Array.init (Array.length t.inputs) Fun.id)
+        && Array.length values.arrays.(index) < values.count * t.msl.input_widths.(index)
+      then short := true
+    done;
+    !short
   then error "GPU input count changed."
   else begin
     (* Invalidate borrowed output before reallocating or submitting any write,
@@ -442,10 +474,9 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
           | Error error -> raise (Diagnostic.Error error)
         in
         Bytes.set_int32_le t.uniforms 0 (Int32.of_int values.count);
-        List.iter
-          (fun (name, offset, width) ->
-            if String.starts_with ~prefix:"uniform:" name then begin
-              let index = int_of_string (String.sub name 8 (String.length name - 8)) in
+        for e = 0 to Array.length t.layout - 1 do
+          match t.layout.(e) with
+          | Uniform_at (index, offset, width) ->
               if
                 index >= Array.length values.uniforms
                 || Array.length values.uniforms.(index) <> width
@@ -455,35 +486,28 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
               for component = 0 to width - 1 do
                 pack t.uniforms (offset + (component * 4)) values.uniforms.(index).(component)
               done
-            end
-            else
-              match String.split_on_char ':' name with
-              | [ "gather"; k; _ ] ->
-                  let u, width = msl.gathers.(int_of_string k) in
-                  if u >= Array.length values.tables then
-                    raise
-                      (Diagnostic.Error
-                         (Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
-                  let length =
-                    match bound_table u with
-                    | Some (_, length) -> length
-                    | None -> Array.length values.tables.(u)
-                  in
-                  Bytes.set_int32_le t.uniforms offset (Int32.of_int (length / width))
-              | [ "scene"; "strands" ] ->
-                  Bytes.set_int32_le t.uniforms offset (Int32.of_int extras.strand_count)
-              | [ "scene"; "spheres" ] ->
-                  Bytes.set_int32_le t.uniforms offset
-                    (Int32.of_int (match scene with Some s -> s.sphere_count | None -> 0))
-              | [ "frame"; index; _ ] ->
-                  let index = int_of_string index in
-                  if index >= Array.length values.frame then
-                    raise
-                      (Diagnostic.Error
-                         (Diagnostic.error ~code:"E_KERNEL" "GPU frame uniform changed."));
-                  pack t.uniforms offset values.frame.(index)
-              | _ -> assert false)
-          msl.uniform_layout;
+          | Gather_at (k, offset) ->
+              let u, width = msl.gathers.(k) in
+              if u >= Array.length values.tables then
+                raise
+                  (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
+              let length =
+                match bound_table u with
+                | Some (_, length) -> length
+                | None -> Array.length values.tables.(u)
+              in
+              Bytes.set_int32_le t.uniforms offset (Int32.of_int (length / width))
+          | Strands_at offset ->
+              Bytes.set_int32_le t.uniforms offset (Int32.of_int extras.strand_count)
+          | Spheres_at offset ->
+              Bytes.set_int32_le t.uniforms offset
+                (Int32.of_int (match scene with Some s -> s.sphere_count | None -> 0))
+          | Frame_at (index, offset) ->
+              if index >= Array.length values.frame then
+                raise
+                  (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU frame uniform changed."));
+              pack t.uniforms offset values.frame.(index)
+        done;
         (* a buffer this runner's last dispatch still reads is not rewritten under it *)
         if commands = None && t.last_epoch > B.completed_epoch t.queue then
           get (B.complete_through t.queue t.last_epoch);
@@ -533,9 +557,9 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
                 | Some (cell, mul, div) -> (cell, mul, div, 1)
                 | None -> (out, 1, 1, 0)
               in
-              List.iteri
-                (fun k v -> Bytes.set_int32_le t.uniforms (offset + (4 * k)) (Int32.of_int v))
-                [ mul; div; use ];
+              Bytes.set_int32_le t.uniforms offset (Int32.of_int mul);
+              Bytes.set_int32_le t.uniforms (offset + 4) (Int32.of_int div);
+              Bytes.set_int32_le t.uniforms (offset + 8) (Int32.of_int use);
               (cell, out))
             msl.counts
         in
@@ -604,17 +628,20 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
         in
         let queue = t.queue in
         let encode commands =
-          let encoder = get (B.compute_encoder commands) in
+          let shared = encoder in
+          let encoder =
+            match shared with Some encoder -> encoder | None -> get (B.compute_encoder commands)
+          in
           Fun.protect
-            ~finally:(fun () -> ignore (B.end_compute encoder))
+            ~finally:(fun () -> if shared = None then ignore (B.end_compute encoder))
             (fun () ->
               (* a device count sizes the grid on the device: groups of 256 to it, not the capacity *)
               let groups =
                 match (counted, count) with
                 | Some (cell, _), Some (_, mul, div) ->
                     let groups = ensure t t.groups 12 in
-                    dispatch_arguments encoder t.pipelines ~cell ~mul ~div ~capacity:values.count
-                      ~group:256 ~groups;
+                    dispatch_arguments ~bound:t.arguments encoder t.pipelines ~cell ~mul ~div
+                      ~capacity:values.count ~group:256 ~groups;
                     Some groups
                 | _ -> None
               in
@@ -1244,16 +1271,19 @@ end
    first and last take their group count from it on the device, written into [groups] (12 bytes). *)
 let compact_blocks count = 8 * max 1 ((count + 1023) / 1024)
 
-let compact commands pipelines ~mask ~count ~count_in ~kept ~total ~blocks ~groups =
+let compact ?encoder commands pipelines ~mask ~count ~count_in ~kept ~total ~blocks ~groups =
   try
     let compiled =
       match Pipelines.get pipelines Kernels.compaction with
       | Ok compiled -> compiled
       | Error error -> raise (Diagnostic.Error error)
     in
-    let encoder = get (B.compute_encoder commands) in
+    let shared = encoder in
+    let encoder =
+      match shared with Some encoder -> encoder | None -> get (B.compute_encoder commands)
+    in
     Fun.protect
-      ~finally:(fun () -> ignore (B.end_compute encoder))
+      ~finally:(fun () -> if shared = None then ignore (B.end_compute encoder))
       (fun () ->
         Option.iter
           (fun cell ->

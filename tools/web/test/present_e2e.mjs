@@ -53,7 +53,7 @@ window.__result = (async () => {
   const g = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
   g.canvas.width = canvas.width; g.canvas.height = canvas.height; g.drawImage(canvas, 0, 0);
   const px = g.getImageData(0, 0, canvas.width, canvas.height);
-  return { gpu: rt.counts.gpu, width: px.width, height: px.height, entries: rt.marks.length, texts: rt.marks.filter(e => e.type === 'text').map(e => ({ x: e.x, y: e.y, size: e.size, length: [...e.text].length })), errors: presenter.errors, raw: Array.from(px.data) };
+  return { gpu: rt.counts.gpu, shown: rt.counts.shown ?? 0, width: px.width, height: px.height, entries: rt.marks.length, texts: rt.marks.filter(e => e.type === 'text').map(e => ({ x: e.x, y: e.y, size: e.size, length: [...e.text].length })), errors: presenter.errors, raw: Array.from(px.data) };
 })().catch(e => ({ failure: String(e && e.stack || e) }));
 </script>`;
 
@@ -110,6 +110,6 @@ for (const dir of dirs) {
   const fraction = over / counted;
   const ok = fraction <= 0.005 && worst <= 64 && ratios.every(([a, n]) => n > 0 && a / n > 0.5 && a / n < 2) && !r.errors.length && boot.marks > 0 && boot.presented && !boot.failure && boot.isolated;
   if (!ok) bad++;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${dir}: ${r.entries} entries, ${r.gpu} device dispatches, ${over} of ${counted} pixels outside text differ by more than 8 (${(100 * fraction).toFixed(3)}%), worst ${worst}, mean ${(sum / counted).toFixed(4)}; text boxes ${JSON.stringify(ratios.map(([a, n]) => (a / n).toFixed(3)))} (web/native brightness), ink bounding boxes web/native ${JSON.stringify(placed)}; index.html: ${boot.marks} marks, screenshot ${boot.screenshotBytes} bytes${boot.failure ? `; failure ${boot.failure}` : ''}${boot.text ? `; page text ${JSON.stringify(boot.text)}` : ''}${r.errors.length ? '; errors ' + r.errors : ''}`);
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${dir}: ${r.entries} entries, ${r.gpu} device dispatches (${r.shown} over kept arrays), ${over} of ${counted} pixels outside text differ by more than 8 (${(100 * fraction).toFixed(3)}%), worst ${worst}, mean ${(sum / counted).toFixed(4)}; text boxes ${JSON.stringify(ratios.map(([a, n]) => (a / n).toFixed(3)))} (web/native brightness), ink bounding boxes web/native ${JSON.stringify(placed)}; index.html: ${boot.marks} marks, screenshot ${boot.screenshotBytes} bytes${boot.failure ? `; failure ${boot.failure}` : ''}${boot.text ? `; page text ${JSON.stringify(boot.text)}` : ''}${r.errors.length ? '; errors ' + r.errors : ''}`);
 }
 process.exit(bad ? 1 : 0);

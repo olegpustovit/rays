@@ -58,7 +58,10 @@ memory belongs to the workspace execution.
 
 The workspace's precision policy applies to JavaScript and WGSL. Fast
 integer paths use exact 64-bit register pairs. Resident GPU folds count and
-compact records, make one readback and draw display regions indirectly.
+compact records, make one readback and draw display regions indirectly; when
+what follows the loop only ranges over and draws its arrays they stay on the
+device through the frame (no readback; `resident.js` `keep`, `range`, `show`),
+and a site's slots take turns (ping-pong), as natively.
 A target-specific repair carries a parity check on the other target.
 
 ## Verification

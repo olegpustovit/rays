@@ -1,0 +1,358 @@
+; IsoGrid: seeded voxel carving in a real, orbitable 3D viewport.
+; Port of crystalboxes/isogrid-houdini-sop (WB IsoGrid by Frederik Vanhoutte).
+; No IsoGrid SOP is installed: the algorithm lives here; sop/mesh is only the mesh carrier.
+; Select volume/recipe-switch (0–7) in the graph; recipe-name shows the chosen structure.
+; Custom recipes accept remove, noise, invert, edge, wire, hollow,
+; maze, slice-x/y/z, rotate-x/y/z, flip, mirror-x/y/z, mirror-xz, reset.
+; remove-2/4/8/16/32/64/128 carves one scale; -random selects blocks for an edit.
+; Repeated steps compose with a fresh deterministic random stream.
+; Run: dune exec rays -- sketches/isogrid.rays
+; GPU parity: _build/default/tools/check.exe @tools/isogrid-native
+; Voxel maps are GPU-capable; maze walking and mesh topology are assembled on the CPU.
+(workspace isogrid
+
+  ; A bounded integer hash: identical CPU/Metal decisions, using supported integer instructions.
+  (defn random-at :context value [(seed : int) (index : int)]
+    (let* [mask 2147483647
+           mixed (int/and (int/xor seed index) mask)
+           first (int/and (int/add (int/mul mixed 1103515245) 12345) mask)
+           second (int/and (int/mul (int/xor first (int/shr first 16)) 1597334677) mask)
+           final (int/xor second (int/shr second 15))]
+      (/ final 2147483648.0)))
+
+  (defn cell :context value [(index : int) (side : int)]
+    [(int/div index (* side side)) (mod (int/div index side) side) (mod index side)])
+
+  ; Outside the volume is empty, including when a neighbour crosses a row boundary.
+  (defn occupied :context value [(voxels : (array int)) (side : int) (p : vec3)]
+    (if (and (and (>= p.x 0) (< p.x side))
+             (and (and (>= p.y 0) (< p.y side)) (and (>= p.z 0) (< p.z side))))
+        (array/nth voxels (+ (+ (* (int p.x) (* side side)) (* (int p.y) side)) (int p.z)))
+        0))
+
+  ; Randomly subdivide a block into eight retained/removed octants, as in subdivideRandomGrid.
+  (defn carve :context value [(voxels : (array int)) (side : int) (seed : int)
+                              (step : int) (divide : float) (retain : float) (gradient : float)]
+    (map (fn [(index : int)]
+           (let* [p (cell index side)
+                  half (max 1 (int/div step 2))
+                  block [(floor (/ p.x step)) (floor (/ p.y step)) (floor (/ p.z step))]
+                  octant [(floor (/ p.x half)) (floor (/ p.y half)) (floor (/ p.z half))]]
+             (if (and (< (random-at (+ seed (* step 101)) (int (+ (+ (* block.x (* side side)) (* block.y side)) block.z))) divide)
+                      (>= (random-at (+ seed (* half 307)) (int (+ (+ (* octant.x (* side side)) (* octant.y side)) octant.z))) (+ retain (* gradient (/ (* block.y step) side)))))
+                 0 (array/nth voxels index))))
+         (array/range (* (* side side) side) :type int)))
+
+  ; Each edit reads one immutable snapshot: neighbours never see a half-applied operation.
+  (defn edit-cells :context value [(voxels : (array int)) (side : int)
+                                    (seed : int) (operation : int)]
+    (map (fn [(index : int)]
+           (let* [p (cell index side)
+                  last (- side 1)
+                  here (array/nth voxels index)
+                  left (occupied voxels side (- p [1 0 0]))
+                  right (occupied voxels side (+ p [1 0 0]))
+                  down (occupied voxels side (- p [0 1 0]))
+                  up (occupied voxels side (+ p [0 1 0]))
+                  back (occupied voxels side (- p [0 0 1]))
+                  front (occupied voxels side (+ p [0 0 1]))]
+             (cond
+               (= operation 1) (- 1 here)
+               (= operation 2)
+                 (if (< (noise3 (* p 0.04) :seed seed) 0.6) here 0)
+               (= operation 3)
+                 (if (= (+ (+ (+ left right) (+ down up)) (+ back front)) 6) 0 here)
+               (= operation 4)
+                 (if (= (+ (+ (if (= (+ left right) 0) 1 0) (if (= (+ down up) 0) 1 0)) (if (= (+ back front) 0) 1 0)) 1) 0 here)
+               ; Active edgeBlock compares six negative neighbours, ignoring lower boundaries.
+               (= operation 5)
+                 (if (or (or (and (> p.x 0) (not (= left here)))
+                             (and (> p.y 0) (not (= down here))))
+                         (or (and (> p.z 0) (not (= back here)))
+                             (or (and (and (> p.x 0) (> p.y 0))
+                                      (not (= (occupied voxels side (- p [1 1 0])) here)))
+                                 (or (and (and (> p.x 0) (> p.z 0))
+                                          (not (= (occupied voxels side (- p [1 0 1])) here)))
+                                     (and (and (> p.y 0) (> p.z 0))
+                                          (not (= (occupied voxels side (- p [0 1 1])) here)))))))
+                     1 0)
+               (= operation 6) (if (>= (mod p.x 52) 44) 0 here)
+               (= operation 7) (if (>= (mod p.y 8) 6) 0 here)
+               (= operation 8) (if (>= (mod p.z 52) 44) 0 here)
+               (= operation 9) (occupied voxels side [p.x p.z (- last p.y)])
+               (= operation 10) (occupied voxels side [p.z p.y (- last p.x)])
+               (= operation 11) (occupied voxels side [p.y (- last p.x) p.z])
+               (= operation 12) (occupied voxels side (- [last last last] p))
+               (= operation 13) (occupied voxels side [(min p.x (- last p.x)) p.y p.z])
+               (= operation 14) (occupied voxels side [p.x (min p.y (- last p.y)) p.z])
+               (= operation 15) (occupied voxels side [p.x p.y (min p.z (- last p.z))])
+               (= operation 16) (occupied voxels side [(min p.x p.z) p.y (max p.x p.z)])
+               :else here)))
+         (array/range (* (* side side) side) :type int)))
+
+  ; Resolve command text once, outside the numeric GPU kernel.
+  (defn edit-volume :context value [(voxels : (array int)) (side : int)
+                                    (seed : int) (operation : text)]
+    (edit-cells voxels side seed
+      (cond
+        (equal? operation "invert") 1
+        (equal? operation "noise") 2
+        (equal? operation "hollow") 3
+        (equal? operation "wire") 4
+        (equal? operation "edge") 5
+        (equal? operation "slice-x") 6
+        (equal? operation "slice-y") 7
+        (equal? operation "slice-z") 8
+        (equal? operation "rotate-x") 9
+        (equal? operation "rotate-y") 10
+        (equal? operation "rotate-z") 11
+        (equal? operation "flip") 12
+        (equal? operation "mirror-x") 13
+        (equal? operation "mirror-y") 14
+        (equal? operation "mirror-z") 15
+        (equal? operation "mirror-xz") 16
+        :else (error "E_ISOGRID_COMMAND" (str "Unknown voxel command: " operation)))))
+
+  (defn direction :context value [(axis : int)]
+    (cond (= axis 0) [1 0 0] (= axis 1) [-1 0 0]
+          (= axis 2) [0 1 0] (= axis 3) [0 -1 0]
+          (= axis 4) [0 0 1] :else [0 0 -1]))
+
+  ; Aldous-Broder random walk, including the source's previsited central chamber.
+  ; A finite walk reports failure rather than returning a disconnected partial maze.
+  (defn maze-links :context value [(cells : int) (seed : int)]
+    (let* [total (* (* cells cells) cells)
+           start (int (* (random-at seed 0) total))
+           seen (map (fn [(index : int)]
+                       (let* [p (cell index cells)
+                              lower (int/div cells 3)
+                              upper (int/div (* cells 2) 3)]
+                         (if (or (= index start)
+                                 (and (and (>= p.x lower) (< p.x upper))
+                                      (and (and (>= p.y lower) (< p.y upper))
+                                           (and (>= p.z lower) (< p.z upper))))) 1 0)))
+                     (array/range total :type int))
+           walked (iterate 4096
+                     {:seen seen :links (array/int (* total 6)) :current start
+                      :remaining (- total (array/sum seen)) :tick 1}
+                     (fn [(walk : {:seen (array int) :links (array int) :current int :remaining int :tick int})]
+                       (let* [p (cell walk.current cells)
+                              candidates (array/compact
+                                           (map (fn [(axis : int)]
+                                                  (let* [q (+ p (direction axis))]
+                                                    (if (and (and (>= q.x 0) (< q.x cells))
+                                                             (and (and (>= q.y 0) (< q.y cells))
+                                                                  (and (>= q.z 0) (< q.z cells)))) 1 0)))
+                                                (array/range 6 :type int)))
+                              axis (array/nth candidates (int (* (random-at seed walk.tick) (array/count candidates))))
+                              q (+ p (direction axis))
+                              target (+ (+ (* (int q.x) (* cells cells)) (* (int q.y) cells)) (int q.z))
+                              fresh (= (array/nth walk.seen target) 0)
+                              reverse (if (= (mod axis 2) 0) (+ axis 1) (- axis 1))
+                              marks (array/concat (array/int 1 (+ (* walk.current 6) axis))
+                                                  (array/int 1 (+ (* target 6) reverse)))]
+                         {:seen (if fresh
+                                    (map (fn [(a : int) (b : int)] (+ a b)) walk.seen
+                                         (array/scatter_add (array/int 1 target) (array/int 1 1) total)) walk.seen)
+                          :links (if fresh
+                                     (map (fn [(a : int) (b : int)] (+ a b)) walk.links
+                                          (array/scatter_add marks (array/int 2 1) (* total 6))) walk.links)
+                          :current target :remaining (- walk.remaining (if fresh 1 0))
+                          :tick (+ walk.tick 1)}))
+                     :until (fn [previous next] (= next.remaining 0)))]
+      (if (= walked.remaining 0) walked.links
+          (error "E_MAZE_WALK" "Maze walk did not finish; choose another seed."))))
+
+  ; Two-voxel-wide corridors join cell centres along the walk's undirected links.
+  (defn maze-volume :context value [(side : int) (seed : int)]
+    (let* [cells 4
+           width (/ side cells)
+           links (maze-links cells seed)]
+      (map (fn [(index : int)]
+             (let* [p (cell index side)
+                    room [(floor (/ p.x width)) (floor (/ p.y width)) (floor (/ p.z width))]
+                    room-index (+ (+ (* (int room.x) (* cells cells)) (* (int room.y) cells)) (int room.z))
+                    local [(- (mod p.x width) (/ width 2))
+                           (- (mod p.y width) (/ width 2))
+                           (- (mod p.z width) (/ width 2))]
+                    center-x (and (>= local.x -1) (< local.x 1))
+                    center-y (and (>= local.y -1) (< local.y 1))
+                    center-z (and (>= local.z -1) (< local.z 1))
+                    axis (cond (and center-y center-z) (if (< local.x 0) 1 0)
+                               (and center-x center-z) (if (< local.y 0) 3 2)
+                               :else (if (< local.z 0) 5 4))
+                    linked (= (array/nth links (+ (* room-index 6) axis)) 1)
+                    active (> (array/sum (array/slice links (* room-index 6) 6)) 0)]
+               (if (or (and (and center-x center-y) (and center-z active))
+                       (and linked (or (and center-x center-y)
+                                       (or (and center-x center-z) (and center-y center-z))))) 1 0)))
+           (array/range (* (* side side) side) :type int))))
+
+  ; Random-selection edits choose whole blocks, as the source does.
+  (defn selected-edit :context value [(voxels : (array int)) (side : int)
+                                      (seed : int) (operation : int) (chance : float) (block-size : int)]
+    (let* [edited (edit-cells voxels side seed operation)]
+      (map (fn [(index : int)]
+             (let* [p (cell index side)
+                    block [(floor (/ p.x block-size)) (floor (/ p.y block-size)) (floor (/ p.z block-size))]
+                    key (int (+ (+ (* block.x (* side side)) (* block.y side)) block.z))]
+               (if (< (random-at seed key) chance) (array/nth edited index) (array/nth voxels index))))
+           (array/range (* (* side side) side) :type int))))
+
+  ; Normalized architectural seeds: recursive cubic holes, a beam lattice,
+  ; stepped towers, or concentric cubic shells with three crossing passageways.
+  (defn structure :context value [(side : int) (seed : int) (kind : int)]
+    (map (fn [(index : int)]
+           (let* [p (cell index side)
+                  sample (* (+ p [0.5 0.5 0.5]) (/ 24.0 side))
+                  centered (- sample [12 12 12])
+                  distance (max (abs centered.x) (max (abs centered.y) (abs centered.z)))
+                  filled
+                    (cond
+                      (= kind 0)
+                        (let* [digits (* p (/ 27.0 side))]
+                          (= (array/sum
+                               (map (fn [(level : int)]
+                                      (let* [scale (cond (= level 0) 1 (= level 1) 3 :else 9)
+                                             middle (+ (+ (if (= (mod (floor (/ digits.x scale)) 3) 1) 1 0)
+                                                           (if (= (mod (floor (/ digits.y scale)) 3) 1) 1 0))
+                                                        (if (= (mod (floor (/ digits.z scale)) 3) 1) 1 0))]
+                                        (if (>= middle 2) 1 0)))
+                                    (array/range 3 :type int))) 0))
+                      (= kind 1)
+                        (>= (+ (+ (if (< (abs (- (mod sample.x 6) 3)) 1.1) 1 0)
+                                   (if (< (abs (- (mod sample.y 6) 3)) 1.1) 1 0))
+                                (if (< (abs (- (mod sample.z 6) 3)) 1.1) 1 0)) 2)
+                      (= kind 2)
+                        (let* [column (int/div (int sample.x) 8)
+                               row (int/div (int sample.z) 8)
+                               height (+ 9 (* 15 (random-at seed (+ (* column 3) row))))
+                               inset (+ 0.5 (* 0.55 (floor (/ sample.y 4))))
+                               width (- 4 inset)]
+                          (and (< sample.y height)
+                               (and (< (abs (- (mod sample.x 8) 4)) width)
+                                    (< (abs (- (mod sample.z 8) 4)) width))))
+                      :else
+                        (and (< (mod distance 4) 1.2)
+                             (not (or (and (< (abs centered.x) 2) (< (abs centered.y) 2))
+                                      (or (and (< (abs centered.y) 2) (< (abs centered.z) 2))
+                                          (and (< (abs centered.x) 2) (< (abs centered.z) 2)))))))]
+             (if filled 1 0)))
+         (array/range (* (* side side) side) :type int)))
+
+  ; One shared book supplies both the graph's labels and its ordered command lists.
+  (defn recipe-book :context value []
+    (list {:name "0 · Labyrinth" :steps (list "maze")}
+          {:name "1 · Porous citadel" :steps (list "carve-dense" "mirror-x" "mirror-z" "mirror-y")}
+          {:name "2 · Hanging galleries" :steps (list "carve-dense" "slice-y" "mirror-xz")}
+          {:name "3 · Cubic coral" :steps (list "carve-dense" "edge" "wire")}
+          {:name "4 · Menger sanctuary" :steps (list "menger")}
+          {:name "5 · Broken scaffold" :steps (list "lattice" "carve-light" "mirror-xz")}
+          {:name "6 · Terraced towers" :steps (list "terraces" "mirror-xz")}
+          {:name "7 · Nested vaults" :steps (list "vaults" "carve-light" "mirror-xz")}))
+
+  (defn command :context value [(voxels : (array int)) (side : int) (seed : int) (operation : text)]
+    (let* [step (cond (equal? operation "remove-128") 128 (equal? operation "remove-64") 64
+                      (equal? operation "remove-32") 32 (equal? operation "remove-16") 16
+                      (equal? operation "remove-8") 8 (equal? operation "remove-4") 4
+                      (equal? operation "remove-2") 2 :else 0)]
+      (cond
+        (equal? operation "menger") (structure side seed 0)
+        (equal? operation "lattice") (structure side seed 1)
+        (equal? operation "terraces") (structure side seed 2)
+        (equal? operation "vaults") (structure side seed 3)
+        (equal? operation "carve-dense")
+          (fold [carved voxels] [scale (list 8 4 2)]
+            (carve carved side seed scale 1.0 0.82 0.0))
+        (equal? operation "carve-light") (carve voxels side seed 4 0.7 0.85 0.0)
+        (> step 0) (carve voxels side seed step 0.25 (if (= step 4) 0.35 0.5) (if (= step 4) -0.4 0.0))
+        (equal? operation "remove")
+          (fold [carved voxels] [scale (list 64 32 16 8 4)]
+            (carve carved side seed scale
+                   (cond (= scale 64) 0.5 (= scale 32) 0.4 (= scale 16) 0.3 (= scale 8) 0.2 :else 0.01)
+                   (if (= scale 4) 0.2 0.5) 0.0))
+        (equal? operation "maze")
+          (if (and (>= side 8) (= (mod side 4) 0)) (maze-volume side seed)
+              (error "E_MAZE_SIZE" "Maze resolution must be a multiple of four, at least eight."))
+        (equal? operation "edge-random") (selected-edit voxels side seed 5 0.5 32)
+        (equal? operation "wire-random") (selected-edit voxels side seed 4 0.25 32)
+        (equal? operation "hollow-random") (selected-edit voxels side seed 3 0.25 32)
+        (equal? operation "slice-x-random") (selected-edit voxels side seed 6 0.25 72)
+        (equal? operation "slice-y-random") (selected-edit voxels side seed 7 0.25 32)
+        (equal? operation "slice-z-random") (selected-edit voxels side seed 8 0.25 72)
+        (equal? operation "reset") (array/int (* (* side side) side) 1)
+        :else (edit-volume voxels side seed operation))))
+
+  (defn build-volume :context value [(side : int) (seed : int) (recipe : (list text))]
+    (let* [cooked (fold [state {:voxels (array/int (* (* side side) side) 1) :seed seed}]
+                        [operation recipe]
+                    {:voxels (command state.voxels side state.seed operation)
+                     :seed (+ state.seed 7919)})]
+      cooked.voxels))
+
+  (graph volume :context host [(resolution : int 24) (seed : int 17)]
+    (let* [side (max 2 resolution)
+           ; Scrub 0–7: Labyrinth, Citadel, Galleries, Coral, Menger, Scaffold, Towers, Vaults.
+           recipe-switch 1
+           recipes (recipe-book)
+           selected (nth recipes (max 0 (min (- (count recipes) 1) recipe-switch)))
+           recipe-name selected.name
+           ; The selected command list is editable through the corresponding recipe-book branch.
+           recipe selected.steps
+           voxels (build-volume side seed recipe)]
+      {:side side :seed seed :name recipe-name :voxels voxels}))
+
+  ; Six outward-wound unit quads. Only faces next to empty space are emitted.
+  (graph sculpture :context sop
+    (let* [volume (ref volume)
+           side volume.side
+           directions (list [1 0 0] [-1 0 0] [0 1 0] [0 -1 0] [0 0 1] [0 0 -1])
+           corners (list [1 0 0] [1 1 0] [1 1 1] [1 0 1]
+                                     [0 0 1] [0 1 1] [0 1 0] [0 0 0]
+                                     [0 1 1] [1 1 1] [1 1 0] [0 1 0]
+                                     [0 0 0] [1 0 0] [1 0 1] [0 0 1]
+                                     [1 0 1] [1 1 1] [0 1 1] [0 0 1]
+                                     [0 0 0] [0 1 0] [1 1 0] [1 0 0])
+           faces (array/compact
+                   (map (fn [(face : int)]
+                          (let* [index (int/div face 6)
+                                 p (cell index side)
+                                 direction (nth directions (mod face 6))]
+                            (if (and (= (array/nth volume.voxels index) 1)
+                                     (= (occupied volume.voxels side (+ p direction)) 0)) 1 0)))
+                        (array/range (* (* side side) (* side 6)) :type int)))
+           face_count (array/count faces)
+           vertices (array/range (* face_count 4) :type int)
+           positions (map (fn [(vertex : int)]
+                            (let* [face (array/nth faces (int/div vertex 4))
+                                   p (cell (int/div face 6) side)
+                                   corner (nth corners (+ (* (mod face 6) 4) (mod vertex 4)))]
+                              (* (- (+ p corner) [(/ side 2) (/ side 2) (/ side 2)]) (/ 6.0 side)))) vertices)
+           normals (map (fn [(vertex : int)]
+                          (nth directions (mod (array/nth faces (int/div vertex 4)) 6))) vertices)
+           colors (map (fn [(normal : vec3)]
+                         ; Axis palette from createColors: yellow, cyan, magenta.
+                         (cond (> (abs normal.x) 0) [0.95 0.85 0.12]
+                               (> (abs normal.y) 0) [0.12 0.85 0.9]
+                               :else [0.9 0.16 0.65])) normals)
+           mesh (sop/mesh :points (exact positions) :vertex_points (exact vertices)
+                         :primitive_offsets (exact (map (fn [(face : int)] (* face 4)) (array/range (+ face_count 1) :type int)))
+                         :kinds (exact (array/int face_count 0)))
+           shaded (sop/with_attr mesh "N" (exact normals) :owner "point" :type vec3)]
+      (sop/with_attr shaded "Cd" (exact colors) :owner "point" :type vec3)))
+
+  (graph scene :context scene
+    (let* [sculpture (scene/geometry (ref sculpture) :name "IsoGrid")
+           camera (scene/camera :eye [10 8 10] :target [0 0 0] :fov 36 :follow_viewport true)
+           light (scene/light :shape "Directional" :translate [6 10 8] :intensity 1.8)]
+      (scene/root (scene/merge sculpture camera light) :camera camera)))
+
+  (graph editor :context editor
+    (let* [preview (ui/viewport (ref scene))
+           network (ui/graph "volume" :focus true)
+           inspector (ui/inspector :of network)]
+      (ui/workspace (ui/split "horizontal" preview
+                                  (ui/split "vertical" network inspector) :second_size 400))))
+
+  (graph settings :context settings
+    (settings/config :title "IsoGrid · voxel sculpture" :width 1280 :height 900)))

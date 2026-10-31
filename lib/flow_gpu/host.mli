@@ -17,6 +17,14 @@ val resident : fast:bool -> t -> Flow_ir.Core_exec.resident
     their buffers, placeholders and counts on the host between drawings (64 calls a site, 32 sites)
     and size its arrays by them; a count that outgrew one reruns the loop exactly. *)
 
+val show :
+  t -> Flow_ir.Packed.t -> live:Input.t -> Flow_ir.Gpu.value option option
+(** A drawing's mark attribute over the arrays its resident fold kept after the loop
+    ({!Flow_ir.Core_exec.resident}'s [settle]), dispatched over their buffers with the device count:
+    its output, which {!output} resolves and which carries a count record. [None] when it reads no
+    kept array (the ordinary display path), [Some None] when it reads one but cannot run on this
+    host (the CPU, after the arrays are read back). *)
+
 val normals :
   t ->
   positions:Ogpu.Backend.buffer ->

@@ -508,8 +508,8 @@ let resident_fold ?(n = 9000) ?(levels = 3) ?(keep = "(>= (int/mod (int i) 3) 1)
         {
           r with
           invoke =
-            (fun p ~live ->
-              let v = r.invoke p ~live in
+            (fun p args ~locals ~live ->
+              let v = r.invoke p args ~locals ~live in
               if v <> None then incr ran;
               v);
         }

@@ -66,7 +66,9 @@ Immutable frame facts, including time, permit resident folds on both targets;
 they disable reuse of loop results across frames, not device residency.
 A resident fold sizes its arrays from earlier draws' counts; one a count may have outgrown
 raises `Core_exec.Resident_overflow` before the host reads it, and the loop runs again from
-its writes' values before it (`specification/gpu-codegen.md`, slots), on both targets.
+its writes' values before it (`specification/gpu-codegen.md`, slots), on both targets. When only
+counts, ranges over a count and regions read its arrays afterwards, they stay on the device until
+the draw ends (`Core_exec.resident_tail`, `specification/flow.md`), on both targets.
 
 A **region** is a pure data loop over packed arrays. It has explicit input
 buffers, captured uniforms, an iteration domain, a checked body and output
@@ -1103,6 +1105,7 @@ operation. A user function/macro row is not a new runtime primitive.
 | `-` | primitive | `-` |
 | `/` | primitive | `/` |
 | `<` | primitive | `<` |
+| `<=` | primitive | `<=` |
 | `=` | primitive | `=` |
 | `>` | primitive | `>` |
 | `>=` | primitive | `>=` |
@@ -1147,6 +1150,8 @@ operation. A user function/macro row is not a new runtime primitive.
 | `exact` | compiler rule | Identity precision boundary; web placement refuses an in-frame GPU readback. |
 | `exp` | primitive | `exp` |
 | `filter` | compiler rule | Inline predicate, ordered loop, `truthy`, `sequence/get`, `sequence/build`, copying retained items. Packed output retains packed layout. |
+| `field` | compiler rule | Inline checked definition: `field-slot`, `floor`, `min`, arithmetic. |
+| `field-slot` | compiler rule | Inline checked definition: `noise3`, `round`, arithmetic. |
 | `finish` | compiler rule | Inline checked definition: ordered field updates, `array/concat`, `array/vec3`, list access/build, `coerce`, branches. |
 | `floor` | primitive | `floor` |
 | `fn` | compiler rule | Specialize and inline the checked body at each call site; retain capture and call identity. |
@@ -1207,6 +1212,7 @@ operation. A user function/macro row is not a new runtime primitive.
 | `reverse` | compiler rule | Ordered loop, `sequence/build`, `sequence/get` at length minus one minus index. |
 | `rim` | compiler rule | Expand image-body macro: `pow`, `mod`, `abs`, `max`, arithmetic. |
 | `ring` | compiler rule | Expand the shader macro or specialize the checked definition at its resolved call site; an instantiated SOP body is refused on web. |
+| `round` | primitive | `round` |
 | `scheme-hash` | compiler rule | Inline checked definition: `int/mul`, `int/and`, numeric conversion. |
 | `sin` | primitive | `sin` |
 | `sop/box` | refused on web | A geometry factory in a definition counted by the census, outside the 2D target. |

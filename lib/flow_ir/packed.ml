@@ -570,6 +570,42 @@ let trace_hit traced j id q =
       traced.(j) <- Some (id, q, h);
       h
 
+(* A chunk's register banks, every register for each lane of a block: each domain keeps the last
+   few it returned and hands one out again, zeroed as a fresh one is, so a kernel run each frame
+   allocates no scratch. *)
+let registers_key = Domain.DLS.new_key (fun () -> ref [])
+
+let take_registers n =
+  let free = Domain.DLS.get registers_key in
+  match List.find_opt (fun (integer, _) -> Array.length integer >= n) !free with
+  | Some ((integer, floats) as banks) ->
+      free := List.filter (fun b -> b != banks) !free;
+      Array.fill integer 0 n 0;
+      Array.fill floats 0 n 0.;
+      (integer, floats)
+  | None -> (Array.make n 0, Array.make n 0.)
+
+(* ponytail: four banks a domain, the largest kept; a pool by size class if kernels of very
+   different sizes alternate *)
+let give_registers integer floats =
+  let free = Domain.DLS.get registers_key in
+  free :=
+    List.take 4
+      (List.sort
+         (fun (a, _) (b, _) -> compare (Array.length b) (Array.length a))
+         ((integer, floats) :: !free))
+
+(* Noise tables are immutable and shared between domains: one per seed, the last 16 seeds. *)
+let noise_tables = Atomic.make []
+
+let noise_table seed =
+  match List.assoc_opt seed (Atomic.get noise_tables) with
+  | Some n -> n
+  | None ->
+      let n = Rays_math.Noise.create seed in
+      Atomic.set noise_tables (List.take 16 ((seed, n) :: Atomic.get noise_tables));
+      n
+
 let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~seed (t : t) ~live =
   let carried =
     Array.fold_left
@@ -772,10 +808,8 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
     block_layout ~count ~limit:(max 64 (min 1024 (65536 / max 1 (Array.length t.code))))
   in
   let dependent_flags = if count = 0 then [||] else Core.Region.dependent_flags t in
-  let chunk chunk =
-    let integer = Array.make (Array.length t.code * block_size) 0
-    and floats = Array.make (Array.length t.code * block_size) 0.
-    and traced = Array.make block_size None in
+  let chunk_on integer floats chunk =
+    let traced = Array.make block_size None in
     let texts = Array.make (!text_count * block_size) "" in
     let loops =
       if carried = 0 then None
@@ -829,7 +863,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
       match Hashtbl.find_opt tables seed with
       | Some n -> n
       | None ->
-          let n = Rays_math.Noise.create seed in
+          let n = noise_table seed in
           Hashtbl.add tables seed n;
           n
     in
@@ -1459,6 +1493,14 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
           if t.result <> Collect then initialized := true
         done
     done
+  in
+  let chunk chunk =
+    let integer, floats = take_registers (Array.length t.code * block_size) in
+    match chunk_on integer floats chunk with
+    | () -> give_registers integer floats
+    | exception e ->
+        give_registers integer floats;
+        raise e
   in
   (* A Cartesian projection repeats one checked row. Its unused outer input
      is concrete integers or a checked range; removing those loads cannot hide
@@ -3497,14 +3539,78 @@ module Host = struct
               Lru.Identity_list.add cache values floats;
               floats)
 
-  let device_inputs (values : value_inputs) =
-    let floats = function
-      | E.Float_array values | Vec2_array values | Vec3_array values | Vec4_array values ->
-          Some values
-      | E.Int_array [||] -> Some [||]
-      | E.Int_array values -> Some (int_floats values)
+  let floats = function
+    | E.Float_array values | Vec2_array values | Vec3_array values | Vec4_array values ->
+        Some values
+    | E.Int_array [||] -> Some [||]
+    | E.Int_array values -> Some (int_floats values)
+    | _ -> None
+
+  type argument = Argument of int | Argument_range of int * int * int
+
+  type plan = {
+    plan_sources : argument array;
+    plan_uniforms : int array;
+    plan_frames : (int * (Input.t -> float)) array;
+  }
+
+  (* Worked out once on the unbound region: what [prepare_values] would make of each source and
+     uniform is one Core argument (or a range of one's count), so a caller with the arguments in hand
+     makes the inputs without binding or evaluating anything. *)
+  let plan (t : t) =
+    let argument = function
+      | E.Source ("$core/argument", _, [ ("index", E.Int i) ]) -> Some i
       | _ -> None
     in
+    try
+      if t.iteration <> Zip || t.count <> None || t.sources = [||] then raise Exit;
+      let plan_sources =
+        Array.map
+          (fun (r, term) ->
+            match shape r term with
+            | Value v -> (
+                match argument v with Some i -> Argument i | None -> raise Exit)
+            | Range (v, mul, div) -> (
+                match argument v with
+                | Some i -> Argument_range (i, mul, div)
+                | None -> raise Exit)
+            | Opaque _ -> raise Exit)
+          t.sources
+      and plan_uniforms =
+        Array.map
+          (fun v ->
+            let v =
+              match v with
+              | E.Residual r -> (
+                  match shape r (E.Residual.residual_view r).term with
+                  | Value v -> v
+                  | _ -> raise Exit)
+              | v -> v
+            in
+            match argument v with Some i -> i | None -> raise Exit)
+          t.uniforms
+      and plan_frames =
+        Array.of_list
+          (List.filter_map Fun.id
+             (List.mapi
+                (fun i instruction ->
+                  match unguarded instruction with
+                  | Frame "t" -> Some (i, fun (live : Input.t) -> live.t)
+                  | Frame name | Int_frame name -> (
+                      match Flow.Op.find name Flow.Context.value with
+                      | Some op ->
+                          Some
+                            ( i,
+                              fun live ->
+                                V.num (op.body ~live ~node:(fun _ _ -> raise Unsupported) []) )
+                      | None -> raise Exit)
+                  | _ -> None)
+                (Array.to_list t.code)))
+      in
+      Some { plan_sources; plan_uniforms; plan_frames }
+    with Exit -> None
+
+  let device_inputs (values : value_inputs) =
     ({
        arrays = Array.map (fun v -> Option.get (floats v)) values.arrays;
        uniforms =

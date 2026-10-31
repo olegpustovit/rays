@@ -885,6 +885,12 @@ type context = {
   fast : bool;
   mutable remembered : bool;
   mutable resident : bool;
+  mutable tail_ranges : (int * (int * int)) list;
+      (* after a resident loop whose arrays stay (Core_exec.resident_tail), its ranges' sources and
+         divisors *)
+  mutable kept : bool;  (* a resident loop keeps its arrays: the frame's end closes the fold *)
+  mutable loop_arrays : string;
+      (* inside a resident loop, its array locals: a slot none holds is taken again *)
   kernel : int -> string option;
 }
 
@@ -1102,6 +1108,12 @@ and statement ctx depth (s : C.statement) =
   | Assign (n, Prim (Coerce (Flow.Ty.Array _ as ty), [ (_, a) ])) when ctx.resident ->
       ctx.async <- true;
       line "%s%s = await rt.resident.prim('coerce', %s, %s);" at (local n) (ty_json ty) (local a)
+  (* a range of a kept array's count: the index buffer the fold binds *)
+  | Assign (n, Prim (Array_range, _)) when List.mem_assoc n ctx.tail_ranges ->
+      ctx.async <- true;
+      let source, div = List.assoc n ctx.tail_ranges in
+      line "%s%s = await rt.resident.range(%s, %d, %s);" at (local n) (local source) div
+        (match ctx.program.locals.(n) with Flow.Ty.Array Int -> "'int'" | _ -> "'float'")
   | Assign (n, Prim (Array_count, [ (_, a) ])) when ctx.resident ->
       ctx.async <- true;
       line "%s%s = await rt.resident.settle(%s); %s = rt.array_count(%s);" at (local a) (local a)
@@ -1236,9 +1248,10 @@ and statement ctx depth (s : C.statement) =
             (String.concat ", " (List.map local args))
             plan
         else
-          line "%s%s = await rt.invoke(%d, [%s]%s);" at (local result) region
+          line "%s%s = await rt.invoke(%d, [%s]%s%s);" at (local result) region
             (String.concat ", " (List.map local args))
             plan
+            (if ctx.resident && dynamic then ", [" ^ ctx.loop_arrays ^ "]" else "")
       end
 
 and binding_plan ?(fast = false) ?kernel packed =
@@ -1368,6 +1381,9 @@ and frame_result ?store ?(fast = false) ?(kernel = fun _ -> None) ?(gpu = fun _ 
       fast;
       remembered = false;
       resident = false;
+      tail_ranges = [];
+      kept = false;
+      loop_arrays = "";
       kernel;
     }
   in
@@ -1384,15 +1400,37 @@ and frame_result ?store ?(fast = false) ?(kernel = fun _ -> None) ?(gpu = fun _ 
         Printf.bprintf body
           "    const r%d = [%s];\n    for (;;) {\n    rt.resident.begin();\n    try {\n" s.id
           writes;
+        let arrays = ref [] in
+        C.iter (fun s -> arrays := C.writes s @ !arrays) [ s ];
+        ctx.loop_arrays <-
+          names
+            (Array.of_list
+               (List.filter
+                  (fun n -> match program.locals.(n) with Flow.Ty.Array _ -> true | _ -> false)
+                  (List.sort_uniq compare !arrays)));
         ctx.resident <- true;
         statement ctx 3 s;
         ctx.resident <- false;
+        (* its arrays stay on the device when what follows only ranges over and draws them *)
+        let tail = Flow_ir.Core_exec.resident_tail program s ~mark:ctx.gpu in
+        Option.iter
+          (fun (_, ranges) ->
+            ctx.tail_ranges <- ranges @ ctx.tail_ranges;
+            ctx.kept <- true)
+          tail;
+        let ending =
+          match tail with
+          | Some _ -> "      await rt.resident.keep();\n"
+          | None ->
+              Printf.sprintf "      [%s] = await rt.resident.finish([%s]);\n" (names live)
+                (names live)
+        in
         Printf.bprintf body
-          "      [%s] = await rt.resident.finish([%s]);\n\
+          "%s\
           \      break;\n\
           \    } catch (e) { if (e !== rt.resident.overflow) throw e; [%s] = r%d; }\n\
           \    finally { rt.resident.end(); } }\n"
-          (names live) (names live) writes s.id
+          ending writes s.id
     | _ -> statement ctx depth s
   in
   (* A drawing's loop memory, as native [Core_exec.prepare ~remember_loops]: a top-level loop or
@@ -1449,7 +1487,9 @@ and frame_result ?store ?(fast = false) ?(kernel = fun _ -> None) ?(gpu = fun _ 
     "  } catch (e) {\n\
     \    if (e !== null && typeof e === \"object\" && e.statement === undefined) e.statement = at;\n\
     \    throw e;\n\
-    \  }\n";
+    \  }";
+  (* a fold that kept its arrays closes as the frame ends *)
+  Buffer.add_string out (if ctx.kept then " finally { rt.resident.close(); }\n" else "\n");
   (match Array.to_list program.results with
   | [ r ] -> Printf.bprintf out "  return %s;\n" (local r)
   | rs -> Printf.bprintf out "  return [%s];\n" (String.concat ", " (List.map local rs)));
