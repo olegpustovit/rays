@@ -2798,6 +2798,10 @@ Run 2026-11-01 at 17752691, load average 2 to 16, with the owner VM running. The
 - `bench_isogrid --bench 64`: exit 0; payload 0, bounds 24,576 bytes per flip (`s11-bench-64.log`)
 - `bench_isogrid --plateau 64 96 64`: exit 0, 345 s (`s11-plateau-64.log`)
 
+Rerun on `ebe99e06`, the commit that changed only the sketch comment and its hash pins, with Dune's cache kept as `AGENTS.md` requires, so actions unaffected by that edit may be reused: `--ship` exit 0, 27 s; `@runtest-native` exit 0, 41 s; `@smoke-all` exit 0, 111 s; `@qualification-scale` exit 0, 133 s; `rays check` exit 0; the bounded open exit 0, 0.90 s; `--plateau 64 96 64` exit 0, 347 s, an uncached process, with 129,348,298 words warm and 129,348,242 final, live handles 967 and 967.
+
+`@lib/rays_editor/native_qualification/test_isogrid_viewport_all`, now in `@qualification-scale`, compares all eight recipes: pixel difference 0 and publication/display payload 0/0 on each, 6 s (`s11-viewport-all-recipes.log`).
+
 64³ retention, strict comparison unchanged: workload words 129,348,269 warm, 129,348,213 final, +0 a cycle over the 8 measured cycles, live handles 967 and 967. Evidence reaches its plateau at warm cycle 10 of the fixed 96-flip warmup, because the caches fill first. Three causes were found: `Workspace_gpu.shown` kept entries until 64 (`badbf64e`), each domain's free-name memo kept dead cells until a resize (`17752691`), and the last 4 words a flip were `bench_isogrid`'s own `geometry_ids` table, now removed. `buffer_creations` at 64³ is reported as turnover (2,331 to 3,859), since recipes outgrow the session and pool budgets; live handles bound the buffers, and 24³ keeps it strict.
 
 The native corrections: `test_workspace_gpu_native` expects 63 readbacks for the 7x3 image, because Qualification no longer has a size floor. `test_chain_gpu_native`, `test_chain_frames_native` and `test_scrub_gpu_native` set Qualification, because they check device contracts.
@@ -2820,7 +2824,7 @@ Status words: Met means the named evidence covers the whole requirement; Partial
 | Cold and warm edits, verified geometry | S0, S5 | `verified_digest` on every edit in `s5-editor-64.log` and the S10 benches | Met with the stated float32 Cd exception (digest differs from the walker, verified as its conversion) |
 | Exact CPU behaviour and errors past the prefix | S1 to S3 | three unedited contract tests; `@tools/verify-static` over 43 sketch files (S3 text) | Met; `@qualification-scale` exit 0 |
 | Bounded caches under repeated changes | S5, S10 | 24³ 200 flips: `s10-final-selector-gate.log` retained words 15,590,099 (final) against 15,591,473 (warm); 64³ `--no-device` passes `s10-final-plateau-64-cpu.log` | Met: strict at 24³ and 64³ (`s11-plateau-64.log`, +0 a cycle); `buffer_creations` is reported as turnover at 64³ |
-| Original colours and quads render | S9 | `s9-viewport.log` pixel difference 0, Maze and Coral | Met for the plan (maze and one carved recipe); the other six recipes are not compared by pixel |
+| Original colours and quads render | S9 | `s11-viewport-all-recipes.log` pixel difference 0 on all eight recipes | Met |
 | Compiler chooses placement | S10 | `s10-production-flips-64.log`, `s10-final-placement.log` reasons | Met; cold cook is CPU and the CPU sink is a minimum |
 | Payload stays resident | S8, S9 | payload 0 in `s8-resident-64.log`, `s10-production-flips-64.log` | Met: `s11-bench-64.log` reruns the sequence with payload 0; the old 11,010,252 bytes predate the display fixes |
 | Dynamic topology | S8 | `s8-empty-resident.log` (counted replays, no publication payload); empty, growth and overflow cases (S8 text) | Met |

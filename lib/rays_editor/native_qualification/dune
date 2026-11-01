@@ -75,6 +75,14 @@
 
 (rule
  (enabled_if (= %{system} macosx))
+ (alias test_isogrid_viewport_all)
+ (deps ../../../sketches/isogrid.rays)
+ (action (run %{exe:test_isogrid_viewport.exe} %{dep:../../../sketches/isogrid.rays} --all-recipes)))
+
+(alias (name qualification-scale) (deps (alias test_isogrid_viewport_all)))
+
+(rule
+ (enabled_if (= %{system} macosx))
  (alias test_placement_native)
  (deps ../../../sketches/isogrid.rays)
  (action (run %{exe:test_placement_native.exe} %{dep:../../../sketches/isogrid.rays})))

@@ -1,0 +1,16 @@
+IsoGrid recipe 0: picking materialises 216004 payload bytes; repeated read +0
+IsoGrid recipe 0: 3000 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 1: inspection materialises 1960704 payload bytes; repeated read +0
+IsoGrid recipe 1: 13616 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 2: inspection materialises 1630368 payload bytes; repeated read +0
+IsoGrid recipe 2: 11322 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 3: inspection materialises 1708704 payload bytes; repeated read +0
+IsoGrid recipe 3: 11866 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 4: inspection materialises 1772928 payload bytes; repeated read +0
+IsoGrid recipe 4: 12312 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 5: inspection materialises 878976 payload bytes; repeated read +0
+IsoGrid recipe 5: 6104 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 6: inspection materialises 517248 payload bytes; repeated read +0
+IsoGrid recipe 6: 3592 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 7: inspection materialises 603648 payload bytes; repeated read +0
+IsoGrid recipe 7: 4192 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises

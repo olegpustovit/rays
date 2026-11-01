@@ -339,7 +339,8 @@ let () =
   Fun.protect
     ~finally:(fun () -> Gpu.close gpu)
     (fun () ->
-      Gpu.with_backend ~fast:true gpu (fun config -> List.iter (run gpu config workspace) [ 0; 3 ]));
+      Gpu.with_backend ~fast:true gpu (fun config -> List.iter (run gpu config workspace)
+            (if Array.mem "--all-recipes" Sys.argv then [ 0; 1; 2; 3; 4; 5; 6; 7 ] else [ 0; 3 ])));
   assert (Ogpu.Impl.live_handles () = baseline);
   assert (
     Editor_document.Lowering.sha256 (In_channel.with_open_bin file In_channel.input_all) = frozen)
