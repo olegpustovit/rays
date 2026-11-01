@@ -1321,7 +1321,8 @@ let () =
     visit root;
     !count
   in
-  check (attributes compiled = 1) "static deferred writes did not share one attribute program";
+  (* the mesh's record is the one program: with a device owner its writes are its fields *)
+  check (attributes compiled = 0) "static deferred writes did not fold into their mesh's program";
   let moving =
     source
       {|(sop/with_attr colored "heat"

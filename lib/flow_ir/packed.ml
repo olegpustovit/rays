@@ -1517,6 +1517,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
         give_registers integer floats;
         raise e
   in
+  let chunk = E.interruptible chunk in
   (* A Cartesian projection repeats one checked row. Its unused outer input
      is concrete integers or a checked range; removing those loads cannot hide
      a type or finite-value error. Other programs use the block loop. *)
@@ -3043,7 +3044,7 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
               collect_product;
             }
           in
-          let chunk = run_chunk r in
+          let chunk = E.interruptible (run_chunk r) in
           (match t.result with
           | Collect -> Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(chunks - 1) chunk
           | Sum _ | Accumulate _ ->

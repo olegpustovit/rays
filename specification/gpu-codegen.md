@@ -165,8 +165,11 @@ output's floats) each route keeps the cheaper of two measured cook rates (second
 cook pays one-time preparation). The CPU alternative adds the upload of the mesh it displays and the device
 one the host materialisation known CPU readers force, both priced by `Cost.readback` at the site's last
 output size, and `Cost.choose` decides with a recorded reason. Unknown consumers stay CPU
-(`missing_consumer`); a class without both routes runs CPU, then device (its mesh is the real result), until
-it has numbers (`no_cost_evidence`). A live `sop/mesh` (its record reads a frame fact: `t`, the pointer, any input) with no CPU reader starts on the device instead, and samples the CPU only if the device's cook is under 1 ms (`live_device`): two CPU samples of a mesh that recooks every frame can freeze the window for minutes. A write that reads no attribute and deletes none forwards its input
+(`missing_consumer`); a site without both routes runs the device twice (its mesh is the real result), then samples the CPU
+under `Cost.probe_budget` (twice the device's cost, at least 20 ms), because a CPU cook can cost minutes where
+the device takes milliseconds. A sample past its budget is abandoned through `Eval.with_interrupt`, which
+reaches worker chunks, is recorded at the budget and the frame cooks on the device; it costs a few device
+cooks, once. A body that fails on the device falls back to the CPU. Until it has numbers it reports (`no_cost_evidence`). A write that reads no attribute and deletes none forwards its input
 unread in the consumer census. A displayed root with a device owner has no CPU reader unless probed; a
 write beside host positions counts one reader, and beside resident positions its CPU alternative is charged the
 measured host display sink, so mesh and writes cannot split into a mixed mesh the display must convert.
@@ -190,10 +193,10 @@ consumers learn capacities and replay the complete producer chain on overflow.
 Host mesh eligibility uses a nonmaterialising count check, which settles work
 without switching into the post-fold phase or disabling later capacity history.
 
-A frame-driven chain of point writes over a `sop/mesh` nothing else reads is folded into the mesh's
+A chain of point writes over a `sop/mesh` nothing else reads is folded into the mesh's
 record (`Lower.fold_mesh_writes`), so their maps share its producers. As separate writes each would
 evaluate a captured compacted list on the CPU (`Packed.Host.prepare`) and upload it every frame.
-Static chains keep their own nodes and the prefix those cache.
+A static mesh under a frame-driven write keeps its own node, so it does not cook again each frame.
 
 Sibling Zip regions with unknown counts can fuse when their ordered immutable
 source sequences agree. Direct source identity or the existing residual

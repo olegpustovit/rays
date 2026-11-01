@@ -143,6 +143,10 @@ module Display_sink : sig
   (** The cheaper rate of the two [(size, seconds per unit)] samples nearest [size], priced at
       [size]: a route's first cook pays one-time preparation. [None] below two samples. *)
 
+  val device_first : Flow_ir.Gpu.backend -> string -> device_seconds:float option -> bool
+  (** Whether a write site with no CPU measurement stays on the device: for its first two priced
+      cooks, or while the device cannot price it. False: sample the CPU under a budget. *)
+
   val cpu_write : Flow_ir.Gpu.backend -> string -> count:int -> float option
   (** The measured seconds of an attribute write site's CPU route at [count] elements. *)
 

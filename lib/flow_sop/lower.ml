@@ -489,8 +489,10 @@ let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
    its cook, the CPU alternative pays the display conversion of a host mesh and the device one the
    conversion of a resident mesh (both measured by the editor's preparation, {!observe_display}) and,
    with CPU readers, the host materialisation of its mesh, measured under the clock while the device
-   route is measured. The site runs on the CPU until it has two cooks, then on the device (its mesh is
-   the real result) until it has two, then [Flow_ir.Cost.choose] decides. The state is weakly keyed by
+   route is measured. The site runs on the device for two cooks (its mesh is the real result), then samples the CPU under
+   [Flow_ir.Cost.probe_budget], since a CPU cook can cost minutes where the device takes milliseconds. A
+   sample past its budget is abandoned, recorded at the budget (the CPU cost at least that) and the frame
+   cooks on the device: at most a few device cooks, once. Then [Flow_ir.Cost.choose] decides. The state is weakly keyed by
    the backend, so a closed owner's evidence goes with it. *)
 module Chain = struct
   type samples = { mutable cpu : (int * float) list; mutable device : (int * float) list }
@@ -571,20 +573,19 @@ module Chain = struct
 
   let priced = Attribute_kernel.Display_sink.priced
 
-  (* A live [sop/mesh] recooks every frame, and its CPU cook can cost seconds where the device takes
-     milliseconds: two CPU samples would freeze the window. It starts on the device and samples
-     the CPU only when the device's cook is small enough that the CPU's must be bearable too.
-     ponytail: a live mesh the CPU would win over 1 ms stays on the device, unmeasured;
-     a CPU cook that can be abandoned at the device's time would let it compare safely. *)
-  let bearable_device_seconds = 0.001
 
-  let stays_on_device samples =
-    match samples.device with
-    | [] | [ _ ] -> true
-    | (floats, per_float) :: _ -> per_float *. float floats > bearable_device_seconds
+  type route = Device | Cpu | Probe of float
 
-  let place ?(live = false) ~(gpu : Flow_ir.Gpu.config) ~profile ~clock ~owner ~readers () =
-    if gpu.policy = Flow_ir.Gpu.Qualification then (true, fun _ ~device:_ _ -> ())
+  type placed = {
+    route : route;
+    record : Rdk.Geometry.t -> device:bool -> float -> unit;
+    abandoned : unit -> unit;  (** A [Probe] ran past its budget. *)
+  }
+
+  let unplaced route = { route; record = (fun _ ~device:_ _ -> ()); abandoned = ignore }
+
+  let place ~(gpu : Flow_ir.Gpu.config) ~profile ~clock ~owner ~readers =
+    if gpu.policy = Flow_ir.Gpu.Qualification then unplaced Device
     else
       let site = String.concat "/" (fst owner) ^ "#" ^ String.concat "," (List.map string_of_int (snd owner)) in
       let report ~points reason cpu_seconds device_seconds =
@@ -605,22 +606,29 @@ module Chain = struct
                 Hashtbl.add state.sites site samples;
                 samples)
       in
+      let device_cost state samples floats =
+        let moved = Flow_ir.Cost.readback ~count:floats ~width:1 in
+        let rate r fallback = if r < infinity then r *. float floats else fallback in
+        let _, resident_sink =
+          Option.fold ~none:(infinity, infinity) ~some:Attribute_kernel.Display_sink.rates gpu.backend
+        in
+        Option.map
+          (fun s ->
+            s +. rate resident_sink 0.
+            +. if Option.value ~default:0 readers = 0 then 0. else rate state.materialise moved)
+          (priced samples.device floats)
+      in
       let decide state samples (floats, points) =
         let cpu_consumers = Option.value ~default:0 readers in
         Mutex.protect lock (fun () ->
             let moved = Flow_ir.Cost.readback ~count:floats ~width:1 in
             let rate r fallback = if r < infinity then r *. float floats else fallback in
-            let materialise = rate state.materialise moved in
-            let host_sink, resident_sink =
+            let host_sink, _ =
               Option.fold ~none:(infinity, infinity) ~some:Attribute_kernel.Display_sink.rates gpu.backend
             in
             let cpu_seconds =
               Option.map (fun s -> s +. rate host_sink moved) (priced samples.cpu floats)
-            and device_seconds =
-              Option.map
-                (fun s ->
-                  s +. rate resident_sink 0. +. if cpu_consumers = 0 then 0. else materialise)
-                (priced samples.device floats)
+            and device_seconds = device_cost state samples floats
             in
             let reason =
               Flow_ir.Cost.choose ~cpu_seconds ~device_seconds ~resident:false ~cpu_consumers
@@ -656,29 +664,36 @@ module Chain = struct
               if readers <> None then ignore (decide state samples (floats, points))
             end
       in
+      let placed route abandoned = { route; record; abandoned } in
       match (state, readers) with
       | None, _ ->
           report ~points:None No_cost_evidence None None;
-          (false, record)
+          placed Cpu ignore
       | _, None ->
           report ~points:None Missing_consumer None None;
-          (false, record)
-      | Some state, Some 0 when live && stays_on_device (evidence state) ->
-          report ~points:None Live_device None None;
-          (true, record)
+          placed Cpu ignore
       | Some state, Some _ -> (
           let samples = evidence state in
-          match Mutex.protect lock (fun () -> Hashtbl.find_opt state.last site) with
-          | None ->
+          let size = Mutex.protect lock (fun () -> Hashtbl.find_opt state.last site) in
+          match size with
+          | Some ((floats, _) as size) when List.length samples.device >= 2 ->
+              if List.length samples.cpu >= 2 then
+                placed (if Flow_ir.Cost.on_device (decide state samples size) then Device else Cpu) ignore
+              else
+                let budget =
+                  Flow_ir.Cost.probe_budget
+                    ~device_seconds:
+                      (Option.value ~default:0.
+                         (Mutex.protect lock (fun () -> device_cost state samples floats)))
+                in
+                placed (Probe budget) (fun () ->
+                    Mutex.protect lock (fun () ->
+                        let sample = (floats, budget /. float floats) in
+                        samples.cpu <- sample :: sample :: samples.cpu);
+                    ignore (decide state samples size))
+          | _ ->
               report ~points:None No_cost_evidence None None;
-              (false, record)
-          | Some size ->
-              if List.length samples.cpu < 2 then begin
-                report ~points:None No_cost_evidence None None;
-                (false, record)
-              end
-              else if List.length samples.device < 2 then (true, record)
-              else (Flow_ir.Cost.on_device (decide state samples size), record))
+              placed Device ignore)
 end
 
 
@@ -773,19 +788,19 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
           (not reference) && gpu.Flow_ir.Gpu.fast
           && List.mem operation [ "sop/mesh"; "sop/mesh_planes" ]
         in
-        let device, record =
+        let placed =
           if eligible then
-            Chain.place ~live:(operation = "sop/mesh" && E.frame_dependent data) ~gpu ~profile ~clock
+            Chain.place ~gpu ~profile ~clock
               ~owner:
                 (Option.fold ~none:([ operation ], []) ~some:Fun.id (Chain.site_of (E.Record args)))
-              ~readers:(Sop.Context.cpu_consumers context node_id) ()
-          else (false, fun _ ~device:_ _ -> ())
+              ~readers:(Sop.Context.cpu_consumers context node_id)
+          else Chain.unplaced Chain.Cpu
         in
-        let began = clock () and on_device = ref false in
+        let began = ref (clock ()) and on_device = ref false in
         let geometry id =
           Option.map (fun index -> geometries.(index)) (List.find_index (( = ) id) sources)
         in
-        let result =
+        let cooked device =
           if cancelled () then error ()
           else
             Result.bind program (fun program ->
@@ -907,8 +922,21 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
                           Error
                             (Diagnostic.error ~code:"E_TOPOLOGY_TYPE" "Mesh data must be a record.")))
         in
+        let result =
+          match placed.route with
+          | Device -> cooked true
+          | Cpu -> cooked false
+          | Probe budget -> (
+              let stop = !began +. budget in
+              match E.with_interrupt (fun () -> clock () > stop) (fun () -> cooked false) with
+              | Some result -> result
+              | None ->
+                  placed.abandoned ();
+                  began := clock ();
+                  cooked true)
+        in
         if eligible && not (cancelled ()) then
-          Result.iter (fun geometry -> record geometry ~device:!on_device (clock () -. began)) result;
+          Result.iter (fun geometry -> placed.record geometry ~device:!on_device (clock () -. !began)) result;
         Result.map (fun geometry -> Sop.Node.Build.{ geometry; instances = None }) result)
   in
   Sop.Node.Build.with_facts
@@ -1815,10 +1843,10 @@ let static_cpu_data data =
   && Attribute_kernel.context_reads data = Sop.Context.Dependencies.static
 
 
-(* A frame-driven chain of point writes over a [sop/mesh] that nothing else reads becomes fields of
-   the mesh's record, so one program builds them: a compacted face list their maps gather is one
-   producer on the device, rather than evaluated on the CPU and uploaded for each write. Everything
-   else keeps its nodes. A static chain keeps the cached prefix it has now (S10, isogrid.md). *)
+(* A chain of point writes over a [sop/mesh] that nothing else reads becomes fields of the mesh's
+   record, so one program builds them: a compacted face list their maps gather is one producer on the
+   device, rather than evaluated on the CPU and uploaded for each write. A static mesh under a
+   frame-driven write keeps its own node, or the mesh would cook again every frame. *)
 let fold_mesh_writes (plan : E.plan) =
   let nodes = Array.copy plan.nodes in
   let count = Array.length nodes in
@@ -1833,12 +1861,23 @@ let fold_mesh_writes (plan : E.plan) =
             done
         | _ -> ())
     nodes;
+  (* an earlier write [fold_writes] folded into a later one stays in the plan, unread: not a reader *)
+  let folded = Array.make count false in
+  Array.iter
+    (fun (n : E.node) ->
+      match List.assoc_opt fused_chain n.args with
+      | Some (E.List ids) ->
+          Array.iter
+            (function E.Int id when id >= 0 && id < count -> folded.(id) <- true | _ -> ())
+            ids
+      | _ -> ())
+    nodes;
   let note values =
     List.iter
       (fun id -> if id >= 0 && id < count then uses.(id) <- uses.(id) + 1)
       (List.sort_uniq Int.compare (List.concat_map Attribute_kernel.sources values))
   in
-  Array.iter (fun (n : E.node) -> note (List.map snd n.args)) nodes;
+  Array.iter (fun (n : E.node) -> if not folded.(n.id) then note (List.map snd n.args)) nodes;
   Array.iter (fun (i : E.instance) -> note (i.result :: List.map snd i.inputs)) plan.instances;
   let rec mesh_under id =
     if id < 0 || id >= count || uses.(id) <> 1 || templ.(id) then None
@@ -1876,7 +1915,8 @@ let fold_mesh_writes (plan : E.plan) =
             match mesh_under g with
             | Some mesh
               when List.for_all plain writes
-                   && List.exists (fun (_, _, values) -> E.frame_dependent values) writes
+                   && (E.frame_dependent (geometry_arrays_data mesh.args)
+                      || not (List.exists (fun (_, _, values) -> E.frame_dependent values) writes))
                    && not (List.exists (fun (_, _, values) -> E.state_dependent values) writes) ->
                 nodes.(id) <-
                   {
@@ -2557,16 +2597,16 @@ struct
             (not reference) && gpu.Flow_ir.Gpu.fast
             && Array.length program.Flow_ir.Core.state_slots = 0
           in
-          let device, record =
+          let placed =
             if eligible then
               Chain.place ~gpu ~profile ~clock
                 ~owner:(Option.get (Chain.site_of (E.Residual residual)))
-                ~readers:(Sop.Context.cpu_consumers context node_id) ()
-            else (false, fun _ ~device:_ _ -> ())
+                ~readers:(Sop.Context.cpu_consumers context node_id)
+            else Chain.unplaced Chain.Cpu
           in
-          let began = clock () in
+          let began = ref (clock ()) and used_device = ref false in
           let scope =
-            if device then Option.bind gpu.backend (fun backend -> backend.residency ~fast:true)
+            if placed.route <> Chain.Cpu then Option.bind gpu.backend (fun backend -> backend.residency ~fast:true)
             else None
           in
           let session =
@@ -3136,12 +3176,27 @@ struct
                       ~live:(Sop.Context.input context))
                   prepared ~live:(Sop.Context.input context)
               in
-              let result =
+              let on_device () =
+                used_device := scope <> None;
                 match run scope with
                 | Error _ when scope <> None && not (Sop.Context.cancelled context) ->
                     Option.iter (fun (s : Flow_ir.Gpu.residency) -> s.executor.close ()) scope;
+                    used_device := false;
                     run None
                 | result -> result
+              in
+              let result =
+                match placed.route with
+                | Device -> on_device ()
+                | Cpu -> run None
+                | Probe budget -> (
+                    let stop = !began +. budget in
+                    match E.with_interrupt (fun () -> clock () > stop) (fun () -> run None) with
+                    | Some result -> result
+                    | None ->
+                        placed.abandoned ();
+                        began := clock ();
+                        on_device ())
               in
               let result =
                 Result.bind result (function
@@ -3154,7 +3209,7 @@ struct
                   if eligible && not (Sop.Context.cancelled context) then
                     (match output.payload with
                     | Sop.Payload.Geometry geometry ->
-                        record geometry ~device:(scope <> None) (clock () -. began)
+                        placed.record geometry ~device:!used_device (clock () -. !began)
                     | _ -> ());
                   Sop.Node.Build.{ payload = output.payload; instances = output.instances })
                 result))

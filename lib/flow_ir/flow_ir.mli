@@ -141,7 +141,6 @@ type placement_reason =
   | Validation_read
   | Cpu_consumer
   | No_cost_evidence
-  | Live_device
   | Cpu_measured_cheaper
   | Device_measured_cheaper
   | Held_on_device
@@ -175,6 +174,10 @@ module Cost : sig
 
   val readback : count:int -> width:int -> float
   (** Measured seconds to move [count] elements of [width] floats between host and device. *)
+
+  val probe_budget : device_seconds:float -> float
+  (** How long a CPU cook sampled for comparison may run. Past it the CPU has lost: the abandoned
+      cook is the CPU's evidence, at this cost. *)
 
   val on_device : placement_reason -> bool
   val reason_name : placement_reason -> string
@@ -308,6 +311,7 @@ module Executor : sig
     ?cpu_consumers:int ->
     ?cpu_penalty:float ->
     ?cpu_cost:(owner:string list * int list -> count:int -> float option) ->
+    ?device_first:(owner:string list * int list -> count:int -> device_seconds:float option -> bool) ->
     ?gpu:Gpu.config ->
     program ->
     live:Flow.Eval.live ->
@@ -317,7 +321,8 @@ module Executor : sig
       kept on the device as its planes (a field of width [w]: [w] arrays of the count), by field
       name, read only when they materialise. [None] keeps the record on the CPU, also when the
       device fails. [cpu_cost] prices the CPU route of this site from its measured cooks; [None] from
-      it is {!No_cost_evidence} and the CPU; without it the route is priced from the cost table. An input array the device already holds (the same array as the last dispatch's)
+      it is {!No_cost_evidence}, and [device_first] then chooses (true: the device; false: the CPU,
+      to be measured), or without it the CPU; without it the route is priced from the cost table. An input array the device already holds (the same array as the last dispatch's)
       is not uploaded again. [resident v] names a source bound as the value [v] (an attribute read)
       that the device already holds: its placeholder ({!Gpu.planes}) and count, passed instead of
       evaluating it.

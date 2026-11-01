@@ -125,6 +125,20 @@ let check_interrupt () =
       fail "cancelled" "Evaluation interrupted."
   | _ -> ()
 
+(* A worker domain runs a caller's chunks: they answer to that caller's stop too. *)
+let interruptible f =
+  match Domain.DLS.get interrupt with
+  | None -> f
+  | inherited ->
+      fun chunk ->
+        let outer = Domain.DLS.get interrupt in
+        Domain.DLS.set interrupt inherited;
+        Fun.protect
+          ~finally:(fun () -> Domain.DLS.set interrupt outer)
+          (fun () ->
+            check_interrupt ();
+            f chunk)
+
 let with_interrupt expired f =
   let fired = ref false and outer = Domain.DLS.get interrupt in
   Domain.DLS.set interrupt (Some (expired, fired));

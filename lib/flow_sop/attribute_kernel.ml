@@ -1630,6 +1630,7 @@ module Display_sink = struct
     mutable resident : float;
     writes : (string, (int * float) list) Hashtbl.t;
         (* per write site, its recent CPU cooks (elements, seconds per element), at most 256 sites *)
+    devices : (string, int) Hashtbl.t;  (* per write site, its priced device cooks *)
   }
 
   let registry : (Flow_ir.Gpu.backend Weak.t * t) list ref = ref []
@@ -1646,7 +1647,7 @@ module Display_sink = struct
         | Some (_, rates) -> rates
         | None ->
             let rates =
-              { host = infinity; draw = infinity; resident = infinity; writes = Hashtbl.create 16 }
+              { host = infinity; draw = infinity; resident = infinity; writes = Hashtbl.create 16; devices = Hashtbl.create 16 }
             in
             let weak = Weak.create 1 in
             Weak.set weak 0 (Some backend);
@@ -1685,6 +1686,22 @@ module Display_sink = struct
         in
         Some (rate *. float size)
     | _ -> None
+
+  (* Whether this write site, not yet measured on the CPU, stays on the device: for its first two
+     priced cooks, or while the device cannot price it. *)
+  let device_first backend site ~device_seconds =
+    match device_seconds with
+    | None -> true
+    | Some _ ->
+        let rates = find backend in
+        Mutex.protect lock (fun () ->
+            let seen = Option.value ~default:0 (Hashtbl.find_opt rates.devices site) in
+            if seen >= 2 then false
+            else begin
+              if seen = 0 && Hashtbl.length rates.devices >= 256 then Hashtbl.reset rates.devices;
+              Hashtbl.replace rates.devices site (seen + 1);
+              true
+            end)
 
   let cpu_write backend site ~count =
     let rates = find backend in
@@ -1780,6 +1797,8 @@ let node ?(clock = Unix.gettimeofday) ?state ?(reference = false) ?(strict = fal
         let resolve = resolve ~context ~geometry in
         (* the site and count a measured decision asked about, and when it left this cook to the CPU *)
         let asked = ref None and cpu_began = ref None in
+        (* set when this cook samples the CPU: when that sample has lost, and its cost *)
+        let probe = ref None in
         (* a cooked [:when] is decided before the values, which may read what it tests for *)
         let guarded =
           match guard with
@@ -1791,7 +1810,7 @@ let node ?(clock = Unix.gettimeofday) ?state ?(reference = false) ?(strict = fal
                 (function
                   | E.Bool b -> Ok b | _ -> error "E_ATTR_TYPE" "sop/with_attr :when must be a bool")
         in
-        let result =
+        let attempt () =
           if geometries = [||] then error "E_DATA_SOURCE" "Attribute write needs geometry."
           else if Sop.Context.cancelled context then
             error "E_CANCELLED" "Attribute kernel cancelled."
@@ -1849,8 +1868,29 @@ let node ?(clock = Unix.gettimeofday) ?state ?(reference = false) ?(strict = fal
                             Display_sink.cpu_write backend site ~count)
                           gpu.backend)
                   in
+                  let device_first =
+                    Option.bind gpu (fun (gpu : Flow_ir.Gpu.config) ->
+                        Option.map
+                          (fun backend ~owner:(path, iter) ~count ~device_seconds ->
+                            let site =
+                              String.concat "/" path ^ "#"
+                              ^ String.concat "," (List.map string_of_int iter)
+                            in
+                            asked := Some (backend, site, count);
+                            Display_sink.device_first backend site ~device_seconds
+                            || begin
+                                 let budget =
+                                   Flow_ir.Cost.probe_budget
+                                     ~device_seconds:(Option.value ~default:0. device_seconds)
+                                 in
+                                 probe := Some (clock () +. budget, budget);
+                                 false
+                               end)
+                          gpu.backend)
+                  in
                   Flow_ir.Executor.record_on_device ?state ~resolve
                     ~cpu_penalty ?cpu_cost
+                    ?device_first
                     ?cpu_consumers:
                       (match Sop.Context.cpu_consumers context node_id with
                       | Some 0 when not whole ->
@@ -1997,6 +2037,24 @@ let node ?(clock = Unix.gettimeofday) ?state ?(reference = false) ?(strict = fal
                                             write_storage ~owned_fields
                                               ~grain:(Sop.Context.grain context) ~owner ~kind name
                                               values geometries.(0)))))
+        in
+        let result =
+          match
+            E.with_interrupt
+              (fun () -> match !probe with Some (stop, _) -> clock () > stop | None -> false)
+              attempt
+          with
+          | Some result -> result
+          | None ->
+              (* the CPU has lost: this is its measurement, and the cook runs on the device *)
+              (match (!asked, !probe) with
+              | Some (backend, site, count), Some (_, budget) ->
+                  Display_sink.observe_cpu_write backend site ~count budget;
+                  Display_sink.observe_cpu_write backend site ~count budget
+              | _ -> ());
+              probe := None;
+              cpu_began := None;
+              attempt ()
         in
         (match (!asked, !cpu_began, result) with
         | Some (backend, site, count), Some began, Ok _ ->

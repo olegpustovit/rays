@@ -100,7 +100,6 @@ type placement_reason =
   | Validation_read
   | Cpu_consumer
   | No_cost_evidence
-  | Live_device
   | Cpu_measured_cheaper
   | Device_measured_cheaper
   | Held_on_device
@@ -332,7 +331,11 @@ module Cost = struct
         else Cpu_measured_cheaper
     | _ -> No_cost_evidence
 
-  let on_device = function Device_measured_cheaper | Held_on_device | Live_device -> true | _ -> false
+  (* A CPU cook sampled for comparison stops here: past it the CPU has lost, and a floor keeps a
+     tiny site's one-time compile from reading as slow. Its cost is bounded by a few device cooks. *)
+  let probe_budget ~device_seconds = Float.max 0.02 (2. *. device_seconds)
+
+  let on_device = function Device_measured_cheaper | Held_on_device -> true | _ -> false
 
   let reason_name = function
     | Unsupported_form -> "unsupported_form"
@@ -343,7 +346,6 @@ module Cost = struct
     | Cpu_measured_cheaper -> "cpu_measured_cheaper"
     | Device_measured_cheaper -> "device_measured_cheaper"
     | Held_on_device -> "held_on_device"
-    | Live_device -> "live_device"
 
   let readback ~count ~width =
     let cost = table Gpu_readback in
@@ -1756,7 +1758,7 @@ module Executor = struct
      region, one dispatch and a readback per output, by field name. [None] leaves the record to
      the CPU: the device declines or fails, or the cost model keeps it there. *)
   let record_on_device ?state ?resolve ?resident ?expected_count ?cpu_consumers ?(cpu_penalty = 0.)
-      ?cpu_cost
+      ?cpu_cost ?device_first
       ?(gpu = Gpu.default) program ~live =
     Option.iter
       (fun count -> if count < 0 then invalid_arg "record_on_device: negative consumers")
@@ -1806,9 +1808,10 @@ module Executor = struct
                       let _, path, iter = Packed.site merged in
                       cost ~owner:(path, iter) ~count)
               in
-              (* no CPU evidence yet decides nothing, so it calibrates nothing *)
+              let first = if Option.is_none cpu_seconds then device_first else None in
+              (* no CPU evidence and no device-first rule decides nothing, so it calibrates nothing *)
               let device_seconds =
-                if Option.is_none cpu_seconds then None
+                if Option.is_none cpu_seconds && Option.is_none first then None
                 else
                 Option.bind (backend.cost ?inputs ~fast:true merged ~count) (fun seconds ->
                     if not (Float.is_finite seconds && seconds >= 0.) then None
@@ -1819,7 +1822,13 @@ module Executor = struct
               let reason = Cost.choose ~cpu_seconds ~device_seconds ~resident:held ~cpu_consumers:readers in
               report merged (Some count) reason cpu_seconds device_seconds;
               Cost.on_device reason
-              || (preflight && reason = No_cost_evidence && Option.is_some cpu_seconds)
+              || (preflight && reason = No_cost_evidence && (Option.is_some cpu_seconds || Option.is_some first))
+              || (not preflight)
+                 && Option.fold ~none:false
+                      ~some:(fun first ->
+                        let _, path, iter = Packed.site merged in
+                        first ~owner:(path, iter) ~count ~device_seconds)
+                      first
           in
           let preflight =
             if Option.is_none resident && scalar_uniforms merged then

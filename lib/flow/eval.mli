@@ -391,6 +391,11 @@ val with_interrupt : (unit -> bool) -> (unit -> 'a) -> 'a option
 (** [with_interrupt expired f] runs [f], failing this domain's evaluation as cancelled once
     [expired ()] holds (checked every 1,024 steps and packed block); [None] when it did. *)
 
+val interruptible : ('a -> unit) -> 'a -> unit
+(** The chunk of a parallel loop started here, answering to this domain's {!with_interrupt} on
+    whichever domain it runs. Without a stop it is the chunk itself. *)
+
+
 module Host : sig
   val static_with_requests :
     ?budget:int ->

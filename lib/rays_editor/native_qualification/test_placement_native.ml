@@ -430,7 +430,7 @@ let chain_counterexamples () =
             let lane = Flow_sop.Value_lane.create () in
             let session = string_ok (Sop.Session.create ~max_entries:4 ~max_payload_bytes:(1 lsl 30)) in
             Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
-                List.init 5 (fun frame ->
+                List.init 6 (fun frame ->
                     let time = float frame /. 60. in
                     let live = Input.at_time time in
                     let resolved =
@@ -453,18 +453,21 @@ let chain_counterexamples () =
             List.iteri
               (fun i ((resident, (p : Flow_ir.placement))) ->
                 if p.cpu_consumers <> Some readers then failwith "chain: consumers lost";
+                (* the device first, whatever the size; then the CPU sampled under a budget, whose
+                   two samples a cheap body completes and an expensive one is abandoned for *)
                 if fresh && i < 2 then
-                  assert (p.reason = No_cost_evidence && p.cpu_seconds = None && not resident)
-                else begin
+                  assert (p.reason = No_cost_evidence && p.cpu_seconds = None && resident)
+                else if i >= 4 then begin
                   assert (p.cpu_seconds <> None && p.device_seconds <> None);
+
                   assert (
                     p.reason
                     = Flow_ir.Cost.choose ~cpu_seconds:p.cpu_seconds ~device_seconds:p.device_seconds
                         ~resident:false ~cpu_consumers:readers);
-                  if i > 2 then assert (resident = Flow_ir.Cost.on_device p.reason)
+                  assert (resident = Flow_ir.Cost.on_device p.reason)
                 end)
               frames;
-            let _, last = List.nth frames 4 in
+            let _, last = List.nth frames 5 in
             Printf.printf "Animated CPU-origin chain %d^2, %d readers: %s (cpu %.6f s, device %.6f s)\n%!"
               side readers (name_of last) (Option.get last.cpu_seconds) (Option.get last.device_seconds);
             last

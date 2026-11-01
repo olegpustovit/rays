@@ -1,6 +1,6 @@
 (* A mesh whose faces depend on t, with point N and Cd, under the ordinary Measured policy: P and both
    attributes are resident from the first cook (no CPU cook to learn from, which at this shape would
-   cost seconds), later frames upload nothing, and each frame equals the CPU cook of the same time.
+   cost minutes), later frames upload nothing, and each frame equals the CPU cook of the same time.
    The large case's face mask and vertices are past 4M, the native limits the web's dispatch reach
    and an old draw bound used to set, and its display borrows the device's streams. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
@@ -156,6 +156,7 @@ let () =
       Flow_native.Workspace_gpu.with_backend ~fast:true gpu (fun config ->
           (* t 0 and 1/6 give different face counts *)
           resident_case gpu config ~side:8 ~frames:[ 0.; 1. /. 6. ] ~compare:true ~displayed:false;
-          (* 12.6M mask elements, over 4M vertices *)
-          resident_case gpu config ~side:128 ~frames:[ 0.; 0.01 ] ~compare:false ~displayed:true));
+          (* 12.6M mask elements, over 4M vertices. Its third cook samples the CPU, whose minutes a budget
+             abandons: every frame comes from the device *)
+          resident_case gpu config ~side:128 ~frames:[ 0.; 0.01; 0.02; 0.03; 0.04 ] ~compare:false ~displayed:true));
   print_endline "Live mesh: P, N and Cd resident from the first cook; no uploads; equal to the CPU"

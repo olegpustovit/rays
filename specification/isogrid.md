@@ -2812,6 +2812,12 @@ Owner decisions, 2026-11-01: the 64³ `buffer_creations` exemption is accepted; 
 
 Margin risk: `@tools/isogrid-selector-lifetimes` failed once when run beside other gates with the owner VM at 179% CPU: one edit in 200 evaluated in 152.5 ms against the 150 ms limit. Run alone it passes with a maximum of 103.7 ms and p95 94.7 ms. The limit was not changed.
 
+### After the handoff: the device first (2026-11-01)
+
+Superseding "Cold cook is CPU" and "a site runs CPU twice" above, and the cold figures: placement now runs the
+device first and samples the CPU under a budget (`gpu-codegen.md`). The CPU-first order had no reason beyond
+being the safe default; it cost 42 s a cook at 32^3 for a live mesh.
+
 ### Acceptance map
 
 Status words: Met means the named evidence covers the whole requirement; Partial says what is missing.
