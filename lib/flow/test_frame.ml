@@ -134,8 +134,12 @@ let () =
   assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_TIME_COUNT") ds)
 
 (* A map is live when its function reads the frame, whichever elements do: the first million never
-   read it here, and walking them to find out would exhaust the static budget. *)
+   read it here, and walking their heavy branch to find out would exhaust the static budget. *)
 let () =
-  let w = check "(let* [r (map (fn [(i : int)] (if (< i 1000000) 0.0 t)) (array/range 1000001 :type int))] (array/nth r 0))" in
+  let w =
+    check
+      "(let* [r (map (fn [(i : int)] (if (< i 1000000) (array/sum (map (fn [(j : int)] (* j 2.0)) \
+       (array/range 1000 :type int))) t)) (array/range 1000001 :type int))] (array/nth r 0))"
+  in
   let s = Result.get_ok (Eval.static ~record:true w) in
   assert (Eval.is_live (snd (List.hd (List.assoc [ "g"; "r" ] s.records))))

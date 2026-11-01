@@ -2226,9 +2226,6 @@ and hof c env term kind f rest =
       | Fn f -> f
       | _ -> fail "E_TYPE" "Expected a function."
     in
-    (* A function that reads the frame is live whichever elements read it: walking until one does could
-       spend the static budget on a branch that leaves it unread. *)
-    if c.st.time = None && frame_dependent (Fn fv) then raise Needs_t;
     (match (kind, fv) with
     | `Map, Closure cl
       when c.st.record && c.rec_ && match out with Ty.Array _ -> true | _ -> false ->
@@ -2248,6 +2245,9 @@ and hof c env term kind f rest =
         in
         note c (cl.zone @ [ "~calls" ]) (Record [ ("offset", Int !(cl.calls)); ("call", call) ])
     | _ -> ());
+    (* A function that reads the frame is live whichever elements read it: walking until one does could
+       spend the static budget on a branch that leaves it unread. *)
+    if c.st.time = None && frame_dependent (Fn fv) then raise Needs_t;
     let lists_of ts =
       List.mapi
         (fun i t ->
