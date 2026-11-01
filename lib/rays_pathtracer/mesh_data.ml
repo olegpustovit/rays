@@ -53,15 +53,23 @@ type extras = {
 }
 
 (* A device mesh's triangles ({!Rays.Mesh.View.create_device}): the registration [key] names its
-   packed float3 positions and normals on the device, [corners] its topology (three vertex indices
-   per triangle, kept by identity), [holder] the mesh that keeps them alive. The host arrays of the
+   packed float3 positions and normals on the device (and colours, when [colored]), [index_count] its
+   corners: [corners] the host's indices (kept by identity), empty when the device holds them too, [holder] the mesh that keeps them alive. The host arrays of the
    mesh it is part of stay empty: the tracer gathers the corners on the device. *)
-type device = { key : string; vertex_count : int; corners : int array; holder : Rays.Mesh.t }
+type device = {
+  key : string;
+  vertex_count : int;
+  index_count : int;
+  corners : int array;
+  colored : bool;
+  holder : Rays.Mesh.t;
+}
 
 type 'material t = {
   device : device option;
   mesh_positions : bytes;
   mesh_normals : bytes;
+  mesh_colors : bytes;  (* a float3 per corner like the normals; empty: no mesh has colours *)
   mesh_ids : bytes;
   triangles : int;
   mesh_materials : 'material list;
@@ -70,12 +78,18 @@ type 'material t = {
   scene : layout option;
 }
 
-let flat_mesh ?(colored = fun material _ -> material) ~extras ~materials source_meshes =
+let flat_mesh ~extras ~materials source_meshes =
   let flatten objects =
     let positions = Stdlib.Buffer.create 4096
     and normals = Stdlib.Buffer.create 4096
+    and colors = Stdlib.Buffer.create 4096
     and ids = Stdlib.Buffer.create 1024
-    and count = ref 0 in
+    and count = ref 0
+    and colored =
+      List.exists
+        (fun (source, _) -> (Rays.Mesh.View.packed_view source).colors <> None)
+        objects
+    in
     let* () =
       List.fold_left
         (fun acc (source_mesh, material_index) ->
@@ -96,16 +110,20 @@ let flat_mesh ?(colored = fun material _ -> material) ~extras ~materials source_
                 (plane.x.(index), plane.y.(index), plane.z.(index))
               in
               let id_bytes = Bytes.create 4 in
+              put_u32 id_bytes 0 material_index;
               for triangle = 0 to (Array.length view.indices / 3) - 1 do
-                (* a triangle is one colour: its first corner's, as a material of that albedo *)
-                put_u32 id_bytes 0
-                  (match view.colors with
-                  | Some colors -> colored material_index colors.(view.indices.(triangle * 3))
-                  | None -> material_index);
                 for corner = 0 to 2 do
                   let vertex = view.indices.((triangle * 3) + corner) in
                   add_vec3 positions (component positions_view vertex);
                   add_vec3 normals (component normals_view vertex)
+;
+                  if colored then
+                    add_vec3 colors
+                      (match view.colors with
+                      | Some c ->
+                          let r, g, b, _ = Rays_math.Color.to_floats c.(vertex) in
+                          (r, g, b)
+                      | None -> (1., 1., 1.))
                 done;
                 Stdlib.Buffer.add_bytes ids id_bytes;
                 incr count
@@ -119,10 +137,11 @@ let flat_mesh ?(colored = fun material _ -> material) ~extras ~materials source_
       Ok
         ( Stdlib.Buffer.to_bytes positions,
           Stdlib.Buffer.to_bytes normals,
+          Stdlib.Buffer.to_bytes colors,
           Stdlib.Buffer.to_bytes ids,
           !count )
   in
-  let* mesh_positions, mesh_normals, mesh_ids, triangles =
+  let* mesh_positions, mesh_normals, mesh_colors, mesh_ids, triangles =
     flatten (List.mapi (fun index mesh -> (mesh, index)) source_meshes)
   in
   Ok
@@ -130,6 +149,7 @@ let flat_mesh ?(colored = fun material _ -> material) ~extras ~materials source_
       device = None;
       mesh_positions;
       mesh_normals;
+      mesh_colors;
       mesh_ids;
       triangles;
       mesh_materials = materials;
@@ -237,14 +257,15 @@ let layout_mesh ?(objects = [||]) ?(placed = [||]) ?(locals = [||]) base parts p
 
 (* Spheres and strands are traced beside the triangle structure (scene/trace), which then needs a triangle: a
    degenerate one, never hit, stands in when there is none. *)
-let mesh ?colored ~extras ~materials source_meshes =
-  let* flat = flat_mesh ?colored ~extras ~materials source_meshes in
+let mesh ~extras ~materials source_meshes =
+  let* flat = flat_mesh ~extras ~materials source_meshes in
   if flat.triangles = 0 then
     Ok
       {
         flat with
         mesh_positions = Bytes.make 36 '\000';
         mesh_normals = Bytes.make 36 '\000';
+        mesh_colors = Bytes.empty;
         mesh_ids = Bytes.make 4 '\000';
       }
   else Ok flat
@@ -367,6 +388,8 @@ let scene_mesh (objects : (Rays_math.Mat4.t * 'material t) list) =
   else
     let positions = Stdlib.Buffer.create 4096
     and normals = Stdlib.Buffer.create 4096
+    and colors = Stdlib.Buffer.create 4096
+    and colored = List.exists (fun (_, (m : 'material t), _, _) -> m.mesh_colors <> Bytes.empty) inputs
     and ids = Stdlib.Buffer.create 1024 in
     let parts = ref []
     and placements = ref []
@@ -379,6 +402,12 @@ let scene_mesh (objects : (Rays_math.Mat4.t * 'material t) list) =
       (fun (matrix, (m : 'material t), input_parts, input_placements) ->
         Stdlib.Buffer.add_bytes positions m.mesh_positions;
         Stdlib.Buffer.add_bytes normals m.mesh_normals;
+        if colored then
+          if m.mesh_colors <> Bytes.empty then Stdlib.Buffer.add_bytes colors m.mesh_colors
+          else
+            for _ = 1 to Bytes.length m.mesh_normals / 12 do
+              add_vec3 colors (1., 1., 1.)
+            done;
         for i = 0 to (Bytes.length m.mesh_ids / 4) - 1 do
           Stdlib.Buffer.add_int32_le ids
             (Int32.add (Bytes.get_int32_le m.mesh_ids (4 * i)) (Int32.of_int !material_base))
@@ -424,6 +453,7 @@ let scene_mesh (objects : (Rays_math.Mat4.t * 'material t) list) =
         device = None;
         mesh_positions = Stdlib.Buffer.to_bytes positions;
         mesh_normals = Stdlib.Buffer.to_bytes normals;
+        mesh_colors = Stdlib.Buffer.to_bytes colors;
         mesh_ids = Stdlib.Buffer.to_bytes ids;
         triangles = !triangles;
         mesh_materials = List.rev !materials;

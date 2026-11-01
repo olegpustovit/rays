@@ -148,6 +148,88 @@ let resident_case gpu config ~side ~frames ~compare ~displayed =
         same_vec3 "Cd" (vec3 geometry "Cd") cd
       end)
 
+(* A live mesh path traced: its indices, positions, normals and colours are gathered where the device
+   holds them, with no payload read back, and its picture is the host route's. *)
+let traced_case gpu config =
+  let module P = Rays_pathtracer in
+  let got = function Ok value -> value | Error message -> failwith message in
+  let time = 1. /. 6. and text = text 8 in
+  let camera =
+    Rays.Camera.perspective ~at:(Rays_math.Vec3.create 20. 18. 22.)
+      ~target:(Rays_math.Vec3.create 4. 4. 4.) ()
+  in
+  let picture mesh =
+    let material = P.material (P.Linear_color.rgb 1. 1. 1.) in
+    let tracer =
+      got
+        (P.create ~width:64 ~height:64
+           {
+             P.objects = [ (mesh, material) ];
+             spheres = [];
+             strands = [];
+             environment =
+               {
+                 sky = P.Linear_color.rgb 0.5 0.5 0.5;
+                 ground = P.Linear_color.rgb 0.5 0.5 0.5;
+                 panels = [];
+               };
+             lights = [];
+           })
+    in
+    Fun.protect
+      ~finally:(fun () -> P.destroy tracer)
+      (fun () ->
+        P.reset tracer;
+        for _ = 1 to 16 do
+          got (P.render tracer camera);
+          got (P.flush tracer)
+        done;
+        Bytes.copy (got (Rays.Image.pixels (P.image tracer))))
+  in
+  let mean pixels channel =
+    let sum = ref 0 in
+    for i = 0 to (Bytes.length pixels / 4) - 1 do
+      sum := !sum + Char.code (Bytes.get pixels ((4 * i) + channel))
+    done;
+    float !sum /. float (Bytes.length pixels / 4)
+  in
+  let host = ref None in
+  cook text [ time ] ~each:(fun _ geometry ->
+      host := Some (picture (got (Result.map_error Rdk.Error.to_string (Rdk_rays.Rays_mesh.to_trace_mesh geometry)))));
+  let payload () =
+    let stats, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
+    stats.payload_readback_bytes
+  in
+  cook ~gpu:config text [ time ] ~each:(fun _ geometry ->
+      let scene =
+        Rdk_rays.Surface.scene3
+          ~device:(Flow_native.Workspace_gpu.display gpu)
+          (Result.get_ok (Rdk_rays.Surface.of_geometry geometry))
+      in
+      let mesh = ref None in
+      Rays.Scene.D3.Walk.iter_batches
+        (fun (drawing : Rays.Scene.D3.Walk.drawing) _ -> mesh := Some drawing.mesh)
+        scene;
+      let mesh = Option.get !mesh in
+      if Rays.Mesh.View.device mesh = None then failwith "no device mesh to trace";
+      let before = payload () in
+      let device = picture mesh in
+      if payload () <> before then
+        failwith (Printf.sprintf "the trace read back %d payload bytes" (payload () - before));
+      let host = Option.get !host in
+      (* the colours arrive: the mesh is yellow under a grey sky *)
+      List.iter
+        (fun (route, pixels) ->
+          if mean pixels 0 -. mean pixels 2 < 2. then
+            failwith (Printf.sprintf "%s route lost the colours: r %.1f b %.1f" route (mean pixels 0) (mean pixels 2)))
+        [ ("device", device); ("host", host) ];
+      List.iter
+        (fun channel ->
+          let difference = Float.abs (mean device channel -. mean host channel) in
+          if difference > 2. then
+            failwith (Printf.sprintf "channel %d: device and host differ by %.2f of 255" channel difference))
+        [ 0; 1; 2 ])
+
 let () =
   let gpu = Flow_native.Workspace_gpu.create () in
   Fun.protect
@@ -158,5 +240,6 @@ let () =
           resident_case gpu config ~side:8 ~frames:[ 0.; 1. /. 6. ] ~compare:true ~displayed:false;
           (* 12.6M mask elements, over 4M vertices. Its third cook samples the CPU, whose minutes a budget
              abandons: every frame comes from the device *)
+          traced_case gpu config;
           resident_case gpu config ~side:128 ~frames:[ 0.; 0.01; 0.02; 0.03; 0.04 ] ~compare:false ~displayed:true));
   print_endline "Live mesh: P, N and Cd resident from the first cook; no uploads; equal to the CPU"

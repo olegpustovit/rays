@@ -240,14 +240,22 @@ let prepare_extras ~first_material spheres strands =
     }
 
 (* A lone triangle device mesh with normals ({!Rays.Mesh.View.create_device}) is traced from the
-   device: its corners are gathered there, never read back. Vertex indices travel as float32, exact
-   below 2^24. *)
+   device: its corners are gathered there, never read back.
+   ponytail: float4 colours take the host route; a vec4 gather is the upgrade if a sketch needs them. *)
 let device_of (m : Rays.Mesh.t) =
   match Rays.Mesh.View.device m with
   | Some (key, true) when Rays.Mesh.mode m = Triangles ->
-      let corners = (Rays.Mesh.View.unread m).indices and vertex_count = Rays.Mesh.vertex_count m in
-      if Array.length corners > 0 && Array.length corners mod 3 = 0 && vertex_count <= 1 lsl 24 then
-        Some { Mesh_data.key; vertex_count; corners; holder = m }
+      let index_count = Rays.Mesh.index_count m and width = Rays.Mesh.View.device_color_width m in
+      if index_count > 0 && index_count mod 3 = 0 && width <> 4 then
+        Some
+          {
+            Mesh_data.key;
+            vertex_count = Rays.Mesh.vertex_count m;
+            index_count;
+            corners = (Rays.Mesh.View.unread m).indices;
+            colored = width = 3;
+            holder = m;
+          }
       else None
   | Some _ | None -> None
 
@@ -265,34 +273,15 @@ let mesh ?(spheres = []) ?(strands = []) (objects : (Rays.Mesh.t * material) lis
           device = Some device;
           mesh_positions = Bytes.empty;
           mesh_normals = Bytes.empty;
+          mesh_colors = Bytes.empty;
           mesh_ids = Bytes.empty;
-          triangles = Array.length device.corners / 3;
+          triangles = device.index_count / 3;
           mesh_materials = materials;
           instances = None;
           extras;
           scene = None;
         }
-  | _ ->
-      (* Vertex colours are albedo: each distinct colour is one more material, so the kernels' per
-         triangle material ids carry them.
-         ponytail: a mesh over 4096 colours keeps its own material for the rest; a per-corner
-         albedo buffer in pathtrace.rays is the upgrade once smooth colour needs tracing. *)
-      let added = Hashtbl.create 64 and extra = ref [] in
-      let colored index (color : Rays_math.Color.t) =
-        match Hashtbl.find_opt added (index, color) with
-        | Some id -> id
-        | None when Hashtbl.length added >= 4096 -> index
-        | None ->
-            let id = List.length materials + Hashtbl.length added in
-            Hashtbl.add added (index, color) id;
-            extra :=
-              (let r, g, b, _ = Rays_math.Color.to_floats color in
-               { (List.nth materials index) with albedo = Linear_color.rgb r g b })
-              :: !extra;
-            id
-      in
-      let* flat = Mesh_data.mesh ~colored ~extras ~materials (List.map fst objects) in
-      Ok { flat with mesh_materials = flat.mesh_materials @ List.rev !extra }
+  | _ -> Mesh_data.mesh ~extras ~materials (List.map fst objects)
 
 let mesh_instanced = Mesh_data.mesh_instanced
 let scene_mesh = Mesh_data.scene_mesh
@@ -454,6 +443,7 @@ let create_tracer ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4
                device = None;
                mesh_positions = Bytes.make 36 '\000';
                mesh_normals = Bytes.make 36 '\000';
+               mesh_colors = Bytes.empty;
                mesh_ids = Bytes.make 4 '\000';
                triangles = 1;
              })
@@ -694,14 +684,24 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
         t.gather <- Some g;
         Ok g
   in
-  let corners = Array.length d.corners and material_key = material_bytes mesh.mesh_materials in
-  let encode_gather commands ~vix ~into_positions ~into_normals =
+  let indices, colors =
+    Option.value ~default:(None, None) (Renderer.gpu_streams t.lease d.key)
+  in
+  let* colors =
+    match (d.colored, colors) with
+    | true, Some (colors, 3) -> Ok (Some colors)
+    | false, _ -> Ok None
+    | true, _ -> Error "path tracer device mesh's colours are stale"
+  in
+  let corners = d.index_count and material_key = material_bytes mesh.mesh_materials in
+  let encode_gather commands ~vix ~into_positions ~into_normals ~into_colors =
     let gather src into =
       Lisp_kernel.gather gather ~commands ~cell:t.cell ~indices:vix ~count:corners ~src
         ~vertices:d.vertex_count ~into
     in
     let* () = gather positions into_positions in
-    gather normals into_normals
+    let* () = gather normals into_normals in
+    match colors with Some colors -> gather colors into_colors | None -> Ok ()
   in
   let triangles soup =
     B.Blas
@@ -721,8 +721,9 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
   in
   match t.gpu.device with
   | Some installed
-    when installed.corners == d.corners
+    when d.corners <> [||] && installed.corners == d.corners
          && installed.vertex_count = d.vertex_count
+         && t.gpu.shape.colored = d.colored
          && Bytes.equal installed.material_key material_key ->
       (* the last gather read the previous mesh's buffers: done before that mesh is let go *)
       let* () = wait t.queue installed.receipt in
@@ -730,7 +731,7 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
       let encoded =
         let* () =
           encode_gather commands ~vix:installed.vix ~into_positions:t.gpu.positions
-            ~into_normals:t.gpu.normals
+            ~into_normals:t.gpu.normals ~into_colors:t.gpu.colors
         in
         let* encoder = gpu (B.accel_encoder commands) in
         let* () =
@@ -760,17 +761,25 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
       in
       let local ~label size = keep (buffer ~memory:Ogpu.Types.Device_local t.device ~label size) in
       let built =
+        let held = Option.bind indices (fun (buffer, n) -> if n = corners then Some buffer else None) in
         let* vix =
-          keep
-            (shared t.device ~label:"pathtracer-corners"
-               (floats (Array.map float_of_int d.corners)))
+          match held with
+          | Some buffer -> Ok buffer
+          | None when d.corners = [||] -> Error "path tracer device mesh's indices are stale"
+          | None ->
+              let bytes = Bytes.create (4 * corners) in
+              Array.iteri (fun i v -> put_u32 bytes (4 * i) v) d.corners;
+              keep (shared t.device ~label:"pathtracer-corners" bytes)
         in
         let* soup_positions = local ~label:"pathtracer-positions" (12 * corners) in
         let* soup_normals = local ~label:"pathtracer-normals" (12 * corners) in
+        let* soup_colors =
+          local ~label:"pathtracer-colors" (if d.colored then 12 * corners else 12)
+        in
         let* materials = keep (shared t.device ~label:"pathtracer-materials" material_key) in
         let* tables =
           upload_tables ~material_data:material_key t.device
-            { mesh with mesh_ids = Bytes.make (4 * (corners / 3)) '\000' }
+            { mesh with mesh_ids = Bytes.make 4 '\000' }
         in
         owned := table_buffers tables @ !owned;
         let* blas = gpu (B.create_accel ~refit:true t.device (triangles soup_positions)) in
@@ -782,7 +791,10 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
         in
         let* c = gpu (B.begin_commands t.queue) in
         commands := Some c;
-        let* () = encode_gather c ~vix ~into_positions:soup_positions ~into_normals:soup_normals in
+        let* () =
+          encode_gather c ~vix ~into_positions:soup_positions ~into_normals:soup_normals
+            ~into_colors:soup_colors
+        in
         let* encoder = gpu (B.accel_encoder c) in
         let* () = gpu (B.build_accel encoder blas ~scratch:work ()) in
         let* () = gpu (B.end_accel encoder) in
@@ -799,12 +811,14 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
                       vertex_count = d.vertex_count;
                       material_key;
                       vix;
+                      owns_vix = Option.is_none held;
                       refit_scratch;
                       source = d.holder;
                       receipt;
                     };
                 positions = soup_positions;
                 normals = soup_normals;
+                colors = soup_colors;
                 materials;
                 curves = None;
                 structure = blas;
@@ -997,6 +1011,8 @@ let lisp_facts t =
     sun = (match t.world with Some { sun = Some sun; _ } -> sun.angular_radius > 0. | _ -> false);
     bsdf_only = t.bsdf_only;
     instanced = t.gpu.shape.instanced;
+    colored = t.gpu.shape.colored;
+    lone = t.gpu.shape.lone;
     classes = t.gpu.tables.classes;
     motion = t.gpu.shape.motion;
     curves =
@@ -1113,6 +1129,7 @@ let lisp_table t (tables : Mesh_build.tables) ~geo ~pgeo ~pcol name =
   | "ids" -> (tables.ids, tables.id_count)
   | "inst" -> (tables.inst, 4 * tables.instance_count)
   | "nrm" -> (t.gpu.normals, count t.gpu.normals 12)
+  | "cols" -> (t.gpu.colors, count t.gpu.colors 12)
   | "accum" -> (t.film.accum, n)
   | "geo" -> (geo, n)
   | "pgeo" -> (pgeo, n)
@@ -1378,8 +1395,6 @@ let create ?spp ?bounces ?exposure ?round_samples ?bsdf_only ?profile ~width ~he
         Result.map (fun () -> t) failure
 
 module Private = struct
-  let material_count (mesh : mesh) = List.length mesh.mesh_materials
-
   let cpu_trace t camera ~accum =
     let* fov = camera_fov camera in
     let* kernels = lisp_kernels t (lisp_facts t) in

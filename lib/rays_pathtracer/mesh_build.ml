@@ -6,7 +6,15 @@ let gpu result = Result.map_error Ogpu.Error.to_string result
 let put_f32 bytes offset value = Bytes.set_int32_le bytes offset (Int32.bits_of_float value)
 let put_u32 bytes offset value = Bytes.set_int32_le bytes offset (Int32.of_int value)
 
-type shape = { instanced : bool; motion : bool; spheres : bool; curves : bool; scene : bool }
+type shape = {
+  instanced : bool;
+  colored : bool;
+  lone : bool;
+  motion : bool;
+  spheres : bool;
+  curves : bool;
+  scene : bool;
+}
 
 (* The kernel's views of a mesh (pathtrace.rays): float material ids (per triangle, then per strand segment),
    four vec3 rows per instance (first triangle, material or -1, then the normal-matrix columns; seven with
@@ -40,6 +48,7 @@ type device_gpu = {
   vertex_count : int;
   material_key : bytes;
   vix : B.buffer;
+  owns_vix : bool;  (* false: the producer's index stream *)
   refit_scratch : B.buffer;
   mutable source : Rays.Mesh.t;
   mutable receipt : B.receipt;
@@ -49,6 +58,7 @@ type gpu_mesh = {
   device : device_gpu option;
   positions : B.buffer;
   normals : B.buffer;
+  colors : B.buffer;
   materials : B.buffer;
   curves : (B.accel * B.buffer list) option; (* strands as native curves, with their control data *)
   mutable structure : B.accel;
@@ -100,13 +110,13 @@ let destroy_gpu gpu =
   if gpu.owns_prototype then begin
     Option.iter
       (fun d ->
-        ignore (B.destroy_buffer d.vix);
+        if d.owns_vix then ignore (B.destroy_buffer d.vix);
         ignore (B.destroy_buffer d.refit_scratch))
       gpu.device;
     Option.iter (fun primitive -> ignore (B.destroy_accel primitive)) gpu.primitive;
     List.iter
       (fun value -> ignore (B.destroy_buffer value))
-      [ gpu.positions; gpu.normals; gpu.materials ];
+      [ gpu.positions; gpu.normals; gpu.colors; gpu.materials ];
     List.iter (fun blas -> ignore (B.destroy_accel blas)) gpu.scene_blas;
     Option.iter
       (fun (curves, buffers) ->
@@ -182,6 +192,10 @@ let submit_instances device queue (build : mesh_build) =
 let mesh_shape mesh =
   {
     instanced = mesh.instances <> None;
+    colored =
+      mesh.mesh_colors <> Bytes.empty
+      || (match mesh.device with Some d -> d.colored | None -> false);
+    lone = mesh.device <> None;
     motion =
       (match mesh.instances with Some { motion_transforms = Some _; _ } -> true | _ -> false);
     spheres = mesh.extras.sphere_count > 0;
@@ -352,19 +366,26 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
                && Bytes.equal normals mesh.mesh_normals
                && Bytes.equal ids mesh.mesh_ids
                && Bytes.equal materials material_data
-               && Bytes.equal extra_key (Bytes.cat extras.sphere_bytes extras.strand_points) ->
+               && Bytes.equal extra_key
+                    (Bytes.concat Bytes.empty
+                       [ extras.sphere_bytes; extras.strand_points; mesh.mesh_colors ]) ->
             Some (gpu, primitive)
         | _ -> None)
     | _ -> None
   in
   let result =
-    let* positions, normals, materials, curves, primitive, scene_blas, build_primitive =
+    let* positions, normals, colors, materials, curves, primitive, scene_blas, build_primitive =
       match reused with
       | Some (gpu, primitive) ->
-          Ok (gpu.positions, gpu.normals, gpu.materials, gpu.curves, primitive, [], false)
+          Ok (gpu.positions, gpu.normals, gpu.colors, gpu.materials, gpu.curves, primitive, [], false)
       | None ->
           let* positions = owned mesh.mesh_positions ~label:"pathtracer-positions" in
           let* normals = owned mesh.mesh_normals ~label:"pathtracer-normals" in
+          let* colors =
+            owned
+              (if mesh.mesh_colors = Bytes.empty then Bytes.make 12 '\000' else mesh.mesh_colors)
+              ~label:"pathtracer-colors"
+          in
           let* materials = owned material_data ~label:"pathtracer-materials" in
           let* curves =
             if not native_curves then Ok None
@@ -423,7 +444,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
           let primitive = List.hd blas in
           Ok
             ( positions,
-              normals,
+              normals, colors,
               materials,
               curves,
               primitive,
@@ -492,6 +513,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
         device = None;
         positions;
         normals;
+        colors;
         materials;
         curves;
         structure = primitive;
@@ -506,7 +528,8 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
                   mesh.mesh_normals,
                   mesh.mesh_ids,
                   material_data,
-                  Bytes.cat extras.sphere_bytes extras.strand_points )
+                  Bytes.concat Bytes.empty
+                    [ extras.sphere_bytes; extras.strand_points; mesh.mesh_colors ] )
           | _ -> None);
         scene_blas;
         tables;

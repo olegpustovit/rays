@@ -413,6 +413,7 @@ module View = struct
           | Error message, _ | _, Error message -> Error message)
 
   let device (mesh : t) = Option.map (fun d -> (d.key, d.device_normals)) mesh.device
+  let device_color_width (mesh : t) = match mesh.device with Some d -> d.device_color_width | None -> 0
   let device_index_count (mesh : t) = Option.bind mesh.device (fun d -> d.device_index_count)
 
   let device_color_width (mesh : t) =

@@ -5,7 +5,7 @@
 ; through the cube without flicker. Scrub `side` (a power of two), `seed`, `tempo` and `palette`.
 ; The whole chain (voxels, surface, faces, positions, colours) is one GPU program of t.
 ; Cook on an M1: 64³ 16 ms, 128³ 110 ms (3M triangles), 256³ 1.1 s (19M triangles, 5.7 GB).
-; Path traced (Scene root > renderer), a changing mesh is read back every frame: 64³ 410 ms a frame.
+; Path traced (Scene root > renderer) too, the mesh is never read back.
 ; Run: dune exec rays -- sketches/isogrid_city.rays
 (workspace isogrid_city
 

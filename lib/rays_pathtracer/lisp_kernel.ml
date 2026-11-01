@@ -58,6 +58,7 @@ let tables =
       ("ids", Array Int);
       ("inst", Array Vec3);
       ("nrm", Array Vec3);
+      ("cols", Array Vec3);
       ("accum", Array Vec4);
       ("geo", Array Vec4);
       ("pgeo", Array Vec4);
@@ -106,6 +107,8 @@ type facts = {
   sun : bool;
   bsdf_only : bool;
   instanced : bool;
+  colored : bool;
+  lone : bool;  (* a device mesh: one material, whatever its triangles *)
   classes : bool * bool * bool;
   motion : bool;
   curves : [ `Loop | `Native ] option;
@@ -127,7 +130,7 @@ let text f ~preview:set =
        :width width :height height :spp %d :bounces %d :frame frame :sky sky :ground ground \
        :panels %d :lights %d :world %d :background %d :map-w %d :map-h %d :bg bg :sun-dir sundir \
        :sun-cos suncos :sun-rad sunrad :sun-pdf %s :round-samples %d :preview %b :bsdf-only %b \
-       :instanced %b :sphere-base spherebase :metallic %b :emissive %b :round %b :motion %b \
+       :instanced %b :colored %b :lone %b :sphere-base spherebase :metallic %b :emissive %b :round %b :motion %b \
        :inst-rows %d :strand-base strandbase}"
       (if preview then "0." else "lens")
       (if preview then 1 else f.spp)
@@ -135,10 +138,10 @@ let text f ~preview:set =
       f.panels f.lights (Bool.to_int f.world) f.background f.map_w f.map_h
       (if f.sun then "sunpdf" else "0.")
       (if preview then 1 else f.round_samples)
-      preview f.bsdf_only f.instanced metallic emissive round f.motion
+      preview f.bsdf_only f.instanced f.colored f.lone metallic emissive round f.motion
       (if f.motion then 7 else 4)
   in
-  let args = "lights mats ids inst nrm pan wmap cdf" and clear = f.world && f.background = 2 in
+  let args = "lights mats ids inst nrm cols pan wmap cdf" and clear = f.world && f.background = 2 in
   (* the records are built inside each kernel, whose captures are then the placeholders themselves *)
   let kernel ?(params = "(pixel : int)") name body =
     Printf.sprintf
@@ -260,6 +263,8 @@ let check_sketch () =
       sun = false;
       bsdf_only = false;
       instanced = true;
+      colored = true;
+      lone = false;
       classes = (false, false, true);
       motion = false;
       curves = None;
@@ -416,7 +421,7 @@ let dispatch t ~lease ~pipelines ~commands ~count ~pixels ?slots ~cell ~into ?sc
   let inputs = { k.base with uniforms; arrays = Array.map (fun _ -> [||]) k.base.arrays; count } in
   Result.map_error Diagnostic.to_string
     (Result.map ignore
-       (Flow_gpu.Run.dispatch ~commands ~reset_status:false ~into:(into, cell) ?scene ?extras
+       (Flow_gpu.Run.dispatch ~uint32_cpu:true ~commands ~reset_status:false ~into:(into, cell) ?scene ?extras
           ?resident
           ~bound:(fun i -> if i = 0 then Some pixels else slots)
           ~bound_table:(fun u ->
@@ -493,7 +498,8 @@ let gather_kernel ~lease ~pipelines =
     Option.to_result ~none:"path tracer gather has no device template"
       (Packed.compile_template residual (E.Residual.residual_view residual).term)
   in
-  let* msl = Result.map_error Diagnostic.to_string (Flow_shader.Emit.kernel ~fast:true template) in
+  let* msl = Result.map_error Diagnostic.to_string (Flow_shader.Emit.kernel ~fast:true ~uint32_scalars:true ~uint32_inputs:[ 0 ] template)
+  in
   let* base =
     Result.map_error Diagnostic.to_string
       (Packed.Host.prepare ~fast:true template ~live:(Input.at_time 0.))

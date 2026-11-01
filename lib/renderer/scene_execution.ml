@@ -3220,6 +3220,11 @@ module Private = struct
         Some (source.gpu_buffer, source.gpu_extra, source.gpu_vertex_count)
     | Some _ | None -> None
 
+  let find_gpu_streams owner key =
+    match Hashtbl.find_opt owner.gpu_vertex_registry key with
+    | Some source when gpu_vertices_valid source -> Some (source.gpu_indices, source.gpu_colors)
+    | Some _ | None -> None
+
   let gpu_vertex_count_for_test owner = Hashtbl.length owner.gpu_vertex_registry
   let cache_count_for_report value = String_table.length value.cache
 

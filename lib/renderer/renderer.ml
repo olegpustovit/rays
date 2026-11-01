@@ -1742,6 +1742,10 @@ let gpu_positions gpu key =
         Some (positions, List.nth_opt extra 0, count)
     | Some _ | None -> None
 
+let gpu_streams gpu key =
+  if gpu.gpu_released then None
+  else Scene_execution.Private.find_gpu_streams gpu.gpu_owner.scene_vertices key
+
 let register_gpu_positions gpu ~positions ?normals ?indices ?colors ~count ~valid () =
   let operation = "Renderer.register_gpu_positions" in
   if gpu.gpu_released then fail operation Ogpu.Error.Stale_handle "GPU lease is released"

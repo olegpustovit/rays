@@ -148,6 +148,12 @@ val register_gpu_positions :
     bytes. [colors] borrows packed float3/float4 colours with their component width; Scene3 uniform
     word 81 carries that width. At most 128 borrowed sources are live. *)
 
+val gpu_streams :
+  gpu ->
+  string ->
+  ((Ogpu.Backend.buffer * int) option * (Ogpu.Backend.buffer * int) option) option
+(** The indices (count) and colours (width) borrowed under [key]. *)
+
 val gpu_positions : gpu -> string -> (Ogpu.Backend.buffer * Ogpu.Backend.buffer option * int) option
 (** The packed float3 positions, normals (if registered) and count that the valid registration under
     [key] borrows, for another consumer of the same device (the path tracer); the producer keeps

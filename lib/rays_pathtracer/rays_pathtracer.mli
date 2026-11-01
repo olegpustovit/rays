@@ -223,9 +223,6 @@ val image : t -> Rays.Image.t
 val destroy : t -> unit
 
 module Private : sig
-  val material_count : mesh -> int
-  (** A prepared mesh's materials, one more per distinct vertex colour. *)
-
   val cpu_trace : t -> Rays.Camera.t -> accum:float array -> (float array, string) result
   (** The CPU walker's accumulation frame of the current scene (the device kernel's oracle): [accum]
       plus this frame's samples, a vec4 per pixel in row order. Scene traces go to the

@@ -8,9 +8,12 @@ demos; the demo scene is `sketches/pathtracer.rays` (Lisp; the editor's Path tra
 
 ## Scope
 
-- A host mesh's vertex colours (`Cd`) are albedo: each distinct colour is one more material over the
-  object's, and a triangle takes its first corner's, up to 4,096 colours. A device-indexed mesh takes
-  this route too, read back once per mesh, so a live mesh with changing topology is read back every frame.
+- Vertex colours (`Cd`) tint the material's albedo, interpolated like the normals: the `cols` table, a float3
+  per corner beside `nrm`. A host mesh uploads it; a device mesh gathers it, with its positions and normals,
+  from the streams registered under its key, through its `uint32` indices (host corners or the device's own),
+  so an animated mesh whose topology changes is never read back: each new mesh rebuilds its structure on the
+  device, and frames trace the last one built until it is installed. A lone device mesh has one material
+  (`u.lone`), so its ids table has one entry. Float4 colours take the host route.
 - Input: a list of `Rdk.Geometry.t` objects, each with one metallic-roughness
   material (`albedo`, `roughness`, `metallic`, `emission`), plus analytic
   `sphere`s (intersected analytically beside the triangle structure, so they

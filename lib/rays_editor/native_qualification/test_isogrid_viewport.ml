@@ -240,16 +240,14 @@ let run gpu config workspace recipe =
             recipe consumer consumer_bytes;
           let host_scene =
             let trace_start = (stats gpu).payload_readback_bytes in
-            let prepared_trace =
-              string_ok
+            ignore
+              (string_ok
                 (Rays_pathtracer.mesh
                    [
                      (mesh, Rays_pathtracer.material (Rays_pathtracer.Linear_color.rgb 0.8 0.7 0.6));
-                   ])
-            in
-            ignore
-              (string_ok (Rays_pathtracer.scene_mesh [ (Rays_math.Mat4.identity, prepared_trace) ]));
-            assert ((stats gpu).payload_readback_bytes > trace_start);
+                   ]));
+            (* the tracer gathers what the device holds *)
+            assert ((stats gpu).payload_readback_bytes = trace_start);
             Rdk_rays.Surface.scene3 (string_ok (Rdk_rays.Surface.of_geometry geometry))
           in
           string_ok
@@ -316,7 +314,7 @@ let run gpu config workspace recipe =
           Printf.printf
             "IsoGrid recipe %d: %d quads, pixel difference %d, publication/display payload %d/%d, \
              validation +4, renderer upload %Ld, %.0f allocated bytes/warm frame, \
-             orbit/frame/shadow/modes parity, trace preparation materialises\n\
+             orbit/frame/shadow/modes parity, trace preparation reads nothing\n\
              %!"
             recipe (G.primitive_count geometry) !worst
             (before.payload_readback_bytes - publication.payload_readback_bytes)

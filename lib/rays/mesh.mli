@@ -127,6 +127,9 @@ module View : sig
   val device_color_width : t -> int
   (** Borrowed colour components (3 or 4), or 0 for host/default colours. *)
 
+  val device_color_width : t -> int
+  (** 3 or 4 for colours the device holds under the mesh's key, otherwise 0. *)
+
   val derived_normals : t -> bool
   (** Whether a device mesh's normals were made from its positions for display ([~derived]): it has
       none of its own, so a path tracer reads its host copy and cusps it as any mesh without
