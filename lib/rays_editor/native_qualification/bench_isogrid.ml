@@ -415,11 +415,9 @@ let benchmark ?domains ?(warmup = 8) ?(cycles = false) ?(roots = false) ?(switch
   let editor = ref None and count = ref 0 in
   let presets = Filename.temp_dir "isogrid-bench" "" in
   let prepared_seconds = ref 0. in
-  let prepare_calls = ref 0 and prepared_geometries = Hashtbl.create 16 in
+  let prepare_calls = ref 0 in
   let prepare settings output =
     incr prepare_calls;
-    let geometry = ok (Sop.Payload.geometry output.Sop.Session.payload) in
-    Hashtbl.replace prepared_geometries (Rdk.Geometry.data_id geometry) ();
     let started = Unix.gettimeofday () in
     Fun.protect
       (fun () -> Editor.prepare settings output)
@@ -729,14 +727,13 @@ let benchmark ?domains ?(warmup = 8) ?(cycles = false) ?(roots = false) ?(switch
           "retention %s live_words=%d workload_words=%d scheduler_empty_words=%d \
            scheduler_capacity=%d timer_words=%d heap_words=%d history=%d entries=%d \
            payload_bytes=%d compiled=%d lanes=%d drawn=%d converted=%d ids=%d pipelines=%d held=%d \
-           preparations=%d preparation_bytes=%d prepare_calls=%d geometry_ids=%d \
+           preparations=%d preparation_bytes=%d prepare_calls=%d \
            renderer_pipelines=%d registrations=%d flow_buffers_created=%d live_handles=%d\n\
            %!"
           name gc.live_words workload_words scheduler_empty_words scheduler_capacity timer_words
           gc.heap_words history stats.retained_entries stats.retained_payload_bytes compiled lanes
           drawn converted ids host.pipeline_compilations host.held_buffers preparations
           preparation_bytes !prepare_calls
-          (Hashtbl.length prepared_geometries)
           native.pipeline_cache_entries registrations host.buffer_creations (Ogpu.Impl.live_handles ())
       in
       if flips > 0 then begin
