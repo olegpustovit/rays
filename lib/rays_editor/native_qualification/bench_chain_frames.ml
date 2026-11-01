@@ -111,6 +111,10 @@ let () =
                in
                walk node);
             let resident = Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry) in
+            (* each route measures what it claims *)
+            if Sys.getenv_opt "QUALIFICATION" <> None && Sys.getenv_opt "CPU" = None && not resident then
+              failwith "the Qualification route left the device";
+            if Sys.getenv_opt "CPU" <> None && resident then failwith "the CPU route reached the device";
             let start = Unix.gettimeofday () in
             if not noread then ignore (Rdk_rays.Geometry_view.bounds geometry);
             let bounds_seconds = Unix.gettimeofday () -. start in

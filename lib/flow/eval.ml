@@ -22,11 +22,20 @@ module Free_cache = Ephemeron.K1.Make (struct
   let hash (term : t) = Hashtbl.hash term.form.id
 end)
 
-let free_caches = Domain.DLS.new_key (fun () -> Free_cache.create 256)
+let free_caches = Domain.DLS.new_key (fun () -> (ref 0, Free_cache.create 256))
 let free_walks = Atomic.make 0
 
+(* A new static pass replaces its checked terms, on every domain that walked them: a cook worker's
+   memo otherwise keeps a dead cell per term until the table next resizes. Each domain drops its
+   entries and bucket storage at its first walk of the new pass; frame forces reuse this pass's walks. *)
+let free_pass = Atomic.make 0
+
 let free_names term =
-  let free_cache = Domain.DLS.get free_caches in
+  let seen, free_cache = Domain.DLS.get free_caches in
+  if !seen <> Atomic.get free_pass then begin
+    seen := Atomic.get free_pass;
+    Free_cache.reset free_cache
+  end;
   match Free_cache.find_opt free_cache term with
   | Some names -> names
   | None ->
@@ -2927,10 +2936,7 @@ let static_impl ?budget ?(record = false) ?(inputs = []) ws =
                 failf "E_UNKNOWN_GRAPH" "Unknown graph input target: %s." name)
             inputs;
           List.iter (fun (_, ins) -> List.iter (fun (_, value) -> Value.validate value) ins) inputs;
-          (* A new static pass replaces its checked terms. Drop the previous
-             weak memo's empty entries as well as their bucket storage. Frame
-             forces still reuse this pass's free-name walks. *)
-          Free_cache.reset (Domain.DLS.get free_caches);
+          Atomic.incr free_pass;
           let st = new_state ?budget ~record ws in
           let c = root st in
           let results =

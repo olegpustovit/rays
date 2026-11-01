@@ -423,9 +423,14 @@ checks, and the shared `Flow_ir.Cost.choose` comparison. There is no size/noise
 placement rule. Measured record placement requires a known CPU-reader count:
 unknown consumers keep CPU with `missing_consumer`; zero readers promises a
 known resident consumer. Completed backend cost plus one materialisation per
-output (shared by all CPU readers) competes with the CPU kernel estimate plus
-readback of distinct resident inputs. Decisions and optional reader counts
-appear in `Flow_ir.Profile.placements`. Qualification places every legal region.
+output (shared by all CPU readers) competes with the site's measured CPU cook
+(`Attribute_kernel.Display_sink`, per backend and site, the cheaper of the two
+samples nearest the count) plus readback of distinct resident inputs and, with
+zero readers, the display conversion a host or mixed mesh pays. A site runs on the CPU
+for its first two cooks (`no_cost_evidence`, no device calibration), then decides. A
+fused write that writes P counts as resident whole, so the mixed-mesh reader does not apply to it.
+Decisions and optional reader counts
+appear in `Flow_ir.Profile.placements`, on the lowering's profile. Qualification places every legal region.
 `Cook.prepared_context` supplies the consumer counts; absent metadata is
 `missing_consumer`, never a free device sink.
 
