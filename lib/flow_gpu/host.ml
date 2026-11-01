@@ -944,11 +944,12 @@ let resident_scope ?(uint32 = false) ~fast t =
               in
               (* from 256 elements a level's device work (no wait) is cheaper than the CPU's,
                  and a site whose deeper levels went to the device keeps its small ones there
-                 too, so its arrays never cross; a capacity past 4M (upper bounds double with
-                 each level) settles the counts on the host instead *)
+                 too, so its arrays never cross; a capacity past 64M (upper bounds double with
+                 each level) settles the counts on the host instead. Metal dispatches a grid of
+                 any size, so the web's 4M reach (65,535 groups of 64) is not a limit here *)
               if
                 n = 0
-                || n > 1 lsl 22
+                || n > 1 lsl 26
                 || not (held || n >= 256 || Dynarray.exists (fun s -> s.capacity > 0) site.slots)
               then None
               else

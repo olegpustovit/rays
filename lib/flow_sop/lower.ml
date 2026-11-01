@@ -571,7 +571,19 @@ module Chain = struct
 
   let priced = Attribute_kernel.Display_sink.priced
 
-  let place ~(gpu : Flow_ir.Gpu.config) ~profile ~clock ~owner ~readers =
+  (* A live [sop/mesh] recooks every frame, and its CPU cook can cost seconds where the device takes
+     milliseconds: two CPU samples would freeze the window. It starts on the device and samples
+     the CPU only when the device's cook is small enough that the CPU's must be bearable too.
+     ponytail: a live mesh the CPU would win over 1 ms stays on the device, unmeasured;
+     a CPU cook that can be abandoned at the device's time would let it compare safely. *)
+  let bearable_device_seconds = 0.001
+
+  let stays_on_device samples =
+    match samples.device with
+    | [] | [ _ ] -> true
+    | (floats, per_float) :: _ -> per_float *. float floats > bearable_device_seconds
+
+  let place ?(live = false) ~(gpu : Flow_ir.Gpu.config) ~profile ~clock ~owner ~readers () =
     if gpu.policy = Flow_ir.Gpu.Qualification then (true, fun _ ~device:_ _ -> ())
     else
       let site = String.concat "/" (fst owner) ^ "#" ^ String.concat "," (List.map string_of_int (snd owner)) in
@@ -651,6 +663,9 @@ module Chain = struct
       | _, None ->
           report ~points:None Missing_consumer None None;
           (false, record)
+      | Some state, Some 0 when live && stays_on_device (evidence state) ->
+          report ~points:None Live_device None None;
+          (true, record)
       | Some state, Some _ -> (
           let samples = evidence state in
           match Mutex.protect lock (fun () -> Hashtbl.find_opt state.last site) with
@@ -665,6 +680,51 @@ module Chain = struct
               else if List.length samples.device < 2 then (true, record)
               else (Flow_ir.Cost.on_device (decide state samples size), record))
 end
+
+
+(* The point attributes [fold_mesh_writes] folded into a mesh's record, in write order. *)
+let mesh_attribute_prefix = "$attr:"
+
+let mesh_attributes fields =
+  List.filter_map
+    (fun (key, value) ->
+      if not (String.starts_with ~prefix:mesh_attribute_prefix key) then None
+      else
+        match String.split_on_char ':' key with
+        | [ _; name; kind ] -> Some (name, kind, value)
+        | _ -> None)
+    fields
+
+let mesh_host_attributes ~grain fields geometry =
+  List.fold_left
+    (fun geometry (name, kind, values) ->
+      Result.bind geometry
+        (Attribute_kernel.write ~grain ~owner:Rdk.Attribute.Point ~kind name values))
+    (Ok geometry) (mesh_attributes fields)
+
+(* On the device each attribute keeps its buffer. A stream that is not resident, or whose count is
+   not the mesh's, takes the host writer, which reports the count error as a CPU cook does. *)
+let mesh_resident_attributes ~grain (scope : Flow_ir.Gpu.residency) fields geometry =
+  let points = Rdk.Geometry.point_count geometry in
+  let result =
+    List.fold_left
+      (fun geometry (name, kind, values) ->
+        Result.bind geometry (fun geometry ->
+            match
+              if scope.executor.count values = Some points then scope.retain_float values else None
+            with
+            | Some planes ->
+                Attribute_kernel.install_deferred ~owner:Rdk.Attribute.Point ~kind name planes
+                  geometry
+            | None ->
+                Attribute_kernel.write ~grain ~owner:Rdk.Attribute.Point ~kind name
+                  (Flow_ir.Core_exec.host_value scope.executor values)
+                  geometry))
+      (Ok geometry) (mesh_attributes fields)
+  in
+  if Result.is_error result then
+    List.iter (fun (_, release) -> release ~held:false) (Rdk.Geometry.releasers geometry);
+  result
 
 let rec geometry_arrays_node ?check ~gpu ~profile ~clock ~strict_body ~reference ~approx ~kernel_source
     ?host ?state ?elems ~operation ~args ~sources inputs =
@@ -715,10 +775,10 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
         in
         let device, record =
           if eligible then
-            Chain.place ~gpu ~profile ~clock
+            Chain.place ~live:(operation = "sop/mesh" && E.frame_dependent data) ~gpu ~profile ~clock
               ~owner:
                 (Option.fold ~none:([ operation ], []) ~some:Fun.id (Chain.site_of (E.Record args)))
-              ~readers:(Sop.Context.cpu_consumers context node_id)
+              ~readers:(Sop.Context.cpu_consumers context node_id) ()
           else (false, fun _ ~device:_ _ -> ())
         in
         let began = clock () and on_device = ref false in
@@ -755,6 +815,11 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
                                            (fun (k, v) ->
                                              (k, Flow_ir.Core_exec.host_value scope.executor v))
                                            fields)
+                                in
+                                let result =
+                                  Result.bind result
+                                    (mesh_resident_attributes ~grain:(Sop.Context.grain context) scope
+                                       fields)
                                 in
                                 Result.bind result (fun geometry ->
                                     if cancelled () then begin
@@ -812,7 +877,9 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
                                     Topology_kernel_impl.concat
                                       ~cancel:(Sop.Context.cancel_token context)
                                       ~grain:(Sop.Context.grain context) ~sources fields)
-                              else if operation <> "sop/remap" then Topology_kernel.mesh fields
+                              else if operation <> "sop/remap" then
+                                Result.bind (Topology_kernel.mesh fields)
+                                  (mesh_host_attributes ~grain:(Sop.Context.grain context) fields)
                               else
                                 let cooked name =
                                   match List.assoc_opt name args with
@@ -1747,6 +1814,86 @@ let static_cpu_data data =
   && Attribute_kernel.sources data = []
   && Attribute_kernel.context_reads data = Sop.Context.Dependencies.static
 
+
+(* A frame-driven chain of point writes over a [sop/mesh] that nothing else reads becomes fields of
+   the mesh's record, so one program builds them: a compacted face list their maps gather is one
+   producer on the device, rather than evaluated on the CPU and uploaded for each write. Everything
+   else keeps its nodes. A static chain keeps the cached prefix it has now (S10, isogrid.md). *)
+let fold_mesh_writes (plan : E.plan) =
+  let nodes = Array.copy plan.nodes in
+  let count = Array.length nodes in
+  let uses = Array.make count 0 and templ = Array.make count false in
+  Array.iter
+    (fun (n : E.node) ->
+      if is_zone n.kind then
+        match (List.assoc_opt "lo" n.args, List.assoc_opt "hi" n.args) with
+        | Some (E.Int lo), Some (E.Int hi) ->
+            for id = max 0 lo to min count hi - 1 do
+              templ.(id) <- true
+            done
+        | _ -> ())
+    nodes;
+  let note values =
+    List.iter
+      (fun id -> if id >= 0 && id < count then uses.(id) <- uses.(id) + 1)
+      (List.sort_uniq Int.compare (List.concat_map Attribute_kernel.sources values))
+  in
+  Array.iter (fun (n : E.node) -> note (List.map snd n.args)) nodes;
+  Array.iter (fun (i : E.instance) -> note (i.result :: List.map snd i.inputs)) plan.instances;
+  let rec mesh_under id =
+    if id < 0 || id >= count || uses.(id) <> 1 || templ.(id) then None
+    else
+      let n = nodes.(id) in
+      if n.kind = "sop/mesh" then Some n
+      else if n.kind = E.card_kind && guards_of "guards" n.args = [] then
+        match List.assoc_opt "value" n.args with
+        | Some (E.Deferred (_, below)) when below < id -> mesh_under below
+        | _ -> None
+      else None
+  in
+  let text (n : E.node) key =
+    match List.assoc_opt key n.args with Some (E.Text t) -> Some t | _ -> None
+  in
+  Array.iteri
+    (fun id (w : E.node) ->
+      if
+        w.kind = "sop/with_attr" && (not templ.(id))
+        && List.for_all
+             (fun (k, _) ->
+               List.mem k [ "geometry"; "attribute"; "values"; "owner"; "type"; fused_writes; fused_chain ])
+             w.args
+        && Option.fold ~none:true ~some:(( = ) "point") (text w "owner")
+      then
+        match (List.assoc_opt "geometry" w.args, text w "attribute", List.assoc_opt "values" w.args) with
+        | Some (E.Deferred (_, g)), Some name, Some values -> (
+            let kind = Option.value ~default:"vec3" (text w "type") in
+            let writes = fused_entries w.args @ [ (name, kind, values) ] in
+            let plain (name, _, values) =
+              (not (String.contains name ':'))
+              && name <> "P" && Attribute_kernel.sources values = []
+              && (match values with E.Record _ -> false | _ -> true)
+            in
+            match mesh_under g with
+            | Some mesh
+              when List.for_all plain writes
+                   && List.exists (fun (_, _, values) -> E.frame_dependent values) writes
+                   && not (List.exists (fun (_, _, values) -> E.state_dependent values) writes) ->
+                nodes.(id) <-
+                  {
+                    w with
+                    kind = mesh.kind;
+                    args =
+                      mesh.args
+                      @ List.map
+                          (fun (name, kind, values) ->
+                            (mesh_attribute_prefix ^ name ^ ":" ^ kind, values))
+                          writes;
+                  }
+            | _ -> ())
+        | _ -> ())
+    nodes;
+  { plan with nodes }
+
 let fold_writes ~device ~defer (plan : E.plan) =
   let nodes = Array.copy plan.nodes in
   let count = Array.length nodes in
@@ -2414,7 +2561,7 @@ struct
             if eligible then
               Chain.place ~gpu ~profile ~clock
                 ~owner:(Option.get (Chain.site_of (E.Residual residual)))
-                ~readers:(Sop.Context.cpu_consumers context node_id)
+                ~readers:(Sop.Context.cpu_consumers context node_id) ()
             else (false, fun _ ~device:_ _ -> ())
           in
           let began = clock () in
@@ -3049,7 +3196,9 @@ struct
 
   let plan =
     if reference then evaluated.plan
-    else fold_writes ~device:(gpu.fast && gpu.backend <> None) ~defer evaluated.plan
+    else
+      let plan = fold_writes ~device:(gpu.fast && gpu.backend <> None) ~defer evaluated.plan in
+      if gpu.fast && gpu.backend <> None then fold_mesh_writes plan else plan
 
   let external_kernel fn =
     List.find_map

@@ -54,6 +54,15 @@ val write_source :
 (** Share an unchanged typed attribute query's immutable storage after checking
     owner/type/cardinality. [None] retains the ordinary computed-array path. *)
 
+val install_deferred :
+  owner:Rdk.Attribute.owner ->
+  kind:string ->
+  string ->
+  Flow_ir.Gpu.planes ->
+  Rdk.Geometry.t ->
+  (Rdk.Geometry.t, Diagnostic.t) result
+(** A device output as an attribute's storage, read back only when a CPU reader first needs it. *)
+
 val write :
   grain:int ->
   owner:Rdk.Attribute.owner ->

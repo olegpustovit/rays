@@ -100,6 +100,7 @@ type placement_reason =
   | Validation_read
   | Cpu_consumer
   | No_cost_evidence
+  | Live_device
   | Cpu_measured_cheaper
   | Device_measured_cheaper
   | Held_on_device
@@ -331,7 +332,7 @@ module Cost = struct
         else Cpu_measured_cheaper
     | _ -> No_cost_evidence
 
-  let on_device = function Device_measured_cheaper | Held_on_device -> true | _ -> false
+  let on_device = function Device_measured_cheaper | Held_on_device | Live_device -> true | _ -> false
 
   let reason_name = function
     | Unsupported_form -> "unsupported_form"
@@ -342,6 +343,7 @@ module Cost = struct
     | Cpu_measured_cheaper -> "cpu_measured_cheaper"
     | Device_measured_cheaper -> "device_measured_cheaper"
     | Held_on_device -> "held_on_device"
+    | Live_device -> "live_device"
 
   let readback ~count ~width =
     let cost = table Gpu_readback in

@@ -166,7 +166,7 @@ cook pays one-time preparation). The CPU alternative adds the upload of the mesh
 one the host materialisation known CPU readers force, both priced by `Cost.readback` at the site's last
 output size, and `Cost.choose` decides with a recorded reason. Unknown consumers stay CPU
 (`missing_consumer`); a class without both routes runs CPU, then device (its mesh is the real result), until
-it has numbers (`no_cost_evidence`). A write that reads no attribute and deletes none forwards its input
+it has numbers (`no_cost_evidence`). A live `sop/mesh` (its record reads a frame fact: `t`, the pointer, any input) with no CPU reader starts on the device instead, and samples the CPU only if the device's cook is under 1 ms (`live_device`): two CPU samples of a mesh that recooks every frame can freeze the window for minutes. A write that reads no attribute and deletes none forwards its input
 unread in the consumer census. A displayed root with a device owner has no CPU reader unless probed; a
 write beside host positions counts one reader, and beside resident positions its CPU alternative is charged the
 measured host display sink, so mesh and writes cannot split into a mixed mesh the display must convert.
@@ -189,6 +189,11 @@ supplies each force's state, resolver and strict policy. This lets counted
 consumers learn capacities and replay the complete producer chain on overflow.
 Host mesh eligibility uses a nonmaterialising count check, which settles work
 without switching into the post-fold phase or disabling later capacity history.
+
+A frame-driven chain of point writes over a `sop/mesh` nothing else reads is folded into the mesh's
+record (`Lower.fold_mesh_writes`), so their maps share its producers. As separate writes each would
+evaluate a captured compacted list on the CPU (`Packed.Host.prepare`) and upload it every frame.
+Static chains keep their own nodes and the prefix those cache.
 
 Sibling Zip regions with unknown counts can fuse when their ordered immutable
 source sequences agree. Direct source identity or the existing residual
@@ -345,7 +350,7 @@ installed.
   wait the run already made; the web copies them at the loop's end and records them when the map
   resolves, never awaited. Without history (a new site, the first draw) the capacity is the bound, and
   past 256K a native fold reads the device count once (one wait) and takes it as the bound (the web past
-  4M only, 65,535 groups of 64 being a dispatch's reach); past 4M a region settles on the host.
+  4M only, 65,535 groups of 64 being a dispatch's reach); past 4M on the web and 64M natively, where Metal dispatches a grid of any size, a region settles on the host.
 - A slot's count that reaches a capacity below its bound may have been cut (the kernel stops at its
   capacity). Before the host reads any resident array, `finish` reads every such count (after the wait
   the read makes anyway) and raises `Core_exec.Resident_overflow` (web: throws `resident.overflow`): the

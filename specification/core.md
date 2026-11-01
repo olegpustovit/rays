@@ -1674,6 +1674,11 @@ runtime primitive.
 | `recipe-book` | compiler rule | Inline checked body: immutable list of name/step records. |
 | `selected-edit` | compiler rule | Inline checked body: `edit-cells`, block-coordinate hash and per-cell old/new selection. |
 | `structure` | compiler rule | Inline checked body: selected numeric structure predicate over packed cells. |
+| `corner` | compiler rule | Inline checked body: per-axis division, `floor` and product (`isogrid_city`). |
+| `dice` | compiler rule | Inline checked body: `random-at` over a block key and a floored moment of the clock. |
+| `key-of` | compiler rule | Inline checked body: scalar arithmetic and integer conversion. |
+| `motif` | compiler rule | Inline checked body: per-axis comparisons and ordered numeric branches, no array. |
+| `parcel-size` | compiler rule | Inline checked body: ordered comparisons of `dice` at each block size. |
 
 Core argument binding preserves residual DAG sharing. Each physical captured
 residual is rewritten once for the current argument vector; the root, sources,

@@ -1,6 +1,6 @@
 ; The host's first-ear quad rule, with conservative refusal near floating decisions.
-; ponytail: float32 error bounds may refuse small faces far from the origin;
-; use adaptive predicates if that refusal becomes a measured placement problem.
+; epsilon is twice the float32 error of a cross product of coordinates of magnitude m (8 m^2 2^-24).
+; ponytail: a face still smaller than that is refused; use adaptive predicates if that is ever measured.
 (defn at3 :context value [(p : (array float)) (k : int)]
   (let* [at (int/mul k 3)] [(array/nth p at) (array/nth p (int/add at 1)) (array/nth p (int/add at 2))]))
 (defn newell :context value [(a : vec3) (b : vec3)]
@@ -29,7 +29,7 @@
                            (ia : int) (ib : int) (ic : int) (id : int)]
   (let* [a (at3 p ia) b (at3 p ib) c (at3 p ic) d (at3 p id)
          m (max (max (magnitude a) (magnitude b)) (max (magnitude c) (magnitude d)))
-         epsilon (+ (* (* m m) 0.0001) 1e-10)
+         epsilon (+ (* (* m m) 0.000001) 1e-10)
          normal (+ (+ (+ (newell a b) (newell b c)) (newell c d)) (newell d a))
          ax (abs normal.x) ay (abs normal.y) az (abs normal.z)
          axis (if (and (>= ax ay) (>= ax az)) 0 (if (>= ay az) 1 2))

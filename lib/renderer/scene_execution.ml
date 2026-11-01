@@ -41,7 +41,7 @@ let register_gpu_vertices owner ?(extra = []) ?(stride = 16) ?indirect ?indices 
     ~buffer ~vertex_count ~valid () =
   let operation = "Scene_execution.register_gpu_vertices" in
   if
-    key = "" || vertex_count <= 0 || vertex_count > 4_000_000
+    key = "" || vertex_count <= 0 || vertex_count > 1 lsl 30
     || (extra = [] && Ogpu.Backend.buffer_size buffer < Int64.of_int (vertex_count * stride))
     || List.exists (fun b -> Ogpu.Backend.buffer_size b <= 0L) (buffer :: extra)
     || (match indirect with

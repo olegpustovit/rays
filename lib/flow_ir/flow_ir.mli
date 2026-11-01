@@ -141,6 +141,7 @@ type placement_reason =
   | Validation_read
   | Cpu_consumer
   | No_cost_evidence
+  | Live_device
   | Cpu_measured_cheaper
   | Device_measured_cheaper
   | Held_on_device
