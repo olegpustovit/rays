@@ -1,6 +1,7 @@
-(* On the real device: grid 1000 x 1000 Points (GRID_SIDE; 512 in @runtest-native, the smallest
-   grid the cost model places) > attribute_noise > transform, the fused write of noise,
-   P and N, cooked on the CPU and with the workspace GPU in fast precision (Executor.record_on_device).
+(* On the real device: grid 1000 x 1000 Points (GRID_SIDE; 512 in @runtest-native) > attribute_noise > transform, the fused write
+   of noise, P and N, cooked on the CPU and with the workspace GPU in fast precision
+   (Executor.record_on_device), under Qualification: this checks device contracts, placement has its
+   own tests.
    The device cook takes at most two dispatches, a recook uploads nothing and reads nothing back
    (its attributes stay in device buffers), a CPU read of P materialises exactly that one output,
    its noise and P agree with the CPU within float32 tolerance and N exactly (a translation keeps
@@ -116,6 +117,7 @@ let () =
   let unplaced = node () in
   let cpu_seconds, cpu = median (fun () -> cook unplaced) in
   let gpu = Flow_native.Workspace_gpu.create () in
+  Flow_native.Workspace_gpu.qualification gpu;
   Fun.protect
     ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu)
     (fun () ->

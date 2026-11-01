@@ -560,7 +560,7 @@ let () =
         "Frozen exact capacity %dx%d: 63 pinned versions plus source, 65th resource refuses before \
          readback, retained bytes survive close\n"
         width height)
-    [ (7, 3, 0); (65, 17, 63) ]
+    [ (7, 3, 63); (65, 17, 63) ]
 
 let () =
   if Array.mem "--capture-budget" Sys.argv then begin

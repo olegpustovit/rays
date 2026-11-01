@@ -54,6 +54,7 @@ let cook_elsewhere text =
 
 let () =
   let owner = Flow_native.Workspace_gpu.create () in
+  Flow_native.Workspace_gpu.qualification owner;
   Fun.protect
     ~finally:(fun () -> Flow_native.Workspace_gpu.close owner)
     (fun () ->

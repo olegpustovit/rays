@@ -225,6 +225,7 @@ let run (drive, xdrive, connectivity) =
   let per_frame = if recompute then 2 else 1 in
   let cpu_cook, cpu_close = animate () in
   let gpu = Flow_native.Workspace_gpu.create () in
+  Flow_native.Workspace_gpu.qualification gpu;
   Fun.protect
     ~finally:(fun () ->
       cpu_close ();
