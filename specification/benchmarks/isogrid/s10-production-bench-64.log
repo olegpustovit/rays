@@ -1,0 +1,49 @@
+ 7:45  up 24 days,  1:18, 1 user, load averages: 9.73 12.33 10.46
+cold present_s=1.518636 alloc_bytes=612414840 prepare_s=0.129112 uploads=16 upload_bytes=7989312 readback_bytes=0 inspect_readback_bytes=0 pipelines=1 held=0 verified_Cd=binary64 phases=[check 20.7 ms · cook 1115.8 ms · evaluate 250.2 ms · layout 0.1 ms · lower 4.3 ms · parse 1.9 ms · print 12.6 ms · project 0.0 ms · reduce 0.1 ms]
+transfer_totals stage=cold payload=0 status=16 validation=0 count=0 bounds=0
+placement stage=cold owner=sculpture/normals count=998592 reason=cpu_consumer cpu_s=0.0164996523862 device_s=0.0522000682752 readers=1
+placement stage=cold owner=sculpture/mesh#:kinds count=998592 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
+recipe_3 present_s=1.403610 alloc_bytes=482948432 prepare_s=0.110640 uploads=32 upload_bytes=14682240 readback_bytes=0 inspect_readback_bytes=0 pipelines=1 held=0 verified_Cd=binary64 phases=[check 21.5 ms · cook 956.0 ms · evaluate 338.1 ms · layout 0.1 ms · lower 5.1 ms · parse 0.9 ms · print 11.2 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=recipe_3 payload=0 status=32 validation=0 count=0 bounds=0
+placement stage=recipe_3 owner=sculpture/normals count=836544 reason=cpu_consumer cpu_s=0.0138259048329 device_s=0.0436750452403 readers=1
+placement stage=recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=no_cost_evidence cpu_s=0.253169502024 device_s=unknown readers=1
+recipe_1 present_s=0.669697 alloc_bytes=603140984 prepare_s=0.139631 uploads=32 upload_bytes=14682240 readback_bytes=0 inspect_readback_bytes=0 pipelines=1 held=0 verified_Cd=binary64 phases=[check 22.1 ms · cook 139.8 ms · evaluate 389.3 ms · layout 0.1 ms · lower 5.8 ms · parse 1.0 ms · print 11.4 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=recipe_1 payload=0 status=32 validation=0 count=0 bounds=0
+recipe_0 present_s=0.864756 alloc_bytes=479134808 prepare_s=0.004470 uploads=51 upload_bytes=15986472 readback_bytes=573124 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64 phases=[check 22.1 ms · cook 642.8 ms · evaluate 156.2 ms · layout 0.1 ms · lower 6.1 ms · parse 0.8 ms · print 18.9 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=recipe_0 payload=573124 status=60 validation=36 count=24 bounds=0
+placement stage=recipe_0 owner=sculpture/normals count=31840 reason=cpu_consumer cpu_s=0.000548509547761 device_s=0.00188058685091 readers=1
+placement stage=recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
+recipe_2 present_s=1.448653 alloc_bytes=480298328 prepare_s=0.113098 uploads=67 upload_bytes=22616680 readback_bytes=573124 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64 phases=[check 22.5 ms · cook 1018.0 ms · evaluate 301.7 ms · layout 0.1 ms · lower 7.4 ms · parse 1.1 ms · print 12.3 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=recipe_2 payload=573124 status=76 validation=36 count=24 bounds=0
+placement stage=recipe_2 owner=sculpture/normals count=828704 reason=cpu_consumer cpu_s=0.0136965469832 device_s=0.0432533411609 readers=1
+placement stage=recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=no_cost_evidence cpu_s=0.250796842393 device_s=unknown readers=1
+recipe_4 present_s=0.872914 alloc_bytes=338597600 prepare_s=0.055550 uploads=86 upload_bytes=26887376 readback_bytes=7820792 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64 phases=[check 21.9 ms · cook 696.7 ms · evaluate 82.8 ms · layout 0.1 ms · lower 5.9 ms · parse 1.0 ms · print 20.0 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=recipe_4 payload=7820792 status=104 validation=72 count=48 bounds=0
+placement stage=recipe_4 owner=sculpture/normals count=402648 reason=cpu_consumer cpu_s=0.00666673984222 device_s=0.0210995126415 readers=1
+placement stage=recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
+recipe_5 present_s=1.078043 alloc_bytes=296272960 prepare_s=0.039021 uploads=102 upload_bytes=29001104 readback_bytes=7820792 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64 phases=[check 21.5 ms · cook 780.5 ms · evaluate 209.5 ms · layout 0.1 ms · lower 5.6 ms · parse 1.0 ms · print 18.6 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=recipe_5 payload=7820792 status=120 validation=72 count=48 bounds=0
+placement stage=recipe_5 owner=sculpture/normals count=264144 reason=cpu_consumer cpu_s=0.00438146183122 device_s=0.0139342061583 readers=1
+placement stage=recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
+recipe_6 present_s=0.924130 alloc_bytes=259184056 prepare_s=0.015553 uploads=118 upload_bytes=29925840 readback_bytes=7820792 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64 phases=[check 21.1 ms · cook 723.7 ms · evaluate 140.9 ms · layout 0.1 ms · lower 5.5 ms · parse 1.0 ms · print 11.7 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=recipe_6 payload=7820792 status=136 validation=72 count=48 bounds=0
+placement stage=recipe_6 owner=sculpture/normals count=115520 reason=cpu_consumer cpu_s=0.00192920659594 device_s=0.00621036031128 readers=1
+placement stage=recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
+recipe_7 present_s=0.958579 alloc_bytes=254528656 prepare_s=0.023091 uploads=134 upload_bytes=31322384 readback_bytes=7820792 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64 phases=[check 20.6 ms · cook 756.3 ms · evaluate 139.8 ms · layout 0.1 ms · lower 5.4 ms · parse 0.9 ms · print 11.7 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=recipe_7 payload=7820792 status=152 validation=72 count=48 bounds=0
+placement stage=recipe_7 owner=sculpture/normals count=174496 reason=cpu_consumer cpu_s=0.00290229441995 device_s=0.00927412436038 readers=1
+placement stage=recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=no_cost_evidence cpu_s=0.144876703067 device_s=unknown readers=1
+seed_18 present_s=0.835924 alloc_bytes=349660032 prepare_s=0.027514 uploads=153 upload_bytes=33789432 readback_bytes=11010252 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64 phases=[check 21.3 ms · cook 625.2 ms · evaluate 145.5 ms · layout 0.1 ms · lower 6.1 ms · parse 0.9 ms · print 11.2 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=seed_18 payload=11010252 status=180 validation=108 count=72 bounds=0
+placement stage=seed_18 owner=sculpture/normals count=177192 reason=cpu_consumer cpu_s=0.00294677768049 device_s=0.00941052739336 readers=1
+placement stage=seed_18 owner=sculpture/mesh#:kinds count=177192 reason=no_cost_evidence cpu_s=0.147115049679 device_s=unknown readers=1
+side_64 present_s=0.179804 alloc_bytes=238120384 prepare_s=0.000000 uploads=153 upload_bytes=33789432 readback_bytes=11010252 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64 phases=[check 21.0 ms · cook 0.0 ms · evaluate 129.7 ms · layout 0.1 ms · lower 5.6 ms · parse 0.9 ms · print 11.5 ms · reduce 0.0 ms]
+transfer_totals stage=side_64 payload=11010252 status=180 validation=108 count=72 bounds=0
+side_24 present_s=0.121119 alloc_bytes=138769312 prepare_s=0.002962 uploads=172 upload_bytes=33981536 readback_bytes=11315968 inspect_readback_bytes=0 pipelines=10 held=0 verified_Cd=binary64 phases=[check 21.0 ms · cook 56.9 ms · evaluate 13.0 ms · layout 0.1 ms · lower 5.1 ms · parse 1.0 ms · print 11.3 ms · project 0.0 ms · reduce 0.0 ms]
+transfer_totals stage=side_24 payload=11315968 status=208 validation=144 count=96 bounds=0
+placement stage=side_24 owner=sculpture/normals count=16984 reason=cpu_consumer cpu_s=0.000303389622477 device_s=0.00109243798209 readers=1
+placement stage=side_24 owner=sculpture/mesh#:kinds count=16984 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
+workspace_close handles=0 baseline=0
+real 14.16
+user 58.54
+sys 3.96

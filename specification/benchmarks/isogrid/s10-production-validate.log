@@ -1,0 +1,27 @@
+## uptime
+ 7:30  up 24 days,  1:03, 1 user, load averages: 5.20 7.47 7.71
+## shasum
+0fdb9b0ebec8f5fe
+## dependency gate
+real 3.10
+user 2.30
+sys 0.37
+## placement native (chain + isogrid generations)
+placement calibration: 0.000204 s completed, status +16 bytes, payload +0; cached estimate issues no work
+Measured chain placement: 65536 points cpu_measured_cheaper (cpu 0.041233 s, device 0.054466 s; one reader: device 0.059155 s); small cpu_consumer (cpu 0.000022 s, device 0.000031 s); unknown consumers stay CPU (missing_consumer)
+IsoGrid 24^3 measured meshes: recipes 3, 0, 3 held together on the device, each reads its own positions (47464, 12000 points); first reads materialise 1283136 payload bytes, repeats none
+real 3.33
+user 3.24
+sys 0.61
+## placement lifetimes
+Measured retained generations: small CPU-origin stays CPU; 200 dispatches, two canvases, old pixels stable, cancel/recook/source edit/read-release orders pass; payload before explicit read=0, held=4, buffers=21 (+0 warm), pipelines=1, heap_delta_words=74612
+real 4.63
+user 20.58
+sys 0.61
+## 24 cubed 200 selector flips
+retention final live_words=21003818 workload_words=21003258 scheduler_empty_words=554 scheduler_capacity=368 timer_words=6 heap_words=29713022 history=1 entries=16 payload_bytes=21715380 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=8 held=0 preparations=8 preparation_bytes=65146140 prepare_calls=8 geometry_ids=8 renderer_pipelines=96 registrations=0 flow_buffers_created=109 live_handles=
+allocation flips=200 mean_bytes=165832121
+latency present mean_s=0.081965 p50_s=0.075617 p95_s=0.148114 max_s=0.162155
+latency evaluate mean_s=0.027252 p50_s=0.021889 p95_s=0.095167 max_s=0.108834
+workspace_close handles=0 baseline=0
+real 30.99

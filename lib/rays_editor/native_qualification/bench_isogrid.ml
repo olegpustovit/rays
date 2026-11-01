@@ -651,7 +651,7 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
               retention 2 (Printf.sprintf "cycle_%d" ((i + 1) / 8))
           done
         in
-        run_flips true 8;
+        run_flips true 40;
         retention 0 "warm";
         let allocation_before = Option.map Retainers.snapshot retainers in
         run_flips false flips;

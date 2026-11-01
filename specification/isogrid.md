@@ -22,7 +22,7 @@ substitute or Scene/SOP web export is part of this work.
 | S7 deferred topology | Done | Non-forcing metadata, single racing materialisation, release orders, CPU consumers; full RDK/SOP/gate checks |
 | S8 resident construction | Done | Frozen 24³/64³ zero-payload publication and full parity, typed validation/ownership, host calls, CPU readers, cancellation, capacity replay and strict empty-offset checks; exit audit below |
 | S9 coloured quad viewport | Done | Maze/Coral exact raster/modes/orbit/frame/shadow, zero payload, static frames, actual picking/inspection readers, full editor shot and full native gate pass; production policy remains S10 |
-| S10 production placement/lifetimes | In progress | Measured record comparison, consumer budgets, 64³ CPU decisions, 200-generation stress and original 24³ 200-selector lifetime gate pass; whole-chain costs, measured mesh guards and resident original-workspace lifetime exit remain |
+| S10 production placement/lifetimes | In progress | Measured record comparison, consumer budgets, unforced whole-chain mesh placement, counterexamples, retained-generation and 200-selector lifetime checks pass; missing: a demonstrated 64³ time-to-present win over S5 on a quiet machine, a measured (not table-priced) CPU display sink, and zero-payload viewport under production policy |
 | S11 close-out | In progress | Incremental private-CMI ordering fixed; specifications, full acceptance audit and shipping/scale/native checks remain |
 
 ## S0 measurements
@@ -2381,3 +2381,75 @@ is still explicitly Qualification in this measurement. It establishes a
 reproducible candidate advantage for pricing; production selection and S10's
 remaining full-workspace lifetime/placement audit are still open. The frozen
 sketch SHA is unchanged.
+
+### S10 production mesh placement (2026-11-01)
+
+`sop/mesh`, `sop/mesh_planes` and `flow.geometry_select` no longer test `policy = Qualification`.
+`Lower.Chain.place` decides each cook from measurements and records one named reason through
+`Flow_ir.Profile.placements` (`Profile.place` and `Cost.readback` are now exported). Evidence is kept per
+authored site and output size class (log2 of P, topology floats; 256 classes, bounded `Lru`): each route
+keeps the cheaper of two measured cook rates in seconds per float, because a route's first cook pays
+one-time preparation. The CPU alternative adds the upload of the mesh it displays and the device one the
+host materialisation known CPU readers force, both at the site's last output size. While the device route is
+being measured with CPU readers its mesh is materialised under the clock, so that cost is measured; the CPU
+upload term is still the `Cost.readback` table, not a measurement. `Cost.choose` compares; no size
+threshold exists. Unknown consumers stay CPU (`missing_consumer`); a class runs CPU twice
+(`no_cost_evidence`), then device twice (the device mesh is the real result), then is decided. A
+write that reads no attribute and deletes none now declares `Forward 0` in the consumer census, which gave the
+mesh its reader count (it was unknown, so the isogrid mesh was `missing_consumer`). Qualification still
+forces the device and is used only by tests of display and by benchmarks.
+
+Placement of the frozen sketch (64³, ordinary editor route, load average 5-13 from the owner's workload, so
+absolute times are not comparable with S5's idle-machine numbers):
+
+| Stage | Reason | Measured (cpu / device, s) | Present (s) |
+| --- | --- | --- | --- |
+| cold 64³, recipe 1 (998,592 points) | `no_cost_evidence`, CPU | none yet | 1.519 (S5, idle: 0.9245) |
+| second and later visits of a size class | CPU until two cooks | cpu 0.253 at 836,544 points | as cold |
+| classes with both routes, 0.83-1.0 M points | `device_measured_cheaper` | 0.221-0.272 / 0.039-0.046 | see below |
+| classes with both routes, 115-174 k points | `device_measured_cheaper` | 0.091-0.139 / 0.018-0.027 | see below |
+| 31,840 points and 24³ (16,984) | `no_cost_evidence` in the sequence; device 0.021 | | |
+
+The device rate includes the measured materialisation of P and topology (negligible against the cook).
+Digests: every stage of `--bench 64` and `--flips 64 48` matches the walker golden exactly
+(`Cd=binary64`, no float32 conversion needed), on both routes. Cold behaviour is the unchanged CPU route.
+
+Paired same-load comparison, 24 flips after 40 warm ones (`s10-production-ab-64.log`; CPU forced by a
+temporary local edit, since removed): mean present 1.265 s CPU against 1.108 s production (-12 percent),
+mean cook phase 0.900 against 0.772 s, evaluate 0.239 against 0.224 s. Predicted from the recorded mesh
+rates the gain is about 0.09 s per flip; observed 0.128 s. Per sample the noise is about 0.1 s: recipe 1
+(the 1 M-point headline) is 1.636 s CPU against 1.700 s production over three samples each, which does
+not resolve a win or a loss. Therefore this log does **not** demonstrate that the device beats S5's
+0.925/0.939 s at 64³ on a quiet machine, and S10 stays In progress.
+
+Why the gain is partial: the viewport is counted as one CPU reader (`Cook.prepared_context`), so the N and Cd
+writes still choose CPU (`cpu_consumer`) and the displayed geometry is mixed (resident P, CPU N and Cd). The
+S9 zero-payload display needs all of them resident and is exercised only under Qualification in
+`test_isogrid_viewport`. Pricing the display as a borrower, and a measured display-conversion sink, are
+the missing steps.
+
+Counterexamples (`test_placement_native`, ordinary Measured policy, 4.35 s with rebuild): unknown consumers
+stay CPU (`missing_consumer`); a 65,536-point mesh_planes chain records `cpu_measured_cheaper` (cpu 0.0406 s,
+device 0.0537 s; with one reader the device total is 0.0584 s) and the recorded reason equals
+`Cost.choose` on its own numbers for 0, 1 and 2 readers; a 32-point CPU-origin mesh stays CPU
+(`cpu_consumer`, 0.000022 against 0.000027 s); a different output size is a new class that re-measures. The
+mesh nodes take no geometry inputs, so mixed-origin input pricing remains the `record_on_device` control
+tests of the earlier S10 sections. A multiple-consumer census is in `lib/sop` consumer facts.
+
+Lifetimes: `test_placement_native --lifetimes` (4.81 s) passes unchanged on the measured route: 200 dispatches,
+two canvases, old pixels stable, cancel, recook, source edit, read and release orders, a four-domain
+deferred reader, pool reuse (+0 buffers after warmup), pipelines 1, heap delta 74,612 words and handles back
+to baseline. The new IsoGrid check holds measured device meshes of recipes 3, 0, 3 (47,464 / 12,000
+points) together and each reads its own positions (first reads 1,283,136 payload bytes, repeats none).
+The original 24³ 200-selector alias passes (32.25 s combined with rebuild): after five warm cycles (the
+warmup is 40 flips, was 8, because each size class needs four cooks to learn) retained words are equal, and
+pipelines 8, registrations 0, held buffers 0, handles 422 and buffer creations are equal at both
+snapshots; handles return to 0 at close. The Session caches those 24³ results after warmup, so the 200
+recooks on the resident route are the `--lifetimes` run. Logs:
+[validation](benchmarks/isogrid/s10-production-final.log),
+[24³ selector](benchmarks/isogrid/s10-production-selector-24.log),
+[64³ sequence](benchmarks/isogrid/s10-production-bench-64.log),
+[64³ flips](benchmarks/isogrid/s10-production-flips-64.log),
+[paired CPU/production](benchmarks/isogrid/s10-production-ab-64.log).
+Unit sets: Flow IR, SOP, Flow SOP (14.69 s), Flow native and the dependency gate pass. The frozen sketch
+SHA-256 still starts 0fdb9b0ebec8f5fe.

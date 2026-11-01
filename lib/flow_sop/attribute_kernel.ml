@@ -1877,14 +1877,17 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
         in
         Result.map (fun geometry -> N.Build.{ geometry; instances = None }) result)
   in
+  let reads = if selected then List.sort_uniq String.compare (name :: reads data) else reads data in
+  (* a write that reads no attribute and deletes none carries its input's storage through unread *)
   N.Build.with_facts
     {
       (N.facts node) with
       elementwise = (match owner with A.Point -> N.Points | Primitive -> Primitives | _ -> None);
       topology = N.Preserved;
-      reads = (if selected then List.sort_uniq String.compare (name :: reads data) else reads data);
+      reads;
       writes =
         List.sort_uniq String.compare
           ((name :: List.map (fun (n, _, _) -> n) prior) @ List.map snd deletes);
     }
     node
+  |> N.Build.with_input_use (if reads = [] && deletes = [] then N.Forward 0 else N.Cpu)

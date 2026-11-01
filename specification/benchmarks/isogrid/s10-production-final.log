@@ -1,0 +1,40 @@
+## uptime
+ 7:44  up 24 days,  1:16, 1 user, load averages: 11.82 13.15 10.57
+## shasum
+0fdb9b0ebec8f5fe
+## @lib/flow_ir/runtest
+exit 0
+real 0.21
+## @lib/sop/runtest
+exit 0
+real 2.29
+## @lib/flow_sop/runtest
+exit 0
+Measured SOP consumer plumbing: opaque root declines resident record; capture supplies one CPU reader
+sop/concat: bytes equal native merge, errors share codes, inputs untouched, reference/CPU/domains/grains
+C1 native topology errors, exact Int validation, lazy untaken mesh and selected causes retain cook timing
+Mesh planes finite/count/topology errors, lazy causes and exact scalar capacity retain native boundaries
+Deferred malformed mesh returns the CLI topology error and publishes no geometry
+Authored body errors cook lazily; parameter rebuilds, causes and context seed changes preserve timing
+Cooked materialized writes: owned tuple/CSR storage, expanded instances, producer/count errors and cancellation
+mesh-plane stage authored error precedence, exact bytes and ownership at 1/4/8 domains
+Encoded parameters: typed hooks and transitive pure helpers; generic error projection/edit
+inline cards: body errors cook, refusals lower, ranges/encoded text/rest slots as the node
+inline cards: recomputed normals keep dev's owners and storage errors
+Native compound audit: 0/1863 components exceed four ULP; max 1 ULP, max absolute error 2.2204460492503131e-16
+real 14.69
+## @lib/flow_native/runtest
+exit 0
+real 1.85
+## @test/dependency_gate
+exit 0
+real 2.92
+## @lib/rays_editor/native_qualification/test_placement_native
+exit 0
+Measured chain placement: 65536 points cpu_measured_cheaper (cpu 0.040565 s, device 0.053715 s; one reader: device 0.058404 s); small cpu_consumer (cpu 0.000022 s, device 0.000027 s); unknown consumers stay CPU (missing_consumer)
+IsoGrid 24^3 measured meshes: recipes 3, 0, 3 held together on the device, each reads its own positions (47464, 12000 points); first reads materialise 1283136 payload bytes, repeats none
+real 4.35
+## @lib/rays_editor/native_qualification/test_placement_lifetimes
+exit 0
+Measured retained generations: small CPU-origin stays CPU; 200 dispatches, two canvases, old pixels stable, cancel/recook/source edit/read-release orders pass; payload before explicit read=0, held=4, buffers=21 (+0 warm), pipelines=1, heap_delta_words=74612
+real 4.81

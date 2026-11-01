@@ -153,11 +153,21 @@ over resident Flow values. `Executor.force ?resident` forwards it through both
 normal and cached root execution. The workspace GPU proxy routes all these
 callbacks to its owner, including scope cleanup; workers only read settled
 owned holders. Exact precision declines before acquiring a native owner.
-Under Qualification policy, shared mesh cooking now validates resident fields
+When the placement below selects the device (or under the test-only Qualification policy), shared mesh cooking validates resident fields
 before transferring them into deferred Float3 positions and Topology. CPU
 consumers force the existing carriers. Unsupported stream shapes materialise
 before the scope closes and pass through the ordinary mesh constructor.
-Fused N/Cd writes stay resident under Qualification; production measured placement remains separate work.
+Fused N/Cd writes stay resident when their own measured comparison selects the device.
+
+Mesh construction (`sop/mesh`, `sop/mesh_planes`) and `flow.geometry_select` enter the resident scope by a
+whole-chain measured comparison (`Lower.Chain`): per authored site and output size class (log2 of the
+output's floats) each route keeps the cheaper of two measured cook rates (seconds per float, a route's first
+cook pays one-time preparation). The CPU alternative adds the upload of the mesh it displays and the device
+one the host materialisation known CPU readers force, both priced by `Cost.readback` at the site's last
+output size, and `Cost.choose` decides with a recorded reason. Unknown consumers stay CPU
+(`missing_consumer`); a class without both routes runs CPU, then device (its mesh is the real result), until
+it has numbers (`no_cost_evidence`). A write that reads no attribute and deletes none forwards its input
+unread in the consumer census.
 
 Stateless structured geometry selection uses the same Qualification scope.
 Core offers raw `Host_source` arguments to the host before its usual CPU

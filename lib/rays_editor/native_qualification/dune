@@ -76,7 +76,8 @@
 (rule
  (enabled_if (= %{system} macosx))
  (alias test_placement_native)
- (action (run %{exe:test_placement_native.exe})))
+ (deps ../../../sketches/isogrid.rays)
+ (action (run %{exe:test_placement_native.exe} %{dep:../../../sketches/isogrid.rays})))
 
 (alias (name runtest-native) (deps (alias test_placement_native)))
 

@@ -324,4 +324,165 @@ let retained_generations () =
                     last.pipeline_compilations heap_delta))));
   assert (Ogpu.Impl.live_handles () = baseline)
 
-let () = if Array.exists (( = ) "--lifetimes") Sys.argv then retained_generations ()
+(* Unforced whole-chain placement of a mesh: each scenario cooks until the measured comparison has
+   both routes, then reads the recorded decision. *)
+let chain_counterexamples () =
+  let baseline = Ogpu.Impl.live_handles () in
+  let gpu = Gpu.create () in
+  let string_ok = function Ok value -> value | Error message -> failwith message in
+  Fun.protect ~finally:(fun () -> Gpu.close gpu) (fun () ->
+      Gpu.with_backend ~fast:true gpu (fun config ->
+          assert (config.policy = Flow_ir.Gpu.Measured);
+          let wave = List.fold_left (fun x _ -> "(sin " ^ x ^ ")") "(+ (float i) t)"
+              (List.init 16 Fun.id) in
+          let source n =
+            Printf.sprintf
+              "(workspace chain (graph g :context sop\n\
+               (sop/mesh_planes :points {:x (exact (map (fn [i] %s) (array/range %d))) :y (array/float %d)\n\
+                 :z (array/float %d)} :vertex_points (array/int 0)\n\
+                 :primitive_offsets (array/int 1) :kinds (array/int 0))))"
+              wave n n n
+          in
+          let session = string_ok (Sop.Session.create ~max_entries:0 ~max_payload_bytes:0) in
+          Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
+              let lowered_by_size = Hashtbl.create 4 in
+              let cook ?readers n =
+                let lowered, node =
+                  match Hashtbl.find_opt lowered_by_size n with
+                  | Some found -> found
+                  | None ->
+                      let lowered = ok (Flow_sop.Lower.workspace ~gpu:config ~defer:true
+                          (ok (Flow.Syntax.parse (source n)))) in
+                      let graph = List.hd lowered.graphs in
+                      let node = string_ok (Sop.Edit_graph.compile_node graph.network.geometry
+                          ~node_id:(Option.get graph.root)) in
+                      Hashtbl.add lowered_by_size n (lowered, node);
+                      (lowered, node)
+                in
+                let context = string_ok (Sop.Context.create ~domains:1 ()) in
+                let output = ok (Sop.Session.cook ?cpu_consumers:readers session ~context node) in
+                let geometry = ok (Sop.Payload.geometry output.payload) in
+                let placement = List.hd (Flow_ir.Profile.placements lowered.profile) in
+                (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry), placement)
+              in
+              let settle ?readers n =
+                let rec go i =
+                  let resident, placement = cook ?readers n in
+                  if placement.cpu_seconds <> None && placement.device_seconds <> None || i = 0 then
+                    (resident, placement)
+                  else go (i - 1)
+                in
+                for _ = 1 to 4 do ignore (cook ?readers n) done;
+                go 4
+              in
+              let name (p : Flow_ir.placement) = Flow_ir.Cost.reason_name p.reason in
+              let large = 65536 in
+              (* unknown consumers never leave the CPU, whatever the sizes *)
+              let resident, p = cook large in
+              assert (not resident && p.reason = Missing_consumer && p.cpu_consumers = None);
+              (* with both routes measured, the record is the shared comparison of its own numbers *)
+              let _, free = settle ~readers:0 large in
+              let consistent (p : Flow_ir.placement) =
+                p.reason
+                = Flow_ir.Cost.choose ~cpu_seconds:p.cpu_seconds ~device_seconds:p.device_seconds
+                    ~resident:false ~cpu_consumers:(Option.get p.cpu_consumers)
+              in
+              assert (free.cpu_seconds <> None && free.device_seconds <> None && consistent free);
+              (* each known CPU reader count reaches the decision record *)
+              let _, one = settle ~readers:1 large in
+              let _, two = settle ~readers:2 large in
+              assert (one.cpu_consumers = Some 1 && two.cpu_consumers = Some 2);
+              assert (consistent one && consistent two);
+              (* a small CPU-origin mesh stays on the CPU *)
+              let resident, small = settle ~readers:1 32 in
+              if resident || not (small.reason = Cpu_measured_cheaper || small.reason = Cpu_consumer) then
+                failwith ("small chain: " ^ name small);
+              (* a topology change is a new size, measured again rather than assumed *)
+              let _, grown = cook ~readers:1 large in
+              assert (grown.count <> small.count);
+              Printf.printf
+                "Measured chain placement: %d points %s (cpu %.6f s, device %.6f s; one reader: \
+                 device %.6f s); small %s (cpu %.6f s, device %.6f s); unknown consumers stay CPU \
+                 (missing_consumer)\n%!"
+                large (name free) (Option.get free.cpu_seconds) (Option.get free.device_seconds)
+                (Option.get one.device_seconds) (name small)
+                (Option.get small.cpu_seconds) (Option.get small.device_seconds))));
+  assert (Ogpu.Impl.live_handles () = baseline)
+
+(* The frozen IsoGrid at 24^3 on the ordinary measured policy: two recipes' meshes that the
+   comparison placed on the device are held together, and each still reads its own recipe's
+   positions after the other exists. *)
+let isogrid_generations file =
+  let text = In_channel.with_open_bin file In_channel.input_all in
+  assert (Editor_document.Lowering.sha256 text
+          = "0fdb9b0ebec8f5fe84227d7c0963dd3ec8c446c6145e145555b4fa4f80744e69");
+  let workspace = ok (Rays_editor.Workspace.load text |> Result.map_error (fun ds -> List.hd ds)) in
+  let catalog = ok (Rays_editor.workspace_catalog ()) in
+  let baseline = Ogpu.Impl.live_handles () in
+  let gpu = Gpu.create () in
+  let string_ok = function Ok value -> value | Error message -> failwith message in
+  Fun.protect ~finally:(fun () -> Gpu.close gpu) (fun () ->
+      Gpu.with_backend ~fast:true gpu (fun device ->
+          let node_of config recipe =
+            let value = List.hd (ok (Flow.Syntax.parse (string_of_int recipe))) in
+            let workspace = ok (Editor_document.Workspace_doc.edit catalog workspace
+                (Flow_graph.Flow_edit.Set_arg
+                   { node = [ "volume"; "recipe-switch" ]; key = Whole; sub = []; value })) in
+            let lowered = ok (Flow_sop.Lower.of_checked ~gpu:config ~defer:true
+                ~inputs:workspace.inputs workspace.checked) in
+            let graph = List.find (fun (g : Flow_sop.Lower.graph) -> g.default && g.name = "sculpture")
+                lowered.graphs in
+            string_ok (Sop.Edit_graph.compile_node graph.network.geometry
+                ~node_id:(Option.get graph.root))
+          in
+          let session = string_ok (Sop.Session.create ~max_entries:0 ~max_payload_bytes:(1 lsl 28)) in
+          Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
+              let cook node =
+                let context = string_ok (Sop.Context.create ~domains:1 ()) in
+                ok (Sop.Payload.geometry (ok (Sop.Session.cook ~cpu_consumers:1 session ~context node)).payload)
+              in
+              let checksum geometry =
+                let positions = Rdk.Geometry.positions geometry in
+                let sum = ref 0. in
+                for i = 0 to Rdk.Packed.Float3.length positions - 1 do
+                  let x, y, z = Rdk.Packed.Float3.get positions i in
+                  sum := !sum +. (x *. 1.0001) +. (y *. 1.0002) +. (z *. 1.0003)
+                done;
+                (Rdk.Geometry.point_count geometry, !sum)
+              in
+              let reference recipe =
+                checksum (cook (node_of Flow_ir.Gpu.{ default with fast = true } recipe))
+              in
+              let expected = [| reference 3; reference 0 |] in
+              let placed recipe =
+                let node = node_of device recipe in
+                let rec go attempts =
+                  let geometry = cook node in
+                  if Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry) then geometry
+                  else if attempts = 0 then failwith "measured policy kept the IsoGrid mesh on the CPU"
+                  else go (attempts - 1)
+                in
+                go 8
+              in
+              let a = placed 3 in
+              let b = placed 0 in
+              let a2 = placed 3 in
+              let before = (let h, _, _, _, _ = Gpu.image_stats gpu in h.payload_readback_bytes) in
+              assert (checksum a = expected.(0));
+              assert (checksum b = expected.(1));
+              assert (checksum a2 = expected.(0));
+              assert (checksum a = expected.(0));
+              let after = (let h, _, _, _, _ = Gpu.image_stats gpu in h.payload_readback_bytes) in
+              Printf.printf
+                "IsoGrid 24^3 measured meshes: recipes 3, 0, 3 held together on the device, each reads \
+                 its own positions (%d, %d points); first reads materialise %d payload bytes, repeats \
+                 none\n%!"
+                (fst expected.(0)) (fst expected.(1)) (after - before))));
+  assert (Ogpu.Impl.live_handles () = baseline)
+
+let () =
+  if Array.exists (( = ) "--lifetimes") Sys.argv then retained_generations ()
+  else begin
+    chain_counterexamples ();
+    if Array.length Sys.argv > 1 then isogrid_generations Sys.argv.(1)
+  end

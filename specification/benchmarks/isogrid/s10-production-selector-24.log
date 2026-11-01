@@ -1,0 +1,7 @@
+ 7:45  up 24 days,  1:17, 1 user, load averages: 10.38 12.69 10.52
+retention final live_words=21002872 workload_words=21002310 scheduler_empty_words=556 scheduler_capacity=368 timer_words=6 heap_words=30339710 history=1 entries=16 payload_bytes=21715380 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=8 held=0 preparations=8 preparation_bytes=65146140 prepare_calls=8 geometry_ids=8 renderer_pipelines=96 registrations=0 flow_buffers_created=103 live_handles=422
+allocation flips=200 mean_bytes=165972920
+latency present mean_s=0.083386 p50_s=0.076444 p95_s=0.158631 max_s=0.172937
+latency evaluate mean_s=0.027989 p50_s=0.022478 p95_s=0.096872 max_s=0.107851
+workspace_close handles=0 baseline=0
+real 32.25

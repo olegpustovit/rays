@@ -144,7 +144,8 @@ adopt or materialise them before closing the resident execution. Errors close
 it; capacity overflow closes and reruns from the start. Value programs with
 state slots refuse with `E_CORE_RESIDENT`; drawing folds retain their existing
 state and loop rules. Native mesh construction uses this execution boundary
-under Qualification policy; production measured placement remains separate.
+when the whole-chain measured comparison (`specification/gpu-codegen.md`) selects the device; the test-only
+Qualification policy forces it.
 It does not add a web SOP target.
 
 Resident records with frame-dependent fields lower as one cached Core program.

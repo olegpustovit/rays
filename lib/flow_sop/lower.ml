@@ -481,83 +481,137 @@ let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
     |> Sop.Node.Build.with_facts (Sop.Node.facts base)
 
 (* Whole-chain placement of a resident mesh scope, measured rather than assumed. Each route's cook
-   seconds are kept per program key and output size. The CPU alternative adds the upload of the mesh
-   it displays, the device one the host materialisation its CPU readers force. The first cook of a
-   key runs on the CPU; the next runs the device route (its mesh is the real result) so both are
-   measured, then [Flow_ir.Cost.choose] decides. A new output size starts the measurement over. *)
+   rate (seconds per output float) is kept per authored site and output size class, because a fixed
+   cost makes small and large outputs differ. The CPU alternative adds the upload of the mesh it
+   displays, the device one the host materialisation its CPU readers force, both at the expected
+   size (the site's last output). While the device route is being measured and CPU readers exist, its
+   mesh is materialised under the clock, so their cost is measured, not assumed. A route's first cook pays one-time preparation, so a route needs
+   two cooks and keeps the cheaper rate. A class runs on the CPU until it has two, then on the
+   device (its mesh is the real result) until it has two, then [Flow_ir.Cost.choose] decides. *)
 module Chain = struct
   module T = Lru.Make (String)
 
   type evidence = {
     backend : Flow_ir.Gpu.backend option;
-    mutable floats : int;
-    mutable points : int;
-    mutable cpu : float option;
-    mutable device : float option;
+    mutable cpu : float;
+    mutable cpu_cooks : int;
+    mutable device : float;
+    mutable device_cooks : int;
+    mutable materialise : float;
   }
 
-  let table = T.create 256
+  let classes : evidence T.t = T.create 256
+  let last : (Flow_ir.Gpu.backend option * int * int) T.t = T.create 256
   let lock = Mutex.create ()
 
-  let place ~(gpu : Flow_ir.Gpu.config) ~profile ~owner ~key ~readers =
+  let rec log2 n = if n <= 1 then 0 else 1 + log2 (n lsr 1)
+
+  let rec site_of = function
+    | E.Residual residual ->
+        let view = E.Residual.residual_view residual in
+        Some (view.site, view.iter)
+    | E.Record fields -> List.find_map (fun (_, value) -> site_of value) (List.rev fields)
+    | _ -> None
+
+  (* what a CPU reader of the mesh forces *)
+  let force_host geometry =
+    let positions = Rdk.Geometry.positions geometry in
+    if Rdk.Packed.Float3.length positions > 0 then ignore (Rdk.Packed.Float3.get positions 0);
+    let topology = Rdk.Geometry.topology geometry in
+    if Rdk.Topology.primitive_count topology > 0 then begin
+      ignore (Rdk.Topology.point_of_vertex topology 0);
+      ignore (Rdk.Topology.primitive_vertex_range topology 0);
+      ignore (Rdk.Topology.primitive_kind topology 0)
+    end
+
+  let place ~(gpu : Flow_ir.Gpu.config) ~profile ~clock ~owner ~readers =
     if gpu.policy = Flow_ir.Gpu.Qualification then (true, fun _ ~device:_ _ -> ())
     else
-      let report ?(points = None) reason cpu_seconds device_seconds =
+      let site = String.concat "/" (fst owner) ^ "#" ^ String.concat "," (List.map string_of_int (snd owner)) in
+      let report ~points reason cpu_seconds device_seconds =
         Flow_ir.Profile.place (Some profile)
           { owner; count = points; reason; cpu_seconds; device_seconds; cpu_consumers = readers }
       in
-      let evidence () =
+      let expected =
         Mutex.protect lock (fun () ->
-            match T.find_opt table key with
+            match T.find_opt last site with
+            | Some (backend, floats, points) when backend == gpu.backend -> Some (floats, points)
+            | _ -> None)
+      in
+      let entry floats =
+        Mutex.protect lock (fun () ->
+            let key = site ^ "@" ^ string_of_int (log2 floats) in
+            match T.find_opt classes key with
             | Some ev when ev.backend == gpu.backend -> ev
             | _ ->
-                let ev = { backend = gpu.backend; floats = -1; points = 0; cpu = None; device = None } in
-                T.add table key ev;
+                let ev = { backend = gpu.backend; cpu = infinity; cpu_cooks = 0; device = infinity; device_cooks = 0; materialise = infinity } in
+                T.add classes key ev;
                 ev)
       in
-      let ev = evidence () in
-      let decide () =
-        Mutex.protect lock (fun () ->
-            let cpu_consumers = Option.value ~default:0 readers in
-            let moved = Flow_ir.Cost.readback ~count:(max ev.floats 0) ~width:1 in
-            let cpu_seconds = Option.map (fun s -> s +. moved) ev.cpu
-            and device_seconds =
-              Option.map (fun s -> if cpu_consumers = 0 then s else s +. moved) ev.device
-            in
-            let reason =
-              Flow_ir.Cost.choose ~cpu_seconds ~device_seconds ~resident:false ~cpu_consumers
-            in
-            report ~points:(Some ev.points) reason cpu_seconds device_seconds;
-            reason)
+      (* [seconds] are rates; both are priced at the expected size *)
+      let decide (floats, points) ev =
+        let cpu_consumers = Option.value ~default:0 readers in
+        let moved = Flow_ir.Cost.readback ~count:floats ~width:1 in
+        let materialise = if ev.materialise < infinity then ev.materialise *. float floats else moved in
+        let cpu_seconds =
+          if ev.cpu_cooks < 2 then None else Some ((ev.cpu *. float floats) +. moved)
+        and device_seconds =
+          if ev.device_cooks < 2 then None
+          else Some ((ev.device *. float floats) +. if cpu_consumers = 0 then 0. else materialise)
+        in
+        let reason =
+          Flow_ir.Cost.choose ~cpu_seconds ~device_seconds ~resident:false ~cpu_consumers
+        in
+        report ~points:(Some points) reason cpu_seconds device_seconds;
+        reason
       in
       let record geometry ~device seconds =
-        Mutex.protect lock (fun () ->
-            let floats =
-              (Rdk.Geometry.point_count geometry * 9) + (Rdk.Geometry.primitive_count geometry * 6)
-            in
-            if floats <> ev.floats then begin
-              ev.floats <- floats;
-              ev.points <- Rdk.Geometry.point_count geometry;
-              ev.cpu <- None;
-              ev.device <- None
-            end;
-            if device then ev.device <- Some seconds else ev.cpu <- Some seconds);
-        if readers <> None then ignore (decide ())
+        let points = Rdk.Geometry.point_count geometry in
+        let floats = (points * 9) + (Rdk.Geometry.primitive_count geometry * 6) in
+        if floats > 0 then begin
+          let ev = entry floats in
+          let materialise =
+            if device && Option.fold ~none:false ~some:(fun n -> n > 0) readers && ev.device_cooks < 2
+            then begin
+              let began = clock () in
+              force_host geometry;
+              Some ((clock () -. began) /. float floats)
+            end
+            else None
+          in
+          Mutex.protect lock (fun () ->
+              let rate = seconds /. float floats in
+              Option.iter (fun rate -> ev.materialise <- Float.min ev.materialise rate) materialise;
+              if device then begin
+                ev.device <- Float.min ev.device rate;
+                ev.device_cooks <- ev.device_cooks + 1
+              end
+              else begin
+                ev.cpu <- Float.min ev.cpu rate;
+                ev.cpu_cooks <- ev.cpu_cooks + 1
+              end;
+              T.add last site (gpu.backend, floats, points));
+          if readers <> None then ignore (decide (floats, points) ev)
+        end
       in
-      match (gpu.backend, readers) with
-      | None, _ ->
-          report No_cost_evidence None None;
+      match (gpu.backend, readers, expected) with
+      | None, _, _ ->
+          report ~points:None No_cost_evidence None None;
           (false, record)
-      | _, None ->
-          report Missing_consumer None None;
+      | _, None, _ ->
+          report ~points:None Missing_consumer None None;
           (false, record)
-      | Some _, Some _ -> (
-          match (ev.cpu, ev.device) with
-          | Some _, Some _ -> (Flow_ir.Cost.on_device (decide ()), record)
-          | Some _, None -> (true, record)
-          | None, _ ->
-              report No_cost_evidence None None;
-              (false, record))
+      | _, _, None ->
+          report ~points:None No_cost_evidence None None;
+          (false, record)
+      | Some _, Some _, Some ((floats, _) as size) -> (
+          let ev = entry floats in
+          if ev.cpu_cooks < 2 then begin
+            report ~points:None No_cost_evidence None None;
+            (false, record)
+          end
+          else if ev.device_cooks < 2 then (true, record)
+          else (Flow_ir.Cost.on_device (decide size ev), record))
 end
 
 let rec geometry_arrays_node ?check ~gpu ~profile ~clock ~strict_body ~reference ~approx ~kernel_source
@@ -609,8 +663,10 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
         in
         let device, record =
           if eligible then
-            Chain.place ~gpu ~profile ~owner:([ operation; Digest.to_hex (Digest.string parameters) ], [])
-              ~key:parameters ~readers:(Sop.Context.cpu_consumers context node_id)
+            Chain.place ~gpu ~profile ~clock
+              ~owner:
+                (Option.fold ~none:([ operation ], []) ~some:Fun.id (Chain.site_of (E.Record args)))
+              ~readers:(Sop.Context.cpu_consumers context node_id)
           else (false, fun _ ~device:_ _ -> ())
         in
         let began = clock () and on_device = ref false in
@@ -2293,10 +2349,9 @@ struct
           in
           let device, record =
             if eligible then
-              let key = Lazy.force kernel_source ^ Flow.Value.key_of ~residual:E.Residual.residual_id (E.Residual residual) in
-              Chain.place ~gpu ~profile
-                ~owner:([ "flow.geometry_select"; Digest.to_hex (Digest.string key) ], [])
-                ~key ~readers:(Sop.Context.cpu_consumers context node_id)
+              Chain.place ~gpu ~profile ~clock
+                ~owner:(Option.get (Chain.site_of (E.Residual residual)))
+                ~readers:(Sop.Context.cpu_consumers context node_id)
             else (false, fun _ ~device:_ _ -> ())
           in
           let began = clock () in
