@@ -65,10 +65,12 @@ type t = {
       (* the keys of displays whose meshes were collected (any domain) *)
   mutable displays : int;  (** device meshes bound so far *)
   mutable display_refusal : string option;
-  bound : (string, unit -> unit) Hashtbl.t; (* each live display's release, by its key *)
+  bound : (string, int * (unit -> unit)) Hashtbl.t;
+      (* each live display's geometry id and release, by its key *)
   shown : (int, string * bool * int option * int * unit ref Weak.t) Hashtbl.t;
       (* a live display by its geometry's data id: drawing the same geometry again names it, so
-         the renderer's caches keyed by it hit instead of filling with dead registrations *)
+         the renderer's caches keyed by it hit instead of filling with dead registrations; an entry
+         leaves with its registration *)
   mutable frames : int;
   mutable releasing : (int * (unit -> unit)) list;
       (* dropped displays, released at a later {!frame}: one that drew them may be in flight on the
@@ -565,8 +567,12 @@ let rec push cell value =
 
 let drop_display t key =
   match Hashtbl.find_opt t.bound key with
-  | Some release ->
+  | Some (id, release) ->
       Hashtbl.remove t.bound key;
+      (* a re-display after the token died may already name this geometry with a newer key *)
+      (match Hashtbl.find_opt t.shown id with
+      | Some (shown, _, _, _, _) when String.equal shown key -> Hashtbl.remove t.shown id
+      | _ -> ());
       t.releasing <- (t.frames + 2, release) :: t.releasing
   | None -> ()
 
@@ -705,17 +711,15 @@ let display t geometry =
           | Error d -> Error (Ogpu.Error.to_string d)
           | Ok (key, unregister) ->
               t.displays <- t.displays + 1;
-              Hashtbl.replace t.bound key (fun () ->
-                  unregister ();
-                  release_all ());
+              Hashtbl.replace t.bound key
+                ( id,
+                  fun () ->
+                    unregister ();
+                    release_all () );
               let token = ref () in
               Gc.finalise (fun _ -> push t.dropped key) token;
               let weak = Weak.create 1 in
               Weak.set weak 0 (Some token);
-              if Hashtbl.length t.shown >= 64 then
-                Hashtbl.filter_map_inplace
-                  (fun _ ((k, _, _, _, _) as entry) -> if Hashtbl.mem t.bound k then Some entry else None)
-                  t.shown;
               Hashtbl.replace t.shown id
                 (key, normals <> None, Option.map snd indices, Option.fold ~none:0 ~some:snd colors, weak);
               Ok
@@ -763,7 +767,7 @@ let close t =
     done;
     Condition.broadcast t.jobs_ready;
     Mutex.unlock t.jobs_lock;
-    Hashtbl.iter (fun _ release -> release ()) t.bound;
+    Hashtbl.iter (fun _ (_, release) -> release ()) t.bound;
     Hashtbl.reset t.bound;
     List.iter (fun (_, release) -> release ()) t.releasing;
     t.releasing <- [];
