@@ -1,9 +1,11 @@
 ; IsoGrid city: an animated wblut-style voxel grid seen almost isometrically.
-; A folded cube is divided into parcels of 32, 16, 8, 4 or 2 voxels; each parcel draws one motif
-; (wire frame, window shell, floors, columns, cross, sponge, block or nothing) and one palette, and
-; redraws itself at its own moment, so changes travel up through the cube without flicker.
-; The whole chain (voxels, face mask, compaction, positions, colours) is one GPU program of t: nothing
-; crosses to the CPU per frame. Cook on an M1: 64³ 26 ms, 96³ 60 ms, 128³ 110 ms (`side` in the graph).
+; A cube folded twice into one kaleidoscopic wedge is divided into parcels of six sizes. Each parcel
+; draws a motif clipped by a second, finer motif repeating inside it (frames, shells, stairs, sponge,
+; lattices, pipes), takes one colour family, and redraws itself at its own moment, so changes climb
+; through the cube without flicker. Scrub `side` (a power of two), `seed`, `tempo` and `palette`.
+; The whole chain (voxels, surface, faces, positions, colours) is one GPU program of t.
+; Cook on an M1: 64³ 16 ms, 128³ 110 ms (3M triangles), 256³ 1.1 s (19M triangles, 5.7 GB).
+; Path traced (Scene root > renderer), a changing mesh is read back every frame: 64³ 410 ms a frame.
 ; Run: dune exec rays -- sketches/isogrid_city.rays
 (workspace isogrid_city
 
@@ -27,29 +29,33 @@
     (int (+ (+ (* low.x 9973) (* low.y 613)) (+ low.z (* size 104729)))))
 
   ; A block's dice change at its own moment: its random phase plus its height, so a redraw climbs.
-  (defn dice :context value [(seed : int) (key : int) (low : vec3) (clock : float)]
-    (let* [moment (floor (+ clock (+ (random-at seed key) (* low.y 0.03))))]
+  (defn dice :context value [(seed : int) (key : int) (low : vec3) (clock : float) (climb : float)]
+    (let* [moment (floor (+ clock (+ (random-at seed key) (* low.y climb))))]
       (random-at (int/add seed (int/mul (int moment) 7919)) key)))
 
-  ; Subdivide 32 -> 16 -> 8 -> 4 -> 2, stopping early by chance: the size of the parcel holding p.
-  (defn parcel-size :context value [(p : vec3) (seed : int) (clock : float)]
-    (let* [huge (corner p 32)
-           big (corner p 16)
-           mid (corner p 8)
-           small (corner p 4)]
-      (cond
-        (< (dice seed (key-of huge 32) huge clock) 0.08) 32
-        (< (dice seed (key-of big 16) big clock) 0.18) 16
-        (< (dice seed (key-of mid 8) mid clock) 0.45) 8
-        (< (dice seed (key-of small 4) small clock) 0.6) 4
-        :else 2)))
+  ; Whether the block of `size` holding p stops subdividing, with this chance.
+  (defn stops :context value [(p : vec3) (size : float) (chance : float) (seed : int) (clock : float) (climb : float)]
+    (let* [low (corner p size)]
+      (< (dice seed (key-of low size) low clock climb) chance)))
 
-  ; One motif over a parcel. `local` runs from 0 to size-1, `rim` is the distance to the nearest wall.
+  ; Subdivide from a quarter of the cube, halving, stopping early by chance; never under two voxels.
+  (defn parcel-size :context value [(p : vec3) (top : float) (seed : int) (clock : float) (climb : float)]
+    (cond
+      (stops p top 0.04 seed clock climb) top
+      (stops p (/ top 2) 0.12 seed clock climb) (/ top 2)
+      (stops p (/ top 4) 0.22 seed clock climb) (/ top 4)
+      (stops p (/ top 8) 0.4 seed clock climb) (max 2 (/ top 8))
+      (stops p (/ top 16) 0.6 seed clock climb) (max 2 (/ top 16))
+      :else (max 2 (/ top 32))))
+
+  ; One motif over a block of `size`; `local` runs from 0 to size-1, `rim` measures from the nearest wall.
   (defn motif :context value [(kind : int) (local : vec3) (size : float)]
     (let* [last (- size 1)
            rim [(min local.x (- last local.x)) (min local.y (- last local.y)) (min local.z (- last local.z))]
            stroke (max 1 (floor (/ size 8)))
+           pitch (* 2 (+ stroke 1))
            third (/ size 3)
+           near (min rim.x (min rim.y rim.z))
            on-x (if (< rim.x stroke) 1 0)
            on-y (if (< rim.y stroke) 1 0)
            on-z (if (< rim.z stroke) 1 0)
@@ -57,31 +63,59 @@
            mid-y (if (>= rim.y third) 1 0)
            mid-z (if (>= rim.z third) 1 0)
            walls (+ (+ on-x on-y) on-z)
-           middles (+ (+ mid-x mid-y) mid-z)]
+           middles (+ (+ mid-x mid-y) mid-z)
+           bar-x (if (< (mod local.x pitch) stroke) 1 0)
+           bar-y (if (< (mod local.y pitch) stroke) 1 0)
+           bar-z (if (< (mod local.z pitch) stroke) 1 0)
+           bars (+ (+ bar-x bar-y) bar-z)]
       (cond
         (= kind 0) false
-        (= kind 1) (and (> rim.x 0) (and (> rim.y 0) (> rim.z 0)))
+        (= kind 1) (> near 0)
         (= kind 2) (>= walls 2)
         (= kind 3) (and (>= walls 1) (< middles 2))
-        (= kind 4) (or (>= walls 2) (< (mod local.y (* 2 (+ stroke 1))) stroke))
-        (= kind 5) (or (= on-y 1) (and (< (mod local.x (* 2 (+ stroke 1))) stroke)
-                                       (< (mod local.z (* 2 (+ stroke 1))) stroke)))
+        (= kind 4) (or (>= walls 2) (= bar-y 1))
+        (= kind 5) (or (= on-y 1) (and (= bar-x 1) (= bar-z 1)))
         (= kind 6) (>= middles 2)
-        :else (< middles 2))))
+        (= kind 7) (< middles 2)
+        ; nested shells
+        (= kind 8) (< (mod near pitch) stroke)
+        ; a lattice of bars along all three axes
+        (= kind 9) (>= bars 2)
+        ; stairs
+        (= kind 10) (< (mod (+ local.x (- last local.y)) pitch) stroke)
+        ; diagonal planes through the block
+        (= kind 11) (< (mod (+ (+ local.x local.y) local.z) pitch) (max 1 (- stroke 1)))
+        ; a three-axis cross
+        :else (>= (+ (+ (if (< (abs (- local.x (/ last 2))) stroke) 1 0)
+                        (if (< (abs (- local.y (/ last 2))) stroke) 1 0))
+                     (if (< (abs (- local.z (/ last 2))) stroke) 1 0)) 2))))
 
-  ; 0 is empty; otherwise one more than the voxel's palette number.
+  ; 0 is empty; otherwise one more than the voxel's colour family.
   (defn voxel :context value [(p : vec3) (side : int) (seed : int) (clock : float)]
     (let* [last (- side 1)
-           ; Fold into one eighth of the plan, so the whole cube is a kaleidoscope of it.
+           half (/ side 2)
+           ; Fold into one eighth of the plan, then fold that again around its middle.
            x (min p.x (- last p.x))
            z (min p.z (- last p.z))
-           q [(min x z) p.y (max x z)]
-           size (parcel-size q seed clock)
+           wedge [(min x z) p.y (max x z)]
+           inner (abs (- (- half 1) (* 2 wedge.x)))
+           q [(floor (/ inner 2)) p.y wedge.z]
+           top (/ side 4)
+           climb (/ 2.0 side)
+           size (parcel-size q top seed clock climb)
            low (corner q size)
            key (key-of low size)
-           kind (int (* 8 (dice (int/add seed 11) key low clock)))
-           tone (int (* 4 (dice (int/add seed 23) key low clock)))]
-      (if (motif kind (- q low) size) (+ tone 1) 0)))
+           local (- q low)
+           kind (int (* 13 (dice (int/add seed 11) key low clock climb)))
+           ; A finer motif repeats inside it, a third to a quarter of its size.
+           fine (max 3 (floor (/ size (+ 3 (mod kind 2)))))
+           inner-kind (int (+ 1 (* 12 (dice (int/add seed 31) key low clock climb))))
+           tile [(mod local.x fine) (mod local.y fine) (mod local.z fine)]
+           family (int (* 4 (dice (int/add seed 23) key low clock climb)))]
+      (if (and (motif kind local size)
+               (or (< size 6) (motif inner-kind tile fine)))
+          (+ family 1)
+          0)))
 
   (defn occupied :context value [(voxels : (array int)) (side : int) (p : vec3)]
     (if (and (and (>= p.x 0) (< p.x side))
@@ -89,7 +123,7 @@
         (array/nth voxels (+ (+ (* (int p.x) (* side side)) (* (int p.y) side)) (int p.z)))
         0))
 
-  (graph city :context sop [(side : int 64) (seed : int 17) (tempo : float 0.25)]
+  (graph city :context sop [(side : int 128) (seed : int 17) (tempo : float 0.25) (palette : int 0)]
     (let* [clock (* t tempo)
            voxels (map (fn [(index : int)] (voxel (cell index side) side seed clock))
                        (array/range (* (* side side) side) :type int))
@@ -100,33 +134,63 @@
                          [0 0 0] [1 0 0] [1 0 1] [0 0 1]
                          [1 0 1] [1 1 1] [0 1 1] [0 0 1]
                          [0 0 0] [0 1 0] [1 1 0] [1 0 0])
-           ; Four palettes, one colour per facing: side, top, front.
-           palette (list [0.93 0.91 0.86] [1.00 0.99 0.96] [0.70 0.68 0.64]
-                         [0.08 0.09 0.12] [0.20 0.22 0.27] [0.03 0.03 0.05]
-                         [0.95 0.28 0.12] [1.00 0.62 0.20] [0.62 0.10 0.16]
-                         [0.05 0.42 0.72] [0.25 0.80 0.88] [0.02 0.20 0.45])
+           ; Only voxels touching air can have a face: a fraction of the volume to test six times.
+           shell (array/compact
+                   (map (fn [(index : int)]
+                          (let* [p (cell index side)]
+                            (if (and (> (array/nth voxels index) 0)
+                                     (or (or (= (occupied voxels side (+ p [1 0 0])) 0) (= (occupied voxels side (- p [1 0 0])) 0))
+                                         (or (or (= (occupied voxels side (+ p [0 1 0])) 0) (= (occupied voxels side (- p [0 1 0])) 0))
+                                             (or (= (occupied voxels side (+ p [0 0 1])) 0) (= (occupied voxels side (- p [0 0 1])) 0)))))
+                                1 0)))
+                        (array/range (* (* side side) side) :type int)))
+           ; Five palettes of four families, one colour per facing: side, top, front.
+           palettes (list
+                      ; paper, ink, vermilion, cobalt
+                      [0.86 0.83 0.76] [0.98 0.96 0.90] [0.62 0.58 0.52]
+                      [0.05 0.05 0.07] [0.13 0.13 0.17] [0.02 0.02 0.03]
+                      [0.86 0.17 0.07] [1.00 0.38 0.14] [0.50 0.06 0.08]
+                      [0.04 0.22 0.62] [0.10 0.44 0.86] [0.02 0.09 0.34]
+                      ; bone, teal, coral, mustard
+                      [0.80 0.78 0.70] [0.95 0.93 0.86] [0.55 0.53 0.47]
+                      [0.03 0.33 0.35] [0.07 0.55 0.54] [0.01 0.17 0.21]
+                      [0.90 0.30 0.27] [1.00 0.52 0.42] [0.55 0.13 0.20]
+                      [0.84 0.59 0.09] [0.98 0.78 0.22] [0.50 0.31 0.04]
+                      ; night, violet, magenta, ice
+                      [0.04 0.04 0.10] [0.10 0.10 0.22] [0.02 0.02 0.05]
+                      [0.25 0.10 0.55] [0.45 0.25 0.85] [0.12 0.04 0.32]
+                      [0.80 0.05 0.45] [1.00 0.25 0.65] [0.42 0.02 0.28]
+                      [0.60 0.85 0.92] [0.88 0.97 0.99] [0.28 0.50 0.62]
+                      ; moss, sand, rust, slate
+                      [0.20 0.28 0.13] [0.38 0.48 0.22] [0.09 0.14 0.07]
+                      [0.76 0.65 0.46] [0.92 0.83 0.63] [0.46 0.37 0.24]
+                      [0.55 0.21 0.08] [0.78 0.36 0.14] [0.29 0.09 0.04]
+                      [0.20 0.25 0.31] [0.36 0.43 0.50] [0.09 0.12 0.17]
+                      ; black and white, one signal
+                      [0.90 0.90 0.90] [1.00 1.00 1.00] [0.62 0.62 0.62]
+                      [0.03 0.03 0.03] [0.09 0.09 0.09] [0.01 0.01 0.01]
+                      [0.42 0.42 0.42] [0.62 0.62 0.62] [0.22 0.22 0.22]
+                      [1.00 0.20 0.03] [1.00 0.42 0.10] [0.55 0.07 0.02])
            faces (array/compact
                    (map (fn [(face : int)]
-                          (let* [index (int/div face 6)
-                                 p (cell index side)
-                                 direction (nth directions (mod face 6))]
-                            (if (and (> (array/nth voxels index) 0)
-                                     (= (occupied voxels side (+ p direction)) 0)) 1 0)))
-                        (array/range (* (* side side) (* side 6)) :type int)))
+                          (let* [p (cell (array/nth shell (int/div face 6)) side)]
+                            (if (= (occupied voxels side (+ p (nth directions (mod face 6)))) 0) 1 0)))
+                        (array/range (* (array/count shell) 6) :type int)))
            face_count (array/count faces)
            vertices (array/range (* face_count 4) :type int)
            positions (map (fn [(vertex : int)]
                             (let* [face (array/nth faces (int/div vertex 4))
-                                   p (cell (int/div face 6) side)
+                                   p (cell (array/nth shell (int/div face 6)) side)
                                    turn (nth corners (+ (* (mod face 6) 4) (mod vertex 4)))]
                               (* (- (+ p turn) [(/ side 2) (/ side 2) (/ side 2)]) (/ 6.0 side)))) vertices)
            normals (map (fn [(vertex : int)]
                           (nth directions (mod (array/nth faces (int/div vertex 4)) 6))) vertices)
            colors (map (fn [(vertex : int)]
                          (let* [face (array/nth faces (int/div vertex 4))
-                                tone (- (array/nth voxels (int/div face 6)) 1)
-                                facing (int/div (mod face 6) 2)]
-                           (nth palette (+ (* tone 3) facing)))) vertices)
+                                family (- (array/nth voxels (array/nth shell (int/div face 6))) 1)
+                                facing (int/div (mod face 6) 2)
+                                chosen (mod palette 5)]
+                           (nth palettes (+ (+ (* chosen 12) (* family 3)) facing)))) vertices)
            mesh (sop/mesh :points (exact positions) :vertex_points (exact vertices)
                           :primitive_offsets (exact (map (fn [(face : int)] (* face 4)) (array/range (+ face_count 1) :type int)))
                           :kinds (exact (array/int face_count 0)))
@@ -137,7 +201,7 @@
     (let* [city (scene/geometry (ref city) :name "City")
            ; Far away through a long lens: as near to isometric as a perspective camera gets.
            camera (scene/camera :eye [62 62 62] :target [0 0 0] :fov 8 :follow_viewport true)
-           light (scene/light :shape "Directional" :translate [4 10 6] :intensity 2.2)]
+           light (scene/light :shape "Directional" :translate [4 10 6] :intensity 1.15)]
       (scene/root (scene/merge city camera light) :camera camera)))
 
   (graph settings :context settings

@@ -1679,6 +1679,7 @@ runtime primitive.
 | `key-of` | compiler rule | Inline checked body: scalar arithmetic and integer conversion. |
 | `motif` | compiler rule | Inline checked body: per-axis comparisons and ordered numeric branches, no array. |
 | `parcel-size` | compiler rule | Inline checked body: ordered comparisons of `dice` at each block size. |
+| `stops` | compiler rule | Inline checked body: `corner`, `dice` and one comparison. |
 
 Core argument binding preserves residual DAG sharing. Each physical captured
 residual is rewritten once for the current argument vector; the root, sources,

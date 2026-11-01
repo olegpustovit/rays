@@ -29,7 +29,28 @@ let unresolve value =
   in
   search 0. 16. 60
 
+(* Vertex colours are albedo: a material per distinct colour, none without colours. *)
+let vertex_colours () =
+  let module C = Rays_math.Color in
+  let triangles ?colors () =
+    let plane = Array.init 6 float_of_int and zero = Array.make 6 0. in
+    get
+      (Rays.Mesh.View.create_packed_owned ~indices:[| 0; 1; 2; 3; 4; 5 |]
+         ~normals:{ x = Array.copy zero; y = Array.copy zero; z = Array.make 6 1. }
+         ?colors
+         { x = plane; y = Array.init 6 (fun i -> float_of_int (i mod 3)); z = zero })
+  in
+  let materials mesh =
+    P.Private.material_count (get (P.mesh [ (mesh, P.material (rgb 1. 1. 1.)) ]))
+  in
+  assert (materials (triangles ()) = 1);
+  let colors = Array.init 6 (fun i -> if i < 3 then C.red else C.black) in
+  assert (materials (triangles ~colors ()) = 3);
+  assert (materials (triangles ~colors:(Array.make 6 C.red) ()) = 2);
+  print_endline "Vertex colours: one material per distinct colour"
+
 let run () =
+  vertex_colours ();
   let initial_handles = live_handles () in
   let floor =
     rdk

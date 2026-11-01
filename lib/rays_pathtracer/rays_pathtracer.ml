@@ -272,7 +272,27 @@ let mesh ?(spheres = []) ?(strands = []) (objects : (Rays.Mesh.t * material) lis
           extras;
           scene = None;
         }
-  | _ -> Mesh_data.mesh ~extras ~materials (List.map fst objects)
+  | _ ->
+      (* Vertex colours are albedo: each distinct colour is one more material, so the kernels' per
+         triangle material ids carry them.
+         ponytail: a mesh over 4096 colours keeps its own material for the rest; a per-corner
+         albedo buffer in pathtrace.rays is the upgrade once smooth colour needs tracing. *)
+      let added = Hashtbl.create 64 and extra = ref [] in
+      let colored index (color : Rays_math.Color.t) =
+        match Hashtbl.find_opt added (index, color) with
+        | Some id -> id
+        | None when Hashtbl.length added >= 4096 -> index
+        | None ->
+            let id = List.length materials + Hashtbl.length added in
+            Hashtbl.add added (index, color) id;
+            extra :=
+              (let r, g, b, _ = Rays_math.Color.to_floats color in
+               { (List.nth materials index) with albedo = Linear_color.rgb r g b })
+              :: !extra;
+            id
+      in
+      let* flat = Mesh_data.mesh ~colored ~extras ~materials (List.map fst objects) in
+      Ok { flat with mesh_materials = flat.mesh_materials @ List.rev !extra }
 
 let mesh_instanced = Mesh_data.mesh_instanced
 let scene_mesh = Mesh_data.scene_mesh
@@ -1358,6 +1378,8 @@ let create ?spp ?bounces ?exposure ?round_samples ?bsdf_only ?profile ~width ~he
         Result.map (fun () -> t) failure
 
 module Private = struct
+  let material_count (mesh : mesh) = List.length mesh.mesh_materials
+
   let cpu_trace t camera ~accum =
     let* fov = camera_fov camera in
     let* kernels = lisp_kernels t (lisp_facts t) in

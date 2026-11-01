@@ -70,7 +70,7 @@ type 'material t = {
   scene : layout option;
 }
 
-let flat_mesh ~extras ~materials source_meshes =
+let flat_mesh ?(colored = fun material _ -> material) ~extras ~materials source_meshes =
   let flatten objects =
     let positions = Stdlib.Buffer.create 4096
     and normals = Stdlib.Buffer.create 4096
@@ -96,8 +96,12 @@ let flat_mesh ~extras ~materials source_meshes =
                 (plane.x.(index), plane.y.(index), plane.z.(index))
               in
               let id_bytes = Bytes.create 4 in
-              put_u32 id_bytes 0 material_index;
               for triangle = 0 to (Array.length view.indices / 3) - 1 do
+                (* a triangle is one colour: its first corner's, as a material of that albedo *)
+                put_u32 id_bytes 0
+                  (match view.colors with
+                  | Some colors -> colored material_index colors.(view.indices.(triangle * 3))
+                  | None -> material_index);
                 for corner = 0 to 2 do
                   let vertex = view.indices.((triangle * 3) + corner) in
                   add_vec3 positions (component positions_view vertex);
@@ -233,8 +237,8 @@ let layout_mesh ?(objects = [||]) ?(placed = [||]) ?(locals = [||]) base parts p
 
 (* Spheres and strands are traced beside the triangle structure (scene/trace), which then needs a triangle: a
    degenerate one, never hit, stands in when there is none. *)
-let mesh ~extras ~materials source_meshes =
-  let* flat = flat_mesh ~extras ~materials source_meshes in
+let mesh ?colored ~extras ~materials source_meshes =
+  let* flat = flat_mesh ?colored ~extras ~materials source_meshes in
   if flat.triangles = 0 then
     Ok
       {

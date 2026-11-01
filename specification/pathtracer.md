@@ -8,6 +8,9 @@ demos; the demo scene is `sketches/pathtracer.rays` (Lisp; the editor's Path tra
 
 ## Scope
 
+- A host mesh's vertex colours (`Cd`) are albedo: each distinct colour is one more material over the
+  object's, and a triangle takes its first corner's, up to 4,096 colours. A device-indexed mesh takes
+  this route too, read back once per mesh, so a live mesh with changing topology is read back every frame.
 - Input: a list of `Rdk.Geometry.t` objects, each with one metallic-roughness
   material (`albedo`, `roughness`, `metallic`, `emission`), plus analytic
   `sphere`s (intersected analytically beside the triangle structure, so they
