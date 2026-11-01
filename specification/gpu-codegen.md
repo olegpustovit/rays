@@ -77,13 +77,13 @@ the error instruction cannot inline away, including an empty slice. Native and
 web read the same typed failures. Raster
 placements refuse explicit errors: those stages have no status record.
 
-Native `Flow_gpu.Host.stats` separates payload, status, count and bounds bytes.
-The compatibility `readback_bytes` is payload plus bounds. Resident-executor
+Native `Flow_gpu.Host.stats` separates payload, status, count, validation and bounds
+bytes. The compatibility `readback_bytes` is payload plus bounds. Resident-executor
 payload reads and four-byte count reads are included, as are lazy kept-output
 materialisations from worker domains (atomic accounting). Cached materialisations
-and bounds queries add nothing. Status bytes are four per successful status read.
-Topology-validation readback accounting will accompany its validation dispatch;
-the resident mesh construction/validation path is not yet implemented.
+and bounds queries add nothing. Status bytes are four per successful status read;
+topology validation (36 bytes per mesh, 4 for the display index kernel) counts as
+validation, never payload.
 
 The native compute printer accepts selected scalar uint32 buffers for topology:
 `uint32_outputs` selects output indices, `uint32_inputs` selects source indices,
@@ -153,7 +153,7 @@ over resident Flow values. `Executor.force ?resident` forwards it through both
 normal and cached root execution. The workspace GPU proxy routes all these
 callbacks to its owner, including scope cleanup; workers only read settled
 owned holders. Exact precision declines before acquiring a native owner.
-When the placement below selects the device (or under the test-only Qualification policy), shared mesh cooking validates resident fields
+When the placement below selects the device (the test-only Qualification policy forces it), shared mesh cooking validates resident fields
 before transferring them into deferred Float3 positions and Topology. CPU
 consumers force the existing carriers. Unsupported stream shapes materialise
 before the scope closes and pass through the ordinary mesh constructor.
@@ -171,7 +171,7 @@ unread in the consumer census. A displayed root with a device owner has no CPU r
 write beside host positions counts one reader, and beside resident positions its CPU alternative is charged the
 measured host display sink, so mesh and writes cannot split into a mixed mesh the display must convert.
 
-Stateless structured geometry selection uses the same Qualification scope.
+Stateless structured geometry selection uses the same resident scope.
 Core offers raw `Host_source` arguments to the host before its usual CPU
 boundary; `sop/mesh` accepts them through the shared resident constructor and
 registers its geometry handle. Other sources decline the offer and materialise
@@ -236,7 +236,7 @@ kind range, minimum corners and a caller-supplied polygon-size ceiling.
 `Host.validate_topology` caches one status buffer; successful reads, including
 rejected topology, increment `validation_readback_bytes` rather than payload.
 Buffer capacities are checked before encoding; no input ownership transfers.
-This boundary is not yet wired into deferred mesh publication.
+Deferred mesh publication runs it once per cook; a failure is `E_TOPOLOGY` and nothing is published.
 
 ## Raster stages (P9)
 

@@ -51,7 +51,15 @@ preparation explicitly materialising once. Picking builds the existing CPU
 surface index, and inspection reads the existing sheet columns. Native frozen
 workspace checks exercise each as the first CPU reader, verify its materialised
 bytes and prove repeated reads add no transfers; summary/count metadata remains
-nonforcing. Production placement remains a separate measured-policy gate.
+nonforcing. Under the ordinary Measured policy a mesh whose site chose the device
+displays with zero payload readback and size-independent renderer upload.
+`Surface` keeps the device mesh it last bound (and a declined preview's host
+conversion) per surface while the display names the same registration, and
+`Workspace_gpu.display` returns the live registration of a geometry it already
+shows. Releasing a registration sweeps its borrowed-vertex entries from the renderer
+mesh cache, and `Scene_execution` drops retained draw layers whose borrowed stream is
+gone (`borrows_unregistered`). Picking materialises one host copy per surface; that copy
+is not charged to the editor's prepared-geometry cache.
 
 The Flow GPU display-index kernel reads resident positions and UInt32
 topology, following the host's position-dependent quad ear order. A two-pass
@@ -1181,8 +1189,9 @@ with optional counts, costs and CPU-consumer counts. Invalid evidence and ties
 keep CPU; unsupported forms and missing consumers have distinct reasons.
 SOP record writes use the same comparison with explicit known CPU-reader counts,
 amortised output materialisation and resident-input readback credit. Missing
-reader information is an explicit CPU refusal; production consumer metadata and
-the resident mesh guard remain pending. A rejected later record output releases
+reader information is an explicit CPU refusal; `Cook.prepared_context` supplies the
+reader counts and `Lower.Chain` applies the same comparison to whole mesh chains
+(specification/gpu-codegen.md). A rejected later record output releases
 earlier borrowed outputs before CPU fallback. Compile, dispatch and
 readback appear separately in execution reports. GPU group time uses the
 completed device duration when available and wall time otherwise. Images use the existing UI
@@ -1276,13 +1285,14 @@ execution. The native host supplies it in fast precision; workspace workers
 route scope creation, invocation, counts, validation, retention and cleanup to
 the owner domain. Materialisation and release retain their existing any-domain
 holder semantics. Ordinary backends may decline the scope with `None`.
-Shared mesh cooking uses this capability under Qualification policy to validate
-and install deferred positions/topology. Resident storage is mapped: workers
+Shared mesh cooking uses this capability, when `Lower.Chain` selects the device (Qualification
+forces it in tests), to validate and install deferred positions/topology. Resident storage is mapped: workers
 invalidate its owned view and decode uint32 words without initial-domain-only
 buffer reads. `Backend.mapped_view` exposes the existing live mapped view,
 with shared mock/Metal conformance checks for identity and destroyed/unmapped
-buffers. Fused attributes stay resident under Qualification; production
-measured placement remains pending.
+buffers. Fused attributes stay resident when their measured comparison selects the
+device. `Workspace_gpu.close` calls `Lower.forget_backend`, so no lowered node or
+placement state outlives its owner.
 
 Stateless structured geometry calls can use the same scope. A neutral Core
 host-source offer lets the SOP host consume resident mesh fields before the

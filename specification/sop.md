@@ -426,8 +426,8 @@ known resident consumer. Completed backend cost plus one materialisation per
 output (shared by all CPU readers) competes with the CPU kernel estimate plus
 readback of distinct resident inputs. Decisions and optional reader counts
 appear in `Flow_ir.Profile.placements`. Qualification places every legal region.
-The production cook still needs to supply this consumer metadata; absent
-metadata does not imply a free device sink.
+`Cook.prepared_context` supplies the consumer counts; absent metadata is
+`missing_consumer`, never a free device sink.
 
 Data movement (`Flow_gpu.Run` over mapped buffers, specification/backend.md): sources are packed
 straight into the kernel's mapped input buffers (one float32 rounding, finite check folded in).
@@ -457,7 +457,7 @@ an opaque holder, release callback and a thunk returning validated owned topolog
 `all_triangles` uses the shape when provided. `View.view` and indexed payload
 queries force exactly once across racing readers, caching failure as well as success.
 The materialiser cannot recursively read that topology. Geometry release accounting
-includes this component. This carrier alone does not select resident mesh execution.
+includes this component. `Lower.Chain` selects resident mesh execution (below).
 When the session drops a result (an LRU or payload eviction, a volatile slot replaced), the
 resident components no retained entry shares are released at the end of the first cook whose root
 output, and the previous cook's, do not hold them (`release ~held`). A component some cook's root
@@ -2186,11 +2186,21 @@ boundary applies to non-indexed writes too. A field rewritten later in a device
 chain retains the existing fusion opportunity, so an indexed producer can still
 be generated inside that chain instead of uploaded.
 
-The editor assigns one conservative CPU-reader budget to each published root,
-probe and framing request before submitting its asynchronous cook. Preparation
-and inspection callbacks are CPU-capable; their shared materialisation is charged
-when comparing a resident attribute output even if a particular display borrows
-it instead. This budget does not imply all internal opaque nodes are classified.
+The editor assigns `Cook.prepared_context` readers to each published root, probe and
+framing request before submitting its asynchronous cook. A displayed root a device
+owner can borrow has zero readers (preparation, bounds and drawing keep it resident;
+picking and inspection materialise on their gesture) unless it is probed, which keeps
+one; without a device owner it has one. This does not imply all internal opaque nodes
+are classified.
+
+**Mesh placement.** `sop/mesh`, `sop/mesh_planes` and `flow.geometry_select` choose their route per
+authored site with `Lower.Chain` (specification/gpu-codegen.md): measured seconds per output float of each
+route, the CPU one plus the host display sink (`Attribute_kernel.Display_sink`), the device one plus the
+resident sink and the materialisation known CPU readers force, compared by `Flow_ir.Cost.choose` with one
+named reason in `Profile.placements`. No size threshold exists. A write beside host positions counts one
+reader; beside resident positions its CPU alternative is charged the measured host sink. Qualification
+forces the device and is used only by display tests and benchmarks. Placement state is weakly keyed by the
+backend and `Lower.forget_backend` (called by `Workspace_gpu.close`) drops the owner's nodes.
 
 A writer with wholly CPU-owned geometry inputs can pass its target owner count
 to record placement before input preparation. A measured CPU refusal then avoids

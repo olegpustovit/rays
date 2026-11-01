@@ -2616,3 +2616,204 @@ Commands, all passing, with wall time including any rebuild: `@tools/isogrid-sel
 `@lib/flow_sop/runtest` 16 s, `@test/dependency_gate` 3 s, `@lib/renderer/runtest` 2 s,
 `@lib/flow_gpu/runtest` 1 s. Not run here: the whole `@runtest`, `@runtest-native`, `@smoke-all`, `--ship`.
 The sketch's SHA-256 still starts 0fdb9b0ebec8f5fe.
+
+## Handoff
+
+Frozen sketch: `shasum -a 256 sketches/isogrid.rays` starts `0fdb9b0ebec8f5fe` (checked again for this handoff).
+Raw logs are in `benchmarks/isogrid/`. Every number below was read from the log named beside it. Load average was
+5 to 40 during the S10 runs (the owner's VM), so absolute times are not comparable with S0 to S5.
+
+### Representation and ownership contract
+
+- **Values.** An immutable homogeneous int/float/vec2-4 list captured by a region is an internal packed table; the
+  authored value stays a list (`nth` is a guarded Gather, `E_LIST_RANGE`). A gather takes its element type from the
+  table. `array/sum (map f (array/range K))` and `array/sum (array/slice t first K)` unroll for constant Int K of at
+  most 64. A trusted exact static map runs its kernel first; records replay on demand; any refusal restarts the walker
+  at element 0 (`core.md`, `flow.md`).
+- **Mesh arrays.** In a `:context sop` graph a qualifying large static map is a `Residual` for the cook
+  (`qualify_workspace ~defer:true`); `rays check` keeps deferral off and still reports malformed mesh errors.
+- **Topology.** `Rdk.Topology.deferred` carries counts, identity, optional `(kind, corners)` shape, a holder and a
+  release; counts, identity and `payload_bytes` never force it, the first payload read (`View.view`) materialises once
+  across racing domains and caches failure. `Geometry.releasers` includes it. RDK links no GPU library.
+- **Resident construction.** `Core_exec.execute ?resident` (via `Flow_ir.Gpu.backend.residency`) runs the mesh record
+  on `Flow_gpu.Host.resident`; integer streams are exact uint32. One 36-byte validation record (`topology.rays`)
+  gates publication; a failure is `E_TOPOLOGY` and nothing is published. Positions and topology are installed as
+  deferred `Float3` / `Topology`; fused N and Cd stay resident. Ownership: `Run.adopt_uint32`/`adopt_float` over mapped
+  buffers, released by `Geometry.releasers` (held components retire, unheld components are freed).
+- **Display.** `Workspace_gpu.display` pins settled unread P/N/Cd and topology, runs the index kernel (`triangles.rays`,
+  four validation bytes) and registers the borrow; `Surface.scene3` binds it with `draw_indexed`. Picking and
+  inspection materialise on their first gesture; the path tracer reads the host copy and is counted as materialising.
+- **Owner lifetime.** `Workspace_gpu.close` calls `Lower.forget_backend`; placement state is weakly keyed by the backend
+  (`Lower.chain_states` is zero after close, asserted by `test_placement_native`).
+
+### Production placement decision
+
+Placement is `Lower.Chain.place`, one measured `Flow_ir.Cost.choose` per authored site and output size class, with a
+named reason in `Flow_ir.Profile.placements`. There is no size threshold (the plan's "stop if a device win depends on
+a fixed size threshold" is not triggered). Reasons, from the logs:
+
+- A site runs CPU twice (`no_cost_evidence`), then the device twice (its mesh is the real result), then is decided.
+  The cold 64³ cook is therefore CPU with `no_cost_evidence`; one size class needs four cooks to learn
+  (`s10-production-bench-64.log`: cold `no_cost_evidence`, and `s10-production-flips-64.log`).
+- 64³, `device_measured_cheaper` for the mesh: cpu 0.326 s / device 0.028 s at 998,592 points (`warm_1`),
+  cpu 0.273 / 0.0269 at 836,544 (`s10-production-flips-64.log`). The CPU alternative includes the measured host display
+  sink (`Display_sink`), the device one the resident sink and, with CPU readers, the measured materialisation.
+- Counterexamples: 65,536-point `mesh_planes` records `cpu_measured_cheaper` (cpu 0.042903 s, device 0.056224 s;
+  one reader 0.060913 s); a 32-point CPU-origin mesh records `cpu_consumer` (0.000022 / 0.000032 s); unknown
+  consumers record `missing_consumer` (`s10-final-placement.log`).
+- Paired same-load A/B at 64³, 16 flips, 3 rounds: production 0.698 / 0.693 / 0.679 s, CPU (`--no-device`)
+  1.272 / 1.170 / 1.186 s present; medians 0.693 against 1.186 s, ratio 0.584; cook 0.39 against 0.84 s
+  (`s10-final-ab-64.log`, load average 10 to 18 in the log).
+- The displayed root with a device owner has zero readers unless probed (`Cook.prepared_context`), so N and Cd choose
+  with the mesh and the display is not mixed.
+
+### Remaining CPU boundaries
+
+CPU by design: the path tracer (host copy); wire and vertex modes and textured meshes of a device-indexed mesh (host
+copy); picking (`Geometry_view.surface`, 216,004 payload bytes at Maze) and inspection (1,708,704 at Coral, first
+gesture, zero repeated; `s9-viewport.log`); polygons above 4 corners and curves; `maze-links` walking (fixed four-cell
+grid); host-context graphs (`volume`) stay eager on CPU kernels; the cold cook of each size class; exact precision;
+the web export of Scene and SOP graphs (not built). A cook with a probed or framed root counts that reader.
+
+### Transfer counts by category
+
+Categories are `Flow_gpu.Host.stats` `payload / status / count / validation / bounds` bytes.
+
+| Run (log) | payload | status | count | validation | bounds |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 64³ resident publication, Qualification (`s8-resident-64.log`) | 0 | 16 | 24 | 36 | 0 |
+| same, explicit CPU inspection afterwards | 41,940,868 once, repeat 0 | | | | |
+| Maze 3,000 / Coral 11,866 quads, display (`s9-viewport.log`) | 0 | | | +4 | up to 24,576 (S9 text) |
+| 64³ present, 4 resident cooks (`s10-present-isolated.log`) | 0 | | | 4 per mesh | 0 |
+| 64³ production cold (`s10-production-bench-64.log`) | 0 | 16 | 0 | 0 | 0 |
+| 64³ production sequence through seed 18, same log | 11,010,252 | 180 | 72 | 108 | 0 |
+| 64³ production `--flips` stages (`s10-production-flips-64.log`) | 0 each stage | 4 dispatches | | | |
+
+The 11,010,252 payload bytes in the `--bench 64` sequence appear from recipe 0 onward (573,124 first) while the later
+`--flips` run, after the display fixes, reports `payload_bytes=0`; the log does not attribute the earlier bytes, and
+no `--bench 64` run exists after those fixes. Renderer upload at 64³: CPU route 41,946,320 then 41,940,864 bytes per
+cook, resident 5,456 then 0 (`s10-present-isolated.log`); production flips 165,5xx to 171,848 bytes, constant
+(`s10-production-flips-64.log`); Flow input upload 1.1 to 3.0 MB per flip there.
+
+### Focused test times
+
+From the logs (wall seconds including any rebuild, loaded machine): dependency gate 2.92, `test_placement_native` 3.15,
+`test_placement_lifetimes` 4.60, `test_isogrid_viewport` 2.09, `@lib/flow_ir/runtest` 11.87, `@lib/sop/runtest` 2.08,
+`@lib/flow_sop/runtest` 15.07, `@lib/flow_native/runtest` 2.06 (`s10-production-final.log`); 24³ selector
+gate 28.27 s in `s10-final-selector-gate.log` (the S10 section and `test-times.md` record 38 s from another run; no raw
+log of that run is kept); `test_isogrid_resident_64` 30.85 (`s8-resident-64.log`); 64³ defer spike 30.79
+(`s6-materialisation-64.log` per the S6 text); `bench_isogrid_cost` and `bench_isogrid_present` 6.00 / 6.66 (S10 text);
+S6 `@smoke-all` 115.56 (`s6-smoke-final.log`). Over the 30 s focused-alias budget: the 24³ selector gate (38 s recorded),
+`test_isogrid_resident_64` and the 64³ defer spike (scale qualification, outside `@runtest`). Rows are in `test-times.md`.
+
+### Parity evidence
+
+- Walker goldens: 12³ (`@tools/isogrid`), 24³/64³ (`@qualification-scale`), all eight recipes plus seed 18, exact
+  binary64/int64 digests of P, vertex_points, offsets, kinds, N and Cd. The editor benches compare every presented
+  geometry (`verified_digest`). Exception stated in S0: after the first presented frame `sculpture/colors` may be placed
+  `Bulk_approx` and returns float32, which the bench checks as exactly the float32 conversion of the walker Cd
+  (for example `warm_3` in `s10-final-plateau-64-production.log` prints `Cd=float32` and two different digests).
+- Resident against CPU mesh at 64³: topology exact, P/N/Cd within 1e-6 (`s8-resident-64.log`).
+- Image parity: Maze and Coral, every framebuffer channel bit exact against host drawing for faces, orbit, framing,
+  World shadow, wire and vertices (`s9-viewport.log`, pixel difference 0). The other six recipes are not image-compared.
+- Web and native kernel parity for the shared kinds: S2 and S4 sections (Chrome WebGPU, SPIR-V, Metal).
+- One-domain against multi-domain: S3 `s3-parallel.log` and the S4 and S2 tests named above.
+
+### Reproducible benchmarks
+
+```sh
+_build/default/tools/check.exe @tools/isogrid @tools/isogrid-native
+B=_build/default/lib/rays_editor/native_qualification
+$B/bench_isogrid.exe --bench 64 --single      # cold
+$B/bench_isogrid.exe --switch 64              # warm recipe switch, digests verified
+$B/bench_isogrid.exe --ab 64 16 3             # paired production against --no-device
+$B/bench_isogrid.exe --flips 24 200           # selector gate (alias @tools/isogrid-selector-lifetimes)
+$B/bench_isogrid.exe --plateau 64 96 320      # 64³ retention per cycle
+$B/bench_isogrid.exe --cli                    # sixteen fresh-process rays check runs
+_build/default/tools/check.exe @lib/rays_editor/native_qualification/bench_isogrid_cost \
+  @lib/rays_editor/native_qualification/bench_isogrid_present @tools/isogrid-measured-64
+```
+
+### Resolved refusals
+
+Before (S0, recipe 1, `s0-cold-24.log`/`s0-editor.log`): `directions`/`corners` refused as `list:vec3`, the face-mask
+gather refused as `any`, recipe 0 `array/slice`, recipe 4 a nested `array/sum (map ...)`, and every map walked a
+4,096-element head. After: no side-scaled numeric map refuses in any of the eight recipes at 12³/24³/64³ (S4 section,
+`s4-goldens.log`); in `s10-final-plateau-64-production.log` every voxel map is `tier=cpu_kernel head=0 tail=0
+refusal=""` and `sculpture/faces#0` is `tier=deferred`. The generic "Packed form requires reference evaluation" is absent
+from `lib/flow_ir`. Cold `rays check` 64³: S0 30.02 s, S5 0.464 to 0.828 s (`s5-cli.log`, recipe 1 0.827848 s, budget 3 s).
+
+### Warm 64³ switch latency on the restored (unchanged) Lisp
+
+| Route | Run | Present mean / p50 / p95 / max (s) | Evaluate mean / max (s) |
+| --- | --- | --- | --- |
+| CPU, S0 baseline | 1→3 (`s0-switch-64.log` per S0 text) | 33.574 | 33.124 |
+| CPU, S5 | recipe sequence, idle machine (`s5-editor-64.log`) | max 0.939 (recipe 1) | max 0.4986 |
+| Production (device) | 320 flips (`s10-final-plateau-64-production.log`) | 0.710 / 0.637 / 0.966 / 1.048 | 0.236 / 0.554 |
+| `--no-device` | 64 flips (`s10-final-plateau-64-cpu.log`) | 1.189 / 1.033 / 1.668 / 1.703 | 0.237 / 0.512 |
+
+The production and `--no-device` rows are loaded-machine figures and are not comparable with the S5 idle row. No
+quiet-machine production run exists, so the plan's condition "device beats S5's CPU route" is shown only as the paired
+same-load ratio 0.584. Cold present: 1.519 s production (`s10-production-bench-64.log`) and 1.666 s
+(`s10-final-plateau-64-production.log`), against 0.9245 s CPU idle in S5; the cold cook is CPU in both.
+
+### Stale line in the frozen sketch
+
+`sketches/isogrid.rays` line 11 reads: `; Voxel maps are GPU-capable; maze walking and mesh topology are assembled on the CPU.`
+Mesh topology is built and validated on the device when the placement chooses it (`Core_exec.execute ?resident`,
+`Topology.deferred`). The sketch stays frozen; this is reported to the owner, not edited.
+
+### Known weak spots
+
+1. **`buffer_creations` at 64³.** The strict snapshot comparison fails on this monotonic counter
+   (`snapshot_differs buffer_creations warm=2338 final=10098`, exactly 194 a cycle, `s10-final-plateau-64-production.log`,
+   which ends in `Fatal error`); live handles stay flat at 960 / 960. `bench_isogrid.ml` now excludes it when side is not
+   24 (turnover; `live_handles` and retained words still compared). No log of a passing production plateau after that edit
+   is kept, and `s10-final-host-owners-64.log` also ends in `Fatal error` (it fails on `buffer_creations` and `live_handles`).
+   At 24³ the comparison stays strict.
+2. **CPU display sink is a minimum.** The model reads 0.179 s (CPU run) to 0.202 s (production run) at 998,592 points;
+   measured post-cook in the same run about 0.215 to 0.231 s (one sample, phases assumed not to overlap) (S10 text).
+3. **Cold cook is CPU** with `no_cost_evidence`; each size class needs four cooks before a decision.
+4. **Size prediction** uses the site's last output size (`Chain.last`); a topology-changing frame is priced at the
+   previous size.
+5. **Picking on every recipe** adds one host copy per surface (23.82 M words at 24³ in the forced run, flat after), not
+   charged to the prepared cache's 64 MiB.
+6. **64³ `--no-device` owners untraced:** the owners were traced only for the production route (`--roots 64 64`); the
+   renderer caches are a hypothesis.
+7. **Selector gate time:** 28.27 s in the retained log, 38 s recorded in the S10 text and `test-times.md`; over the 30 s
+   alias budget on the recorded figure.
+8. **S10 under load:** every S10 time was measured at load average 5 to 40; no idle-machine production run.
+
+### Pending gates
+
+- `_build/default/tools/check.exe --ship`: PENDING
+- `dune build @smoke-all`: PENDING
+- `dune build @runtest-native`: PENDING
+- `dune build @qualification-scale`: PENDING
+- `_build/default/bin/rays.exe check sketches/isogrid.rays`: PENDING
+- `RAYS_MAX_FRAMES=3 _build/default/bin/rays.exe sketches/isogrid.rays` (bounded open): PENDING
+
+### Acceptance map
+
+Status words: Met means the named evidence covers the whole requirement; Partial says what is missing.
+
+| PROBLEM.md requirement | Stage | Evidence | Status |
+| --- | --- | --- | --- |
+| Readable sketch at 24 and 64, no rewrites | S2 to S5 | SHA `0fdb9b0ebec8f5fe` unchanged; `s5-cli.log` (24³ 0.284 to 0.757 s, 64³ 0.464 to 0.828 s) | Met; the sketch header has one stale line (above) |
+| Independent compiler regression cases | S1 to S4 | `lib/flow_ir/test_static_map.ml` cases per form (S1, S2, S4 sections) | Met; final run PENDING (`--ship`) |
+| Observed fallback and materialisation counts | S0, S8 | `Profile.static_maps` lines in `s10-final-plateau-64-production.log`; `Host.stats` categories | Met for production; 64³ `--no-device` owners untraced |
+| Cold and warm edits, verified geometry | S0, S5 | `verified_digest` on every edit in `s5-editor-64.log` and the S10 benches | Met with the stated float32 Cd exception (digest differs from the walker, verified as its conversion) |
+| Exact CPU behaviour and errors past the prefix | S1 to S3 | three unedited contract tests; `@tools/verify-static` over 43 sketch files (S3 text) | Met; final `@qualification-scale` PENDING |
+| Bounded caches under repeated changes | S5, S10 | 24³ 200 flips: `s10-final-selector-gate.log` retained words 15,590,099 (final) against 15,591,473 (warm); 64³ `--no-device` passes `s10-final-plateau-64-cpu.log` | Partial: 64³ production passes only with `buffer_creations` excluded and no passing log of that run is kept |
+| Original colours and quads render | S9 | `s9-viewport.log` pixel difference 0, Maze and Coral | Partial: two of eight recipes compared |
+| Compiler chooses placement | S10 | `s10-production-flips-64.log`, `s10-final-placement.log` reasons | Met; cold cook is CPU and the CPU sink is a minimum |
+| Payload stays resident | S8, S9 | payload 0 in `s8-resident-64.log`, `s10-production-flips-64.log` | Partial: `--bench 64` sequence log shows 11,010,252 payload bytes, unattributed and not rerun |
+| Dynamic topology | S8 | `s8-empty-resident.log` (counted replays, no publication payload); empty, growth and overflow cases (S8 text) | Met |
+| CPU interoperability | S7, S8 | Clean SOP reads 19,156 bytes once (S8 text); `s8-empty-resident.log` concurrent reads | Met |
+| Lifetimes | S10 | `test_placement_lifetimes` 200 dispatches, buffers +0 warm, one pipeline (`s10-production-final.log`) | Met at test scale; S10 not marked Done here |
+| Validation stays real | S8 | malformed cases for every rule give `E_TOPOLOGY`, no publication (S8 text) | Met |
+| Static work stays cached | S9 | `s9-viewport.log`: repeated frames upload 0, 17,136 allocated bytes per warm frame at both sizes | Partial: Maze and Coral only; no 64³ idle-frame measurement |
+| Performance claims, with a CPU counterexample | S10 | ratio 0.584 (`s10-final-ab-64.log`); `cpu_measured_cheaper` at 65,536 points (`s10-final-placement.log`) | Partial: loaded machine only; not compared with S5 on a quiet one |
+| Architecture stays valid | S7 to S10 | dependency gate 59 libraries, 36 rules, 29 whitelists (`s8-empty-resident.log`); gate exit 0 in `s10-production-final.log` | Met; final PENDING |
+
+S10 and S11 remain open in the stage table above.
