@@ -22,8 +22,8 @@ substitute or Scene/SOP web export is part of this work.
 | S7 deferred topology | Done | Non-forcing metadata, single racing materialisation, release orders, CPU consumers; full RDK/SOP/gate checks |
 | S8 resident construction | Done | Frozen 24³/64³ zero-payload publication and full parity, typed validation/ownership, host calls, CPU readers, cancellation, capacity replay and strict empty-offset checks; exit audit below |
 | S9 coloured quad viewport | Done | Maze/Coral exact raster/modes/orbit/frame/shadow, zero payload, static frames, actual picking/inspection readers, full editor shot and full native gate pass; production policy remains S10 |
-| S10 production placement/lifetimes | Done | Unforced resident 64³ route, 24³ strict gate, paired 0.584x; 64³ is bounded rather than equal: see the Handoff weak spots |
-| S11 close-out | Done | Specifications updated; gates and acceptance map in the Handoff |
+| S10 production placement/lifetimes | In progress | Unforced resident 64³ route, 24³ strict gate, paired 0.584x; open: 64³ strict retention (+8,477 words) and the CPU-origin attribute chain verdict |
+| S11 close-out | In progress | Specifications and handoff written; waits on S10 and a final gate run |
 
 ## S0 measurements
 
