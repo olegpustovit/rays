@@ -132,3 +132,10 @@ let () =
   in
   let _, ds = Workspace.check { Catalog.version = 1; kinds = [] } forms in
   assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_TIME_COUNT") ds)
+
+(* A map is live when its function reads the frame, whichever elements do: the first million never
+   read it here, and walking them to find out would exhaust the static budget. *)
+let () =
+  let w = check "(let* [r (map (fn [(i : int)] (if (< i 1000000) 0.0 t)) (array/range 1000001 :type int))] (array/nth r 0))" in
+  let s = Result.get_ok (Eval.static ~record:true w) in
+  assert (Eval.is_live (snd (List.hd (List.assoc [ "g"; "r" ] s.records))))
