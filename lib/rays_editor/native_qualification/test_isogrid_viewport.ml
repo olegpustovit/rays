@@ -28,14 +28,38 @@ let run gpu config workspace recipe =
   let node =
     string_ok (Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
   in
-  let session = string_ok (Sop.Session.create ~max_entries:16 ~max_payload_bytes:(1 lsl 28)) in
+  let session = string_ok (Sop.Session.create ~max_entries:0 ~max_payload_bytes:(1 lsl 28)) in
   Fun.protect
     ~finally:(fun () -> Sop.Session.close session)
     (fun () ->
-      let output =
-        ok (Sop.Session.cook session ~context:(string_ok (Sop.Context.create ~domains:1 ())) node)
+      (* Ordinary measured policy, as the viewport's display root is cooked (no host reader): each
+         route runs until the shared comparison has numbers, so cook again until the whole mesh is
+         resident. *)
+      let cook () =
+        let output =
+          ok
+            (Sop.Session.cook ~cpu_consumers:0 session
+               ~context:(string_ok (Sop.Context.create ~domains:1 ()))
+               node)
+        in
+        ok (Sop.Payload.geometry output.payload)
       in
-      let geometry = ok (Sop.Payload.geometry output.payload) in
+      let resident geometry =
+        let attribute name =
+          Option.fold ~none:false ~some:Rdk.Attribute.resident
+            (G.find_attribute ~owner:Point name geometry)
+        in
+        Rdk.Packed.Float3.resident (G.positions geometry)
+        && attribute "N" && attribute "Cd"
+        && Rdk.Topology.resident (G.topology geometry)
+      in
+      let rec cook_until_resident attempts =
+        let geometry = cook () in
+        if resident geometry then geometry
+        else if attempts = 0 then failwith "measured policy did not keep the IsoGrid mesh resident"
+        else cook_until_resident (attempts - 1)
+      in
+      let geometry = cook_until_resident 8 in
       let before = stats gpu in
       assert (before.payload_readback_bytes = publication.payload_readback_bytes);
       let surface = string_ok (Rdk_rays.Surface.of_geometry geometry) in
@@ -315,7 +339,6 @@ let () =
   Fun.protect
     ~finally:(fun () -> Gpu.close gpu)
     (fun () ->
-      Gpu.qualification gpu;
       Gpu.with_backend ~fast:true gpu (fun config -> List.iter (run gpu config workspace) [ 0; 3 ]));
   assert (Ogpu.Impl.live_handles () = baseline);
   assert (

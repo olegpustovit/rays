@@ -1753,7 +1753,8 @@ module Executor = struct
   (* A fused SOP write's record: its elementwise fields over one count are one
      region, one dispatch and a readback per output, by field name. [None] leaves the record to
      the CPU: the device declines or fails, or the cost model keeps it there. *)
-  let record_on_device ?state ?resolve ?resident ?expected_count ?cpu_consumers ?(gpu = Gpu.default) program ~live =
+  let record_on_device ?state ?resolve ?resident ?expected_count ?cpu_consumers ?(cpu_penalty = 0.)
+      ?(gpu = Gpu.default) program ~live =
     Option.iter
       (fun count -> if count < 0 then invalid_arg "record_on_device: negative consumers")
       cpu_consumers;
@@ -1794,7 +1795,7 @@ module Executor = struct
             else
               let readers = Option.get cpu_consumers in
               let cpu_seconds =
-                Some (Cost.estimate (Cost.packed ~count) ~count +. held_readback)
+                Some (Cost.estimate (Cost.packed ~count) ~count +. held_readback +. cpu_penalty)
               in
               let device_seconds =
                 Option.bind (backend.cost ?inputs ~fast:true merged ~count) (fun seconds ->

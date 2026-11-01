@@ -192,7 +192,7 @@ let set_volatile value predicate = Async_cook.set_volatile value.worker predicat
 let stats value = Async_cook.stats value.worker
 let pieces value = value.pieces
 
-let prepare_cached value ~id ~context settings output =
+let prepare_cached ?gpu value ~id ~context settings output =
   let key = (id, settings, output, context) in
   match
     Mutex.protect value.prepared_lock (fun () -> Prepared_cache.find_opt value.prepared_cache key)
@@ -219,7 +219,14 @@ let prepare_cached value ~id ~context settings output =
                     key prepared)
           end;
           prepared)
-        (value.prepare settings output)
+        (let began = Unix.gettimeofday () in
+         let prepared = value.prepare settings output in
+         (* the measured display sink the mesh placement prices, per route of the geometry *)
+         (match (gpu, prepared) with
+         | Some gpu, Ok prepared ->
+             Flow_sop.Lower.observe_display gpu prepared.geometry (Unix.gettimeofday () -. began)
+         | _ -> ());
+         prepared)
 
 (* the counts of a compiled node of an object, once a cook has reported them *)
 let geometry value ~object_id ~node_id = List.assoc_opt (object_id, node_id) value.summaries
@@ -240,10 +247,12 @@ let busy value = match status value with Async_cook.Idle -> false | Cooking _ ->
 let force value = { value with force = true }
 
 (* Preparation, probes and framing are CPU-capable readers of published geometry.
-   Budget their shared host materialisation even when a supported display borrows it. *)
-let prepared_context context nodes =
+   Budget their shared host materialisation even when a supported display borrows it. A displayed root
+   a device owner can borrow reads the host in no cook (preparation, bounds and drawing keep it
+   resident; picking and inspection materialise on their gesture), so unless probed it has none. *)
+let prepared_context ?(readers = 1) context nodes =
   List.fold_left
-    (fun context node -> Context.with_cpu_consumers context ~node:(Node.id node) (Some 1))
+    (fun context node -> Context.with_cpu_consumers context ~node:(Node.id node) (Some readers))
     context nodes
 
 (* [objects] are the visible geometry objects as (id, network graph,
@@ -510,7 +519,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
                   let* tinted =
                     Pick.tint output lit |> Result.map_error Diagnostic.error_to_string
                   in
-                  Result.bind (prepare_cached value ~id ~context:projection settings tinted)
+                  Result.bind (prepare_cached ?gpu value ~id ~context:projection settings tinted)
                     (fun prepared ->
                       loop
                         ({
@@ -534,7 +543,15 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
         if submit || probe_only then
           match
             Result.bind (context value timeline frame) (fun context ->
-                let context = prepared_context context (List.map snd graphs @ List.map snd probed) in
+                let device =
+                  Option.fold ~none:false
+                    ~some:(fun (gpu : Flow_ir.Gpu.config) -> gpu.backend <> None)
+                    gpu
+                in
+                let context =
+                  prepared_context ~readers:(if device then 0 else 1) context (List.map snd graphs)
+                in
+                let context = prepared_context context (List.map snd probed) in
                 Async_cook.submit_some value.worker ~context ~nodes:(List.map snd graphs)
                   ~optional:(List.map snd probed) ~prepare:(prepare context))
           with

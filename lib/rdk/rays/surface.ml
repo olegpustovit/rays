@@ -13,6 +13,11 @@ type t = {
   transforms : Rays_math.Mat4.t array option;
   batches : (Material.t * int array) list;
   host_reason : string option;
+  mutable device_copy : (string * Mesh.t) option;
+      (* the device mesh last bound, reused while the display names the same registration *)
+  mutable host_copy : Mesh.t option;
+      (* the host mesh of a device preview the device declined: one per surface, so drawing it
+         again names the renderer's cached copy rather than converting and uploading anew *)
 }
 
 (* Point Cd stays with P/N on device. Resident polygon topology is offered to the
@@ -74,7 +79,7 @@ let device_refusal geometry =
 let rec of_geometry ?instances geometry =
   match device_refusal geometry with
   | None ->
-      Ok { preview = Device geometry; transforms = instances; batches = []; host_reason = None }
+      Ok { preview = Device geometry; transforms = instances; batches = []; host_reason = None; device_copy = None; host_copy = None }
   | Some reason -> of_host ?instances ~reason geometry
 
 and of_host ?instances ~reason geometry =
@@ -209,7 +214,7 @@ and of_host ?instances ~reason geometry =
             indices ))
         !order
   in
-  Ok { preview; transforms = instances; batches; host_reason = Some reason }
+  Ok { preview; transforms = instances; batches; host_reason = Some reason; device_copy = None; host_copy = None }
 
 let host_reason surface = surface.host_reason
 
@@ -233,15 +238,30 @@ let scene3_result ?explosion ?device surface =
                 Some (Topology.View.view (Geometry.topology geometry)).vertex_points
               else None
             in
-            Mesh.View.create_device ~mode ?indices ?device_index_count ~device_color_width
-              ~host:(fun () -> converted (host geometry))
-              ~bounds:(fun () -> Geometry_view.bounds geometry)
-              ~derived:
-                (mode = Mesh.Triangles && Geometry.find_attribute ~owner:Point "N" geometry = None)
-              ~key ~normals ~keep count
+            (match surface.device_copy with
+            | Some (bound, mesh) when bound = key -> Ok mesh
+            | _ ->
+                let* mesh =
+                  Mesh.View.create_device ~mode ?indices ?device_index_count ~device_color_width
+                    ~host:(fun () -> converted (host geometry))
+                    ~bounds:(fun () -> Geometry_view.bounds geometry)
+                    ~derived:
+                      (mode = Mesh.Triangles
+                      && Geometry.find_attribute ~owner:Point "N" geometry = None)
+                    ~key ~normals ~keep count
+                in
+                surface.device_copy <- Some (key, mesh);
+                Ok mesh)
         | None ->
             (* no device to bind (another renderer, a closed runner): the host copy *)
-            host geometry)
+            if device = None then host geometry
+            else
+              match surface.host_copy with
+              | Some mesh -> Ok mesh
+              | None ->
+                  let* mesh = host geometry in
+                  surface.host_copy <- Some mesh;
+                  Ok mesh)
   in
   let draw material mesh =
     match surface.transforms with

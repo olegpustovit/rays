@@ -1,7 +1,11 @@
- 7:45  up 24 days,  1:17, 1 user, load averages: 10.38 12.69 10.52
-retention final live_words=21002872 workload_words=21002310 scheduler_empty_words=556 scheduler_capacity=368 timer_words=6 heap_words=30339710 history=1 entries=16 payload_bytes=21715380 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=8 held=0 preparations=8 preparation_bytes=65146140 prepare_calls=8 geometry_ids=8 renderer_pipelines=96 registrations=0 flow_buffers_created=103 live_handles=422
-allocation flips=200 mean_bytes=165972920
-latency present mean_s=0.083386 p50_s=0.076444 p95_s=0.158631 max_s=0.172937
-latency evaluate mean_s=0.027989 p50_s=0.022478 p95_s=0.096872 max_s=0.107851
-workspace_close handles=0 baseline=0
-real 32.25
+ 8:28  up 24 days,  2:01, 1 user, load averages: 8.23 12.11 11.61
+retention warm words=18793202 pipelines=10 held=3 registrations=1 buffers=213 handles=530
+retention final words=23641621 pipelines=10 held=0 registrations=0 buffers=213 handles=541
+allocation flips=200 mean_bytes=168249857
+latency present mean_s=0.082911 p50_s=0.076334 p95_s=0.148280 max_s=0.156216
+latency evaluate mean_s=0.026797 p50_s=0.021891 p95_s=0.095430 max_s=0.101638
+snapshot_differs held_buffers warm=3 final=0
+snapshot_differs registrations warm=1 final=0
+snapshot_differs live_handles warm=530 final=541
+Fatal error: exception Failure("selector caches/history grew after warmup")
+real 39.28

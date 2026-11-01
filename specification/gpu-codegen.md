@@ -167,7 +167,9 @@ one the host materialisation known CPU readers force, both priced by `Cost.readb
 output size, and `Cost.choose` decides with a recorded reason. Unknown consumers stay CPU
 (`missing_consumer`); a class without both routes runs CPU, then device (its mesh is the real result), until
 it has numbers (`no_cost_evidence`). A write that reads no attribute and deletes none forwards its input
-unread in the consumer census.
+unread in the consumer census. A displayed root with a device owner has no CPU reader unless probed; a
+write beside host positions counts one reader, and beside resident positions its CPU alternative is charged the
+measured host display sink, so mesh and writes cannot split into a mixed mesh the display must convert.
 
 Stateless structured geometry selection uses the same Qualification scope.
 Core offers raw `Host_source` arguments to the host before its usual CPU

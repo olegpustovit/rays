@@ -1,186 +1,109 @@
- 7:37  up 24 days,  1:10, 1 user, load averages: 3.40 6.10 7.17
-placement stage=cold owner=sculpture/mesh#:kinds count=998592 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
-warm_2 present_s=1.285070 alloc_bytes=488060592 prepare_s=0.107119 uploads=32 upload_bytes=14619520 readback_bytes=0 inspect_readback_bytes=0 pipelines=1 held=0 verified_Cd=binary64
-placement stage=warm_2 owner=sculpture/mesh#:kinds count=828704 reason=no_cost_evidence cpu_s=0.229171862317 device_s=unknown readers=1
-warm_3 present_s=1.364431 alloc_bytes=666740536 prepare_s=0.113372 uploads=51 upload_bytes=22361384 readback_bytes=15057796 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_3 owner=sculpture/mesh#:kinds count=836544 reason=no_cost_evidence cpu_s=0.231339937628 device_s=unknown readers=1
-warm_4 present_s=0.843267 alloc_bytes=367752384 prepare_s=0.052324 uploads=70 upload_bytes=26632080 readback_bytes=22305464 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
-warm_5 present_s=1.010529 alloc_bytes=329652304 prepare_s=0.039786 uploads=86 upload_bytes=28745808 readback_bytes=22305464 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
-warm_6 present_s=0.883349 alloc_bytes=280130296 prepare_s=0.015174 uploads=102 upload_bytes=29670544 readback_bytes=22305464 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_6 owner=sculpture/mesh#:kinds count=115520 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
-warm_7 present_s=0.984567 alloc_bytes=298271528 prepare_s=0.022097 uploads=118 upload_bytes=31067088 readback_bytes=22305464 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_7 owner=sculpture/mesh#:kinds count=174496 reason=no_cost_evidence cpu_s=0.137439473911 device_s=unknown readers=1
-warm_0 present_s=0.818877 alloc_bytes=506103536 prepare_s=0.004721 uploads=137 upload_bytes=32371320 readback_bytes=22878588 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=1
-warm_1 present_s=1.531995 alloc_bytes=635900784 prepare_s=0.132143 uploads=137 upload_bytes=32371320 readback_bytes=22878588 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_1 owner=sculpture/mesh#:kinds count=998592 reason=no_cost_evidence cpu_s=0.27159273318 device_s=unknown readers=1
-warm_2 present_s=1.175905 alloc_bytes=611586360 prepare_s=0.108834 uploads=140 upload_bytes=33420256 readback_bytes=37795264 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-warm_3 present_s=1.272660 alloc_bytes=653010824 prepare_s=0.129919 uploads=143 upload_bytes=34469192 readback_bytes=52853060 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-warm_4 present_s=0.829906 alloc_bytes=364493408 prepare_s=0.054554 uploads=146 upload_bytes=35518128 readback_bytes=60100728 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-warm_5 present_s=0.971341 alloc_bytes=312073528 prepare_s=0.042816 uploads=146 upload_bytes=35518128 readback_bytes=60100728 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.152899464298 device_s=unknown readers=1
-warm_6 present_s=0.797915 alloc_bytes=357309232 prepare_s=0.016984 uploads=149 upload_bytes=36567064 readback_bytes=62180092 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_6 owner=sculpture/mesh#:kinds count=115520 reason=no_cost_evidence cpu_s=0.0909884394994 device_s=unknown readers=1
-warm_7 present_s=0.809705 alloc_bytes=390053880 prepare_s=0.026250 uploads=152 upload_bytes=37616000 readback_bytes=65321024 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-warm_0 present_s=0.790959 alloc_bytes=507544224 prepare_s=0.004499 uploads=155 upload_bytes=38664936 readback_bytes=65894148 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0243229866028 readers=1
-warm_1 present_s=1.558556 alloc_bytes=606650168 prepare_s=0.143862 uploads=155 upload_bytes=38664936 readback_bytes=65894148 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-warm_2 present_s=1.142261 alloc_bytes=620382968 prepare_s=0.130718 uploads=158 upload_bytes=39713872 readback_bytes=80810824 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-warm_3 present_s=1.295094 alloc_bytes=575613976 prepare_s=0.141081 uploads=161 upload_bytes=40762808 readback_bytes=95868620 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-warm_4 present_s=0.875386 alloc_bytes=358924992 prepare_s=0.066255 uploads=164 upload_bytes=41811744 readback_bytes=103116288 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-warm_5 present_s=1.027078 alloc_bytes=324979768 prepare_s=0.036647 uploads=164 upload_bytes=41811744 readback_bytes=103116288 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.152899464298 device_s=unknown readers=1
-warm_6 present_s=0.842302 alloc_bytes=364586176 prepare_s=0.019685 uploads=167 upload_bytes=42860680 readback_bytes=105195652 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-warm_7 present_s=0.828751 alloc_bytes=389415696 prepare_s=0.033576 uploads=170 upload_bytes=43909616 readback_bytes=108336584 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-warm_0 present_s=0.865791 alloc_bytes=507503920 prepare_s=0.006130 uploads=173 upload_bytes=44958552 readback_bytes=108909708 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0236880779266 readers=1
-warm_1 present_s=1.625977 alloc_bytes=634949560 prepare_s=0.136822 uploads=173 upload_bytes=44958552 readback_bytes=108909708 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-warm_2 present_s=1.313133 alloc_bytes=615143120 prepare_s=0.135360 uploads=176 upload_bytes=46007488 readback_bytes=123826384 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-warm_3 present_s=1.302818 alloc_bytes=652376352 prepare_s=0.127918 uploads=179 upload_bytes=47056424 readback_bytes=138884180 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-warm_4 present_s=0.956556 alloc_bytes=364493128 prepare_s=0.075057 uploads=182 upload_bytes=48105360 readback_bytes=146131848 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-warm_5 present_s=1.003047 alloc_bytes=324029760 prepare_s=0.041032 uploads=182 upload_bytes=48105360 readback_bytes=146131848 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.152899464298 device_s=unknown readers=1
-warm_6 present_s=0.896887 alloc_bytes=333143856 prepare_s=0.023925 uploads=185 upload_bytes=49154296 readback_bytes=148211212 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-warm_7 present_s=0.860226 alloc_bytes=388547848 prepare_s=0.032258 uploads=188 upload_bytes=50203232 readback_bytes=151352144 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-warm_0 present_s=0.873382 alloc_bytes=507554768 prepare_s=0.006097 uploads=191 upload_bytes=51252168 readback_bytes=151925268 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0210359096527 readers=1
-warm_1 present_s=1.695615 alloc_bytes=595393880 prepare_s=0.140337 uploads=191 upload_bytes=51252168 readback_bytes=151925268 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-warm_2 present_s=1.425852 alloc_bytes=614759080 prepare_s=0.147641 uploads=194 upload_bytes=52301104 readback_bytes=166841944 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-warm_3 present_s=1.338469 alloc_bytes=634697856 prepare_s=0.146780 uploads=197 upload_bytes=53350040 readback_bytes=181899740 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-warm_4 present_s=0.934653 alloc_bytes=364494824 prepare_s=0.071013 uploads=200 upload_bytes=54398976 readback_bytes=189147408 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-warm_5 present_s=1.002028 alloc_bytes=325892232 prepare_s=0.039904 uploads=200 upload_bytes=54398976 readback_bytes=189147408 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.152899464298 device_s=unknown readers=1
-warm_6 present_s=0.915202 alloc_bytes=364593784 prepare_s=0.021954 uploads=203 upload_bytes=55447912 readback_bytes=191226772 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-warm_7 present_s=0.912518 alloc_bytes=374091632 prepare_s=0.029323 uploads=206 upload_bytes=56496848 readback_bytes=194367704 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-warm_0 present_s=0.844194 alloc_bytes=507552112 prepare_s=0.006617 uploads=209 upload_bytes=57545784 readback_bytes=194940828 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0210359096527 readers=1
-warm_1 present_s=1.526247 alloc_bytes=631464616 prepare_s=0.137039 uploads=209 upload_bytes=57545784 readback_bytes=194940828 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=warm_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-retention warm live_words=302403187 workload_words=302402449 scheduler_empty_words=736 scheduler_capacity=368 timer_words=2 history=1 entries=14 payload_bytes=232256290 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=8 held=0 preparations=2 preparation_bytes=50913456 prepare_calls=41 geometry_ids=41 renderer_pipelines=96 
-flip_0_recipe_2 present_s=1.322774 alloc_bytes=589334872 prepare_s=0.127134 uploads=212 upload_bytes=58594720 readback_bytes=209857504 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_0_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-flip_1_recipe_3 present_s=1.266617 alloc_bytes=643299136 prepare_s=0.127637 uploads=215 upload_bytes=59643656 readback_bytes=224915300 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_1_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-flip_2_recipe_4 present_s=0.910363 alloc_bytes=358872096 prepare_s=0.064110 uploads=218 upload_bytes=60692592 readback_bytes=232162968 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_2_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-flip_3_recipe_5 present_s=0.960793 alloc_bytes=287819144 prepare_s=0.037176 uploads=218 upload_bytes=60692592 readback_bytes=232162968 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_3_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.151579340625 device_s=unknown readers=1
-flip_4_recipe_6 present_s=0.795228 alloc_bytes=335621984 prepare_s=0.020001 uploads=221 upload_bytes=61741528 readback_bytes=234242332 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_4_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-flip_5_recipe_7 present_s=0.854141 alloc_bytes=359588944 prepare_s=0.029116 uploads=224 upload_bytes=62790464 readback_bytes=237383264 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_5_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-flip_6_recipe_0 present_s=0.826755 alloc_bytes=504173832 prepare_s=0.005862 uploads=227 upload_bytes=63839400 readback_bytes=237956388 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_6_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0210359096527 readers=1
-flip_7_recipe_1 present_s=1.580400 alloc_bytes=585507408 prepare_s=0.137253 uploads=227 upload_bytes=63839400 readback_bytes=237956388 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_7_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-flip_8_recipe_2 present_s=1.388268 alloc_bytes=578942528 prepare_s=0.140724 uploads=230 upload_bytes=64888336 readback_bytes=252873064 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_8_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-flip_9_recipe_3 present_s=1.290690 alloc_bytes=603886600 prepare_s=0.139229 uploads=233 upload_bytes=65937272 readback_bytes=267930860 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_9_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-flip_10_recipe_4 present_s=0.947773 alloc_bytes=358882152 prepare_s=0.075068 uploads=236 upload_bytes=66986208 readback_bytes=275178528 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_10_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-flip_11_recipe_5 present_s=1.194856 alloc_bytes=297651600 prepare_s=0.037969 uploads=236 upload_bytes=66986208 readback_bytes=275178528 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_11_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.151579340625 device_s=unknown readers=1
-flip_12_recipe_6 present_s=0.989425 alloc_bytes=325901512 prepare_s=0.026931 uploads=239 upload_bytes=68035144 readback_bytes=277257892 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_12_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-flip_13_recipe_7 present_s=1.025747 alloc_bytes=364635648 prepare_s=0.033753 uploads=242 upload_bytes=69084080 readback_bytes=280398824 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_13_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-flip_14_recipe_0 present_s=0.842018 alloc_bytes=504182336 prepare_s=0.006497 uploads=245 upload_bytes=70133016 readback_bytes=280971948 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_14_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0210359096527 readers=1
-flip_15_recipe_1 present_s=1.644829 alloc_bytes=560361632 prepare_s=0.137480 uploads=245 upload_bytes=70133016 readback_bytes=280971948 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_15_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-flip_16_recipe_2 present_s=1.397858 alloc_bytes=557706112 prepare_s=0.142387 uploads=248 upload_bytes=71181952 readback_bytes=295888624 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_16_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-flip_17_recipe_3 present_s=1.239896 alloc_bytes=585930424 prepare_s=0.135343 uploads=251 upload_bytes=72230888 readback_bytes=310946420 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_17_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-flip_18_recipe_4 present_s=0.973288 alloc_bytes=358930024 prepare_s=0.068396 uploads=254 upload_bytes=73279824 readback_bytes=318194088 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_18_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-flip_19_recipe_5 present_s=1.062013 alloc_bytes=283211048 prepare_s=0.036831 uploads=254 upload_bytes=73279824 readback_bytes=318194088 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_19_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.151579340625 device_s=unknown readers=1
-flip_20_recipe_6 present_s=1.022908 alloc_bytes=334041832 prepare_s=0.020575 uploads=257 upload_bytes=74328760 readback_bytes=320273452 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_20_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-flip_21_recipe_7 present_s=0.913709 alloc_bytes=357491808 prepare_s=0.032843 uploads=260 upload_bytes=75377696 readback_bytes=323414384 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_21_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-flip_22_recipe_0 present_s=0.859139 alloc_bytes=504200616 prepare_s=0.005212 uploads=263 upload_bytes=76426632 readback_bytes=323987508 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_22_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0210359096527 readers=1
-flip_23_recipe_1 present_s=1.753211 alloc_bytes=560369424 prepare_s=0.298522 uploads=263 upload_bytes=76426632 readback_bytes=323987508 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_23_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-flip_24_recipe_2 present_s=1.516774 alloc_bytes=614961648 prepare_s=0.135287 uploads=266 upload_bytes=77475568 readback_bytes=338904184 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_24_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-flip_25_recipe_3 present_s=1.583044 alloc_bytes=635362296 prepare_s=0.133616 uploads=269 upload_bytes=78524504 readback_bytes=353961980 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_25_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-flip_26_recipe_4 present_s=1.067064 alloc_bytes=364494056 prepare_s=0.083286 uploads=272 upload_bytes=79573440 readback_bytes=361209648 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_26_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-flip_27_recipe_5 present_s=1.079733 alloc_bytes=324999904 prepare_s=0.046624 uploads=272 upload_bytes=79573440 readback_bytes=361209648 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_27_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.151579340625 device_s=unknown readers=1
-flip_28_recipe_6 present_s=1.320034 alloc_bytes=347660336 prepare_s=0.019812 uploads=275 upload_bytes=80622376 readback_bytes=363289012 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_28_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-flip_29_recipe_7 present_s=1.240458 alloc_bytes=372982456 prepare_s=0.032647 uploads=278 upload_bytes=81671312 readback_bytes=366429944 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_29_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-flip_30_recipe_0 present_s=1.007198 alloc_bytes=504226840 prepare_s=0.006392 uploads=281 upload_bytes=82720248 readback_bytes=367003068 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_30_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0210359096527 readers=1
-flip_31_recipe_1 present_s=2.249763 alloc_bytes=635923088 prepare_s=0.221152 uploads=281 upload_bytes=82720248 readback_bytes=367003068 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_31_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-flip_32_recipe_2 present_s=1.472919 alloc_bytes=606777984 prepare_s=0.157779 uploads=284 upload_bytes=83769184 readback_bytes=381919744 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_32_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-flip_33_recipe_3 present_s=1.537330 alloc_bytes=611119008 prepare_s=0.146490 uploads=287 upload_bytes=84818120 readback_bytes=396977540 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_33_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-flip_34_recipe_4 present_s=0.994756 alloc_bytes=364453032 prepare_s=0.067683 uploads=290 upload_bytes=85867056 readback_bytes=404225208 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_34_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-flip_35_recipe_5 present_s=1.028126 alloc_bytes=324958712 prepare_s=0.042637 uploads=290 upload_bytes=85867056 readback_bytes=404225208 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_35_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.151579340625 device_s=unknown readers=1
-flip_36_recipe_6 present_s=0.928854 alloc_bytes=356408496 prepare_s=0.023494 uploads=293 upload_bytes=86915992 readback_bytes=406304572 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_36_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-flip_37_recipe_7 present_s=0.883393 alloc_bytes=383907808 prepare_s=0.033170 uploads=296 upload_bytes=87964928 readback_bytes=409445504 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_37_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-flip_38_recipe_0 present_s=0.796437 alloc_bytes=510997704 prepare_s=0.005892 uploads=299 upload_bytes=89013864 readback_bytes=410018628 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_38_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0210359096527 readers=1
-flip_39_recipe_1 present_s=1.587574 alloc_bytes=642121048 prepare_s=0.144629 uploads=299 upload_bytes=89013864 readback_bytes=410018628 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_39_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-flip_40_recipe_2 present_s=1.467615 alloc_bytes=573472840 prepare_s=0.134431 uploads=302 upload_bytes=90062800 readback_bytes=424935304 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_40_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.225387649089 device_s=0.0385320186615 readers=1
-flip_41_recipe_3 present_s=1.241237 alloc_bytes=639383280 prepare_s=0.156228 uploads=305 upload_bytes=91111736 readback_bytes=439993100 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_41_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.227519923642 device_s=0.038896552954 readers=1
-flip_42_recipe_4 present_s=0.898090 alloc_bytes=364456936 prepare_s=0.070347 uploads=308 upload_bytes=92160672 readback_bytes=447240768 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_42_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=no_cost_evidence cpu_s=unknown device_s=0.030565738678 readers=1
-flip_43_recipe_5 present_s=1.005910 alloc_bytes=324056680 prepare_s=0.039910 uploads=308 upload_bytes=92160672 readback_bytes=447240768 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_43_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=no_cost_evidence cpu_s=0.151579340625 device_s=unknown readers=1
-flip_44_recipe_6 present_s=0.909755 alloc_bytes=357313648 prepare_s=0.024536 uploads=311 upload_bytes=93209608 readback_bytes=449320132 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_44_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0909884394994 device_s=0.0179910161354 readers=1
-flip_45_recipe_7 present_s=0.936191 alloc_bytes=362160576 prepare_s=0.033814 uploads=314 upload_bytes=94258544 readback_bytes=452461064 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_45_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.137439473911 device_s=0.0271759033203 readers=1
-flip_46_recipe_0 present_s=0.800688 alloc_bytes=504194640 prepare_s=0.005745 uploads=317 upload_bytes=95307480 readback_bytes=453034188 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_46_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=no_cost_evidence cpu_s=unknown device_s=0.0210359096527 readers=1
-flip_47_recipe_1 present_s=1.674489 alloc_bytes=556754728 prepare_s=0.286135 uploads=317 upload_bytes=95307480 readback_bytes=453034188 inspect_readback_bytes=0 pipelines=8 held=0 verified_Cd=binary64
-placement stage=flip_47_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.27159273318 device_s=0.046431253595 readers=1
-retention final live_words=310385539 workload_words=310384801 scheduler_empty_words=736 scheduler_capacity=368 timer_words=2 history=1 entries=14 payload_bytes=232256290 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=8 held=0 preparations=2 preparation_bytes=50913456 prepare_calls=89 geometry_ids=89 renderer_pipelines=96
-allocation flips=48 mean_bytes=460076884
-latency present mean_s=1.172711 p50_s=1.062013 p95_s=1.674489 max_s=2.249763
-latency evaluate mean_s=0.239986 p50_s=0.214075 p95_s=0.490624 max_s=0.560962
-latency cook mean_s=0.815276 p50_s=0.790226 p95_s=1.192837 max_s=1.501819
+ 8:15  up 24 days,  1:47, 1 user, load averages: 5.26 10.07 9.96
+production cold handles=300 payload_bytes=0 dispatches=4 flow_input_bytes=7989312 renderer_upload_bytes=43188936
+placement stage=cold owner=sculpture/normals count=998592 reason=cpu_consumer cpu_s=0.0164996523862 device_s=0.0521719348828 readers=1
+placement stage=cold owner=sculpture/mesh#:kinds count=998592 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=0
+production warm_2 handles=301 payload_bytes=0 dispatches=4 flow_input_bytes=6630208 renderer_upload_bytes=36019848
+placement stage=warm_2 owner=sculpture/normals count=828704 reason=cpu_consumer cpu_s=0.0136965469832 device_s=0.0432581095324 readers=1
+placement stage=warm_2 owner=sculpture/mesh#:kinds count=828704 reason=no_cost_evidence cpu_s=0.270690355707 device_s=unknown readers=0
+production warm_3 handles=374 payload_bytes=0 dispatches=8 flow_input_bytes=9415096 renderer_upload_bytes=1220424
+placement stage=warm_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.121253062769 device_s=0.00372385978699 readers=0
+placement stage=warm_3 owner=sculpture/mesh#:kinds count=836544 reason=no_cost_evidence cpu_s=0.27325123678 device_s=unknown readers=0
+production warm_4 handles=409 payload_bytes=0 dispatches=8 flow_input_bytes=5076136 renderer_upload_bytes=165704
+placement stage=warm_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.0583739187695 device_s=0.00191497802734 readers=0
+placement stage=warm_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.131522148252 device_s=0.0169845185327 readers=0
+production warm_5 handles=433 payload_bytes=0 dispatches=8 flow_input_bytes=3691096 renderer_upload_bytes=1214192
+placement stage=warm_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0383022588315 device_s=0.00137400627136 readers=0
+placement stage=warm_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.0862807870095 device_s=0.0130758068233 readers=0
+production warm_6 handles=468 payload_bytes=0 dispatches=8 flow_input_bytes=2204856 renderer_upload_bytes=165528
+placement stage=warm_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0167640333172 device_s=0.000741004943848 readers=0
+placement stage=warm_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0377337986679 device_s=0.00732750970107 readers=0
+production warm_7 handles=501 payload_bytes=0 dispatches=8 flow_input_bytes=2794616 renderer_upload_bytes=165616
+placement stage=warm_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0253106905727 device_s=0.00101494789124 readers=0
+placement stage=warm_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0569978958826 device_s=0.02351662572 readers=0
+production warm_0 handles=536 payload_bytes=0 dispatches=8 flow_input_bytes=1368056 renderer_upload_bytes=1214104
+placement stage=warm_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00463733297926 device_s=0.000445127487183 readers=0
+placement stage=warm_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0104003129292 device_s=0.00500483767897 readers=0
+production warm_1 handles=561 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+placement stage=warm_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.144736661435 device_s=0.00455904006958 readers=0
+placement stage=warm_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.326183080673 device_s=0.0282785280708 readers=0
+retention warm history=1 entries=14 payload_bytes=232256290 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=10 held=6 preparations=2 preparation_bytes=50913456 prepare_calls=9 geometry_ids=9 renderer_pipelines=96 registrations=2 flow_buffers_created=244
+production flip_0_recipe_2 handles=586 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+placement stage=flip_0_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.1201169092 device_s=0.00374484062195 readers=0
+placement stage=flip_0_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.270690355707 device_s=0.0277433194287 readers=0
+production flip_1_recipe_3 handles=610 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+placement stage=flip_1_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.121253062769 device_s=0.00372385978699 readers=0
+placement stage=flip_1_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.27325123678 device_s=0.0268721580505 readers=0
+production flip_2_recipe_4 handles=632 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+placement stage=flip_2_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.0583739187695 device_s=0.00191497802734 readers=0
+placement stage=flip_2_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.131522148252 device_s=0.0255402278923 readers=0
+production flip_3_recipe_5 handles=645 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+placement stage=flip_3_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0383022588315 device_s=0.00137400627136 readers=0
+placement stage=flip_3_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.0862807870095 device_s=0.0324067692295 readers=0
+production flip_4_recipe_6 handles=653 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165528
+placement stage=flip_4_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0167640333172 device_s=0.000741004943848 readers=0
+placement stage=flip_4_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0377337986679 device_s=0.0155684978634 readers=0
+production flip_5_recipe_7 handles=661 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165616
+placement stage=flip_5_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0253106905727 device_s=0.00101494789124 readers=0
+placement stage=flip_5_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0569978958826 device_s=0.0245043938932 readers=0
+production flip_6_recipe_0 handles=670 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+placement stage=flip_6_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00463733297926 device_s=0.000445127487183 readers=0
+placement stage=flip_6_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0104003129292 device_s=0.00765112870377 readers=0
+production flip_7_recipe_1 handles=679 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+placement stage=flip_7_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.144736661435 device_s=0.00455904006958 readers=0
+placement stage=flip_7_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.326183080673 device_s=0.0302736147407 readers=0
+production flip_8_recipe_2 handles=687 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+placement stage=flip_8_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.1201169092 device_s=0.00374484062195 readers=0
+placement stage=flip_8_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.270690355707 device_s=0.0266203150882 readers=0
+production flip_9_recipe_3 handles=695 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+placement stage=flip_9_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.121253062769 device_s=0.00372385978699 readers=0
+placement stage=flip_9_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.27325123678 device_s=0.0254981517792 readers=0
+production flip_10_recipe_4 handles=703 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+placement stage=flip_10_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.0583739187695 device_s=0.00191497802734 readers=0
+placement stage=flip_10_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.131522148252 device_s=0.0340309934398 readers=0
+production flip_11_recipe_5 handles=709 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+placement stage=flip_11_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0383022588315 device_s=0.00137400627136 readers=0
+placement stage=flip_11_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.0862807870095 device_s=0.0189897636905 readers=0
+production flip_12_recipe_6 handles=714 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165616
+placement stage=flip_12_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0167640333172 device_s=0.000741004943848 readers=0
+placement stage=flip_12_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0377337986679 device_s=0.0162224210443 readers=0
+production flip_13_recipe_7 handles=719 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165528
+placement stage=flip_13_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0253106905727 device_s=0.00101494789124 readers=0
+placement stage=flip_13_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0569978958826 device_s=0.0238713925657 readers=0
+production flip_14_recipe_0 handles=724 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+placement stage=flip_14_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00463733297926 device_s=0.000445127487183 readers=0
+placement stage=flip_14_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0104003129292 device_s=0.00821061521445 readers=0
+production flip_15_recipe_1 handles=734 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+placement stage=flip_15_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.144736661435 device_s=0.00455904006958 readers=0
+placement stage=flip_15_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.326183080673 device_s=0.0235664232734 readers=0
+production flip_16_recipe_2 handles=742 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+placement stage=flip_16_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.1201169092 device_s=0.00374484062195 readers=0
+placement stage=flip_16_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.270690355707 device_s=0.0249309338696 readers=0
+production flip_17_recipe_3 handles=750 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+placement stage=flip_17_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.121253062769 device_s=0.00372385978699 readers=0
+placement stage=flip_17_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.27325123678 device_s=0.0226862430573 readers=0
+production flip_18_recipe_4 handles=758 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+placement stage=flip_18_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.0583739187695 device_s=0.00191497802734 readers=0
+placement stage=flip_18_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.131522148252 device_s=0.0201121167918 readers=0
+production flip_19_recipe_5 handles=763 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+placement stage=flip_19_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0383022588315 device_s=0.00137400627136 readers=0
+placement stage=flip_19_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.0862807870095 device_s=0.0205907444492 readers=0
+production flip_20_recipe_6 handles=768 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165616
+placement stage=flip_20_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0167640333172 device_s=0.000741004943848 readers=0
+placement stage=flip_20_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0377337986679 device_s=0.015803360932 readers=0
+production flip_21_recipe_7 handles=773 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165528
+placement stage=flip_21_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0253106905727 device_s=0.00101494789124 readers=0
+placement stage=flip_21_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0569978958826 device_s=0.0181715195951 readers=0
+production flip_22_recipe_0 handles=778 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+placement stage=flip_22_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00463733297926 device_s=0.000445127487183 readers=0
+placement stage=flip_22_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0104003129292 device_s=0.00578098228523 readers=0
+production flip_23_recipe_1 handles=788 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+placement stage=flip_23_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.144736661435 device_s=0.00455904006958 readers=0
+placement stage=flip_23_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.326183080673 device_s=0.0270808239937 readers=0
+retention final history=1 entries=14 payload_bytes=232256290 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=10 held=6 preparations=2 preparation_bytes=50913456 prepare_calls=33 geometry_ids=33 renderer_pipelines=96 registrations=2 flow_buffers_created=
+latency present mean_s=0.613603 p50_s=0.594869 p95_s=0.823454 max_s=0.888356
+latency evaluate mean_s=0.192201 p50_s=0.174297 p95_s=0.379392 max_s=0.429854
+latency cook mean_s=0.351226 p50_s=0.349198 p95_s=0.382742 max_s=0.433018
+snapshot_differs buffer_creations warm=244 final=786
+snapshot_differs live_handles warm=561 final=788
 Fatal error: exception Failure("selector caches/history grew after warmup")
-real 134.20
+real 59.84

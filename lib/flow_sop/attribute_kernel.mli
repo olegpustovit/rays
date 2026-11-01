@@ -118,6 +118,17 @@ val delete_after :
   (string * string) list -> Rdk.Cancel.t -> Rdk.Geometry.t -> (Rdk.Geometry.t, Diagnostic.t) result
 (** Delete each (owner, pattern) in order, as [sop/delete_attr] does. *)
 
+module Display_sink : sig
+  val observe : Flow_ir.Gpu.backend -> resident:bool -> floats:int -> float -> unit
+  (** Seconds the editor spent preparing a mesh of [floats] floats for display. *)
+
+  val rates : Flow_ir.Gpu.backend -> float * float
+  (** Seconds per float (host mesh, resident mesh); [infinity] while unmeasured. *)
+
+  val live : unit -> int
+  (** Backends still owning rates, for the close checks. *)
+end
+
 val node :
   ?state:Flow.Eval.state ->
   ?reference:bool ->

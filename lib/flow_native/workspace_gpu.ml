@@ -66,6 +66,9 @@ type t = {
   mutable displays : int;  (** device meshes bound so far *)
   mutable display_refusal : string option;
   bound : (string, unit -> unit) Hashtbl.t; (* each live display's release, by its key *)
+  shown : (int, string * bool * int option * int * unit ref Weak.t) Hashtbl.t;
+      (* a live display by its geometry's data id: drawing the same geometry again names it, so
+         the renderer's caches keyed by it hit instead of filling with dead registrations *)
   mutable frames : int;
   mutable releasing : (int * (unit -> unit)) list;
       (* dropped displays, released at a later {!frame}: one that drew them may be in flight on the
@@ -103,6 +106,7 @@ let create ?(clock = Unix.gettimeofday) () =
     displays = 0;
     display_refusal = None;
     bound = Hashtbl.create 8;
+    shown = Hashtbl.create 8;
     frames = 0;
     releasing = [];
   }
@@ -599,8 +603,18 @@ let display t geometry =
   end
   else begin
     t.display_refusal <- None;
-    match (t.owner, Flow_sop.Attribute_kernel.resident_vec3 geometry "P") with
-    | Some (gpu, host), Some positions -> (
+    let id = Rdk.Geometry.data_id geometry in
+    let again =
+      match Hashtbl.find_opt t.shown id with
+      | Some (key, normals, indices, width, weak) when Hashtbl.mem t.bound key ->
+          Option.map
+            (fun token -> (key, normals, indices, width, fun () -> ignore (Sys.opaque_identity token)))
+            (Weak.get weak 0)
+      | _ -> None
+    in
+    match (again, t.owner, Flow_sop.Attribute_kernel.resident_vec3 geometry "P") with
+    | Some _, _, _ -> again
+    | None, Some (gpu, host), Some positions -> (
         let count = Rdk.Geometry.point_count geometry in
         let releases = ref [] and checks = ref [] in
         let hold valid release =
@@ -696,6 +710,14 @@ let display t geometry =
                   release_all ());
               let token = ref () in
               Gc.finalise (fun _ -> push t.dropped key) token;
+              let weak = Weak.create 1 in
+              Weak.set weak 0 (Some token);
+              if Hashtbl.length t.shown >= 64 then
+                Hashtbl.filter_map_inplace
+                  (fun _ ((k, _, _, _, _) as entry) -> if Hashtbl.mem t.bound k then Some entry else None)
+                  t.shown;
+              Hashtbl.replace t.shown id
+                (key, normals <> None, Option.map snd indices, Option.fold ~none:0 ~some:snd colors, weak);
               Ok
                 ( key,
                   normals <> None,
@@ -709,7 +731,7 @@ let display t geometry =
             release_all ();
             t.display_refusal <- Some reason;
             None)
-    | _ ->
+    | None, _, _ ->
         t.display_refusal <- Some "Resident positions or the workspace device are unavailable.";
         None
   end

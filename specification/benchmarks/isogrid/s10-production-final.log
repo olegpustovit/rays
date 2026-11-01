@@ -1,13 +1,23 @@
-## uptime
- 7:44  up 24 days,  1:16, 1 user, load averages: 11.82 13.15 10.57
-## shasum
+ 8:26  up 24 days,  1:59, 1 user, load averages: 13.05 12.98 11.74
 0fdb9b0ebec8f5fe
 ## @lib/flow_ir/runtest
 exit 0
-real 0.21
+Core errors: division by zero, range, non-finite, authored fields and state rollback match the walker
+Authored errors: exact dynamic messages, lazy text/packed branches, empty inputs, rollback and dynamic packed refusal pass
+Core state: slots, pending writes, keys, errors and rollback match the walker (36 executions)
+Resident value execution: counts, escaping records, CPU readers, errors and overflow match
+Static gathers: reference fields, helpers, Text, lazy/tail errors and concrete mismatch
+Inner sums: K=0/1/64, exact Int/vector bits, helper tables, guarded empty/bounds errors, eager map errors, constant refusals and one/eight domains agree
+Scatter: ordered numeric bytes, Int wrap, malformed inputs, source ownership, lazy errors and strict Core/reference 1/4/8 domains
+Compact/scan: kept indices, exclusive offset boundaries, Int wrap, immutable sources, lazy errors and strict/reference domains
+Numeric gather: independent tables, exact Int/vector bytes, lazy preparation, first-error order and one/four/eight domains pass
+Typed total prefix: wrapping Int/native Text bytes, guarded storage checks and earliest-row block/chunk errors pass
+Core carried loops: empty, dynamic, nested, record/helper, error and domain parity passed
+Captured uniform packed/reference parity, ordered named reductions, changing inputs, errors and rollback passed
+real 11.87
 ## @lib/sop/runtest
 exit 0
-real 2.29
+real 2.08
 ## @lib/flow_sop/runtest
 exit 0
 Measured SOP consumer plumbing: opaque root declines resident record; capture supplies one CPU reader
@@ -22,19 +32,36 @@ Encoded parameters: typed hooks and transitive pure helpers; generic error proje
 inline cards: body errors cook, refusals lower, ranges/encoded text/rest slots as the node
 inline cards: recomputed normals keep dev's owners and storage errors
 Native compound audit: 0/1863 components exceed four ULP; max 1 ULP, max absolute error 2.2204460492503131e-16
-real 14.69
+real 15.07
 ## @lib/flow_native/runtest
 exit 0
-real 1.85
+real 2.06
+## @lib/rdk/rays/runtest
+exit 0
+real 0.22
+## @lib/rays_editor/runtest
+exit 1
+workspace start: I/O and syntax errors return without exiting
+sketches/ws_kit.rays: def:box_error/@result E_PACKED_PENDING: No unambiguous static specialization was observed for producer node:sop/box/@result#else/@result#else/invalid#else/@result#0.
+scene conversion: typed draw error persists with cached geometry and clears after correction
+Fatal error: exception Failure("test_viewport_pick: deselecting prepares once")
+real 28.27
 ## @test/dependency_gate
 exit 0
 real 2.92
 ## @lib/rays_editor/native_qualification/test_placement_native
 exit 0
-Measured chain placement: 65536 points cpu_measured_cheaper (cpu 0.040565 s, device 0.053715 s; one reader: device 0.058404 s); small cpu_consumer (cpu 0.000022 s, device 0.000027 s); unknown consumers stay CPU (missing_consumer)
+Measured chain placement: 65536 points cpu_measured_cheaper (cpu 0.040176 s, device 0.052891 s; one reader: device 0.057580 s); small cpu_consumer (cpu 0.000021 s, device 0.000030 s); unknown consumers stay CPU (missing_consumer)
 IsoGrid 24^3 measured meshes: recipes 3, 0, 3 held together on the device, each reads its own positions (47464, 12000 points); first reads materialise 1283136 payload bytes, repeats none
-real 4.35
+real 3.15
 ## @lib/rays_editor/native_qualification/test_placement_lifetimes
 exit 0
-Measured retained generations: small CPU-origin stays CPU; 200 dispatches, two canvases, old pixels stable, cancel/recook/source edit/read-release orders pass; payload before explicit read=0, held=4, buffers=21 (+0 warm), pipelines=1, heap_delta_words=74612
-real 4.81
+Measured retained generations: small CPU-origin stays CPU; 200 dispatches, two canvases, old pixels stable, cancel/recook/source edit/read-release orders pass; payload before explicit read=0, held=4, buffers=21 (+0 warm), pipelines=1, heap_delta_words=74594
+real 4.60
+## @lib/rays_editor/native_qualification/test_isogrid_viewport
+exit 0
+IsoGrid recipe 0: picking materialises 216004 payload bytes; repeated read +0
+IsoGrid recipe 0: 3000 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 3: inspection materialises 1708704 payload bytes; repeated read +0
+IsoGrid recipe 3: 11866 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+real 2.09

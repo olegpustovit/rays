@@ -480,31 +480,57 @@ let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
     |> Sop.Node.Build.with_input_use (Sop.Node.input_use base)
     |> Sop.Node.Build.with_facts (Sop.Node.facts base)
 
-(* Whole-chain placement of a resident mesh scope, measured rather than assumed. Each route's cook
-   rate (seconds per output float) is kept per authored site and output size class, because a fixed
-   cost makes small and large outputs differ. The CPU alternative adds the upload of the mesh it
-   displays, the device one the host materialisation its CPU readers force, both at the expected
-   size (the site's last output). While the device route is being measured and CPU readers exist, its
-   mesh is materialised under the clock, so their cost is measured, not assumed. A route's first cook pays one-time preparation, so a route needs
-   two cooks and keeps the cheaper rate. A class runs on the CPU until it has two, then on the
-   device (its mesh is the real result) until it has two, then [Flow_ir.Cost.choose] decides. *)
+(* Whole-chain placement of a resident mesh scope, measured rather than assumed. Per backend and
+   authored site, each route keeps the seconds-per-output-float of its recent cooks, with the output
+   size they had. A route's first cook pays one-time preparation, so a route needs two cooks and is
+   priced by the cheaper of the two samples nearest the expected size (the site's last output). Besides
+   its cook, the CPU alternative pays the display conversion of a host mesh and the device one the
+   conversion of a resident mesh (both measured by the editor's preparation, {!observe_display}) and,
+   with CPU readers, the host materialisation of its mesh, measured under the clock while the device
+   route is measured. The site runs on the CPU until it has two cooks, then on the device (its mesh is
+   the real result) until it has two, then [Flow_ir.Cost.choose] decides. The state is weakly keyed by
+   the backend, so a closed owner's evidence goes with it. *)
 module Chain = struct
-  module T = Lru.Make (String)
+  type samples = { mutable cpu : (int * float) list; mutable device : (int * float) list }
 
-  type evidence = {
-    backend : Flow_ir.Gpu.backend option;
-    mutable cpu : float;
-    mutable cpu_cooks : int;
-    mutable device : float;
-    mutable device_cooks : int;
+  type state = {
+    sites : (string, samples) Hashtbl.t;
+    last : (string, int * int) Hashtbl.t;
     mutable materialise : float;
   }
 
-  let classes : evidence T.t = T.create 256
-  let last : (Flow_ir.Gpu.backend option * int * int) T.t = T.create 256
+  (* weak backend, so the registry never keeps a closed owner's closures alive *)
+  let registry : (Flow_ir.Gpu.backend Weak.t * state) list ref = ref []
   let lock = Mutex.create ()
+  let sites_cap = 256
 
-  let rec log2 n = if n <= 1 then 0 else 1 + log2 (n lsr 1)
+  let live registry = List.filter (fun (weak, _) -> Weak.check weak 0) registry
+
+  let state_of backend =
+    Mutex.protect lock (fun () ->
+        registry := live !registry;
+        match
+          List.find_opt
+            (fun (weak, _) -> match Weak.get weak 0 with Some b -> b == backend | None -> false)
+            !registry
+        with
+        | Some (_, state) -> state
+        | None ->
+            let state =
+              { sites = Hashtbl.create 16; last = Hashtbl.create 16; materialise = infinity }
+            in
+            let weak = Weak.create 1 in
+            Weak.set weak 0 (Some backend);
+            registry := (weak, state) :: !registry;
+            state)
+
+  let states () =
+    Mutex.protect lock (fun () ->
+        registry := live !registry;
+        List.length !registry)
+
+  let floats_of geometry =
+    (Rdk.Geometry.point_count geometry * 9) + (Rdk.Geometry.primitive_count geometry * 6)
 
   let rec site_of = function
     | E.Residual residual ->
@@ -513,7 +539,7 @@ module Chain = struct
     | E.Record fields -> List.find_map (fun (_, value) -> site_of value) (List.rev fields)
     | _ -> None
 
-  (* what a CPU reader of the mesh forces *)
+  (* what a CPU reader of the mesh forces: positions, topology and every attribute *)
   let force_host geometry =
     let positions = Rdk.Geometry.positions geometry in
     if Rdk.Packed.Float3.length positions > 0 then ignore (Rdk.Packed.Float3.get positions 0);
@@ -522,7 +548,26 @@ module Chain = struct
       ignore (Rdk.Topology.point_of_vertex topology 0);
       ignore (Rdk.Topology.primitive_vertex_range topology 0);
       ignore (Rdk.Topology.primitive_kind topology 0)
-    end
+    end;
+    List.iter (fun a -> ignore (Rdk.Attribute.storage a)) (Rdk.Geometry.attributes geometry)
+
+  let observe_display (gpu : Flow_ir.Gpu.config) geometry seconds =
+    match gpu.backend with
+    | Some backend when gpu.policy = Flow_ir.Gpu.Measured ->
+        Attribute_kernel.Display_sink.observe backend
+          ~resident:(Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry))
+          ~floats:(floats_of geometry) seconds
+    | _ -> ()
+
+  (* the cheaper of the two samples nearest [floats], priced at [floats] *)
+  let priced samples floats =
+    match samples with
+    | _ :: _ :: _ ->
+        let distance (n, _) = Float.abs (log (float (max n 1) /. float (max floats 1))) in
+        let nearest = List.sort (fun a b -> Float.compare (distance a) (distance b)) samples in
+        let rate = List.fold_left (fun m (_, r) -> Float.min m r) infinity (List.filteri (fun i _ -> i < 2) nearest) in
+        Some (rate *. float floats)
+    | _ -> None
 
   let place ~(gpu : Flow_ir.Gpu.config) ~profile ~clock ~owner ~readers =
     if gpu.policy = Flow_ir.Gpu.Qualification then (true, fun _ ~device:_ _ -> ())
@@ -532,86 +577,91 @@ module Chain = struct
         Flow_ir.Profile.place (Some profile)
           { owner; count = points; reason; cpu_seconds; device_seconds; cpu_consumers = readers }
       in
-      let expected =
+      let state = Option.map state_of gpu.backend in
+      let evidence state =
         Mutex.protect lock (fun () ->
-            match T.find_opt last site with
-            | Some (backend, floats, points) when backend == gpu.backend -> Some (floats, points)
-            | _ -> None)
+            match Hashtbl.find_opt state.sites site with
+            | Some samples -> samples
+            | None ->
+                if Hashtbl.length state.sites >= sites_cap then begin
+                  Hashtbl.reset state.sites;
+                  Hashtbl.reset state.last
+                end;
+                let samples = { cpu = []; device = [] } in
+                Hashtbl.add state.sites site samples;
+                samples)
       in
-      let entry floats =
-        Mutex.protect lock (fun () ->
-            let key = site ^ "@" ^ string_of_int (log2 floats) in
-            match T.find_opt classes key with
-            | Some ev when ev.backend == gpu.backend -> ev
-            | _ ->
-                let ev = { backend = gpu.backend; cpu = infinity; cpu_cooks = 0; device = infinity; device_cooks = 0; materialise = infinity } in
-                T.add classes key ev;
-                ev)
-      in
-      (* [seconds] are rates; both are priced at the expected size *)
-      let decide (floats, points) ev =
+      let decide state samples (floats, points) =
         let cpu_consumers = Option.value ~default:0 readers in
-        let moved = Flow_ir.Cost.readback ~count:floats ~width:1 in
-        let materialise = if ev.materialise < infinity then ev.materialise *. float floats else moved in
-        let cpu_seconds =
-          if ev.cpu_cooks < 2 then None else Some ((ev.cpu *. float floats) +. moved)
-        and device_seconds =
-          if ev.device_cooks < 2 then None
-          else Some ((ev.device *. float floats) +. if cpu_consumers = 0 then 0. else materialise)
-        in
-        let reason =
-          Flow_ir.Cost.choose ~cpu_seconds ~device_seconds ~resident:false ~cpu_consumers
-        in
-        report ~points:(Some points) reason cpu_seconds device_seconds;
-        reason
+        Mutex.protect lock (fun () ->
+            let moved = Flow_ir.Cost.readback ~count:floats ~width:1 in
+            let rate r fallback = if r < infinity then r *. float floats else fallback in
+            let materialise = rate state.materialise moved in
+            let host_sink, resident_sink =
+              Option.fold ~none:(infinity, infinity) ~some:Attribute_kernel.Display_sink.rates gpu.backend
+            in
+            let cpu_seconds =
+              Option.map (fun s -> s +. rate host_sink moved) (priced samples.cpu floats)
+            and device_seconds =
+              Option.map
+                (fun s ->
+                  s +. rate resident_sink 0. +. if cpu_consumers = 0 then 0. else materialise)
+                (priced samples.device floats)
+            in
+            let reason =
+              Flow_ir.Cost.choose ~cpu_seconds ~device_seconds ~resident:false ~cpu_consumers
+            in
+            report ~points:(Some points) reason cpu_seconds device_seconds;
+            reason)
       in
       let record geometry ~device seconds =
-        let points = Rdk.Geometry.point_count geometry in
-        let floats = (points * 9) + (Rdk.Geometry.primitive_count geometry * 6) in
-        if floats > 0 then begin
-          let ev = entry floats in
-          let materialise =
-            if device && Option.fold ~none:false ~some:(fun n -> n > 0) readers && ev.device_cooks < 2
-            then begin
-              let began = clock () in
-              force_host geometry;
-              Some ((clock () -. began) /. float floats)
+        match state with
+        | None -> ()
+        | Some state ->
+            let points = Rdk.Geometry.point_count geometry in
+            let floats = floats_of geometry in
+            if floats > 0 then begin
+              let samples = evidence state in
+              let materialise =
+                if device && Option.fold ~none:false ~some:(fun n -> n > 0) readers
+                   && List.length samples.device < 2
+                then begin
+                  let began = clock () in
+                  force_host geometry;
+                  Some ((clock () -. began) /. float floats)
+                end
+                else None
+              in
+              Mutex.protect lock (fun () ->
+                  Option.iter (fun r -> state.materialise <- Float.min state.materialise r) materialise;
+                  let sample = (floats, seconds /. float floats) in
+                  let keep l = sample :: List.filteri (fun i _ -> i < 7) l in
+                  if device then samples.device <- keep samples.device
+                  else samples.cpu <- keep samples.cpu;
+                  Hashtbl.replace state.last site (floats, points));
+              if readers <> None then ignore (decide state samples (floats, points))
             end
-            else None
-          in
-          Mutex.protect lock (fun () ->
-              let rate = seconds /. float floats in
-              Option.iter (fun rate -> ev.materialise <- Float.min ev.materialise rate) materialise;
-              if device then begin
-                ev.device <- Float.min ev.device rate;
-                ev.device_cooks <- ev.device_cooks + 1
-              end
-              else begin
-                ev.cpu <- Float.min ev.cpu rate;
-                ev.cpu_cooks <- ev.cpu_cooks + 1
-              end;
-              T.add last site (gpu.backend, floats, points));
-          if readers <> None then ignore (decide (floats, points) ev)
-        end
       in
-      match (gpu.backend, readers, expected) with
-      | None, _, _ ->
+      match (state, readers) with
+      | None, _ ->
           report ~points:None No_cost_evidence None None;
           (false, record)
-      | _, None, _ ->
+      | _, None ->
           report ~points:None Missing_consumer None None;
           (false, record)
-      | _, _, None ->
-          report ~points:None No_cost_evidence None None;
-          (false, record)
-      | Some _, Some _, Some ((floats, _) as size) -> (
-          let ev = entry floats in
-          if ev.cpu_cooks < 2 then begin
-            report ~points:None No_cost_evidence None None;
-            (false, record)
-          end
-          else if ev.device_cooks < 2 then (true, record)
-          else (Flow_ir.Cost.on_device (decide size ev), record))
+      | Some state, Some _ -> (
+          let samples = evidence state in
+          match Mutex.protect lock (fun () -> Hashtbl.find_opt state.last site) with
+          | None ->
+              report ~points:None No_cost_evidence None None;
+              (false, record)
+          | Some size ->
+              if List.length samples.cpu < 2 then begin
+                report ~points:None No_cost_evidence None None;
+                (false, record)
+              end
+              else if List.length samples.device < 2 then (true, record)
+              else (Flow_ir.Cost.on_device (decide state samples size), record))
 end
 
 let rec geometry_arrays_node ?check ~gpu ~profile ~clock ~strict_body ~reference ~approx ~kernel_source
@@ -4849,3 +4899,6 @@ let field_calls ?state ~live ~resolve lowered =
                         end
                 | _ -> None)
             | _ -> None))
+
+let observe_display = Chain.observe_display
+let chain_states () = Chain.states () + Attribute_kernel.Display_sink.live ()

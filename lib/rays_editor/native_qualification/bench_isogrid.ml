@@ -352,6 +352,24 @@ let frame count : Rays.Frame.t =
     mouse_delta = (0., 0.);
   }
 
+(* --no-device: the same editor sequence with an owner whose backend declines every device region
+   and resident scope, so every route is the CPU one. A bench option, never a product switch. *)
+let no_device = ref false
+
+let no_device_owner () =
+  if not !no_device then None
+  else begin
+    let owner = Flow_native.Workspace_gpu.create () in
+    let backend =
+      Option.get (Flow_native.Workspace_gpu.config ~fast:true owner).Flow_ir.Gpu.backend
+    in
+    Flow_native.Workspace_gpu.Private.install_test_backend owner
+      { backend with
+        residency = (fun ~fast:_ -> None);
+        cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> None) };
+    Some owner
+  end
+
 let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(empty = false)
     ?(present = true) ?(retainers = false) base side single =
   let handles = Ogpu.Impl.live_handles () in
@@ -438,8 +456,10 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
       Option.iter Retainers.stop retainers;
       if Sys.readdir presets = [||] then Unix.rmdir presets)
     (fun () ->
+      let after_hash = ref (Flow_gpu.Host.zero, 0L) in
       let measured name make =
         let profile = Flow_ir.Profile.create ~clock:Unix.gettimeofday in
+        let renderer_before = (string_ok (Rays.Canvas.Private.native_stats canvas)).uploaded_bytes in
         let before_alloc = Gc.allocated_bytes () and before_prepare = !prepared_seconds in
         let result, phases =
           Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
@@ -496,6 +516,16 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
           end
         in
         let materialised, _, _, _, _ = Editor.gpu_stats result in
+        let previous, previous_uploads = !after_hash in
+        let renderer_after = (string_ok (Rays.Canvas.Private.native_stats canvas)).uploaded_bytes in
+        Printf.printf
+          "production %s handles=%d payload_bytes=%d dispatches=%d flow_input_bytes=%d renderer_upload_bytes=%Ld\n%!"
+          name (Ogpu.Impl.live_handles ()) (host.payload_readback_bytes - previous.payload_readback_bytes)
+          (host.status_reads - previous.status_reads)
+          (host.input_uploaded_bytes - previous.input_uploaded_bytes)
+          (Int64.sub renderer_after renderer_before);
+        ignore previous_uploads;
+        after_hash := (materialised, renderer_after);
         Printf.printf
           "%s present_s=%.6f alloc_bytes=%.0f prepare_s=%.6f heap_words=%d uploads=%d \
            upload_bytes=%d readback_bytes=%d inspect_readback_bytes=%d pipelines=%d held=%d \
@@ -530,8 +560,8 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
       let current =
         ref
           (measured "cold" (fun () ->
-               Editor.create ?domains ~workspace:(load text) ~await:true ~presets ~prepare
-                 ~draw:Editor.draw ()
+               Editor.create ?domains ?gpu_owner:(no_device_owner ()) ~workspace:(load text)
+                 ~await:true ~presets ~prepare ~draw:Editor.draw ()
                |> string_ok))
       in
       let change name op =
@@ -593,6 +623,34 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
           |]
           0 cache_snapshots.(snapshot) 0 17;
         if roots then begin
+          let rec fields depth path o =
+            if Obj.is_block o && Obj.tag o < Obj.no_scan_tag && depth > 0 then
+              for i = 0 to Obj.size o - 1 do
+                let f = Obj.field o i in
+                let w = Obj.reachable_words f in
+                if w > 200_000 then begin
+                  Printf.printf "root %s canvas%s.%d words=%d\n%!" name path i w;
+                  fields (depth - 1) (path ^ "." ^ string_of_int i) f
+                end
+              done
+          in
+          fields 5 "" (Obj.repr canvas);
+          (* the largest child at each level below the canvas's biggest cache *)
+          let rec chain depth o =
+            if Obj.is_block o && Obj.tag o < Obj.no_scan_tag && depth > 0 then begin
+              let best = ref (-1) and best_words = ref 0 in
+              for i = 0 to Obj.size o - 1 do
+                let w = Obj.reachable_words (Obj.field o i) in
+                if w > !best_words then (best := i; best_words := w)
+              done;
+              if !best >= 0 then begin
+                Printf.printf "chain %s depth=%d field=%d tag=%d size=%d words=%d\n%!" name depth !best
+                  (Obj.tag o) (Obj.size o) !best_words;
+                chain (depth - 1) (Obj.field o !best)
+              end
+            end
+          in
+          chain 24 (Obj.field (Obj.repr canvas) 3);
           List.iter
             (fun (owner, root) ->
               Printf.printf "root %s %s words=%d\n%!" name owner (Obj.reachable_words root))
@@ -651,7 +709,7 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
               retention 2 (Printf.sprintf "cycle_%d" ((i + 1) / 8))
           done
         in
-        run_flips true 40;
+        run_flips true 8;
         retention 0 "warm";
         let allocation_before = Option.map Retainers.snapshot retainers in
         run_flips false flips;
@@ -675,8 +733,21 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
         Array.sort (fun (_, a) (_, b) -> Float.compare b a) means;
         Array.iter (fun (name, mean) -> Printf.printf "phase_rank %s %.6f\n%!" name mean) means;
         if flips mod 8 = 0 then begin
-          if cache_snapshots.(0) <> cache_snapshots.(1) then
-            failwith "selector caches/history grew after warmup";
+          if cache_snapshots.(0) <> cache_snapshots.(1) then begin
+            let names =
+              [| "history"; "session_entries"; "session_payload_bytes"; "compiled"; "lanes"; "drawn";
+                 "converted"; "ids"; "pipelines"; "held_buffers"; "preparations";
+                 "preparation_bytes"; "renderer_pipelines"; "scheduler_capacity"; "registrations";
+                 "buffer_creations"; "live_handles" |]
+            in
+            Array.iteri
+              (fun i name ->
+                if cache_snapshots.(0).(i) <> cache_snapshots.(1).(i) then
+                  Printf.printf "snapshot_differs %s warm=%d final=%d\n%!" name
+                    cache_snapshots.(0).(i) cache_snapshots.(1).(i))
+              names;
+            failwith "selector caches/history grew after warmup"
+          end;
           if retained_words.(1) > retained_words.(0) then failwith "retained heap grew after warmup"
         end;
         let budget = if side = 24 then 0.150 else 2. in
@@ -729,10 +800,66 @@ let cli base =
         [ 24; 64 ];
       if !failures <> [] then failwith "cold CLI performance gate failed")
 
+(* --ab SIDE FLIPS ROUNDS: adjacent processes alternate production and --no-device on the same
+   unforced editor sequence (the flip warmup and gate included); the medians of their means follow. *)
+let ab side flips rounds =
+  let exe = Sys.executable_name in
+  let run extra =
+    let file = Filename.temp_file "isogrid-ab" ".log" in
+    let out = Unix.openfile file [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+    let pid =
+      Unix.create_process exe
+        (Array.of_list ([ exe; "--flips"; string_of_int side; string_of_int flips ] @ extra))
+        Unix.stdin out out
+    in
+    ignore (Unix.waitpid [] pid);
+    Unix.close out;
+    let lines = String.split_on_char '\n' (read file) in
+    Sys.remove file;
+    let mean prefix =
+      List.find_map
+        (fun line ->
+          if String.starts_with ~prefix line then
+            Scanf.sscanf_opt line "%_s %_s mean_s=%f" Fun.id
+          else None)
+        lines
+      |> Option.get
+    in
+    (mean "latency present", mean "latency cook")
+  in
+  let load () =
+    let channel = Unix.open_process_in "uptime" in
+    let line = try input_line channel with End_of_file -> "" in
+    ignore (Unix.close_process_in channel);
+    line
+  in
+  let production = ref [] and cpu = ref [] in
+  for round = 1 to rounds do
+    let first_cpu = round mod 2 = 0 in
+    let one cpu_run =
+      let present, cook = run (if cpu_run then [ "--no-device" ] else []) in
+      Printf.printf "ab round=%d route=%s present_mean_s=%.6f cook_mean_s=%.6f load: %s\n%!" round
+        (if cpu_run then "cpu" else "production") present cook (load ());
+      if cpu_run then cpu := present :: !cpu else production := present :: !production
+    in
+    one first_cpu;
+    one (not first_cpu)
+  done;
+  let median l =
+    let a = Array.of_list (List.sort Float.compare l) in
+    a.(Array.length a / 2)
+  in
+  Printf.printf "ab side=%d flips=%d rounds=%d median_present_s cpu=%.6f production=%.6f ratio=%.3f\n%!"
+    side flips rounds (median !cpu) (median !production) (median !production /. median !cpu)
+
 let () =
   if Editor_document.Lowering.sha256 (read source) <> frozen then failwith "isogrid sketch changed";
   let base = load (read source) in
-  match Array.to_list Sys.argv with
+  let argv = List.filter (( <> ) "--no-device") (Array.to_list Sys.argv) in
+  no_device := List.length argv <> Array.length Sys.argv;
+  match argv with
+  | [ _; "--ab"; side; flips; rounds ] ->
+      ab (int_of_string side) (int_of_string flips) (int_of_string rounds)
   | [ _; "--source"; side ] -> print_string (Doc.to_text (variant base (int_of_string side) 1 17))
   | [ _; "--write-goldens"; side ] -> write_goldens base (int_of_string side)
   | [ _; "--check-goldens"; file ] -> check_goldens base file

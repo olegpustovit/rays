@@ -305,6 +305,7 @@ module Executor : sig
     ?resident:(Flow.Eval.value -> (Flow.Eval.value * int) option) ->
     ?expected_count:int ->
     ?cpu_consumers:int ->
+    ?cpu_penalty:float ->
     ?gpu:Gpu.config ->
     program ->
     live:Flow.Eval.live ->
@@ -327,7 +328,9 @@ module Executor : sig
       early evidence permits preparation. A device candidate validates and compares actual inputs
       again, including their table layout and resident bindings. The expected
       count is the consuming writer's target size, not a substitute for input/count validation.
-      Negative expected counts are rejected. *)
+      Negative expected counts are rejected. [cpu_penalty] seconds are added to the CPU alternative: what
+      its result costs downstream that the device one does not (a mesh kept whole on the device is
+      displayed without being read back). *)
 
   val force_into :
     ?state:Flow.Eval.state ->

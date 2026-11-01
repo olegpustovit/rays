@@ -16,9 +16,12 @@ type gpu_vertices = {
   mutable gpu_active : bool;
 }
 
-and gpu_vertices_owner = { gpu_vertex_registry : (string, gpu_vertices) Hashtbl.t }
+and gpu_vertices_owner = {
+  gpu_vertex_registry : (string, gpu_vertices) Hashtbl.t;
+  mutable unregistered : int;
+}
 
-let create_gpu_vertices_owner () = { gpu_vertex_registry = Hashtbl.create 16 }
+let create_gpu_vertices_owner () = { gpu_vertex_registry = Hashtbl.create 16; unregistered = 0 }
 let gpu_vertex_capacity = 128
 
 (* The ids that identify a source's buffers in signatures and fingerprints. *)
@@ -87,6 +90,7 @@ let unregister_gpu_vertices value =
   if value.gpu_domain <> Domain.self () then invalid_arg "GPU vertices closed on another domain";
   if value.gpu_active then (
     value.gpu_active <- false;
+    value.gpu_owner.unregistered <- value.gpu_owner.unregistered + 1;
     Hashtbl.remove value.gpu_owner.gpu_vertex_registry value.gpu_key)
 
 (* A borrowed GPU vertex stream is named apart from every host-owned mesh. A name
@@ -401,6 +405,7 @@ type t = {
   mutable arguments : argument_pool option;
   icb_stats : icb_stats;
   mutable uploaded : int64;
+  mutable swept_unregistered : int;
   sun_factory : (Ogpu.Backend.device -> (Ogpu.Backend.pipeline, Ogpu.Error.t) result) option;
   mutable sun : sun_map option;
   mutable sun_passes : int64;
@@ -716,6 +721,7 @@ let create ?device ?gpu_vertices ?sun_depth:sun_factory ~offscreen driver config
                               icb_last_failure = None;
                             };
                           uploaded = 0L;
+                          swept_unregistered = 0;
                           sun_factory;
                           sun = None;
                           sun_passes = 0L;
@@ -788,6 +794,22 @@ let prepare value ~reserved ~uniforms ?(vertex_stable = false) (mesh : mesh) =
       uniforms
   in
   let key = mesh_key_string mesh.key in
+  (* a borrowed stream that was unregistered can never be named again: its cached copies go, rather
+     than waiting for the table's byte or entry limit *)
+  let owner = value.gpu_vertices in
+  if value.swept_unregistered <> owner.unregistered then begin
+    value.swept_unregistered <- owner.unregistered;
+    let prefix = "gpu:vertices:" in
+    let stale = ref [] in
+    String_table.iter value.cache (fun cached _ ->
+        if
+          String.starts_with ~prefix cached
+          && not
+               (Hashtbl.mem owner.gpu_vertex_registry
+                  (String.sub cached (String.length prefix) (String.length cached - String.length prefix)))
+        then stale := cached :: !stale);
+    List.iter (String_table.remove value.cache) !stale
+  end;
   let upload existing =
     let { vertices; indices; vertex_count; index_count; _ } = mesh in
     let total = Bytes.length vertices + Bytes.length indices + Bytes.length uniform_bytes in

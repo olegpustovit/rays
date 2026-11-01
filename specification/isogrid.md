@@ -22,7 +22,7 @@ substitute or Scene/SOP web export is part of this work.
 | S7 deferred topology | Done | Non-forcing metadata, single racing materialisation, release orders, CPU consumers; full RDK/SOP/gate checks |
 | S8 resident construction | Done | Frozen 24³/64³ zero-payload publication and full parity, typed validation/ownership, host calls, CPU readers, cancellation, capacity replay and strict empty-offset checks; exit audit below |
 | S9 coloured quad viewport | Done | Maze/Coral exact raster/modes/orbit/frame/shadow, zero payload, static frames, actual picking/inspection readers, full editor shot and full native gate pass; production policy remains S10 |
-| S10 production placement/lifetimes | In progress | Measured record comparison, consumer budgets, unforced whole-chain mesh placement, counterexamples, retained-generation and 200-selector lifetime checks pass; missing: a demonstrated 64³ time-to-present win over S5 on a quiet machine, a measured (not table-priced) CPU display sink, and zero-payload viewport under production policy |
+| S10 production placement/lifetimes | In progress | Unforced resident 64³ route (P, N, Cd, topology; zero payload, 165 KB renderer upload per flip) and paired 0.60x time to present; missing: strict-equality retention gates (24³ 200-selector alias and 64³ flips) fail, measured display sink underestimates CPU post-cook, `test_viewport_pick` failure unexplained |
 | S11 close-out | In progress | Incremental private-CMI ordering fixed; specifications, full acceptance audit and shipping/scale/native checks remain |
 
 ## S0 measurements
@@ -2453,3 +2453,71 @@ recooks on the resident route are the `--lifetimes` run. Logs:
 [paired CPU/production](benchmarks/isogrid/s10-production-ab-64.log).
 Unit sets: Flow IR, SOP, Flow SOP (14.69 s), Flow native and the dependency gate pass. The frozen sketch
 SHA-256 still starts 0fdb9b0ebec8f5fe.
+
+### S10 review fixes: display reader, measured sink, owned evidence, paired A/B (2026-11-01)
+
+Load average 8 to 17 throughout (the owner's VM); every comparison below is paired in the same
+period. Logs: [validation](benchmarks/isogrid/s10-production-final.log),
+[paired A/B](benchmarks/isogrid/s10-production-ab-64.log),
+[64³ flips](benchmarks/isogrid/s10-production-flips-64.log),
+[24³ selector](benchmarks/isogrid/s10-production-selector-24.log).
+
+Root cause of the mixed mesh. `Cook.prepared_context` counted every displayed root as one CPU reader, so
+the N and Cd writes priced a readback and chose CPU while the mesh went to the device: P resident, N/Cd on
+the CPU, a host conversion and upload of the whole mesh on every draw. Now a displayed root with a device
+owner has zero readers unless it is probed (framing keeps its one); the census, preparation, bounds and
+drawing keep it resident, and picking and inspection materialise on their gesture (measured: 216,004 and
+1,708,704 payload bytes on first gesture, zero repeated). Two rules keep mesh and writes from disagreeing:
+a write beside host positions counts one reader (it is read back to be drawn), and a write beside resident
+positions is charged the measured host display sink (`Display_sink`, else the readback table) on its CPU
+alternative (`record_on_device ?cpu_penalty`). Two bugs the resident route exposed are fixed at their
+roots: `Surface.scene3` converted a declined device preview anew on every draw (fresh renderer key, upload and
+buffer per draw) and bound a fresh mesh each draw; both are now kept per surface while the registration
+is the same, and `Workspace_gpu.display` returns the live registration of a geometry it already shows.
+Stale borrowed-vertex entries are swept from the renderer mesh cache when a registration goes.
+
+Result, unforced (ordinary Measured policy, no Qualification): `bench_isogrid --flips 64 24` production
+lines show for every recipe from 31,840 to 998,592 points payload readback 0, 4 dispatches (status reads),
+renderer upload 165,5xx to 171,848 bytes (constant, not size dependent) and Flow input upload 1.1-3.0 MB
+(cook inputs). P, N, Cd and topology resident: `test_placement_native` (IsoGrid 24³, recipes 3, 0, 3)
+asserts it with zero payload and zero input upload across `Surface.of_geometry`, `scene3` and the display
+bind, and the whole S9 `test_isogrid_viewport` suite (raster, orbit, frame, shadow, modes, picking,
+inspection) now runs on the ordinary policy with no `Qualification`. 24³ verdict: device after learning;
+64³ verdict: device (`device_measured_cheaper`, cpu 0.327 / device 0.027 s for 998,592 points, 0.271 /
+0.025 s at 828,704; the cold cook is CPU with `no_cost_evidence`). Learning takes two CPU and two device
+cooks per site (samples are shared across sizes: the two nearest set the price).
+
+Paired A/B (`bench_isogrid --ab 64 16 3`: adjacent processes alternating production and `--no-device`,
+which installs a backend that declines every device region and resident scope; bench only, no product or
+Lisp switch): medians of the per-run mean present time, 16 flips after the 8-flip warmup, are CPU 1.106 s,
+production 0.665 s (ratio 0.602); cook 0.804 against 0.378 s. Rounds: production 0.624 / 0.665 / 0.681,
+CPU 1.091 / 1.115 / 1.106. The device route beats the CPU route at 64³ on this machine under load, which
+is the plan's selection condition; S5's absolute 0.925/0.939 s was measured on an idle machine and is not
+comparable.
+
+Measured CPU sink. The editor's preparation is now timed per mesh route and feeds `Display_sink`; the CPU
+alternative is priced with the measured host conversion and the device one with the resident conversion,
+plus a measured materialisation when CPU readers exist; the table remains only the fallback. At 998,592
+points the model's CPU total is 0.327 s of which about 0.05 s is sink, against 0.215 s measured post-cook in
+`--present`: the preparation timer excludes the renderer's own upload and draw conversion, so the model
+still underestimates the CPU alternative. Not closed.
+
+Owned evidence. Placement state is weakly keyed by the backend (`Weak`), no longer a module global holding
+it; `test_placement_native` asserts zero states after the owner closes and a full major collection.
+`Built` (the inlined-node cache, 64 entries) still holds a backend strongly; not changed.
+`force_host` now forces positions, topology and every attribute present.
+
+Retention. Fixed: handles grew 6 per cycle at 24³ before the surface and registration fixes; after the first
+post-warm cycle live handles are constant (523 for 40 more cycles) and retained words drift by under
+20,000 per cycle. Not fixed: the strict gate, restored to an 8-flip warmup. 24³ 200-selector: warm to
+final retained words 18.79 M to 23.64 M, handles 530 to 541, held buffers 3 to 0 and registrations 1 to 0
+(the last two decrease), so equality fails (it passed before only because of the 40-flip warmup, which is
+withdrawn). The step arrives in the first cycle after the warmup and its cause is not isolated. 64³
+`--flips`: `snapshot_differs` names buffer_creations (a turnover counter: 244 to 786 in 24 flips),
+live_handles (561 to 788), held_buffers and registrations; retained words grow about 21 M per 8 flips even
+with the CPU route forced (the root listing attributes it to the canvas caches, and with the device route
+also to the lowered document), so the 64³ gate cannot be passed or bounded from this evidence. Ceiling
+versions of those checks are not added because no bound was shown.
+
+Open: `test_viewport_pick` ("deselecting prepares once") fails under load, also with `cook.ml` restored to
+the committed version, and passed twice in isolation; not explained. S10 stays In progress.

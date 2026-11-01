@@ -407,11 +407,18 @@ let chain_counterexamples () =
                 large (name free) (Option.get free.cpu_seconds) (Option.get free.device_seconds)
                 (Option.get one.device_seconds) (name small)
                 (Option.get small.cpu_seconds) (Option.get small.device_seconds))));
-  assert (Ogpu.Impl.live_handles () = baseline)
+  assert (Ogpu.Impl.live_handles () = baseline);
+  (* the placement evidence went with its owner's backend *)
+  Gc.full_major ();
+  Gc.full_major ();
+  if Flow_sop.Lower.chain_states () <> 0 then
+    failwith (Printf.sprintf "placement state outlived its closed owner: %d" (Flow_sop.Lower.chain_states ()))
 
 (* The frozen IsoGrid at 24^3 on the ordinary measured policy: two recipes' meshes that the
    comparison placed on the device are held together, and each still reads its own recipe's
    positions after the other exists. *)
+let profile = ref None
+
 let isogrid_generations file =
   let text = In_channel.with_open_bin file In_channel.input_all in
   assert (Editor_document.Lowering.sha256 text
@@ -432,6 +439,7 @@ let isogrid_generations file =
                 ~inputs:workspace.inputs workspace.checked) in
             let graph = List.find (fun (g : Flow_sop.Lower.graph) -> g.default && g.name = "sculpture")
                 lowered.graphs in
+            profile := Some lowered.profile;
             string_ok (Sop.Edit_graph.compile_node graph.network.geometry
                 ~node_id:(Option.get graph.root))
           in
@@ -439,7 +447,7 @@ let isogrid_generations file =
           Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
               let cook node =
                 let context = string_ok (Sop.Context.create ~domains:1 ()) in
-                ok (Sop.Payload.geometry (ok (Sop.Session.cook ~cpu_consumers:1 session ~context node)).payload)
+                ok (Sop.Payload.geometry (ok (Sop.Session.cook ~cpu_consumers:0 session ~context node)).payload)
               in
               let checksum geometry =
                 let positions = Rdk.Geometry.positions geometry in
@@ -458,13 +466,29 @@ let isogrid_generations file =
                 let node = node_of device recipe in
                 let rec go attempts =
                   let geometry = cook node in
-                  if Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry) then geometry
-                  else if attempts = 0 then failwith "measured policy kept the IsoGrid mesh on the CPU"
+                  let attribute name =
+                    Option.fold ~none:false ~some:Rdk.Attribute.resident
+                      (Rdk.Geometry.find_attribute ~owner:Point name geometry)
+                  in
+                  if Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)
+                     && attribute "N" && attribute "Cd"
+                     && Rdk.Topology.resident (Rdk.Geometry.topology geometry)
+                  then geometry
+                  else if attempts = 0 then (List.iter (fun (p : Flow_ir.placement) -> Printf.printf "  %s %s cpu=%s dev=%s readers=%s\n" (String.concat "/" (fst p.owner)) (Flow_ir.Cost.reason_name p.reason) (Option.fold ~none:"-" ~some:string_of_float p.cpu_seconds) (Option.fold ~none:"-" ~some:string_of_float p.device_seconds) (Option.fold ~none:"-" ~some:string_of_int p.cpu_consumers)) (Flow_ir.Profile.placements (Option.get !profile)); failwith (Printf.sprintf "measured policy kept the IsoGrid mesh partly on the CPU: P %b N %b Cd %b topology %b" (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)) (attribute "N") (attribute "Cd") (Rdk.Topology.resident (Rdk.Geometry.topology geometry))))
                   else go (attempts - 1)
                 in
                 go 8
               in
               let a = placed 3 in
+              (* P, N, Cd and topology all resident: the viewport borrows them, nothing is read back *)
+              let stats () = (let h, _, _, _, _ = Gpu.image_stats gpu in h) in
+              let before_display = stats () in
+              let surface = string_ok (Rdk_rays.Surface.of_geometry a) in
+              let scene = Rdk_rays.Surface.scene3 ~device:(Gpu.display gpu) surface in
+              assert (Gpu.display_refusal gpu = None);
+              assert (Rays.Mesh.View.device (List.hd (Rays.Scene.D3.Walk.drawings scene)).mesh <> None);
+              assert ((stats ()).payload_readback_bytes = before_display.payload_readback_bytes);
+              assert ((stats ()).input_uploaded_bytes = before_display.input_uploaded_bytes);
               let b = placed 0 in
               let a2 = placed 3 in
               let before = (let h, _, _, _, _ = Gpu.image_stats gpu in h.payload_readback_bytes) in

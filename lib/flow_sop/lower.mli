@@ -240,3 +240,11 @@ val counts : t -> int * int
 val status : t -> seconds:float -> string option
 (** The viewport header [t N live · M cached · frame cook X ms] ([t] for the study's ◷, which
     DepartureMono lacks); [None] when nothing is live. *)
+
+val observe_display : Flow_ir.Gpu.config -> Rdk.Geometry.t -> float -> unit
+(** The seconds the editor spent preparing a mesh for display: the measured display sink of a host
+    mesh, or of a resident one, that the whole-chain mesh placement prices. Under Qualification it
+    does nothing. *)
+
+val chain_states : unit -> int
+(** Placement states still owned by a live backend, for the close checks. *)
