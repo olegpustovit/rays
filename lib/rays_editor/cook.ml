@@ -55,6 +55,7 @@ type t = {
   await : bool; (* block on each cook: fixed-step runs, see [create] *)
   schedule : Schedule.t;
   prepare : Settings.t -> Session.output -> (prepared, string) result;
+  clock : unit -> float;
   prepared_cache : prepared Prepared_cache.t;
   prepared_lock : Mutex.t;
   pieces : piece list;
@@ -154,6 +155,7 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
         domains;
         await;
         prepare;
+        clock = Option.value ~default:Unix.gettimeofday clock;
         prepared_cache = Prepared_cache.create ~byte_capacity:prepared_byte_capacity 16;
         prepared_lock = Mutex.create ();
         schedule = Schedule.initial;
@@ -219,12 +221,12 @@ let prepare_cached ?gpu value ~id ~context settings output =
                     key prepared)
           end;
           prepared)
-        (let began = Unix.gettimeofday () in
+        (let began = value.clock () in
          let prepared = value.prepare settings output in
          (* the measured display sink the mesh placement prices, per route of the geometry *)
          (match (gpu, prepared) with
          | Some gpu, Ok prepared ->
-             Flow_sop.Lower.observe_display gpu prepared.geometry (Unix.gettimeofday () -. began)
+             Flow_sop.Lower.observe_display gpu prepared.geometry (value.clock () -. began)
          | _ -> ());
          prepared)
 

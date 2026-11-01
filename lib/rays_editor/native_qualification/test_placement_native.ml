@@ -406,7 +406,16 @@ let chain_counterexamples () =
                  (missing_consumer)\n%!"
                 large (name free) (Option.get free.cpu_seconds) (Option.get free.device_seconds)
                 (Option.get one.device_seconds) (name small)
-                (Option.get small.cpu_seconds) (Option.get small.device_seconds))));
+                (Option.get small.cpu_seconds) (Option.get small.device_seconds);
+              (* a host mesh's first draw adds to its display sink, the smallest rate kept *)
+              let module Sink = Flow_sop.Attribute_kernel.Display_sink in
+              let backend = Option.get config.Flow_ir.Gpu.backend in
+              Sink.observe backend ~resident:false ~floats:1_000_000 1.;
+              let base = fst (Sink.rates backend) in
+              Sink.observe_draw backend ~floats:1_000_000 2.;
+              Sink.observe_draw backend ~floats:1_000_000 1.;
+              Sink.observe_draw backend ~floats:1_000_000 3.;
+              if Float.abs (fst (Sink.rates backend) -. base -. 1e-6) > 1e-12 then failwith "display sink first draw")));
   assert (Ogpu.Impl.live_handles () = baseline);
   (* the placement evidence went with its owner's backend *)
   Gc.full_major ();

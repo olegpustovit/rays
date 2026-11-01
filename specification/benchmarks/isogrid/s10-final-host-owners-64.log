@@ -1,0 +1,916 @@
+production cold handles=300 payload_bytes=0 dispatches=4 flow_input_bytes=7989312 renderer_upload_bytes=43188936
+cold present_s=1.735239 alloc_bytes=627676152 prepare_s=0.203022 heap_words=86531247 uploads=16 upload_bytes=7989312 readback_bytes=0 inspect_readback_bytes=0 pipelines=1 held=0 digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=binary64 phases=[check 21.8 ms · cook 1265.0 ms · evaluate 268.6 ms · layout 0.1 ms · lower 4.6 ms · parse 2.0 ms · print 13.8 ms · project 0.0 ms · reduce 0.1 ms]
+display_sink stage=cold points=998592 floats=10485216 host_model_s=0.321241 resident_model_s=inf
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.028391 head_s=0.000005 kernel_s=0.028385 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022751 head_s=0.000004 kernel_s=0.022746 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.029558 head_s=0.000003 kernel_s=0.029554 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.065246 head_s=0.000004 kernel_s=0.065241 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.049364 head_s=0.000002 kernel_s=0.049360 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.049457 head_s=0.000005 kernel_s=0.049451 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000119 head_s=0.000119 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=cold payload=0 status=16 validation=0 count=0 bounds=0
+placement stage=cold owner=sculpture/normals count=998592 reason=cpu_consumer cpu_s=0.0164996523862 device_s=0.052265871803 readers=1
+placement stage=cold owner=sculpture/mesh#:kinds count=998592 reason=no_cost_evidence cpu_s=unknown device_s=unknown readers=0
+production warm_2 handles=301 payload_bytes=0 dispatches=4 flow_input_bytes=6630208 renderer_upload_bytes=36019936
+warm_2 present_s=1.502809 alloc_bytes=495591744 prepare_s=0.123479 heap_words=129982774 uploads=32 upload_bytes=14619520 readback_bytes=0 inspect_readback_bytes=0 pipelines=1 held=0 digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=binary64 phases=[check 23.0 ms · cook 1038.5 ms · evaluate 313.6 ms · layout 0.1 ms · lower 5.8 ms · parse 1.0 ms · print 23.3 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=warm_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=inf
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.033503 head_s=0.000001 kernel_s=0.033498 tail_s=0.000004 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026977 head_s=0.000002 kernel_s=0.026974 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022319 head_s=0.000002 kernel_s=0.022316 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.064287 head_s=0.000004 kernel_s=0.064281 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.153104 head_s=0.000003 kernel_s=0.153100 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000147 head_s=0.000147 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=warm_2 payload=0 status=32 validation=0 count=0 bounds=0
+placement stage=warm_2 owner=sculpture/normals count=828704 reason=cpu_consumer cpu_s=0.0136965469832 device_s=0.0433553843127 readers=1
+placement stage=warm_2 owner=sculpture/mesh#:kinds count=828704 reason=no_cost_evidence cpu_s=0.447633882299 device_s=unknown readers=0
+production warm_3 handles=366 payload_bytes=0 dispatches=8 flow_input_bytes=9415096 renderer_upload_bytes=1220424
+warm_3 present_s=0.920969 alloc_bytes=482829432 prepare_s=0.000002 heap_words=222281570 uploads=55 upload_bytes=24034616 readback_bytes=24576 inspect_readback_bytes=0 pipelines=10 held=6 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 22.7 ms · cook 440.1 ms · evaluate 401.7 ms · layout 0.1 ms · lower 6.0 ms · parse 0.9 ms · print 23.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=warm_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.044150 head_s=0.000003 kernel_s=0.044145 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.023280 head_s=0.000002 kernel_s=0.023276 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.030804 head_s=0.000005 kernel_s=0.030797 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.206153 head_s=0.000006 kernel_s=0.206146 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.081915 head_s=0.000003 kernel_s=0.081911 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000107 head_s=0.000107 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=warm_3 payload=0 status=64 validation=40 count=24 bounds=24576
+placement stage=warm_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=warm_3 owner=sculpture/mesh#:kinds count=836544 reason=no_cost_evidence cpu_s=0.389297507664 device_s=unknown readers=0
+production warm_4 handles=402 payload_bytes=0 dispatches=8 flow_input_bytes=5076136 renderer_upload_bytes=165616
+warm_4 present_s=0.516062 alloc_bytes=302557984 prepare_s=0.000002 heap_words=164002611 uploads=78 upload_bytes=29110752 readback_bytes=49152 inspect_readback_bytes=0 pipelines=10 held=12 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 21.2 ms · cook 366.8 ms · evaluate 76.5 ms · layout 0.1 ms · lower 5.5 ms · parse 0.8 ms · print 28.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=warm_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.069145 head_s=0.000001 kernel_s=0.069142 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000093 head_s=0.000093 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=warm_4 payload=0 status=96 validation=80 count=48 bounds=49152
+placement stage=warm_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=warm_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.0207313956923 readers=0
+production warm_5 handles=437 payload_bytes=0 dispatches=8 flow_input_bytes=3691096 renderer_upload_bytes=1214280
+warm_5 present_s=0.595566 alloc_bytes=327924288 prepare_s=0.000003 heap_words=192497189 uploads=101 upload_bytes=32801848 readback_bytes=73728 inspect_readback_bytes=0 pipelines=10 held=18 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 21.8 ms · cook 376.8 ms · evaluate 139.2 ms · layout 0.1 ms · lower 7.1 ms · parse 1.1 ms · print 24.0 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=warm_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.016891 head_s=0.000002 kernel_s=0.016886 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.024018 head_s=0.000003 kernel_s=0.024014 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.088115 head_s=0.000003 kernel_s=0.088110 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000125 head_s=0.000125 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=warm_5 payload=0 status=128 validation=120 count=72 bounds=73728
+placement stage=warm_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=warm_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0136001514567 readers=0
+production warm_6 handles=472 payload_bytes=0 dispatches=8 flow_input_bytes=2204856 renderer_upload_bytes=165616
+warm_6 present_s=0.662338 alloc_bytes=332517512 prepare_s=0.000005 heap_words=225574391 uploads=124 upload_bytes=35006704 readback_bytes=98304 inspect_readback_bytes=0 pipelines=10 held=24 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 24.1 ms · cook 387.6 ms · evaluate 200.4 ms · layout 0.2 ms · lower 6.1 ms · parse 2.0 ms · print 24.0 ms · project 0.1 ms · reduce 0.1 ms]
+display_sink stage=warm_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.025502 head_s=0.000002 kernel_s=0.025499 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.165680 head_s=0.000002 kernel_s=0.165676 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000118 head_s=0.000118 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=warm_6 payload=0 status=160 validation=160 count=96 bounds=98304
+placement stage=warm_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=warm_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0114193449784 readers=0
+production warm_7 handles=507 payload_bytes=0 dispatches=8 flow_input_bytes=2794616 renderer_upload_bytes=165616
+warm_7 present_s=0.553845 alloc_bytes=351699096 prepare_s=0.000002 heap_words=204616461 uploads=147 upload_bytes=37801320 readback_bytes=122880 inspect_readback_bytes=0 pipelines=10 held=30 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 22.6 ms · cook 355.6 ms · evaluate 129.7 ms · layout 0.1 ms · lower 6.2 ms · parse 1.0 ms · print 23.3 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=warm_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.012454 head_s=0.000002 kernel_s=0.012450 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.043177 head_s=0.000002 kernel_s=0.043173 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.063333 head_s=0.000001 kernel_s=0.063330 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000109 head_s=0.000109 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=warm_7 payload=0 status=192 validation=200 count=120 bounds=122880
+placement stage=warm_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=warm_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.0180996663805 readers=0
+production warm_0 handles=542 payload_bytes=0 dispatches=8 flow_input_bytes=1368056 renderer_upload_bytes=1214104
+warm_0 present_s=0.609442 alloc_bytes=500901800 prepare_s=0.000004 heap_words=225219092 uploads=170 upload_bytes=39169376 readback_bytes=147456 inspect_readback_bytes=0 pipelines=10 held=36 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 21.8 ms · cook 376.4 ms · evaluate 163.3 ms · layout 0.1 ms · lower 6.2 ms · parse 1.0 ms · print 24.0 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=warm_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.067544 head_s=0.000002 kernel_s=0.067537 tail_s=0.000005 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000122 head_s=0.000122 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=warm_0 payload=0 status=224 validation=240 count=144 bounds=147456
+placement stage=warm_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=warm_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0148171914974 device_s=0.00699539883434 readers=0
+production warm_1 handles=570 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+warm_1 present_s=0.884501 alloc_bytes=559225464 prepare_s=0.000003 heap_words=238541210 uploads=177 upload_bytes=42215640 readback_bytes=172032 inspect_readback_bytes=0 pipelines=10 held=42 digest=7877dae2bc889cc410d1b2fd0851466ef9120e9e7a91450ae4a5872d9b7d3311 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=float32 phases=[check 24.0 ms · cook 373.8 ms · evaluate 434.0 ms · layout 0.1 ms · lower 8.1 ms · parse 1.0 ms · print 23.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=warm_1 points=998592 floats=10485216 host_model_s=0.246549 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034400 head_s=0.000001 kernel_s=0.034397 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.027345 head_s=0.000002 kernel_s=0.027342 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.035591 head_s=0.000001 kernel_s=0.035589 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.151505 head_s=0.000002 kernel_s=0.151503 tail_s=0.000000 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.059234 head_s=0.000003 kernel_s=0.059229 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.110992 head_s=0.000002 kernel_s=0.110989 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000101 head_s=0.000101 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=warm_1 payload=0 status=240 validation=280 count=168 bounds=172032
+placement stage=warm_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.263048560347 device_s=0.00465297698975 readers=0
+placement stage=warm_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.464708821978 device_s=0.021598416456 readers=0
+hostf warm gpu 37303792
+hostf warm pipelines 60439
+hostf warm runners 3321040
+hostf warm created 2
+hostf warm retired 20
+hostf warm sites 34035712
+hostf warm flight 6
+hostf warm iota 59793
+hostf warm buffers 60422
+hostf warm vs 59790
+hostf warm disc 2
+hostf warm shared 62569
+hostf warm ownership 63917
+hostf warm tables 12
+hostc warm sites=21 retired_buffers=0 tables=0
+poolf warm 0 words=62556 tag=0 size=4 len=-1
+poolf warm 2 words=2 tag=0 size=1 len=-1
+poolf warm 3 words=2 tag=0 size=1 len=-1
+poolf warm 4 words=2 tag=0 size=1 len=-1
+site warm #0 f0=60850 f1=309547 f3=2 f4=32
+site warm #1 f0=61289 f1=3055674 f3=2 f4=319
+site warm #2 f0=454545 f1=3205936 f3=2 f4=421
+site warm #3 f0=60850 f1=67859 f3=2 f4=32
+site warm #4 f0=61289 f1=155418 f3=2 f4=319
+site warm #5 f0=454545 f1=3205936 f3=2 f4=421
+site warm #6 f0=60850 f1=103523 f3=2 f4=32
+site warm #7 f0=61289 f1=583386 f3=2 f4=319
+site warm #8 f0=454545 f1=3205936 f3=2 f4=421
+site warm #9 f0=60850 f1=88779 f3=2 f4=32
+site warm #10 f0=61289 f1=406458 f3=2 f4=319
+site warm #11 f0=454545 f1=3205936 f3=2 f4=421
+site warm #12 f0=60850 f1=125935 f3=2 f4=32
+site warm #13 f0=61289 f1=852330 f3=2 f4=319
+site warm #14 f0=454545 f1=3205936 f3=2 f4=421
+site warm #15 f0=60850 f1=160561 f3=2 f4=32
+site warm #16 f0=61289 f1=1267842 f3=2 f4=319
+site warm #17 f0=454545 f1=3205936 f3=2 f4=421
+site warm #18 f0=60844 f1=269035 f3=2 f4=32
+site warm #19 f0=61283 f1=2569530 f3=2 f4=319
+site warm #20 f0=454539 f1=3205936 f3=2 f4=421
+root warm model words=53649531
+root warm core words=53648903
+root warm doc words=40621456
+root warm history words=53192764
+root warm panes words=40996384
+root warm ui words=369079
+root warm text words=26
+root warm cook words=40628776
+root warm compiled words=40618168
+root warm preparations words=171416
+root warm drawn words=40590617
+root warm extra words=206
+root warm rendered words=565271
+root warm baked words=0
+root warm opened words=49895705
+root warm saved_doc words=4
+root warm rows words=0
+root warm host words=40619269
+root warm canvas words=75343873
+retention warm live_words=100611236 workload_words=100610496 scheduler_empty_words=736 scheduler_capacity=368 timer_words=4 heap_words=103988427 history=1 entries=14 payload_bytes=232256290 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=10 held=42 preparations=2 preparation_bytes=50913456 prepare_calls=9 geometry_ids=9 renderer_pipelines=96 registrations=2 flow_buffers_created=253 live_handles=570
+production flip_0_recipe_2 handles=598 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+flip_0_recipe_2 present_s=0.711868 alloc_bytes=481234024 prepare_s=0.000002 heap_words=277443810 uploads=184 upload_bytes=44922128 readback_bytes=196608 inspect_readback_bytes=0 pipelines=10 held=48 digest=bdb3063aa2a0bc3cafa612b79bf8677dff1b0db61193dc08a916c8d7e67fdb07 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=float32 phases=[check 22.1 ms · cook 384.4 ms · evaluate 254.6 ms · layout 0.1 ms · lower 6.5 ms · parse 1.0 ms · print 22.9 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_0_recipe_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.040530 head_s=0.000003 kernel_s=0.040526 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.042160 head_s=0.000003 kernel_s=0.042156 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.042883 head_s=0.000002 kernel_s=0.042879 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.050382 head_s=0.000001 kernel_s=0.050380 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.066472 head_s=0.000002 kernel_s=0.066469 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000103 head_s=0.000103 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_0_recipe_2 payload=0 status=256 validation=320 count=192 bounds=196608
+placement stage=flip_0_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.218300695848 device_s=0.00384211540222 readers=0
+placement stage=flip_0_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.385649053476 device_s=0.0239798754543 readers=0
+production flip_1_recipe_3 handles=624 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+flip_1_recipe_3 present_s=0.801688 alloc_bytes=458600376 prepare_s=0.000003 heap_words=455718138 uploads=191 upload_bytes=47644296 readback_bytes=221184 inspect_readback_bytes=0 pipelines=10 held=54 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 21.2 ms · cook 380.8 ms · evaluate 348.1 ms · layout 0.1 ms · lower 5.1 ms · parse 1.0 ms · print 23.7 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_1_recipe_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.031840 head_s=0.000002 kernel_s=0.031836 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.021146 head_s=0.000002 kernel_s=0.021142 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.020391 head_s=0.000002 kernel_s=0.020388 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.122164 head_s=0.000002 kernel_s=0.122161 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.137938 head_s=0.000001 kernel_s=0.137936 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000108 head_s=0.000108 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_1_recipe_3 payload=0 status=272 validation=360 count=216 bounds=221184
+placement stage=flip_1_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=flip_1_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.389297507664 device_s=0.0242067383915 readers=0
+production flip_2_recipe_4 handles=650 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+flip_2_recipe_4 present_s=0.602487 alloc_bytes=289130984 prepare_s=0.000003 heap_words=547414986 uploads=198 upload_bytes=49498672 readback_bytes=245760 inspect_readback_bytes=0 pipelines=10 held=60 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 45.8 ms · cook 403.7 ms · evaluate 97.9 ms · layout 0.1 ms · lower 6.8 ms · parse 1.0 ms · print 24.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_2_recipe_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.088928 head_s=0.000001 kernel_s=0.088925 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000108 head_s=0.000108 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_2_recipe_4 payload=0 status=288 validation=400 count=240 bounds=245760
+placement stage=flip_2_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=flip_2_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.0398024274312 readers=0
+production flip_3_recipe_5 handles=667 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+flip_3_recipe_5 present_s=0.716884 alloc_bytes=336757968 prepare_s=0.000002 heap_words=621354153 uploads=205 upload_bytes=51076040 readback_bytes=270336 inspect_readback_bytes=0 pipelines=10 held=66 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 22.1 ms · cook 426.2 ms · evaluate 214.5 ms · layout 0.1 ms · lower 6.4 ms · parse 2.3 ms · print 25.4 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_3_recipe_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026781 head_s=0.000002 kernel_s=0.026777 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.055764 head_s=0.000002 kernel_s=0.055759 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.119834 head_s=0.000003 kernel_s=0.119828 tail_s=0.000003 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000116 head_s=0.000116 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_3_recipe_5 payload=0 status=304 validation=440 count=264 bounds=270336
+placement stage=flip_3_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=flip_3_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0273984405168 readers=0
+production flip_4_recipe_6 handles=679 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165616
+flip_4_recipe_6 present_s=0.620138 alloc_bytes=337598904 prepare_s=0.000003 heap_words=663802429 uploads=212 upload_bytes=52356160 readback_bytes=294912 inspect_readback_bytes=0 pipelines=10 held=72 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 24.2 ms · cook 389.8 ms · evaluate 151.7 ms · layout 0.1 ms · lower 8.1 ms · parse 1.1 ms · print 24.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_4_recipe_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.027584 head_s=0.000003 kernel_s=0.027577 tail_s=0.000004 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.112752 head_s=0.000005 kernel_s=0.112745 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000136 head_s=0.000136 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_4_recipe_6 payload=0 status=320 validation=480 count=288 bounds=294912
+placement stage=flip_4_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=flip_4_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0119823575341 readers=0
+production flip_5_recipe_7 handles=691 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165616
+flip_5_recipe_7 present_s=0.578202 alloc_bytes=361044496 prepare_s=0.000002 heap_words=709042378 uploads=219 upload_bytes=53754232 readback_bytes=319488 inspect_readback_bytes=0 pipelines=10 held=78 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 21.7 ms · cook 399.3 ms · evaluate 108.4 ms · layout 0.1 ms · lower 5.9 ms · parse 1.1 ms · print 25.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_5_recipe_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.012738 head_s=0.000002 kernel_s=0.012731 tail_s=0.000005 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.021038 head_s=0.000004 kernel_s=0.021033 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.062086 head_s=0.000002 kernel_s=0.062082 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000132 head_s=0.000132 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_5_recipe_7 payload=0 status=336 validation=520 count=312 bounds=319488
+placement stage=flip_5_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=flip_5_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.0270744569536 readers=0
+production flip_6_recipe_0 handles=703 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+flip_6_recipe_0 present_s=0.620886 alloc_bytes=502362192 prepare_s=0.000002 heap_words=736177183 uploads=226 upload_bytes=54866992 readback_bytes=344064 inspect_readback_bytes=0 pipelines=10 held=84 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 22.7 ms · cook 382.6 ms · evaluate 164.2 ms · layout 0.1 ms · lower 6.1 ms · parse 1.1 ms · print 25.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_6_recipe_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.061544 head_s=0.000003 kernel_s=0.061540 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000114 head_s=0.000114 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_6_recipe_0 payload=0 status=352 validation=560 count=336 bounds=344064
+placement stage=flip_6_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=flip_6_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0148171914974 device_s=0.00759352500538 readers=0
+production flip_7_recipe_1 handles=715 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+flip_7_recipe_1 present_s=1.011223 alloc_bytes=529512680 prepare_s=0.000002 heap_words=431083978 uploads=233 upload_bytes=57913256 readback_bytes=368640 inspect_readback_bytes=0 pipelines=10 held=90 digest=7877dae2bc889cc410d1b2fd0851466ef9120e9e7a91450ae4a5872d9b7d3311 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=float32 phases=[check 22.6 ms · cook 440.6 ms · evaluate 480.8 ms · layout 0.1 ms · lower 7.2 ms · parse 1.2 ms · print 26.2 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_7_recipe_1 points=998592 floats=10485216 host_model_s=0.246549 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.028406 head_s=0.000005 kernel_s=0.028399 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.021971 head_s=0.000002 kernel_s=0.021967 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.037246 head_s=0.000004 kernel_s=0.037241 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.128352 head_s=0.000003 kernel_s=0.128347 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.111946 head_s=0.000002 kernel_s=0.111943 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.136384 head_s=0.000003 kernel_s=0.136380 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000115 head_s=0.000115 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_7_recipe_1 payload=0 status=368 validation=600 count=360 bounds=368640
+placement stage=flip_7_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.263048560347 device_s=0.00465297698975 readers=0
+placement stage=flip_7_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.464708821978 device_s=0.034631329664 readers=0
+production flip_8_recipe_2 handles=723 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+flip_8_recipe_2 present_s=0.742770 alloc_bytes=462778624 prepare_s=0.000003 heap_words=455949854 uploads=240 upload_bytes=60619744 readback_bytes=393216 inspect_readback_bytes=0 pipelines=10 held=54 digest=bdb3063aa2a0bc3cafa612b79bf8677dff1b0db61193dc08a916c8d7e67fdb07 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=float32 phases=[check 21.3 ms · cook 394.9 ms · evaluate 275.8 ms · layout 0.1 ms · lower 5.4 ms · parse 1.0 ms · print 23.2 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_8_recipe_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.038531 head_s=0.000002 kernel_s=0.038528 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034589 head_s=0.000002 kernel_s=0.034585 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.039568 head_s=0.000003 kernel_s=0.039564 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.083887 head_s=0.000002 kernel_s=0.083884 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.066222 head_s=0.000002 kernel_s=0.066219 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000127 head_s=0.000127 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_8_recipe_2 payload=0 status=384 validation=640 count=384 bounds=393216
+placement stage=flip_8_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.218300695848 device_s=0.00384211540222 readers=0
+placement stage=flip_8_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.385649053476 device_s=0.0278336733669 readers=0
+production flip_9_recipe_3 handles=731 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+flip_9_recipe_3 present_s=0.890780 alloc_bytes=510357816 prepare_s=0.000003 heap_words=410603018 uploads=247 upload_bytes=63341912 readback_bytes=417792 inspect_readback_bytes=0 pipelines=10 held=54 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 20.7 ms · cook 393.9 ms · evaluate 426.9 ms · layout 0.1 ms · lower 5.3 ms · parse 1.0 ms · print 22.9 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_9_recipe_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.028941 head_s=0.000002 kernel_s=0.028938 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.035861 head_s=0.000001 kernel_s=0.035859 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.039248 head_s=0.000001 kernel_s=0.039246 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.240471 head_s=0.000001 kernel_s=0.240469 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.067454 head_s=0.000001 kernel_s=0.067451 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000118 head_s=0.000118 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_9_recipe_3 payload=0 status=400 validation=680 count=408 bounds=417792
+placement stage=flip_9_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=flip_9_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.389297507664 device_s=0.0278859138489 readers=0
+production flip_10_recipe_4 handles=739 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+flip_10_recipe_4 present_s=0.505905 alloc_bytes=294684864 prepare_s=0.000003 heap_words=355596975 uploads=254 upload_bytes=65196288 readback_bytes=442368 inspect_readback_bytes=0 pipelines=10 held=54 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 20.6 ms · cook 371.6 ms · evaluate 68.6 ms · layout 0.1 ms · lower 5.3 ms · parse 1.0 ms · print 22.4 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_10_recipe_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.061152 head_s=0.000001 kernel_s=0.061150 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000090 head_s=0.000090 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_10_recipe_4 payload=0 status=416 validation=720 count=432 bounds=442368
+placement stage=flip_10_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=flip_10_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.0220562877364 readers=0
+production flip_11_recipe_5 handles=747 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+flip_11_recipe_5 present_s=0.615369 alloc_bytes=347604912 prepare_s=0.000002 heap_words=428169232 uploads=261 upload_bytes=66773656 readback_bytes=466944 inspect_readback_bytes=0 pipelines=10 held=54 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 22.3 ms · cook 359.4 ms · evaluate 187.5 ms · layout 0.1 ms · lower 6.1 ms · parse 1.0 ms · print 23.0 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_11_recipe_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.019816 head_s=0.000002 kernel_s=0.019812 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.027144 head_s=0.000002 kernel_s=0.027140 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.129500 head_s=0.000002 kernel_s=0.129497 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000136 head_s=0.000136 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_11_recipe_5 payload=0 status=432 validation=760 count=456 bounds=466944
+placement stage=flip_11_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=flip_11_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0219659302414 readers=0
+production flip_12_recipe_6 handles=755 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165616
+flip_12_recipe_6 present_s=0.598083 alloc_bytes=314903000 prepare_s=0.000002 heap_words=291553551 uploads=268 upload_bytes=68053776 readback_bytes=491520 inspect_readback_bytes=0 pipelines=10 held=48 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 20.5 ms · cook 402.2 ms · evaluate 129.9 ms · layout 0.1 ms · lower 5.8 ms · parse 1.0 ms · print 23.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_12_recipe_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026984 head_s=0.000002 kernel_s=0.026981 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.091821 head_s=0.000002 kernel_s=0.091818 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000104 head_s=0.000104 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_12_recipe_6 payload=0 status=448 validation=800 count=480 bounds=491520
+placement stage=flip_12_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=flip_12_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0179238565198 readers=0
+production flip_13_recipe_7 handles=763 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165616
+flip_13_recipe_7 present_s=0.564397 alloc_bytes=358491136 prepare_s=0.000003 heap_words=335544765 uploads=275 upload_bytes=69451848 readback_bytes=516096 inspect_readback_bytes=0 pipelines=10 held=54 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 22.0 ms · cook 377.6 ms · evaluate 118.7 ms · layout 0.1 ms · lower 6.9 ms · parse 1.0 ms · print 22.9 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_13_recipe_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.011658 head_s=0.000001 kernel_s=0.011655 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.031109 head_s=0.000002 kernel_s=0.031105 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.065636 head_s=0.000003 kernel_s=0.065631 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000121 head_s=0.000121 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_13_recipe_7 payload=0 status=464 validation=840 count=504 bounds=516096
+placement stage=flip_13_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=flip_13_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.0234245069262 readers=0
+production flip_14_recipe_0 handles=771 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+flip_14_recipe_0 present_s=0.581655 alloc_bytes=499005616 prepare_s=0.000002 heap_words=361063744 uploads=282 upload_bytes=70564608 readback_bytes=540672 inspect_readback_bytes=0 pipelines=10 held=60 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 20.5 ms · cook 374.5 ms · evaluate 139.8 ms · layout 0.1 ms · lower 6.9 ms · parse 1.0 ms · print 24.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_14_recipe_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.044922 head_s=0.000002 kernel_s=0.044918 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000110 head_s=0.000110 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_14_recipe_0 payload=0 status=480 validation=880 count=528 bounds=540672
+placement stage=flip_14_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=flip_14_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0148171914974 device_s=0.00770898399049 readers=0
+production flip_15_recipe_1 handles=772 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+flip_15_recipe_1 present_s=0.900704 alloc_bytes=497996408 prepare_s=0.000003 heap_words=331271783 uploads=289 upload_bytes=73610872 readback_bytes=565248 inspect_readback_bytes=0 pipelines=10 held=66 digest=7877dae2bc889cc410d1b2fd0851466ef9120e9e7a91450ae4a5872d9b7d3311 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=float32 phases=[check 21.5 ms · cook 417.3 ms · evaluate 407.4 ms · layout 0.1 ms · lower 5.6 ms · parse 1.0 ms · print 23.9 ms · project 0.0 ms · reduce 0.1 ms]
+display_sink stage=flip_15_recipe_1 points=998592 floats=10485216 host_model_s=0.246549 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.030467 head_s=0.000002 kernel_s=0.030462 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.043923 head_s=0.000005 kernel_s=0.043916 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.030784 head_s=0.000002 kernel_s=0.030781 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.069913 head_s=0.000002 kernel_s=0.069908 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.068625 head_s=0.000003 kernel_s=0.068621 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.146444 head_s=0.000002 kernel_s=0.146440 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000118 head_s=0.000118 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_15_recipe_1 payload=0 status=496 validation=920 count=552 bounds=565248
+placement stage=flip_15_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.263048560347 device_s=0.00465297698975 readers=0
+placement stage=flip_15_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.464708821978 device_s=0.033287729614 readers=0
+production flip_16_recipe_2 handles=780 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+flip_16_recipe_2 present_s=0.722192 alloc_bytes=474446344 prepare_s=0.000006 heap_words=344896197 uploads=296 upload_bytes=76317360 readback_bytes=589824 inspect_readback_bytes=0 pipelines=10 held=48 digest=bdb3063aa2a0bc3cafa612b79bf8677dff1b0db61193dc08a916c8d7e67fdb07 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=float32 phases=[check 22.1 ms · cook 382.3 ms · evaluate 266.4 ms · layout 0.1 ms · lower 6.2 ms · parse 1.2 ms · print 23.9 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_16_recipe_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034299 head_s=0.000002 kernel_s=0.034296 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.038241 head_s=0.000002 kernel_s=0.038237 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.043929 head_s=0.000002 kernel_s=0.043925 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.057244 head_s=0.000002 kernel_s=0.057240 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.078979 head_s=0.000004 kernel_s=0.078974 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000101 head_s=0.000101 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_16_recipe_2 payload=0 status=512 validation=960 count=576 bounds=589824
+placement stage=flip_16_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.218300695848 device_s=0.00384211540222 readers=0
+placement stage=flip_16_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.385649053476 device_s=0.0249478548854 readers=0
+production flip_17_recipe_3 handles=786 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+flip_17_recipe_3 present_s=0.802011 alloc_bytes=479758144 prepare_s=0.000002 heap_words=413732212 uploads=303 upload_bytes=79039528 readback_bytes=614400 inspect_readback_bytes=0 pipelines=10 held=54 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 21.1 ms · cook 384.6 ms · evaluate 345.1 ms · layout 0.1 ms · lower 7.1 ms · parse 0.9 ms · print 23.1 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_17_recipe_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026010 head_s=0.000003 kernel_s=0.026004 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022948 head_s=0.000003 kernel_s=0.022943 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022950 head_s=0.000002 kernel_s=0.022947 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.192549 head_s=0.000003 kernel_s=0.192545 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.067185 head_s=0.000002 kernel_s=0.067182 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000119 head_s=0.000119 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_17_recipe_3 payload=0 status=528 validation=1000 count=600 bounds=614400
+placement stage=flip_17_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=flip_17_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.389297507664 device_s=0.0251838754456 readers=0
+production flip_18_recipe_4 handles=794 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+flip_18_recipe_4 present_s=0.569818 alloc_bytes=289110232 prepare_s=0.000002 heap_words=376577593 uploads=310 upload_bytes=80893904 readback_bytes=638976 inspect_readback_bytes=0 pipelines=10 held=48 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 22.7 ms · cook 403.5 ms · evaluate 91.0 ms · layout 0.1 ms · lower 6.2 ms · parse 1.0 ms · print 27.7 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_18_recipe_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.083769 head_s=0.000002 kernel_s=0.083766 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000098 head_s=0.000098 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_18_recipe_4 payload=0 status=544 validation=1040 count=624 bounds=638976
+placement stage=flip_18_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=flip_18_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.02776235959 readers=0
+production flip_19_recipe_5 handles=802 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+flip_19_recipe_5 present_s=0.635745 alloc_bytes=325876936 prepare_s=0.000003 heap_words=304706410 uploads=317 upload_bytes=82471272 readback_bytes=663552 inspect_readback_bytes=0 pipelines=10 held=54 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 23.3 ms · cook 377.8 ms · evaluate 151.2 ms · layout 0.1 ms · lower 6.2 ms · parse 2.2 ms · print 44.2 ms · project 0.0 ms · reduce 0.1 ms]
+display_sink stage=flip_19_recipe_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.017440 head_s=0.000002 kernel_s=0.017436 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.030247 head_s=0.000002 kernel_s=0.030244 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.093161 head_s=0.000002 kernel_s=0.093158 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000103 head_s=0.000103 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_19_recipe_5 payload=0 status=560 validation=1080 count=648 bounds=663552
+placement stage=flip_19_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=flip_19_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0325197670639 readers=0
+production flip_20_recipe_6 handles=810 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165616
+flip_20_recipe_6 present_s=0.616868 alloc_bytes=327867056 prepare_s=0.000003 heap_words=346151381 uploads=324 upload_bytes=83751392 readback_bytes=688128 inspect_readback_bytes=0 pipelines=10 held=60 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 24.2 ms · cook 394.4 ms · evaluate 148.7 ms · layout 0.1 ms · lower 6.1 ms · parse 1.0 ms · print 24.0 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_20_recipe_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.025874 head_s=0.000002 kernel_s=0.025870 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.112471 head_s=0.000002 kernel_s=0.112468 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000109 head_s=0.000109 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_20_recipe_6 payload=0 status=576 validation=1120 count=672 bounds=688128
+placement stage=flip_20_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=flip_20_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0155075132961 readers=0
+production flip_21_recipe_7 handles=817 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165616
+flip_21_recipe_7 present_s=0.620418 alloc_bytes=333012928 prepare_s=0.000003 heap_words=378138237 uploads=331 upload_bytes=85149464 readback_bytes=712704 inspect_readback_bytes=0 pipelines=10 held=66 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 24.8 ms · cook 381.4 ms · evaluate 163.1 ms · layout 0.1 ms · lower 5.1 ms · parse 2.0 ms · print 28.7 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_21_recipe_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.012556 head_s=0.000002 kernel_s=0.012552 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.037447 head_s=0.000003 kernel_s=0.037441 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.100458 head_s=0.000003 kernel_s=0.100454 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000132 head_s=0.000132 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_21_recipe_7 payload=0 status=592 validation=1160 count=696 bounds=712704
+placement stage=flip_21_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=flip_21_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.0352684266802 readers=0
+production flip_22_recipe_0 handles=825 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+flip_22_recipe_0 present_s=0.608049 alloc_bytes=495549904 prepare_s=0.000003 heap_words=289634354 uploads=338 upload_bytes=86262224 readback_bytes=737280 inspect_readback_bytes=0 pipelines=10 held=48 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 37.6 ms · cook 375.7 ms · evaluate 140.0 ms · layout 0.1 ms · lower 7.2 ms · parse 7.0 ms · print 25.7 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_22_recipe_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.037832 head_s=0.000001 kernel_s=0.037829 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000115 head_s=0.000115 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_22_recipe_0 payload=0 status=608 validation=1200 count=720 bounds=737280
+placement stage=flip_22_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=flip_22_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0148171914974 device_s=0.00801967840234 readers=0
+production flip_23_recipe_1 handles=833 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+flip_23_recipe_1 present_s=0.811433 alloc_bytes=561939824 prepare_s=0.000002 heap_words=343778269 uploads=345 upload_bytes=89308488 readback_bytes=761856 inspect_readback_bytes=0 pipelines=10 held=54 digest=7877dae2bc889cc410d1b2fd0851466ef9120e9e7a91450ae4a5872d9b7d3311 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=float32 phases=[check 20.5 ms · cook 387.0 ms · evaluate 355.8 ms · layout 0.1 ms · lower 5.2 ms · parse 0.9 ms · print 22.9 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_23_recipe_1 points=998592 floats=10485216 host_model_s=0.246549 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034641 head_s=0.000004 kernel_s=0.034636 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034631 head_s=0.000002 kernel_s=0.034628 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022229 head_s=0.000002 kernel_s=0.022225 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.055146 head_s=0.000001 kernel_s=0.055144 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.054624 head_s=0.000001 kernel_s=0.054622 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.139206 head_s=0.000002 kernel_s=0.139203 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000119 head_s=0.000119 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_23_recipe_1 payload=0 status=624 validation=1240 count=744 bounds=761856
+placement stage=flip_23_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.263048560347 device_s=0.00465297698975 readers=0
+placement stage=flip_23_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.464708821978 device_s=0.0227652369822 readers=0
+production flip_24_recipe_2 handles=837 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+flip_24_recipe_2 present_s=0.688126 alloc_bytes=442060744 prepare_s=0.000001 heap_words=293693167 uploads=352 upload_bytes=92014976 readback_bytes=786432 inspect_readback_bytes=0 pipelines=10 held=48 digest=bdb3063aa2a0bc3cafa612b79bf8677dff1b0db61193dc08a916c8d7e67fdb07 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=float32 phases=[check 21.0 ms · cook 396.8 ms · evaluate 217.8 ms · layout 0.1 ms · lower 5.6 ms · parse 0.9 ms · print 24.4 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_24_recipe_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.040562 head_s=0.000002 kernel_s=0.040559 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.030832 head_s=0.000002 kernel_s=0.030829 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.023612 head_s=0.000002 kernel_s=0.023609 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.055954 head_s=0.000003 kernel_s=0.055950 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.053890 head_s=0.000003 kernel_s=0.053885 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000124 head_s=0.000124 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_24_recipe_2 payload=0 status=640 validation=1280 count=768 bounds=786432
+placement stage=flip_24_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.218300695848 device_s=0.00384211540222 readers=0
+placement stage=flip_24_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.385649053476 device_s=0.0257324988836 readers=0
+production flip_25_recipe_3 handles=845 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+flip_25_recipe_3 present_s=0.888536 alloc_bytes=504072864 prepare_s=0.000002 heap_words=362574258 uploads=359 upload_bytes=94737144 readback_bytes=811008 inspect_readback_bytes=0 pipelines=10 held=54 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 23.4 ms · cook 389.5 ms · evaluate 422.8 ms · layout 0.1 ms · lower 6.3 ms · parse 1.0 ms · print 24.2 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_25_recipe_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.038461 head_s=0.000002 kernel_s=0.038458 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.032396 head_s=0.000003 kernel_s=0.032392 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.036331 head_s=0.000002 kernel_s=0.036328 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.173813 head_s=0.000002 kernel_s=0.173809 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.128976 head_s=0.000003 kernel_s=0.128972 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000101 head_s=0.000101 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_25_recipe_3 payload=0 status=656 validation=1320 count=792 bounds=811008
+placement stage=flip_25_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=flip_25_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.389297507664 device_s=0.0238027572632 readers=0
+production flip_26_recipe_4 handles=854 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+flip_26_recipe_4 present_s=0.544736 alloc_bytes=283570224 prepare_s=0.000003 heap_words=326401053 uploads=366 upload_bytes=96591520 readback_bytes=835584 inspect_readback_bytes=0 pipelines=10 held=54 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 23.4 ms · cook 406.5 ms · evaluate 65.5 ms · layout 0.1 ms · lower 6.6 ms · parse 1.0 ms · print 23.3 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_26_recipe_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.058230 head_s=0.000002 kernel_s=0.058226 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000103 head_s=0.000103 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_26_recipe_4 payload=0 status=672 validation=1360 count=816 bounds=835584
+placement stage=flip_26_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=flip_26_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.0273122253127 readers=0
+production flip_27_recipe_5 handles=858 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+flip_27_recipe_5 present_s=0.570983 alloc_bytes=340383336 prepare_s=0.000003 heap_words=391744127 uploads=373 upload_bytes=98168888 readback_bytes=860160 inspect_readback_bytes=0 pipelines=10 held=54 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 23.2 ms · cook 374.9 ms · evaluate 123.2 ms · layout 0.1 ms · lower 6.9 ms · parse 1.0 ms · print 24.9 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_27_recipe_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.018304 head_s=0.000002 kernel_s=0.018300 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.030535 head_s=0.000002 kernel_s=0.030531 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.063342 head_s=0.000002 kernel_s=0.063338 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000128 head_s=0.000128 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_27_recipe_5 payload=0 status=688 validation=1400 count=840 bounds=860160
+placement stage=flip_27_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=flip_27_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0226728413284 readers=0
+production flip_28_recipe_6 handles=866 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165704
+flip_28_recipe_6 present_s=0.694086 alloc_bytes=327854112 prepare_s=0.000004 heap_words=314710645 uploads=380 upload_bytes=99449008 readback_bytes=884736 inspect_readback_bytes=0 pipelines=10 held=48 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 35.9 ms · cook 379.8 ms · evaluate 210.6 ms · layout 0.1 ms · lower 14.5 ms · parse 1.9 ms · print 30.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_28_recipe_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.031690 head_s=0.000003 kernel_s=0.031685 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.167191 head_s=0.000006 kernel_s=0.167180 tail_s=0.000005 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000125 head_s=0.000125 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_28_recipe_6 payload=0 status=704 validation=1440 count=864 bounds=884736
+placement stage=flip_28_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=flip_28_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0233484357813 readers=0
+production flip_29_recipe_7 handles=874 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165616
+flip_29_recipe_7 present_s=0.681017 alloc_bytes=338275208 prepare_s=0.000002 heap_words=358964687 uploads=387 upload_bytes=100847080 readback_bytes=909312 inspect_readback_bytes=0 pipelines=10 held=54 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 25.1 ms · cook 397.4 ms · evaluate 207.1 ms · layout 0.1 ms · lower 8.1 ms · parse 1.2 ms · print 24.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_29_recipe_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.012339 head_s=0.000003 kernel_s=0.012334 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026784 head_s=0.000005 kernel_s=0.026777 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.157634 head_s=0.000004 kernel_s=0.157629 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000098 head_s=0.000098 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_29_recipe_7 payload=0 status=720 validation=1480 count=888 bounds=909312
+placement stage=flip_29_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=flip_29_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.0307887799975 readers=0
+production flip_30_recipe_0 handles=882 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+flip_30_recipe_0 present_s=0.573659 alloc_bytes=499016488 prepare_s=0.000003 heap_words=385684240 uploads=394 upload_bytes=101959840 readback_bytes=933888 inspect_readback_bytes=0 pipelines=10 held=60 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 21.3 ms · cook 365.9 ms · evaluate 140.7 ms · layout 0.1 ms · lower 5.9 ms · parse 0.9 ms · print 23.9 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_30_recipe_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.044422 head_s=0.000002 kernel_s=0.044418 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000108 head_s=0.000108 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_30_recipe_0 payload=0 status=736 validation=1520 count=912 bounds=933888
+placement stage=flip_30_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=flip_30_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0148171914974 device_s=0.00662359067396 readers=0
+production flip_31_recipe_1 handles=885 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+flip_31_recipe_1 present_s=1.060130 alloc_bytes=544677184 prepare_s=0.000002 heap_words=310416028 uploads=401 upload_bytes=105006104 readback_bytes=958464 inspect_readback_bytes=0 pipelines=10 held=48 digest=7877dae2bc889cc410d1b2fd0851466ef9120e9e7a91450ae4a5872d9b7d3311 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=float32 phases=[check 22.0 ms · cook 388.5 ms · evaluate 596.3 ms · layout 0.1 ms · lower 5.9 ms · parse 1.1 ms · print 24.4 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_31_recipe_1 points=998592 floats=10485216 host_model_s=0.246549 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.041527 head_s=0.000003 kernel_s=0.041522 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.063083 head_s=0.000003 kernel_s=0.063076 tail_s=0.000004 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.023159 head_s=0.000003 kernel_s=0.023154 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.095700 head_s=0.000002 kernel_s=0.095697 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.210009 head_s=0.000002 kernel_s=0.210004 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.145892 head_s=0.000003 kernel_s=0.145888 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000110 head_s=0.000110 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_31_recipe_1 payload=0 status=752 validation=1560 count=936 bounds=958464
+placement stage=flip_31_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.263048560347 device_s=0.00465297698975 readers=0
+placement stage=flip_31_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.464708821978 device_s=0.0266853152598 readers=0
+production flip_32_recipe_2 handles=892 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+flip_32_recipe_2 present_s=0.632798 alloc_bytes=489031848 prepare_s=0.000003 heap_words=391628740 uploads=408 upload_bytes=107712592 readback_bytes=983040 inspect_readback_bytes=0 pipelines=10 held=54 digest=bdb3063aa2a0bc3cafa612b79bf8677dff1b0db61193dc08a916c8d7e67fdb07 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=float32 phases=[check 20.5 ms · cook 374.9 ms · evaluate 188.1 ms · layout 0.1 ms · lower 6.0 ms · parse 1.0 ms · print 22.3 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_32_recipe_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=0.000002
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034571 head_s=0.000001 kernel_s=0.034569 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026118 head_s=0.000001 kernel_s=0.026116 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.020430 head_s=0.000002 kernel_s=0.020425 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.043818 head_s=0.000002 kernel_s=0.043815 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.049937 head_s=0.000002 kernel_s=0.049934 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000100 head_s=0.000100 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_32_recipe_2 payload=0 status=768 validation=1600 count=960 bounds=983040
+placement stage=flip_32_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.218300695848 device_s=0.00384211540222 readers=0
+placement stage=flip_32_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.385649053476 device_s=0.0235792204678 readers=0
+production flip_33_recipe_3 handles=897 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+flip_33_recipe_3 present_s=0.798489 alloc_bytes=465779672 prepare_s=0.000002 heap_words=304623427 uploads=415 upload_bytes=110434760 readback_bytes=1007616 inspect_readback_bytes=0 pipelines=10 held=48 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 20.6 ms · cook 394.3 ms · evaluate 334.6 ms · layout 0.1 ms · lower 5.8 ms · parse 1.0 ms · print 22.1 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_33_recipe_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000002
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.036149 head_s=0.000001 kernel_s=0.036146 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026395 head_s=0.000002 kernel_s=0.026392 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.021110 head_s=0.000001 kernel_s=0.021107 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.162601 head_s=0.000003 kernel_s=0.162596 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.075701 head_s=0.000002 kernel_s=0.075697 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000104 head_s=0.000104 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_33_recipe_3 payload=0 status=784 validation=1640 count=984 bounds=1007616
+placement stage=flip_33_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=flip_33_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.389297507664 device_s=0.0267723419154 readers=0
+production flip_34_recipe_4 handles=906 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+flip_34_recipe_4 present_s=0.506515 alloc_bytes=294701856 prepare_s=0.000002 heap_words=403678042 uploads=422 upload_bytes=112289136 readback_bytes=1032192 inspect_readback_bytes=0 pipelines=10 held=54 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 20.4 ms · cook 359.3 ms · evaluate 81.4 ms · layout 0.1 ms · lower 5.6 ms · parse 1.0 ms · print 22.4 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_34_recipe_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.074423 head_s=0.000001 kernel_s=0.074420 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000102 head_s=0.000102 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_34_recipe_4 payload=0 status=800 validation=1680 count=1008 bounds=1032192
+placement stage=flip_34_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=flip_34_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.0195800873253 readers=0
+production flip_35_recipe_5 handles=914 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+flip_35_recipe_5 present_s=0.598938 alloc_bytes=362071752 prepare_s=0.000002 heap_words=353468213 uploads=429 upload_bytes=113866504 readback_bytes=1056768 inspect_readback_bytes=0 pipelines=10 held=54 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 21.2 ms · cook 375.1 ms · evaluate 136.6 ms · layout 0.1 ms · lower 5.7 ms · parse 0.9 ms · print 40.7 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_35_recipe_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.021471 head_s=0.000002 kernel_s=0.021467 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.029086 head_s=0.000002 kernel_s=0.029082 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.076160 head_s=0.000002 kernel_s=0.076157 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000103 head_s=0.000103 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_35_recipe_5 payload=0 status=816 validation=1720 count=1032 bounds=1056768
+placement stage=flip_35_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=flip_35_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0191038070195 readers=0
+production flip_36_recipe_6 handles=922 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165528
+flip_36_recipe_6 present_s=0.530921 alloc_bytes=330328056 prepare_s=0.000002 heap_words=394842416 uploads=436 upload_bytes=115146624 readback_bytes=1081344 inspect_readback_bytes=0 pipelines=10 held=60 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 21.6 ms · cook 376.8 ms · evaluate 84.2 ms · layout 0.1 ms · lower 6.5 ms · parse 1.1 ms · print 23.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_36_recipe_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.017455 head_s=0.000001 kernel_s=0.017452 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.057043 head_s=0.000005 kernel_s=0.057037 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000114 head_s=0.000114 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_36_recipe_6 payload=0 status=832 validation=1760 count=1056 bounds=1081344
+placement stage=flip_36_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=flip_36_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0203827519133 readers=0
+production flip_37_recipe_7 handles=928 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165616
+flip_37_recipe_7 present_s=0.606945 alloc_bytes=325946848 prepare_s=0.000002 heap_words=285212304 uploads=443 upload_bytes=116544696 readback_bytes=1105920 inspect_readback_bytes=0 pipelines=10 held=54 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 21.1 ms · cook 384.2 ms · evaluate 158.4 ms · layout 0.1 ms · lower 5.7 ms · parse 1.0 ms · print 23.3 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_37_recipe_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.010452 head_s=0.000001 kernel_s=0.010450 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.043205 head_s=0.000004 kernel_s=0.043200 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.093591 head_s=0.000002 kernel_s=0.093587 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000113 head_s=0.000113 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_37_recipe_7 payload=0 status=848 validation=1800 count=1080 bounds=1105920
+placement stage=flip_37_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=flip_37_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.0311974141621 readers=0
+production flip_38_recipe_0 handles=936 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+flip_38_recipe_0 present_s=0.530133 alloc_bytes=505781104 prepare_s=0.000002 heap_words=310872599 uploads=450 upload_bytes=117657456 readback_bytes=1130496 inspect_readback_bytes=0 pipelines=10 held=60 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 21.2 ms · cook 335.0 ms · evaluate 130.2 ms · layout 0.1 ms · lower 5.8 ms · parse 0.9 ms · print 22.0 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_38_recipe_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.032798 head_s=0.000002 kernel_s=0.032794 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000092 head_s=0.000092 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_38_recipe_0 payload=0 status=864 validation=1840 count=1104 bounds=1130496
+placement stage=flip_38_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=flip_38_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0148171914974 device_s=0.00569254118674 readers=0
+production flip_39_recipe_1 handles=927 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+flip_39_recipe_1 present_s=0.794650 alloc_bytes=508924984 prepare_s=0.000003 heap_words=336427456 uploads=457 upload_bytes=120703720 readback_bytes=1155072 inspect_readback_bytes=0 pipelines=10 held=66 digest=7877dae2bc889cc410d1b2fd0851466ef9120e9e7a91450ae4a5872d9b7d3311 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=float32 phases=[check 22.3 ms · cook 362.5 ms · evaluate 359.6 ms · layout 0.1 ms · lower 6.0 ms · parse 0.9 ms · print 24.2 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_39_recipe_1 points=998592 floats=10485216 host_model_s=0.246549 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.032782 head_s=0.000002 kernel_s=0.032777 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034032 head_s=0.000002 kernel_s=0.034029 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.033302 head_s=0.000002 kernel_s=0.033299 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.128181 head_s=0.000002 kernel_s=0.128177 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.064590 head_s=0.000004 kernel_s=0.064585 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.050967 head_s=0.000003 kernel_s=0.050963 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000100 head_s=0.000100 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_39_recipe_1 payload=0 status=880 validation=1880 count=1128 bounds=1155072
+placement stage=flip_39_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.263048560347 device_s=0.00465297698975 readers=0
+placement stage=flip_39_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.464708821978 device_s=0.0262649059296 readers=0
+production flip_40_recipe_2 handles=935 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+flip_40_recipe_2 present_s=0.719887 alloc_bytes=485325368 prepare_s=0.000002 heap_words=338850751 uploads=464 upload_bytes=123410208 readback_bytes=1179648 inspect_readback_bytes=0 pipelines=10 held=48 digest=bdb3063aa2a0bc3cafa612b79bf8677dff1b0db61193dc08a916c8d7e67fdb07 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=float32 phases=[check 23.4 ms · cook 376.7 ms · evaluate 268.6 ms · layout 0.1 ms · lower 7.1 ms · parse 1.1 ms · print 23.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_40_recipe_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=0.000002
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.038509 head_s=0.000003 kernel_s=0.038505 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026648 head_s=0.000001 kernel_s=0.026646 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.041201 head_s=0.000001 kernel_s=0.041199 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.077672 head_s=0.000001 kernel_s=0.077669 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.072122 head_s=0.000003 kernel_s=0.072117 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000269 head_s=0.000269 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_40_recipe_2 payload=0 status=896 validation=1920 count=1152 bounds=1179648
+placement stage=flip_40_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.218300695848 device_s=0.00384211540222 readers=0
+placement stage=flip_40_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.385649053476 device_s=0.0216174026655 readers=0
+production flip_41_recipe_3 handles=943 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+flip_41_recipe_3 present_s=0.755228 alloc_bytes=472727608 prepare_s=0.000002 heap_words=375393979 uploads=471 upload_bytes=126132376 readback_bytes=1204224 inspect_readback_bytes=0 pipelines=10 held=54 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 20.7 ms · cook 396.8 ms · evaluate 284.7 ms · layout 0.1 ms · lower 6.0 ms · parse 0.9 ms · print 23.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_41_recipe_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000002
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.018893 head_s=0.000002 kernel_s=0.018890 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.020021 head_s=0.000002 kernel_s=0.020017 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.019483 head_s=0.000001 kernel_s=0.019481 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.125187 head_s=0.000001 kernel_s=0.125185 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.088984 head_s=0.000002 kernel_s=0.088980 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000089 head_s=0.000089 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_41_recipe_3 payload=0 status=912 validation=1960 count=1176 bounds=1204224
+placement stage=flip_41_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=flip_41_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.389297507664 device_s=0.0218219152984 readers=0
+production flip_42_recipe_4 handles=951 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+flip_42_recipe_4 present_s=0.549853 alloc_bytes=283552616 prepare_s=0.000003 heap_words=361427147 uploads=478 upload_bytes=127986752 readback_bytes=1228800 inspect_readback_bytes=0 pipelines=10 held=48 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 21.7 ms · cook 403.8 ms · evaluate 75.5 ms · layout 0.1 ms · lower 6.2 ms · parse 1.0 ms · print 24.4 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_42_recipe_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.068373 head_s=0.000003 kernel_s=0.068369 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000094 head_s=0.000094 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_42_recipe_4 payload=0 status=928 validation=2000 count=1200 bounds=1228800
+placement stage=flip_42_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=flip_42_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.0250701519462 readers=0
+production flip_43_recipe_5 handles=954 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+flip_43_recipe_5 present_s=0.559406 alloc_bytes=362076608 prepare_s=0.000002 heap_words=281454325 uploads=485 upload_bytes=129564120 readback_bytes=1253376 inspect_readback_bytes=0 pipelines=10 held=54 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 21.8 ms · cook 387.4 ms · evaluate 104.9 ms · layout 0.1 ms · lower 6.5 ms · parse 0.9 ms · print 22.1 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_43_recipe_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.016643 head_s=0.000003 kernel_s=0.016639 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026540 head_s=0.000002 kernel_s=0.026537 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.051402 head_s=0.000002 kernel_s=0.051398 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000131 head_s=0.000131 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_43_recipe_5 payload=0 status=944 validation=2040 count=1224 bounds=1253376
+placement stage=flip_43_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=flip_43_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0210607467168 readers=0
+production flip_44_recipe_6 handles=962 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165616
+flip_44_recipe_6 present_s=0.553078 alloc_bytes=335081928 prepare_s=0.000002 heap_words=322574549 uploads=492 upload_bytes=130844240 readback_bytes=1277952 inspect_readback_bytes=0 pipelines=10 held=48 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 21.5 ms · cook 346.3 ms · evaluate 140.6 ms · layout 0.1 ms · lower 5.8 ms · parse 1.0 ms · print 22.7 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_44_recipe_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.026734 head_s=0.000001 kernel_s=0.026732 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.104544 head_s=0.000001 kernel_s=0.104541 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000110 head_s=0.000110 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_44_recipe_6 payload=0 status=960 validation=2080 count=1248 bounds=1277952
+placement stage=flip_44_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=flip_44_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0183702440726 readers=0
+production flip_45_recipe_7 handles=970 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165616
+flip_45_recipe_7 present_s=0.591369 alloc_bytes=336800416 prepare_s=0.000002 heap_words=366815008 uploads=499 upload_bytes=132242312 readback_bytes=1302528 inspect_readback_bytes=0 pipelines=10 held=54 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 20.9 ms · cook 384.1 ms · evaluate 142.7 ms · layout 0.1 ms · lower 5.5 ms · parse 1.0 ms · print 22.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_45_recipe_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.010861 head_s=0.000001 kernel_s=0.010858 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.030969 head_s=0.000004 kernel_s=0.030963 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.089807 head_s=0.000001 kernel_s=0.089805 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000100 head_s=0.000100 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_45_recipe_7 payload=0 status=976 validation=2120 count=1272 bounds=1302528
+placement stage=flip_45_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=flip_45_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.025415443636 readers=0
+production flip_46_recipe_0 handles=980 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+flip_46_recipe_0 present_s=0.537067 alloc_bytes=502383992 prepare_s=0.000002 heap_words=393355587 uploads=506 upload_bytes=133355072 readback_bytes=1327104 inspect_readback_bytes=0 pipelines=10 held=60 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 20.3 ms · cook 340.8 ms · evaluate 132.8 ms · layout 0.1 ms · lower 6.0 ms · parse 1.0 ms · print 22.8 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_46_recipe_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.037241 head_s=0.000002 kernel_s=0.037238 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000100 head_s=0.000100 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_46_recipe_0 payload=0 status=992 validation=2160 count=1296 bounds=1327104
+placement stage=flip_46_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=flip_46_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0148171914974 device_s=0.00506326671806 readers=0
+production flip_47_recipe_1 handles=983 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+flip_47_recipe_1 present_s=0.919717 alloc_bytes=505235584 prepare_s=0.000003 heap_words=323443302 uploads=513 upload_bytes=136401336 readback_bytes=1351680 inspect_readback_bytes=0 pipelines=10 held=48 digest=7877dae2bc889cc410d1b2fd0851466ef9120e9e7a91450ae4a5872d9b7d3311 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=float32 phases=[check 22.0 ms · cook 391.6 ms · evaluate 454.3 ms · layout 0.1 ms · lower 6.4 ms · parse 1.0 ms · print 23.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_47_recipe_1 points=998592 floats=10485216 host_model_s=0.246549 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.029775 head_s=0.000002 kernel_s=0.029771 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.036601 head_s=0.000003 kernel_s=0.036597 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.036474 head_s=0.000004 kernel_s=0.036468 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.142431 head_s=0.000002 kernel_s=0.142428 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.085492 head_s=0.000002 kernel_s=0.085488 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.108288 head_s=0.000002 kernel_s=0.108285 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000107 head_s=0.000107 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_47_recipe_1 payload=0 status=1008 validation=2200 count=1320 bounds=1351680
+placement stage=flip_47_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.263048560347 device_s=0.00465297698975 readers=0
+placement stage=flip_47_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.464708821978 device_s=0.0291248573358 readers=0
+production flip_48_recipe_2 handles=989 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+flip_48_recipe_2 present_s=0.822150 alloc_bytes=481745936 prepare_s=0.000002 heap_words=404145214 uploads=520 upload_bytes=139107824 readback_bytes=1376256 inspect_readback_bytes=0 pipelines=10 held=54 digest=bdb3063aa2a0bc3cafa612b79bf8677dff1b0db61193dc08a916c8d7e67fdb07 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=float32 phases=[check 21.6 ms · cook 422.1 ms · evaluate 326.7 ms · layout 0.1 ms · lower 6.2 ms · parse 1.0 ms · print 23.7 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_48_recipe_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=0.000002
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.040066 head_s=0.000002 kernel_s=0.040062 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.028782 head_s=0.000001 kernel_s=0.028780 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022575 head_s=0.000003 kernel_s=0.022570 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.072782 head_s=0.000001 kernel_s=0.072780 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.149236 head_s=0.000002 kernel_s=0.149232 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000101 head_s=0.000101 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_48_recipe_2 payload=0 status=1024 validation=2240 count=1344 bounds=1376256
+placement stage=flip_48_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.218300695848 device_s=0.00384211540222 readers=0
+placement stage=flip_48_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.385649053476 device_s=0.0241699170168 readers=0
+production flip_49_recipe_3 handles=988 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+flip_49_recipe_3 present_s=0.884773 alloc_bytes=461985608 prepare_s=0.000003 heap_words=302813326 uploads=527 upload_bytes=141829992 readback_bytes=1400832 inspect_readback_bytes=0 pipelines=10 held=48 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 22.6 ms · cook 430.2 ms · evaluate 379.6 ms · layout 0.1 ms · lower 6.3 ms · parse 0.9 ms · print 23.1 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_49_recipe_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000002
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.040868 head_s=0.000002 kernel_s=0.040865 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034812 head_s=0.000002 kernel_s=0.034808 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022416 head_s=0.000002 kernel_s=0.022412 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.182995 head_s=0.000002 kernel_s=0.182991 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.085392 head_s=0.000004 kernel_s=0.085386 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000107 head_s=0.000107 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_49_recipe_3 payload=0 status=1040 validation=2280 count=1368 bounds=1400832
+placement stage=flip_49_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=flip_49_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.389297507664 device_s=0.0265230034947 readers=0
+production flip_50_recipe_4 handles=991 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+flip_50_recipe_4 present_s=0.472369 alloc_bytes=294711536 prepare_s=0.000002 heap_words=401849998 uploads=534 upload_bytes=143684368 readback_bytes=1425408 inspect_readback_bytes=0 pipelines=10 held=54 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 20.9 ms · cook 339.3 ms · evaluate 66.4 ms · layout 0.1 ms · lower 5.8 ms · parse 0.9 ms · print 22.2 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_50_recipe_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.059018 head_s=0.000001 kernel_s=0.059015 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000080 head_s=0.000080 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_50_recipe_4 payload=0 status=1056 validation=2320 count=1392 bounds=1425408
+placement stage=flip_50_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=flip_50_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.0216350170585 readers=0
+production flip_51_recipe_5 handles=990 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+flip_51_recipe_5 present_s=0.544125 alloc_bytes=333144464 prepare_s=0.000003 heap_words=341982690 uploads=541 upload_bytes=145261736 readback_bytes=1449984 inspect_readback_bytes=0 pipelines=10 held=54 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 21.8 ms · cook 357.4 ms · evaluate 117.3 ms · layout 0.1 ms · lower 6.5 ms · parse 1.0 ms · print 23.3 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_51_recipe_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.020553 head_s=0.000002 kernel_s=0.020548 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.021153 head_s=0.000192 kernel_s=0.020959 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.064921 head_s=0.000002 kernel_s=0.064918 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000110 head_s=0.000110 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_51_recipe_5 payload=0 status=1072 validation=2360 count=1416 bounds=1449984
+placement stage=flip_51_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=flip_51_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0326297698491 readers=0
+production flip_52_recipe_6 handles=992 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165616
+flip_52_recipe_6 present_s=0.539301 alloc_bytes=337585216 prepare_s=0.000002 heap_words=383354933 uploads=548 upload_bytes=146541856 readback_bytes=1474560 inspect_readback_bytes=0 pipelines=10 held=60 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 21.2 ms · cook 365.3 ms · evaluate 106.9 ms · layout 0.1 ms · lower 6.0 ms · parse 1.0 ms · print 22.5 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_52_recipe_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.019270 head_s=0.000003 kernel_s=0.019266 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.076917 head_s=0.000002 kernel_s=0.076913 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000130 head_s=0.000130 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_52_recipe_6 payload=0 status=1088 validation=2400 count=1440 bounds=1474560
+placement stage=flip_52_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=flip_52_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0168255550204 readers=0
+production flip_53_recipe_7 handles=992 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165616
+flip_53_recipe_7 present_s=0.611506 alloc_bytes=351258824 prepare_s=0.000002 heap_words=421110179 uploads=555 upload_bytes=147939928 readback_bytes=1499136 inspect_readback_bytes=0 pipelines=10 held=66 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 20.7 ms · cook 383.0 ms · evaluate 162.3 ms · layout 0.1 ms · lower 5.6 ms · parse 0.9 ms · print 23.8 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_53_recipe_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.011271 head_s=0.000002 kernel_s=0.011267 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.045059 head_s=0.000003 kernel_s=0.045055 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.093695 head_s=0.000002 kernel_s=0.093692 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000111 head_s=0.000111 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_53_recipe_7 payload=0 status=1104 validation=2440 count=1464 bounds=1499136
+placement stage=flip_53_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=flip_53_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.028988622881 readers=0
+production flip_54_recipe_0 handles=994 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165616
+flip_54_recipe_0 present_s=0.576606 alloc_bytes=498996272 prepare_s=0.000002 heap_words=308146571 uploads=562 upload_bytes=149052688 readback_bytes=1523712 inspect_readback_bytes=0 pipelines=10 held=60 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 21.9 ms · cook 351.4 ms · evaluate 145.7 ms · layout 0.1 ms · lower 20.5 ms · parse 1.0 ms · print 23.0 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_54_recipe_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.046621 head_s=0.000001 kernel_s=0.046618 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000107 head_s=0.000107 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_54_recipe_0 payload=0 status=1120 validation=2480 count=1488 bounds=1523712
+placement stage=flip_54_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=flip_54_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=device_measured_cheaper cpu_s=0.0148171914974 device_s=0.00778039712018 readers=0
+production flip_55_recipe_1 handles=987 payload_bytes=0 dispatches=4 flow_input_bytes=3046264 renderer_upload_bytes=165704
+flip_55_recipe_1 present_s=0.879138 alloc_bytes=563252488 prepare_s=0.000003 heap_words=355438366 uploads=569 upload_bytes=152098952 readback_bytes=1548288 inspect_readback_bytes=0 pipelines=10 held=66 digest=7877dae2bc889cc410d1b2fd0851466ef9120e9e7a91450ae4a5872d9b7d3311 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=float32 phases=[check 20.6 ms · cook 373.4 ms · evaluate 436.0 ms · layout 0.1 ms · lower 4.9 ms · parse 0.9 ms · print 22.4 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_55_recipe_1 points=998592 floats=10485216 host_model_s=0.246549 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.042885 head_s=0.000002 kernel_s=0.042881 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.041013 head_s=0.000002 kernel_s=0.041009 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.035200 head_s=0.000002 kernel_s=0.035197 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.117965 head_s=0.000002 kernel_s=0.117961 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.064679 head_s=0.000002 kernel_s=0.064675 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.119409 head_s=0.000004 kernel_s=0.119404 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000101 head_s=0.000101 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_55_recipe_1 payload=0 status=1136 validation=2520 count=1512 bounds=1548288
+placement stage=flip_55_recipe_1 owner=sculpture/normals count=998592 reason=device_measured_cheaper cpu_s=0.263048560347 device_s=0.00465297698975 readers=0
+placement stage=flip_55_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.464708821978 device_s=0.0246279239655 readers=0
+production flip_56_recipe_2 handles=983 payload_bytes=0 dispatches=4 flow_input_bytes=2706488 renderer_upload_bytes=165704
+flip_56_recipe_2 present_s=0.669665 alloc_bytes=467669000 prepare_s=0.000003 heap_words=345920421 uploads=576 upload_bytes=154805440 readback_bytes=1572864 inspect_readback_bytes=0 pipelines=10 held=48 digest=bdb3063aa2a0bc3cafa612b79bf8677dff1b0db61193dc08a916c8d7e67fdb07 verified_digest=b1b54f9083788333e74defde1990f3436823887eae5b8c384ebfc81748ef1302 Cd=float32 phases=[check 20.3 ms · cook 378.8 ms · evaluate 220.5 ms · layout 0.1 ms · lower 5.5 ms · parse 1.1 ms · print 23.9 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_56_recipe_2 points=828704 floats=8701392 host_model_s=0.204604 resident_model_s=0.000002
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.036592 head_s=0.000001 kernel_s=0.036588 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.032505 head_s=0.000002 kernel_s=0.032502 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.020889 head_s=0.000001 kernel_s=0.020887 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.043470 head_s=0.000001 kernel_s=0.043468 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.073269 head_s=0.000002 kernel_s=0.073265 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000111 head_s=0.000111 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_56_recipe_2 payload=0 status=1152 validation=2560 count=1536 bounds=1572864
+placement stage=flip_56_recipe_2 owner=sculpture/normals count=828704 reason=device_measured_cheaper cpu_s=0.218300695848 device_s=0.00384211540222 readers=0
+placement stage=flip_56_recipe_2 owner=sculpture/mesh#:kinds count=828704 reason=device_measured_cheaper cpu_s=0.385649053476 device_s=0.0281753441023 readers=0
+production flip_57_recipe_3 handles=985 payload_bytes=0 dispatches=4 flow_input_bytes=2722168 renderer_upload_bytes=165704
+flip_57_recipe_3 present_s=0.798809 alloc_bytes=501979624 prepare_s=0.000002 heap_words=360913384 uploads=583 upload_bytes=157527608 readback_bytes=1597440 inspect_readback_bytes=0 pipelines=10 held=54 digest=ce7a0102c6490226833709ef6c01fa2c2deea224f8befeaa585419c750a31452 verified_digest=52088c645d8d8fc58cafe91dbb9f1aeb60add62ca91f3a81692af92168a9f819 Cd=float32 phases=[check 20.4 ms · cook 349.6 ms · evaluate 379.4 ms · layout 0.1 ms · lower 5.9 ms · parse 1.0 ms · print 22.8 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_57_recipe_3 points=836544 floats=8783712 host_model_s=0.206540 resident_model_s=0.000002
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.047395 head_s=0.000002 kernel_s=0.047391 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.043927 head_s=0.000001 kernel_s=0.043924 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.033360 head_s=0.000002 kernel_s=0.033357 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.190638 head_s=0.000002 kernel_s=0.190635 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.051692 head_s=0.000001 kernel_s=0.051690 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000098 head_s=0.000098 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_57_recipe_3 payload=0 status=1168 validation=2600 count=1560 bounds=1597440
+placement stage=flip_57_recipe_3 owner=sculpture/normals count=836544 reason=device_measured_cheaper cpu_s=0.220365722558 device_s=0.00381588935852 readers=0
+placement stage=flip_57_recipe_3 owner=sculpture/mesh#:kinds count=836544 reason=device_measured_cheaper cpu_s=0.389297507664 device_s=0.0230522281366 readers=0
+production flip_58_recipe_4 handles=985 payload_bytes=0 dispatches=4 flow_input_bytes=1854376 renderer_upload_bytes=165616
+flip_58_recipe_4 present_s=0.499977 alloc_bytes=294713440 prepare_s=0.000002 heap_words=327947595 uploads=590 upload_bytes=159381984 readback_bytes=1622016 inspect_readback_bytes=0 pipelines=10 held=54 digest=a902f6db5debe22ce9b9703aaa0bbbd3e24f202fc19c4918e40c9d8ecbd2bf33 verified_digest=d69f4cf1678cb43964235d029795597d9cd1d3e1ed08088b733a2b7378cf0447 Cd=float32 phases=[check 20.7 ms · cook 364.8 ms · evaluate 68.7 ms · layout 0.1 ms · lower 5.8 ms · parse 1.0 ms · print 22.8 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_58_recipe_4 points=402648 floats=4227804 host_model_s=0.099412 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.061343 head_s=0.000002 kernel_s=0.061340 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000129 head_s=0.000129 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_58_recipe_4 payload=0 status=1184 validation=2640 count=1584 bounds=1622016
+placement stage=flip_58_recipe_4 owner=sculpture/normals count=402648 reason=device_measured_cheaper cpu_s=0.10607913719 device_s=0.0019588470459 readers=0
+placement stage=flip_58_recipe_4 owner=sculpture/mesh#:kinds count=402648 reason=device_measured_cheaper cpu_s=0.187377905843 device_s=0.0210473152611 readers=0
+production flip_59_recipe_5 handles=986 payload_bytes=0 dispatches=4 flow_input_bytes=1577368 renderer_upload_bytes=165704
+flip_59_recipe_5 present_s=0.553049 alloc_bytes=333132008 prepare_s=0.000002 heap_words=400573285 uploads=597 upload_bytes=160959352 readback_bytes=1646592 inspect_readback_bytes=0 pipelines=10 held=54 digest=b41621092e33e0713e26694bf2a63e783806dabb8091c80f416d68684b1e508c verified_digest=45568f03584fe636353bec62c26e7acb03c2a90c375e881775f24c73376bd36d Cd=float32 phases=[check 21.2 ms · cook 369.5 ms · evaluate 116.7 ms · layout 0.1 ms · lower 6.5 ms · parse 1.0 ms · print 22.6 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_59_recipe_5 points=264144 floats=2773512 host_model_s=0.065216 resident_model_s=0.000001
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~2/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.016655 head_s=0.000001 kernel_s=0.016653 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.034173 head_s=0.000002 kernel_s=0.034169 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.056467 head_s=0.000001 kernel_s=0.056464 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000103 head_s=0.000103 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_59_recipe_5 payload=0 status=1200 validation=2680 count=1608 bounds=1646592
+placement stage=flip_59_recipe_5 owner=sculpture/normals count=264144 reason=device_measured_cheaper cpu_s=0.0695977010406 device_s=0.00137090682983 readers=0
+placement stage=flip_59_recipe_5 owner=sculpture/mesh#:kinds count=264144 reason=device_measured_cheaper cpu_s=0.12292312283 device_s=0.0206339774602 readers=0
+production flip_60_recipe_6 handles=983 payload_bytes=0 dispatches=4 flow_input_bytes=1280120 renderer_upload_bytes=165616
+flip_60_recipe_6 present_s=0.581337 alloc_bytes=315847648 prepare_s=0.000002 heap_words=298374429 uploads=604 upload_bytes=162239472 readback_bytes=1671168 inspect_readback_bytes=0 pipelines=10 held=48 digest=1cb7a3c8552912e1e8304548314e0d06b18c1bbd31a299740164aa243cca4c81 verified_digest=a983c1da0694182569721df57bc66071d196a828ac93fa3e16249faa57852067 Cd=float32 phases=[check 20.8 ms · cook 394.5 ms · evaluate 121.8 ms · layout 0.1 ms · lower 6.0 ms · parse 1.0 ms · print 23.0 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_60_recipe_6 points=115520 floats=1212960 host_model_s=0.028521 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~3/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.017971 head_s=0.000002 kernel_s=0.017967 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.093642 head_s=0.000003 kernel_s=0.093636 tail_s=0.000003 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000112 head_s=0.000112 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_60_recipe_6 payload=0 status=1216 validation=2720 count=1632 bounds=1671168
+placement stage=flip_60_recipe_6 owner=sculpture/normals count=115520 reason=device_measured_cheaper cpu_s=0.0304506946989 device_s=0.000744104385376 readers=0
+placement stage=flip_60_recipe_6 owner=sculpture/mesh#:kinds count=115520 reason=device_measured_cheaper cpu_s=0.0537588555836 device_s=0.0191910743812 readers=0
+production flip_61_recipe_7 handles=984 payload_bytes=0 dispatches=4 flow_input_bytes=1398072 renderer_upload_bytes=165528
+flip_61_recipe_7 present_s=0.517475 alloc_bytes=362097704 prepare_s=0.000003 heap_words=342604524 uploads=611 upload_bytes=163637544 readback_bytes=1695744 inspect_readback_bytes=0 pipelines=10 held=54 digest=3dba2b6968f19e91153f9ce9adc05ec2160dd29c79b07b3b5c34c17b9fb70695 verified_digest=d6f0dd4058b722f30252fbf0f5bc2713ea2dca2354b44ac3fc84bdee15250d63 Cd=float32 phases=[check 20.5 ms · cook 361.4 ms · evaluate 92.4 ms · layout 0.1 ms · lower 5.2 ms · parse 0.9 ms · print 23.0 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_61_recipe_7 points=174496 floats=1832208 host_model_s=0.043082 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~4/@result/def:structure/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.010973 head_s=0.000001 kernel_s=0.010970 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~6/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.021182 head_s=0.000002 kernel_s=0.021179 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.050463 head_s=0.000001 kernel_s=0.050461 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000108 head_s=0.000108 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_61_recipe_7 payload=0 status=1232 validation=2760 count=1656 bounds=1695744
+placement stage=flip_61_recipe_7 owner=sculpture/normals count=174496 reason=device_measured_cheaper cpu_s=0.0459847527649 device_s=0.000977039337158 readers=0
+placement stage=flip_61_recipe_7 owner=sculpture/mesh#:kinds count=174496 reason=device_measured_cheaper cpu_s=0.0812041660657 device_s=0.0343935720693 readers=0
+production flip_62_recipe_0 handles=986 payload_bytes=0 dispatches=4 flow_input_bytes=1112760 renderer_upload_bytes=165528
+flip_62_recipe_0 present_s=0.561910 alloc_bytes=495580496 prepare_s=0.000002 heap_words=368681918 uploads=618 upload_bytes=164750304 readback_bytes=1720320 inspect_readback_bytes=0 pipelines=10 held=60 digest=3ca8488a24dd12232d1e3e180a3c546a9c4ce2363e64867c7944da0498e6e705 verified_digest=9d072dc8fdad64ae924e83d97f47e3f34c60ec3098080e27785787d7fd95fcdd Cd=float32 phases=[check 20.4 ms · cook 366.1 ms · evaluate 133.1 ms · layout 0.1 ms · lower 5.4 ms · parse 0.9 ms · print 23.3 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_62_recipe_0 points=31840 floats=334320 host_model_s=0.007861 resident_model_s=0.000000
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~9/@result#then/@result/def:maze-volume/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.040341 head_s=0.000001 kernel_s=0.040339 tail_s=0.000001 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000104 head_s=0.000104 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_62_recipe_0 payload=0 status=1248 validation=2800 count=1680 bounds=1720320
+placement stage=flip_62_recipe_0 owner=sculpture/normals count=31840 reason=device_measured_cheaper cpu_s=0.00840969532682 device_s=0.000365018844604 readers=0
+placement stage=flip_62_recipe_0 owner=sculpture/mesh#:kinds count=31840 reason=cpu_measured_cheaper cpu_s=0.0148171914974 device_s=0.0167808751488 readers=0
+production flip_63_recipe_1 handles=980 payload_bytes=0 dispatches=0 flow_input_bytes=0 renderer_upload_bytes=42112800
+flip_63_recipe_1 present_s=1.640308 alloc_bytes=567054040 prepare_s=0.136982 heap_words=357440898 uploads=618 upload_bytes=164750304 readback_bytes=1720320 inspect_readback_bytes=0 pipelines=10 held=42 digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 verified_digest=ca4df802d14ed8240c2581e2bd972cab41b66216a1bec2d2b16d4548b1993bd8 Cd=binary64 phases=[check 21.2 ms · cook 1071.6 ms · evaluate 440.2 ms · layout 0.1 ms · lower 6.0 ms · parse 1.0 ms · print 23.2 ms · project 0.0 ms · reduce 0.0 ms]
+display_sink stage=flip_63_recipe_1 points=998592 floats=10485216 host_model_s=0.197513 resident_model_s=0.000003
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.028744 head_s=0.000002 kernel_s=0.028739 tail_s=0.000003 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022331 head_s=0.000005 kernel_s=0.022325 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#then~5/@result/@result/def:carve/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.022711 head_s=0.000002 kernel_s=0.022707 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.058482 head_s=0.000002 kernel_s=0.058479 tail_s=0.000001 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.182172 head_s=0.000002 kernel_s=0.182168 tail_s=0.000002 refusal=""
+map volume/voxels/def:build-volume/cooked/@result/voxels/def:command/@result#else/@result/def:edit-volume/@result/def:edit-cells/@result n=262144 tier=cpu_kernel head=0 tail=0 wall=0.108992 head_s=0.000004 kernel_s=0.108986 tail_s=0.000002 refusal=""
+map sculpture/faces#0 n=1572864 tier=deferred head=0 tail=0 wall=0.000125 head_s=0.000125 kernel_s=0.000000 tail_s=0.000000 refusal=""
+transfer_totals stage=flip_63_recipe_1 payload=0 status=1248 validation=2800 count=1680 bounds=1720320
+placement stage=flip_63_recipe_1 owner=sculpture/normals count=998592 reason=cpu_consumer cpu_s=0.0164996523862 device_s=0.052265871803 readers=1
+placement stage=flip_63_recipe_1 owner=sculpture/mesh#:kinds count=998592 reason=device_measured_cheaper cpu_s=0.455687778201 device_s=0.0246279239655 readers=0
+hostf final gpu 63168654
+hostf final pipelines 90811
+hostf final runners 14788419
+hostf final created 2
+hostf final retired 20
+hostf final sites 48434966
+hostf final flight 6
+hostf final iota 90165
+hostf final buffers 90963
+hostf final vs 90162
+hostf final disc 2
+hostf final shared 97405
+hostf final ownership 99028
+hostf final tables 12
+hostc final sites=32 retired_buffers=0 tables=0
+poolf final 0 words=92564 tag=0 size=4 len=-1
+poolf final 1 words=94706 tag=0 size=2 len=74
+poolf final 2 words=2 tag=0 size=1 len=-1
+poolf final 3 words=62 tag=0 size=1 len=-1
+poolf final 4 words=2 tag=0 size=1 len=-1
+poolf final 5 words=180 tag=0 size=2 len=18
+site final #0 f0=91222 f1=98231 f3=2 f4=32
+site final #1 f0=91661 f1=185790 f3=2 f4=319
+site final #2 f0=484917 f1=3236308 f3=2 f4=421
+site final #3 f0=91222 f1=133895 f3=2 f4=32
+site final #4 f0=91661 f1=613758 f3=2 f4=319
+site final #5 f0=484917 f1=3236308 f3=2 f4=421
+site final #6 f0=91222 f1=119151 f3=2 f4=32
+site final #7 f0=91661 f1=436830 f3=2 f4=319
+site final #8 f0=484917 f1=3236308 f3=2 f4=421
+site final #9 f0=91222 f1=156307 f3=2 f4=32
+site final #10 f0=91661 f1=882702 f3=2 f4=319
+site final #11 f0=484917 f1=3236308 f3=2 f4=421
+site final #12 f0=91222 f1=190933 f3=2 f4=32
+site final #13 f0=91661 f1=1298214 f3=2 f4=319
+site final #14 f0=484917 f1=3236308 f3=2 f4=421
+site final #15 f0=91222 f1=299407 f3=2 f4=32
+site final #16 f0=91661 f1=2599902 f3=2 f4=319
+site final #17 f0=484917 f1=3236308 f3=2 f4=421
+site final #18 f0=91222 f1=297447 f3=2 f4=32
+site final #19 f0=91661 f1=2576382 f3=2 f4=319
+site final #20 f0=484917 f1=3236308 f3=2 f4=421
+site final #21 f0=91222 f1=339919 f3=2 f4=32
+site final #22 f0=91661 f1=3086046 f3=2 f4=319
+site final #23 f0=484917 f1=3236308 f3=2 f4=421
+site final #24 f0=91222 f1=98231 f3=2 f4=32
+site final #25 f0=91661 f1=185790 f3=2 f4=319
+site final #26 f0=484917 f1=3236308 f3=2 f4=421
+site final #27 f0=91222 f1=133895 f3=2 f4=32
+site final #28 f0=91661 f1=613758 f3=2 f4=319
+site final #29 f0=484917 f1=3236308 f3=2 f4=421
+site final #30 f0=91222 f1=119151 f3=2 f4=32
+site final #31 f0=91661 f1=436830 f3=2 f4=319
+root final model words=102269735
+root final core words=102269107
+root final doc words=75760627
+root final history words=88332231
+root final panes words=76135540
+root final ui words=369087
+root final text words=26
+root final cook words=89248668
+root final compiled words=75757339
+root final preparations words=206524
+root final drawn words=89210237
+root final extra words=206
+root final rendered words=13481108
+root final baked words=0
+root final opened words=75761068
+root final saved_doc words=4
+root final rows words=0
+root final host words=75758440
+root final canvas words=121431356
+retention final live_words=154999126 workload_words=154998388 scheduler_empty_words=736 scheduler_capacity=368 timer_words=2 heap_words=161815566 history=1 entries=14 payload_bytes=232256290 compiled=1 lanes=1 drawn=1 converted=0 ids=3 pipelines=10 held=36 preparations=2 preparation_bytes=50913456 prepare_calls=73 geometry_ids=73 renderer_pipelines=96 registrations=1 flow_buffers_created=1702 live_handles=975
+allocation flips=64 mean_bytes=412125626
+latency present mean_s=0.679505 p50_s=0.616868 p95_s=0.919717 max_s=1.640308
+latency prepare mean_s=0.002143 p50_s=0.000002 p95_s=0.000003 max_s=0.136982
+latency evaluate mean_s=0.212672 p50_s=0.158434 p95_s=0.440247 max_s=0.596320
+latency check mean_s=0.022515 p50_s=0.021508 p95_s=0.025111 max_s=0.045791
+latency lower mean_s=0.006453 p50_s=0.006038 p95_s=0.008079 max_s=0.020450
+latency print mean_s=0.024360 p50_s=0.023485 p95_s=0.028654 max_s=0.044196
+latency parse mean_s=0.001153 p50_s=0.000977 p95_s=0.002006 max_s=0.007028
+latency cook mean_s=0.393016 p50_s=0.382551 p95_s=0.426166 max_s=1.071599
+latency layout mean_s=0.000086 p50_s=0.000086 p95_s=0.000093 max_s=0.000094
+latency project mean_s=0.000026 p50_s=0.000026 p95_s=0.000030 max_s=0.000034
+latency reduce mean_s=0.000037 p50_s=0.000035 p95_s=0.000047 max_s=0.000058
+phase_rank present 0.679505
+phase_rank cook 0.393016
+phase_rank evaluate 0.212672
+phase_rank print 0.024360
+phase_rank check 0.022515
+phase_rank lower 0.006453
+phase_rank prepare 0.002143
+phase_rank parse 0.001153
+phase_rank layout 0.000086
+phase_rank reduce 0.000037
+phase_rank project 0.000026
+bounded session_entries warm=14 final=14 capacity=16
+bounded session_payload_bytes warm=232256290 final=232256290 capacity=268435456
+snapshot_differs held_buffers warm=42 final=36
+bounded preparations warm=2 final=2 capacity=16
+bounded preparation_bytes warm=50913456 final=50913456 capacity=67108864
+bounded registrations warm=2 final=1 capacity=128
+snapshot_differs buffer_creations warm=253 final=1702
+snapshot_differs live_handles warm=570 final=975
+Fatal error: exception Failure("selector caches/history grew after warmup")

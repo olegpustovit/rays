@@ -241,6 +241,13 @@ val status : t -> seconds:float -> string option
 (** The viewport header [t N live · M cached · frame cook X ms] ([t] for the study's ◷, which
     DepartureMono lacks); [None] when nothing is live. *)
 
+val forget_backend : Flow_ir.Gpu.backend -> unit
+(** Drops the inlined-body nodes built for a closed owner's backend. *)
+
+val observe_draw : Flow_ir.Gpu.config -> Rdk.Geometry.t -> float -> unit
+(** The seconds from a host mesh's frame to its first presentation, added to its display sink. A
+    resident mesh, or Qualification, does nothing. *)
+
 val observe_display : Flow_ir.Gpu.config -> Rdk.Geometry.t -> float -> unit
 (** The seconds the editor spent preparing a mesh for display: the measured display sink of a host
     mesh, or of a resident one, that the whole-chain mesh placement prices. Under Qualification it

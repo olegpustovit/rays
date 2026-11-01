@@ -122,6 +122,11 @@ module Display_sink : sig
   val observe : Flow_ir.Gpu.backend -> resident:bool -> floats:int -> float -> unit
   (** Seconds the editor spent preparing a mesh of [floats] floats for display. *)
 
+  val observe_draw : Flow_ir.Gpu.backend -> floats:int -> float -> unit
+  (** Seconds from a host mesh's frame to its presentation: the renderer's conversion and upload,
+      which preparation does not see. The smallest rate is kept, where the rest of the frame weighs
+      least. *)
+
   val rates : Flow_ir.Gpu.backend -> float * float
   (** Seconds per float (host mesh, resident mesh); [infinity] while unmeasured. *)
 

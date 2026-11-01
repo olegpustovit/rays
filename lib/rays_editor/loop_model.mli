@@ -45,6 +45,7 @@ type t = {
   state_error : string option;
   canvases : (string * canvas_picture) list;
   host : Flow_native.Workspace_host.t;
+  presenting : (float * Rdk.Geometry.t list) option;
 }
 
 val create :
@@ -138,3 +139,6 @@ val compose :
   * (Sop.Node.t * Cook.prepared * V.rendered * Rays.Texture.t option * string option)
     Editor_document.Document.Int_map.t
   * string list
+
+val observe_presented : t -> t
+(** Call after presenting: feeds the first draw of this frame's new host meshes to the display sink. *)

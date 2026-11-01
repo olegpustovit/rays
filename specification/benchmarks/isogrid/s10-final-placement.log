@@ -1,0 +1,8 @@
+Integer-input calibration after a range: 524288 uploaded bytes, payload +0; cached query adds no work
+CPU-input calibration: 0.000237 s, 524288 uploaded bytes across four samples, payload +0; cached query adds no work
+Prepared-table calibration: 1024/2048 entries upload 16384/32768 bytes; distinct layout cache, cached queries add no work
+Prepared mixed-origin calibration: CPU/CPU uploads 1048576 bytes, resident/CPU 524288; payload +0 during measurement, old source unchanged
+Prepared-frame calibration: failed frame does not poison a valid frame; successful result is cached
+placement calibration: 0.000291 s completed, status +16 bytes, payload +0; cached estimate issues no work
+Measured chain placement: 65536 points cpu_measured_cheaper (cpu 0.042903 s, device 0.056224 s; one reader: device 0.060913 s); small cpu_consumer (cpu 0.000022 s, device 0.000032 s); unknown consumers stay CPU (missing_consumer)
+IsoGrid 24^3 measured meshes: recipes 3, 0, 3 held together on the device, each reads its own positions (47464, 12000 points); first reads materialise 1283136 payload bytes, repeats none

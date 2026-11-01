@@ -50,6 +50,8 @@ type t = {
   state_error : string option;
   canvases : (string * canvas_picture) list;
   host : Flow_native.Workspace_host.t;
+  presenting : (float * Rdk.Geometry.t list) option;
+      (* when this frame's update ended, and the meshes it draws for the first time *)
 }
 
 (* Scene objects a sketch starts with: its lights as light objects. *)
@@ -119,6 +121,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?(lights = [])
            rendered = None;
            views = [];
            drawn = Document.Int_map.empty;
+           presenting = None;
            composed = None;
            resolved = None;
            context_error = None;
@@ -490,3 +493,17 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
       views,
       drawn,
       draw_errors drawn errors )
+
+(* The frame that first drew a mesh has been presented: its time is the display sink's first draw. *)
+let observe_presented value =
+  Option.iter
+    (fun (began, geometries) ->
+      let seconds = value.core.Editor_model.clock () -. began in
+      let gpu =
+        Flow_native.Workspace_gpu.config
+          ~fast:(Editor_document.Lowering.fast value.core.doc)
+          value.host.gpu
+      in
+      List.iter (fun geometry -> Flow_sop.Lower.observe_draw gpu geometry seconds) geometries)
+    value.presenting;
+  { value with presenting = None }

@@ -1624,7 +1624,7 @@ let delete_after deletes cancel geometry =
 (* The measured display sinks of a backend: seconds per float the editor spent preparing a host mesh
    for display, and a resident one. Weakly keyed, so a closed owner's rates go with it. *)
 module Display_sink = struct
-  type t = { mutable host : float; mutable resident : float }
+  type t = { mutable host : float; mutable draw : float; mutable resident : float }
 
   let registry : (Flow_ir.Gpu.backend Weak.t * t) list ref = ref []
   let lock = Mutex.create ()
@@ -1639,7 +1639,7 @@ module Display_sink = struct
         with
         | Some (_, rates) -> rates
         | None ->
-            let rates = { host = infinity; resident = infinity } in
+            let rates = { host = infinity; draw = infinity; resident = infinity } in
             let weak = Weak.create 1 in
             Weak.set weak 0 (Some backend);
             registry := (weak, rates) :: !registry;
@@ -1654,10 +1654,18 @@ module Display_sink = struct
           else rates.host <- Float.min rates.host rate)
     end
 
-  (* seconds per float, [infinity] while unmeasured *)
+  let observe_draw backend ~floats seconds =
+    if floats > 0 then begin
+      let rates = find backend in
+      let rate = seconds /. float floats in
+      Mutex.protect lock (fun () -> rates.draw <- Float.min rates.draw rate)
+    end
+
+  (* seconds per float, [infinity] while unmeasured; a host mesh's includes its first draw once seen *)
   let rates backend =
     let rates = find backend in
-    Mutex.protect lock (fun () -> (rates.host, rates.resident))
+    Mutex.protect lock (fun () ->
+        ((rates.host +. if rates.draw < infinity then rates.draw else 0.), rates.resident))
 
   let live () =
     Mutex.protect lock (fun () ->

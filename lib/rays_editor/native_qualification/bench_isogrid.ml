@@ -109,8 +109,8 @@ module Retainers = struct
                 Hashtbl.add cells site cell;
                 cell)
       in
-      ignore (Atomic.fetch_and_add cell.words allocation.size);
-      Some (cell, allocation.size)
+      ignore (Atomic.fetch_and_add cell.words allocation.n_samples);
+      Some (cell, allocation.n_samples)
     in
     let deallocate (cell, words) = ignore (Atomic.fetch_and_add cell.words (-words)) in
     let profile =
@@ -148,7 +148,7 @@ module Retainers = struct
         (words - Option.value ~default:0 (List.assoc_opt site before), site))
     |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
     |> List.take 20
-    |> List.iter (fun (words, site) -> Printf.printf "retainer sampled_words=%d %s\n%!" words site)
+    |> List.iter (fun (words, site) -> Printf.printf "retainer estimated_words=%d %s\n%!" (words * 10_000) site)
 
   let stop value =
     Gc.Memprof.stop ();
@@ -243,22 +243,59 @@ let interleave (planes : Rdk.Packed.Float3.View.view) =
     (3 * Array.length planes.x)
     (fun i -> (match i mod 3 with 0 -> planes.x | 1 -> planes.y | _ -> planes.z).(i / 3))
 
+(* A first read gives a resident stream's buffer back (Flow_gpu.Run.materialise), so hashing through
+   the host would send every later visit of the mesh down the host route, and the flip gates would
+   measure that instead of the displayed route. A pin reads the bytes the display binds and leaves
+   them there; a stream that is not resident or not settled is read on the host. *)
+let held pin width decode =
+  Option.map
+    (fun (buffer, count, _, unpin) ->
+      let floats = Option.get (Ogpu.Backend.mapped_view buffer) in
+      Result.get_ok (Ogpu.Backend.invalidate_mapped buffer ~length:(count * width * 4));
+      let values = Array.init (count * width) (fun i -> decode (Bigarray.Array1.get floats i)) in
+      unpin ();
+      values)
+    pin
+
 let geometry_digest geometry =
-  let topology = Rdk.Topology.View.view (Rdk.Geometry.topology geometry) in
+  let vec3 name host =
+    match
+      Option.bind (Flow_sop.Attribute_kernel.resident_vec3 geometry name) (fun placeholder ->
+          held (Flow_gpu.Run.pin placeholder) 3 Fun.id)
+    with
+    | Some values -> values
+    | None -> host ()
+  in
   let attribute name =
-    match Rdk.Geometry.find_attribute ~owner:Point name geometry with
-    | Some attr -> (
-        match Rdk.Attribute.View.storage attr with
-        | Float3 data -> interleave (Rdk.Packed.Float3.View.view data)
-        | _ -> failwith (name ^ " is not float3"))
-    | None -> failwith ("missing " ^ name)
+    vec3 name (fun () ->
+        match Rdk.Geometry.find_attribute ~owner:Point name geometry with
+        | Some attr -> (
+            match Rdk.Attribute.View.storage attr with
+            | Float3 data -> interleave (Rdk.Packed.Float3.View.view data)
+            | _ -> failwith (name ^ " is not float3"))
+        | None -> failwith ("missing " ^ name))
+  in
+  let words holder =
+    held (Flow_gpu.Run.pin_integers holder) 1 (fun word ->
+        Int32.to_int (Int32.bits_of_float word) land 0xffffffff)
+  in
+  let vertices, offsets, kinds =
+    match
+      Option.map
+        (fun (v, o, k) -> (words v, words o, words k))
+        (Flow_sop.Topology_kernel.resident geometry)
+    with
+    | Some (Some v, Some o, Some k) -> (v, o, k)
+    | _ ->
+        let topology = Rdk.Topology.View.view (Rdk.Geometry.topology geometry) in
+        ( topology.vertex_points,
+          topology.primitive_offsets,
+          Array.init (Bytes.length topology.primitive_kinds) (fun i ->
+              Char.code (Bytes.get topology.primitive_kinds i)) )
   in
   digest
-    (interleave (Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry)))
-    topology.vertex_points topology.primitive_offsets
-    (Array.init (Bytes.length topology.primitive_kinds) (fun i ->
-         Char.code (Bytes.get topology.primitive_kinds i)))
-    (attribute "N") (attribute "Cd")
+    (vec3 "P" (fun () -> interleave (Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry))))
+    vertices offsets kinds (attribute "N") (attribute "Cd")
 
 let print_maps profile =
   List.iter
@@ -370,7 +407,7 @@ let no_device_owner () =
     Some owner
   end
 
-let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(empty = false)
+let benchmark ?domains ?(warmup = 8) ?(cycles = false) ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(empty = false)
     ?(present = true) ?(retainers = false) base side single =
   let handles = Ogpu.Impl.live_handles () in
   let retainers = if retainers then Some (Retainers.start ()) else None in
@@ -481,7 +518,8 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
                   let scene = Editor.scene !value (facts !count) in
                   if present then begin
                     Rays.Canvas.render canvas scene |> string_ok;
-                    ignore (Rays.Canvas.pixel canvas ~x:0 ~y:0)
+                    ignore (Rays.Canvas.pixel canvas ~x:0 ~y:0);
+                    value := Editor.observe_presented !value
                   end
                   else Rays.Scene.Layer.release scene;
                   !value))
@@ -498,7 +536,7 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
                 | name -> Flow.Phase_timer.seconds phases name))
             phase_names
         end;
-        (* Hashing materialises deliberately, after measuring time to presentation. *)
+        (* Hashing reads the held bytes where they are, after measuring time to presentation. *)
         let host, _, _, _, _ = Editor.gpu_stats result in
         assert (Flow_native.Workspace_gpu.held_displays result.host.gpu <= 128);
         let geometry = Option.get (Editor.prepared result) in
@@ -538,6 +576,17 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
           (materialised.readback_bytes - host.readback_bytes)
           host.pipeline_compilations host.held_buffers hash (expected ()) colour_storage
           (Flow.Phase_timer.summary phases);
+        (let host_rate, resident_rate =
+           Option.fold ~none:(infinity, infinity)
+             ~some:Flow_sop.Attribute_kernel.Display_sink.rates
+             (Flow_native.Workspace_gpu.config result.host.gpu).backend
+         in
+         let floats =
+           (Rdk.Geometry.point_count geometry * 9) + (Rdk.Geometry.primitive_count geometry * 6)
+         in
+         Printf.printf "display_sink stage=%s points=%d floats=%d host_model_s=%.6f resident_model_s=%.6f\n%!"
+           name (Rdk.Geometry.point_count geometry) floats (host_rate *. float floats)
+           (resident_rate *. float floats));
         print_maps profile;
         Printf.printf
           "transfer_totals stage=%s payload=%d status=%d validation=%d count=%d bounds=%d\n%!"
@@ -705,11 +754,12 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
               else Printf.sprintf "flip_%d_recipe_%d" i preset
             in
             change name (recipe preset);
-            if (not warm) && Option.is_some retainers && i mod 8 = 7 then
-              retention 2 (Printf.sprintf "cycle_%d" ((i + 1) / 8))
+            if ((not warm) && Option.is_some retainers || cycles) && i mod 8 = 7 then
+              retention 2
+                (Printf.sprintf "%s_%d" (if warm then "warm_cycle" else "cycle") ((i + 1) / 8))
           done
         in
-        run_flips true 8;
+        run_flips true warmup;
         retention 0 "warm";
         let allocation_before = Option.map Retainers.snapshot retainers in
         run_flips false flips;
@@ -733,6 +783,14 @@ let benchmark ?domains ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(em
         Array.sort (fun (_, a) (_, b) -> Float.compare b a) means;
         Array.iter (fun (name, mean) -> Printf.printf "phase_rank %s %.6f\n%!" name mean) means;
         if flips mod 8 = 0 then begin
+          (* past 24³ the recipes outgrow the session and the buffer pool, so flips recook and
+             creations are turnover: live_handles and retained words are what bound the buffers *)
+          let turnover = 15 in
+          if side <> 24 then begin
+            Printf.printf "buffer_creations warm=%d final=%d\n%!" cache_snapshots.(0).(turnover)
+              cache_snapshots.(1).(turnover);
+            cache_snapshots.(1).(turnover) <- cache_snapshots.(0).(turnover)
+          end;
           if cache_snapshots.(0) <> cache_snapshots.(1) then begin
             let names =
               [| "history"; "session_entries"; "session_payload_bytes"; "compiled"; "lanes"; "drawn";
@@ -871,6 +929,9 @@ let () =
   | [ _; "--bench"; side ] -> benchmark base (int_of_string side) false
   | [ _; "--flips"; side; count ] ->
       benchmark ~flips:(int_of_string count) base (int_of_string side) false
+  | [ _; "--plateau"; side; warmup; count ] ->
+      benchmark ~cycles:true ~warmup:(int_of_string warmup) ~flips:(int_of_string count) base
+        (int_of_string side) false
   | [ _; "--flips-no-canvas"; side; count ] ->
       benchmark ~present:false ~flips:(int_of_string count) base (int_of_string side) false
   | [ _; "--retainers"; side; count ] ->
@@ -891,4 +952,5 @@ let () =
   | _ ->
       failwith
         "usage: bench_isogrid [--source SIDE | --write-goldens SIDE | --check-goldens FILE | \
-         --bench SIDE [--single] | --switch SIDE | --flips SIDE COUNT | --empty SIDE | --cli]"
+         --bench SIDE [--single] | --switch SIDE | --flips SIDE COUNT | --plateau SIDE WARMUP COUNT | --empty \
+         SIDE | --cli]"

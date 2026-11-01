@@ -163,7 +163,8 @@ let pick_run () =
   let cook = cooked ~lit ~cook sunflower ~prepared in
   check (!prepared = before + 1) "an unchanged highlight prepares nothing";
   let cook = cooked ~cook sunflower ~prepared in
-  check (!prepared = before + 2) "deselecting prepares once";
+  check (!prepared = before + 1) "deselecting takes the first preparation back from the cache";
+  check ((Cook.stats cook).misses = misses) "deselecting does not recook";
   check
     ((List.hd (Cook.pieces cook)).prepared.Cook.geometry
     == Result.get_ok (Sop.Payload.geometry piece.output.payload))

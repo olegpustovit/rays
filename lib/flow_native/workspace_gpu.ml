@@ -754,6 +754,7 @@ let close t =
   if not t.closed then begin
     Mutex.lock t.jobs_lock;
     t.mailbox_closed <- true;
+    List.iter (Option.iter Flow_sop.Lower.forget_backend) [ t.backend; t.proxy ];
     let diagnostic = error "The workspace GPU service closed before the request ran." in
     while not (Queue.is_empty t.jobs) do
       let job = Queue.take t.jobs in

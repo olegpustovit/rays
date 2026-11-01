@@ -117,7 +117,9 @@ type site = {
   slots : slot Dynarray.t;
   mutable shown : runner option;
   mutable plan : Flow_ir.Packed.Host.plan option option;  (** from its first unbound region *)
-  mutable unbound : Flow_ir.Packed.t option;
+  mutable shape : (int array * Flow_ir.Packed.instruction array) option;
+      (** the uniform widths and code of the region: a site outlives its lowering, so it keeps no
+          [Packed.t], which holds that lowering's whole program and source *)
   mutable inputs : Flow_ir.Packed.Host.inputs option;  (** the plan's inputs, refilled per call *)
 }
 
@@ -552,14 +554,14 @@ let resident_scope ?(uint32 = false) ~fast t =
     slot.held <- p :: slot.held;
     v
   in
-  let integer_source (packed : Flow_ir.Packed.t) source =
+  let integer_source code source =
     uint32
     && Array.exists
          (fun code ->
            match snd (Trace.flat [] code) with
            | Flow_ir.Packed.Int_input i -> i = source
            | _ -> false)
-         packed.code
+         code
   in
   let iota ?(integer = uint32) length =
     if not integer then iota t length
@@ -659,7 +661,7 @@ let resident_scope ?(uint32 = false) ~fast t =
             slots = Dynarray.create ();
             shown = None;
             plan = None;
-            unbound = None;
+            shape = None;
             inputs = None;
           }
         in
@@ -789,13 +791,13 @@ let resident_scope ?(uint32 = false) ~fast t =
       match site.inputs with
       | Some inputs -> inputs
       | None ->
-          let widths = (P.view (Option.get site.unbound)).uniform_widths in
+          let widths, code = Option.get site.shape in
           let inputs : P.inputs =
             {
               arrays = Array.make (Array.length plan.plan_sources) [||];
               uniforms = Array.map (fun w -> Array.make w 0.) widths;
               tables = Array.make (Array.length plan.plan_uniforms) [||];
-              frame = Array.make (Array.length (Option.get site.unbound).code) 0.;
+              frame = Array.make (Array.length code) 0.;
               count = 0;
             }
           in
@@ -805,7 +807,7 @@ let resident_scope ?(uint32 = false) ~fast t =
     let bound_source s =
       match plan.plan_sources.(s) with
       | P.Argument i -> bound args.(i)
-      | Argument_range _ -> iota ~integer:(integer_source (Option.get site.unbound) s) !n
+      | Argument_range _ -> iota ~integer:(integer_source (snd (Option.get site.shape)) s) !n
     in
     let bound_table u =
       Option.map
@@ -865,9 +867,9 @@ let resident_scope ?(uint32 = false) ~fast t =
             let input i =
               match (bound values.arrays.(i), shapes.(i)) with
               | (Some _ as b), _ -> b
-              | None, Range _ -> iota ~integer:(integer_source packed i) values.count
+              | None, Range _ -> iota ~integer:(integer_source packed.code i) values.count
               | None, _ when uint32 && indices.(i) ->
-                  iota ~integer:(integer_source packed i) values.count
+                  iota ~integer:(integer_source packed.code i) values.count
               | None, _ -> None
             in
             (* a bound input is not uploaded: it needs no float copy, only its length *)
@@ -900,7 +902,7 @@ let resident_scope ?(uint32 = false) ~fast t =
       let site = site packed in
       if site.plan = None then begin
         site.plan <- Some (P.plan packed);
-        site.unbound <- Some packed
+        site.shape <- Some ((P.view packed).uniform_widths, packed.code)
       end;
       match site.run with
       | None -> None

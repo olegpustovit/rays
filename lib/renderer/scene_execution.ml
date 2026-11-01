@@ -170,6 +170,14 @@ type sampled_draw = {
 type scene3_entry = sampled_draw
 type prepared_scene3 = { entries : scene3_entry array }
 
+let borrows_unregistered owner prepared =
+  Array.exists
+    (fun entry ->
+      match entry.draw.mesh.key with
+      | Gpu_vertices name -> not (Hashtbl.mem owner.gpu_vertex_registry (borrowed name))
+      | Host _ -> false)
+    prepared.entries
+
 type cached = {
   mutable key : string;
   mutable payload_hash : string;

@@ -47,6 +47,16 @@ let with_cache_context context f =
   Domain.DLS.set current_cache_context (Some context);
   Fun.protect ~finally:(fun () -> Domain.DLS.set current_cache_context previous) f
 
+(* a layer whose borrowed stream went is never drawn again; it does not wait for eviction *)
+let sweep_retained owner =
+  Option.iter
+    (fun context ->
+      let stale = ref [] in
+      Retained_table.iter context.retained_draws (fun layer _ ->
+          if Renderer.Scene_execution.borrows_unregistered owner layer then stale := layer :: !stale);
+      List.iter (Retained_table.remove context.retained_draws) !stale)
+    (Domain.DLS.get current_cache_context)
+
 let draws_of_prepared (staged : Scene.Layer.staged_native) prepared =
   match staged.retained with
   | None -> Array.to_list prepared.Renderer.Scene_execution.entries |> List.map draw_of_scene3_entry
@@ -165,6 +175,7 @@ let render ~execution ~density ~width ~height scene =
                               | Error error -> Error (Lower error)
                               | Ok batch -> lower (batch :: reversed) rest)
                           | Scene.Layer.Scene3_layer prepared :: rest -> (
+                              sweep_retained (Renderer.Native.gpu_vertices_owner execution);
                               let draws = draws_of_prepared staged prepared in
                               match
                                 Renderer.Native.adopt_retained_view submission ~density

@@ -1,0 +1,7 @@
+ab round=1 route=production present_mean_s=0.698435 cook_mean_s=0.398661 load:  9:45  up 24 days,  3:18, 1 user, load averages: 10.22 10.98 11.10
+ab round=1 route=cpu present_mean_s=1.272130 cook_mean_s=0.894537 load:  9:46  up 24 days,  3:19, 1 user, load averages: 17.85 12.75 11.73
+ab round=2 route=cpu present_mean_s=1.170447 cook_mean_s=0.821010 load:  9:47  up 24 days,  3:19, 1 user, load averages: 15.09 12.81 11.81
+ab round=2 route=production present_mean_s=0.692597 cook_mean_s=0.391837 load:  9:48  up 24 days,  3:20, 1 user, load averages: 16.16 13.37 12.07
+ab round=3 route=production present_mean_s=0.678652 cook_mean_s=0.380155 load:  9:48  up 24 days,  3:21, 1 user, load averages: 15.10 13.59 12.22
+ab round=3 route=cpu present_mean_s=1.185774 cook_mean_s=0.839015 load:  9:49  up 24 days,  3:22, 1 user, load averages: 17.05 13.95 12.41
+ab side=64 flips=16 rounds=3 median_present_s cpu=1.185774 production=0.692597 ratio=0.584

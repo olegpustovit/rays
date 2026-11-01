@@ -414,6 +414,7 @@ let pick_in_views value focused ~core ~camera ~extra ~area ~modifiers ~(input : 
   (core, pick_press)
 
 let update_with value frame ~inspector =
+  let drawn_before = value.drawn in
   let value = follow_focus value frame in
   let ui = value.core.Editor_model.ui in
   let raw_frame = frame and extra, frame = V.begin_frame value.extra frame in
@@ -694,11 +695,26 @@ let update_with value frame ~inspector =
     | Ok () -> value
     | Error diagnostic -> { value with context_error = Some (Diagnostic.to_string diagnostic) }
   in
-  (autosave value ~now:frame.input.t, inspected)
+  let first_draws =
+    Document.Int_map.fold
+      (fun id (_, (prepared : Cook.prepared), _, _, _) found ->
+        match Document.Int_map.find_opt id drawn_before with
+        | Some (_, known, _, _, _) when known == prepared -> found
+        | _ -> prepared.geometry :: found)
+      value.drawn []
+  in
+  let presenting =
+    match (first_draws, value.presenting) with
+    | [], None -> None
+    | [], Some (_, pending) -> Some (value.core.clock (), pending)
+    | first_draws, _ -> Some (value.core.clock (), first_draws)
+  in
+  (autosave { value with presenting } ~now:frame.input.t, inspected)
 
 let update value frame = fst (update_with value frame ~inspector:ignore)
 
 let after_present value frame =
+  let value = observe_presented value in
   let value =
     match Flow_native.Workspace_host.save_pending value.host Canvas.save_screen_png with
     | Ok () -> value

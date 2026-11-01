@@ -91,6 +91,9 @@ type sampled_draw = {
 type scene3_entry = sampled_draw
 type prepared_scene3 = { entries : scene3_entry array }
 
+val borrows_unregistered : gpu_vertices_owner -> prepared_scene3 -> bool
+(** A draw names a borrowed stream that was unregistered: it can never be drawn again. *)
+
 val prepare_scene3 :
   clear:float * float * float * float ->
   clear_depth:float ->

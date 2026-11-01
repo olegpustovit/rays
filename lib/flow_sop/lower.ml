@@ -559,6 +559,14 @@ module Chain = struct
           ~floats:(floats_of geometry) seconds
     | _ -> ()
 
+  let observe_draw (gpu : Flow_ir.Gpu.config) geometry seconds =
+    match gpu.backend with
+    | Some backend
+      when gpu.policy = Flow_ir.Gpu.Measured
+           && not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)) ->
+        Attribute_kernel.Display_sink.observe_draw backend ~floats:(floats_of geometry) seconds
+    | _ -> ()
+
   (* the cheaper of the two samples nearest [floats], priced at [floats] *)
   let priced samples floats =
     match samples with
@@ -1561,6 +1569,16 @@ module Built = Lru.Make (String)
 
 let built = Built.create 64
 let built_lock = Mutex.create ()
+
+let built_for keep =
+  let found = ref [] in
+  Built.iter built (fun key (backend, _) -> if keep backend then found := key :: !found);
+  !found
+
+(* a closed owner's nodes hold its backend and whatever the backend reaches *)
+let forget_backend backend =
+  Mutex.protect built_lock (fun () ->
+      List.iter (Built.remove built) (built_for (fun held -> held == Some backend)))
 
 let geo_of args =
   let rec sources = function
@@ -4901,4 +4919,7 @@ let field_calls ?state ~live ~resolve lowered =
             | _ -> None))
 
 let observe_display = Chain.observe_display
-let chain_states () = Chain.states () + Attribute_kernel.Display_sink.live ()
+let observe_draw = Chain.observe_draw
+let chain_states () =
+  Chain.states () + Attribute_kernel.Display_sink.live ()
+  + Mutex.protect built_lock (fun () -> List.length (built_for Option.is_some))

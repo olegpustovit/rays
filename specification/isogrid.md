@@ -22,7 +22,7 @@ substitute or Scene/SOP web export is part of this work.
 | S7 deferred topology | Done | Non-forcing metadata, single racing materialisation, release orders, CPU consumers; full RDK/SOP/gate checks |
 | S8 resident construction | Done | Frozen 24³/64³ zero-payload publication and full parity, typed validation/ownership, host calls, CPU readers, cancellation, capacity replay and strict empty-offset checks; exit audit below |
 | S9 coloured quad viewport | Done | Maze/Coral exact raster/modes/orbit/frame/shadow, zero payload, static frames, actual picking/inspection readers, full editor shot and full native gate pass; production policy remains S10 |
-| S10 production placement/lifetimes | In progress | Unforced resident 64³ route (P, N, Cd, topology; zero payload, 165 KB renderer upload per flip) and paired 0.60x time to present; missing: strict-equality retention gates (24³ 200-selector alias and 64³ flips) fail, measured display sink underestimates CPU post-cook, `test_viewport_pick` failure unexplained |
+| S10 production placement/lifetimes | In progress | Unforced resident 64³ route, 24³ strict gate, 64³ plateau, paired 0.584x; `buffer_creations` at 64³ is reported as turnover (194 a cycle, live handles flat at 960), still strict at 24³; awaiting the native and shipping runs |
 | S11 close-out | In progress | Incremental private-CMI ordering fixed; specifications, full acceptance audit and shipping/scale/native checks remain |
 
 ## S0 measurements
@@ -2521,3 +2521,98 @@ versions of those checks are not added because no bound was shown.
 
 Open: `test_viewport_pick` ("deselecting prepares once") fails under load, also with `cook.ml` restored to
 the committed version, and passed twice in isolation; not explained. S10 stays In progress.
+
+### S10 retention roots, plateau and paired recheck (2026-11-01)
+
+Load average 6 to 40 throughout (the owner's VM); wall times are noisy. Logs below are in
+`benchmarks/isogrid/`, prefix `s10-final-`.
+
+**A. 24³ selector gate: passes, unchanged.** `tools/dune` still runs `--flips 24 200`; the warmup is one
+8-edit cycle; the comparison is the old strict one (`cache_snapshots` equal, retained final <= warm).
+38 s wall (was 27.69 s; over the 30 s alias budget, in `@qualification-scale`). Every digest matched.
+
+| Field | Before, warm / final | Now, warm / final |
+| --- | ---: | ---: |
+| Retained workload words | 18,793,202 / 23,641,621 | 15,591,473 / 15,590,099 |
+| Held buffers | 3 / 0 | 36 / 36 |
+| Registrations | 1 / 0 | 1 / 1 |
+| Flow buffer creations | 213 / 213 | 225 / 225 |
+| Flow pipelines / renderer pipelines | 10 / 96 | 10 / 96 |
+| Live handles | 530 / 541 | 542 / 542 |
+
+Present mean/p95/max 83.0/150.1/160.9 ms, evaluate 26.9/95.7/99.1 ms (gate 150 ms), 168 MB allocated per
+edit, handles 0 at close. Three causes:
+
+1. The bench's digest forced each mesh. A first read gives the resident buffer back
+   (`Flow_gpu.Run.materialise`), so from the second visit `display` refused ("Resident topology streams
+   cannot be pinned", then "Resident positions ... unavailable") and each surface built a host mesh.
+   Registrations went to 0 and the 200 flips measured the host fallback, not the display route. Memprof
+   named `Surface.host` and the renderer packers. The digest now reads the pinned bytes in place, which
+   checks what the display binds rather than a cached CPU copy. A kept read is still covered by
+   `test_placement_native` and `test_isogrid_viewport`.
+2. `Host.sites` kept each site's whole `Packed.t` in `unbound`, which pins that lowering's program (up to
+   1.28 M words a site). Each resident flip replaced sites, so they stopped sharing with `Built`: its unique
+   reach went from 416,944 to 2,917,814 words while its own size and the model's stayed flat. Found with
+   pairwise reach overlaps, since no single root grew. A site now keeps the widths and code it reads
+   (`shape`).
+3. `retained_draws` filled toward its 16 entries (about +4,600 words) with layers whose borrowed stream was
+   gone, which can never be drawn again. They are swept (`Scene_execution.borrows_unregistered`).
+
+Refuted by measurement: unswept worker pools (live words identical after forcing slices on the workers);
+the warm snapshot's release phase, finalisers and tokens as the cause (the step tracked flips of resident
+recipes, about 400,000 words each); `Built` keeping an old entry (refreshing it on a hit changed nothing,
+reverted). The roughly 20,000 words a cycle seen under `--retainers` is absent without Memprof.
+The old "sampled_words" estimator was biased by block size and is now `n_samples` scaled.
+
+Known and not changed: a user who materialises every recipe (a pick on each) gets one host copy per
+surface, 23.82 M words at 24³ in the forced run, flat after that, and those copies are not charged to the
+prepared cache's 64 MiB.
+
+**B. 64³: bounded; one named field stays unequal, pending a decision.** `--plateau SIDE WARMUP COUNT`
+(new; bench only) uses the same strict comparison after a longer warmup and prints a snapshot per cycle. No
+capacity ceiling or heap budget is in the gate. Warmup 96 flips (12 cycles), then:
+
+| Route | Flips measured | Warm cycles 1 / 4 / 7 / 10 (M words) | Warm / final words | Handles |
+| --- | ---: | --- | ---: | ---: |
+| Production | 320 | 100.61 / 123.41 / 128.95 / 129.36 | 129,357,856 / 129,357,321 | 960 / 960 |
+| `--no-device` | 64 | 135.01 / 222.62 / 241.54 / 241.54 | 241,545,036 / 241,543,801 | 346 / 346 |
+
+Between cycles production saws between 129.36 and 129.38 M with no trend over 40 cycles; final is below warm.
+Session entries 14, payload 232,256,290 bytes, preparations 2 / 50,913,456 bytes, registrations 2, held 42
+and pipelines are equal. `--no-device` passes the whole comparison. Production fails it on one field:
+`buffer_creations` 2,338 to 10,098, exactly 194 a cycle. It is a monotonic counter: at 64³ the recipes exceed
+the session's 256 MiB, so flips recook, and buffers past the pool's free budget (`Run.free_budget`, 256 MiB)
+are destroyed and created again, while live handles stay flat. It cannot be equal under this behaviour, and
+it is not relaxed here. The growth is not a leak. Production owners measured warm to final
+(`--roots 64 64`): `Host.sites` 21 to 32 entries, its capacity (`host.ml`), 34.0 to 48.4 M words; `Host.runners`,
+capacity 64, 3.3 to 14.8 M words. These overlap and count entries, not bytes. The CPU route's owners were not traced
+separately; the renderer's byte caps are the likely owners (hypothesis). The sawtooth's trend is part
+`shown` (+152 words a cycle, filtered at 64, `workspace_gpu.ml`); the rest of the +1,208 a cycle was
+not located and is bounded only by the measurement above.
+
+**C. `test_viewport_pick`: test corrected.** Deselecting returns the same output, so `prepare_cached` hits the
+first preparation: +1, not +2. That is right, since the key is the same immutable output and the preparation
+is pure. The test now asserts +1, no recook, and the geometry restored. From the code the failure dates from
+652db6a7 (S5's cache): the path is textually the same since, and 9bb09327 has no cache. No worktree was built.
+This log shows no `@lib/rays_editor/runtest` before S10, which would explain it going unnoticed (hypothesis).
+The earlier "passed in isolation" was not reproduced and stays unexplained.
+
+**D. CPU display sink: fed.** `Display_sink` adds the time from a host mesh's frame to its first presentation
+(`observe_draw`, smallest rate kept), on the editor's clock in place of `Unix.gettimeofday`. At 998,592 points
+the model reads 0.179 s on the CPU route (0.202 s in the production run) against about 0.05 s before; measured
+in the same CPU run, flip 7: prepare 0.133 s plus about 0.098 s after the listed phases, 0.231 s (arithmetic on
+one sample, assuming the phases do not overlap); 0.215 s earlier. Being a minimum, it stays somewhat low. The
+verdict at 64³ is unchanged: cpu 0.419 s, device 0.037 s.
+
+**E. `Built` past close: fixed.** `Workspace_gpu.close` drops its backend's nodes (`Lower.forget_backend`);
+`chain_states` counts entries holding a backend, asserted zero by `test_placement_native`.
+
+**Win rechecked.** `bench_isogrid --ab 64 16 3`: production 0.698 / 0.693 / 0.679 s, CPU 1.272 / 1.170 / 1.186 s;
+medians 0.693 against 1.186 s, ratio 0.584 (was 0.602); cook 0.39 against 0.84 s.
+
+Commands, all passing, with wall time including any rebuild: `@tools/isogrid-selector-lifetimes` 38 s,
+`@lib/rays_editor/test/test_viewport_pick` under 4 s, `@lib/rays_editor/runtest` 27 s,
+`.../test_placement_native` 4 s, `.../test_placement_lifetimes` 5 s, `.../test_isogrid_viewport` 3 s,
+`@lib/flow_sop/runtest` 16 s, `@test/dependency_gate` 3 s, `@lib/renderer/runtest` 2 s,
+`@lib/flow_gpu/runtest` 1 s. Not run here: the whole `@runtest`, `@runtest-native`, `@smoke-all`, `--ship`.
+The sketch's SHA-256 still starts 0fdb9b0ebec8f5fe.
