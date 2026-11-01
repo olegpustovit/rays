@@ -165,9 +165,10 @@ let () =
             time (after.status_reads - before.status_reads);
           (* SOP factories retain their creation-time Measured policy: these
              small captures stay on CPU. Each warmed frame runs two GPU image
-             kernels; first-use calibration is reported separately above. *)
-          if time = 1. then assert (after.status_reads - before.status_reads = 2))
-        [ 0.; 1. ];
+             kernels; the writes' first cooks measure the CPU, and the frame that
+             first decides calibrates the device (time 1). *)
+          if time = 2. then assert (after.status_reads - before.status_reads = 2))
+        [ 0.; 1.; 2. ];
       assert (generation parent > parent_generation && rgba saved = saved_bytes);
       let stats, _, _, _, _ = Editor.Private.image_gpu_stats display in
       Printf.printf "workspace_geometry_capture,startup_status_reads=%d,status_reads=%d,readback_bytes=%d\n%!"

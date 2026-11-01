@@ -130,11 +130,22 @@ module Display_sink : sig
   val rates : Flow_ir.Gpu.backend -> float * float
   (** Seconds per float (host mesh, resident mesh); [infinity] while unmeasured. *)
 
+  val priced : (int * float) list -> int -> float option
+  (** The cheaper rate of the two [(size, seconds per unit)] samples nearest [size], priced at
+      [size]: a route's first cook pays one-time preparation. [None] below two samples. *)
+
+  val cpu_write : Flow_ir.Gpu.backend -> string -> count:int -> float option
+  (** The measured seconds of an attribute write site's CPU route at [count] elements. *)
+
+  val observe_cpu_write : Flow_ir.Gpu.backend -> string -> count:int -> float -> unit
+  (** One CPU cook of a write site. *)
+
   val live : unit -> int
   (** Backends still owning rates, for the close checks. *)
 end
 
 val node :
+  ?clock:(unit -> float) ->
   ?state:Flow.Eval.state ->
   ?reference:bool ->
   ?strict:bool ->

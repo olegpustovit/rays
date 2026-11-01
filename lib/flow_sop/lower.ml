@@ -444,6 +444,12 @@ let geometry_arrays_data args =
 (* A kernel over data that reads its cook context (an inlined body's seed, frame or time) is built
    per context from the specialized data: the last context's
    build is kept. The node at the default context gives the identity, facts and strict refusals. *)
+let cook_wrapped node ~node_id context payloads =
+  Sop.Node.Build.cook node
+    (Sop.Context.with_cpu_consumers context ~node:(Sop.Node.id node)
+       (Sop.Context.cpu_consumers context node_id))
+    payloads
+
 let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
   let reads = Attribute_kernel.context_reads value in
   if reads = Sop.Context.Dependencies.static then build Fun.id
@@ -472,11 +478,7 @@ let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
               Atomic.set last (Some (key context, node));
               node
         in
-        let context =
-          Sop.Context.with_cpu_consumers context ~node:(Sop.Node.id node)
-            (Sop.Context.cpu_consumers context node_id)
-        in
-        Sop.Node.Build.cook node context payloads)
+        cook_wrapped node ~node_id context payloads)
     |> Sop.Node.Build.with_input_use (Sop.Node.input_use base)
     |> Sop.Node.Build.with_facts (Sop.Node.facts base)
 
@@ -567,15 +569,7 @@ module Chain = struct
         Attribute_kernel.Display_sink.observe_draw backend ~floats:(floats_of geometry) seconds
     | _ -> ()
 
-  (* the cheaper of the two samples nearest [floats], priced at [floats] *)
-  let priced samples floats =
-    match samples with
-    | _ :: _ :: _ ->
-        let distance (n, _) = Float.abs (log (float (max n 1) /. float (max floats 1))) in
-        let nearest = List.sort (fun a b -> Float.compare (distance a) (distance b)) samples in
-        let rate = List.fold_left (fun m (_, r) -> Float.min m r) infinity (List.filteri (fun i _ -> i < 2) nearest) in
-        Some (rate *. float floats)
-    | _ -> None
+  let priced = Attribute_kernel.Display_sink.priced
 
   let place ~(gpu : Flow_ir.Gpu.config) ~profile ~clock ~owner ~readers =
     if gpu.policy = Flow_ir.Gpu.Qualification then (true, fun _ ~device:_ _ -> ())
@@ -916,9 +910,10 @@ let guarded guards node =
            (Sop.Node.dependencies node) guards)
       ~input_policy:(Sop.Node.Build.input_policy node)
       ~inputs:(Sop.Node.Build.input_array node)
-      (fun ~node_id:_ context payloads ->
+      (fun ~node_id context payloads ->
         Result.bind (check_guards guards context) (fun () ->
-            Sop.Node.Build.cook node context payloads))
+            cook_wrapped node ~node_id context payloads))
+    |> Sop.Node.Build.with_input_use (Sop.Node.input_use node)
     |> Sop.Node.Build.with_facts (Sop.Node.facts node)
 
 let attribute_data args =
@@ -946,7 +941,7 @@ let () =
 let is_resource (n : E.node) =
   Operators.lowering n.kind = Some Operators.Resource && (n.kind <> "exact" || n.ty = Ty.image)
 
-let attribute_node ?(check = true) ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source
+let attribute_node ?(check = true) ~clock ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source
     ?state ?elems ?selection ?default ?guard ?(prior = []) ?(owner = Rdk.Attribute.Point)
     ?(kind = "vec3") ?deletes ~name ~values ~sources inputs =
   let data =
@@ -965,7 +960,7 @@ let attribute_node ?(check = true) ~strict_body ~reference ~profile ~approx ~gpu
   and prior = List.map (fun (name, kind, v) -> (name, kind, specialize v)) prior in
   if strict_body && check then
     ignore (ok (Attribute_kernel.prepare ~strict:true ~sources inputs values));
-  Attribute_kernel.node ?state ?elems ?selection ?default ?guard ~prior ~gpu ~strict:strict_body
+  Attribute_kernel.node ~clock ?state ?elems ?selection ?default ?guard ~prior ~gpu ~strict:strict_body
     ~reference ~profile ~approx ~owner ~kind ?deletes ~source:(Lazy.force kernel_source) ~name
     ~values ~sources inputs
 
@@ -1578,7 +1573,7 @@ let built_for keep =
 (* a closed owner's nodes hold its backend and whatever the backend reaches *)
 let forget_backend backend =
   Mutex.protect built_lock (fun () ->
-      List.iter (Built.remove built) (built_for (fun held -> held == Some backend)))
+      List.iter (Built.remove built) (built_for (function Some held -> held == backend | None -> false)))
 
 let geo_of args =
   let rec sources = function
@@ -3037,7 +3032,7 @@ struct
             (String.concat "," (List.map (fun (n, k, _) -> n ^ ":" ^ k) prior)))
          data inputs
     @@ fun () ->
-    attribute_node ~check:strict_body
+    attribute_node ~check:strict_body ~clock
       ~strict_body:(strict_body || inlined node)
       ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source:(kernel_source_of node) ?state
       ?elems ?selection ?default ?guard ~prior ~owner ~kind ~deletes ~name ~values ~sources inputs

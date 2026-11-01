@@ -16,6 +16,8 @@ let compile body =
   compile_source
     ("(workspace placement (graph g :context host (map (fn [i] " ^ body ^ ") (array/range 32768))))")
 
+let name_of (p : Flow_ir.placement) = Flow_ir.Cost.reason_name p.reason
+
 let () =
   let packed = compile "(+ (sin (+ i t)) 0.25)" in
   let handles = Ogpu.Impl.live_handles () in
@@ -199,7 +201,9 @@ let retained_generations () =
           let small_session = string_ok (Sop.Session.create ~max_entries:0 ~max_payload_bytes:0) in
           Fun.protect ~finally:(fun () -> Sop.Session.close small_session) (fun () ->
               let context = string_ok (Sop.Context.create ~domains:1 ()) in
-              let output = ok (Sop.Session.cook ~cpu_consumers:0 small_session ~context small_node) in
+              let cook () = ok (Sop.Session.cook ~cpu_consumers:0 small_session ~context small_node) in
+              ignore (cook (), cook ());
+              let output = cook () in
               let geometry = ok (Sop.Payload.geometry output.payload) in
               assert (not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)));
               let placements = Flow_ir.Profile.placements small.profile in
@@ -244,6 +248,12 @@ let retained_generations () =
                     string_ok (Rays.Canvas.render target frame);
                     string_ok (Rays.Canvas.pixels target)
                   in
+                  (* the site's first cooks measure its CPU route *)
+                  List.iter
+                    (fun time ->
+                      let context = string_ok (Sop.Context.create ~domains:1 ~time ()) in
+                      ignore (ok (Sop.Session.cook ~cpu_consumers:0 session ~context node)))
+                    [ -2.; -1. ];
                   let previous = ref (cook 0.) in
                   let expected = ref (draw canvas !previous) in
                   assert (Array.exists (fun (c : Rays_math.Color.t) -> c.r + c.g + c.b > 0) !expected);
@@ -375,7 +385,7 @@ let chain_counterexamples () =
                 for _ = 1 to 4 do ignore (cook ?readers n) done;
                 go 4
               in
-              let name (p : Flow_ir.placement) = Flow_ir.Cost.reason_name p.reason in
+              let name = name_of in
               let large = 65536 in
               (* unknown consumers never leave the CPU, whatever the sizes *)
               let resident, p = cook large in
@@ -406,16 +416,73 @@ let chain_counterexamples () =
                  (missing_consumer)\n%!"
                 large (name free) (Option.get free.cpu_seconds) (Option.get free.device_seconds)
                 (Option.get one.device_seconds) (name small)
-                (Option.get small.cpu_seconds) (Option.get small.device_seconds);
-              (* a host mesh's first draw adds to its display sink, the smallest rate kept *)
-              let module Sink = Flow_sop.Attribute_kernel.Display_sink in
-              let backend = Option.get config.Flow_ir.Gpu.backend in
-              Sink.observe backend ~resident:false ~floats:1_000_000 1.;
-              let base = fst (Sink.rates backend) in
-              Sink.observe_draw backend ~floats:1_000_000 2.;
-              Sink.observe_draw backend ~floats:1_000_000 1.;
-              Sink.observe_draw backend ~floats:1_000_000 3.;
-              if Float.abs (fst (Sink.rates backend) -. base -. 1e-6) > 1e-12 then failwith "display sink first draw")));
+                (Option.get small.cpu_seconds) (Option.get small.device_seconds));
+          (* a CPU-origin fused chain whose noise a card's check guards and the frame drives, as
+             animated: its known consumers reach the write through the guard, its first cooks measure
+             the CPU, then the decision is the shared comparison of measured numbers *)
+          let animated side readers =
+            let lowered = ok (Flow_sop.Lower.workspace ~gpu:config (ok (Flow.Syntax.parse (Printf.sprintf
+                "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" \
+                 :connectivity \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" \
+                 :seed 7 :offset [(get (frame/input) :t) 0.0 0.0]) (sop/transform :translate [0.0 1.0 0.0]))))"
+                side side)))) in
+            let graph = List.hd lowered.graphs in
+            let lane = Flow_sop.Value_lane.create () in
+            let session = string_ok (Sop.Session.create ~max_entries:4 ~max_payload_bytes:(1 lsl 30)) in
+            Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
+                List.init 5 (fun frame ->
+                    let time = float frame /. 60. in
+                    let live = Input.at_time time in
+                    let resolved =
+                      ok (Flow_sop.Value_lane.resolve ~gpu:config ~live lane ~time graph.network)
+                    in
+                    let node = string_ok (Sop.Edit_graph.compile_node resolved.geometry
+                        ~node_id:(Option.get graph.root)) in
+                    let context = string_ok (Sop.Context.create ~time ~input:live ()) in
+                    let output = ok (Sop.Session.cook ~cpu_consumers:readers session ~context node) in
+                    let geometry = ok (Sop.Payload.geometry output.payload) in
+                    let write =
+                      List.find
+                        (fun (p : Flow_ir.placement) -> fst p.owner <> [ "sop/mesh_planes" ])
+                        (Flow_ir.Profile.placements lowered.profile)
+                    in
+                    (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry), write)))
+          in
+          let check_chain ?(fresh = true) side readers =
+            let frames = animated side readers in
+            List.iteri
+              (fun i ((resident, (p : Flow_ir.placement))) ->
+                if p.cpu_consumers <> Some readers then failwith "chain: consumers lost";
+                if fresh && i < 2 then
+                  assert (p.reason = No_cost_evidence && p.cpu_seconds = None && not resident)
+                else begin
+                  assert (p.cpu_seconds <> None && p.device_seconds <> None);
+                  assert (
+                    p.reason
+                    = Flow_ir.Cost.choose ~cpu_seconds:p.cpu_seconds ~device_seconds:p.device_seconds
+                        ~resident:false ~cpu_consumers:readers);
+                  if i > 2 then assert (resident = Flow_ir.Cost.on_device p.reason)
+                end)
+              frames;
+            let _, last = List.nth frames 4 in
+            Printf.printf "Animated CPU-origin chain %d^2, %d readers: %s (cpu %.6f s, device %.6f s)\n%!"
+              side readers (name_of last) (Option.get last.cpu_seconds) (Option.get last.device_seconds);
+            last
+          in
+          (* the measured cost of 262,144 noise evaluations against one kernel: orders of magnitude *)
+          let large = check_chain 512 0 in
+          if large.reason <> Device_measured_cheaper then failwith "chain: device not chosen at 512^2";
+          ignore (check_chain ~fresh:false 512 1);
+          ignore (check_chain ~fresh:false 8 0);
+          (* a host mesh's first draw adds to its display sink, the smallest rate kept *)
+          let module Sink = Flow_sop.Attribute_kernel.Display_sink in
+          let backend = Option.get config.Flow_ir.Gpu.backend in
+          Sink.observe backend ~resident:false ~floats:1_000_000 1.;
+          let base = fst (Sink.rates backend) in
+          Sink.observe_draw backend ~floats:1_000_000 2.;
+          Sink.observe_draw backend ~floats:1_000_000 1.;
+          Sink.observe_draw backend ~floats:1_000_000 3.;
+          if Float.abs (fst (Sink.rates backend) -. base -. 1e-6) > 1e-12 then failwith "display sink first draw"));
   assert (Ogpu.Impl.live_handles () = baseline);
   (* the placement evidence went with its owner's backend *)
   Gc.full_major ();

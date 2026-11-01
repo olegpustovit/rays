@@ -306,6 +306,7 @@ module Executor : sig
     ?expected_count:int ->
     ?cpu_consumers:int ->
     ?cpu_penalty:float ->
+    ?cpu_cost:(owner:string list * int list -> count:int -> float option) ->
     ?gpu:Gpu.config ->
     program ->
     live:Flow.Eval.live ->
@@ -314,7 +315,8 @@ module Executor : sig
       in fast precision when the shared measured comparison places it: one dispatch, each output
       kept on the device as its planes (a field of width [w]: [w] arrays of the count), by field
       name, read only when they materialise. [None] keeps the record on the CPU, also when the
-      device fails. An input array the device already holds (the same array as the last dispatch's)
+      device fails. [cpu_cost] prices the CPU route of this site from its measured cooks; [None] from
+      it is {!No_cost_evidence} and the CPU; without it the route is priced from the cost table. An input array the device already holds (the same array as the last dispatch's)
       is not uploaded again. [resident v] names a source bound as the value [v] (an attribute read)
       that the device already holds: its placeholder ({!Gpu.planes}) and count, passed instead of
       evaluating it.

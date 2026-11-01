@@ -1754,6 +1754,7 @@ module Executor = struct
      region, one dispatch and a readback per output, by field name. [None] leaves the record to
      the CPU: the device declines or fails, or the cost model keeps it there. *)
   let record_on_device ?state ?resolve ?resident ?expected_count ?cpu_consumers ?(cpu_penalty = 0.)
+      ?cpu_cost
       ?(gpu = Gpu.default) program ~live =
     Option.iter
       (fun count -> if count < 0 then invalid_arg "record_on_device: negative consumers")
@@ -1795,9 +1796,18 @@ module Executor = struct
             else
               let readers = Option.get cpu_consumers in
               let cpu_seconds =
-                Some (Cost.estimate (Cost.packed ~count) ~count +. held_readback +. cpu_penalty)
+                Option.map
+                  (fun seconds -> seconds +. held_readback +. cpu_penalty)
+                  (match cpu_cost with
+                  | None -> Some (Cost.estimate (Cost.packed ~count) ~count)
+                  | Some cost ->
+                      let _, path, iter = Packed.site merged in
+                      cost ~owner:(path, iter) ~count)
               in
+              (* no CPU evidence yet decides nothing, so it calibrates nothing *)
               let device_seconds =
+                if Option.is_none cpu_seconds then None
+                else
                 Option.bind (backend.cost ?inputs ~fast:true merged ~count) (fun seconds ->
                     if not (Float.is_finite seconds && seconds >= 0.) then None
                     else Some (seconds +.
@@ -1806,7 +1816,8 @@ module Executor = struct
               in
               let reason = Cost.choose ~cpu_seconds ~device_seconds ~resident:held ~cpu_consumers:readers in
               report merged (Some count) reason cpu_seconds device_seconds;
-              Cost.on_device reason || (preflight && reason = No_cost_evidence)
+              Cost.on_device reason
+              || (preflight && reason = No_cost_evidence && Option.is_some cpu_seconds)
           in
           let preflight =
             if Option.is_none resident && scalar_uniforms merged then

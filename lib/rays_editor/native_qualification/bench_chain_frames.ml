@@ -2,11 +2,13 @@
    points (GRID_SIDE), cooked frame after frame as the editor does (Value_lane.resolve, then one
    session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments; FRAMES (12);
    CONNECTIVITY (Points) the grid's; TEXT replaces the whole workspace; CPU=1 lowers without the
-   device.
+   device; QUALIFICATION=1 the fixed device rule instead of the measured policy; READERS (0) the
+   root's known CPU readers, as the editor's display declares; NOREAD=1 leaves the result unread.
    Prints per frame: seconds (and the resolve's), dispatches, buffers created, uploads, pipelines
    compiled, whether P is resident, the seconds and bytes read back of P's bounds (the selected box
-   and framing, Geometry_view.bounds), the seconds reading P, and noise[1] (a read back); NODES=1
-   also each node's own seconds in the session. *)
+   and framing, Geometry_view.bounds), the seconds reading P, and noise[1] (a read back), then each
+   placement with its reason and seconds, the median cook of the second half last; NODES=1 also each
+   node's own seconds in the session. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 
@@ -25,6 +27,10 @@ let text =
 
 let () =
   let gpu = Flow_native.Workspace_gpu.create () in
+  if Sys.getenv_opt "QUALIFICATION" <> None then Flow_native.Workspace_gpu.qualification gpu;
+  let readers = try int_of_string (Sys.getenv "READERS") with Not_found -> 0 in
+  let noread = Sys.getenv_opt "NOREAD" <> None in
+  let times = ref [] in
   Fun.protect
     ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu)
     (fun () ->
@@ -85,13 +91,14 @@ let () =
               |> Result.get_ok
             in
             let output =
-              Sop.Session.cook session
+              Sop.Session.cook ~cpu_consumers:readers session
                 ~context:(Sop.Context.create ~time ~input:live () |> Result.get_ok)
                 node
               |> ok
             in
             let geometry = Result.get_ok (Sop.Payload.geometry output.payload) in
             let seconds = Unix.gettimeofday () -. start in
+            times := seconds :: !times;
             let after = stats () in
             (if Sys.getenv_opt "NODES" <> None then
                let rec walk n =
@@ -105,11 +112,11 @@ let () =
                walk node);
             let resident = Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry) in
             let start = Unix.gettimeofday () in
-            ignore (Rdk_rays.Geometry_view.bounds geometry);
+            if not noread then ignore (Rdk_rays.Geometry_view.bounds geometry);
             let bounds_seconds = Unix.gettimeofday () -. start in
             let bounded = stats () in
             let start = Unix.gettimeofday () in
-            ignore (Rdk.Packed.Float3.get (Rdk.Geometry.positions geometry) 0);
+            if not noread then ignore (Rdk.Packed.Float3.get (Rdk.Geometry.positions geometry) 0);
             let read_seconds = Unix.gettimeofday () -. start in
             Printf.printf
               "frame %2d: %.4f s (resolve %.4f s), %d dispatches, %d buffers, %d uploads (%d \
@@ -127,10 +134,24 @@ let () =
               (bounded.materialisations - after.materialisations)
               read_seconds
               (match Rdk.Geometry.find_attribute ~owner:Point "noise" geometry with
+              | _ when noread -> nan
               | Some a -> (
                   match Rdk.Attribute.View.storage a with
                   | Rdk.Attribute.Float v -> v.(1)
                   | _ -> nan)
-              | None -> nan)
+              | None -> nan);
+            List.iter
+              (fun (p : Flow_ir.placement) ->
+                let seconds = Option.fold ~none:"unknown" ~some:(Printf.sprintf "%.6f") in
+                Printf.printf "  placement %s count=%s reason=%s cpu_s=%s device_s=%s readers=%s\n%!"
+                  (String.concat "/" (fst p.owner))
+                  (Option.fold ~none:"unknown" ~some:string_of_int p.count)
+                  (Flow_ir.Cost.reason_name p.reason) (seconds p.cpu_seconds) (seconds p.device_seconds)
+                  (Option.fold ~none:"unknown" ~some:string_of_int p.cpu_consumers))
+              (Flow_ir.Profile.placements lowered.profile)
           done;
+          let late = List.filteri (fun i _ -> i < max 1 (List.length !times / 2)) !times in
+          Printf.printf "median_cook_s=%.6f over last %d frames\n%!"
+            (List.nth (List.sort Float.compare late) (List.length late / 2))
+            (List.length late);
           Sop.Session.close session))

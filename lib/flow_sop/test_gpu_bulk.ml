@@ -136,6 +136,7 @@ let () =
      (sop/with_attr (sop/mesh_planes :points {:x (array/float 32) :y (array/float 32) :z (array/float 32)} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)) :P\n\
        (exact (map (fn [i] [(+ i t) 0 0]) (array/range 32))))))"
   in
+  let ticks = ref 0 in
   let captured ?(points = false) capture time =
     mock_time := time;
     planes := 0;
@@ -147,7 +148,10 @@ let () =
       else authored
     in
     let lowered =
-      L.workspace ~gpu ~clock:(fun () -> 0.) (Flow.Syntax.parse authored |> flow_ok) |> flow_ok
+      (* a clock that advances: the write's first cooks measure its CPU route *)
+      L.workspace ~gpu ~clock:(fun () -> incr ticks; float !ticks)
+        (Flow.Syntax.parse authored |> flow_ok)
+      |> flow_ok
     in
     let profile = lowered.profile in
     let graph = List.hd lowered.graphs in
@@ -163,10 +167,13 @@ let () =
     Fun.protect
       ~finally:(fun () -> Session.close session)
       (fun () ->
-        let output =
+        let cook () =
           Session.cook session ~context:(Sop.Context.create ~domains:1 ~time () |> get_string_ok) root
           |> flow_ok
         in
+        if capture then ignore (cook (), cook ());
+        planes := 0;
+        let output = cook () in
         let geometry = Sop.Payload.geometry output.payload |> flow_ok in
         if points then
           List.iter

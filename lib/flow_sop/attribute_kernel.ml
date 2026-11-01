@@ -1624,7 +1624,13 @@ let delete_after deletes cancel geometry =
 (* The measured display sinks of a backend: seconds per float the editor spent preparing a host mesh
    for display, and a resident one. Weakly keyed, so a closed owner's rates go with it. *)
 module Display_sink = struct
-  type t = { mutable host : float; mutable draw : float; mutable resident : float }
+  type t = {
+    mutable host : float;
+    mutable draw : float;
+    mutable resident : float;
+    writes : (string, (int * float) list) Hashtbl.t;
+        (* per write site, its recent CPU cooks (elements, seconds per element), at most 256 sites *)
+  }
 
   let registry : (Flow_ir.Gpu.backend Weak.t * t) list ref = ref []
   let lock = Mutex.create ()
@@ -1639,7 +1645,9 @@ module Display_sink = struct
         with
         | Some (_, rates) -> rates
         | None ->
-            let rates = { host = infinity; draw = infinity; resident = infinity } in
+            let rates =
+              { host = infinity; draw = infinity; resident = infinity; writes = Hashtbl.create 16 }
+            in
             let weak = Weak.create 1 in
             Weak.set weak 0 (Some backend);
             registry := (weak, rates) :: !registry;
@@ -1667,13 +1675,40 @@ module Display_sink = struct
     Mutex.protect lock (fun () ->
         ((rates.host +. if rates.draw < infinity then rates.draw else 0.), rates.resident))
 
+  let priced samples size =
+    match samples with
+    | _ :: _ :: _ ->
+        let distance (n, _) = Float.abs (log (float (max n 1) /. float (max size 1))) in
+        let nearest = List.sort (fun a b -> Float.compare (distance a) (distance b)) samples in
+        let rate =
+          List.fold_left (fun m (_, r) -> Float.min m r) infinity (List.filteri (fun i _ -> i < 2) nearest)
+        in
+        Some (rate *. float size)
+    | _ -> None
+
+  let cpu_write backend site ~count =
+    let rates = find backend in
+    Mutex.protect lock (fun () ->
+        priced (Option.value ~default:[] (Hashtbl.find_opt rates.writes site)) count)
+
+  let observe_cpu_write backend site ~count seconds =
+    if count > 0 then begin
+      let rates = find backend in
+      Mutex.protect lock (fun () ->
+          let old = Option.value ~default:[] (Hashtbl.find_opt rates.writes site) in
+          if old = [] && Hashtbl.length rates.writes >= 256 then Hashtbl.reset rates.writes;
+          Hashtbl.replace rates.writes site
+            ((count, seconds /. float count) :: List.filteri (fun i _ -> i < 7) old))
+    end
+
   let live () =
     Mutex.protect lock (fun () ->
         registry := List.filter (fun (weak, _) -> Weak.check weak 0) !registry;
         List.length !registry)
 end
 
-let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?gpu ?selection
+let node ?(clock = Unix.gettimeofday) ?state ?(reference = false) ?(strict = false) ?elems ?profile
+    ?approx ?gpu ?selection
     ?default ?guard ?(prior = []) ?(owner = A.Point) ?(kind = "vec3") ?(deletes = []) ~source ~name
     ~values ~sources inputs =
   let selected = selection <> None || default <> None in
@@ -1743,6 +1778,8 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
           Option.map (fun index -> geometries.(index)) (List.find_index (( = ) id) sources)
         in
         let resolve = resolve ~context ~geometry in
+        (* the site and count a measured decision asked about, and when it left this cook to the CPU *)
+        let asked = ref None and cpu_began = ref None in
         (* a cooked [:when] is decided before the values, which may read what it tests for *)
         let guarded =
           match guard with
@@ -1782,12 +1819,17 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                     if Array.for_all (fun geometry -> G.releasers geometry = []) geometries then None
                     else Some (resident_read ~geometry)
                   in
-                  (* beside resident positions a host-computed field makes a mixed mesh, which the display
-                     converts and uploads whole instead of borrowing *)
+                  (* a display borrows only a mesh resident whole: positions held already or written
+                     here, with this write's other outputs *)
+                  let whole =
+                    Rdk.Packed.Float3.resident (G.positions geometries.(0))
+                    || name = "P"
+                    || List.exists (fun (n, _, _) -> n = "P") prior
+                  in
+                  (* the CPU route leaves a host or mixed mesh, which the display converts and uploads *)
                   let cpu_penalty =
                     match (Sop.Context.cpu_consumers context node_id, gpu) with
-                    | Some 0, Some { Flow_ir.Gpu.backend = Some backend; _ }
-                      when name <> "P" && Rdk.Packed.Float3.resident (G.positions geometries.(0)) ->
+                    | Some 0, Some { Flow_ir.Gpu.backend = Some backend; _ } when whole ->
                         let g = geometries.(0) in
                         let floats = (G.point_count g * 9) + (G.primitive_count g * 6) in
                         let host, _ = Display_sink.rates backend in
@@ -1795,21 +1837,32 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                         else Flow_ir.Cost.readback ~count:floats ~width:1
                     | _ -> 0.
                   in
+                  let cpu_cost =
+                    Option.bind gpu (fun (gpu : Flow_ir.Gpu.config) ->
+                        Option.map
+                          (fun backend ~owner:(path, iter) ~count ->
+                            let site =
+                              String.concat "/" path ^ "#"
+                              ^ String.concat "," (List.map string_of_int iter)
+                            in
+                            asked := Some (backend, site, count);
+                            Display_sink.cpu_write backend site ~count)
+                          gpu.backend)
+                  in
                   Flow_ir.Executor.record_on_device ?state ~resolve
-                    ~cpu_penalty
+                    ~cpu_penalty ?cpu_cost
                     ?cpu_consumers:
                       (match Sop.Context.cpu_consumers context node_id with
-                      | Some 0
-                        when name <> "P"
-                             && not (Rdk.Packed.Float3.resident (G.positions geometries.(0))) ->
-                          (* a display borrows only a mesh resident whole: beside host positions
-                             the written field is read back to be drawn *)
+                      | Some 0 when not whole ->
+                          (* beside host positions the written field is read back to be drawn *)
                           Some 1
                       | readers -> readers)
                     ~expected_count:(owner_count geometries.(0) owner) ?resident ?gpu program ~live
               in
               Result.bind device (function
-                | None -> Ok None
+                | None ->
+                    cpu_began := Some (clock ());
+                    Ok None
                 | Some fields ->
                     (* in flight: the session settles the dispatch before a CPU reader, and
                        recooks this write on the CPU if its status fails *)
@@ -1945,6 +1998,10 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                                               ~grain:(Sop.Context.grain context) ~owner ~kind name
                                               values geometries.(0)))))
         in
+        (match (!asked, !cpu_began, result) with
+        | Some (backend, site, count), Some began, Ok _ ->
+            Display_sink.observe_cpu_write backend site ~count (clock () -. began)
+        | _ -> ());
         let result =
           if deletes = [] then result
           else Result.bind result (delete_after deletes (Sop.Context.cancel_token context))
