@@ -28,6 +28,27 @@ val primitive_size : t -> int -> int
 val primitive_kind : t -> int -> primitive_kind
 val all_triangles : t -> bool
 
+val deferred :
+  ?shape:primitive_kind * int ->
+  ?holder:Packed.Deferred.holder ->
+  ?release:(held:bool -> unit) ->
+  point_count:int ->
+  vertex_count:int ->
+  primitive_count:int ->
+  (unit -> t) ->
+  t
+(** An externally owned, validated topology. Counts, identity and payload size never force it.
+    [shape] promises the same kind and corner count for every primitive, allowing [all_triangles] to
+    answer without reading. The first payload reader materialises once, including racing domains;
+    the returned topology must match the counts and shape. The materialiser must not recursively
+    read this topology. *)
+
+val resident : t -> bool
+val holder : t -> Packed.Deferred.holder option
+
+val releaser : t -> (held:bool -> unit) option
+(** The same ownership/release contract as {!Packed.Float3}. *)
+
 module Builder : sig
   type t
 

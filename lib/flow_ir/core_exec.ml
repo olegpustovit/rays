@@ -8,6 +8,7 @@ exception Resident_overflow
 (* A resident fold's device: inside a qualifying top-level loop of a drawing, a region's array may stay
    on the GPU, standing in the locals as a placeholder (zeros of its capacity) the device knows. *)
 type resident = {
+  fill : Flow.Ty.t -> length:int -> Flow.Eval.value -> Flow.Eval.value option;
   invoke : Packed.t -> E.value array -> locals:E.value array -> live:Input.t -> E.value option;
       (* run the region with these arguments on the device ([locals]: the draw's, an array none
          holds is free); None leaves it to the CPU *)
@@ -15,13 +16,25 @@ type resident = {
   coerce : Flow.Ty.t -> E.value -> E.value option; (* a placeholder retyped, on the device *)
   finish : E.value -> E.value;
       (* the host array a placeholder stands for; any other value as it is *)
-  close : unit -> unit; (* the loop (or the draw keeping its arrays) is over: forget its placeholders *)
+  count : E.value -> int option;
+      (* a placeholder's settled element count, without reading its payload *)
+  close : unit -> unit;
+      (* the loop (or the draw keeping its arrays) is over: forget its placeholders *)
   settle : unit -> unit;
       (* the loop is over and its arrays stay: check its counts (raising [Resident_overflow]) *)
   range : Flow.Ty.t -> E.value -> div:int -> length:int -> E.value option;
       (* after [settle], [array/range] (of type [ty]) of a placeholder's count over [div] ([length]
          its capacity's) *)
 }
+
+let rec host_value resident = function
+  | E.Record fields -> E.Record (List.map (fun (name, v) -> (name, host_value resident v)) fields)
+  | E.List values -> E.List (Array.map (host_value resident) values)
+  | E.Source (name, ty, fields) ->
+      E.Source (name, ty, List.map (fun (name, v) -> (name, host_value resident v)) fields)
+  | E.Struct (name, ty, fields) ->
+      E.Struct (name, ty, List.map (fun (name, v) -> (name, host_value resident v)) fields)
+  | value -> resident.finish value
 
 type state = {
   values : E.value array;
@@ -32,6 +45,7 @@ type state = {
   root : E.residual option;
   force : (Packed.t -> (E.value, Diagnostic.t) result) option;
   resolve : (E.value -> (E.value, Diagnostic.t) result) option;
+  host_source : (E.value -> (E.value option, Diagnostic.t) result) option;
   marks : Core_marks.sink option; (* the table the draw statements of a draw program fill *)
   device : (Packed.t -> ((int * int * int) array option, Diagnostic.t) result) option;
   resident : resident option;
@@ -452,7 +466,8 @@ let builds statements =
 let rec hidden ?(frame = false) = function
   | E.Source (name, _, _) -> name <> "$core/argument"
   | E.Residual r as v ->
-      ((not frame) && E.frame_dependent v) || E.state_dependent v
+      ((not frame) && E.frame_dependent v)
+      || E.state_dependent v
       || List.exists (fun (_, v) -> hidden ~frame v) (E.Residual.residual_view r).bindings
   | E.Deferred _ -> true
   | E.List xs -> Array.exists (hidden ~frame) xs
@@ -555,7 +570,7 @@ let resident_live (program : C.program) (s : C.statement) =
 let resident_tail (program : C.program) (s : C.statement) ~mark =
   match resident_live program s with
   | None | Some [||] -> None
-  | Some live -> (
+  | Some live ->
       let device_array n =
         match program.locals.(n) with
         | Flow.Ty.Array (Float | Vec2 | Vec3 | Vec4) -> true
@@ -606,10 +621,12 @@ let resident_tail (program : C.program) (s : C.statement) ~mark =
       else begin
         List.iter (fun n -> Hashtbl.replace held n ()) live;
         if List.for_all step (after program.body) then
-          let kept = List.of_seq (Seq.append (Hashtbl.to_seq_keys held) (Hashtbl.to_seq_keys ranges)) in
+          let kept =
+            List.of_seq (Seq.append (Hashtbl.to_seq_keys held) (Hashtbl.to_seq_keys ranges))
+          in
           Some (Array.of_list kept, List.of_seq (Hashtbl.to_seq ranges))
         else None
-      end)
+      end
 
 (* A kept tail goes back to the host when a region over it cannot run on the device, or another
    resident loop needs the slots. *)
@@ -631,11 +648,11 @@ let resident_run r st run live tail =
     st.resident_on <- true;
     match
       run st;
-      (match tail with
+      match tail with
       | Some kept ->
           r.settle ();
           st.kept <- kept
-      | None -> Array.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) live)
+      | None -> Array.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) live
     with
     | () ->
         st.resident_on <- false;
@@ -703,7 +720,7 @@ let remember (reads, writes) run =
   in
   fun st ->
     (* a kept device array is a placeholder the next draw reuses: never a key *)
-    if st.kept <> [||] then run st
+    if st.kept <> [||] || st.resident_on then run st
     else
       let key = Array.map (fun n -> st.values.(n)) reads in
       match Lru.Identity_list.peek table key with
@@ -756,7 +773,7 @@ let prepare_invoke packed ~args ~result ~on_device ~keep =
                   st.values.(result) <- v;
                   true
               | None ->
-                  List.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) args;
+                  List.iter (fun n -> st.values.(n) <- host_value r st.values.(n)) args;
                   false)
           | Some r when held && not on_device -> (
               match r.invoke packed (arguments st) ~locals:st.values ~live:st.live with
@@ -882,7 +899,29 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
               | Error d -> V.raise_diagnostic d))
     | Host_source { name; ty; args } -> (
         fun st ->
-          let args = List.map (fun (name, index) -> (name, st.values.(index))) args in
+          let offered = match st.host_source with
+            | None -> Ok None
+            | Some offer -> offer (E.Source (name, ty,
+                List.map (fun (name, index) -> name, st.values.(index)) args)) in
+          match offered with
+          | Error d -> V.raise_diagnostic d
+          | Ok (Some value) ->
+              (match value with
+              | E.Source _ | Struct (_, Flow.Ty.Array _, _) ->
+                  V.fail "E_DATA_SOURCE" "The host returned an unresolved data source."
+              | _ -> ());
+              if ty <> Flow.Ty.Any && V.ty_of value <> ty then
+                V.fail "E_DATA_SOURCE" "The host returned a data source of the wrong type.";
+              V.validate value;
+              value
+          | Ok None ->
+          let args =
+            List.map
+              (fun (name, index) ->
+                let value = st.values.(index) in
+                (name, match st.resident with Some r -> host_value r value | None -> value))
+              args
+          in
           if name = "$core/complete" && ty = Flow.Ty.geometry && args = [ ("value", V.No_geo) ] then
             V.No_geo
           else
@@ -901,7 +940,11 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
             let value = Flow.Op.constant_array_descriptor operation args in
             if V.ty_of value <> ty then
               V.fail "E_ARRAY_TYPE" "Constant array descriptor has the wrong declared type.";
-            value)
+            match st.resident, value with
+            | Some resident, E.Source (_, Flow.Ty.Array Int,
+                [ ("count", E.Int length); ("value", initial) ]) when st.resident_on ->
+                Option.value ~default:value (resident.fill ty ~length initial)
+            | _ -> value)
           else E.Source (name, ty, args)
     | Local n -> fun st -> st.values.(n)
     | Call_index slot ->
@@ -934,7 +977,14 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
             let op = lazy (operator name) in
             fun st -> apply_op (Lazy.force op) st []
         | _ -> assert false)
-    | Prim (op, args) -> primitive ~track ~locals:program.locals op args
+    | Prim (op, args) ->
+        let run = primitive ~track ~locals:program.locals op args in
+        fun st ->
+          (match st.resident with
+          | Some r when st.resident_on ->
+              List.iter (fun (_, n) -> st.values.(n) <- host_value r st.values.(n)) args
+          | _ -> ());
+          run st
     | Vec ns -> (
         fun st ->
           match List.map (fun n -> V.num st.values.(n)) ns with
@@ -1076,8 +1126,9 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
                    | Some live -> (
                        fun st ->
                          match st.resident with
-                         | None -> run st
-                         | Some r -> resident_run r st run live (List.assq_opt s tails))
+                         | Some r when st.marks <> None ->
+                             resident_run r st run live (List.assq_opt s tails)
+                         | _ -> run st)
                    | _ -> run
                  in
                  match footprint program s with Some f -> remember f run | None -> run)
@@ -1131,7 +1182,8 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
     | Assign (n, (Prim (Array_range, [ (_, count) ]) as e)) when List.mem_assoc n tail_ranges -> (
         (* a range of a kept array's count: the device's index buffer while the array stays there,
            else made from the array's count (a kept count is its capacity) *)
-        let value = expression e and source, div = List.assoc n tail_ranges in
+        let value = expression e
+        and source, div = List.assoc n tail_ranges in
         fun st ->
           match st.resident with
           | None -> st.values.(n) <- value st
@@ -1149,14 +1201,41 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
                   if st.kept <> [||] then release_kept r st;
                   st.values.(count) <- V.Int (V.array_length st.values.(source) / div);
                   st.values.(n) <- value st))
-    | Assign (n, (Prim (Array_count, [ (_, arg) ]) as e)) ->
+    | Assign (n, (Prim (Array_range, args) as e)) ->
+        let value = expression e and count = List.assoc "count" args in
+        fun st ->
+          let result =
+            match st.resident with
+            | Some r when st.resident_on && program.locals.(n) = Flow.Ty.Array Flow.Ty.Int ->
+                let length =
+                  Flow.Op.array_count ~limit:Sys.max_array_length "array/range" st.values.(count)
+                in
+                r.range program.locals.(n) (V.Int length) ~div:1 ~length
+            | _ -> None
+          in
+          st.values.(n) <- (match result with Some v -> v | None -> value st)
+    | Assign (n, (Prim (Array_int, args) as e)) ->
+        let value = expression e and count = List.assoc "count" args in
+        let initial = List.assoc_opt "value" args in
+        fun st ->
+          let made = match st.resident with
+            | Some r when st.resident_on ->
+                let length = Flow.Op.array_count ~limit:Sys.max_array_length "array/int" st.values.(count) in
+                r.fill program.locals.(n) ~length
+                  (Option.fold ~none:(V.Int 0) ~some:(Array.get st.values) initial)
+            | _ -> None
+          in
+          st.values.(n) <- (match made with Some v -> v | None -> value st)
+    | Assign (n, (Prim (Array_count, [ (_, arg) ]) as e)) -> (
         (* a resident array's length is a capacity: its count is the host array's *)
         let value = expression e in
         fun st ->
-          (match st.resident with
-          | Some r when st.resident_on -> st.values.(arg) <- r.finish st.values.(arg)
-          | _ -> ());
-          st.values.(n) <- value st
+          match st.resident with
+          | Some r when st.resident_on -> (
+              match r.count st.values.(arg) with
+              | Some count -> st.values.(n) <- V.Int count
+              | None -> st.values.(n) <- value st)
+          | _ -> st.values.(n) <- value st)
     | Assign (n, e) ->
         let value = expression e in
         let ownership =
@@ -1231,7 +1310,11 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
     | Iterate { sequence; index; item; limit; body } ->
         let setup, body = loop_body body in
         fun st ->
-          let source = st.values.(sequence) in
+          let source =
+            match st.resident with
+            | Some r when st.resident_on -> host_value r st.values.(sequence)
+            | _ -> st.values.(sequence)
+          in
           let count =
             match source with V.List xs -> Array.length xs | source -> V.array_length source
           in
@@ -1350,16 +1433,16 @@ let call_counters (program : C.program) =
 
 let has_regions prepared = Array.length prepared.program.regions > 0
 
-let rec general root force resolve prepared live =
+let rec general root force resolve resident host_source prepared live =
   match Input.validate live with
   | Error message -> Error (Diagnostic.error ~code:"E_FRAME" message)
-  | Ok () when prepared.scalar <> None -> (
+  | Ok () when prepared.scalar <> None && resident = None -> (
       match run_scalar (Option.get prepared.scalar) live with
       | x -> Ok (E.Float x)
-      | exception Non_finite -> general_values root force resolve prepared live)
-  | Ok () -> general_values root force resolve prepared live
+      | exception Non_finite -> general_values root force resolve resident host_source prepared live)
+  | Ok () -> general_values root force resolve resident host_source prepared live
 
-and general_values root force resolve prepared live =
+and general_values root force resolve resident host_source prepared live =
   let program = prepared.program in
   match () with
   | () ->
@@ -1381,16 +1464,18 @@ and general_values root force resolve prepared live =
           root;
           force;
           resolve;
+          host_source;
           marks = None;
           device = None;
-          resident = None;
-          resident_on = false;
+          resident;
+          resident_on = Option.is_some resident;
           kept = [||];
         }
       in
       let result =
         try
           prepared.body st;
+          Option.iter (fun r -> r.settle ()) resident;
           if Array.length program.results <> 1 then V.fail "E_CORE" "Expected one core result.";
           Ok st.values.(program.results.(0))
         with
@@ -1401,7 +1486,8 @@ and general_values root force resolve prepared live =
       if pooled then Atomic.set prepared.pool values;
       result
 
-let attempt ?root ?force ?resolve prepared ~live = general root force resolve prepared live
+let attempt ?root ?force ?resolve ?resident ?host_source prepared ~live =
+  general root force resolve resident host_source prepared live
 
 (* A stateless program with no host sources runs with no checkpoint or resolver; errors reenter the dispatcher. *)
 let direct prepared =
@@ -1416,18 +1502,36 @@ let direct prepared =
 
 (* State needs its residual even in strict mode; strict failures restore it without
    entering the tree walker. Ordinary failures retain the evaluator's fallback. *)
-let execute ?root ?(strict = false) ?(rerun_on_error = true) ?on_walk ?force ?resolve prepared ~live
-    =
+let execute ?root ?(strict = false) ?(rerun_on_error = true) ?on_walk ?force ?resolve ?resident ?host_source
+    prepared ~live =
+  let restore =
+    match root with Some r when not prepared.stateless -> E.Residual.checkpoint r | _ -> ignore
+  in
+  let close () = Option.iter (fun r -> r.close ()) resident in
+  let rec run () =
+    try attempt ?root ?force ?resolve ?resident ?host_source prepared ~live with
+    | Resident_overflow when resident <> None ->
+        close ();
+        restore ();
+        run ()
+    | Diagnostic.Error d -> Error d
+    | Invalid_argument _ | Not_found | Failure _ ->
+        Error (Diagnostic.error ~code:"E_CORE" "Core execution failed.")
+  in
+  let result =
+    if resident <> None && Array.length prepared.program.state_slots <> 0 then
+      Error
+        (Diagnostic.error ~code:"E_CORE_RESIDENT"
+           "Resident value execution requires a stateless program.")
+    else run ()
+  in
+  (match result with Error _ -> close () | Ok _ -> ());
   match root with
-  | None -> attempt ?force ?resolve prepared ~live
+  | None -> result
   | Some r -> (
-      let restore = if prepared.stateless then ignore else E.Residual.checkpoint r in
-      match
-        try attempt ~root:r ?force ?resolve prepared ~live
-        with Diagnostic.Error _ | Invalid_argument _ | Not_found | Failure _ ->
-          Error (Diagnostic.error ~code:"E_CORE" "Core execution failed.")
-      with
+      match result with
       | Ok _ as ok -> ok
+      | Error d as error when d.Diagnostic.code = "E_CORE_RESIDENT" -> error
       | Error _ as error when strict || resolve <> None || not rerun_on_error ->
           restore ();
           error
@@ -1464,6 +1568,7 @@ let draw ?root ?force ?resolve ?device ?resident ?image prepared ~live ~size ~bu
           root;
           force;
           resolve;
+          host_source = None;
           marks = Some sink;
           device;
           resident;

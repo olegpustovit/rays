@@ -1,0 +1,12 @@
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+64³ deferred cook stays on its worker; three full editor frames return before publication
+Integer-input calibration after a range: 524288 uploaded bytes, payload +0; cached query adds no work
+CPU-input calibration: 0.000259 s, 524288 uploaded bytes across four samples, payload +0; cached query adds no work
+placement calibration: 0.000359 s completed, status +16 bytes, payload +0; cached estimate issues no work
+Measured retained generations: small CPU-origin stays CPU; 200 dispatches, two canvases, old pixels stable, cancel/recook/source edit/read-release orders pass; payload before explicit read=0, held=4, buffers=19 (+0 warm), pipelines=1, heap_delta_words=74566
+isogrid geometry goldens passed
+isogrid geometry goldens passed
+isogrid geometry goldens passed
+real 17.35
+user 112.81
+sys 3.51

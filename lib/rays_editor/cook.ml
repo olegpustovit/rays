@@ -31,6 +31,22 @@ type cooked =
     (* the footers' counts alone: the displayed objects are cache hits *)
   | Framed of bounds option
 
+module Prepared_key = struct
+  type t = int * Settings.t * Session.output * string
+
+  let equal (id, settings, output, context) (other_id, other_settings, other_output, other_context)
+      =
+    id = other_id && settings == other_settings && output == other_output && context = other_context
+
+  (* ponytail: at most 16 entries; hash only the object rather than traversing
+     immutable geometry. Add stable settings/output IDs if this cache grows. *)
+  let hash (id, _, _, _) = Hashtbl.hash id
+end
+
+module Prepared_cache = Lru.Make (Prepared_key)
+
+let prepared_byte_capacity = 64 * 1024 * 1024
+
 type t = {
   worker : cooked Async_cook.t;
   seed : int64;
@@ -39,6 +55,8 @@ type t = {
   await : bool; (* block on each cook: fixed-step runs, see [create] *)
   schedule : Schedule.t;
   prepare : Settings.t -> Session.output -> (prepared, string) result;
+  prepared_cache : prepared Prepared_cache.t;
+  prepared_lock : Mutex.t;
   pieces : piece list;
   settings : Settings.t option; (* the latest desired submission settings *)
   error : string option;
@@ -136,6 +154,8 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
         domains;
         await;
         prepare;
+        prepared_cache = Prepared_cache.create ~byte_capacity:prepared_byte_capacity 16;
+        prepared_lock = Mutex.create ();
         schedule = Schedule.initial;
         pieces = [];
         settings = None;
@@ -172,6 +192,35 @@ let set_volatile value predicate = Async_cook.set_volatile value.worker predicat
 let stats value = Async_cook.stats value.worker
 let pieces value = value.pieces
 
+let prepare_cached value ~id ~context settings output =
+  let key = (id, settings, output, context) in
+  match
+    Mutex.protect value.prepared_lock (fun () -> Prepared_cache.find_opt value.prepared_cache key)
+  with
+  | Some prepared -> Ok prepared
+  | None ->
+      Result.map
+        (fun prepared ->
+          (* Geometry's payload is metadata-only, including for a resident carrier.
+             Budget both that input and the derived display arrays conservatively. *)
+          let source =
+            Result.fold ~ok:Rdk.Geometry.payload_bytes
+              ~error:(fun _ -> 0)
+              (Payload.geometry output.payload)
+          in
+          let bytes = Rdk.Geometry.payload_bytes prepared.geometry in
+          if source <= prepared_byte_capacity && bytes <= (prepared_byte_capacity - source) / 2 then begin
+            let bytes = source + (bytes * 2) in
+            let instances = Option.fold ~none:0 ~some:Array.length output.instances in
+            if instances <= (prepared_byte_capacity - bytes) / 128 then
+              Mutex.protect value.prepared_lock (fun () ->
+                  Prepared_cache.add value.prepared_cache
+                    ~bytes:(bytes + (instances * 128))
+                    key prepared)
+          end;
+          prepared)
+        (value.prepare settings output)
+
 (* the counts of a compiled node of an object, once a cook has reported them *)
 let geometry value ~object_id ~node_id = List.assoc_opt (object_id, node_id) value.summaries
 let source value ~object_id ~node_id = List.assoc_opt (object_id, node_id) value.sources
@@ -189,6 +238,13 @@ let context value timeline frame =
 
 let busy value = match status value with Async_cook.Idle -> false | Cooking _ -> true
 let force value = { value with force = true }
+
+(* Preparation, probes and framing are CPU-capable readers of published geometry.
+   Budget their shared host materialisation even when a supported display borrows it. *)
+let prepared_context context nodes =
+  List.fold_left
+    (fun context node -> Context.with_cpu_consumers context ~node:(Node.id node) (Some 1))
+    context nodes
 
 (* [objects] are the visible geometry objects as (id, network graph,
    display node); [frame_request] is (object, node) to frame. *)
@@ -454,7 +510,8 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
                   let* tinted =
                     Pick.tint output lit |> Result.map_error Diagnostic.error_to_string
                   in
-                  Result.bind (value.prepare settings tinted) (fun prepared ->
+                  Result.bind (prepare_cached value ~id ~context:projection settings tinted)
+                    (fun prepared ->
                       loop
                         ({
                            id;
@@ -477,6 +534,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
         if submit || probe_only then
           match
             Result.bind (context value timeline frame) (fun context ->
+                let context = prepared_context context (List.map snd graphs @ List.map snd probed) in
                 Async_cook.submit_some value.worker ~context ~nodes:(List.map snd graphs)
                   ~optional:(List.map snd probed) ~prepare:(prepare context))
           with
@@ -532,7 +590,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
                   match
                     Result.bind
                       (Pick.tint piece.output lit |> Result.map_error Diagnostic.error_to_string)
-                      (value.prepare piece.settings)
+                      (prepare_cached value ~id:piece.id ~context:piece.context piece.settings)
                   with
                   | Ok prepared ->
                       retinted := true;
@@ -570,6 +628,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
                     let was_busy = busy value && framing = None in
                     match
                       Result.bind (context value timeline frame) (fun context ->
+                          let context = prepared_context context [ node ] in
                           Async_cook.submit value.worker ~context ~node ~prepare:(fun output ->
                               Result.map (fun bounds -> Framed bounds) (output_bounds output)
                               |> Result.map_error Diagnostic.error_to_string))
@@ -607,7 +666,9 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
         framed;
       })
 
-let close value = Async_cook.close value.worker
+let close value =
+  Async_cook.close value.worker;
+  Mutex.protect value.prepared_lock (fun () -> Prepared_cache.clear value.prepared_cache)
 
 (* The nearest displayed primitive under a ray in the piece's own space, as (t, provenance tag)
    where the hit is [origin + t * direction]: the parameter, not the local distance, so hits of

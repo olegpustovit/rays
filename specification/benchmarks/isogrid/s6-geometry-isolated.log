@@ -1,0 +1,38 @@
+Components seams: edge mask equals Analysis.classify_connectivity with seams, alone and masked
+Triangles: ear order per primitive, refused primitives emit nothing
+sop/concat: bytes equal native merge, errors share codes, inputs untouched, reference/CPU/domains/grains
+C1 five plain geometries rebuild from owned arrays and authored topology/P at one/four/eight domains
+C1 32769-point authored packed mesh preserves signed-zero/subnormal bytes across domains and grains
+C1 topology copies, captured count origins and actual 2D host-source refusal are explicit
+C1 native topology errors, exact Int validation, lazy untaken mesh and selected causes retain cook timing
+C1 ordinary cards, typed defaults and checked keyword/connection edits retain prior source on refusal
+C1 retained live/state arrays and zone element captures stay byte-exact
+Mesh planes all five plain topologies and 65537-point authored maps own exact planes at 1/4/8 domains
+Mesh planes finite/count/topology errors, lazy causes and exact scalar capacity retain native boundaries
+Mesh planes typed record cards, defaults, insertion, source save and malformed edit rollback are ordinary gestures
+Mesh planes retained live/state and zone element captures preserve constructor behavior
+Mesh planes helper/Fn captures, cancellation and failed cooked state preserve the existing boundary
+Mesh planes keep precise P read facts, source ownership and a shared point-owner count through captured records
+C4 authored compact→gather and exclusive scan→mesh offsets preserve native geometry bytes
+Deferred static mesh/attributes cook on CPU without frame work or GPU cost probes
+Deferred malformed mesh returns the CLI topology error and publishes no geometry
+grid bulk: 22 words per point beyond the walked head
+iterate: 0, 1, 7 and 500 passes in one cook node match OCaml, reference and one/eight domains
+iterate :until stops after the pass that satisfies it
+Authored body errors cook lazily; parameter rebuilds, causes and context seed changes preserve timing
+Prepared bodies reuse unchanged graphs; live drives/state changes recompile and warm contexts retain cache hits
+Cooked materialized writes: owned tuple/CSR storage, expanded instances, producer/count errors and cancellation
+Lisp declaration cache keys preserve unchanged siblings and invalidate edited helpers at one/eight domains
+Declaration cones: unrelated helpers retain hits; Fn_ref/helper, child body/default/validator, normalizer and macro edits invalidate at one/eight domains
+Diagnostic boundaries: deferred and unused protected children cook once; raw causes, hints, trace, untaken arms and one/four/eight domains agree
+Context frame: float cook frame, Frame dependency, rebuilt per frame, body only
+Context time: float cook time, Time dependency, rebuilt per time, body only
+mesh-plane stage authored error precedence, exact bytes and ownership at 1/4/8 domains
+sop/attr_planes + sop/with_planes: all owners and widths round-trip storage, computed planes, P and typed refusals at reference/CPU/domains/grains
+C3 all owner/storage raw bytes, ordinary order and edge copies across reference/CPU/domains/grains
+remap -1 rows: defaults for every owner and storage, in no group, 1 and 8 domains
+Weighted remap: every owner and storage, N renormalisation, Curve_join bytes, mixed owners, reference/CPU, 1 and 8 domains, refusals
+Settle: in-flight device writes settle at a cook's end, recook on the CPU on failure
+real 6.88
+user 12.98
+sys 1.24

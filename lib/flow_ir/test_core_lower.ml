@@ -402,6 +402,24 @@ let () =
           | _ -> ())
         program.body;
       assert !host;
+      let prepared = Flow_ir.Core_exec.prepare program in
+      let live = Input.at_time 2. in
+      let resolve = function
+        | E.Source ("test/source", _, [ ("value", value) ]) -> Ok value
+        | _ -> assert false in
+      assert (ok (Flow_ir.Core_exec.execute ~resolve
+          ~host_source:(fun _ -> Ok None) prepared ~live) = E.Float 4.);
+      assert (ok (Flow_ir.Core_exec.execute ~resolve
+          ~host_source:(fun _ -> Ok (Some (E.Float 8.))) prepared ~live) = E.Float 9.);
+      (match Flow_ir.Core_exec.execute ~resolve
+          ~host_source:(fun _ -> Ok (Some (E.Int 8))) prepared ~live with
+      | Error d -> assert (d.code = "E_DATA_SOURCE")
+      | Ok _ -> failwith "Host offer returned the wrong declared type");
+      (match Flow_ir.Core_exec.execute ~resolve
+          ~host_source:(fun _ -> Ok (Some (E.Source ("unresolved", Flow.Ty.Float, []))))
+          prepared ~live with
+      | Error d -> assert (d.code = "E_DATA_SOURCE")
+      | Ok _ -> failwith "Host offer returned an unresolved source");
       print_endline
         "Core sources: a captured residual inside a host source lowers to plain Host_source \
          arguments"

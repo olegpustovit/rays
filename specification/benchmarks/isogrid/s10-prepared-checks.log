@@ -1,0 +1,35 @@
+Workspace GPU service: worker cook is pumped by its owner, selects CPU when slower, and reads back when cheaper; a pump never takes a settle as a follow-up
+IsoGrid recipe 0: picking materialises 216004 payload bytes; repeated read +0
+IsoGrid recipe 0: 3000 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 3: inspection materialises 1708704 payload bytes; repeated read +0
+IsoGrid recipe 3: 11866 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+Canvas playback refreshes image/map functions with captured time
+workspace_geometry_capture,override=false,time=0.00,max=0
+workspace_geometry_capture,override=true,time=0.00,max=0
+workspace_geometry_capture,override=false,time=1.00,max=0
+workspace_geometry_capture,override=true,time=1.00,max=0
+workspace_geometry_capture,status_reads=8,readback_bytes=0
+Native geometry captures: P/Cd, two instances, exact CPU domains, resident GPU, parent freshness, unrelated fixed render reuse and close pass
+Native nested image/map: frame and same-frame state captures refresh rendered pixels
+Native Canvas image snapshots: repeat cache, exact one/eight-domain bytes and close ownership passed
+test,width,height,time,max_channel_difference,differing_channels,differing_pixels
+workspace_gpu_image,65,17,0.00,0,0,0
+workspace_gpu_image,65,17,1.00,0,0,0
+workspace_gpu_image,35,33,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+Workspace GPU images: exact-first independent CPU snapshots, live display, mesh/image parity, replan/resize, authority transitions and ownership pass
+Nested image/render exactness: CPU rounding survives an already-resident GPU child without reading or replacing it
+Legacy image stamps: display A, exact B, display A restores A pixels
+Resident Canvas dimensions: omitted axes, nested resize, fixed cache, independent CPU stamps, no implicit Canvas readback, zero handles
+workspace_retained_canvas,65,17,0.00,0,0,0
+workspace_retained_canvas,65,17,0.50,0,0,0
+workspace_retained_canvas,35,33,0.50,0,0,0
+workspace_retained_canvas,35,33,0.00,0,0,0
+workspace_retained_canvas,35,33,0.00,0,0,0
+Resident Canvas live route: mixed mesh/image roundtrip parity, stable identity, exact isolation, replan/resize, failure/recovery, snapshots and teardown pass
+Resident Canvas failed publication: resized candidates close once, prior allocation retained until owner close, no readback or handle leak
+real 6.27
+user 9.50
+sys 1.60

@@ -10,6 +10,8 @@ type gpu_vertices = {
   gpu_domain : Domain.id;
   gpu_indirect : (Ogpu.Backend.buffer * int64) option;
       (* device-written index count: an indirect draw *)
+  gpu_indices : (Ogpu.Backend.buffer * int) option;
+  gpu_colors : (Ogpu.Backend.buffer * int) option;
   gpu_valid : unit -> bool;
   mutable gpu_active : bool;
 }
@@ -24,13 +26,16 @@ let gpu_identity source =
   ( source.gpu_key,
     Ogpu.Backend.buffer_id source.gpu_buffer,
     List.map Ogpu.Backend.buffer_id
-      (source.gpu_extra @ Option.to_list (Option.map fst source.gpu_indirect)) )
+      (source.gpu_extra
+      @ Option.to_list (Option.map fst source.gpu_indirect)
+      @ Option.to_list (Option.map fst source.gpu_indices)
+      @ Option.to_list (Option.map fst source.gpu_colors)) )
 
 let gpu_vertices_valid value =
   value.gpu_active && value.gpu_domain = Domain.self () && value.gpu_valid ()
 
-let register_gpu_vertices owner ?(extra = []) ?(stride = 16) ?indirect ~key ~device ~buffer
-    ~vertex_count ~valid () =
+let register_gpu_vertices owner ?(extra = []) ?(stride = 16) ?indirect ?indices ?colors ~key ~device
+    ~buffer ~vertex_count ~valid () =
   let operation = "Scene_execution.register_gpu_vertices" in
   if
     key = "" || vertex_count <= 0 || vertex_count > 4_000_000
@@ -38,6 +43,18 @@ let register_gpu_vertices owner ?(extra = []) ?(stride = 16) ?indirect ~key ~dev
     || List.exists (fun b -> Ogpu.Backend.buffer_size b <= 0L) (buffer :: extra)
     || (match indirect with
       | Some (b, offset) -> offset < 0L || Int64.add offset 20L > Ogpu.Backend.buffer_size b
+      | None -> false)
+    || (match indices with
+      | Some (b, count) ->
+          count <= 0
+          || count > Sys.max_string_length / 4
+          || Ogpu.Backend.buffer_size b < Int64.of_int (count * 4)
+          || indirect <> None
+      | None -> false)
+    || (match colors with
+      | Some (b, width) ->
+          (not (List.mem width [ 3; 4 ]))
+          || Ogpu.Backend.buffer_size b < Int64.of_int (vertex_count * width * 4)
       | None -> false)
     || Hashtbl.mem owner.gpu_vertex_registry key
   then
@@ -56,6 +73,8 @@ let register_gpu_vertices owner ?(extra = []) ?(stride = 16) ?indirect ~key ~dev
         gpu_extra = extra;
         gpu_vertex_count = vertex_count;
         gpu_indirect = indirect;
+        gpu_indices = indices;
+        gpu_colors = colors;
         gpu_domain = Domain.self ();
         gpu_valid = valid;
         gpu_active = true;
@@ -427,9 +446,31 @@ let resolve_gpu_vertices value (entry : sampled_draw) =
   | Gpu_vertices name -> (
       match Hashtbl.find_opt value.gpu_vertices.gpu_vertex_registry (borrowed name) with
       | Some source when gpu_vertices_valid source ->
+          let color_width =
+            match entry.draw.state.transform_uniforms with
+            | Some bytes when Bytes.length bytes >= 82 * 4 ->
+                Int32.float_of_bits (Bytes.get_int32_le bytes (81 * 4))
+            | _ -> 0.
+          in
           if source.gpu_device != value.device then
             error "Renderer.submit" Ogpu.Error.Cross_device "GPU vertices belong to another device"
           else if
+            source.gpu_colors <> None
+            && not (List.mem entry.family [ Scene3; Scene3_points; Scene3_world ])
+            || (List.mem entry.family [ Scene3; Scene3_points; Scene3_world ]
+               && color_width
+                  <>
+                  match (source.gpu_colors, entry.vertex_attributes) with
+                  | Some (_, width), _ -> float width
+                  | None, Some (_, bytes) when Bytes.length bytes = 0 -> -1.
+                  | None, _ -> 0.)
+            || (match source.gpu_indices with
+              | Some (_, count) ->
+                  (not (List.mem entry.family [ Scene3; Scene3_points; Scene3_world ]))
+                  || Bytes.length mesh.indices <> 0
+                  || mesh.index_count <> count
+              | None -> Bytes.length mesh.indices <> mesh.index_count * 4)
+            ||
             match (entry.family, source.gpu_extra) with
             | (Scene3 | Scene3_points | Scene3_world), ([] | [ _ ]) ->
                 (* a device's packed float3 positions (and normals) *)
@@ -457,12 +498,17 @@ let valid_vertex_attributes (entry : sampled_draw) =
       && (match entry.draw.mesh.key with
         | Gpu_vertices _ -> Bytes.length entry.draw.mesh.vertices = 0
         | Host _ -> Bytes.length entry.draw.mesh.vertices = entry.draw.mesh.vertex_count * 24)
-      && Bytes.length bytes = entry.draw.mesh.vertex_count * 12
+      && (Bytes.length bytes = entry.draw.mesh.vertex_count * 12
+         ||
+         match entry.draw.mesh.key with
+         | Gpu_vertices _ -> Bytes.length bytes = 0
+         | Host _ -> false)
 
 let valid_index_length (mesh : mesh) =
   mesh.index_count >= 0
   && mesh.index_count <= Sys.max_string_length / 4
-  && Bytes.length mesh.indices = mesh.index_count * 4
+  && (Bytes.length mesh.indices = mesh.index_count * 4
+     || match mesh.key with Gpu_vertices _ -> Bytes.length mesh.indices = 0 | Host _ -> false)
 
 let prepare_scene3 ~clear ~clear_depth entries =
   let finite = Float.is_finite in
@@ -747,9 +793,9 @@ let prepare value ~reserved ~uniforms ?(vertex_stable = false) (mesh : mesh) =
     let total = Bytes.length vertices + Bytes.length indices + Bytes.length uniform_bytes in
     if
       mesh_key_string mesh.key = ""
-      || vertex_count <= 0
-      || index_count <= 0
-      || total = 0 || not valid_uniforms
+      || vertex_count <= 0 || index_count <= 0
+      || (total = 0 && match mesh.key with Host _ -> true | Gpu_vertices _ -> false)
+      || not valid_uniforms
     then
       error "Scene_execution.prepare" Ogpu.Error.Invalid_argument
         "mesh payload or transform uniforms are malformed"
@@ -796,7 +842,7 @@ let prepare value ~reserved ~uniforms ?(vertex_stable = false) (mesh : mesh) =
           let descriptor : Ogpu.Types.buffer_descriptor =
             {
               label = Some ("scene-mesh-" ^ mesh_key_string mesh.key);
-              size = Int64.of_int total;
+              size = Int64.of_int (max 4 total);
               usage = [ Vertex; Index; Storage; Copy_dst ];
             }
           in
@@ -1379,6 +1425,7 @@ let combine_meshes meshes =
           mesh.vertex_count <= 0
           || Bytes.length mesh.vertices mod mesh.vertex_count <> 0
           || (not (valid_index_length mesh))
+          || Bytes.length mesh.indices <> mesh.index_count * 4
           || not (valid_indices mesh)
         then error operation Ogpu.Error.Invalid_argument "packed mesh cardinality is inconsistent"
         else if
@@ -2288,8 +2335,15 @@ let render_sun value scratch =
                         buffer
                     in
                     let* () =
+                      let indices, index_offset, index_count =
+                        match
+                          Option.bind slot.slot_gpu_vertices (fun source -> source.gpu_indices)
+                        with
+                        | Some (buffer, count) -> (buffer, 0L, count)
+                        | None -> (item.buffer, item.index_offset, item.index_count)
+                      in
                       Ogpu.Backend.draw_indexed encoder ~primitive:Triangle_list ~index_type:Uint32
-                        item.buffer ~offset:item.index_offset ~count:(Int64.of_int item.index_count)
+                        indices ~offset:index_offset ~count:(Int64.of_int index_count)
                         ~instances:(if bytes > 5456 then (bytes - 5456) / 192 else 1)
                         ()
                     in
@@ -2463,7 +2517,7 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
               11,
               (match slot.slot_vertex_attributes with
               | Some attributes -> attributes.auxiliary_buffer
-              | None -> item.buffer),
+              | None -> vertices),
               0L )
             :: buffers
         in
@@ -2554,8 +2608,26 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch ~unif
           | Marks -> (buffers, textures, samplers)
         in
         let index =
-          Some
-            (Ogpu.Render_pass.Uint32, item.buffer, item.index_offset, Int64.of_int item.index_count)
+          let buffer, offset, count =
+            match Option.bind slot.slot_gpu_vertices (fun source -> source.gpu_indices) with
+            | Some (buffer, count) -> (buffer, 0L, count)
+            | None -> (item.buffer, item.index_offset, item.index_count)
+          in
+          Some (Ogpu.Render_pass.Uint32, buffer, offset, Int64.of_int count)
+        in
+        let buffers =
+          match Option.bind slot.slot_gpu_vertices (fun source -> source.gpu_colors) with
+          | None -> buffers
+          | Some (colors, _) ->
+              (Ogpu.Backend.Vertex, 4, colors, 0L)
+              ::
+              (if slot.slot_vertex_attributes = None then [ (Ogpu.Backend.Vertex, 5, colors, 0L) ]
+               else [])
+              @ List.filter
+                  (fun (stage, binding, _, _) ->
+                    stage <> Ogpu.Backend.Vertex
+                    || (binding <> 4 && (binding <> 5 || slot.slot_vertex_attributes <> None)))
+                  buffers
         in
         let instances =
           match (family, (slot_state slot).transform_uniforms) with
@@ -2797,7 +2869,8 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
             let valid_mesh (mesh : mesh) =
               mesh_key_string mesh.key <> ""
               && mesh.vertex_count > 0 && mesh.index_count > 0 && valid_index_length mesh
-              && Bytes.length mesh.vertices + Bytes.length mesh.indices > 0
+              && (Bytes.length mesh.vertices + Bytes.length mesh.indices > 0
+                 || match mesh.key with Gpu_vertices _ -> true | Host _ -> false)
             in
             let supported =
               List.for_all
@@ -2813,9 +2886,9 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                   && Option.fold ~none:true ~some:valid_texture entry.texture
                   (* a Scene2 mesh is untextured, a Scene2 quad samples its texture *)
                   && (match entry.family with
-                     | Scene2 -> entry.texture = None
-                     | Scene2_textured -> entry.texture <> None
-                     | _ -> true)
+                    | Scene2 -> entry.texture = None
+                    | Scene2_textured -> entry.texture <> None
+                    | _ -> true)
                   && valid_vertex_attributes entry
                   && Option.fold ~none:true
                        ~some:(fun (source : auxiliary_resource) ->
@@ -2936,6 +3009,7 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                                 let cpu_mesh =
                                   match gpu_vertices with
                                   | None -> draw.mesh
+                                  | Some source when source.gpu_indices <> None -> draw.mesh
                                   | Some _ ->
                                       {
                                         draw.mesh with
@@ -2961,6 +3035,7 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                                     let attributes =
                                       match vertex_attributes with
                                       | None -> Ok None
+                                      | Some (_, bytes) when Bytes.length bytes = 0 -> Ok None
                                       | Some (key, bytes) ->
                                           Result.map Option.some (prepare_storage value ~key ~bytes)
                                     in

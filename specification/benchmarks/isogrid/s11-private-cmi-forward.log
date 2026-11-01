@@ -1,0 +1,8 @@
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+64³ deferred cook stays on its worker; three full editor frames return before publication
+scene tree: list keys, enter/up, lights, reparent, World, graph, domains ok
+scene tree: host camera deletion survives Save and reload
+scene conversion: typed draw error persists with cached geometry and clears after correction
+real 18.27
+user 80.44
+sys 25.41

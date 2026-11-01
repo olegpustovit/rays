@@ -1,0 +1,11 @@
+Integer-input calibration after a range: 524288 uploaded bytes, payload +0; cached query adds no work
+CPU-input calibration: 0.000275 s, 524288 uploaded bytes across four samples, payload +0; cached query adds no work
+placement calibration: 0.000237 s completed, status +16 bytes, payload +0; cached estimate issues no work
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+Integer-input calibration after a range: 524288 uploaded bytes, payload +0; cached query adds no work
+CPU-input calibration: 0.000269 s, 524288 uploaded bytes across four samples, payload +0; cached query adds no work
+placement calibration: 0.000280 s completed, status +16 bytes, payload +0; cached estimate issues no work
+Measured retained generations: small CPU-origin stays CPU; 200 dispatches, two canvases, old pixels stable, cancel/recook/source edit/read-release orders pass; payload before explicit read=0, held=4, buffers=19 (+0 warm), pipelines=1, heap_delta_words=74517
+real 4.34
+user 5.76
+sys 0.88

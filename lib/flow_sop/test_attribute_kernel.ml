@@ -2268,7 +2268,8 @@ let () =
   let count = 2048 and calls = ref 0 and reads = ref 0 and time = ref 0. in
   let backend : Flow_ir.Gpu.backend =
     {
-      cost = (fun ~fast:_ _ ~count:_ -> Some 0.);
+      residency = (fun ~fast:_ -> None);
+      cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> Some 0.);
       prepare =
         (fun ~fast:_ _ ->
           assert (Domain.is_main_domain ());
@@ -2332,7 +2333,7 @@ let () =
         [ 1; 8 ])
     [ 0.; 0.5 ];
   assert (!calls = 2 && !reads = 2);
-  let unmeasured = { backend with cost = (fun ~fast:_ _ ~count:_ -> None) } in
+  let unmeasured = { backend with cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> None) } in
   let unmeasured_gpu = { Flow_ir.Gpu.default with backend = Some unmeasured } in
   let unmeasured_network =
     (List.hd (lower ~gpu:unmeasured_gpu (source ~columns:1024 (body "exact "))).graphs).network

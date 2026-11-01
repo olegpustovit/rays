@@ -1,0 +1,7 @@
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+Resident counted mesh (direct): 2 capacity replays, zero publication payload, old/new CPU arrays exact
+Resident counted mesh (host): 2 capacity replays, zero publication payload, old/new CPU arrays exact
+Resident mesh: validated deferred publication, concurrent CPU reads and bounded ownership
+real 5.42
+user 15.39
+sys 0.87

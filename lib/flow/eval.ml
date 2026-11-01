@@ -121,7 +121,8 @@ let with_interrupt expired f =
   Domain.DLS.set interrupt (Some (expired, fired));
   Fun.protect
     ~finally:(fun () -> Domain.DLS.set interrupt outer)
-    (fun () -> match f () with v -> if !fired then None else Some v | exception _ when !fired -> None)
+    (fun () ->
+      match f () with v -> if !fired then None else Some v | exception _ when !fired -> None)
 
 let hash = Value.hash
 let element_key zone = "$elem:" ^ String.concat "/" zone
@@ -154,6 +155,7 @@ type value = (fn, residual) payload
 and fn =
   | Closure of {
       params : (W.pattern * Ty.t option) list;
+      replayable : bool;
       body : W.term;
       env : value Smap.t;
       zone : W.path;
@@ -197,6 +199,7 @@ and ctx = {
   data : bool;
   geometry : bool;
   host : bool;
+  context : Context.t;
   kernel_requests : bool;
   card : string option;
       (* the cook label of the inlined card whose body this is: its context operators read it *)
@@ -237,7 +240,9 @@ and st = {
   find_op : string -> Context.t -> Op.t option;
       (* [Op.finder ops]: [ops] is a list, the whole SOP catalog in the editor *)
   mutable terms :
-    ((int * W.path option * int * Ty.t, W.term) Hashtbl.t * (string, unit) Hashtbl.t) option;
+    ((int * W.path option * int * Ty.t * W.path option, W.term) Hashtbl.t
+    * (string, unit) Hashtbl.t)
+    option;
       (* helper and inlined node terms by form id, for a replayed body (built on its first
          replay), and the node kinds indexed *)
   mutable inlined : string list; (* the node kinds inlined so far, newest first *)
@@ -332,16 +337,25 @@ module Residual_effect = struct
     | Kernel_value : residual -> value option Effect.t
     | Bulk_static : residual -> value option Effect.t
     | Bulk_approx : residual -> value option Effect.t
+    | Static_mode : (bool * bool * bool) Effect.t
+    | Static_map :
+        W.path * W.term * int
+        -> (head:int -> tail:int -> completed:bool -> unit) Effect.t
 
   let handle : type result.
       ?observe:(residual -> unit) ->
       ?kernel:(residual -> value option) ->
       ?bulk:(residual -> value option) ->
+      ?defer:(residual -> bool) ->
       ?bulk_approx:(residual -> value option) ->
+      ?trusted:bool ->
+      ?replay:bool ->
+      ?map:(W.path -> W.term -> int -> head:int -> tail:int -> completed:bool -> unit) ->
       (unit -> result) ->
       result =
-   fun ?(observe = fun _ -> ()) ?(kernel = fun _ -> None) ?(bulk = fun _ -> None)
-       ?(bulk_approx = fun _ -> None) f ->
+   fun ?(observe = fun _ -> ()) ?(kernel = fun _ -> None) ?(bulk = fun _ -> None) ?defer
+       ?(bulk_approx = fun _ -> None) ?(trusted = false) ?(replay = false)
+       ?(map = fun _ _ _ ~head:_ ~tail:_ ~completed:_ -> ()) f ->
     let resume callback continuation =
       match callback () with
       | value -> Effect.Deep.continue continuation value
@@ -366,11 +380,24 @@ module Residual_effect = struct
             | Bulk_static residual ->
                 Some
                   (fun (continuation : (a, result) Effect.Deep.continuation) ->
-                    resume (fun () -> bulk residual) continuation)
+                    resume
+                      (fun () ->
+                        if Option.fold ~none:false ~some:(fun accept -> accept residual) defer then
+                          raise Needs_t;
+                        bulk residual)
+                      continuation)
             | Bulk_approx residual ->
                 Some
                   (fun (continuation : (a, result) Effect.Deep.continuation) ->
                     resume (fun () -> bulk_approx residual) continuation)
+            | Static_mode ->
+                Some
+                  (fun (continuation : (a, result) Effect.Deep.continuation) ->
+                    Effect.Deep.continue continuation (trusted, replay, Option.is_some defer))
+            | Static_map (path, term, count) ->
+                Some
+                  (fun (continuation : (a, result) Effect.Deep.continuation) ->
+                    resume (fun () -> map path term count) continuation)
             | _ -> None);
       }
 
@@ -819,17 +846,27 @@ let inline_key c ~key parameters vals =
              vals)
     with
     | k ->
+        let _, _, deferred = Effect.perform Residual_effect.Static_mode in
         Some
           (Digest.string
-             (Lazy.force key ^ "\000" ^ k ^ string_of_bool c.geometry ^ string_of_bool c.host))
+             (Lazy.force key ^ "\000" ^ k ^ string_of_bool c.geometry ^ Context.name c.context
+            ^ string_of_bool deferred))
     | exception _ -> None
 
 (* The terms of the workspace's definitions (helpers and inlined node bodies, as evaluated) by form
-   id, path, node kind and type (what a replayed term is found by), built once per evaluation. A
+   id, path, node kind, type and zone (what a replayed term is found by), built once per evaluation.
+   Macro expansions can share a form id but bind different names in distinct loop/function zones. A
    form checks to a term at each call of its helper; those with one key are the same term, so the
    first is kept and the others are not walked (walking each, and testing membership among them,
    was quadratic: 40k terms, 548 per form id, 88 ms of a gpu_sea replay). *)
-let term_key (t : W.term) = (t.form.id, t.path, Obj.tag (Obj.repr t.node), t.ty)
+let term_key (t : W.term) =
+  let rec zone (term : W.term) =
+    match term.node with
+    | W.Loop { zone; _ } | Fn { zone; _ } | State { zone; _ } -> Some zone
+    | Expanded { body; _ } -> zone body
+    | _ -> None
+  in
+  (t.form.id, t.path, Obj.tag (Obj.repr t.node), t.ty, zone t)
 
 let term_index st kinds =
   let index, indexed =
@@ -1560,14 +1597,32 @@ and ev_raw c env (x : W.term) : value =
       | None ->
           Fn
             (Closure
-               { params; body; env = capture x env; zone; calls = ref 0; fid = fn_id c.st; at = c })
+               {
+                 params;
+                 replayable = true;
+                 body;
+                 env = capture x env;
+                 zone;
+                 calls = ref 0;
+                 fid = fn_id c.st;
+                 at = c;
+               })
       | Some original -> (
           match ev c env original with
           | Fn (Closure cl) -> Fn (Closure { cl with params; body })
           | Fn (Named n) ->
               Fn
                 (Closure
-                   { params; body; zone; env = Smap.empty; calls = n.ncalls; fid = n.fid; at = c })
+                   {
+                     params;
+                     replayable = false;
+                     body;
+                     zone;
+                     env = Smap.empty;
+                     calls = n.ncalls;
+                     fid = n.fid;
+                     at = c;
+                   })
           | _ -> fail "E_TYPE" "A function port requires a function."))
   | W.Hof (kind, f :: rest) -> hof c env x kind f rest
   | W.Hof (_, []) -> fail "E_ARITY" "A higher-order form takes a function."
@@ -2180,152 +2235,205 @@ and hof c env term kind f rest =
         ts
     in
     match (kind, rest) with
-    | `Map, ls -> (
+    | `Map, ls ->
         let ls = lists_of ls in
         let n = List.fold_left (fun n (length, _) -> min n length) max_int ls in
         let n = if ls = [] then 0 else n in
         let item k = call fv (List.map (fun (_, get) -> get k) ls) in
-        match (out, c.st.time) with
-        | Ty.Array Ty.Int, None when numeric && n > max_iterations -> (
-            let head =
-              match array_init Ty.Int max_iterations (fun k -> concrete c (item k)) with
-              | Int_array data -> data
-              | _ -> assert false
-            in
-            let whole =
-              Effect.perform
-                (Residual_effect.Bulk_static
-                   {
-                     rid = Atomic.fetch_and_add bulk_ids (-1);
-                     rterm = term;
-                     renv = capture term env;
-                     rc = c;
-                     previous = false;
-                     live = None;
-                     dep_frame = 0;
-                     dep_state = 0;
-                   })
-            in
-            match whole with
-            | Some (Int_array data as value)
-              when Array.length data = n
-                   && Array.for_all2 Int.equal head (Array.sub data 0 max_iterations) ->
-                (match fv with
-                | Closure cl -> cl.calls := !(cl.calls) + (n - max_iterations)
-                | Named f -> f.ncalls := !(f.ncalls) + (n - max_iterations));
-                value
-            | _ ->
-                if n > Sys.max_array_length then
-                  fail "E_ARRAY_RANGE" "Array length is outside native storage bounds.";
-                let data = Array.make n 0 in
-                Array.blit head 0 data 0 max_iterations;
-                for k = max_iterations to n - 1 do
-                  Value.int_array_put data k (concrete c (item k))
-                done;
-                Int_array data)
-        | Ty.Array e, None when numeric && n > max_iterations -> (
-            (* A large static packed map. The walker makes the first 4,096 elements as always (their
+        let offer residual =
+          match Effect.perform (Residual_effect.Bulk_static residual) with
+          | value -> value
+          | exception Needs_t ->
+              (* A deferred known-size call still reserves its full call-index
+                 interval, just as a completed kernel does. *)
+              (match fv with
+              | Closure cl -> cl.calls := !(cl.calls) + (n - !calls)
+              | Named fn -> fn.ncalls := !(fn.ncalls) + (n - !calls));
+              raise Needs_t
+        in
+        let finish =
+          if packed && numeric && c.st.time = None then
+            Effect.perform (Residual_effect.Static_map (site c, term, n))
+          else fun ~head:_ ~tail:_ ~completed:_ -> ()
+        in
+        let completed = ref false in
+        Fun.protect
+          ~finally:(fun () ->
+            finish ~head:(min max_iterations !calls)
+              ~tail:(max 0 (!calls - max_iterations))
+              ~completed:!completed)
+          (fun () ->
+            let result =
+              match (out, c.st.time) with
+              | Ty.Array e, None
+                when numeric && n > max_iterations
+                     &&
+                     let trusted, replay, _ = Effect.perform Residual_effect.Static_mode in
+                     trusted
+                     && ((not (c.st.record && c.rec_))
+                        || (replay && match fv with Closure cl -> cl.replayable | Named _ -> false)
+                        ) -> (
+                  let whole =
+                    offer
+                      {
+                        rid = Atomic.fetch_and_add bulk_ids (-1);
+                        rterm = term;
+                        renv = capture term env;
+                        rc = c;
+                        previous = false;
+                        live = None;
+                        dep_frame = 0;
+                        dep_state = 0;
+                      }
+                  in
+                  match whole with
+                  | Some value when Value.ty_of value = out && array_length value = n ->
+                      (match fv with
+                      | Closure cl -> cl.calls := !(cl.calls) + n
+                      | Named f -> f.ncalls := !(f.ncalls) + n);
+                      value
+                  | _ -> array_init e n (fun k -> concrete c (item k)))
+              | Ty.Array Ty.Int, None when numeric && n > max_iterations -> (
+                  let head =
+                    match array_init Ty.Int max_iterations (fun k -> concrete c (item k)) with
+                    | Int_array data -> data
+                    | _ -> assert false
+                  in
+                  let whole =
+                    offer
+                      {
+                        rid = Atomic.fetch_and_add bulk_ids (-1);
+                        rterm = term;
+                        renv = capture term env;
+                        rc = c;
+                        previous = false;
+                        live = None;
+                        dep_frame = 0;
+                        dep_state = 0;
+                      }
+                  in
+                  match whole with
+                  | Some (Int_array data as value)
+                    when Array.length data = n
+                         && Array.for_all2 Int.equal head (Array.sub data 0 max_iterations) ->
+                      (match fv with
+                      | Closure cl -> cl.calls := !(cl.calls) + (n - max_iterations)
+                      | Named f -> f.ncalls := !(f.ncalls) + (n - max_iterations));
+                      value
+                  | _ ->
+                      if n > Sys.max_array_length then
+                        fail "E_ARRAY_RANGE" "Array length is outside native storage bounds.";
+                      let data = Array.make n 0 in
+                      Array.blit head 0 data 0 max_iterations;
+                      for k = max_iterations to n - 1 do
+                        Value.int_array_put data k (concrete c (item k))
+                      done;
+                      Int_array data)
+              | Ty.Array e, None when numeric && n > max_iterations -> (
+                  (* A large static packed map. The walker makes the first 4,096 elements as always (their
               records, call indices and failures are the ordinary ones); the host may then supply
               the whole array, which is taken only when it has the walked elements bit for bit. Any
               other outcome walks the rest: the value never depends on the host. *)
-            let head = array_init e max_iterations (fun k -> concrete c (item k)) in
-            let width, walked =
-              match head with
-              | Vec2_array d -> (2, d)
-              | Vec3_array d -> (3, d)
-              | Vec4_array d -> (4, d)
-              | Float_array d -> (1, d)
-              | _ -> assert false
+                  let head = array_init e max_iterations (fun k -> concrete c (item k)) in
+                  let width, walked =
+                    match head with
+                    | Vec2_array d -> (2, d)
+                    | Vec3_array d -> (3, d)
+                    | Vec4_array d -> (4, d)
+                    | Float_array d -> (1, d)
+                    | _ -> assert false
+                  in
+                  let same (d : float array) =
+                    Array.length d = n * width
+                    &&
+                    let i = ref 0 in
+                    while
+                      !i < Array.length walked
+                      && Int64.equal (Int64.bits_of_float d.(!i)) (Int64.bits_of_float walked.(!i))
+                    do
+                      incr i
+                    done;
+                    !i = Array.length walked
+                  in
+                  let tolerant (d : float array) =
+                    Array.length d = n * width
+                    &&
+                    let ok = ref true in
+                    Array.iteri
+                      (fun i w ->
+                        let g = d.(i) in
+                        if not (Float.abs (g -. w) <= 1e-4 *. (1. +. Float.abs w)) then ok := false)
+                      walked;
+                    !ok
+                  in
+                  let approx_whole =
+                    match
+                      Effect.perform
+                        (Residual_effect.Bulk_approx
+                           {
+                             rid = Atomic.fetch_and_add bulk_ids (-1);
+                             rterm = term;
+                             renv = capture term env;
+                             rc = c;
+                             previous = false;
+                             live = None;
+                             dep_frame = 0;
+                             dep_state = 0;
+                           })
+                    with
+                    | Some (Float_array d as v) when width = 1 && tolerant d -> Some v
+                    | Some (Vec2_array d as v) when width = 2 && tolerant d -> Some v
+                    | Some (Vec3_array d as v) when width = 3 && tolerant d -> Some v
+                    | Some (Vec4_array d as v) when width = 4 && tolerant d -> Some v
+                    | _ -> None
+                  in
+                  let whole =
+                    if Option.is_some approx_whole then approx_whole
+                    else
+                      match
+                        offer
+                          {
+                            rid = Atomic.fetch_and_add bulk_ids (-1);
+                            rterm = term;
+                            renv = capture term env;
+                            rc = c;
+                            previous = false;
+                            live = None;
+                            dep_frame = 0;
+                            dep_state = 0;
+                          }
+                      with
+                      | Some (Float_array d as v) when width = 1 && same d -> Some v
+                      | Some (Vec2_array d as v) when width = 2 && same d -> Some v
+                      | Some (Vec3_array d as v) when width = 3 && same d -> Some v
+                      | Some (Vec4_array d as v) when width = 4 && same d -> Some v
+                      | _ -> None
+                  in
+                  match whole with
+                  | Some v ->
+                      (* the calls the walker would have made *)
+                      (match fv with
+                      | Closure cl -> cl.calls := !(cl.calls) + (n - max_iterations)
+                      | Named f -> f.ncalls := !(f.ncalls) + (n - max_iterations));
+                      v
+                  | None -> (
+                      if n > Sys.max_floatarray_length / width then
+                        fail "E_ARRAY_RANGE" "Array length is outside native storage bounds.";
+                      let data = Array.make (n * width) 0. in
+                      Array.blit walked 0 data 0 (Array.length walked);
+                      for k = max_iterations to n - 1 do
+                        Value.array_put data width k (concrete c (item k))
+                      done;
+                      match width with
+                      | 2 -> Vec2_array data
+                      | 3 -> Vec3_array data
+                      | 4 -> Vec4_array data
+                      | _ -> Float_array data))
+              | Ty.Array e, _ -> array_init e n (fun k -> concrete c (item k))
+              | _ -> List (join_values (Array.init n item))
             in
-            let same (d : float array) =
-              Array.length d = n * width
-              &&
-              let i = ref 0 in
-              while
-                !i < Array.length walked
-                && Int64.equal (Int64.bits_of_float d.(!i)) (Int64.bits_of_float walked.(!i))
-              do
-                incr i
-              done;
-              !i = Array.length walked
-            in
-            let tolerant (d : float array) =
-              Array.length d = n * width
-              &&
-              let ok = ref true in
-              Array.iteri
-                (fun i w ->
-                  let g = d.(i) in
-                  if not (Float.abs (g -. w) <= 1e-4 *. (1. +. Float.abs w)) then ok := false)
-                walked;
-              !ok
-            in
-            let approx_whole =
-              match
-                Effect.perform
-                  (Residual_effect.Bulk_approx
-                     {
-                       rid = Atomic.fetch_and_add bulk_ids (-1);
-                       rterm = term;
-                       renv = capture term env;
-                       rc = c;
-                       previous = false;
-                       live = None;
-                       dep_frame = 0;
-                       dep_state = 0;
-                     })
-              with
-              | Some (Float_array d as v) when width = 1 && tolerant d -> Some v
-              | Some (Vec2_array d as v) when width = 2 && tolerant d -> Some v
-              | Some (Vec3_array d as v) when width = 3 && tolerant d -> Some v
-              | Some (Vec4_array d as v) when width = 4 && tolerant d -> Some v
-              | _ -> None
-            in
-            let whole =
-              if Option.is_some approx_whole then approx_whole
-              else
-                match
-                  Effect.perform
-                    (Residual_effect.Bulk_static
-                       {
-                         rid = Atomic.fetch_and_add bulk_ids (-1);
-                         rterm = term;
-                         renv = capture term env;
-                         rc = c;
-                         previous = false;
-                         live = None;
-                         dep_frame = 0;
-                         dep_state = 0;
-                       })
-                with
-                | Some (Float_array d as v) when width = 1 && same d -> Some v
-                | Some (Vec2_array d as v) when width = 2 && same d -> Some v
-                | Some (Vec3_array d as v) when width = 3 && same d -> Some v
-                | Some (Vec4_array d as v) when width = 4 && same d -> Some v
-                | _ -> None
-            in
-            match whole with
-            | Some v ->
-                (* the calls the walker would have made *)
-                (match fv with
-                | Closure cl -> cl.calls := !(cl.calls) + (n - max_iterations)
-                | Named f -> f.ncalls := !(f.ncalls) + (n - max_iterations));
-                v
-            | None -> (
-                if n > Sys.max_floatarray_length / width then
-                  fail "E_ARRAY_RANGE" "Array length is outside native storage bounds.";
-                let data = Array.make (n * width) 0. in
-                Array.blit walked 0 data 0 (Array.length walked);
-                for k = max_iterations to n - 1 do
-                  Value.array_put data width k (concrete c (item k))
-                done;
-                match width with
-                | 2 -> Vec2_array data
-                | 3 -> Vec3_array data
-                | 4 -> Vec4_array data
-                | _ -> Float_array data))
-        | Ty.Array e, _ -> array_init e n (fun k -> concrete c (item k))
-        | _ -> List (join_values (Array.init n item)))
+            completed := true;
+            result)
     | `Filter, [ l ] -> (
         let count, get = List.hd (lists_of [ l ]) in
         match out with
@@ -2676,6 +2784,7 @@ and graph_value ?(rec_ = true) c name over =
         data = c.data;
         geometry = c.geometry;
         host = g.context = Context.host;
+        context = g.context;
         kernel_requests = c.kernel_requests;
         card = c.card;
       }
@@ -2794,6 +2903,7 @@ let root st =
     data = false;
     geometry = false;
     host = false;
+    context = Context.host;
     kernel_requests = false;
     card = None;
   }
@@ -2817,6 +2927,10 @@ let static_impl ?budget ?(record = false) ?(inputs = []) ws =
                 failf "E_UNKNOWN_GRAPH" "Unknown graph input target: %s." name)
             inputs;
           List.iter (fun (_, ins) -> List.iter (fun (_, value) -> Value.validate value) ins) inputs;
+          (* A new static pass replaces its checked terms. Drop the previous
+             weak memo's empty entries as well as their bucket storage. Frame
+             forces still reuse this pass's free-name walks. *)
+          Free_cache.reset (Domain.DLS.get free_caches);
           let st = new_state ?budget ~record ws in
           let c = root st in
           let results =
@@ -3142,8 +3256,14 @@ module Host = struct
   let force_reference_observed ?state ?elems ?resolve ~on_walk v ~live =
     force_with ?state ?elems ?resolve ~on_walk v ~live
 
-  let map_probe ?state ?resolve ?(offset = 0) r ~live =
-    with_live ?state ?resolve live (fun ctx_of ->
+  let map_probe ?state ?resolve ?execute ?(offset = 0) r ~live =
+    let kernel residual =
+      Option.map
+        (fun execute -> match execute residual with Ok value -> value | Error d -> raise_diagnostic d)
+        execute
+    in
+    Residual_effect.handle_kernel ~kernel @@ fun () ->
+    with_live ?state ?resolve ~kernel_requests:(Option.is_some execute) live (fun ctx_of ->
         let c = { (ctx_of r) with rec_ = false } in
         match r.rterm.node with
         | W.Hof (`Map, f :: sources) ->
@@ -3166,15 +3286,14 @@ module Host = struct
                       record = true;
                       recs = Hashtbl.create 16;
                       fn_calls = Hashtbl.create 1;
-                      memo = Hashtbl.create 16;
+                      memo = Hashtbl.copy c.st.memo;
                       steps = 0;
                     }
                   in
                   let fid = match fn with Closure cl -> cl.fid | Named n -> n.fid in
                   Hashtbl.add st.fn_calls fid (offset + k);
-                  ignore
-                    (concrete { c with st; rec_ = true }
-                       (call_fn { c with st; rec_ = true } fn (List.map (fun v -> get v k) arrays)));
+                  let selected = { c with st; rec_ = true; kernel_requests = false } in
+                  ignore (concrete selected (call_fn selected fn (List.map (fun v -> get v k) arrays)));
                   Hashtbl.fold
                     (fun path (_, values) all -> (path, List.rev values) :: all)
                     st.recs [])
@@ -3192,6 +3311,7 @@ module Residual = struct
     | Kernel_value = Residual_effect.Kernel_value
     | Bulk_static = Residual_effect.Bulk_static
     | Bulk_approx = Residual_effect.Bulk_approx
+    | Static_map = Residual_effect.Static_map
 
   let handle = Residual_effect.handle
   let free_names term = Names.elements (free_names term)
@@ -3220,6 +3340,7 @@ module Residual = struct
         zone;
         env = Smap.of_seq (List.to_seq bindings);
         calls = ref 0;
+        replayable = true;
         fid = Atomic.fetch_and_add bulk_ids (-1);
         at = { r.rc with inst = instance; prefix };
       }
@@ -3232,7 +3353,16 @@ module Residual = struct
     | Named _ -> None
 
   let function_name = function Named n -> Some n.name | Closure _ -> None
-  let residual_definition r name = Hashtbl.find_opt r.rc.st.defs name
+
+  let residual_definition r name =
+    match Hashtbl.find_opt r.rc.st.defs name with
+    | None -> None
+    | Some definition ->
+        (* Compilation can replace all walker calls of a helper. Keep it in the
+           enclosing inline body's dependency set just as eval_named does. *)
+        List.iter (fun watched -> Hashtbl.replace watched name ()) r.rc.st.watching;
+        Some definition
+
   let residual_graph r name = Hashtbl.find_opt r.rc.st.graphs name
 
   let graph_instance r name =
@@ -3249,6 +3379,7 @@ module Residual = struct
     previous : bool;
     host : bool;
     geometry : bool;
+    context : Context.t;
   }
 
   let residual_view r =
@@ -3263,6 +3394,7 @@ module Residual = struct
       previous = r.previous;
       host = r.rc.host;
       geometry = r.rc.geometry;
+      context = r.rc.context;
     }
 
   let residual_id r = r.rid
@@ -3311,6 +3443,7 @@ module Residual = struct
     v
 
   let residual_ops r = r.rc.st.ops
+  let residual_authored_key r = Lazy.force r.rc.st.authored_defs
 
   let eval_term ?state ?elems ?resolve ?on_walk ?kernel r term ~live =
     Option.iter (fun on_walk -> on_walk ()) on_walk;

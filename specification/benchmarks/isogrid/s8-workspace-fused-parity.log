@@ -1,0 +1,20 @@
+points=54464 primitives=13616 topology_resident=true positions_resident=true N_resident=true Cd_resident=true payload=0 validation=36 status=16 count=24 bounds=0
+CPU parity: topology exact; P/N/Cd <=1e-6; first-read payload=2287492; repeated-read delta=0
+        5.11 real         5.06 user         0.82 sys
+           172326912  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               10838  page reclaims
+                 570  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+              208014  involuntary context switches
+         68909127720  instructions retired
+         17959349487  cycles elapsed
+           149046064  peak memory footprint

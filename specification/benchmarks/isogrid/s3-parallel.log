@@ -1,0 +1,172 @@
+check: waiting for another agent's validation
+parallel exactness: line
+parallel exactness passed: line
+parallel exactness: resample
+parallel exactness passed: resample
+parallel exactness: facet
+parallel exactness passed: facet
+parallel exactness: grouped_facet
+parallel exactness passed: grouped_facet
+parallel exactness: inline_facet
+parallel exactness passed: inline_facet
+parallel exactness: polyframe
+parallel exactness passed: polyframe
+parallel exactness: circle
+parallel exactness passed: circle
+parallel exactness: grid
+parallel exactness passed: grid
+parallel exactness: box
+parallel exactness passed: box
+parallel exactness: torus
+parallel exactness passed: torus
+parallel exactness: tube
+parallel exactness passed: tube
+parallel exactness: platonic
+parallel exactness passed: platonic
+parallel exactness: attributes
+parallel exactness passed: attributes
+parallel exactness: groups
+parallel exactness passed: groups
+parallel exactness: filters_blurred
+parallel exactness passed: filters_blurred
+parallel exactness: filters_ray_collision
+parallel exactness passed: filters_ray_collision
+parallel exactness: filters_grid_snapped
+parallel exactness passed: filters_grid_snapped
+parallel exactness: filters_smoothed
+parallel exactness passed: filters_smoothed
+parallel exactness: filters_bounded
+parallel exactness passed: filters_bounded
+parallel exactness: sphere
+parallel exactness passed: sphere
+parallel exactness: filters_instances
+parallel exactness passed: filters_instances
+parallel exactness: filters_mirrored
+parallel exactness passed: filters_mirrored
+parallel exactness: spiral
+parallel exactness passed: spiral
+parallel exactness: subdivision_subdivided
+parallel exactness passed: subdivision_subdivided
+parallel exactness: filters_clipped
+parallel exactness passed: filters_clipped
+parallel exactness: filters_constrained_source
+parallel exactness passed: filters_constrained_source
+parallel exactness: filters_expanded_groups
+parallel exactness passed: filters_expanded_groups
+parallel exactness: subdivision_creased_subdivision
+parallel exactness passed: subdivision_creased_subdivision
+parallel exactness: subdivision_dense_curve_source
+parallel exactness passed: subdivision_dense_curve_source
+parallel exactness: subdivision_chaikin_subdivision
+parallel exactness passed: subdivision_chaikin_subdivision
+parallel exactness: subdivision_boundary_edge
+parallel exactness passed: subdivision_boundary_edge
+parallel exactness: subdivision_crease_topology
+parallel exactness passed: subdivision_crease_topology
+parallel exactness: subdivision_all_edge_source
+parallel exactness passed: subdivision_all_edge_source
+parallel exactness: subdivision_boundary_corner
+parallel exactness passed: subdivision_boundary_corner
+parallel exactness: subdivision_boundary_none
+parallel exactness passed: subdivision_boundary_none
+parallel exactness: subdivision_hole_indices
+parallel exactness passed: subdivision_hole_indices
+parallel exactness: subdivision_fvar_none
+parallel exactness passed: subdivision_fvar_none
+parallel exactness: subdivision_fvar_corners
+parallel exactness passed: subdivision_fvar_corners
+parallel exactness: subdivision_fvar_plus1
+parallel exactness passed: subdivision_fvar_plus1
+parallel exactness: subdivision_fvar_plus2
+parallel exactness passed: subdivision_fvar_plus2
+parallel exactness: subdivision_fvar_boundaries
+parallel exactness passed: subdivision_fvar_boundaries
+parallel exactness: subdivision_fvar_all
+parallel exactness passed: subdivision_fvar_all
+parallel exactness: subdivision_smooth_triangles
+parallel exactness passed: subdivision_smooth_triangles
+parallel exactness: modeling_enumerate_source
+parallel exactness passed: modeling_enumerate_source
+parallel exactness: modeling_extended_random
+parallel exactness passed: modeling_extended_random
+parallel exactness: modeling_generated_attributes
+parallel exactness passed: modeling_generated_attributes
+parallel exactness: modeling_deformed
+parallel exactness passed: modeling_deformed
+parallel exactness: modeling_bent
+parallel exactness passed: modeling_bent
+parallel exactness: modeling_duplicated
+parallel exactness passed: modeling_duplicated
+parallel exactness: modeling_match_target
+parallel exactness passed: modeling_match_target
+parallel exactness: modeling_blasted
+parallel exactness passed: modeling_blasted
+parallel exactness: modeling_curve_points
+parallel exactness passed: modeling_curve_points
+parallel exactness: subdivision_detail_source
+parallel exactness passed: subdivision_detail_source
+parallel exactness: modeling_joined_curve_parts
+parallel exactness passed: modeling_joined_curve_parts
+parallel exactness: combining_converted_lines
+parallel exactness passed: combining_converted_lines
+parallel exactness: combining_many_wires
+parallel exactness passed: combining_many_wires
+parallel exactness: modeling_scattered
+parallel exactness passed: modeling_scattered
+parallel exactness: combining_split_source
+parallel exactness passed: combining_split_source
+parallel exactness: combining_connected_lines
+parallel exactness passed: combining_connected_lines
+parallel exactness: combining_transfer_source
+parallel exactness passed: combining_transfer_source
+parallel exactness: combining_columns
+parallel exactness passed: combining_columns
+parallel exactness: combining_attribute_boundaries
+parallel exactness passed: combining_attribute_boundaries
+parallel exactness: combining_merged
+parallel exactness passed: combining_merged
+parallel exactness: modeling_curve_samples
+parallel exactness passed: modeling_curve_samples
+parallel exactness: combining_normal_groups
+parallel exactness passed: combining_normal_groups
+parallel exactness: combining_random_groups
+parallel exactness passed: combining_random_groups
+parallel exactness: editing_extruded
+parallel exactness passed: editing_extruded
+parallel exactness: combining_named_count
+parallel exactness passed: combining_named_count
+parallel exactness: editing_cleaned
+parallel exactness passed: editing_cleaned
+parallel exactness: editing_compacted
+parallel exactness passed: editing_compacted
+parallel exactness: combining_general_backbone
+parallel exactness passed: combining_general_backbone
+parallel exactness: editing_collapsed
+parallel exactness passed: editing_collapsed
+parallel exactness: editing_reduced
+parallel exactness passed: editing_reduced
+parallel exactness: editing_point_split
+parallel exactness passed: editing_point_split
+parallel exactness: editing_volume_graph
+parallel exactness passed: editing_volume_graph
+parallel exactness: emission_emission_points
+parallel exactness passed: emission_emission_points
+parallel exactness: emission_flipped
+parallel exactness passed: emission_flipped
+parallel exactness: editing_beveled
+parallel exactness passed: editing_beveled
+parallel exactness: emission_equalized
+parallel exactness passed: emission_equalized
+parallel exactness: emission_relax_source
+parallel exactness passed: emission_relax_source
+parallel exactness: emission_parameterized
+parallel exactness passed: emission_parameterized
+parallel exactness: emission_cusped
+parallel exactness passed: emission_cusped
+parallel exactness: emission_uv_mapped
+parallel exactness passed: emission_uv_mapped
+parallel exactness: emission_straightened
+parallel exactness passed: emission_straightened
+real 57.91
+user 302.23
+sys 23.91

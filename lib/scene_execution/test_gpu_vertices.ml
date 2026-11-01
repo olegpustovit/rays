@@ -13,6 +13,8 @@ let () =
   let indices_seen = ref []
   and vertex_bindings = ref []
   and producer = ref 0L
+  and index_bindings = ref []
+  and producer_indices = ref 0L
   and mesh_uploads = ref 0 in
   let encoder : Ogpu.Backend.driver_render_encoder =
     {
@@ -30,13 +32,20 @@ let () =
       set_winding = (fun _ -> Ok ());
       set_depth_state = (fun _ -> Ok ());
       draw = (fun ~primitive:_ ~first:_ ~count:_ ~instances:_ -> Ok ());
-      draw_indexed = (fun ~primitive:_ ~index_type:_ _ ~offset:_ ~count:_ ~instances:_ -> Ok ());
+      draw_indexed =
+        (fun ~primitive:_ ~index_type:_ buffer ~offset ~count ~instances:_ ->
+          index_bindings := (buffer, offset, count) :: !index_bindings;
+          Ok ());
       draw_indexed_indirect =
         (fun ~primitive:_ ~index_type:_ _ ~offset:_ _ ~arguments_offset:_ -> Ok ());
       draw_batch =
         (fun draws ->
           Array.iter
             (fun (draw : Ogpu.Backend.driver_batch_draw) ->
+              Option.iter
+                (fun (_, buffer, offset, count) ->
+                  index_bindings := (buffer, offset, count) :: !index_bindings)
+                draw.batch_index;
               Array.iter
                 (fun (stage, index, buffer, _) ->
                   if stage = Ogpu.Backend.Vertex then indices_seen := index :: !indices_seen;
@@ -65,6 +74,8 @@ let () =
                       (fun buffer ->
                         if descriptor.Ogpu.Types.label = Some "producer-instances" then
                           producer := buffer.Ogpu.Backend.token;
+                        if descriptor.Ogpu.Types.label = Some "producer-indices" then
+                          producer_indices := buffer.Ogpu.Backend.token;
                         if
                           Option.fold ~none:false
                             ~some:(String.starts_with ~prefix:"scene-mesh-")
@@ -365,6 +376,133 @@ let () =
            ());
       Scene_execution.Private.unregister_gpu_vertices marks_source;
       List.iter (fun b -> ignore (get (Ogpu.Backend.destroy_buffer b))) extra;
+      (* Scene3 can borrow the producer's settled UInt32 indices. No host index
+         payload is uploaded; replay retains and revalidates both streams. *)
+      let device_indices =
+        get
+          (Ogpu.Backend.create_buffer device
+             { label = Some "producer-indices"; size = 48L; usage = [ Index; Storage; Copy_dst ] })
+      in
+      let indexed_alive = ref true in
+      let indexed =
+        get
+          (Scene_execution.Private.register_gpu_vertices owner ~stride:12
+             ~indices:(device_indices, 12) ~key:"indexed-scene3" ~device ~buffer ~vertex_count:8
+             ~valid:(fun () -> !indexed_alive)
+             ())
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Scene_execution.Private.unregister_gpu_vertices indexed;
+          ignore (get (Ogpu.Backend.destroy_buffer device_indices)))
+        (fun () ->
+          expect Invalid_argument
+            (Scene_execution.Private.register_gpu_vertices owner ~indices:(device_indices, 13)
+               ~key:"oversized-indices" ~device ~buffer ~vertex_count:8
+               ~valid:(fun () -> true)
+               ());
+          List.iter
+            (fun (colors, key) ->
+              expect Invalid_argument
+                (Scene_execution.Private.register_gpu_vertices owner ~colors ~key ~device ~buffer
+                   ~vertex_count:8
+                   ~valid:(fun () -> true)
+                   ()))
+            [ ((buffer, 2), "invalid-color-width"); ((device_indices, 4), "short-color-buffer") ];
+          let indexed_entry =
+            {
+              entry with
+              family = Scene3;
+              texture = None;
+              vertex_attributes = Some ("indexed-attributes", Bytes.make (8 * 12) '\000');
+              draw =
+                {
+                  mesh = { mesh with key = Gpu_vertices "indexed-scene3"; indices = Bytes.empty };
+                  state = { state with transform_uniforms = Some (Bytes.make 5456 '\000') };
+                };
+            }
+          in
+          index_bindings := [];
+          let uploads = !mesh_uploads in
+          assert (get (Scene_execution.submit ~prepared:("indexed", 1L) renderer [ indexed_entry ]));
+          assert (!mesh_uploads = uploads);
+          assert (List.mem (!producer_indices, 0L, 12L) !index_bindings);
+          let uploaded = Scene_execution.upload_bytes renderer in
+          assert (get (Scene_execution.submit ~prepared:("indexed", 1L) renderer [ indexed_entry ]));
+          assert (Scene_execution.upload_bytes renderer = uploaded);
+          indexed_alive := false;
+          expect Stale_handle
+            (Scene_execution.replay_prepared_sampled_resources ~identity:"indexed" ~version:1L
+               renderer);
+          indexed_alive := true;
+          let bad_count =
+            {
+              indexed_entry with
+              draw =
+                { indexed_entry.draw with mesh = { indexed_entry.draw.mesh with index_count = 9 } };
+            }
+          in
+          expect Invalid_argument (Scene_execution.submit renderer [ bad_count ]);
+          let host_indices =
+            {
+              indexed_entry with
+              draw = { indexed_entry.draw with mesh = { indexed_entry.draw.mesh with indices } };
+            }
+          in
+          expect Invalid_argument (Scene_execution.submit renderer [ host_indices ]);
+          expect Invalid_argument
+            (Scene_execution.submit renderer
+               [
+                 { indexed_entry with vertex_attributes = Some ("missing-attributes", Bytes.empty) };
+               ]);
+          let colored_source =
+            get
+              (Scene_execution.Private.register_gpu_vertices owner ~stride:12
+                 ~indices:(device_indices, 12) ~colors:(buffer, 3) ~key:"colored-scene3" ~device
+                 ~buffer ~vertex_count:8
+                 ~valid:(fun () -> true)
+                 ())
+          in
+          Fun.protect
+            ~finally:(fun () -> Scene_execution.Private.unregister_gpu_vertices colored_source)
+            (fun () ->
+              let colored =
+                {
+                  indexed_entry with
+                  vertex_attributes = Some ("resident-colors", Bytes.empty);
+                  draw =
+                    {
+                      indexed_entry.draw with
+                      mesh = { indexed_entry.draw.mesh with key = Gpu_vertices "colored-scene3" };
+                    };
+                }
+              in
+              expect Invalid_argument (Scene_execution.submit renderer [ colored ]);
+              let uniforms = Bytes.make 5456 '\000' in
+              Bytes.set_int32_le uniforms (81 * 4) (Int32.bits_of_float 3.);
+              let colored =
+                {
+                  colored with
+                  draw =
+                    {
+                      colored.draw with
+                      state = { colored.draw.state with transform_uniforms = Some uniforms };
+                    };
+                }
+              in
+              assert (get (Scene_execution.submit renderer [ colored ])));
+          expect Invalid_argument
+            (Scene_execution.submit renderer
+               [
+                 {
+                   indexed_entry with
+                   draw =
+                     {
+                       indexed_entry.draw with
+                       mesh = { indexed_entry.draw.mesh with key = Gpu_vertices key };
+                     };
+                 };
+               ]));
       Scene_execution.Private.unregister_gpu_vertices source;
       Scene_execution.Private.unregister_gpu_vertices source;
       expect Stale_handle (render ());

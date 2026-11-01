@@ -1,0 +1,6 @@
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+isogrid checks passed
+isogrid geometry goldens passed
+real 5.01
+user 9.67
+sys 1.42

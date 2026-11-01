@@ -25,6 +25,7 @@ type stats = {
   volatile_entries : int; (* one slot per volatile node, outside the LRU *)
   retained_payload_bytes : int;
   last_node : node_timing option;
+  consumer_scans : int;
 }
 
 type output = {
@@ -50,7 +51,11 @@ val set_volatile : t -> (int -> bool) -> unit
     volatile node count; ponytail: one slot, so scrubbing back recooks). Replaces the previous
     predicate (a new lowering) and drops the slots of nodes that stopped being volatile. *)
 
-val cook : t -> context:Context.t -> Node.t -> (output, Diagnostic.t) result
+val cook : ?cpu_consumers:int -> t -> context:Context.t -> Node.t -> (output, Diagnostic.t) result
+(** Consumer facts are inferred only through explicitly declared CPU readers and nonforcing
+    forwarders. [cpu_consumers] declares the root's external use; absent is unknown, zero is a known
+    resident consumer. Counts are scoped to this cook. A cached latest-root census avoids traversing
+    an unchanged graph; opaque uses and reused node ids remain unknown. *)
 
 val cached : t -> context:Context.t -> Node.t -> output option
 (** What [cook] would answer from the cache for this node under [context], without cooking,

@@ -1,0 +1,49 @@
+chain_present route=cpu iteration=0 cook_to_pixel_seconds=0.787376 main_allocated_bytes=769083432 renderer_upload_bytes=41946320 payload_delta=0 validation_delta=0 bounds_delta=0
+chain_route=cpu iteration=0 domains=8 cook_seconds=0.527385 cook_allocated_bytes=385562400
+chain_present route=cpu iteration=1 cook_to_pixel_seconds=0.679655 main_allocated_bytes=780710000 renderer_upload_bytes=41940864 payload_delta=0 validation_delta=0 bounds_delta=0
+chain_route=cpu iteration=1 domains=8 cook_seconds=0.473632 cook_allocated_bytes=410495112
+chain_present route=cpu iteration=2 cook_to_pixel_seconds=0.678628 main_allocated_bytes=758620064 renderer_upload_bytes=41940864 payload_delta=0 validation_delta=0 bounds_delta=0
+chain_route=cpu iteration=2 domains=8 cook_seconds=0.470422 cook_allocated_bytes=387090312
+chain_present route=cpu iteration=3 cook_to_pixel_seconds=0.670788 main_allocated_bytes=778171032 renderer_upload_bytes=41940864 payload_delta=0 validation_delta=0 bounds_delta=0
+chain_route=cpu iteration=3 domains=8 cook_seconds=0.455361 cook_allocated_bytes=407165912
+chain_totals iterations=4 upload_bytes=0
+chain_callback=invoke calls=0 seconds=0.000000
+chain_callback=fill calls=0 seconds=0.000000
+chain_callback=range calls=0 seconds=0.000000
+chain_callback=compact calls=0 seconds=0.000000
+chain_callback=coerce calls=0 seconds=0.000000
+chain_callback=count calls=0 seconds=0.000000
+chain_callback=finish calls=0 seconds=0.000000
+chain_callback=settle calls=0 seconds=0.000000
+chain_callback=close calls=0 seconds=0.000000
+chain_callback=retain_uint32 calls=0 seconds=0.000000
+chain_callback=retain_float calls=0 seconds=0.000000
+chain_callback=validate_topology calls=0 seconds=0.000000
+points=998592 primitives=249648 topology_resident=false positions_resident=false N_resident=false Cd_resident=false payload=0 validation=0 status=0 count=0 bounds=0
+publication_seconds=3.661818 main_allocated_bytes=3799924304 cook_domains=8 iterations=4
+chain_present route=qualification_resident iteration=0 cook_to_pixel_seconds=0.431499 main_allocated_bytes=303815984 renderer_upload_bytes=5456 payload_delta=0 validation_delta=4 bounds_delta=0
+chain_route=qualification_resident iteration=0 domains=8 cook_seconds=0.397405 cook_allocated_bytes=285604944
+chain_present route=qualification_resident iteration=1 cook_to_pixel_seconds=0.336823 main_allocated_bytes=166844976 renderer_upload_bytes=0 payload_delta=0 validation_delta=4 bounds_delta=0
+chain_route=qualification_resident iteration=1 domains=8 cook_seconds=0.329247 cook_allocated_bytes=162162560
+chain_present route=qualification_resident iteration=2 cook_to_pixel_seconds=0.324572 main_allocated_bytes=158168064 renderer_upload_bytes=0 payload_delta=0 validation_delta=4 bounds_delta=0
+chain_route=qualification_resident iteration=2 domains=8 cook_seconds=0.317829 cook_allocated_bytes=153485048
+chain_present route=qualification_resident iteration=3 cook_to_pixel_seconds=0.324398 main_allocated_bytes=186125088 renderer_upload_bytes=0 payload_delta=0 validation_delta=4 bounds_delta=0
+chain_route=qualification_resident iteration=3 domains=8 cook_seconds=0.319539 cook_allocated_bytes=181441520
+chain_totals iterations=4 upload_bytes=9037816
+chain_callback=invoke calls=12 seconds=0.040533
+chain_callback=fill calls=4 seconds=0.008337
+chain_callback=range calls=4 seconds=0.003495
+chain_callback=compact calls=4 seconds=0.002960
+chain_callback=coerce calls=0 seconds=0.000000
+chain_callback=count calls=20 seconds=0.010767
+chain_callback=finish calls=8 seconds=0.000001
+chain_callback=settle calls=4 seconds=0.000030
+chain_callback=close calls=4 seconds=0.000025
+chain_callback=retain_uint32 calls=12 seconds=0.005777
+chain_callback=retain_float calls=4 seconds=0.000098
+chain_callback=validate_topology calls=4 seconds=0.014170
+points=998592 primitives=249648 topology_resident=true positions_resident=true N_resident=true Cd_resident=true payload=0 validation=160 status=64 count=96 bounds=0
+publication_seconds=2.030402 main_allocated_bytes=1535988576 cook_domains=8 iterations=4
+real 6.66
+user 26.99
+sys 1.10

@@ -1,0 +1,10 @@
+Measured SOP consumer plumbing: opaque root declines resident record; capture supplies one CPU reader
+consumer facts: CPU/forward/opaque, fanout, scopes, selected inputs and cached census pass
+component cache facts tests passed
+payload: immutable image, exact domains, cache/eviction accounting and typed geometry refusal passed
+editable graph tests passed
+parallel branch transactions: exact bytes, keys, counters and cancellation
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+real 3.29
+user 8.13
+sys 1.60

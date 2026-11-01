@@ -1,4 +1,5 @@
 module Cancel = Rdk.Cancel
+module Consumer_map = Map.Make (Int)
 
 module Dependencies = struct
   type fact = Frame | Time | Seed | Domains | Grain | Input | Pointer | Keys | Size | Step
@@ -51,6 +52,7 @@ type t = {
   cancel : Cancel.t;
   deferred : (Domain.id * int * (unit -> (unit, Diagnostic.t) result)) list Atomic.t;
   refused : int list Atomic.t;
+  cpu_consumers : int option Consumer_map.t;
 }
 
 let create ?(frame = 0L) ?(time = 0.) ?input ?(seed = 0L) ?domains ?(grain = 16_384) ?cancel () =
@@ -81,6 +83,7 @@ let create ?(frame = 0L) ?(time = 0.) ?input ?(seed = 0L) ?domains ?(grain = 16_
           cancel = Option.value ~default:(Cancel.create ()) cancel;
           deferred = Atomic.make [];
           refused = Atomic.make [];
+          cpu_consumers = Consumer_map.empty;
         })
       (Input.validate input)
 
@@ -92,6 +95,25 @@ let domains value = value.domains
 let grain value = value.grain
 let cancel_token value = value.cancel
 let cancelled value = Cancel.is_cancelled value.cancel
+let cpu_consumers value node = Option.join (Consumer_map.find_opt node value.cpu_consumers)
+
+let with_cpu_consumers value ~node count =
+  Option.iter
+    (fun n -> if n < 0 then invalid_arg "Context.with_cpu_consumers: negative count")
+    count;
+  { value with cpu_consumers = Consumer_map.add node count value.cpu_consumers }
+
+module Private = struct
+  type consumers = int option Consumer_map.t
+
+  let consumers value = value.cpu_consumers
+
+  let with_consumers value cpu_consumers =
+    if value.cpu_consumers == cpu_consumers then value else { value with cpu_consumers }
+
+  let find consumers node = Consumer_map.find_opt node consumers
+  let set consumers node count = Consumer_map.add node count consumers
+end
 
 let rec push cell value =
   let old = Atomic.get cell in

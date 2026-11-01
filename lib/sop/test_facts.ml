@@ -422,7 +422,95 @@ let test_parameter_reads () =
   Session.close cold;
   Session.close evaluator
 
+let test_consumer_facts () =
+  let geometry = Line_geometry.points [||] in
+  let source seen =
+    Node.Build.make_geometry ~operation:"consumer_source" ~version:1 ~parameters:""
+      ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
+      (fun ~node_id context _ ->
+        seen := Context.cpu_consumers context node_id :: !seen;
+        Ok Node.Build.{ geometry; instances = None })
+  in
+  let use ?input_policy kind inputs =
+    Node.Build.make_geometry ~operation:"consumer_use" ~version:1 ~parameters:""
+      ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ?input_policy ~inputs
+      (fun ~node_id:_ _ inputs ->
+        if kind = Node.Cpu then
+          Array.iter (fun g -> ignore (Packed.Float3.View.view (Geometry.positions g))) inputs;
+        Ok Node.Build.{ geometry = inputs.(0); instances = None })
+    |> Node.Build.with_input_use kind
+  in
+  let run ?cpu_consumers ?context root =
+    let e = session ~entries:0 () in
+    Fun.protect
+      ~finally:(fun () -> Session.close e)
+      (fun () ->
+        Session.cook ?cpu_consumers e
+          ~context:(Option.value ~default:(Context.create () |> get) context)
+          root
+        |> Result.get_ok |> ignore)
+  in
+  let seen = ref [] in
+  let s = source seen in
+  let a = use (Node.Forward 0) [| s |] and b = use (Node.Forward 0) [| s |] in
+  run (use Node.Cpu [| a; b |]);
+  check (!seen = [ Some 1 ]) "forwarding diamond double-counted one CPU reader";
+  let a = use Node.Cpu [| s |] and b = use Node.Cpu [| s |] in
+  List.iter
+    (fun domains ->
+      seen := [];
+      run ~context:(context domains) (use Node.Unknown [| a; b |]);
+      check (!seen = [ Some 2 ]) "shared source lost CPU consumers")
+    [ 1; 4 ];
+  seen := [];
+  run (use Node.Unknown [| a; s |]);
+  check (!seen = [ None ]) "opaque use became a known resident consumer";
+  let e = session ~entries:0 () and ctx = context 1 in
+  Fun.protect
+    ~finally:(fun () -> Session.close e)
+    (fun () ->
+      let root = use (Node.Forward 0) [| s |] in
+      let cook count ctx =
+        Session.cook ~cpu_consumers:count e ~context:ctx root |> Result.get_ok |> ignore
+      in
+      seen := [];
+      cook 0 ctx;
+      cook 0 ctx;
+      check
+        (!seen = [ Some 0; Some 0 ] && (Session.stats e).consumer_scans = 1)
+        "unchanged root rescanned consumers or lost the resident sink";
+      cook 1 ctx;
+      check
+        (List.hd !seen = Some 1 && (Session.stats e).consumer_scans = 2)
+        "changed external consumer reused stale facts";
+      cook 0 (Context.with_cpu_consumers ctx ~node:(Node.id s) (Some 2));
+      check (List.hd !seen = Some 2) "nested cook forgot enclosing consumers";
+      cook 1 (Context.with_cpu_consumers ctx ~node:(Node.id s) None);
+      check (List.hd !seen = None) "nested cook erased an enclosing unknown use";
+      check
+        (match Session.cook ~cpu_consumers:(-1) e ~context:ctx root with
+        | Error d -> d.Diagnostic.code = "consumer_count"
+        | Ok _ -> false)
+        "negative root consumer count was accepted";
+      check
+        (try
+            ignore (Node.Build.rebuild_with_inputs root [||]);
+           false
+         with Invalid_argument _ -> true)
+        "forwarded input survived invalid rewiring");
+  seen := [];
+  let alias = Node.relabel "same id, another node" s in
+  run (use Node.Unknown [| use Node.Cpu [| s |]; use Node.Cpu [| alias |] |]);
+  check (!seen = [ None; None ]) "reused node ids received ambiguous consumer facts";
+  seen := [];
+  let skipped = ref [] in
+  run (use ~input_policy:(Node.Build.Only 1) Node.Cpu [| source skipped; s |]);
+  check (!skipped = [] && !seen = [ Some 1 ]) "consumer census visited an unselected input";
+  print_endline
+    "consumer facts: CPU/forward/opaque, fanout, scopes, selected inputs and cached census pass"
+
 let () =
+  test_consumer_facts ();
   test_reuse false;
   test_reuse true;
   test_dependencies ();

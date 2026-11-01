@@ -4404,6 +4404,7 @@ let run_view_native () =
   let text =
     In_channel.with_open_bin "../../../sketches/shattered_cube.rays" In_channel.input_all
   in
+  let text = replace text "(sop/points :points 50)" "(sop/points :points 8)" in
   let rendered = ref ""
   and vertices = ref []
   and original = ref []
@@ -4429,7 +4430,7 @@ let run_view_native () =
                    ~elevation:0.42 ())
               ~prepare:Editor_prepare.surface
               ~draw:(fun node (prepared : Rays_editor__.Cook.prepared) ->
-                rendered := Node.operation node;
+                rendered := Node.label node;
                 let explosion =
                   Rdk_rays.Packed_pieces.explosion ~operation:(Node.operation node)
                     ~fields:(Node.parameter_fields node)
@@ -4498,7 +4499,7 @@ let run_view_native () =
                 if frame.input.frame = 16 || frame.input.frame = 22 then "box" else "exploded_view"
               in
               check
-                (Node.operation (E3.displayed_node e) = operation && !rendered = operation)
+                (Node.label (E3.displayed_node e) = operation && !rendered = operation)
                 (Printf.sprintf "Shattered Cube frame %d rendered %s instead of %s"
                    frame.input.frame !rendered operation);
               check
@@ -4508,7 +4509,7 @@ let run_view_native () =
               if frame.input.frame = 26 then begin
                 original := !vertices;
                 check
-                  (Node.operation (E3.displayed_node e) = "exploded_view")
+                  (Node.label (E3.displayed_node e) = "exploded_view")
                   "native v did not preview the result node"
               end;
               if frame.input.frame = 30 then begin

@@ -62,4 +62,5 @@ let replace target source =
 let identity image = Runtime_resources.Image.identity image.resource
 let pixels image = map "Image.pixels" (Runtime_resources.Image.pixels image.resource)
 let resource image = image.resource
-let dimensions image = (image.width, image.height)
+let dimensions image =
+  match get_size image with Ok size -> size | Error _ -> (image.width, image.height)

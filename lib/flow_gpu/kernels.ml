@@ -10,10 +10,14 @@ let compaction =
     entry = "compact_mask";
     uniform_layout = [];
     uniform_bytes = 12;
+    uint32_uniforms = [];
     table_seeds = [||];
     output_widths = [| 1 |];
+    output_uint32 = [| false |];
     input_widths = [| 1 |];
+    input_uint32 = [| false |];
     gathers = [||];
+    gather_uint32 = [||];
     counts = None;
     scene = None;
     interface =
@@ -27,6 +31,57 @@ let compaction =
               visibility = [ Compute ];
             })
         [ 0; 1; 2; 3; 4; 5 ];
+  }
+
+let compaction_uint32 =
+  {
+    compaction with
+    source = Compact_uint32_source.source;
+    entry = "compact_mask_uint32";
+    output_uint32 = [| true |];
+  }
+
+let indices =
+  {
+    compaction_uint32 with
+    source = Indices_source.source;
+    entry = "write_indices";
+    uniform_bytes = 12;
+    interface =
+      List.map
+        (fun binding ->
+          S.
+            {
+              group = 0;
+              binding;
+              kind = (if binding = 1 then Uniform_buffer else Storage_buffer);
+              visibility = [ Compute ];
+            })
+        [ 0; 1 ];
+  }
+
+let triangles =
+  {
+    compaction_uint32 with
+    source = Triangles_source.source;
+    entry = "triangle_indices";
+    uniform_bytes = 16;
+    interface = List.init 8 (fun binding ->
+      S.{ group = 0; binding; kind = (if binding = 7 then Uniform_buffer else Storage_buffer);
+          visibility = [ Compute ] });
+  }
+
+let topology =
+  {
+    compaction_uint32 with
+    source = Topology_source.source;
+    entry = "topology_check";
+    uniform_bytes = 20;
+    interface =
+      List.init 5 (fun binding ->
+          S.{ group = 0; binding;
+              kind = (if binding = 4 then Uniform_buffer else Storage_buffer);
+              visibility = [ Compute ] });
   }
 
 (* A resident dispatch's threadgroup counts from a count cell, one thread (shaders/dispatch.rays,

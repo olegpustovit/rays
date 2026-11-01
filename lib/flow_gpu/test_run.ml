@@ -566,6 +566,84 @@ let resident_fold ?(n = 9000) ?(levels = 3) ?(keep = "(>= (int/mod (int i) 3) 1)
 (* One host draws a resident fold again and again while its counts (k of every 8 kept, doubled, each
    level) grow past the capacities earlier draws gave its slots, shrink to none, then grow again:
    every draw is the CPU's, and the cut ones ran again. *)
+let resident_value gpu =
+  let module E = Flow.Eval in
+  let module C = Flow_ir.Core_exec in
+  let ok = Test_program.ok in
+  let source =
+    {|(workspace w (graph g :context value
+      (let* [tested (if (>= t 0.)
+        (let* [mask (map (fn [(i : int)] (if (< (int/mod i 8) 5) 1 0))
+                       (array/range (int t) :type int))
+               kept (array/compact mask)
+               points (map (fn [(i : int)] [(float i) 2.0 0.0]) kept)]
+          {:points points :indices kept :count (array/count kept)})
+        {:points (array/vec3 0) :indices (array/int 0) :count 0})] 0.)))|}
+  in
+  let workspace =
+    match
+      Flow.Workspace.check { Flow.Catalog.version = 1; kinds = [] } (ok (Flow.Syntax.parse source))
+    with
+    | Some workspace, [] -> workspace
+    | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
+  in
+  let value =
+    snd (List.hd (List.assoc [ "g"; "tested" ] (ok (E.static ~record:true workspace)).records))
+  in
+  let residual = match value with E.Residual r -> r | _ -> failwith "expected record residual" in
+  let program = Result.get_ok (Flow_ir.Core_lower.lower ~strict:true residual) in
+  let prepared = C.prepare program in
+  let host = Flow_gpu.Host.create ~clock:Unix.gettimeofday gpu in
+  Fun.protect
+    ~finally:(fun () -> Flow_gpu.Host.close host)
+    (fun () ->
+      List.iter
+        (fun count ->
+          List.iter
+            (fun uint32 ->
+              let r = Flow_gpu.Host.resident ~uint32 ~fast:true host in
+              let before = Flow_gpu.Host.stats host in
+              let invoked = ref 0 and reads = ref 0 in
+              let resident =
+                {
+                  r with
+                  invoke =
+                    (fun packed args ~locals ~live ->
+                      let value = r.invoke packed args ~locals ~live in
+                      if value <> None then incr invoked;
+                      value);
+                  finish =
+                    (fun value ->
+                      let actual = r.finish value in
+                      if actual != value then incr reads;
+                      actual);
+                }
+              in
+              Fun.protect ~finally:resident.close (fun () ->
+                  let live = Input.at_time (float count) in
+                  let result = ok (C.execute ~strict:true ~resident prepared ~live) in
+                  if count >= 256 then assert (!invoked >= 2 && !reads = 0);
+                  let published = Flow_gpu.Host.stats host in
+                  assert (published.payload_readback_bytes = before.payload_readback_bytes);
+                  if count >= 256 then
+                    assert (published.count_readback_bytes > before.count_readback_bytes);
+                  let rec materialise = function
+                    | E.Record fields ->
+                        E.Record (List.map (fun (k, v) -> (k, materialise v)) fields)
+                    | value -> r.finish value
+                  in
+                  assert (materialise result = ok (E.Host.force_reference value ~live));
+                  let read = Flow_gpu.Host.stats host in
+                  if count >= 256 then
+                    assert (read.payload_readback_bytes > published.payload_readback_bytes);
+                  assert (
+                    read.readback_bytes = read.payload_readback_bytes + read.bounds_readback_bytes);
+                  assert (read.status_readback_bytes = 4 * read.status_reads)))
+            [ false; true ])
+        [ 9000; 5001; 0; 16385; 1025 ]);
+  print_endline
+    "Resident value records: native count-only publication and exact CPU materialisation"
+
 let resident_history gpu =
   let ok = Test_program.ok in
   let body =
@@ -656,7 +734,8 @@ let counted gpu =
         let n = min values.count (c * mul / div) in
         let out = buffer (values.count * width * 4) and record = buffer 24 and cell = buffer 4 in
         Fun.protect
-          ~finally:(fun () -> List.iter (fun b -> ignore (B.destroy_buffer b)) [ out; record; cell ])
+          ~finally:(fun () ->
+            List.iter (fun b -> ignore (B.destroy_buffer b)) [ out; record; cell ])
           (fun () ->
             get (B.write_buffer out ~offset:0L (Bytes.make (values.count * width * 4) '\xff'));
             get (B.write_buffer record ~offset:0L (Bytes.make 24 '\x07'));
@@ -666,8 +745,8 @@ let counted gpu =
             let commands = get (B.begin_commands queue) in
             ignore
               (Test_program.ok
-                 (Flow_gpu.Run.dispatch ~commands ~count:(cell, mul, div) ~into:(out, record)
-                    runner values));
+                 (Flow_gpu.Run.dispatch ~commands ~count:(cell, mul, div) ~into:(out, record) runner
+                    values));
             get (B.complete_through queue (get (B.commit commands)).epoch);
             let words = get (B.read_buffer record ~offset:0L ~length:24) in
             let floats =
@@ -684,8 +763,16 @@ let counted gpu =
       in
       List.iter check
         [
-          (0, 1, 1); (1, 1, 1); (255, 1, 1); (256, 1, 1); (257, 1, 1); (4096, 1, 1); (9999, 1, 1);
-          (100, 3, 1); (171, 3, 2); (513, 1, 2);
+          (0, 1, 1);
+          (1, 1, 1);
+          (255, 1, 1);
+          (256, 1, 1);
+          (257, 1, 1);
+          (4096, 1, 1);
+          (9999, 1, 1);
+          (100, 3, 1);
+          (171, 3, 2);
+          (513, 1, 2);
         ];
       print_endline
         "counted dispatch: the device count sizes the grid, from 0 past the capacity, mul / div")
@@ -744,10 +831,9 @@ let compaction gpu =
           || List.exists
                (fun (j, i) -> Int32.float_of_bits (Bytes.get_int32_le kept' (4 * j)) <> float i)
                (List.mapi (fun j i -> (j, i)) expected)
-        then
-          failwith (Printf.sprintf "compaction: n %d: device kept indices differ from the CPU" n))
+        then failwith (Printf.sprintf "compaction: n %d: device kept indices differ from the CPU" n))
   in
-  let irregular i = (i * 2654435761) lsr 13 land 7 < 3 in
+  let irregular i = ((i * 2654435761) lsr 13) land 7 < 3 in
   Fun.protect
     ~finally:(fun () -> Flow_gpu.Pipelines.close pipelines)
     (fun () ->
@@ -762,8 +848,7 @@ let compaction gpu =
              ])
            [ 0; 1; 1023; 1024; 1025; 300_000 ]);
       print_endline
-        "compaction: the CPU's kept indices from 0 to 300,000 elements, every mask and device \
-         count")
+        "compaction: the CPU's kept indices from 0 to 300,000 elements, every mask and device count")
 
 let () =
   let module H = Flow_gpu.Host in
@@ -792,6 +877,7 @@ let () =
       resident_fold gpu ~count:"(int/div (array/count kept) 2)";
       resident_fold gpu ~keep:"(< (int i) 0)" ~count:"(array/count kept)";
       resident_history gpu;
+      resident_value gpu;
       counted gpu;
       compaction gpu;
       let host = H.create ~clock:Unix.gettimeofday gpu in

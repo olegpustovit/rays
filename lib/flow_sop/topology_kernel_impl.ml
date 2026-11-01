@@ -285,6 +285,87 @@ let mesh args =
       error "E_TOPOLOGY_TYPE"
         "Mesh requires vec3 points and integer vertex_points, primitive_offsets and kinds arrays."
 
+type Rdk.Packed.Deferred.holder +=
+  | Resident of E.value * int
+  | Resident_topology of Flow_ir.Gpu.integers * Flow_ir.Gpu.integers * Flow_ir.Gpu.integers
+
+let resident geometry =
+  let topology = G.topology geometry in
+  match Rdk.Topology.holder topology with
+  | Some (Resident_topology (vertices, offsets, kinds))
+    when vertices.count = Rdk.Topology.vertex_count topology
+      && offsets.count = Rdk.Topology.primitive_count topology + 1
+      && kinds.count = Rdk.Topology.primitive_count topology ->
+      Some (vertices, offsets, kinds)
+  | Some _ | None -> None
+
+let mesh_resident (scope : Flow_ir.Gpu.residency) args =
+  match List.assoc_opt "points" args, List.assoc_opt "vertex_points" args,
+        List.assoc_opt "primitive_offsets" args, List.assoc_opt "kinds" args with
+  | Some (E.Vec3_array points), Some vertices, Some offsets, Some kinds
+    when Array.length points = 0 ->
+      (* Empty maps may return owned arrays while their one-word offset stays
+         resident. Validate that stream before constructing the canonical empty
+         mesh; reading its payload back is unnecessary. *)
+      let stream value =
+        match scope.executor.count value, value with
+        | Some _, _ -> Some value
+        | None, E.Int_array values when Array.length values = 0 ->
+            scope.executor.fill (Flow.Ty.Array Flow.Ty.Int) ~length:0 (E.Int 0)
+        | _ -> None
+      in
+      (match stream vertices, stream offsets, stream kinds with
+      | Some vertices, Some offsets, Some kinds ->
+          Option.map
+            (fun valid -> Result.bind valid (fun () ->
+                mesh [ ("points", E.Vec3_array points); ("vertex_points", E.Int_array [||]);
+                  ("primitive_offsets", E.Int_array [| 0 |]); ("kinds", E.Int_array [||]) ]))
+            (scope.validate_topology ~point_count:0 ~vertices ~offsets ~kinds
+               ~max_polygon_size:4294967295)
+      | _ -> None)
+  | Some (E.Vec3_array _ as points), Some vertices, Some offsets, Some kinds ->
+      (match scope.executor.count points, scope.executor.count vertices,
+             scope.executor.count offsets, scope.executor.count kinds with
+      | Some point_count, Some vertex_count, Some _, Some primitive_count ->
+          (match scope.validate_topology ~point_count ~vertices ~offsets ~kinds
+                   ~max_polygon_size:4294967295 with
+          | None -> None
+          | Some (Error _ as error) -> Some error
+          | Some (Ok ()) ->
+              let acquired = ref [] in
+              let retain release value =
+                match value with
+                | Some value -> acquired := release value :: !acquired; value
+                | None -> Flow.Value.raise_diagnostic
+                    (Diagnostic.error ~code:"E_GPU" "Validated mesh stream could not be retained.")
+              in
+              let result =
+                try
+                  let points = retain (fun (p : Flow_ir.Gpu.planes) -> p.release) (scope.retain_float points) in
+                  let integer value = retain (fun (p : Flow_ir.Gpu.integers) -> p.release)
+                      (scope.retain_uint32 value) in
+                  let vertices = integer vertices and offsets = integer offsets and kinds = integer kinds in
+                  let release ~held = List.iter (fun (p : Flow_ir.Gpu.integers) -> p.release ~held)
+                      [ vertices; offsets; kinds ] in
+                  let topology = Rdk.Topology.deferred ~point_count ~vertex_count ~primitive_count
+                      ~holder:(Resident_topology (vertices, offsets, kinds)) ~release (fun () ->
+                        Rdk.Topology.create_owned ~point_count ~vertex_points:(vertices.materialise ())
+                          ~primitive_offsets:(offsets.materialise ())
+                          ~primitive_kinds:(Array.map (function
+                              | 0 -> Rdk.Topology.Polygon | 1 -> Open_polyline | _ -> Closed_polyline)
+                              (kinds.materialise ())) |> Result.get_ok) in
+                  let holder = Option.map (fun v -> Resident (v, point_count)) points.resident in
+                  let positions = Rdk.Packed.Float3.deferred ?holder ~length:point_count
+                      ~release:points.release ~bounds:points.bounds points.materialise in
+                  Result.map_error (Diagnostic.error ~code:"E_TOPOLOGY")
+                    (G.create ~positions ~topology ())
+                with Diagnostic.Error d -> Error d
+              in
+              (match result with Error _ -> List.iter (fun release -> release ~held:false) !acquired | Ok _ -> ());
+              Some result)
+      | _ -> None)
+  | _ -> None
+
 let count geometry = function
   | "points" -> Ok (G.point_count geometry)
   | "vertices" -> Ok (G.vertex_count geometry)

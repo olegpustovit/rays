@@ -39,6 +39,8 @@ let run driver =
          { label = Some "mapped"; size = 16L; usage = [ Storage; Copy_src; Copy_dst ] })
   in
   require (Bigarray.Array1.dim floats = 4 && floats.{3} = 0.) "mapped view is not 4 zeroed floats";
+  require (Option.get (Backend.mapped_view mapped) == floats) "mapped view accessor copied storage";
+  require (Backend.mapped_view source = None) "unmapped buffer exposed a mapped view";
   floats.{1} <- 1.5;
   get (Backend.flush_mapped mapped ~length:16);
   require
@@ -57,6 +59,7 @@ let run driver =
   | Error { Error.kind = Invalid_argument; _ } -> ()
   | _ -> failwith "an unmapped buffer was flushed");
   get (Backend.destroy_buffer mapped);
+  require (Backend.mapped_view mapped = None) "destroyed buffer exposed a mapped view";
   require (floats.{1} = 1.5) "mapped view changed after destroy";
   (match Backend.invalidate_mapped mapped ~length:4 with
   | Error { Error.kind = Stale_handle; _ } -> ()

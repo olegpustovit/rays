@@ -1,0 +1,19 @@
+Resident mesh: validated deferred publication, concurrent CPU reads and bounded ownership
+        1.37 real         4.06 user         0.05 sys
+           107200512  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                7187  page reclaims
+                 430  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                2319  involuntary context switches
+         19778656484  instructions retired
+         12366395947  cycles elapsed
+            86835944  peak memory footprint

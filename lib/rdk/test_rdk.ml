@@ -100,8 +100,205 @@ let check_topology_validation () =
             ~offsets:[| 0; 1; count |] ~kinds:(Array.make 2 Topology.Polygon)))
     [ 1; 4; 8 ]
 
+type Packed.Deferred.holder += Topology_test of int
+
+let check_deferred_topology () =
+  let source =
+    Plane_generators.grid ~connectivity:Grid_quads ~columns:2 ~rows:2 ~size:2. () |> get_rdk
+  in
+  let owned = Geometry.topology source in
+  let expected = Topology.View.view owned in
+  let make ?shape ?holder ?release reads =
+    Topology.deferred ?shape ?holder ?release ~point_count:(Topology.point_count owned)
+      ~vertex_count:(Topology.vertex_count owned) ~primitive_count:(Topology.primitive_count owned)
+      (fun () ->
+        Atomic.incr reads;
+        owned)
+  in
+  let reads = Atomic.make 0 and releases = ref [] in
+  let topology =
+    make ~shape:(Polygon, 4) ~holder:(Topology_test 7)
+      ~release:(fun ~held -> releases := held :: !releases)
+      reads
+  in
+  let geometry =
+    Geometry.create ~positions:(Geometry.positions source) ~topology
+      ~attributes:(Geometry.attributes source) ()
+    |> get_string
+  in
+  let id = Topology.data_id topology in
+  check
+    (Topology.point_count topology = Topology.point_count owned
+    && Topology.vertex_count topology = Topology.vertex_count owned
+    && Topology.primitive_count topology = Topology.primitive_count owned
+    && Topology.payload_bytes topology = Topology.payload_bytes owned
+    && Geometry.payload_bytes geometry = Geometry.payload_bytes source
+    && (not (Topology.all_triangles topology))
+    && Topology.resident topology
+    && Topology.holder topology = Some (Topology_test 7)
+    && Atomic.get reads = 0)
+    "deferred topology metadata or Geometry.create forced payload";
+  let release = List.assoc id (Geometry.releasers geometry) in
+  release ~held:true;
+  Parallel.run ~domains:4 (fun () ->
+      Parallel.for_ ~chunk_size:1 ~start:0 ~finish:63 (fun _ ->
+          check (Topology.View.view topology = expected) "racing topology readers differ"));
+  check
+    (Atomic.get reads = 1
+    && (not (Topology.resident topology))
+    && Topology.holder topology = None
+    && Topology.releaser topology = None
+    && Topology.data_id topology = id
+    && Geometry.releasers geometry = []
+    && !releases = [ true ])
+    "deferred topology must materialise once and drop its holder";
+  release ~held:false;
+  check (!releases = [ false; true ]) "retained release handle changed contract";
+  check
+    (Topology.point_of_vertex topology 2 = Topology.point_of_vertex owned 2
+    && Topology.primitive_vertex_range topology 1 = Topology.primitive_vertex_range owned 1
+    && Topology.primitive_size topology 1 = 4
+    && Topology.primitive_kind topology 1 = Polygon)
+    "topology queries read placeholder planes";
+  List.iter
+    (fun domains ->
+      Parallel.run ~domains (fun () ->
+          List.iter
+            (fun consume ->
+              let reads = Atomic.make 0 in
+              let topology = make reads in
+              let geometry =
+                Geometry.create ~positions:(Geometry.positions source) ~topology
+                  ~attributes:(Geometry.attributes source) ()
+                |> get_string
+              in
+              consume topology geometry;
+              check (Atomic.get reads = 1) "CPU consumer did not materialise topology once")
+            [
+              (fun topology _ ->
+                check
+                  (Point_index.View.view (Point_index.create topology)
+                  = Point_index.View.view (Point_index.create owned))
+                  "deferred point incidence");
+              (fun topology _ ->
+                check
+                  (Topology_index.View.view (Topology_index.create topology)
+                  = Topology_index.View.view (Topology_index.create owned))
+                  "deferred edge incidence");
+              (fun _ geometry ->
+                let run = Triangulate.run { cancel = None; grain = Some 1; primitives = None } in
+                check
+                  (equal_geometry (run geometry |> get_rdk) (run source |> get_rdk))
+                  "deferred triangulation");
+              (fun _ geometry ->
+                let run =
+                  Normal_ops.run
+                    {
+                      cancel = None;
+                      grain = Some 1;
+                      selection = None;
+                      primitives = None;
+                      owner = Point;
+                      weighting = Face_area;
+                      cusp_angle = Float.pi;
+                      attribute = "N";
+                    }
+                in
+                check
+                  (equal_geometry (run geometry |> get_rdk) (run source |> get_rdk))
+                  "deferred normal attribute operation");
+            ]))
+    [ 1; 4 ];
+  let triangles =
+    Triangulate.run { cancel = None; grain = None; primitives = None } source |> get_rdk
+  in
+  let triangles = Geometry.topology triangles in
+  let reads = ref 0 in
+  let topology =
+    Topology.deferred ~shape:(Polygon, 3) ~point_count:(Topology.point_count triangles)
+      ~vertex_count:(Topology.vertex_count triangles)
+      ~primitive_count:(Topology.primitive_count triangles) (fun () ->
+        incr reads;
+        triangles)
+  in
+  check (Topology.all_triangles topology && !reads = 0) "triangle shape forced payload";
+  ignore (Topology.View.view topology);
+  check (!reads = 1) "triangle shape materialisation";
+  let mismatch =
+    Topology.deferred ~point_count:0 ~vertex_count:0 ~primitive_count:0 (fun () -> owned)
+  in
+  check
+    (try
+       ignore (Topology.View.view mismatch);
+       false
+     with Invalid_argument _ -> true)
+    "deferred topology accepted changing counts";
+  let bad_shape = make ~shape:(Open_polyline, 4) (Atomic.make 0) in
+  check
+    (try
+       ignore (Topology.View.view bad_shape);
+       false
+     with Invalid_argument _ -> true)
+    "deferred topology accepted changing shape";
+  let empty_reads = ref 0 in
+  let empty =
+    Topology.deferred ~shape:(Polygon, 3) ~point_count:0 ~vertex_count:0 ~primitive_count:0
+      (fun () ->
+        incr empty_reads;
+        Topology.empty ~point_count:0)
+  in
+  check
+    (Topology.all_triangles empty
+    && Topology.payload_bytes empty = Sys.word_size / 8
+    && !empty_reads = 0)
+    "empty topology metadata forced payload";
+  check
+    ((Topology.View.view empty).primitive_offsets = [| 0 |] && !empty_reads = 1)
+    "empty topology materialisation";
+  let reads = Atomic.make 0 in
+  let freed = ref false in
+  let unread =
+    Topology.deferred ~point_count:0 ~vertex_count:0 ~primitive_count:0
+      ~release:(fun ~held -> if not held then freed := true)
+      (fun () ->
+        Atomic.incr reads;
+        if !freed then invalid_arg "released topology";
+        Topology.empty ~point_count:0)
+  in
+  Option.get (Topology.releaser unread) ~held:false;
+  check (Atomic.get reads = 0) "release materialised unread topology";
+  for _ = 1 to 2 do
+    check
+      (try
+         ignore (Topology.View.view unread);
+         false
+       with Invalid_argument _ -> true)
+      "released topology still materialised"
+  done;
+  check (Atomic.get reads = 1) "failed materialisation reran its thunk";
+  List.iter
+    (fun (point_count, vertex_count, primitive_count, shape) ->
+      check
+        (try
+           ignore
+             (Topology.deferred ?shape ~point_count ~vertex_count ~primitive_count (fun () ->
+                  fail "invalid metadata invoked its materialiser"));
+           false
+         with Invalid_argument _ -> true)
+        "deferred topology accepted invalid metadata")
+    [
+      (-1, 0, 0, None);
+      (0, -1, 0, None);
+      (0, 0, -1, None);
+      (1, 1, 0, None);
+      (4, 4, 1, Some (Polygon, 2));
+      (4, 4, 1, Some (Polygon, 3));
+    ];
+  print_endline "Deferred topology metadata, single materialisation, release and CPU consumers pass"
+
 let run () =
   check_topology_validation ();
+  check_deferred_topology ();
   let builder = Packed.Float3.Builder.create 4 in
   Packed.Float3.Builder.set builder 0 0. 0. 0.;
   Packed.Float3.Builder.set builder 1 1. 0. 0.;

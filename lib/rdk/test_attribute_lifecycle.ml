@@ -46,7 +46,86 @@ let names geometry =
   Geometry.attributes geometry
   |> List.map (fun value -> (Attribute.owner value, Attribute.name value))
 
+type Packed.Deferred.holder += Deferred_surface_fixture
+
+let surface_failure () =
+  let x = [| 0.; 1.; 0.; 1. |] and y = [| 0.; 1.; 1.; 0. |] and z = Array.make 4 0. in
+  let positions = Packed.Float3.of_owned ~x ~y ~z |> get in
+  let points =
+    Geometry.create
+      ~positions:
+        (Packed.Float3.deferred ~holder:Deferred_surface_fixture ~length:4 (fun () -> [| x; y; z |]))
+      ~topology:(Topology.empty ~point_count:4)
+      ~attributes:
+        [
+          Attribute.create_owned ~name:"uv" ~owner:Attribute.Point
+            (Attribute.Float2
+               (Packed.Float2.of_owned ~x:(Array.make 4 0.) ~y:(Array.make 4 0.) |> get))
+          |> get;
+        ]
+      ()
+    |> get
+  in
+  let host = Rdk_rays.Surface.of_geometry points |> get in
+  check
+    (Rdk_rays.Surface.host_reason host = Some "Attribute uv requires the host bridge.")
+    "unsupported surface did not record its host reason";
+  let empty_colors = Attribute.Float3 (Packed.Float3.of_owned ~x:[||] ~y:[||] ~z:[||] |> get) in
+  let points =
+    Geometry.with_attribute
+      (Attribute.create_owned ~name:"Cd" ~owner:Attribute.Primitive empty_colors |> get)
+      points
+    |> get
+  in
+  let points =
+    Geometry.with_attribute
+      (Attribute.create_owned ~name:"N" ~owner:Attribute.Vertex empty_colors |> get)
+      points
+    |> get
+  in
+  let mesh = Rdk_rays.Rays_mesh.to_mesh points |> get_ok in
+  check (Rays.Mesh.vertex_count mesh = 4) "empty corner attributes broke a point-cloud host reader";
+  let topology =
+    Topology.polygons_owned ~point_count:4 ~vertex_points:[| 0; 1; 2; 3 |]
+      ~primitive_offsets:[| 0; 4 |]
+    |> get
+  in
+  let owned = Geometry.create ~positions ~topology () |> get in
+  let expected =
+    match Rdk_rays.Surface.of_geometry owned with
+    | Error message -> message
+    | Ok _ -> fail "bow-tie surface was accepted"
+  in
+  let normals =
+    Attribute.create_deferred ~name:"N" ~owner:Attribute.Point ~like:(Attribute.Float3 positions)
+      ~length:4 (fun () -> Attribute.Float3 positions)
+    |> get
+  in
+  let deferred =
+    Geometry.create
+      ~positions:
+        (Packed.Float3.deferred ~holder:Deferred_surface_fixture ~length:4 (fun () -> [| x; y; z |]))
+      ~topology:
+        (Topology.deferred ~holder:Deferred_surface_fixture ~point_count:4 ~vertex_count:4
+           ~primitive_count:1 (fun () -> topology))
+      ~attributes:[ normals ] ()
+    |> get
+  in
+  let surface = Rdk_rays.Surface.of_geometry deferred |> get in
+  check (Rdk_rays.Surface.host_reason surface = None) "resident surface was refused";
+  check
+    (Packed.Float3.resident (Geometry.positions deferred))
+    "surface preparation forced deferred P";
+  check
+    (Rdk_rays.Surface.scene3_result surface = Error expected)
+    "deferred surface fallback lost the owned triangulation error";
+  match Rdk_rays.Surface.scene3 surface with
+  | exception Rdk_rays.Surface.Conversion_error message ->
+      check (message = expected) "surface convenience error changed its cause"
+  | _ -> fail "invalid deferred surface silently drew an empty mesh"
+
 let run () =
+  surface_failure ();
   let applied = Attribute_pattern.compile "^bar score" |> get in
   check
     (not (Attribute_pattern.apply ~selected:true applied "bar"))

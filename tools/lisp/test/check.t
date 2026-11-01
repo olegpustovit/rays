@@ -108,6 +108,44 @@ refuses fails here too, and what they accept passes.
   >   (graph g :context sop (sop/merge (ring 2) (ring 3))))
   > X
   $ rays check inline.rays
+
+Static mesh arrays use the cook's topology validator here too. Live arrays remain
+checked when their frame cooks.
+
+  $ cat > malformed-mesh.rays <<'X'
+  > (workspace malformed
+  >   (graph g :context sop
+  >     (sop/mesh :points (exact (map (fn [(i : int)] [i 0 0]) (array/range 5001 :type int)))
+  >       :vertex_points (array/int 3 6000)
+  >       :primitive_offsets (exact (map (fn [(i : int)] (* i 3)) (array/range 2 :type int)))
+  >       :kinds (array/int 1 0))))
+  > X
+  $ rays check malformed-mesh.rays
+  File "malformed-mesh.rays", line 1, characters 0-0:
+  Error [E_TOPOLOGY]: Topology: vertex references an invalid point
+  [1]
+
+  $ cat > mapped-mesh.rays <<'X'
+  > (workspace mapped
+  >   (graph g :context sop
+  >     (with_error
+  >       (sop/mesh :points (array/vec3 1) :vertex_points (array/int 1 9)
+  >         :primitive_offsets (array/range 2 :type int) :kinds (array/int 1 0))
+  >       (fn [failure] (assoc failure :code "E_WRAPPED" :message "authored topology error")))))
+  > X
+  $ rays check mapped-mesh.rays > mapped.out 2>&1
+  [1]
+  $ grep 'Error \[E_WRAPPED\]' mapped.out
+  Error [E_WRAPPED]: authored topology error
+
+  $ cat > unused-mesh.rays <<'X'
+  > (workspace unused
+  >   (graph g :context sop
+  >     (let* [unused (sop/mesh :points (array/vec3 1) :vertex_points (array/int 1 9)
+  >                     :primitive_offsets (array/range 2 :type int) :kinds (array/int 1 0))]
+  >       (sop/box))))
+  > X
+  $ rays check unused-mesh.rays
   $ cat > kindfn.rays <<'X'
   > (workspace w
   >   (graph g :context sop

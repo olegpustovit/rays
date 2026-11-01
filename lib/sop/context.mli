@@ -52,6 +52,22 @@ val grain : t -> int
 val cancel_token : t -> Cancel.t
 val cancelled : t -> bool
 
+val cpu_consumers : t -> int -> int option
+(** Known CPU-reader budget for a node's output in this cook; absent means unknown. *)
+
+val with_cpu_consumers : t -> node:int -> int option -> t
+(** Add immutable consumer metadata, sharing cancellation and deferred checks. Negative counts raise
+    [Invalid_argument]. Zero promises a resident consumer. *)
+
+module Private : sig
+  type consumers
+
+  val consumers : t -> consumers
+  val with_consumers : t -> consumers -> t
+  val find : consumers -> int -> int option option
+  val set : consumers -> int -> int option -> consumers
+end
+
 val defer : t -> node:int -> (unit -> (unit, Diagnostic.t) result) -> unit
 (** Node [node] left device work in flight (from any domain): [settle] waits for it and checks its
     status. {!Session} settles before it cooks any node and at a cook's end, so no CPU reader sees

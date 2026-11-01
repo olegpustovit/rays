@@ -199,7 +199,8 @@ module Host : sig
   val bind_arguments : ?validate:bool -> t -> Flow.Eval.value array -> (t, Diagnostic.t) result
   (** Borrow checked immutable Core arguments in place of typed source markers. Refuses wrong
       arity/storage; rewrites closure and residual captures without re-evaluating their checked
-      bodies. [~validate:false] skips the finite-value scan, for a device that checks what it
+      bodies. Shared residuals are copied once per bind, preserving their DAG sharing; no argument
+      or rewritten capture is retained across binds. [~validate:false] skips the finite-value scan, for a device that checks what it
       uploads (a resident fold's placeholders are zeros). *)
 
   val ordered_add : t -> bool
@@ -314,6 +315,7 @@ end
 type column = { data : float array; offset : int; stride : int }
 
 val force_into :
+  ?dispatch:(Flow.Eval.residual -> Flow.Workspace.term -> (Flow.Eval.value, Diagnostic.t) result) ->
   ?state:Flow.Eval.state ->
   ?elems:(string * Flow.Eval.value) list ->
   ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->

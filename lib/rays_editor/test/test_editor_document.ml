@@ -60,7 +60,8 @@ let run () =
       in
       let backend : Flow_ir.Gpu.backend =
         {
-          cost = (fun ~fast:_ _ ~count:_ -> None);
+          residency = (fun ~fast:_ -> None);
+          cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> None);
           prepare =
             (fun ~fast:_ _ -> Error (Diagnostic.error ~code:"E_TEST_GPU" "unused test backend"));
         }

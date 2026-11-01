@@ -2497,7 +2497,7 @@ let builtin_kind op =
   | _ when String.starts_with ~prefix:"gpu/" op.name -> Some Stage
   | _ when op.name = "noise3" -> Some Noise3
   | _ when op.name = "exact" -> Some Exact
-  | _ when op.name = "array/nth" -> Some Gather
+  | _ when op.name = "array/nth" || op.name = "nth" -> Some Gather
   | _ when op.live -> Some Frame
   | _ -> Some Constant_only
 

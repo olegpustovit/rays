@@ -8,6 +8,7 @@ type cook_mode =
 
 type elementwise = Points | Primitives | None
 type topology = Preserved | Changed
+type input_use = Unknown | Cpu | Forward of int
 
 type facts = {
   cook_mode : cook_mode;
@@ -45,6 +46,7 @@ type t = {
   facts_key : string;
   dependencies : Context.Dependencies.t;
   input_policy : Private_types.input_policy;
+  input_use : input_use;
   inputs : t array;
   cook : node_id:int -> Context.t -> Payload.t array -> (Private_types.cooked, Diagnostic.t) result;
   expand : (Context.t -> t array -> Payload.t array -> (t array, Diagnostic.t) result) option;
@@ -71,6 +73,7 @@ let parameter_key value = value.parameter_key
 let facts value = value.facts
 let dependencies value = value.dependencies
 let inputs value = Array.to_list value.inputs
+let input_use value = value.input_use
 
 let trace value =
   Diagnostic.{ node_id = value.id; label = value.label; operation = value.operation }
@@ -181,6 +184,7 @@ module Build = struct
       facts_key = Marshal.to_string facts [ Marshal.No_sharing ];
       dependencies;
       input_policy;
+      input_use = Unknown;
       inputs;
       cook;
       expand;
@@ -225,6 +229,16 @@ module Build = struct
     { value with facts; facts_key = Marshal.to_string facts [ Marshal.No_sharing ] }
 
   let input_policy value = value.input_policy
+
+  let with_input_use input_use value =
+    (match input_use with
+    | Forward i when i < 0 || i >= Array.length value.inputs ->
+        invalid_arg "Node.with_input_use: forwarded input is out of bounds"
+    | Forward i when value.input_policy <> All && value.input_policy <> Only i ->
+        invalid_arg "Node.with_input_use: forwarded input is not selected"
+    | _ -> ());
+    { value with input_use }
+
   let input_array value = Array.copy value.inputs
 
   let with_inputs value inputs =
@@ -233,6 +247,10 @@ module Build = struct
     | All -> ()
     | Only index when index >= 0 && index < Array.length inputs -> ()
     | Only _ -> invalid_arg "Node.with_inputs: selected input is out of bounds");
+    (match value.input_use with
+    | Forward i when i >= Array.length inputs ->
+        invalid_arg "Node.with_inputs: forwarded input is out of bounds"
+    | _ -> ());
     { value with inputs }
 
   let rebuild_with_inputs value inputs =

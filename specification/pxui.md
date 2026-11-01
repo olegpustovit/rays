@@ -48,7 +48,9 @@ Each frame runs four steps:
    distinct keys. Per-key state — rectangles, scroll offsets, section
    state, text-editing buffers, double-click timing — lives
    in a retained cache: an open-addressing integer table into structure-of-
-   arrays pools. A key not built for a frame is pruned.
+   arrays pools. A key not built for a frame is pruned. Relative-size, hit and
+   paint callbacks live only through that frame's layout and painting; publishing
+   the frame releases their captures, including boxes absent from the next frame.
 3. **Layout.** A bottom-up pass computes `Px`, `Text`, and `Fit` sizes; a
    top-down pass resolves `Pct`, `Rel`, and `Grow`, reserves a 10-point
    gutter in overflowing scroll boxes, clamps scroll offsets, and positions

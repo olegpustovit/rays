@@ -363,6 +363,10 @@ val invalidate_mapped : buffer -> length:int -> (unit, Error.t) result
 (** The device copy's first [length] bytes become the view's; call once the writing work completed.
 *)
 
+val mapped_view : buffer -> floats option
+(** The existing owned view of a live mapped buffer, without queue work. [None] for an unmapped
+    or destroyed buffer. The same invalidate/flush rules as [create_mapped_buffer] apply. *)
+
 val create_texture : device -> Types.texture_descriptor -> (texture, Error.t) result
 val create_depth_texture : device -> Types.texture_descriptor -> (texture, Error.t) result
 val create_queue : device -> (queue, Error.t) result

@@ -1,0 +1,21 @@
+Fatal error: exception Failure("retained heap grew after warmup")
+real 29.99
+user 72.32
+sys 11.30
+          1515814912  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               98460  page reclaims
+                 582  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 309  voluntary context switches
+             1457222  involuntary context switches
+        541014032580  instructions retired
+        229754545085  cycles elapsed
+          1503594488  peak memory footprint

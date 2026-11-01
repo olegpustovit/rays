@@ -44,6 +44,7 @@ val create : ?pool:pool -> Renderer.gpu -> Pipelines.t -> Emit.msl -> t
 val dispatch :
   ?wait:bool ->
   ?reset_status:bool ->
+  ?uint32_cpu:bool ->
   ?commands:Ogpu.Backend.commands ->
   ?encoder:Ogpu.Backend.compute_encoder ->
   ?count:Ogpu.Backend.buffer * int * int ->
@@ -59,26 +60,30 @@ val dispatch :
 (** [~wait:false] leaves the dispatch in flight, without its status read; [~commands] only encodes
     it into the caller's command buffer (epoch 0 until the caller commits it), into its open compute
     [encoder] when given (the caller ends it; a serial encoder orders the dispatches);
-    [~reset_status:false]
-    keeps ORed error flags from earlier encodings on this runner. [~count:(cell, mul, div)] bounds a
-    fast kernel's count by [cell * mul / div] on the device, and its grid too: an indirect
-    dispatch of groups of 256 to that count, written on the device (Kernels.dispatch_arguments),
-    not to the capacity [inputs.count]; [~into:(output, cell)] writes a
-    one-output fast kernel's output and count into the caller's buffers; [bound i] and
+    [~reset_status:false] keeps ORed error flags from earlier encodings on this runner.
+    [~count:(cell, mul, div)] bounds a fast kernel's count by [cell * mul / div] on the device, and
+    its grid too: an indirect dispatch of groups of 256 to that count, written on the device
+    (Kernels.dispatch_arguments), not to the capacity [inputs.count]; [~into:(output, cell)] writes
+    a one-output fast kernel's output and count into the caller's buffers; [bound i] and
     [bound_table u] supply device buffers already holding input [i] or uniform [u]'s table (with the
     table's length in floats, which a gather clamps to); a bound input's array is not read.
     [resident] lists the bottom-level structures an instanced [scene] references, declared read so
     they stay resident. Input arrays are borrowed immutable storage. Replace an array when its
     contents change; mutating an uploaded array is unsupported. Each input slot retains only its
     last successfully uploaded array and covered length, until buffer replacement or close.
-    Frame/uniform/status writes remain live. *)
+    Frame/uniform/status writes remain live. Emit's uint32 source/table buffers require explicit
+    [bound]/[bound_table] callbacks; missing bindings refuse with [E_GPU_UINT32_BINDING] before
+    upload. [uint32_cpu:true] instead validates and uploads ordinary host arrays as exact uint32
+    words; implicit float32 holders still refuse. Selected uint32 scalar uniforms and frame words
+    are likewise validated before upload. *)
 
 val select_output : index:int -> output -> output option
 (** Select a fused producer's output; an invalid index returns [None]. The selected view shares the
     producer's lifetime and dispatch generation. *)
 
 val readback : ?index:int -> output -> (Flow.Eval.value, Diagnostic.t) result
-(** [index] overrides the selected output (initially the first). *)
+(** [index] overrides the selected output (initially the first). Uint32 storage returns an exact
+    [Int_array], including values above 2^24 and through 2^32-1. *)
 
 val planes : ?index:int -> output -> (float array array, Diagnostic.t) result
 (** The output as [width] owned planes of [count] doubles (component [c] of element [i] at
@@ -97,9 +102,47 @@ val keep : ?index:int -> output -> (Flow_ir.Gpu.planes, Diagnostic.t) result
     holder still alive (unless [~discard:true], at a host's shutdown: nobody reads them, a later
     read raises). [resident] is the output's placeholder, an array of [width] zeros: a later
     {!dispatch} (of any runner) whose input is that array binds the held buffer instead, while it is
-    held and unread. *)
+    held and unread. Uint32 outputs refuse with [E_GPU_UINT32_KEEP] until adopted by a typed
+    topology holder; they cannot be borrowed as float32 buffers. *)
 
 val buffer : ?index:int -> output -> Ogpu.Backend.buffer option
+
+type uint32_holder = {
+  count : int;
+  materialise : unit -> int array;
+  settle : unit -> (unit, Diagnostic.t) result;
+  release : held:bool -> unit;
+  pin : unit -> (Ogpu.Backend.buffer * int * (unit -> bool) * (unit -> unit)) option;
+}
+
+val keep_uint32 : ?index:int -> output -> (uint32_holder, Diagnostic.t) result
+(** Transfers an unsigned output into an exact integer holder, using the same bounded pool and
+    release lifecycle as [keep], without registering a float input binding. Settle on the creating
+    domain before a worker reads. [materialise] caches exact integers and reads payload once. [pin]
+    borrows an unread settled stream until unpin; it declines once materialised or freed. A runner
+    close materialises live holders unless discard was requested. *)
+
+val integers : uint32_holder -> Flow_ir.Gpu.integers
+(** The same holder through the backend-neutral integer carrier, with shared ownership. *)
+
+val pin_integers :
+  Flow_ir.Gpu.integers -> (Ogpu.Backend.buffer * int * (unit -> bool) * (unit -> unit)) option
+(** Borrow native UInt32 storage without materialising it. Other backend tokens decline. The native
+    holder's creating-domain, settlement, view-count and lifetime rules apply. *)
+
+val adopt_uint32 :
+  t -> buffer:Ogpu.Backend.buffer -> count:int -> (uint32_holder, Diagnostic.t) result
+
+val adopt_float :
+  t ->
+  buffer:Ogpu.Backend.buffer ->
+  count:int ->
+  width:int ->
+  (Flow_ir.Gpu.planes, Diagnostic.t) result
+(** Transfer a caller-owned, completed and status-validated buffer without copying or reading it.
+    Success gives this runner exclusive ownership; failure leaves ownership with the caller. Buffers
+    must be mapped, and float buffers must contain validated finite float32 values. The owned mapped
+    view supports worker reads after invalidation; released buffers rejoin the pool. *)
 
 val pin : float array -> (Ogpu.Backend.buffer * int * (unit -> bool) * (unit -> unit)) option
 (** A display's borrow of the held buffer a settled output's placeholder ([keep]'s [resident])
@@ -122,6 +165,7 @@ val max_total_threads : t -> (int, Diagnostic.t) result
 val close : ?discard:bool -> t -> unit
 
 val compact :
+  ?uint32:bool ->
   ?encoder:Ogpu.Backend.compute_encoder ->
   Ogpu.Backend.commands ->
   Pipelines.t ->
@@ -138,9 +182,54 @@ val compact :
    [kept], and their count into the cell [total]. The mask's count is [count], or at most the uint
    in [count_in]; [blocks] is scratch of [compact_blocks count] bytes. With [count_in] the count and
    scatter passes take their group count from it on the device, through [groups] (12 bytes).
-   Nothing is committed or read. *)
+   Nothing is committed or read. [uint32] instead reads a uint32 mask and writes exact uint32
+   indices; count cells and scratch have the same layout. *)
 
 val compact_blocks : int -> int
+
+val validate_topology :
+  ?on_read:(int -> unit) ->
+  Ogpu.Backend.queue ->
+  Pipelines.t ->
+  vertices:Ogpu.Backend.buffer * int ->
+  offsets:Ogpu.Backend.buffer * int ->
+  kinds:Ogpu.Backend.buffer * int ->
+  status:Ogpu.Backend.buffer ->
+  point_count:int ->
+  max_polygon_size:int ->
+  (unit, Diagnostic.t) result
+(** One workgroup checks exact uint32 topology, reading only a 36-byte status record. Counts are
+    actual element counts within buffer capacity; status needs 36 bytes. No input ownership
+    transfers. Polygon sizes above [max_polygon_size] refuse. [on_read] records successful status
+    bytes even when validation rejects the mesh. *)
+
+val triangle_indices :
+  ?on_read:(int -> unit) ->
+  Ogpu.Backend.queue ->
+  Pipelines.t ->
+  positions:Ogpu.Backend.buffer * int ->
+  vertices:Ogpu.Backend.buffer * int ->
+  offsets:Ogpu.Backend.buffer * int ->
+  kinds:Ogpu.Backend.buffer * int ->
+  indices:Ogpu.Backend.buffer ->
+  blocks:Ogpu.Backend.buffer ->
+  status:Ogpu.Backend.buffer ->
+  (int, Diagnostic.t) result
+(** Generate UInt32 triangle indices for resident polygons with three/four corners, using the host's
+    first-ear rule and positions. Returns the settled index count. Numerically uncertain/degenerate
+    quads and other primitives refuse with [E_GPU_DISPLAY_TRIANGLES], so callers can take the host
+    path. [blocks] needs one word per 256 primitives; [status] needs one word. Only four status
+    bytes are read, reported by [on_read]; no input/output ownership transfers. *)
+
+val fill_indices :
+  ?value:int ->
+  Ogpu.Backend.queue ->
+  Pipelines.t ->
+  Ogpu.Backend.buffer ->
+  count:int ->
+  (unit, Diagnostic.t) result
+(** Writes [0..count-1], or the supplied constant [value], as exact uint32 words on the device and
+    waits for completion. No size-dependent CPU staging. *)
 
 val read_count :
   Ogpu.Backend.queue -> Ogpu.Backend.buffer -> epoch:int64 -> (int, Diagnostic.t) result
@@ -152,7 +241,14 @@ val read_floats :
   length:int ->
   (float array, Diagnostic.t) result
 
-(* [length] floats of a buffer, once the queue has completed [epoch]. *)
+val read_uint32 :
+  Ogpu.Backend.queue ->
+  Ogpu.Backend.buffer ->
+  epoch:int64 ->
+  length:int ->
+  (int array, Diagnostic.t) result
+
+(* [read_floats]/[read_uint32] read [length] words after the queue completes [epoch]. *)
 type instance = {
   first : int;
   triangles : int;
@@ -202,6 +298,7 @@ module Private : sig
   val status_reads : t -> int
   val check_status : t -> epoch:int64 -> (unit, Diagnostic.t) result
   val readback_bytes : t -> int
+  val bounds_readback_bytes : t -> int
 
   val materialisations : t -> int
   (** Kept outputs read so far (from {!keep}'s thunks or at close). *)

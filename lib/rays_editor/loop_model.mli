@@ -14,12 +14,13 @@ type t = {
   rendered : V.rendered option;
   views : (string * V.rendered) list;
   drawn :
-    (Sop.Node.t * Cook.prepared * V.rendered * Rays.Texture.t option)
+    (Sop.Node.t * Cook.prepared * V.rendered * Rays.Texture.t option * string option)
     Editor_document.Document.Int_map.t;
   composed :
     (Editor_document.Kind_graph.t * Editor_document.Document.level * (string * int list) list)
     option;
-  resolved : (Editor_document.Document.t * Input.t * Editor_document.Kind_graph.t) option;
+  resolved :
+    (Editor_document.Document.t * Input.t * Editor_document.Kind_graph.t * string option) option;
   context_error : string option;
   baked : Rays.World.baked option;
   baked_from : (Rays.World.t * Rays.World.baked) option;
@@ -39,7 +40,7 @@ type t = {
   opened : Editor_document.Document.t;
   state_owned : bool;
   state_checked : float;
-  saved_doc : Editor_document.Document.t;
+  saved_doc : (Editor_document.Document.t, unit) Ephemeron.K1.t;
   saved_view : Flow.Syntax.t;
   state_error : string option;
   canvases : (string * canvas_picture) list;
@@ -122,7 +123,8 @@ val refresh_hidden : t -> Rays.Frame.t -> t
 val composition_key :
   Editor_model.t -> 'b -> 'b * Editor_document.Document.level * (string * int list) list
 
-val display_keys : ('a * 'b * V.rendered * 'c) Editor_document.Document.Int_map.t -> string list
+val display_keys :
+  ('a * 'b * V.rendered * 'c * 'd) Editor_document.Document.Int_map.t -> string list
 (** The device display keys the drawn scenes draw ({!Flow_native.Workspace_gpu.frame}'s [keep]). *)
 
 val compose :
@@ -133,6 +135,6 @@ val compose :
   scene:Editor_document.Kind_graph.t ->
   V.rendered option
   * (string * V.rendered) list
-  * (Sop.Node.t * Cook.prepared * V.rendered * Rays.Texture.t option)
+  * (Sop.Node.t * Cook.prepared * V.rendered * Rays.Texture.t option * string option)
     Editor_document.Document.Int_map.t
   * string list

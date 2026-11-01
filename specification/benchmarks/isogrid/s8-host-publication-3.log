@@ -1,0 +1,5 @@
+points=54464 primitives=13616 topology_resident=true positions_resident=true N_resident=true Cd_resident=true payload=0 validation=36 status=16 count=24 bounds=0
+publication_seconds=0.342067 main_allocated_bytes=344871544 cook_domains=1
+real 0.38
+user 0.38
+sys 0.03

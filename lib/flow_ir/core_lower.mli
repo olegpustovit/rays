@@ -1,4 +1,5 @@
 val lower :
+  ?value:Flow.Eval.value ->
   ?trace:((Packed.t, Diagnostic.t list) result -> unit) ->
   ?strict:bool ->
   ?budget:int ->
@@ -13,6 +14,10 @@ val lower :
    [strict] requires every packed numeric subterm to qualify as a region;
    structured scalar control and bounded list work remain compiled core. [lowered] is told each
    residual the program lowers (the root and the captures it reads), once. *)
+(* [value] lowers a structured value in the root's evaluation context. Shared residuals in its
+   fields become shared Core locals, preserving field order. Captured array producers are explicit;
+   a filter over a range shares the drawing path's mask/compaction lowering. Static SOP programs also carry
+   program-scoped count origins through top-level single-write arrays and collecting regions. *)
 
 type draw_context = {
   value : Core.source -> Flow.Eval.value -> int;

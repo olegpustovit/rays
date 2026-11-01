@@ -81,7 +81,9 @@ type sampled_draw = {
   vertex_attributes : (string * bytes) option;
       (** Independently retained Scene3 color/UV stream (12 bytes per vertex), bound at vertex
           buffer 11. Required (and only valid) for the Scene3 families; 2D, UI and Marks draws carry
-          [None]. *)
+          [None]. A Scene3 device draw may carry a named empty byte string: its colour registration
+          supplies the stream, or surface word 81 is -1 for constant opaque white/zero UV. No host
+          attribute buffer is uploaded. *)
   samples : int;
   draw : geometry_draw;
 }
@@ -112,10 +114,10 @@ val create :
   (t, Ogpu.Error.t) result
 (** Creates a renderer with one pipeline per family, blend, and supported sample count. The factory
     receives the renderer's device and returns owned OGPU render pipelines (see
-    [Ogpu.Backend.create_render_pipeline]); the renderer destroys them. Scene2 draws run
-    marks.rays' geometry pipeline (a vertex a float2 position and colour word) and Scene2_textured
-    its quad pipeline (a quad's 80 bytes of constants its vertices), which binds its texture and
-    sampler through a fragment argument buffer at index 7; both are created with [~indirect:true].
+    [Ogpu.Backend.create_render_pipeline]); the renderer destroys them. Scene2 draws run marks.rays'
+    geometry pipeline (a vertex a float2 position and colour word) and Scene2_textured its quad
+    pipeline (a quad's 80 bytes of constants its vertices), which binds its texture and sampler
+    through a fragment argument buffer at index 7; both are created with [~indirect:true].
 
     With [~offscreen:true] the renderer owns a texture target without creating, acquiring, or
     presenting a platform surface. Submissions complete before the call returns, so exact readback
@@ -161,6 +163,8 @@ module Private : sig
     ?extra:Ogpu.Backend.buffer list ->
     ?stride:int ->
     ?indirect:Ogpu.Backend.buffer * int64 ->
+    ?indices:Ogpu.Backend.buffer * int ->
+    ?colors:Ogpu.Backend.buffer * int ->
     key:string ->
     device:Ogpu.Backend.device ->
     buffer:Ogpu.Backend.buffer ->
@@ -178,7 +182,11 @@ module Private : sig
       draw is never batched or recorded. A [Scene3] or [Scene3_points] draw of a device's packed
       float3 positions (empty [vertices], host indices and attribute record, uniform word 79 set)
       registers them as [buffer] with [stride] 12 and its normals as the one [extra] buffer, or none
-      (word 80 clear: the normal is (0, 0, 1)). *)
+      (word 80 clear: the normal is (0, 0, 1)). With [indices], Scene3 draws borrow a uint32 index
+      buffer and its settled count; the mesh's host [indices] must be empty and [index_count] must
+      match. Shadow draws use the same buffer. [indices] and [indirect] are mutually exclusive.
+      [colors] borrows packed float3/float4 colours (buffer, width) at vertex binding 4; surface
+      word 81 must be the width. Float3 colours are opaque. *)
 
   val unregister_gpu_vertices : gpu_vertices -> unit
 

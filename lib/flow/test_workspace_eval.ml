@@ -1688,3 +1688,108 @@ let () =
   print_endline
     "Static bulk maps: offered past 4,096 elements, checked against the walked ones, refused or \
      wrong values walked"
+
+let () =
+  let workspace =
+    check
+      {|(workspace macro_replay
+        (defmacro hold_geometry [value]
+          `(fold [held# ~value] [i# (array/range (int t) :type int)] held#))
+        (defnode sop/test_macro_replay :label "Macro replay" :category "Test"
+          [(in0 : geometry)]
+          (let* [first (hold_geometry in0)
+                 second (hold_geometry first)] second))
+        (graph g :context sop (sop/test_macro_replay (sop/box))))|}
+  in
+  for _ = 1 to 2 do
+    let evaluated = static workspace in
+    let card =
+      Array.find_opt (fun (node : Eval.node) -> node.kind = Eval.card_kind) evaluated.plan.nodes
+      |> Option.get
+    in
+    let value = List.assoc "value" card.args in
+    let geometry =
+      Array.find_opt (fun (node : Eval.node) -> node.kind = "sop/box") evaluated.plan.nodes
+      |> Option.get
+    in
+    assert (ok (Eval.force value ~live:(Input.at_time 1.)) = Eval.Deferred (Ty.geometry, geometry.id))
+  done;
+  print_endline "Inline replay keeps distinct macro-expanded loop scopes and their captures"
+
+let () =
+  let workspace =
+    check
+      {|(workspace defer_calls
+        (defn build :context value [(n : int)]
+          (map (fn [(i : int)] (+ i 1)) (array/range n :type int)))
+        (graph volume :context host (build 5001))
+        (graph sculpture :context sop
+          (let* [f (fn [(i : int)] (+ i 1))
+                 first (map f (array/range 5001 :type int))
+                 second (map f (array/range 5002 :type int))
+                 small (map f (array/range 3 :type int))]
+            (sop/box))))|}
+  in
+  let deferred = ref 0 in
+  let evaluated =
+    ok
+      (Eval.Residual.handle ~trusted:true ~replay:true
+         ~defer:(fun residual ->
+           let accept = (Eval.Residual.residual_view residual).context = Context.sop in
+           if accept then incr deferred;
+           accept)
+         (fun () -> Eval.Host.static_with_requests ~record:true workspace))
+  in
+  assert (!deferred = 2);
+  (match result evaluated "volume" with
+  | Eval.Int_array values -> assert (Array.length values = 5001 && values.(5000) = 5001)
+  | _ -> failwith "host helper must stay eager");
+  let recorded name = List.assoc [ "sculpture"; name ] evaluated.records |> List.hd |> snd in
+  List.iter
+    (fun (name, count) ->
+      let value = recorded name in
+      (match value with Eval.Residual _ -> () | _ -> failwith "SOP map must defer");
+      match ok (Eval.force value ~live:(Input.at_time 0.)) with
+      | Eval.Int_array values -> assert (Array.length values = count && values.(count - 1) = count)
+      | _ -> assert false)
+    [ ("first", 5001); ("second", 5002) ];
+  (match recorded "small" with
+  | Eval.Int_array values -> assert (values = [| 1; 2; 3 |])
+  | _ -> assert false);
+  let offsets =
+    List.assoc [ "sculpture"; "f"; "~calls" ] evaluated.records
+    |> List.map (fun (_, value) ->
+        match value with
+        | Eval.Record fields -> (
+            match List.assoc "offset" fields with Eval.Int n -> n | _ -> assert false)
+        | _ -> assert false)
+    |> List.sort Int.compare
+  in
+  assert (offsets = [ 0; 5001; 10003 ]);
+  print_endline "Deferred maps keep host helpers eager, reserve call indices and force exact arrays"
+
+let () =
+  let workspace =
+    check
+      {|(workspace defer_cache
+        (defnode sop/defer_cache :label "Defer cache" :category "Test" []
+          (let* [data (map (fn [(i : int)] (+ i 1)) (array/range 4101 :type int))]
+            (sop/box :size (exact [(/ (array/count data) 4101) 1 1]))))
+        (graph g :context sop (sop/defer_cache)))|}
+  in
+  List.iter
+    (fun deferred ->
+      let evaluated =
+        ok
+          (Eval.Residual.handle ~trusted:true ~replay:true
+             ?defer:(if deferred then Some (fun _ -> true) else None)
+             (fun () -> Eval.Host.static_with_requests ~record:true workspace))
+      in
+      let box =
+        Array.find_opt (fun (node : Eval.node) -> node.kind = "sop/box") evaluated.plan.nodes
+        |> Option.get
+      in
+      let pending = match List.assoc "size" box.args with Eval.Residual _ -> true | _ -> false in
+      assert (pending = deferred))
+    [ false; true; false; true ];
+  print_endline "Inline body memo separates eager and deferred static evaluations"

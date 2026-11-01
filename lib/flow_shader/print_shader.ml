@@ -27,13 +27,17 @@ let compute = function
   | "flow_gpu" ->
       [
         (* the resident fold's compaction (Run.compaction) *)
-        ("compact", "compact-mask", true, 1024, 256);
+        ("compact", "compact", "compact-mask", true, 1024, 256);
+        ("compact_uint32", "compact", "compact-mask-uint32", true, 1024, 256);
+        ("indices", "indices", "write-indices", true, 256, 256);
+        ("topology", "topology", "topology-check", false, 256, 256);
+        ("triangles", "triangles", "triangle-indices", true, 256, 256);
         (* a resident P's bounds (Run.bounds) *)
-        ("bounds", "chunk-bounds", false, 1024, 256);
+        ("bounds", "bounds", "chunk-bounds", false, 1024, 256);
         (* a triangle mesh's display normals from its resident P (Host.normals) *)
-        ("normals", "point-normal", true, 256, 256);
+        ("normals", "normals", "point-normal", true, 256, 256);
         (* a resident dispatch's threadgroup counts from a count cell (Run.dispatch_arguments) *)
-        ("dispatch", "dispatch-arguments", false, 1, 1);
+        ("dispatch", "dispatch", "dispatch-arguments", false, 1, 1);
       ]
   | _ -> []
 
@@ -57,8 +61,8 @@ let () =
       write (name ^ ".frag.spv") (Bytes.to_string frag))
     (raster owner);
   List.iter
-    (fun (name, entry, grid, metal, vulkan) ->
-      let declarations = source name in
+    (fun (name, source_name, entry, grid, metal, vulkan) ->
+      let declarations = source source_name in
       write (name ^ ".metal")
         (ok name (Flow_shader.Raster.compute_msl ~grid ~size:metal ~declarations ~entry));
       write (name ^ ".comp.spv")

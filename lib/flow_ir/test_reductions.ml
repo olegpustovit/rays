@@ -165,6 +165,15 @@ let () =
   | Error d -> assert (d.code = "E_NONFINITE")
   | Ok _ -> failwith "nonfinite argument accepted");
   let bound = ok (I.Packed.Host.bind_arguments packed [| E.Float 3. |]) in
+  assert (Array.exists (fun (r, _) -> r == packed.residual) packed.sources);
+  Array.iteri
+    (fun i (r, _) ->
+      if r == packed.residual then assert (fst bound.sources.(i) == bound.residual))
+    packed.sources;
+  List.iter2
+    (fun (original, _) (copy, _) ->
+      if original == packed.residual then assert (copy == bound.residual))
+    packed.stages bound.stages;
   assert (
     ok (I.Packed.force ~strict:true bound ~live:(Input.at_time 1.))
     = E.Float_array (Array.init 11 (fun i -> float i +. 3.)));

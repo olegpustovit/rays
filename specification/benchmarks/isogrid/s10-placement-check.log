@@ -1,0 +1,8 @@
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+image qualification: authored sites, shared functions, folded/unsupported forms, capture requalification, state and declaration identity pass
+Flow IR passes, precision, scalar/fallback execution and twelve-fixture parity passed
+GPU neutral callbacks: measured placement, illegal exact sinks, qualification scope and phase profiles passed
+Workspace qualification: actual captures, empty/vector/loop/noise kernels, limits, ambiguity, callable ownership and repeated/zero IDs passed
+real 6.05
+user 8.00
+sys 1.65

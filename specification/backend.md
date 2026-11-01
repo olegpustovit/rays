@@ -18,6 +18,59 @@ device's registry identifier remains `Device_lost`, with source operation
 
 ## Ownership and dependency direction
 
+Scene3's existing borrowed-position registration can also borrow a UInt32
+index buffer with a settled count. Those draws carry no host index bytes;
+ordinary and sun-shadow indexed draws bind the same producer-owned buffer.
+The renderer validates count and storage size, includes index identity in
+retained replay signatures, and checks the producer's validity before replay.
+Device indices and indirect arguments are mutually exclusive. The existing
+bounded mesh cache retains a fixed four-byte backing allocation for an empty
+host payload, with no mesh upload. The registration also accepts packed
+float3/float4 colours at the existing vertex attribute binding (4); uniform
+word 81 must match their width. The Lisp shader preserves host 8-bit Color
+rounding, including half-byte decisions using the FMA multiplication residual,
+before interpolation. Float3 is opaque, float4 carries alpha, and UV is zero.
+Absent device colours use constant opaque white/zero UV (uniform word 81 = -1),
+so no per-vertex default attribute array or upload is needed.
+Colour buffer identity participates in retained replay validation. Surface
+accepts resident P/N/Cd and offers resident polygon topology to the checked
+triangle/quad index generator. Resident topology requires authored point N;
+other attributes/layouts retain the host bridge and its prepared
+`Surface.host_reason`. CPU-only deferred topology is not offered as a device
+source. Point-cloud host conversion ignores empty corner attributes and does
+not promote primitive colours when no primitives exist.
+
+The existing device mesh now carries the borrowed triangle index count and
+colour width as metadata. Face lowering emits no host vertex, index or colour
+payload; a named empty attribute record requires a live colour registration.
+Public mesh counts and triangle counts remain non-forcing. Wire/vertex modes
+of a device-indexed mesh and textured uses currently materialise its memoised
+host copy. Maze/Coral native qualification verifies exact raster, wire, vertex,
+orbit, framing and World-shadow pixels against the host, with path-tracer
+preparation explicitly materialising once. Picking builds the existing CPU
+surface index, and inspection reads the existing sheet columns. Native frozen
+workspace checks exercise each as the first CPU reader, verify its materialised
+bytes and prove repeated reads add no transfers; summary/count metadata remains
+nonforcing. Production placement remains a separate measured-policy gate.
+
+The Flow GPU display-index kernel reads resident positions and UInt32
+topology, following the host's position-dependent quad ear order. A two-pass
+rejection reduction reads four validation bytes. `Host.triangle_indices`
+returns its owned index buffer/count/release through the existing bounded
+display storage pool, shared with derived normals; ambiguous/unsupported
+polygons return a typed host-fallback reason. The workspace display borrow
+returns the actual index count and colour width together with its key and
+lifetime, so Surface never guesses from concurrently forceable deferred state.
+`Workspace_gpu.display_refusal` keeps the last initial-domain fallback reason.
+
+If host conversion also fails, `Surface.scene3_result` returns its RDK cause;
+the convenience form raises `Surface.Conversion_error`. The editor retains
+that diagnostic with the cached drawing until its prepared geometry changes.
+It never replaces a failed conversion with an apparently valid empty mesh.
+Scene-resolution errors are cached with their own result, separately from
+combined drawing/image/texture errors, so corrected geometry clears the old
+message without re-resolving an unchanged scene graph.
+
 `bin/rays.ml` owns the product executable. `lib/web_export` owns static export
 and its embedded `runtime/` assets, with a narrow lower/files/load interface.
 Its direct dependencies are `flow`, `flow_ir`, `flow_web`, `flow_sop`,
@@ -119,6 +172,13 @@ session outputs. The SOP host extracts those values at its existing boundary.
 Geometry nodes lower through `flow_sop`; Drawing nodes lower through
 `Rays_editor.Drawing` into existing native `Rays.Scene` commands. Canvas
 panels use the same PXUI composition and renderer as every other panel.
+`Rdk.Topology.deferred` is the GPU-free topology carrier for an external owner:
+counts, identity and payload accounting never read its arrays. An optional
+homogeneous kind/corner-count promise answers triangle classification without
+forcing. Payload queries and `Topology.View.view` materialise once across racing
+domains; the returned validated topology must match the promised counts and shape.
+`Geometry.releasers` includes topology with the same held/unheld ownership rule
+as positions and attributes. Owned topology keeps its direct array fields.
 There is one evaluator, one UI engine and one native Metal renderer.
 `rays_editor` may reach `flow_ir` to prepare drawing argument programs;
 the editor retains that preparation while the plan is unchanged, and exports
@@ -528,6 +588,13 @@ itself. `lib/metal` takes its source preprocessor from
 `ppx/result_bind`, so no foundational library is built by something under
 `tools/`; the gate rejects a `tools/` path in `lib/metal/dune`. Each rule has
 an injected violation in the gate's own run.
+
+The IsoGrid native qualification benchmark may use the standard library's
+`Dynlink.unsafe_get_global_value` solely to inspect the already-linked shared
+scheduler's empty task-slot cells when measuring retained heap. Its source-token
+allowance admits that read-only function at that one tool path; module loading
+there, and symbol inspection in product code, remain rejected by injected checks.
+This adds no renderer or backend selection path.
 
 Texture formats use one backend-neutral `Types.texture_format` enum. It has
 seven Metal formats: `R8_unorm`, `Rgba8_unorm`, `Bgra8_unorm`,
@@ -1090,6 +1157,13 @@ by worker cooks between frame scopes, and closing the owner cancels pending
 requests. Pre-window cost queries decline until that owner has entered its pump
 loop, avoiding count-sized GPU calibration during static startup. Compiled
 kernel and display caches distinguish precision as well as backend/program.
+Each calibration sample waits for its fast dispatch to finish and validates
+status through retained planes, releasing them without reading payload. A
+failed completion/status supplies no cost evidence; the bounded measurement
+cache remembers the refusal. Submission time alone is not a completed cost.
+CPU input and table identities are fresh per sample, so warm-up cannot hide
+their uploads behind the immutable-array cache. Index-range sources keep their
+existing index-buffer binding instead of allocating dummy CPU source arrays.
 GPU values carry identity, count, width, output index, generation and optional
 completed device dispatch duration; they carry no backend handle. A
 bounded `Flow_gpu.Host` owns pipelines and runners; the drawing boundary borrows
@@ -1100,7 +1174,16 @@ Their output views select distinct buffers of one dispatch while sharing its
 owner and generation; selection does not extend a borrowed buffer's lifetime.
 Production placement requires a measured cost and an approximable packed producer; absent
 measurements keep the CPU tier. Explicit qualification can exercise the GPU
-route, while references and exports retain the CPU path. Compile, dispatch and
+route, while references and exports retain the CPU path. The display/readback
+path uses `Cost.choose` over total estimates, without an element-count floor.
+Its named choices appear in `Profile.placements`, bounded to 512 recent owners,
+with optional counts, costs and CPU-consumer counts. Invalid evidence and ties
+keep CPU; unsupported forms and missing consumers have distinct reasons.
+SOP record writes use the same comparison with explicit known CPU-reader counts,
+amortised output materialisation and resident-input readback credit. Missing
+reader information is an explicit CPU refusal; production consumer metadata and
+the resident mesh guard remain pending. A rejected later record output releases
+earlier borrowed outputs before CPU fallback. Compile, dispatch and
 readback appear separately in execution reports. GPU group time uses the
 completed device duration when available and wall time otherwise. Images use the existing UI
 image batch for borrowed inspector thumbnails; probing dimensions never loads
@@ -1182,6 +1265,34 @@ segment's middle so float32 keeps them within 1e-5 of the CPU. The loop is linea
 structure with a candidate loop is the upgrade if strand counts grow). `Trace_scene.register ~strands` is the
 CPU host. `test_trace` checks the capsule loop against the CPU on Metal; on a device below family 9 it checks
 only that the native kernel compiles to a pipeline. `test_spirv` validates the loop's SPIR-V (`fast_trace_curves`).
+
+## Resident value scopes
+
+Resident value execution uses `Flow_ir.Gpu.backend.residency`, a neutral scope
+over `Core_exec.resident`, owned integer/float materialisation callbacks and
+topology validation. No OGPU handle crosses into Flow IR or SOP libraries.
+`Executor.force ?resident` forwards this scope through normal and cached root
+execution. The native host supplies it in fast precision; workspace workers
+route scope creation, invocation, counts, validation, retention and cleanup to
+the owner domain. Materialisation and release retain their existing any-domain
+holder semantics. Ordinary backends may decline the scope with `None`.
+Shared mesh cooking uses this capability under Qualification policy to validate
+and install deferred positions/topology. Resident storage is mapped: workers
+invalidate its owned view and decode uint32 words without initial-domain-only
+buffer reads. `Backend.mapped_view` exposes the existing live mapped view,
+with shared mock/Metal conformance checks for identity and destroyed/unmapped
+buffers. Fused attributes stay resident under Qualification; production
+measured placement remains pending.
+
+Stateless structured geometry calls can use the same scope. A neutral Core
+host-source offer lets the SOP host consume resident mesh fields before the
+ordinary CPU-reader boundary, through the shared mesh constructor. Other host
+sources still materialise. Retention pins the transferred buffer and preserves
+its placeholder/count cell until scope close, so later calls may reuse that
+immutable input. CPU reads consult the holder's cache. Integer aliases over one
+range buffer keep their own logical lengths and share one physical read;
+different-length views retire together through the existing holder pool.
+The Core offer contains Flow values only, with no geometry or backend types.
 
 ## Film accumulation (P8.S2)
 

@@ -57,8 +57,31 @@ module Gpu = struct
             }
       | _ -> Error (Diagnostic.error ~code:"E_GPU" "GPU output is not a float array."))
 
+  type integer_storage = ..
+
+  type integers = {
+    count : int;
+    storage : integer_storage option;
+    materialise : unit -> int array;
+    release : held:bool -> unit;
+  }
+
+  type residency = {
+    executor : Core_exec.resident;
+    retain_uint32 : E.value -> integers option;
+    retain_float : E.value -> planes option;
+    validate_topology :
+      point_count:int ->
+      vertices:E.value ->
+      offsets:E.value ->
+      kinds:E.value ->
+      max_polygon_size:int ->
+      (unit, Diagnostic.t) result option;
+  }
+
   type backend = {
-    cost : fast:bool -> Packed.t -> count:int -> float option;
+    residency : fast:bool -> residency option;
+    cost : ?inputs:Packed.Host.inputs -> fast:bool -> Packed.t -> count:int -> float option;
     prepare : fast:bool -> Packed.t -> (kernel, Diagnostic.t) result;
   }
 
@@ -71,11 +94,198 @@ end
 type id = W.path * int list
 type tier = Interp | Core | Cpu_kernel | Gpu | Gpu_compile | Gpu_readback
 
+type placement_reason =
+  | Unsupported_form
+  | Missing_consumer
+  | Validation_read
+  | Cpu_consumer
+  | No_cost_evidence
+  | Cpu_measured_cheaper
+  | Device_measured_cheaper
+  | Held_on_device
+
+type placement = {
+  owner : id;
+  count : int option;
+  reason : placement_reason;
+  cpu_seconds : float option;
+  device_seconds : float option;
+  cpu_consumers : int option;
+}
+
+type execution = {
+  owner : id;
+  sites : (int * W.path * int list) list;
+  tier : tier;
+  seconds : float;
+}
+
+module Profile = struct
+  type static_map = {
+    site : W.path;
+    count : int;
+    tier : tier;
+    deferred : bool;
+    refusal : Diagnostic.t list;
+    head_elements : int;
+    tail_elements : int;
+    seconds : float;
+    head_seconds : float;
+    kernel_seconds : float;
+    tail_seconds : float;
+  }
+
+  type t = {
+    clock : unit -> float;
+    executions : execution list Atomic.t;
+    placements : placement list Atomic.t;
+    maps : (int * static_map) option Atomic.t array;
+    map_next : int Atomic.t;
+  }
+
+  type pending = {
+    started : float;
+    mutable head_end : float option;
+    mutable kernel_end : float;
+    mutable kernel_seconds : float;
+    mutable tier : tier;
+    mutable deferred : bool;
+    mutable refusal : Diagnostic.t list;
+  }
+
+  let current = Domain.DLS.new_key (fun () -> None)
+
+  let create ~clock =
+    {
+      clock;
+      executions = Atomic.make [];
+      placements = Atomic.make [];
+      maps = Array.init 512 (fun _ -> Atomic.make None);
+      map_next = Atomic.make 0;
+    }
+
+  let executions profile = Atomic.get profile.executions
+  let placements profile = Atomic.get profile.placements
+
+  let rec record_placement profile (placement : placement) =
+    (* ponytail: scan at most 512 owners per decision; index if profiling itself becomes costly. *)
+    let previous = placements profile in
+    let next =
+      placement
+      :: List.take 511
+           (List.filter (fun (old : placement) -> old.owner <> placement.owner) previous)
+    in
+    if not (Atomic.compare_and_set profile.placements previous next) then
+      record_placement profile placement
+
+  let place profile placement =
+    let profile =
+      match profile with Some _ -> profile | None -> Option.map fst (Domain.DLS.get current)
+    in
+    Option.iter (fun profile -> record_placement profile placement) profile
+
+  let static_maps profile =
+    Array.to_list profile.maps |> List.filter_map Atomic.get
+    |> List.sort (fun (a, _) (b, _) -> Int.compare a b)
+    |> List.map snd
+
+  let sample profile run =
+    let previous = Domain.DLS.get current in
+    Domain.DLS.set current (Some (profile, ref []));
+    Fun.protect run ~finally:(fun () -> Domain.DLS.set current previous)
+
+  let rec record profile (execution : execution) =
+    let previous = executions profile in
+    let rec keep n = function
+      | [] -> []
+      | _ when n = 0 -> []
+      | old :: rest when old.sites = execution.sites && old.tier = execution.tier -> keep n rest
+      | old :: rest -> old :: keep (n - 1) rest
+    in
+    (* ponytail: 512 recent groups, a linear scan once per group; index if
+       profiling many small groups measurably costs a frame. *)
+    let next = execution :: keep 511 previous in
+    if not (Atomic.compare_and_set profile.executions previous next) then record profile execution
+
+  let map site _term count =
+    match Domain.DLS.get current with
+    | None -> fun ~head:_ ~tail:_ ~completed:_ -> ()
+    | Some (profile, stack) ->
+        let started = profile.clock () in
+        let pending =
+          {
+            started;
+            head_end = None;
+            kernel_end = started;
+            kernel_seconds = 0.;
+            tier = Interp;
+            deferred = false;
+            refusal = [];
+          }
+        in
+        stack := pending :: !stack;
+        fun ~head ~tail ~completed ->
+          let finished = profile.clock () in
+          stack := List.filter (fun frame -> frame != pending) !stack;
+          let kernel = completed && head + tail < count in
+          let head_end = Option.value ~default:finished pending.head_end in
+          let entry =
+            {
+              site;
+              count;
+              tier = (if kernel then pending.tier else Interp);
+              deferred = pending.deferred;
+              refusal = pending.refusal;
+              head_elements = head;
+              tail_elements = tail;
+              seconds = max 0. (finished -. started);
+              head_seconds = max 0. (head_end -. started);
+              kernel_seconds = pending.kernel_seconds;
+              tail_seconds =
+                (if pending.kernel_end = started then 0.
+                 else max 0. (finished -. head_end -. pending.kernel_seconds));
+            }
+          in
+          let serial = Atomic.fetch_and_add profile.map_next 1 in
+          let slot = profile.maps.(serial land 511) in
+          let rec publish () =
+            let previous = Atomic.get slot in
+            match previous with
+            | Some (newer, _) when newer > serial -> ()
+            | _ ->
+                if not (Atomic.compare_and_set slot previous (Some (serial, entry))) then publish ()
+          in
+          publish ()
+
+  let attempt tier run =
+    match Domain.DLS.get current with
+    | Some (profile, stack) when !stack <> [] ->
+        let pending = List.hd !stack in
+        let began = profile.clock () in
+        if pending.head_end = None then pending.head_end <- Some began;
+        Fun.protect
+          (fun () ->
+            let result = run (fun reasons -> pending.refusal <- reasons) in
+            if Option.is_some result then pending.tier <- tier;
+            result)
+          ~finally:(fun () ->
+            pending.kernel_end <- profile.clock ();
+            pending.kernel_seconds <- pending.kernel_seconds +. max 0. (pending.kernel_end -. began))
+    | _ -> run (fun _ -> ())
+
+  let deferred () =
+    match Domain.DLS.get current with
+    | Some (_, { contents = pending :: _ }) -> pending.deferred <- true
+    | _ -> ()
+end
+
 module Cost = struct
   type tier_cost = { fixed : float; per_element : float }
 
   let table = function
-    | Interp -> { fixed = 0.; per_element = 0.710282087 /. 1_000_000. }
+    (* Apple M1, one domain: bench_core placement's 4,096/16,384 arithmetic slope.
+       Lookup and inner-loop bodies cost more; this remains the cheap-body baseline. *)
+    | Interp -> { fixed = 0.; per_element = 0.614741 /. 1_000_000. }
     | Core -> { fixed = 0.000000170; per_element = 0. }
     | Cpu_kernel ->
         let per_element = (0.016522884 -. 0.000040054) /. (1_000_000. -. 1024.) in
@@ -111,48 +321,111 @@ module Cost = struct
 
   let packed ~count = cheapest ~legal:[ Interp; Cpu_kernel ] ~count
 
-  (* A fused SOP write on the device (fast precision; specification/sop.md, "Device placement"):
-     a region of at least 2^18 elements that samples noise. Upload, dispatch and readback cost about
-     what a light arithmetic map costs on the CPU blocks, so only noise (about 0.1 microseconds an
-     element and octave on the CPU) pays for the trip; so does a region that reads data the device
-     holds ([resident]), which the CPU would first read back. [Qualification] places every legal
-     region. *)
-  let sop_device policy (region : Core.Region.t) ~count ~resident =
-    policy = Gpu.Qualification
-    || count >= 1 lsl 18
-       && (resident
-          || Array.exists
-               (fun instruction ->
-                 let rec noise = function
-                   | Core.Region.Noise3 _ -> true
-                   | Guarded (_, body) -> noise body
-                   | _ -> false
-                 in
-                 noise instruction)
-               region.code)
+  let choose ~cpu_seconds ~device_seconds ~resident ~cpu_consumers =
+    if cpu_consumers < 0 then invalid_arg "Flow_ir.Cost.choose: negative consumer count";
+    let valid seconds = Float.is_finite seconds && seconds >= 0. in
+    match (cpu_seconds, device_seconds) with
+    | Some cpu, Some device when valid cpu && valid device ->
+        if device < cpu then if resident then Held_on_device else Device_measured_cheaper
+        else if cpu_consumers > 0 then Cpu_consumer
+        else Cpu_measured_cheaper
+    | _ -> No_cost_evidence
+
+  let on_device = function Device_measured_cheaper | Held_on_device -> true | _ -> false
+
+  let reason_name = function
+    | Unsupported_form -> "unsupported_form"
+    | Missing_consumer -> "missing_consumer"
+    | Validation_read -> "validation_read"
+    | Cpu_consumer -> "cpu_consumer"
+    | No_cost_evidence -> "no_cost_evidence"
+    | Cpu_measured_cheaper -> "cpu_measured_cheaper"
+    | Device_measured_cheaper -> "device_measured_cheaper"
+    | Held_on_device -> "held_on_device"
+
+  let readback ~count ~width =
+    let cost = table Gpu_readback in
+    cost.fixed +. (cost.per_element *. float count *. float width)
+
+  let outputs_readback (packed : Packed.t) ~count =
+    Array.fold_left
+      (fun total lanes -> total +. readback ~count ~width:(Array.length lanes))
+      0. packed.outputs
 end
 
-(* A static packed map of more than 4,096 elements runs as the kernel it would be at frame rate
-   instead of through the walker for every element (about 22 microseconds and 79 KB each). The
-   evaluator checks the result against the elements it walked and walks the rest itself when the
-   kernel refuses, fails or reads anything live. *)
-let static_map residual =
-  let value = E.Residual residual in
-  if E.frame_dependent value || E.state_dependent value then None
-  else
-    match Packed.compile residual (E.Residual.residual_view residual).term with
-    | None -> None
-    | Some packed -> (
-        match Packed.force packed ~live:(Input.at_time 0.) with
-        | Ok value -> Some value
-        | Error _ | (exception (Diagnostic.Error _ | Invalid_argument _ | Not_found | Failure _)) ->
-            None)
+let scalar_uniforms (packed : Packed.t) =
+  let scalar = function
+    | Ty.Int | Float | Bool | Vec2 | Vec3 | Vec4 | Text -> true
+    | _ -> false
+  in
+  Array.for_all
+    (function
+      | E.Int _ | Float _ | Bool _ | Vec2 _ | Vec3 _ | Vec4 _ | Text _ -> true
+      | E.Residual r -> scalar (E.Residual.residual_view r).term.ty
+      | E.Source (_, ty, _) | Struct (_, ty, _) -> scalar ty
+      | _ -> false)
+    packed.uniforms
 
-let static ?record ?inputs workspace =
-  E.Residual.handle ~bulk:static_map (fun () ->
+
+(* Only exact static kernels receive trust. Failure or a live capture lets the
+   evaluator walk from zero; eager recording still checks its ordinary head.
+   Qualification additionally compares every element with the reference. *)
+exception Static_verification_failed of string
+
+let static_map ?(verify = false) residual =
+  Profile.attempt Cpu_kernel (fun refuse ->
+      let value = E.Residual residual in
+      if E.frame_dependent value || E.state_dependent value then None
+      else
+        match
+          Packed.compile
+            ~trace:(function Error reasons -> refuse reasons | Ok _ -> ())
+            residual (E.Residual.residual_view residual).term
+        with
+        | None -> None
+        | Some packed -> (
+            match Packed.force packed ~live:(Input.at_time 0.) with
+            | Ok value ->
+                if verify then begin
+                  let reference =
+                    match E.Host.force_reference (E.Residual residual) ~live:(Input.at_time 0.) with
+                    | Ok value -> value
+                    | Error diagnostic ->
+                        raise (Static_verification_failed (Diagnostic.to_string diagnostic))
+                  in
+                  let same =
+                    match (reference, value) with
+                    | E.Int_array a, E.Int_array b -> a = b
+                    | E.Float_array a, E.Float_array b
+                    | E.Vec2_array a, E.Vec2_array b
+                    | E.Vec3_array a, E.Vec3_array b
+                    | E.Vec4_array a, E.Vec4_array b ->
+                        Array.length a = Array.length b
+                        && Array.for_all2
+                             (fun x y -> Int64.bits_of_float x = Int64.bits_of_float y)
+                             a b
+                    | _ -> false
+                  in
+                  if not same then
+                    raise
+                      (Static_verification_failed
+                         ("Exact static kernel differs from the walker at "
+                         ^ String.concat "/" (E.Residual.residual_view residual).site))
+                end;
+                Some value
+            | Error diagnostic | (exception Diagnostic.Error diagnostic) ->
+                refuse [ diagnostic ];
+                None
+            | exception ((Invalid_argument _ | Not_found | Failure _) as exn) ->
+                refuse [ Diagnostic.error ~code:"E_PACKED_EXECUTION" (Printexc.to_string exn) ];
+                None))
+
+let static ?record ?inputs ?(replay = false) ?(verify = false) workspace =
+  E.Residual.handle ~trusted:true ~replay ~map:Profile.map ~bulk:(static_map ~verify) (fun () ->
       E.Host.static_with_requests ?record ?inputs workspace)
 
-let qualify_workspace ?record ?inputs ?observe ?(gpu = Gpu.default) (workspace : W.t) =
+let qualify_workspace ?record ?inputs ?observe ?(replay = false) ?(verify = false) ?(defer = false)
+    ?(gpu = Gpu.default) (workspace : W.t) =
   let roots = Hashtbl.create 32
   and index = Hashtbl.create 32
   and outcomes = Hashtbl.create 32
@@ -368,69 +641,87 @@ let qualify_workspace ?record ?inputs ?observe ?(gpu = Gpu.default) (workspace :
       producer;
     Option.iter (fun callback -> callback producer (Result.value adapted ~default:residual)) observe
   in
-  (* A large static map the checker accepts as an approximable producer may run on the device and come
+  (* A static map the checker accepts as an approximable producer may run on the device and come
      back as a 32-bit array: the SOP-input readback of the owner decision, taken within a tolerance. *)
   let bulk_approx residual =
-    if gpu.backend = None then None
-    else
-      let value = E.Residual residual in
-      if E.frame_dependent value || E.state_dependent value then None
-      else
-        match Packed.compile residual (E.Residual.residual_view residual).term with
-        | None -> None
-        | Some packed ->
-            let _, site, _ = Packed.site packed in
-            if
-              List.exists
-                (fun (path, form) ->
-                  path = site && match form with W.Candidate _ -> true | W.Refused _ -> false)
-                workspace.packed
-            then
-              match gpu.backend with
-              | None -> None
-              | Some backend -> (
-                  let fast = gpu.fast
-                  and count = Option.value ~default:0 (Packed.static_count packed) in
-                  let placed =
-                    count >= 1024
-                    && (gpu.policy = Gpu.Qualification
-                       || Option.fold ~none:false
-                            ~some:(fun seconds ->
-                              Float.is_finite seconds && seconds >= 0.
-                              && seconds +. Cost.estimate Gpu_readback ~count
-                                 < Cost.estimate (Cost.packed ~count) ~count)
-                            (backend.cost ~fast packed ~count))
-                  in
-                  if (not placed) || Packed.gpu_refusals ~fused:true ~fast packed <> [] then None
-                  else
-                    match Packed.Host.prepare ~fast packed ~live:(Input.at_time 0.) with
-                    | Error _ -> None
-                    | Ok inputs -> (
-                        let placed =
-                          inputs.count >= 1024
-                          && (gpu.policy = Gpu.Qualification
-                             || Option.fold ~none:false
-                                  ~some:(fun seconds ->
-                                    Float.is_finite seconds && seconds >= 0.
-                                    && seconds +. Cost.estimate Gpu_readback ~count:inputs.count
-                                       < Cost.estimate (Cost.packed ~count:inputs.count)
-                                           ~count:inputs.count)
-                                  (backend.cost ~fast packed ~count:inputs.count))
-                        in
-                        if not placed then None
+    Profile.attempt Gpu (fun _ ->
+        if
+          gpu.backend = None
+          || (defer && (E.Residual.residual_view residual).context = Flow.Context.sop)
+        then None
+        else
+          let value = E.Residual residual in
+          if E.frame_dependent value || E.state_dependent value then None
+          else
+            match Packed.compile residual (E.Residual.residual_view residual).term with
+            | None -> None
+            | Some packed ->
+                let _, site, _ = Packed.site packed in
+                if
+                  List.exists
+                    (fun (path, form) ->
+                      path = site && match form with W.Candidate _ -> true | W.Refused _ -> false)
+                    workspace.packed
+                then
+                  match gpu.backend with
+                  | None -> None
+                  | Some backend -> (
+                      let fast = gpu.fast
+                      and count = Option.value ~default:0 (Packed.static_count packed) in
+                      let placed ?inputs count =
+                        if gpu.policy = Gpu.Qualification then true
                         else
-                          match backend.prepare ~fast packed with
-                          | Error _ -> None
-                          | Ok kernel -> (
-                              match kernel.run inputs with
+                          let cpu_seconds = Some (Cost.estimate (Cost.packed ~count) ~count) in
+                          let device_seconds =
+                            Option.bind (backend.cost ?inputs ~fast packed ~count)
+                              (fun seconds ->
+                                if not (Float.is_finite seconds && seconds >= 0.) then None
+                                else Some (seconds +. Cost.outputs_readback packed ~count))
+                          in
+                          let reason = Cost.choose ~cpu_seconds ~device_seconds
+                              ~resident:false ~cpu_consumers:1 in
+                          let _, path, iter = Packed.site packed in
+                          Profile.place None
+                            { owner = (path, iter); count = Some count; reason;
+                              cpu_seconds; device_seconds; cpu_consumers = Some 1 };
+                          Cost.on_device reason
+                          || (Option.is_none inputs && reason = No_cost_evidence)
+                      in
+                      if Packed.gpu_refusals ~fused:true ~fast packed <> []
+                         || (scalar_uniforms packed && not (placed count)) then
+                        None
+                      else
+                        match Packed.Host.prepare ~fast packed ~live:(Input.at_time 0.) with
+                        | Error _ -> None
+                        | Ok inputs -> (
+                            if not (placed ~inputs inputs.count) then None
+                            else
+                              match backend.prepare ~fast packed with
                               | Error _ -> None
-                              | Ok output -> Result.to_option (kernel.readback output))))
-            else None
+                              | Ok kernel -> (
+                                  match kernel.run inputs with
+                                  | Error _ -> None
+                                  | Ok output -> Result.to_option (kernel.readback output))))
+                else None)
   in
   let ( let* ) = Result.bind in
+  let defer_map residual =
+    let view = E.Residual.residual_view residual in
+    let value = E.Residual residual in
+    if view.context <> Flow.Context.sop || E.frame_dependent value || E.state_dependent value then
+      false
+    else
+      match Packed.compile residual view.term with
+      | None -> false
+      | Some _ ->
+          Profile.deferred ();
+          true
+  in
   let* evaluated =
-    E.Residual.handle ~observe:observed ~bulk:static_map ~bulk_approx (fun () ->
-        E.Host.static_with_requests ?record ?inputs workspace)
+    E.Residual.handle ~trusted:true ~replay ~map:Profile.map ~observe:observed
+      ?defer:(if defer then Some defer_map else None)
+      ~bulk:(static_map ~verify) ~bulk_approx
+      (fun () -> E.Host.static_with_requests ?record ?inputs workspace)
   in
   let packed_by_path = Hashtbl.create 64 in
   List.iter
@@ -455,33 +746,6 @@ let qualify_workspace ?record ?inputs ?observe ?(gpu = Gpu.default) (workspace :
       (W.Paths.empty, []) workspace.packed
   in
   Ok ({ workspace with approx; approx_reasons = List.rev approx_reasons }, evaluated)
-
-type execution = {
-  owner : id;
-  sites : (int * W.path * int list) list;
-  tier : tier;
-  seconds : float;
-}
-
-module Profile = struct
-  type t = { clock : unit -> float; executions : execution list Atomic.t }
-
-  let create ~clock = { clock; executions = Atomic.make [] }
-  let executions profile = Atomic.get profile.executions
-
-  let rec record profile execution =
-    let previous = executions profile in
-    let rec keep n = function
-      | [] -> []
-      | _ when n = 0 -> []
-      | old :: rest when old.sites = execution.sites && old.tier = execution.tier -> keep n rest
-      | old :: rest -> old :: keep (n - 1) rest
-    in
-    (* ponytail: 512 recent groups, a linear scan once per group; index if
-       profiling many small groups measurably costs a frame. *)
-    let next = execution :: keep 511 previous in
-    if not (Atomic.compare_and_set profile.executions previous next) then record profile execution
-end
 
 type sink = Display of string | Sop_input
 
@@ -616,9 +880,51 @@ module Executor = struct
       | Vec terms | List_lit terms | Str terms | List_op (_, terms) | Hof (_, terms) ->
           children terms
       | Assoc (record, updates) -> children (record :: List.map snd updates)
-      | Call_fn { args; body; _ } -> children (args @ Option.to_list body)
+      | Call_fn { fn; args; body = Some body } -> (
+          match children args with
+          | Some _ as refusal -> refusal
+          | None -> (
+              match E.Residual.residual_definition residual fn with
+              | None -> unsupported_source residual body
+              | Some definition ->
+                  let bindings =
+                    List.mapi
+                      (fun index (name, ty, _) ->
+                        (name, E.Source ("$core/argument", ty, [ ("index", E.Int index) ])))
+                      definition.inputs
+                  in
+                  unsupported_source (E.Residual.with_bindings residual ~term:body bindings) body))
+      | Call_fn { args; body = None; _ } -> children args
       | Graph_ref { inputs; _ } | Call { args = inputs; _ } -> children (List.map snd inputs)
-      | Fn { body; capture; _ } -> children (body :: Option.to_list capture)
+      | Fn { params; body; capture; _ } ->
+          let types =
+            match term.ty with
+            | Ty.Fn (Some signature) -> List.map Option.some signature.params
+            | _ -> List.map snd params
+          in
+          if
+            List.length types = List.length params
+            && List.for_all2
+                 (fun (pattern, _) ty ->
+                   (match pattern with W.Name _ -> true | _ -> false)
+                   && Option.fold ~none:false
+                        ~some:(function
+                          | Ty.Int | Float | Bool | Text | Vec2 | Vec3 | Vec4
+                          | Array (Int | Float | Text | Vec2 | Vec3 | Vec4) ->
+                              true
+                          | _ -> false)
+                        ty)
+                 params types
+          then
+            let bindings =
+              List.mapi
+                (fun index ((pattern, _), ty) ->
+                  let name = match pattern with W.Name name -> name | _ -> assert false in
+                  (name, E.Source ("$core/argument", Option.get ty, [ ("index", E.Int index) ])))
+                (List.combine params types)
+            in
+            unsupported_source (E.Residual.with_bindings residual ~term:body bindings) body
+          else children (body :: Option.to_list capture)
       | State { init; step; _ } -> children [ init; step ]
       | _ -> None
     and unsupported_packed_source packed =
@@ -766,21 +1072,25 @@ module Executor = struct
               } ))
       profile
 
-  let force_impl ?lower_counter ?walker_counter ?state ?elems ?resolve ?(reference = false)
-      ?(strict = false) program ~live =
+  let force_impl ?into ?lower_counter ?walker_counter ?resident ?state ?elems ?resolve
+      ?(reference = false) ?(strict = false) program ~live =
     let fast =
-      if state <> None || elems <> None || resolve <> None || reference || program.profile <> None
+      if
+        into <> None || state <> None || elems <> None || resolve <> None || reference
+        || program.profile <> None
       then None
       else
         match Atomic.get program.root_core with
-        | Some (cached_strict, prepared) when cached_strict = strict -> Some prepared
+        (* Region programs use the per-force dispatcher/resolver below, even when cached. *)
+        | Some (cached_strict, prepared) when cached_strict = strict && Core_exec.direct prepared ->
+            Some prepared
         | _ -> None
     in
     match fast with
     | Some prepared when E.is_live program.value -> (
-        match Core_exec.execute prepared ~live with
+        match Core_exec.execute ?resident ~strict prepared ~live with
         | Ok _ as result -> result
-        | Error _ when not strict ->
+        | Error _ when (not strict) && resident = None ->
             let count_walk () = Option.iter incr walker_counter in
             E.Host.force_reference_observed ~on_walk:count_walk program.value ~live
         | Error _ as error -> error)
@@ -913,20 +1223,17 @@ module Executor = struct
                             operation_many := Some table);
                         result)
               in
+              let execute_core ?root p =
+                Core_exec.execute ?root ?resident ~strict ~rerun_on_error:false ~on_walk:count_walk
+                  ?resolve
+                  ~force:(fun packed ->
+                    Packed.force ~dispatch ~strict ~state ?elems ?resolve ?measure
+                      ~on_walk:count_walk packed ~live)
+                  p ~live
+              in
               let execute r live =
                 match candidate r with
-                | Core p when not (Core_exec.has_regions p) ->
-                    Some
-                      (Core_exec.execute ~root:r ~strict ~rerun_on_error:false ~on_walk:count_walk
-                         ?resolve p ~live)
-                | Core p ->
-                    Some
-                      (Core_exec.execute ~root:r ~strict ~rerun_on_error:false ~on_walk:count_walk
-                         ?resolve
-                         ~force:(fun packed ->
-                           Packed.force ~dispatch ~strict ~state ?elems ?resolve ?measure
-                             ~on_walk:count_walk packed ~live)
-                         p ~live)
+                | Core p -> Some (execute_core ~root:r p)
                 | Packed p
                   when strict
                        || not
@@ -959,7 +1266,7 @@ module Executor = struct
                               match execute r live with
                               | Some (Ok value) -> Ok value
                               | Some (Error d) ->
-                                  if strict then Error d
+                                  if strict || resident <> None then Error d
                                   else begin
                                     restore ();
                                     fell_back := true;
@@ -967,7 +1274,10 @@ module Executor = struct
                                       ~on_walk:count_walk (E.Residual r) ~live
                                   end
                               | None ->
-                                  if strict && not (E.state_dependent (E.Residual r)) then begin
+                                  if
+                                    (strict || resident <> None)
+                                    && not (E.state_dependent (E.Residual r))
+                                  then begin
                                     restore ();
                                     Error
                                       (Diagnostic.error ~code:"E_CORE_FORM"
@@ -1026,7 +1336,51 @@ module Executor = struct
                       else E.Residual.with_bindings residual ~term view.bindings
                     in
                     walk (E.Residual residual));
-              E.transaction state (fun () -> walk value)
+              E.transaction state (fun () ->
+                  match into with
+                  | None -> (
+                      let record_core =
+                        match value with
+                        | E.Record fields
+                          when (not (E.state_dependent value))
+                               && (resident <> None || not (E.frame_dependent value)) ->
+                            Option.bind
+                              (List.find_map
+                                 (function
+                                   | _, E.Residual r
+                                     when resident <> None
+                                          || (E.Residual.residual_view r).context = Flow.Context.sop
+                                     ->
+                                       Some r
+                                   | _ -> None)
+                                 fields)
+                              (fun root ->
+                                match Atomic.get program.root_core with
+                                | Some (cached_strict, prepared) when cached_strict = strict ->
+                                    Some prepared
+                                | _ -> (
+                                    match
+                                      Core_lower.lower ~value ?trace:program.trace ~strict root
+                                    with
+                                    | Error _ -> None
+                                    | Ok core ->
+                                        let prepared = Core_exec.prepare core in
+                                        Atomic.set program.root_core (Some (strict, prepared));
+                                        Some prepared))
+                        | _ -> None
+                      in
+                      match record_core with
+                      | None -> walk value
+                      | Some prepared -> (
+                          match execute_core prepared with
+                          | Ok result -> walk result
+                          | Error d when strict || resident <> None -> Error d
+                          | Error _ -> fallback ()))
+                  | Some (packed, column_source, count, outputs) ->
+                      Result.map
+                        (fun () -> E.No_geo)
+                        (Packed.force_into ~dispatch ~state ?elems ?resolve ?measure ~strict
+                           ~column_source ~count ~outputs packed ~live))
             in
             let run () = if reference then fallback () else force_with_packed program.value ~live in
             let started = Option.map (fun profile -> profile.Profile.clock ()) program.profile in
@@ -1073,8 +1427,13 @@ module Executor = struct
           program.profile;
         result
 
-  let force ?state ?elems ?resolve ?reference ?strict program ~live =
-    force_impl ?state ?elems ?resolve ?reference ?strict program ~live
+  let force ?resident ?state ?elems ?resolve ?reference ?strict program ~live =
+    match force_impl ?resident ?state ?elems ?resolve ?reference ?strict program ~live with
+    | Error _ when resident <> None ->
+        (* A failed field closed the shared scope: earlier fields' placeholders are invalid too. *)
+        (Option.get resident).close ();
+        force_impl ?state ?elems ?resolve ?reference ?strict program ~live
+    | result -> result
 
   module Private = struct
     let force_with_lower_attempts ?state ?elems ?resolve ?reference ?strict program ~live =
@@ -1098,19 +1457,34 @@ module Executor = struct
     match packed_root program with
     | Some packed when Packed.elementwise packed ->
         Result.map
-          (fun () -> Some ())
-          (Packed.force_into ?state ?elems ?resolve ?measure:(measure program.profile) ~strict
-             ~column_source ~count ~outputs packed ~live)
+          (fun _ -> Some ())
+          (force_impl
+             ~into:(packed, column_source, count, outputs)
+             ?state ?elems ?resolve ~strict program ~live)
     | _ -> Ok None
 
   type displayed = Cpu of E.value | Gpu of Gpu.value
+
 
   (* A packed region on the GPU when the backend takes it and measures it cheaper. [cached] and
      [store] are the owner's one-kernel cache; [display] says a GPU array may leave the executor. *)
   let display_packed ?state ?resolve ?source ~gpu ~approx ~display ~profile ~cached ~store ~readback
       packed ~live =
+    let refused reason =
+      let _, path, iter = Packed.site packed in
+      Profile.place profile
+        {
+          owner = (path, iter);
+          count = Packed.static_count packed;
+          reason;
+          cpu_seconds = None;
+          device_seconds = None;
+          cpu_consumers = Some (if readback then 1 else 0);
+        };
+      Ok None
+    in
     match gpu.Gpu.backend with
-    | None -> Ok None
+    | None -> refused No_cost_evidence
     | Some backend ->
         let cpu () = Ok None in
         let fast = gpu.fast in
@@ -1119,42 +1493,63 @@ module Executor = struct
         if
           (not ((fast && display) || W.Paths.mem site approx))
           || Packed.gpu_refusals ~fused:true ~fast packed <> []
-        then cpu ()
+        then refused Unsupported_form
         else
-          let cheaper count =
-            count >= 1024
-            && (gpu.policy = Gpu.Qualification
-               || Option.fold ~none:false
-                    ~some:(fun seconds ->
-                      Float.is_finite seconds && seconds >= 0.
-                      && (seconds
-                         +.
-                         if readback then Cost.estimate Gpu_readback ~count
-                         else Cost.display_sink Gpu ~count)
-                         < Cost.estimate (Cost.packed ~count) ~count
-                           +. if readback then 0. else Cost.display_sink Cpu_kernel ~count)
-                    (Option.bind gpu.backend (fun backend -> backend.Gpu.cost ~fast packed ~count))
-               )
+          let cheaper ?inputs count =
+            if gpu.policy = Gpu.Qualification then true
+            else
+              let cpu_seconds =
+                Some
+                  (Cost.estimate (Cost.packed ~count) ~count
+                  +. if readback then 0. else Cost.display_sink Cpu_kernel ~count)
+              in
+              let device_seconds =
+                Option.bind (backend.cost ?inputs ~fast packed ~count) (fun seconds ->
+                    if not (Float.is_finite seconds && seconds >= 0.) then None
+                    else
+                      Some
+                        (seconds
+                        +.
+                        if readback then Cost.outputs_readback packed ~count
+                        else Cost.display_sink Gpu ~count))
+              in
+              let cpu_consumers = if readback then 1 else 0 in
+              let reason =
+                Cost.choose ~cpu_seconds ~device_seconds ~resident:false ~cpu_consumers
+              in
+              let _, path, iter = Packed.site packed in
+              Profile.place profile
+                {
+                  owner = (path, iter);
+                  count = Some count;
+                  reason;
+                  cpu_seconds;
+                  device_seconds;
+                  cpu_consumers = Some cpu_consumers;
+                };
+              Cost.on_device reason || (Option.is_none inputs && reason = No_cost_evidence)
           in
           (* Static cardinality lets unmeasured placement decline before allocating
        producer inputs, especially the million-element exact SOP value lane. *)
           if
-            Option.fold ~none:false
+            scalar_uniforms packed && Option.fold ~none:false
               ~some:(fun count -> not (cheaper count))
               (Packed.static_count packed)
           then cpu ()
           else
             let ( let* ) = Result.bind in
             let* inputs = Packed.Host.prepare ~fast ?state ?resolve ?source packed ~live in
-            if not (cheaper inputs.count) then cpu ()
+            if not (cheaper ~inputs inputs.count) then cpu ()
             else
               let* () =
                 if display || readback then Ok ()
-                else
+                else begin
+                  ignore (refused Missing_consumer);
                   Error
                     (Diagnostic.error ~code:"E_APPROX_SINK"
                        "GPU arrays require a display sink or (exact x) before CPU, SOP, state, \
                         export or cache use.")
+                end
               in
               let profile ?(seconds = fun _ -> None) tier run =
                 let start = Option.map (fun p -> p.Profile.clock ()) profile in
@@ -1355,55 +1750,140 @@ module Executor = struct
         | Ok _ | Error _ -> cpu ())
     | _ -> cpu ()
 
-  (* A fused SOP write's record ({!Cost.sop_device}): its elementwise fields over one count are one
+  (* A fused SOP write's record: its elementwise fields over one count are one
      region, one dispatch and a readback per output, by field name. [None] leaves the record to
      the CPU: the device declines or fails, or the cost model keeps it there. *)
-  let record_on_device ?state ?resolve ?resident ?(gpu = Gpu.default) program ~live =
+  let record_on_device ?state ?resolve ?resident ?expected_count ?cpu_consumers ?(gpu = Gpu.default) program ~live =
+    Option.iter
+      (fun count -> if count < 0 then invalid_arg "record_on_device: negative consumers")
+      cpu_consumers;
+    Option.iter
+      (fun count -> if count < 0 then invalid_arg "record_on_device: negative expected count")
+      expected_count;
+    if Option.is_none gpu.backend then begin
+      let rec site = function
+        | E.Residual residual ->
+            let view = E.Residual.residual_view residual in
+            Some (view.site, view.iter)
+        | E.Record fields -> List.find_map (fun (_, value) -> site value) (List.rev fields)
+        | _ -> None
+      in
+      Profile.place program.profile
+        { owner = Option.value ~default:([ "@value" ], []) (site program.value);
+          count = expected_count; reason = No_cost_evidence; cpu_seconds = None;
+          device_seconds = None; cpu_consumers };
+      Ok None
+    end
+    else
+    let report merged count reason cpu_seconds device_seconds =
+      let _, path, iter = Packed.site merged in
+      Profile.place program.profile
+        { owner = (path, iter); count; reason; cpu_seconds; device_seconds; cpu_consumers }
+    in
     match (gpu.backend, Lazy.force program.record_region) with
     | Some backend, Some (names, merged)
       when gpu.fast && Packed.gpu_refusals ~fused:true ~fast:true merged = [] -> (
-        let ( let* ) = Result.bind in
-        let device =
-          (* a source another write keeps on this device is bound there, not read back *)
-          let held = ref false in
-          let resident =
-            Option.map
-              (fun resident value ->
-                let found = resident value in
-                if found <> None then held := true;
-                found)
-              resident
+        if gpu.policy = Gpu.Measured && cpu_consumers = None then begin
+          report merged (Packed.static_count merged) Missing_consumer None None;
+          Ok None
+        end
+        else
+          let ( let* ) = Result.bind in
+          let select ?inputs ?(preflight = false) ~held ~held_readback count =
+            if gpu.policy = Gpu.Qualification then true
+            else
+              let readers = Option.get cpu_consumers in
+              let cpu_seconds =
+                Some (Cost.estimate (Cost.packed ~count) ~count +. held_readback)
+              in
+              let device_seconds =
+                Option.bind (backend.cost ?inputs ~fast:true merged ~count) (fun seconds ->
+                    if not (Float.is_finite seconds && seconds >= 0.) then None
+                    else Some (seconds +.
+                      if readers = 0 then 0.
+                      else Cost.outputs_readback merged ~count))
+              in
+              let reason = Cost.choose ~cpu_seconds ~device_seconds ~resident:held ~cpu_consumers:readers in
+              report merged (Some count) reason cpu_seconds device_seconds;
+              Cost.on_device reason || (preflight && reason = No_cost_evidence)
           in
-          let* inputs =
-            Packed.Host.prepare ~fast:true ~index:true ?state ?resolve ?resident merged ~live
+          let preflight =
+            if Option.is_none resident && scalar_uniforms merged then
+              Option.map (fun count -> (count, select ~preflight:true ~held:false ~held_readback:0. count)) expected_count
+            else None
           in
-          if not (Cost.sop_device gpu.policy merged ~count:inputs.count ~resident:!held) then
-            Ok None
+          if Option.fold ~none:false ~some:(fun (_, selected) -> not selected) preflight then Ok None
           else
-            let* kernel =
-              match program.gpu_kernel with
-              | Some (b, true, p, kernel) when b == backend && p == merged -> Ok kernel
-              | _ ->
-                  Result.map
-                    (fun kernel ->
-                      program.gpu_kernel <- Some (backend, true, merged, kernel);
-                      kernel)
-                    (backend.prepare ~fast:true merged)
+          let device =
+            (* a source another write keeps on this device is bound there, not read back *)
+            let held = ref false in
+            let held_values = ref [] and held_readback = ref 0. in
+            let resident =
+              Option.map
+                (fun resident value ->
+                  let found = resident value in
+                  (match found with
+                  | Some (value, count)
+                    when not (List.exists (fun old -> old == value) !held_values) ->
+                      held := true;
+                      held_values := value :: !held_values;
+                      let width =
+                        match value with
+                        | E.Vec2_array _ -> 2
+                        | Vec3_array _ -> 3
+                        | Vec4_array _ -> 4
+                        | _ -> 1
+                      in
+                      held_readback := !held_readback +. Cost.readback ~count ~width
+                  | _ -> ());
+                  found)
+                resident
             in
-            let* output = kernel.run inputs in
-            let rec read i = function
-              | [] -> Ok []
-              | name :: rest ->
-                  let* value =
-                    kernel.planes
-                      { output with output = i; width = Array.length merged.outputs.(i) }
-                  in
-                  Result.map (fun values -> (name, value) :: values) (read (i + 1) rest)
+            let* inputs =
+              Packed.Host.prepare ~fast:true ~index:true ?state ?resolve ?resident merged ~live
             in
-            Result.map Option.some (read 0 names)
-        in
-        match device with Ok _ as placed -> placed | Error _ -> Ok None)
-    | _ -> Ok None
+            let selected =
+              select ~inputs ~held:!held ~held_readback:!held_readback inputs.count
+            in
+            if not selected then Ok None
+            else
+              let* kernel =
+                match program.gpu_kernel with
+                | Some (b, true, p, kernel) when b == backend && p == merged -> Ok kernel
+                | _ ->
+                    Result.map
+                      (fun kernel ->
+                        program.gpu_kernel <- Some (backend, true, merged, kernel);
+                        kernel)
+                      (backend.prepare ~fast:true merged)
+              in
+              let* output = kernel.run inputs in
+              let rec read i = function
+                | [] -> Ok []
+                | name :: rest -> (
+                    let* value =
+                      kernel.planes
+                        { output with output = i; width = Array.length merged.outputs.(i) }
+                    in
+                    match read (i + 1) rest with
+                    | Ok values -> Ok ((name, value) :: values)
+                    | Error d ->
+                        value.release ~held:false;
+                        Error d)
+              in
+              Result.map Option.some (read 0 names)
+          in
+          match device with
+          | Ok _ as placed -> placed
+          | Error _ ->
+              report merged (Packed.static_count merged) Unsupported_form None None;
+              Ok None)
+    | backend, Some (_, merged) ->
+        report merged (Packed.static_count merged)
+          (if Option.is_none backend then No_cost_evidence else Unsupported_form)
+          None None;
+        Ok None
+    | _, None -> Ok None
 
   let force_display ?state ?(reference = false) ?(gpu = Gpu.default) program ~live =
     Result.bind (try_display ?state ~reference ~gpu program ~live) (function

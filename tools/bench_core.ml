@@ -397,6 +397,59 @@ let loop_fusion () =
             \      (map (fn [x] (iterate 3 (+ x t) (fn [a] (+ a 1.)))) (array/range 4096)))" );
         ])
 
+(* Placement calibration includes cold compilation. Large enough rows estimate
+   interpreter cost; small ones show why a fixed conservative cutoff is useful. *)
+let placement () =
+  Parallel.run ~domains:1 (fun () ->
+      List.iter
+        (fun (name, expression) ->
+          let rows =
+            List.map
+              (fun count ->
+                let residual = kernel_residual (expression count) in
+                let term = (E.Residual.residual_view residual).term in
+                let packed = Option.get (I.Packed.compile residual term) in
+                let reference () = ok (E.Host.force_reference (E.Residual residual) ~live) in
+                let kernel () = ok (I.Packed.force ~strict:true packed ~live) in
+                if Marshal.to_string (reference ()) [] <> Marshal.to_string (kernel ()) [] then
+                  failwith (name ^ ": placement calibration differs from reference");
+                let repeat = max 1 (min 200 (16384 / count)) in
+                let compile =
+                  time_median ~repeat:100 (fun () -> ignore (I.Packed.compile residual term))
+                in
+                let walked = time_median ~repeat (fun () -> ignore (reference ())) in
+                let forced = time_median ~repeat (fun () -> ignore (kernel ())) in
+                Printf.printf
+                  "placement %s count=%d registers=%d domains=1 compile_s=%.9f walker_s=%.9f \
+                   kernel_s=%.9f cold_kernel_s=%.9f\n\
+                   %!"
+                  name count
+                  (Array.length packed.I.Core.Region.code)
+                  compile walked forced (compile +. forced);
+                (count, walked))
+              [ 16; 64; 256; 1024; 4096; 16384 ]
+          in
+          let at count = List.assoc count rows in
+          let slope = (at 16384 -. at 4096) /. float (16384 - 4096) in
+          Printf.printf "interpreter %s fixed_s=%.9f per_element_s=%.12f\n%!" name
+            (at 4096 -. (4096. *. slope))
+            slope)
+        [
+          ("arithmetic", fun n -> Printf.sprintf "(map (fn [x] (+ (* x 2.) t)) (array/range %d))" n);
+          ( "list_lookup",
+            fun n ->
+              Printf.sprintf
+                "(let* [table (list [1 0 0] [0 1 0] [0 0 1])] (map (fn [x] (+ (nth table (int/mod \
+                 (int x) 3)) [t 0. 0.])) (array/range %d)))"
+                n );
+          ( "inner_64",
+            fun n ->
+              Printf.sprintf
+                "(map (fn [x] (+ t (array/sum (map (fn [j] (+ x j)) (array/range 64))))) \
+                 (array/range %d))"
+                n );
+        ])
+
 let () =
   match Sys.argv with
   | [| _; "frames"; path |] -> frames path
@@ -405,4 +458,5 @@ let () =
   | [| _; "attributes" |] -> attributes ()
   | [| _; "loops" |] -> loops ()
   | [| _; "loop-fusion" |] -> loop_fusion ()
+  | [| _; "placement" |] -> placement ()
   | _ -> scalar ()

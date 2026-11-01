@@ -53,6 +53,18 @@ let checks =
   (let* [full (array/int 8000 1)
          hollow (edit-volume full 20 17 "hollow")]
     (array/sum hollow)))
+(graph bulk-list :context host
+  (let* [directions (list [1 0 0] [0 1 0] [0 0 1])
+         indices (map (fn [(i : int)] i) (array/range 8000 :type int))]
+    (map (fn [(i : int)] (nth directions (int/mod i 3))) indices)))
+(graph bulk-inner-map :context host
+  (let* [indices (map (fn [(i : int)] (int/mod i 61)) (array/range 8000 :type int))]
+    (map (fn [(i : int)]
+           (array/sum (map (fn [(j : int)] (+ i j)) (array/range 3 :type int)))) indices)))
+(graph bulk-inner-slice :context host
+  (let* [data (array/range 64 :type int)
+         indices (map (fn [(i : int)] (int/mod i 61)) (array/range 8000 :type int))]
+    (map (fn [(i : int)] (array/sum (array/slice data i 3))) indices)))
 |rays}
 
 let () =
@@ -122,7 +134,13 @@ let () =
             let observe path residual =
               if
                 List.mem path
-                  [ Some [ "def:edit-cells"; "@result" ]; Some [ "def:carve"; "@result" ] ]
+                  [
+                    Some [ "def:edit-cells"; "@result" ];
+                    Some [ "def:carve"; "@result" ];
+                    Some [ "bulk-list"; "@result" ];
+                    Some [ "bulk-inner-map"; "@result" ];
+                    Some [ "bulk-inner-slice"; "@result" ];
+                  ]
                 && not (List.mem path !dispatched)
               then begin
                 let term = (E.Residual.residual_view residual).term in
@@ -143,13 +161,34 @@ let () =
                       | E.Float_array actual, E.Int_array expected ->
                           assert (actual = Array.map float_of_int expected)
                       | _ -> assert (actual = expected));
+                      if path = Some [ "bulk-list"; "@result" ] then begin
+                        let invalid = { inputs with arrays = Array.map Array.copy inputs.arrays } in
+                        invalid.arrays.(0).(0) <- -1.;
+                        match Result.bind (kernel.run invalid) kernel.readback with
+                        | Error d -> assert (d.code = "E_LIST_RANGE")
+                        | Ok _ -> failwith "invalid list index was accepted by native GPU"
+                      end;
+                      if path = Some [ "bulk-inner-slice"; "@result" ] then
+                        List.iter
+                          (fun (first, message) ->
+                            let invalid =
+                              { inputs with arrays = Array.map Array.copy inputs.arrays }
+                            in
+                            invalid.arrays.(0).(0) <- first;
+                            match Result.bind (kernel.run invalid) kernel.readback with
+                            | Error d -> assert (d.code = "E_ARRAY_RANGE" && d.message = message)
+                            | Ok _ -> failwith "invalid slice was accepted by native GPU")
+                          [
+                            (100., "An array slice must be within its source.");
+                            (-1., "array/slice needs a non-negative whole length.");
+                          ];
                       dispatched := path :: !dispatched
                     end
               end
             in
             let _, result = get (Flow_ir.qualify_workspace ~observe ~gpu:config workspace) in
             verify result;
-            assert (List.length !dispatched = 2);
+            assert (List.length !dispatched = 5);
             let stats = Flow_gpu.Host.stats host in
             Printf.printf "GPU: %d pipelines, %d status reads, %d readback bytes\n"
               stats.pipeline_compilations stats.status_reads stats.readback_bytes))

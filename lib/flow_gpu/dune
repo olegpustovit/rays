@@ -3,6 +3,10 @@
  (public_name rays.flow_gpu)
  (modules
   compact_source
+  compact_uint32_source
+  indices_source
+  topology_source
+  triangles_source
   dispatch_source
   bounds_source
   normals_source
@@ -14,6 +18,10 @@
   image_rgba8_source)
  (private_modules
   compact_source
+  compact_uint32_source
+  indices_source
+  topology_source
+  triangles_source
   dispatch_source
   bounds_source
   normals_source
@@ -32,6 +40,14 @@
  (targets
   compact.metal
   compact.comp.spv
+  compact_uint32.metal
+  compact_uint32.comp.spv
+  indices.metal
+  indices.comp.spv
+  topology.metal
+  topology.comp.spv
+  triangles.metal
+  triangles.comp.spv
   bounds.metal
   bounds.comp.spv
   normals.metal
@@ -44,6 +60,60 @@
   (run %{exe:../flow_shader/print_shader.exe} flow_gpu)))
 
 ; the resident fold's compaction
+
+(rule
+ (target triangles_source.ml)
+ (deps triangles.metal)
+ (action
+  (with-stdout-to %{target}
+   (progn (echo "let source = {msl|") (cat triangles.metal) (echo "|msl}\n")))))
+
+(rule
+ (target topology_source.ml)
+ (deps topology.metal)
+ (action
+  (with-stdout-to %{target}
+   (progn (echo "let source = {msl|") (cat topology.metal) (echo "|msl}\n")))))
+
+(rule
+ (target indices_source.ml)
+ (deps indices.metal)
+ (action
+  (with-stdout-to %{target}
+   (progn (echo "let source = {msl|") (cat indices.metal) (echo "|msl}\n")))))
+
+(rule
+ (target compact_uint32_source.ml)
+ (deps compact_uint32.metal)
+ (action
+  (with-stdout-to %{target}
+   (progn (echo "let source = {msl|") (cat compact_uint32.metal) (echo "|msl}\n")))))
+
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_uint32)
+ (modules test_uint32)
+ (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal parallel unix))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_uint32)
+ (action (run %{exe:test_uint32.exe})))
+
+(alias (name runtest-native) (deps (alias test_uint32)))
+
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_triangles)
+ (modules test_triangles)
+ (libraries flow_gpu renderer ogpu ogpu_metal rdk unix))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_triangles)
+ (action (run %{exe:test_triangles.exe})))
+
+(alias (name runtest-native) (deps (alias test_triangles)))
 
 (rule
  (target compact_source.ml)

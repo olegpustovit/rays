@@ -9,7 +9,10 @@ let mesh_vec3 (view : Packed.Float3.View.view) : Mesh.View.vec3_view =
 
 let standard geometry ~name ~point_kind ~vertex_kind =
   let read owner expected =
-    match Geometry.find_attribute ~owner name geometry with
+    match
+      if owner = Attribute.Vertex && Geometry.vertex_count geometry = 0 then None
+      else Geometry.find_attribute ~owner name geometry
+    with
     | None -> Ok None
     | Some attribute -> (
         match expected (Attribute.View.storage attribute) with
@@ -317,7 +320,8 @@ let to_mesh geometry =
        point: expanding it preserves material boundaries between faces. *)
       let geometry =
         if
-          Geometry.find_attribute ~owner:Attribute.Vertex "Cd" geometry <> None
+          Geometry.primitive_count geometry = 0
+          || Geometry.find_attribute ~owner:Attribute.Vertex "Cd" geometry <> None
           || Geometry.find_attribute ~owner:Attribute.Point "Cd" geometry <> None
           || Geometry.find_attribute ~owner:Attribute.Primitive "Cd" geometry = None
         then Ok geometry

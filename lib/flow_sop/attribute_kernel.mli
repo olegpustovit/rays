@@ -143,3 +143,6 @@ val node :
 val resident_vec3 : Rdk.Geometry.t -> string -> float array option
 (** The placeholder ({!Flow_ir.Gpu.planes}[.resident]) of point P or a point vec3 attribute [name]
     that a device still holds unread, or [None]: asked without materialising it. *)
+
+val resident_color : Rdk.Geometry.t -> (float array * int) option
+(** Unread point Cd placeholder and its component width (3 or 4), without materialisation. *)

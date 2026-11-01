@@ -137,7 +137,7 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
                 let timed = Sop.Context.Dependencies.mem Time dependencies in
                 N.Build.make ~label ~operation ~version ~parameters:source
                   ~cook_mode:facts.N.cook_mode ~dependencies ~inputs:(Array.of_list inputs)
-                  (fun ~node_id:_ context payloads ->
+                  (fun ~node_id context payloads ->
                     let wrong =
                       List.find_mapi
                         (fun i geometry ->
@@ -215,6 +215,9 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
                                                    payload = output.payload;
                                                    instances = output.instances;
                                                  })
-                                             (Sop.Session.cook session ~context body)))))))
+                                             (Sop.Session.cook
+                                                ?cpu_consumers:
+                                                  (Sop.Context.cpu_consumers context node_id)
+                                                session ~context body)))))))
                 |> N.Build.with_facts facts)
               (build ~label ~context inputs arguments)))

@@ -1,0 +1,4 @@
+64³ deferred cook stays on its worker; three full editor frames return before publication
+real 3.32
+user 9.21
+sys 0.71

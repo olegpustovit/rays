@@ -2,6 +2,22 @@ open Flow_ir
 module E = Flow.Eval
 
 let () =
+  let choose cpu device resident cpu_consumers =
+    Cost.choose ~cpu_seconds:cpu ~device_seconds:device ~resident ~cpu_consumers
+  in
+  List.iter
+    (fun bad ->
+      assert (choose bad (Some 1.) false 0 = No_cost_evidence);
+      assert (choose (Some 1.) bad false 0 = No_cost_evidence))
+    [ None; Some nan; Some infinity; Some neg_infinity; Some (-1e-12) ];
+  assert (choose (Some 1.) (Some 0.5) false 0 = Device_measured_cheaper);
+  assert (choose (Some 1.) (Some 0.5) true 0 = Held_on_device);
+  assert (choose (Some 1.) (Some 1.) false 0 = Cpu_measured_cheaper);
+  assert (choose (Some 1.) (Some 1.5) true 1 = Cpu_consumer);
+  assert (not (Cost.on_device (choose None None true 0)));
+  assert (Cost.reason_name Cpu_consumer = "cpu_consumer")
+
+let () =
   let module W = Flow.Workspace in
   let check source =
     match
@@ -129,6 +145,53 @@ let value ?ops body =
   let ws = check ?ops ("(workspace w (graph g :context value " ^ body ^ "))") in
   let evaluated = ok (E.static ~record:true ws) in
   List.assoc "g" evaluated.results
+
+let () =
+  let ws = check "(workspace static (graph g :context host\n\
+    (map (fn [i] (+ (float i) 0.25)) (array/range 4097))))" in
+  (* Callback/placement coverage; the readback is computed on CPU. Native
+     shader conformance is exercised by the owner qualification tests. *)
+  let run ?(width = 1) ~shape ~actual expected dispatched =
+    let ws = if width = 1 then ws else
+      check "(workspace static (graph g :context host\n\
+        (map (fn [i] [(float i) 0.25 0.5 1.]) (array/range 4097))))" in
+    let calls = ref 0 in
+    let profile = Profile.create ~clock:(fun () -> 0.) in
+    let backend : Gpu.backend = {
+      residency = (fun ~fast:_ -> None);
+      cost = (fun ?inputs ~fast:_ _ ~count:_ ->
+        if Option.is_some inputs then actual else shape);
+      prepare = (fun ~fast:_ packed -> Ok {
+        run = (fun inputs ->
+          incr calls;
+          Ok Gpu.{ identity = 1; output = 0; count = inputs.count; width;
+            stamp = 0L; gpu_seconds = actual });
+        readback = (fun _ -> Packed.force packed ~live:(Input.at_time 0.));
+        planes = (fun _ -> failwith "static map uses readback, not planes");
+      });
+    } in
+    let gpu = { Gpu.default with backend = Some backend; fast = true } in
+    let _, result = Profile.sample profile (fun () ->
+        ok (qualify_workspace ~gpu ~record:true ws)) in
+    let expected_value = if width = 1 then
+        E.Float_array (Array.init 4097 (fun i -> float i +. 0.25))
+      else E.Vec4_array (Array.init (4097 * 4) (fun i ->
+        match i mod 4 with 0 -> float (i / 4) | 1 -> 0.25 | 2 -> 0.5 | _ -> 1.)) in
+    assert (List.assoc "g" result.results = expected_value);
+    assert (!calls = dispatched);
+    let placement = List.hd (Profile.placements profile) in
+    assert (placement.reason = expected && placement.cpu_consumers = Some 1);
+  in
+  run ~shape:(Some 0.) ~actual:(Some 0.) Device_measured_cheaper 1;
+  run ~shape:None ~actual:(Some 0.) Device_measured_cheaper 1;
+  run ~shape:(Some 0.) ~actual:None No_cost_evidence 0;
+  run ~shape:(Some 0.) ~actual:(Some (-1e-12)) No_cost_evidence 0;
+  run ~shape:(Some 1.) ~actual:(Some 0.) Cpu_consumer 0;
+  let cpu = Cost.estimate (Cost.packed ~count:4097) ~count:4097 in
+  let price = Some (cpu -. Cost.estimate Gpu_readback ~count:8194) in
+  run ~shape:price ~actual:price Device_measured_cheaper 1;
+  run ~width:4 ~shape:price ~actual:price Cpu_consumer 0;
+  print_endline "Static approximable maps: shared measured comparison, prepared-only evidence, invalid costs, CPU reader and output-width readback pass"
 
 let rec same_bits a b =
   match (a, b) with
@@ -494,7 +557,8 @@ let () =
   let prepared = ref 0 and dispatched = ref 0 and gpu_seconds = ref (Some 0.002) in
   let backend : Gpu.backend =
     {
-      cost = (fun ~fast:_ _ ~count:_ -> None);
+      residency = (fun ~fast:_ -> None);
+      cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> None);
       prepare =
         (fun ~fast:_ _ ->
           incr prepared;
@@ -605,24 +669,208 @@ let () =
     | _ -> false);
   (* Measured policy: a finite GPU estimate plus its display sink competes with
      the CPU kernel plus instance building; an expensive estimate keeps CPU. *)
+  let vector_ws, vector_evaluation = ok (qualify_workspace ~record:true
+      (check "(workspace vectors (graph g :context value (let* [mapped\n\
+        (map (fn [i] [(+ (float i) t) 0.25 0.5 1.]) (array/range 64))] 0.)))")) in
+  let vector_value = List.assoc [ "g"; "mapped" ] vector_evaluation.records |> List.hd |> snd in
+  let vector_program = ok (Executor.compile ~profile
+      ~approx:(Flow.Workspace.Paths.add [ "g"; "mapped" ] vector_ws.approx)
+      ~sink:Sop_input vector_value) in
+  let cpu = Cost.estimate (Cost.packed ~count:64) ~count:64 in
+  let seconds = cpu -. Cost.estimate Gpu_readback ~count:128 in
+  let vector_gpu = { measured_gpu with fast = true; backend = Some { backend with
+      cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> Some seconds) } } in
+  assert (ok (Executor.try_display ~gpu:vector_gpu vector_program ~live:(Input.at_time 1.)) = None);
+  let vector_placement = List.hd (Profile.placements profile) in
+  if vector_placement.reason <> Cpu_consumer then
+    failwith ("vec4 readback placement: " ^ Cost.reason_name vector_placement.reason);
+  assert (Float.abs (Option.get vector_placement.device_seconds
+      -. seconds -. Cost.estimate Gpu_readback ~count:256) < 1e-12);
   List.iter
-    (fun (seconds, expect_gpu) ->
+    (fun (seconds, expect_gpu, reason) ->
       let gpu =
         {
           measured_gpu with
-          backend = Some { backend with cost = (fun ~fast:_ _ ~count:_ -> Some seconds) };
+          backend = Some { backend with cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> seconds) };
         }
       in
       assert (
         match ok (Executor.force_display ~gpu program ~live:(Input.at_time 1.)) with
         | Executor.Gpu _ -> expect_gpu
-        | Executor.Cpu _ -> not expect_gpu))
-    [ (0., true); (Cost.estimate Cpu_kernel ~count:1024, true); (1., false) ];
+        | Executor.Cpu _ -> not expect_gpu);
+      let placed = List.hd (Profile.placements profile) in
+      assert (placed.count = Some 1024 && placed.reason = reason && placed.cpu_consumers = Some 0))
+    [
+      (Some 0., true, Device_measured_cheaper);
+      (Some (Cost.estimate Cpu_kernel ~count:1024), true, Device_measured_cheaper);
+      (Some 1., false, Cpu_measured_cheaper);
+      (Some (-1e-12), false, No_cost_evidence);
+      (Some nan, false, No_cost_evidence);
+      (Some infinity, false, No_cost_evidence);
+      (None, false, No_cost_evidence);
+    ];
   let fast = { qualification_gpu with fast = true } and exact = qualification_gpu in
+  let record = ok (Executor.compile ~profile (E.Record [ ("values", value) ])) in
+  let lowered_candidates = ref 0 in
+  let unavailable = ok (Executor.compile ~profile
+      ~trace:(fun _ -> incr lowered_candidates) (E.Record [ ("values", value) ])) in
+  assert (!lowered_candidates = 0);
+  assert (ok (Executor.record_on_device unavailable ~live:(Input.at_time 0.)) = None);
+  assert (!lowered_candidates = 0);
+  assert ((List.hd (Profile.placements profile)).reason = No_cost_evidence);
+  let cpu = Cost.estimate (Cost.packed ~count:1024) ~count:1024 in
+  let measured =
+    {
+      measured_gpu with
+      fast = true;
+      backend = Some { backend with cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> Some (cpu *. 0.9)) };
+    }
+  in
+  let actual_only =
+    { measured with backend = Some { backend with cost = (fun ?inputs ~fast:_ _ ~count:_ ->
+        Option.map (fun (_ : Packed.Host.inputs) -> 0.) inputs) } }
+  in
+  assert (Option.is_some (ok (Executor.record_on_device ~expected_count:1024 ~cpu_consumers:0
+      ~gpu:actual_only record ~live:(Input.at_time 0.))));
+  let dispatched_before = !dispatched in
+  assert (ok (Executor.record_on_device ~gpu:measured record ~live:(Input.at_time 0.)) = None);
+  assert (!dispatched = dispatched_before);
+  let missing = List.hd (Profile.placements profile) in
+  assert (missing.reason = Missing_consumer && missing.cpu_consumers = None);
+  assert (
+    Option.is_some
+      (ok
+         (Executor.record_on_device ~cpu_consumers:0 ~gpu:measured record ~live:(Input.at_time 0.))));
+  assert ((List.hd (Profile.placements profile)).reason = Device_measured_cheaper);
+  assert (
+    ok (Executor.record_on_device ~cpu_consumers:1 ~gpu:measured record ~live:(Input.at_time 0.))
+    = None);
+  let one = List.hd (Profile.placements profile) in
+  assert (one.reason = Cpu_consumer && one.cpu_consumers = Some 1);
+  assert (
+    ok (Executor.record_on_device ~cpu_consumers:2 ~gpu:measured record ~live:(Input.at_time 0.))
+    = None);
+  let two = List.hd (Profile.placements profile) in
+  assert (
+    two.reason = Cpu_consumer && two.cpu_consumers = Some 2
+    && one.device_seconds = two.device_seconds);
+  let source = E.Source ("test/held", Flow.Ty.Array Flow.Ty.Float, []) in
+  let held_workspace =
+    check
+      "(workspace held (graph held :context host [(data : (array float) (array/float 1024))]\n\
+       (map (fn [x y] (+ (+ x y) t)) data data)))"
+  in
+  let held_value =
+    List.assoc "held"
+      (ok (E.static ~inputs:[ ("held", [ ("data", source) ]) ] held_workspace)).results
+  in
+  let held_record = ok (Executor.compile ~profile (E.Record [ ("values", held_value) ])) in
+  assert (ok (Executor.record_on_device ~expected_count:1024 ~cpu_consumers:1
+      ~resolve:(fun _ -> failwith "CPU refusal prepared a source")
+      ~gpu:measured held_record ~live:(Input.at_time 0.)) = None);
+  assert ((List.hd (Profile.placements profile)).reason = Cpu_consumer);
+  let compared = ref [] in
+  let changed_count =
+    { measured with backend = Some { backend with cost = (fun ?inputs:_ ~fast:_ _ ~count ->
+        compared := count :: !compared;
+        Some (if count = 1 then 0. else 1.)) } }
+  in
+  assert (ok (Executor.record_on_device ~expected_count:1 ~cpu_consumers:0
+      ~gpu:changed_count record ~live:(Input.at_time 0.)) = None);
+  assert (!compared = [ 1024; 1 ]);
+  assert ((List.hd (Profile.placements profile)).count = Some 1024);
+  assert (try
+      ignore (Executor.record_on_device ~expected_count:(-1) ~cpu_consumers:0
+          ~gpu:measured record ~live:(Input.at_time 0.));
+      false
+    with Invalid_argument _ -> true);
+  let placeholder = E.Float_array [| 0. |] in
+  let resident value = if value == source then Some (placeholder, 1024) else None in
+  assert (
+    Option.is_some
+      (ok
+         (Executor.record_on_device ~expected_count:1024 ~cpu_consumers:1 ~resident
+            ~resolve:(fun _ -> failwith "resident source was forced")
+            ~gpu:measured held_record ~live:(Input.at_time 0.))));
+  let held = List.hd (Profile.placements profile) in
+  assert (held.reason = Held_on_device);
+  assert (
+    abs_float (Option.get held.cpu_seconds -. cpu -. Cost.estimate Gpu_readback ~count:1024) < 1e-12);
+  assert (Option.is_some (ok (Executor.record_on_device ~gpu:fast record ~live:(Input.at_time 0.))));
+  let released = ref 0 in
+  let rejecting =
+    {
+      backend with
+      prepare =
+        (fun ~fast packed ->
+          Result.map
+            (fun (kernel : Gpu.kernel) ->
+              {
+                kernel with
+                planes =
+                  (fun output ->
+                    if output.Gpu.output = 1 then
+                      Error (Diagnostic.error ~code:"E_GPU" "second output refused")
+                    else
+                      Result.map
+                        (fun (planes : Gpu.planes) ->
+                          {
+                            planes with
+                            release =
+                              (fun ~held ->
+                                incr released;
+                                planes.release ~held);
+                          })
+                        (kernel.planes output));
+              })
+            (backend.prepare ~fast packed));
+    }
+  in
+  let pair = ok (Executor.compile ~profile (E.Record [ ("first", value); ("second", value) ])) in
+  assert (
+    ok
+      (Executor.record_on_device
+         ~gpu:{ fast with backend = Some rejecting }
+         pair ~live:(Input.at_time 0.))
+    = None);
+  assert (!released = 1);
+  assert ((List.hd (Profile.placements profile)).reason = Unsupported_form);
+  assert (
+    try
+      ignore
+        (Executor.record_on_device ~cpu_consumers:(-1) ~gpu:measured record ~live:(Input.at_time 0.));
+      false
+    with Invalid_argument _ -> true);
   ignore (ok (Executor.force_display ~gpu:fast program ~live:(Input.at_time 2.)));
   let before_precision_switch = !prepared in
   ignore (ok (Executor.force_display ~gpu:exact program ~live:(Input.at_time 2.)));
   assert (!prepared = before_precision_switch + 1);
+  let bounded = Profile.create ~clock:(fun () -> 0.) in
+  let unmeasured =
+    {
+      measured_gpu with
+      fast = true;
+      backend = Some { backend with cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> None) };
+    }
+  in
+  for i = 0 to 519 do
+    let name = "g" ^ string_of_int i in
+    let workspace =
+      check
+        ("(workspace history (graph " ^ name
+       ^ " :context host (map (fn [i] (+ i t)) (array/range 1))))")
+    in
+    let value = List.assoc name (ok (E.static workspace)).results in
+    let program = ok (Executor.compile ~sink:(Display "points") value) in
+    ignore
+      (Profile.sample bounded (fun () ->
+           ok (Executor.force_display ~gpu:unmeasured program ~live:(Input.at_time 0.))))
+  done;
+  assert (List.length (Profile.placements bounded) = 512);
+  assert (
+    List.for_all
+      (fun (p : placement) -> p.reason = No_cost_evidence && p.count = Some 1)
+      (Profile.placements bounded));
   print_endline
     "GPU neutral callbacks: measured placement, illegal exact sinks, qualification scope and phase \
      profiles passed"

@@ -1,0 +1,168 @@
+Core cooked handles: exact type, lazy failures, changing live branches and fresh execution validation
+Core constant arrays: original-site validation, cooked storage aliases, mixed-use dense path and empty/large metadata
+Core frame facts: scoped sharing, changing inputs, branch dominance and empty loops agree
+Core sources: a captured residual inside a host source lowers to plain Host_source arguments
+Core control: direct vector/branch/pattern/call/macro/bypass parity and dynamic call identity passed
+Resident value execution: counts, escaping records, CPU readers, errors and overflow match
+Resident field failure discards earlier placeholders and reruns the whole CPU value
+Core errors: division by zero, range, non-finite, authored fields and state rollback match the walker
+Authored errors: exact dynamic messages, lazy text/packed branches, empty inputs, rollback and dynamic packed refusal pass
+Core state: slots, pending writes, keys, errors and rollback match the walker (36 executions)
+Core state kernels: result, previous, resized, two-state and sum regions match the walker at one and eight domains
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+Core operators: every scalar value operator lowers and matches the walker bit for bit (2240 cases)
+Text arrays: strict structured Core and Executor match reference beyond 4,096 at one/eight domains; dependent collecting clauses refuse honestly
+Core records/text: ordered fields, nesting, coercion, runtime tags, display/equality and lazy captures passed
+Core parity: fixtures, scalar expressions, direct execution (407 cases), and diagnostics passed
+Inner sums: K=0/1/64, exact Int/vector bits, helper tables, guarded empty/bounds errors, eager map errors, constant refusals and one/eight domains agree
+Numeric reductions: exact extrema/CSR/order, empty and malformed ranges, strict Core/reference and one/eight-domain bytes pass
+array/max_length: exact native element bounds, checked literal selectors, symbolic guards, reference/Core/CPU and ordinary Int-bank refusals; no giant allocations
+Scatter: ordered numeric bytes, Int wrap, malformed inputs, source ownership, lazy errors and strict Core/reference 1/4/8 domains
+Core lists: direct/reference/executor parity passed
+Core list stores: local builder ownership and alias publication passed
+Known 5001 geometry map/filter captures: bounded loop shape, ordered native/reference handles and unchanged ordinary list guard
+Core iterate: one region, one counted loop for 5000 passes, byte-identical to the walker
+Packed noise spans, scalar bits and one/eight-domain parity passed
+Packed scaled noise skips untaken overflow and refuses selected overflow
+Compact/scan: kept indices, exclusive offset boundaries, Int wrap, immutable sources, lazy errors and strict/reference domains
+Diagnostic boundaries: strict Core/reference, nested nil, unused local helper, lazy mapping, cancellation and lossless envelopes pass
+Static maps: kernel-made values, records and failures equal the walker's
+Static map profiles: actual head/tail counts, refusal, scoped clock and bounded history
+Static gathers: reference fields, helpers, Text, lazy/tail errors and concrete mismatch
+Static list guards: negative, range and fractional indices before/after 4,096 keep walker diagnostics
+Trusted static maps: full bit verification, replayed body probes and consecutive call indices
+Replay failures retain full diagnostics; named-function recording retains its eager head
+Strict captured iterate validates maps and until reductions with their carried array bindings
+SOP deferral: host/small maps eager, compiled arrays/counts exact, late diagnostics preserved
+Diagnostic rows: strict Core/reference, complete immutable flags, boundary/tail selection, cancellation and checked graph edits pass
+Packed frame folds: template reuse, particle branches, domains, resets, repeated reads and rollback passed
+Numeric gather: independent tables, exact Int/vector bytes, lazy preparation, first-error order and one/four/eight domains pass
+Typed one-lane copies: constants, initial-domain uniforms, signed zeros/exact Int/native bytes and one/four/eight domains pass
+Typed total prefix: wrapping Int/native Text bytes, guarded storage checks and earliest-row block/chunk errors pass
+Prepared table prefix: delayed forcing, per-force content/count changes, late bounds versus earlier table cause and one/four/eight domains pass
+Text gather: immutable byte leaves, identity/uniform/select/helper, strict Core and one/four/eight domains pass
+integer sources and tables convert once per array
+List tables: exact numeric widths, list range guards, rebind shape and one/eight domains
+Grade/index: stable direction, exact Int/byte Text, first match, ownership, strict/reference and lazy source/state parity
+Core regions: packed-array primitives and Region_ref forms match the walker
+Core carried loops: empty, dynamic, nested, record/helper, error and domain parity passed
+Loop fusion: producer/consumer scopes, guards, integer/text aliases and sibling outputs agree
+Carried Int/Float widening retains exact initial bits through structured Core
+checked key line: 1 Lisp golden rows
+checked fixture line/none: 1 Lisp golden rows (partial key, prepared checking)
+updated 1 golden rows in /var/folders/8q/7xmv0zpd5359pbvz2xj72zv00000gn/T/build_0663dc_dune/rays-golden-replayfee36c.tmp
+replay self-test checked output, refusal, malformed/duplicate rows, partial checkpoints, cached inputs and tampered/missing fixtures
+image qualification: authored sites, shared functions, folded/unsupported forms, capture requalification, state and declaration identity pass
+Flow IR passes, precision, scalar/fallback execution and twelve-fixture parity passed
+GPU neutral callbacks: measured placement, illegal exact sinks, qualification scope and phase profiles passed
+Workspace qualification: actual captures, empty/vector/loop/noise kernels, limits, ambiguity, callable ownership and repeated/zero IDs passed
+projection tests passed
+workspace cook tests passed
+Workspace GPU service: worker cook is pumped by its owner, selects CPU when slower, and reads back when cheaper; a pump never takes a settle as a follow-up
+placement calibration: 0.000304 s completed, status +16 bytes, payload +0; cached estimate issues no work
+Tiny maps in recorded-call records preserve reference results and strict packed execution at one/eight domains
+One force lowers 129 distinct residuals once and reuses the first shared value
+Strict uniforms: direct/wrapped unsupported reductions refuse; Float/Int outputs and supported add match reference at one/eight domains
+Captured uniform packed/reference parity, ordered named reductions, changing inputs, errors and rollback passed
+IsoGrid recipe 0: picking materialises 216004 payload bytes; repeated read +0
+IsoGrid recipe 0: 3000 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 3: inspection materialises 1708704 payload bytes; repeated read +0
+IsoGrid recipe 3: 11866 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+moved one point of 12: 5 misses, 18 hits
+workspace zone: ok
+checked 128 Lisp SOP golden rows without native factories
+Components seams: edge mask equals Analysis.classify_connectivity with seams, alone and masked
+Triangles: ear order per primitive, refused primitives emit nothing
+sop/concat: bytes equal native merge, errors share codes, inputs untouched, reference/CPU/domains/grains
+Encoded parameters: canonical defaults/edits/cook keys, atomic refusal, authored source and projection
+Encoded parameters: typed hooks and transitive pure helpers; generic error projection/edit
+Encoded parameters: live text drives canonicalize and malformed drives retain previous node
+Encoded parameters: native table codec parity beyond 4096 rows without a new input-size ceiling
+Defnode version: runtime/rebuild/cook identity, unchanged schema/manifest, actual card gesture and saved source
+C1 five plain geometries rebuild from owned arrays and authored topology/P at one/four/eight domains
+C1 32769-point authored packed mesh preserves signed-zero/subnormal bytes across domains and grains
+C1 topology copies, captured count origins and actual 2D host-source refusal are explicit
+C1 native topology errors, exact Int validation, lazy untaken mesh and selected causes retain cook timing
+C1 ordinary cards, typed defaults and checked keyword/connection edits retain prior source on refusal
+C1 retained live/state arrays and zone element captures stay byte-exact
+Mesh planes all five plain topologies and 65537-point authored maps own exact planes at 1/4/8 domains
+Mesh planes finite/count/topology errors, lazy causes and exact scalar capacity retain native boundaries
+Mesh planes typed record cards, defaults, insertion, source save and malformed edit rollback are ordinary gestures
+Mesh planes retained live/state and zone element captures preserve constructor behavior
+Mesh planes helper/Fn captures, cancellation and failed cooked state preserve the existing boundary
+Mesh planes keep precise P read facts, source ownership and a shared point-owner count through captured records
+C4 authored compact→gather and exclusive scan→mesh offsets preserve native geometry bytes
+Deferred static mesh/attributes cook on CPU without frame work or GPU cost probes
+Deferred malformed mesh returns the CLI topology error and publishes no geometry
+grid bulk: 22 words per point beyond the walked head
+Groups: native owner masks, stable/empty order and unordered round trips, strict queries, owned arrays and one/eight-domain bytes
+Groups: native wildcard/escape/exclusion/name order and count/mask/order/owner/source refusals
+Group cards expose typed masks/name arrays/order records; owner and mask gestures recheck directly
+Groups: captured geometry and group changes invalidate caches; warm hits and live strict multi-block masks preserve native bytes
+Group frame folds snapshot on the initial domain and recook exact masks at one/eight domains
+Glob literal/rewrite and ordered group entries: byte oracles, native snapshot conflicts, strict 5001-text loops and direct graph gestures
+Cooked defnode Fold traverses 5001 inventory entries through geometry handles; public array-node folds and collecting forms remain refused
+Ordinary group byte masks preserve empty/tails/all owners/explicit order and immutable storage at one/four/eight domains
+Group query promotion: native any-incidence masks, owner lookup, empty/tails/order/copy and exact domain/grain proof
+Group promotion output count origins and optional-target graph set/disconnect gestures preserve source owner
+Promoted captured group descriptors share point fusion origins; original source owners remain distinct
+image/map: typed function, graph gestures, UV orientation, reference/packed/domain bytes and live captures pass
+image lowering: named-call authored provenance, qualified display selection and independent exact CPU snapshots pass
+image lowering: missing provenance is sticky before and after a successful observation
+iterate: 0, 1, 7 and 500 passes in one cook node match OCaml, reference and one/eight domains
+iterate :until stops after the pass that satisfies it
+keyword ports: generated Fn/Image metadata, compiled captures, live values and cache invalidation pass
+Lisp fusion: four noise_displace nodes cook as at most one kernel run, equal at one and four domains
+Lisp fusion: four noise_displace cards over a cooked input fold into one region, as the unfolded bytes; an intermediate card cooks as itself
+Lisp fusion: color_by_height > noise_displace > transform write Cd and P in one region, as the unfolded bytes
+Lisp fusion: a map reading the chain in its term folds, as the unfolded bytes
+inline set_orient > color_by_height: region runs 4, bytes equal the factory node's
+inline color_by_height > color_by_height: region runs 4, bytes equal the factory node's
+inline cards: body errors cook, refusals lower, ranges/encoded text/rest slots as the node
+inline cards: context-reaching bodies and live arguments inline
+inline cards: frame-driven vec3 groups and checks inline, failing as the call
+inline cards: a driven transform's identity and singular frames as the call
+inline cards: recomputed normals are sop/normals' face-area bytes, in place
+inline cards: recomputed normals keep dev's owners and storage errors
+inline cards: cooked-data arguments resolve once per cook (20k 0.009s, 80k 0.018s)
+Authored body errors cook lazily; parameter rebuilds, causes and context seed changes preserve timing
+Prepared bodies reuse unchanged graphs; live drives/state changes recompile and warm contexts retain cache hits
+Cooked materialized writes: owned tuple/CSR storage, expanded instances, producer/count errors and cancellation
+Lisp declaration cache keys preserve unchanged siblings and invalidate edited helpers at one/eight domains
+Declaration cones: unrelated helpers retain hits; Fn_ref/helper, child body/default/validator, normalizer and macro edits invalidate at one/eight domains
+Diagnostic boundaries: deferred and unused protected children cook once; raw causes, hints, trace, untaken arms and one/four/eight domains agree
+Context frame: float cook frame, Frame dependency, rebuilt per frame, body only
+Context time: float cook time, Time dependency, rebuilt per time, body only
+Native compound audit: 0/1863 components exceed four ULP; max 1 ULP, max absolute error 2.2204460492503131e-16
+Prior unfused cross/multiply audit retained: 15 components exceed native four ULP
+Scalar math/rounding and explicit-FMA cross/multiply match exact bytes; ordinary products remain unfused; compound native four-ULP gate passes
+Quaternion native threshold checks: 60 cases, exact overflow/signed zeros and four-ULP finite components
+Packed math matches native reference bytes on one/eight domains; invalid domains refuse
+Quaternion finite-overflow guards match strict reference bytes at one/eight domains on 32769 elements
+Explicit-FMA cross and matrix products:5001 exact native/reference/strict Core/packed/JS rows, signed zeros/cancellation/subnormals, one/four/eight domains and overflow refusal
+Lisp source merge byte parity and refusal tests passed
+mesh-plane stage authored error precedence, exact bytes and ownership at 1/4/8 domains
+metadata draft focused semantics passed
+metadata draft: all owners/storage, copied queries and canonical P passed
+Metadata copy/move/swap preserve owner payloads and canonical P
+attr_entries: parallel name/type/owner columns keep native order and owner filter
+Metadata graph projection and enum gestures remain checked
+facts: 10 registered Preserved nodes checked at one/eight domains
+Lisp noise_displace SOP cache, context-seed dependency and relabel identity pass
+sop/attr_planes + sop/with_planes: all owners and widths round-trip storage, computed planes, P and typed refusals at reference/CPU/domains/grains
+C3 all owner/storage raw bytes, ordinary order and edge copies across reference/CPU/domains/grains
+remap -1 rows: defaults for every owner and storage, in no group, 1 and 8 domains
+Weighted remap: every owner and storage, N renormalisation, Curve_join bytes, mixed owners, reference/CPU, 1 and 8 domains, refusals
+Settle: in-flight device writes settle at a cook's end, recook on the CPU on failure
+Topology empty: counts and stable unique-edge order match RDK at one/eight domains
+Topology shared-polygons: counts and stable unique-edge order match RDK at one/eight domains
+Topology open-repeated: counts and stable unique-edge order match RDK at one/eight domains
+Topology closed: counts and stable unique-edge order match RDK at one/eight domains
+Topology mixed-nonmanifold: counts and stable unique-edge order match RDK at one/eight domains
+Strict authored topology counts build exact integer attributes for every element owner at one/eight domains
+Topology cards expose exact Int/edge fields; direct keyword edits recheck and invalid selectors/sources refuse
+Topology count captures ignore unrelated attributes/positions, carry fresh components, and invalidate on topology changes
+scene/trace CPU: 169 of 256 rays hit; Packed = walker at 1 and 8 domains; t and prim = Surface_index.raycast
+real 35.90
+user 157.73
+sys 35.03

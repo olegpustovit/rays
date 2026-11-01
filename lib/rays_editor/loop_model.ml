@@ -18,10 +18,11 @@ type t = {
   draw : Node.t -> Cook.prepared -> V.rendered;
   rendered : V.rendered option;
   views : (string * V.rendered) list; (* viewports over another scene instance *)
-  drawn : (Node.t * Cook.prepared * V.rendered * Texture.t option) Document.Int_map.t;
+  drawn :
+    (Node.t * Cook.prepared * V.rendered * Texture.t option * string option) Document.Int_map.t;
       (* per object *)
   composed : (Kind_graph.t * Document.level * (string * int list) list) option;
-  resolved : (Document.t * Input.t * Kind_graph.t) option;
+  resolved : (Document.t * Input.t * Kind_graph.t * string option) option;
   context_error : string option;
   (* The scene, open level (ghosts), and viewport membership used by the picture. *)
   baked : World.baked option;
@@ -43,7 +44,8 @@ type t = {
   opened : Document.t; (* the document this session started from *)
   state_owned : bool; (* this session wrote the recovery file *)
   state_checked : float;
-  saved_doc : Document.t;
+  saved_doc : (Document.t, unit) Ephemeron.K1.t;
+      (* Identity marker only: recovery must not retain a previous cook's arrays. *)
   saved_view : Flow.Syntax.t;
   state_error : string option;
   canvases : (string * canvas_picture) list;
@@ -142,7 +144,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?(lights = [])
            cameras = [];
            viewing = None;
            state_checked = neg_infinity;
-           saved_doc = core.doc;
+           saved_doc = Ephemeron.K1.make core.doc ();
            saved_view = V.section camera extra;
            state_error = None;
          })
@@ -217,7 +219,7 @@ let same_context (a : Document.t) (b : Document.t) =
 
 let resolved_scene value =
   match value.resolved with
-  | Some (doc, _, scene) when same_context doc value.core.Editor_model.doc -> scene
+  | Some (doc, _, scene, _) when same_context doc value.core.Editor_model.doc -> scene
   | _ -> Editor_inspect.scene value.core
 
 let lights value = Objects.lights ~render:true (resolved_scene value)
@@ -320,7 +322,7 @@ let refresh_hidden value frame =
 (* the device display keys the drawn scenes draw: a display left out is released *)
 let display_keys drawn =
   Document.Int_map.fold
-    (fun _ (_, _, scene, _) keys ->
+    (fun _ (_, _, scene, _, _) keys ->
       let keys = ref keys in
       Scene.D3.Walk.iter_batches
         (fun (drawing : Scene.D3.Walk.drawing) _ ->
@@ -338,6 +340,12 @@ let composition_key core scene =
     match core.Editor_model.doc.Document.shell with Some shell -> shell.views | None -> [] )
 
 let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
+  let draw_errors drawn errors =
+    Document.Int_map.fold
+      (fun _ (_, _, _, _, error) errors ->
+        Option.fold ~none:errors ~some:(fun message -> message :: errors) error)
+      drawn errors
+  in
   let live =
     {
       update.core.live_frame with
@@ -361,7 +369,7 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
   in
   let texture_changed =
     Document.Int_map.exists
-      (fun id (_, _, _, previous) ->
+      (fun id (_, _, _, previous, _) ->
         not (Option.equal ( == ) previous (Document.Int_map.find_opt id textures)))
       value.drawn
   in
@@ -376,7 +384,7 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
       (texture_changed || update.prepared_changed || update.scene_changed || update.effects.view
      || update.effects.export || (not same) || baked != value.baked
      || baked_views != value.baked_views || value.rendered = None)
-  then (value.rendered, value.views, value.drawn, errors)
+  then (value.rendered, value.views, value.drawn, draw_errors value.drawn errors)
   else
     let placed = Editor_host.placed_pieces ~view:`All update.core in
     let drawn =
@@ -384,14 +392,17 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
         (fun drawn (_, (piece : Cook.piece)) ->
           let texture = Document.Int_map.find_opt piece.id textures in
           match Document.Int_map.find_opt piece.id value.drawn with
-          | Some (graph, prepared, rendered, previous)
+          | Some (graph, prepared, rendered, previous, error)
             when graph == piece.graph && prepared == piece.prepared
                  && Option.equal ( == ) previous texture ->
-              Document.Int_map.add piece.id (graph, prepared, rendered, texture) drawn
+              Document.Int_map.add piece.id (graph, prepared, rendered, texture, error) drawn
           | Some _ | None ->
-              let scene =
-                Cook.with_display (Flow_native.Workspace_gpu.display value.host.gpu) (fun () ->
-                    value.draw piece.graph piece.prepared)
+              let scene, error =
+                try
+                  ( Cook.with_display (Flow_native.Workspace_gpu.display value.host.gpu) (fun () ->
+                        value.draw piece.graph piece.prepared),
+                    None )
+                with Rdk_rays.Surface.Conversion_error message -> (Scene.D3.empty, Some message)
               in
               let scene =
                 Option.fold ~none:scene
@@ -399,7 +410,9 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
                     Scene.D3.Walk.with_texture (Scene.D3.textured texture) scene)
                   texture
               in
-              Document.Int_map.add piece.id (piece.graph, piece.prepared, scene, texture) drawn)
+              Document.Int_map.add piece.id
+                (piece.graph, piece.prepared, scene, texture, error)
+                drawn)
         Document.Int_map.empty placed
     in
     let waiting =
@@ -419,7 +432,7 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
         ~world
         (List.map
            (fun (matrix, (piece : Cook.piece)) ->
-             let _, _, rendered, _ = Document.Int_map.find piece.id drawn in
+             let _, _, rendered, _, _ = Document.Int_map.find piece.id drawn in
              (matrix, ghost piece.id, rendered))
            pieces)
     in
@@ -476,4 +489,4 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
        else Some (compose_pieces `Primary (Editor_host.placed_pieces update.core))),
       views,
       drawn,
-      errors )
+      draw_errors drawn errors )

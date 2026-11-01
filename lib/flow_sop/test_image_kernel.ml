@@ -235,7 +235,8 @@ let () =
   let calls = ref 0 in
   let backend : Flow_ir.Gpu.backend =
     {
-      cost = (fun ~fast:_ _ ~count:_ -> Some 0.);
+      residency = (fun ~fast:_ -> None);
+      cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> Some 0.);
       prepare =
         (fun ~fast:_ packed ->
           assert (Flow_ir.Packed.site packed = (producer.inst, path, producer.iter));

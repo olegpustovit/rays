@@ -845,7 +845,18 @@ let violations graph ~scan =
         else
           List.filter_map
             (fun needle ->
-              let in_code = contains (code_tokens text) needle in
+              let code = code_tokens text in
+              (* This qualification tool reads the already-linked scheduler's
+                 empty task slots. It never loads code or selects a renderer. *)
+              let code =
+                if
+                  needle = "Dynlink"
+                  && path = "lib/rays_editor/native_qualification/bench_isogrid.ml"
+                then
+                  Str.global_replace (Str.regexp_string "Dynlink.unsafe_get_global_value") "" code
+                else code
+              in
+              let in_code = contains code needle in
               let selector =
                 String.starts_with ~prefix:"RAYS_" needle || String.starts_with ~prefix:"--" needle
               in
@@ -1346,6 +1357,17 @@ let run () =
     violations graph ~scan:[ ("lib/sdl3/injected.c", "SDL_CreateRenderer(window, 0)") ] = []
     || violations graph ~scan:[ ("lib/rays/injected.ml", "Sys.getenv \"RAYS_BACKEND\"") ] = []
   then failwith "gate accepted an injected alternate renderer or backend selector";
+  let qualification = "lib/rays_editor/native_qualification/bench_isogrid.ml" in
+  let symbols =
+    "let x = Dynlink.unsafe_get_global_value ~bytecode_or_asm_symbol:\"camlParallel\""
+  in
+  if violations graph ~scan:[ (qualification, symbols) ] <> [] then
+    failwith "gate rejected read-only qualification symbols";
+  if
+    violations graph ~scan:[ (qualification, "let x = Dynlink.loadfile \"renderer.cmxs\"") ] = []
+    || violations graph ~scan:[ (qualification, symbols ^ "\nlet x = Dynlink.loadfile file") ] = []
+    || violations graph ~scan:[ ("lib/rays/injected.ml", symbols) ] = []
+  then failwith "gate accepted module loading or product symbol inspection";
   if
     violations graph ~scan:[ ("lib/rays/injected.ml", "let d = Sys.getenv_opt \"RAYS_CRASH_DIR\"") ]
     = []

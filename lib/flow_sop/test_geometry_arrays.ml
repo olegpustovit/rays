@@ -1277,3 +1277,111 @@ let () =
     [ false; true ];
   print_endline
     "C4 authored compact→gather and exclusive scan→mesh offsets preserve native geometry bytes"
+
+let () =
+  let gpu =
+    Flow_ir.Gpu.
+      {
+        default with
+        fast = true;
+        backend =
+          Some
+            {
+              residency = (fun ~fast:_ -> None);
+              cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> failwith "static deferred data reached GPU cost");
+              prepare = (fun ~fast:_ _ -> failwith "static deferred data reached GPU prepare");
+            };
+      }
+  in
+  let source result =
+    Printf.sprintf
+    {|(workspace cpu_deferred
+      (graph g :context sop
+        (let* [points (map (fn [(i : int)] [i 0 0]) (array/range 5001 :type int))
+               normals (map (fn [(i : int)] [0 1 0]) (array/range 5001 :type int))
+               colors (map (fn [(n : vec3)] [n.y 0 0]) normals)
+               mesh (sop/mesh :points (exact points) :vertex_points (array/int 0)
+                     :primitive_offsets (array/int 1 0) :kinds (array/int 0))
+               shaded (sop/with_attr mesh "N" (exact normals) :owner "point" :type vec3)
+               colored (sop/with_attr shaded "Cd" (exact colors) :owner "point" :type vec3)]
+          %s)))|}
+      result
+  in
+  let lowered = L.workspace ~defer:true ~gpu ~factories (parse (source "colored")) |> flow in
+  let graph, compiled = compile lowered in
+  let attributes root =
+    let seen = Hashtbl.create 8 and count = ref 0 in
+    let rec visit node =
+      if not (Hashtbl.mem seen (Sop.Node.id node)) then begin
+        Hashtbl.add seen (Sop.Node.id node) ();
+        if Sop.Node.operation node = "flow.with_attr" then incr count;
+        List.iter visit (Sop.Node.inputs node)
+      end
+    in
+    visit root;
+    !count
+  in
+  check (attributes compiled = 1) "static deferred writes did not share one attribute program";
+  let moving =
+    source
+      {|(sop/with_attr colored "heat"
+        (exact (map (fn [(n : vec3)] (+ n.y t)) normals)) :owner "point" :type float)|}
+    |> parse |> L.workspace ~defer:true ~factories |> flow |> compile |> snd
+  in
+  check (attributes moving = 2) "a moving write absorbed the immutable deferred prefix";
+  check
+    (Flow_sop.Network.Int_map.is_empty graph.network.frame_nodes)
+    "static deferred data became an initial-domain frame node";
+  let lane = Flow_sop.Value_lane.create () in
+  let resolved = Flow_sop.Value_lane.resolve ~gpu lane ~time:0. graph.network |> flow in
+  let node =
+    Edit.compile_node resolved.geometry ~node_id:(Option.get graph.root) |> get_string_ok
+  in
+  let first = ref None in
+  List.iter
+    (fun domains ->
+      with_session (fun session ->
+          let actual = geometry (cook session ~domains node) in
+          check (Geometry.point_count actual = 5001) "deferred CPU points lost count";
+          let p = Packed.Float3.View.view (Geometry.positions actual) in
+          check (p.x.(5000) = 5000.) "deferred CPU points differ";
+          (match Geometry.find_attribute ~owner:Attribute.Point "N" actual with
+          | Some attribute -> (
+              match Attribute.View.storage attribute with
+              | Float3 data ->
+                  let n = Packed.Float3.View.view data in
+                  check (Array.for_all (( = ) 1.) n.y) "deferred CPU normals differ"
+              | _ -> assert false)
+          | None -> failwith "deferred CPU normals missing");
+          let bytes = geometry_bytes actual in
+          match !first with
+          | None -> first := Some bytes
+          | Some expected -> check (bytes = expected) "deferred CPU domains differ"))
+    [ 1; 8 ];
+  print_endline "Deferred static mesh/attributes cook on CPU without frame work or GPU cost probes"
+
+let () =
+  let source =
+    {|(workspace malformed
+      (graph g :context sop
+        (sop/mesh
+          :points (exact (map (fn [(i : int)] [i 0 0]) (array/range 5001 :type int)))
+          :vertex_points (array/int 3 6000)
+          :primitive_offsets (exact (map (fn [(i : int)] (* i 3)) (array/range 2 :type int)))
+          :kinds (array/int 1 0))))|}
+  in
+  let lowered = L.workspace ~defer:true ~factories (parse source) |> flow in
+  let _, node = compile lowered in
+  List.iter
+    (fun domains ->
+      with_session (fun session ->
+          (match cook session ~domains node with
+          | Error d ->
+              check
+                (d.code = "E_TOPOLOGY" && d.message = "Topology: vertex references an invalid point")
+                "deferred malformed mesh changed its topology diagnostic"
+          | Ok _ -> failwith "deferred malformed mesh published geometry");
+          check ((Sop.Session.stats session).retained_entries = 0)
+            "deferred malformed mesh retained a published cache entry"))
+    [ 1; 8 ];
+  print_endline "Deferred malformed mesh returns the CLI topology error and publishes no geometry"

@@ -1,0 +1,21 @@
+placement arithmetic count=16 registers=5 domains=1 compile_s=0.000013041 walker_s=0.000033489 kernel_s=0.000004455 cold_kernel_s=0.000017496
+placement arithmetic count=64 registers=5 domains=1 compile_s=0.000006909 walker_s=0.000065390 kernel_s=0.000003361 cold_kernel_s=0.000010270
+placement arithmetic count=256 registers=5 domains=1 compile_s=0.000003252 walker_s=0.000158872 kernel_s=0.000006046 cold_kernel_s=0.000009298
+placement arithmetic count=1024 registers=5 domains=1 compile_s=0.000002499 walker_s=0.000628188 kernel_s=0.000020698 cold_kernel_s=0.000023196
+placement arithmetic count=4096 registers=5 domains=1 compile_s=0.000002491 walker_s=0.002493024 kernel_s=0.000051796 cold_kernel_s=0.000054288
+placement arithmetic count=16384 registers=5 domains=1 compile_s=0.000002539 walker_s=0.010046959 kernel_s=0.000098944 cold_kernel_s=0.000101483
+interpreter arithmetic fixed_s=-0.000024954 per_element_s=0.000000614741
+placement list_lookup count=16 registers=19 domains=1 compile_s=0.000006869 walker_s=0.000022199 kernel_s=0.000003746 cold_kernel_s=0.000010614
+placement list_lookup count=64 registers=19 domains=1 compile_s=0.000006661 walker_s=0.000086040 kernel_s=0.000006790 cold_kernel_s=0.000013452
+placement list_lookup count=256 registers=19 domains=1 compile_s=0.000006728 walker_s=0.000345875 kernel_s=0.000020154 cold_kernel_s=0.000026882
+placement list_lookup count=1024 registers=19 domains=1 compile_s=0.000006812 walker_s=0.001373813 kernel_s=0.000092685 cold_kernel_s=0.000099497
+placement list_lookup count=4096 registers=19 domains=1 compile_s=0.000006890 walker_s=0.005469263 kernel_s=0.000296712 cold_kernel_s=0.000303602
+placement list_lookup count=16384 registers=19 domains=1 compile_s=0.000007381 walker_s=0.021780014 kernel_s=0.001185179 cold_kernel_s=0.001192560
+interpreter list_lookup fixed_s=0.000032345 per_element_s=0.000001327372
+placement inner_64 count=16 registers=195 domains=1 compile_s=0.000114050 walker_s=0.000430945 kernel_s=0.000017509 cold_kernel_s=0.000131559
+placement inner_64 count=64 registers=195 domains=1 compile_s=0.000113399 walker_s=0.001718025 kernel_s=0.000041870 cold_kernel_s=0.000155269
+placement inner_64 count=256 registers=195 domains=1 compile_s=0.000113461 walker_s=0.006880984 kernel_s=0.000132907 cold_kernel_s=0.000246368
+placement inner_64 count=1024 registers=195 domains=1 compile_s=0.000113170 walker_s=0.027469382 kernel_s=0.000454068 cold_kernel_s=0.000567238
+placement inner_64 count=4096 registers=195 domains=1 compile_s=0.000113411 walker_s=0.110233486 kernel_s=0.001434743 cold_kernel_s=0.001548154
+placement inner_64 count=16384 registers=195 domains=1 compile_s=0.000113301 walker_s=0.441910028 kernel_s=0.005330086 cold_kernel_s=0.005443387
+interpreter inner_64 fixed_s=-0.000325362 per_element_s=0.000026991906

@@ -448,6 +448,8 @@ let sync operation f (value : buffer) ~length =
 
 let flush_mapped = sync "Backend.flush_mapped" (fun m -> m.flush)
 let invalidate_mapped = sync "Backend.invalidate_mapped" (fun m -> m.invalidate)
+let mapped_view (value : buffer) =
+  if value.resource.dead then None else Option.map (fun m -> m.view) value.mapping
 let buffer_size (value : buffer) = value.buffer_descriptor.size
 
 let create_texture device descriptor =

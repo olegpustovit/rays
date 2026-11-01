@@ -277,6 +277,13 @@ let () =
           let c1 = !creates in
           ignore (second.bounds ());
           assert (!creates = c1 && R.Private.readback_bytes sea = 2 * read);
+          assert (R.Private.bounds_readback_bytes sea = 2 * read);
+          ignore (Domain.join (Domain.spawn first.materialise));
+          let payload = 1024 * 3 * 4 in
+          assert (R.Private.readback_bytes sea = (2 * read) + payload);
+          ignore (first.materialise ());
+          assert (R.Private.readback_bytes sea = (2 * read) + payload);
+          assert (R.Private.bounds_readback_bytes sea = 2 * read);
           first.release ~held:false;
           second.release ~held:false));
   assert (live () = 0 && !pipelines = 0);

@@ -1,0 +1,303 @@
+deferred storage tests passed
+point generate tests passed
+point replicate tests passed
+point jitter tests passed
+scatter tests passed
+circle tests passed
+Tube tests passed
+Platonic tests passed
+Spiral tests passed
+test_point_generate
+test_point_replicate
+test_point_jitter
+test_scatter
+test_circle
+test_tube
+test_platonic
+test_spiral
+deferred storage tests passed
+extract point from curve tests passed
+test_poly_loft: ok
+test_skin: ok
+test_poly_bridge: ok
+PolyWire tests passed
+Revolve tests passed
+Sweep tests passed
+Resample tests passed
+circle from edges tests passed
+test_extract_point_curve
+test_poly_loft
+test_skin
+test_poly_bridge
+test_polywire
+test_revolve
+test_sweep
+test_resample
+test_circle_from_edges
+deferred storage tests passed
+boolean detect tests passed
+test_boolean_constraints
+test_boolean_coplanar
+test_boolean_face_arrangement
+test_boolean_face_cdt
+test_boolean_refinement
+test_boolean_complex
+test_boolean_radial
+test_boolean_weiler
+test_boolean_cells
+test_boolean_extract
+test_boolean_seam
+test_boolean_solid
+test_boolean_payload
+test_boolean
+test_boolean_detect
+deferred storage tests passed
+test_predicates
+test_delaunay2
+test_planar_cdt
+test_planar_constraints
+test_triangulate2d
+test_implicit_point
+deferred storage tests passed
+intersection analysis tests passed
+distance along geometry tests passed
+distance from geometry tests passed
+distance from target tests passed
+ray tests passed
+test_surface_index
+test_intersection_analysis
+test_distance_along_geometry
+test_distance_from_geometry
+test_distance_from_target
+test_ray
+deferred storage tests passed
+RDK Copy to Points tests passed
+extract centroid tests passed
+Rewire Vertices tests passed
+test_motion: ok
+test_dissolve: ok
+poly reduce tests passed
+remesh tests passed
+poly bevel tests passed
+point split tests passed
+Ends tests passed
+Duplicate tests passed
+blast by attribute tests passed
+rdk crease tests passed
+rdk PolyCut tests passed
+rdk Separate Pieces tests passed
+fuse/grid snap tests passed
+convex hull tests passed
+clip tests passed
+PolyFrame tests passed
+Facet tests passed
+edge divide tests passed
+edge collapse tests passed
+edge flip tests passed
+edge cusp tests passed
+edge straighten tests passed
+edge equalize tests passed
+edge relax tests passed
+edge transport tests passed
+Reverse tests passed
+Triangulate tests passed
+curvature tests passed
+attribute Laplacian tests passed
+poly extrude tests passed
+poly fill tests passed
+clean tests passed
+test_copy_to_points
+test_extract_centroid
+test_rewire_vertices
+test_motion
+test_dissolve
+test_poly_reduce
+test_remesh
+test_poly_bevel
+test_point_split
+test_ends
+test_duplicate
+test_blast_by_attribute
+test_crease
+test_poly_cut
+test_separate_pieces
+test_smooth
+test_fuse
+test_convex_hull
+test_clip
+test_polyframe
+test_facet
+test_subdivide
+test_edge_divide
+test_edge_collapse
+test_edge_flip
+test_edge_cusp
+test_edge_straighten
+test_edge_equalize
+test_edge_relax
+test_edge_transport
+test_reverse
+test_triangulate
+test_curvature
+test_laplacian
+test_poly_extrude
+test_poly_fill
+test_clean
+gallery: independent old inputs, four views, exact native pixels
+deferred storage tests passed
+Deferred topology metadata, single materialisation, release and CPU consumers pass
+rdk tests passed
+transform tests passed
+soft transform tests passed
+match size tests passed
+Normals tests passed
+RDK instance materialization tests passed
+test_rdk
+test_rdk_sources
+test_rdk_attributes
+test_rdk_misc
+test_transform
+test_soft_transform
+test_match_size
+test_normals
+test_instances
+GPU film: exact standalone/shared/Canvas bytes, direct texture, readback, zero live delta
+points=54464 primitives=13616 topology_resident=true positions_resident=true N_resident=true Cd_resident=true payload=0 validation=36 status=16 count=24 bounds=0
+publication_seconds=0.906175 main_allocated_bytes=358936408 cook_domains=1
+CPU parity: topology exact; P/N/Cd <=1e-6; first-read payload=2287492; repeated-read delta=0
+pathtracer scene: vs composed mean |diff| 0.000, 0 outliers
+pathtracer scene: red centroid 22.3 -> 28.7
+pathtracer scene: move (direct) vs scene_mesh mean |diff| 0.000
+pathtracer scene: move (superseded) vs scene_mesh mean |diff| 0.000
+pathtracer scene: move (queued) vs scene_mesh mean |diff| 0.000
+pathtracer scene: 2001-instance scene: scene_mesh+queue_mesh+flush 18.88 ms, move+flush 6.05 ms (median of 8)
+pathtracer scene: 41 red pixels in a disc of radius 4.02 px
+pathtracer scene: mixed triangles and spheres ok
+pathtracer light_of area: 0.3873 expected 0.3880
+pathtracer light_of point: 0.3873 expected 0.3880
+pathtracer light_of spot: 0.3873 expected 0.3880
+pathtracer light_of directional: 0.3818 expected 0.3880
+pathtracer scene: handle baseline 0 final 0
+pathtracer: instance structure stays resident
+pathtracer: deterministic lit render ok
+pathtracer: furnace mean 223.6 / 223.6 (expected 224)
+pathtracer: sphere furnace mean 223.6 (expected 224)
+pathtracer: spheres, instance materials, motion ok
+pathtracer: strands ok
+handle baseline 0 final 0
+packed_capture,stateful=false,domains=1,override=false,frame=0,max=0
+packed_capture,stateful=false,domains=8,override=false,frame=0,max=0
+packed_capture,stateful=false,domains=1,override=true,frame=0,max=0
+packed_capture,stateful=false,domains=8,override=true,frame=0,max=0
+packed_capture,stateful=false,domains=1,override=false,frame=1,max=0
+packed_capture,stateful=false,domains=8,override=false,frame=1,max=0
+packed_capture,stateful=false,domains=1,override=true,frame=1,max=0
+packed_capture,stateful=false,domains=8,override=true,frame=1,max=0
+Actual packed captures: six materialized P/Cd values, order, two overrides, live/state forks, CPU domains, GPU/parent bytes, warm reuse, fixed render and clean close pass
+packed_capture,stateful=true,domains=1,override=false,frame=0,max=0
+packed_capture,stateful=true,domains=8,override=false,frame=0,max=0
+packed_capture,stateful=true,domains=1,override=true,frame=0,max=0
+packed_capture,stateful=true,domains=8,override=true,frame=0,max=0
+packed_capture,stateful=true,domains=1,override=false,frame=1,max=0
+packed_capture,stateful=true,domains=8,override=false,frame=1,max=0
+packed_capture,stateful=true,domains=1,override=true,frame=1,max=0
+packed_capture,stateful=true,domains=8,override=true,frame=1,max=0
+packed_capture,stateful=true,domains=1,override=false,frame=1,max=0
+packed_capture,stateful=true,domains=8,override=false,frame=1,max=0
+packed_capture,stateful=true,domains=1,override=true,frame=1,max=0
+packed_capture,stateful=true,domains=8,override=true,frame=1,max=0
+packed_capture,stateful=true,domains=1,override=false,frame=1,max=0
+packed_capture,stateful=true,domains=8,override=false,frame=1,max=0
+packed_capture,stateful=true,domains=1,override=true,frame=1,max=0
+packed_capture,stateful=true,domains=8,override=true,frame=1,max=0
+Actual packed captures: six materialized P/Cd values, order, two overrides, live/state forks, CPU domains, GPU/parent bytes, warm reuse, fixed render and clean close pass
+State capture failure domains=1: repeated typed array refusal, caller rollback, stale parent invalidation, same-frame fork recovery and retained bytes pass
+State capture failure domains=8: repeated typed array refusal, caller rollback, stale parent invalidation, same-frame fork recovery and retained bytes pass
+Frozen exact images: CPU127/GPU128, read-once versions, saved Scene, expiry/refusal/recovery, resize/replan, ref composition and owned close pass
+Frozen exact capacity 7x3: 63 pinned versions plus source, 65th resource refuses before readback, retained bytes survive close
+Frozen exact capacity 65x17: 63 pinned versions plus source, 65th resource refuses before readback, retained bytes survive close
+capture_capacity,metadata=64,data=64,bytes=78720,cooks=65,flattens=65
+Capture capacity: one image with 65 sources keeps bounded owned data, static reuse survives metadata eviction, exact cooks leave display counters unchanged
+Workspace capture cycles: typed repeated resolver re-entry, unchanged caller state, same-owner acyclic and changed-plan recovery, CPU domains and clean close pass
+Workspace GPU sinks: failed conversions/publications/exceptions retain no slots or handles, 64 pinned sites remain live, failed updates invalidate and retry
+measured  lowering 0.007 s (cpu 0.235 s), readback 0 bytes (CPU)
+forced    lowering 0.009 s (cpu 0.235 s), readback 0 bytes (CPU)
+Canvas playback refreshes image/map functions with captured time
+workspace_geometry_capture,override=false,time=0.00,max=0
+workspace_geometry_capture,override=true,time=0.00,max=0
+workspace_geometry_capture,override=false,time=1.00,max=0
+workspace_geometry_capture,override=true,time=1.00,max=0
+workspace_geometry_capture,status_reads=4,readback_bytes=0
+Native geometry captures: P/Cd, two instances, exact CPU domains, resident GPU, parent freshness, unrelated fixed render reuse and close pass
+Native nested image/map: frame and same-frame state captures refresh rendered pixels
+Native Canvas image snapshots: repeat cache, exact one/eight-domain bytes and close ownership passed
+test,width,height,time,max_channel_difference,differing_channels,differing_pixels
+workspace_gpu_image,65,17,0.00,0,0,0
+workspace_gpu_image,65,17,1.00,0,0,0
+workspace_gpu_image,35,33,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+Workspace GPU images: exact-first independent CPU snapshots, live display, mesh/image parity, replan/resize, authority transitions and ownership pass
+Nested image/render exactness: CPU rounding survives an already-resident GPU child without reading or replacing it
+Legacy image stamps: display A, exact B, display A restores A pixels
+Resident Canvas dimensions: omitted axes, nested resize, fixed cache, independent CPU stamps, no implicit Canvas readback, zero handles
+workspace_retained_canvas,65,17,0.00,0,0,0
+workspace_retained_canvas,65,17,0.50,0,0,0
+workspace_retained_canvas,35,33,0.50,0,0,0
+workspace_retained_canvas,35,33,0.00,0,0,0
+workspace_retained_canvas,35,33,0.00,0,0,0
+Resident Canvas live route: mixed mesh/image roundtrip parity, stable identity, exact isolation, replan/resize, failure/recovery, snapshots and teardown pass
+Resident Canvas failed publication: resized candidates close once, prior allocation retained until owner close, no readback or handle leak
+grid > attribute_noise > transform, 262144 points: CPU cook 0.075 s, GPU cook 0.002 s (first 0.035 s), 1 dispatch(es), largest difference 2.90e-07
+two consecutive fused writes: GPU recook 0.004 s, largest difference 8.91e-08
+a gather of a resident P by index: largest difference 2.97e-08
+edited chain, one session: GPU recook median 0.0008 s (min 0.0006)
+new runners per edit: 3 buffers created (the first 3), 15 held
+World: furnace 223.19, converged mean difference 0.008, 16-spp RMSE MIS 0.954 BSDF 3.253
+pathtracer World: furnace, MIS, backgrounds, reflected rect and teardown checked
+Particles native exports match byte for byte: /tmp/rays-drawing-export
+workspace start: 1,000,000 static marks, 1 evaluation, 331 bytes a mark for the first frame
+workspace start: a file that differs from the built text reloads and its static values are the ones seen (2 evaluations)
+device display of 262144 resident points (Points), nothing read back, the host display's pixels within 0: 0.0013 s a frame against 0.0163 s reading P back (medians of 7)
+animated grid > attribute_noise :offset [(get (frame/input) :t) 0.0 0.0] > transform :translate [0.0 1.0 0.0], 262144 points: frame CPU 0.0390 s, GPU 0.0018 s (medians of 7), 1 dispatches, nothing compiled, uploaded or read back, largest difference 3.36e-07 (N 0.00e+00 of its P, 0.00e+00 of the CPU's)
+device display of 262144 resident points (Points), nothing read back, the host display's pixels within 0: 0.0014 s a frame against 0.0168 s reading P back (medians of 7)
+animated grid > attribute_noise :octaves 3 :lacunarity (+ 1.5 (get (frame/input) :t)) :roughness (+ 0.25 (* (get (frame/input) :t) 0.5)) > transform :translate [0.0 1.0 0.0], 262144 points: frame CPU 0.0450 s, GPU 0.0020 s (medians of 7), 1 dispatches, nothing compiled, uploaded or read back, largest difference 3.01e-07 (N 0.00e+00 of its P, 0.00e+00 of the CPU's)
+device display of 262144 resident points (Points), nothing read back, the host display's pixels within 0: 0.0014 s a frame against 0.0173 s reading P back (medians of 7)
+animated grid > attribute_noise :octaves (int (+ 2.0 (* (get (frame/input) :t) 60.0))) :roughness 0.6 > transform :translate [0.0 1.0 0.0], 262144 points: frame CPU 0.0530 s, GPU 0.0022 s (medians of 7), 1 dispatches, nothing compiled, uploaded or read back, largest difference 2.63e-07 (N 0.00e+00 of its P, 0.00e+00 of the CPU's)
+path traced 262144 resident points (128 x 128, 1 spp): update and trace 0.0046 s a frame from the device (corners gathered, structure refit, nothing read back) against 0.1656 s from the host copy (medians of 7)
+device display of 262144 resident points (Triangles), nothing read back, the host display's pixels within 0: 0.0021 s a frame against 0.0259 s reading P back (medians of 7)
+animated grid > attribute_noise :offset [0.5 0.0 0.0] > transform :translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5), 262144 points: frame CPU 0.0471 s, GPU 0.0050 s (medians of 7), 1 dispatches, nothing compiled, uploaded or read back, largest difference 2.43e-07 (N 0.00e+00 of its P, 0.00e+00 of the CPU's)
+path traced 262144 resident points (128 x 128, 1 spp): update and trace 0.0067 s a frame from the device (corners gathered, structure refit, nothing read back) against 0.1537 s from the host copy (medians of 7)
+device display of 262144 resident points (Triangles), nothing read back, the host display's pixels within 0: 0.0021 s a frame against 0.0263 s reading P back (medians of 7)
+animated grid > attribute_noise :offset [0.5 0.0 0.0] > transform :translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5) :recompute_normals true, 262144 points: frame CPU 0.1692 s, GPU 0.0055 s (medians of 7), 2 dispatches, nothing compiled, uploaded or read back, largest difference 2.43e-07 (N 1.64e-07 of its P, 4.42e-05 of the CPU's)
+device display of 262144 resident points (Triangles, no N), nothing read back, the host display's pixels within 0: 0.0038 s a frame against 0.0406 s reading P back (medians of 7)
+animated grid > attribute_noise :offset [0.5 0.0 0.0] > transform :translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5), 262144 points: frame CPU 0.0388 s, GPU 0.0037 s (medians of 7), 1 dispatches, nothing compiled, uploaded or read back, largest difference 2.43e-07 (N 0.00e+00 of its P, 0.00e+00 of the CPU's)
+scrub seed 9: 0 pipelines compiled, 0 runners created
+scrub octaves 5: 0 pipelines compiled, 0 runners created
+scrub seed 11: 0 pipelines compiled, 0 runners created
+scrub lacunarity 2.25: 0 pipelines compiled, 0 runners created
+scrub width 7.5: 0 pipelines compiled, 0 runners created
+scrub seed 9: 0 pipelines compiled, 0 runners created
+scrub seed 11: 0 pipelines compiled, 0 runners created
+scrub seed 9: 0 pipelines compiled, 0 runners created
+port moving_circles: four PNG modes byte-identical
+port basic: four PNG modes byte-identical
+port generative: four PNG modes byte-identical
+port noise: four PNG modes byte-identical
+port recursive_rectangles: four PNG modes byte-identical
+port drawing: four PNG modes byte-identical
+port audio: four PNG modes byte-identical
+port file_dialog: four PNG modes byte-identical
+port pxui: four PNG modes byte-identical
+host: synthetic key edge fires once, export rejects quit, two nodes share one sample, close releases once
+host: fixed-step screenshot matches the requested presented export frame
+SOP render parity: 23 graphs, one/four-domain PNGs equal
+workspace UI batches: 27
+sketch ui tests passed
+workspace shell: two roots in one frame, each with its own film, camera and cap ok
+workspace shell: a shared slot, the focused slot every frame, the others in turns ok
+Shattered Cube: native VIEW of the result, camera movement, parameter edit and returning up passed
+real 82.59
+user 188.66
+sys 32.18

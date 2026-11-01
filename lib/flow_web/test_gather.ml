@@ -5,6 +5,7 @@ module P = I.Packed
 let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
 
 let numeric = function
+  | E.Int n -> Printf.sprintf "{scalar:[%S]}" (string_of_int n)
   | E.Text_array a ->
       "[" ^ String.concat "," (Array.to_list (Array.map Flow_web.Kernel_table.json_string a)) ^ "]"
   | E.Int_array a ->
@@ -21,7 +22,7 @@ let numeric = function
       ^ String.concat "," (Array.to_list (Array.map (fun x -> Param.float_text x) a))
       ^ "])"
 
-let fixture ?(identity = false) ty table indices body =
+let fixture ?(identity = false) ?(erased = false) ?(list = false) ty table indices body =
   let text =
     "(workspace w (graph g :context host [(table : (array " ^ Flow.Ty.to_string ty
     ^ ") (array/int 0)) (indices : (array int) (array/int 0))] (map (fn [(i : int)] " ^ body
@@ -39,6 +40,24 @@ let fixture ?(identity = false) ty table indices body =
   in
   let text =
     Str.global_replace (Str.regexp_string "(array/int 0)) (indices") (default ^ ") (indices") text
+  in
+  let text =
+    if not list then text
+    else
+      let zero =
+        match ty with
+        | Flow.Ty.Int -> "0"
+        | Float -> "0.0"
+        | Vec2 -> "[0 0]"
+        | Vec3 -> "[0 0 0]"
+        | Vec4 -> "[0 0 0 0]"
+        | _ -> assert false
+      in
+      text
+      |> Str.global_replace (Str.regexp_string "(table : (array ") "(table : (list "
+      |> Str.global_replace
+           (Str.regexp_string (default ^ ") (indices"))
+           ("(list " ^ zero ^ ")) (indices")
   in
   let text =
     if identity then
@@ -69,6 +88,17 @@ let fixture ?(identity = false) ty table indices body =
         [ ("indices", E.Int_array indices) ]
     else r
   in
+  let r =
+    if not erased then r
+    else
+      let view = E.Residual.residual_view r in
+      let rec erase (term : Flow.Workspace.term) =
+        match term.node with
+        | Op { op = "array/nth"; _ } -> { term with ty = Flow.Ty.Any }
+        | _ -> Flow.Workspace.map_children erase term
+      in
+      E.Residual.with_bindings r ~term:(erase view.term) view.bindings
+  in
   let value = E.Residual r in
   let p =
     match P.compile_result r (E.Residual.residual_view r).term with
@@ -88,8 +118,9 @@ let () =
   Buffer.add_string js
     "const pools=[null,await createPool({size:1}),await createPool({size:8})];try {\n";
   let live = Input.at_time 0.25 in
-  let section ?(skip = [||]) ?(identity = false) ty table indices body expected =
-    let value, p = fixture ~identity ty table indices body in
+  let section ?(skip = [||]) ?(identity = false) ?(erased = false) ?(list = false) ty table indices
+      body expected =
+    let value, p = fixture ~identity ~erased ~list ty table indices body in
     let p = if skip = [||] then p else I.Core.Region.rebuild p ~skip () |> Result.get_ok in
     assert (P.gpu_refusals p <> []);
     assert (Result.is_error (Flow_web.Wgsl.kernel p));
@@ -101,7 +132,8 @@ let () =
           Marshal.to_string got [] = Marshal.to_string (ok (E.Host.force_reference value ~live)) [])
     | Some _, Ok _ -> ()
     | None, Error _ -> ()
-    | _ -> assert false);
+    | Some _, Error diagnostic -> failwith (body ^ ": " ^ Diagnostic.to_string diagnostic)
+    | None, Ok _ -> failwith (body ^ ": expected a native failure"));
     Buffer.add_string js "{\n";
     Printf.bprintf js "const arrays=[%s], captures=[%s];\n"
       (String.concat "," (Array.to_list (Array.map numeric prepared.arrays)))
@@ -114,7 +146,7 @@ let () =
        offset=0;const store=a=>{if(Array.isArray(a))return {texts:a};const spec=[offset,a.length,a \
        instanceof BigInt64Array];new \
        a.constructor(data,offset,a.length).set(a);offset+=a.byteLength;return spec};const \
-       inputs=arrays.map(store),uniforms=captures.map(a=>Array.isArray(a)?store(a):{table:store(a)});\n";
+       inputs=arrays.map(store),uniforms=captures.map(a=>a.scalar??(Array.isArray(a)?store(a):{table:store(a)}));\n";
     let r = p in
     let facts =
       Array.to_list
@@ -178,9 +210,35 @@ let () =
       in
       section ty table (Array.init 32769 Fun.id)
         ("(if (> t 0.) (array/nth table (int/mod i 7)) " ^ zero ^ ")")
-        (Some ()))
+        (Some ());
+      section ~erased:true ty table (Array.init 7 Fun.id)
+        ("(if (> t 0.) (array/nth table i) " ^ zero ^ ")")
+        (Some ());
+      let list_table = E.List (Array.init 7 (Flow.Value.array_get table)) in
+      section ~list:true ty list_table
+        (Array.init 13 (fun i -> i mod 7))
+        ("(if (> t 0.) (nth table i) " ^ zero ^ ")")
+        (Some ());
+      section ~list:true ty list_table [| -1 |] ("(if (> t 0.) (nth table i) " ^ zero ^ ")") None)
     [ Flow.Ty.Int; Float; Vec2; Vec3; Vec4 ];
   let table = E.Int_array [| min_int; max_int; 9007199254740993 |] in
+  List.iter
+    (fun count ->
+      section Flow.Ty.Int
+        (E.Int_array (Array.init 80 Fun.id))
+        (Array.init 5001 (fun i -> i mod (81 - count)))
+        (Printf.sprintf "(if (> t 0.) (array/sum (array/slice table i %d)) 0)" count)
+        (Some ());
+      section Flow.Ty.Int table [| 0; 1; max_int |]
+        (Printf.sprintf
+           "(if (> t 0.) (array/sum (map (fn [(j : int)] (int/add i j)) (array/range %d :type \
+            int))) 0)"
+           count)
+        (Some ()))
+    [ 0; 1; 64 ];
+  section Flow.Ty.Int table [| -1 |] "(if (> t 0.) (array/sum (array/slice table i 0)) 0)" None;
+  section Flow.Ty.Int table [| 4 |] "(if (> t 0.) (array/sum (array/slice table i 0)) 0)" None;
+  section Flow.Ty.Int table [| -1 |] "(if (> t 0.) 0 (array/sum (array/slice table i 0)))" (Some ());
   List.iter
     (fun index -> section Flow.Ty.Int table [| index |] "(if (> t 0.) (array/nth table i) 0)" None)
     [ -1; 3; Sys.max_array_length + 1; max_int ];
@@ -199,6 +257,8 @@ let () =
   let texts =
     E.Text_array [| ""; "é日本😀"; "x\000y"; "\255\128"; "\237\160\128"; String.init 256 Char.chr |]
   in
+  section ~erased:true Flow.Ty.Text texts (Array.init 6 Fun.id)
+    "(if (> t 0.) (array/nth table i) \"safe\")" (Some ());
   List.iter
     (fun count ->
       section Flow.Ty.Text texts (Array.init count Fun.id)

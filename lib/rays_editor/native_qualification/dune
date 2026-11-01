@@ -9,6 +9,10 @@
   test_chain_gpu_native
   bench_chain_recook
   bench_chain_frames
+  bench_isogrid
+  bench_isogrid_resident
+  test_isogrid_viewport
+  test_placement_native
   test_chain_frames_native
   test_scrub_gpu_native)
  (modules
@@ -19,6 +23,10 @@
   test_chain_gpu_native
   bench_chain_recook
   bench_chain_frames
+  bench_isogrid
+  bench_isogrid_resident
+  test_isogrid_viewport
+  test_placement_native
   test_chain_frames_native
   test_scrub_gpu_native)
  (libraries
@@ -41,12 +49,36 @@
   rays_pathtracer
   rays_editor
   editor_document
+  editor_core
   flow_graph
   lisp_sop
   rdk_test_support
   str
   unix
+  dynlink
   parallel))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_isogrid_resident)
+ (action (run %{exe:bench_isogrid_resident.exe} %{dep:../../../sketches/isogrid.rays})))
+
+(alias (name runtest-native) (deps (alias test_isogrid_resident)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_isogrid_viewport)
+ (deps ../../../sketches/isogrid.rays)
+ (action (run %{exe:test_isogrid_viewport.exe} %{dep:../../../sketches/isogrid.rays})))
+
+(alias (name runtest-native) (deps (alias test_isogrid_viewport)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_placement_native)
+ (action (run %{exe:test_placement_native.exe})))
+
+(alias (name runtest-native) (deps (alias test_placement_native)))
 
 (rule
  (enabled_if
@@ -101,3 +133,45 @@
  (alias qualification)
  (action
   (run %{exe:test_chain_gpu_native.exe})))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_placement_lifetimes)
+ (action (run %{exe:test_placement_native.exe} --lifetimes)))
+
+(alias (name qualification-scale) (deps (alias test_placement_lifetimes)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias bench_isogrid_cost)
+ (deps ../../../sketches/isogrid.rays)
+ (action
+  (progn
+   (run %{exe:bench_isogrid_resident.exe} %{dep:../../../sketches/isogrid.rays}
+    --resolution 64 --publication-only --cpu --domains 8 --repeat 3)
+   (run %{exe:bench_isogrid_resident.exe} %{dep:../../../sketches/isogrid.rays}
+    --resolution 64 --publication-only --domains 8 --repeat 3))))
+
+(alias (name qualification-scale) (deps (alias bench_isogrid_cost)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias bench_isogrid_present)
+ (locks smoke_window)
+ (deps ../../../sketches/isogrid.rays)
+ (action
+  (progn
+   (run %{exe:bench_isogrid_resident.exe} %{dep:../../../sketches/isogrid.rays}
+    --resolution 64 --publication-only --cpu --domains 8 --repeat 4 --present)
+   (run %{exe:bench_isogrid_resident.exe} %{dep:../../../sketches/isogrid.rays}
+    --resolution 64 --publication-only --domains 8 --repeat 4 --present))))
+
+(alias (name qualification-scale) (deps (alias bench_isogrid_present)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_isogrid_resident_64)
+ (action
+  (run %{exe:bench_isogrid_resident.exe} %{dep:../../../sketches/isogrid.rays} --resolution 64)))
+
+(alias (name qualification-scale) (deps (alias test_isogrid_resident_64)))

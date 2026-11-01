@@ -17,19 +17,85 @@ and resource descriptions. It never serializes an OCaml closure, cache, SDL
 object or GPU handle. The remaining checked expressions lower once to a frame
 program and its regions.
 
-A static packed `map` of more than 4,096 elements is made differently, not
-to a different value. The walker evaluates its first 4,096 elements as usual
-(their records, call indices and failures are the ordinary ones). The host
-may then supply the whole array from the CPU region the map would be at frame
-rate (`Flow_ir.static`, which `qualify_workspace` uses); it is accepted only
-when it is a packed array of the map's kind and length whose first 4,096
-elements equal the walked ones bit for bit. When the region refuses the form,
-fails, reads anything live or disagrees, the walker evaluates the remaining
-elements itself, so a failure past element 4,096 is still the walker's
-diagnostic. Records inside such a map are those of its first 4,096 elements;
-the walker alone would keep visiting later elements until a path inside a
-branch had 4,096 of its own. At 1,000,000 elements the walker costs about 22
-microseconds and 79 KB an element; the region about 20 nanoseconds.
+A static packed `map` of more than 4,096 elements may run its exact CPU region
+first (`Flow_ir.static`, also used by `qualify_workspace`). The scoped residual
+handler explicitly declares that kernel trusted. With no eager recording, a
+successful result of the right kind and length advances function call indices
+by the full count without walking a prefix. Refusal, live captures or failure
+walks from element zero, preserving the walker's complete diagnostic.
+
+The native editor enables `qualify_workspace ~defer:true`: compilable large static
+maps in SOP graphs stay as residuals until their CPU cook. Host graphs and small
+maps remain eager; standalone evaluation and `rays check` leave deferral off.
+Deferral reserves known closure-call intervals and participates in inline memo
+identity along with the executing graph context. Static SOP captures lower as
+explicit Core producers. A structured numeric value can lower as one ordered
+program (`Core_lower.lower ~value`), sharing captured residuals through locals
+instead of re-evaluating each field's source chain. Caller-owned plane writes
+use the same executor's nested dispatcher. Frame/state-dependent SOP lowering
+retains its existing rules; this policy alone introduces no device placement.
+
+Static SOP count provenance follows top-level single-write locals without
+forcing their arrays. Constructors use their count local; aliases and zip
+regions preserve it. Compaction gets a distinct count identity, and products
+of several sources do not inherit one input's count. Each compiled program
+owns a separate origin namespace. Thus positions, normals and colours made
+from the same dynamic vertex range agree in count without confusing another
+program's locals or an independently compacted array. Unproved branches and
+loops keep their materialization boundary.
+
+`~record:true` keeps the original eager 4,096-element head and bit comparison.
+Production lowering also requests `~replay:true`: closure maps retain their
+`~calls` residual and probes reference-record individual selected calls on
+demand. Maps of named functions keep eager heads while recording, since they
+have no closure selector. An untrusted handler and `Bulk_approx` always retain
+the head checks; an approximate result never gains exact trust. `~verify:true`
+is qualification-only: every successful exact kernel is compared against every
+walker element, including float bits, and any difference aborts qualification.
+
+Inline-body replay distinguishes macro-expanded loop/function/state zones in
+its term key as well as form id, path, node kind and type. Two expansions of the
+same macro keep their own seed and captures. Strict captured-source validation
+checks function and helper bodies with their checked parameter bindings, so a
+loop's array parameter is not mistaken for a missing outer capture. Nested node
+lowering retains normalizer helper dependencies as well as body/validation
+helpers. Delayed graph/topology algorithm arguments are compiled to concrete
+CPU values in their cook context before the algorithm validates their storage.
+
+`Flow_ir.Profile.sample` optionally observes static maps without changing their
+execution. Its bounded history (512 maps) reports the runtime site, element
+count, selected tier, packed refusal, actual walked head/tail counts and wall
+durations for the head, compile/force attempt and tail. Timings include nested
+maps and use the caller's clock. Instrumentation is scoped to the calling
+domain and restored on exceptions; ordinary evaluation reads no clock.
+
+Invariant array gathers take their element layout from the prepared table when
+the checked lookup result is `any` (for example, a field of `(ref graph)`). A
+concrete checked type must agree with the table or compilation refuses at the
+lookup with both types named. Integer and Text tables retain their distinct
+banks; numeric vectors retain the table's width. Unsupported internal layouts
+name the innermost term and its type instead of a generic reference-evaluation
+message. This changes compiler specialization, not checker diagnostics or the
+walker's range/error behavior.
+
+Nonempty homogeneous captured Lists of int, float or vec2–4 become internal
+prepared numeric tables for `nth`; the captured value remains a List. Empty or
+mixed lists refuse with `E_PACKED_CAPTURE`. Integer bounds and float whole-number
+checks guard the Gather, with `E_LIST_RANGE` on an invalid index and no read from
+an untaken invalid path. A reused template requires the same element type and
+length; a different shape specializes again.
+
+Inside a region, `array/sum (map f (array/range K))` and
+`array/sum (array/slice table first K)` unroll for compile-time Int counts
+from 0 to 64. Dynamic or larger counts keep a named `E_PACKED_CONSTANT`
+refusal. The map evaluates every element before the ordered sum begins, so a
+later map failure precedes sum overflow. Int sums wrap as the native primitive
+does; scalar/vector sums retain their ordered additions and positive-zero seed.
+Slice sums use an invariant numeric table and an Int first index. Its length is
+a scalar capture prepared from that same table, including through helpers.
+The native non-negative-length and slice-bounds guards remain reachable for
+`K=0`, and an untaken invalid slice performs no gather. No new region
+instruction or target-specific lowering is introduced.
 
 A program start runs the static stage once. `Rays_editor.Workspace.run` builds
 the document the editor opens (`Lowering.of_workspace`) and reads the window
@@ -69,6 +135,25 @@ raises `Core_exec.Resident_overflow` before the host reads it, and the loop runs
 its writes' values before it (`specification/gpu-codegen.md`, slots), on both targets. When only
 counts, ranges over a count and regions read its arrays afterwards, they stay on the device until
 the draw ends (`Core_exec.resident_tail`, `specification/flow.md`), on both targets.
+
+Native `Core_exec.execute ?resident` also offers a stateless value program's
+regions and compactions to this executor. Settled array counts do not read
+payloads; CPU primitive/host consumers materialise their inputs first. Success
+settles and returns records containing resident placeholders. The caller must
+adopt or materialise them before closing the resident execution. Errors close
+it; capacity overflow closes and reruns from the start. Value programs with
+state slots refuse with `E_CORE_RESIDENT`; drawing folds retain their existing
+state and loop rules. Native mesh construction uses this execution boundary
+under Qualification policy; production measured placement remains separate.
+It does not add a web SOP target.
+
+Resident records with frame-dependent fields lower as one cached Core program.
+Captured array producers remain explicit, and filters over ranges use the
+existing mask/compaction path, so their device counts feed downstream regions.
+Capacity replay restarts the whole record. Prepared region programs reuse this
+cache but still execute through the per-force dispatcher/resolver; only direct
+scalar programs take the rootless fast path. A host mesh's prepublication count
+check settles its stream without marking the whole program as a completed fold.
 
 A **region** is a pure data loop over packed arrays. It has explicit input
 buffers, captured uniforms, an iteration domain, a checked body and output
@@ -135,7 +220,9 @@ that private validated representation, so CPU and device consumers share one
 region layout and validation boundary. The region's instruction-dependency flags
 are derived on first execution and cached atomically; each executor forces them
 before dispatching work to the shared domain pool. CPU scratch blocks are capped
-by the actual element count, up to the existing block limit. Branches retain
+by the actual element count, up to the existing block limit. Idle CPU register
+banks are weakly held (at most four per domain); borrowed banks remain strong
+through their chunk, and GC can reclaim scratch from past workloads. Branches retain
 their selected lanes; captures, array ownership and integer range are checked
 before execution. Effects, escaping locals, accumulators, filters, aliasing
 input/output buffers and unsupported layouts use the general statements. A block
@@ -276,7 +363,15 @@ result type and rejects another unresolved marker. Geometry handles remain
 private immutable host captures; this expression is refused by the 2D web target.
 
 `Host_source` constructs a typed source from computed locals and resolves it
-when reached. A storage-valued argument of a cooked call may instead retain
+when reached. Native execution may first offer its raw arguments to
+`execute ?host_source`: an accepted source returns a checked result after
+retaining escaped buffers, while a decline retains the ordinary materialising
+host boundary. Wrong result types and unresolved source results are errors.
+Stateless geometry selection uses this offer for `sop/mesh`, sharing the normal
+resident mesh constructor; unsupported shapes and other readers retain their
+CPU route. Constant integer-array descriptors offer their already-validated
+count/value to the same resident fill callback as ordinary constructors.
+A storage-valued argument of a cooked call may instead retain
 its immutable query as `Source_descriptor`. The native attribute consumer
 checks its storage kind and owner cardinality before sharing unchanged planes;
 it does not interleave, copy or finite-scan them. This preserves native storage
@@ -1091,7 +1186,8 @@ partially exported to make a coverage count pass.
 The source census parses 45 files and identifies 15 structurally eligible draw
 workspaces. It counts 114 distinct authored heads in draw/host/image/value
 graphs and all definition/macro bodies. This includes function parameter
-calls, macro templates and SOP definitions unused by a draw graph; it is not
+defaults and calls, macro templates and SOP definitions unused by a draw graph;
+parameter names and type declarations are not calls and are excluded. It is not
 the exported dependency closure. Counts change with authored source, but each
 head must have its own row here. `primitive` refers to the inventory above;
 `compiler rule` names its leaves/control, `region` names the packed numeric
@@ -1549,3 +1645,38 @@ storage through the ordinary planar `sop/with_attr` writer: owner count
 (`E_ATTR_COUNT`), finiteness (`E_NONFINITE`) and the `P` vec3 rule are unchanged,
 and a width outside 1 to 4 is `E_ATTR_WIDTH`. A round trip restores the storage
 type. Neither adds a Core instruction; there is no JavaScript twin (decision 4).
+
+The frozen IsoGrid workspace adds these authored heads to the same census. Its
+helper calls inline their checked bodies; none introduces another executor or
+runtime primitive.
+
+| Head | Rule | Lowering / leaves |
+| --- | --- | --- |
+| `array/compact` | primitive | Ordered Int mask compaction; the resident executor uses the existing count/compaction path. |
+| `array/int` | primitive | Validated exact integer-array construction; resident uint32 fill when supported. |
+| `array/scatter_add` | primitive | Ordered CPU scatter, including duplicate indices, as specified above; no device atomic reordering. |
+| `array/sum` | region | Ordered packed reduction, or the structured array reduction rule when not a numeric region. |
+| `error` | primitive | Typed code/message failure; preserves authored control-flow laziness. |
+| `int/add` | primitive | Exact signed integer addition with the existing wrapping contract. |
+| `int/shr` | primitive | Exact logical right shift of the integer's 63-bit representation, with checked shift count. |
+| `build-volume` | compiler rule | Inline checked body: `fold` over recipe commands, record fields and `command`. |
+| `carve` | compiler rule | Inline checked body: packed voxel `map`, `random-at` integer hashes, comparisons and selected old/new cell values. |
+| `cell` | compiler rule | Inline checked body: index arithmetic and vec3 construction. |
+| `command` | compiler rule | Inline checked body: ordered operation-name branches, `carve`, `edit-volume`, `maze-volume` and integer parameters. |
+| `direction` | compiler rule | Inline checked body: ordered axis comparisons selecting one of six constant vec3 directions. |
+| `edit-cells` | compiler rule | Inline checked body: packed map, checked cell/neighbor access, operation branches and integer masks. |
+| `edit-volume` | compiler rule | Inline checked body: operation-text branches choose the integer selector passed to `edit-cells`; unknown text raises the authored typed error. |
+| `maze-links` | compiler rule | Inline checked body: bounded `iterate` with record accumulator, mask compaction, ordered scatter and array reads. |
+| `maze-volume` | compiler rule | Inline checked body: maze-size check, `maze-links`, cell map and exact integer bit tests. |
+| `occupied` | compiler rule | Inline checked body: bounds comparisons and lazy typed voxel lookup. |
+| `random-at` | compiler rule | Inline checked body: exact integer hash/bit operations and floating conversion. |
+| `recipe-book` | compiler rule | Inline checked body: immutable list of name/step records. |
+| `selected-edit` | compiler rule | Inline checked body: `edit-cells`, block-coordinate hash and per-cell old/new selection. |
+| `structure` | compiler rule | Inline checked body: selected numeric structure predicate over packed cells. |
+
+Core argument binding preserves residual DAG sharing. Each physical captured
+residual is rewritten once for the current argument vector; the root, sources,
+uniforms and provenance stages reuse that copy. The memo is local to one bind,
+so another invocation never inherits arguments or frame values. Physical identity
+also distinguishes separately rebound views that share a residual ID. Storage,
+arity and finite-value validation remain the same as before this sharing rule.

@@ -614,6 +614,7 @@ let check_row ?capture ?(prepared = true) ?(times : replay_times option) (cache 
   | [ name; fixture; case; source; input_forms; expected ] ->
       let name = string name and fixture = string fixture and case = string case in
       let label = Printf.sprintf "%s/%s/%s" name fixture case in
+      if Sys.getenv_opt "REPLAY_TRACE" = Some "1" then Printf.eprintf "start %s\n%!" label;
       let parsed =
         try source_workspace_and_call (string source)
         with Failure message -> fail (label ^ ": malformed Lisp source: " ^ message)
@@ -653,6 +654,8 @@ let check_row ?capture ?(prepared = true) ?(times : replay_times option) (cache 
             string code <> "" && string code = actual_code && string message = actual_message
         | _ -> false
       in
+      if Sys.getenv_opt "REPLAY_TRACE" = Some "1" then
+        Printf.eprintf "%s %s\n%!" (if matches then "done" else "mismatch") label;
       if (not matches) && capture <> None then Option.iter (fun capture -> capture actual) capture
       else if not matches then
         let describe = function
@@ -1131,7 +1134,20 @@ let () =
       check_fixture ~prepared:false ~profile:true (create_cache ()) directory key fixture rows
         coverage;
       Printf.printf "selected fixture provenance %s\n%!" status
-  | [ _; directory ] ->
+  | [ _; directory ] | [ _; "--profile"; directory ] ->
+      let profile = Array.length Sys.argv = 3 in
+      let check cache row =
+        let times = if profile then Some (create_replay_times ()) else None in
+        check_row ?times cache directory row;
+        Option.iter
+          (fun times ->
+            let key = match children "golden" row with
+              | node :: fixture :: _ -> string node ^ "/" ^ string fixture
+              | _ -> fail "malformed golden row" in
+            Printf.printf "row_profile %s inputs=%.6f check=%.6f lower=%.6f compile=%.6f cook=%.6f\n%!"
+              key times.inputs times.check times.lower times.compile times.cook)
+          times
+      in
       let rows, coverage = read_corpus directory in
       check_coverage coverage rows;
       let nodes =
@@ -1192,7 +1208,7 @@ let () =
                       (fun row ->
                         match children "golden" row with
                         | node :: _ when Hashtbl.hash (string node) mod jobs = job ->
-                            check_row cache directory row
+                            check cache row
                         | _ -> ())
                       rows;
                     0
@@ -1209,12 +1225,12 @@ let () =
         children;
       (if jobs = 1 then
          let cache = create_cache () in
-         List.iter (check_row cache directory) rows);
+         List.iter (check cache) rows);
       Printf.printf "checked %d Lisp SOP golden rows without native factories\n%!"
         (List.length rows)
   | _ ->
       fail
-        "usage: replay.exe [DIR | --update DIR NODE... | --update-all DIR | --keys DIR KEY... | \
+        "usage: replay.exe [DIR | --profile DIR | --update DIR NODE... | --update-all DIR | --keys DIR KEY... | \
          --fixture DIR KEY FIXTURE | --fixture-ordinary DIR KEY FIXTURE | --fixture-profile DIR \
          KEY FIXTURE | --fixture-ordinary-profile DIR KEY FIXTURE | --benchmark-inputs DIR ROUNDS \
          | --self-test]"

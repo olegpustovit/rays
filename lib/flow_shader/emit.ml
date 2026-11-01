@@ -7,10 +7,14 @@ type msl = {
   interface : S.binding list;
   uniform_layout : (string * int * int) list;
   uniform_bytes : int;
+  uint32_uniforms : int list;
   table_seeds : int array;
   output_widths : int array;
+  output_uint32 : bool array;
   input_widths : int array;
+  input_uint32 : bool array;
   gathers : (int * int) array;
+  gather_uint32 : bool array;
   counts : int option;
   scene : int option;
 }
@@ -328,13 +332,16 @@ let group_intrinsic ~scans ~(raster : raster) (current : Scope.t) guards stage (
         (if ty = Flow.Ty.Array Flow.Ty.Int then low r.(2) else float_of r.(2))
   | _ -> fail "Not a workgroup intrinsic."
 
-let rec kernel ?fast ?instanced ?motion ?curves ?spheres program =
-  generate ?fast ?instanced ?motion ?curves ?spheres program
+let rec kernel ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs
+    ?uint32_inputs ?uint32_tables program =
+  generate ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs ?uint32_inputs
+    ?uint32_tables program
 
 and stage_body ~raster program =
   Result.map (fun msl -> msl.source) (generate ~fast:true ~raster program)
 
 and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(spheres = true)
+    ?(uint32_scalars = false) ?(uint32_outputs = []) ?(uint32_inputs = []) ?(uint32_tables = [])
     ?raster program =
   try
     (match P.gpu_refusals ~fused:true ~fast program with
@@ -386,7 +393,38 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
       | Some k -> k
       | None -> fail "Gather without its table."
     in
+    let input_uint32 = Array.make (Array.length view.widths) false in
+    List.iter
+      (fun i ->
+        if (not fast) || i < 0 || i >= Array.length view.widths || view.widths.(i) <> 1 then
+          fail "Uint32 input requires a scalar buffer in fast precision.";
+        input_uint32.(i) <- true)
+      uint32_inputs;
+    let gather_uint32 = Array.make (List.length gathers) false in
+    List.iter
+      (fun u ->
+        match List.find_index (fun (_, (index, width)) -> index = u && width = 1) gathers with
+        | Some k when fast -> gather_uint32.(k) <- true
+        | _ -> fail "Uint32 table requires a scalar gathered buffer in fast precision.")
+      uint32_tables;
     let integer_register slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
+    let uint32_uniforms = ref [] in
+    if uint32_scalars then begin
+      if not fast then fail "Uint32 scalars require fast precision.";
+      Array.iteri
+        (fun slot code ->
+          match snd (guarded [] code) with
+          | P.Int_uniform u -> uint32_uniforms := (uniforms.(u) * 4) :: !uint32_uniforms
+          | P.Int_frame _ when frames.(slot) >= 0 ->
+              uint32_uniforms := (frames.(slot) * 4) :: !uint32_uniforms
+          | _ -> ())
+        view.code
+    end;
+    let uint32_uniforms = List.sort_uniq Int.compare !uint32_uniforms in
+    let uniform_word offset =
+      if List.mem (offset * 4) uint32_uniforms then Printf.sprintf "uniforms[%d]" offset
+      else Printf.sprintf "as_type<float>(uniforms[%d])" offset
+    in
     (* The kernel prints twice. The first pass counts each register's references and where they are;
      the second prints a register read once, in its own scope inside the blocks it is computed in, as
      an expression inside its reader instead of a named local (naga's baking rule), and declares a
@@ -435,7 +473,7 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
          && (not named.(slot))
          && (not finite_checks.(slot))
          && (match instruction with
-           | P.Trace _
+           | P.Trace _ | Raise _
            | Int_binary ((Idiv | Imod | Ishl | Ishr), _, _)
            | Stage
                ( ( Trace_triangles _ | Trace_any | Trace_curves _ | Trace_curves_any | Group_scan _
@@ -479,18 +517,25 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
         | _ -> None
     in
     let float_of r = if integer_register r then "float(" ^ register r ^ ")" else register r in
-    let element prepared index width component =
+    let element ?(integer = false) prepared index width component =
       let k = gather_index prepared
       and index = if narrow.(index) then register index else int_of index in
-      match raster with
-      | Some r ->
-          Printf.sprintf "%s[%s*%d+%d]"
-            (r.buffer (fst (snd (List.nth gathers k))))
-            index width component
-      | None ->
-          Printf.sprintf
-            "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])" k index
-            gather_lengths.(k) width component
+      let value =
+        match raster with
+        | Some r ->
+            Printf.sprintf "%s[%s*%d+%d]"
+              (r.buffer (fst (snd (List.nth gathers k))))
+              index width component
+        | None ->
+            let raw =
+              Printf.sprintf "gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d]" k index
+                gather_lengths.(k) width component
+            in
+            if gather_uint32.(k) then raw else "as_type<float>(" ^ raw ^ ")"
+      in
+      if integer then "long(" ^ value ^ ")"
+      else if gather_uint32.(k) then "float(" ^ value ^ ")"
+      else value
     in
     let hits = Hashtbl.create 4 in
     let instancing = scene_instances <> None and moving = layout.scene_motion in
@@ -515,6 +560,14 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
            (if name = "gpu/scene-spheres" then scene_spheres else layout.scene_strand_count))
     in
     let outputs = Array.length view.outputs in
+    let output_uint32 = Array.make outputs false in
+    List.iter
+      (fun index ->
+        if index < 0 || index >= outputs then fail "Uint32 output index is outside its producer.";
+        match view.outputs.(index) with
+        | [| slot |] when fast && integer_register slot -> output_uint32.(index) <- true
+        | _ -> fail "Uint32 output requires a scalar integer result in fast precision.")
+      uint32_outputs;
     let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
     let print () =
       Hashtbl.reset hits;
@@ -551,6 +604,9 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
               if narrow.(slot) then
                 match instruction with
                 | P.Int_const n -> Printf.sprintf "%du" (n land 0xffffffff)
+                | Raise _ when raster <> None ->
+                    fail "Explicit errors need a compute status record."
+                | Raise _ -> "0u"
                 | Int_binary (op, a, b) ->
                     narrow_integer op (low a)
                       (if (op = Ishl || op = Ishr) && not narrow.(b) then int_of b else low b)
@@ -571,12 +627,18 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
                 match instruction with
                 | P.Const value ->
                     Printf.sprintf "as_type<float>(0x%lxu)" (Int32.bits_of_float value)
+                | Raise _ when raster <> None ->
+                    fail "Explicit errors need a compute status record."
+                | Raise _ -> if integer_register slot then "0L" else "0.0f"
                 | Input (input, _, component) when raster <> None ->
                     (Option.get raster).input input component
                 | Input (input, width, component) ->
-                    Printf.sprintf "input%d[i*%d+%d]" input width component
+                    let value = Printf.sprintf "input%d[i*%d+%d]" input width component in
+                    if input_uint32.(input) then "float(" ^ value ^ ")" else value
                 | Uniform (index, component) ->
-                    Printf.sprintf "as_type<float>(uniforms[%d])" (uniforms.(index) + component)
+                    let offset = uniforms.(index) + component in
+                    let value = uniform_word offset in
+                    if List.mem (offset * 4) uint32_uniforms then "float(" ^ value ^ ")" else value
                 | Frame name when raster <> None -> (Option.get raster).builtin name
                 | Frame _ -> Printf.sprintf "as_type<float>(uniforms[%d])" frames.(slot)
                 | Accumulator _ -> assert false
@@ -598,18 +660,17 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
                       (Printf.sprintf "fma(%s,%s,%s)" (register a) (register b) (register c))
                 | Gather (prepared, index, width, component) ->
                     element prepared index width component
-                | Int_gather (prepared, index) -> "long(" ^ element prepared index 1 0 ^ ")"
+                | Int_gather (prepared, index) -> element ~integer:true prepared index 1 0
                 | Array_prepare _ -> assert false
                 | Int_const n -> Printf.sprintf "long(%dL)" n
                 | Int_input input when raster <> None -> (Option.get raster).int_input input
                 | Int_input input -> Printf.sprintf "long(input%d[i])" input
-                | Int_uniform index ->
-                    Printf.sprintf "long(as_type<float>(uniforms[%d]))" uniforms.(index)
+                | Int_uniform index -> "long(" ^ uniform_word uniforms.(index) ^ ")"
                 | Int_frame name when raster <> None ->
                     "long(" ^ (Option.get raster).builtin name ^ ")"
                 | Int_frame name when Flow_ir.Kernel_layout.scene_fact name ->
                     "long(" ^ scene_count name ^ ")"
-                | Int_frame _ -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" frames.(slot)
+                | Int_frame _ -> "long(" ^ uniform_word frames.(slot) ^ ")"
                 | Int_binary (op, a, b) -> integer op (int_of a) (int_of b)
                 | Int_compare (op, a, b) -> comparison op (int_of a) (int_of b)
                 | Int_abs a -> wrap_integer ("abs(" ^ int_of a ^ ")")
@@ -677,6 +738,9 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
             if finite_checks.(slot) && (not (integer_register slot)) && raster = None then
               Printf.bprintf body "%ssb|=!isfinite(r%d);\n" indentation slot;
             match instruction with
+            | P.Raise (_, code, message, _) ->
+                Printf.bprintf body "%ssb|=%du;\n" indentation
+                  (Flow.Packed_ops.error_status code message)
             | P.Int_binary (operation, _, b) ->
                 Buffer.add_string body
                   (if narrow.(b) then integer_status ~unsigned:true indentation operation (low b)
@@ -782,13 +846,20 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
                    if not (integer_register slot) then
                      Printf.bprintf body "  sb|=!isfinite(r%d);\n" slot))
               view.outputs;
+          Array.iteri
+            (fun k registers ->
+              if output_uint32.(k) then
+                let value = int_of registers.(0) in
+                Printf.bprintf body "  sb|=((%s)<0L||ulong(%s)>0xffffffffUL)?64u:0u;\n" value value)
+            view.outputs;
           Printf.bprintf body "  %s\n" flush_status;
           Array.iteri
             (fun k registers ->
               Array.iteri
                 (fun component slot ->
                   Printf.bprintf body "  %s[i*%d+%d]=%s;\n" (output_name k) (Array.length registers)
-                    component (float_of slot))
+                    component
+                    (if output_uint32.(k) then "uint(" ^ int_of slot ^ ")" else float_of slot))
                 registers)
             view.outputs);
       body
@@ -804,10 +875,14 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
           interface = [];
           uniform_layout = [];
           uniform_bytes = 0;
+          uint32_uniforms = [];
           table_seeds = [||];
           output_widths = [||];
+          output_uint32 = [||];
           input_widths = [||];
+          input_uint32 = [||];
           gathers = [||];
+          gather_uint32 = [||];
           counts = None;
           scene = None;
         }
@@ -864,10 +939,14 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
         Array.to_list
           (Array.mapi
              (fun index _ ->
-               Printf.sprintf "device const float* input%d [[buffer(%d)]]" index index)
+               Printf.sprintf "device const %s* input%d [[buffer(%d)]]"
+                 (if input_uint32.(index) then "uint" else "float")
+                 index index)
              view.widths)
         @ List.init outputs (fun k ->
-            Printf.sprintf "device float* %s [[buffer(%d)]]" (output_name k) (count + k))
+            Printf.sprintf "device %s* %s [[buffer(%d)]]"
+              (if output_uint32.(k) then "uint" else "float")
+              (output_name k) (count + k))
         @ [
             Printf.sprintf "constant uint* uniforms [[buffer(%d)]]" uniform_binding;
             Printf.sprintf "device atomic_uint* status [[buffer(%d)]]" status_binding;
@@ -948,11 +1027,15 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
           interface;
           uniform_layout;
           uniform_bytes;
+          uint32_uniforms;
           scene = scene_binding;
           table_seeds;
           output_widths = Array.map Array.length view.outputs;
+          output_uint32;
           input_widths = view.widths;
+          input_uint32;
           gathers = Array.of_list (List.map snd gathers);
+          gather_uint32;
           counts;
         }
   with Diagnostic.Error diagnostic -> Error diagnostic

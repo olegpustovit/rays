@@ -17,6 +17,14 @@ let rec files path =
   else if Filename.check_suffix path ".rays" then [ path ]
   else []
 
+let parameter_defaults params =
+  List.filter_map
+    (fun (param : S.t) ->
+      match param.node with
+      | S.List [ _; { node = S.Sym ":"; _ }; _; value ] -> Some value
+      | _ -> None)
+    params
+
 let declarations forms =
   let children =
     List.concat_map
@@ -39,15 +47,7 @@ let declarations forms =
             match rest with
             | [ body ] -> [ body ]
             | [ { node = S.Vec params; _ }; body ] ->
-                let defaults =
-                  List.filter_map
-                    (fun (param : S.t) ->
-                      match param.node with
-                      | S.List [ _; { node = S.Sym ":"; _ }; _; value ] -> Some value
-                      | _ -> None)
-                    params
-                in
-                defaults @ [ body ]
+                parameter_defaults params @ [ body ]
             | _ -> []
           in
           Some
@@ -74,7 +74,13 @@ let rec heads counts (form : S.t) =
     | None -> counts
     | Some head -> Counts.update head (fun count -> Some (1 + Option.value count ~default:0)) counts
   in
-  List.fold_left heads counts (S.children form)
+  let children =
+    match form.node with
+    | S.List ({ node = S.Sym "fn"; _ } :: { node = S.Vec params; _ } :: body) ->
+        parameter_defaults params @ body
+    | _ -> S.children form
+  in
+  List.fold_left heads counts children
 
 let blockers declarations root =
   let rec visit seen blocked declaration =
@@ -171,6 +177,12 @@ let self_check () =
   assert (Counts.find "*" counts = 1);
   assert (Counts.find "+" counts = 1);
   assert (not (Counts.mem "x" counts));
+  let fn_counts =
+    heads Counts.empty (List.hd (parse "parameters"
+      "(fn [(walk : {:seen (array int)}) (axis : int (+ 1 2))] (array/count walk.seen))"))
+  in
+  assert (not (Counts.mem "walk" fn_counts || Counts.mem "axis" fn_counts || Counts.mem "array" fn_counts));
+  assert (Counts.find "+" fn_counts = 1 && Counts.find "array/count" fn_counts = 1);
   assert (core (graph "twice") && (not (core (graph "lift"))) && not (core (graph "geometry")));
   print_endline "core census self-check passed"
 

@@ -1721,11 +1721,54 @@ let carry () =
   if scene_size () <> idle then fail "an idle frame painted a ghost";
   Ui.destroy ui
 
+let retired_callbacks () =
+  let ui = Ui.create () and held = Weak.create 5 and seen = Array.make 5 false in
+  let payload index =
+    let bytes = Bytes.make 32 'x' in
+    Weak.set held index (Some bytes);
+    bytes
+  in
+  let painter index =
+    let bytes = payload index in
+    fun _ _ ->
+      seen.(index) <- true;
+      ignore (Sys.opaque_identity bytes)
+  in
+  let hit () =
+    let bytes = payload 2 in
+    fun rect ->
+      seen.(2) <- true;
+      ignore (Sys.opaque_identity bytes);
+      rect
+  in
+  let relative index =
+    let bytes = payload index in
+    Ui.Rel
+      (fun size ->
+        seen.(index) <- true;
+        ignore (Sys.opaque_identity bytes);
+        size)
+  in
+  Ui.frame ui (frame ~scale:1. ~time:0. []) (fun ui ->
+      let box = Ui.box ui ~w:(relative 3) ~h:(relative 4) ~hit:(hit ()) "callbacks" in
+      Ui.draw ui box (painter 0);
+      Ui.draw_over ui box (painter 1));
+  Gc.full_major ();
+  if not (Array.for_all Fun.id seen) then fail "callback retention fixture did not run";
+  if List.exists (Weak.check held) [ 0; 1; 2; 3; 4 ] then
+    fail "a published UI frame retained a callback's payload";
+  Ui.frame ui (frame ~scale:1. ~time:1. []) (fun _ -> ());
+  Gc.full_major ();
+  if List.exists (Weak.check held) [ 0; 1; 2; 3; 4 ] then
+    fail "a smaller UI frame retained a retired paint, overlay, hit or size callback";
+  Ui.destroy ui
+
 let run () =
   (match Sdl3.Init.init [ Sdl3.Init.Video ] with
   | Ok () -> ()
   | Error error -> fail (Format.asprintf "%a" Sdl3.pp_error error));
   tooltip_rest ();
+  retired_callbacks ();
   with_scale 1.;
   with_scale 2.;
   hover_cursor ();

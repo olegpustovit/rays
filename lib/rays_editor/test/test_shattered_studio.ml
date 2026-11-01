@@ -13,8 +13,8 @@ let workspace =
 let graph = Rays_editor.Workspace.sop_graphs workspace |> get |> List.assoc "shards"
 
 let fracture =
-  Node.inspect graph |> List.find (fun (i : Node.info) -> i.operation = "boolean") |> fun i ->
-  Node.find graph ~node_id:i.id |> Option.get
+  Node.inspect graph |> List.find (fun (i : Node.info) -> i.operation = "boolean_fracture")
+  |> fun i -> Node.find graph ~node_id:i.id |> Option.get
 
 let with_cook domains f =
   let session = Session.create ~max_entries:32 ~max_payload_bytes:(256 * 1024 * 1024) |> get in

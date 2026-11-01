@@ -1,0 +1,39 @@
+chain_route=cpu iteration=0 domains=8 cook_seconds=0.515403 cook_allocated_bytes=391772584
+chain_route=cpu iteration=1 domains=8 cook_seconds=0.481848 cook_allocated_bytes=392101792
+chain_route=cpu iteration=2 domains=8 cook_seconds=0.461159 cook_allocated_bytes=386453576
+chain_totals iterations=3 upload_bytes=0
+chain_callback=invoke calls=0 seconds=0.000000
+chain_callback=fill calls=0 seconds=0.000000
+chain_callback=range calls=0 seconds=0.000000
+chain_callback=compact calls=0 seconds=0.000000
+chain_callback=coerce calls=0 seconds=0.000000
+chain_callback=count calls=0 seconds=0.000000
+chain_callback=finish calls=0 seconds=0.000000
+chain_callback=settle calls=0 seconds=0.000000
+chain_callback=close calls=0 seconds=0.000000
+chain_callback=retain_uint32 calls=0 seconds=0.000000
+chain_callback=retain_float calls=0 seconds=0.000000
+chain_callback=validate_topology calls=0 seconds=0.000000
+points=998592 primitives=249648 topology_resident=false positions_resident=false N_resident=false Cd_resident=false payload=0 validation=0 status=0 count=0 bounds=0
+publication_seconds=2.000410 main_allocated_bytes=1761009456 cook_domains=8 iterations=3
+chain_route=qualification_resident iteration=0 domains=8 cook_seconds=0.369571 cook_allocated_bytes=288033232
+chain_route=qualification_resident iteration=1 domains=8 cook_seconds=0.341443 cook_allocated_bytes=186693048
+chain_route=qualification_resident iteration=2 domains=8 cook_seconds=0.345094 cook_allocated_bytes=148417696
+chain_totals iterations=3 upload_bytes=7040632
+chain_callback=invoke calls=9 seconds=0.029958
+chain_callback=fill calls=3 seconds=0.013405
+chain_callback=range calls=3 seconds=0.002756
+chain_callback=compact calls=3 seconds=0.002635
+chain_callback=coerce calls=0 seconds=0.000000
+chain_callback=count calls=15 seconds=0.009527
+chain_callback=finish calls=6 seconds=0.000000
+chain_callback=settle calls=3 seconds=0.000039
+chain_callback=close calls=3 seconds=0.000018
+chain_callback=retain_uint32 calls=9 seconds=0.000075
+chain_callback=retain_float calls=3 seconds=0.000058
+chain_callback=validate_topology calls=3 seconds=0.011191
+points=998592 primitives=249648 topology_resident=true positions_resident=true N_resident=true Cd_resident=true payload=0 validation=108 status=48 count=72 bounds=0
+publication_seconds=1.606599 main_allocated_bytes=1206731952 cook_domains=8 iterations=3
+real 6.00
+user 20.51
+sys 0.91

@@ -1109,6 +1109,7 @@ module Layer = struct
     cached_aggregate : bool;
     cached_stage : staged_native;
     cached_device : bool; (* it draws a device's vertices ({!borrows_device}) *)
+    cached_ui : bool;
   }
 
   let native_stage_cache_capacity = 16
@@ -1291,6 +1292,15 @@ module Layer = struct
             match uncached ~density ~width ~height scene with
             | Error _ as error -> error
             | Ok stage ->
+                let ui = List.exists (function Ui_layer _ -> true | _ -> false) stage.layers in
+                if ui then begin
+                  (* UI packets change with status text every frame. Keep the latest
+                     frame and replace its submission, rather than retaining 64 copies. *)
+                  let old = ref [] in
+                  Native_stage_table.iter context.native_stages (fun key cached ->
+                      if cached.cached_ui then old := key :: !old);
+                  List.iter (Native_stage_table.remove context.native_stages) !old
+                end;
                 let stage =
                   match stage.retained with
                   | Some _ -> stage
@@ -1298,7 +1308,10 @@ module Layer = struct
                       context.next_identity <- Int64.succ context.next_identity;
                       {
                         stage with
-                        retained = Some ("scene-stage:" ^ Int64.to_string context.next_identity, 1L);
+                        retained =
+                          Some
+                            (if ui then ("scene-ui", context.next_identity)
+                             else ("scene-stage:" ^ Int64.to_string context.next_identity, 1L));
                       }
                 in
                 let entry =
@@ -1311,6 +1324,7 @@ module Layer = struct
                     cached_aggregate = aggregate;
                     cached_stage = stage;
                     cached_device = borrows_device stage;
+                    cached_ui = ui;
                   }
                 in
                 if entry.cached_device then begin

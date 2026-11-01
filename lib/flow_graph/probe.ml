@@ -167,7 +167,10 @@ let remember tbl key v =
 let summarize t v =
   let v =
     match (t.live_frame, t.resolve) with
-    | (Some _ | None), _ when E.is_live v && (t.live_frame <> None || Option.is_some t.resolve) -> (
+    | (Some _ | None), _
+      when E.is_live v
+           && (t.live_frame <> None || Option.is_some t.resolve
+              || not (E.frame_dependent v || E.state_dependent v)) -> (
         match
           t.force ?state:t.state ?resolve:t.resolve v
             ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame)
@@ -342,7 +345,11 @@ let map_calls t zone outer =
               | E.Record [ ("offset", E.Int offset); ("call", E.Residual call) ] -> (
                   match
                     t.guard ~fallback:stopped (fun () ->
-                        E.Host.map_probe ?state:t.state ?resolve:t.resolve ~offset call
+                        E.Host.map_probe ?state:t.state ?resolve:t.resolve
+                          ~execute:(fun residual ->
+                            t.force ?state:t.state ?resolve:t.resolve (E.Residual residual)
+                              ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame))
+                          ~offset call
                           ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame))
                   with
                   | Ok (count, at) ->

@@ -4,10 +4,14 @@ type msl = {
   interface : Ogpu_core.Shader.binding list;
   uniform_layout : (string * int * int) list;
   uniform_bytes : int;
+  uint32_uniforms : int list;
   table_seeds : int array;
   output_widths : int array;
+  output_uint32 : bool array;
   input_widths : int array;
+  input_uint32 : bool array;
   gathers : (int * int) array;
+  gather_uint32 : bool array;
   counts : int option;
   scene : int option;
 }
@@ -25,8 +29,16 @@ val kernel :
   ?motion:bool ->
   ?curves:[ `Loop | `Native ] ->
   ?spheres:bool ->
+  ?uint32_scalars:bool ->
+  ?uint32_outputs:int list ->
+  ?uint32_inputs:int list ->
+  ?uint32_tables:int list ->
   Flow_ir.Packed.t ->
   (msl, Diagnostic.t) result
+(** [uint32_outputs] selects scalar integer outputs to store as exact uint32 words, with range
+    status validation. [uint32_inputs] selects scalar source buffers and [uint32_tables] selects
+    uniform-table indices to read as raw uint32. Those require explicit device bindings. Other
+    buffers retain float32 storage and their existing ABI. *)
 
 (* [instanced], [motion], [curves] and [spheres] are static scene facts of a [scene/trace] kernel
    (Flow_gpu.Run.build_scene reports the first three): [`Native] strands are Metal curve

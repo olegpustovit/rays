@@ -26,7 +26,7 @@
 ; workers; @qualification-scale replays all 819.
 
 (rule
- (alias runtest)
+ (alias replay)
  (deps
   data/ports.sexp.gz
   data/coverage.sexp.gz
@@ -36,6 +36,8 @@
    REPLAY_JOBS
    4
    (run %{exe:replay.exe} data))))
+
+(alias (name runtest) (deps (alias replay)))
 
 (rule
  (alias qualification-scale)
@@ -51,3 +53,8 @@
     REPLAY_JOBS
     4
     (run %{exe:replay.exe} data)))))
+
+(rule
+ (alias replay_profile)
+ (deps data/ports.sexp.gz data/coverage.sexp.gz (glob_files data/inputs/*.gz))
+ (action (setenv REPLAY_JOBS 1 (run %{exe:replay.exe} --profile data))))

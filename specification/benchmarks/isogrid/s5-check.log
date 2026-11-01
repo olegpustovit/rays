@@ -1,0 +1,4 @@
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+real 4.15
+user 3.31
+sys 0.80

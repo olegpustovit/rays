@@ -19,6 +19,7 @@ type stats = {
   volatile_entries : int;
   retained_payload_bytes : int;
   last_node : node_timing option;
+  consumer_scans : int;
 }
 
 type output = { payload : Payload.t; instances : Rays_math.Mat4.t array option }
@@ -78,6 +79,9 @@ type t = {
       (* the resident components of the root the last cook returned: its caller may still read it
          until it has taken this cook's *)
   mutable written : (string, int) Either.t list;
+  mutable consumer_plan :
+    (Node.t * int option * Context.Private.consumers * Context.Private.consumers) option;
+  mutable consumer_scans : int;
       (* cache keys and volatile slots this cook attempt wrote, dropped if it settles a failure *)
 }
 
@@ -139,6 +143,8 @@ let create ~max_entries ~max_payload_bytes =
         fanouts = 0;
         previous_root = [];
         written = [];
+        consumer_plan = None;
+        consumer_scans = 0;
       }
 
 let set_clock session clock = session.clock <- clock
@@ -539,6 +545,102 @@ let replay_event session = function
 let selected_inputs node =
   let inputs = Node.Build.input_array node in
   match Node.Build.input_policy node with All -> inputs | Only i -> [| inputs.(i) |]
+
+module Consumers = Set.Make (Int)
+
+type consumer_entry = {
+  consumer_node : Node.t;
+  serial : int;
+  mutable readers : Consumers.t;
+  mutable external_readers : int;
+  mutable known_consumer : bool;
+  mutable unknown_consumer : bool;
+}
+
+let consumer_context session context root external_readers =
+  let base = Context.Private.consumers context in
+  match session.consumer_plan with
+  | Some (old, readers, previous, planned)
+    when old == root && readers = external_readers && previous == base ->
+      Context.Private.with_consumers context planned
+  | _ ->
+      session.consumer_scans <- session.consumer_scans + 1;
+      let entries = Hashtbl.create 32 and ordered = ref [] and next = ref 0 in
+      let rec visit node =
+        match memo_find entries node with
+        | Some (_, entry) -> entry
+        | None ->
+            let entry =
+              {
+                consumer_node = node;
+                serial = !next;
+                readers = Consumers.empty;
+                external_readers = 0;
+                known_consumer = false;
+                unknown_consumer = false;
+              }
+            in
+            incr next;
+            Hashtbl.add entries (Node.id node) (node, entry);
+            Array.iter (fun child -> ignore (visit child)) (selected_inputs node);
+            ordered := entry :: !ordered;
+            entry
+      in
+      let first = visit root in
+      Option.iter
+        (fun count ->
+          first.known_consumer <- true;
+          first.external_readers <- count)
+        external_readers;
+      List.iter
+        (fun entry ->
+          let input child = snd (Option.get (memo_find entries child)) in
+          match Node.input_use entry.consumer_node with
+          | Unknown ->
+              Array.iter
+                (fun child -> (input child).unknown_consumer <- true)
+                (selected_inputs entry.consumer_node)
+          | Cpu ->
+              Array.iter
+                (fun child ->
+                  let child = input child in
+                  child.known_consumer <- true;
+                  child.readers <- Consumers.add entry.serial child.readers)
+                (selected_inputs entry.consumer_node)
+          | Forward i ->
+              let child = input (Node.Build.input_array entry.consumer_node).(i) in
+              child.known_consumer <- child.known_consumer || entry.known_consumer;
+              child.unknown_consumer <- child.unknown_consumer || entry.unknown_consumer;
+              child.external_readers <- max child.external_readers entry.external_readers;
+              child.readers <- Consumers.union child.readers entry.readers)
+        !ordered;
+      let ids = Hashtbl.fold (fun id _ ids -> Consumers.add id ids) entries Consumers.empty in
+      let planned =
+        Consumers.fold
+          (fun id result ->
+            let versions = Hashtbl.find_all entries id in
+            let count =
+              match versions with
+              | [ (_, entry) ] when entry.known_consumer && not entry.unknown_consumer ->
+                  let local = Consumers.cardinal entry.readers in
+                  if entry.external_readers > max_int - local then None
+                  else Some (entry.external_readers + local)
+              | _ -> None
+            in
+            (* An enclosing cook's facts also cover uses outside this nested graph.
+             Do not replace them with a smaller local view. Reused ids are ambiguous. *)
+            let count =
+              match (versions, Context.Private.find base id) with
+              | [ _ ], Some outer when id <> Node.id root -> outer
+              | _ -> count
+            in
+            Context.Private.set result id count)
+          ids base
+      in
+      (* ponytail: keep only the latest root's census; add a bounded multi-root cache
+         if alternating unchanged roots makes this metadata scan measurable. *)
+      session.consumer_plan <- Some (root, external_readers, base, planned);
+      Context.Private.with_consumers context planned
 
 let branch_min_seconds = 0.002
 let branch_min_points = 10_000
@@ -942,12 +1044,20 @@ let release_dropped session (result : (output, Diagnostic.t) result) =
       (List.sort_uniq Int.compare dropped)
   end
 
-let cook session ~context node =
+let cook ?cpu_consumers session ~context node =
   if session.closed then
     Error
       (Diagnostic.error ~code:"session_closed" "cannot cook with a closed procedural session"
       |> Diagnostic.prepend_trace (Node.trace node))
+  else if Option.fold ~none:false ~some:(fun n -> n < 0) cpu_consumers then
+    Error (Diagnostic.error ~code:"consumer_count" "CPU consumer count must be non-negative.")
   else
+    let external_readers =
+      match cpu_consumers with
+      | Some _ -> cpu_consumers
+      | None -> Context.cpu_consumers context (Node.id node)
+    in
+    let context = consumer_context session context node external_readers in
     Parallel.run ~domains:(Context.domains context) (fun () ->
         (* a device failure found at a settle point refuses the device to the nodes that failed:
            what this attempt wrote is dropped and the graph cooks again (each retry refuses one
@@ -984,6 +1094,7 @@ let stats session =
     volatile_entries = Hashtbl.length session.slots;
     retained_payload_bytes = session.payload.bytes;
     last_node = session.last_node;
+    consumer_scans = session.consumer_scans;
   }
 
 (* what a clear or close drops is left to its holders' collection: results handed out stay valid *)
@@ -994,6 +1105,7 @@ let forget_resident session =
   session.payload.dropped <- []
 
 let clear session =
+  session.consumer_plan <- None;
   Mutex.protect session.times_lock (fun () -> Hashtbl.reset session.times);
   ();
   Entry_cache.clear session.cache;

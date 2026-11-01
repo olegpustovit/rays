@@ -40,7 +40,8 @@
     {!run} is the convenience that does both for a given time.
 
     [residual] environments hold only lexically free bindings, including names captured by nested
-    function and zone bodies. The checked-term walk is memoized with a bounded weak cache. *)
+    function and zone bodies. The checked-term walk is memoized with a bounded weak cache. A new
+    static pass resets it; subsequent live forces reuse that pass's entries. *)
 
 type ('f, 'r) payload = ('f, 'r) Value.t =
   | Int of int
@@ -93,16 +94,36 @@ module Residual : sig
     | Kernel_value : residual -> value option Effect.t
     | Bulk_static : residual -> value option Effect.t
     | Bulk_approx : residual -> value option Effect.t
+    | Static_map :
+        Workspace.path * Workspace.term * int
+        -> (head:int -> tail:int -> completed:bool -> unit) Effect.t
 
   val handle :
     ?observe:(residual -> unit) ->
     ?kernel:(residual -> value option) ->
     ?bulk:(residual -> value option) ->
+    ?defer:(residual -> bool) ->
     ?bulk_approx:(residual -> value option) ->
+    ?trusted:bool ->
+    ?replay:bool ->
+    ?map:(Workspace.path -> Workspace.term -> int -> head:int -> tail:int -> completed:bool -> unit) ->
     (unit -> 'a) ->
     'a
   (** Handle evaluator yield points for residual observation and large static maps. The handler
-      resumes the evaluator with a decision; no dispatcher is stored in evaluator state. *)
+      resumes the evaluator with a decision; no dispatcher is stored in evaluator state. [map]
+      starts optional static-map instrumentation and returns its completion callback, given the
+      number of calls actually walked in the head and tail, and whether the map completed
+      successfully (the callback also runs on failure).
+
+      [defer] may accept a compiled large static map without executing it: the existing residual
+      boundary keeps that map and its captures for the host's later cook. Known-size calls still
+      reserve their call-index interval.
+
+      [trusted] permits exact kernels before any head walk when eager records are absent. [replay]
+      permits this for recording closure maps too: their existing [~calls] selectors
+      reference-record individual calls on demand. Named maps still walk the eager head. Approximate
+      handlers always retain head checks. A refused or failed trusted kernel walks from element
+      zero. *)
 
   val free_names : Workspace.term -> string list
   (** Lexically free binding names, including nested function captures. *)
@@ -148,6 +169,7 @@ module Residual : sig
     previous : bool;
     host : bool;
     geometry : bool;
+    context : Context.t;  (** The executing graph's context, inherited by helper/function calls. *)
   }
 
   val residual_view : residual -> residual_view
@@ -174,6 +196,9 @@ module Residual : sig
     residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool -> value -> value
 
   val residual_ops : residual -> Op.t list
+  val residual_authored_key : residual -> string
+  (** The checked declaration key used with [structure] when comparing rewritten residuals.
+      Operator implementations must agree separately through [residual_ops]. *)
 
   val eval_term :
     ?state:state ->
@@ -441,6 +466,7 @@ module Host : sig
   val map_probe :
     ?state:state ->
     ?resolve:(value -> (value, Diagnostic.t) result) ->
+    ?execute:(residual -> (value, Diagnostic.t) result) ->
     ?offset:int ->
     residual ->
     live:live ->

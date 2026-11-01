@@ -1,0 +1,5 @@
+Inner sums: K=0/1/64, exact Int/vector bits, helper tables, guarded empty/bounds errors, eager map errors, constant refusals and one/eight domains agree
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+real 3.12
+user 3.23
+sys 0.71

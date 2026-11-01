@@ -1742,15 +1742,15 @@ let gpu_positions gpu key =
         Some (positions, List.nth_opt extra 0, count)
     | Some _ | None -> None
 
-let register_gpu_positions gpu ~positions ?normals ~count ~valid () =
+let register_gpu_positions gpu ~positions ?normals ?indices ?colors ~count ~valid () =
   let operation = "Renderer.register_gpu_positions" in
   if gpu.gpu_released then fail operation Ogpu.Error.Stale_handle "GPU lease is released"
   else
     let key = Printf.sprintf "positions:%d" (Atomic.fetch_and_add next_gpu_positions 1) in
     match
       Scene_execution.Private.register_gpu_vertices gpu.gpu_owner.scene_vertices
-        ~extra:(Option.to_list normals) ~stride:12 ~key ~device:gpu.gpu_device ~buffer:positions
-        ~vertex_count:count
+        ~extra:(Option.to_list normals) ?indices ?colors ~stride:12 ~key ~device:gpu.gpu_device
+        ~buffer:positions ~vertex_count:count
         ~valid:(fun () -> (not gpu.gpu_released) && valid ())
         ()
     with

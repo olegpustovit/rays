@@ -8,6 +8,11 @@ exception Unsupported of string
 
 let refuse name = raise (Unsupported name)
 
+let static_sop residual =
+  (E.Residual.residual_view residual).context = Flow.Context.sop
+  && not (E.frame_dependent (V.Residual residual))
+  && not (E.state_dependent (V.Residual residual))
+
 let failure (d : Diagnostic.t) =
   if d.span = None && d.position = None && d.cause = None && d.hints = [] && d.trace = [] then
     C.Fail (d.code, d.message)
@@ -539,6 +544,7 @@ module Lowerer (P : sig
   val strict : bool
   val region_allowed : C.Region.t -> bool
   val draw : (draw_context -> unit) option
+  val initial : E.value option
   val root : E.residual Lazy.t
   val lowered : E.residual -> unit
 end) =
@@ -925,10 +931,10 @@ struct
               Names.of_seq (List.to_seq (List.map (fun (name, v) -> (name, Known v)) view.bindings))
             in
             let source = source_of_view view in
-            (* A draw's captured arrays need explicit producers, especially resident folds.
-               Scalar-only captures retain the direct packed path and its grouping. *)
-            let draw_arrays =
-              draw <> None
+            (* Draws and SOP cooks lower captured arrays as explicit producers, so compacted
+               counts and the regions consuming them share their Core locals. *)
+            let captured_arrays =
+              (initial <> None || draw <> None || static_sop r)
               && List.exists
                    (fun name ->
                      match List.assoc_opt name view.bindings with
@@ -939,7 +945,7 @@ struct
                      | _ -> false)
                    (E.Residual.free_names view.term)
             in
-            let packed = if view.previous || draw_arrays then None else packed_region r view in
+            let packed = if view.previous || captured_arrays then None else packed_region r view in
             let value =
               if Option.is_some packed then region statements (Option.get packed) view
               else if view.previous then
@@ -1005,15 +1011,17 @@ struct
            (E.Residual.free_names x)
     in
     let packed =
-      if (not candidate) || not (strict || draw <> None || state_parent || reads_state ()) then None
+      let sop = Option.fold ~none:false ~some:static_sop !current in
+      if (not candidate) || not (strict || initial <> None || draw <> None || sop || state_parent || reads_state ())
+      then None
       else
         Option.bind !current (fun parent ->
             let names = E.Residual.free_names x in
             let arguments = ref [] in
             let rec capture = function
-              (* in a drawing, and for any state-dependent capture, a captured residual is lowered first and
-           passed as an argument: the map then reads no state itself, even when the value it was handed did *)
-              | Known (V.Residual r) when draw <> None || E.state_dependent (V.Residual r) ->
+              (* Draws, SOP cooks and state-dependent captures use an explicit producer before
+                 the region, which reads its immutable result as an argument. *)
+              | Known (V.Residual r) when initial <> None || draw <> None || sop || E.state_dependent (V.Residual r) ->
                   capture (residual statements cache r)
               (* a record local is passed field by field: Packed takes scalars, not a record argument *)
               | Computed (id, Flow.Ty.Record fields) when draw <> None ->
@@ -1441,7 +1449,7 @@ struct
                 coerce statements cache source inner.ty
                   (term ~borrow statements cache source env input)
             | None -> refuse "bypass")
-        (* A drawing's filter of a range: its predicate as an Int mask map (its free names read from the
+        (* A drawing or structured value's filter of a range: its predicate as an Int mask map (its free names read from the
        lowering's scope, as the inline fn reads them), which packs like any map (all cores, or the
        device in fast precision), then array/compact keeps the indices.  Any other filter, or a mask
        that does not pack, keeps the element loop below. *)
@@ -1455,7 +1463,7 @@ struct
                    _;
                  } as items);
               ] )
-          when draw <> None && x.ty = Flow.Ty.Array elem ->
+          when (draw <> None || initial <> None) && x.ty = Flow.Ty.Array elem ->
             let lit n =
               { body with node = Lit (Param.Int_value n); ty = Flow.Ty.Int; path = None }
             in
@@ -2839,9 +2847,13 @@ struct
             [||]
         | None ->
             let root = Lazy.force root in
-            let result = residual body cache root in
             let view = E.Residual.residual_view root in
             let source = { (source_of_view view) with C.span = Some view.term.form.span } in
+            let result =
+              match initial with
+              | None -> residual body cache root
+              | Some value -> Known value
+            in
             [| ensure body cache source result |]
       in
       Ok
@@ -2860,22 +2872,96 @@ struct
     | Diagnostic.Error _ | Not_found | Invalid_argument _ | Failure _ -> Error "constant"
 end
 
-let lower_with ?trace ?budget ?(lowered = ignore) ~strict ~region_allowed ~draw root =
+let lower_with ?value ?trace ?budget ?(lowered = ignore) ~strict ~region_allowed ~draw root =
   let module L = Lowerer (struct
     let trace = trace
     let budget = budget
     let strict = strict
     let region_allowed = region_allowed
     let draw = draw
+    let initial = value
     let root = root
     let lowered = lowered
   end) in
   L.result
 
-let lower ?trace ?(strict = false) ?budget ?lowered root =
-  lower_with ?trace ?budget ?lowered ~strict
-    ~region_allowed:(fun _ -> true)
-    ~draw:None (Lazy.from_val root)
+let count_scopes = Atomic.make 0
+
+(* Count identities refer to single-write locals in this program only. Compaction
+   gets a new identity; a multi-source product never inherits an input's count. *)
+let count_origins (program : C.program) =
+  let scope = Atomic.fetch_and_add count_scopes 1 in
+  let writes = Array.make (Array.length program.locals) 0
+  and origins = Array.make (Array.length program.locals) None in
+  C.iter
+    (fun statement -> List.iter (fun local -> writes.(local) <- writes.(local) + 1) (C.writes statement))
+    program.body;
+  let identity kind local = Some ([ "@core-count"; string_of_int scope; kind; string_of_int local ], []) in
+  let count args =
+    Option.bind (List.assoc_opt "count" args) (fun local ->
+        if writes.(local) = 1 then identity "scalar" local else None)
+  in
+  let rec argument residual (term : W.term) =
+    match term.node with
+    | W.Ref_binding (name, []) ->
+        Option.bind (List.assoc_opt name (E.Residual.residual_view residual).bindings) value
+    | Expanded { body; _ } -> argument residual body
+    | _ -> None
+  and value = function
+    | E.Source ("$core/argument", _, [ ("index", E.Int index) ]) -> Some index
+    | E.Residual r -> argument r (E.Residual.residual_view r).term
+    | _ -> None
+  in
+  let regions = Array.copy program.regions in
+  List.iter
+    (fun (statement : C.statement) ->
+      match statement.node with
+      | Assign (local, expression) when writes.(local) = 1 ->
+          let origin =
+            match expression with
+            | C.Local old | Prim (Coerce _, [ (_, old) ]) -> origins.(old)
+            | Prim ((Array_range | Array_int | Array_float | Array_text | Array_vec3 | Array_vec4), args) ->
+                count args
+            | Source_descriptor { name; args; _ }
+              when String.starts_with ~prefix:"$core/constant-array/" name -> count args
+            | _ -> None
+          in
+          (match program.locals.(local) with
+          | Flow.Ty.Array _ -> origins.(local) <- (match origin with Some _ -> origin | None -> identity "array" local)
+          | _ -> ())
+      | Invoke { region; args; result } ->
+          let packed = regions.(region) and args = Array.of_list args in
+          (match program.locals.(result) with
+          | Flow.Ty.Array _ when writes.(result) = 1 -> origins.(result) <- identity "array" result
+          | _ -> ());
+          if
+            Packed.elementwise packed && packed.skip = [||]
+            && (packed.iteration = C.Region.Zip || Array.length packed.sources = 1)
+          then begin
+            let inputs =
+              Array.map
+                (fun (residual, term) ->
+                  Option.bind (argument residual term) (fun index ->
+                      if index < 0 || index >= Array.length args then None else origins.(args.(index))))
+                packed.sources
+            in
+            if inputs <> [||] && inputs.(0) <> None && Array.for_all (( = ) inputs.(0)) inputs then begin
+              regions.(region) <- Result.get_ok (C.Region.rebuild packed ~origin:inputs.(0) ());
+              if writes.(result) = 1 then origins.(result) <- inputs.(0)
+            end
+          end
+      | _ -> ())
+    program.body;
+  { program with regions }
+
+let lower ?value ?trace ?(strict = false) ?budget ?lowered root =
+  let result =
+    lower_with ?value ?trace ?budget ?lowered ~strict
+      ~region_allowed:(fun _ -> true)
+      ~draw:None (Lazy.from_val root)
+  in
+  if static_sop root then Result.map count_origins result
+  else result
 
 let lower_draw ?(region_allowed = fun _ -> true) ~root build =
   lower_with ~strict:false ~region_allowed ~draw:(Some build) root

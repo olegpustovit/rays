@@ -42,6 +42,10 @@ val supported_gpu_noise_octaves :
 val finite_float32 : float -> bool
 (** Limits shared by packed compilation and GPU form qualification. *)
 
+val error_status : string -> string -> int
+(** Compute status bit for an explicit error's code and message. Unknown errors use the existing
+    generic kernel-error bit. *)
+
 val scalar_width : Ty.t -> int option
 (** Register widths for Float/Int/Bool and Vec2/3/4 expressions. *)
 

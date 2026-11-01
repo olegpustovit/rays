@@ -41,13 +41,18 @@ val marks : t -> Marks_scene.gpu
 (* The [Marks]-family sources of the GPU mark sets of a frame, one per slot (at most 64), each
    owning the uploads of its CPU attributes and borrowing its GPU ones. *)
 
-val display : t -> Rdk.Geometry.t -> (string * bool * (unit -> unit)) option
+val display : t -> Rdk.Geometry.t -> (string * bool * int option * int * (unit -> unit)) option
 (** {!Rdk_rays.Surface.scene3}'s [device]: a point cloud's P (and N) this workspace's device holds,
     settled and unread, pinned in its pool and registered as the renderer's device positions (the
-    key, whether N is bound, and what the mesh keeps). A triangle mesh without N binds the normals
-    the host display would compute, made from P on the device ({!Flow_gpu.Host.normals}). It is
-    released two {!frame}s after it is dropped: its key left out of [keep], or its mesh collected.
-    [None] (draw the host copy) otherwise. Initial domain. *)
+    key, whether N is bound, device triangle index count if any, colour width, and what the mesh
+    keeps). Resident triangle/quad topology is triangulated from its positions on device; point Cd
+    is borrowed as float3/float4. A triangle mesh without N binds the normals the host display would
+    compute, made from P on the device ({!Flow_gpu.Host.normals}). It is released two {!frame}s
+    after it is dropped: its key left out of [keep], or its mesh collected. [None] (draw the host
+    copy) otherwise. Initial domain. *)
+
+val display_refusal : t -> string option
+(** The last initial-domain display attempt's host-fallback reason, or [None] on success. *)
 
 val frame : ?keep:string list -> t -> unit
 (** One presented frame (initial domain): [keep] is every display key the frame's scenes still draw,

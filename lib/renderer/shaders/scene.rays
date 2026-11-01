@@ -3,7 +3,10 @@
 ; Scene3: a vertex is a 24-byte packed record (position,
 ; normal as floats, colour and uv in the 12-byte attribute record), or with surface[79] set (a
 ; device's positions) packed float3 positions in buffer 0 and, with surface[80], packed float3
-; normals in buffer 1 (else the normal is (0, 0, 1), as a record without normals); surface[83] says whether the draw
+; normals in buffer 1 (else the normal is (0, 0, 1), as a record without normals). With surface[81]
+; set to 3 or 4, buffer 4 carries packed float3/float4 colours, rounded to host Color bytes; UV is zero.
+; With surface[81] set to -1 the default is constant opaque white/zero UV, with no attribute payload.
+; surface[83] says whether the draw
 ; is instanced (48 floats an instance). surface holds the transforms (0 clip, 16 world, 32 normal) and
 ; the material and lights (from 48). The record and attribute buffers are read as floats and as words,
 ; so each is bound twice; the texture is 6 (sampler 7), the binding after the six buffers.
@@ -24,6 +27,21 @@
 (defn unpack :context value [(w : int)]
   [(/ (float (int/and (int/shr w 24) 255)) 255.) (/ (float (int/and (int/shr w 16) 255)) 255.)
    (/ (float (int/and (int/shr w 8) 255)) 255.) (/ (float (int/and w 255)) 255.)])
+; Match the host mesh's 8-bit Color channels before interpolation.
+; FMA keeps the multiplication residual: float32 0.7 * 255 rounds to 178.5,
+; but its exact product is below the host's half-byte boundary.
+(defn color-byte :context value [(v : float)]
+  (let* [x (min 1. (max 0. v))
+         scaled (* x 255.)
+         whole (floor scaled)
+         fraction (- scaled (float whole))
+         error (fma x 255. (* scaled -1.))]
+    (int/add whole (if (or (> fraction 0.5) (and (= fraction 0.5) (>= error 0.))) 1 0))))
+(defn resident-color :context value [(channels : (array float)) (at : int) (lanes : int)]
+  (unpack (int/or (int/shl (color-byte (array/nth channels at)) 24)
+    (int/or (int/shl (color-byte (array/nth channels (int/add at 1))) 16)
+      (int/or (int/shl (color-byte (array/nth channels (int/add at 2))) 8)
+        (if (int/eq lanes 4) (color-byte (array/nth channels (int/add at 3))) 255))))))
 ; row [base] of a row-major 4x4 dotted with v, as MSL's dot(float4)
 (defn row :context value [(m : (array float)) (base : int) (v : vec4)]
   (fma v.w (array/nth m (int/add base 3)) (fma v.z (array/nth m (int/add base 2))
@@ -48,10 +66,16 @@
          clip (if instanced (transform instances base local) (transform surface 0 local))
          world (if instanced (transform instances (int/add base 16) local) (transform surface 16 local))
          turned (if instanced (transform instances (int/add base 32) normal) (transform surface 32 normal))
-         a (int/mul vid 3)]
+         a (int/mul vid 3)
+         color-width (int (array/nth surface 81))
+         c (int/mul vid color-width)]
     {:position clip
-     :color (unpack (array/nth attribute-words a))
-     :uv [(array/nth attributes (int/add a 1)) (array/nth attributes (int/add a 2))]
+     :color (if (int/lt color-width 0) [1. 1. 1. 1.]
+            (if (int/gt color-width 0)
+              (resident-color attributes c color-width)
+              (unpack (array/nth attribute-words a))))
+     :uv (if (not (int/eq color-width 0)) [0. 0.]
+             [(array/nth attributes (int/add a 1)) (array/nth attributes (int/add a 2))])
      :world (xyz world) :normal (unit3 (xyz turned))}))
 
 (defn scene3-points-vertex :context value

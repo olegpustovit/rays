@@ -130,6 +130,10 @@ let releasers value =
     (Option.map
        (fun r -> (Packed.Float3.data_id value.positions, r))
        (Packed.Float3.releaser value.positions))
+  @ Option.to_list
+      (Option.map
+         (fun r -> (Topology.data_id value.topology, r))
+         (Topology.releaser value.topology))
   @ List.filter_map
       (fun a -> Option.map (fun r -> (Attribute.storage_id a, r)) (Attribute.releaser a))
       (Array.to_list value.attributes)

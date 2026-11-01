@@ -592,3 +592,66 @@ let run_host () =
     "undo did not give the host camera back";
   List.iter E.close [ env; no_camera; undone ];
   print_endline "scene tree: host camera deletion survives Save and reload"
+
+let run_surface_errors () =
+  let module Host = Rays_editor__.Loop_model in
+  let current =
+    ref
+      (Host.create ~ui_text_size:11 ~await:true
+         ~workspace:
+           (Ws_fixture.of_text
+              {|(workspace surface_error
+      (graph geo :context sop (let* [box (sop/box :size [1 1 1])] box))
+      (graph scene :context scene (scene/root (scene/geometry (ref geo)))))|})
+         ~prepare:Editor_prepare.surface
+         ~draw:(fun _ _ -> Scene.D3.empty)
+         ()
+      |> Result.get_ok)
+  in
+  let calls = ref 0 and message = "surface conversion refused at draw time" in
+  current :=
+    {
+      !current with
+      draw =
+        (fun _ prepared ->
+          incr calls;
+          let lo, hi =
+            Option.get (Rdk_rays.Geometry_view.bounds prepared.Rays_editor__.Cook.geometry)
+          in
+          if hi.x -. lo.x < 1.5 then raise (Rdk_rays.Surface.Conversion_error message);
+          Rdk_rays.Surface.scene3 prepared.surface);
+    };
+  Fun.protect
+    ~finally:(fun () -> Rays_editor__.Editor_loop.close !current)
+    (fun () ->
+      current := Rays_editor__.Editor_loop.update !current (frame 0);
+      check
+        (Option.fold ~none:false ~some:(fun s -> contains s message) !current.context_error)
+        "draw-time conversion error was hidden";
+      check
+        (match !current.resolved with Some (_, _, _, None) -> true | _ -> false)
+        "a draw error polluted the cached scene-resolution diagnostic";
+      check
+        (Editor_document.Document.Int_map.exists
+           (fun _ (_, _, _, _, error) -> error = Some message)
+           !current.drawn)
+        "the failed drawing did not retain its conversion cause";
+      current := { !current with rendered = None; context_error = None };
+      current := Rays_editor__.Editor_loop.update !current (frame 1);
+      current := Rays_editor__.Editor_loop.update !current (frame 2);
+      check (!calls = 1) "cached conversion error repeated the draw";
+      check
+        (Option.fold ~none:false ~some:(fun s -> contains s message) !current.context_error)
+        "cached drawing lost its conversion error";
+      let value = List.hd (Flow.Syntax.parse "[2 2 2]" |> Result.get_ok) in
+      current :=
+        Host.edit !current
+          (Flow_graph.Flow_edit.Set_arg
+             { node = [ "geo"; "box" ]; key = Kw "size"; sub = []; value })
+        |> Result.get_ok;
+      current := Rays_editor__.Editor_loop.update !current (frame 3);
+      check
+        (!calls = 2 && !current.context_error = None)
+        "a corrected prepared object kept its old conversion error");
+  print_endline
+    "scene conversion: typed draw error persists with cached geometry and clears after correction"

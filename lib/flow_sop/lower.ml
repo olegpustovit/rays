@@ -40,6 +40,7 @@ type graph = {
 
 type t = {
   gpu : Flow_ir.Gpu.config;
+  defer : bool;
   graphs : graph list;
   factories : Edit.factory list;
   compiled_ids : int Path_map.t;
@@ -462,7 +463,7 @@ let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
       ~dependencies:(Sop.Context.Dependencies.union (Sop.Node.dependencies base) reads)
       ~input_policy:(Sop.Node.Build.input_policy base)
       ~inputs:(Sop.Node.Build.input_array base)
-      (fun ~node_id:_ context payloads ->
+      (fun ~node_id context payloads ->
         let node =
           match Atomic.get last with
           | Some (k, node) when k = key context -> node
@@ -471,20 +472,105 @@ let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
               Atomic.set last (Some (key context, node));
               node
         in
+        let context =
+          Sop.Context.with_cpu_consumers context ~node:(Sop.Node.id node)
+            (Sop.Context.cpu_consumers context node_id)
+        in
         Sop.Node.Build.cook node context payloads)
+    |> Sop.Node.Build.with_input_use (Sop.Node.input_use base)
     |> Sop.Node.Build.with_facts (Sop.Node.facts base)
 
-let rec geometry_arrays_node ?check ~profile ~strict_body ~reference ~approx ~kernel_source ?host
-    ?state ?elems ~operation ~args ~sources inputs =
+(* Whole-chain placement of a resident mesh scope, measured rather than assumed. Each route's cook
+   seconds are kept per program key and output size. The CPU alternative adds the upload of the mesh
+   it displays, the device one the host materialisation its CPU readers force. The first cook of a
+   key runs on the CPU; the next runs the device route (its mesh is the real result) so both are
+   measured, then [Flow_ir.Cost.choose] decides. A new output size starts the measurement over. *)
+module Chain = struct
+  module T = Lru.Make (String)
+
+  type evidence = {
+    backend : Flow_ir.Gpu.backend option;
+    mutable floats : int;
+    mutable points : int;
+    mutable cpu : float option;
+    mutable device : float option;
+  }
+
+  let table = T.create 256
+  let lock = Mutex.create ()
+
+  let place ~(gpu : Flow_ir.Gpu.config) ~profile ~owner ~key ~readers =
+    if gpu.policy = Flow_ir.Gpu.Qualification then (true, fun _ ~device:_ _ -> ())
+    else
+      let report ?(points = None) reason cpu_seconds device_seconds =
+        Flow_ir.Profile.place (Some profile)
+          { owner; count = points; reason; cpu_seconds; device_seconds; cpu_consumers = readers }
+      in
+      let evidence () =
+        Mutex.protect lock (fun () ->
+            match T.find_opt table key with
+            | Some ev when ev.backend == gpu.backend -> ev
+            | _ ->
+                let ev = { backend = gpu.backend; floats = -1; points = 0; cpu = None; device = None } in
+                T.add table key ev;
+                ev)
+      in
+      let ev = evidence () in
+      let decide () =
+        Mutex.protect lock (fun () ->
+            let cpu_consumers = Option.value ~default:0 readers in
+            let moved = Flow_ir.Cost.readback ~count:(max ev.floats 0) ~width:1 in
+            let cpu_seconds = Option.map (fun s -> s +. moved) ev.cpu
+            and device_seconds =
+              Option.map (fun s -> if cpu_consumers = 0 then s else s +. moved) ev.device
+            in
+            let reason =
+              Flow_ir.Cost.choose ~cpu_seconds ~device_seconds ~resident:false ~cpu_consumers
+            in
+            report ~points:(Some ev.points) reason cpu_seconds device_seconds;
+            reason)
+      in
+      let record geometry ~device seconds =
+        Mutex.protect lock (fun () ->
+            let floats =
+              (Rdk.Geometry.point_count geometry * 9) + (Rdk.Geometry.primitive_count geometry * 6)
+            in
+            if floats <> ev.floats then begin
+              ev.floats <- floats;
+              ev.points <- Rdk.Geometry.point_count geometry;
+              ev.cpu <- None;
+              ev.device <- None
+            end;
+            if device then ev.device <- Some seconds else ev.cpu <- Some seconds);
+        if readers <> None then ignore (decide ())
+      in
+      match (gpu.backend, readers) with
+      | None, _ ->
+          report No_cost_evidence None None;
+          (false, record)
+      | _, None ->
+          report Missing_consumer None None;
+          (false, record)
+      | Some _, Some _ -> (
+          match (ev.cpu, ev.device) with
+          | Some _, Some _ -> (Flow_ir.Cost.on_device (decide ()), record)
+          | Some _, None -> (true, record)
+          | None, _ ->
+              report No_cost_evidence None None;
+              (false, record))
+end
+
+let rec geometry_arrays_node ?check ~gpu ~profile ~clock ~strict_body ~reference ~approx ~kernel_source
+    ?host ?state ?elems ~operation ~args ~sources inputs =
   per_context (E.Record args) (fun specialize ->
       let args =
         match specialize (E.Record args) with E.Record args -> args | _ -> assert false
       in
-      geometry_arrays_node_in ?check ~profile ~strict_body ~reference ~approx ~kernel_source ?host
-        ?state ?elems ~operation ~args ~sources inputs)
+      geometry_arrays_node_in ?check ~gpu ~profile ~clock ~strict_body ~reference ~approx ~kernel_source
+        ?host ?state ?elems ~operation ~args ~sources inputs)
 
-and geometry_arrays_node_in ?(check = true) ~profile ~strict_body ~reference ~approx ~kernel_source
-    ?(host = false) ?state ?elems ~operation ~args ~sources inputs =
+and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~reference ~approx
+    ~kernel_source ?(host = false) ?state ?elems ~operation ~args ~sources inputs =
   let data = geometry_arrays_data args in
   let program =
     Attribute_kernel.prepare ~profile ~strict:strict_body ~approx ~sink:Flow_ir.Sop_input ~sources
@@ -514,9 +600,20 @@ and geometry_arrays_node_in ?(check = true) ~profile ~strict_body ~reference ~ap
          else Sop.Node.Generator)
       ~dependencies:(Attribute_kernel.dependencies data)
       ~inputs:(Array.of_list inputs)
-      (fun ~node_id:_ context geometries ->
+      (fun ~node_id context geometries ->
         let cancelled () = Sop.Context.cancelled context in
         let error () = Error (Diagnostic.error ~code:"E_CANCELLED" "Mesh kernel cancelled.") in
+        let eligible =
+          (not reference) && gpu.Flow_ir.Gpu.fast
+          && List.mem operation [ "sop/mesh"; "sop/mesh_planes" ]
+        in
+        let device, record =
+          if eligible then
+            Chain.place ~gpu ~profile ~owner:([ operation; Digest.to_hex (Digest.string parameters) ], [])
+              ~key:parameters ~readers:(Sop.Context.cpu_consumers context node_id)
+          else (false, fun _ ~device:_ _ -> ())
+        in
+        let began = clock () and on_device = ref false in
         let geometry id =
           Option.map (fun index -> geometries.(index)) (List.find_index (( = ) id) sources)
         in
@@ -524,81 +621,119 @@ and geometry_arrays_node_in ?(check = true) ~profile ~strict_body ~reference ~ap
           if cancelled () then error ()
           else
             Result.bind program (fun program ->
-                Result.bind
-                  (Flow_ir.Executor.force ?state ?elems ~reference ~strict:strict_body
-                     ~resolve:(Attribute_kernel.resolve ~context ~geometry)
-                     program ~live:(Sop.Context.input context))
-                  (function
-                    | E.Record fields ->
-                        if cancelled () then error ()
-                        else
-                          let result =
-                            if operation = "sop/with_planes" then
-                              match List.assoc_opt "geometry" args with
-                              | Some (E.Deferred (ty, id))
-                                when ty = Ty.geometry && geometry id <> None ->
-                                  Attribute_kernel.with_planes ~grain:(Sop.Context.grain context)
-                                    (Option.get (geometry id))
-                                    fields
-                              | _ ->
-                                  Error
-                                    (Diagnostic.error ~code:"E_DATA_SOURCE"
-                                       "With planes needs a cooked geometry.")
-                            else if operation = "sop/concat" then
-                              let rec collect result = function
-                                | [] -> Ok (List.rev result)
-                                | E.No_geo :: rest -> collect result rest
-                                | E.Deferred (ty, id) :: rest when ty = Ty.geometry -> (
-                                    match geometry id with
-                                    | Some value -> collect (value :: result) rest
-                                    | None ->
-                                        Error
-                                          (Diagnostic.error ~code:"E_DATA_SOURCE"
-                                             "Concat needs cooked source geometries."))
-                                | _ ->
-                                    Error
-                                      (Diagnostic.error ~code:"E_CONCAT_TYPE"
-                                         "Concat sources must be a geometry list.")
-                              in
-                              Result.bind
-                                (match List.assoc_opt "sources" args with
-                                | Some (E.List values) -> collect [] (Array.to_list values)
-                                | _ ->
-                                    Error
-                                      (Diagnostic.error ~code:"E_CONCAT_TYPE"
-                                         "Concat sources must be a geometry list."))
-                                (fun sources ->
-                                  Topology_kernel_impl.concat
-                                    ~cancel:(Sop.Context.cancel_token context)
-                                    ~grain:(Sop.Context.grain context) ~sources fields)
-                            else if operation <> "sop/remap" then Topology_kernel.mesh fields
-                            else
-                              let cooked name =
-                                match List.assoc_opt name args with
-                                | Some (E.Deferred (ty, id)) when ty = Ty.geometry -> (
-                                    match geometry id with
-                                    | Some geometry -> Ok geometry
-                                    | None ->
-                                        Error
-                                          (Diagnostic.error ~code:"E_DATA_SOURCE"
-                                             "Remap needs two cooked geometries."))
+                let force ?resident () =
+                  Flow_ir.Executor.force ?resident ?state ?elems ~reference ~strict:strict_body
+                    ~resolve:(Attribute_kernel.resolve ~context ~geometry)
+                    program ~live:(Sop.Context.input context)
+                in
+                let scope =
+                  if device then Option.bind gpu.backend (fun backend -> backend.residency ~fast:true)
+                  else None
+                in
+                match scope with
+                | Some scope ->
+                    on_device := true;
+                    Fun.protect ~finally:scope.executor.close (fun () ->
+                        Result.bind (force ~resident:scope.executor ()) (function
+                          | E.Record fields ->
+                              if cancelled () then error ()
+                              else
+                                let result =
+                                  match Topology_kernel_impl.mesh_resident scope fields with
+                                  | Some result -> result
+                                  | None ->
+                                      Topology_kernel.mesh
+                                        (List.map
+                                           (fun (k, v) ->
+                                             (k, Flow_ir.Core_exec.host_value scope.executor v))
+                                           fields)
+                                in
+                                Result.bind result (fun geometry ->
+                                    if cancelled () then begin
+                                      List.iter
+                                        (fun (_, release) -> release ~held:false)
+                                        (Rdk.Geometry.releasers geometry);
+                                      error ()
+                                    end
+                                    else Ok geometry)
+                          | _ ->
+                              Error
+                                (Diagnostic.error ~code:"E_TOPOLOGY_TYPE"
+                                   "Mesh data must be a record.")))
+                | None ->
+                    Result.bind (force ()) (function
+                      | E.Record fields ->
+                          if cancelled () then error ()
+                          else
+                            let result =
+                              if operation = "sop/with_planes" then
+                                match List.assoc_opt "geometry" args with
+                                | Some (E.Deferred (ty, id))
+                                  when ty = Ty.geometry && geometry id <> None ->
+                                    Attribute_kernel.with_planes ~grain:(Sop.Context.grain context)
+                                      (Option.get (geometry id))
+                                      fields
                                 | _ ->
                                     Error
                                       (Diagnostic.error ~code:"E_DATA_SOURCE"
-                                         "Remap needs two cooked geometries.")
-                              in
-                              Result.bind (cooked "source") (fun source ->
-                                  Result.bind (cooked "target") (fun target ->
-                                      Topology_kernel_impl.remap
-                                        ~cancel:(Sop.Context.cancel_token context)
-                                        ~grain:(Sop.Context.grain context) ~source ~target fields))
-                          in
-                          Result.bind result (fun geometry ->
-                              if cancelled () then error () else Ok geometry)
-                    | _ ->
-                        Error
-                          (Diagnostic.error ~code:"E_TOPOLOGY_TYPE" "Mesh data must be a record.")))
+                                         "With planes needs a cooked geometry.")
+                              else if operation = "sop/concat" then
+                                let rec collect result = function
+                                  | [] -> Ok (List.rev result)
+                                  | E.No_geo :: rest -> collect result rest
+                                  | E.Deferred (ty, id) :: rest when ty = Ty.geometry -> (
+                                      match geometry id with
+                                      | Some value -> collect (value :: result) rest
+                                      | None ->
+                                          Error
+                                            (Diagnostic.error ~code:"E_DATA_SOURCE"
+                                               "Concat needs cooked source geometries."))
+                                  | _ ->
+                                      Error
+                                        (Diagnostic.error ~code:"E_CONCAT_TYPE"
+                                           "Concat sources must be a geometry list.")
+                                in
+                                Result.bind
+                                  (match List.assoc_opt "sources" args with
+                                  | Some (E.List values) -> collect [] (Array.to_list values)
+                                  | _ ->
+                                      Error
+                                        (Diagnostic.error ~code:"E_CONCAT_TYPE"
+                                           "Concat sources must be a geometry list."))
+                                  (fun sources ->
+                                    Topology_kernel_impl.concat
+                                      ~cancel:(Sop.Context.cancel_token context)
+                                      ~grain:(Sop.Context.grain context) ~sources fields)
+                              else if operation <> "sop/remap" then Topology_kernel.mesh fields
+                              else
+                                let cooked name =
+                                  match List.assoc_opt name args with
+                                  | Some (E.Deferred (ty, id)) when ty = Ty.geometry -> (
+                                      match geometry id with
+                                      | Some geometry -> Ok geometry
+                                      | None ->
+                                          Error
+                                            (Diagnostic.error ~code:"E_DATA_SOURCE"
+                                               "Remap needs two cooked geometries."))
+                                  | _ ->
+                                      Error
+                                        (Diagnostic.error ~code:"E_DATA_SOURCE"
+                                           "Remap needs two cooked geometries.")
+                                in
+                                Result.bind (cooked "source") (fun source ->
+                                    Result.bind (cooked "target") (fun target ->
+                                        Topology_kernel_impl.remap
+                                          ~cancel:(Sop.Context.cancel_token context)
+                                          ~grain:(Sop.Context.grain context) ~source ~target fields))
+                            in
+                            Result.bind result (fun geometry ->
+                                if cancelled () then error () else Ok geometry)
+                      | _ ->
+                          Error
+                            (Diagnostic.error ~code:"E_TOPOLOGY_TYPE" "Mesh data must be a record.")))
         in
+        if eligible && not (cancelled ()) then
+          Result.iter (fun geometry -> record geometry ~device:!on_device (clock () -. began)) result;
         Result.map (fun geometry -> Sop.Node.Build.{ geometry; instances = None }) result)
   in
   Sop.Node.Build.with_facts
@@ -997,7 +1132,10 @@ let build_call ~gpu ~lower_call ~record_profile ~checked ~(definition : Workspac
             })
           definition.validations
       in
-      let reached = Context_kernel.reachable_defs checked (body :: validations) in
+      let normalizers =
+        List.map (fun (_, term) -> { body with body = term }) definition.normalizers
+      in
+      let reached = Context_kernel.reachable_defs checked ((body :: validations) @ normalizers) in
       let library =
         {
           checked with
@@ -1485,7 +1623,12 @@ let indexed value =
    is not folded: the CPU would compute it again with every recook of the chain, where its own
    node is cooked once and cached; a device makes it from the element index instead of an upload
    ([indexed_fold] below). *)
-let fold_writes ~device (plan : E.plan) =
+let static_cpu_data data =
+  (not (E.frame_dependent data || E.state_dependent data))
+  && Attribute_kernel.sources data = []
+  && Attribute_kernel.context_reads data = Sop.Context.Dependencies.static
+
+let fold_writes ~device ~defer (plan : E.plan) =
   let nodes = Array.copy plan.nodes in
   let count = Array.length nodes in
   let uses = Array.make count 0 and templ = Array.make count false in
@@ -1631,19 +1774,26 @@ let fold_writes ~device (plan : E.plan) =
   (* An indexed earlier write (a grid's P) folds only where a device makes it, and only into a chain
      that writes its attribute again: otherwise the chain's output would carry it, a new array with
      every recook (a driven noise would make P new each frame, and every reader of P cook again). *)
-  let indexed_fold (u : E.node) id =
-    (* a fused write's indexed entries were decided when they folded into it *)
-    List.mem_assoc fused_chain u.args
-    || (let values = List.assoc "values" u.args in
-        not (indexed values && Attribute_kernel.reads values = []))
-    || (device && List.mem (text u "attribute") (List.map Option.some (writes_from id)))
+  let indexed_fold (u : E.node) (w : E.node) id =
+    let values = List.assoc "values" u.args in
+    let fixed = (defer || device) && static_cpu_data values
+    and next_fixed = static_cpu_data (List.assoc "values" w.args) in
+    let rewritten =
+      device && List.mem (text u "attribute") (List.map Option.some (writes_from id))
+    in
+    (* Keep a static prefix cached when the following write changes. An indexed
+       field rewritten later can still fold into that device chain. *)
+    ((not (fixed && not next_fixed)) || rewritten)
+    && (List.mem_assoc fused_chain u.args
+       || (not (indexed values && Attribute_kernel.reads values = []))
+       || (fixed && next_fixed) || rewritten)
   in
   let fold id (w : E.node) =
     match (List.assoc_opt "geometry" w.args, text w "attribute") with
     | Some (E.Deferred (_, g)), Some name when point_write w -> (
         match back name g [] [] with
         | None -> ()
-        | Some (u, _, _, _) when not (indexed_fold u id) -> ()
+        | Some (u, _, _, _) when not (indexed_fold u w id) -> ()
         | Some (u, base, chain, dels) ->
             let deleted = List.filter_map pattern dels
             and reads = Attribute_kernel.reads (List.assoc "values" w.args) in
@@ -1898,6 +2048,7 @@ module Lowerer (P : sig
   val tag_base : int
   val reference : bool
   val gpu : Flow_ir.Gpu.config
+  val defer : bool
   val strict_body : bool
   val defer_body_errors : bool
   val kernel_bindings : (E.fn * int) list
@@ -1914,6 +2065,7 @@ module Lowerer (P : sig
     ?tag_base:int ->
     ?reference:bool ->
     ?gpu:Flow_ir.Gpu.config ->
+    ?defer:bool ->
     ?strict_body:bool ->
     ?defer_body_errors:bool ->
     ?kernel_bindings:(E.fn * int) list ->
@@ -1928,6 +2080,7 @@ end) =
 struct
   open P
 
+  let deferred_cpu data = defer && E.is_live data && static_cpu_data data
   let image_origins = Hashtbl.create 16
 
   let observe producer residual =
@@ -1942,7 +2095,9 @@ struct
     Hashtbl.replace image_origins key origin
 
   let checked, evaluated =
-    match Flow_ir.qualify_workspace ~record:true ?inputs ~observe ~gpu checked with
+    match
+      Flow_ir.qualify_workspace ~record:true ~replay:true ~defer ?inputs ~observe ~gpu checked
+    with
     | Ok evaluated -> evaluated
     | Error diagnostic when defer_body_errors -> raise (Diagnostic.Error diagnostic)
     | Error diagnostic -> raise (Diagnostic.Error diagnostic)
@@ -2081,7 +2236,9 @@ struct
            E.structure data;
            string_of_bool reference;
            string_of_bool strict_body;
+           string_of_bool defer;
            string_of_bool gpu.fast;
+           string_of_bool (gpu.policy = Qualification);
          ]
         @ List.map input_key inputs)
     in
@@ -2105,7 +2262,7 @@ struct
       ("arrays " ^ operation ^ Option.fold ~none:"" ~some:string_of_bool host)
       (E.Record args) inputs
     @@ fun () ->
-    geometry_arrays_node ~check:strict_body ~profile
+    geometry_arrays_node ~gpu ~check:strict_body ~profile ~clock
       ~strict_body:(strict_body || inlined node)
       ~reference ~approx:checked.approx ~kernel_source:(kernel_source_of node) ?host ?state ?elems
       ~operation ~args ~sources inputs
@@ -2117,7 +2274,9 @@ struct
       match specialize (E.Residual residual) with E.Residual r -> r | _ -> assert false
     in
     let program =
-      match Flow_ir.Core_lower.lower ~strict:true ~budget:32768 residual with
+      match
+        Flow_ir.Core_lower.lower ~value:(E.Residual residual) ~strict:true ~budget:32768 residual
+      with
       | Ok program -> program
       | Error name -> fail "E_PACKED_FORM" ("Cooked selection cannot compile " ^ name ^ ".")
     in
@@ -2127,7 +2286,24 @@ struct
       Sop.Node.Build.make ~operation:"flow.geometry_select" ~version:1
         ~parameters:(Lazy.force kernel_source) ~cook_mode:Sop.Node.Generic ~inputs
         ~dependencies:(Attribute_kernel.dependencies (E.Residual residual))
-        (fun ~node_id:_ context payloads ->
+        (fun ~node_id context payloads ->
+          let eligible =
+            (not reference) && gpu.Flow_ir.Gpu.fast
+            && Array.length program.Flow_ir.Core.state_slots = 0
+          in
+          let device, record =
+            if eligible then
+              let key = Lazy.force kernel_source ^ Flow.Value.key_of ~residual:E.Residual.residual_id (E.Residual residual) in
+              Chain.place ~gpu ~profile
+                ~owner:([ "flow.geometry_select"; Digest.to_hex (Digest.string key) ], [])
+                ~key ~readers:(Sop.Context.cpu_consumers context node_id)
+            else (false, fun _ ~device:_ _ -> ())
+          in
+          let began = clock () in
+          let scope =
+            if device then Option.bind gpu.backend (fun backend -> backend.residency ~fast:true)
+            else None
+          in
           let session =
             lazy
               (let session =
@@ -2137,7 +2313,9 @@ struct
                session)
           in
           Fun.protect
-            ~finally:(fun () -> if Lazy.is_val session then Sop.Session.close (Lazy.force session))
+            ~finally:(fun () ->
+              Option.iter (fun (scope : Flow_ir.Gpu.residency) -> scope.executor.close ()) scope;
+              if Lazy.is_val session then Sop.Session.close (Lazy.force session))
             (fun () ->
               let handles = Hashtbl.create 16
               and geometries = Hashtbl.create 16
@@ -2650,12 +2828,55 @@ struct
                   | value -> Attribute_kernel.resolve ~context ~geometry value
                 with Diagnostic.Error d -> Error d
               in
-              let result =
-                Flow_ir.Core_exec.execute ~resolve
+              let run scope =
+                let host_source =
+                  Option.map
+                    (fun (scope : Flow_ir.Gpu.residency) -> function
+                      | E.Source ("$core/operator", ty, args)
+                        when ty = Ty.geometry
+                             && List.assoc_opt "$name" args = Some (E.Text "sop/mesh") -> (
+                          let points =
+                            Option.bind (List.assoc_opt "points" args) scope.executor.count
+                          in
+                          if points = None then Ok None
+                          else if Sop.Context.cancelled context then
+                            error "E_CANCELLED" "Mesh kernel cancelled."
+                          else
+                            match Topology_kernel_impl.mesh_resident scope args with
+                            | None -> Ok None
+                            | Some result ->
+                                Result.bind result (fun geometry ->
+                                    if Sop.Context.cancelled context then begin
+                                      List.iter
+                                        (fun (_, release) -> release ~held:false)
+                                        (Rdk.Geometry.releasers geometry);
+                                      error "E_CANCELLED" "Mesh kernel cancelled."
+                                    end
+                                    else
+                                      Ok
+                                        (Some
+                                           (register_output ty
+                                              {
+                                                payload = Sop.Payload.Geometry geometry;
+                                                instances = None;
+                                              }))))
+                      | _ -> Ok None)
+                    scope
+                in
+                Flow_ir.Core_exec.execute ?host_source
+                  ?resident:(Option.map (fun (s : Flow_ir.Gpu.residency) -> s.executor) scope)
+                  ~resolve
                   ~force:(fun program ->
                     Flow_ir.Packed.force ~strict:true ~resolve program
                       ~live:(Sop.Context.input context))
                   prepared ~live:(Sop.Context.input context)
+              in
+              let result =
+                match run scope with
+                | Error _ when scope <> None && not (Sop.Context.cancelled context) ->
+                    Option.iter (fun (s : Flow_ir.Gpu.residency) -> s.executor.close ()) scope;
+                    run None
+                | result -> result
               in
               let result =
                 Result.bind result (function
@@ -2665,6 +2886,11 @@ struct
               in
               Result.map
                 (fun (output : Sop.Session.output) ->
+                  if eligible && not (Sop.Context.cancelled context) then
+                    (match output.payload with
+                    | Sop.Payload.Geometry geometry ->
+                        record geometry ~device:(scope <> None) (clock () -. began)
+                    | _ -> ());
                   Sop.Node.Build.{ payload = output.payload; instances = output.instances })
                 result))
     in
@@ -2673,18 +2899,20 @@ struct
   let attribute_node ?node ?state ?elems ?selection ?default ?guard ?(prior = [])
       ?(owner = Rdk.Attribute.Point) ?(kind = "vec3") ?(deletes = []) ~name ~values ~sources inputs
       =
+    let data =
+      E.Record
+        ([ ("values", values) ]
+        @ List.map (fun (_, _, v) -> ("prior", v)) prior
+        @ Option.to_list (Option.map (fun v -> ("when", v)) guard)
+        @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
+        @ Option.to_list (Option.map (fun v -> ("default", v)) default))
+    in
     guarded (match node with Some (n : E.node) -> guards_of fused_guards n.args | None -> [])
     @@ reuse ?node ?state ?elems
          (Printf.sprintf "attribute %d %s %s %s %s" (Hashtbl.hash owner) kind name
             (String.concat "," (List.map (fun (o, p) -> o ^ ":" ^ p) deletes))
             (String.concat "," (List.map (fun (n, k, _) -> n ^ ":" ^ k) prior)))
-         (E.Record
-            ([ ("values", values) ]
-            @ List.map (fun (_, _, v) -> ("prior", v)) prior
-            @ Option.to_list (Option.map (fun v -> ("when", v)) guard)
-            @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
-            @ Option.to_list (Option.map (fun v -> ("default", v)) default)))
-         inputs
+         data inputs
     @@ fun () ->
     attribute_node ~check:strict_body
       ~strict_body:(strict_body || inlined node)
@@ -2703,7 +2931,7 @@ struct
 
   let plan =
     if reference then evaluated.plan
-    else fold_writes ~device:(gpu.fast && gpu.backend <> None) evaluated.plan
+    else fold_writes ~device:(gpu.fast && gpu.backend <> None) ~defer evaluated.plan
 
   let external_kernel fn =
     List.find_map
@@ -3243,6 +3471,7 @@ struct
             ~cook_mode:(Sop.Node.Passthrough 0) ~dependencies:Sop.Context.Dependencies.static
             ~inputs:(Array.of_list inputs) (fun ~node_id:_ _ payloads ->
               Ok Sop.Node.Build.{ payload = payloads.(0); instances = None })
+          |> Sop.Node.Build.with_input_use (Sop.Node.Forward 0)
           |> Sop.Node.Build.with_facts
                Sop.Node.
                  {
@@ -3929,7 +4158,12 @@ struct
                    values)
             in
             let eligible =
-              Attribute_kernel.sources values = []
+              (* Stateless fast writes choose placement in their cook, where
+                 downstream consumers are known. CPU-owned frame folds keep
+                 their existing pre-cook state advancement. *)
+              ((not gpu.fast) || gpu.backend = None || E.state_dependent (attribute_data n.args))
+              && (not (deferred_cpu (attribute_data n.args)))
+              && Attribute_kernel.sources values = []
               && Flow_ir.Executor.root_is_packed_or_readback program
             in
             if (not eligible) && not (E.state_dependent (attribute_data n.args)) then nodes
@@ -4266,6 +4500,7 @@ struct
   let result =
     {
       gpu;
+      defer;
       graphs;
       factories = lisp_factories;
       card_node;
@@ -4299,8 +4534,8 @@ struct
 end
 
 let rec lower_checked ~factories ?(provenance_tags = true) ?(tag_base = 0) ?(reference = false)
-    ?(gpu = Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false)
-    ?(kernel_bindings = []) ?(clock = Unix.gettimeofday) ?on_profile
+    ?(gpu = Flow_ir.Gpu.default) ?(defer = false) ?(strict_body = false)
+    ?(defer_body_errors = false) ?(kernel_bindings = []) ?(clock = Unix.gettimeofday) ?on_profile
     ?(compiled_ids = Path_map.empty) ?(sites = []) ?inputs checked =
   Phase_timer.measure "lower" (fun () ->
       try
@@ -4310,6 +4545,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(tag_base = 0) ?(ref
           let tag_base = tag_base
           let reference = reference
           let gpu = gpu
+          let defer = defer
           let strict_body = strict_body
           let defer_body_errors = defer_body_errors
           let kernel_bindings = kernel_bindings
@@ -4324,20 +4560,20 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(tag_base = 0) ?(ref
         Ok L.result
       with Diagnostic.Error diagnostic -> Error diagnostic)
 
-let of_checked ?(factories = Sop.Nodes.factories) ?provenance_tags ?reference ?gpu ?clock
+let of_checked ?(factories = Sop.Nodes.factories) ?provenance_tags ?reference ?gpu ?defer ?clock
     ?on_profile ?compiled_ids ?sites ?inputs checked =
   Result.bind
     (Encoded_parameters.checked checked)
-    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?clock ?on_profile ?compiled_ids
-       ?sites ?inputs)
+    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?defer ?clock ?on_profile
+       ?compiled_ids ?sites ?inputs)
 
-let workspace ?(factories = Sop.Nodes.factories) ?extra ?reference ?gpu ?clock ?on_profile
+let workspace ?(factories = Sop.Nodes.factories) ?extra ?reference ?gpu ?defer ?clock ?on_profile
     ?compiled_ids ?sites ?inputs source =
   Result.bind (Flow_catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
       match Flow_catalog.check_workspace ~ops:Operators.all catalog source with
       | Some checked, _ ->
-          of_checked ~factories ?reference ?gpu ?clock ?on_profile ?compiled_ids ?sites ?inputs
-            checked
+          of_checked ~factories ?reference ?gpu ?defer ?clock ?on_profile ?compiled_ids ?sites
+            ?inputs checked
       | None, diagnostics ->
           Error
             (match

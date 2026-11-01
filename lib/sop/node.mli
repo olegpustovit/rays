@@ -11,6 +11,15 @@ type cook_mode =
 type elementwise = Points | Primitives | None
 type topology = Preserved | Changed
 
+type input_use =
+  | Unknown
+  | Cpu
+  | Forward of int
+      (** Payload use, separate from output-sharing facts. [Cpu] is a CPU reader of each selected
+          input. [Forward i] only forwards input [i], without payload reads, and ignores other
+          payloads. [Unknown] supplies no placement proof. Owners must explicitly promise the use.
+      *)
+
 type facts = {
   cook_mode : cook_mode;
   elementwise : elementwise;
@@ -43,6 +52,7 @@ val parameter_key : t -> string
 
 val dependencies : t -> Context.Dependencies.t
 val inputs : t -> t list
+val input_use : t -> input_use
 val trace : t -> Diagnostic.trace
 
 val parameter_fields : t -> Param.field_view list
@@ -72,6 +82,7 @@ val apply_parameters : t -> (string * Param.value) list -> (t * Param.effects, s
     intact. *)
 
 module Build : sig
+  val with_input_use : input_use -> t -> t
   val fresh_id : unit -> int
 
   val with_facts : facts -> t -> t

@@ -1,0 +1,9 @@
+S6 region sculpture/faces#0 origin=none
+S6 region sculpture/positions origin=none
+S6 region sculpture/normals origin=none
+S6 region sculpture/colors origin=none
+S6 region sculpture/mesh#:primitive_offsets#0 origin=none
+S6 strict sculpture record: 5 regions, exact reference/one/eight-domain fields
+real 3.75
+user 2.99
+sys 0.61

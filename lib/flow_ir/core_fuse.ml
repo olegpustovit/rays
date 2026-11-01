@@ -253,6 +253,27 @@ and fuse ?(through_exact = false) (t : Core.Region.t) : Core.Region.t =
         |> Result.value ~default:t
       with Core_region.Unsupported -> t
 
+let rec resolved (residual, (term : W.term)) =
+  match term.node with
+  | W.Ref_binding (name, []) -> (
+      match List.assoc_opt name (E.Residual.residual_view residual).bindings with
+      | Some (E.Residual r) -> resolved (r, (E.Residual.residual_view r).term)
+      | Some value -> `Value value
+      | None -> `Term (residual, term))
+  | _ -> `Term (residual, term)
+
+let same_source a b =
+  match resolved a, resolved b with
+  | `Value a, `Value b -> a == b
+  | `Term (a, x), `Term (b, y) ->
+      not (E.state_dependent (E.Residual a) || E.state_dependent (E.Residual b))
+      && ((a == b && x == y)
+          || ((E.Residual.residual_view a).term == x && (E.Residual.residual_view b).term == y
+              && E.Residual.residual_ops a == E.Residual.residual_ops b
+              && E.Residual.residual_authored_key a = E.Residual.residual_authored_key b
+              && E.structure (E.Residual a) = E.structure (E.Residual b)))
+  | _ -> false
+
 (* Sibling regions of one mark set: Collect + Zip regions of equal static count or origin
    become one region with every output, sharing equal instructions. [None] when they do not
    agree or the register limit declines; the regions then stay separate. *)
@@ -268,6 +289,10 @@ let merge (regions : Core.Region.t list) : Core.Region.t option =
       let same_count (r : Core.Region.t) =
         (Option.is_some first.count && r.count = first.count)
         || (Option.is_some first.origin && r.origin = first.origin)
+        (* Rewritten captures have new residual IDs. Their existing structural/declaration
+           keys prove the same immutable inputs, hence the same Zip minimum, without forcing. *)
+        || (Array.length first.sources > 0 && Array.length first.sources = Array.length r.sources
+            && Array.for_all2 same_source first.sources r.sources)
       in
       if not (List.for_all (fun r -> one r && same_count r) regions) then None
       else
@@ -298,15 +323,6 @@ let merge (regions : Core.Region.t list) : Core.Region.t option =
 (* A device region binds what varies. A source that fills one constant ([array/int n 1], a static
    vector) becomes that constant, and sources that read the same attribute ([sop/attr g :P] bound
    twice) are one upload. *)
-let rec resolved (residual, (term : W.term)) =
-  match term.node with
-  | W.Ref_binding (name, []) -> (
-      match List.assoc_opt name (E.Residual.residual_view residual).bindings with
-      | Some (E.Residual r) -> resolved (r, (E.Residual.residual_view r).term)
-      | Some value -> `Value value
-      | None -> `Term (residual, term))
-  | _ -> `Term (residual, term)
-
 let fill source width =
   match resolved source with
   | `Term (residual, { node = W.Op { op; args; _ }; _ }) -> (
@@ -344,8 +360,8 @@ let compact_sources (t : Core.Region.t) =
           if j >= i then i
           else if
             fills.(j) = None
-            && reads.(i) <> None
-            && reads.(j) = reads.(i)
+            && ((reads.(i) <> None && reads.(j) = reads.(i))
+                || same_source t.sources.(j) t.sources.(i))
             && t.widths.(j) = t.widths.(i)
           then j
           else find (j + 1)

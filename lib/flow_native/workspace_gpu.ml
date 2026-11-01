@@ -59,11 +59,12 @@ type t = {
       *)
   jobs : job Queue.t;
   mutable mailbox_closed : bool;
-  measured : (string * int, float option) Measurements.t;
+  measured : (string * int * int list, float option) Measurements.t;
   entries : (Flow_ir.Packed.instruction array * bool, string option) Entries.t;
   dropped : string list Atomic.t;
       (* the keys of displays whose meshes were collected (any domain) *)
   mutable displays : int;  (** device meshes bound so far *)
+  mutable display_refusal : string option;
   bound : (string, unit -> unit) Hashtbl.t; (* each live display's release, by its key *)
   mutable frames : int;
   mutable releasing : (int * (unit -> unit)) list;
@@ -94,10 +95,13 @@ let create ?(clock = Unix.gettimeofday) () =
        (r, w));
     jobs = Queue.create ();
     mailbox_closed = false;
-    measured = Measurements.create ~equal:(fun (a, n) (b, m) -> String.equal a b && n = m) 64;
+    measured = Measurements.create
+        ~equal:(fun (a, n, layout) (b, m, other) ->
+          String.equal a b && n = m && layout = other) 64;
     entries = Entries.create ~equal:(fun (a, fast) (b, other) -> a == b && fast = other) 64;
     dropped = Atomic.make [];
     displays = 0;
+    display_refusal = None;
     bound = Hashtbl.create 8;
     frames = 0;
     releasing = [];
@@ -127,17 +131,20 @@ let owner t =
             owner)
           (native (X.acquire_gpu ()))
 
-(* The cost of a producer is measured on this device: pack, upload and one synchronized dispatch of the
-   program over zeroed inputs of the real shape, median of three after a warm-up. A count is measured at
-   the power of two above it, an upper bound on its cost, so a count that drifts frame to frame (a fold's
-   survivors) reuses one measurement per size class instead of measuring again. At most 64 programs
-   (by emitted kernel, and size class) are kept; one that cannot run is unmeasured and keeps the CPU. *)
-let measure t ~fast packed ~count =
+(* Measure packing, upload and synchronized completion: median of three after
+   a warm-up. Prepared inputs retain their exact count, tables, frame and resident
+   bindings; CPU arrays get fresh identities to charge upload. Shape-only probes
+   use zeroed inputs and power-of-two counts. The 64-entry cache distinguishes
+   both modes and binding layouts. A failed prepared frame is not cached. *)
+let measure ?inputs:prepared t ~fast packed ~count =
   let count =
     let rec up p = if p >= count then p else up (2 * p) in
-    up 1
+    if Option.is_some prepared then count else up 1
   in
-  if not t.measurement_ready then None
+  if not t.measurement_ready || count < 0
+     || Option.fold ~none:false
+          ~some:(fun (inputs : Flow_ir.Packed.Host.inputs) -> inputs.count <> count) prepared
+  then None
   else
     (* a site's kernel entry, by its code: emitting it again (and digesting it) is per-draw work *)
     let code = (Flow_ir.Packed.Host.view packed).code in
@@ -157,10 +164,47 @@ let measure t ~fast packed ~count =
     match entry with
     | None -> None
     | Some entry -> (
-        let key = (entry, count) in
+        let view = Flow_ir.Packed.Host.view packed in
+        let indices = Flow_ir.Packed.Host.index_sources packed in
+        let inputs : Flow_ir.Packed.Host.inputs =
+          match prepared with
+          | Some inputs -> inputs
+          | None ->
+              { arrays = Array.map (fun _ -> [||]) view.widths;
+                uniforms = Array.map (fun width -> Array.make width 0.) view.uniform_widths;
+                tables = Array.map (fun _ -> Array.make 4 0.) view.uniform_widths;
+                frame = Array.make (Array.length view.code) 0.; count }
+        in
+        let binding values =
+          if Array.length values > 4 then None
+          else Option.map (fun (_, count, valid, unpin) ->
+              let live = valid () in
+              unpin ();
+              if live then Some count else None) (Flow_gpu.Run.pin values)
+            |> Option.join
+        in
+        let sources = Array.map binding inputs.arrays
+        and tables = Array.map binding inputs.tables in
+        let size held values =
+          Option.fold ~none:(Array.length values) ~some:(fun count -> -count - 2) held
+        in
+        let layout =
+          (if Option.is_some prepared then 1 else 0)
+          :: (Array.to_list (Array.mapi (fun i values ->
+                if indices.(i) then -1
+                else if Option.is_none prepared then count * view.widths.(i)
+                else size sources.(i) values) inputs.arrays)
+             @ Array.to_list (Array.mapi (fun i values -> size tables.(i) values) inputs.tables))
+        in
+        let key = (entry, count, layout) in
         match Measurements.peek t.measured key with
         | Some seconds -> seconds
         | None ->
+            let inputs = match prepared with
+              | Some _ -> inputs
+              | None -> { inputs with arrays = Array.mapi (fun i width ->
+                    if indices.(i) then [||] else Array.make (count * width) 0.) view.widths }
+            in
             let seconds =
               match owner t with
               | Error _ -> None
@@ -168,23 +212,32 @@ let measure t ~fast packed ~count =
                   match (H.backend host).prepare ~fast packed with
                   | Error _ -> None
                   | Ok kernel -> (
-                      let view = Flow_ir.Packed.Host.view packed in
-                      let inputs : Flow_ir.Packed.Host.inputs =
-                        {
-                          arrays =
-                            Array.map (fun width -> Array.make (count * width) 0.) view.widths;
-                          uniforms =
-                            Array.map (fun width -> Array.make width 0.) view.uniform_widths;
-                          tables = Array.map (fun _ -> Array.make 4 0.) view.uniform_widths;
-                          frame = Array.make (Array.length view.code) 0.;
-                          count;
-                        }
-                      in
                       let once () =
+                        (* New immutable CPU inputs must pay their transfer on every
+                           sample; reusing identities only measures the upload cache. *)
+                        let inputs =
+                          {
+                            inputs with
+                            arrays = Array.mapi (fun i values ->
+                                if indices.(i) || sources.(i) <> None then values
+                                else Array.copy values) inputs.arrays;
+                            tables = Array.mapi (fun i values ->
+                                if tables.(i) <> None then values else Array.copy values) inputs.tables;
+                          }
+                        in
                         let start = t.clock () in
                         match kernel.run inputs with
                         | Error _ -> None
-                        | Ok _ -> Some (t.clock () -. start)
+                        | Ok output -> (
+                            match kernel.planes output with
+                            | Error _ -> None
+                            | Ok planes ->
+                                Fun.protect
+                                  ~finally:(fun () -> planes.release ~held:false)
+                                  (fun () ->
+                                    match planes.settle () with
+                                    | Error _ -> None
+                                    | Ok () -> Some (t.clock () -. start)))
                       in
                       match once () with
                       | None -> None
@@ -193,7 +246,9 @@ let measure t ~fast packed ~count =
                           if List.length runs < 3 then None
                           else Some (List.nth (List.sort Float.compare runs) 1)))
             in
-            Measurements.add t.measured key seconds;
+            (* Actual frame/data errors need not hold on the next invocation. *)
+            if Option.is_none prepared || Option.is_some seconds then
+              Measurements.add t.measured key seconds;
             seconds)
 
 let backend t =
@@ -202,7 +257,14 @@ let backend t =
   | None ->
       let backend : G.backend =
         {
-          cost = (fun ~fast packed ~count -> measure t ~fast packed ~count);
+          residency =
+            (fun ~fast ->
+              if not fast then None
+              else
+                match owner t with
+                | Ok (_, host) -> (H.backend host).residency ~fast
+                | Error _ -> None);
+          cost = (fun ?inputs ~fast packed ~count -> measure ?inputs t ~fast packed ~count);
           prepare =
             (fun ~fast packed ->
               Result.bind (owner t) (fun (_, host) -> (H.backend host).prepare ~fast packed));
@@ -257,9 +319,39 @@ let proxy t =
       let route_result f = try f () with Diagnostic.Error d -> Error d in
       let proxy : G.backend =
         {
+          residency =
+            (fun ~fast ->
+              Option.map
+                (fun (scope : G.residency) ->
+                  let r = scope.executor in
+                  {
+                    G.executor =
+                      {
+                        invoke =
+                          (fun packed values ~locals ~live ->
+                            route t (fun () -> r.invoke packed values ~locals ~live));
+                        compact = (fun v -> route t (fun () -> r.compact v));
+                        coerce = (fun ty v -> route t (fun () -> r.coerce ty v));
+                        finish = (fun v -> route t (fun () -> r.finish v));
+                        count = (fun v -> route t (fun () -> r.count v));
+                        close = (fun () -> route t r.close);
+                        settle = (fun () -> route t r.settle);
+                        range =
+                          (fun ty v ~div ~length -> route t (fun () -> r.range ty v ~div ~length));
+                        fill = (fun ty ~length v -> route t (fun () -> r.fill ty ~length v));
+                      };
+                    retain_uint32 = (fun v -> route t (fun () -> scope.retain_uint32 v));
+                    retain_float = (fun v -> route t (fun () -> scope.retain_float v));
+                    validate_topology =
+                      (fun ~point_count ~vertices ~offsets ~kinds ~max_polygon_size ->
+                        route t (fun () ->
+                            scope.validate_topology ~point_count ~vertices ~offsets ~kinds
+                              ~max_polygon_size));
+                  })
+                (route t (fun () -> real.residency ~fast)));
           cost =
-            (fun ~fast packed ~count ->
-              try route t (fun () -> real.cost ~fast packed ~count)
+            (fun ?inputs ~fast packed ~count ->
+              try route t (fun () -> real.cost ?inputs ~fast packed ~count)
               with Diagnostic.Error _ -> None);
           prepare =
             (fun ~fast packed ->
@@ -500,79 +592,130 @@ let held_displays t = Hashtbl.length t.bound + List.length t.releasing
    registered while the mesh that keeps the returned closure lives. Initial domain, after the cook
    settled (its dispatch completed: explicit, not unified-memory, ordering). *)
 let display t geometry =
-  if t.closed || not (Domain.is_main_domain ()) then None
+  if not (Domain.is_main_domain ()) then None
+  else if t.closed then begin
+    t.display_refusal <- Some "The workspace GPU service is closed.";
+    None
+  end
   else begin
+    t.display_refusal <- None;
     match (t.owner, Flow_sop.Attribute_kernel.resident_vec3 geometry "P") with
     | Some (gpu, host), Some positions -> (
         let count = Rdk.Geometry.point_count geometry in
+        let releases = ref [] and checks = ref [] in
+        let hold valid release =
+          checks := valid :: !checks;
+          releases := release :: !releases
+        in
+        let release_all () = List.iter (fun release -> release ()) !releases in
+        let ( let* ) = Result.bind in
         let pin placeholder =
           match Flow_gpu.Run.pin placeholder with
-          | Some (buffer, n, valid, unpin) when n = count -> Some (buffer, valid, unpin)
+          | Some (buffer, n, valid, unpin) when n = count ->
+              hold valid unpin;
+              Ok buffer
           | Some (_, _, _, unpin) ->
               unpin ();
-              None
-          | None -> None
+              Error "Resident display stream count differs from the geometry."
+          | None -> Error "Resident display stream is no longer available."
         in
-        let pinned = pin positions in
-        let normals =
-          match Rdk.Geometry.find_attribute ~owner:Point "N" geometry with
-          | None when Rdk.Geometry.primitive_count geometry = 0 -> Ok None
-          | None -> (
-              (* lit triangles without N: the host display's normals, made from P on the device *)
-              match
-                Option.bind pinned (fun (buffer, _, _) ->
-                    H.normals host ~positions:buffer ~count
-                      ~corners:
-                        (Rdk.Topology.View.view (Rdk.Geometry.topology geometry)).vertex_points)
-              with
-              | Some (buffer, release) ->
-                  let live = ref true in
-                  Ok
-                    (Some
-                       ( buffer,
-                         (fun () -> !live),
-                         fun () ->
-                           live := false;
-                           release () ))
-              | None -> Error ())
-          | Some _ -> (
-              match Option.bind (Flow_sop.Attribute_kernel.resident_vec3 geometry "N") pin with
-              | Some pinned -> Ok (Some pinned)
-              | None -> Error ())
+        let owned buffer release =
+          let live = ref true in
+          hold
+            (fun () -> !live)
+            (fun () ->
+              live := false;
+              release ());
+          buffer
         in
-        match (pinned, normals) with
-        | Some (buffer, valid, unpin), Ok normals -> (
-            let unpin_all () =
-              unpin ();
-              Option.iter (fun (_, _, unpin) -> unpin ()) normals
-            in
-            match
-              X.register_gpu_positions gpu ~positions:buffer
-                ?normals:(Option.map (fun (b, _, _) -> b) normals)
-                ~count
-                ~valid:(fun () ->
-                  valid () && Option.fold ~none:true ~some:(fun (_, valid, _) -> valid ()) normals)
-                ()
-            with
-            | Error _ ->
-                unpin_all ();
-                None
-            | Ok (key, unregister) ->
-                t.displays <- t.displays + 1;
-                Hashtbl.replace t.bound key (fun () ->
-                    unregister ();
-                    unpin_all ());
-                let token = ref () in
-                Gc.finalise (fun _ -> push t.dropped key) token;
-                Some (key, normals <> None, fun () -> ignore (Sys.opaque_identity token)))
-        | pinned, normals ->
-            Option.iter (fun (_, _, unpin) -> unpin ()) pinned;
-            Result.iter (Option.iter (fun (_, _, unpin) -> unpin ())) normals;
+        let bind () =
+          let* buffer = pin positions in
+          let* normals =
+            match Rdk.Geometry.find_attribute ~owner:Point "N" geometry with
+            | None when Rdk.Geometry.primitive_count geometry = 0 -> Ok None
+            | None when Rdk.Topology.resident (Rdk.Geometry.topology geometry) ->
+                Error "Resident topology without authored normals requires the host display."
+            | None when not (Rdk.Topology.all_triangles (Rdk.Geometry.topology geometry)) ->
+                Error "Host polygon topology requires the host display."
+            | None -> (
+                (* lit triangles without N: the host display's normals, made from P on the device *)
+                match
+                  H.normals host ~positions:buffer ~count
+                    ~corners:(Rdk.Topology.View.view (Rdk.Geometry.topology geometry)).vertex_points
+                with
+                | Some (buffer, release) -> Ok (Some (owned buffer release))
+                | None -> Error "Device normals could not be derived.")
+            | Some _ -> (
+                match Flow_sop.Attribute_kernel.resident_vec3 geometry "N" with
+                | Some value -> Result.map Option.some (pin value)
+                | None -> Error "Point normals are not an unread resident vec3 stream.")
+          in
+          let* colors =
+            match Rdk.Geometry.find_attribute ~owner:Point "Cd" geometry with
+            | None -> Ok None
+            | Some _ -> (
+                match Flow_sop.Attribute_kernel.resident_color geometry with
+                | Some (value, width) -> Result.map (fun buffer -> Some (buffer, width)) (pin value)
+                | None -> Error "Point colours are not an unread resident float3/float4 stream.")
+          in
+          let* indices =
+            if Rdk.Geometry.primitive_count geometry = 0 then Ok None
+            else
+              match Flow_sop.Topology_kernel.resident geometry with
+              | None
+                when (not (Rdk.Topology.resident (Rdk.Geometry.topology geometry)))
+                     && Rdk.Topology.all_triangles (Rdk.Geometry.topology geometry) ->
+                  Ok None
+              | None -> Error "Topology is unavailable as resident triangle/quad streams."
+              | Some (vertices, offsets, kinds) ->
+                  let pins = List.map Flow_gpu.Run.pin_integers [ vertices; offsets; kinds ] in
+                  Fun.protect
+                    ~finally:(fun () ->
+                      List.iter (Option.iter (fun (_, _, _, unpin) -> unpin ())) pins)
+                    (fun () ->
+                      match pins with
+                      | [ Some (v, nv, vv, _); Some (o, no, ov, _); Some (k, nk, kv, _) ]
+                        when vv () && ov () && kv () ->
+                          H.triangle_indices host ~positions:(buffer, count) ~vertices:(v, nv)
+                            ~offsets:(o, no) ~kinds:(k, nk)
+                          |> Result.map_error Diagnostic.to_string
+                          |> Result.map (fun (indices, count, release) ->
+                              Some (owned indices release, count))
+                      | _ -> Error "Resident topology streams cannot be pinned.")
+          in
+          match
+            X.register_gpu_positions gpu ~positions:buffer ?normals ?colors ?indices ~count
+              ~valid:(fun () -> (not t.closed) && List.for_all (fun valid -> valid ()) !checks)
+              ()
+          with
+          | Error d -> Error (Ogpu.Error.to_string d)
+          | Ok (key, unregister) ->
+              t.displays <- t.displays + 1;
+              Hashtbl.replace t.bound key (fun () ->
+                  unregister ();
+                  release_all ());
+              let token = ref () in
+              Gc.finalise (fun _ -> push t.dropped key) token;
+              Ok
+                ( key,
+                  normals <> None,
+                  Option.map snd indices,
+                  Option.fold ~none:0 ~some:snd colors,
+                  fun () -> ignore (Sys.opaque_identity token) )
+        in
+        match bind () with
+        | Ok result -> Some result
+        | Error reason ->
+            release_all ();
+            t.display_refusal <- Some reason;
             None)
-    | _ -> None
+    | _ ->
+        t.display_refusal <- Some "Resident positions or the workspace device are unavailable.";
+        None
   end
 
 let displays t = t.displays
+let display_refusal t = t.display_refusal
 
 let image_stats t =
   if not (Domain.is_main_domain ()) then

@@ -1,0 +1,6 @@
+CPU-only IsoGrid empty=false: 54464 points, 13616 primitives; exact P/topology/N/Cd
+CPU-only IsoGrid empty=true: 0 points, 0 primitives; exact P/topology/N/Cd
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+real 2.93
+user 4.76
+sys 0.93

@@ -581,16 +581,16 @@ let update_with value frame ~inspector =
       frame = Int64.to_int (Timeline.frame (Editor_list.timeline core));
     }
   in
-  let scene, context_error =
+  let scene, scene_error =
     match value.resolved with
-    | Some (doc, at, scene)
+    | Some (doc, at, scene, error)
       when same_context doc core.Editor_model.doc
            && not (Sop.Context.input_changed (Lowering.scene_reads doc) at input) ->
-        (scene, value.context_error)
+        (scene, error)
     | _ ->
         let previous =
           match value.resolved with
-          | Some (doc, _, scene) when same_context doc core.doc -> Some scene
+          | Some (doc, _, scene, _) when same_context doc core.doc -> Some scene
           | _ -> None
         in
         let scene, errors =
@@ -601,7 +601,7 @@ let update_with value frame ~inspector =
           else Some (String.concat "; " (List.map Diagnostic.to_string errors)) )
   in
   let context_error =
-    if image_errors = [] then context_error else Some (String.concat "; " image_errors)
+    if image_errors = [] then scene_error else Some (String.concat "; " image_errors)
   in
   let canvases, context_error =
     canvas_pictures ~control ~core ~raw_frame ~input ~value ~context_error ()
@@ -669,7 +669,7 @@ let update_with value frame ~inspector =
         views;
         drawn;
         composed = Some (composition_key core scene);
-        resolved = Some (core.doc, input, scene);
+        resolved = Some (core.doc, input, scene, scene_error);
         context_error;
         canvases;
         baked;

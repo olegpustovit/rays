@@ -22,6 +22,7 @@
   test_core_lists
   test_core_state
   test_core_regions
+  test_core_resident
   test_core_operators
   test_core_errors
   test_core_draw
@@ -34,6 +35,7 @@
   test_core_lists
   test_core_state
   test_core_regions
+  test_core_resident
   test_core_operators
   test_core_errors
   test_core_draw
@@ -68,7 +70,7 @@
   ../flow_sop/flow_manifest.sexp
   (glob_files ../../specification/workspace/cases/*.lisp)
   ../../sketches/particles.rays)
- (libraries test_support flow_ir flow rays_math parallel))
+ (libraries test_support flow_ir flow flow_graph rays_math parallel))
 
 (tests
  (names
@@ -77,6 +79,7 @@
   test_scatter
   test_compact_scan
   test_grade_index
+  test_inner_sum
   test_array_max_length)
  (modules
   test_gather
@@ -84,6 +87,7 @@
   test_scatter
   test_compact_scan
   test_grade_index
+  test_inner_sum
   test_array_max_length)
  (libraries
   test_support

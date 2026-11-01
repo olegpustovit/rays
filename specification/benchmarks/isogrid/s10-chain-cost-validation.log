@@ -1,0 +1,21 @@
+chain_route=qualification_resident iteration=0 domains=1 cook_seconds=0.096455 cook_allocated_bytes=57030792
+chain_totals iterations=1 upload_bytes=164728
+chain_callback=invoke calls=3 seconds=0.011969
+chain_callback=fill calls=1 seconds=0.000773
+chain_callback=range calls=1 seconds=0.000719
+chain_callback=compact calls=1 seconds=0.001591
+chain_callback=coerce calls=0 seconds=0.000000
+chain_callback=count calls=5 seconds=0.003828
+chain_callback=finish calls=2 seconds=0.000000
+chain_callback=settle calls=1 seconds=0.000006
+chain_callback=close calls=1 seconds=0.000005
+chain_callback=retain_uint32 calls=3 seconds=0.000003
+chain_callback=retain_float calls=1 seconds=0.000006
+chain_callback=validate_topology calls=1 seconds=0.000559
+points=54464 primitives=13616 topology_resident=true positions_resident=true N_resident=true Cd_resident=true payload=0 validation=36 status=16 count=24 bounds=0
+publication_seconds=0.392548 main_allocated_bytes=344859592 cook_domains=1 iterations=1
+CPU parity: topology exact; P/N/Cd <=1e-6; first-read payload=2287492; repeated-read delta=0
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+real 5.22
+user 8.65
+sys 1.76

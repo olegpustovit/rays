@@ -140,7 +140,9 @@ let () =
           let mask = Array.init count (fun i -> if i mod 3 = 1 then 0 else 1) in
           let literal = String.concat " " (Array.to_list (Array.map string_of_int mask)) in
           agree geometry
-            (Printf.sprintf "(sop/components geo :over \"%s\" :mask (array/int %d 1))" over count)
+            (Printf.sprintf
+               "(sop/components geo :over \"%s\" :mask (array/int (sop/count geo :%s) 1))" over
+               (if over = "edges" then "points" else "primitives"))
             (classify (Some (Array.make count 1)));
           if count > 0 then
             agree geometry

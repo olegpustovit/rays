@@ -1,0 +1,16 @@
+cli side=24 recipe=0 seconds=0.756773 budget=1.2
+cli side=24 recipe=1 seconds=0.308285 budget=1.2
+cli side=24 recipe=2 seconds=0.299709 budget=1.2
+cli side=24 recipe=3 seconds=0.304192 budget=1.2
+cli side=24 recipe=4 seconds=0.285753 budget=1.2
+cli side=24 recipe=5 seconds=0.291189 budget=1.2
+cli side=24 recipe=6 seconds=0.284094 budget=1.2
+cli side=24 recipe=7 seconds=0.286930 budget=1.2
+cli side=64 recipe=0 seconds=0.491419 budget=5.0
+cli side=64 recipe=1 seconds=0.827848 budget=3.0
+cli side=64 recipe=2 seconds=0.740110 budget=5.0
+cli side=64 recipe=3 seconds=0.766591 budget=5.0
+cli side=64 recipe=4 seconds=0.500376 budget=5.0
+cli side=64 recipe=5 seconds=0.531121 budget=5.0
+cli side=64 recipe=6 seconds=0.464345 budget=5.0
+cli side=64 recipe=7 seconds=0.487613 budget=5.0

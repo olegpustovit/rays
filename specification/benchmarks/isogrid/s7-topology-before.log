@@ -1,0 +1,8 @@
+topology vertices=1000000 case=valid invalid_index=-1 domains=1 trials=7 median_seconds=0.000941038 allocated_bytes=840 promoted_words=0 major_words=0
+topology vertices=1000000 case=invalid_first invalid_index=0 domains=1 trials=7 median_seconds=0.000000000 allocated_bytes=472 promoted_words=0 major_words=0
+topology vertices=1000000 case=invalid_block_boundary invalid_index=65536 domains=1 trials=7 median_seconds=0.000788927 allocated_bytes=712 promoted_words=0 major_words=0
+topology vertices=1000000 case=invalid_last invalid_index=999999 domains=1 trials=7 median_seconds=0.000843048 allocated_bytes=712 promoted_words=0 major_words=0
+topology vertices=1000000 case=valid invalid_index=-1 domains=4 trials=7 median_seconds=0.000274897 allocated_bytes=5256 promoted_words=0 major_words=0
+topology vertices=1000000 case=invalid_first invalid_index=0 domains=4 trials=7 median_seconds=0.000000000 allocated_bytes=472 promoted_words=0 major_words=0
+topology vertices=1000000 case=invalid_block_boundary invalid_index=65536 domains=4 trials=7 median_seconds=0.000262022 allocated_bytes=4968 promoted_words=0 major_words=0
+topology vertices=1000000 case=invalid_last invalid_index=999999 domains=4 trials=7 median_seconds=0.000270128 allocated_bytes=5240 promoted_words=0 major_words=0

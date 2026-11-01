@@ -2,6 +2,77 @@ module E = Flow.Eval
 module I = Flow_ir
 open Test_support
 
+let () =
+  List.iter (fun (count_expression, base) ->
+  let packed = Test_program.compile
+      ("(map (fn [(i : int)] i) (array/range " ^ count_expression ^ " :type int))") in
+  List.iter (fun count ->
+      let kernels = ref 0 in
+      let measure = ((fun () -> 0.), (fun _ ~seconds:_ ~reference -> if not reference then incr kernels)) in
+      let inputs = ok (I.Packed.Host.prepare_values ~measure ~index:true packed ~live:(Input.at_time (float count))) in
+      assert (inputs.count = base + count);
+      assert (!kernels > 0);
+      Array.iter (function E.Int_array a -> assert (a = [||]) | _ -> assert false) inputs.arrays)
+    [ 0; 1; 5001 ])
+    [ "(array/count (map (fn [(i : int)] (int/add i 1)) (array/range (int t) :type int)))", 0;
+      "(int/add (array/count (map (fn [(i : int)] (int/add i 1)) (array/range 5001 :type int))) (int t))", 5001 ]
+
+let () =
+  let packed = Test_program.compile
+      "(map (fn [(i : int)] (int/add i (array/count (map (fn [(j : int)] (int/add j 1)) (array/range (int t) :type int))))) (array/range 1 :type int))" in
+  List.iter (fun count ->
+      let kernels = ref 0 in
+      let measure = ((fun () -> 0.), (fun _ ~seconds:_ ~reference -> if not reference then incr kernels)) in
+      let inputs = ok (I.Packed.Host.prepare_values ~measure ~index:true packed ~live:(Input.at_time (float count))) in
+      assert (inputs.count = 1 && !kernels > 0);
+      assert (Array.exists (function E.Int n -> n = count | _ -> false) inputs.uniforms))
+    [ 0; 1; 5001 ]
+
+let () =
+  let source_count ?(declarations = "") body =
+    let p = Test_program.compile ~declarations ("(map (fn [(i : int)] (int/add i 7)) (array/range " ^ body ^ " :type int))") in
+    let residual, term = p.I.Core.Region.sources.(0) in
+    let input = E.Residual.with_bindings residual ~term (E.Residual.residual_view residual).bindings in
+    let p = Result.get_ok (I.Core.Region.rebuild p ~sources:[| input, term |] ~count:None ~origin:None ()) in
+    p, input
+  in
+  let first, input = source_count "(int t)" in
+  let cloned = match E.Host.rewrite (fun _ -> None) (E.Residual input) with
+    | E.Residual r -> r | _ -> assert false in
+  assert (cloned != input);
+  let second = Result.get_ok (I.Core.Region.rebuild first
+      ~sources:[| cloned, (E.Residual.residual_view cloned).term |] ()) in
+  let merged = I.Core_fuse.compact_sources (Option.get (I.Core_fuse.merge [ first; second ])) in
+  assert (Array.length merged.sources = 1);
+  let different, _ = source_count "(int/add (int t) 1)" in
+  assert (I.Core_fuse.merge [ first; different ] = None);
+  let declared delta = fst (source_count
+      ~declarations:(Printf.sprintf "(defn bound :context value [(n : int)] (int/add n %d))" delta)
+      "(bound (int t))") in
+  assert (I.Core_fuse.merge [ declared 1; declared 2 ] = None);
+  List.iter (fun time ->
+      let live = Input.at_time time in
+      let expected = ok (I.Packed.Host.reference first ~live) in
+      List.iter (fun domains -> Parallel.run ~domains (fun () ->
+          let actual = ok (I.Packed.force_all ~strict:true merged ~live) in
+          assert (List.length actual = 2);
+          List.iter (fun value -> assert (value = expected)) actual)) [ 1; 4 ]) [ 0.; 1.; 1025. ]
+
+let () =
+  let packed =
+    Test_program.compile
+      "(map (fn [(i : int)] (int/add i (int t))) (array/range (int t) :type int))"
+  in
+  List.iter
+    (fun t ->
+      let live = Input.at_time t in
+      match
+        (I.Packed.Host.prepare_values ~index:true packed ~live, I.Packed.Host.reference packed ~live)
+      with
+      | Error actual, Error expected -> assert (actual = expected)
+      | _ -> failwith "index-only range preparation lost its reference error")
+    [ -1.; -17. ]
+
 let bits x y = Int64.bits_of_float x = Int64.bits_of_float y
 
 let rec same (a : E.value) (b : E.value) =

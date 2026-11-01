@@ -299,10 +299,12 @@
 (rule
  (enabled_if
   (= %{system} macosx))
- (alias runtest-native)
+ (alias test_workspace_images_native)
  (locks smoke_window)
  (action
   (run %{exe:test_workspace_images_native.exe})))
+
+(alias (name runtest-native) (deps (alias test_workspace_images_native)))
 
 (test
  (name test_open_domain)
@@ -891,13 +893,15 @@
 (rule
  (enabled_if
   (= %{system} macosx))
- (alias runtest-native)
+ (alias test_drawing_native)
  (locks %{workspace_root}/smoke_window)
  (action
   (run
    %{exe:test_drawing.exe}
    %{dep:../../../sketches/particles.rays}
    /tmp/rays-drawing-export)))
+
+(alias (name runtest-native) (deps (alias test_drawing_native)))
 
 ; One evaluation a start, the first frame of a million static marks, and a reload after a
 ; shared start: each opens the sketch's window through Workspace.run.
@@ -990,3 +994,17 @@
  (name editor_prepare)
  (modules editor_prepare)
  (libraries rdk rdk_rays sop rays_editor rays_diagnostic))
+
+(executable
+ (name test_isogrid_deferred)
+ (modules test_isogrid_deferred)
+ (libraries editor_prepare rays_editor editor_document flow_graph flow flow_sop sop rdk rays ogpu_mock parallel))
+
+(rule
+ (alias test_isogrid_deferred)
+ (deps ../../../sketches/isogrid.rays)
+ (action (run %{exe:test_isogrid_deferred.exe} %{dep:../../../sketches/isogrid.rays})))
+
+(alias
+ (name runtest)
+ (deps (alias test_isogrid_deferred)))

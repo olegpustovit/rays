@@ -15,7 +15,8 @@ let tests =
     ( "test_scene_tree",
       fun () ->
         Test_scene_tree.run ();
-        Test_scene_tree.run_host () );
+        Test_scene_tree.run_host ();
+        Test_scene_tree.run_surface_errors () );
     ( "test_scene_sync",
       fun () ->
         Test_scene_sync.run ();

@@ -4,6 +4,11 @@
     inspection, bounded asynchronous cooking, status UI, and finite native execution. Overlay
     callbacks receive a frame and coordinates local to the current view pane. *)
 
+(* Workspace tests reach private aliases, which Dune's public-CMI dependency
+   set omits. Wait for the coordinator's private chain before publishing this
+   interface. ponytail: remove when tests use only the public editor boundary. *)
+open! Editor_loop
+
 module Workspace_doc = Editor_document.Workspace_doc
 (** The workspace document a sketch can open the editor on: a checked workspace, its layout by path
     and its settings (see [Editor_document.Workspace_doc]). *)

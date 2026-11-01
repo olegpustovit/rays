@@ -1,0 +1,19 @@
+Uint32 outputs/compaction: exact above 2^24, uint32 maximum, mixed/empty outputs, block tails, counts and range status
+        0.11 real         0.04 user         0.03 sys
+           171245568  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               11010  page reclaims
+                 165  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 744  involuntary context switches
+           643660331  instructions retired
+           232635572  cycles elapsed
+           155665176  peak memory footprint

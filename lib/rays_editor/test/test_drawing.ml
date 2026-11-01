@@ -90,7 +90,8 @@ let pure workspace =
   in
   let backend : Flow_ir.Gpu.backend =
     {
-      cost = (fun ~fast:_ _ ~count:_ -> None);
+      residency = (fun ~fast:_ -> None);
+      cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> None);
       prepare =
         (fun ~fast:_ _ ->
           Ok
@@ -402,16 +403,16 @@ let native workspace directory =
   let config = { Rays.Sketch.default_config with width = 800; height = 600; fps = None } in
   let frames = 4 in
   let view particles _ =
-    let points =
-      Array.to_list
-        (Array.map
-           (fun p ->
-             Rays.Scene.point
-               ~at:(int_of_float p.x, int_of_float p.y)
-               ~color:(Rays_math.Color.rgb 0 255 255) ())
-           particles)
-    in
-    Rays.Scene.clear (Rays_math.Color.rgb 8 10 16) :: points
+    let points = Scene_command.Ui_batch.Builder.create ~capacity:(Array.length particles) () in
+    Array.iter
+      (fun p ->
+        Scene_command.Ui_batch.Builder.shape_rect points ~x:p.x ~y:p.y ~width:1. ~height:1.
+          ~fill:0x00ffffffl ~stroke:0l ())
+      particles;
+    [
+      Rays.Scene.clear (Rays_math.Color.rgb 8 10 16);
+      Rays.Scene.shapes (Scene_command.Ui_batch.Builder.publish points);
+    ]
   in
   ignore
     (Result.get_ok

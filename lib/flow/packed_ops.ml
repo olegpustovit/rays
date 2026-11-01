@@ -36,6 +36,13 @@ let supported_noise_octaves n = n >= 1 && n <= 64
 let supported_gpu_noise_octaves n = n >= 1 && n <= 32
 let finite_float32 x = Float.is_finite (Int32.float_of_bits (Int32.bits_of_float x))
 
+let error_status code message =
+  match (code, message) with
+  | "E_LIST_RANGE", _ -> 8
+  | "E_ARRAY_RANGE", "An array slice must be within its source." -> 16
+  | "E_ARRAY_RANGE", "array/slice needs a non-negative whole length." -> 32
+  | _ -> 1
+
 let scalar_width = function
   | Ty.Float | Int | Bool -> Some 1
   | Vec2 -> Some 2

@@ -42,6 +42,7 @@ val has_settings : Workspace_doc.t -> bool
 val of_workspace :
   ?factories:Sop.Edit_graph.factory list ->
   ?gpu:Flow_ir.Gpu.config ->
+  ?defer:bool ->
   ?previous:Document.t ->
   Workspace_doc.t ->
   (Document.t, Diagnostic.t) result
@@ -55,7 +56,9 @@ val of_workspace :
     and the World when it has a world graph ([world/none] means none). Light intensity/color retain
     their residuals for timeline composition. Other time-dependent fields in scene, World, settings
     and editor structs are refused with [E_CONTEXT_TIME], naming the graph and field. Geometry
-    references with live SOP parameters are supported. *)
+    references with live SOP parameters are supported. Compiled large static SOP arrays defer to the
+    cook by default; [defer:false] keeps CLI validation eager. Literal reuse requires the same
+    deferral mode. *)
 
 val scene_reads : Document.t -> Sop.Context.Dependencies.t
 (** The host-input slices the recorded live scene fields read: {!resolve_scene} gives the same scene

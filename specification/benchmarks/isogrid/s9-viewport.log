@@ -1,0 +1,6 @@
+IsoGrid recipe 0: picking materialises 216004 payload bytes; repeated read +0
+IsoGrid recipe 0: 3000 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 3: inspection materialises 1708704 payload bytes; repeated read +0
+IsoGrid recipe 3: 11866 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+Focused check: 3.10 s wall, 2.40 s user, 0.57 s system.
+Full affected/native exit: see s9-native-exit.log (unchanged successful actions cached).

@@ -14,20 +14,19 @@ val footprint : Core.program -> Core.statement -> (int array * int array) option
 
 val resident_live : Core.program -> Core.statement -> int array option
 (** A top-level loop a resident fold may keep on the device (its body holds only regions, scalars,
-    ifs, compaction, retyping, counts and immutable frame facts): the writes later statements
-    read, which its end reads back; [None] for any other statement. The web printer uses the same
-    rule. *)
+    ifs, compaction, retyping, counts and immutable frame facts): the writes later statements read,
+    which its end reads back; [None] for any other statement. The web printer uses the same rule. *)
 
 val resident_tail :
   Core.program ->
   Core.statement ->
   mark:(int -> bool) ->
   (int array * (int * (int * int)) list) option
-(** After a {!resident_live} loop, whether its arrays may stay on the device for the rest of the draw:
-    the later statements only count them, divide a count by a constant, make an [array/range] of it,
-    and pass these to regions, each a mark attribute ([mark region]) or one whose array result stays
-    under the same rule. The locals that may then hold device arrays, and each range local's source
-    array and divisor. The web printer uses the same rule. *)
+(** After a {!resident_live} loop, whether its arrays may stay on the device for the rest of the
+    draw: the later statements only count them, divide a count by a constant, make an [array/range]
+    of it, and pass these to regions, each a mark attribute ([mark region]) or one whose array
+    result stays under the same rule. The locals that may then hold device arrays, and each range
+    local's source array and divisor. The web printer uses the same rule. *)
 
 val prepare :
   ?remember_loops:bool -> ?approx:Flow.Workspace.Paths.t -> ?fast:bool -> Core.program -> prepared
@@ -40,20 +39,10 @@ val has_regions : prepared -> bool (* the program invokes a region, so [execute]
 val direct : prepared -> bool
 
 (* Stateless and free of host sources: [execute] without [~root] needs no checkpoint or resolver. *)
-val execute :
-  ?root:Flow.Eval.residual ->
-  ?strict:bool ->
-  ?rerun_on_error:bool ->
-  ?on_walk:(unit -> unit) ->
-  ?force:(Packed.t -> (Flow.Eval.value, Diagnostic.t) result) ->
-  ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
-  prepared ->
-  live:Input.t ->
-  (Flow.Eval.value, Diagnostic.t) result
-
 module Buffers = Core_marks.Buffers
 
 type resident = {
+  fill : Flow.Ty.t -> length:int -> Flow.Eval.value -> Flow.Eval.value option;
   invoke :
     Packed.t ->
     Flow.Eval.value array ->
@@ -63,6 +52,7 @@ type resident = {
   compact : Flow.Eval.value -> Flow.Eval.value option;
   coerce : Flow.Ty.t -> Flow.Eval.value -> Flow.Eval.value option;
   finish : Flow.Eval.value -> Flow.Eval.value;
+  count : Flow.Eval.value -> int option;
   close : unit -> unit;
   settle : unit -> unit;
   range : Flow.Ty.t -> Flow.Eval.value -> div:int -> length:int -> Flow.Eval.value option;
@@ -71,15 +61,43 @@ type resident = {
     scalar statements, [array/compact], retyping and [array/count] ([~remember_loops] programs), a
     region's array may stay on the device: [invoke] runs a region there and returns a placeholder
     (an array of its length the device knows), [compact] and [coerce] work on placeholders, [finish]
-    reads one back. A declined region gets its placeholder inputs back first; the loop's arrays are
-    read back as it ends, then [close].
+    reads one back. [count] settles and returns a known placeholder's element count without payload,
+    or [None] for an ordinary host value. A declined region gets its placeholder inputs back first;
+    the loop's arrays are read back as it ends, then [close].
 
-    When the statements after such a loop only count its arrays, divide the count by a constant, make
-    an [array/range] of it and pass these to regions (a mark attribute, or a region whose array stays
-    under the same rule), the arrays stay: [settle] checks the loop's counts instead of reading back,
-    [range] gives the range as a device array, a region over them goes to [device] (a mark attribute)
-    or [invoke], and the draw closes the device as it ends. A region the device declines first gets
-    every kept array read back. *)
+    When the statements after such a loop only count its arrays, divide the count by a constant,
+    make an [array/range] of it and pass these to regions (a mark attribute, or a region whose array
+    stays under the same rule), the arrays stay: [settle] checks the loop's counts instead of
+    reading back, [range] gives the range as a device array, a region over them goes to [device] (a
+    mark attribute) or [invoke], and the draw closes the device as it ends. A region the device
+    declines first gets every kept array read back. During value execution [range] may also receive
+    [Int n], requesting a validated scalar-length integer range of [n / div] elements.
+    [fill] offers a validated constant integer-array count and scalar value to the device;
+    a declined value retains the ordinary signed CPU array semantics. *)
+
+val host_value : resident -> Flow.Eval.value -> Flow.Eval.value
+(** Materialise placeholders recursively through records, lists, structs and source arguments. *)
+
+val execute :
+  ?root:Flow.Eval.residual ->
+  ?strict:bool ->
+  ?rerun_on_error:bool ->
+  ?on_walk:(unit -> unit) ->
+  ?force:(Packed.t -> (Flow.Eval.value, Diagnostic.t) result) ->
+  ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
+  ?resident:resident ->
+  ?host_source:(Flow.Eval.value -> (Flow.Eval.value option, Diagnostic.t) result) ->
+  prepared ->
+  live:Input.t ->
+  (Flow.Eval.value, Diagnostic.t) result
+(** [resident] offers a stateless value program's regions and compactions to the existing resident
+    executor. Counts use [resident.count], without materialising payload; ordinary CPU operations
+    first materialise their inputs. Success settles and retains result placeholders: the caller must
+    adopt/materialise them before calling [resident.close]. Error closes it; overflow closes and
+    reruns from the start with the resident's updated capacities. State-bearing value programs
+    refuse with [E_CORE_RESIDENT]. [host_source] offers a host source its raw resident arguments
+    before ordinary host materialisation. [Some] must return its correctly typed result after
+    retaining any escaped buffers; [None] keeps the ordinary materialising host boundary. *)
 
 exception Resident_overflow
 (** Raised by [finish] when a placeholder's capacity (sized from an earlier draw) was too small for

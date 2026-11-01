@@ -67,6 +67,165 @@ IR to WGSL, SPIR-V, MSL, GLSL and HLSL) and by Futhark's GPU backends
 One IR still feeds every target. Region becomes this structured IR,
 Packed is its CPU lowering, and MSL, SPIR-V, WGSL and JS print it.
 
+Compute printers preserve guarded explicit errors through the small status
+record: bit 8 is `E_LIST_RANGE`, alongside nonfinite (1), division (2) and shift
+(4) failures. Slice bounds use bit 16 and invalid slice lengths bit 32, both
+decoded as their native `E_ARRAY_RANGE` message (length takes precedence when
+multiple rows fail). `Flow.Packed_ops.error_status` supplies the explicit-error
+bits to MSL, SPIR-V and WGSL. Invalid list and slice gathers stay guarded, and
+the error instruction cannot inline away, including an empty slice. Native and
+web read the same typed failures. Raster
+placements refuse explicit errors: those stages have no status record.
+
+Native `Flow_gpu.Host.stats` separates payload, status, count and bounds bytes.
+The compatibility `readback_bytes` is payload plus bounds. Resident-executor
+payload reads and four-byte count reads are included, as are lazy kept-output
+materialisations from worker domains (atomic accounting). Cached materialisations
+and bounds queries add nothing. Status bytes are four per successful status read.
+Topology-validation readback accounting will accompany its validation dispatch;
+the resident mesh construction/validation path is not yet implemented.
+
+The native compute printer accepts selected scalar uint32 buffers for topology:
+`uint32_outputs` selects output indices, `uint32_inputs` selects source indices,
+and `uint32_tables` selects gathered uniform indices. The buffers remain one
+four-byte word per element; default float32 inputs/outputs, binding numbers and
+uniform layouts are unchanged. Integer loads/stores bypass float32 conversion.
+Selected output values outside 0..2^32-1 set status bit 64 and return
+`E_GPU_UINT32_RANGE`. Readback returns exact `Int_array` storage; planar reads
+convert the decoded words directly to doubles. Uint32 inputs require explicitly
+bound device buffers (`E_GPU_UINT32_BINDING` otherwise), or the internal
+`Run.dispatch ~uint32_cpu:true` checked host-array upload. Implicit float32 held
+arrays always refuse. `uint32_scalars` selects exact unsigned integer captures
+and frame words without changing their uniform offsets. `Host.resident` has an
+internal uint32 mode with separate site caches and device-generated integer
+ranges; its float-only display borrow declines in that mode. Uint32 output ownership is still a
+separate integration step: `Run.keep` refuses `E_GPU_UINT32_KEEP` rather than
+handing a uint32 buffer to the float32 planar-holder path.
+
+`Run.keep_uint32` transfers a typed output to an integer holder using the
+existing bounded pool, retirement budget and close lifecycle. It never
+registers a float binding. Settled workers decode raw uint32 words exactly,
+cache integers and read payload once; an unread settled stream can be pinned
+for a native consumer. A runner close preserves live holders by materialising
+them unless discard was requested. Both holder codecs check dispatch status
+before an initial-domain materialisation; failed uint32 outputs never become
+readable geometry.
+
+The neutral integer carrier preserves an extensible backend storage token.
+`Run.integers` wraps the same UInt32 holder without a copy or new ownership;
+`Run.pin_integers` recognises its native token and applies the existing pin
+rules (creating domain, settled, unread, live, logical view length). Other
+backend tokens decline. `Topology_kernel.resident` exposes the three checked
+carrier lengths without forcing topology. No native buffer type reaches
+Flow IR, SOP or RDK, and no second binding registry is introduced.
+
+`triangles.rays` generates UInt32 display indices from positions and exact
+topology streams, following host Newell projection and ordered quad ear
+clipping at the closed-form triangle base `offsets[p] - 2*p`. Two passes reduce
+per-group rejection counts to four status bytes. Ambiguous float decisions,
+collapsed quads and unsupported topology return `E_GPU_DISPLAY_TRIANGLES`
+for host fallback. `Host.triangle_indices` reuses the bounded display pool and
+counts the read as validation, with no payload read or input upload. Native
+index parity remains separate from Surface/sketch viewport qualification.
+
+`Host.resident_scope` exposes the executor plus stream retention. It settles
+before transferring a buffer, preserves actual counts, and detaches slot
+ownership. A scope pin and deferred count-cell return keep retained inputs
+readable by later regions until close. CPU reads use the retained holder cache.
+Equal integer views share a holder; different prefix lengths over one generated
+range share physical storage with separate logical counts, pins and cached
+arrays. Their owner reads the largest live view once; empty views read nothing.
+Shared views retire together through the existing pool's GC/pressure path.
+Generated range buffers transfer out of the host's range cache too. The retained
+uint32 and float streams remain unread across executor close.
+`Run.adopt_uint32`/`adopt_float` use the existing holder machinery for these
+completed, status-validated mapped buffers, without copying. Resident slots
+and generated ranges allocate mapped storage; `Backend.mapped_view` retrieves
+its existing owned view. Unsigned materialisation invalidates that view and
+reads uint32 words directly in a small C accessor, preserving NaN-shaped bits
+without calling initial-domain-only `read_buffer` from a worker. Adopted
+buffers rejoin the mapped pool after use. One lazy ownership runner per host
+tracks their lifetime and materialisation counters.
+
+`Flow_ir.Gpu.backend.residency` now carries this scope without native handles:
+the executor, owned integer/float retention and a topology-validation callback
+over resident Flow values. `Executor.force ?resident` forwards it through both
+normal and cached root execution. The workspace GPU proxy routes all these
+callbacks to its owner, including scope cleanup; workers only read settled
+owned holders. Exact precision declines before acquiring a native owner.
+Under Qualification policy, shared mesh cooking now validates resident fields
+before transferring them into deferred Float3 positions and Topology. CPU
+consumers force the existing carriers. Unsupported stream shapes materialise
+before the scope closes and pass through the ordinary mesh constructor.
+Fused N/Cd writes stay resident under Qualification; production measured placement remains separate work.
+
+Stateless structured geometry selection uses the same Qualification scope.
+Core offers raw `Host_source` arguments to the host before its usual CPU
+boundary; `sop/mesh` accepts them through the shared resident constructor and
+registers its geometry handle. Other sources decline the offer and materialise
+normally. Invalid returned types and unresolved markers are refused. A failed
+device attempt closes its scope and retries the selection on CPU unless the
+cook was cancelled. Constant integer-array descriptors use the existing
+validated descriptor decoder and resident fill callback; no staging array is
+built for a device-owned `array/int` kind stream.
+
+Frame-dependent resident records also compile as one cached Core program.
+Structured-value lowering makes captured array producers explicit and reuses
+the drawing filter's mask/compaction path. The prepared program, including its
+region identities, stays stable across forces; the general dispatcher still
+supplies each force's state, resolver and strict policy. This lets counted
+consumers learn capacities and replay the complete producer chain on overflow.
+Host mesh eligibility uses a nonmaterialising count check, which settles work
+without switching into the post-fold phase or disabling later capacity history.
+
+Sibling Zip regions with unknown counts can fuse when their ordered immutable
+source sequences agree. Direct source identity or the existing residual
+structural key establishes equality, with matching authored declarations and
+operator implementations; stateful residuals decline this proof. Rewritten
+captures may therefore share a count despite fresh residual IDs. No source is
+forced to establish it. Different dynamic count expressions or declarations
+retain separate regions. The frozen sketch's N/Cd writer uses this route.
+
+A resident Executor failure is atomic across the whole value. A failed field's
+Core execution closes its scope, invalidating placeholders from earlier fields
+too; the Executor propagates that failure out of the record walk, closes the
+scope and retries the entire value on CPU under the requested strict policy.
+It must not resume a later field's reference fallback while retaining earlier
+placeholders. The native publication test poisons float placeholders with NaN
+to make any accidental host use deterministic, including signed-index declines.
+
+The same source comparison compacts duplicate immutable inputs after fusion.
+Preparation evaluates index counts and uniform roots through the existing
+packed evaluator. When a root cannot compile, its reference evaluation offers
+stateless nested kernels back to that evaluator, using the current resolver.
+Stateful or unsupported kernels retain reference semantics. This avoids
+walking nested maps once per element merely to obtain a count or uniform;
+there is no additional cache or alternate evaluator.
+
+Constant integer arrays use the same device range kernel: an optional fill word
+selects either index generation or an exact uint32 constant. `Core_exec` offers
+validated `array/int` counts/values through the resident `fill` callback; signed
+values outside uint32 decline to the ordinary CPU semantics. No count-sized
+CPU staging array is uploaded. The workspace worker proxy routes fill to its
+owner, and the output uses ordinary retained-slot ownership. Capacity guards
+reject an oversized fill before dispatch.
+
+`shaders/compact.rays` supplies float32 and uint32 entry points through one
+hygienic macro for the scan/count/scatter algorithm. `Run.compact ~uint32:true`
+reads a uint32 mask and stores exact uint32 indices; count cells/scratch keep
+their layout. This native storage specialization is not a web SOP target.
+The original float entry remains shared with web export.
+
+`shaders/topology.rays` validates exact uint32 vertex, offset and kind streams
+in one 256-lane workgroup. Lanes scan disjoint rows, then nine uniform group
+scans reduce rule failures into a 36-byte status record. It checks the initial
+zero, terminal offset, kind/offset lengths, point references, offset ordering,
+kind range, minimum corners and a caller-supplied polygon-size ceiling.
+`Host.validate_topology` caches one status buffer; successful reads, including
+rejected topology, increment `validation_readback_bytes` rather than payload.
+Buffer capacities are checked before encoding; no input ownership transfers.
+This boundary is not yet wired into deferred mesh publication.
+
 ## Raster stages (P9)
 
 The renderer's raster pipelines are `lib/renderer/shaders/NAME.rays`, two defns per pipeline,

@@ -1,0 +1,189 @@
+Resident value execution: counts, escaping records, CPU readers, errors and overflow match
+Resident field failure discards earlier placeholders and reruns the whole CPU value
+Core control: direct vector/branch/pattern/call/macro/bypass parity and dynamic call identity passed
+Core cooked handles: exact type, lazy failures, changing live branches and fresh execution validation
+Core constant arrays: original-site validation, cooked storage aliases, mixed-use dense path and empty/large metadata
+Core frame facts: scoped sharing, changing inputs, branch dominance and empty loops agree
+Core sources: a captured residual inside a host source lowers to plain Host_source arguments
+Core state: slots, pending writes, keys, errors and rollback match the walker (36 executions)
+Core state kernels: result, previous, resized, two-state and sum regions match the walker at one and eight domains
+Core operators: every scalar value operator lowers and matches the walker bit for bit (2240 cases)
+Text arrays: strict structured Core and Executor match reference beyond 4,096 at one/eight domains; dependent collecting clauses refuse honestly
+Core records/text: ordered fields, nesting, coercion, runtime tags, display/equality and lazy captures passed
+Core errors: division by zero, range, non-finite, authored fields and state rollback match the walker
+Authored errors: exact dynamic messages, lazy text/packed branches, empty inputs, rollback and dynamic packed refusal pass
+Core parity: fixtures, scalar expressions, direct execution (407 cases), and diagnostics passed
+array/max_length: exact native element bounds, checked literal selectors, symbolic guards, reference/Core/CPU and ordinary Int-bank refusals; no giant allocations
+Numeric reductions: exact extrema/CSR/order, empty and malformed ranges, strict Core/reference and one/eight-domain bytes pass
+Packed noise spans, scalar bits and one/eight-domain parity passed
+Packed scaled noise skips untaken overflow and refuses selected overflow
+Inner sums: K=0/1/64, exact Int/vector bits, helper tables, guarded empty/bounds errors, eager map errors, constant refusals and one/eight domains agree
+Scatter: ordered numeric bytes, Int wrap, malformed inputs, source ownership, lazy errors and strict Core/reference 1/4/8 domains
+Diagnostic rows: strict Core/reference, complete immutable flags, boundary/tail selection, cancellation and checked graph edits pass
+Core lists: direct/reference/executor parity passed
+Core list stores: local builder ownership and alias publication passed
+Known 5001 geometry map/filter captures: bounded loop shape, ordered native/reference handles and unchanged ordinary list guard
+Core iterate: one region, one counted loop for 5000 passes, byte-identical to the walker
+Compact/scan: kept indices, exclusive offset boundaries, Int wrap, immutable sources, lazy errors and strict/reference domains
+Diagnostic boundaries: strict Core/reference, nested nil, unused local helper, lazy mapping, cancellation and lossless envelopes pass
+Packed frame folds: template reuse, particle branches, domains, resets, repeated reads and rollback passed
+Static maps: kernel-made values, records and failures equal the walker's
+Static map profiles: actual head/tail counts, refusal, scoped clock and bounded history
+Static gathers: reference fields, helpers, Text, lazy/tail errors and concrete mismatch
+Static list guards: negative, range and fractional indices before/after 4,096 keep walker diagnostics
+Trusted static maps: full bit verification, replayed body probes and consecutive call indices
+Replay failures retain full diagnostics; named-function recording retains its eager head
+Strict captured iterate validates maps and until reductions with their carried array bindings
+SOP deferral: host/small maps eager, compiled arrays/counts exact, late diagnostics preserved
+Numeric gather: independent tables, exact Int/vector bytes, lazy preparation, first-error order and one/four/eight domains pass
+Typed one-lane copies: constants, initial-domain uniforms, signed zeros/exact Int/native bytes and one/four/eight domains pass
+Typed total prefix: wrapping Int/native Text bytes, guarded storage checks and earliest-row block/chunk errors pass
+Prepared table prefix: delayed forcing, per-force content/count changes, late bounds versus earlier table cause and one/four/eight domains pass
+Text gather: immutable byte leaves, identity/uniform/select/helper, strict Core and one/four/eight domains pass
+integer sources and tables convert once per array
+List tables: exact numeric widths, list range guards, rebind shape and one/eight domains
+Grade/index: stable direction, exact Int/byte Text, first match, ownership, strict/reference and lazy source/state parity
+Core regions: packed-array primitives and Region_ref forms match the walker
+Core carried loops: empty, dynamic, nested, record/helper, error and domain parity passed
+Loop fusion: producer/consumer scopes, guards, integer/text aliases and sibling outputs agree
+Carried Int/Float widening retains exact initial bits through structured Core
+image qualification: authored sites, shared functions, folded/unsupported forms, capture requalification, state and declaration identity pass
+Flow IR passes, precision, scalar/fallback execution and twelve-fixture parity passed
+GPU neutral callbacks: measured placement, illegal exact sinks, qualification scope and phase profiles passed
+Workspace qualification: actual captures, empty/vector/loop/noise kernels, limits, ambiguity, callable ownership and repeated/zero IDs passed
+Tiny maps in recorded-call records preserve reference results and strict packed execution at one/eight domains
+One force lowers 129 distinct residuals once and reuses the first shared value
+Strict uniforms: direct/wrapped unsupported reductions refuse; Float/Int outputs and supported add match reference at one/eight domains
+Captured uniform packed/reference parity, ordered named reductions, changing inputs, errors and rollback passed
+row_profile uv_unitize/quads inputs=0.007904 check=0.030605 lower=0.002081 compile=0.000001 cook=0.000431
+row_profile uv_transform/empty inputs=0.019826 check=0.004892 lower=0.000551 compile=0.000002 cook=0.000081
+row_profile uv_sphere/none inputs=0.000003 check=0.013169 lower=0.343124 compile=0.000002 cook=0.000814
+row_profile uv_project/empty inputs=0.004789 check=0.009704 lower=0.001978 compile=0.000001 cook=0.000209
+row_profile uv_auto_seam/empty inputs=0.004973 check=0.009870 lower=0.002946 compile=0.000002 cook=0.001062
+row_profile tube/none inputs=0.000002 check=0.012581 lower=0.018288 compile=0.000002 cook=0.000416
+row_profile transform/empty inputs=0.000032 check=0.034438 lower=0.015804 compile=0.000002 cook=0.000040
+row_profile torus/none inputs=0.000002 check=0.018680 lower=0.109011 compile=0.000005 cook=0.002030
+row_profile polywire/empty inputs=0.007231 check=0.097540 lower=0.028951 compile=0.000002 cook=0.000157
+row_profile sweep_circle/empty inputs=0.000033 check=0.119663 lower=0.042323 compile=0.000002 cook=0.000192
+row_profile sweep/small inputs=0.010777 check=0.080174 lower=0.060307 compile=0.000026 cook=0.234199
+row_profile subdivide/box+groups inputs=0.005575 check=0.143969 lower=0.361143 compile=0.000003 cook=0.007986
+row_profile spiral/none inputs=0.000001 check=0.032706 lower=0.015340 compile=0.000001 cook=0.000053
+row_profile sort/empty inputs=0.004056 check=0.008965 lower=0.001528 compile=0.000002 cook=0.000623
+row_profile snap_to_grid/empty inputs=0.000033 check=0.006151 lower=0.002696 compile=0.000002 cook=0.000050
+row_profile smooth/empty inputs=0.000037 check=0.017575 lower=0.005607 compile=0.000002 cook=0.000074
+row_profile skin/empty inputs=0.000031 check=0.033713 lower=0.010608 compile=0.000001 cook=0.000104
+row_profile separate_pieces/separated inputs=0.004467 check=0.009481 lower=0.002150 compile=0.000001 cook=0.000540
+row_profile scatter/empty inputs=0.000035 check=0.048378 lower=0.034886 compile=0.000019 cook=0.009245
+row_profile rewire_vertices/empty inputs=0.004576 check=0.009785 lower=0.001707 compile=0.000001 cook=0.000121
+row_profile revolve/curves inputs=0.004604 check=0.014330 lower=0.004589 compile=0.000001 cook=0.003166
+row_profile reverse/empty inputs=0.000035 check=0.004720 lower=0.000523 compile=0.000001 cook=0.000055
+row_profile rest_position/empty inputs=0.000031 check=0.010593 lower=0.000932 compile=0.000002 cook=0.000068
+row_profile resample/open inputs=0.004810 check=0.012096 lower=0.004687 compile=0.000002 cook=0.002549
+row_profile promote_attributes/empty inputs=0.000032 check=0.023519 lower=0.024604 compile=0.000002 cook=0.000108
+row_profile polyframe/empty inputs=0.000031 check=0.009056 lower=0.002236 compile=0.000001 cook=0.000313
+row_profile poly_path/empty inputs=0.000026 check=0.008770 lower=0.004556 compile=0.000002 cook=0.003223
+row_profile poly_loft/empty inputs=0.000029 check=0.052933 lower=0.009094 compile=0.000001 cook=0.000105
+row_profile poly_bridge/rings inputs=0.003459 check=0.052453 lower=0.021713 compile=0.000002 cook=0.002859
+row_profile points/none inputs=0.000002 check=0.003932 lower=0.000451 compile=0.000001 cook=0.000054
+row_profile point_velocity/previous_next inputs=0.011495 check=0.006084 lower=0.001742 compile=0.000002 cook=0.000321
+row_profile point_split/empty inputs=0.000029 check=0.025725 lower=0.008137 compile=0.000001 cook=0.000174
+row_profile point_replicate/empty inputs=0.003235 check=0.013942 lower=0.009048 compile=0.000001 cook=0.003191
+row_profile point_jitter/empty inputs=0.000034 check=0.004774 lower=0.001090 compile=0.000001 cook=0.000039
+row_profile point_generate/empty inputs=0.002831 check=0.006312 lower=0.001595 compile=0.000001 cook=0.000678
+row_profile platonic/none inputs=0.000002 check=0.008190 lower=0.003275 compile=0.000002 cook=0.000052
+row_profile peak/empty inputs=0.003697 check=0.011295 lower=0.001554 compile=0.000001 cook=0.000083
+row_profile ordered_group/single inputs=0.003129 check=0.004371 lower=0.000352 compile=0.000001 cook=0.000249
+row_profile normals/empty inputs=0.000028 check=0.009730 lower=0.002395 compile=0.000001 cook=0.000214
+row_profile name_from_groups/empty inputs=0.000030 check=0.004441 lower=0.000546 compile=0.000002 cook=0.000099
+row_profile mountain/empty inputs=0.000027 check=0.012048 lower=0.002045 compile=0.000002 cook=0.000123
+row_profile mirror/empty inputs=0.000027 check=0.004950 lower=0.001533 compile=0.000002 cook=0.000834
+row_profile merge/one inputs=0.037190 check=0.004088 lower=0.000344 compile=0.000001 cook=0.000987
+row_profile measure_curvature/grid inputs=0.004012 check=0.015020 lower=0.006222 compile=0.000001 cook=0.001873
+row_profile measure/empty inputs=0.000031 check=0.005751 lower=0.000700 compile=0.000001 cook=0.000126
+row_profile material/empty inputs=0.000033 check=0.004142 lower=0.000609 compile=0.000002 cook=0.000083
+row_profile match_size/single inputs=0.000033 check=0.009218 lower=0.003226 compile=0.000001 cook=0.000162
+row_profile match_axis/empty inputs=0.000032 check=0.005629 lower=0.001101 compile=0.000001 cook=0.000159
+row_profile iso_surface/none inputs=0.000002 check=0.007284 lower=0.000000 compile=0.000000 cook=0.000000
+row_profile groups_from_name/empty inputs=0.003753 check=0.005348 lower=0.000885 compile=0.000001 cook=0.000050
+row_profile group_unshared/empty inputs=0.000027 check=0.005044 lower=0.000620 compile=0.000001 cook=0.000227
+row_profile group_ranges/empty inputs=0.000027 check=0.022696 lower=0.004642 compile=0.000001 cook=0.000222
+row_profile group_range/empty inputs=0.000036 check=0.020496 lower=0.003492 compile=0.000001 cook=0.000213
+row_profile group_random/empty inputs=0.000032 check=0.005507 lower=0.000998 compile=0.000002 cook=0.000272
+row_profile group_promotions/empty inputs=0.000029 check=0.021417 lower=0.004718 compile=0.000001 cook=0.001802
+row_profile group_promote_boundary/empty inputs=0.003623 check=0.016859 lower=0.003466 compile=0.000001 cook=0.010186
+row_profile group_normal/empty inputs=0.000030 check=0.007564 lower=0.001995 compile=0.000002 cook=0.000800
+row_profile group_non_planar/empty inputs=0.000031 check=0.006989 lower=0.002159 compile=0.000001 cook=0.000376
+row_profile group_invert/empty inputs=0.000033 check=0.004398 lower=0.000530 compile=0.000001 cook=0.002920
+row_profile group_from_attribute_boundary/mixed inputs=0.003502 check=0.014517 lower=0.002662 compile=0.000002 cook=0.000344
+row_profile group_find_path/book inputs=0.003250 check=0.009025 lower=0.003121 compile=0.000002 cook=0.000583
+row_profile group_expand/empty inputs=0.003312 check=0.030989 lower=0.008509 compile=0.000001 cook=0.000395
+row_profile group_edges/bumpy grid inputs=0.003752 check=0.011154 lower=0.002871 compile=0.000002 cook=0.002008
+row_profile group_edge_depth/empty inputs=0.003112 check=0.006029 lower=0.001051 compile=0.000001 cook=0.000222
+row_profile group_copy/grid_to_mixed inputs=0.099507 check=0.006039 lower=0.001304 compile=0.000001 cook=0.004536
+row_profile group_combine/empty inputs=0.000031 check=0.005591 lower=0.001429 compile=0.000001 cook=0.000319
+row_profile group_bounds/empty inputs=0.000032 check=0.008772 lower=0.001888 compile=0.000001 cook=0.000276
+row_profile group_boundary_components/empty inputs=0.000028 check=0.005587 lower=0.001556 compile=0.000001 cook=0.000503
+row_profile group_backface/empty inputs=0.000030 check=0.006629 lower=0.002209 compile=0.000001 cook=0.000286
+row_profile grid/none inputs=0.000004 check=0.006528 lower=0.010448 compile=0.000001 cook=0.000144
+row_profile graph_color/empty inputs=0.000033 check=0.005874 lower=0.001010 compile=0.000001 cook=0.000110
+row_profile extract_point_from_curve/open inputs=0.003671 check=0.007401 lower=0.002791 compile=0.000001 cook=0.001152
+row_profile extract_centroid/single inputs=0.003162 check=0.010891 lower=0.003690 compile=0.000001 cook=0.000523
+row_profile enumerate/empty inputs=0.003815 check=0.005735 lower=0.000662 compile=0.000001 cook=0.000100
+row_profile ends/open inputs=0.003417 check=0.006059 lower=0.001261 compile=0.000002 cook=0.000240
+row_profile edge_transport_parent/empty inputs=0.003703 check=0.008917 lower=0.001352 compile=0.000001 cook=0.000262
+row_profile edge_transport_curves/open inputs=0.003984 check=0.006237 lower=0.001496 compile=0.000001 cook=0.000521
+row_profile edge_transport/empty inputs=0.003304 check=0.010250 lower=0.001703 compile=0.000001 cook=0.000169
+row_profile edge_straighten/empty inputs=0.000029 check=0.012453 lower=0.004450 compile=0.000001 cook=0.000063
+row_profile edge_relax/empty inputs=0.000038 check=0.009835 lower=0.003711 compile=0.000001 cook=0.000116
+row_profile edge_flip/empty inputs=0.003268 check=0.014333 lower=0.003935 compile=0.000002 cook=0.000081
+row_profile edge_equalize/empty inputs=0.000032 check=0.008533 lower=0.002652 compile=0.000001 cook=0.000072
+row_profile edge_divide/empty inputs=0.000034 check=0.008305 lower=0.004282 compile=0.000001 cook=0.000079
+row_profile edge_cusp/empty inputs=0.000028 check=0.013002 lower=0.002099 compile=0.000001 cook=0.000070
+row_profile duplicate/empty inputs=0.003463 check=0.009371 lower=0.009492 compile=0.000004 cook=0.002587
+row_profile distance_from_target/empty inputs=0.000032 check=0.005768 lower=0.000877 compile=0.000001 cook=0.000106
+row_profile distance_along_geometry/empty inputs=0.003447 check=0.005089 lower=0.000839 compile=0.000001 cook=0.000142
+row_profile crease/mixed/plain inputs=0.003525 check=0.006438 lower=0.001769 compile=0.000001 cook=0.000232
+row_profile copy_to_points/mixed<-plain inputs=0.007169 check=0.032020 lower=0.015587 compile=0.000002 cook=0.003491
+row_profile convert_line/empty inputs=0.000036 check=0.013059 lower=0.002134 compile=0.000002 cook=0.000474
+row_profile connectivity/empty inputs=0.000030 check=0.006443 lower=0.001318 compile=0.000001 cook=0.000070
+row_profile compact_points/empty inputs=0.000031 check=0.004127 lower=0.000531 compile=0.000000 cook=0.000050
+row_profile color_by_height/empty inputs=0.000030 check=0.004171 lower=0.000749 compile=0.000001 cook=0.000057
+row_profile circle_from_edges/empty inputs=0.003899 check=0.020097 lower=0.010282 compile=0.000001 cook=0.000107
+row_profile circle/none inputs=0.000003 check=0.006277 lower=0.002448 compile=0.000001 cook=0.000036
+row_profile carve/empty inputs=0.003142 check=0.064185 lower=0.020648 compile=0.000002 cook=0.000069
+row_profile box/none inputs=0.000002 check=0.011686 lower=0.004803 compile=0.000001 cook=0.000041
+row_profile bound/mixed inputs=0.004360 check=0.029996 lower=0.006750 compile=0.000002 cook=0.000257
+row_profile blend_shapes/empty inputs=0.000038 check=0.018572 lower=0.007528 compile=0.000002 cook=0.001493
+row_profile blast_by_attribute/empty inputs=0.003413 check=0.005577 lower=0.001080 compile=0.000001 cook=0.000146
+row_profile blast/empty inputs=0.003386 check=0.005255 lower=0.000800 compile=0.000001 cook=0.000130
+row_profile bend/empty inputs=0.000026 check=0.010450 lower=0.001793 compile=0.000001 cook=0.000039
+row_profile attribute_remap/empty inputs=0.003761 check=0.006917 lower=0.001844 compile=0.000002 cook=0.000147
+row_profile attribute_randomize/empty inputs=0.000024 check=0.016852 lower=0.007532 compile=0.000001 cook=0.000195
+row_profile attribute_noise_quaternion/empty inputs=0.000027 check=0.006024 lower=0.000953 compile=0.000001 cook=0.000096
+row_profile attribute_noise/empty inputs=0.000030 check=0.006233 lower=0.001772 compile=0.000001 cook=0.000109
+row_profile attribute_laplacian/grid inputs=0.000030 check=0.011531 lower=0.003380 compile=0.000001 cook=0.001672
+row_profile attribute_interpolate/rich inputs=0.007840 check=0.022326 lower=0.009214 compile=0.000002 cook=0.000645
+row_profile attribute_fade/empty inputs=0.003496 check=0.005555 lower=0.001755 compile=0.000001 cook=0.000905
+row_profile attribute_copy/mixed to mixed inputs=0.003780 check=0.010937 lower=0.005131 compile=0.000002 cook=0.000766
+row_profile attribute_composite/six mixed inputs=0.020473 check=0.020888 lower=3.160567 compile=0.000002 cook=0.123882
+row_profile attribute_blur/empty inputs=0.000016 check=0.009129 lower=0.004276 compile=0.000001 cook=0.000054
+row_profile attr_from_image/empty inputs=0.003446 check=0.003881 lower=0.000612 compile=0.000001 cook=0.000029
+row_profile line/none inputs=0.000002 check=0.003919 lower=0.000376 compile=0.000001 cook=0.000028
+row_profile noise_displace/points0 inputs=0.003324 check=0.003785 lower=0.000432 compile=0.000002 cook=0.000057
+row_profile set_color/empty inputs=0.003266 check=0.003808 lower=0.000334 compile=0.000001 cook=0.000059
+row_profile set_float/empty inputs=0.000017 check=0.003629 lower=0.000336 compile=0.000001 cook=0.000037
+row_profile set_int/empty inputs=0.000019 check=0.003553 lower=0.000297 compile=0.000001 cook=0.000037
+row_profile set_vector/empty inputs=0.000014 check=0.003627 lower=0.000333 compile=0.000001 cook=0.000036
+row_profile set_orient/empty inputs=0.000019 check=0.003654 lower=0.000470 compile=0.000002 cook=0.000070
+row_profile set_transform/empty inputs=0.000016 check=0.004041 lower=0.000324 compile=0.000001 cook=0.000070
+row_profile delete_attributes/points0 inputs=0.000021 check=0.003640 lower=0.000322 compile=0.000001 cook=0.000025
+row_profile delete_edge_group/points0 inputs=0.000017 check=0.003734 lower=0.000280 compile=0.000002 cook=0.000024
+row_profile group_delete/points0 inputs=0.000016 check=0.003736 lower=0.000323 compile=0.000001 cook=0.000018
+row_profile group_rename/points0 inputs=0.000023 check=0.003600 lower=0.000282 compile=0.000001 cook=0.000018
+row_profile rename_attributes/points0 inputs=0.000022 check=0.003623 lower=0.000291 compile=0.000001 cook=0.000017
+row_profile rename_edge_group/points0 inputs=0.000022 check=0.003345 lower=0.000294 compile=0.000002 cook=0.000021
+row_profile swap_attributes/points0 inputs=0.000024 check=0.003650 lower=0.000341 compile=0.000001 cook=0.000018
+checked 128 Lisp SOP golden rows without native factories
+real 14.75
+user 53.71
+sys 13.27

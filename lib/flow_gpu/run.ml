@@ -19,6 +19,7 @@ type device_pressure
 (* a block the GC counts as [bytes] of memory, as a Bigarray its data: a dead holder is collected as
    promptly as an array of its buffer's size *)
 external device_pressure : int -> device_pressure = "rays_flow_gpu_device_pressure"
+external uint32_word : B.floats -> int -> int = "rays_flow_gpu_uint32_word" [@@noalloc]
 
 type kept = {
   id : int;
@@ -26,6 +27,7 @@ type kept = {
   kept_floats : B.floats;
   kept_count : int;
   kept_width : int;
+  uint32 : bool;
   lock : Mutex.t;  (** orders an invalidate against close's destroy; never held while converting *)
   planes : float array array option Atomic.t;
   mutable destroyed : bool;  (** its buffer is gone: closed (read first) or freed (never read) *)
@@ -132,6 +134,8 @@ type t = {
   mutable input_uploaded_bytes : int;
   mutable status_reads : int;
   mutable readback_bytes : int;
+  mutable bounds_readback_bytes : int;
+  materialised_bytes : int Atomic.t;
   mutable status_checked : bool;
   mutable generation : int;
   mutable table_ready : bool;
@@ -191,12 +195,33 @@ let kernel_status flags =
     Diagnostic.error ~code:"E_RANGE" "Integer shift count must be within [0, 62]."
   else if Int32.logand flags 2l <> 0l then
     Diagnostic.error ~code:"E_RANGE" "Integer division by zero."
+  else if Int32.logand flags 8l <> 0l then
+    Diagnostic.error ~code:"E_LIST_RANGE" "nth index is out of range or is not a whole number."
+  else if Int32.logand flags 32l <> 0l then
+    Diagnostic.error ~code:"E_ARRAY_RANGE" "array/slice needs a non-negative whole length."
+  else if Int32.logand flags 16l <> 0l then
+    Diagnostic.error ~code:"E_ARRAY_RANGE" "An array slice must be within its source."
+  else if Int32.logand flags 64l <> 0l then
+    Diagnostic.error ~code:"E_GPU_UINT32_RANGE" "GPU uint32 value must be within [0, 4294967295]."
   else Diagnostic.error ~code:"E_KERNEL" "GPU output contains a nonfinite value."
 
 let pack bytes offset value =
   let bits = Int32.bits_of_float value in
   if not (Float.is_finite (Int32.float_of_bits bits)) then raise (nonfinite ());
   Bytes.set_int32_le bytes offset bits
+
+let pack_uint32 bytes offset value =
+  if (not (Float.is_integer value)) || value < 0. || value > 4294967295. then
+    raise (Diagnostic.Error (kernel_status 64l));
+  Bytes.set_int32_le bytes offset (Int32.of_int (int_of_float value))
+
+let upload_uint32 buffer slot source count =
+  let length = count * 4 in
+  if Bytes.length slot.bytes <> length then slot.bytes <- Bytes.create length;
+  for i = 0 to count - 1 do
+    pack_uint32 slot.bytes (i * 4) source.(i)
+  done;
+  if count > 0 then get (B.write_buffer buffer ~offset:0L slot.bytes)
 
 (* Straight into the mapped buffer the kernel reads: one float32 rounding per element, no staging
    bytes and no copy. A finite double past float32's range rounds to infinity and is refused. *)
@@ -239,6 +264,8 @@ let create_owned ?pool:shared device queue pipelines (msl : Emit.msl) =
     input_uploaded_bytes = 0;
     status_reads = 0;
     readback_bytes = 0;
+    bounds_readback_bytes = 0;
+    materialised_bytes = Atomic.make 0;
     status_checked = false;
     generation = 0;
     table_ready = false;
@@ -386,14 +413,19 @@ let dispatch_arguments ?(bound = Bytes.create 16) encoder pipelines ~cell ~mul ~
   get (B.set_buffer encoder ~index:2 groups);
   get (B.dispatch_threads encoder ~threads:(1, 1, 1) ~threadgroup:(1, 1, 1))
 
-let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?into
-    ?(bound = fun _ -> None)
-    ?(bound_table = fun _ -> None) ?scene ?(extras = no_extras) ?(resident = []) t
-    (values : P.Host.inputs) =
+let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?commands ?encoder ?count
+    ?into ?(bound = fun _ -> None) ?(bound_table = fun _ -> None) ?scene ?(extras = no_extras)
+    ?(resident = []) t (values : P.Host.inputs) =
+  let explicit_input = bound and explicit_table = bound_table in
   (* a table another runner keeps on the device (its placeholder) is bound to its buffer *)
   let bound_table u =
     match bound_table u with
     | Some _ as b -> b
+    | None
+      when match Array.find_index (fun (index, _) -> index = u) t.msl.gathers with
+           | Some k -> t.msl.gather_uint32.(k)
+           | None -> false ->
+        None
     | None when u < Array.length values.tables && Array.length values.tables.(u) <= 4 ->
         held values.tables.(u)
     | None -> None
@@ -402,6 +434,9 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
   let bound index =
     match bound index with
     | Some _ as b -> b
+    | None when index >= 0 && index < Array.length t.msl.input_uint32 && t.msl.input_uint32.(index)
+      ->
+        None
     | None when index < Array.length values.arrays && Array.length values.arrays.(index) <= 4 ->
         held_input values.arrays.(index)
           ~length:(values.count * t.msl.input_widths.(min index (Array.length t.inputs - 1)))
@@ -437,6 +472,29 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
         > List.length scene_tail
   then error "GPU scene binding changed."
   else if Array.length values.arrays <> Array.length t.inputs then error "GPU input arity changed."
+  else if
+    values.count > 0
+    &&
+    let missing = ref false in
+    Array.iteri
+      (fun i typed ->
+        if typed && explicit_input i = None && ((not uint32_cpu) || held values.arrays.(i) <> None)
+        then missing := true)
+      t.msl.input_uint32;
+    Array.iteri
+      (fun k typed ->
+        let u = fst t.msl.gathers.(k) in
+        if
+          typed
+          && explicit_table u = None
+          && ((not uint32_cpu) || u >= Array.length values.tables || held values.tables.(u) <> None)
+        then missing := true)
+      t.msl.gather_uint32;
+    !missing
+  then
+    Error
+      (Diagnostic.error ~code:"E_GPU_UINT32_BINDING"
+         "Uint32 inputs require explicit device buffers.")
   else if
     let short = ref false in
     for index = 0 to Array.length t.inputs - 1 do
@@ -484,7 +542,10 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
                 raise
                   (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU uniform type changed."));
               for component = 0 to width - 1 do
-                pack t.uniforms (offset + (component * 4)) values.uniforms.(index).(component)
+                let at = offset + (component * 4) in
+                (if List.mem at msl.uint32_uniforms then pack_uint32 else pack)
+                  t.uniforms at
+                  values.uniforms.(index).(component)
               done
           | Gather_at (k, offset) ->
               let u, width = msl.gathers.(k) in
@@ -506,7 +567,8 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
               if index >= Array.length values.frame then
                 raise
                   (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU frame uniform changed."));
-              pack t.uniforms offset values.frame.(index)
+              (if List.mem offset msl.uint32_uniforms then pack_uint32 else pack)
+                t.uniforms offset values.frame.(index)
         done;
         (* a buffer this runner's last dispatch still reads is not rewritten under it *)
         if commands = None && t.last_epoch > B.completed_epoch t.queue then
@@ -518,7 +580,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
               | Some buffer -> buffer
               | None ->
                   let length = values.count * msl.input_widths.(index) * 4 in
-                  let buffer = ensure ~mapped:true t slot length in
+                  let buffer = ensure ~mapped:(not msl.input_uint32.(index)) t slot length in
                   let source = values.arrays.(index) in
                   if
                     not
@@ -528,8 +590,11 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
                   then begin
                     (* A failed write may have partially replaced the previous source. *)
                     slot.uploaded <- None;
-                    pack_floats (Option.get slot.floats) source (length / 4);
-                    get (B.flush_mapped buffer ~length);
+                    if msl.input_uint32.(index) then upload_uint32 buffer slot source (length / 4)
+                    else begin
+                      pack_floats (Option.get slot.floats) source (length / 4);
+                      get (B.flush_mapped buffer ~length)
+                    end;
                     slot.uploaded <- Some (source, length);
                     t.input_uploads <- t.input_uploads + 1;
                     t.input_uploaded_bytes <- t.input_uploaded_bytes + length
@@ -609,7 +674,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
               | None ->
                   let source = values.tables.(fst msl.gathers.(k)) in
                   let length = max 4 (Array.length source * 4) in
-                  let buffer = ensure ~mapped:true t slot length in
+                  let buffer = ensure ~mapped:(not msl.gather_uint32.(k)) t slot length in
                   if
                     not
                       (match slot.uploaded with
@@ -617,8 +682,12 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
                       | None -> false)
                   then begin
                     slot.uploaded <- None;
-                    pack_floats (Option.get slot.floats) source (Array.length source);
-                    get (B.flush_mapped buffer ~length:(Array.length source * 4));
+                    if msl.gather_uint32.(k) then
+                      upload_uint32 buffer slot source (Array.length source)
+                    else begin
+                      pack_floats (Option.get slot.floats) source (Array.length source);
+                      get (B.flush_mapped buffer ~length:(Array.length source * 4))
+                    end;
                     slot.uploaded <- Some (source, length);
                     t.input_uploads <- t.input_uploads + 1;
                     t.input_uploaded_bytes <- t.input_uploaded_bytes + length
@@ -686,8 +755,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?encoder ?count ?in
                     B.dispatch_threadgroups_indirect encoder groups ~offset:0L
                       ~threadgroup:(256, 1, 1)
                 | None ->
-                    B.dispatch_threads encoder ~threads:(values.count, 1, 1)
-                      ~threadgroup:(256, 1, 1)))
+                    B.dispatch_threads encoder ~threads:(values.count, 1, 1) ~threadgroup:(256, 1, 1)))
         in
         match commands with
         | Some commands ->
@@ -828,26 +896,66 @@ let unpack_floats (floats : B.floats) length =
   done;
   (values, !finite)
 
+let uint32_output ?index output =
+  let index = Option.value ~default:output.index index in
+  index >= 0
+  && index < Array.length output.owner.msl.output_uint32
+  && output.owner.msl.output_uint32.(index)
+
+let read_uint32 queue buffer ~epoch ~length =
+  try
+    if epoch > B.completed_epoch queue then get (B.complete_through queue epoch);
+    if length = 0 then Ok [||]
+    else
+      let bytes = get (B.read_buffer buffer ~offset:0L ~length:(length * 4)) in
+      Ok
+        (Array.init length (fun i ->
+             Int32.to_int (Bytes.get_int32_le bytes (i * 4)) land 0xffffffff))
+  with Diagnostic.Error d -> Error d
+
+let uint32_values ?index output =
+  Result.bind (ready ?index output) (fun (slot, _) ->
+      try
+        let values =
+          if output.count = 0 then [||]
+          else
+            let values =
+              match
+                read_uint32 output.owner.queue (Option.get slot.buffer) ~epoch:output.epoch
+                  ~length:output.count
+              with
+              | Ok values -> values
+              | Error d -> raise (Diagnostic.Error d)
+            in
+            output.owner.readback_bytes <- output.owner.readback_bytes + (output.count * 4);
+            values
+        in
+        Ok values
+      with Diagnostic.Error d -> Error d)
+
 let readback ?index output =
-  Result.bind (completed ?index output) (fun contents ->
-      let count = output.count in
-      let values, finite, width =
-        match contents with
-        | `Floats (floats, width) ->
-            let values, finite = unpack_floats floats (count * width) in
-            (values, finite, width)
-        | `Bytes (bytes, width) ->
-            let values, finite = unpack_array bytes (count * width) in
-            (values, finite, width)
-      in
-      if not finite then nonfinite_output ()
-      else
-        Ok
-          (match width with
-          | 2 -> Flow.Eval.Vec2_array values
-          | 3 -> Vec3_array values
-          | 4 -> Vec4_array values
-          | _ -> Float_array values))
+  if uint32_output ?index output then
+    Result.map (fun values -> Flow.Eval.Int_array values) (uint32_values ?index output)
+  else
+    Result.bind (completed ?index output) (fun contents ->
+        let count = output.count in
+        let values, finite, width =
+          match contents with
+          | `Floats (floats, width) ->
+              let values, finite = unpack_floats floats (count * width) in
+              (values, finite, width)
+          | `Bytes (bytes, width) ->
+              let values, finite = unpack_array bytes (count * width) in
+              (values, finite, width)
+        in
+        if not finite then nonfinite_output ()
+        else
+          Ok
+            (match width with
+            | 2 -> Flow.Eval.Vec2_array values
+            | 3 -> Vec3_array values
+            | 4 -> Vec4_array values
+            | _ -> Float_array values))
 
 (* [width] planes of [count] doubles from float32 contents, in parallel blocks *)
 let to_planes ?(checked = false) (floats : B.floats) ~count ~width =
@@ -874,19 +982,22 @@ let to_planes ?(checked = false) (floats : B.floats) ~count ~width =
 (* The output as [width] planes of [count] doubles, read where the kernel wrote them: what a planar
    store (an rdk attribute) owns, with no interleaved copy between. *)
 let planes ?index output =
-  Result.bind (completed ?index output) (fun contents ->
-      let count = output.count in
-      let floats, width =
-        match contents with
-        | `Floats (floats, width) -> (floats, width)
-        | `Bytes (bytes, width) ->
-            let floats = Bigarray.(Array1.create float32 c_layout (count * width)) in
-            for i = 0 to (count * width) - 1 do
-              floats.{i} <- Int32.float_of_bits (Bytes.get_int32_le bytes (4 * i))
-            done;
-            (floats, width)
-      in
-      to_planes floats ~count ~width)
+  if uint32_output ?index output then
+    Result.map (fun values -> [| Array.map float_of_int values |]) (uint32_values ?index output)
+  else
+    Result.bind (completed ?index output) (fun contents ->
+        let count = output.count in
+        let floats, width =
+          match contents with
+          | `Floats (floats, width) -> (floats, width)
+          | `Bytes (bytes, width) ->
+              let floats = Bigarray.(Array1.create float32 c_layout (count * width)) in
+              for i = 0 to (count * width) - 1 do
+                floats.{i} <- Int32.float_of_bits (Bytes.get_int32_le bytes (4 * i))
+              done;
+              (floats, width)
+        in
+        to_planes floats ~count ~width)
 
 (* a holder that no longer needs its buffer names it (a finaliser or a first read, any domain); the
    runner recycles or destroys it on its next dispatch *)
@@ -921,14 +1032,31 @@ let materialise t kept =
       (* a reader on the initial domain waits for the kernel itself; any other reader runs after its
          cook settled (Sop.Session settles before every CPU node and at a cook's end) *)
       if not (Atomic.get kept.settled) then
-        if Domain.self () = t.domain then begin
-          if kept.kept_epoch > B.completed_epoch t.queue then
-            ignore (B.complete_through t.queue kept.kept_epoch);
-          Atomic.set kept.settled true
-        end
+        if Domain.self () = t.domain then
+          (match settle t kept with Ok () -> () | Error d -> raise (Diagnostic.Error d))
         else invalid_arg "Run.materialise: a device output was read before its cook settled";
       if kept.destroyed then invalid_arg "Run.materialise: a device output was read after its free";
       let length = kept.kept_count * kept.kept_width in
+      if kept.uint32 then
+        Mutex.protect kept.lock (fun () ->
+            match Atomic.get kept.planes with
+            | Some planes -> planes
+            | None ->
+                if kept.destroyed then invalid_arg "Run.materialise: uint32 output was freed";
+                let floats = kept.kept_floats in
+                if length > 0 then get (B.invalidate_mapped kept.kept_buffer ~length:(length * 4));
+                let planes = Array.init kept.kept_width (fun component ->
+                    Array.init kept.kept_count (fun i ->
+                        let index = i * kept.kept_width + component in
+                        if kept.uint32 then
+                          float_of_int (uint32_word floats index)
+                        else Bigarray.Array1.unsafe_get floats index)) in
+                ignore (Atomic.fetch_and_add t.materialised_bytes (length * 4));
+                Atomic.incr t.materialised;
+                Atomic.set kept.planes (Some planes);
+                release t.pool.released kept.id;
+                planes)
+      else begin
       (* Nothing here can fail, so no reader (an rdk accessor on any domain) ever sees an error:
          the buffer is mapped, the range is its own, it is destroyed only under this lock after
          [destroyed] is set (its view stays valid), and the status check at [keep] covered the
@@ -936,7 +1064,7 @@ let materialise t kept =
       Mutex.protect kept.lock (fun () ->
           if (not kept.destroyed) && length > 0 then
             match B.invalidate_mapped kept.kept_buffer ~length:(length * 4) with
-            | Ok () -> ()
+            | Ok () -> ignore (Atomic.fetch_and_add t.materialised_bytes (length * 4))
             | Error e -> invalid_arg ("Run.materialise: " ^ Ogpu.Error.to_string e));
       Atomic.incr kept.readers;
       let planes =
@@ -954,6 +1082,7 @@ let materialise t kept =
         release t.pool.released kept.id
       end;
       Option.get (Atomic.get kept.planes)
+      end
 
 (* A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): one group of
    1,024 lanes, each lane's min and max (of every 1,024th element) read back (24 KB at most) and finished here. On the
@@ -1023,6 +1152,7 @@ let bounds_of t kept =
               unpack_array (get (B.read_buffer out ~offset:0L ~length:(lanes * 24))) (lanes * 6)
             in
             t.readback_bytes <- t.readback_bytes + (lanes * 24);
+            t.bounds_readback_bytes <- t.bounds_readback_bytes + (lanes * 24);
             if not finite then None
             else begin
               let b = Array.sub lane 0 6 in
@@ -1065,74 +1195,64 @@ let release_kept t kept ~held =
       push t.pool.retiring (kept.id, w)
     end
 
+let hold t ~uint32 ~buffer ~floats ~capacity ~count ~width ~epoch ~settled =
+  let kept =
+    { id = Atomic.fetch_and_add next_kept 1;
+      kept_buffer = buffer; kept_floats = floats; kept_count = count; kept_width = width;
+      uint32; lock = Mutex.create (); planes = Atomic.make None; destroyed = false;
+      retired = false; placeholder = Array.make width 0.; kept_epoch = epoch;
+      settled = Atomic.make settled; readers = Atomic.make 0; bounds_memo = None;
+      thaw = ignore; pressure = device_pressure capacity }
+  in
+  let weak = Weak.create 1 in
+  Weak.set weak 0 (Some kept);
+  t.kept <- (epoch, kept.settled, weak) :: t.kept;
+  kept.thaw <- (fun () -> ignore (materialise t kept));
+  Hashtbl.replace t.pool.held kept.id (buffer, floats, capacity, kept.readers);
+  let id = kept.id and released = t.pool.released in
+  Gc.finalise (fun _ -> release released id) kept;
+  if not uint32 then bindable := (kept.placeholder, weak) :: !bindable;
+  let resident : Flow.Eval.value =
+    match width with
+    | 1 -> Float_array kept.placeholder | 2 -> Vec2_array kept.placeholder
+    | 3 -> Vec3_array kept.placeholder | _ -> Vec4_array kept.placeholder
+  in
+  ({ Flow_ir.Gpu.count; width;
+     materialise = (fun () -> materialise t kept);
+     resident = (if uint32 then None else Some resident);
+     settle = (fun () -> settle t kept);
+     release = (fun ~held -> release_kept t kept ~held);
+     bounds = (fun () -> bounds_of t kept) }, Some kept)
+
 (* Hand the output's buffer to a lazy planar store: nothing is read or waited for now. *)
-let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
+let keep_storage ~uint32 ?index output =
   let index = Option.value ~default:output.index index in
   let t = output.owner in
   if t.closed || Domain.self () <> t.domain || output.generation <> t.generation then
     Error (Diagnostic.error ~code:"E_GPU" "GPU output was closed or superseded.")
   else if index < 0 || index >= Array.length t.outputs then
     Error (Diagnostic.error ~code:"E_GPU" "GPU output index is outside its producer.")
+  else if uint32_output ~index output <> uint32 then
+    Error
+      (Diagnostic.error ~code:"E_GPU_UINT32_KEEP"
+         (if uint32 then "Expected a uint32 output for a typed topology holder."
+          else "Uint32 outputs require a typed topology holder."))
   else
     let slot = t.outputs.(index) and width = t.msl.output_widths.(index) in
     match (slot.buffer, slot.floats) with
     | Some buffer, Some floats when output.count > 0 && output.epoch > 0L ->
-        let kept =
-          {
-            id = Atomic.fetch_and_add next_kept 1;
-            kept_buffer = buffer;
-            kept_floats = floats;
-            kept_count = output.count;
-            kept_width = width;
-            lock = Mutex.create ();
-            planes = Atomic.make None;
-            destroyed = false;
-            retired = false;
-            placeholder = Array.make width 0.;
-            kept_epoch = output.epoch;
-            settled = Atomic.make false;
-            readers = Atomic.make 0;
-            bounds_memo = None;
-            thaw = ignore;
-            pressure = device_pressure slot.capacity;
-          }
-        in
-        let capacity = slot.capacity in
+        let holder = hold t ~uint32 ~buffer ~floats ~capacity:slot.capacity
+            ~count:output.count ~width ~epoch:output.epoch ~settled:false in
         slot.buffer <- None;
         slot.floats <- None;
         slot.capacity <- 0;
         slot.uploaded <- None;
-        let weak = Weak.create 1 in
-        Weak.set weak 0 (Some kept);
-        t.kept <- (kept.kept_epoch, kept.settled, weak) :: t.kept;
-        kept.thaw <- (fun () -> ignore (materialise t kept));
-        Hashtbl.replace t.pool.held kept.id (buffer, floats, capacity, kept.readers);
-        (* any domain, any allocation: only name the holder; after close nothing drains it *)
-        let id = kept.id and released = t.pool.released in
-        Gc.finalise (fun _ -> release released id) kept;
-        bindable := (kept.placeholder, weak) :: !bindable;
-        let resident : Flow.Eval.value =
-          match width with
-          | 1 -> Float_array kept.placeholder
-          | 2 -> Vec2_array kept.placeholder
-          | 3 -> Vec3_array kept.placeholder
-          | _ -> Vec4_array kept.placeholder
-        in
-        Ok
-          {
-            count = output.count;
-            width;
-            materialise = (fun () -> materialise t kept);
-            resident = Some resident;
-            settle = (fun () -> settle t kept);
-            release = (fun ~held -> release_kept t kept ~held);
-            bounds = (fun () -> bounds_of t kept);
-          }
+        Ok holder
     | _ ->
         (* an empty, unmapped or caller-encoded output is read now *)
         Result.map
           (fun planes ->
-            {
+            ({
               Flow_ir.Gpu.count = output.count;
               width;
               materialise = (fun () -> planes);
@@ -1140,8 +1260,79 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
               settle = (fun () -> Ok ());
               release = (fun ~held:_ -> ());
               bounds = (fun () -> None);
-            })
+            }, None))
           (planes ~index output)
+
+let keep ?index output = Result.map fst (keep_storage ~uint32:false ?index output)
+
+let pin_kept kept =
+  if kept.destroyed || not (Atomic.get kept.settled) || Atomic.get kept.planes <> None then None
+  else begin
+    Atomic.incr kept.readers;
+    let pinned = Atomic.make true in
+    Some (kept.kept_buffer, kept.kept_count,
+          (fun () -> Atomic.get pinned && not kept.destroyed),
+          fun () -> if Atomic.exchange pinned false then Atomic.decr kept.readers)
+  end
+
+type uint32_holder = {
+  count : int;
+  materialise : unit -> int array;
+  settle : unit -> (unit, Diagnostic.t) result;
+  release : held:bool -> unit;
+  pin : unit -> (B.buffer * int * (unit -> bool) * (unit -> unit)) option;
+}
+
+type Flow_ir.Gpu.integer_storage += Native_uint32 of uint32_holder
+
+let integers (holder : uint32_holder) : Flow_ir.Gpu.integers =
+  { count = holder.count; storage = Some (Native_uint32 holder);
+    materialise = holder.materialise; release = holder.release }
+
+let pin_integers (holder : Flow_ir.Gpu.integers) =
+  match holder.storage with
+  | Some (Native_uint32 native) -> native.pin ()
+  | Some _ | None -> None
+
+let integer_holder ~domain ((planes : Flow_ir.Gpu.planes), kept) =
+      let integers = Atomic.make None in
+      { count = planes.count;
+        materialise = (fun () ->
+            match Atomic.get integers with
+            | Some values -> values
+            | None ->
+                let values = Array.map int_of_float (planes.materialise ()).(0) in
+                ignore (Atomic.compare_and_set integers None (Some values));
+                Option.get (Atomic.get integers));
+        settle = planes.settle;
+        release = planes.release;
+        pin = (fun () ->
+            if Domain.self () <> domain then None else Option.bind kept pin_kept) }
+
+let keep_uint32 ?index output =
+  Result.map (integer_holder ~domain:output.owner.domain)
+    (keep_storage ~uint32:true ?index output)
+
+let adopt_storage t ~uint32 ~buffer ~count ~width =
+  if t.closed || Domain.self () <> t.domain then
+    Error (Diagnostic.error ~code:"E_GPU" "GPU owner is closed or called from another domain.")
+  else if width < 1 || width > 4 || (uint32 && width <> 1) || count < 0
+          || Int64.of_int count > Int64.div (B.buffer_size buffer) (Int64.of_int (4 * width)) then
+    Error (Diagnostic.error ~code:"E_GPU" "Adopted array exceeds its buffer or has an invalid width.")
+  else match B.mapped_view buffer with
+  | None -> Error (Diagnostic.error ~code:"E_GPU" "Adopted array requires mapped storage for worker reads.")
+  | Some floats -> begin
+    drain t;
+    Ok (hold t ~uint32 ~buffer ~floats ~capacity:(Int64.to_int (B.buffer_size buffer))
+          ~count ~width ~epoch:(B.completed_epoch t.queue) ~settled:true)
+  end
+
+let adopt_uint32 t ~buffer ~count =
+  Result.map (integer_holder ~domain:t.domain)
+    (adopt_storage t ~uint32:true ~buffer ~count ~width:1)
+
+let adopt_float t ~buffer ~count ~width =
+  Result.map fst (adopt_storage t ~uint32:false ~buffer ~count ~width)
 
 (* A display borrowing a settled kept output's buffer: a reader the pool waits for (no reuse, no
    thaw) until [unpin]; [valid] while the buffer exists (a close destroys it). Initial domain. *)
@@ -1185,7 +1376,7 @@ let count_record output =
   then None
   else output.owner.counted.buffer
 
-let count output = output.count
+let count (output : output) = output.count
 let epoch output = output.epoch
 let width output = output.width
 let gpu_seconds output = output.gpu_seconds
@@ -1249,7 +1440,8 @@ module Private = struct
   let input_uploaded_bytes t = t.input_uploaded_bytes
   let status_reads t = t.status_reads
   let check_status t ~epoch = check_status t ~epoch
-  let readback_bytes t = t.readback_bytes
+  let readback_bytes t = t.readback_bytes + Atomic.get t.materialised_bytes
+  let bounds_readback_bytes t = t.bounds_readback_bytes
   let materialisations t = Atomic.get t.materialised
 
   let held_buffers t =
@@ -1269,12 +1461,140 @@ end
    back (the one wait of a fold level). Three dispatches in order over blocks of 1,024: count each
    block, scan the counts in one group, scatter each block from its first slot. With [count_in] the
    first and last take their group count from it on the device, written into [groups] (12 bytes). *)
+let fill_indices ?value queue pipelines buffer ~count =
+  if count < 0 || Int64.of_int count > Int64.div (B.buffer_size buffer) 4L then
+    Error (Diagnostic.error ~code:"E_GPU" "Integer fill count exceeds its buffer capacity.")
+  else if count = 0 then Ok ()
+  else
+    try
+      let compiled =
+        match Pipelines.get pipelines Kernels.indices with
+        | Ok p -> p
+        | Error d -> raise (Diagnostic.Error d)
+      in
+      let commands = get (B.begin_commands queue) and committed = ref false in
+      Fun.protect
+        ~finally:(fun () -> if not !committed then ignore (B.abandon commands))
+        (fun () ->
+          let encoder = get (B.compute_encoder commands) in
+          Fun.protect
+            ~finally:(fun () -> ignore (B.end_compute encoder))
+            (fun () ->
+              get (B.set_pipeline encoder compiled.pipeline);
+              get (B.set_buffer encoder ~index:0 buffer);
+              let word = Bytes.create 12 in
+              pack_uint32 word 0 (float count);
+              pack_uint32 word 4 (if value = None then 0. else 1.);
+              pack_uint32 word 8 (float (Option.value ~default:0 value));
+              get (B.set_bytes encoder ~index:1 word);
+              get (B.dispatch_threads encoder ~threads:(count, 1, 1) ~threadgroup:(256, 1, 1)));
+          let receipt = get (B.commit commands) in
+          committed := true;
+          get (B.complete_through queue receipt.epoch));
+      Ok ()
+    with Diagnostic.Error d -> Error d
+
 let compact_blocks count = 8 * max 1 ((count + 1023) / 1024)
 
-let compact ?encoder commands pipelines ~mask ~count ~count_in ~kept ~total ~blocks ~groups =
+let validate_topology ?(on_read = fun _ -> ()) queue pipelines ~vertices:(vertices, nv) ~offsets:(offsets, no)
+    ~kinds:(kinds, nk) ~status ~point_count ~max_polygon_size =
+  try
+    List.iter
+      (fun (buffer, count) ->
+        if count < 0 || Int64.of_int count > Int64.div (B.buffer_size buffer) 4L then
+          raise (Diagnostic.Error
+                   (Diagnostic.error ~code:"E_TOPOLOGY" "Topology: array count exceeds buffer capacity")))
+      [ (vertices, nv); (offsets, no); (kinds, nk); (status, 9) ];
+    let bound = Bytes.create 20 in
+    List.iteri (fun i n -> pack_uint32 bound (i * 4) (float n))
+      [ point_count; nv; no; nk; max_polygon_size ];
+    let compiled =
+      match Pipelines.get pipelines Kernels.topology with
+      | Ok p -> p
+      | Error d -> raise (Diagnostic.Error d)
+    in
+    let commands = get (B.begin_commands queue) and committed = ref false in
+    Fun.protect
+      ~finally:(fun () -> if not !committed then ignore (B.abandon commands))
+      (fun () ->
+        let encoder = get (B.compute_encoder commands) in
+        Fun.protect ~finally:(fun () -> ignore (B.end_compute encoder)) (fun () ->
+            get (B.set_pipeline encoder compiled.pipeline);
+            List.iteri (fun index buffer -> get (B.set_buffer encoder ~index buffer))
+              [ vertices; offsets; kinds; status ];
+            get (B.set_bytes encoder ~index:4 bound);
+            get (B.dispatch_threads encoder ~threads:(256, 1, 1) ~threadgroup:(256, 1, 1)));
+        let receipt = get (B.commit commands) in
+        committed := true;
+        get (B.complete_through queue receipt.epoch));
+    let bytes = get (B.read_buffer status ~offset:0L ~length:36) in
+    on_read 36;
+    let failed i = Bytes.get_int32_le bytes (4 * i) <> 0l in
+    let failure =
+      List.find_opt (fun (bit, _, _) -> failed bit)
+        [ (6, "E_TOPOLOGY_KIND", "Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline).");
+          (0, "E_TOPOLOGY", "Topology: primitive offsets must contain the initial zero");
+          (1, "E_TOPOLOGY", "Topology: first primitive offset must be zero");
+          (2, "E_TOPOLOGY", "Topology: final primitive offset must equal vertex count");
+          (3, "E_TOPOLOGY", "Topology: primitive kind count must match primitive count");
+          (4, "E_TOPOLOGY", "Topology: vertex references an invalid point");
+          (5, "E_TOPOLOGY", "Topology: primitive offsets are not ordered");
+          (7, "E_TOPOLOGY", "Topology: primitive has too few vertices for its kind");
+          (8, "E_TOPOLOGY", "Topology: polygon exceeds the supported vertex count") ]
+    in
+    match failure with
+    | None -> Ok ()
+    | Some (_, code, message) -> Error (Diagnostic.error ~code message)
+  with Diagnostic.Error d -> Error d
+
+let triangle_indices ?(on_read = fun _ -> ()) queue pipelines ~positions:(positions, points)
+    ~vertices:(vertices, nv) ~offsets:(offsets, no) ~kinds:(kinds, np) ~indices ~blocks ~status =
+  try
+    let refuse message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_DISPLAY_TRIANGLES" message)) in
+    if points <= 0 || points > (1 lsl 30) || np <= 0 || np > (1 lsl 28) || no <> np + 1
+      || nv < 3 * np || nv > 4 * np || nv > Sys.max_string_length / 12
+    then refuse "Resident display requires nonempty triangle/quad topology.";
+    let count = 3 * (nv - (2 * np)) in
+    let groups = (np + 255) / 256 in
+    List.iter (fun (buffer, words) ->
+      if words < 0 || Int64.of_int words > Int64.div (B.buffer_size buffer) 4L then
+        refuse "Resident display stream count exceeds buffer capacity.")
+      [ positions, points * 3; vertices, nv; offsets, no; kinds, np;
+        indices, count; blocks, groups; status, 1 ];
+    let compiled = match Pipelines.get pipelines Kernels.triangles with
+      | Ok p -> p | Error d -> raise (Diagnostic.Error d) in
+    let bound = Bytes.create 16 in
+    List.iteri (fun i n -> Bytes.set_int32_le bound (i * 4) (Int32.of_int n)) [ points; nv; np ];
+    let commands = get (B.begin_commands queue) and committed = ref false in
+    Fun.protect ~finally:(fun () -> if not !committed then ignore (B.abandon commands)) (fun () ->
+      for pass = 0 to 1 do
+        Bytes.set_int32_le bound 12 (Int32.of_int pass);
+        let encoder = get (B.compute_encoder commands) in
+        Fun.protect ~finally:(fun () -> ignore (B.end_compute encoder)) (fun () ->
+          get (B.set_pipeline encoder compiled.pipeline);
+          List.iteri (fun index buffer -> get (B.set_buffer encoder ~index buffer))
+            [ positions; vertices; offsets; kinds; indices; blocks; status ];
+          get (B.set_bytes encoder ~index:7 bound);
+          get (B.dispatch_threads encoder ~threads:((if pass = 0 then groups * 256 else 256), 1, 1)
+            ~threadgroup:(256, 1, 1)))
+      done;
+      let receipt = get (B.commit commands) in
+      committed := true;
+      get (B.complete_through queue receipt.epoch));
+    let result = get (B.read_buffer status ~offset:0L ~length:4) in
+    on_read 4;
+    if Bytes.get_int32_le result 0 <> 0l then
+      refuse "Resident display polygon is unsupported, degenerate or numerically ambiguous.";
+    Ok count
+  with Diagnostic.Error d -> Error d
+
+let compact ?(uint32 = false) ?encoder commands pipelines ~mask ~count ~count_in ~kept ~total
+    ~blocks ~groups =
   try
     let compiled =
-      match Pipelines.get pipelines Kernels.compaction with
+      match
+        Pipelines.get pipelines (if uint32 then Kernels.compaction_uint32 else Kernels.compaction)
+      with
       | Ok compiled -> compiled
       | Error error -> raise (Diagnostic.Error error)
     in
@@ -1305,12 +1625,10 @@ let compact ?encoder commands pipelines ~mask ~count ~count_in ~kept ~total ~blo
             get (B.set_bytes encoder ~index:3 bound);
             get
               (if pass <> 1 && count_in <> None then
-                 B.dispatch_threadgroups_indirect encoder groups ~offset:0L
-                   ~threadgroup:(1024, 1, 1)
+                 B.dispatch_threadgroups_indirect encoder groups ~offset:0L ~threadgroup:(1024, 1, 1)
                else
                  let groups = if pass = 1 then 1 else compact_blocks count / 8 in
-                 B.dispatch_threads encoder ~threads:(1024 * groups, 1, 1)
-                   ~threadgroup:(1024, 1, 1)))
+                 B.dispatch_threads encoder ~threads:(1024 * groups, 1, 1) ~threadgroup:(1024, 1, 1)))
           [ 0; 1; 2 ]);
     Ok ()
   with Diagnostic.Error error -> Error error

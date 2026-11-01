@@ -90,6 +90,7 @@ let () =
     ~finally:(fun () -> List.iter Editor.close [ display; cpu1; cpu8 ])
     (fun () ->
       Editor.Private.gpu_qualification display;
+      let initial, _, _, _, _ = Editor.Private.image_gpu_stats display in
       let node owner ~override kind graph =
         let plan = Editor.Private.image_plan owner in
         Array.find_opt
@@ -130,6 +131,7 @@ let () =
       let parent_generation = generation parent in
       List.iter
         (fun time ->
+          let before, _, _, _, _ = Editor.Private.image_gpu_stats display in
           Array.iteri
             (fun i image ->
               let override = i = 1 in
@@ -157,16 +159,24 @@ let () =
             actual;
           assert (
             resolve time ~override:false "image/render" "fixed" == fixed
-            && generation fixed = fixed_generation))
+            && generation fixed = fixed_generation);
+          let after, _, _, _, _ = Editor.Private.image_gpu_stats display in
+          Printf.printf "workspace_geometry_capture,time=%.2f,status_reads=%d\n%!"
+            time (after.status_reads - before.status_reads);
+          (* SOP factories retain their creation-time Measured policy: these
+             small captures stay on CPU. Each warmed frame runs two GPU image
+             kernels; first-use calibration is reported separately above. *)
+          if time = 1. then assert (after.status_reads - before.status_reads = 2))
         [ 0.; 1. ];
       assert (generation parent > parent_generation && rgba saved = saved_bytes);
       let stats, _, _, _, _ = Editor.Private.image_gpu_stats display in
-      Printf.printf "workspace_geometry_capture,status_reads=%d,readback_bytes=%d\n%!"
-        stats.status_reads stats.readback_bytes;
-      assert (stats.status_reads = 4 && stats.readback_bytes = 0));
+      Printf.printf "workspace_geometry_capture,startup_status_reads=%d,status_reads=%d,readback_bytes=%d\n%!"
+        initial.status_reads (stats.status_reads - initial.status_reads)
+        (stats.readback_bytes - initial.readback_bytes);
+      assert (stats.readback_bytes - initial.readback_bytes = 0));
   assert (handles () = before);
   print_endline
-    "Native geometry captures: P/Cd, two instances, exact CPU domains, resident GPU, parent \
+    "Native geometry captures: P/Cd, two instances, exact CPU domains, resident GPU images, parent \
      freshness, unrelated fixed render reuse and close pass"
 
 let () =
@@ -499,7 +509,9 @@ let () =
           verify 0.5;
           assert (Result.get_ok (Rays.Image.get_size image) = (35, 33));
           assert (Editor.Private.image_stats !owner = (1, 0));
-          reload 20. (text 65 3 "[uv.x uv.y 0.5 1]");
+          (* Hypot is deliberately CPU-only; fallback must not depend on an
+             arbitrary size threshold in the placement policy. *)
+          reload 20. (text 65 3 "[(hypot uv.x 0) uv.y 0.5 1]");
           let cpu_image, cpu_texture = resolve 0. in
           assert (cpu_image == image && Rays.Texture.Private.image cpu_texture = None);
           assert (Result.get_ok (I.gpu_snapshot resource) = None);

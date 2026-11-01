@@ -1687,6 +1687,13 @@ refreshes graph reports without projecting or laying the graph out again.
 Reports retain graph-instance identities; the authored pane reads its default
 instance, so an override's execution cannot replace its badge or duration.
 
+Static evaluation has a separate bounded 512-map history in the same profile,
+enabled by `Profile.sample`. It records actual walker head/tail counts, packed
+refusals and inclusive wall times, including compile/force attempts. The
+offscreen `bench_isogrid` benchmark scopes it around real editor load and graph
+edits; geometry digests are taken after measuring presentation so deliberate
+host inspection is excluded from that latency.
+
 Full-workspace parity checks lower the same checked document twice with its
 actual SOP factories. `Lower.of_checked ~reference:true` independently
 interprets value drives and attribute writes while retaining native opaque
@@ -1964,6 +1971,23 @@ indices beyond 4,096 remain inspectable. Parameter and body cards share the call
 memo, and sparklines sample at most 64 calls across the full input. Probe state is
 forked from the environment, so inspection does not advance a frame fold. Zone
 wire hit boxes are children of the zone, below its controls in PXUI's hit order.
+
+Static numeric maps above 4,096 elements run a trusted exact CPU kernel before
+walking when eager records are absent. Production lowering requests replayed
+records: a closure's call template serves selected body probes, with call indices
+advancing by the full map count. A refused or failed kernel restarts the walker
+at zero, retaining its error code, message and span. Named-function maps keep
+their eager recording head. Ordinary `~record:true` callers and approximate
+GPU maps keep the checked head contract. Qualification `~verify:true` compares
+every exact kernel element with the walker bit for bit and stops on a mismatch.
+
+The native editor defers qualifying large static SOP maps to the worker cook;
+host graphs stay eager and CLI checking disables deferral. Static deferred
+values remain inspectable without a live frame. A selected map call compiles
+its inputs through the host service, reuses their materialized captures and
+reference-records the selected body. Untaken body captures remain lazy.
+Static mesh arrays in `rays check` pass through the cook's topology validator,
+so malformed storage cannot pass the CLI and fail only when opened.
 
 ### Frame data and native 2D drawings
 
@@ -2332,11 +2356,11 @@ CPU kernel tier plus CPU instance building; an unmeasured backend keeps CPU. For
 domain before submitting CPU geometry work. The cook worker receives an owned
 CPU array. Attribute-reading cones retain their cooked-input CPU route.
 A large static map in a node body is the one producer the static evaluator may take from the device:
-`Eval.Host.static_with_requests ~bulk_approx` offers a map of more than 4,096 elements whose
+`Eval.Residual.handle ~bulk_approx` offers a map of more than 4,096 elements whose
 producer the checker marks approximable; when the backend's measured cost beats the CPU row the
 executor runs it, reads it back once, and the evaluator accepts it within 1e-4 (relative plus
-absolute) of the walked first 4,096 elements instead of bit for bit. Everything not so placed keeps
-the bit-for-bit check. The native device runs fused and checked multiply-add in 32 bits
+absolute) of the walked first 4,096 elements instead of bit for bit. Trusted exact
+CPU maps use the kernel-first/replayed-record contract above. The native device runs fused and checked multiply-add in 32 bits
 (`Packed.gpu_refusals ~fused:true`); the web export keeps the binary64 refusals. A kernel that reads cooked attributes runs inside a cook on a worker domain, which may not drive the
 device. A host that pumps the device (`Workspace_gpu.with_backend`) publishes it as a service
 (`Gpu.set_service`); a worker's `Gpu.available` is then a proxy whose requests the initial domain serves

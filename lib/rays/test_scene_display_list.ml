@@ -87,6 +87,31 @@ let run () =
           ()
       | _ -> failwith "changed layer invalidated unrelated retained Scene2 IR");
 
+      let packets = Weak.create 24 in
+      let ui_frame i =
+        let builder = Scene_command.Ui_batch.Builder.create () in
+        Scene_command.Ui_batch.Builder.rect builder ~x:(float i) ~y:0. ~width:1. ~height:1. ();
+        let batch = Scene_command.Ui_batch.Builder.publish builder in
+        Weak.set packets i (Some batch);
+        let frame = [ Scene.Layer.ui batch ] in
+        let stage () = Result.get_ok (Scene.Layer.stage_native_render ~width:32 ~height:32 frame) in
+        let first = stage () in
+        if first != stage () then failwith "unchanged UI frame missed stage reuse";
+        Option.get first.retained
+      in
+      let identity, version = ui_frame 0 in
+      for i = 1 to 23 do
+        let next_identity, next_version = ui_frame i in
+        if next_identity <> identity || next_version <= version then
+          failwith "changed UI frame did not replace its versioned submission"
+      done;
+      Gc.full_major ();
+      let alive = ref 0 in
+      for i = 0 to 23 do
+        if Weak.check packets i then incr alive
+      done;
+      if !alive > 1 then failwith "native staging retained superseded UI packets";
+
       let image_builder = Scene_command.Display_list.Builder.create () in
       Scene_command.Display_list.Builder.image image_builder ~resource_id:7
         ~source:{ x = 0.; y = 0.; width = 1.; height = 1. }

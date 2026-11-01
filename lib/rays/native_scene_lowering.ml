@@ -20,7 +20,6 @@ let draw_of_scene3_entry (entry : Renderer.Scene_execution.scene3_entry) =
     entry.draw
 
 type retained_draws = {
-  staged : Scene.Layer.staged_native;
   layer : Renderer.Scene_execution.prepared_scene3; (* a frame with several 3D layers caches each *)
   draws : Renderer.draw list;
 }
@@ -28,13 +27,12 @@ type retained_draws = {
 let retained_draw_capacity = 16
 
 module Retained_key = struct
-  type t = Scene.Layer.staged_native * Renderer.Scene_execution.prepared_scene3
+  type t = Renderer.Scene_execution.prepared_scene3
 
-  let equal (a, b) (c, d) = a == c && b == d
+  let equal = ( == )
 
-  let hash ((staged : Scene.Layer.staged_native), (layer : Renderer.Scene_execution.prepared_scene3))
-      =
-    Hashtbl.hash (staged.retained, Array.length layer.Renderer.Scene_execution.entries)
+  (* ponytail: 16 immutable layers; add stable IDs if this cache grows. *)
+  let hash (layer : t) = Hashtbl.hash (Array.length layer.entries)
 end
 
 module Retained_table = Lru.Make (Retained_key)
@@ -57,7 +55,7 @@ let draws_of_prepared (staged : Scene.Layer.staged_native) prepared =
       | None ->
           Array.to_list prepared.Renderer.Scene_execution.entries |> List.map draw_of_scene3_entry
       | Some context -> (
-          let key = (staged, prepared) in
+          let key = prepared in
           match Retained_table.find context.retained_draws key with
           | cached -> cached.draws
           | exception Not_found ->
@@ -69,7 +67,7 @@ let draws_of_prepared (staged : Scene.Layer.staged_native) prepared =
                     (draw_of_scene3_entry (Array.unsafe_get entries index) :: reversed)
               in
               let draws = build 0 [] in
-              Retained_table.add context.retained_draws key { staged; layer = prepared; draws };
+              Retained_table.add context.retained_draws key { layer = prepared; draws };
               draws))
 
 let rec validate_images = function

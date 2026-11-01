@@ -18,6 +18,66 @@ let catalog () =
   | Ok c -> c
   | Error d -> die "rays: catalog: %s" (D.to_string d)
 
+let check_meshes (lowered : Flow_sop.Lower.t) =
+  let check_root instance fallback =
+    match
+      List.find_opt (fun (graph : Flow_sop.Lower.graph) -> graph.instance = instance) lowered.graphs
+    with
+    | None -> Error fallback
+    | Some { root = None; _ } -> Ok ()
+    | Some graph ->
+        let ( let* ) = Result.bind in
+        let* resolved =
+          Flow_sop.Value_lane.resolve (Flow_sop.Value_lane.create ()) ~time:0. graph.network
+        in
+        let* node =
+          Result.map_error (D.error ~code:"E_LOWER")
+            (Sop.Edit_graph.compile_node resolved.geometry ~node_id:(Option.get graph.root))
+        in
+        let session =
+          Sop.Session.create ~max_entries:16 ~max_payload_bytes:(1 lsl 28) |> Result.get_ok
+        in
+        Fun.protect
+          ~finally:(fun () -> Sop.Session.close session)
+          (fun () ->
+            Result.map ignore
+              (Sop.Session.cook session ~context:(Sop.Context.create () |> Result.get_ok) node))
+  in
+  let result =
+    Array.fold_left
+      (fun result (node : Flow.Eval.node) ->
+        Result.bind result (fun () ->
+            if
+              List.mem node.kind [ "sop/mesh"; "sop/mesh_planes" ]
+              && not (Flow.Eval.is_live (Flow.Eval.Record node.args))
+            then
+              match Flow_sop.Topology_kernel.mesh node.args with
+              | Ok _ -> Ok ()
+              (* On failure, the ordinary cook applies authored error mappers and
+               leaves an unused, unprotected constructor uncooked. *)
+              | Error diagnostic -> check_root node.inst diagnostic
+            else Ok ()))
+      (Ok ()) lowered.plan.nodes
+  in
+  Array.fold_left
+    (fun (index, result) (instance : Flow.Eval.instance) ->
+      let result =
+        Result.bind result (fun () ->
+            match instance.result with
+            | Flow.Eval.Residual residual
+              when (Flow.Eval.Residual.residual_view residual).term.ty = Flow.Ty.geometry
+                   && not
+                        (Flow.Eval.frame_dependent instance.result
+                        || Flow.Eval.state_dependent instance.result) ->
+                (* Protected geometry is a residual root: its constructor is not a
+               static plan node. Cook through the boundary so its mapper runs. *)
+                check_root index (D.error ~code:"E_LOWER" "Missing static geometry graph")
+            | _ -> Ok ())
+      in
+      (index + 1, result))
+    (0, result) lowered.plan.instances
+  |> snd
+
 (* The checked document and every diagnostic to print. Warnings fail the file
    unless the workspace form carries ^:allow-warnings.  The document is also
    evaluated and lowered as a window opens it, so a file that passes opens. *)
@@ -33,8 +93,13 @@ let check_text ?(imports = []) text =
   match Doc.check_text ~imports (catalog ()) text with
   | Error ds -> (None, ds, allow)
   | Ok (doc, warnings) -> (
-      match Editor_document.Lowering.of_workspace ~factories:Sop.Nodes.factories doc with
-      | Ok _ -> (Some doc, warnings, allow)
+      match
+        Editor_document.Lowering.of_workspace ~defer:false ~factories:Sop.Nodes.factories doc
+      with
+      | Ok lowered -> (
+          match check_meshes lowered.workspace.lowered with
+          | Ok () -> (Some doc, warnings, allow)
+          | Error d -> (None, warnings @ [ d ], allow))
       | Error d -> (None, warnings @ [ d ], allow))
 
 (* The text, the document when the file reads, and whether it passes. *)

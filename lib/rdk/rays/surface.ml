@@ -3,19 +3,20 @@ open Rdk_core
 open Rdk_ops
 open Rdk_ops
 
-(* [Device]: a point cloud or triangle mesh whose positions (and normals) a device holds, drawn
-   from there *)
+(* [Device]: resident positions, normals/colours and optional topology, bound on the initial domain. *)
 type preview = Pieces of Packed_pieces.t | Mesh of Mesh.t | Device of Geometry.t
+
+exception Conversion_error of string
 
 type t = {
   preview : preview;
   transforms : Rays_math.Mat4.t array option;
   batches : (Material.t * int array) list;
+  host_reason : string option;
 }
 
-(* The display reads nothing of a point cloud or a triangle mesh but P, N and the topology: with P
-   and N on the device (or no N: lit triangles then take normals the device makes from P) and no
-   colour, uv, piece or material, it binds them there. *)
+(* Point Cd stays with P/N on device. Resident polygon topology is offered to the
+   checked index kernel; unsupported layouts take the host bridge. *)
 (* whether every primitive is a triangle, the last topology's answer kept: a deforming mesh's frames
    share their topology *)
 let last_topology = Atomic.make None
@@ -28,35 +29,55 @@ let triangles topology =
       Atomic.set last_topology (Some (topology, answer));
       answer
 
-let device_points geometry =
-  Packed.Float3.resident (Geometry.positions geometry)
-  && Geometry.point_count geometry > 0
-  && (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
-    | None -> true
-    | Some n -> Attribute.resident n)
-  && (Geometry.primitive_count geometry = 0 || triangles (Geometry.topology geometry))
-  && List.for_all
-       (fun (owner, name) -> Geometry.find_attribute ~owner name geometry = None)
-       [
-         (Attribute.Point, "Cd");
-         (Attribute.Point, "uv");
-         (Attribute.Vertex, "N");
-         (Attribute.Vertex, "Cd");
-         (Attribute.Vertex, "uv");
-         (Attribute.Primitive, "Cd");
-         (Attribute.Primitive, "piece");
-         (Attribute.Primitive, "material_color");
-         (Attribute.Primitive, "material_roughness");
-         (Attribute.Primitive, "material_emission");
-         (Attribute.Primitive, "material_round");
-       ]
+let device_color geometry =
+  match Geometry.find_attribute ~owner:Attribute.Point "Cd" geometry with
+  | None -> true
+  | Some a -> Attribute.resident a && List.mem (Attribute.kind_name a) [ "float3"; "float4" ]
+
+let device_refusal geometry =
+  if not (Packed.Float3.resident (Geometry.positions geometry)) then
+    Some "Positions are on the CPU."
+  else if Geometry.point_count geometry = 0 then Some "Geometry is empty."
+  else if
+    match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
+    | None -> false
+    | Some n -> not (Attribute.resident n && Attribute.kind_name n = "float3")
+  then Some "Point normals are not a resident float3 stream."
+  else if not (device_color geometry) then
+    Some "Point colours are not a resident float3/float4 stream."
+  else if
+    Geometry.primitive_count geometry <> 0
+    &&
+    if Topology.resident (Geometry.topology geometry) then
+      Topology.holder (Geometry.topology geometry) = None
+      || Geometry.find_attribute ~owner:Attribute.Point "N" geometry = None
+    else not (triangles (Geometry.topology geometry))
+  then Some "Topology requires the host bridge (resident polygons also require point normals)."
+  else
+    List.find_map
+      (fun (owner, name) ->
+        if Geometry.find_attribute ~owner name geometry = None then None
+        else Some ("Attribute " ^ name ^ " requires the host bridge."))
+      [
+        (Attribute.Point, "uv");
+        (Attribute.Vertex, "N");
+        (Attribute.Vertex, "Cd");
+        (Attribute.Vertex, "uv");
+        (Attribute.Primitive, "Cd");
+        (Attribute.Primitive, "piece");
+        (Attribute.Primitive, "material_color");
+        (Attribute.Primitive, "material_roughness");
+        (Attribute.Primitive, "material_emission");
+        (Attribute.Primitive, "material_round");
+      ]
 
 let rec of_geometry ?instances geometry =
-  if device_points geometry then
-    Ok { preview = Device geometry; transforms = instances; batches = [] }
-  else of_host ?instances geometry
+  match device_refusal geometry with
+  | None ->
+      Ok { preview = Device geometry; transforms = instances; batches = []; host_reason = None }
+  | Some reason -> of_host ?instances ~reason geometry
 
-and of_host ?instances geometry =
+and of_host ?instances ~reason geometry =
   let ( let* ) = Result.bind in
   let needs_triangles =
     List.exists
@@ -188,39 +209,36 @@ and of_host ?instances geometry =
             indices ))
         !order
   in
-  Ok { preview; transforms = instances; batches }
+  Ok { preview; transforms = instances; batches; host_reason = Some reason }
+
+let host_reason surface = surface.host_reason
 
 (* the host mesh of a device preview, reading P back *)
-let host geometry =
-  match Rays_mesh.to_mesh geometry with
-  | Ok mesh -> mesh
-  | Error _ -> Mesh.View.create_owned ~mode:Mesh.Points [||] |> Result.get_ok
+let host geometry = Rays_mesh.to_mesh geometry |> Result.map_error Error.to_string
+let converted = function Ok value -> value | Error message -> raise (Conversion_error message)
 
-let scene3 ?explosion ?device surface =
-  let mesh =
+let scene3_result ?explosion ?device surface =
+  let ( let* ) = Result.bind in
+  let* mesh =
     match surface.preview with
-    | Mesh mesh -> mesh
-    | Pieces pieces -> Packed_pieces.mesh_for_explosion explosion pieces
+    | Mesh mesh -> Ok mesh
+    | Pieces pieces -> Ok (Packed_pieces.mesh_for_explosion explosion pieces)
     | Device geometry -> (
         let count = Geometry.point_count geometry in
-        (* a triangle mesh's corners, as the host mesh's indices *)
-        let mode, indices =
-          if Geometry.primitive_count geometry = 0 then (Mesh.Points, None)
-          else (Mesh.Triangles, Some (Topology.View.view (Geometry.topology geometry)).vertex_points)
-        in
-        match
-          Option.bind device (fun device ->
-              Option.bind (device geometry) (fun (key, normals, keep) ->
-                  Result.to_option
-                    (Mesh.View.create_device ~mode ?indices
-                       ~host:(fun () -> host geometry)
-                       ~bounds:(fun () -> Geometry_view.bounds geometry)
-                       ~derived:
-                         (mode = Mesh.Triangles
-                         && Geometry.find_attribute ~owner:Point "N" geometry = None)
-                       ~key ~normals ~keep count)))
-        with
-        | Some mesh -> mesh
+        let mode = if Geometry.primitive_count geometry = 0 then Mesh.Points else Mesh.Triangles in
+        match Option.bind device (fun device -> device geometry) with
+        | Some (key, normals, device_index_count, device_color_width, keep) ->
+            let indices =
+              if mode = Mesh.Triangles && device_index_count = None then
+                Some (Topology.View.view (Geometry.topology geometry)).vertex_points
+              else None
+            in
+            Mesh.View.create_device ~mode ?indices ?device_index_count ~device_color_width
+              ~host:(fun () -> converted (host geometry))
+              ~bounds:(fun () -> Geometry_view.bounds geometry)
+              ~derived:
+                (mode = Mesh.Triangles && Geometry.find_attribute ~owner:Point "N" geometry = None)
+              ~key ~normals ~keep count
         | None ->
             (* no device to bind (another renderer, a closed runner): the host copy *)
             host geometry)
@@ -246,4 +264,6 @@ let scene3 ?explosion ?device surface =
             draw material mesh)
           batches
   in
-  Scene.D3.create drawings
+  Ok (Scene.D3.create drawings)
+
+let scene3 ?explosion ?device surface = converted (scene3_result ?explosion ?device surface)

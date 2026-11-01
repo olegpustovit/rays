@@ -53,10 +53,11 @@
    node_sources.ml
    (run %{exe:../flow/embed.exe} %{deps}))))
 
-(test
- (name test_units)
+(tests
+ (names test_units test_units_geometry)
  (modules
   test_units
+  test_units_geometry
   test_node_sources
   test_math_helpers
   test_math_kernel
@@ -105,6 +106,20 @@
   parallel)
  (preprocess
   (pps rays.ppx)))
+
+(rule
+ (alias test_units_core)
+ (deps nodes/prelude.rays (env_var RAYS_SLOW))
+ (action (run %{exe:test_units.exe})))
+
+(rule
+ (alias test_units_geometry)
+ (deps nodes/prelude.rays (env_var RAYS_SLOW))
+ (action (run %{exe:test_units_geometry.exe})))
+
+(alias
+ (name test_units)
+ (deps (alias test_units_core) (alias test_units_geometry)))
 
 (test
  (name test_attribute_kernel)
@@ -202,8 +217,8 @@
 
 (test
  (name test_gpu_bulk)
- (enabled_if
-  (= %{env:RAYS_SLOW=0} 1))
+ (deps (env_var RAYS_SLOW) (env_var GRID_SIDE))
+ (action (run %{test} %{env:RAYS_SLOW=0}))
  (modules test_gpu_bulk)
  (libraries
   test_support
@@ -216,6 +231,8 @@
   lisp_sop
   rays_math
   parallel))
+
+(rule (alias test_gpu_consumers) (action (run %{exe:test_gpu_bulk.exe} 0)))
 
 (executable
  (name flow_manifest)
@@ -233,3 +250,16 @@
  (alias runtest)
  (action
   (diff flow_manifest.sexp flow_manifest.gen.sexp)))
+
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_mesh_resident)
+ (modules test_mesh_resident)
+ (libraries flow_sop flow_gpu flow_ir flow renderer rdk sop ogpu ogpu_metal parallel))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_mesh_resident)
+ (action (run %{exe:test_mesh_resident.exe})))
+
+(alias (name runtest-native) (deps (alias test_mesh_resident)))

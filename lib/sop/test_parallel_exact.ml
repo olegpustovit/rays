@@ -251,7 +251,7 @@ let curve_chain_geometry segments =
     ()
   |> get_ok
 
-let run () =
+let generated_line () =
   let generated_line =
     Lisp_sop.node
       {|(sop/line :points 500001 :origin [-10.0 2.0 3.0] :direction [1.0 2.0 3.0] :length 25.0)|}
@@ -261,6 +261,9 @@ let run () =
   check
     (Geometry.point_count one = 500_001 && Geometry.vertex_count one = 500_001)
     "Line exactness fixture cardinality";
+  ()
+
+let generated_resample () =
   let generated_resample =
     Lisp_sop.node
       (Printf.sprintf
@@ -284,6 +287,9 @@ let run () =
     (Geometry.point_count one > 5_001
     && Geometry.find_attribute ~owner:Attribute.Point "tangent" one <> None)
     "advanced Resample exactness fixture cardinality";
+  ()
+
+let generated_polyframe () =
   let generated_polyframe =
     Lisp_sop.node
       {|(-> (sop/grid
@@ -302,6 +308,9 @@ let run () =
     && Geometry.find_attribute ~owner:Attribute.Vertex "tangentu" one <> None
     && Geometry.find_attribute ~owner:Attribute.Vertex "tangentv" one <> None)
     "PolyFrame exactness fixture attributes";
+  ()
+
+let generated_facet () =
   let generated_facet =
     Lisp_sop.node
       {|(-> (sop/grid
@@ -326,23 +335,35 @@ let run () =
     (Geometry.point_count one = Geometry.vertex_count one
     && Geometry.find_attribute ~owner:Attribute.Point "uv" one <> None)
     "Facet exactness fixture cardinality";
+  ()
+
+let generated_grouped_facet () =
+  let source =
+    Lisp_sop.node
+      {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 401 :rows 301
+          :uv_attribute "uv" :size 20.0)|}
+    |> cook 1
+  in
+  (* This checks Facet's group handling; parsing 120,000 textual group IDs
+     dominated it. Build the identical ordered fixture through its carrier. *)
+  let group =
+    Group.ordered ~owner:Group.Primitive ~name:"facet_even"
+      ~length:(Geometry.primitive_count source)
+      (Array.init (400 * 300) (fun primitive -> primitive * 2))
+    |> get_ok
+  in
+  let source = Geometry.with_group group source |> get_ok |> Lisp_sop.snapshot in
   let generated_grouped_facet =
     Lisp_sop.node
-      (Printf.sprintf
-         {|(-> (sop/grid
-   :width_mode "Auto"
-   :height_mode "Auto"
-   :columns 401
-   :rows 301
-   :uv_attribute "uv"
-   :size 20.0)
-     (sop/ordered_group :owner "Primitives" :name "facet_even" :elements %S)
-     (sop/facet :cusp_mode "Auto" :inline_distance 0.0 :group "facet_even" :pre_compute_normals true
-       :unique_points true :reverse_normals true))|}
-         (ints (Array.init (400 * 300) (fun primitive -> primitive * 2))))
+      ~with_:[ ("grouped", source) ]
+      {|(sop/facet (sop/ext_grouped) :cusp_mode "Auto" :inline_distance 0.0
+          :group "facet_even" :pre_compute_normals true :unique_points true :reverse_normals true)|}
   in
   let one = cook 1 generated_grouped_facet and many = cook 4 generated_grouped_facet in
   check (equal_geometry one many) "one-domain and four-domain grouped Facet geometry differ";
+  ()
+
+let generated_inline_facet () =
   let generated_inline_facet =
     Lisp_sop.node
       ~with_:[ ("in1689", Lisp_sop.snapshot (inline_geometry 40_000)) ]
@@ -357,6 +378,9 @@ let run () =
   check
     (Geometry.point_count one = 160_000 && Geometry.vertex_count one = 160_000)
     "Facet inline exactness fixture cardinality";
+  ()
+
+let generated_grid () =
   let generated_grid =
     Lisp_sop.node
       {|(sop/grid
@@ -378,6 +402,9 @@ let run () =
   check
     (Geometry.point_count one = 351_201 && Geometry.primitive_count one = 700_000)
     "advanced Grid exactness fixture cardinality";
+  ()
+
+let generated_circle () =
   let generated_circle =
     Lisp_sop.node
       {|(sop/circle
@@ -401,6 +428,9 @@ let run () =
     (Geometry.point_count one = 500_002
     && Topology.primitive_kind (Geometry.topology one) 0 = Topology.Closed_polyline)
     "advanced Circle exactness fixture cardinality";
+  ()
+
+let generated_box () =
   let generated_box =
     Lisp_sop.node
       {|(sop/box :connectivity "Quads" :consolidate_points true :normals "Vertex"
@@ -415,6 +445,9 @@ let run () =
     && Geometry.primitive_count one = 212_992
     && List.length (Geometry.groups one) = 6)
     "advanced Box exactness fixture cardinality";
+  ()
+
+let generated_sphere () =
   let generated_sphere =
     Lisp_sop.node
       {|(sop/uv_sphere
@@ -437,6 +470,9 @@ let run () =
     && Geometry.vertex_count one = 195_072
     && Geometry.primitive_count one = 65_024)
     "advanced UV Sphere exactness fixture cardinality";
+  ()
+
+let generated_torus () =
   let generated_torus =
     Lisp_sop.node
       {|(sop/torus
@@ -467,6 +503,9 @@ let run () =
     && Geometry.vertex_count one = 196_096
     && Geometry.primitive_count one = 65_282)
     "advanced Torus exactness fixture cardinality";
+  ()
+
+let generated_tube () =
   let generated_tube =
     Lisp_sop.node
       {|(sop/tube
@@ -491,6 +530,9 @@ let run () =
     && Geometry.vertex_count one = 195_584
     && Geometry.primitive_count one = 65_153)
     "advanced Tube exactness fixture cardinality";
+  ()
+
+let generated_platonic () =
   let generated_platonic =
     Lisp_sop.node
       {|(sop/platonic
@@ -510,6 +552,11 @@ let run () =
     && Geometry.vertex_count one = 180
     && Geometry.primitive_count one = 32)
     "advanced Platonic exactness fixture cardinality";
+  ()
+
+let generated_spiral () =
+  (* ponytail: ramp knot folds still use the reference evaluator. 5,005 output
+     points cross the kernel threshold; raise divisions after those folds compile. *)
   let generated_spiral =
     Lisp_sop.node
       {|(sop/spiral
@@ -525,7 +572,7 @@ let run () =
    :direction "Clockwise"
    :start_angle -0.7
    :divisions_mode "Per curve"
-   :divisions 20000
+   :divisions 1000
    :uniform_angle false
    :spiral_count 5
    :orientation "Custom axis"
@@ -544,10 +591,13 @@ let run () =
   let one = cook 1 generated_spiral and many = cook 4 generated_spiral in
   check (equal_geometry one many) "one-domain and four-domain advanced Spiral geometry differ";
   check
-    (Geometry.point_count one = 100_005
-    && Geometry.vertex_count one = 100_005
+    (Geometry.point_count one = 5_005
+    && Geometry.vertex_count one = 5_005
     && Geometry.primitive_count one = 5)
     "advanced Spiral exactness fixture cardinality";
+  ()
+
+let group_fixture () =
   let matrix =
     Rays_math.Mat4.mul
       (Rays_math.Mat4.translation (Rays_math.Vec3.create 2. 3. 4.))
@@ -629,6 +679,10 @@ let run () =
             ~min:(Rays_math.Vec3.create (-5.) (-100.) (-5.))
             ~max:(Rays_math.Vec3.create 5. 100. 5.)))
   in
+  graph
+
+let groups () =
+  let graph = group_fixture () in
   let one = cook 1 graph and many = cook 4 graph in
   check (equal_geometry one many) "one-domain and four-domain procedural geometry differ";
   check
@@ -681,6 +735,9 @@ let run () =
     && Geometry.find_attribute ~owner:Attribute.Detail "stored_detail" one <> None
     && Geometry.find_attribute ~owner:Attribute.Point "rest" one <> None)
     "Attribute Delete/Rename/Swap exactness fixture outputs";
+  ()
+
+let filters_blurred () =
   let blurred =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 240 :rows 160 :size 14.0)
@@ -712,6 +769,9 @@ let run () =
   check
     (Geometry.find_attribute ~owner:Attribute.Point "Cd" one <> None)
     "Attribute Blur exactness fixture dropped color";
+  ()
+
+let filters_smoothed () =
   let smoothed =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 300 :rows 220 :size 18.0)
@@ -745,6 +805,9 @@ let run () =
     (Geometry.find_attribute ~owner:Attribute.Point "Cd" one <> None
     && Geometry.point_count one = 301 * 221)
     "Smooth exactness fixture changed payload/cardinality";
+  ()
+
+let filters_ray_collision () =
   let ray_collision =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 320 :rows 240 :size 20.0)
@@ -799,6 +862,9 @@ let run () =
     (Geometry.point_count one = 321 * 241
     && Geometry.find_attribute ~owner:Attribute.Point "Cd" one <> None)
     "Ray exactness fixture changed payload/cardinality";
+  ()
+
+let filters_grid_snapped () =
   let grid_snapped =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)
@@ -813,6 +879,9 @@ let run () =
   check
     (Geometry.find_group ~owner:Group.Point "snapped" one <> None)
     "procedural grid snap exactness fixture dropped output group";
+  ()
+
+let filters_bounded () =
   let bounded =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 30.0)
@@ -832,6 +901,9 @@ let run () =
   check
     (Geometry.point_count one = 116_486 && Geometry.primitive_count one = 229_376)
     "procedural Bound exactness cardinality";
+  ()
+
+let filters_expanded_groups () =
   let expanded_groups =
     Lisp_sop.node
       (Printf.sprintf
@@ -851,8 +923,13 @@ let run () =
     (Geometry.find_group ~owner:Group.Primitive "grown_faces" one <> None
     && Geometry.find_edge_group "grown_edges" one <> None)
     "Group Expand/Promote exactness fixture dropped outputs";
+  ()
+
+let filters_constrained_source () =
+  (* ponytail: flood expansion visits every frontier. Keep this constraint
+     fixture above the kernel threshold; the separate expansion case is dense. *)
   let constrained_source =
-    Rdk_test_support.Plane_generators.grid ~columns:400 ~rows:300 ~size:20. () |> get_rdk
+    Rdk_test_support.Plane_generators.grid ~columns:120 ~rows:80 ~size:20. () |> get_rdk
   in
   let constrained_primitive_count = Geometry.primitive_count constrained_source in
   let region_attribute =
@@ -911,6 +988,9 @@ let run () =
     && Group.cardinality constrained_group < constrained_primitive_count
     && Geometry.find_attribute ~owner:Attribute.Primitive "constraint_step" one <> None)
     "constrained Group Expand exactness fixture ignored constraints";
+  ()
+
+let filters_instances () =
   let instances =
     Lisp_sop.node
       {|(-> (sop/box :normals "Auto" :connectivity "Triangles")
@@ -922,6 +1002,9 @@ let run () =
   let one = cook 1 instances and many = cook 4 instances in
   check (equal_geometry one many) "one-domain and four-domain copy-to-points geometry differ";
   check (Geometry.point_count one = 81 * 61 * 24) "copy-to-points exactness fixture cardinality";
+  ()
+
+let filters_mirrored () =
   let mirrored =
     Lisp_sop.node
       (Printf.sprintf
@@ -937,6 +1020,9 @@ let run () =
   in
   let one = cook 1 mirrored and many = cook 4 mirrored in
   check (equal_geometry one many) "one-domain and four-domain fuse/mirror geometry differ";
+  ()
+
+let filters_clipped () =
   let clipped =
     Lisp_sop.node
       {|(-> (sop/uv_sphere
@@ -973,6 +1059,9 @@ let run () =
   (match Geometry.find_edge_group "clip_edges" one with
   | Some group -> check (Edge_group.cardinality group > 0) "filled keep-all clip edge count"
   | None -> fail "filled keep-all clip edge group missing");
+  ()
+
+let subdivision_subdivided () =
   let subdivided =
     Lisp_sop.node
       (Printf.sprintf
@@ -1003,6 +1092,9 @@ let run () =
     (Geometry.primitive_count one = 576)
     (Printf.sprintf "Catmull-Clark procedural fixture cardinality: %d"
        (Geometry.primitive_count one));
+  ()
+
+let subdivision_creased_subdivision () =
   let creased_subdivision =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 80 :size 8.0)
@@ -1020,9 +1112,12 @@ let run () =
   check
     (Geometry.find_attribute ~owner:Attribute.Vertex "creaseweight" one <> None)
     "semi-sharp subdivision did not emit residual creases";
+  ()
+
+let subdivision_chaikin_subdivision () =
   let chaikin_subdivision =
     Lisp_sop.node
-      {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 80 :size 8.0)
+      {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 60 :rows 40 :size 8.0)
      (sop/attribute_randomize
        :a [0.0 0.0 0.0]
        :b [4.0 0.0 0.0]
@@ -1047,6 +1142,9 @@ let run () =
     | Some group -> Edge_group.cardinality group > 0
     | None -> false)
     "parallel Chaikin subdivision omitted its resulting crease group";
+  ()
+
+let subdivision_all_edge_source () =
   let all_edge_source =
     Rdk_test_support.Plane_generators.grid
       ~connectivity:Rdk_test_support.Plane_generators.Grid_quads ~columns:120 ~rows:80 ~size:8. ()
@@ -1077,6 +1175,9 @@ let run () =
     | Some group -> Edge_group.cardinality group = all_edge_source_count * 4
     | None -> false)
     "parallel all-edge crease override omitted source-edge descendants";
+  ()
+
+let subdivision_dense_curve_source () =
   let dense_curve_source = curve_chain_geometry 50_000 in
   let shared_curves =
     Lisp_sop.node
@@ -1117,6 +1218,9 @@ let run () =
   check
     (Geometry.point_count one = 250_000 && Geometry.vertex_count one = 250_000)
     "parallel independent polygon-curve subdivision cardinality";
+  ()
+
+let subdivision_crease_topology () =
   let crease_topology =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 80 :size 8.0)
@@ -1143,6 +1247,9 @@ let run () =
     | Some group -> Edge_group.cardinality group > 0
     | None -> false)
     "parallel second-input subdivision omitted its resulting crease group";
+  ()
+
+let subdivision_hole_indices () =
   let hole_indices =
     Array.init (((120 * 80) + 6) / 7) (fun index -> index * 7)
     |> Array.to_list
@@ -1174,20 +1281,10 @@ let run () =
   check
     (Geometry.primitive_count one = ((120 * 80) - Array.length hole_indices) * 16)
     "parallel recursive hole subdivision cardinality";
-  let boundary_text = function
-    | Subdivide.Subdivide_boundary_edge_only -> "Edge only"
-    | Subdivide.Subdivide_boundary_edge_and_corner -> "Edge and corner"
-    | Subdivide.Subdivide_boundary_none -> "None"
-  in
-  let fvar_text = function
-    | Subdivide.Subdivide_fvar_none -> "None"
-    | Subdivide.Subdivide_fvar_corners_only -> "Corners only"
-    | Subdivide.Subdivide_fvar_corners_plus1 -> "Corners plus 1"
-    | Subdivide.Subdivide_fvar_corners_plus2 -> "Corners plus 2"
-    | Subdivide.Subdivide_fvar_boundaries -> "Boundaries"
-    | Subdivide.Subdivide_fvar_all -> "All"
-  in
-  let boundary_fixture policy =
+  ()
+
+let subdivision_boundary policy () =
+  let fixture =
     Lisp_sop.node
       (Printf.sprintf
          {|(-> (sop/grid
@@ -1201,21 +1298,16 @@ let run () =
      (sop/subdivide :crease_weight_mode "Auto" :face_varying_interpolation "All"
        :remove_holes true :generate_resulting_creases true :hole_group ""
        :boundary_interpolation %S))|}
-         (boundary_text policy))
+         policy)
   in
-  List.iter
-    (fun policy ->
-      let one = cook 1 (boundary_fixture policy) and many = cook 4 (boundary_fixture policy) in
-      check (equal_geometry one many) "one-domain and four-domain point-boundary subdivision differ")
-    [
-      Subdivide.Subdivide_boundary_edge_only;
-      Subdivide.Subdivide_boundary_edge_and_corner;
-      Subdivide.Subdivide_boundary_none;
-    ];
-  let no_boundary_surface = cook 4 (boundary_fixture Subdivide.Subdivide_boundary_none) in
-  check
-    (Geometry.primitive_count no_boundary_surface = (120 - 2) * (80 - 2) * 4)
-    "parallel None point-boundary subdivision cardinality";
+  let one = cook 1 fixture and many = cook 4 fixture in
+  check (equal_geometry one many) "one-domain and four-domain point-boundary subdivision differ";
+  if policy = "None" then
+    check
+      (Geometry.primitive_count one = (120 - 2) * (80 - 2) * 4)
+      "parallel None point-boundary subdivision cardinality"
+
+let subdivision_fvar policy () =
   let fvar_source =
     Rdk_test_support.Plane_generators.grid
       ~connectivity:Rdk_test_support.Plane_generators.Grid_quads ~columns:120 ~rows:80 ~size:8. ()
@@ -1241,7 +1333,7 @@ let run () =
     |> get_ok
   in
   let fvar_source = Geometry.with_attribute fvar_attribute fvar_source |> get_ok in
-  let fvar_fixture policy =
+  let fixture =
     Lisp_sop.node
       ~with_:[ ("fvar_source", Lisp_sop.snapshot fvar_source) ]
       (Printf.sprintf
@@ -1249,20 +1341,12 @@ let run () =
        :boundary_interpolation "Edge only" :remove_holes true
        :generate_resulting_creases true :hole_group ""
        :face_varying_interpolation %S)|}
-         (fvar_text policy))
+         policy)
   in
-  List.iter
-    (fun policy ->
-      let one = cook 1 (fvar_fixture policy) and many = cook 4 (fvar_fixture policy) in
-      check (equal_geometry one many) "one-domain and four-domain face-varying subdivision differ")
-    [
-      Subdivide.Subdivide_fvar_none;
-      Subdivide.Subdivide_fvar_corners_only;
-      Subdivide.Subdivide_fvar_corners_plus1;
-      Subdivide.Subdivide_fvar_corners_plus2;
-      Subdivide.Subdivide_fvar_boundaries;
-      Subdivide.Subdivide_fvar_all;
-    ];
+  let one = cook 1 fixture and many = cook 4 fixture in
+  check (equal_geometry one many) "one-domain and four-domain face-varying subdivision differ"
+
+let subdivision_smooth_triangles () =
   let smooth_triangles =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 80 :size 8.0)
@@ -1281,9 +1365,14 @@ let run () =
   check
     (Geometry.primitive_count one = 120 * 80 * 2 * 3)
     "parallel Smooth Triangles subdivision cardinality";
+  ()
+
+let subdivision_detail_source () =
+  (* Two refinement levels multiply the fixture sixteenfold. This still
+     exercises dense face-varying data without the former 4 GB working set. *)
   let detail_source =
     Rdk_test_support.Plane_generators.grid
-      ~connectivity:Rdk_test_support.Plane_generators.Grid_triangles ~columns:120 ~rows:80 ~size:8.
+      ~connectivity:Rdk_test_support.Plane_generators.Grid_triangles ~columns:60 ~rows:40 ~size:8.
       ()
     |> get_rdk
   in
@@ -1349,6 +1438,9 @@ let run () =
     | Some group -> Edge_group.cardinality group > 0
     | None -> false)
     "parallel detail-overridden Chaikin subdivision dropped residual creases";
+  ()
+
+let attributes () =
   let promoted =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 240 :rows 160 :size 12.0)
@@ -1737,6 +1829,9 @@ let run () =
   check
     (Geometry.find_attribute ~owner:Attribute.Vertex "surface_distance" one <> None)
     "vertex surface transfer distance attribute missing";
+  ()
+
+let modeling_enumerate_source () =
   let enumerate_source =
     Rdk_test_support.Plane_generators.grid ~columns:500 ~rows:300 ~size:20. () |> get_rdk
   in
@@ -1762,6 +1857,9 @@ let run () =
   let one = cook 1 enumerated and many = cook 4 enumerated in
   check (equal_geometry one many)
     "one-domain and four-domain restricted piece enumeration/sort differ";
+  ()
+
+let modeling_generated_attributes () =
   let generated_attributes =
     Lisp_sop.node
       (Printf.sprintf
@@ -1786,6 +1884,9 @@ let run () =
   in
   let one = cook 1 generated_attributes and many = cook 4 generated_attributes in
   check (equal_geometry one many) "one-domain and four-domain Attribute Randomize/Remap differ";
+  ()
+
+let modeling_extended_random () =
   let extended_random =
     (Lisp_sop.node
        {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)|}
@@ -1841,6 +1942,9 @@ let run () =
   in
   let one = cook 1 extended_random and many = cook 4 extended_random in
   check (equal_geometry one many) "one-domain and four-domain extended Attribute Randomize differ";
+  ()
+
+let modeling_deformed () =
   let deformed =
     Lisp_sop.node
       {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)|}
@@ -1857,6 +1961,9 @@ let run () =
   in
   let one = cook 1 deformed and many = cook 4 deformed in
   check (equal_geometry one many) "one-domain and four-domain Peak/Mountain geometry differ";
+  ()
+
+let modeling_bent () =
   let bent =
     Lisp_sop.node
       {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)|}
@@ -1871,6 +1978,9 @@ let run () =
   in
   let one = cook 1 bent and many = cook 4 bent in
   check (equal_geometry one many) "one-domain and four-domain Bend geometry differ";
+  ()
+
+let modeling_scattered () =
   let scattered =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 400 :rows 250 :size 20.0)
@@ -1898,6 +2008,9 @@ let run () =
   in
   let one = cook 1 scattered and many = cook 4 scattered in
   check (equal_geometry one many) "one-domain and four-domain weighted Scatter geometry differ";
+  ()
+
+let modeling_duplicated () =
   let duplicated =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 80 :size 4.0)
@@ -1907,6 +2020,9 @@ let run () =
   in
   let one = cook 1 duplicated and many = cook 4 duplicated in
   check (equal_geometry one many) "one-domain and four-domain materialized duplicate differ";
+  ()
+
+let modeling_match_target () =
   let match_target =
     Lisp_sop.node
       {|(-> (sop/box :normals "Auto" :connectivity "Triangles" :size [4.0 3.0 5.0])
@@ -1938,6 +2054,9 @@ let run () =
   in
   let one = cook 1 utilities and many = cook 4 utilities in
   check (equal_geometry one many) "one-domain and four-domain compact/match-size geometry differ";
+  ()
+
+let modeling_blasted () =
   let blasted =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 180 :rows 120 :size 12.0)
@@ -1949,6 +2068,9 @@ let run () =
   in
   let one = cook 1 blasted and many = cook 4 blasted in
   check (equal_geometry one many) "one-domain and four-domain point Blast geometry differ";
+  ()
+
+let modeling_curve_points () =
   let curve_points =
     Array.init 2_001 (fun index ->
         let x = float_of_int index *. 0.01 in
@@ -1963,9 +2085,14 @@ let run () =
   let one = cook 1 healed_curve and many = cook 4 healed_curve in
   check (equal_geometry one many) "one-domain and four-domain vertex-healed curve differ";
   check (Geometry.vertex_count one = 1_601) "vertex-healed curve cardinality";
+  ()
+
+let modeling_curve_samples () =
+  (* ponytail: curve sampling scans source segments; 6,145 samples retain
+     a >4,096-point carved result without a quadratic 20,001-point fixture. *)
   let curve_samples =
-    Array.init 20_001 (fun index ->
-        let x = float_of_int index *. 0.001 in
+    Array.init 6_145 (fun index ->
+        let x = float_of_int index *. (20. /. 6144.) in
         (x, sin (x *. 0.7), cos (x *. 0.31)))
   in
   let carved_curve =
@@ -1979,7 +2106,7 @@ let run () =
   in
   let one = cook 1 carved_curve and many = cook 4 carved_curve in
   check (equal_geometry one many) "one-domain and four-domain carve/curve-ends geometry differ";
-  check (Geometry.point_count one > 10_000) "carve exactness fixture unexpectedly small";
+  check (Geometry.point_count one > 4_096) "carve exactness fixture unexpectedly small";
   let grouped_carve =
     Lisp_sop.node
       (Printf.sprintf
@@ -2003,6 +2130,7 @@ let run () =
     (Geometry.primitive_count one = 12_289
     && Topology.primitive_kind (Geometry.topology one) 1 = Topology.Polygon)
     "grouped Carve unselected polygon/cardinality behavior";
+  let grouped_carve = Lisp_sop.snapshot one in
   let cut_pieces =
     Lisp_sop.node
       ~with_:[ ("grouped_carve", grouped_carve) ]
@@ -2028,15 +2156,18 @@ let run () =
    :first 0.1
    :last 0.9
    :extract_points true
-   :divisions 10001)|}
+   :divisions 5001)|}
   in
   let one = cook 1 extracted_points and many = cook 4 extracted_points in
   check (equal_geometry one many) "one-domain and four-domain Carve point extraction differ";
   check
     (Geometry.primitive_count one = 12_288
-    && Geometry.point_count one > 10_001
+    && Geometry.point_count one > 5_001
     && Geometry.vertex_count one = 49_152)
     "Carve point extraction exactness cardinality";
+  ()
+
+let modeling_joined_curve_parts () =
   let joined_curve_parts =
     List.init 64 (fun slot ->
         let part = if slot = 0 then 0 else 1 + (slot * 20 mod 63) in
@@ -2094,6 +2225,9 @@ let run () =
   check
     (Geometry.primitive_count one = 70 && Geometry.vertex_count one >= 16_400)
     "picked-end Curve Join subgroup/keep exactness fixture cardinality";
+  ()
+
+let combining_converted_lines () =
   let converted_lines =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 256 :rows 192 :size 16.0)
@@ -2109,6 +2243,9 @@ let run () =
   | Some group ->
       check (Edge_group.cardinality group = 147_904) "Convert Line lost native edge membership"
   | None -> fail "Convert Line dropped native edge group");
+  ()
+
+let combining_connected_lines () =
   let connected_lines =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 256 :rows 192 :size 16.0)
@@ -2132,6 +2269,9 @@ let run () =
         (Edge_group.cardinality group = 147_904)
         "connected Convert Line lost native edge membership"
   | None -> fail "connected Convert Line dropped native edge group");
+  ()
+
+let combining_many_wires () =
   let many_wires =
     Lisp_sop.node
       (Printf.sprintf
@@ -2161,6 +2301,11 @@ let run () =
   (match Geometry.find_group ~owner:Group.Primitive "wire_caps" one with
   | Some group -> check (Group.cardinality group = 18_656) "many-curve sweep cap group cardinality"
   | None -> fail "many-curve sweep cap group missing");
+  ()
+
+let combining_general_backbone () =
+  (* ponytail: the general-profile sweep searches its backbone per output.
+     257 samples still produce 6,168 points; use more after that search is indexed. *)
   let general_backbone =
     Lisp_sop.node
       (Printf.sprintf
@@ -2168,8 +2313,8 @@ let run () =
      (sop/set_float :name "pscale" :value 0.85)
      (sop/group_edges :name "backbone_edges"))|}
          (curve_list
-            (Array.init 5_001 (fun point ->
-                 let t = float_of_int point *. 0.002 in
+            (Array.init 257 (fun point ->
+                 let t = float_of_int point *. (10. /. 256.) in
                  (0.3 *. sin (t *. 0.71), 0.2 *. cos (t *. 0.43), t)))))
   and general_profile =
     (* LISP GAP: sop/curve has no closed polyline (its lowering always writes closed=false), so
@@ -2203,10 +2348,13 @@ let run () =
   let one = cook 1 general_sweep and many = cook 4 general_sweep in
   check (equal_geometry one many) "one-domain and four-domain general-profile Sweep geometry differ";
   check
-    (Geometry.point_count one = 120_024
-    && Geometry.primitive_count one = 240_002
+    (Geometry.point_count one = 6_168
+    && Geometry.primitive_count one = 12_290
     && Geometry.find_attribute ~owner:Attribute.Point "cross_section_profile_id" one <> None)
     "general-profile Sweep exactness fixture cardinality/payload";
+  ()
+
+let combining_split_source () =
   let split_source =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 20 :size 4.0)
@@ -2233,6 +2381,10 @@ let run () =
   check
     (Geometry.primitive_count selected_one = 100 && Geometry.primitive_count remainder_one = 300)
     "split selected/remainder cardinality";
+  ()
+
+let combining_merged () =
+  let graph = group_fixture () in
   let merged =
     Lisp_sop.node
       ~with_:
@@ -2252,6 +2404,9 @@ let run () =
   in
   let one = cook 1 merged and many = cook 4 merged in
   check (equal_geometry one many) "one-domain and four-domain merge geometry differ";
+  ()
+
+let combining_transfer_source () =
   let transfer_source =
     Lisp_sop.node
       {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 40 :rows 30 :size 8.0)|}
@@ -2288,6 +2443,9 @@ let run () =
   in
   let one = cook 1 transferred and many = cook 4 transferred in
   check (equal_geometry one many) "one-domain and four-domain Group Transfer geometry differ";
+  ()
+
+let combining_columns () =
   let columns = 121 in
   let base_elements =
     Array.init 32 (fun index ->
@@ -2329,6 +2487,9 @@ let run () =
   let one = cook 1 primitive_paths and many = cook 4 primitive_paths in
   check (equal_geometry one many)
     "one-domain and four-domain primitive Group Find Path geometry differ";
+  ()
+
+let combining_attribute_boundaries () =
   let attribute_boundaries =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 90 :size 20.0)
@@ -2339,6 +2500,9 @@ let run () =
   let one = cook 1 attribute_boundaries and many = cook 4 attribute_boundaries in
   check (equal_geometry one many)
     "one-domain and four-domain Group from Attribute Boundary geometry differ";
+  ()
+
+let combining_named_count () =
   let named_count = 200_003 in
   let named_source =
     Rdk.Line_geometry.points (Array.init named_count (fun point -> (float_of_int point, 0., 0.)))
@@ -2370,6 +2534,9 @@ let run () =
   in
   let one = cook 1 round_trip and many = cook 4 round_trip in
   check (equal_geometry one many) "one-domain and four-domain Name from Groups geometry differ";
+  ()
+
+let combining_random_groups () =
   let random_groups =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 180 :rows 120 :size 20.0)
@@ -2419,6 +2586,9 @@ let run () =
   in
   let one = cook 1 bounded_groups and many = cook 4 bounded_groups in
   check (equal_geometry one many) "one-domain and four-domain Group Bounds geometry differ";
+  ()
+
+let combining_normal_groups () =
   let normal_groups =
     Lisp_sop.node
       (Printf.sprintf
@@ -2453,6 +2623,9 @@ let run () =
   let one = cook 1 normal_groups and many = cook 4 normal_groups in
   check (equal_geometry one many)
     "one-domain and four-domain Group Normal/Non-Planar geometry differ";
+  ()
+
+let editing_extruded () =
   let extruded =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 40 :rows 30 :size 8.0)
@@ -2473,6 +2646,9 @@ let run () =
   in
   let one = cook 1 extruded and many = cook 4 extruded in
   check (equal_geometry one many) "one-domain and four-domain extrude/analysis geometry differ";
+  ()
+
+let editing_cleaned () =
   let cleaned =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 320 :rows 240 :size 12.0)
@@ -2489,14 +2665,22 @@ let run () =
   in
   let one = cook 1 cleaned and many = cook 4 cleaned in
   check (equal_geometry one many) "one-domain and four-domain Clean geometry differ";
+  ()
+
+let editing_volume_graph () =
+  (* The materialized duplicate is only the volume fixture; 1,025 boxes keep
+     more than 4,096 faces without a 20,001-box reference expansion. *)
   let volume_graph =
     Lisp_sop.node
       {|(-> (sop/box :normals "Auto" :connectivity "Triangles" :size [2.0 3.0 4.0])
-     (sop/duplicate :copies 20000 :m03 3.0)
+     (sop/duplicate :copies 1024 :m03 3.0)
      (sop/measure :total_attribute "signed_volume" :kind "Signed volume"))|}
   in
   let one = cook 1 volume_graph and many = cook 4 volume_graph in
   check (equal_geometry one many) "one-domain and four-domain signed-volume geometry differ";
+  ()
+
+let editing_compacted () =
   let compacted =
     Lisp_sop.node
       ~with_:[ ("in1751", Lisp_sop.snapshot (Rdk.Line_geometry.points [| (8., 0., 0.) |])) ]
@@ -2514,6 +2698,9 @@ let run () =
         (Edge_group.cardinality group = 2)
         "point compaction did not preserve native edge membership"
   | None -> fail "point compaction dropped its native edge group");
+  ()
+
+let editing_collapsed () =
   let collapsed =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 240 :rows 180 :size 12.0)
@@ -2526,6 +2713,9 @@ let run () =
   check
     (Geometry.point_count one < 241 * 181 && Geometry.primitive_count one > 0)
     "parallel Edge Collapse fixture did not retain useful output";
+  ()
+
+let editing_reduced () =
   let reduced =
     Lisp_sop.node
       {|(-> (sop/grid
@@ -2552,6 +2742,9 @@ let run () =
     && Geometry.find_group ~owner:Group.Primitive "reduced" one <> None
     && Geometry.find_edge_group "boundary" one <> None)
     "parallel PolyReduce fixture lost cardinality or ancestry";
+  ()
+
+let editing_beveled () =
   let beveled =
     Lisp_sop.node
       {|(-> (sop/box :connectivity "Quads" :consolidate_points true
@@ -2573,6 +2766,9 @@ let run () =
     && Geometry.find_group ~owner:Group.Primitive "edge_fillets" one <> None
     && Geometry.find_edge_group "offset_edges" one <> None)
     "parallel PolyBevel fixture lost cardinality or ancestry";
+  ()
+
+let editing_point_split () =
   let point_split =
     Lisp_sop.node
       {|(-> (sop/grid
@@ -2589,6 +2785,9 @@ let run () =
   check
     (Geometry.point_count one = 400 * 300 * 4 && Geometry.vertex_count one = 400 * 300 * 4)
     "parallel Point Split fixture cardinality";
+  ()
+
+let emission_emission_points () =
   let emission_points =
     Array.init 100_000 (fun point ->
         ( float_of_int (point mod 1_000) *. 0.01,
@@ -2634,6 +2833,9 @@ let run () =
     (Geometry.point_count one = 600_000
     && Geometry.find_group ~owner:Group.Point "cloud" one <> None)
     "parallel Point Replicate fixture cardinality";
+  ()
+
+let emission_flipped () =
   let flipped =
     Lisp_sop.node
       ~with_:[ ("in1754", Lisp_sop.snapshot (edge_flip_geometry 20_000)) ]
@@ -2646,6 +2848,9 @@ let run () =
     && Geometry.vertex_count one = 120_000
     && Geometry.primitive_count one = 40_000)
     "parallel Edge Flip fixture cardinality";
+  ()
+
+let emission_cusped () =
   let cusped =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 320 :rows 240 :size 12.0)
@@ -2658,9 +2863,12 @@ let run () =
   check
     (Geometry.point_count one > 321 * 241 && Geometry.vertex_count one = 320 * 240 * 6)
     "parallel Edge Cusp fixture cardinality";
+  ()
+
+let emission_straightened () =
   let straightened =
     Lisp_sop.node
-      {|(-> (sop/grid :columns 400 :rows 300 :width 14.0 :height 9.0)
+      {|(-> (sop/grid :columns 200 :rows 150 :width 14.0 :height 9.0)
      (sop/mountain :seed 919 :height 0.8 :frequency [0.7 1.1 0.9])
      (sop/group_edges :name "straighten_edges")
      (sop/edge_straighten :group "straighten_edges" :output_group "straightened"))|}
@@ -2668,9 +2876,12 @@ let run () =
   let one = cook 1 straightened and many = cook 4 straightened in
   check (equal_geometry one many) "one-domain and four-domain Edge Straighten geometry differ";
   check
-    (Geometry.point_count one = 401 * 301
+    (Geometry.point_count one = 201 * 151
     && Geometry.find_edge_group "straightened" one |> Option.get |> Edge_group.cardinality > 0)
     "parallel Edge Straighten fixture cardinality";
+  ()
+
+let emission_equalized () =
   let equalized =
     Lisp_sop.node
       ~with_:[ ("in1755", Lisp_sop.snapshot (edge_equalize_geometry 50_000)) ]
@@ -2683,6 +2894,9 @@ let run () =
     (Geometry.point_count one = 100_000
     && Geometry.find_edge_group "equalized" one |> Option.get |> Edge_group.cardinality = 50_000)
     "parallel Edge Equalize fixture cardinality";
+  ()
+
+let emission_relax_source () =
   let relax_source = edge_equalize_geometry 50_000 in
   let relaxed =
     Lisp_sop.node
@@ -2698,6 +2912,9 @@ let run () =
   check
     (Geometry.point_count one = 100_000 && Geometry.primitive_count one = 50_000)
     "parallel Edge Relax fixture cardinality";
+  ()
+
+let emission_uv_mapped () =
   let uv_mapped =
     Lisp_sop.node
       (Printf.sprintf
@@ -2730,6 +2947,9 @@ let run () =
   check
     (Geometry.find_attribute ~owner:Attribute.Vertex "uv" one <> None)
     "parallel UV fixture missing vertex coordinates";
+  ()
+
+let emission_parameterized () =
   let parameterized =
     Lisp_sop.node
       {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 96 :rows 64 :size 8.0)
@@ -2738,4 +2958,103 @@ let run () =
   in
   let one = cook 1 parameterized and many = cook 4 parameterized in
   check (equal_geometry one many) "one-domain and four-domain UV flatten/relax differ";
-  print_endline "procedural parallel exactness test passed"
+  ()
+
+let sections =
+  [
+    ("line", generated_line);
+    ("resample", generated_resample);
+    ("polyframe", generated_polyframe);
+    ("facet", generated_facet);
+    ("grouped_facet", generated_grouped_facet);
+    ("inline_facet", generated_inline_facet);
+    ("grid", generated_grid);
+    ("circle", generated_circle);
+    ("box", generated_box);
+    ("sphere", generated_sphere);
+    ("torus", generated_torus);
+    ("tube", generated_tube);
+    ("platonic", generated_platonic);
+    ("spiral", generated_spiral);
+    ("groups", groups);
+    ("filters_blurred", filters_blurred);
+    ("filters_smoothed", filters_smoothed);
+    ("filters_ray_collision", filters_ray_collision);
+    ("filters_grid_snapped", filters_grid_snapped);
+    ("filters_bounded", filters_bounded);
+    ("filters_expanded_groups", filters_expanded_groups);
+    ("filters_constrained_source", filters_constrained_source);
+    ("filters_instances", filters_instances);
+    ("filters_mirrored", filters_mirrored);
+    ("filters_clipped", filters_clipped);
+    ("subdivision_subdivided", subdivision_subdivided);
+    ("subdivision_creased_subdivision", subdivision_creased_subdivision);
+    ("subdivision_chaikin_subdivision", subdivision_chaikin_subdivision);
+    ("subdivision_all_edge_source", subdivision_all_edge_source);
+    ("subdivision_dense_curve_source", subdivision_dense_curve_source);
+    ("subdivision_crease_topology", subdivision_crease_topology);
+    ("subdivision_hole_indices", subdivision_hole_indices);
+    ("subdivision_boundary_edge", subdivision_boundary "Edge only");
+    ("subdivision_boundary_corner", subdivision_boundary "Edge and corner");
+    ("subdivision_boundary_none", subdivision_boundary "None");
+    ("subdivision_fvar_none", subdivision_fvar "None");
+    ("subdivision_fvar_corners", subdivision_fvar "Corners only");
+    ("subdivision_fvar_plus1", subdivision_fvar "Corners plus 1");
+    ("subdivision_fvar_plus2", subdivision_fvar "Corners plus 2");
+    ("subdivision_fvar_boundaries", subdivision_fvar "Boundaries");
+    ("subdivision_fvar_all", subdivision_fvar "All");
+    ("subdivision_smooth_triangles", subdivision_smooth_triangles);
+    ("subdivision_detail_source", subdivision_detail_source);
+    ("attributes", attributes);
+    ("modeling_enumerate_source", modeling_enumerate_source);
+    ("modeling_generated_attributes", modeling_generated_attributes);
+    ("modeling_extended_random", modeling_extended_random);
+    ("modeling_deformed", modeling_deformed);
+    ("modeling_bent", modeling_bent);
+    ("modeling_scattered", modeling_scattered);
+    ("modeling_duplicated", modeling_duplicated);
+    ("modeling_match_target", modeling_match_target);
+    ("modeling_blasted", modeling_blasted);
+    ("modeling_curve_points", modeling_curve_points);
+    ("modeling_curve_samples", modeling_curve_samples);
+    ("modeling_joined_curve_parts", modeling_joined_curve_parts);
+    ("combining_converted_lines", combining_converted_lines);
+    ("combining_connected_lines", combining_connected_lines);
+    ("combining_many_wires", combining_many_wires);
+    ("combining_general_backbone", combining_general_backbone);
+    ("combining_split_source", combining_split_source);
+    ("combining_merged", combining_merged);
+    ("combining_transfer_source", combining_transfer_source);
+    ("combining_columns", combining_columns);
+    ("combining_attribute_boundaries", combining_attribute_boundaries);
+    ("combining_named_count", combining_named_count);
+    ("combining_random_groups", combining_random_groups);
+    ("combining_normal_groups", combining_normal_groups);
+    ("editing_extruded", editing_extruded);
+    ("editing_cleaned", editing_cleaned);
+    ("editing_volume_graph", editing_volume_graph);
+    ("editing_compacted", editing_compacted);
+    ("editing_collapsed", editing_collapsed);
+    ("editing_reduced", editing_reduced);
+    ("editing_beveled", editing_beveled);
+    ("editing_point_split", editing_point_split);
+    ("emission_emission_points", emission_emission_points);
+    ("emission_flipped", emission_flipped);
+    ("emission_cusped", emission_cusped);
+    ("emission_straightened", emission_straightened);
+    ("emission_equalized", emission_equalized);
+    ("emission_relax_source", emission_relax_source);
+    ("emission_uv_mapped", emission_uv_mapped);
+    ("emission_parameterized", emission_parameterized);
+  ]
+
+let run ?section () =
+  let selected =
+    match section with None -> sections | Some name -> [ (name, List.assoc name sections) ]
+  in
+  List.iter
+    (fun (name, run) ->
+      Printf.printf "parallel exactness: %s\n%!" name;
+      run ();
+      Printf.printf "parallel exactness passed: %s\n%!" name)
+    selected

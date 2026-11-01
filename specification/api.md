@@ -105,6 +105,16 @@ are not the language contract. Scene equality ignores transient render
 caches; image and resource identity still matter. Shader and retained-buffer
 lifetime must remain valid while a prepared scene can be presented.
 
+Internal device meshes describe borrowed P/N, optional UInt32 triangle indices
+and float3/float4 point colours through metadata and one lifetime. Surface's
+native callback returns the actual index count and colour width; face lowering
+keeps geometry payload on device. Wire/vertex views, textured uses and a tracer
+needing device-only indices use the memoised host copy and materialise geometry.
+These are internal carriers for the existing Lisp mesh/attribute contract.
+`Rdk_rays.Surface.scene3_result` exposes deferred conversion failures; the
+convenience `scene3` raises `Conversion_error`. The editor preserves this
+cause with a cached drawing and clears it when corrected geometry replaces it.
+
 ## Owned resources
 
 Images, textures, fonts, canvases and audio have explicit owners. Create,

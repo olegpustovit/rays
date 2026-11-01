@@ -99,6 +99,7 @@ type graph = {
 
 type t = {
   gpu : Flow_ir.Gpu.config;
+  defer : bool;
   graphs : graph list;  (** one per [sop] instance, in plan order *)
   factories : Sop.Edit_graph.factory list;
       (** Factories owned by this workspace's checked Lisp declarations, including embedded node
@@ -199,6 +200,7 @@ val workspace :
   ?extra:Catalog.descriptor list ->
   ?reference:bool ->
   ?gpu:Flow_ir.Gpu.config ->
+  ?defer:bool ->
   ?clock:(unit -> float) ->
   ?on_profile:(Flow_ir.Profile.t -> unit) ->
   ?compiled_ids:int Path_map.t ->
@@ -215,6 +217,7 @@ val of_checked :
   ?provenance_tags:bool ->
   ?reference:bool ->
   ?gpu:Flow_ir.Gpu.config ->
+  ?defer:bool ->
   ?clock:(unit -> float) ->
   ?on_profile:(Flow_ir.Profile.t -> unit) ->
   ?compiled_ids:int Path_map.t ->
@@ -227,7 +230,9 @@ val of_checked :
     checked document, without rebuilding a catalog or checking its source again. The retained
     evaluation includes probe records and qualifies actual packed captures, publishing [approx] and
     [approx_reasons]. [reference:true] retains native catalog cooking but independently interprets
-    value drives and attribute writes for full-workspace parity checks. *)
+    value drives and attribute writes for full-workspace parity checks. [defer:true] keeps compiled
+    large static SOP maps for the cook's executor; host graphs stay eager. The default is false for
+    independent/CLI checks. *)
 
 val counts : t -> int * int
 (** (live, cached) node counts. *)

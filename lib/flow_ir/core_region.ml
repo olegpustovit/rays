@@ -25,6 +25,16 @@ let instruction_key = function
 let width_of ty =
   match Flow.Packed_ops.scalar_width ty with Some width -> width | None -> raise Unsupported
 
+let packed_list = function
+  | E.List items when Array.length items > 0 ->
+      let ty = V.ty_of items.(0) in
+      if
+        List.mem ty [ Ty.Int; Float; Vec2; Vec3; Vec4 ]
+        && Array.for_all (fun item -> V.ty_of item = ty) items
+      then Some (V.array_init ty (Array.length items) (Array.get items))
+      else None
+  | _ -> None
+
 let components = function
   | E.Vec2 (x, y) -> [| x; y |]
   | Vec3 (x, y, z) -> [| x; y; z |]
@@ -177,10 +187,10 @@ let iteration_skips iter skip =
     skip
   |> List.sort_uniq Int.compare |> Array.of_list
 
-let canonical_range residual =
+let canonical_operator residual name =
   match
-    ( Flow.Op.find ~extra:(E.Residual.residual_ops residual) "range" Flow.Context.value,
-      Flow.Op.find "range" Flow.Context.value )
+    ( Flow.Op.find ~extra:(E.Residual.residual_ops residual) name Flow.Context.value,
+      Flow.Op.find name Flow.Context.value )
   with
   | Some actual, Some builtin -> actual == builtin
   | _ -> false
@@ -440,8 +450,8 @@ let hsl ~emit ~as_float ~expression args =
     fields = [];
   }
 
-let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards ~expression residual
-    (t : W.term) op args =
+let operation ~emit ~as_float ~as_int ~is_integer ~literal ~is_table ~table_type ~component ~guards
+    ~expression residual (t : W.term) op args =
   let refuse ~(at : W.term) code message =
     raise (Compile_refused (Diagnostic.error ~span:at.W.form.span ~code message))
   in
@@ -474,16 +484,75 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards ~exp
   else if kind = Flow.Op.Gather then begin
     match expressions with
     | [ array; index ] when is_table array ->
-        let index = as_int index in
+        let under condition selected instruction =
+          let previous = !guards in
+          guards := previous @ [ (condition, selected) ];
+          Fun.protect (fun () -> emit instruction) ~finally:(fun () -> guards := previous)
+        in
+        let index, valid =
+          if op <> "nth" then (as_int index, None)
+          else
+            let count =
+              match array.constant with
+              | Some (E.List items) -> Array.length items
+              | _ -> refuse ~at:t "E_PACKED_CAPTURE" "nth requires an immutable numeric list table."
+            in
+            let converted, valid =
+              if is_integer index then
+                let converted = as_int index in
+                let r = converted.registers.(0) in
+                let lo = emit (Int_compare (Flow.Packed_ops.Ige, r, emit (Int_const 0))) in
+                let hi = emit (Int_compare (Flow.Packed_ops.Ilt, r, emit (Int_const count))) in
+                (converted, emit (Binary (And, lo, hi)))
+              else
+                let index = as_float index in
+                if Array.length index.registers <> 1 then
+                  refuse ~at:t "E_PACKED_TYPE" "List indices require a scalar value.";
+                let r = index.registers.(0) in
+                let zero = emit (Const 0.) in
+                let lo = emit (Binary (Ge, r, zero)) in
+                let hi = emit (Binary (Lt, r, emit (Const (float count)))) in
+                let whole = emit (Binary (Eq, emit (Binary (Mod, r, emit (Const 1.))), zero)) in
+                let valid = emit (Binary (And, emit (Binary (And, lo, hi)), whole)) in
+                ( {
+                    registers = [| under valid true (Convert (Truncate, r)) |];
+                    constant = None;
+                    fields = [];
+                  },
+                  valid )
+            in
+            let failure =
+              under valid false
+                (Raise
+                   ( Ty.Int,
+                     "E_LIST_RANGE",
+                     "nth index is out of range or is not a whole number.",
+                     None ))
+            in
+            ( {
+                converted with
+                registers = [| emit (Int_select (valid, converted.registers.(0), failure)) |];
+              },
+              Some valid )
+        in
         if Array.length index.registers <> 1 then
           refuse ~at:t "E_PACKED_TYPE" "Array indices require a scalar integer.";
         let prepared = array.registers.(0) and index = index.registers.(0) in
+        let element = Option.get (Ty.elem (table_type prepared)) in
+        if t.ty <> Ty.Any && t.ty <> element then
+          refuse ~at:t "E_PACKED_TYPE"
+            (Printf.sprintf "%s has checked type %s, but its table contains %s."
+               (Flow.Lisp.flat t.form) (Ty.to_string t.ty) (Ty.to_string element));
+        let element = if t.ty = Ty.Any then element else t.ty in
+        let gather instruction =
+          match valid with None -> emit instruction | Some valid -> under valid true instruction
+        in
         let registers =
-          if t.ty = Ty.Int then [| emit (Int_gather (prepared, index)) |]
-          else if t.ty = Ty.Text then [| emit (Text_gather (prepared, index)) |]
+          if element = Ty.Int then [| gather (Int_gather (prepared, index)) |]
+          else if element = Ty.Text then [| gather (Text_gather (prepared, index)) |]
           else
-            let width = width_of t.ty in
-            Array.init width (fun component -> emit (Gather (prepared, index, width, component)))
+            let width = width_of element in
+            Array.init width (fun component -> gather (Gather (prepared, index, width, component)))
         in
         { registers; constant = None; fields = [] }
     | _ -> refuse ~at:t "E_PACKED_CAPTURE" "Array lookup requires an invariant numeric table."
@@ -838,7 +907,8 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
     and integer_registers = Hashtbl.create 16
     and text_registers = Hashtbl.create 8
     and bottom_registers = Hashtbl.create 4
-    and array_registers = Hashtbl.create 8 in
+    and array_registers = Hashtbl.create 8
+    and array_values = Hashtbl.create 8 in
     let table_uniforms = Hashtbl.create 8 in
     let emit instruction =
       let control =
@@ -894,7 +964,9 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
             if fst name <> "" then Hashtbl.add table_uniforms name i;
             i
       in
-      { registers = [| emit (Array_prepare (i, ty)) |]; constant = None; fields = [] }
+      let prepared = emit (Array_prepare (i, ty)) in
+      Hashtbl.replace array_values prepared value;
+      { registers = [| prepared |]; constant = None; fields = [] }
     in
     let is_table e = Array.length e.registers = 1 && Hashtbl.mem array_registers e.registers.(0) in
     let rec literal ?(at = term) v =
@@ -982,8 +1054,15 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
       }
     in
     let uniform at name v =
-      match array_type v with
-      | Ty.Array _ -> table at name v
+      match (v, array_type v) with
+      | E.List _, _ -> (
+          match packed_list v with
+          | Some packed -> { (table at name packed) with constant = Some v }
+          | None ->
+              refuse ~at "E_PACKED_CAPTURE"
+                "Kernel list tables require a nonempty homogeneous list of int, float or vec2–4 \
+                 values.")
+      | _, Ty.Array _ -> table at name v
       | _ -> (
           match v with
           | E.Residual _ | E.Source _ | E.Int _ | Text _ | Float _ | Bool _ | Vec2 _ | Vec3 _
@@ -1129,6 +1208,11 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
     let component e i = e.registers.(if Array.length e.registers = 1 then 0 else i) in
     let rec coerce at ty value =
       match (ty, value.constant) with
+      | Ty.List element, _
+        when is_table value
+             && (element = Ty.Any
+                || Some element = Ty.elem (Hashtbl.find array_registers value.registers.(0))) ->
+          value
       | Ty.Array _, _ when is_table value && Hashtbl.find array_registers value.registers.(0) = ty
         ->
           value
@@ -1229,7 +1313,7 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
               skip = [];
               _;
             }
-          when canonical_range residual ->
+          when canonical_operator residual "range" ->
             let initial = carried_initial ~coerce seed t.ty (expression env seed) in
             let bound term = (as_int (expression env term)).registers.(0) in
             let first, last =
@@ -1328,6 +1412,9 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
                    in
                    { t with node = If (condition, yes, no) })
                  arms default)
+        | Op { op = "array/sum"; args = [ (_, source) ]; _ }
+          when canonical_operator residual "array/sum" ->
+            small_sum env t source
         | Op { op = ("array/concat" | "array/slice" | "array/count") as op; _ }
           when (match (op, t.ty) with
                  | "array/count", Ty.Int -> true
@@ -1439,7 +1526,13 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
         | Op { op = "color/hsl"; args; _ } when List.map fst args = [ "h"; "s"; "l" ] ->
             hsl ~emit ~as_float ~expression:(expression env) args
         | Op { op; args; _ } ->
-            operation ~emit ~as_float ~as_int ~is_table ~component ~guards
+            operation ~emit ~as_float ~as_int
+              ~is_integer:(fun e ->
+                match e.constant with
+                | Some (E.Int _) -> true
+                | _ ->
+                    Array.length e.registers = 1 && Hashtbl.find integer_registers e.registers.(0))
+              ~is_table ~table_type:(Hashtbl.find array_registers) ~component ~guards
               ~literal:(fun value -> literal ~at:t value)
               ~expression:(expression env) residual t op args
         | Let (bindings, result) ->
@@ -1472,15 +1565,159 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
               ("Unsupported packed body form "
               ^ Option.value ~default:(Ty.to_string t.ty) (Flow.Syntax.head t.form)
               ^ ".")
-      with Diagnostic.Error d ->
-        if !guards <> [] || !control_scope <> [] then
+      with
+      | Unsupported ->
+          refuse ~at:t "E_PACKED_FORM"
+            (Printf.sprintf "Packed term %s has unsupported type %s." (Flow.Lisp.flat t.form)
+               (Ty.to_string t.ty))
+      | Diagnostic.Error d ->
+          if !guards <> [] || !control_scope <> [] then
+            {
+              registers = [| emit (Raise (t.ty, d.code, d.message, d.cause)) |];
+              constant = None;
+              fields = [];
+            }
+          else
+            raise
+              (Diagnostic.Error { d with span = Some (Option.value ~default:t.form.span d.span) })
+    and small_sum env at source =
+      let rec unwrap (term : W.term) =
+        match term.node with Expanded { body; _ } -> unwrap body | _ -> term
+      in
+      let source = unwrap source in
+      let ty = match source.ty with Ty.Array ty -> ty | _ -> Ty.Any in
+      if not (List.mem ty [ Ty.Int; Float; Vec2; Vec3; Vec4 ]) then
+        refuse ~at:source "E_PACKED_TYPE" "An inner sum requires a numeric array.";
+      let count term =
+        match (expression env term).constant with
+        | Some (E.Int n) when n >= 0 && n <= 64 -> n
+        | _ ->
+            refuse ~at:term "E_PACKED_CONSTANT"
+              "An inner map/slice sum requires a constant count from 0 to 64."
+      in
+      let zero =
+        if ty = Ty.Int then literal (E.Int 0)
+        else
+          let width = width_of ty in
+          { registers = Array.make width (emit (Const 0.)); constant = None; fields = [] }
+      in
+      let seed, items =
+        match source.node with
+        | Hof (`Map, [ fn; range ]) -> (
+            let range = unwrap range in
+            match range.node with
+            | Op { op = "array/range"; args; _ } when canonical_operator residual "array/range" ->
+                let n = count (List.assoc "count" args) in
+                (* Materialise every mapped expression before adding any of them:
+                   a later map error precedes overflow in the sum. *)
+                let items =
+                  Array.init n (fun i ->
+                      let index =
+                        if range.ty = Ty.Array Ty.Int then E.Int i else E.Float (float i)
+                      in
+                      coerce at ty (inline env at fn [ literal index ]))
+                in
+                (zero, items)
+            | _ ->
+                refuse ~at:range "E_PACKED_FORM"
+                  "An inner map sum requires a constant-count array/range.")
+        | Op { op = "array/slice"; args; _ } when canonical_operator residual "array/slice" ->
+            let table = expression env (List.assoc "array" args) in
+            if not (is_table table) then
+              refuse ~at:source "E_PACKED_CAPTURE" "An inner slice sum requires a numeric table.";
+            let first_term = List.assoc "first" args in
+            let first = expression env first_term in
+            if
+              first_term.ty <> Ty.Int
+              && not (match first.constant with Some (E.Int _) -> true | _ -> false)
+            then
+              refuse ~at:first_term "E_PACKED_TYPE"
+                "An inner slice sum requires an integer first index.";
+            let first = (as_int first).registers.(0) in
+            let n = count (List.assoc "count" args) in
+            let prepared = table.registers.(0) in
+            let input =
+              { source with ty = Ty.Array ty; node = W.Ref_binding ("$inner-sum-table", []) }
+            in
+            let length =
+              {
+                source with
+                ty = Ty.Int;
+                node = W.Op { op = "array/count"; args = [ ("array", input) ]; skip = [] };
+              }
+            in
+            let length =
+              E.Residual.with_bindings residual ~term:length
+                [ ("$inner-sum-table", Hashtbl.find array_values prepared) ]
+              |> fun value -> (as_int (uniform source ("", []) (E.Residual value))).registers.(0)
+            in
+            let under condition selected instruction =
+              let previous = !guards in
+              guards := previous @ [ (condition, selected) ];
+              Fun.protect (fun () -> emit instruction) ~finally:(fun () -> guards := previous)
+            in
+            let require condition message value =
+              let failed = under condition false (Raise (Ty.Int, "E_ARRAY_RANGE", message, None)) in
+              emit (Int_select (condition, value, failed))
+            in
+            let constant n = emit (Int_const n) in
+            let compare op a b = emit (Int_compare (op, a, b)) in
+            let both a b = emit (Binary (And, a, b)) in
+            let first =
+              require
+                (both
+                   (compare Flow.Packed_ops.Ige first (constant 0))
+                   (compare Flow.Packed_ops.Ile first (constant Sys.max_floatarray_length)))
+                "array/slice needs a non-negative whole length." first
+            in
+            let valid =
+              both
+                (compare Flow.Packed_ops.Ile first length)
+                (compare Flow.Packed_ops.Ile (constant n)
+                   (emit (Int_binary (Flow.Packed_ops.Isub, length, first))))
+            in
+            (* Keep the guard reachable even when n=0, and guard device gathers:
+               a status error does not stop the rest of a device invocation. *)
+            let seed = require valid "An array slice must be within its source." (constant 0) in
+            let seed = if ty = Ty.Int then seed else emit (Convert (To_float, seed)) in
+            let width = if ty = Ty.Int then 1 else width_of ty in
+            let seed = { registers = Array.make width seed; constant = None; fields = [] } in
+            let items =
+              Array.init n (fun i ->
+                  let index = emit (Int_binary (Flow.Packed_ops.Iadd, first, constant i)) in
+                  {
+                    registers =
+                      Array.init width (fun component ->
+                          under valid true
+                            (if ty = Ty.Int then Int_gather (prepared, index)
+                             else Gather (prepared, index, width, component)));
+                    constant = None;
+                    fields = [];
+                  })
+            in
+            (seed, items)
+        | _ ->
+            refuse ~at:source "E_PACKED_FORM"
+              "An inner sum requires map over array/range or array/slice with a constant count."
+      in
+      Array.fold_left
+        (fun sum item ->
+          let sum, item =
+            if ty = Ty.Int then (as_int sum, as_int item) else (as_float sum, as_float item)
+          in
           {
-            registers = [| emit (Raise (t.ty, d.code, d.message, d.cause)) |];
+            registers =
+              Array.mapi
+                (fun component register ->
+                  emit
+                    (if ty = Ty.Int then
+                       Int_binary (Flow.Packed_ops.Iadd, register, item.registers.(component))
+                     else Binary (Add, register, item.registers.(component))))
+                sum.registers;
             constant = None;
             fields = [];
-          }
-        else
-          raise (Diagnostic.Error { d with span = Some (Option.value ~default:t.form.span d.span) })
+          })
+        seed items
     and inline env at fn values =
       if !call_depth >= 64 then refuse ~at "E_PACKED_LIMIT" "Packed helper call depth exceeds 64.";
       let params, body, _ = function_body fn in
@@ -1594,7 +1831,8 @@ let lower ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) 
       Error
         [
           Diagnostic.error ~span:term.form.span ~code:"E_PACKED_FORM"
-            "Packed form requires reference evaluation.";
+            (Printf.sprintf "Packed term %s has unsupported type %s." (Flow.Lisp.flat term.form)
+               (Ty.to_string term.ty));
         ]
 
 (* A frame-fold template keeps its captures as uniforms: rebinding reads the next step's bindings. *)
@@ -1613,7 +1851,8 @@ let rebind (t : Core.Region.t) residual =
         | W.Hof (_, ({ node = Fn { capture = Some _; _ }; _ } as f) :: _) -> Some f
         | _ -> None
       in
-      let bindings =
+      let bindings_of residual =
+        let view = E.Residual.residual_view residual in
         match (captured, t.binding_fn) with
         | Some f, _ -> (
             match E.Residual.eval_term residual f ~live:(Input.at_time 0.) with
@@ -1633,10 +1872,20 @@ let rebind (t : Core.Region.t) residual =
                 E.Residual.function_bindings f
             | _ -> raise Unsupported)
       in
+      let bindings = bindings_of residual in
+      let previous = lazy (bindings_of t.residual) in
       let uniforms =
         Array.mapi
           (fun i (name, fields) ->
-            if name = "" then t.uniforms.(i) else captured_value bindings name fields)
+            if name = "" then t.uniforms.(i)
+            else
+              let value = captured_value bindings name fields in
+              match (captured_value (Lazy.force previous) name fields, value) with
+              | E.List before, E.List after when Array.length before = Array.length after -> (
+                  match packed_list value with Some packed -> packed | None -> raise Unsupported)
+              | E.List _, _ -> raise Unsupported
+              | _, E.List _ -> raise Unsupported
+              | _ -> value)
           t.uniform_names
       in
       let sources =

@@ -41,6 +41,8 @@ type device = {
   key : string;
   count : int;
   device_normals : bool;
+  device_index_count : int option;
+  device_color_width : int;
   derived : bool;
       (* its normals made from its positions for display (it has none of its own): a tracer, which
          cusps a mesh without normals, reads the host copy *)
@@ -80,6 +82,8 @@ let same a b =
      | Some x, Some y ->
          String.equal x.key y.key && x.count = y.count
          && x.device_normals = y.device_normals
+         && x.device_index_count = y.device_index_count
+         && x.device_color_width = y.device_color_width
          && x.derived = y.derived
      | _ -> false
 
@@ -148,7 +152,10 @@ let vertices (mesh : t) = Vec3_buffer.to_list (readable mesh).vertices
 let vertex_count (mesh : t) =
   match mesh.device with Some d -> d.count | None -> Vec3_buffer.length mesh.vertices
 
-let index_count (mesh : t) = Array.length mesh.indices
+let index_count (mesh : t) =
+  match mesh.device with
+  | Some { device_index_count = Some count; _ } -> count
+  | _ -> Array.length mesh.indices
 
 let centroid (mesh : t) =
   let mesh = readable mesh in
@@ -321,7 +328,7 @@ module View = struct
   let create_packed_shared = create_packed_owned
 
   let create_device ?(mode = Triangles) ?indices ?colors ?tex_coords ?host ?bounds
-      ?(derived = false) ~key ~normals ~keep count =
+      ?(derived = false) ?device_index_count ?(device_color_width = 0) ~key ~normals ~keep count =
     let host =
       Option.map
         (fun make ->
@@ -341,6 +348,7 @@ module View = struct
     let indices =
       match indices with
       | Some indices -> indices
+      | None when device_index_count <> None -> [||]
       | None -> (
           match Atomic.get device_identity with
           | identity when Array.length identity = count -> identity
@@ -358,6 +366,18 @@ module View = struct
           bad
     in
     if key = "" || count <= 0 then Error "Mesh.create_device: a device mesh has vertices"
+    else if
+      (match device_index_count with
+        | Some n ->
+            n <= 0
+            || n > Sys.max_string_length / 4
+            || n mod 3 <> 0
+            || mode <> Triangles
+            || Array.length indices <> 0
+        | None -> false)
+      || (not (List.mem device_color_width [ 0; 3; 4 ]))
+      || (device_color_width <> 0 && (colors <> None || tex_coords <> None))
+    then Error "Mesh.create_device: incompatible device indices or colours"
     else
       match checked with
       | Some index ->
@@ -382,6 +402,8 @@ module View = struct
                         key;
                         count;
                         device_normals = normals;
+                        device_index_count;
+                        device_color_width;
                         derived;
                         keep;
                         host;
@@ -391,11 +413,16 @@ module View = struct
           | Error message, _ | _, Error message -> Error message)
 
   let device (mesh : t) = Option.map (fun d -> (d.key, d.device_normals)) mesh.device
+  let device_index_count (mesh : t) = Option.bind mesh.device (fun d -> d.device_index_count)
+
+  let device_color_width (mesh : t) =
+    Option.fold ~none:0 ~some:(fun d -> d.device_color_width) mesh.device
+
   let derived_normals (mesh : t) = match mesh.device with Some d -> d.derived | None -> false
 
   let triangle_count (mesh : t) =
     match mesh.mode with
-    | Triangles -> Array.length mesh.indices / 3
+    | Triangles -> index_count mesh / 3
     | Triangle_strip | Triangle_fan -> max 0 (Array.length mesh.indices - 2)
     | Points | Lines | Line_strip | Line_loop -> 0
 end

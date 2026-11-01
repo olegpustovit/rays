@@ -188,7 +188,7 @@ let autosave ?(force = false) value ~now =
     let value = { value with state_checked = now } in
     (* a preview document is never saved *)
     if
-      (value.core.doc == value.saved_doc && view = value.saved_view)
+      (Ephemeron.K1.query value.saved_doc value.core.doc <> None && view = value.saved_view)
       || Editor_host.carrying value.core
     then value
     else if
@@ -197,7 +197,7 @@ let autosave ?(force = false) value ~now =
       (not value.state_owned)
       && Editor_text.same_text value.core.doc value.opened
       && Sys.file_exists (Editor_setup.state_file value.core)
-    then { value with saved_doc = value.core.doc; saved_view = view }
+    then { value with saved_doc = Ephemeron.K1.make value.core.doc (); saved_view = view }
     else
       match
         Preset.save
@@ -207,7 +207,7 @@ let autosave ?(force = false) value ~now =
       | Ok _ ->
           {
             value with
-            saved_doc = value.core.doc;
+            saved_doc = Ephemeron.K1.make value.core.doc ();
             saved_view = view;
             state_error = None;
             state_owned = true;

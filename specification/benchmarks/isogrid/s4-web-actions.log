@@ -1,0 +1,158 @@
+SPIR-V: deterministic binaries, shared bindings and Vulkan validation pass
+{
+ "adapter": {
+  "vendor": "apple",
+  "architecture": "metal-3",
+  "device": "",
+  "description": ""
+ },
+ "kernels": {
+  "arithmetic": {
+   "cpuStatus": 0,
+   "bad": 0,
+   "worstAbsError": 0.000003814697265625,
+   "ok": true
+  },
+  "noise": {
+   "cpuStatus": 0,
+   "bad": 0,
+   "worstAbsError": 2.6182766410531855e-7,
+   "ok": true
+  },
+  "select": {
+   "cpuStatus": 0,
+   "bad": 0,
+   "worstAbsError": 1.1920928955078125e-7,
+   "ok": true
+  },
+  "two_outputs": {
+   "cpuStatus": 0,
+   "bad": 0,
+   "worstAbsError": 0.0000019073486328125,
+   "ok": true
+  },
+  "ops": {
+   "cpuStatus": 0,
+   "bad": 0,
+   "worstAbsError": 0.000022809036977378128,
+   "ok": true
+  },
+  "noise_fractal": {
+   "cpuStatus": 0,
+   "bad": 0,
+   "worstAbsError": 0.0000016231004920097547,
+   "ok": true
+  }
+ },
+ "errors": [],
+ "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+ "overflow": {
+  "reportedSynchronously": 0,
+  "reported": [
+   "E_KERNEL"
+  ]
+ },
+ "hiddenOverflow": {
+  "hidden_select": [],
+  "hidden_min": [
+   "E_KERNEL"
+  ]
+ },
+ "nonfiniteDeviceInput": [
+  "E_KERNEL"
+ ],
+ "nonfiniteInput": "E_KERNEL",
+ "replaced": true
+}
+gpu_check: ok
+ok   hash: 0 bad, worst 0
+ok   hash_div: 0 bad, worst 0
+ok   mod_negative: 0 bad, worst 0
+ok   div_negative: 0 bad, worst 648
+ok   shifts: 0 bad, worst 0
+ok   compare: 0 bad, worst 0
+ok   gather: 0 bad, worst 0
+ok   seed_mod: 0 bad, worst 0.000028076171872726263
+ok   list_gather: 0 bad, worst 0
+ok   list_float_index: 0 bad, worst 0
+ok   inner_map_sum: 0 bad, worst 0
+ok   inner_slice_sum: 0 bad, worst 0
+ok   noise_hash: 0 bad, worst 0.0020125000010011718
+ok   noise_octaves: 0 bad, worst 0.00007015525971987291
+ok   loop-bounds: 0 bad, worst 0
+ok   loop-empty: 0 bad, worst 0
+ok   loop-nested: 0 bad, worst 0
+ok   loop-record: 0 bad, worst 0
+ok   loop-guard: 0 bad, worst 0
+ok   iterate-count: 0 bad, worst 0
+ok   iterate-until: 0 bad, worst 0
+ok   iterate-old-state: 0 bad, worst 0
+ok   iterate-int63: 0 bad, worst 0
+ok   loop-uint32: 0 bad, worst 0
+ok   iterate-captured-function: 0 bad, worst 0
+ok   iterate-fused-producer: 0 bad, worst 0
+ok   iterate-fused-consumer: 0 bad, worst 0
+ok   iterate-fused-both: 0 bad, worst 0
+ok   iterate-fused-integer: 0 bad, worst 0
+ok   counts: record [500,3000,1,0,0,0,6,500,0,0], 500 values bounded, values true, compaction true
+ok   integer status errors: {"error_slice_selected":[{"code":"E_ARRAY_RANGE","message":"An array slice must be within its source."}],"error_slice_untaken":[],"error_slice_length_selected":[{"code":"E_ARRAY_RANGE","message":"array/slice needs a non-negative whole length."}],"error_slice_length_untaken":[],"error_list_selected":[{"code":"E_LIST_RANGE","message":"nth index is out of range or is not a whole number."}],"error_list_untaken":[],"error_list_fraction_selected":[{"code":"E_LIST_RANGE","message":"nth index is out of range or is not a whole number."}],"error_shift_selected":[{"code":"E_RANGE","message":"Integer shift count must be within [0, 62]."}],"error_shift_untaken":[],"error_negative_shift_selected":[{"code":"E_RANGE","message":"Integer shift count must be within [0, 62]."}],"error_negative_shift_untaken":[],"error_div_selected":[{"code":"E_RANGE","message":"Integer division by zero."}],"error_div_untaken":[],"error_mod_selected":[{"code":"E_RANGE","message":"Integer division by zero."}],"error_mod_untaken":[]}
+File "lib/flow_web/dune", line 100, characters 7-18:
+100 |  (name test_gather)
+             ^^^^^^^^^^^
+Fatal error: exception File "lib/flow_web/test_gather.ml", line 135, characters 11-17: Assertion failed
+ok   sketches/recursive_rectangles.rays: 8 entries, 339 device dispatches (36 over kept arrays), 0 of 307200 pixels outside text differ by more than 8 (0.000%), worst 1, mean 0.0004; text boxes [] (web/native brightness), ink bounding boxes web/native []; index.html: 8 marks, screenshot 6974 bytes
+ok   sketches/recursive_signals.rays: 6 entries, 659 device dispatches (30 over kept arrays), 0 of 307200 pixels outside text differ by more than 8 (0.000%), worst 0, mean 0.0000; text boxes [] (web/native brightness), ink bounding boxes web/native []; index.html: 6 marks, screenshot 1853 bytes
+9 probes  rect fill and stroke
+4 probes  stroke only
+8 probes  circle fill and stroke
+5 probes  circle buffers
+9 probes  line constant and buffer
+12 probes  geometry and points
+12 probes  transform and clip
+4 probes  rotate
+5 probes  blend
+6 probes  image
+{"ink":512,"minx":11,"maxx":65,"miny":14,"maxy":36,"offInk":0}  text
+{"w":200,"h":80,"ink":571,"minx":22,"miny":26,"maxy":56}  text at dpr 2
+6 probes  dpr 2
+kept uploads 2,2,2,4,4, per-frame uploads 1,2,3,4,7  constants of data.bin are uploaded once
+present_check: 83 checks, 0 failures, tolerance 2, 
+ok   sketches/flow_vectors.rays: 2 entries, 0 device dispatches (0 over kept arrays), 0 of 307200 pixels outside text differ by more than 8 (0.000%), worst 1, mean 0.0000; text boxes [] (web/native brightness), ink bounding boxes web/native []; index.html: 2 marks, screenshot 2988 bytes
+ok   sketches/basic.rays: 3 entries, 0 device dispatches (0 over kept arrays), 0 of 300060 pixels outside text differ by more than 8 (0.000%), worst 0, mean 0.0000; text boxes ["1.272"] (web/native brightness), ink bounding boxes web/native [[[13,14,183,26],[13,16,190,27]]]; index.html: 3 marks, screenshot 6654 bytes
+ok   sketches/particles.rays: 2 entries, 0 device dispatches (0 over kept arrays), 0 of 307200 pixels outside text differ by more than 8 (0.000%), worst 1, mean 0.0000; text boxes [] (web/native brightness), ink bounding boxes web/native []; index.html: 2 marks, screenshot 3271 bytes
+ok   synthetic: 0 of 307200 pixels differ by more than 8 (0.000%), worst 1, mean 0.0007; e2e page: 5 GPU dispatches (expected 5), 0 CPU invokes, 2 device attribute refs, 0 CPU position buffers, kernels k0:2; index.html: 2 marks, counts {"invoke":0,"gpu":148}
+ok   flow_particles_gpu: 0 of 480000 pixels differ by more than 8 (0.000%), worst 1, mean 0.0190; e2e page: 5 GPU dispatches (expected 5), 0 CPU invokes, 1 device attribute refs, 0 CPU position buffers, kernels k0:1; index.html: 2 marks, counts {"invoke":0,"gpu":144}
+ok   sketches/recursive_rectangles.rays live: 5 distinct pictures in 6 samples while the pointer moved, frame 392, 17264 device dispatches, settled at (400,401) 756x413: 0 of 312228 pixels differ by more than 8 (0.000%), worst 1
+opened sketches/audio.rays: frame 11 then 41, 10 marks, counts {"invoke":0,"gpu":0}
+opened sketches/basic.rays: frame 10 then 40, 3 marks, counts {"invoke":0,"gpu":0}
+opened sketches/drawing.rays: frame 13 then 45, 292 marks, counts {"invoke":0,"gpu":0}
+opened sketches/file_dialog.rays: frame 11 then 42, 4 marks, counts {"invoke":0,"gpu":0}
+opened sketches/generative.rays: frame 10 then 40, 10 marks, counts {"invoke":0,"gpu":80}
+opened sketches/noise.rays: frame 10 then 40, 2 marks, counts {"invoke":40,"gpu":40}
+opened sketches/particles.rays: frame 8 then 38, 2 marks, counts {"invoke":76,"gpu":0}
+opened sketches/pxui.rays: frame 10 then 41, 3 marks, counts {"invoke":0,"gpu":0}
+opened sketches/recursive_rectangles.rays: frame 9 then 40, 8 marks, counts {"invoke":480,"gpu":120}
+opened sketches/flow_contours.rays: frame 5 then 35, 7 marks, counts {"invoke":0,"gpu":210}
+opened sketches/flow_image.rays: frame 5 then 36, 2 marks, counts {"invoke":0,"gpu":0}
+opened sketches/flow_image_kernel.rays: frame 6 then 36, 1 marks, counts {"invoke":0,"gpu":36}
+opened sketches/flow_particles_gpu.rays: frame 11 then 41, 2 marks, counts {"invoke":0,"gpu":41}
+opened sketches/flow_shader.rays: frame 10 then 40, 26 marks, counts {"invoke":0,"gpu":766}
+opened sketches/flow_vectors.rays: frame 5 then 36, 2 marks, counts {"invoke":0,"gpu":0}
+ok synthetic 65x43 frame 3: 0 pixels differ by >8, worst 1, mean 0.0007; 4 GPU dispatches, 0 CPU invokes
+ok synthetic 97x51 frame 7: 0 pixels differ by >8, worst 0, mean 0.0000; 8 GPU dispatches, 0 CPU invokes
+ok flow_contours 640x480 frame 3: 0 pixels differ by >8, worst 1, mean 0.0003; 18 GPU dispatches, 0 CPU invokes
+ok flow_contours 800x600 frame 7: 0 pixels differ by >8, worst 1, mean 0.0002; 42 GPU dispatches, 0 CPU invokes
+ok flow_image_kernel 320x280 frame 3: 0 pixels differ by >8, worst 3, mean 1.5657; 3 GPU dispatches, 0 CPU invokes
+ok flow_shader 760x760 frame 3: 0 pixels differ by >8, worst 1, mean 0.0000; 63 GPU dispatches, 0 CPU invokes
+ok flow_image 640x480 frame 3: 0 pixels differ by >8, worst 0, mean 0.0000; 0 GPU dispatches, 0 CPU invokes
+ok loaded 256x160 frame 3: 0 pixels differ by >8, worst 0, mean 0.0000; 0 GPU dispatches, 0 CPU invokes
+ok noise_live 65x43 frame 3: 0 pixels differ by >8, worst 0, mean 0.0000; 0 GPU dispatches, 0 CPU invokes
+ok noise_live 97x51 frame 7: 0 pixels differ by >8, worst 0, mean 0.0000; 0 GPU dispatches, 0 CPU invokes
+ok nested 65x43 frame 3: 0 pixels differ by >8, worst 0, mean 0.0000; 1 GPU dispatches, 0 CPU invokes
+ok nested 97x51 frame 7: 0 pixels differ by >8, worst 0, mean 0.0000; 1 GPU dispatches, 0 CPU invokes
+ok shared_state 65x43 frame 3: 0 pixels differ by >8, worst 0, mean 0.0000; 3 GPU dispatches, 0 CPU invokes
+ok shared_state 97x51 frame 7: 0 pixels differ by >8, worst 0, mean 0.0000; 7 GPU dispatches, 0 CPU invokes
+ok render_regions 65x43 frame 3: 0 pixels differ by >8, worst 0, mean 0.0000; 6 GPU dispatches, 3 CPU invokes
+real 45.47
+user 102.12
+sys 32.34

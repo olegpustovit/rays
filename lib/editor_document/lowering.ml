@@ -724,7 +724,8 @@ let same_settings a b =
 let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
   a.fast = b.fast && a.policy = b.policy && a.backend == b.backend
 
-let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?previous (workspace : Workspace_doc.t) =
+let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?(defer = true) ?previous
+    (workspace : Workspace_doc.t) =
   let gpu =
     Option.value gpu
       ~default:
@@ -754,7 +755,7 @@ let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?previous (workspace : 
     Option.bind previous (fun (doc : Document.t) ->
         let old = doc.workspace.ws and lowered = doc.workspace.lowered in
         Option.bind
-          (if same_gpu gpu lowered.Flow_sop.Lower.gpu then
+          (if same_gpu gpu lowered.Flow_sop.Lower.gpu && lowered.defer = defer then
              Workspace_doc.literal_changes ~previous:old workspace
            else None)
           (fun changes ->
@@ -771,8 +772,8 @@ let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?previous (workspace : 
     | Some result -> result
     | None ->
         let lower gpu =
-          Flow_sop.Lower.of_checked ~factories ~gpu ?compiled_ids ?sites ~inputs:workspace.inputs
-            workspace.checked
+          Flow_sop.Lower.of_checked ~factories ~gpu ~defer ?compiled_ids ?sites
+            ~inputs:workspace.inputs workspace.checked
         in
         Result.bind (lower gpu) (fun lowered ->
             match (gpu.backend, plan_window workspace lowered.plan) with

@@ -1,0 +1,19 @@
+points=54464 primitives=13616 topology_resident=true positions_resident=true N_resident=false Cd_resident=false payload=0 validation=36 status=12 count=24 bounds=0
+        0.82 real         0.40 user         0.07 sys
+           159367168  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               10054  page reclaims
+                 569  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                1209  involuntary context switches
+          5177143984  instructions retired
+          1358319342  cycles elapsed
+           136282928  peak memory footprint

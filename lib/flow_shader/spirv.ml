@@ -563,6 +563,10 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
     if narrow.(slot) then
       match instruction with
       | P.Int_const n -> u e (n land 0xffffffff)
+      | Raise (_, code, message, _) ->
+          if raster <> None then fail "Explicit errors need a compute status record.";
+          record_status e (truth e (f e 1.)) (Flow.Packed_ops.error_status code message);
+          u e 0
       | Int_binary (op, a, b) ->
           integer_status e op (int_of b);
           narrow_binary e op (low a) (low b)
@@ -577,6 +581,10 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
       | _ -> assert false
     else wide_expression slot instruction
   and wide_expression slot = function
+    | P.Raise (_, code, message, _) ->
+        if raster <> None then fail "Explicit errors need a compute status record.";
+        record_status e (truth e (f e 1.)) (Flow.Packed_ops.error_status code message);
+        if integer slot then l e 0L else f e 0.
     | P.Stage (Noise_table seed, r) ->
         result e (long e) 124
           [ result e (Option.get e.ulong) 113 [ noise_table e layout seed (low r.(0)) ] ]
@@ -1007,9 +1015,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
         (fun binding ->
           let accel_type = Words.declare words 5341 [] in
           let accel =
-            bind
-              (Words.declare words 32 [ 0; accel_type ])
-              0 binding Shader.Acceleration_structure
+            bind (Words.declare words 32 [ 0; accel_type ]) 0 binding Shader.Acceleration_structure
           in
           let vertices = bind storage 12 (binding + 1) Shader.Storage_buffer in
           let spheres = bind storage 12 (binding + 2) Shader.Storage_buffer in
@@ -1030,9 +1036,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
         layout.scene_binding
     in
     let strands =
-      Option.map
-        (fun binding -> bind storage 12 binding Shader.Storage_buffer)
-        layout.scene_strands
+      Option.map (fun binding -> bind storage 12 binding Shader.Storage_buffer) layout.scene_strands
     in
     let invocation = variable invocation_pointer 1 in
     Words.instruction words.annotations 71 [ invocation; 11; 28 ];

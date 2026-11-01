@@ -67,6 +67,37 @@ let run () =
       if before_release.scene3 <> after_release.scene3 then
         failwith "released reusable View3d changed prepared native data";
       let prepared = prepare ~width:16 ~height:16 scene in
+      let with_ui ~x scene =
+        let builder = Scene_command.Ui_batch.Builder.create () in
+        Scene_command.Ui_batch.Builder.rect builder ~x ~y:0. ~width:1. ~height:1. ();
+        let batch = Scene_command.Ui_batch.Builder.publish builder in
+        Result.get_ok
+          (Scene.Layer.stage_native_render ~width:16 ~height:16
+             [ Scene.view3d ~camera scene; Scene.Layer.ui batch ])
+      in
+      let first_ui = with_ui ~x:0. scene in
+      let equivalent =
+        Scene.D3.create [ Scene.D3.mesh ~material:(Material.unlit Rays_math.Color.white) mesh ]
+      in
+      let second_ui = with_ui ~x:1. equivalent in
+      if List.hd first_ui.scene3 != List.hd second_ui.scene3 then
+        failwith "changed UI rebuilt an equivalent 3D layer's uniforms";
+      let changed_material =
+        with_ui ~x:2.
+          (Scene.D3.create [ Scene.D3.mesh ~material:(Material.unlit Rays_math.Color.red) mesh ])
+      in
+      if List.hd second_ui.scene3 == List.hd changed_material.scene3 then
+        failwith "changed material reused stale 3D uniforms";
+      let module Native = Native_scene_lowering in
+      Native.with_cache_context (Native.create_cache_context ()) (fun () ->
+          let first = Native.draws_of_prepared retained_first prepared in
+          let second =
+            Native.draws_of_prepared
+              { retained_first with retained = Some ("different frame", 2L) }
+              prepared
+          in
+          if first != second then
+            failwith "unchanged 3D layer rebuilt its draws for a different UI frame");
       if Array.length prepared.entries <> 1 then failwith "native triangle draw count";
       let entry = prepared.entries.(0) and vertices = prepared.entries.(0).draw.mesh.vertices in
       if Bytes.length vertices <> 72 || entry.draw.mesh.index_count <> 3 then
@@ -242,6 +273,91 @@ let device_host () =
   print_endline "device meshes: host copy made once, for a reader of vertices"
 
 let () = device_host ()
+
+let resident_streams () =
+  Scene.Layer.with_cache_context (Scene.Layer.create_cache_context ()) (fun () ->
+      let made = ref 0 in
+      let host () =
+        incr made;
+        Test_meshes.box ~width:1. ~height:1. ~depth:1. ()
+      in
+      let create ?indices ?colors ?tex_coords ?(mode = Mesh.Triangles) ?(device_index_count = 36)
+          ?(device_color_width = 3) () =
+        Mesh.View.create_device ~mode ?indices ?colors ?tex_coords ~host ~device_index_count
+          ~device_color_width ~key:"resident-streams" ~normals:true ~keep:ignore 24
+      in
+      let mesh = Result.get_ok (create ()) in
+      assert (Mesh.index_count mesh = 36 && Mesh.View.triangle_count mesh = 12);
+      assert (Mesh.View.device_index_count mesh = Some 36 && Mesh.View.device_color_width mesh = 3);
+      assert (Array.length (Mesh.View.unread mesh).indices = 0 && !made = 0);
+      List.iter
+        (fun result -> assert (Result.is_error result))
+        [
+          create ~device_index_count:35 ();
+          create ~device_index_count:0 ();
+          create ~device_color_width:2 ();
+          create ~mode:Mesh.Points ();
+          create ~indices:[| 0; 1; 2 |] ();
+          create ~colors:(Array.make 24 Rays_math.Color.white) ();
+          create ~tex_coords:(Array.make 24 Rays_math.Vec2.zero) ();
+        ];
+      assert (not (Mesh.same mesh (Result.get_ok (create ~device_color_width:4 ()))));
+      let camera =
+        Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.)
+          ~target:Rays_math.Vec3.zero ()
+      in
+      let stage mode =
+        Result.get_ok
+          (Scene.Layer.stage_native ~width:16 ~height:16
+             [ Scene.view3d ~camera (Scene.D3.create [ Scene.D3.mesh ~mode mesh ]) ])
+      in
+      let face_frame = [ Scene.view3d ~camera (Scene.D3.create [ Scene.D3.mesh mesh ]) ] in
+      let stage_faces () =
+        Result.get_ok (Scene.Layer.stage_native ~width:16 ~height:16 face_frame)
+      in
+      let faces = stage_faces () in
+      assert (stage_faces () == faces);
+      let entry = (List.hd faces.scene3).entries.(0) in
+      assert (Bytes.length entry.draw.mesh.vertices = 0 && Bytes.length entry.draw.mesh.indices = 0);
+      assert (entry.draw.mesh.index_count = 36);
+      assert (
+        match entry.vertex_attributes with
+        | Some (_, bytes) -> Bytes.length bytes = 0
+        | None -> false);
+      let uniforms = Option.get entry.draw.state.transform_uniforms in
+      assert (Int32.float_of_bits (Bytes.get_int32_le uniforms (81 * 4)) = 3.);
+      assert (!made = 0);
+      ignore (stage Scene.D3.Wireframe);
+      assert (!made = 1);
+      ignore (stage Scene.D3.Vertices);
+      ignore (Mesh.View.packed_view mesh);
+      assert (!made = 1);
+      let indices = (Mesh.View.packed_view mesh).indices in
+      let legacy =
+        Result.get_ok
+          (Mesh.View.create_device ~indices ~host ~key:"legacy-texture" ~normals:true ~keep:ignore
+             24)
+      in
+      let texture = Texture.init ~width:1 ~height:1 (fun ~x:_ ~y:_ -> Rays_math.Color.white) in
+      List.iter
+        (fun source ->
+          let frame =
+            [
+              Scene.view3d ~camera
+                (Scene.D3.create [ Scene.D3.mesh ~texture:(Scene.D3.textured texture) source ]);
+            ]
+          in
+          let staged = Result.get_ok (Scene.Layer.stage_native ~width:16 ~height:16 frame) in
+          let entry = (List.hd staged.scene3).entries.(0) in
+          assert (match entry.draw.mesh.key with Host _ -> true | Gpu_vertices _ -> false);
+          assert (Bytes.length entry.draw.mesh.vertices > 0))
+        [ mesh; legacy ];
+      assert (!made = 2);
+      print_endline
+        "resident mesh streams: nonforcing counts/face staging, checked metadata and single CPU \
+         fallback")
+
+let () = resident_streams ()
 
 (* A live cook's display is a new device mesh each frame: the staging caches keep the newest few
    and let the older frames go (each holds its scene, its geometry and the device outputs under

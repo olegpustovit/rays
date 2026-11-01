@@ -13,6 +13,52 @@ let text =
     (count / 2) count
 
 let () =
+  let service = Flow_native.Workspace_gpu.create () in
+  Fun.protect ~finally:(fun () -> Flow_native.Workspace_gpu.close service) (fun () ->
+      let calls = ref 0 in
+      let owner () = assert (Domain.is_main_domain ()); incr calls in
+      let backend : Flow_ir.Gpu.backend = {
+        cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> None);
+        prepare = (fun ~fast:_ _ -> failwith "resident test dispatched ordinary kernel");
+        residency = (fun ~fast ->
+            owner (); assert fast;
+            Some {
+              executor = {
+                invoke = (fun _ _ ~locals:_ ~live:_ -> owner (); None);
+                compact = (fun v -> owner (); Some v);
+                coerce = (fun _ v -> owner (); Some v);
+                finish = (fun v -> owner (); v);
+                count = (fun _ -> owner (); Some 1);
+                close = owner; settle = owner;
+                range = (fun _ _ ~div:_ ~length:_ -> owner (); Some (Flow.Eval.Int_array [| 0 |]));
+                fill = (fun _ ~length:_ _ -> owner (); Some (Flow.Eval.Int_array [| 0 |]));
+              };
+              retain_uint32 = (fun _ -> owner (); Some {
+                  count = 1; storage = None; materialise = (fun () -> [| 16777217 |]); release = (fun ~held:_ -> ()) });
+              retain_float = (fun _ -> owner (); None);
+              validate_topology = (fun ~point_count:_ ~vertices:_ ~offsets:_ ~kinds:_ ~max_polygon_size:_ ->
+                  owner (); Some (Ok ())) })
+      } in
+      Flow_native.Workspace_gpu.Private.install_test_backend service backend;
+      let gpu = Flow_native.Workspace_gpu.config service in
+      let done_ = Atomic.make false in
+      let worker = Domain.spawn (fun () -> Fun.protect ~finally:(fun () -> Atomic.set done_ true) (fun () ->
+          let scope = Option.get ((Option.get gpu.backend).residency ~fast:true) in
+          let r = scope.executor and value = Flow.Eval.Int_array [| 0 |] in
+          r.settle ();
+          assert (r.compact value = Some value);
+          assert (r.coerce (Flow.Ty.Array Flow.Ty.Int) value = Some value);
+          assert (r.finish value = value && r.count value = Some 1);
+          assert (r.range (Flow.Ty.Array Flow.Ty.Int) (Flow.Eval.Int 1) ~div:1 ~length:1 = Some value);
+          assert (r.fill (Flow.Ty.Array Flow.Ty.Int) ~length:1 (Flow.Eval.Int 0) = Some value);
+          assert ((Option.get (scope.retain_uint32 value)).materialise () = [| 16777217 |]);
+          assert (scope.retain_float value = None);
+          ok (Option.get (scope.validate_topology ~point_count:1 ~vertices:value ~offsets:value
+                            ~kinds:value ~max_polygon_size:3));
+          r.close ())) in
+      while not (Atomic.get done_) do Flow_native.Workspace_gpu.pump service; Domain.cpu_relax () done;
+      Domain.join worker;
+      assert (!calls = 12));
   let lowered = Flow_sop.Lower.workspace (Flow.Syntax.parse text |> ok) |> ok in
   let cpu_graph = List.hd lowered.graphs in
   assert (not (Flow_sop.Network.Int_map.is_empty cpu_graph.network.frame_nodes));
@@ -46,8 +92,9 @@ let () =
   let costs = ref 0 and prepares = ref 0 and runs = ref 0 and reads = ref 0 in
   let backend ~cost : Flow_ir.Gpu.backend =
     {
+      residency = (fun ~fast:_ -> None);
       cost =
-        (fun ~fast:_ _ ~count:_ ->
+        (fun ?inputs:_ ~fast:_ _ ~count:_ ->
           incr costs;
           cost);
       prepare =

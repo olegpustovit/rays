@@ -20,7 +20,8 @@ and fail = ref false
 (* every output reads as 42s: a device result is recognisable, a CPU one is not *)
 let backend : Flow_ir.Gpu.backend =
   {
-    cost = (fun ~fast:_ _ ~count:_ -> Some 0.);
+    residency = (fun ~fast:_ -> None);
+    cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> Some 0.);
     prepare =
       (fun ~fast:_ _ ->
         Ok

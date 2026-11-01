@@ -1,0 +1,51 @@
+Integer-input calibration after a range: 524288 uploaded bytes, payload +0; cached query adds no work
+CPU-input calibration: 0.000279 s, 524288 uploaded bytes across four samples, payload +0; cached query adds no work
+Prepared-table calibration: 1024/2048 entries upload 16384/32768 bytes; distinct layout cache, cached queries add no work
+Prepared mixed-origin calibration: CPU/CPU uploads 1048576 bytes, resident/CPU 524288; payload +0 during measurement, old source unchanged
+Prepared-frame calibration: failed frame does not poison a valid frame; successful result is cached
+placement calibration: 0.000630 s completed, status +16 bytes, payload +0; cached estimate issues no work
+Workspace GPU service: worker cook is pumped by its owner, selects CPU when slower, and reads back when cheaper; a pump never takes a settle as a follow-up
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+IsoGrid recipe 0: picking materialises 216004 payload bytes; repeated read +0
+IsoGrid recipe 0: 3000 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+IsoGrid recipe 3: inspection materialises 1708704 payload bytes; repeated read +0
+IsoGrid recipe 3: 11866 quads, pixel difference 0, publication/display payload 0/0, validation +4, renderer upload 5456, 17136 allocated bytes/warm frame, orbit/frame/shadow/modes parity, trace preparation materialises
+Integer-input calibration after a range: 524288 uploaded bytes, payload +0; cached query adds no work
+CPU-input calibration: 0.000336 s, 524288 uploaded bytes across four samples, payload +0; cached query adds no work
+Prepared-table calibration: 1024/2048 entries upload 16384/32768 bytes; distinct layout cache, cached queries add no work
+Prepared mixed-origin calibration: CPU/CPU uploads 1048576 bytes, resident/CPU 524288; payload +0 during measurement, old source unchanged
+Prepared-frame calibration: failed frame does not poison a valid frame; successful result is cached
+placement calibration: 0.000427 s completed, status +16 bytes, payload +0; cached estimate issues no work
+Measured retained generations: small CPU-origin stays CPU; 200 dispatches, two canvases, old pixels stable, cancel/recook/source edit/read-release orders pass; payload before explicit read=0, held=4, buffers=21 (+0 warm), pipelines=1, heap_delta_words=74589
+Canvas playback refreshes image/map functions with captured time
+workspace_geometry_capture,override=false,time=0.00,max=0
+workspace_geometry_capture,override=true,time=0.00,max=0
+workspace_geometry_capture,time=0.00,status_reads=0
+workspace_geometry_capture,override=false,time=1.00,max=0
+workspace_geometry_capture,override=true,time=1.00,max=0
+workspace_geometry_capture,time=1.00,status_reads=2
+workspace_geometry_capture,startup_status_reads=0,status_reads=12,readback_bytes=0
+Native geometry captures: P/Cd, two instances, exact CPU domains, resident GPU images, parent freshness, unrelated fixed render reuse and close pass
+Native nested image/map: frame and same-frame state captures refresh rendered pixels
+Native Canvas image snapshots: repeat cache, exact one/eight-domain bytes and close ownership passed
+test,width,height,time,max_channel_difference,differing_channels,differing_pixels
+workspace_gpu_image,65,17,0.00,0,0,0
+workspace_gpu_image,65,17,1.00,0,0,0
+workspace_gpu_image,35,33,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+workspace_gpu_image,65,17,0.50,0,0,0
+Workspace GPU images: exact-first independent CPU snapshots, live display, mesh/image parity, replan/resize, authority transitions and ownership pass
+Nested image/render exactness: CPU rounding survives an already-resident GPU child without reading or replacing it
+Legacy image stamps: display A, exact B, display A restores A pixels
+Resident Canvas dimensions: omitted axes, nested resize, fixed cache, independent CPU stamps, no implicit Canvas readback, zero handles
+workspace_retained_canvas,65,17,0.00,0,0,0
+workspace_retained_canvas,65,17,0.50,0,0,0
+workspace_retained_canvas,35,33,0.50,0,0,0
+workspace_retained_canvas,35,33,0.00,0,0,0
+workspace_retained_canvas,35,33,0.00,0,0,0
+Resident Canvas live route: mixed mesh/image roundtrip parity, stable identity, exact isolation, replan/resize, failure/recovery, snapshots and teardown pass
+Resident Canvas failed publication: resized candidates close once, prior allocation retained until owner close, no readback or handle leak
+real 9.54
+user 47.84
+sys 3.87

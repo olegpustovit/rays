@@ -87,6 +87,18 @@ let with_cook ?(domains = 1) prepare run =
       run current step finish)
 
 let run () =
+  let consumers = Atomic.make None in
+  let published =
+    Node.Build.make_geometry ~operation:"test_prepared_consumer" ~version:1 ~parameters:""
+      ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
+      (fun ~node_id context _ ->
+        Atomic.set consumers (Some (Context.cpu_consumers context node_id));
+        Ok Node.Build.{ geometry = Rdk.Line_geometry.points [| (0., 0., 0.) |]; instances = None })
+  in
+  with_cook Editor_prepare.empty (fun _ _ finish ->
+      ignore (finish [ network 1 published ]);
+      check (Atomic.get consumers = Some (Some 1))
+        "published geometry lost its CPU preparation consumer budget");
   let source = Lisp_sop.snapshot (Rdk.Line_geometry.points [| (0., 0., 0.) |]) in
   let objects = [ network 1 source; network 2 source ] in
   let prepares = Atomic.make 0 in
@@ -97,6 +109,9 @@ let run () =
     (fun current step finish ->
       let a = settings 0 and b = settings 1 in
       ignore (finish ~settings:a objects);
+      let first_prepared =
+        (List.find (fun (piece : Cook.piece) -> piece.id = 1) (Cook.pieces !current)).prepared
+      in
       let second =
         List.assoc 2
           (List.map (fun (piece : Cook.piece) -> (piece.id, piece)) (Cook.pieces !current))
@@ -122,6 +137,14 @@ let run () =
         (Atomic.get prepares = 5
         && List.for_all (fun (piece : Cook.piece) -> piece.settings == b) (Cook.pieces !current))
         "settings did not invalidate both prepares without a cook effect";
+      ignore (finish ~settings:a objects);
+      check
+        (Atomic.get prepares = 5
+        && (List.find (fun (piece : Cook.piece) -> piece.id = 1) (Cook.pieces !current)).prepared
+           == first_prepared)
+        "returning to a cached output rebuilt its prepared surface";
+      ignore (finish ~settings:b [ changed; List.nth objects 1 ]);
+      check (Atomic.get prepares = 5) "returning to cached settings rebuilt their prepared surfaces";
       for _ = 1 to 5 do
         ignore (step ~settings:b [ changed; List.nth objects 1 ])
       done;

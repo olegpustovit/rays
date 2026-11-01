@@ -1,4 +1,27 @@
 let () =
+  let integer =
+    Test_program.compile
+      "(map (fn [(i : int)] (+ (+ 16777217 i) (int t))) (array/range 16 :type int))"
+  in
+  let ordinary = Test_program.ok (Flow_shader.Emit.kernel ~fast:true integer) in
+  let exact = Test_program.ok (Flow_shader.Emit.kernel ~fast:true ~uint32_outputs:[ 0 ] integer) in
+  assert (ordinary.output_uint32 = [| false |] && exact.output_uint32 = [| true |]);
+  let input = Test_program.ok (Flow_shader.Emit.kernel ~fast:true ~uint32_inputs:[ 0 ] integer) in
+  assert (input.input_uint32 = [| true |]);
+  assert (Result.is_error (Flow_shader.Emit.kernel ~fast:true ~uint32_inputs:[ -1 ] integer));
+  assert (Result.is_error (Flow_shader.Emit.kernel ~fast:true ~uint32_tables:[ 0 ] integer));
+  assert (ordinary.output_widths = exact.output_widths && ordinary.interface = exact.interface);
+  List.iter
+    (fun outputs ->
+      assert (Result.is_error (Flow_shader.Emit.kernel ~fast:true ~uint32_outputs:outputs integer)))
+    [ [ -1 ]; [ 1 ] ];
+  List.iter
+    (fun body ->
+      let packed = Test_program.compile body in
+      assert (Result.is_error (Flow_shader.Emit.kernel ~fast:true ~uint32_outputs:[ 0 ] packed)))
+    [ "(map (fn [i] (+ i t)) (array/range 16))"; "(map (fn [i] [i t]) (array/range 16))" ]
+
+let () =
   let contains source fragment =
     let n = String.length fragment in
     let rec at i =

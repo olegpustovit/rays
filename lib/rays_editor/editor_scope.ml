@@ -30,7 +30,8 @@ let sync_views value =
       }
   | _ ->
       let records =
-        Flow_graph.Probe.make ~clock:value.clock ~dynamic:(Flow_sop.Lower.zone_count lowered)
+        Flow_graph.Probe.make ~clock:value.clock
+          ~dynamic:(Flow_sop.Lower.zone_count lowered)
           lowered.evaluated
       in
       let probes_of (preview : preview) =
@@ -261,11 +262,14 @@ let sync_scope value =
                   ?display)
           end
         in
-        (* the records outlive this frame: their closures take the owner and the cook, not [value] *)
-        let owner = node_owner_of value and cook = value.cook in
+        (* Probe snapshots need the published facts, not the previous cook's
+           compiled graphs and their arrays. *)
+        let owner = node_owner_of value in
+        let summaries = value.cook.summaries and sources = value.cook.sources in
         let geometry id =
           Option.bind (Flow_sop.Network.Int_map.find_opt id lowered.compiled) (fun node_id ->
-              Option.bind (owner node_id) (fun object_id -> Cook.geometry cook ~object_id ~node_id))
+              Option.bind (owner node_id) (fun object_id ->
+                  List.assoc_opt (object_id, node_id) summaries))
         in
         (* a pick in another graph's geometry asked for its node to be selected here *)
         let scope_view, select_later =
@@ -282,7 +286,7 @@ let sync_scope value =
           Flow_sop.Attribute_kernel.resolve ~geometry:(fun id ->
               Option.bind (Flow_sop.Network.Int_map.find_opt id lowered.compiled) (fun node_id ->
                   Option.bind (owner node_id) (fun object_id ->
-                      Cook.source cook ~object_id ~node_id)))
+                      List.assoc_opt (object_id, node_id) sources)))
         in
         let execution path ~probes =
           let instance =
@@ -304,9 +308,8 @@ let sync_scope value =
           if reuse <> None then reuse
           else
             Option.map
-              (Flow_graph.Probe.make ~clock:value.clock ~force ~state:value.cook.state ?live:time ~geometry
-                 ~resolve
-                 ~execution
+              (Flow_graph.Probe.make ~clock:value.clock ~force ~state:value.cook.state ?live:time
+                 ~geometry ~resolve ~execution
                  ~bulk_calls:
                    (Flow_sop.Lower.field_calls ~state:value.cook.state
                       ~live:(Option.value ~default:(Input.at_time 0.) time)

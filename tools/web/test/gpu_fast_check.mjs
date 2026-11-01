@@ -47,7 +47,8 @@ window.__result = (async () => {
     window.__activeCase = name;
     const k = gpu.kernels.get(name), uniforms = {};
     for (const [u] of k.uniform_layout) {
-      const m = /^frame:(\\d+):/.exec(u); if (m) uniforms[u] = c.frame[+m[1]];
+      let m = /^uniform:(\\d+)$/.exec(u); if (m) { const v = c.uniforms[+m[1]]; uniforms[u] = v.length === 1 ? v[0] : v; continue; }
+      m = /^frame:(\\d+):/.exec(u); if (m) uniforms[u] = c.frame[+m[1]];
     }
     gpu.dispatch(name, { count: c.count, inputs: c.inputs, uniforms, tables: c.tables });
     await gpu.flush();
@@ -101,6 +102,15 @@ try {
   const ok = !result?.fatal && c.recordOk && c.valuesOk && c.compactOk && c.length === 500;
   const integerErrorsOk = !result?.fatal && Object.entries(result.integerErrors).every(([name, errors]) => {
     const selected = name.endsWith('_selected'), shift = name.includes('shift');
+    if (name.includes('list')) return selected
+      ? errors.length === 1 && errors[0].code === 'E_LIST_RANGE'
+        && errors[0].message === 'nth index is out of range or is not a whole number.'
+      : errors.length === 0;
+    if (name.includes('slice')) return selected
+      ? errors.length === 1 && errors[0].code === 'E_ARRAY_RANGE'
+        && errors[0].message === (name.includes('length')
+          ? 'array/slice needs a non-negative whole length.' : 'An array slice must be within its source.')
+      : errors.length === 0;
     return selected ? errors.length === 1 && errors[0].code === 'E_RANGE'
       && errors[0].message === (shift ? 'Integer shift count must be within [0, 62].' : 'Integer division by zero.')
       : errors.length === 0;

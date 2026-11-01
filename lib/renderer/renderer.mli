@@ -134,6 +134,8 @@ val register_gpu_positions :
   gpu ->
   positions:Ogpu.Backend.buffer ->
   ?normals:Ogpu.Backend.buffer ->
+  ?indices:Ogpu.Backend.buffer * int ->
+  ?colors:Ogpu.Backend.buffer * int ->
   count:int ->
   valid:(unit -> bool) ->
   unit ->
@@ -141,7 +143,10 @@ val register_gpu_positions :
 (** Borrows another producer's [count] packed float3 positions (and normals) for a Scene3 mesh drawn
     from the device: the key a device mesh names ({!Rays.Mesh.View.create_device}) and its
     unregistration (initial domain). The producer keeps the buffers while [valid]; a draw of a
-    registration no longer valid is refused as stale. At most 128 borrowed sources are live. *)
+    registration no longer valid is refused as stale. Optional [indices] borrows uint32 triangle
+    indices with their settled count, including for shadow draws; the draw carries empty host index
+    bytes. [colors] borrows packed float3/float4 colours with their component width; Scene3 uniform
+    word 81 carries that width. At most 128 borrowed sources are live. *)
 
 val gpu_positions : gpu -> string -> (Ogpu.Backend.buffer * Ogpu.Backend.buffer option * int) option
 (** The packed float3 positions, normals (if registered) and count that the valid registration under

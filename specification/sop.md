@@ -419,8 +419,15 @@ map over arrays that share an origin and a card marker's input all count the poi
 geometry they come from (`Attribute_kernel.prepare`'s count source). Placement: the workspace
 precision is fast (the editor lowers with the precision its settings read, `Lowering.of_workspace`;
 exact work stays on the CPU, bit for bit), the backend is present, the region passes the GPU form
-checks, and `Flow_ir.Cost.sop_device`: at least 2^18 elements and noise in its code (Qualification
-places every legal region).
+checks, and the shared `Flow_ir.Cost.choose` comparison. There is no size/noise
+placement rule. Measured record placement requires a known CPU-reader count:
+unknown consumers keep CPU with `missing_consumer`; zero readers promises a
+known resident consumer. Completed backend cost plus one materialisation per
+output (shared by all CPU readers) competes with the CPU kernel estimate plus
+readback of distinct resident inputs. Decisions and optional reader counts
+appear in `Flow_ir.Profile.placements`. Qualification places every legal region.
+The production cook still needs to supply this consumer metadata; absent
+metadata does not imply a free device sink.
 
 Data movement (`Flow_gpu.Run` over mapped buffers, specification/backend.md): sources are packed
 straight into the kernel's mapped input buffers (one float32 rounding, finite check folded in).
@@ -443,6 +450,14 @@ use through `Rdk.Packed.Deferred` (once, any domain, the thunk and its buffer dr
 length, kind, identity and payload size never do. rdk stays GPU-free: it holds only a thunk and a
 release (`Deferred.create ?release`, `Geometry.releasers`). A recook whose result is only held
 (cached, compared by identity, counted) reads nothing back; the first CPU reader of P reads P alone.
+Topology has the corresponding `Rdk.Topology.deferred` carrier: known point,
+vertex and primitive counts, optional homogeneous `(kind, corner_count)` shape,
+an opaque holder, release callback and a thunk returning validated owned topology.
+`Geometry.create`, count queries, identity and payload accounting do not force it;
+`all_triangles` uses the shape when provided. `View.view` and indexed payload
+queries force exactly once across racing readers, caching failure as well as success.
+The materialiser cannot recursively read that topology. Geometry release accounting
+includes this component. This carrier alone does not select resident mesh execution.
 When the session drops a result (an LRU or payload eviction, a volatile slot replaced), the
 resident components no retained entry shares are released at the end of the first cook whose root
 output, and the previous cook's, do not hold them (`release ~held`). A component some cook's root
@@ -585,7 +600,7 @@ Tried and stopped (2026-10-29), with what each still needs:
   (c) Only a fused write (with `$writes`) is placed, and the normals write cannot fold into the chain
   that wrote P: a table read of a written attribute is not a fold (`fold_writes`' retarget refuses
   any read but `(map f (sop/attr in0 :P))`), so it stays a lone write, never on the device.
-  (d) `Cost.sop_device` places only regions with noise. (e) The CPU (exact precision, no device,
+  (d) The earlier size/noise placement rule excluded this path. (e) The CPU (exact precision, no device,
   every refusal) runs the same record program: the gather in the typed interpreter (an integer
   program) instead of `fast_point_area`, and no Lisp form can pick by device (`live?` is about the
   frame); the alternative, a device path inside the native normals node over a resident P (a hook on
@@ -614,8 +629,8 @@ Tried and stopped (2026-10-29), with what each still needs:
   a device that check is its status, so the body needs a check form the device's status answers
   (deferred like a fused write's guards) to keep its errors. (4) The normals write would be a lone
   write (a table read of the chain's written P does not fold), and only fused writes are placed;
-  placement for a lone write whose source or table is resident, and `Cost.sop_device` beyond
-  noise, are needed. A gather form of the point sums (each point folds its vertices'
+  placement for a lone write whose source or table is resident, and a consumer-aware measured
+  comparison beyond the earlier noise rule, are needed. A gather form of the point sums (each point folds its vertices'
   contributions in ascending vertex order, the scatter's order and adds, so the same bytes) was
   tried on the CPU: 2.5 s a frame at 1M against 1.83 s for the scatter (one domain), so it can
   only be the device's form, which brings back (1). Measured now (`bench_chain_frames`,
@@ -651,9 +666,10 @@ domain). (3) No check form was needed: `sop/normals`' non-finite checks never de
 and kernels raise `E_NONFINITE` first, for any input P), and the gather's own nonfinite result fails
 the write's checks, on the device through its status (the session recooks the write on the CPU,
 which reports the error). (4) A lone write is tried as a one-field record (`Attribute_kernel.node`,
-`lone_record`, only with a fast device) through `record_on_device`; `Cost.sop_device ~resident`
-places a region that reads data the device holds (its source or table answered by `resident`),
-which the CPU would read back first. Topology and adjacency arrays are kept per topology
+`lone_record`, only with a fast device) through `record_on_device`; the measured comparison
+charges the CPU alternative for a source/table that `resident` answers from the device,
+which the CPU would read back first. Unknown consumers still keep CPU, independently of
+this resident-input credit. Topology and adjacency arrays are kept per topology
 (`Topology_kernel_impl.kept`, by the topology's identity): each read copied them, so the device
 uploaded the CSR every frame. A bound map (`(exact displaced)`, `noise_displace`) is now a direct
 region, so a noise displacement is placed too. The CPU cost of the gather: about six incident
@@ -2151,3 +2167,33 @@ before the protected scope exits; hints and ordered child trace survive the
 Flow/SOP boundary. Cancellation and errors from already cooked public input
 edges remain unchanged. Mapping text belongs to the Lisp mapper, never to an
 operation-name switch in Flow or a private SOP callback.
+
+Cook-time device placement uses explicit input-use facts. `Node.Cpu` budgets a
+CPU read of each selected input; `Node.Forward i` promises that only input `i`'s
+payload is forwarded without inspection; `Node.Unknown` supplies no proof.
+Forwarding is independent of output-sharing facts. `Session.cook` propagates
+unique CPU-reader identities through forwarding edges, preserves enclosing
+consumer facts across nested cooks, and caches one root census. Its optional
+`cpu_consumers` counts readers outside the cooked graph; zero is an explicit
+known resident-consumer promise, whereas absence is unknown. Negative counts
+are rejected. Production geometry capture declares its CPU use and specialised
+attribute cooks receive the wrapper's output budget. Unknown consumers retain
+the conservative CPU route in measured placement.
+
+Write fusion preserves a static prefix as a separately cached node before a
+changing write when deferred evaluation or a device backend is enabled. The
+boundary applies to non-indexed writes too. A field rewritten later in a device
+chain retains the existing fusion opportunity, so an indexed producer can still
+be generated inside that chain instead of uploaded.
+
+The editor assigns one conservative CPU-reader budget to each published root,
+probe and framing request before submitting its asynchronous cook. Preparation
+and inspection callbacks are CPU-capable; their shared materialisation is charged
+when comparing a resident attribute output even if a particular display borrows
+it instead. This budget does not imply all internal opaque nodes are classified.
+
+A writer with wholly CPU-owned geometry inputs can pass its target owner count
+to record placement before input preparation. A measured CPU refusal then avoids
+speculative source evaluation/conversion. Possibly deferred inputs retain the
+resident-aware preparation path; a device choice still validates actual inputs
+and rechecks cost if their count differs from the target.

@@ -1,0 +1,74 @@
+dependency gate: 59 libraries, 36 rules, 29 whitelists
+Graph state: inline/bound known tuples, coercion sharing, opposite orders, private snapshots and host/frame clocks agree
+Exact images: static state refusal and opaque seed/step backstops preserve caller state; numeric and packed exact state remains data
+Host forcing: concrete/legacy sources, validation/cause/frame failures and live nested fallback agree with supplied state
+Constant vector constructor: empty/single/power tails/multi-block signed-zero bits match element builder
+Constant array descriptors: canonical count/bounds/empty/fill checks match dense constructor errors
+Whole-array primitive census: canonical shapes, grade default, counts, exact outputs, ownership and refusals
+Defnode: typed slots, metadata, validations, identity and malformed declarations pass
+Defnode version: exact nonnegative integer metadata, default, source and malformed declarations
+Flow workspace: 12 fixtures, register rules, liveness and macros pass (71 check.cjs cases ported here)
+workspace candidates: raw approximation empty; maps/collect, aliases, exact, structural refusals and uncertain captures passed
+workspace precision: producer/sink paths, aliases, exact, cond/case and display consumers passed
+Text arrays: exact UTF-8 values, empty operations and interpreter map/for/scan/fold/reduce beyond 4,096 pass
+Remembered facts: a key no one holds is collected while the memo is in use
+Flow workspace eval: 114 value cases pass
+Static bulk maps: offered past 4,096 elements, checked against the walked ones, refused or wrong values walked
+Inline replay keeps distinct macro-expanded loop scopes and their captures
+isogrid checks passed
+isogrid geometry goldens passed
+isogrid geometry goldens passed
+verify static ../sketches/audio.rays
+verify static ../sketches/flow_contours.rays
+verify static ../sketches/flow_kernel.rays
+verify static ../sketches/flow_vectors.rays
+verify static ../sketches/million_marks.rays
+verify static ../sketches/procedural_modeling.rays
+verify static ../sketches/shattered_cube.rays
+verify static ../sketches/ws_bloom.rays
+verify static ../sketches/ws_layout.rays
+verify static ../sketches/ws_spreadsheet.rays
+verify static ../sketches/ws_tunnel.rays
+Verified static kernels across 11 source files
+verify static ../sketches/drawing.rays
+verify static ../sketches/flow_image.rays
+verify static ../sketches/flow_shader.rays
+verify static ../sketches/gpu_sea.rays
+  qualification grid: 73² points
+verify static ../sketches/particles.rays
+verify static ../sketches/recursive_rectangles.rays
+verify static ../sketches/sop_gallery.rays
+verify static ../sketches/ws_garland.rays
+verify static ../sketches/ws_orrery.rays
+verify static ../sketches/ws_tiles.rays
+verify static ../sketches/ws_wave.rays
+Verified static kernels across 11 source files
+isogrid geometry goldens passed
+verify static ../sketches/basic.rays
+verify static ../sketches/flow_field.rays
+verify static ../sketches/flow_particles_gpu.rays
+  qualification grid: 73² points
+verify static ../sketches/generative.rays
+verify static ../sketches/noise.rays
+verify static ../sketches/pxui.rays
+verify static ../sketches/shattered_studio.rays
+verify static ../sketches/ws_facade.rays
+verify static ../sketches/ws_morph.rays
+verify static ../sketches/ws_sunflower.rays
+verify static ../sketches/ws_variations.rays
+Verified static kernels across 11 source files
+verify static ../sketches/file_dialog.rays
+verify static ../sketches/flow_image_kernel.rays
+verify static ../sketches/flow_survey.rays
+verify static ../sketches/isogrid.rays
+verify static ../sketches/pathtracer.rays
+verify static ../sketches/recursive_signals.rays
+verify static ../sketches/voxel_wall.rays
+verify static ../sketches/ws_kit.rays
+verify static ../sketches/ws_rosette.rays
+verify static ../sketches/ws_tree.rays
+Verified static kernels across 10 source files
+isogrid geometry goldens passed
+real 25.09
+user 126.20
+sys 29.50

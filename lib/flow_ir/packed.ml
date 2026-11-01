@@ -570,30 +570,33 @@ let trace_hit traced j id q =
       traced.(j) <- Some (id, q, h);
       h
 
-(* A chunk's register banks, every register for each lane of a block: each domain keeps the last
-   few it returned and hands one out again, zeroed as a fresh one is, so a kernel run each frame
-   allocates no scratch. *)
-let registers_key = Domain.DLS.new_key (fun () -> ref [])
+(* A chunk borrows zeroed register banks for its block lanes. Each domain may
+   reuse idle scratch until GC reclaims it. *)
+let registers_key = Domain.DLS.new_key (fun () -> Weak.create 1)
 
 let take_registers n =
   let free = Domain.DLS.get registers_key in
-  match List.find_opt (fun (integer, _) -> Array.length integer >= n) !free with
+  let available = Option.value ~default:[] (Weak.get free 0) in
+  match List.find_opt (fun (integer, _) -> Array.length integer >= n) available with
   | Some ((integer, floats) as banks) ->
-      free := List.filter (fun b -> b != banks) !free;
+      Weak.set free 0 (Some (List.filter (fun b -> b != banks) available));
       Array.fill integer 0 n 0;
       Array.fill floats 0 n 0.;
       (integer, floats)
   | None -> (Array.make n 0, Array.make n 0.)
 
-(* ponytail: four banks a domain, the largest kept; a pool by size class if kernels of very
-   different sizes alternate *)
+(* Idle scratch must not retain a worker's largest past workload across GC.
+   Borrowed banks stay strong until [give_registers].
+   ponytail: four weak banks a domain, largest first; size classes if measured. *)
 let give_registers integer floats =
   let free = Domain.DLS.get registers_key in
-  free :=
+  let banks =
     List.take 4
       (List.sort
          (fun (a, _) (b, _) -> compare (Array.length b) (Array.length a))
-         ((integer, floats) :: !free))
+         ((integer, floats) :: Option.value ~default:[] (Weak.get free 0)))
+  in
+  Weak.set free 0 (Some banks)
 
 (* Noise tables are immutable and shared between domains: one per seed, the last 16 seeds. *)
 let noise_tables = Atomic.make []
@@ -606,7 +609,8 @@ let noise_table seed =
       Atomic.set noise_tables (List.take 16 ((seed, n) :: Atomic.get noise_tables));
       n
 
-let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~seed (t : t) ~live =
+let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~seed
+    (t : t) ~live =
   let carried =
     Array.fold_left
       (fun count instruction ->
@@ -628,6 +632,17 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
     && Array.exists (function Guarded _ -> true | _ -> false) t.code
   in
   let inputs, borrowed, ranges, lengths = typed_inputs ?column_source ~evaluate t in
+  let started = Option.map (fun (clock, _) -> clock ()) measure and excluded = ref 0. in
+  let uniform =
+    match measure with
+    | None -> uniform
+    | Some (clock, _) ->
+        fun value ->
+          let before = clock () in
+          Fun.protect
+            ~finally:(fun () -> excluded := !excluded +. max 0. (clock () -. before))
+            (fun () -> uniform value)
+  in
   (* A leading total prefix only writes private banks. Keep every potentially
      failing instruction and lazy capture in the existing reference lane order. *)
   let total = typed_total ranges inputs in
@@ -1606,17 +1621,24 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
             for i = first_chunk to chunks - 1 do
               chunk i
             done));
-  if plane_outputs <> None then []
-  else if collecting then Array.to_list outputs
-  else
-    [
-      (if kept = 0 then
-         match (t.result, seed) with
-         | Accumulate _, Some seed -> seed
-         | Sum false, _ -> E.Int 0
-         | _ -> !accumulator
-       else !accumulator);
-    ]
+  let result =
+    if plane_outputs <> None then []
+    else if collecting then Array.to_list outputs
+    else
+      [
+        (if kept = 0 then
+           match (t.result, seed) with
+           | Accumulate _, Some seed -> seed
+           | Sum false, _ -> E.Int 0
+           | _ -> !accumulator
+         else !accumulator);
+      ]
+  in
+  Option.iter
+    (fun (clock, report) ->
+      report t ~seconds:(max 0. (clock () -. Option.get started -. !excluded)) ~reference:false)
+    measure;
+  result
 
 let ordered_add (t : t) =
   let output = t.outputs.(0) in
@@ -2772,7 +2794,7 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
             t.code
         in
         if integer_program t || guarded_capture then
-          run_typed ?column_source ?plane_outputs ?expected_count ~seed ~live t
+          run_typed ?measure ?column_source ?plane_outputs ?expected_count ~seed ~live t
             ~evaluate:(fun r term -> get (evaluate r term))
             ~uniform:(fun value -> get (uniform value))
         else
@@ -3101,11 +3123,12 @@ and force ?dispatch ?state ?elems ?resolve ?measure ?on_walk ?strict t ~live =
 let force_all ?dispatch ?state ?elems ?resolve ?measure ?on_walk ?strict t ~live =
   run_all ?dispatch ?state ?elems ?resolve ?measure ?on_walk ?strict t ~live
 
-let force_into ?state ?elems ?resolve ?measure ?strict ~column_source ~count ~outputs t ~live =
+let force_into ?dispatch ?state ?elems ?resolve ?measure ?strict ~column_source ~count ~outputs t
+    ~live =
   Result.map
     (fun _ -> ())
-    (run_all ~column_source ~plane_outputs:outputs ~expected_count:count ?state ?elems ?resolve
-       ?measure ?strict t ~live)
+    (run_all ?dispatch ~column_source ~plane_outputs:outputs ~expected_count:count ?state ?elems
+       ?resolve ?measure ?strict t ~live)
 
 module Host = struct
   let argument_types (t : t) =
@@ -3154,6 +3177,7 @@ module Host = struct
         arguments;
       if types = [||] then Ok t
       else
+        let copies = Hashtbl.create 32 in
         let rec value = function
           | E.Source ("$core/argument", _, [ ("index", E.Int index) ]) -> arguments.(index)
           | Residual r -> Residual (residual r)
@@ -3166,9 +3190,16 @@ module Host = struct
               Source (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
           | v -> v
         and residual r =
-          let view = E.Residual.residual_view r in
-          E.Residual.with_bindings r ~term:view.term
-            (List.map (fun (name, v) -> (name, value v)) view.bindings)
+          let id = E.Residual.residual_id r in
+          match List.find_map (fun (old, copy) -> if old == r then Some copy else None)
+              (Hashtbl.find_all copies id) with
+          | Some copy -> copy
+          | None ->
+              let view = E.Residual.residual_view r in
+              let copy = E.Residual.with_bindings r ~term:view.term
+                  (List.map (fun (name, v) -> (name, value v)) view.bindings) in
+              Hashtbl.add copies id (r, copy);
+              copy
         in
         Core.Region.Private.with_captures t ~residual:(residual t.residual)
           ~uniforms:(Array.map value t.uniforms)
@@ -3255,7 +3286,8 @@ module Host = struct
     in
     match (value residual term, term.node) with
     | Some v, _ -> Value v
-    | None, Op { op = "array/range"; args = [ (_, n) ]; _ } when scaled n <> None ->
+    | None, Op { op = "array/range"; args = ("count", n) :: _; _ }
+      when (term.ty = Ty.Array Ty.Int || term.ty = Ty.Array Ty.Float) && scaled n <> None ->
         let v, mul, div = Option.get (scaled n) in
         Range (v, mul, div)
     | None, _ -> Opaque (refs residual term (Some []))
@@ -3336,7 +3368,14 @@ module Host = struct
                 let residual, term = program.sources.(0) in
                 evaluate_with resolve residual term
             | Ok program -> get (force ~state ?resolve ?measure program ~live)
-            | Error _ -> get (E.Residual.eval_term ~state ?resolve residual term ~live)
+            | Error _ -> get (E.Residual.eval_term ~state ?resolve ~kernel:(execute_request resolve) residual term ~live)
+          and execute_request resolve residual =
+            if E.state_dependent (E.Residual residual) then None
+            else
+              let term = (E.Residual.residual_view residual).term in
+              match compile_impl ~fusion:t.fusion ~dynamic:t.dynamic ~count_source:t.count_source residual term with
+              | Ok program -> Result.to_option (force ~state ?resolve ?measure program ~live)
+              | Error _ -> None
           in
           (* A source that is one read of data the device holds ([resident]) is that data's
              placeholder, bound on the device, with its count: tried with a resolve answering
@@ -3377,8 +3416,18 @@ module Host = struct
                 | None, true ->
                     Option.map
                       (fun (residual, n) ->
-                        match get (E.Residual.eval_term ~state ?resolve residual n ~live) with
-                        | E.Int n -> max 0 n
+                        match evaluate residual n with
+                        | E.Int _ as value -> (
+                            try
+                              Flow.Op.array_count
+                                ~limit:
+                                  (if term.W.ty = Ty.Array Ty.Int then Sys.max_array_length
+                                   else Sys.max_floatarray_length)
+                                "array/range" value
+                            with Diagnostic.Error _ ->
+                              ignore
+                                (get (E.Residual.eval_term ~state ?resolve residual term ~live));
+                              raise Unsupported)
                         | _ -> raise Unsupported)
                       (index_range residual term))
               t.sources
@@ -3458,13 +3507,7 @@ module Host = struct
                     residual
                   else E.Residual.with_bindings residual ~term:view.term bindings
                 in
-                (* a uniform that is no bulk form is no kernel: it is made by reference *)
-                let value =
-                  match view.term.node with
-                  | W.Hof ((`Map | `Reduce), _) | Loop _ | Op { op = "array/sum"; _ } ->
-                      evaluate residual view.term
-                  | _ -> get (E.Residual.eval_term ~state ?resolve residual view.term ~live)
-                in
+                let value = evaluate residual view.term in
                 Hashtbl.replace made id value;
                 value
           and binding value =
@@ -3568,12 +3611,9 @@ module Host = struct
         Array.map
           (fun (r, term) ->
             match shape r term with
-            | Value v -> (
-                match argument v with Some i -> Argument i | None -> raise Exit)
+            | Value v -> ( match argument v with Some i -> Argument i | None -> raise Exit)
             | Range (v, mul, div) -> (
-                match argument v with
-                | Some i -> Argument_range (i, mul, div)
-                | None -> raise Exit)
+                match argument v with Some i -> Argument_range (i, mul, div) | None -> raise Exit)
             | Opaque _ -> raise Exit)
           t.sources
       and plan_uniforms =

@@ -55,8 +55,36 @@ module Gpu : sig
     (value -> (Flow.Eval.value, Diagnostic.t) result) -> value -> (planes, Diagnostic.t) result
   (** [planes] from a [readback], deinterleaving its array. *)
 
+  type integer_storage = ..
+  (** Backend-owned integer storage token; no native handle crosses this boundary. *)
+
+  type integers = {
+    count : int;
+    storage : integer_storage option;
+    materialise : unit -> int array;
+    release : held:bool -> unit;
+  }
+
+  type residency = {
+    executor : Core_exec.resident;
+    retain_uint32 : Flow.Eval.value -> integers option;
+    retain_float : Flow.Eval.value -> planes option;
+    validate_topology :
+      point_count:int ->
+      vertices:Flow.Eval.value ->
+      offsets:Flow.Eval.value ->
+      kinds:Flow.Eval.value ->
+      max_polygon_size:int ->
+      (unit, Diagnostic.t) result option;
+  }
+  (** A backend-neutral resident value scope. Validate topology before retaining its fields; retain
+      final streams before closing the executor. [None] declines an unsupported stream. *)
+
   type backend = {
-    cost : fast:bool -> Packed.t -> count:int -> float option;
+    residency : fast:bool -> residency option;
+    cost : ?inputs:Packed.Host.inputs -> fast:bool -> Packed.t -> count:int -> float option;
+        (** With prepared inputs, measure their actual layout, uniforms and frame values. Without
+            them the backend may offer a shape estimate; callers recheck after preparation. *)
     prepare : fast:bool -> Packed.t -> (kernel, Diagnostic.t) result;
   }
 
@@ -70,18 +98,24 @@ end
 val static :
   ?record:bool ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
+  ?replay:bool ->
+  ?verify:bool ->
   Flow.Workspace.t ->
   (Flow.Eval.t, Diagnostic.t) result
-(** {!Flow.Eval.static} with the same result, in which a static packed [map] of more than 4,096
-    elements runs as its CPU kernel after the walker has made the first 4,096 elements
-    ({!Flow.Eval.Residual}, [Bulk_static]). The evaluator resumes after the scoped handler supplies
-    a value or declines. The walker finishes the map itself when the kernel refuses the form, fails,
-    or differs from the walked elements. {!qualify_workspace} evaluates the same way. *)
+(** Exact static kernels run before the walker for maps above 4,096 elements. Refusal or failure
+    restarts reference evaluation from zero. [record] keeps eager checked heads; [replay] instead
+    uses closure call selectors for body records (named-function recording keeps its head). [verify]
+    compares every successful kernel element with the walker bit for bit and aborts on any
+    difference. It is intended for qualification, not production evaluation. {!qualify_workspace}
+    uses the same execution and recording contract. *)
 
 val qualify_workspace :
   ?record:bool ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   ?observe:(Flow.Workspace.path option -> Flow.Eval.residual -> unit) ->
+  ?replay:bool ->
+  ?verify:bool ->
+  ?defer:bool ->
   ?gpu:Gpu.config ->
   Flow.Workspace.t ->
   (Flow.Workspace.t * Flow.Eval.t, Diagnostic.t) result
@@ -92,12 +126,33 @@ val qualify_workspace :
     requalifies. The optional audit callback receives the associated authored producer, or None for
     an ambiguous/missing association, and the actual observed handle. For image/map, successful
     adaptation supplies its synthetic pixel map with the original captures, authored producer and
-    runtime instance/tuple. *)
+    runtime instance/tuple. [defer:true] keeps qualifying large static maps in SOP graphs as
+    residuals for their cook. Host graphs stay eager; the default is false for CLI checking and
+    independent evaluation. *)
 
 type id = Flow.Workspace.path * int list
 (** A profile owner: authored path and iteration. *)
 
 type tier = Interp | Core | Cpu_kernel | Gpu | Gpu_compile | Gpu_readback
+
+type placement_reason =
+  | Unsupported_form
+  | Missing_consumer
+  | Validation_read
+  | Cpu_consumer
+  | No_cost_evidence
+  | Cpu_measured_cheaper
+  | Device_measured_cheaper
+  | Held_on_device
+
+type placement = {
+  owner : id;
+  count : int option;
+  reason : placement_reason;
+  cpu_seconds : float option;
+  device_seconds : float option;
+  cpu_consumers : int option;
+}
 
 module Cost : sig
   type tier_cost = { fixed : float; per_element : float }
@@ -108,9 +163,20 @@ module Cost : sig
   val packed : count:int -> tier
   (** The same measured CPU decision used at placement and force time. *)
 
-  val sop_device : Gpu.policy -> Core.Region.t -> count:int -> resident:bool -> bool
-  (** A fused SOP write's region goes to the device: [Qualification], or [count] of at least 2^18
-      elements and noise in its code or a read of data the device holds ([resident]). *)
+  val choose :
+    cpu_seconds:float option ->
+    device_seconds:float option ->
+    resident:bool ->
+    cpu_consumers:int ->
+    placement_reason
+  (** Compare total time to the known consumers, including transfers, validation and sinks. Missing,
+      negative or nonfinite evidence keeps CPU. Ties keep CPU. *)
+
+  val readback : count:int -> width:int -> float
+  (** Measured seconds to move [count] elements of [width] floats between host and device. *)
+
+  val on_device : placement_reason -> bool
+  val reason_name : placement_reason -> string
 end
 
 type sink = Display of string | Sop_input
@@ -123,13 +189,44 @@ type execution = {
 }
 
 module Profile : sig
+  type static_map = {
+    site : Flow.Workspace.path;
+    count : int;
+    tier : tier;
+    deferred : bool;
+    refusal : Diagnostic.t list;
+    head_elements : int;
+    tail_elements : int;
+    seconds : float;
+    head_seconds : float;
+    kernel_seconds : float;
+    tail_seconds : float;
+  }
+
   type t
 
   val create : clock:(unit -> float) -> t
 
+  val sample : t -> (unit -> 'a) -> 'a
+  (** Scope static-map observations to this domain, restoring the previous scope on failure. Timings
+      are inclusive of nested maps and use only the supplied clock. *)
+
+  val static_maps : t -> static_map list
+  (** At most 512 recent static maps, oldest first. Head/tail counts are actual walker calls; the
+      compilation/force attempt and any refusal are measured separately. *)
+
   val executions : t -> execution list
   (** Immutable snapshot of at most 512 recent groups. Each packed group has one timing, excluding
       input materialization and nested groups. *)
+
+  val place : t option -> placement -> unit
+  (** Record one decision for its owner, replacing the owner's previous one; [None] uses the scoped
+      profile of this domain. *)
+
+  val placements : t -> placement list
+  (** At most 512 recent placement decisions, newest first, one per owner. A declined program with
+      unknown cardinality has [count = None], never a fabricated zero. Unknown downstream CPU-reader
+      counts likewise remain [cpu_consumers = None]. *)
 end
 
 module Executor : sig
@@ -158,6 +255,7 @@ module Executor : sig
   (** Packed root, through transparent [exact] readback boundaries. *)
 
   val force :
+    ?resident:Core_exec.resident ->
     ?state:Flow.Eval.state ->
     ?elems:(string * Flow.Eval.value) list ->
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
@@ -170,7 +268,13 @@ module Executor : sig
       supported scalar dataflow uses its operator records. Failures rerun the reference for its
       precise diagnostic. [strict:true] requires packed numeric bodies at compilation and execution,
       without cost-based interpreter placement or error fallback. [reference:true] retains the
-      explicit reference oracle. *)
+      explicit reference oracle. [resident] offers compiled value regions to a device scope,
+      including cached root programs. Successful placeholders must be retained or materialised
+      before that scope closes; explicit reference evaluation does not use it. A failed resident
+      attempt closes the scope and retries the whole value on CPU under the requested [strict]
+      policy, discarding all partial placeholders rather than mixing fields from both attempts.
+      Resident records, including frame-dependent fields, share a cached whole-value Core program so
+      capacity replay reevaluates the complete producer/consumer chain. *)
 
   (** Narrow test counters for lowering and reference-walker attempts in one force operation. *)
   module Private : sig
@@ -199,17 +303,31 @@ module Executor : sig
     ?state:Flow.Eval.state ->
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
     ?resident:(Flow.Eval.value -> (Flow.Eval.value * int) option) ->
+    ?expected_count:int ->
+    ?cpu_consumers:int ->
     ?gpu:Gpu.config ->
     program ->
     live:Flow.Eval.live ->
     ((string * Gpu.planes) list option, Diagnostic.t) result
   (** The elementwise fields of a record program (a fused SOP write's) as one region on the device,
-      in fast precision when {!Cost.sop_device} places it: one dispatch, each output kept on the
-      device as its planes (a field of width [w]: [w] arrays of the count), by field name, read only
-      when they materialise. [None] keeps the record on the CPU, also when the device fails. An
-      input array the device already holds (the same array as the last dispatch's) is not uploaded
-      again. [resident v] names a source bound as the value [v] (an attribute read) that the device
-      already holds: its placeholder ({!Gpu.planes}) and count, passed instead of evaluating it. *)
+      in fast precision when the shared measured comparison places it: one dispatch, each output
+      kept on the device as its planes (a field of width [w]: [w] arrays of the count), by field
+      name, read only when they materialise. [None] keeps the record on the CPU, also when the
+      device fails. An input array the device already holds (the same array as the last dispatch's)
+      is not uploaded again. [resident v] names a source bound as the value [v] (an attribute read)
+      that the device already holds: its placeholder ({!Gpu.planes}) and count, passed instead of
+      evaluating it.
+
+      Measured placement needs a known [cpu_consumers] count. Without it the record stays on CPU
+      with [Missing_consumer]. CPU readers share one materialisation per output; resident input
+      readback is charged to the CPU alternative. Zero promises a known resident consumer, not an
+      unknown sink. Qualification bypasses cost. Partial output borrow failure releases earlier
+      outputs immediately. With [expected_count], scalar uniforms and no resident-input resolver,
+      compare before preparing inputs: a definite CPU refusal does no source evaluation. Missing
+      early evidence permits preparation. A device candidate validates and compares actual inputs
+      again, including their table layout and resident bindings. The expected
+      count is the consuming writer's target size, not a substitute for input/count validation.
+      Negative expected counts are rejected. *)
 
   val force_into :
     ?state:Flow.Eval.state ->

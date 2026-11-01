@@ -8,6 +8,57 @@
  (modules core_census)
  (libraries flow parallel))
 
+(executable
+ (name verify_static)
+ (modules verify_static)
+ (libraries rays_editor editor_document flow_graph flow_ir ogpu_mock parallel))
+
+(executable
+ (name test_isogrid_cpu)
+ (modules test_isogrid_cpu)
+ (libraries rays_editor editor_document flow_graph flow flow_ir flow_sop sop rdk ogpu_mock parallel))
+
+(executable
+ (name test_isogrid_defer)
+ (modules test_isogrid_defer)
+ (libraries rays_editor editor_document flow_graph flow flow_ir ogpu_mock parallel))
+
+(rule
+ (alias isogrid-defer-spike)
+ (deps ../sketches/isogrid.rays)
+ (action (run %{exe:test_isogrid_defer.exe} %{dep:../sketches/isogrid.rays})))
+
+(rule
+ (alias isogrid-cpu)
+ (deps ../sketches/isogrid.rays)
+ (action (run %{exe:test_isogrid_cpu.exe} %{dep:../sketches/isogrid.rays})))
+
+(alias
+ (name isogrid)
+ (deps (alias isogrid-cpu) (alias isogrid-defer-spike)))
+
+(rule
+ (alias verify-static)
+ (deps (source_tree ../sketches))
+ (action (run %{exe:verify_static.exe} --shard 0/4 ../sketches)))
+
+(rule
+ (alias verify-static)
+ (deps (source_tree ../sketches))
+ (action (run %{exe:verify_static.exe} --shard 1/4 ../sketches)))
+
+(rule
+ (alias verify-static)
+ (deps (source_tree ../sketches))
+ (action (run %{exe:verify_static.exe} --shard 2/4 ../sketches)))
+
+(rule
+ (alias verify-static)
+ (deps (source_tree ../sketches))
+ (action (run %{exe:verify_static.exe} --shard 3/4 ../sketches)))
+
+(alias (name qualification-scale) (deps (alias verify-static)))
+
 (rule
  (alias runtest)
  (action
@@ -406,6 +457,103 @@
  (deps ../sketches/isogrid.rays)
  (action (run %{exe:test_isogrid.exe} ../sketches/isogrid.rays)))
 
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid)
+ (deps ../sketches/isogrid.rays isogrid_12.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-goldens tools/isogrid_12.expected))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-24)
+ (deps ../sketches/isogrid.rays isogrid_24.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-goldens tools/isogrid_24.expected --shard 0/2))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-24)
+ (deps ../sketches/isogrid.rays isogrid_24.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-goldens tools/isogrid_24.expected --shard 1/2))))
+
+(alias (name qualification-scale) (deps (alias isogrid-24)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-deferred)
+ (deps ../sketches/isogrid.rays isogrid_12.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-deferred tools/isogrid_12.expected --shard 0/2))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-deferred)
+ (deps ../sketches/isogrid.rays isogrid_12.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-deferred tools/isogrid_12.expected --shard 1/2))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-deferred-24)
+ (deps ../sketches/isogrid.rays isogrid_24.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-deferred tools/isogrid_24.expected))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-deferred-64)
+ (deps ../sketches/isogrid.rays isogrid_64.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-deferred tools/isogrid_64.expected --shard 0/3))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-deferred-64)
+ (deps ../sketches/isogrid.rays isogrid_64.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-deferred tools/isogrid_64.expected --shard 1/3))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-deferred-64)
+ (deps ../sketches/isogrid.rays isogrid_64.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-deferred tools/isogrid_64.expected --shard 2/3))))
+
+(alias (name isogrid) (deps (alias isogrid-deferred)))
+(alias
+ (name qualification-scale)
+ (deps (alias isogrid-deferred-24) (alias isogrid-deferred-64)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias qualification-scale)
+ (deps ../sketches/isogrid.rays isogrid_64.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe}
+    --check-goldens tools/isogrid_64.expected))))
+
 (alias
  (name runtest)
  (deps (alias isogrid)))
@@ -418,3 +566,29 @@
 (alias
  (name runtest-native)
  (deps (alias isogrid-native)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-measured-64)
+ (deps ../sketches/isogrid.rays isogrid_64.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe} --switch 64))))
+
+(rule
+ (alias isogrid-defer-spike-64)
+ (deps ../sketches/isogrid.rays)
+ (action (run %{exe:test_isogrid_defer.exe} %{dep:../sketches/isogrid.rays} --resolution 64)))
+
+(alias (name qualification-scale) (deps (alias isogrid-defer-spike-64)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias isogrid-selector-lifetimes)
+ (locks smoke_window)
+ (deps ../sketches/isogrid.rays isogrid_24.expected)
+ (action
+  (chdir ..
+   (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe} --flips 24 200))))
+
+(alias (name qualification-scale) (deps (alias isogrid-selector-lifetimes)))

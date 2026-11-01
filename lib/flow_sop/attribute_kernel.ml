@@ -661,6 +661,13 @@ let rec resolve ?context ~geometry value =
    record): resolve them so the algorithm sees concrete arrays. *)
 and concrete_args ?context ~geometry args =
   let rec concrete = function
+    | E.Residual _ as value ->
+        let live = Option.fold ~none:(Input.at_time 0.) ~some:Sop.Context.input context in
+        Result.bind (Flow_ir.Executor.compile ~strict:true value) (fun program ->
+            Result.bind
+              (Flow_ir.Executor.force ~strict:true ~resolve:(resolve ?context ~geometry) program
+                 ~live)
+              concrete)
     | (E.Source _ | E.Struct ("sop/attr", _, _)) as source ->
         Result.bind (resolve ?context ~geometry source) concrete
     | E.Record fields -> Result.map (fun fields -> E.Record fields) (all fields)
@@ -701,7 +708,7 @@ let install ~owner ~kind name planes geometry =
 
 (* A device output as the attribute's storage, read from the device only when a CPU reader first
    needs it (any domain); until then the geometry holds the device's buffer. *)
-type Rdk.Packed.Deferred.holder += Resident of E.value * int
+type Rdk.Packed.Deferred.holder += Resident = Topology_kernel_impl.Resident
 
 let install_deferred ~owner ~kind name
     ({ count; materialise; resident; release; bounds; _ } : Flow_ir.Gpu.planes) geometry =
@@ -754,6 +761,14 @@ let resident_vec3 geometry name =
   match holder with
   | Some (Resident (E.Vec3_array placeholder, count)) when count = G.point_count geometry ->
       Some placeholder
+  | _ -> None
+
+let resident_color geometry =
+  match Option.bind (G.find_attribute ~owner:A.Point "Cd" geometry) A.holder with
+  | Some (Resident (E.Vec3_array placeholder, count)) when count = G.point_count geometry ->
+      Some (placeholder, 3)
+  | Some (Resident (E.Vec4_array placeholder, count)) when count = G.point_count geometry ->
+      Some (placeholder, 4)
   | _ -> None
 
 let borrowed_storage ~geometry values =
@@ -1224,6 +1239,7 @@ let materialized_source source =
   N.Build.make_geometry ~operation:"flow.capture" ~version:1 ~parameters:"" ~cook_mode:N.Generic
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[| source |]
     (fun ~node_id:_ _ geometries -> Ok N.Build.{ geometry = geometries.(0); instances = None })
+  |> N.Build.with_input_use N.Cpu
 
 let rec captured bindings (term : Flow.Workspace.term) =
   match term.node with
@@ -1710,8 +1726,13 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                 if reference || elems <> None || Sop.Context.device_refused context node_id then
                   Ok None
                 else
+                  let resident =
+                    if Array.for_all (fun geometry -> G.releasers geometry = []) geometries then None
+                    else Some (resident_read ~geometry)
+                  in
                   Flow_ir.Executor.record_on_device ?state ~resolve
-                    ~resident:(resident_read ~geometry) ?gpu program ~live
+                    ?cpu_consumers:(Sop.Context.cpu_consumers context node_id)
+                    ~expected_count:(owner_count geometries.(0) owner) ?resident ?gpu program ~live
               in
               Result.bind device (function
                 | None -> Ok None

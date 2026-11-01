@@ -450,7 +450,8 @@ let device_inputs () =
   let seen = ref [] and serial = ref 0 in
   let backend : G.backend =
     {
-      cost = (fun ~fast:_ _ ~count:_ -> Some 0.);
+      residency = (fun ~fast:_ -> None);
+      cost = (fun ?inputs:_ ~fast:_ _ ~count:_ -> Some 0.);
       prepare =
         (fun ~fast:_ packed ->
           let width = Array.length (Flow_ir.Packed.Host.view packed).outputs.(0) in

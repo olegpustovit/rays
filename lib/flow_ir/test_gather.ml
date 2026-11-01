@@ -1200,3 +1200,80 @@ let () =
   assert (a.arrays.(0) == b.arrays.(0) && a.tables.(0) == b.tables.(0));
   assert (a.arrays.(0).(4095) = 4095.);
   print_endline "integer sources and tables convert once per array"
+
+let () =
+  let live = Input.at_time 0. in
+  List.iter
+    (fun ty ->
+      let array = array ty 7 in
+      let table = E.List (Array.init 7 (V.array_get array)) in
+      let value =
+        instantiate ~table (Flow.Ty.List ty) "(fn [(index : int)] (nth data (int/mod index 7)))"
+          (Array.init 32769 Fun.id)
+      in
+      let expected = ok (E.Host.force_reference value ~live) in
+      let p = packed value in
+      List.iter
+        (fun domains ->
+          Parallel.run ~domains (fun () ->
+              assert (bytes (ok (P.force ~strict:true p ~live)) = bytes expected)))
+        [ 1; 8 ])
+    [ Flow.Ty.Int; Float; Vec2; Vec3; Vec4 ];
+  let table = E.List [| E.Int 1; Int 2; Int 3 |] in
+  List.iter
+    (fun index ->
+      let value =
+        instantiate ~table (Flow.Ty.List Flow.Ty.Int) "(fn [(index : int)] (nth data index))"
+          [| index |]
+      in
+      let actual = diagnostic (P.force ~strict:true (packed value) ~live)
+      and expected = diagnostic (E.Host.force_reference value ~live) in
+      assert (actual.code = "E_LIST_RANGE" && actual.code = expected.code);
+      same_error (P.force (packed value) ~live) (E.Host.force_reference value ~live))
+    [ -1; 3; max_int ];
+  let closure =
+    fn (Flow.Ty.List Flow.Ty.Int) "(fn [(index : float)] (nth data index))"
+    |> E.Host.map_function_bindings (function E.Source ("probe/table", _, _) -> table | v -> v)
+  in
+  List.iter
+    (fun index ->
+      let value =
+        ok
+          (E.Host.map_function
+             ~signature:Flow.Ty.{ params = [ Float ]; result = Int }
+             closure [ E.Float_array [| index |] ])
+      in
+      let actual = diagnostic (P.force ~strict:true (packed value) ~live) in
+      assert (actual.code = "E_LIST_RANGE");
+      same_error (P.force (packed value) ~live) (E.Host.force_reference value ~live))
+    [ -1.; 3.; 0.5; 2.0000000001; Float.max_float ];
+  List.iter
+    (fun table ->
+      let value =
+        instantiate ~table (Flow.Ty.List Flow.Ty.Int) "(fn [(index : int)] (nth data index))"
+          [| 0 |]
+      in
+      match value with
+      | E.Residual r -> (
+          match P.compile_result r (E.Residual.residual_view r).term with
+          | Error [ d ] -> assert (d.code = "E_PACKED_CAPTURE")
+          | _ -> failwith "empty/mixed list table did not refuse by name")
+      | _ -> assert false)
+    [ E.List [||]; E.List [| E.Int 1; Text "mixed" |] ];
+  let value =
+    instantiate ~table (Flow.Ty.List Flow.Ty.Int)
+      "(fn [(index : int)] (nth data (int/mod index 3)))" [| 0; 1; 2 |]
+  in
+  let residual = match value with E.Residual r -> r | _ -> assert false in
+  let p = Option.get (P.compile_template residual (E.Residual.residual_view residual).term) in
+  let changed items =
+    match E.Host.rewrite (function E.List _ -> Some (E.List items) | _ -> None) value with
+    | E.Residual r -> r
+    | _ -> assert false
+  in
+  let rebound = Option.get (P.rebind p (changed [| E.Int 9; Int 8; Int 7 |])) in
+  assert (ok (P.force ~strict:true rebound ~live) = E.Int_array [| 9; 8; 7 |]);
+  assert (P.rebind p (changed [| E.Int 9 |]) = None);
+  assert (ok (P.force ~strict:true p ~live) = E.Int_array [| 1; 2; 3 |]);
+  print_endline
+    "List tables: exact numeric widths, list range guards, rebind shape and one/eight domains"

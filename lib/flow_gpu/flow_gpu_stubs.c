@@ -7,6 +7,14 @@
 #include <caml/alloc.h>
 #include <caml/custom.h>
 #include <caml/mlvalues.h>
+#include <caml/bigarray.h>
+#include <stdint.h>
+
+/* Read an already invalidated mapped word without float conversion (including NaN bit patterns).
+   The OCaml loop proves the index is within its owned mapped view. No GPU operation. */
+value rays_flow_gpu_uint32_word(value view, value index) {
+  return Val_long(((uint32_t *)Caml_ba_data_val(view))[Long_val(index)]);
+}
 
 static struct custom_operations pressure_ops = {
     "rays.flow_gpu.device_pressure", custom_finalize_default,  custom_compare_default,

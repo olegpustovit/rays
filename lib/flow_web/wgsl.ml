@@ -624,7 +624,8 @@ and fast_kernel ?placement program =
     let buffers =
       match placement with
       | Some (Compute c) -> c.buffers
-      | Some (Vertex (_, s) | Fragment (_, s)) -> List.map (fun (u, b, w) -> (u, b, w, false)) s.buffers
+      | Some (Vertex (_, s) | Fragment (_, s)) ->
+          List.map (fun (u, b, w) -> (u, b, w, false)) s.buffers
       | None -> []
     in
     (* a placed stage reads its bound buffers unclamped, as the Metal raster placement; a float from a
@@ -637,7 +638,9 @@ and fast_kernel ?placement program =
             | Some (_, b, _, _) -> b
             | None -> fail "A placed stage reads an unbound table."
           in
-          let value = Printf.sprintf "buffer%d[%s * %du + %du]" binding (low index) width component in
+          let value =
+            Printf.sprintf "buffer%d[%s * %du + %du]" binding (low index) width component
+          in
           if ty <> Flow.Ty.Array Int && List.exists (fun (_, b, w, _) -> b = binding && w) buffers
           then "bitcast<f32>(" ^ value ^ ")"
           else value
@@ -648,7 +651,8 @@ and fast_kernel ?placement program =
     let varying input width component =
       match placement with
       | Some (Fragment (_, s)) ->
-          "v." ^ identifier (List.nth s.elements input)
+          "v."
+          ^ identifier (List.nth s.elements input)
           ^ if width = 1 then "" else "." ^ String.make 1 "xyzw".[component]
       | _ -> fail "Only a fragment stage reads varyings."
     in
@@ -666,7 +670,9 @@ and fast_kernel ?placement program =
       | Float_bits, _ -> "bitcast<f32>(" ^ low r.(0) ^ ")"
       | Sample (t, c), _ ->
           Printf.sprintf "textureSample(texture%d, sampler%d, vec2<f32>(%s, %s)).%c" t (t + 1)
-            (float_of r.(0)) (float_of r.(1)) "xyzw".[c]
+            (float_of r.(0))
+            (float_of r.(1))
+            "xyzw".[c]
       | _ -> fail "This raster-stage intrinsic has no WGSL form."
     in
     let scans = Hashtbl.create 1 and workgroup = Buffer.create 64 in
@@ -688,8 +694,12 @@ and fast_kernel ?placement program =
           if not constant then enter float_of current guards;
           let body = current.code and indentation = Scope.indent current in
           let group stage r =
-            workgroup_intrinsic ~scans ~workgroup ~compute:(match compute with Some c -> c | None -> fail "A workgroup intrinsic runs only in a compute stage.") ~current ~guards
-              ~body ~indentation
+            workgroup_intrinsic ~scans ~workgroup
+              ~compute:
+                (match compute with
+                | Some c -> c
+                | None -> fail "A workgroup intrinsic runs only in a compute stage.")
+              ~current ~guards ~body ~indentation
               ~table:(fun x ->
                 match snd (guarded [] view.code.(x)) with
                 | P.Array_prepare (u, ty) -> (u, ty)
@@ -700,6 +710,8 @@ and fast_kernel ?placement program =
             if narrow.(slot) then
               match instruction with
               | P.Int_const n -> Printf.sprintf "%du" (n land 0xffffffff)
+              | Raise _ when raster -> fail "Explicit errors need a compute status record."
+              | Raise _ -> "0u"
               | Int_binary (op, a, b) -> narrow_integer op (low a) b
               | Int_select (condition, yes, no) ->
                   Printf.sprintf "select(%s, %s, %s != 0.0)" (low no) (low yes) (float_of condition)
@@ -709,6 +721,8 @@ and fast_kernel ?placement program =
             else
               match instruction with
               | P.Const value -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float value)
+              | Raise _ when raster -> fail "Explicit errors need a compute status record."
+              | Raise _ -> if integer slot then "vec2<u32>(0u, 0u)" else "0.0"
               | Int_input input -> (
                   match placement with
                   | Some (Compute _) -> "vec2<u32>(gid.x, 0u)"
@@ -816,6 +830,9 @@ and fast_kernel ?placement program =
           if finite_checks.(slot) && (not (integer slot)) && not raster then
             Printf.bprintf body "%sif (!wfinite(r%d)) { sb |= 1u; }\n" indentation slot;
           match instruction with
+          | Raise (_, code, message, _) ->
+              Printf.bprintf body "%ssb |= %du;\n" indentation
+                (Flow.Packed_ops.error_status code message)
           | Int_binary (operation, _, b) ->
               Buffer.add_string body (indentation ^ integer_status operation (int_of b))
           | _ -> ()
@@ -925,13 +942,22 @@ and fast_kernel ?placement program =
           match placement with
           | Some (Fragment (out, _)) ->
               Printf.sprintf
-                "@fragment\nfn %s(v: %s) -> @location(0) vec4<f32> {\n\
-                 %s  var sb: u32 = 0u;\n  var colour: vec4<f32>;\n%s%s  return colour;\n}\n"
+                "@fragment\n\
+                 fn %s(v: %s) -> @location(0) vec4<f32> {\n\
+                 %s  var sb: u32 = 0u;\n\
+                \  var colour: vec4<f32>;\n\
+                 %s%s  return colour;\n\
+                 }\n"
                 entry out (Buffer.contents fwidths) (Buffer.contents body) (Buffer.contents stores)
           | _ ->
               Printf.sprintf
-                "@vertex\nfn %s(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u32) \
-                 -> %s_out {\n  var sb: u32 = 0u;\n  var o: %s_out;\n%s%s  return o;\n}\n"
+                "@vertex\n\
+                 fn %s(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u32) -> \
+                 %s_out {\n\
+                \  var sb: u32 = 0u;\n\
+                \  var o: %s_out;\n\
+                 %s%s  return o;\n\
+                 }\n"
                 entry entry entry (Buffer.contents body) (Buffer.contents stores)
         in
         Ok
@@ -963,8 +989,8 @@ and fast_kernel ?placement program =
           declarations ^ Buffer.contents workgroup ^ int64
           ^ Printf.sprintf
               "@compute @workgroup_size(%d)\n\
-               fn %s(@builtin(local_invocation_index) lid: u32, \
-               @builtin(global_invocation_id) gid: vec3<u32>) {\n\
+               fn %s(@builtin(local_invocation_index) lid: u32, @builtin(global_invocation_id) \
+               gid: vec3<u32>) {\n\
               \  var sb: u32 = 0u;\n\
                %s}\n"
               size name (Buffer.contents body)
@@ -1112,9 +1138,7 @@ let raster pipelines =
         in
         List.iter
           (fun (s : stage) ->
-            List.iter
-              (fun (_, b, w) -> Hashtbl.replace resources (`Buffer b) w)
-              s.buffers;
+            List.iter (fun (_, b, w) -> Hashtbl.replace resources (`Buffer b) w) s.buffers;
             Array.iter
               (fun i ->
                 match snd (guarded [] i) with

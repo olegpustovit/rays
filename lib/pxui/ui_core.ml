@@ -2280,6 +2280,13 @@ let carry_ghost ui =
           ui.foreground <- (max_int, ghost.index) :: (max_int, tip.index) :: ui.foreground)
   | _ -> ()
 
+let clear_frame_callbacks ui =
+  Array.fill ui.b_w 0 ui.count Grow;
+  Array.fill ui.b_h 0 ui.count Grow;
+  Array.fill ui.b_hit 0 ui.count None;
+  Array.fill ui.b_painters 0 ui.count [];
+  Array.fill ui.b_overlays 0 ui.count []
+
 let frame ui (frame : Frame.t) f =
   if ui.destroyed then invalid_arg "Ui.frame: the UI was destroyed";
   if ui.building then invalid_arg "Ui.frame: frames cannot nest";
@@ -2295,6 +2302,8 @@ let frame ui (frame : Frame.t) f =
   route ui frame;
   ui.modal_key <- None;
   ui.modal_extra <- [];
+  (* Also release callbacks left by a build that raised before publishing. *)
+  clear_frame_callbacks ui;
   ui.count <- 0;
   ui.closed_section <- -1;
   ui.building <- true;
@@ -2365,6 +2374,9 @@ let frame ui (frame : Frame.t) f =
         (key, if Batch.count batch = 0 then [] else [ Scene.Layer.ui ~images batch ]))
       layers;
   ui.scene <- List.concat_map snd ui.scene_layers @ List.rev ui.regions;
+  (* Layout, hit rectangles and painting are published data now. The callbacks
+     can capture whole document versions, so keep them only while building. *)
+  clear_frame_callbacks ui;
   result
 
 (* ------------------------------------------------------ layout helpers *)

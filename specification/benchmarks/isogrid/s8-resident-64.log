@@ -1,0 +1,6 @@
+points=998592 primitives=249648 topology_resident=true positions_resident=true N_resident=true Cd_resident=true payload=0 validation=36 status=16 count=24 bounds=0
+publication_seconds=2.065647 main_allocated_bytes=1547765728 cook_domains=1
+CPU parity: topology exact; P/N/Cd <=1e-6; first-read payload=41940868; repeated-read delta=0
+real 30.85
+user 29.92
+sys 4.27

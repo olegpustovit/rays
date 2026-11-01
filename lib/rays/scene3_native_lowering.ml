@@ -657,7 +657,7 @@ module Prepared_cache = Lru.Identity_list
 let make_prepared_cache () =
   Prepared_cache.create
     ~equal:(fun (scene_a, camera_a, viewport_a) (scene_b, camera_b, viewport_b) ->
-      scene_a == scene_b && camera_a = camera_b && viewport_a = viewport_b)
+      Scene3.same scene_a scene_b && camera_a = camera_b && viewport_a = viewport_b)
     prepared_cache_capacity
 
 type prepared_cache_context = {
@@ -889,7 +889,6 @@ let find_packed predicate =
    count, so they are packed once, and the renderer keeps the indices under their own key, not per
    borrow of the positions (Scene_execution's [Gpu_vertices "borrow\nindices"]). *)
 let device_indices = Atomic.make []
-let device_attributes = Atomic.make None
 
 let packed_of_device mode mesh (key, normals) =
   let source = Mesh.View.unread mesh in
@@ -900,44 +899,41 @@ let packed_of_device mode mesh (key, normals) =
     m = mode && n = count && if points then corners == [||] else corners == source.indices
   in
   let native =
-    match List.find_opt same (Atomic.get device_indices) with
-    | Some (_, _, _, packed) -> Some packed
-    | None ->
-        let made =
-          if points then Some (Ogpu.Render_pass.Point_list, Array.init count Fun.id)
-          else
-            Option.map
-              (fun indices ->
-                if mode = Scene3.Wireframe then
-                  (Ogpu.Render_pass.Line_list, unique_triangle_edges indices)
-                else (Ogpu.Render_pass.Triangle_list, indices))
-              (triangle_indices source.mode source.indices)
-        in
-        Option.map
-          (fun (primitive, indices) ->
-            let packed =
-              ( primitive,
-                pack_indices indices,
-                Array.length indices,
-                Printf.sprintf "scene3:device-indices:%d" (fresh_resource_id ()) )
+    match Mesh.View.device_index_count mesh with
+    | Some index_count -> Some (Ogpu.Render_pass.Triangle_list, Bytes.empty, index_count, key)
+    | None -> (
+        match List.find_opt same (Atomic.get device_indices) with
+        | Some (_, _, _, packed) -> Some packed
+        | None ->
+            let made =
+              if points then Some (Ogpu.Render_pass.Point_list, Array.init count Fun.id)
+              else
+                Option.map
+                  (fun indices ->
+                    if mode = Scene3.Wireframe then
+                      (Ogpu.Render_pass.Line_list, unique_triangle_edges indices)
+                    else (Ogpu.Render_pass.Triangle_list, indices))
+                  (triangle_indices source.mode source.indices)
             in
-            Atomic.set device_indices
-              (List.filteri
-                 (fun i _ -> i < 8)
-                 (((if points then [||] else source.indices), mode, count, packed)
-                 :: Atomic.get device_indices));
-            packed)
-          made
+            Option.map
+              (fun (primitive, indices) ->
+                let packed =
+                  ( primitive,
+                    pack_indices indices,
+                    Array.length indices,
+                    Printf.sprintf "scene3:device-indices:%d" (fresh_resource_id ()) )
+                in
+                Atomic.set device_indices
+                  (List.filteri
+                     (fun i _ -> i < 8)
+                     (((if points then [||] else source.indices), mode, count, packed)
+                     :: Atomic.get device_indices));
+                packed)
+              made)
   in
   let attributes =
-    match Atomic.get device_attributes with
-    | Some (n, attributes) when n = count && plain -> Ok attributes
-    | _ ->
-        let attributes = pack_attributes ~count source in
-        (match attributes with
-        | Ok attributes when plain -> Atomic.set device_attributes (Some (count, attributes))
-        | _ -> ());
-        attributes
+    if plain || Mesh.View.device_color_width mesh <> 0 then Ok Bytes.empty
+    else pack_attributes ~count source
   in
   match (native, attributes) with
   | Some (primitive, indices, index_count, indices_key), Ok attributes
@@ -948,7 +944,8 @@ let packed_of_device mode mesh (key, normals) =
           source;
           mode;
           primitive;
-          key = key ^ "\n" ^ indices_key;
+          key =
+            (if Mesh.View.device_index_count mesh <> None then key else key ^ "\n" ^ indices_key);
           vertices = Bytes.empty;
           indices;
           vertex_attributes =
@@ -958,15 +955,18 @@ let packed_of_device mode mesh (key, normals) =
           vertex_count = count;
           index_count;
           opaque =
-            Option.fold ~none:true
-              ~some:(Array.for_all (fun (c : Rays_math.Color.t) -> c.a = 255))
-              source.colors;
+            Mesh.View.device_color_width mesh <> 4
+            && Option.fold ~none:true
+                 ~some:(Array.for_all (fun (c : Rays_math.Color.t) -> c.a = 255))
+                 source.colors;
           gpu = Some (key, normals);
         }
   | _ -> Error Invalid_mesh
 
 let rec packed_of_mesh mode mesh =
   match Mesh.View.device mesh with
+  | Some _ when Mesh.View.device_index_count mesh <> None && mode <> Scene3.Faces ->
+      packed_of_host mode mesh
   | Some device -> packed_of_device mode mesh device
   | None -> packed_of_host mode mesh
 
@@ -1128,7 +1128,11 @@ let prepare ~resources ~camera ~viewport:((x, y, width, height) as viewport) sce
                 !failure = None
                 && match transforms with Some values -> Array.length values > 0 | None -> true
               then
-                match packed_of_mesh drawing.mode drawing.mesh with
+                match
+                  if drawing.texture <> None && Mesh.View.device drawing.mesh <> None then
+                    packed_of_host drawing.mode drawing.mesh
+                  else packed_of_mesh drawing.mode drawing.mesh
+                with
                 | Ok packed -> (
                     let texture =
                       match drawing.texture with
@@ -1177,7 +1181,12 @@ let prepare ~resources ~camera ~viewport:((x, y, width, height) as viewport) sce
                           Option.iter
                             (fun (_, normals) ->
                               put32 transform_uniforms 79 1.;
-                              put32 transform_uniforms 80 (if normals then 1. else 0.))
+                              put32 transform_uniforms 80 (if normals then 1. else 0.);
+                              let width = Mesh.View.device_color_width packed.mesh in
+                              put32 transform_uniforms 81
+                                (if width = 0 && Bytes.length (snd packed.vertex_attributes) = 0
+                                 then -1.
+                                 else float width))
                             packed.gpu;
                           let state : Renderer.Scene_execution.state =
                             {

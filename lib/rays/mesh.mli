@@ -94,6 +94,8 @@ module View : sig
     ?host:(unit -> t) ->
     ?bounds:(unit -> (Rays_math.Vec3.t * Rays_math.Vec3.t) option) ->
     ?derived:bool ->
+    ?device_index_count:int ->
+    ?device_color_width:int ->
     key:string ->
     normals:bool ->
     keep:(unit -> unit) ->
@@ -101,13 +103,16 @@ module View : sig
     (t, string) result
   (** A mesh of [count] vertices whose packed float3 positions (and, with [normals], normals) a
       device holds, registered under [key] ({!Renderer.register_gpu_positions}); colours, texture
-      coordinates and indices stay host arrays. Its {!vertices} are empty: nothing reads the
-      positions on the host. Without normals a vertex's normal is (0, 0, 1), as a host mesh's
-      without them, so a lit triangle mesh needs [normals]. [keep] is held by the mesh: its producer
-      releases the buffers when it is collected. [host] makes the mesh as the host builds it
-      (reading the positions back), once, for a reader of vertices ({!view}, {!packed_view},
-      {!vertices}, {!centroid}: a path tracer); without it those see no vertices. [bounds] answers
-      {!bounds} (a sun fit) where the positions are. *)
+      coordinates and indices stay host arrays unless their device metadata is supplied.
+      [device_index_count] names a borrowed triangle index stream (positive multiple of three) and
+      excludes host indices. [device_color_width] is 3 or 4 for borrowed float colours, excludes
+      host colours/UV, and defaults to 0. Both describe the same registration under [key]. Its
+      {!vertices} are empty: nothing reads the positions on the host. Without normals a vertex's
+      normal is (0, 0, 1), as a host mesh's without them, so a lit triangle mesh needs [normals].
+      [keep] is held by the mesh: its producer releases the buffers when it is collected. [host]
+      makes the mesh as the host builds it (reading the positions back), once, for a reader of
+      vertices ({!view}, {!packed_view}, {!vertices}, {!centroid}: a path tracer); without it those
+      see no vertices. [bounds] answers {!bounds} (a sun fit) where the positions are. *)
 
   val unread : t -> packed_view
   (** The mesh's own arrays: a device mesh's indices, colours and texture coordinates with no
@@ -115,6 +120,12 @@ module View : sig
 
   val device : t -> (string * bool) option
   (** A device mesh's key and whether it carries normals. *)
+
+  val device_index_count : t -> int option
+  (** The borrowed triangle index count, without reading any buffer. *)
+
+  val device_color_width : t -> int
+  (** Borrowed colour components (3 or 4), or 0 for host/default colours. *)
 
   val derived_normals : t -> bool
   (** Whether a device mesh's normals were made from its positions for display ([~derived]): it has
