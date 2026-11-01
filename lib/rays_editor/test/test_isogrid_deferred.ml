@@ -17,7 +17,7 @@ let () =
   let text = In_channel.with_open_bin Sys.argv.(1) In_channel.input_all in
   assert (
     Editor_document.Lowering.sha256 text
-    = "0fdb9b0ebec8f5fe84227d7c0963dd3ec8c446c6145e145555b4fa4f80744e69");
+    = "75686b00542de41aba26b5ff4cc63f88805924f4a625e8ad44c033d66664eeda");
   let workspace =
     match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace

@@ -5,8 +5,9 @@ source SHA-256 `cca9a45b4d447ed8bae424da7eb442ae4ffb9d91e86b11929133d8fb93f40800
 `PROBLEM.md` supplies the underlying requirements. This log does not replace or
 narrow either document. No commits are requested.
 
-The sketch stays frozen at SHA-256
-`0fdb9b0ebec8f5fe84227d7c0963dd3ec8c446c6145e145555b4fa4f80744e69`.
+The sketch stayed frozen at SHA-256
+`0fdb9b0ebec8f5fe84227d7c0963dd3ec8c446c6145e145555b4fa4f80744e69` for all of this work. With the owner's approval a
+comment-only fix at close-out then moved it to `75686b00542de41aba26b5ff4cc63f88805924f4a625e8ad44c033d66664eeda`.
 No shader placement switch, sketch rewrite, palette removal, triangle-only
 substitute or Scene/SOP web export is part of this work.
 
@@ -2803,7 +2804,9 @@ The native corrections: `test_workspace_gpu_native` expects 63 readbacks for the
 
 Animated CPU-origin chains (`s10-chain-verdict-animated.log`, `8638a4c7`), cook median per frame, on a loaded machine: at 1000² production 0.0072 s, Qualification 0.0067 s, CPU 0.189 s, and 0.254 s before the fix; at 512² production 0.0020 s, Qualification 0.0019 s, CPU 0.054 s; 8² stays on the CPU with `cpu_measured_cheaper`. The cause was consumer facts dropped by `Lower.guarded`, a reader wrongly counted for fused writes of P, and a table CPU price about 10 times too low.
 
-For the owner: `sketches/isogrid.rays` line 11 still says mesh topology is assembled on the CPU. The sketch is frozen by the plan, so it is reported here, not edited.
+Owner decisions, 2026-11-01: the 64³ `buffer_creations` exemption is accepted; the paired timing stands, with no idle-machine rerun; line 11 of the sketch, which said mesh topology is assembled on the CPU, was corrected by a comment-only edit, moving the pinned hash, and geometry goldens are unchanged.
+
+Margin risk: `@tools/isogrid-selector-lifetimes` failed once when run beside other gates with the owner VM at 179% CPU: one edit in 200 evaluated in 152.5 ms against the 150 ms limit. Run alone it passes with a maximum of 103.7 ms and p95 94.7 ms. The limit was not changed.
 
 ### Acceptance map
 
@@ -2811,7 +2814,7 @@ Status words: Met means the named evidence covers the whole requirement; Partial
 
 | PROBLEM.md requirement | Stage | Evidence | Status |
 | --- | --- | --- | --- |
-| Readable sketch at 24 and 64, no rewrites | S2 to S5 | SHA `0fdb9b0ebec8f5fe` unchanged; `s5-cli.log` (24³ 0.284 to 0.757 s, 64³ 0.464 to 0.828 s) | Met; the sketch header has one stale line (above) |
+| Readable sketch at 24 and 64, no rewrites | S2 to S5 | only a comment changed (SHA now `75686b00542de41a`); `s5-cli.log` (24³ 0.284 to 0.757 s, 64³ 0.464 to 0.828 s) | Met |
 | Independent compiler regression cases | S1 to S4 | `lib/flow_ir/test_static_map.ml` cases per form (S1, S2, S4 sections) | Met; `--ship` exit 0 |
 | Observed fallback and materialisation counts | S0, S8 | `Profile.static_maps` lines in `s10-final-plateau-64-production.log`; `Host.stats` categories | Met for production; 64³ `--no-device` owners untraced |
 | Cold and warm edits, verified geometry | S0, S5 | `verified_digest` on every edit in `s5-editor-64.log` and the S10 benches | Met with the stated float32 Cd exception (digest differs from the walker, verified as its conversion) |

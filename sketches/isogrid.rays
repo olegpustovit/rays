@@ -8,7 +8,7 @@
 ; Repeated steps compose with a fresh deterministic random stream.
 ; Run: dune exec rays -- sketches/isogrid.rays
 ; GPU parity: _build/default/tools/check.exe @tools/isogrid-native
-; Voxel maps are GPU-capable; maze walking and mesh topology are assembled on the CPU.
+; Voxel maps are GPU-capable; the maze walks on the CPU; measured placement decides where the mesh is built.
 (workspace isogrid
 
   ; A bounded integer hash: identical CPU/Metal decisions, using supported integer instructions.

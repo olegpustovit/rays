@@ -24,7 +24,7 @@ let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string 
 let string_ok = function Ok value -> value | Error message -> failwith message
 let read file = In_channel.with_open_bin file In_channel.input_all
 let source = "sketches/isogrid.rays"
-let frozen = "0fdb9b0ebec8f5fe84227d7c0963dd3ec8c446c6145e145555b4fa4f80744e69"
+let frozen = "75686b00542de41aba26b5ff4cc63f88805924f4a625e8ad44c033d66664eeda"
 let parse text = List.hd (ok (Flow.Syntax.parse text))
 
 module Scheduler_slots = struct

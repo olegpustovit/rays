@@ -327,7 +327,7 @@ let () =
   Printexc.record_backtrace true;
   let file = if Array.length Sys.argv > 1 then Sys.argv.(1) else "sketches/isogrid.rays" in
   let text = In_channel.with_open_bin file In_channel.input_all in
-  let frozen = "0fdb9b0ebec8f5fe84227d7c0963dd3ec8c446c6145e145555b4fa4f80744e69" in
+  let frozen = "75686b00542de41aba26b5ff4cc63f88805924f4a625e8ad44c033d66664eeda" in
   assert (Editor_document.Lowering.sha256 text = frozen);
   let workspace =
     match Rays_editor.Workspace.load text with
