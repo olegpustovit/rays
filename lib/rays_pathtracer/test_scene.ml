@@ -29,6 +29,31 @@ let unresolve value =
   in
   search 0. 16. 60
 
+(* A mesh changing every frame installs while frames keep tracing, with no flush to help it. *)
+let live_updates ball box material =
+  let tracer =
+    get
+      (P.create ~width:16 ~height:16
+         {
+           P.objects = [ (rays_mesh ball, material) ];
+           spheres = [];
+           strands = [];
+           environment = black;
+           lights = [];
+         })
+  and camera = Rays.Camera.perspective ~at:(V.create 0. 0. 5.) ~target:V.zero () in
+  Fun.protect
+    ~finally:(fun () -> P.destroy tracer)
+    (fun () ->
+      let meshes = [| prepared box material; prepared ball material |] in
+      let start = P.Private.edits tracer and frame = ref 0 in
+      while P.Private.edits tracer < start + 2 && !frame < 200_000 do
+        get (P.queue_mesh tracer meshes.(!frame land 1));
+        get (P.render tracer camera);
+        incr frame
+      done;
+      if P.Private.edits tracer < start + 2 then failwith "a live mesh never installed")
+
 let run () =
   let initial_handles = live_handles () in
   let floor =
@@ -66,6 +91,7 @@ let run () =
       and green = P.material (rgb 0.2 0.8 0.2)
       and blue = P.material ~roughness:0.2 (rgb 0.2 0.2 0.8)
       and gray = P.material (rgb 0.5 0.5 0.5) in
+      live_updates ball box red;
       let t1 = M.mul (M.translation (V.create (-1.2) 0. 0.)) (M.rotation_y 0.4)
       and t2 = M.mul (M.translation (V.create 1. 0. 0.)) (M.rotation_y (-0.3)) in
       let a = M.translation (V.create 0. 0.4 0.)

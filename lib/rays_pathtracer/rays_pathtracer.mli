@@ -232,6 +232,9 @@ module Private : sig
   (** A Lisp kernel of the current scene shape ("trace", "preview", ...): its pipeline's thread
       limit and its MSL. *)
 
+  val edits : t -> int
+  (** Times the film restarted: each mesh installed is one. *)
+
   val refits : t -> int
   (** Device mesh updates that refit the installed structure in place (same topology). *)
 

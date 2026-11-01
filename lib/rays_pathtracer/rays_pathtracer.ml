@@ -557,6 +557,7 @@ let edited t =
 (* A reused prototype or a [move] shares the installed geometry and BLASes;
    ownership passes to the new mesh. *)
 let install_gpu t gpu =
+  (if Sys.getenv_opt "PT_LOG" <> None then Printf.eprintf "INSTALL %.4f tris %d\n%!" (Unix.gettimeofday ()) (Int64.to_int (B.buffer_size gpu.positions) / 36));
   if t.gpu.positions == gpu.positions then begin
     t.gpu.owns_prototype <- false;
     gpu.owns_prototype <- true
@@ -893,8 +894,10 @@ let poll_build t =
           let built = finish_build t.device t.queue build in
           match t.queued_mesh with
           | Some (Full latest) ->
+              (* Installed, not dropped: a mesh that changes every frame always has a newer one queued. *)
               t.queued_mesh <- None;
-              (match built with Ok gpu -> destroy_gpu gpu | Error _ -> ());
+              let* gpu = built in
+              install_gpu t gpu;
               let* next = build_async t latest in
               t.building <- next;
               Ok ()
@@ -1432,6 +1435,8 @@ module Private = struct
     in
     let* source = Lisp_kernel.source kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
     Ok (threads, source)
+
+  let edits t = t.history_epoch
 
   let refits t = t.refits
   let kernel_cache = Lisp_kernel.cache_dir
