@@ -189,6 +189,28 @@ and fix it in the same change that made it worse.
 - Tests that open a window stay in `@runtest-native` (see Loops); an unbounded wait, a sleep or a real clock
   in a test is a bug.
 
+## Find breakage when it happens
+
+A late failure costs hours of tracing; a cheap gate on the edit costs seconds.
+
+- Commit each stage of a multi-step plan, and each fix, once its gates pass. A large uncommitted tree cannot
+  be bisected.
+- On every change, run the alias of each library you touched and the focused native aliases it reaches. Before
+  each commit, also run whole `@runtest-native`. Only `--ship`, `@smoke-all` and `@qualification-scale` wait
+  for the end. A subagent brief never forbids a cheap gate.
+- A change to a policy or default (placement, caching, a threshold) breaks tests elsewhere that assumed it. Grep
+  for them and fix them in the same change. A test of a contract states the policy it needs, rather than relying on
+  the default.
+- A bench asserts on every sample that it is measuring the route it claims. Its own reads must not change that
+  route.
+- A failing gate names what differs: the field, and for heap growth the owner that grew. Never just "grew".
+- Before a run over 2 minutes, check whether a log on disk already answers it. Confirm a fix with one long run,
+  not many. A bench stops once it has its answer.
+- After one failed retry on the same root cause, stop retrying: hand it to a stronger model with what is proved
+  and what is not.
+- These gates stay usable only while they are cheap. New tests reuse an existing fixture at the smallest size that
+  fails; the budgets above apply to native aliases too.
+
 Default `runtest` is green on a clean checkout. Display-dependent tests live in
 `@runtest-native`; long, SDK-, driver-, or machine-specific checks in
 `@qualification`. Large algorithm fixtures (studio fracture and high-density
