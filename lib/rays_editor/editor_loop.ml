@@ -720,7 +720,17 @@ let after_present value frame =
     | Ok () -> value
     | Error diagnostic -> { value with context_error = Some (Diagnostic.to_string diagnostic) }
   in
-  ignore (Mem.retreat ());
+  let value =
+    match Mem.retreat () with
+    | `Ok -> value
+    | `Still_over ->
+        (* Budget is attributed+device; last good frame stays. *)
+        {
+          value with
+          context_error =
+            Some ("E_MEMORY: over budget after cache retreat\n" ^ Mem.Report.to_string (Mem.report ()));
+        }
+  in
   match save_status ~save:V.save ~filename:V.filename value.pending_render value.rendered with
   | Some status ->
       refresh_hidden { value with render_status = Some status; pending_render = None } frame

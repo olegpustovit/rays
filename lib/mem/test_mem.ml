@@ -43,6 +43,9 @@ let () =
           true);
   Mem.charge owner 1_200;
   check (Mem.retreat () = `Ok && Mem.bytes owner = 800 && !bag = [ 400; 400 ]) "retreat drops until under budget";
+  Mem.set_budget 100;
+  bag := [];
+  check (Mem.retreat () = `Still_over && Mem.bytes owner = 800) "retreat Still_over when nothing left to drop";
   Mem.set_budget 0;
   Mem.reset ();
   print_endline "test_mem: ok"
