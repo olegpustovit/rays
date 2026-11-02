@@ -821,7 +821,7 @@ let run_duplicate_and_view () =
         "the viewed node is not saved in the layout";
       step ~mouse:p [];
       check
-        (Node.operation (E3.displayed_node !e) = "box" && centre () = Some 0.)
+        (Node.label (E3.displayed_node !e) = "box" && centre () = Some 0.)
         ("v marked the node but did not show it in the viewport: " ^ node);
       let x, y, w, _ = Option.get (E3.node_box !e [ "g"; "b" ]) in
       let target = (float (x + (w / 2)), float (y + 3)) in
