@@ -35,7 +35,7 @@ let validate_label operation = function
   | _ -> Ok ()
 
 let validate_backend operation backend shaders =
-  if backend <> "metal" && backend <> "mock" then invalid operation "unknown pipeline backend"
+  if backend <> "metal" && backend <> "vulkan" && backend <> "mock" then invalid operation "unknown pipeline backend"
   else if List.exists (fun shader -> Shader.backend shader <> backend) shaders then
     invalid operation "shader backend does not match pipeline backend"
   else Ok ()

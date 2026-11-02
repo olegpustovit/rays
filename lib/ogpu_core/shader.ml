@@ -63,7 +63,7 @@ let validate_bindings bindings =
   loop [] bindings
 
 let create (descriptor : descriptor) =
-  if descriptor.backend <> "metal" && descriptor.backend <> "mock" then
+  if descriptor.backend <> "metal" && descriptor.backend <> "vulkan" && descriptor.backend <> "mock" then
     error "unknown shader backend"
   else if Option.fold ~none:false ~some:(fun value -> not (valid_text value)) descriptor.label then
     error "shader label is empty or contains NUL"

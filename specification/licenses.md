@@ -27,3 +27,10 @@ the release commit.
 Its Dune gate checks complete classifications, the MIT/zlib license and Apple
 SDK provenance boundaries, and requires an explicit non-bundled declaration
 for every staged surface. Final release artifact inspection remains separate.
+
+Vulkan (Windows): `lib/vulkan/vendor` holds two unmodified third-party files, both MIT.
+[volk](https://github.com/zeux/volk) (`volk.c`, `volk.h`), copyright Arseny Kapoulkine, loads Vulkan
+at run time. [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+v3.3.0 (`vk_mem_alloc.h`), copyright Advanced Micro Devices, suballocates. Their licence texts are in
+the files themselves. The Vulkan headers and validation layers come from MSYS2 at build and test time and
+are not distributed.
