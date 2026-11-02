@@ -360,7 +360,7 @@ let create_atlas () =
   {
     width = atlas_width;
     height = 256;
-    pixels = Bytes.make (atlas_width * 256 * 4) '\000';
+    pixels = Bytes.make (atlas_width * 256) '\000';
     glyphs = Int_table.create 512;
     shelf_x = 0;
     shelf_y = 0;
@@ -416,7 +416,7 @@ let reserve atlas width height =
       done;
       if atlas.shelf_y + padded_h > !height then reset_atlas atlas
       else begin
-        let pixels = Bytes.make (atlas.width * !height * 4) '\000' in
+        let pixels = Bytes.make (atlas.width * !height) '\000' in
         Bytes.blit atlas.pixels 0 pixels 0 (Bytes.length atlas.pixels);
         atlas.pixels <- pixels;
         atlas.height <- !height
@@ -445,9 +445,8 @@ let glyph atlas font ~id ~density code =
               | Some (gx, gy) ->
                   for row = 0 to raster.glyph_height - 1 do
                     for column = 0 to raster.glyph_width - 1 do
-                      let offset = ((add gy row * atlas.width) + add gx column) * 4 in
-                      Bytes.set_int32_le atlas.pixels offset 0x00ffffffl;
-                      Bytes.set atlas.pixels (add offset 3)
+                      Bytes.set atlas.pixels
+                        ((add gy row * atlas.width) + add gx column)
                         (Bytes.get raster.glyph_alpha ((row * raster.glyph_width) + column))
                     done
                   done;
@@ -464,17 +463,23 @@ let glyph atlas font ~id ~density code =
           Option.iter (Int_table.replace atlas.glyphs key) glyph;
           glyph)
 
+(* The mirror is alpha alone: a glyph's color is constant, so the upload writes it. *)
 let publish_atlas atlas =
   if atlas.dirty then begin
-    match
-      Image.upload_rgba ?into:atlas.image ~width:atlas.width ~height:atlas.height ~rgba:atlas.pixels
-        ()
-    with
+    let rgba = Bytes.create (4 * Bytes.length atlas.pixels) in
+    Bytes.iteri
+      (fun index alpha ->
+        Bytes.set_int32_le rgba (4 * index)
+          (Int32.logor 0x00ffffffl (Int32.shift_left (Int32.of_int (Char.code alpha)) 24)))
+      atlas.pixels;
+    match Image.upload_rgba ?into:atlas.image ~width:atlas.width ~height:atlas.height ~rgba () with
     | Ok image ->
         atlas.image <- Some image;
         atlas.dirty <- false
     | Error _ -> ()
   end
+
+let atlas_mirror_bytes ui = Bytes.length ui.atlas.pixels
 
 (* The kit face: the caller's [font_path], else Pragmasevka found from the working
    directory or the executable upward. *)

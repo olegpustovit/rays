@@ -89,6 +89,9 @@ val at_rest : t -> bool
 (** Time alone changes nothing in the last frame's UI: no gesture, focused text, scroll in motion or
     hover delay running. A host may skip frames while its input stands still. *)
 
+val atlas_mirror_bytes : t -> int
+(** What the glyph atlas keeps on the host: a byte a texel. *)
+
 val passed_undo : t -> [ `Undo | `Redo ] option
 (** Command-Z or Shift-Command-Z (Command-Y) pressed in the focused text last frame while its own
     stack was empty: the host runs its document undo or redo instead. *)
