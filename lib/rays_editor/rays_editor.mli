@@ -492,6 +492,7 @@ module Measure : sig
     final : sample;
     fallbacks : (string * string * int) list;  (** {!Flow_ir.Fallback.seen}. *)
     readback_bytes : int;
+    payload_readback_bytes : int;  (** arrays read back; the rest is bounds a selection box asks for *)
     memory_error : string option;
     cook_error : string option;
   }

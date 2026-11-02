@@ -32,6 +32,7 @@ type budget = {
   max_footprint_bytes : int option;
   max_unattributed_pct : float option;
   max_readback_bytes : int option;
+  max_payload_readback_bytes : int option;
   route : [ `Device | `Any ];
   ceiling : int option;  (** RAYS_MEM_BUDGET for this scenario: it passes or fails with E_MEMORY *)
   known_red : bool;  (** fails today; passing fails, so the marker is removed *)
@@ -62,6 +63,7 @@ let parse_budget (form : Flow.Syntax.t) =
     max_footprint_bytes = int "max_footprint_bytes";
     max_unattributed_pct = Some (Option.value ~default:20. (float "max_unattributed_pct"));
     max_readback_bytes = int "max_readback_bytes";
+    max_payload_readback_bytes = int "max_payload_readback_bytes";
     route = (if List.assoc_opt "route" fields = Some "device" then `Device else `Any);
     ceiling = int "ceiling";
     known_red = List.mem_assoc "known_red" fields;
@@ -200,6 +202,11 @@ let check (budget : budget) (o : M.outcome) =
     (fun max ->
       if o.readback_bytes > max then note "readback %d B over %d: the route left the device" o.readback_bytes max)
     budget.max_readback_bytes;
+  Option.iter
+    (fun max ->
+      if o.payload_readback_bytes > max then
+        note "payload readback %d B over %d: arrays left the device" o.payload_readback_bytes max)
+    budget.max_payload_readback_bytes;
   (match budget.route with
   | `Any -> ()
   | `Device ->

@@ -60,6 +60,8 @@ type pool = {
       (** oldest first, by id: only the one {!reclaim} reads is ever [Weak.get], since a get while
           the GC marks keeps the holder alive another cycle *)
   mutable collected_at : int;  (** bytes created by the pool's owner at its last requested cycle *)
+  mutable orphans : kept Weak.t list;
+      (** live holders of closed runners: settled, unread, theirs until {!close_pool} *)
   mutable created : int;
 }
 
@@ -75,6 +77,7 @@ let pool () =
     retired = [];
     collected_at = 0;
     created = 0;
+    orphans = [];
   }
 
 (* Kept outputs a later dispatch may bind by their placeholder, on the initial domain. *)
@@ -306,6 +309,7 @@ let slot_shrink_floor = 1 lsl 20
    reader is still converting waits for the next drain) *)
 let drain_pool pool =
   pool.tick <- pool.tick + 1;
+  if pool.tick mod 64 = 0 then pool.orphans <- List.filter (fun w -> Weak.check w 0) pool.orphans;
   (* a free buffer nothing has taken for this long goes back to the device *)
   if pool.free <> [] && pool.tick mod 64 = 0 then begin
     let stale (buffer, _, _) =
@@ -1482,6 +1486,13 @@ let max_total_threads t =
 (* on the initial domain, once its runners are closed *)
 let close_pool pool =
   drain_pool pool;
+  List.iter
+    (fun w ->
+      Option.iter
+        (fun kept -> Mutex.protect kept.lock (fun () -> kept.destroyed <- true))
+        (Weak.get w 0))
+    pool.orphans;
+  pool.orphans <- [];
   ignore (Atomic.exchange pool.released []);
   ignore (Atomic.exchange pool.retiring []);
   pool.retired <- [];
@@ -1503,13 +1514,16 @@ let close ?(discard = false) t =
   if Domain.self () <> t.domain then invalid_arg "Run.close: creating domain required";
   if not t.closed then begin
     (* a holder still alive reads its planes now, while its buffer exists (a finalised holder's
-       weak entry can outlive it: only those still holding count) *)
+       weak entry can outlive it: only those still holding count). On a shared pool its buffer
+       outlives this runner: once settled it stays unread and the pool's, read only by a reader. *)
     drain t;
     List.iter
       (fun (_, _, weak) ->
         Option.iter
           (fun kept ->
             match Hashtbl.find_opt t.pool.held kept.id with
+            | Some _ when (not discard) && (not t.own_pool) && settle t kept = Ok () ->
+                t.pool.orphans <- weak :: t.pool.orphans
             | Some (buffer, _, capacity, _) ->
                 (if not discard then try ignore (materialise t kept) with Diagnostic.Error _ -> ());
                 Mutex.protect kept.lock (fun () -> kept.destroyed <- true);

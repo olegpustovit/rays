@@ -280,6 +280,18 @@ let () =
       Result.get_ok (Mem.configure (fun _ -> None));
       R.close ~discard:true pooled;
       R.close_pool pool;
+      (* an evicted runner on a shared pool reads nothing: its live holder stays unread and readable,
+         until the pool closes *)
+      let pool = R.pool () in
+      let evicted = R.Private.create_owned ~pool device queue cache msl in
+      let kept = Test_program.ok (R.keep (Test_program.ok (R.dispatch evicted values))) in
+      let unread = Test_program.ok (R.keep (Test_program.ok (R.dispatch evicted values))) in
+      kept.release ~held:true;
+      R.close evicted;
+      assert (R.Private.materialisations evicted = 0);
+      assert (Array.fold_left (fun n p -> n + Array.length p) 0 (kept.materialise ()) = kept.count * kept.width);
+      R.close_pool pool;
+      assert (match unread.materialise () with _ -> false | exception Invalid_argument _ -> true);
       (* a slot asking far under its size for long enough comes back down *)
       let big =
         Test_program.ok

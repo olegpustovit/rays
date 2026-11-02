@@ -457,6 +457,7 @@ module Measure = struct
     final : sample;
     fallbacks : (string * string * int) list;
     readback_bytes : int;
+    payload_readback_bytes : int;
     memory_error : string option;
     cook_error : string option;
   }
@@ -574,6 +575,7 @@ module Measure = struct
                     final;
                     fallbacks = Flow_ir.Fallback.seen ();
                     readback_bytes = stats.readback_bytes;
+                    payload_readback_bytes = stats.payload_readback_bytes;
                     memory_error = (!editor).Loop_model.memory_error;
                     cook_error = (!editor).Loop_model.core.cook.error;
                   }))
