@@ -304,8 +304,9 @@ let rec push cell value =
   let old = Atomic.get cell in
   if not (Atomic.compare_and_set cell old (value :: old)) then push cell value
 
-(* Free buffers kept for reuse while their bytes stay under this. A collection returns several dead
-   holders' buffers at once, which the next cooks take. Bytes only — never "any 8" of any size. *)
+(* Free buffers of one size class kept for reuse while their bytes stay under this, and all classes
+   under the pool's [free_limit]. A collection returns several dead holders' buffers at once, which the
+   next cooks take. Bytes only — never "any 8" of any size. *)
 let free_budget = 256 lsl 20
 let held_owner = Mem.plan ~pool:Device "flow_gpu.held"
 let free_owner = Mem.cache ~pool:Device "flow_gpu.free"
