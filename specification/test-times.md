@@ -6,6 +6,10 @@ microbenchmarks name their clock and report allocation separately.
 
 | Date | Test | Before | After | What changed |
 |---|---|---|---|---|
+| 2026-11-02 | `test_scene_execution_metal` (`@runtest-native`) | 63.8 s | 0.5 s (RAYS_SLOW 600-frame soak: see commit) | The uniform-page shrink ran inside the 600-frame loop: 241 submits a frame. It runs once; the other loops take 8 frames, past the ring in flight, and 600 under `RAYS_SLOW=1`. |
+| 2026-11-02 | `test_2d_ports` native / default | 45.7 s native | 17 s native | `lisp-a`, `lisp-b` and `cpu-1` were one code path three times: `Workspace.export` against `Sketch.export` at one and eight domains, and the command parity is 1 against 8; PNG parity at 2 frames (the synthetic command parity keeps 4). |
+| 2026-11-02 | `test_scene2_argument` | 19.2 s | 6.4 s | 1000 managed-image generations to 300 (live handles sampled flat at 100/200/300), 600 mixed frames to 100, 400 affine to 100; exact counters kept. |
+| 2026-11-02 | `test_retained_eviction` | 13.4 s | 3.8 s | 60 eviction frames to 20, pixels at 1, 2 and the last. |
 | 2026-10-31 | `bench_core.exe placement` (S5 interpreter-slope calibration, `benchmarks/isogrid/s5-placement.time`) | new | 8.62 s wall (user 8.09 s) | one domain, medians of three, exact reference check before each timing; a manual calibration, not in any alias |
 | 2026-10-31 | `bench_isogrid.exe --bench 64` / `--switch 64` editor sequences (S4, `benchmarks/isogrid/s4-editor-64.time`; S5, `s5-editor-64.time`) | new | 9.60 s (S4), 9.31 s (S5) wall | all eight recipes, seed and resolution edits with exact digests; run by hand and by `@tools/isogrid-measured-64`, outside `@runtest` |
 | 2026-11-01 | `@tools/isogrid-selector-lifetimes` (`@qualification-scale`, 200 edits at 24³) | 27.69 s | 38 s under load 10-17 | Over the 30 s budget, not in the default loop. The flips now run the resident route and each digest copies the pinned streams; not reworked, shrinking it means fewer edits or a weaker digest |

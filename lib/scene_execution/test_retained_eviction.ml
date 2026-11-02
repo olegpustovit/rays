@@ -83,11 +83,11 @@ let run_case name count entry =
           (* First render succeeds even when resources are evicted during preparation:
      their destruction waits for completion. The next retained replay must not
      submit those now-dead resources. *)
-          for frame = 1 to 60 do
+          for frame = 1 to 20 do
             require
               (get (Scene_execution.submit ~clear ~prepared:(name, 1L) renderer draws))
               "eviction preparation skipped";
-            if List.mem frame [ 1; 2; 60 ] then pixels ();
+            if List.mem frame [ 1; 2; 20 ] then pixels ();
             (match
                get
                  (Scene_execution.replay_prepared_sampled_resources ~clear ~identity:name

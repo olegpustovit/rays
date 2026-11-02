@@ -23,7 +23,9 @@ let render_blended ?clear r draws =
     (List.map (fun (blend, draw) -> sampled Scene_execution.Scene2 blend draw) draws)
 
 let get = function Ok x -> x | Error e -> failwith (Ogpu.Error.to_string e)
-let frames = List.init 600 succ
+
+(* Past the ring of frames in flight (three); the 600-frame soak is RAYS_SLOW's. *)
+let frames = List.init (if Sys.getenv_opt "RAYS_SLOW" = Some "1" then 600 else 8) succ
 
 let run () =
   let driver = Ogpu.Impl.create_driver () in
@@ -109,30 +111,37 @@ let run () =
       (Screen, (255, 0, 128));
       (Subtract, (0, 0, 0));
     ];
+  let scene3_pixel () =
+    let bytes = get (Scene_execution.read_pixels renderer ~bytes_per_row:16) in
+    if Char.code (Bytes.get bytes 0) <> 255 || Char.code (Bytes.get bytes 2) <> 128 then
+      failwith "scene execution Metal Scene3 pixel"
+  in
   List.iter
     (fun _frame ->
       ignore (get (Scene_execution.submit renderer [ sampled3 1 { mesh = mesh3; state = state3 } ]));
-      (* one uniform page, and it comes back down: a large frame, then small ones for long enough *)
-      let draw3 = sampled3 1 { mesh = mesh3; state = state3 } in
-      ignore
-        (get
-           (Scene_execution.submit renderer
-              (List.init 100 (fun i ->
-                   let own = Bytes.copy surface in
-                   Bytes.set_int32_le own 0 (Int32.bits_of_float (1. +. float i));
-                   sampled3 1 { mesh = mesh3; state = { state3 with transform_uniforms = Some own } }))));
-      let large = Scene_execution.Private.uniform_capacity renderer in
-      if large <= 65536 then failwith (Printf.sprintf "the large frame needed a large uniform page: %d, surface %d" large (Bytes.length surface));
-      for _ = 1 to Scene_execution.Private.uniform_shrink_after do
-        ignore (get (Scene_execution.submit renderer [ draw3 ]))
-      done;
-      let small = Scene_execution.Private.uniform_capacity renderer in
-      if small * 4 >= large then
-        failwith (Printf.sprintf "the uniform page stayed at %d after %d small frames" small large);
-      let bytes = get (Scene_execution.read_pixels renderer ~bytes_per_row:16) in
-      if Char.code (Bytes.get bytes 0) <> 255 || Char.code (Bytes.get bytes 2) <> 128 then
-        failwith "scene execution Metal Scene3 pixel")
+      scene3_pixel ())
     frames;
+  (* one uniform page, and it comes back down: a large frame, then small ones for long enough *)
+  let draw3 = sampled3 1 { mesh = mesh3; state = state3 } in
+  ignore
+    (get
+       (Scene_execution.submit renderer
+          (List.init 100 (fun i ->
+               let own = Bytes.copy surface in
+               Bytes.set_int32_le own 0 (Int32.bits_of_float (1. +. float i));
+               sampled3 1 { mesh = mesh3; state = { state3 with transform_uniforms = Some own } }))));
+  let large = Scene_execution.Private.uniform_capacity renderer in
+  if large <= 65536 then
+    failwith
+      (Printf.sprintf "the large frame needed a large uniform page: %d, surface %d" large
+         (Bytes.length surface));
+  for _ = 1 to Scene_execution.Private.uniform_shrink_after do
+    ignore (get (Scene_execution.submit renderer [ draw3 ]))
+  done;
+  let small = Scene_execution.Private.uniform_capacity renderer in
+  if small * 4 >= large then
+    failwith (Printf.sprintf "the uniform page stayed at %d after %d small frames" small large);
+  scene3_pixel ();
   if List.mem 4 supported then
     List.iter
       (fun _frame ->

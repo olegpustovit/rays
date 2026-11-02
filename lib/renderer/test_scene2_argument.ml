@@ -131,7 +131,7 @@ let run () =
         failwith ("scene2 retained argument counters are not exact: " ^ describe retained);
       let settled_release = ref None in
       let peak_live = ref 0 in
-      for frame = 1 to 1000 do
+      for frame = 1 to 300 do
         let rgba = if frame land 1 = 0 then "\x11\x22\x33\xff" else "\x99\x55\x22\xff" in
         (* Managed-image keys carry their generation: same-key image bytes are
            never re-hashed, and a new generation recycles the same-shape texture. *)
@@ -168,11 +168,11 @@ let run () =
       done;
       let churn = get (Renderer.stats runtime) in
       (* The churn frames admit one new automatic plan (two misses, one build)
-         that replaces the earlier one, then replay it for 998 frames while the
+         that replaces the earlier one, then replay it for 298 frames while the
          same-shape texture is recycled with one upload per generation. *)
-      if counters churn <> (4L, 1016L) then
+      if counters churn <> (4L, 316L) then
         failwith ("managed-image churn rebuilt its retained render plan: " ^ describe churn);
-      if Int64.sub churn.uploaded_bytes uploaded <> 256000L then
+      if Int64.sub churn.uploaded_bytes uploaded <> 76800L then
         failwith
           (Printf.sprintf "managed-image churn upload cardinality is not exact: %Ld"
              (Int64.sub churn.uploaded_bytes uploaded));
@@ -190,7 +190,7 @@ let run () =
         }
       in
       let textured_draw = { draw with blend = Ogpu.Pipeline.Alpha } in
-      for _frame = 1 to 600 do
+      for _frame = 1 to 100 do
         if not (get (Renderer.draw runtime [ plain_draw; textured_draw ])) then
           failwith "mixed canonical Scene2 frame was not presented"
       done;
@@ -204,7 +204,7 @@ let run () =
       if Bytes.sub pixels 0 4 <> Bytes.of_string "\x11\x22\x33\xff" then
         failwith "mixed canonical Scene2 exact pixel mismatch";
       let mixed = get (Renderer.stats runtime) in
-      if counters mixed <> (6L, 1614L) then
+      if counters mixed <> (6L, 414L) then
         failwith ("mixed plain/textured Scene2 did not retain one stable plan: " ^ describe mixed);
       for frame = 0 to 159 do
         let identity = frame mod 80 in
@@ -243,7 +243,7 @@ let run () =
       Gc.full_major ();
       let allocation_before = Gc.allocated_bytes ()
       and promotion_before = (Gc.quick_stat ()).promoted_words in
-      let measured_frames = 400 in
+      let measured_frames = 100 in
       for frame = 0 to measured_frames - 1 do
         if not (get (Renderer.draw runtime [ animated (if frame land 1 = 0 then 0. else 2.) ])) then
           failwith "animated affine frame was not presented"
@@ -286,7 +286,7 @@ let run () =
       let after = live_handles () in
       if after <> before then failwith "scene2 retained argument live-handle delta";
       Printf.printf
-        "runtime-next scene2 retained argument: indexed quad + 1000 managed-image generations \
-         + 600 mixed plain/textured + 400 affine frames, %.0f allocated and %.0f promoted \
+        "runtime-next scene2 retained argument: indexed quad + 300 managed-image generations \
+         + 100 mixed plain/textured + 100 affine frames, %.0f allocated and %.0f promoted \
          bytes/frame, exact pixels, bounded release state, zero delta\n"
         allocated_per_frame promoted_per_frame

@@ -56,6 +56,8 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_scene_execution_metal)
+ (deps
+  (env_var RAYS_SLOW))
  (action
   (run %{exe:test_main.exe} test_scene_execution_metal)))
 

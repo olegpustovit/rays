@@ -129,7 +129,9 @@ let save_roundtrip name workspace =
           assert (Editor_document.Workspace_doc.to_text (Editor.workspace !editor) = source)));
   Printf.printf "port %s: Command-S atomically saves the unchanged source and comments\n%!" name
 
-let modes = [ ("lisp-a", 1); ("lisp-b", 1); ("cpu-1", 1); ("cpu-8", 8) ]
+(* Workspace.export against Sketch.export at one and eight domains. *)
+let modes = [ ("lisp", 1); ("cpu-1", 1); ("cpu-8", 8) ]
+let export_frames = 2
 
 let pictures ?(synthetic = true) ?(first = 0) name workspace domains =
   Parallel.run ~domains (fun () ->
@@ -162,12 +164,8 @@ let mode_parity () =
         (fun () ->
           Font.Raster.with_cache_context fonts (fun () ->
               let expected = Array.map serialize (pictures name workspace 1) in
-              List.iter
-                (fun (_, domains) ->
-                  let actual = Array.map serialize (pictures name workspace domains) in
-                  assert (actual = expected))
-                modes));
-      Printf.printf "port %s: source roundtrip, four synthetic frames, four-mode command parity\n%!"
+              assert (Array.map serialize (pictures name workspace 8) = expected)));
+      Printf.printf "port %s: source roundtrip, four synthetic frames, 1/8-domain command parity\n%!"
         name)
     names
 
@@ -197,26 +195,26 @@ let native_modes directory name workspace =
   List.iter
     (fun (mode, scenes) ->
       let directory = directory ^ "/" ^ name ^ "/" ^ mode in
-      if mode = "lisp-a" || mode = "lisp-b" then
-        ignore (ok (Rays_editor.Workspace.export ~directory ~frames:4 workspace))
+      if mode = "lisp" then
+        ignore (ok (Rays_editor.Workspace.export ~directory ~frames:export_frames workspace))
       else
         Parallel.run
           ~domains:(if String.ends_with ~suffix:"8" mode then 8 else 1)
           (fun () ->
             Result.get_ok
-              (Sketch.export_state ~config ~directory ~frames:4
+              (Sketch.export_state ~config ~directory ~frames:export_frames
                  ~init:(fun _ -> ())
                  ~update:(fun () _ -> ())
                  ~view:(fun () frame -> scenes.(frame.input.frame - 1))
                  ())))
     all;
-  for count = 0 to 3 do
+  for count = 0 to export_frames - 1 do
     let path mode = Printf.sprintf "%s/%s/%s/frame-%06d.png" directory name mode count in
-    let expected = read (path "lisp-a") in
+    let expected = read (path "lisp") in
     List.iter
       (fun (mode, _) ->
         if read (path mode) <> expected then
-          failwith (Printf.sprintf "%s frame %d: %s differs from lisp-a" name count mode))
+          failwith (Printf.sprintf "%s frame %d: %s differs from lisp" name count mode))
       modes
   done
 
@@ -224,7 +222,7 @@ let native directory =
   List.iter
     (fun name ->
       native_modes directory name (if name = "moving_circles" then moving_circles () else load name);
-      Printf.printf "port %s: four PNG modes byte-identical\n%!" name)
+      Printf.printf "port %s: three PNG modes byte-identical\n%!" name)
     ("moving_circles" :: names)
 
 let () =
@@ -234,10 +232,7 @@ let () =
     List.iter (fun name -> save_roundtrip name (load name)) names;
     let workspace = moving_circles () in
     let expected = Array.map serialize (pictures "moving_circles" workspace 1) in
-    List.iter
-      (fun (_, domains) ->
-        assert (Array.map serialize (pictures "moving_circles" workspace domains) = expected))
-      modes;
+    assert (Array.map serialize (pictures "moving_circles" workspace 8) = expected);
     assert (expected.(0) <> expected.(3));
-    print_endline "10000 moving circles: four synthetic frames, four-mode command parity"
+    print_endline "10000 moving circles: four synthetic frames, 1/8-domain command parity"
   end
