@@ -312,6 +312,7 @@ let only =
         "ogpu";
         "renderer";
         "lru";
+        "mem";
         "parallel";
       ] );
     ("flow_web", [ "flow"; "flow_ir"; "param"; "rays_math"; "scene_command"; "parallel" ]);

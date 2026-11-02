@@ -157,7 +157,17 @@ type t = {
 let next = Atomic.make 1
 
 (* a slot's idle things are destroyed: none is in flight, since a fold run's close waits for it *)
+(* A placeholder is a host array of its full length: the evaluator takes a device array's count from
+   the block's header (Core_exec's [V.array_length], [array/count] and [array/range]), so the header
+   must say it. Float arrays are never written, so those pages stay untouched; an Int one is zeroed
+   for the collector. Kept slots' arrays are charged here. *)
+let placeholders = Mem.cache "flow_gpu.placeholders"
+let placeholder_bytes (kind, length) = 8 * max 1 length * max 1 kind
+
 let purge slot =
+  Hashtbl.iter
+    (fun key arrays -> Mem.release placeholders (placeholder_bytes key * List.length arrays))
+    slot.arrays;
   Hashtbl.iter
     (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
     slot.free;
@@ -509,6 +519,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         match Hashtbl.find_opt slot.arrays (kind, length) with
         | Some (a :: rest) ->
             Hashtbl.replace slot.arrays (kind, length) rest;
+            Mem.release placeholders (placeholder_bytes (kind, length));
             Obj.obj a
         | _ -> make ())
   in
@@ -1156,6 +1167,7 @@ let resident_scope ?(uint32 = false) ~fast t =
       (fun p ->
         if p.slot.kept && not p.dead then
           let k = (p.kind, p.length) in
+          Mem.charge placeholders (placeholder_bytes k);
           Hashtbl.replace p.slot.arrays k
             (p.key :: Option.value ~default:[] (Hashtbl.find_opt p.slot.arrays k)))
       !table;
@@ -1164,6 +1176,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         if s.kept then
           List.iter
             (fun (k, a) ->
+              Mem.charge placeholders (placeholder_bytes k);
               Hashtbl.replace s.arrays k
                 (a :: Option.value ~default:[] (Hashtbl.find_opt s.arrays k)))
             s.spare_arrays;

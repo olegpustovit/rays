@@ -32,7 +32,7 @@
   (names flow_gpu_stubs))
  (flags
   (:standard -open Flow_shader))
- (libraries flow flow_ir flow_shader ogpu renderer rays_math lru parallel))
+ (libraries flow flow_ir flow_shader ogpu renderer rays_math lru mem parallel))
 
 ; the compute stages, printed from shaders/NAME.rays
 
