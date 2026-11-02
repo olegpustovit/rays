@@ -10,6 +10,7 @@ dev-repo: "git+https://github.com/olegpustovit/rays.git"
 flags: conf
 depends: ["conf-pkg-config" {build}]
 depexts: [
+  ["mingw-w64-x86_64-sdl3"] {os-distribution = "msys2"}
   ["sdl3"] {os-distribution = "homebrew"}
 ]
 build: [["pkg-config" "--atleast-version=3.4.18" "sdl3"]]

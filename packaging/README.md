@@ -37,6 +37,33 @@ floor, which catches header/runtime mismatches that `pkg-config` alone cannot
 detect. After upgrading SDL, `dune exec tools/sdl3/bump.exe` runs the four
 qualification aliases and records the release in the lock's `tested` field.
 
+## Windows
+
+Windows builds with OCaml's MinGW-w64 port over MSYS2's `mingw64` environment, which is the one opam's
+compiler packages target. From MSYS2's own bash (Git Bash mixes two msys runtimes and loses environment
+variables), with [opam 2.2 or later](https://github.com/ocaml/opam/releases) on `PATH`:
+
+```sh
+P=mingw-w64-x86_64
+pacman -S --needed $P-gcc $P-pkgconf $P-sdl3 $P-sdl3-image $P-sdl3-ttf $P-sdl3-mixer \
+  $P-vulkan-headers $P-vulkan-validation-layers $P-spirv-tools $P-glslang make diffutils rsync patch m4 unzip
+opam init --bare --disable-sandboxing --no-setup --cygwin-location='C:\msys64'
+opam switch create rays-win --packages=ocaml-base-compiler.5.3.0,system-mingw
+opam pin add --switch=rays-win --no-action --yes --recursive ./packaging
+opam install --switch=rays-win --assume-depexts . --deps-only
+. packaging/windows-env.sh    # or direnv: .envrc sources it
+dune build bin/rays.exe
+./_build/default/bin/rays.exe sketches/basic.rays
+```
+
+The program needs `mingw64\bin` on `PATH` for SDL3 and the C++ runtime; `vulkan-1.dll` comes with the GPU
+driver. A machine with no Vulkan driver or no discrete device gets a typed `No_adapter` at startup.
+
+For the validation layer, set `RAYS_VULKAN_VALIDATION=fatal` (any message ends the process with code 70)
+and `VK_ADD_LAYER_PATH=C:\msys64\mingw64\bin`. An elevated process ignores that variable: register the layer
+under `HKLM\SOFTWARE\Khronos\Vulkan\ExplicitLayers` instead, a DWORD 0 named
+`C:\msys64\mingw64\bin\VkLayer_khronos_validation.json`.
+
 ## Dune discovery
 
 Dynamic linking is the default.  Set `RAYS_SDL3_LINK_MODE=static` to ask

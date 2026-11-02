@@ -13,6 +13,7 @@ depends: [
   "conf-sdl3"
 ]
 depexts: [
+  ["mingw-w64-x86_64-sdl3-image"] {os-distribution = "msys2"}
   ["sdl3_image"] {os-distribution = "homebrew"}
 ]
 build: [["pkg-config" "--atleast-version=3.4.4" "sdl3-image"]]
