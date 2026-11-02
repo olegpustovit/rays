@@ -1837,7 +1837,9 @@ module Executor = struct
                  && Option.fold ~none:false
                       ~some:(fun first ->
                         let _, path, iter = Packed.site merged in
-                        first ~owner:(path, iter) ~count ~device_seconds)
+                        (* a CPU sample over input the device holds would read it back to learn
+                           nothing: that readback is already what the CPU route costs *)
+                        held || first ~owner:(path, iter) ~count ~device_seconds)
                       first
           in
           let preflight =

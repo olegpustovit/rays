@@ -94,6 +94,7 @@
 (rule
  (enabled_if (= %{system} macosx))
  (alias test_live_mesh_native)
+ (deps ../../../sketches/gpu_sea.rays)
  (action (run %{exe:test_live_mesh_native.exe})))
 
 (alias (name runtest-native) (deps (alias test_live_mesh_native)))
