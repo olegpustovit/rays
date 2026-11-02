@@ -853,6 +853,7 @@ static VkResult transfer_copy(rv_device *d, VkBuffer src, VkDeviceSize src_offse
 
 /* A device-to-host read: into [out]. Any domain. */
 static VkResult staged_read(rv_buffer *b, VkDeviceSize offset, VkDeviceSize length, void *out) {
+  if (length == 0) return VK_SUCCESS;
   rv_device *d = b->d;
   VkResult r = flush_uploads_wait(d);
   if (r != VK_SUCCESS) return r;
@@ -901,6 +902,7 @@ CAMLprim value rv_buffer_zero(value buffer) {
 
 /* The next submit copies these bytes into the buffer, before its commands. */
 static VkResult staged_write(rv_buffer *b, VkDeviceSize offset, const void *from, VkDeviceSize length) {
+  if (length == 0) return VK_SUCCESS;
   rv_device *d = b->d;
   VkDeviceSize chunk_offset;
   VkBuffer chunk;
