@@ -256,14 +256,15 @@ let only =
   [
     ("param", []);
     ("native_layer_token", []);
-    ("lru", []);
+    ("mem", []);
+    ("lru", [ "mem" ]);
     ("rays_diagnostic", []);
     ("input", []);
     ("runtime", [ "sdl3"; "ogpu" ]);
     ("runtime_input", [ "sdl3"; "input" ]);
     ("renderer", [ "ogpu"; "scene_command"; "runtime"; "lru"; "rays_math"; "runtime_resources" ]);
     ("flow", [ "param"; "input"; "rays_diagnostic"; "rays_math" ]);
-    ("sop", [ "param"; "input"; "rays_diagnostic"; "rays_math"; "rdk"; "lru"; "unix"; "parallel" ]);
+    ("sop", [ "param"; "input"; "rays_diagnostic"; "rays_math"; "rdk"; "lru"; "mem"; "unix"; "parallel" ]);
     ( "flow_sop",
       [
         "flow"; "flow_ir"; "lru"; "param"; "sop"; "rays_diagnostic"; "rays_math"; "unix"; "parallel";
@@ -297,7 +298,7 @@ let only =
     ("ogpu_metal_native", [ "ogpu_core"; "metal"; "lru" ]);
     ("ogpu_metal", [ "ogpu_metal_native"; "metal" ]);
     ("scene_execution_fixtures", [ "renderer"; "ogpu" ]);
-    ("pxui", [ "rays"; "rays_math"; "param" ]);
+    ("pxui", [ "rays"; "rays_math"; "param"; "mem" ]);
     ("pxui_shell", [ "rays"; "rays_math"; "editor_core"; "pxui" ]);
     ("flow_shader", [ "flow"; "flow_ir"; "ogpu_core" ]);
     ( "flow_gpu",
