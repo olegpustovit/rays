@@ -370,7 +370,7 @@ let run () =
           let _, actions, _ =
             Editor_core.Router.step L.keymap ~focus ~text_focus:false
               ~frame:(Test_editor_input.frame (500., 400.) events 1)
-              Idle
+              Idle ~platform:Input.Apple
           in
           check
             (List.map (fun (c : _ Command.t) -> c.action) actions = [ expected ])
@@ -387,7 +387,7 @@ let run () =
       let _, actions, _ =
         Editor_core.Router.step L.keymap ~focus ~text_focus:false
           ~frame:(Test_editor_input.frame (500., 400.) [ key Input.Tab ] 1)
-          Idle
+          Idle ~platform:Input.Apple
       in
       check
         (List.map (fun (c : _ Command.t) -> c.action) actions = expected)
@@ -450,7 +450,7 @@ let run () =
     let _, actions, _ =
       Editor_core.Router.step L.keymap ~focus:Pxui_shell.Layout.Graph ~text_focus:false
         ~frame:(Test_editor_input.frame (500., 400.) [ char key_char ] 1)
-        Idle
+        Idle ~platform:Input.Apple
     in
     List.exists (fun (c : _ Command.t) -> c.action = L.List_command expected) actions
   in
@@ -484,7 +484,7 @@ let run () =
       in
       let route focus =
         let _, actions, _ =
-          Editor_core.Router.step table ~focus ~text_focus:false ~frame:input Idle
+          Editor_core.Router.step table ~focus ~text_focus:false ~frame:input Idle ~platform:Input.Apple
         in
         List.map (fun (c : _ Command.t) -> c.action) actions
       in

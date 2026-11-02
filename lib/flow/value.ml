@@ -56,6 +56,98 @@ let truthy = function
 
 let int_of = function Int n -> n | v -> to_int "int" (round (num v))
 
+(* [Printf "%g"], the same on every C library: msvcrt writes a three-digit exponent, 1e-005 *)
+let general x =
+  let s = Printf.sprintf "%g" x in
+  match if Sys.win32 then String.index_opt s 'e' else None with
+  | Some at when String.length s = at + 5 && s.[at + 2] = '0' ->
+      String.sub s 0 (at + 2) ^ String.sub s (at + 3) 2
+  | _ -> s
+
+(* [Printf "%.*f"], exact on every C library: msvcrt pads after 17 significant digits and rounds from
+   those, so a double just under a decimal tie prints as the tie. *)
+let fixed digits x =
+  if not Sys.win32 then Printf.sprintf "%.*f" digits x
+  else begin
+    let mantissa, exponent = Float.frexp x in
+    let m = Int64.to_int (Int64.of_float (Float.ldexp mantissa 53)) and e = exponent - 53 in
+    if e >= 0 then begin
+      (* m * 2^e in base 10^9, little-endian *)
+      let limbs = Array.make 40 0 in
+      limbs.(0) <- m mod 1_000_000_000;
+      limbs.(1) <- m / 1_000_000_000;
+      for _ = 1 to e do
+        let carry = ref 0 in
+        Array.iteri
+          (fun i limb ->
+            let v = (limb * 2) + !carry in
+            limbs.(i) <- v mod 1_000_000_000;
+            carry := v / 1_000_000_000)
+          limbs
+      done;
+      let top = ref 39 in
+      while !top > 0 && limbs.(!top) = 0 do
+        decr top
+      done;
+      let b = Buffer.create 320 in
+      Buffer.add_string b (string_of_int limbs.(!top));
+      for i = !top - 1 downto 0 do
+        Buffer.add_string b (Printf.sprintf "%09d" limbs.(i))
+      done;
+      Buffer.contents b ^ if digits = 0 then "" else "." ^ String.make digits '0'
+    end
+
+    else begin
+      (* the fraction as k bits in base 2^24, little-endian; the integer part fits m's 53 bits *)
+      let k = -e in
+      let whole = if k >= 62 then 0 else m lsr k in
+      let frac_bits = if k >= 62 then m else m land ((1 lsl k) - 1) in
+      let size = (k / 24) + 2 in
+      let words = Array.make size 0 in
+      let rec store i v =
+        if v <> 0 then begin
+          words.(i) <- v land 0xffffff;
+          store (i + 1) (v lsr 24)
+        end
+      in
+      store 0 frac_bits;
+      let top = k / 24 and bit = k mod 24 in
+      let times multiplier =
+        let carry = ref 0 in
+        Array.iteri
+          (fun i w ->
+            let v = (w * multiplier) + !carry in
+            words.(i) <- v land 0xffffff;
+            carry := v lsr 24)
+          words;
+        (* what rose above bit k is the next digit *)
+        let digit = (words.(top) lsr bit) lor (if top + 1 < size then words.(top + 1) lsl (24 - bit) else 0) in
+        words.(top) <- words.(top) land ((1 lsl bit) - 1);
+        if top + 1 < size then words.(top + 1) <- 0;
+        digit
+      in
+      let out = Bytes.make digits '0' in
+      for i = 0 to digits - 1 do
+        Bytes.set out i (Char.chr (48 + times 10))
+      done;
+      (* round half even on what is left, as C99 printf does *)
+      let doubled = times 2 in
+      let rest_zero = Array.for_all (( = ) 0) words in
+      let last_odd = if digits = 0 then whole land 1 = 1 else Char.code (Bytes.get out (digits - 1)) land 1 = 1 in
+      let up = doubled = 1 && ((not rest_zero) || last_odd) in
+      let whole = ref whole in
+      if up then begin
+        let i = ref (digits - 1) in
+        while !i >= 0 && Bytes.get out !i = '9' do
+          Bytes.set out !i '0';
+          decr i
+        done;
+        if !i >= 0 then Bytes.set out !i (Char.chr (Char.code (Bytes.get out !i) + 1)) else incr whole
+      end;
+      if digits = 0 then string_of_int !whole else string_of_int !whole ^ "." ^ Bytes.to_string out
+    end
+  end
+
 (* JS [(+x).toFixed(4)] then [String]: up to 4 decimals, trailing zeros removed;
    an exact tie rounds away from zero, as [toFixed] does (printf would round to even). *)
 let fmt4 x =
@@ -63,11 +155,11 @@ let fmt4 x =
   else if not (Float.is_finite x) then if x > 0. then "Infinity" else "-Infinity"
   else begin
     let ax = Float.abs x in
-    let s40 = Printf.sprintf "%.40f" ax in
+    let s40 = fixed 40 ax in
     let dot = String.index s40 '.' in
     let tail = String.sub s40 (dot + 1) 40 in
     let tie = tail.[4] = '5' && String.for_all (( = ) '0') (String.sub tail 5 35) in
-    let s = Printf.sprintf "%.4f" (if tie then ax +. 1e-6 else ax) in
+    let s = fixed 4 (if tie then ax +. 1e-6 else ax) in
     let n = ref (String.length s) in
     while s.[!n - 1] = '0' do
       decr n

@@ -47,4 +47,25 @@
     -strict-formats
     -short-paths
     -keep-locs
-    -g))))
+    -g)))
+ (_
+  (link_flags
+   (:standard
+    (:include %{project_root}/math_link_flags.sexp)))))
+
+; msvcrt's sin and cos use x87 fcos, wrong for huge arguments and off the other platforms in the low
+; bits; ucrtbase's match the Mac's. Math functions hold no CRT state, so they can come from it alone.
+
+(rule
+ (enabled_if
+  (= %{system} mingw64))
+ (target math_link_flags.sexp)
+ (action
+  (write-file %{target} "(-cclib -lucrtbase)")))
+
+(rule
+ (enabled_if
+  (<> %{system} mingw64))
+ (target math_link_flags.sexp)
+ (action
+  (write-file %{target} "()")))

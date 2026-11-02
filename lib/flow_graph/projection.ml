@@ -223,7 +223,7 @@ let ty_of_port = function
 let show_value = function
   | Param.Bool_value b -> string_of_bool b
   | Int_value i -> string_of_int i
-  | Float_value f -> Printf.sprintf "%g" f
+  | Float_value f -> Flow.Value.general f
   | Text_value s | Choice_value s -> s
 
 (* what a parameter's field is: a soft range paints a position line, a choice a chevron *)

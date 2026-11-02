@@ -72,3 +72,6 @@ val diagnose_rows :
   select:(('f, 'r) t -> int -> int) -> map:(('f, 'r) t -> ('f, 'r) t) -> ('f, 'r) t -> ('f, 'r) t
 (** The selected index is passed only to an always-throwing diagnostic mapper. An all-valid mask
     returns nil without evaluating select or map. *)
+
+val general : float -> string
+(** [Printf "%g"], the same exponent digits on every C library. *)

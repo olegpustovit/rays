@@ -2266,7 +2266,7 @@ let all =
               | [ l; i ] ->
                   (match i with
                   | Float f when not (Float.is_integer f) ->
-                      failf "E_LIST_RANGE" "nth index %g is not a whole number." f
+                      failf "E_LIST_RANGE" "nth index %s is not a whole number." (Value.general f)
                   | _ -> ());
                   let xs = list_arg l and i = int_of i in
                   if i < 0 || i >= Array.length xs then
