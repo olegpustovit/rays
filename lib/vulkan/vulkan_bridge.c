@@ -80,7 +80,7 @@ struct rv_device {
 typedef struct {
   int kind; /* 0 unbound, 1 buffer, 2 image, 3 sampler, 4 acceleration structure */
   VkBuffer buffer;
-  VkDeviceSize offset;
+  VkDeviceSize offset, range;
   VkImageView view;
   VkSampler sampler;
   VkAccelerationStructureKHR accel;
@@ -161,7 +161,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlag
   __atomic_add_fetch(&validation_messages, 1, __ATOMIC_RELAXED);
   fprintf(stderr, "vulkan validation: %s\n", data->pMessage);
   fflush(stderr);
-  if (validation_fatal) _exit(70); /* any message fails the test that caused it */
+  if (validation_fatal) TerminateProcess(GetCurrentProcess(), 70); /* the test that caused it fails; exit() would deadlock in the layer DLL shutdown */
   return VK_FALSE;
 }
 
@@ -1130,7 +1130,7 @@ CAMLprim value rv_cmd_set_buffer(value commands, value index, value offset, valu
   rv_buffer *b = H(buffer);
   int i = Long_val(index);
   if (i < 0 || i >= MAX_BIND) return Val_long(VK_ERROR_TOO_MANY_OBJECTS);
-  c->slots[i] = (rv_slot){.kind = 1, .buffer = b->buffer, .offset = (VkDeviceSize)Long_val(offset)};
+  c->slots[i] = (rv_slot){.kind = 1, .buffer = b->buffer, .offset = (VkDeviceSize)Long_val(offset), .range = b->size - (VkDeviceSize)Long_val(offset)};
   c->dirty = true;
   return Val_long(VK_SUCCESS);
 }
@@ -1145,7 +1145,7 @@ CAMLprim value rv_cmd_set_bytes(value commands, value index, value bytes) {
   char *room = arena(c, length ? length : 16, c->q->d->properties.limits.minUniformBufferOffsetAlignment, &chunk, &at);
   if (!room) return Val_long(VK_ERROR_OUT_OF_DEVICE_MEMORY);
   memcpy(room, Bytes_val(bytes), length);
-  c->slots[i] = (rv_slot){.kind = 1, .buffer = chunk, .offset = at};
+  c->slots[i] = (rv_slot){.kind = 1, .buffer = chunk, .offset = at, .range = length ? length : 16};
   c->dirty = true;
   return Val_long(VK_SUCCESS);
 }
@@ -1185,7 +1185,8 @@ static void push_descriptors(rv_cmd *c) {
     VkWriteDescriptorSet *w = &writes[n];
     *w = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = binding, .descriptorCount = 1, .descriptorType = type};
     if (s->kind == 1) {
-      buffers[n] = (VkDescriptorBufferInfo){s->buffer, s->offset, VK_WHOLE_SIZE};
+      VkDeviceSize limit = type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ? c->q->d->properties.limits.maxUniformBufferRange : s->range;
+      buffers[n] = (VkDescriptorBufferInfo){s->buffer, s->offset, s->range < limit ? s->range : limit};
       w->pBufferInfo = &buffers[n];
     } else if (s->kind == 2) {
       images[n] = (VkDescriptorImageInfo){.imageView = s->view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
