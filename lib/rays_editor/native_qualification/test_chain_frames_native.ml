@@ -563,4 +563,5 @@ let run (drive, xdrive, connectivity) =
                 drive xdrive count (median !cpu_times) (median !gpu_times) (frames - 1) per_frame
                 !worst !normals !drift)))
 
-let () = List.iter run cases
+let () =
+  Result.get_ok (Mem.configure Sys.getenv_opt); List.iter run cases

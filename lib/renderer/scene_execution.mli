@@ -155,6 +155,9 @@ val sun_map_size : int
 (** Width and height of the sun map. *)
 
 module Private : sig
+  val uniform_capacity : t -> int
+  val uniform_shrink_after : int
+
   type gpu_vertices
   type nonrec gpu_vertices_owner = gpu_vertices_owner
 

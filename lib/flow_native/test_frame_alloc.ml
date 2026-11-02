@@ -44,6 +44,7 @@ let profile frames run =
         Printf.printf "%9.0f B/frame  %s\n" (float n *. 8. /. rate /. float frames) key)
 
 let () =
+  Result.get_ok (Mem.configure Sys.getenv_opt);
   let _, doc = Web_export.load Sys.argv.(1) in
   let doc =
     match doc with

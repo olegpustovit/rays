@@ -251,6 +251,55 @@ let () =
       List.iter (fun (next : Flow_ir.Gpu.planes) -> next.release ~held:false) later;
       working_set := None;
       let thaws = R.Private.materialisations run in
+      (* RAYS_MEM_CLOBBER=1: a buffer back in the pool is NaN the moment it is dead *)
+      Result.get_ok (Mem.configure (function "RAYS_MEM_CLOBBER" -> Some "1" | _ -> None));
+      let free_owner = Mem.cache ~pool:Device "flow_gpu.free" in
+      let free_before = Mem.bytes free_owner in
+      let pool = R.pool () in
+      let pooled = R.Private.create_owned ~pool device queue cache msl in
+      let dead = Test_program.ok (R.keep (Test_program.ok (R.dispatch pooled values))) in
+      ignore (Test_program.ok (dead.settle ()));
+      dead.release ~held:false;
+      R.Private.pool_drain pool;
+      (match R.Private.pool_free_floats pool with
+      | [] -> failwith "the dead buffer did not come back to the pool"
+      | floats ->
+          List.iter
+            (fun floats ->
+              for i = 0 to Bigarray.Array1.dim floats - 1 do
+                assert (Float.is_nan floats.{i})
+              done)
+            floats);
+      (* idle ageing: a free buffer nothing takes goes back to the device, and the ledger follows *)
+      assert (Mem.bytes free_owner > free_before);
+      for _ = 1 to 1100 do
+        R.Private.pool_drain pool
+      done;
+      assert (R.Private.pool_free_floats pool = []);
+      assert (Mem.bytes free_owner = free_before);
+      Result.get_ok (Mem.configure (fun _ -> None));
+      R.close ~discard:true pooled;
+      R.close_pool pool;
+      (* a slot asking far under its size for long enough comes back down *)
+      let big =
+        Test_program.ok
+          (Flow_ir.Packed.Host.prepare
+             (List.assoc "arithmetic" (Test_program.fixtures 400_000))
+             ~live:(Input.at_time 1.))
+      in
+      let shrinking = R.Private.create_owned device queue cache msl in
+      ignore (Test_program.ok (R.dispatch shrinking big));
+      let grown = R.Private.buffer_creations shrinking in
+      for _ = 1 to R.Private.slot_shrink_after do
+        ignore (Test_program.ok (R.dispatch shrinking values))
+      done;
+      assert (R.Private.buffer_creations shrinking > grown);
+      let settled = R.Private.buffer_creations shrinking in
+      for _ = 1 to 16 do
+        ignore (Test_program.ok (R.dispatch shrinking values))
+      done;
+      assert (R.Private.buffer_creations shrinking = settled);
+      R.close ~discard:true shrinking;
       (* a host's shutdown closes with [~discard:true]: a live holder is not read back *)
       let live = Test_program.ok (R.keep (Test_program.ok (R.dispatch run values))) in
       ignore (Test_program.ok (live.settle ()));
