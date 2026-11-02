@@ -44,7 +44,7 @@
  (enabled_if
   (= %{system} mingw64))
  (modules test_vulkan)
- (libraries ogpu_conformance ogpu_vulkan vulkan unix))
+ (libraries ogpu_conformance ogpu_vulkan vulkan))
 
 (rule
  (alias ogpu_conformance_vulkan)

@@ -1,0 +1,17 @@
+#version 460
+#extension GL_EXT_ray_query : require
+layout(local_size_x = 4) in;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
+layout(set = 0, binding = 1) readonly buffer Rays { vec4 rays[]; };
+struct Hit { uint hit; uint primitive; uint instance; float t; };
+layout(set = 0, binding = 2) buffer Hits { Hit hits[]; };
+// Metal's primitive_acceleration_structure intersect: the backend binds a top-level wrapper.
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  rayQueryEXT q;
+  rayQueryInitializeEXT(q, scene, gl_RayFlagsOpaqueEXT, 0xFF, rays[i * 2].xyz, 0.001, rays[i * 2 + 1].xyz, 100.0);
+  while (rayQueryProceedEXT(q)) {}
+  bool hit = rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT;
+  hits[i] = Hit(hit ? 1u : 0u, hit ? uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true)) : 0u, 0u,
+                hit ? rayQueryGetIntersectionTEXT(q, true) : 0.0);
+}

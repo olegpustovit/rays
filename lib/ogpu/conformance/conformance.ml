@@ -5,7 +5,6 @@ type shaders = {
   backend : string;
   bytes : string -> bytes;
   scale : bool -> string * (string * Ogpu.Shader.constant_value) list;
-  instance_sizes : int * int;
 }
 
 let run ?shaders driver =
@@ -17,7 +16,6 @@ let run ?shaders driver =
     | None -> ("scale", [ ("TRIPLE", Shader.Bool triple) ])
     | Some s -> s.scale triple
   in
-  let instance_sizes = match shaders with None -> (68, 44) | Some s -> s.instance_sizes in
   let device = get (Backend.create_device driver) in
   let capabilities = Backend.capabilities device in
   get (Caps.validate capabilities);
@@ -551,9 +549,9 @@ let run ?shaders driver =
     get
       (Shader.create
          {
-           backend = "metal";
+           backend;
            label = Some "conformance-rays";
-           bytes = ray_source;
+           bytes = pick "rays" ray_source;
            entry_points =
              [
                { name = "trace"; stage = Shader.Compute };
@@ -962,19 +960,18 @@ let run ?shaders driver =
       get
         (Shader.create
            {
-             backend = "metal";
+             backend;
              label = Some "conformance-rt-extra";
-             bytes = extra_source;
+             bytes = pick "rt_extra" extra_source;
              entry_points =
                List.map
                  (fun name -> { Shader.name; stage = Shader.Compute })
-                 [
-                   "trace_boxes";
-                   "trace_curves";
-                   "trace_motion";
-                   "trace_masked";
-                   "trace_motion_instances";
-                 ];
+                 ([ "trace_boxes"; "trace_masked" ]
+                 @ (if Caps.has profile Caps.Ray_tracing_curves then [ "trace_curves" ] else [])
+                 @
+                 if Caps.has profile Caps.Ray_tracing_motion then
+                   [ "trace_motion"; "trace_motion_instances" ]
+                 else []);
              bindings = [];
            })
     in
@@ -1093,12 +1090,16 @@ let run ?shaders driver =
         }
     in
     let curve_pipeline =
-      get
-        (Backend.create_compute_pipeline_from extra ~entry:"trace_curves" ~interface:ray_interface
-           ())
+      if Caps.has profile Caps.Ray_tracing_curves then
+        Some
+          (get
+             (Backend.create_compute_pipeline_from extra ~entry:"trace_curves"
+                ~interface:ray_interface ()))
+      else None
     in
     let curve_blas =
       if Caps.has profile Caps.Ray_tracing_curves then begin
+        let curve_pipeline = Option.get curve_pipeline in
         let curve_blas = get (Backend.create_accel device curve_descriptor) in
         build_one curve_blas;
         let curve_hits = query_with curve_pipeline curve_blas in
@@ -1121,7 +1122,44 @@ let run ?shaders driver =
         None
       end
     in
-    (* Motion: keyframes at z=0 and z=1.5; time selects the interpolated depth. *)
+    (* Motion: keyframes at z=0 and z=1.5; time selects the interpolated depth. Typed Unsupported
+       where the device has no motion structures. *)
+    let time_bytes t =
+      let bytes = Bytes.create 4 in
+      put_f32 bytes 0 t;
+      bytes
+    in
+    let motion_destroys =
+      if not (Caps.has profile Caps.Ray_tracing_motion) then begin
+        (match
+           Backend.create_accel device
+             (Backend.Motion_blas
+                {
+                  geometries =
+                    [
+                      Backend.Motion_triangles
+                        {
+                          keyframes =
+                            [ { buffer = vertices; offset = 0L }; { buffer = vertices; offset = 0L } ];
+                          vertex_stride = 12;
+                          vertex_count = 6;
+                        };
+                    ];
+                  motion =
+                    {
+                      Backend.keyframes = 2;
+                      start_time = 0.;
+                      end_time = 1.;
+                      start_border = Clamp;
+                      end_border = Clamp;
+                    };
+                })
+         with
+        | Error { Error.kind = Unsupported; _ } -> ()
+        | _ -> failwith "motion geometry without motion support was accepted");
+        []
+      end
+      else begin
     let vertices0 =
       get
         (Backend.create_buffer device
@@ -1188,11 +1226,6 @@ let run ?shaders driver =
            ~interface:(ray_interface @ [ binding 3 Shader.Uniform_buffer ])
            ())
     in
-    let time_bytes t =
-      let bytes = Bytes.create 4 in
-      put_f32 bytes 0 t;
-      bytes
-    in
     List.iter
       (fun (time, expected) ->
         let motion_hits = query_with ~extra_bytes:(time_bytes time) motion_pipeline motion_blas in
@@ -1201,6 +1234,14 @@ let run ?shaders driver =
           (hit0 = 1 && prim0 = 0 && close t0 expected && hit1 = 1 && close t1 expected)
           (Printf.sprintf "motion intersection at time %g differs" time))
       [ (0., 2.); (1., 0.5); (0.5, 1.25) ];
+    [
+      (fun () -> Backend.destroy_pipeline motion_pipeline);
+      (fun () -> Backend.destroy_accel motion_blas);
+      (fun () -> Backend.destroy_buffer vertices1);
+      (fun () -> Backend.destroy_buffer vertices0);
+    ]
+      end
+    in
     (* User-id instances with masks over the triangle BLAS. *)
     let identity = [| 1.; 0.; 0.; 0.; 0.; 1.; 0.; 0.; 0.; 0.; 1.; 0. |] in
     let shifted = [| 1.; 0.; 0.; 8.; 0.; 1.; 0.; 0.; 0.; 0.; 1.; 0. |] in
@@ -1265,6 +1306,25 @@ let run ?shaders driver =
       "mask 2 selected the wrong instance";
     (* Motion instances: one instance whose transform keyframes slide it from
        the origin to x=8, so time decides which ray pair hits it. *)
+    let motion_instance_destroys =
+      if not (Caps.has profile Caps.Ray_tracing_motion) then begin
+        (match
+           Backend.create_accel device
+             (Backend.Tlas_of
+                {
+                  instances = record_buffer;
+                  offset = 0L;
+                  instance_count = 1;
+                  kind = Motion_instances;
+                  structures = [ blas ];
+                  motion_transforms = None;
+                })
+         with
+        | Error { Error.kind = Unsupported; _ } -> ()
+        | _ -> failwith "motion instances without motion support were accepted");
+        []
+      end
+      else begin
     let keyframes = get (Backend.pack_transforms [| identity; shifted |]) in
     let keyframe_buffer =
       get
@@ -1347,6 +1407,14 @@ let run ?shaders driver =
     require
       (hit0 = 0 && hit2 = 1 && inst2 = 5 && close t2 2.)
       "motion instance at time 1 did not reach x=8";
+    [
+      (fun () -> Backend.destroy_pipeline motion_instances_pipeline);
+      (fun () -> Backend.destroy_accel motion_tlas);
+      (fun () -> Backend.destroy_buffer motion_record_buffer);
+      (fun () -> Backend.destroy_buffer keyframe_buffer);
+    ]
+      end
+    in
     (* Compaction of the triangle BLAS reproduces its hits. *)
     let size_buffer =
       get
@@ -1387,24 +1455,17 @@ let run ?shaders driver =
       "compacted structure hits differ from the source";
     List.iter
       (fun destroy -> get (destroy ()))
-      [
+      (motion_destroys @ motion_instance_destroys
+      @ [
         (fun () -> Backend.destroy_pipeline boxes_pipeline);
-        (fun () -> Backend.destroy_pipeline curve_pipeline);
-        (fun () -> Backend.destroy_pipeline motion_pipeline);
+        (fun () -> Option.fold ~none:(Ok ()) ~some:Backend.destroy_pipeline curve_pipeline);
         (fun () -> Backend.destroy_pipeline masked_pipeline);
-        (fun () -> Backend.destroy_pipeline motion_instances_pipeline);
-        (fun () -> Backend.destroy_accel motion_tlas);
-        (fun () -> Backend.destroy_buffer motion_record_buffer);
-        (fun () -> Backend.destroy_buffer keyframe_buffer);
         (fun () -> Backend.destroy_accel compacted);
         (fun () -> Backend.destroy_accel masked_tlas);
-        (fun () -> Backend.destroy_accel motion_blas);
         (fun () -> Option.fold ~none:(Ok ()) ~some:Backend.destroy_accel curve_blas);
         (fun () -> Backend.destroy_accel box_blas);
         (fun () -> Backend.destroy_buffer size_buffer);
         (fun () -> Backend.destroy_buffer record_buffer);
-        (fun () -> Backend.destroy_buffer vertices1);
-        (fun () -> Backend.destroy_buffer vertices0);
         (fun () -> Backend.destroy_buffer indices);
         (fun () -> Backend.destroy_buffer radii);
         (fun () -> Backend.destroy_buffer control);
@@ -1412,7 +1473,7 @@ let run ?shaders driver =
         (fun () -> Backend.destroy_buffer boxes);
         (fun () -> Backend.destroy_buffer spheres);
         (fun () -> Backend.destroy_library extra);
-      ];
+      ]);
     (match Backend.destroy_accel blas with
     | Ok () -> ()
     | Error error -> failwith (Error.to_string error));
@@ -1451,7 +1512,7 @@ let run ?shaders driver =
                    user_id = 3;
                  };
                |]))
-      = fst instance_sizes)
+      = 68)
       "user-id instance packing differs";
     require
       (Bytes.length
@@ -1477,7 +1538,7 @@ let run ?shaders driver =
                    end_border = Clamp;
                  };
                |]))
-      = snd instance_sizes)
+      = 44)
       "motion instance packing differs"
   end;
   get (Backend.destroy_buffer vertices);

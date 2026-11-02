@@ -26,3 +26,18 @@
    (run glslangValidator --target-env vulkan1.3 -o flat_fragment.spv flat_fragment.frag)
    (run glslangValidator --target-env vulkan1.3 -o argument_fragment.spv argument_fragment.frag)
    (run glslangValidator --target-env vulkan1.3 -o textured_fragment.spv textured_fragment.frag))))
+
+(rule
+ (enabled_if
+  (= %{system} mingw64))
+ (targets rays.spv rt_extra.spv)
+ (deps
+  (glob_files *.comp))
+ (action
+  (progn
+   (run glslangValidator --target-env vulkan1.3 -e trace --source-entrypoint main -o trace.spv trace.comp)
+   (run glslangValidator --target-env vulkan1.3 -e trace_instances --source-entrypoint main -o trace_instances.spv trace_instances.comp)
+   (run glslangValidator --target-env vulkan1.3 -e trace_boxes --source-entrypoint main -o trace_boxes.spv trace_boxes.comp)
+   (run glslangValidator --target-env vulkan1.3 -e trace_masked --source-entrypoint main -o trace_masked.spv trace_masked.comp)
+   (run spirv-link trace.spv trace_instances.spv -o rays.spv)
+   (run spirv-link trace_boxes.spv trace_masked.spv -o rt_extra.spv))))
