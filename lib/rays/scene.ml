@@ -305,22 +305,24 @@ let clip ~at:(x, y) ~w ~h nodes = Clip (x, y, w, h, nodes)
 
 (* The same picture: what a node draws, not its render caches; resources and images by identity.
    A value structural equality cannot read (a closure, an opaque handle) counts as different. *)
+let same_value x y = x == y || try x = y with Invalid_argument _ -> false
+
+(* a resource is wrapped afresh each frame: its handle is what stays *)
+let same_handle (x : Renderer.resource) (y : Renderer.resource) =
+  match (x, y) with
+  | Image a, Image b -> a == b
+  | Text a, Text b -> a == b
+  | Canvas a, Canvas b -> a == b
+  | _ -> false
+
+let same_resource (i, x) (j, y) = i = j && same_handle x y
+let same_resources r r' = List.compare_lengths r r' = 0 && List.for_all2 same_resource r r'
+
 let rec same (a : t) (b : t) =
   a == b || (List.compare_lengths a b = 0 && List.for_all2 same_node a b)
 
 and same_node a b =
-  let eq x y = x == y || try x = y with Invalid_argument _ -> false in
-  (* a resource is wrapped afresh each frame: its handle is what stays *)
-  let handle (x : Renderer.resource) (y : Renderer.resource) =
-    match (x, y) with
-    | Image a, Image b -> a == b
-    | Text a, Text b -> a == b
-    | Canvas a, Canvas b -> a == b
-    | _ -> false
-  in
-  let res r r' =
-    List.compare_lengths r r' = 0 && List.for_all2 (fun (i, x) (j, y) -> i = j && handle x y) r r'
-  in
+  let eq = same_value and res = same_resources in
   match (a, b) with
   | Group x, Group y -> same x y
   | Clear x, Clear y -> x = y

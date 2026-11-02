@@ -55,6 +55,9 @@ builds boxes and returns values: every request of a pane is a field of `frame_re
 `scope_changes`, `tree_intents`, `text_intents`, `bar_action`, `view_pick`, `drops`, …). `reduce`
 turns the result and the frame's actions into the next model. Never set a ref or the model inside
 `Ui.frame`. The gutters' drag targets are built last (`Chrome.splitters`), over the panes.
+An idle frame is not built: `Editor_loop.update` returns the last frame again while the input stands
+still, no cook runs, the picture has held and nothing reads a playing clock (`may_rest`, once a second a
+full frame). A new thing that moves with time alone declares itself in `may_rest`.
 
 **Edits.**
 - A gesture on the text is a `Flow_graph.Flow_edit.op`: `Syntax_edit` (one op) or `Syntax_batch`

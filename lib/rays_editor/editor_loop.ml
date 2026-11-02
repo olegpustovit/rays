@@ -711,7 +711,119 @@ let update_with value frame ~inspector =
   in
   (autosave { value with presenting } ~now:frame.input.t, inspected)
 
-let update value frame = fst (update_with value frame ~inspector:ignore)
+let compose_scene value frame =
+  compose_view ?map:(Option.map snd value.map) ~ui_visible:(V.ui_visible value.control)
+    ~canvases:value.canvases ~background:value.background ~rendered:value.rendered
+    ~views:value.views ~focused:(focused_image value) ~camera:(view_camera value)
+    ~camera_of:(camera_of value) ~paint_view:(paint_view value)
+    ~guides:(fun bounds ->
+      if value.core.Editor_model.map_view then []
+      else
+        V.guides ~scene:(Editor_inspect.scene value.core)
+          ~selected:(Editor_list.selected_node value.core)
+          ~space:(Editor_list.space value.core) (view_camera value) value.extra ~pane:bounds
+          ~bounds:(V.film value.extra ~key:(focus_key value) bounds))
+    ~cache:value.hidden_scene_cache value.core frame
+
+(* An idle frame is not built: with no input, no cook and a clock nothing reads, a frame is the last
+   one again and its work is only allocation (Dear ImGui's bar: an idle frame never calls malloc).
+
+   What only time moves is either declared in [may_rest], slow enough for one full frame every
+   [rest_seconds] (the status bar's fps), or runs at rest on its own period (the source file's poll,
+   autosave), waking the frame when it has something to show. The picture must also have stood still
+   for [rest_frames] full frames, which covers what no clause names: a visible clock moving is a
+   picture changing. *)
+let rest_seconds = 1.
+let rest_frames = 2
+
+let same_input (a : Frame.t) (b : Frame.t) =
+  a.input.size = b.input.size && a.pixel_scale = b.pixel_scale && a.input.pointer = b.input.pointer
+  && a.input.buttons = b.input.buttons
+  && a.input.keys = b.input.keys
+
+(* the model is what the last full frame left: the host has asked for nothing since *)
+let untouched value rest = rest.rested == value.core && rest.viewed == value.extra
+
+(* a playing clock moves nothing unless a graph, the scene, the plan or a World reads it *)
+let reads_clock value =
+  let moves dependencies =
+    List.exists
+      (fun fact -> Context.Dependencies.mem fact dependencies)
+      Context.Dependencies.[ Time; Frame; Step; Input ]
+  in
+  let core = value.core in
+  let lowered = core.doc.workspace.lowered in
+  Option.is_some value.baked || value.baked_views <> []
+  || moves (Cook.dependencies core.Editor_model.cook)
+  || moves (Lowering.scene_reads core.doc)
+  || lowered.states <> []
+  || Array.exists
+       (fun (n : Flow.Eval.node) -> List.exists (fun (_, v) -> Flow.Eval.frame_dependent v) n.args)
+       lowered.plan.nodes
+
+let may_rest value (frame : Frame.t) =
+  let core = value.core in
+  frame.input.events = []
+  && Option.is_none value.world_drag
+  && Option.is_none value.pending_render
+  && Option.is_none core.Editor_model.carry
+  && core.queued = [] && Option.is_none core.hud
+  && (Option.is_none core.notice || frame.input.t -. core.notice_at >= 3.)
+  && List.for_all (fun (_, (t : Editor_model.trace)) -> t.samples >= t.cap) core.traces
+  && Pxui.Ui.at_rest core.ui && Cook.at_rest core.cook
+  && (Timeline.mode (Editor_list.timeline core) <> Timeline.Playing || not (reads_clock value))
+
+let settle ~before value frame =
+  if not (may_rest value frame) then { value with rest = None }
+  else
+    let picture = compose_scene value frame in
+    let still =
+      match before.rest with
+      | Some rest when same_input rest.shown frame && Scene.Layer.same rest.picture picture ->
+          rest.still + 1
+      | _ -> 0
+    in
+    { value with rest = Some { rested = value.core; viewed = value.extra; picture; still; shown = frame } }
+
+let rests value (frame : Frame.t) =
+  match value.rest with
+  | Some rest
+    when rest.still >= rest_frames && untouched value rest && frame.input.events = []
+         && same_input rest.shown frame
+         && frame.input.t >= rest.shown.input.t
+         && frame.input.t -. rest.shown.input.t < rest_seconds ->
+      Some rest
+  | _ -> None
+
+(* the poll a full frame would make; a change leaves it unmade, for that frame to make and act on *)
+let source_at_rest value ~now =
+  match value.source with
+  | None -> Some value
+  | Some previous -> (
+      match Source_file.poll ~now previous with
+      | file, None when file.error = previous.error ->
+          Some (if file == previous then value else { value with source = Some file })
+      | _ -> None)
+
+let update value (frame : Frame.t) =
+  let full () = settle ~before:value (fst (update_with value frame ~inspector:ignore)) frame in
+  match rests value frame with
+  | None -> full ()
+  | Some rest -> (
+      match source_at_rest value ~now:frame.input.t with
+      | None -> full ()
+      | Some polled ->
+          let saved = autosave polled ~now:frame.input.t in
+          (* an unread clock still runs, for whatever comes to read it *)
+          let timeline = Editor_list.timeline saved.core in
+          let moved, _ = Timeline.update timeline frame in
+          let value =
+            if moved == timeline then saved
+            else
+              let core = { saved.core with Editor_model.timeline = moved } in
+              { saved with core; rest = Some { rest with rested = core } }
+          in
+          if value.state_error == polled.state_error then value else { value with rest = None })
 
 let after_present value frame =
   let value = observe_presented value in
@@ -737,18 +849,9 @@ let after_present value frame =
   | None -> value
 
 let scene value frame =
-  compose_view ?map:(Option.map snd value.map) ~ui_visible:(V.ui_visible value.control)
-    ~canvases:value.canvases ~background:value.background ~rendered:value.rendered
-    ~views:value.views ~focused:(focused_image value) ~camera:(view_camera value)
-    ~camera_of:(camera_of value) ~paint_view:(paint_view value)
-    ~guides:(fun bounds ->
-      if value.core.Editor_model.map_view then []
-      else
-        V.guides ~scene:(Editor_inspect.scene value.core)
-          ~selected:(Editor_list.selected_node value.core)
-          ~space:(Editor_list.space value.core) (view_camera value) value.extra ~pane:bounds
-          ~bounds:(V.film value.extra ~key:(focus_key value) bounds))
-    ~cache:value.hidden_scene_cache value.core frame
+  match value.rest with
+  | Some rest when untouched value rest && same_input rest.shown frame -> rest.picture
+  | _ -> compose_scene value frame
 
 (* A crash report's editor part: the document as a loadable preset and a
    summary of the view state and undo history. *)

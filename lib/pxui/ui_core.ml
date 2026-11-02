@@ -2387,6 +2387,20 @@ let frame ui (frame : Frame.t) f =
 
 (* ------------------------------------------------------ layout helpers *)
 
+let hover_seconds = 0.380
+
+(* Nothing here moves with the clock alone: no gesture, no text owning the keys, no scroll in
+   motion, no hover waiting out its delay. *)
+let at_rest ui =
+  ui.active = None && ui.focus = 0
+  && Array.for_all (fun (mode : int) -> mode = 0) ui.scroll_mode
+  && Array.for_all (fun (visual : float) -> visual = 0.) ui.scroll_visual
+  &&
+  match (ui.hover_rest, ui.input_frame) with
+  | Some (_, _, start, seen), Some frame when seen = ui.frame_number ->
+      frame.input.t -. start >= hover_seconds
+  | _ -> true
+
 let hover_delay ui ~key =
   let time = match ui.input_frame with Some frame -> frame.input.t | None -> 0. in
   if
@@ -2402,7 +2416,7 @@ let hover_delay ui ~key =
            && (seen = ui.frame_number || seen = ui.frame_number - 1)
            && time >= start ->
         ui.hover_rest <- Some (key, pointer, start, ui.frame_number);
-        time -. start >= 0.380
+        time -. start >= hover_seconds
     | _ ->
         ui.hover_rest <- Some (key, ui.pointer, time, ui.frame_number);
         false

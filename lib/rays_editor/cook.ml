@@ -248,6 +248,10 @@ let context value timeline frame =
 let busy value = match status value with Async_cook.Idle -> false | Cooking _ -> true
 let force value = { value with force = true }
 
+(* no cook running or owed, and past the quiet updates footers wait for ([update]'s [settled]) *)
+let at_rest value = (not (busy value)) && (not value.schedule.dirty) && value.quiet > 8
+let dependencies value = value.schedule.dependencies
+
 (* Preparation, probes and framing are CPU-capable readers of published geometry.
    Budget their shared host materialisation even when a supported display borrows it. A displayed root
    a device owner can borrow reads the host in no cook (preparation, bounds and drawing keep it

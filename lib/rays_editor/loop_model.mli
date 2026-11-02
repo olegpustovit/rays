@@ -4,8 +4,17 @@ module V = Viewport
 
 type layout = Pxui_shell.Layout.t
 
+type rest = {
+  rested : Editor_model.t;
+  viewed : V.extra;
+  picture : Rays.Scene.t;
+  still : int;
+  shown : Rays.Frame.t;
+}
+
 type t = {
   core : Editor_model.t;
+  rest : rest option;
   camera : V.camera;
   cameras : (string * V.camera) list;
   viewing : string option;

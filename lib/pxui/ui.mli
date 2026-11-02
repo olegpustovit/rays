@@ -85,6 +85,10 @@ val text_input_focused : t -> bool
 (** A focused control owns keyboard input (including text and numeric entry). Hosts suppress their
     shortcuts while a control owns it. *)
 
+val at_rest : t -> bool
+(** Time alone changes nothing in the last frame's UI: no gesture, focused text, scroll in motion or
+    hover delay running. A host may skip frames while its input stands still. *)
+
 val passed_undo : t -> [ `Undo | `Redo ] option
 (** Command-Z or Shift-Command-Z (Command-Y) pressed in the focused text last frame while its own
     stack was empty: the host runs its document undo or redo instead. *)
