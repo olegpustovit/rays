@@ -33,28 +33,26 @@ let () =
   assert (label h = "Move");
   let h = Option.get (undo h) in
   assert (label h = "Connect" && redo_label h = Some "Move");
-  (* The owner is charged exactly the entries to undo and to redo, at every step of any sequence. *)
-  Mem.reset ();
-  let owner = Mem.document "test.history" in
+  (* The cap counts exactly the entries to undo and to redo, at every step of any sequence. *)
   let bytes n = 10 + n in
   let check h =
-    assert (Mem.bytes owner = byte_depth h);
+    assert (List.fold_left (fun sum n -> sum + bytes n) 0 (fst (retained h)) = byte_depth h);
     assert (byte_depth h >= 0)
   in
-  let h = create ~owner ~bytes ~byte_capacity:200 0 in
-  assert (Mem.bytes owner = 0);
+  let h = create ~bytes ~byte_capacity:200 0 in
+  assert (byte_depth h = 0);
   let step h f =
     let h = f h in
     check h;
     h
   in
   let h = step h (record 1) in
-  assert (Mem.bytes owner = bytes 0);
+  assert (byte_depth h = bytes 0);
   let h = step h (record 2) in
   let h = step h (record ~merge:(Gesture "a") 3) in
-  let at_three = Mem.bytes owner in
+  let at_three = byte_depth h in
   let h = step h (record ~merge:(Gesture "a") 4) in
-  assert (Mem.bytes owner = at_three);
+  assert (byte_depth h = at_three);
   let h = step h (fun h -> Option.get (undo h)) in
   assert (present h = 2);
   let h = step h (fun h -> Option.get (undo h)) in
@@ -65,9 +63,9 @@ let () =
   (* the byte cap goes oldest first and keeps the newest *)
   let h = List.fold_left (fun h n -> step h (record n)) h [ 60; 70; 80; 90; 100; 110 ] in
   assert (byte_depth h <= 200 && can_undo h);
-  let huge = create ~owner ~bytes ~byte_capacity:1 1000 in
+  let huge = create ~bytes ~byte_capacity:1 1000 in
   let huge = record 1001 huge in
-  assert (depth huge = 1 && Mem.bytes owner = byte_depth h + bytes 1000);
+  assert (depth huge = 1 && byte_depth huge = bytes 1000);
   let huge = release huge in
   assert (depth huge = 0 && byte_depth huge = 0 && present huge = 1001);
   check h;
@@ -78,8 +76,7 @@ let () =
   let h = step h (shed ~keep:2) in
   assert (depth h = 2 && shed_from > 2);
   let h = step h (fun h -> restart 5 h) in
-  assert (present h = 5 && depth h = 0 && not (can_undo h) && Mem.bytes owner = 0);
-  Mem.reset ();
+  assert (present h = 5 && depth h = 0 && not (can_undo h) && byte_depth h = 0);
   (* an entry is only what [keep] took; the last present stays live, older ones come from [restore] *)
   let restored = ref [] in
   let restore entry =

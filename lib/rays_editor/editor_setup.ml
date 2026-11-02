@@ -173,7 +173,7 @@ let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") 
               steady = 0;
               history =
                 Editor_core.History.create ~byte_capacity:(64 * 1024 * 1024)
-                  ~owner:(Mem.document "editor.history") ~keep:Document.snapshot
+                  ~keep:Document.snapshot
                   ~bytes:Document.snapshot_bytes doc;
               focus = Editor_core.Panels.main;
               focus_path = None;

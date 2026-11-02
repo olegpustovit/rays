@@ -35,6 +35,7 @@ type budget = {
   max_readback_bytes : int option;
   max_payload_readback_bytes : int option;
   max_peak_bytes : int option;  (** the process's highest footprint, over a ceiling too *)
+  max_document_bytes : int option;  (** the document is its text, whatever the mesh's size *)
   refuses : bool;  (** its ceiling is under what it needs: the frame path must say E_MEMORY *)
   route : [ `Device | `Any ];
   ceiling : int option;  (** RAYS_MEM_BUDGET for this scenario: it passes or fails with E_MEMORY *)
@@ -69,6 +70,7 @@ let parse_budget (form : Flow.Syntax.t) =
     max_readback_bytes = int "max_readback_bytes";
     max_payload_readback_bytes = int "max_payload_readback_bytes";
     max_peak_bytes = int "max_peak_bytes";
+    max_document_bytes = int "max_document_bytes";
     refuses = List.mem_assoc "refuses" fields;
     route = (if List.assoc_opt "route" fields = Some "device" then `Device else `Any);
     ceiling = int "ceiling";
@@ -196,6 +198,14 @@ let check (budget : budget) (o : M.outcome) =
         note "footprint %d B over max_footprint_bytes %d" o.final.footprint max)
     budget.max_footprint_bytes;
   let report = o.final.report in
+  Option.iter
+    (fun max ->
+      List.iter
+        (fun (e : Mem.Report.entry) ->
+          if e.name = "editor.document" && e.bytes > max then
+            note "editor.document %d B over max_document_bytes %d" e.bytes max)
+        report.owners)
+    budget.max_document_bytes;
   Option.iter
     (fun max_pct ->
       let explicit = report.ocaml_live + report.device in

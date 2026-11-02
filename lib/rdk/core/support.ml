@@ -52,6 +52,7 @@ module Identity_cache = struct
     in
     Option.iter
       (fun owner ->
+        Mem.walk_table owner cache ~uncharged:(fun () -> false);
         Mem.register_evictor owner ~rebuild:2. (fun () ->
             Mutex.try_lock cache.mutex
             && Fun.protect ~finally:(fun () -> Mutex.unlock cache.mutex) (fun () -> drop_oldest cache)))

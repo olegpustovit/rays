@@ -10,7 +10,7 @@ module History = struct
 
   (* The present is the live value; an entry keeps only what restores it ([keep]). [recent] is the
      one live value kept beside the entries: the last present to become one, so stepping back to it
-     recomputes nothing. [byte_depth] is what the owner is charged: every entry in [past] and
+     recomputes nothing. [byte_depth] is what the byte cap counts: every entry in [past] and
      [future], each exactly once, at the size it had when it became an entry. *)
   type ('a, 'e) t = {
     past : ('e * string * int) list;
@@ -22,13 +22,12 @@ module History = struct
     byte_capacity : int;
     keep : 'a -> 'e;
     size : 'e -> int;
-    owner : Mem.owner option;
     depth : int;
     byte_depth : int;
     merge : merge option;
   }
 
-  let create ?(capacity = 128) ?(byte_capacity = max_int) ?(bytes = fun _ -> 0) ?owner ~keep present =
+  let create ?(capacity = 128) ?(byte_capacity = max_int) ?(bytes = fun _ -> 0) ~keep present =
     if capacity < 1 then invalid_arg "Editor_core.History.create: capacity must be positive";
     if byte_capacity < 0 then invalid_arg "Editor_core.History.create: byte_capacity must be non-negative";
     {
@@ -41,7 +40,6 @@ module History = struct
       byte_capacity;
       keep;
       size = bytes;
-      owner;
       depth = 0;
       byte_depth = 0;
       merge = None;
@@ -54,16 +52,15 @@ module History = struct
   let can_redo t = t.future <> []
   let depth t = t.depth
   let byte_depth t = t.byte_depth
-  let charge t n = Option.iter (fun owner -> Mem.charge owner n) t.owner
-  let discharge t n = Option.iter (fun owner -> Mem.release owner n) t.owner
+  let retained t =
+    ( List.map (fun (entry, _, _) -> entry) t.past @ List.map (fun (entry, _, _) -> entry) t.future,
+      Option.map snd t.recent )
+
   let entries_bytes entries = List.fold_left (fun sum (_, _, n) -> sum + n) 0 entries
 
-  (* the entry the present becomes, charged *)
   let entry_of t =
     let entry = t.keep t.present in
-    let n = max 0 (t.size entry) in
-    charge t n;
-    (entry, t.label, n)
+    (entry, t.label, max 0 (t.size entry))
 
   (* Oldest first, down to [limit] entries and the byte cap. The newest entry stays whatever it
      weighs: one edit of a document over the cap can still be undone. *)
@@ -75,7 +72,6 @@ module History = struct
         match oldest_first with
         | (_, _, n) :: rest
           when dropped < excess || (bytes > t.byte_capacity && depth > 1) ->
-            discharge t n;
             drop (dropped + 1) (bytes - n) (depth - 1) rest
         | rest -> (List.rev rest, bytes, depth)
       in
@@ -91,7 +87,6 @@ module History = struct
     else
       let ((entry, _, n) as made) = entry_of t in
       let abandoned = entries_bytes t.future in
-      discharge t abandoned;
       trim
         {
           t with
@@ -139,7 +134,6 @@ module History = struct
           (Result.map
              (fun live ->
                let ((entry, _, m) as made) = entry_of t in
-               discharge t n;
                {
                  t with
                  past;
@@ -161,7 +155,6 @@ module History = struct
           (Result.map
              (fun live ->
                let ((entry, _, m) as made) = entry_of t in
-               discharge t n;
                trim
                  {
                    t with
@@ -179,7 +172,6 @@ module History = struct
   let shed ~keep t = trim_to ~limit:(max 1 keep) t
 
   let release t =
-    discharge t t.byte_depth;
     { t with past = []; future = []; recent = None; depth = 0; byte_depth = 0; merge = None }
 
   let restart value t = { (release t) with present = value; label = "" }

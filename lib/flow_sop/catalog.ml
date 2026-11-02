@@ -93,6 +93,9 @@ let entries =
 
 let () = Mem.root catalog_owner (fun () -> [ Obj.repr entries ])
 
+(* The remembered arrays: an ephemeron's data no walk of a table reaches, every ring's in one line. *)
+let () = Mem.root (Mem.cache "flow.remembered") Flow.Value.remembered
+
 let embedded_sources = lazy (Ok (List.map (fun e -> Lazy.force e.form) (Array.to_list (Lazy.force entries))))
 
 (* The whole library, for what reads all of it (the manifest, tests). A workspace check does not. *)

@@ -91,31 +91,83 @@ let walk_table (account : owner) table ~uncharged =
 
 (* On a report, after its collection: each owner is what its roots reach beyond those walked before
    it, so a plane or a catalog two owners reach is charged once. O(owners * reach): never per frame. *)
-let walk_roots () =
+let walk_roots ~live:heap_live =
   let named, counted = locked (fun () -> (!rooted, List.rev !tables)) in
-  (* one walk per owner, however many tables it has: a walk re-reads what came before it *)
-  let counted =
-    List.fold_left
-      (fun grouped (account, weak, uncharged) ->
-        match Weak.get weak 0 with
-        | Some table when uncharged () ->
-            (account, table :: Option.value ~default:[] (List.assq_opt account grouped))
-            :: List.remove_assq account grouped
-        | _ -> grouped)
-      [] counted
-    |> List.map (fun (account, held) -> (account, fun () -> held))
+  (* tables by owner: the walked ones as owners here, the ones charging their own bytes as ledger *)
+  let group add (account, table) grouped =
+    if add then
+      (account, table :: Option.value ~default:[] (List.assq_opt account grouped))
+      :: List.remove_assq account grouped
+    else grouped
   in
+  let live = List.filter_map (fun (a, w, u) -> Option.map (fun t -> (a, t, u ())) (Weak.get w 0)) counted in
+  let walked_tables, ledger =
+    List.fold_left
+      (fun (w, l) (account, table, uncharged) ->
+        (group uncharged (account, table) w, group (not uncharged) (account, table) l))
+      ([], []) live
+  in
+  let words o = Obj.reachable_words (Obj.repr o) * (Sys.word_size / 8) in
+  (* A table charges what it holds, so a root reaching it (a lowered document's closures reach the
+     cook's caches) must not claim those bytes again: the overlap, at most what it charges, once. *)
+  let ledger =
+    List.filter_map
+      (fun ((account : owner), held) ->
+        if account.pool <> Host then None
+        else
+          let walked_before = Option.value ~default:0 (List.assq_opt account !walked) in
+          Some (account, ref (max 0 (Atomic.get account.bytes - walked_before)), held))
+      ledger
+  in
+  let already_charged before after extra =
+    if extra < 65_536 then 0
+    else
+      List.fold_left
+        (fun sum (_, left, held) ->
+          (* of what this walk adds, what lies in the table *)
+          if !left < 65_536 then sum
+          else
+            let inside = extra - (words (after, held) - words (before, held)) in
+            let credit = max 0 (min (extra - sum) (min !left inside)) in
+            left := !left - credit;
+            sum + credit)
+        0 ledger
+  in
+  let walks = named @ List.map (fun (a, held) -> (a, fun () -> List.map Obj.repr held)) walked_tables in
   let seen = ref [] and total = ref 0 and now = ref [] in
   List.iter
     (fun ((account : owner), roots) ->
-      seen := roots () @ !seen;
-      let reach = Obj.reachable_words (Obj.repr !seen) * (Sys.word_size / 8) in
+      let before = !seen in
+      seen := roots () @ before;
+      let reach = words !seen in
       let extra = max 0 (reach - !total) in
       total := reach;
+      let extra = max 0 (extra - already_charged before !seen extra) in
       now :=
         (account, extra + Option.value ~default:0 (List.assq_opt account !now))
         :: List.remove_assq account !now)
-    (named @ counted);
+    walks;
+  (* last, what a table holds beyond its charge and every walk: boxed texels it counted as bytes, the
+     keys and closures of its entries, which no other owner would ever claim. Up to what the heap has
+     left: a table can also reach what an owner charges with no table (a canvas's bytes). *)
+  let host_walked assoc =
+    List.fold_left (fun sum ((a : owner), n) -> if a.pool = Host then sum + n else sum) 0 assoc
+  in
+  let unclaimed () =
+    heap_live - host_walked !now + host_walked !walked
+    - locked (fun () ->
+          Hashtbl.fold (fun _ (a : account) sum -> if a.pool = Host then sum + bytes a else sum) accounts 0)
+  in
+  List.iter
+    (fun ((account : owner), left, held) ->
+      if words held > !left + 65_536 then begin
+        seen := List.map Obj.repr held @ !seen;
+        let reach = words !seen in
+        let beyond = min (max 0 (reach - !total - !left)) (unclaimed ()) in
+        total := reach;
+        if beyond >= 65_536 then now := (account, beyond) :: List.remove_assq account !now
+      end)
+    ledger;
   List.iter (fun (account, bytes) -> if not (List.mem_assq account !now) then release account bytes) !walked;
   List.iter
     (fun (account, bytes) ->
@@ -503,12 +555,12 @@ let report ?(collect = true) ?(walk = collect) ?(device = 0) ?budget:shown () =
   if collect then Gc.full_major ();
   (* before the walk, whose hash set is the allocator's afterwards *)
   let footprint = phys_footprint () in
-  if walk then walk_roots ();
-  prune ();
   let stat = if collect then Gc.stat () else Gc.quick_stat () in
   let ocaml_live =
     (if collect then stat.live_words else stat.heap_words) * (Sys.word_size / 8)
   in
+  if walk then walk_roots ~live:ocaml_live;
+  prune ();
   let owners =
     locked (fun () ->
         Hashtbl.fold

@@ -157,8 +157,25 @@ let rec show_with conc v =
    querying every slot on every call would keep all 32 keys (and their values) alive for as long as
    the memo is used. [f] runs outside the lock; a raise is not remembered.
    ponytail: a linear scan of 32 slots under a lock; a table if callers remember many values. *)
+let rings : (unit -> Obj.t list) list Atomic.t = Atomic.make []
+
+let remembered () = List.concat_map (fun ring -> ring ()) (Atomic.get rings)
+
 let remember () =
   let slots = Array.make 32 None and next = ref 0 and lock = Mutex.create () in
+  let ring () =
+    Mutex.protect lock (fun () ->
+        Array.to_list slots
+        |> List.filter_map (function
+             | Some (_, e, weak) ->
+                 Option.bind (Weak.get weak 0) (fun key -> Option.map Obj.repr (Ephemeron.K1.query e key))
+             | None -> None))
+  in
+  let rec add () =
+    let old = Atomic.get rings in
+    if not (Atomic.compare_and_set rings old (ring :: old)) then add ()
+  in
+  add ();
   fun key f ->
     let hash = Hashtbl.hash key in
     let found =
@@ -166,7 +183,7 @@ let remember () =
           Array.fold_left
             (fun found slot ->
               match (found, slot) with
-              | None, Some (h, e) when h = hash -> Ephemeron.K1.query e key
+              | None, Some (h, e, _) when h = hash -> Ephemeron.K1.query e key
               | found, _ -> found)
             None slots)
     in
@@ -175,7 +192,9 @@ let remember () =
     | None ->
         let value = f () in
         Mutex.protect lock (fun () ->
-            slots.(!next) <- Some (hash, Ephemeron.K1.make key value);
+            let weak = Weak.create 1 in
+            Weak.set weak 0 (Some key);
+            slots.(!next) <- Some (hash, Ephemeron.K1.make key value, weak);
             next := (!next + 1) mod Array.length slots);
         value
 

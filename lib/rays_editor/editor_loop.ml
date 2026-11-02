@@ -856,9 +856,14 @@ let memory_boundary value =
       { value with memory_known = true }
     end
   in
-  (* the present document, and its lowering, on the ledger when a report walks it *)
-  let doc = value.core.doc.workspace in
-  Mem.root (Mem.document "editor.document") (fun () -> [ Obj.repr doc ]);
+  (* on the ledger when a report walks them: the document is its text; what the frame made from that
+     text (its lowering, the plan's lifetime) is sized apart and replaced with the text's next edit.
+     Undo entries share what an edit did not touch, so they are walked, not summed. *)
+  let doc = value.core.doc in
+  let entries, recent = Editor_core.History.retained value.core.history in
+  Mem.root (Mem.document "editor.document") (fun () -> [ Obj.repr doc.workspace.ws ]);
+  Mem.root (Mem.document "editor.history") (fun () -> [ Obj.repr entries ]);
+  Mem.root (Mem.plan "editor.lowering") (fun () -> [ Obj.repr doc; Obj.repr recent ]);
   let core = ref value.core in
   let undo_past_16 () =
     let history = !core.Editor_model.history in
@@ -993,6 +998,8 @@ let crash_dump value directory =
 
 let close value =
   Mem.root (Mem.document "editor.document") (fun () -> []);
+  Mem.root (Mem.document "editor.history") (fun () -> []);
+  Mem.root (Mem.plan "editor.lowering") (fun () -> []);
   let value = autosave ~force:true value ~now:value.state_checked in
   Option.iter prerr_endline value.state_error;
   Option.iter (fun (_, image) -> ignore (Image.destroy image)) value.map;

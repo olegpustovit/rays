@@ -32,8 +32,9 @@ val reachable_bytes : 'a -> int
     per frame. *)
 
 val root : owner -> (unit -> Obj.t list) -> unit
-(** This owner's size is what these roots reach beyond the owners registered before it, walked when a
-    {!report} walks. For what has no size to charge as it is built (a lowered document); a later call
+(** This owner's size is what these roots reach beyond the owners registered before it and every table
+    that charges its own bytes, walked when a {!report} walks. For what has no size to charge as it is
+    built (a lowered document); a later call
     replaces the roots, so a frame can name its current document, and the closure keeps what it names
     alive: replace it with [fun () -> []] on close. *)
 

@@ -17,14 +17,12 @@ module History : sig
     ?capacity:int ->
     ?byte_capacity:int ->
     ?bytes:('e -> int) ->
-    ?owner:Mem.owner ->
     keep:('a -> 'e) ->
     'a ->
     ('a, 'e) t
   (** The present is a live ['a]; an entry is only what [keep] takes from one, which restores it when
       undo or redo steps there. [bytes] is an entry's size; [byte_capacity] bounds their sum over the
-      entries, oldest going first, the newest always staying; [owner] is charged that sum and
-      released it exactly once per entry, as {!byte_depth} says. *)
+      entries, oldest going first, the newest always staying, as {!byte_depth} says. *)
 
   val present : ('a, 'e) t -> 'a
 
@@ -52,7 +50,11 @@ module History : sig
   val depth : ('a, 'e) t -> int
 
   val byte_depth : ('a, 'e) t -> int
-  (** What [owner] is charged: the entries to undo and to redo. *)
+  (** What the byte cap counts: the entries to undo and to redo. *)
+
+  val retained : ('a, 'e) t -> 'e list * 'a option
+  (** The entries, and the one live value kept beside them: what the ledger walks, since entries
+      share what an edit did not touch and a sum of their sizes counts it again. *)
 
   val shed : keep:int -> ('a, 'e) t -> ('a, 'e) t
   (** The oldest undo entries gone, down to [keep] (at least one). *)

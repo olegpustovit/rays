@@ -51,6 +51,10 @@ val validate : ('f, 'r) t -> unit
 (** Raises on a nonfinite number. A float array over 4,096 elements found finite is remembered by
     identity (arrays are immutable), so validating it again is a lookup. *)
 
+val remembered : unit -> Obj.t list
+(** Every {!remember}'s values still live: the ledger walks them, since a walk does not enter an
+    ephemeron. *)
+
 val remember : unit -> 'k -> (unit -> 'v) -> 'v
 (** [remember ()] is a memo by the key's physical identity, weak in its keys (32 ephemerons, oldest
     replaced): [f] answers a key not remembered; a raise is not remembered. Keys must be immutable
