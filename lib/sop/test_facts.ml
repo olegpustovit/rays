@@ -509,8 +509,53 @@ let test_consumer_facts () =
   print_endline
     "consumer facts: CPU/forward/opaque, fanout, scopes, selected inputs and cached census pass"
 
+(* Memory plan S5: while a 20-node chain cooks with an empty cache, a node's output is live only until
+   its one consumer finishes, so peak live bytes are the two largest neighbours plus the largest
+   other one, not the sum. *)
+let test_chain_peak () =
+  let size k = 2_000 + (((k * 7) mod 20) * 1_000) in
+  let chain = 20 in
+  let peak = ref 0 in
+  let baseline = ref 0 in
+  let bytes_of k = 3 * size k * Sys.word_size / 8 in
+  let link k inputs =
+    Node.Build.make_geometry ~operation:"chain_link" ~version:1 ~parameters:(string_of_int k)
+      ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs
+      (fun ~node_id:_ _ _ ->
+        let geometry =
+          Rdk.Line_geometry.points (Array.init (size k) (fun i -> (float_of_int (i + k), 0., 0.)))
+        in
+        Gc.full_major ();
+        peak := max !peak ((Gc.stat ()).live_words * (Sys.word_size / 8) - !baseline);
+        Ok Node.Build.{ geometry; instances = None })
+  in
+  let root = ref (link 0 [||]) in
+  for k = 1 to chain - 1 do
+    root := link k [| !root |]
+  done;
+  let e = session ~entries:0 () in
+  Gc.full_major ();
+  baseline := (Gc.stat ()).live_words * (Sys.word_size / 8);
+  let output = cook e 1 !root in
+  let neighbours =
+    List.fold_left
+      (fun best k -> max best (bytes_of k + bytes_of (k + 1)))
+      0
+      (List.init (chain - 1) Fun.id)
+  in
+  let largest = List.fold_left (fun best k -> max best (bytes_of k)) 0 (List.init chain Fun.id) in
+  let all = List.fold_left (fun sum k -> sum + bytes_of k) 0 (List.init chain Fun.id) in
+  (* the geometry's own records and the graph's bookkeeping stay well under the slack "one" gives *)
+  if !peak > neighbours + largest then
+    fail (Printf.sprintf "chain peak %d > neighbours %d + largest %d (sum of all %d)" !peak neighbours largest all);
+  ignore (Sys.opaque_identity output);
+  Session.close e;
+  Printf.printf "chain peak: %d KiB live, neighbours+one %d KiB, sum of all %d KiB\n%!"
+    (!peak / 1024) ((neighbours + largest) / 1024) (all / 1024)
+
 let () =
   test_consumer_facts ();
+  test_chain_peak ();
   test_reuse false;
   test_reuse true;
   test_dependencies ();

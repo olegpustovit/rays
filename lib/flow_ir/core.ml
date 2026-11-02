@@ -338,7 +338,26 @@ module Region = struct
   type origin = Flow.Workspace.path * int list
   type count_source = Flow.Eval.residual -> Flow.Workspace.term -> origin option
 
+  type destination = {
+    buffer : Flow.Eval.value;
+    mutable produced : Flow.Eval.value;
+    clobber : bool;
+  }
+
+  type registers = {
+    defs : int array;
+    run_code : instruction array;
+    run_outputs : int array array;
+    slots : int;
+    integer_slots : bool array;
+    text_slots : int array;
+    dedicated : bool array;
+  }
+
   type t = {
+    destination : destination option;
+    slot_plan : registers option Atomic.t;
+    float_slot_plan : registers option Atomic.t;
     residual : Flow.Eval.residual;
     term : Flow.Workspace.term;
     sources : (Flow.Eval.residual * Flow.Workspace.term) array;
@@ -362,6 +381,165 @@ module Region = struct
     binding_fn : string option;
     sites : (int * Flow.Workspace.path * int list) list;
   }
+
+  let with_destination t destination = { t with destination = Some destination }
+
+  let floats_for t length =
+    match t.destination with
+    | Some { buffer = Flow.Eval.Float_array data; _ }
+      when Array.length data = length && Array.length t.outputs = 1 ->
+        data
+    | _ -> Array.make length 0.
+
+  let ints_for t length =
+    match t.destination with
+    | Some { buffer = Flow.Eval.Int_array data; _ }
+      when Array.length data = length && Array.length t.outputs = 1 ->
+        data
+    | _ -> Array.make length 0
+
+  let clobbered t = match t.destination with Some { clobber; _ } -> clobber | None -> false
+
+  (* Linear scan over a [Collect] region's registers, each its instruction's result: a register's slot
+     goes back to its bank after its last read, and never to an operand of the instruction it defines
+     (that one's lanes are still being read). A guarded result keeps its own slot, since a skipped lane
+     reads what the slot held; a guard condition too, since a block caches spans by its register.
+     Array handles have no slot. A loop body re-reads what it wrote and an accumulator re-runs
+     instructions per lane, so such regions keep one slot per register. *)
+  let rec map_registers at = function
+    | Gather (a, i, w, c) -> Gather (a, at i, w, c)
+    | Int_gather (a, i) -> Int_gather (a, at i)
+    | Text_gather (a, i) -> Text_gather (a, at i)
+    | Text_select (c, a, b) -> Text_select (at c, at a, at b)
+    | Binary (op, a, b) -> Binary (op, at a, at b)
+    | Int_binary (op, a, b) -> Int_binary (op, at a, at b)
+    | Int_compare (op, a, b) -> Int_compare (op, at a, at b)
+    | Unary (op, a) -> Unary (op, at a)
+    | Int_abs a -> Int_abs (at a)
+    | Convert (op, a) -> Convert (op, at a)
+    | Noise3 (a, b, c, seed, octaves, lacunarity, gain) ->
+        let live = function Fixed v -> Fixed v | Live r -> Live (at r) in
+        Noise3 (at a, at b, at c, seed, live octaves, live lacunarity, live gain)
+    | Rand_at (seed, index) -> Rand_at (at seed, at index)
+    | Fma (a, b, c) -> Fma (at a, at b, at c)
+    | Checked_mul (p, a, b) -> Checked_mul (p, at a, at b)
+    | Trace (field, r) -> Trace (field, Array.map at r)
+    | Stage (stage, r) -> Stage (stage, Array.map at r)
+    | Checked_fma (p, a, b, c) -> Checked_fma (p, at a, at b, at c)
+    | Select (a, b, c) -> Select (at a, at b, at c)
+    | Int_select (a, b, c) -> Int_select (at a, at b, at c)
+    | Guarded (guards, body) ->
+        Guarded (List.map (fun (c, yes) -> (at c, yes)) guards, map_registers at body)
+    | instruction -> instruction
+
+  let rec has_loop = function
+    | Loop_begin _ | Loop_carry _ | Loop_end _ | Loop_result _ -> true
+    | Guarded (_, body) -> has_loop body
+    | _ -> false
+
+  let rec array_handle = function
+    | Array_prepare _ -> true
+    | Guarded (_, body) -> array_handle body
+    | _ -> false
+
+  let classified code defs slots =
+    let integer_slots = Array.make slots false
+    and text_slots = Array.make slots (-1)
+    and next_text = ref 0 in
+    Array.iteri
+      (fun i instruction ->
+        if integer_register instruction then integer_slots.(defs.(i)) <- true;
+        if text_register instruction && text_slots.(defs.(i)) < 0 then begin
+          text_slots.(defs.(i)) <- !next_text;
+          incr next_text
+        end)
+      code;
+    (integer_slots, text_slots)
+
+  let plan_registers extra t =
+    let n = Array.length t.code in
+    let identity () =
+      let defs = Array.init n Fun.id in
+      let integer_slots, text_slots = classified t.code defs n in
+      {
+        defs;
+        run_code = t.code;
+        run_outputs = t.outputs;
+        slots = n;
+        integer_slots;
+        text_slots;
+        dedicated = Array.make n true;
+      }
+    in
+    if t.result <> Collect || Array.exists has_loop t.code then identity ()
+    else begin
+      let last = Array.init n Fun.id and dedicated = Array.make n false in
+      Array.iteri
+        (fun i instruction ->
+          List.iter (fun r -> last.(r) <- max last.(r) i) (operands instruction);
+          match instruction with
+          | Guarded (guards, _) ->
+              dedicated.(i) <- true;
+              List.iter (fun (c, _) -> dedicated.(c) <- true) guards
+          | _ -> ())
+        t.code;
+      List.iter (fun (r, at) -> last.(r) <- max last.(r) at) extra;
+      Array.iter (Array.iter (fun r -> last.(r) <- n)) t.outputs;
+      let defs = Array.make n 0
+      and free = [| []; []; [] |]
+      and next = ref 0
+      and own = ref [] in
+      let bank i =
+        if text_register t.code.(i) then 2 else if integer_register t.code.(i) then 1 else 0
+      in
+      let release i r =
+        if last.(r) = i && (not dedicated.(r)) && not (array_handle t.code.(r)) then begin
+          last.(r) <- -1;
+          free.(bank r) <- defs.(r) :: free.(bank r)
+        end
+      in
+      for i = 0 to n - 1 do
+        if not (array_handle t.code.(i)) then begin
+          defs.(i) <-
+            (match free.(bank i) with
+            | slot :: rest when not dedicated.(i) ->
+                free.(bank i) <- rest;
+                slot
+            | _ ->
+                let slot = !next in
+                incr next;
+                if dedicated.(i) then own := slot :: !own;
+                slot)
+        end;
+        List.iter (release i) (operands t.code.(i));
+        release i i
+      done;
+      let slots = max 1 !next in
+      let integer_slots, text_slots = classified t.code defs slots in
+      let dedicated = Array.make slots false in
+      List.iter (fun slot -> dedicated.(slot) <- true) !own;
+      {
+        defs;
+        run_code = Array.map (map_registers (Array.get defs)) t.code;
+        run_outputs = Array.map (Array.map (Array.get defs)) t.outputs;
+        slots;
+        integer_slots;
+        text_slots;
+        dedicated;
+      }
+    end
+
+  (* Cached per runner: the float runner's [extra] is what it moved past its instructions. *)
+  let registers ?extra t =
+    let cache = if Option.is_some extra then t.float_slot_plan else t.slot_plan in
+    match Atomic.get cache with
+    | Some plan -> plan
+    | None ->
+        let plan = plan_registers (match extra with Some extra -> extra () | None -> []) t in
+        Atomic.set cache (Some plan);
+        plan
+
+  let finished t value = match t.destination with None -> () | Some d -> d.produced <- value
 
   let dependent_of code =
     let dependent = Array.make (Array.length code) false in
@@ -699,6 +877,9 @@ module Region = struct
         body;
         binding_fn;
         sites;
+        destination = None;
+        slot_plan = Atomic.make None;
+        float_slot_plan = Atomic.make None;
       }
 
   let rebuild t ?residual ?term ?sources ?widths ?uniforms ?uniform_names ?code ?outputs ?count

@@ -196,6 +196,10 @@ module Host : sig
   val argument_types : t -> Flow.Ty.t array
   (** Declared types of the structured Core arguments captured by this region. *)
 
+  val scope_idle : unit -> bool
+  (** No outermost run is sharing results by binding identity on this domain, so an array that dies
+      between two regions cannot be found again through a [Scope] entry. *)
+
   val bind_arguments : ?validate:bool -> t -> Flow.Eval.value array -> (t, Diagnostic.t) result
   (** Borrow checked immutable Core arguments in place of typed source markers. Refuses wrong
       arity/storage; rewrites closure and residual captures without re-evaluating their checked

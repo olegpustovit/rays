@@ -29,12 +29,19 @@ val resident_tail :
     local's source array and divisor. The web printer uses the same rule. *)
 
 val prepare :
+  ?clobber:bool ->
   ?remember_loops:bool -> ?approx:Flow.Workspace.Paths.t -> ?fast:bool -> Core.program -> prepared
 
 (* [~remember_loops:true] (a drawing) keeps
    each top-level loop's last 4 results keyed by the values it reads from outside itself, and skips
    it when they repeat; a loop that reads the frame, state, a host or a random stream, or draws, always
    runs. *)
+(* [~clobber:true], for tests: an array the program's arena drops is filled with NaN or [min_int] as it
+   dies, so a read past its last use fails loudly. *)
+val arena_buffers : first:int array -> last:int array -> size:int array -> int array
+(** The greedy-by-size planner: each local of size class [size.(n) >= 0] and statement interval
+    [first.(n)..last.(n)] gets a buffer; -1 when none would share it. *)
+
 val has_regions : prepared -> bool (* the program invokes a region, so [execute] needs a [force] *)
 val direct : prepared -> bool
 

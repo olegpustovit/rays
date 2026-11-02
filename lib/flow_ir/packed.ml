@@ -733,13 +733,13 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
         else if integer_outputs.(k) then begin
           if kept > Sys.max_array_length then
             V.fail "E_ARRAY_RANGE" "Array length is outside native storage bounds.";
-          E.Int_array (Array.make kept 0)
+          E.Int_array (Core.Region.ints_for t kept)
         end
         else
           let width = Array.length registers in
           if kept > Sys.max_floatarray_length / width then
             V.fail "E_ARRAY_RANGE" "Array length is outside native storage bounds.";
-          let data = Array.make (kept * width) 0. in
+          let data = Core.Region.floats_for t (kept * width) in
           match width with
           | 2 -> E.Vec2_array data
           | 3 -> E.Vec3_array data
@@ -747,17 +747,11 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
           | _ -> E.Float_array data)
       t.outputs
   in
-  let banks = Array.map Core.Region.integer_register t.code in
-  let text_count = ref 0 in
-  let text_offsets =
-    Array.map
-      (fun instruction ->
-        if Core.Region.text_register instruction then (
-          let i = !text_count in
-          incr text_count;
-          i)
-        else -1)
-      t.code
+  let registers = Core.Region.registers t in
+  let code = registers.run_code and defs = registers.defs in
+  let banks = registers.integer_slots and text_offsets = registers.text_slots in
+  let text_count =
+    ref (Array.fold_left (fun count offset -> if offset >= 0 then count + 1 else count) 0 text_offsets)
   in
   let[@inline always] finite x =
     if Float.is_finite x then x else V.fail "E_NONFINITE" "packed produced a nonfinite value."
@@ -820,7 +814,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
   (* a block's scratch holds every register for each of its lanes: a large kernel takes fewer lanes,
      so scratch stays near 64K slots (512 KiB a bank) *)
   let block_size, blocks, blocks_per_chunk, chunks =
-    block_layout ~count ~limit:(max 64 (min 1024 (65536 / max 1 (Array.length t.code))))
+    block_layout ~count ~limit:(max 64 (min 1024 (65536 / max 1 registers.slots)))
   in
   let dependent_flags = if count = 0 then [||] else Core.Region.dependent_flags t in
   let chunk_on integer floats chunk =
@@ -912,7 +906,8 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
       in
       let guard_spans = ref (if cache_guards then Some (Hashtbl.create 16) else None) in
       let rec execute slot instruction first last =
-        let at = slot * block_size in
+        let place = defs.(slot) in
+        let at = place * block_size in
         match instruction with
         | Loop_begin loop ->
             execute_loop (Option.get loops) ~execute:execute_range ~code:t.code slot loop first last
@@ -922,7 +917,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
             done
         | Loop_carry _ | Loop_end _ -> assert false
         | Text_const value ->
-            fill_text ((text_offsets.(slot) * block_size) + first) (last - first) value
+            fill_text ((text_offsets.(place) * block_size) + first) (last - first) value
         | Text_uniform i ->
             if first < last then begin
               let value =
@@ -930,7 +925,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
                 | E.Text text -> text
                 | _ -> V.fail "E_ARRAY_TYPE" "Kernel input changed its packed element type."
               in
-              fill_text ((text_offsets.(slot) * block_size) + first) (last - first) value
+              fill_text ((text_offsets.(place) * block_size) + first) (last - first) value
             end
         | Text_input i ->
             let input =
@@ -939,19 +934,19 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
               | _ -> V.fail "E_ARRAY_TYPE" "Kernel input changed its packed element type."
             in
             for j = first to last - 1 do
-              texts.((text_offsets.(slot) * block_size) + j) <- input.(source j i)
+              texts.((text_offsets.(place) * block_size) + j) <- input.(source j i)
             done
         | Text_gather (array, index) ->
             let array = table array in
             let data = match array with E.Text_array data -> data | _ -> assert false in
             for j = first to last - 1 do
-              texts.((text_offsets.(slot) * block_size) + j) <-
+              texts.((text_offsets.(place) * block_size) + j) <-
                 data.(row array integer.((index * block_size) + j))
             done
         | Text_select (condition, yes, no) ->
             for j = first to last - 1 do
               let register = if numeric condition j <> 0. then yes else no in
-              texts.((text_offsets.(slot) * block_size) + j) <-
+              texts.((text_offsets.(place) * block_size) + j) <-
                 texts.((text_offsets.(register) * block_size) + j)
             done
         | Guarded (guards, body) when last = first + 1 ->
@@ -1318,16 +1313,16 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
           match dependent with
           | None ->
               for slot = first_slot to last_slot - 1 do
-                execute slot t.code.(slot) first last
+                execute slot code.(slot) first last
               done
           | Some value ->
               for slot = first_slot to last_slot - 1 do
-                if dependent_flags.(slot) = value then execute slot t.code.(slot) first last
+                if dependent_flags.(slot) = value then execute slot code.(slot) first last
               done
         else begin
           let slot = ref first_slot in
           while !slot < last_slot do
-            let instruction = t.code.(!slot) in
+            let instruction = code.(!slot) in
             if match dependent with None -> true | Some value -> dependent_flags.(!slot) = value
             then execute !slot instruction first last;
             slot :=
@@ -1353,7 +1348,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
         if not speculated then begin
           guard_spans := None;
           for slot = 0 to total_prefix - 1 do
-            execute slot t.code.(slot) 0 length
+            execute slot code.(slot) 0 length
           done;
           let cached i ty =
             match Atomic.get prepared.(i) with
@@ -1403,10 +1398,10 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
           (* Only already published, validated tables can extend the prefix.
            A failed bounds proof leaves the whole remaining suffix lane-major. *)
           let prefix = ref total_prefix in
-          while !prefix < Array.length t.code && safe [] t.code.(!prefix) do
+          while !prefix < Array.length code && safe [] code.(!prefix) do
             (match unguarded t.code.(!prefix) with
             | Array_prepare _ -> () (* Publication already completed its only effect. *)
-            | _ -> execute !prefix t.code.(!prefix) 0 length);
+            | _ -> execute !prefix code.(!prefix) 0 length);
             incr prefix
           done;
           for j = 0 to length - 1 do
@@ -1456,7 +1451,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
                       done)
                   registers
             | _ -> assert false)
-          t.outputs
+          registers.run_outputs
       else
         for j = 0 to length - 1 do
           if gather then execute_range 0 (Array.length t.code) j (j + 1)
@@ -1510,7 +1505,15 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
     done
   in
   let chunk chunk =
-    let integer, floats = take_registers (Array.length t.code * block_size) in
+    let integer, floats = take_registers (registers.slots * block_size) in
+    if Core.Region.clobbered t then
+      Array.iteri
+        (fun slot dedicated ->
+          if not dedicated then begin
+            Array.fill integer (slot * block_size) block_size min_int;
+            Array.fill floats (slot * block_size) block_size nan
+          end)
+        registers.dedicated;
     match chunk_on integer floats chunk with
     | () -> give_registers integer floats
     | exception e ->
@@ -1639,6 +1642,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
     (fun (clock, report) ->
       report t ~seconds:(max 0. (clock () -. Option.get started -. !excluded)) ~reference:false)
     measure;
+  (match result with [ value ] -> Core.Region.finished t value | _ -> ());
   result
 
 let ordered_add (t : t) =
@@ -1977,6 +1981,7 @@ type launch = {
   skipped_before : int -> int;
   noise_scale : (int * int * int * int) option array;
   collect_product : (int * int * int) option array array;
+  registers : Core.Region.registers;
 }
 
 type block = {
@@ -2047,7 +2052,7 @@ let rec block_instruction r b slot instruction first last =
     let column = columns.(input).(component) in
     Array.unsafe_get column.data (column.offset + (index * column.stride))
   in
-  let at = slot * block_size in
+  let at = r.registers.defs.(slot) * block_size in
   match instruction with
   | Guarded (conditions, body) ->
       let rec selected j = function
@@ -2278,9 +2283,9 @@ let rec block_instruction r b slot instruction first last =
       raise Unsupported
 
 let block_execute r b dependent first last =
-  for slot = 0 to Array.length r.t.code - 1 do
+  for slot = 0 to Array.length r.registers.run_code - 1 do
     if r.dependent_flags.(slot) = dependent && not r.omitted.(slot) then
-      block_instruction r b slot r.t.code.(slot) first last
+      block_instruction r b slot r.registers.run_code.(slot) first last
   done
 
 (* Noise3 scaled by one amplitude and added to a base: sampled straight into the outputs. *)
@@ -2520,7 +2525,7 @@ let block_store r b =
               store k component (output_start + j) x
             done)
           registers)
-      t.outputs
+      r.registers.run_outputs
   else if t.result = Collect then
     Array.iteri
       (fun k registers ->
@@ -2574,12 +2579,12 @@ let block_store r b =
               output.(((output_start + j) * width) + component) <- x
             done
           done)
-      t.outputs
+      r.registers.run_outputs
   else
     for j = 0 to length - 1 do
       (match t.result with Accumulate _ -> block_execute r b true j (j + 1) | _ -> ());
       for k = 0 to Array.length t.outputs - 1 do
-        let registers = t.outputs.(k) in
+        let registers = r.registers.run_outputs.(k) in
         let output = outputs.(k) and width = widths.(k) in
         for component = 0 to width - 1 do
           let x = scratch.((registers.(component) * block_size) + j) in
@@ -2619,10 +2624,15 @@ let run_chunk r chunk =
       Array.make
         ((if Option.is_some streaming then if plane_outputs = None then 1 else 2
           else if Option.is_some scalar_streaming then 2
-          else Array.length t.code)
+          else r.registers.slots)
         * block_size)
         0.
     in
+    if Core.Region.clobbered t && Option.is_none streaming && Option.is_none scalar_streaming then
+      Array.iteri
+        (fun slot dedicated ->
+          if not dedicated then Array.fill scratch (slot * block_size) block_size nan)
+        r.registers.dedicated;
     let noise_scratch = Rays_math.Noise.create_fbm3_scratch () in
     let tables =
       Array.map
@@ -2941,7 +2951,8 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
           let outputs =
             Array.map
               (fun width ->
-                Array.make (if collecting && plane_outputs = None then kept * width else 0) 0.)
+                Core.Region.floats_for t
+                  (if collecting && plane_outputs = None then kept * width else 0))
               widths
           in
           let accumulator =
@@ -3011,6 +3022,37 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
           in
           let streaming, scalar_streaming = detect_streaming t skip noise_scale collect_product in
           let block_size, blocks, blocks_per_chunk, chunks = block_layout ~count ~limit:1024 in
+          (* what [omitted] moved: a noise reads its scaled operands, a product its factors at the end *)
+          let extra () =
+            let end_ = Array.length t.code in
+            List.concat
+              (Array.to_list
+                 (Array.mapi
+                    (fun slot scale ->
+                      match scale with
+                      | Some (a, b, c, f) -> [ (a, slot); (b, slot); (c, slot); (f, slot) ]
+                      | None -> [])
+                    noise_scale))
+            @ List.concat_map
+                (fun products ->
+                  List.concat_map
+                    (function
+                      | Some (base, a, b) -> [ (base, end_); (a, end_); (b, end_) ]
+                      | None -> [])
+                    (Array.to_list products))
+                (Array.to_list collect_product)
+          in
+          let registers = Core.Region.registers ~extra t in
+          let at = Array.get registers.defs in
+          let noise_scale =
+            Array.map
+              (Option.map (fun (a, b, c, f) -> (at a, at b, at c, at f)))
+              noise_scale
+          and collect_product =
+            Array.map
+              (Array.map (Option.map (fun (base, a, b) -> (at base, at a, at b))))
+              collect_product
+          in
           let dependent_flags = if count = 0 then [||] else Core.Region.dependent_flags t in
           let r =
             {
@@ -3042,6 +3084,7 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
               skipped_before;
               noise_scale;
               collect_product;
+              registers;
             }
           in
           let chunk = E.interruptible (run_chunk r) in
@@ -3089,6 +3132,7 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
             (fun (clock, report) ->
               report t ~seconds:(max 0. (clock () -. Option.get started)) ~reference:false)
             measure;
+          (match value with [ value ] -> Core.Region.finished t value | _ -> ());
           value)
   in
   let result =
@@ -3132,6 +3176,8 @@ let force_into ?dispatch ?state ?elems ?resolve ?measure ?strict ~column_source 
        ?resolve ?measure ?strict t ~live)
 
 module Host = struct
+  let scope_idle () = !(Domain.DLS.get Scope.current) = None
+
   let argument_types (t : t) =
     let types = Hashtbl.create 8 and visited = Hashtbl.create 8 in
     let rec value = function

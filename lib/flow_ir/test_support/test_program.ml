@@ -123,7 +123,7 @@ let two_outputs () =
   | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 
 let run ?root ?strict ?force ?resolve program ~live =
-  Flow_ir.Core_exec.(execute ?root ?strict ?force ?resolve (prepare program) ~live)
+  Flow_ir.Core_exec.(execute ?root ?strict ?force ?resolve (prepare ~clobber:true program) ~live)
 
 (* A Core program but for its regions is plain data, with no closures or residuals: it marshals
    without [Closures] and reads back structurally equal. *)

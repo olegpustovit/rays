@@ -59,6 +59,21 @@ type payload_pool = {
       (** resident ids a cook's root held: a caller may read them, so they are only retired *)
 }
 
+(* Who still reads each node of a cook's DAG. The census of [consumer_context] freezes it per root:
+   a node's serial, its distinct inputs by serial and its distinct consumers; each cook's memo counts
+   the consumers down. A DAG with an expansion has an empty census: nothing is dropped.
+   ponytail: an expansion's body may reach census nodes the census cannot see; plan per-expansion
+   if a zone's intermediates show up in the ledger. *)
+type census = {
+  nodes : Node.t array;
+  serials : (int, Node.t * int) Hashtbl.t;
+  distinct_inputs : int array array;
+  consumers : int array;
+}
+
+let no_census =
+  { nodes = [||]; serials = Hashtbl.create 1; distinct_inputs = [||]; consumers = [||] }
+
 type t = {
   mutable clock : unit -> float;
   max_entries : int;
@@ -93,7 +108,7 @@ type t = {
          until it has taken this cook's *)
   mutable written : (string, int) Either.t list;
   mutable consumer_plan :
-    (Node.t * int option * Context.Private.consumers * Context.Private.consumers) option;
+    (Node.t * int option * Context.Private.consumers * Context.Private.consumers * census) option;
   mutable consumer_scans : int;
       (* cache keys and volatile slots this cook attempt wrote, dropped if it settles a failure *)
 }
@@ -575,10 +590,34 @@ let input_geometry session (output : output) =
               session.materialized <- (output, geometry) :: List.take 7 session.materialized;
               Ok (Payload.Geometry geometry)))
 
-(* [memo] holds this cook's results by node id so a node reachable through
-   several paths is evaluated once; the physical check guards reused ids. *)
+(* A table of this cook's results by node id so a node reachable through several paths is evaluated
+   once; the physical check guards reused ids. *)
 let memo_find memo node =
   List.find_opt (fun (seen, _) -> seen == node) (Hashtbl.find_all memo (Node.id node))
+
+let memo_remove memo node =
+  let id = Node.id node in
+  let others = List.filter (fun (seen, _) -> seen != node) (Hashtbl.find_all memo id) in
+  while Hashtbl.mem memo id do
+    Hashtbl.remove memo id
+  done;
+  List.iter (Hashtbl.add memo id) others
+
+type 'a memo = { results : (int, Node.t * 'a) Hashtbl.t; census : census; left : int array }
+
+let new_memo census = { results = Hashtbl.create 64; census; left = Array.copy census.consumers }
+
+(* [node] completed: an input with no reader left drops out of the memo. Keyed by physical node and
+   by graph edge, so a forwarding diamond counts each consumer once. *)
+let consumed memo node =
+  match memo_find memo.census.serials node with
+  | None -> ()
+  | Some (_, serial) ->
+      Array.iter
+        (fun input ->
+          memo.left.(input) <- memo.left.(input) - 1;
+          if memo.left.(input) = 0 then memo_remove memo.results memo.census.nodes.(input))
+        memo.census.distinct_inputs.(serial)
 
 (* Snapshot metadata, not payload planes. Exact CLOCK touch bits matter when
    an earlier branch evicts an entry a later branch initially found. *)
@@ -672,9 +711,9 @@ type consumer_entry = {
 let consumer_context session context root external_readers =
   let base = Context.Private.consumers context in
   match session.consumer_plan with
-  | Some (old, readers, previous, planned)
+  | Some (old, readers, previous, planned, census)
     when old == root && readers = external_readers && previous == base ->
-      Context.Private.with_consumers context planned
+      (Context.Private.with_consumers context planned, census)
   | _ ->
       session.consumer_scans <- session.consumer_scans + 1;
       let entries = Hashtbl.create 32 and ordered = ref [] and next = ref 0 in
@@ -751,8 +790,34 @@ let consumer_context session context root external_readers =
       in
       (* ponytail: keep only the latest root's census; add a bounded multi-root cache
          if alternating unchanged roots makes this metadata scan measurable. *)
-      session.consumer_plan <- Some (root, external_readers, base, planned);
-      Context.Private.with_consumers context planned
+      let census =
+        let ordered = Array.of_list !ordered in
+        if Array.exists (fun e -> Option.is_some (Node.Build.expand e.consumer_node)) ordered then
+          no_census
+        else begin
+          let count = Array.length ordered in
+          let nodes = Array.make count root
+          and serials = Hashtbl.create count
+          and distinct_inputs = Array.make count [||]
+          and consumers = Array.make count 0 in
+          Array.iter
+            (fun entry ->
+              nodes.(entry.serial) <- entry.consumer_node;
+              Hashtbl.add serials (Node.id entry.consumer_node) (entry.consumer_node, entry.serial);
+              let inputs =
+                Array.map
+                  (fun child -> (snd (Option.get (memo_find entries child))).serial)
+                  (selected_inputs entry.consumer_node)
+                |> Array.to_list |> List.sort_uniq Int.compare |> Array.of_list
+              in
+              distinct_inputs.(entry.serial) <- inputs;
+              Array.iter (fun input -> consumers.(input) <- consumers.(input) + 1) inputs)
+            ordered;
+          { nodes; serials; distinct_inputs; consumers }
+        end
+      in
+      session.consumer_plan <- Some (root, external_readers, base, planned, census);
+      (Context.Private.with_consumers context planned, census)
 
 let branch_min_seconds = 0.002
 let branch_min_points = 10_000
@@ -849,11 +914,12 @@ let cached session ~context node =
     | Deferred_refresh | Missing -> None
 
 let rec evaluate memo session context node =
-  match memo_find memo node with
+  match memo_find memo.results node with
   | Some (_, result) -> result
   | None ->
       let result = evaluate_uncached memo session context node in
-      Hashtbl.add memo (Node.id node) (node, result);
+      Hashtbl.add memo.results (Node.id node) (node, result);
+      consumed memo node;
       result
 
 (* Complete the same sequential DFS prefix that reaches every shared node.
@@ -866,7 +932,8 @@ and shared_prefix memo session context roots =
     (fun root ->
       let visited = Hashtbl.create 16 in
       let rec visit node =
-        if Option.is_none (memo_find memo node) && Option.is_none (memo_find visited node) then begin
+        if Option.is_none (memo_find memo.results node) && Option.is_none (memo_find visited node)
+        then begin
           Hashtbl.add visited (Node.id node) (node, ());
           (match memo_find counts node with
           | Some (_, count) -> incr count
@@ -888,15 +955,16 @@ and shared_prefix memo session context roots =
     (* ponytail: shared-node membership scans this coarse DAG frontier; use a
      physical-node set if large shared frontiers dominate cook measurements. *)
     let rec contains node =
-      Option.is_none (memo_find memo node)
+      Option.is_none (memo_find memo.results node)
       && (List.exists (( == ) node) !pending || Array.exists contains (selected_inputs node))
     in
     let rec prefix node =
-      if !pending = [] || Option.is_some (memo_find memo node) then Ok ()
+      if !pending = [] || Option.is_some (memo_find memo.results node) then Ok ()
       else if List.exists (( == ) node) !pending || not (contains node) then
         Result.map
           (fun _ ->
-            pending := List.filter (fun shared -> Option.is_none (memo_find memo shared)) !pending)
+            pending :=
+              List.filter (fun shared -> Option.is_none (memo_find memo.results shared)) !pending)
           (evaluate memo session context node)
       else
         let children = selected_inputs node in
@@ -927,9 +995,9 @@ and evaluate_many memo session context roots =
       (Array.mapi
          (fun i node ->
            if
-             Option.is_none (memo_find memo node)
-             && costly predictions memo session context node
-             && cached_output predictions memo session context node = Missing
+             Option.is_none (memo_find memo.results node)
+             && costly predictions memo.results session context node
+             && cached_output predictions memo.results session context node = Missing
            then Some i
            else None)
          roots)
@@ -967,7 +1035,14 @@ and evaluate_many memo session context roots =
           ignore (Context.settle ~all:true context);
           session.fanouts <- session.fanouts + 1;
           let transactions = Array.make count None in
-          let workers = Array.map (fun _ -> (snapshot session, Hashtbl.copy memo)) indices in
+          let forked = Array.copy memo.left in
+          let workers =
+            Array.map
+              (fun _ ->
+                ( snapshot session,
+                  { memo with results = Hashtbl.copy memo.results; left = Array.copy forked } ))
+              indices
+          in
           Parallel.for_ ~chunk_size:1 ~start:0
             ~finish:(Array.length indices - 1)
             (fun worker_index ->
@@ -1010,10 +1085,10 @@ and evaluate_many memo session context roots =
                         (fun _ (node, worker_result) compatible ->
                           compatible
                           &&
-                          match memo_find memo node with
+                          match memo_find memo.results node with
                           | None -> true
                           | Some (_, parent_result) -> worker_result == parent_result)
-                        local_memo true
+                        local_memo.results true
                     in
                     let probe = snapshot session in
                     if compatible && List.for_all (replay_event probe) events then begin
@@ -1026,11 +1101,26 @@ and evaluate_many memo session context roots =
                       (match local.last_node with
                       | None -> ()
                       | Some _ -> session.last_node <- local.last_node);
+                      (* the worker's completed consumers count against the parent's readers *)
+                      Array.iteri
+                        (fun serial left ->
+                          let completed = forked.(serial) - left in
+                          if completed > 0 then begin
+                            memo.left.(serial) <- memo.left.(serial) - completed;
+                            if memo.left.(serial) = 0 then
+                              memo_remove memo.results memo.census.nodes.(serial)
+                          end)
+                        local_memo.left;
                       Hashtbl.iter
                         (fun id (node, value) ->
-                          if Option.is_none (memo_find memo node) then
-                            Hashtbl.add memo id (node, value))
-                        local_memo;
+                          let wanted =
+                            match memo_find memo.census.serials node with
+                            | None -> true
+                            | Some (_, serial) -> memo.left.(serial) > 0
+                          in
+                          if wanted && Option.is_none (memo_find memo.results node) then
+                            Hashtbl.add memo.results id (node, value))
+                        local_memo.results;
                       result
                     end
                     else
@@ -1182,7 +1272,7 @@ let cook ?cpu_consumers session ~context node =
       | Some _ -> cpu_consumers
       | None -> Context.cpu_consumers context (Node.id node)
     in
-    let context = consumer_context session context node external_readers in
+    let context, census = consumer_context session context node external_readers in
     Parallel.run ~domains:(Context.domains context) (fun () ->
         (* a device failure found at a settle point refuses the device to the nodes that failed:
            what this attempt wrote is dropped and the graph cooks again (each retry refuses one
@@ -1190,7 +1280,7 @@ let cook ?cpu_consumers session ~context node =
         let rec attempt () =
           session.written <- [];
           let refused = Context.refusals context in
-          let result = evaluate (Hashtbl.create 64) session context node in
+          let result = evaluate (new_memo census) session context node in
           ignore (Context.settle ~all:true context);
           if Context.refusals context = refused then result
           else begin
