@@ -88,6 +88,15 @@ let digests =
     "bc9a96cc00caf757afb46c0b94ab6e514f8676ad396541d50171b303b82e9c73";
   ]
 
+(* Picture 19 (draw/rounded_rect) has two arc coordinates 1 ulp off on Windows, where ucrtbase rounds
+   a sin or cos differently from the Mac; this is the digest of that stream there. *)
+let windows_digests = [ (19, "b1ebcb4115521cc169ab2565362ae9e6c7e3be89ed47ad0d297a2ef855880e59") ]
+
+let expected i =
+  match if Sys.win32 then List.assoc_opt i windows_digests else None with
+  | Some digest -> digest
+  | None -> List.nth digests i
+
 let new_scene body =
   let evaluation = ok (E.static (checked body)) in
   let program, root =
@@ -127,9 +136,9 @@ let () =
   List.iteri
     (fun i body ->
       let digest = Editor_document.Lowering.sha256 (Bytes.to_string (serialize (new_scene body))) in
-      if digest <> List.nth digests i then
+      if digest <> expected i then
         failwith
-          (Printf.sprintf "picture %d differs: %s (expected %s, got %s)" i body (List.nth digests i)
+          (Printf.sprintf "picture %d differs: %s (expected %s, got %s)" i body (expected i)
              digest))
     pictures;
   (* Hand-built marks against the Scene API. *)
