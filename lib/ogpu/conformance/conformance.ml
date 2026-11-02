@@ -1,8 +1,23 @@
 let get = function Ok value -> value | Error error -> failwith (Ogpu.Error.to_string error)
 let require condition message = if not condition then failwith message
 
-let run driver =
+type shaders = {
+  backend : string;
+  bytes : string -> bytes;
+  scale : bool -> string * (string * Ogpu.Shader.constant_value) list;
+  instance_sizes : int * int;
+}
+
+let run ?shaders driver =
   let open Ogpu in
+  let backend = match shaders with None -> "metal" | Some s -> s.backend in
+  let pick name msl = match shaders with None -> msl | Some s -> s.bytes name in
+  let scale triple =
+    match shaders with
+    | None -> ("scale", [ ("TRIPLE", Shader.Bool triple) ])
+    | Some s -> s.scale triple
+  in
+  let instance_sizes = match shaders with None -> (68, 44) | Some s -> s.instance_sizes in
   let device = get (Backend.create_device driver) in
   let capabilities = Backend.capabilities device in
   get (Caps.validate capabilities);
@@ -251,7 +266,8 @@ let run driver =
                   ())))
     done;
     let source =
-      Bytes.of_string
+      pick "sample_lod"
+      @@ Bytes.of_string
         "#include <metal_stdlib>\n\
          using namespace metal;\n\
          kernel void sample_lod(texture2d<float> image [[texture(0)]], device float4 *out \
@@ -269,7 +285,7 @@ let run driver =
       get
         (Shader.create
            {
-             backend = "metal";
+             backend;
              label = Some "sample-lod";
              bytes = source;
              entry_points = [ { name = "sample_lod"; stage = Shader.Compute } ];
@@ -316,7 +332,8 @@ let run driver =
      pipelines by function constant, exact output, blit copy, and status
      polling on a non-blocking command buffer. *)
   let library_source =
-    Bytes.of_string
+    pick "library"
+    @@ Bytes.of_string
       "#include <metal_stdlib>\n\
        using namespace metal;\n\
        constant bool TRIPLE [[function_constant(0)]];\n\
@@ -329,13 +346,13 @@ let run driver =
     get
       (Shader.create
          {
-           backend = "metal";
+           backend;
            label = Some "conformance-library";
            bytes = library_source;
            entry_points =
-             [
-               { name = "scale"; stage = Shader.Compute }; { name = "fill"; stage = Shader.Compute };
-             ];
+             List.map
+               (fun name -> { Shader.name; stage = Shader.Compute })
+               (List.sort_uniq compare [ fst (scale true); fst (scale false); "fill" ]);
            bindings = [];
          })
   in
@@ -375,20 +392,20 @@ let run driver =
   if Caps.has profile Caps.Compute_pipeline then begin
     let triple =
       get
-        (Backend.create_compute_pipeline_from library ~entry:"scale"
-           ~constants:[ ("TRIPLE", Shader.Bool true) ]
+        (Backend.create_compute_pipeline_from library ~entry:(fst (scale true))
+           ~constants:(snd (scale true))
            ~interface:scale_interface ())
     in
     let double =
       get
-        (Backend.create_compute_pipeline_from library ~entry:"scale"
-           ~constants:[ ("TRIPLE", Shader.Bool false) ]
+        (Backend.create_compute_pipeline_from library ~entry:(fst (scale false))
+           ~constants:(snd (scale false))
            ~interface:scale_interface ())
     in
     assert (Backend.max_total_threads double >= 32);
     (match
-       Backend.create_compute_pipeline_from library ~entry:"scale"
-         ~constants:[ ("TRIPLE", Shader.Bool true) ]
+       Backend.create_compute_pipeline_from library ~entry:(fst (scale true))
+         ~constants:(snd (scale true))
          ~interface:
            [
              {
@@ -1434,7 +1451,7 @@ let run driver =
                    user_id = 3;
                  };
                |]))
-      = 68)
+      = fst instance_sizes)
       "user-id instance packing differs";
     require
       (Bytes.length
@@ -1460,7 +1477,7 @@ let run driver =
                    end_border = Clamp;
                  };
                |]))
-      = 44)
+      = snd instance_sizes)
       "motion instance packing differs"
   end;
   get (Backend.destroy_buffer vertices);
@@ -1506,9 +1523,9 @@ let run driver =
     get
       (Shader.create
          {
-           backend = "metal";
+           backend;
            label = Some "conformance-render";
-           bytes = render_source;
+           bytes = pick (List.hd entries).Shader.name render_source;
            entry_points = entries;
            bindings;
          })
@@ -1559,7 +1576,7 @@ let run driver =
   in
   let render_descriptor ?(layout = flat_layout) fragment entry : Pipeline.render_descriptor =
     {
-      backend = "metal";
+      backend;
       label = Some "conformance-render";
       layout;
       vertex;
@@ -1643,7 +1660,11 @@ let run driver =
   let pixel bytes x y = Bytes.sub_string bytes (((y * 4) + x) * 4) 4 in
   let expect_pixels expected message =
     let pixels = get (Backend.read_texture target ~bytes_per_row:16) in
-    require (pixel pixels 0 0 = expected && pixel pixels 3 3 = expected) message
+    let hex s = String.concat "" (List.map (fun c -> Printf.sprintf "%02x" (Char.code c)) (List.of_seq (String.to_seq s))) in
+    require
+      (pixel pixels 0 0 = expected && pixel pixels 3 3 = expected)
+      (Printf.sprintf "%s (pixels (0,0) %s and (3,3) %s, expected %s)" message (hex (pixel pixels 0 0))
+         (hex (pixel pixels 3 3)) (hex expected))
   in
   let clear_target r g b a =
     let commands = get (Backend.begin_commands queue) in

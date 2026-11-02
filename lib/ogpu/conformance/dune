@@ -38,3 +38,26 @@
   (= %{system} macosx))
  (deps
   (alias ogpu_conformance_metal)))
+
+(executable
+ (name test_vulkan)
+ (enabled_if
+  (= %{system} mingw64))
+ (modules test_vulkan)
+ (libraries ogpu_conformance ogpu_vulkan vulkan unix))
+
+(rule
+ (alias ogpu_conformance_vulkan)
+ (enabled_if
+  (= %{system} mingw64))
+ (deps
+  (glob_files vulkan/*.spv))
+ (action
+  (run %{exe:test_vulkan.exe})))
+
+(alias
+ (name runtest-native)
+ (enabled_if
+  (= %{system} mingw64))
+ (deps
+  (alias ogpu_conformance_vulkan)))
