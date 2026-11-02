@@ -45,6 +45,7 @@ val bytes : owner -> int
 val peak : owner -> int
 
 val attributed : unit -> int
+val attributed_device : unit -> int
 (** Sum of every owner's current bytes, host and device. *)
 
 (** {1 The budget} *)

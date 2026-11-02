@@ -850,6 +850,9 @@ let memory_boundary value =
         (fun (_, working_set) ->
           Mem.set_budget ~source:Machine (Mem.machine_budget ~working_set))
         (Flow_native.Workspace_gpu.device_limits value.host.gpu);
+      (* what the device holds at the first boundary beyond any owner: the driver's own, and the first
+         frame's pipelines *)
+      Mem.charge (Mem.plan ~pool:Device "metal.driver") (device () - Mem.attributed_device ());
       { value with memory_known = true }
     end
   in

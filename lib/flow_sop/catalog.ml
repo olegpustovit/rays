@@ -56,49 +56,47 @@ let of_defnode (node : Flow.Defnode.t) =
 
 let context_of = Flow.Context.of_qualified
 
-(* the library, and what the lazies below derive from it *)
+(* The library as a process holds it: an index, and each form unmarshalled when a workspace reaches
+   it. [base] is the form's fixed id, from its position in the whole library. *)
+type entry = {
+  name : string;
+  base : int;
+  references : string list;
+  form : Flow.Syntax.t Lazy.t;
+  header : Flow.Defnode.t option;
+}
+
 let catalog_owner = Mem.plan "flow_sop.catalog"
-let catalog_roots : Obj.t list ref = ref []
 
-let embedded_sources =
+let library_base = Flow.Syntax.library_base
+
+let entries =
   lazy
-    (List.fold_left
-       (fun result (file, forms) ->
-         Result.bind result (fun loaded ->
-             let forms =
-               List.concat_map
-                 (fun (form : Flow.Syntax.t) ->
-                   match form.node with
-                   | Flow.Syntax.List ({ node = Flow.Syntax.Sym "workspace"; _ } :: _ :: children)
-                     ->
-                       children
-                   | _ -> [ form ])
-                 forms
-             in
-             match
-               List.find_opt
-                 (fun form ->
-                   not
-                     (List.mem (Flow.Syntax.head form)
-                        [ Some "defnode"; Some "defn"; Some "defmacro" ]))
-                 forms
-             with
-             | Some form ->
-                 Error
-                   (Diagnostic.error ~span:form.span ~code:"E_FORM"
-                      (file ^ ": node sources contain only defnode, defn and defmacro forms"))
-             | None -> Ok (forms :: loaded)))
-       (Ok [])
-       (Marshal.from_string Node_sources.forms 0 : (string * Flow.Syntax.t list) list)
-    |> Result.map (fun files -> List.concat (List.rev files)))
+    (let next = ref library_base in
+     let entries =
+       Array.of_list
+         (List.map
+            (fun (name, size, references, offset, header) ->
+              let base = !next in
+              next := base + size;
+              {
+                name;
+                base;
+                references;
+                form = lazy (Marshal.from_string Node_sources.forms offset : Flow.Syntax.t);
+                header;
+              })
+            (Marshal.from_string Node_sources.index 0
+              : (string * int * string list * int * Flow.Defnode.t option) list))
+     in
+     entries)
 
-(* The embedded library, parsed once and kept for the process: the largest thing a small sketch has. *)
-let sources () =
-  let first = not (Lazy.is_val embedded_sources) in
-  let sources = Lazy.force embedded_sources in
-  if first then
-    Mem.root catalog_owner (fun () -> !catalog_roots);
-  sources
+let () = Mem.root catalog_owner (fun () -> [ Obj.repr entries ])
+
+let embedded_sources = lazy (Ok (List.map (fun e -> Lazy.force e.form) (Array.to_list (Lazy.force entries))))
+
+(* The whole library, for what reads all of it (the manifest, tests). A workspace check does not. *)
+let sources () = Lazy.force embedded_sources
 
 let definitions_of_sources forms =
   List.fold_left
@@ -113,8 +111,12 @@ let definitions_of_sources forms =
 let embedded_node_definitions = lazy (Result.bind (sources ()) definitions_of_sources)
 let node_definitions () = Lazy.force embedded_node_definitions
 
+(* What a catalog needs of a defnode: its declaration, with no Lisp behind it. *)
+let node_headers () =
+  List.filter_map (fun e -> e.header) (Array.to_list (Lazy.force entries))
+
 let library_descriptors =
-  lazy (match node_definitions () with Ok nodes -> List.map of_defnode nodes | Error _ -> [])
+  lazy (List.map of_defnode (node_headers ()))
 
 let with_library present =
   present
@@ -158,22 +160,43 @@ let prepare_source_index source_list =
   in
   { source_list; source_forms; by_name; references }
 
-(* The one embedded library is immutable; keep its dependency index with its existing lazy AST,
-   and leave caller-supplied libraries on the uncached path. *)
+(* The one embedded library is immutable; its dependency index comes from the build. *)
 let embedded_source_index =
   lazy
     (match sources () with
     | Ok source_list -> Some (prepare_source_index source_list)
     | Error _ -> None)
 
-let () =
-  catalog_roots :=
-    [
-      Obj.repr embedded_sources;
-      Obj.repr embedded_node_definitions;
-      Obj.repr library_descriptors;
-      Obj.repr embedded_source_index;
-    ]
+(* The entries a workspace reaches through the names it mentions, in library order; as
+   [reachable_uncached], without unmarshalling what it does not reach. *)
+let reachable_entries forms ~allowed =
+  let entries = Lazy.force entries in
+  let by_name = Hashtbl.create 256 in
+  Array.iteri (fun i e -> if allowed e then Hashtbl.add by_name e.name i) entries;
+  let seen = Hashtbl.create 64 and queue = Queue.create () in
+  let visit name =
+    if not (Hashtbl.mem seen name) then begin
+      Hashtbl.add seen name ();
+      Queue.add name queue
+    end
+  in
+  List.iter
+    (fun form ->
+      let names = Hashtbl.create 16 in
+      mentions names form;
+      Hashtbl.iter (fun name () -> visit name) names)
+    forms;
+  let keep = Array.make (Array.length entries) false in
+  while not (Queue.is_empty queue) do
+    List.iter
+      (fun i ->
+        if not keep.(i) then begin
+          keep.(i) <- true;
+          List.iter visit entries.(i).references
+        end)
+      (Hashtbl.find_all by_name (Queue.pop queue))
+  done;
+  List.filteri (fun i _ -> keep.(i)) (Array.to_list entries)
 
 let reachable_index index forms =
   let seen = Hashtbl.create 64 and queue = Queue.create () in
@@ -244,8 +267,6 @@ let reachable sources forms =
 (* Each library form has a fixed id, from its position in the whole library above any authored id:
    a library definition checks to the same form ids whatever the authored text or the reachable
    subset, so a kept evaluation of its body (Flow.Eval) finds its terms again. *)
-let library_base = Flow.Syntax.library_base
-
 let library_bases sources =
   let rec size (form : Flow.Syntax.t) =
     List.fold_left (fun n child -> n + size child) 1 (Flow.Syntax.children form)
@@ -288,7 +309,41 @@ module Private = struct
   let library_checks () = !prelude_checks
 end
 
+let check_embedded ?ops ?library catalog forms =
+  let in_catalog name =
+    List.exists (fun (kind : Flow.Catalog.kind) -> kind.qualified = name) catalog.Flow.Catalog.kinds
+  in
+  let any_node =
+    Array.exists (fun e -> e.header <> None && in_catalog e.name) (Lazy.force entries)
+  in
+  let reached =
+    if not any_node then []
+    else reachable_entries forms ~allowed:(fun e -> e.header = None || in_catalog e.name)
+  in
+  if reached = [] then Flow.Workspace.check ?ops ?library catalog forms
+  else
+    let positions = List.map (fun e -> e.base) reached in
+    let prelude () =
+      let catalog =
+        {
+          catalog with
+          Flow.Catalog.kinds =
+            List.filter
+              (fun (kind : Flow.Catalog.kind) ->
+                not (List.exists (fun e -> e.header <> None && e.name = kind.qualified) reached))
+              catalog.Flow.Catalog.kinds;
+        }
+      in
+      let sources =
+        List.map (fun e -> fst (Flow.Syntax.renumber e.base (Lazy.force e.form))) reached
+      in
+      (catalog, Flow.Workspace.prelude ?ops ?library catalog sources)
+    in
+    let catalog, prelude = prelude_cached ~ops ~library ~catalog ~positions prelude in
+    Flow.Workspace.check ?ops ?library ~prelude catalog forms
+
 let check_workspace_raw ?ops ?library ?sources:override catalog forms =
+  if override = None then check_embedded ?ops ?library catalog forms else
   let source_forms = match override with Some sources -> Ok sources | None -> sources () in
   match
     Result.bind source_forms (fun source_forms ->
@@ -581,7 +636,7 @@ let of_factories ~version ?(extra = []) ?nodes factories =
     (build [] (List.map descriptor factories @ extra))
     (fun catalog ->
       Result.bind
-        (match nodes with Some nodes -> Ok nodes | None -> node_definitions ())
+        (match nodes with Some nodes -> Ok nodes | None -> Ok (node_headers ()))
         (fun nodes ->
           let rec append catalog = function
             | [] -> Ok catalog

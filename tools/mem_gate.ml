@@ -131,7 +131,7 @@ let scenario = function
   | "pxui" -> (sketch "pxui", no_step)
   | "recursive_signals" -> (sketch "recursive_signals", no_step)
   | "sea_128" | "sea_128_200m" -> (sea 128, no_step)
-  | "sea_256" | "sea_256_150m" -> (sea 256, no_step)
+  | "sea_256" | "sea_256_100m" -> (sea 256, no_step)
   | "isogrid_small" -> (set_input "volume" "resolution" 12 (sketch "isogrid"), no_step)
   | "image_graph" -> (sketch "flow_image", no_step)
   | "scrubs_100" ->

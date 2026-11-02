@@ -129,6 +129,7 @@ let accounts_sum keep =
       Hashtbl.fold (fun _ (a : account) sum -> if keep a then sum + bytes a else sum) accounts 0)
 
 let attributed () = accounts_sum (fun _ -> true)
+let attributed_device () = accounts_sum (fun a -> a.pool = Device)
 
 (* ---- process facts, one small function per OS each in the stubs *)
 
