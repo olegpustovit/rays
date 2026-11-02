@@ -59,6 +59,12 @@ val set_budget : ?source:source -> int -> unit
 
 val budget : unit -> int
 
+val set_device_budget : ?source:source -> int -> unit
+(** Ceiling for the device's own bytes, [0]: none. Set only where they are not in the footprint (a
+    discrete GPU's VRAM); unset, the budget above covers the device as before. Ranked like {!set_budget}. *)
+
+val device_budget : unit -> int
+
 val machine_budget : working_set:int -> int
 (** The default: the smaller of the device's working set ([<= 0]: unknown) and 60% of RAM. *)
 
@@ -113,6 +119,10 @@ val retreat :
     collection does not evict the next cache. Going [Over] runs at most one full collection per
     crossing, then latches until usage is back under the limit: never a stall per frame.
 
+    With a device budget (see {!set_device_budget}) the footprint is the host pool and the backend's bytes
+    ([device]) are checked against it after: the same caches, device-pool ones only, then [Over]; no
+    [later] step, which frees host bytes.
+
     A critical pressure event also runs [Gc.full_major] and the allocator's pressure relief once,
     after evicting; nothing else does. *)
 
@@ -126,9 +136,10 @@ exception Refused of overdraft
     kernel's fallback path can take it for a form the device declined and run on the CPU. A cook's
     node turns it into [E_MEMORY]. *)
 
-val admit_bytes : int -> unit
+val admit_bytes : ?pool:pool -> int -> unit
 (** Called before a large allocation, from any domain; no owner sheds here, the cook's boundary did.
-    One footprint read, at most one collection per crossing.
+    One footprint read, at most one collection per crossing. [~pool:Device] under a device budget
+    compares the ledger's device bytes plus [n] with it instead.
     @raise Refused when usage plus [n] passes the limit. *)
 
 val retry_worthwhile : unit -> bool

@@ -31,6 +31,7 @@ type t = {
   ray_tracing_motion : bool;
   ray_tracing_refit : bool;
   memoryless_attachments : bool;
+  unified_memory : bool;  (** Host and device bytes are one pool (Apple silicon): the process footprint already counts the device. *)
 }
 
 val minimum_m1 : t

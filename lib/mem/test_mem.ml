@@ -92,6 +92,40 @@ let () =
   Mem.set_budget 5_000;
   check (Mem.retreat ~usage () = Mem.Within && Mem.overdraft () = None) "recovery clears it";
   Mem.reset ();
+  (* a device budget sheds the device pool by the same order and leaves the host pool alone *)
+  check (not Sys.win32 || Mem.physical_ram () > 0) "Windows reports installed RAM";
+  let vram = Mem.cache ~pool:Device "test.vram" and ram = Mem.cache "test.ram" in
+  let drops = ref 0 and ram_drops = ref 0 in
+  let evictable owner count =
+    Mem.register_evictor owner (fun () ->
+        Mem.bytes owner > 0
+        && begin
+             incr count;
+             Mem.release owner 400;
+             true
+           end)
+  in
+  evictable vram drops;
+  evictable ram ram_drops;
+  Mem.charge vram 1_200;
+  Mem.charge ram 1_200;
+  Mem.set_device_budget 1_000;
+  let unowned = ref 0 in
+  let device () = Mem.bytes vram + !unowned in
+  check
+    (Mem.retreat ~usage:(fun () -> 0) ~device () = Mem.Within && !drops = 1 && !ram_drops = 0)
+    "over the device budget one VRAM entry goes and no host entry";
+  Mem.set_device_budget 100;
+  unowned := 5_000;
+  (match Mem.retreat ~usage:(fun () -> 0) ~device () with
+  | Over { limit = 100; _ } when !drops = 3 && !ram_drops = 0 -> ()
+  | _ -> fail "device Over names the device limit once every VRAM cache is gone");
+  Mem.charge vram 500;
+  (match Mem.admit_bytes ~pool:Device 1 with
+  | exception Mem.Refused { limit = 100; _ } -> ()
+  | () -> fail "a device allocation past the device budget is refused");
+  Mem.admit_bytes 1;
+  Mem.reset ();
   (* the order of retreat: coldest and largest per rebuild cost, then plans, then undo, then Over *)
   let order = ref [] in
   let table name ~size ~rebuild ~last_use =
