@@ -323,7 +323,13 @@ module Region : sig
   type origin = Flow.Workspace.path * int list
   type count_source = Flow.Eval.residual -> Flow.Workspace.term -> origin option
 
+  type destination = { buffer : Flow.Eval.value; mutable produced : Flow.Eval.value }
+  (** One CPU run of a region from a program's arena: [buffer] is a dead array its one output may
+      overwrite (or [No_geo]); the run sets [produced] to its result as it returns, so the caller
+      knows the block loop ran, rather than a fallback that might hold its inputs. *)
+
   type t = private {
+    destination : destination option;
     residual : Flow.Eval.residual;
     term : Flow.Workspace.term;
     sources : (Flow.Eval.residual * Flow.Workspace.term) array;
@@ -371,6 +377,14 @@ module Region : sig
     (t, Diagnostic.t list) Stdlib.result
 
   val dependent_flags : t -> bool array
+  val with_destination : t -> destination -> t
+
+  val floats_for : t -> int -> float array
+  (** The array a [Collect] region's one output fills: its destination's when the length matches
+      exactly, else a fresh one. Every element is written; a run reads none of it first. *)
+
+  val ints_for : t -> int -> int array
+  val finished : t -> Flow.Eval.value -> unit
 
   val rebuild :
     t ->

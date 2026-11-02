@@ -21,6 +21,7 @@
   test_core_lower
   test_core_control
   test_core_lists
+  test_arena
   test_core_state
   test_core_regions
   test_core_resident
@@ -34,6 +35,7 @@
   test_core_lower
   test_core_control
   test_core_lists
+  test_arena
   test_core_state
   test_core_regions
   test_core_resident

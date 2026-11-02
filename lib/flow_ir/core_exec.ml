@@ -36,7 +36,128 @@ let rec host_value resident = function
       E.Struct (name, ty, List.map (fun (name, v) -> (name, host_value resident v)) fields)
   | value -> resident.finish value
 
+(* A program's array arena (memory plan S5). [arena_buffers] is the TFLite greedy-by-size planner over
+   top-level statement intervals; an OCaml array cannot be a prefix of a larger one, so a buffer
+   holds one exact size. Only a buffer two locals share is kept: the rest are left to the collector
+   the moment they die, and the program's peak is its largest neighbours.
+   ponytail: kept buffers are uncharged: a prepared program has no release point for the ledger; add
+   one when the ledger shows arenas. *)
+type arena_plan = { first : int array; last : int array; dying : int array array }
+
+type arena = {
+  plan : arena_plan;
+  sizes : int array;
+  mutable dirty : bool;
+  mutable assignment : int array;
+  buffers : E.value array;
+  verified : bool array;
+  kills : bool;
+}
+
+(* [size.(n) >= 0] is a size class of local [n], live over statements first.(n)..last.(n): the buffer
+   each takes, -1 for a local alone in its buffer. Largest first; an array's first fitting buffer. *)
+let arena_buffers ~first ~last ~size =
+  let order =
+    List.filter (fun n -> size.(n) >= 0) (List.init (Array.length size) Fun.id)
+    |> List.stable_sort (fun a b -> Int.compare size.(b) size.(a))
+  in
+  let buffers = ref [] and assignment = Array.make (Array.length size) (-1) in
+  List.iter
+    (fun n ->
+      let fits (_, class_, members) =
+        class_ = size.(n)
+        && List.for_all (fun m -> last.(m) < first.(n) || last.(n) < first.(m)) !members
+      in
+      match List.find_opt fits (List.rev !buffers) with
+      | Some (i, _, members) ->
+          assignment.(n) <- i;
+          members := n :: !members
+      | None ->
+          let i = List.length !buffers in
+          assignment.(n) <- i;
+          buffers := (i, size.(n), ref [ n ]) :: !buffers)
+    order;
+  List.iter
+    (fun (_, _, members) ->
+      match !members with [ alone ] -> assignment.(alone) <- -1 | _ -> ())
+    !buffers;
+  assignment
+
+let arena_new plan ~kills =
+  let n = Array.length plan.first in
+  {
+    plan;
+    sizes = Array.make n (-1);
+    dirty = false;
+    assignment = Array.make n (-1);
+    buffers = Array.make n E.No_geo;
+    verified = Array.make n false;
+    kills;
+  }
+
+let arena_take a result =
+  match a.assignment.(result) with
+  | -1 -> E.No_geo
+  | buffer ->
+      let value = a.buffers.(buffer) in
+      a.buffers.(buffer) <- E.No_geo;
+      value
+
+let arena_kill = function
+  | E.Int_array data -> Array.fill data 0 (Array.length data) min_int
+  | E.Float_array data | Vec2_array data | Vec3_array data | Vec4_array data ->
+      Array.fill data 0 (Array.length data) nan
+  | _ -> ()
+
+(* The carrier [Core.Region.floats_for] recognises: only the data is reused, each result boxes its own
+   width. *)
+let arena_die a values n =
+  let value = values.(n) in
+  values.(n) <- E.No_geo;
+  if a.verified.(n) then begin
+    if a.kills then arena_kill value;
+    match a.assignment.(n) with
+    | -1 -> ()
+    | buffer ->
+        a.buffers.(buffer) <-
+          (match value with
+          | E.Vec2_array data | Vec3_array data | Vec4_array data -> E.Float_array data
+          | value -> value)
+  end
+
+(* A region ran: its planned result is ours if its block loop made it; a reader that did not run its
+   block loop may have kept the array, which is then the collector's alone. *)
+let arena_ran a ~result ~args (d : C.Region.destination) value =
+  let ran = value == d.produced in
+  List.iter
+    (fun n -> if a.plan.first.(n) >= 0 then a.verified.(n) <- a.verified.(n) && ran)
+    args;
+  if a.plan.first.(result) >= 0 then begin
+    let size =
+      match value with
+      | E.Int_array data when ran -> (2 * Array.length data) + 1
+      | (E.Float_array data | Vec2_array data | Vec3_array data | Vec4_array data) when ran ->
+          2 * Array.length data
+      | _ -> -1
+    in
+    a.verified.(result) <- size >= 0;
+    if a.sizes.(result) <> size then begin
+      a.sizes.(result) <- size;
+      a.dirty <- true
+    end
+  end
+
+let arena_finish a =
+  if a.dirty then begin
+    a.dirty <- false;
+    a.assignment <- arena_buffers ~first:a.plan.first ~last:a.plan.last ~size:a.sizes;
+    let wanted = Array.make (Array.length a.buffers) false in
+    Array.iter (fun buffer -> if buffer >= 0 then wanted.(buffer) <- true) a.assignment;
+    Array.iteri (fun i keep -> if not keep then a.buffers.(i) <- E.No_geo) wanted
+  end
+
 type state = {
+  arena : arena option;
   values : E.value array;
   mutable builders : bool ref option array;
   (* allocated by the first builder, so a call that builds nothing pays nothing *)
@@ -73,6 +194,9 @@ type prepared = {
   stateless : bool;
       (* no state slot and no region: a failure leaves the evaluation state untouched *)
   scalar : scalar option;
+  arena_plan : arena_plan option;
+  arena_pool : arena option Atomic.t; (* [None] when taken, as [pool] *)
+  arena_kills : bool;
 }
 
 exception Non_finite
@@ -736,6 +860,51 @@ let remember (reads, writes) run =
 let bind_arguments st packed args =
   Packed.Host.bind_arguments packed (Array.of_list (List.map (Array.get st.values) args))
 
+(* The arrays a program can drop at their last read: a result of a top-level region, its local written
+   once, read only by regions and [array/count] (the rule of [resident_tail]), so nothing outside
+   the program ever holds it. A memoized statement's arrays stay; so does a fused or kept region's. *)
+let arena_plan ~remember_loops ~excluded (program : C.program) =
+  let n = Array.length program.locals in
+  let first = Array.make n (-1) and last = Array.make n (-1) and written = Array.make n 0 in
+  let remembered s = remember_loops && Option.is_some (footprint program s) in
+  C.iter
+    (fun s -> List.iter (fun w -> written.(w) <- written.(w) + 1) (C.writes s))
+    program.body;
+  List.iteri
+    (fun i (s : C.statement) ->
+      match s.node with
+      | Invoke { region; result; _ }
+        when written.(result) = 1
+             && (not (excluded region result))
+             && (not (remembered s))
+             && (match program.locals.(result) with
+                | Flow.Ty.Array (Int | Float | Vec2 | Vec3 | Vec4) -> true
+                | _ -> false) ->
+          first.(result) <- i
+      | _ -> ())
+    program.body;
+  Array.iter (fun n -> first.(n) <- -1) program.results;
+  C.iter
+    (fun (s : C.statement) ->
+      match s.node with
+      | Invoke _ | Assign (_, Prim (Array_count, _)) -> ()
+      | _ -> List.iter (fun n -> first.(n) <- -1) (C.reads s))
+    program.body;
+  List.iteri
+    (fun i (s : C.statement) ->
+      List.iter
+        (fun n ->
+          if remembered s then first.(n) <- -1;
+          last.(n) <- max last.(n) i)
+        (mentions [] s))
+    program.body;
+  if Array.for_all (fun at -> at < 0) first then None
+  else begin
+    let dying = Array.make (List.length program.body) [] in
+    Array.iteri (fun n at -> if at >= 0 then dying.(last.(n)) <- n :: dying.(last.(n))) first;
+    Some { first; last; dying = Array.map Array.of_list dying }
+  end
+
 let prepare_invoke packed ~args ~result ~on_device ~keep =
   let packed = if args = [] then Packed.Host.bind_arguments packed [||] else Ok packed in
   let kept = ref None in
@@ -808,6 +977,14 @@ let prepare_invoke packed ~args ~result ~on_device ~keep =
                   bind unbound
               | _ -> packed
             in
+            let destination =
+              Option.map
+                (fun a -> { C.Region.buffer = arena_take a result; produced = E.No_geo })
+                st.arena
+            in
+            let packed =
+              Option.fold ~none:packed ~some:(C.Region.with_destination packed) destination
+            in
             match
               match st.force with
               | Some force -> force packed
@@ -815,6 +992,7 @@ let prepare_invoke packed ~args ~result ~on_device ~keep =
             with
             | Ok v ->
                 st.values.(result) <- v;
+                Option.iter (fun a -> arena_ran a ~result ~args (Option.get destination) v) st.arena;
                 if keep && st.marks <> None then kept := Some v
             | Error d -> fail d)
 
@@ -850,7 +1028,8 @@ let prepare_group (group : Core_draw.group) fallback =
             outputs
       | Ok _ | Error _ -> original st
 
-let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(fast = false)
+let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty)
+    ?(fast = false)
     (program : C.program) =
   let track = builds program.body in
   let device_ok, groups =
@@ -1106,11 +1285,18 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
         | _ -> [])
       statements
   in
+  let planned =
+    arena_plan ~remember_loops program ~excluded:(fun region result ->
+        fused.(region) <> None || static_ok.(result))
+  in
   let rec block statements =
     let statements =
       if !in_loop then List.filter (fun s -> not (hoisted s)) statements else statements
     in
     let top = not !in_loop in
+    let arena_dying =
+      if statements == program.body then Option.map (fun plan -> plan.dying) planned else None
+    in
     let run =
       Array.of_list
         (List.map
@@ -1134,6 +1320,16 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
                  match footprint program s with Some f -> remember f run | None -> run)
              | _ -> statement s)
            statements)
+      |> Array.mapi (fun i run ->
+          match arena_dying with
+          | Some dying when dying.(i) <> [||] -> (
+              let dying = dying.(i) in
+              fun st ->
+                run st;
+                match st.arena with
+                | Some a -> Array.iter (arena_die a st.values) dying
+                | None -> ())
+          | _ -> run)
     and spans = Array.of_list (List.map (fun (s : C.statement) -> s.source.span) statements) in
     (* The innermost block that sees an unlocated failure gives it its statement's span. *)
     fun st ->
@@ -1425,6 +1621,9 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
     pooled = Array.length program.locals > 256 || Array.for_all plain program.locals;
     stateless = Array.length program.state_slots = 0 && Array.length program.regions = 0;
     scalar = scalar_program program;
+    arena_plan = planned;
+    arena_pool = Atomic.make None;
+    arena_kills = clobber;
   }
 
 (* Array.make is a C call even for zero slots. *)
@@ -1432,6 +1631,18 @@ let call_counters (program : C.program) =
   if program.call_slots = 0 then [||] else Array.make program.call_slots 0
 
 let has_regions prepared = Array.length prepared.program.regions > 0
+
+(* Only a pure CPU run drops arrays: a device keeps uploads by an array's identity, and an enclosing
+   run's [Scope] finds results by it. *)
+let arena_for prepared ~device =
+  match prepared.arena_plan with
+  | Some plan when (not device) && Packed.Host.scope_idle () -> (
+      match Atomic.exchange prepared.arena_pool None with
+      | Some a ->
+          Array.fill a.verified 0 (Array.length a.verified) false;
+          Some a
+      | None -> Some (arena_new plan ~kills:prepared.arena_kills))
+  | _ -> None
 
 let rec general root force resolve resident host_source prepared live =
   match Input.validate live with
@@ -1455,8 +1666,10 @@ and general_values root force resolve resident host_source prepared live =
           | [||] -> Array.make n E.No_geo
           | values -> values
       in
+      let arena = arena_for prepared ~device:(Option.is_some resident) in
       let st =
         {
+          arena;
           values;
           builders = [||];
           calls = call_counters program;
@@ -1484,6 +1697,11 @@ and general_values root force resolve resident host_source prepared live =
             Error (Diagnostic.error ~code:"E_CORE" "Invalid core program.")
       in
       if pooled then Atomic.set prepared.pool values;
+      Option.iter
+        (fun a ->
+          arena_finish a;
+          Atomic.set prepared.arena_pool arena)
+        arena;
       result
 
 let attempt ?root ?force ?resolve ?resident ?host_source prepared ~live =
@@ -1559,8 +1777,12 @@ let draw ?root ?force ?resolve ?device ?resident ?image prepared ~live ~size ~bu
                image)
           ~size buffers
       in
+      let arena =
+        arena_for prepared ~device:(Option.is_some device || Option.is_some resident)
+      in
       let st =
         {
+          arena;
           values = Array.make (Array.length program.locals) E.No_geo;
           builders = [||];
           calls = call_counters program;
@@ -1580,6 +1802,11 @@ let draw ?root ?force ?resolve ?device ?resident ?image prepared ~live ~size ~bu
       let close () = Option.iter (fun r -> r.close ()) resident in
       try
         Fun.protect ~finally:close (fun () -> prepared.body st);
+        Option.iter
+          (fun a ->
+            arena_finish a;
+            Atomic.set prepared.arena_pool arena)
+          arena;
         Ok (Core_marks.finish sink)
       with
       | Diagnostic.Error d -> Error d

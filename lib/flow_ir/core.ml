@@ -338,7 +338,10 @@ module Region = struct
   type origin = Flow.Workspace.path * int list
   type count_source = Flow.Eval.residual -> Flow.Workspace.term -> origin option
 
+  type destination = { buffer : Flow.Eval.value; mutable produced : Flow.Eval.value }
+
   type t = {
+    destination : destination option;
     residual : Flow.Eval.residual;
     term : Flow.Workspace.term;
     sources : (Flow.Eval.residual * Flow.Workspace.term) array;
@@ -362,6 +365,24 @@ module Region = struct
     binding_fn : string option;
     sites : (int * Flow.Workspace.path * int list) list;
   }
+
+  let with_destination t destination = { t with destination = Some destination }
+
+  let floats_for t length =
+    match t.destination with
+    | Some { buffer = Flow.Eval.Float_array data; _ }
+      when Array.length data = length && Array.length t.outputs = 1 ->
+        data
+    | _ -> Array.make length 0.
+
+  let ints_for t length =
+    match t.destination with
+    | Some { buffer = Flow.Eval.Int_array data; _ }
+      when Array.length data = length && Array.length t.outputs = 1 ->
+        data
+    | _ -> Array.make length 0
+
+  let finished t value = match t.destination with None -> () | Some d -> d.produced <- value
 
   let dependent_of code =
     let dependent = Array.make (Array.length code) false in
@@ -699,6 +720,7 @@ module Region = struct
         body;
         binding_fn;
         sites;
+        destination = None;
       }
 
   let rebuild t ?residual ?term ?sources ?widths ?uniforms ?uniform_names ?code ?outputs ?count

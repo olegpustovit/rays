@@ -733,13 +733,13 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
         else if integer_outputs.(k) then begin
           if kept > Sys.max_array_length then
             V.fail "E_ARRAY_RANGE" "Array length is outside native storage bounds.";
-          E.Int_array (Array.make kept 0)
+          E.Int_array (Core.Region.ints_for t kept)
         end
         else
           let width = Array.length registers in
           if kept > Sys.max_floatarray_length / width then
             V.fail "E_ARRAY_RANGE" "Array length is outside native storage bounds.";
-          let data = Array.make (kept * width) 0. in
+          let data = Core.Region.floats_for t (kept * width) in
           match width with
           | 2 -> E.Vec2_array data
           | 3 -> E.Vec3_array data
@@ -1639,6 +1639,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
     (fun (clock, report) ->
       report t ~seconds:(max 0. (clock () -. Option.get started -. !excluded)) ~reference:false)
     measure;
+  (match result with [ value ] -> Core.Region.finished t value | _ -> ());
   result
 
 let ordered_add (t : t) =
@@ -2941,7 +2942,8 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
           let outputs =
             Array.map
               (fun width ->
-                Array.make (if collecting && plane_outputs = None then kept * width else 0) 0.)
+                Core.Region.floats_for t
+                  (if collecting && plane_outputs = None then kept * width else 0))
               widths
           in
           let accumulator =
@@ -3089,6 +3091,7 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
             (fun (clock, report) ->
               report t ~seconds:(max 0. (clock () -. Option.get started)) ~reference:false)
             measure;
+          (match value with [ value ] -> Core.Region.finished t value | _ -> ());
           value)
   in
   let result =
@@ -3132,6 +3135,8 @@ let force_into ?dispatch ?state ?elems ?resolve ?measure ?strict ~column_source 
        ?resolve ?measure ?strict t ~live)
 
 module Host = struct
+  let scope_idle () = !(Domain.DLS.get Scope.current) = None
+
   let argument_types (t : t) =
     let types = Hashtbl.create 8 and visited = Hashtbl.create 8 in
     let rec value = function
