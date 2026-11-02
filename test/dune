@@ -17,14 +17,18 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_main)
  (modules test_main dependency_gate private_allowlist)
  (libraries unix str compiler-libs.common))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias dependency_gate)
  (deps
   (source_tree ../lib)

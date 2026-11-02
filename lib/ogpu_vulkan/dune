@@ -1,0 +1,8 @@
+(library
+ (enabled_if
+  (= %{system} mingw64))
+ (name ogpu_vulkan)
+ (public_name rays.ogpu_vulkan)
+ (implements ogpu)
+ (modules Impl)
+ (libraries ogpu_core))

@@ -71,10 +71,12 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name bench_gpu)
  (modules bench_gpu)
- (libraries ogpu ogpu_metal renderer rays_math unix parallel))
+ (libraries ogpu ogpu_native renderer rays_math unix parallel))
 
 (executable
  (name bench_source_poll)
@@ -110,7 +112,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name bench_shattered_renderer)
  (modules bench_shattered_renderer)
  (libraries
@@ -121,13 +125,15 @@
   rdk_rays
   sop
   rays_editor
-  ogpu_metal
+  ogpu_native
   unix
   parallel))
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name render_workspace)
  (modules render_workspace)
  (libraries
@@ -141,7 +147,7 @@
   flow_sop
   editor_document
   rays_editor
-  ogpu_metal
+  ogpu_native
   parallel
   runtime_resources
   unix))
@@ -153,7 +159,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name bench_sop_cook)
  (modules bench_sop_cook)
  (libraries
@@ -178,17 +186,21 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name bench_rays_editor)
  (modules bench_rays_editor)
- (libraries rays sop flow flow_graph rays_editor ogpu_metal unix parallel))
+ (libraries rays sop flow flow_graph rays_editor ogpu_native unix parallel))
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name ui_shot)
  (modules ui_shot)
- (libraries rays rays_editor sop rdk rdk_rays flow ogpu_metal parallel))
+ (libraries rays rays_editor sop rdk rdk_rays flow ogpu_native parallel))
 
 ; Keep the backend-neutral benches buildable on every host.
 
@@ -208,7 +220,9 @@
 
 (alias
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name bench-build-native)
  (deps bench_gpu.exe bench_rays_editor.exe bench_shattered_renderer.exe))
 
@@ -252,7 +266,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification-web)
  (deps
   web/test/present_e2e.mjs
@@ -272,7 +288,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification-web)
  (deps
   web/test/present_e2e.mjs
@@ -292,7 +310,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification-web)
  (deps
   web/test/live_check.mjs
@@ -312,7 +332,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification-web)
  (deps
   web/test/present_check.mjs
@@ -350,7 +372,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name marks_shot)
  (modules marks_shot)
  (libraries
@@ -362,7 +386,7 @@
   flow_native
   sop
   ogpu
-  ogpu_metal
+  ogpu_native
   renderer
   input
   rays
@@ -374,7 +398,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification-web-marks)
  (deps
   web/test/gpu_marks_e2e.mjs
@@ -398,7 +424,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification-web)
  (deps
   web/test/gpu_images_e2e.mjs
@@ -422,7 +450,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification-web)
  (deps
   web/test/open_all.mjs
@@ -442,15 +472,17 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name bench_check)
  (modules bench_check)
- (libraries flow sop flow_sop editor_document rays_pathtracer ogpu_metal))
+ (libraries flow sop flow_sop editor_document rays_pathtracer ogpu_native))
 
 (executable
  (name test_isogrid)
  (modules test_isogrid)
- (libraries flow flow_ir flow_gpu renderer ogpu_metal unix))
+ (libraries flow flow_ir flow_gpu renderer ogpu_native unix))
 
 (rule
  (alias isogrid)
@@ -458,7 +490,9 @@
  (action (run %{exe:test_isogrid.exe} ../sketches/isogrid.rays)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid)
  (deps ../sketches/isogrid.rays isogrid_12.expected)
  (action
@@ -467,7 +501,9 @@
     --check-goldens tools/isogrid_12.expected))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-24)
  (deps ../sketches/isogrid.rays isogrid_24.expected)
  (action
@@ -476,7 +512,9 @@
     --check-goldens tools/isogrid_24.expected --shard 0/2))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-24)
  (deps ../sketches/isogrid.rays isogrid_24.expected)
  (action
@@ -487,7 +525,9 @@
 (alias (name qualification-scale) (deps (alias isogrid-24)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-deferred)
  (deps ../sketches/isogrid.rays isogrid_12.expected)
  (action
@@ -496,7 +536,9 @@
     --check-deferred tools/isogrid_12.expected --shard 0/2))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-deferred)
  (deps ../sketches/isogrid.rays isogrid_12.expected)
  (action
@@ -505,7 +547,9 @@
     --check-deferred tools/isogrid_12.expected --shard 1/2))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-deferred-24)
  (deps ../sketches/isogrid.rays isogrid_24.expected)
  (action
@@ -514,7 +558,9 @@
     --check-deferred tools/isogrid_24.expected))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-deferred-64)
  (deps ../sketches/isogrid.rays isogrid_64.expected)
  (action
@@ -523,7 +569,9 @@
     --check-deferred tools/isogrid_64.expected --shard 0/3))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-deferred-64)
  (deps ../sketches/isogrid.rays isogrid_64.expected)
  (action
@@ -532,7 +580,9 @@
     --check-deferred tools/isogrid_64.expected --shard 1/3))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-deferred-64)
  (deps ../sketches/isogrid.rays isogrid_64.expected)
  (action
@@ -546,7 +596,9 @@
  (deps (alias isogrid-deferred-24) (alias isogrid-deferred-64)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification-scale)
  (deps ../sketches/isogrid.rays isogrid_64.expected)
  (action
@@ -568,7 +620,9 @@
  (deps (alias isogrid-native)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-measured-64)
  (deps ../sketches/isogrid.rays isogrid_64.expected)
  (action
@@ -583,7 +637,9 @@
 (alias (name qualification-scale) (deps (alias isogrid-defer-spike-64)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias isogrid-selector-lifetimes)
  (locks %{workspace_root}/smoke_window)
  (deps ../sketches/isogrid.rays isogrid_24.expected)
@@ -595,12 +651,14 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name mem_gate)
  (modules mem_gate)
  (libraries
   mem
-  ogpu_metal
+  ogpu_native
   rays_editor
   editor_document
   flow
@@ -609,7 +667,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias mem)
  (deps
   ../specification/memory-budgets.sexp

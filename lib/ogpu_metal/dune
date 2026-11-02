@@ -79,6 +79,8 @@
 (test
  (enabled_if
   (= %{system} macosx))
+ (build_if
+  (= %{system} macosx))
  (name test_device_error)
  (modules test_device_error)
  (libraries ogpu_metal_native metal))

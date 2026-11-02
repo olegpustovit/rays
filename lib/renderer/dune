@@ -174,21 +174,27 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_gpu_draw)
  (modules test_gpu_draw)
- (libraries renderer scene_command ogpu ogpu_metal))
+ (libraries renderer scene_command ogpu ogpu_native))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (action
   (run %{exe:test_gpu_draw.exe})))
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_main)
  (modules
   test_main
@@ -203,11 +209,13 @@
   test_scene2_argument
   test_scene3_instances
   test_scene3_lighting)
- (libraries renderer scene_command ogpu ogpu_metal unix))
+ (libraries renderer scene_command ogpu ogpu_native unix))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_runtime_render)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -215,7 +223,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene2_argument)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -223,14 +233,18 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene3_instances)
  (action
   (run %{exe:test_main.exe} test_scene3_instances)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene3_lighting)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -238,49 +252,63 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_offscreen)
  (action
   (run %{exe:test_main.exe} test_offscreen)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene2_coordinates)
  (action
   (run %{exe:test_main.exe} test_scene2_coordinates)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_dense_scene2)
  (action
   (run %{exe:test_main.exe} test_dense_scene2)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_ui_pipeline)
  (action
   (run %{exe:test_main.exe} test_ui_pipeline)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_marks_native)
  (action
   (run %{exe:test_main.exe} test_marks_native)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_batch_merge)
  (action
   (run %{exe:test_main.exe} test_batch_merge)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_shapes_lowering)
  (action
   (run %{exe:test_main.exe} test_shapes_lowering)))

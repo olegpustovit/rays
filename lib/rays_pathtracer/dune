@@ -38,7 +38,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_main)
  (modules
   test_main
@@ -53,7 +55,7 @@
   renderer
   runtime_resources
   ogpu
-  ogpu_metal
+  ogpu_native
   rdk
   rdk_test_support
   rdk_rays
@@ -62,7 +64,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_pathtracer)
  (action
   (run %{exe:test_main.exe} test_pathtracer)))
@@ -73,7 +77,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_pathtracer_exact_m1)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -81,7 +87,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_world)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -89,7 +97,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_gpu_film)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -97,7 +107,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -105,7 +117,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene)
  (action
   (run %{exe:test_main.exe} test_scene)))
@@ -128,14 +142,18 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_lisp)
  (modules test_lisp)
- (libraries rays rays_pathtracer flow ogpu_metal rays_math unix))
+ (libraries rays rays_pathtracer flow ogpu_native rays_math unix))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (action
   (run %{exe:test_lisp.exe})))

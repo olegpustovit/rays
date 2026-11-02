@@ -48,7 +48,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_frame_alloc)
  (modules test_frame_alloc)
  (libraries
@@ -57,12 +59,14 @@
   flow
   flow_sop
   editor_document
-  ogpu_metal
+  ogpu_native
   input))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (deps ../../sketches/recursive_signals.rays)
  (action

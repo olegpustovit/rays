@@ -6,7 +6,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_main)
  (modules
   test_main
@@ -15,11 +17,13 @@
   test_input
   test_keyboard
   test_table)
- (libraries rays rays_math pxui scene_command sdl3 ogpu_metal mem))
+ (libraries rays rays_math pxui scene_command sdl3 ogpu_native mem))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_ui_parity)
  (deps
   fixtures/kit_panel_2x.png
@@ -37,7 +41,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_ui)
  ; pointer positions in the text tests assume the golden face's advance
  (action
@@ -51,7 +57,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_ui_commands)
  (action
   (setenv
@@ -64,7 +72,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_input)
  (action
   (setenv
@@ -74,7 +84,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_keyboard)
  (action
   (setenv
@@ -84,7 +96,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_table)
  (action
   (setenv

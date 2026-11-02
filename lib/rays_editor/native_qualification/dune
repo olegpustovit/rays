@@ -1,6 +1,8 @@
 (executables
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (names
   test_workspace_gpu_native
   test_workspace_gpu_marks
@@ -46,7 +48,7 @@
   lru
   runtime_resources
   ogpu
-  ogpu_metal
+  ogpu_native
   sop
   rdk
   rdk_rays
@@ -63,14 +65,18 @@
   parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_isogrid_resident)
  (action (run %{exe:bench_isogrid_resident.exe} %{dep:../../../sketches/isogrid.rays})))
 
 (alias (name runtest-native) (deps (alias test_isogrid_resident)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_isogrid_viewport)
  (deps ../../../sketches/isogrid.rays)
  (action (run %{exe:test_isogrid_viewport.exe} %{dep:../../../sketches/isogrid.rays})))
@@ -78,7 +84,9 @@
 (alias (name runtest-native) (deps (alias test_isogrid_viewport)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_isogrid_viewport_all)
  (deps ../../../sketches/isogrid.rays)
  (action (run %{exe:test_isogrid_viewport.exe} %{dep:../../../sketches/isogrid.rays} --all-recipes)))
@@ -86,7 +94,9 @@
 (alias (name qualification-scale) (deps (alias test_isogrid_viewport_all)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_placement_native)
  (deps ../../../sketches/isogrid.rays)
  (action (run %{exe:test_placement_native.exe} %{dep:../../../sketches/isogrid.rays})))
@@ -94,7 +104,9 @@
 (alias (name runtest-native) (deps (alias test_placement_native)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_live_mesh_native)
  (deps ../../../sketches/gpu_sea.rays)
  (action (run %{exe:test_live_mesh_native.exe})))
@@ -102,7 +114,9 @@
 (alias (name runtest-native) (deps (alias test_live_mesh_native)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_holder_frames_native)
  (action
   (run %{exe:test_holder_frames_native.exe} %{dep:../../../sketches/gpu_sea.rays}
@@ -112,7 +126,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (deps ../../../sketches/gpu_sea.rays)
  (action
@@ -129,7 +145,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scrub_gpu_native)
  (deps ../../../sketches/gpu_sea.rays)
  (action
@@ -140,7 +158,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_gpu_marks)
  (action
   (run %{exe:test_workspace_gpu_marks.exe})))
@@ -152,27 +172,35 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification)
  (action
   (run %{exe:test_workspace_gpu_native.exe} --capture-budget)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification)
  (action
   (run %{exe:test_chain_gpu_native.exe})))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_placement_lifetimes)
  (action (run %{exe:test_placement_native.exe} --lifetimes)))
 
 (alias (name qualification-scale) (deps (alias test_placement_lifetimes)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias bench_isogrid_cost)
  (deps ../../../sketches/isogrid.rays)
  (action
@@ -185,7 +213,9 @@
 (alias (name qualification-scale) (deps (alias bench_isogrid_cost)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias bench_isogrid_present)
  (locks %{workspace_root}/smoke_window)
  (deps ../../../sketches/isogrid.rays)
@@ -199,7 +229,9 @@
 (alias (name qualification-scale) (deps (alias bench_isogrid_present)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_isogrid_resident_64)
  (action
   (run %{exe:bench_isogrid_resident.exe} %{dep:../../../sketches/isogrid.rays} --resolution 64)))

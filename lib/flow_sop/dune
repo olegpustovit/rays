@@ -257,13 +257,17 @@
   (diff flow_manifest.sexp flow_manifest.gen.sexp)))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_mesh_resident)
  (modules test_mesh_resident)
- (libraries flow_sop flow_gpu flow_ir flow renderer rdk sop ogpu ogpu_metal parallel))
+ (libraries flow_sop flow_gpu flow_ir flow renderer rdk sop ogpu ogpu_native parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_mesh_resident)
  (action (run %{exe:test_mesh_resident.exe})))
 

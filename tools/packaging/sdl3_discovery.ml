@@ -201,6 +201,7 @@ let static_libraries details package core override_directory =
 let platform_libraries config libraries =
   match C.ocaml_config_var config "system" with
   | Some "macosx" -> "-Wl,-no_warn_duplicate_libraries" :: libraries
+  | Some "mingw64" -> List.filter (fun flag -> flag <> "-mwindows") libraries (* flexlink refuses it, and a console program keeps its output *)
   | _ -> libraries
 
 (* The version pkg-config reports for the installed package, as the number

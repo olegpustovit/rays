@@ -1,19 +1,23 @@
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_workspace_ir)
  (modules test_workspace_ir)
  (libraries
   editor_prepare
   workspace_parity
   rays_editor
-  ogpu_metal
+  ogpu_native
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_ir)
  (deps
   (source_tree ../../../sketches)
@@ -28,7 +32,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_ir)
  (deps
   (source_tree ../../../sketches)
@@ -43,7 +49,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_ir)
  (deps
   (source_tree ../../../sketches)
@@ -58,7 +66,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_pixels)
  (locks %{workspace_root}/smoke_window)
  (deps
@@ -74,7 +84,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene3_float32_gallery)
  (locks %{workspace_root}/smoke_window)
  (deps
@@ -103,7 +115,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_main)
  (modules
   test_main
@@ -162,7 +176,7 @@
   rays.sdl3
   lisp_sop
   parallel
-  ogpu_metal)
+  ogpu_native)
  (preprocess
   (pps rays.ppx))
  (link_flags -linkall))
@@ -170,7 +184,9 @@
 (test
  (name test_host_effects)
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (modules test_host_effects)
  (libraries
   editor_prepare
@@ -179,7 +195,7 @@
   rays_editor
   editor_document
   flow
-  ogpu_metal
+  ogpu_native
   parallel)
  (action
   (setenv
@@ -189,7 +205,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_gallery_shapes)
  (modules test_gallery_shapes)
  (libraries
@@ -200,12 +218,14 @@
   sop
   lisp_sop
   flow
-  ogpu_metal
+  ogpu_native
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_gallery_shapes)
  (deps ../../../sketches/sop_gallery.rays)
  (action
@@ -213,7 +233,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_gallery_shapes_native)
  (locks %{workspace_root}/smoke_window)
  (deps ../../../sketches/sop_gallery.rays)
@@ -259,7 +281,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_workspace_images_native)
  (modules test_workspace_images_native)
  (libraries
@@ -272,7 +296,7 @@
   flow_sop
   sop
   ogpu
-  ogpu_metal
+  ogpu_native
   runtime_resources
   unix
   parallel))
@@ -299,7 +323,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_images_native)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -386,14 +412,18 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_rays)
  (action
   (run %{exe:test_main.exe} test_rays)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_text_pane)
  ; pointer positions assume the golden face's advance
  (action
@@ -404,7 +434,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_editor_consistency)
  (deps ../../../sketches/gpu_sea.rays)
  (action
@@ -412,7 +444,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_editor_consistency_native)
  (deps ../../../sketches/gpu_sea.rays)
  (locks %{workspace_root}/smoke_window)
@@ -421,7 +455,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias sop_render_parity)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -434,21 +470,27 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_sop_ui)
  (action
   (run %{exe:test_main.exe} test_sop_ui)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_custom_sop)
  (action
   (run %{exe:test_main.exe} test_custom_sop)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_rays_editor)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -456,35 +498,45 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_rays_editor_logic)
  (action
   (run %{exe:test_main.exe} test_rays_editor_logic)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_editor_document)
  (action
   (run %{exe:test_main.exe} test_editor_document)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_editor_input)
  (action
   (run %{exe:test_main.exe} test_editor_input)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_editor_commands)
  (action
   (run %{exe:test_main.exe} test_editor_commands)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_editor_canvas_native)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -497,28 +549,36 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_world_command)
  (action
   (run %{exe:test_main.exe} test_world_command)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_editor_cook)
  (action
   (run %{exe:test_main.exe} test_editor_cook)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_editor_transactions)
  (action
   (run %{exe:test_main.exe} test_editor_transactions)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene_tree)
  (action
   (setenv
@@ -528,7 +588,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene_sync)
  (deps
   (glob_files_rec ../../../sketches/*.rays))
@@ -537,7 +599,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene_sync)
  (deps
   (glob_files_rec ../../../sketches/*.rays))
@@ -546,7 +610,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_scene_sync)
  (deps
   (glob_files_rec ../../../sketches/*.rays))
@@ -555,7 +621,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_sop_catalog)
  (deps ../../../sketches/ws_morph.rays ../../../sketches/sop_gallery.rays)
  (action
@@ -563,7 +631,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_sop_catalog)
  (deps ../../../sketches/ws_morph.rays ../../../sketches/sop_gallery.rays)
  (action
@@ -571,7 +641,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_sop_catalog_exhaustive)
  (deps ../../../sketches/ws_morph.rays ../../../sketches/sop_gallery.rays)
  (action
@@ -579,21 +651,27 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_packed_pieces)
  (action
   (run %{exe:test_main.exe} test_packed_pieces)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_terminal_boolean_normals)
  (action
   (run %{exe:test_main.exe} test_terminal_boolean_normals)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_live)
  (deps
   (glob_files ../../../specification/workspace/cases/*.lisp))
@@ -602,7 +680,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_shell)
  (deps
   (env_var RAYS_SLOW)
@@ -613,7 +693,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_shell)
  (deps
   (env_var RAYS_SLOW)
@@ -624,7 +706,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_shell)
  (deps
   (env_var RAYS_SLOW)
@@ -635,7 +719,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_shell)
  (deps
   (env_var RAYS_SLOW)
@@ -646,7 +732,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_shell_slow)
  (deps
   (glob_files ../../../specification/workspace/cases/*.lisp)
@@ -659,7 +747,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_shell_native)
  (locks %{workspace_root}/smoke_window)
  (deps
@@ -669,7 +759,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_roots_native)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -677,7 +769,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_view_native)
  (locks %{workspace_root}/smoke_window)
  (deps ../../../sketches/shattered_cube.rays)
@@ -686,7 +780,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_doc)
  (deps
   (glob_files ../../../specification/workspace/cases/*.lisp)
@@ -697,7 +793,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_doc)
  (deps
   (glob_files ../../../specification/workspace/cases/*.lisp)
@@ -708,7 +806,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_doc)
  (deps
   (glob_files ../../../specification/workspace/cases/*.lisp)
@@ -719,7 +819,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_probe)
  (deps
   (glob_files ../../../specification/workspace/cases/*.lisp))
@@ -728,7 +830,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_viewport_pick)
  (deps
   (glob_files ../../../specification/workspace/cases/*.lisp))
@@ -737,21 +841,27 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_source)
  (action
   (run %{exe:test_main.exe} test_workspace_source)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_vocabulary)
  (action
   (run %{exe:test_main.exe} test_workspace_vocabulary)))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_bloom_studio)
  (deps
   ../../../sketches/ws_bloom.rays
@@ -760,7 +870,9 @@
   (run %{exe:test_main.exe} test_bloom_studio)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_history_memory)
  (action
   (run %{exe:test_main.exe} test_history_memory)))
@@ -806,7 +918,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_2d_ports)
  (modules test_2d_ports)
  (libraries
@@ -819,13 +933,15 @@
   flow
   editor_document
   scene_command
-  ogpu_metal
+  ogpu_native
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_2d_ports)
  (deps)
  (action
@@ -841,7 +957,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (locks %{workspace_root}/smoke_window)
  (deps (glob_files ../../../sketches/*.rays))
@@ -854,7 +972,9 @@
 (rule
  (enabled_if
   (and
+   (or
    (= %{system} macosx)
+   (= %{system} mingw64))
    (= %{env:RAYS_SLOW=0} 1)))
  (alias runtest-native)
  (locks %{workspace_root}/smoke_window)
@@ -867,7 +987,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -878,7 +1000,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_drawing)
  (modules test_drawing)
  (libraries
@@ -895,26 +1019,32 @@
   input
   editor_core
   unix
-  ogpu_metal
+  ogpu_native
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest)
  (action
   (run %{exe:test_drawing.exe} %{dep:../../../sketches/particles.rays})))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_drawing)
  (action
   (run %{exe:test_drawing.exe} %{dep:../../../sketches/particles.rays})))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_drawing_native)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -930,7 +1060,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_workspace_start)
  (modules test_workspace_start)
  (libraries
@@ -938,13 +1070,15 @@
   rays_editor
   editor_document
   flow
-  ogpu_metal
+  ogpu_native
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_start_error)
  (action
   (run %{exe:test_workspace_start.exe} errors)))
@@ -956,7 +1090,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_workspace_start)
  (locks %{workspace_root}/smoke_window)
  (action

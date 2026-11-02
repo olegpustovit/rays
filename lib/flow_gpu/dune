@@ -90,26 +90,34 @@
    (progn (echo "let source = {msl|") (cat compact_uint32.metal) (echo "|msl}\n")))))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_uint32)
  (modules test_uint32)
- (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal parallel unix))
+ (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_native parallel unix))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_uint32)
  (action (run %{exe:test_uint32.exe})))
 
 (alias (name runtest-native) (deps (alias test_uint32)))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_triangles)
  (modules test_triangles)
- (libraries flow_gpu renderer ogpu ogpu_metal rdk unix))
+ (libraries flow_gpu renderer ogpu ogpu_native rdk unix))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_triangles)
  (action (run %{exe:test_triangles.exe})))
 
@@ -200,7 +208,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_run)
  (modules test_run)
  (libraries
@@ -211,7 +221,7 @@
   flow_ir_test_support
   renderer
   ogpu
-  ogpu_metal
+  ogpu_native
   scene_command
   input
   unix
@@ -219,7 +229,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_run)
  (action
   (run %{exe:test_run.exe})))
@@ -231,7 +243,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_image_sink_native)
  (modules test_image_sink_native)
  (libraries
@@ -245,13 +259,15 @@
   rays_math
   renderer
   ogpu
-  ogpu_metal
+  ogpu_native
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (action
   (run %{exe:test_image_sink_native.exe})))
@@ -297,7 +313,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_resolve)
  (modules test_resolve)
  (libraries
@@ -307,14 +325,16 @@
   flow_ir_test_support
   renderer
   ogpu
-  ogpu_metal
+  ogpu_native
   input
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (deps ../rays_pathtracer/resolve_preview.rays)
  (action
@@ -324,7 +344,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_trace)
  (modules test_trace)
  (libraries
@@ -338,21 +360,25 @@
   rdk_test_support
   renderer
   ogpu
-  ogpu_metal
+  ogpu_native
   input
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (action
   (run %{exe:test_trace.exe})))
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_helpers)
  (modules test_helpers)
  (libraries
@@ -362,14 +388,16 @@
   flow_ir_test_support
   renderer
   ogpu
-  ogpu_metal
+  ogpu_native
   input
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (deps ../rays_pathtracer/pathtrace_helpers.rays)
  (action
@@ -379,7 +407,9 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_film)
  (modules test_film)
  (libraries
@@ -389,21 +419,25 @@
   flow_ir_test_support
   renderer
   ogpu
-  ogpu_metal
+  ogpu_native
   input
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (action
   (run %{exe:test_film.exe})))
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_sampling)
  (modules test_sampling)
  (libraries
@@ -413,14 +447,16 @@
   flow_ir_test_support
   renderer
   ogpu
-  ogpu_metal
+  ogpu_native
   input
   unix
   parallel))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtest-native)
  (deps ../rays_pathtracer/pathtrace_helpers.rays)
  (action
@@ -434,5 +470,5 @@
  (deps
   (glob_files *.spv)
   (glob_files ../renderer/*.spv)
-  (glob_files ../ogpu_metal/*.spv))
+  (glob_files ../ogpu_native/*.spv))
  (libraries test_support))

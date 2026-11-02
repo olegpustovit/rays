@@ -114,6 +114,8 @@
 (test
  (enabled_if
   (= %{system} macosx))
+ (build_if
+  (= %{system} macosx))
  (name test_metal_build_config)
  (modules test_metal_build_config)
  (libraries metal_build_config))

@@ -1,13 +1,17 @@
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name runtime_native_qualification)
  (modules runtime_native_qualification)
- (libraries renderer runtime runtime_input ogpu ogpu_metal sdl3 unix yojson))
+ (libraries renderer runtime runtime_input ogpu ogpu_native sdl3 unix yojson))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias qualification)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -15,17 +19,21 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name runtime_autorelease)
  (modules runtime_autorelease)
  (foreign_stubs
   (language c)
   (names runtime_autorelease_stubs))
- (libraries renderer runtime ogpu ogpu_metal sdl3 unix))
+ (libraries renderer runtime ogpu ogpu_native sdl3 unix))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtime_autorelease)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -33,14 +41,18 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name runtime_live_resize)
  (modules runtime_live_resize)
- (libraries renderer runtime runtime_input ogpu ogpu_metal sdl3 unix))
+ (libraries renderer runtime runtime_input ogpu ogpu_native sdl3 unix))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias runtime_live_resize)
  (locks %{workspace_root}/smoke_window)
  (action

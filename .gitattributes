@@ -1,0 +1,2 @@
+# Fixtures, goldens and sources stay byte-identical on every platform.
+* text=auto eol=lf

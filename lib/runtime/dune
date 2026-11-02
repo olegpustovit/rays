@@ -13,14 +13,18 @@
 
 (executable
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (name test_main)
  (modules test_main test_runtime_visibility test_runtime_input)
- (libraries runtime runtime_input ogpu ogpu_metal sdl3))
+ (libraries runtime runtime_input ogpu ogpu_native sdl3))
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_runtime_visibility)
  (locks %{workspace_root}/smoke_window)
  (action
@@ -28,7 +32,9 @@
 
 (rule
  (enabled_if
-  (= %{system} macosx))
+  (or
+   (= %{system} macosx)
+   (= %{system} mingw64)))
  (alias test_runtime_input)
  (action
   (run %{exe:test_main.exe} test_runtime_input)))

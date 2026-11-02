@@ -138,6 +138,9 @@ let gpu =
     "ogpu_mock";
     "ogpu_metal";
     "ogpu_metal_native";
+    "ogpu_vulkan";
+    "vulkan";
+    "ogpu_native";
     "runtime";
     "runtime_input";
     "runtime_resources";
@@ -187,11 +190,13 @@ let rules =
         :: "editor_document" :: "rays_editor" :: gpu );
     ]
   @ [
-      ("runtime", [ "metal"; "ogpu_metal_native"; "ogpu_metal" ]);
-      ("renderer", [ "metal"; "ogpu_metal_native"; "ogpu_metal" ]);
-      ("rays", [ "metal"; "ogpu_metal_native"; "ogpu_metal" ]);
+      ("runtime", [ "metal"; "ogpu_metal_native"; "ogpu_metal"; "vulkan"; "ogpu_vulkan"; "ogpu_native" ]);
+      ("renderer", [ "metal"; "ogpu_metal_native"; "ogpu_metal"; "vulkan"; "ogpu_vulkan"; "ogpu_native" ]);
+      ("rays", [ "metal"; "ogpu_metal_native"; "ogpu_metal"; "vulkan"; "ogpu_vulkan"; "ogpu_native" ]);
       ("ogpu_metal_native", [ "sdl3"; "runtime"; "rays"; "renderer" ]);
       ("ogpu_metal", [ "sdl3"; "runtime"; "rays"; "renderer" ]);
+      ("vulkan", [ "sdl3"; "runtime"; "rays"; "renderer" ]);
+      ("ogpu_vulkan", [ "sdl3"; "runtime"; "rays"; "renderer" ]);
       ("runtime", upper);
       ("runtime_input", upper);
       ("flow_native", [ "pxui"; "pxui_shell"; "pxui_graph"; "rays_editor" ]);
@@ -297,6 +302,9 @@ let only =
     ("metal", [ "threads"; "native_layer_token" ]);
     ("ogpu_metal_native", [ "ogpu_core"; "metal"; "lru" ]);
     ("ogpu_metal", [ "ogpu_metal_native"; "metal" ]);
+    ("vulkan", [ "threads"; "native_layer_token" ]);
+    ("ogpu_vulkan", [ "ogpu_core"; "vulkan"; "lru" ]);
+    ("ogpu_native", [ "ogpu_metal"; "ogpu_vulkan" ]);
     ("scene_execution_fixtures", [ "renderer"; "ogpu" ]);
     ("pxui", [ "rays"; "rays_math"; "param"; "mem" ]);
     ("pxui_shell", [ "rays"; "rays_math"; "editor_core"; "pxui" ]);
@@ -356,6 +364,10 @@ let backends =
         "lib/ogpu/conformance/test_metal.ml";
         "test/dependency_gate.ml";
       ] );
+    (
+      [ "Vulkan"; "Ogpu_vulkan" ],
+      [ "lib/vulkan/"; "lib/ogpu_vulkan/" ],
+      [ "lib/ogpu/conformance/test_vulkan.ml"; "test/dependency_gate.ml" ] );
   ]
 
 (* identifiers outside comments and string literals *)
@@ -582,7 +594,7 @@ let backend_selections graph dune_files =
             List.exists (fun name -> name = "ogpu" || List.mem "ogpu" (reachable name)) dependencies
           in
           let selected =
-            List.filter (fun name -> name = "ogpu_metal" || name = "ogpu_mock") dependencies
+            List.filter (fun name -> name = "ogpu_metal" || name = "ogpu_native" || name = "ogpu_vulkan" || name = "ogpu_mock") dependencies
             |> List.sort_uniq String.compare
           in
           if uses_ogpu && List.length selected <> 1 then
