@@ -182,7 +182,11 @@ let run () =
         let objects = [ scrubbed i; List.nth objects 1 ] in
         let run ~recook =
           let first = ref true in
+          (* polls while the worker cooks are skipped: each poll is a quiet frame, and a slow worker
+             must not let 8 of them pass and settle the edit *)
           await (fun () ->
+              Cook.status !current = Async_cook.Idle
+              &&
               let u = update ~recook:(recook && !first) objects in
               first := false;
               check (!current.Cook.summaries == before) "a scrub step counted footers";
