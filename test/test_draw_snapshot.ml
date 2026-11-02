@@ -128,6 +128,8 @@ let () =
       if failed <> [] then
         failwith ("draw snapshot differs: " ^ String.concat " " (List.map file_name failed))
   | names ->
+      (* the parent compares bytes with the LF goldens: Windows' text-mode stdout would add CR *)
+      set_binary_mode_out stdout true;
       List.iter
         (fun name ->
           match List.find_opt (fun workspace -> file_name workspace = name ^ ".txt") workspaces with

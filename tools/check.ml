@@ -26,7 +26,9 @@ let run ?limit program arguments =
                running\n\
                %!"
               limit;
-            Unix.kill pid Sys.sigint;
+            (* Windows' Unix.kill takes no SIGINT: it ends the child at once. ponytail: dune's own
+               children (test executables) are not ended with it; add taskkill /T when that matters *)
+            Unix.kill pid (if Sys.win32 then Sys.sigkill else Sys.sigint);
             wait (Some elapsed)
         | _ ->
             (match interrupted with

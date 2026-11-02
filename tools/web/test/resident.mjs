@@ -3,9 +3,12 @@
 // The resident fold's bookkeeping under node, over a fake device whose reads return a different value on
 // every read: two folds in a row reuse the same pooled placeholder array (a draw's capacities repeat), and
 // the second fold's finish must read the device again, not hand back the first fold's result.
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+
 const [residentPath, primsPath] = process.argv.slice(2);
-const { createResident } = await import(residentPath);
-const p = await import(primsPath);
+const { createResident } = await import(pathToFileURL(resolve(residentPath)).href);
+const p = await import(pathToFileURL(resolve(primsPath)).href);
 
 let reads = 0;
 const buffer = () => ({ size: 0, destroy() {} });

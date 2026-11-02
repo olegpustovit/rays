@@ -10,5 +10,5 @@ Imports splice shared definitions and graphs; the checker and formatter read the
   $ rays check s/one/sketch.rays 2>&1 | grep E_IMPORT
   Error [E_IMPORT]: lib.rays: transitive imports are not supported.
   $ rm s/one/lib.rays
-  $ rays check s/one/sketch.rays 2>&1 | grep E_IMPORT
+  $ rays check s/one/sketch.rays 2>&1 | grep E_IMPORT | tr '\\' '/'
   Error [E_IMPORT]: lib.rays: s/one/lib.rays: No such file or directory

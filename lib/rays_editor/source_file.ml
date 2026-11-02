@@ -28,7 +28,11 @@ let at ~file ~digest = { (synced ~file ~digest) with observed = None }
 (* the first [dune-project] at or above [dir] that is not inside a [_build] *)
 let rec root dir =
   if
-    (not (List.mem "_build" (String.split_on_char '/' dir)))
+    (* Windows' getcwd returns backslashes: split on both separators *)
+    (not
+       (List.mem "_build"
+          (String.split_on_char '/'
+             (if Sys.win32 then String.map (function '\\' -> '/' | c -> c) dir else dir))))
     && Sys.file_exists (Filename.concat dir "dune-project")
   then Some dir
   else

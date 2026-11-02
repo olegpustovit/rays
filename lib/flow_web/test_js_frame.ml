@@ -8,7 +8,8 @@ module M = Scene_command.Marks
 open Test_support
 
 let writing = Array.to_list Sys.argv = [ Sys.argv.(0); "--write-goldens" ]
-let node = Sys.command "command -v node >/dev/null 2>&1" = 0
+let node =
+  Sys.command (if Sys.win32 then "where node >NUL 2>&1" else "command -v node >/dev/null 2>&1") = 0
 let ops = Core_fixtures.offset :: []
 
 let check source =
