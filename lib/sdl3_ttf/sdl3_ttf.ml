@@ -193,6 +193,9 @@ module Font = struct
       "/System/Library/Fonts/HelveticaNeue.ttc";
       "/System/Library/Fonts/Helvetica.ttc";
       "/System/Library/Fonts/LucidaGrande.ttc";
+      (* Windows: only reached when no macOS font exists, so macOS lookups are unchanged *)
+      "C:\\Windows\\Fonts\\segoeui.ttf";
+      "C:\\Windows\\Fonts\\arial.ttf";
     ]
 
   let system_path ?font () =
