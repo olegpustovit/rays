@@ -660,6 +660,7 @@ let move_async t (moved : mesh) =
             extra_scratch = None;
             size_buffer = None;
             uncompacted = None;
+            uncompacted_scene = [];
             stage = Ready;
             instance_count = Array.length instances.records;
           }
@@ -841,6 +842,7 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
                 motion_buffer = None;
                 prototype_key = None;
                 scene_blas = [];
+                scene_unpacked = 0L;
                 tables;
                 owns_prototype = true;
                 shape = mesh_shape mesh;
@@ -849,6 +851,7 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
             extra_scratch = None;
             size_buffer = None;
             uncompacted = None;
+            uncompacted_scene = [];
             stage = Compacting receipt;
             instance_count = 0;
           }
@@ -1442,6 +1445,12 @@ let create ?spp ?bounces ?exposure ?round_samples ?bsdf_only ?profile ~width ~he
 
 module Private = struct
   let device_bytes t = B.allocated_size t.device
+
+  let scene_compaction t =
+    ( t.gpu.scene_unpacked,
+      List.fold_left
+        (fun total blas -> Int64.add total (B.accel_sizes blas).structure_size)
+        0L t.gpu.scene_blas )
 
   let cpu_trace t camera ~accum =
     let* fov = camera_fov camera in

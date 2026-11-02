@@ -228,6 +228,9 @@ val image : t -> Rays.Image.t
 val destroy : t -> unit
 
 module Private : sig
+  val scene_compaction : t -> int64 * int64
+  (** The scene's bottom-level structures, built and then compacted, in bytes. *)
+
   val device_bytes : t -> int64
   (** What the tracer's device has allocated, for its tests. *)
 
