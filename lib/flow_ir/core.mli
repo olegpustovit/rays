@@ -323,13 +323,29 @@ module Region : sig
   type origin = Flow.Workspace.path * int list
   type count_source = Flow.Eval.residual -> Flow.Workspace.term -> origin option
 
-  type destination = { buffer : Flow.Eval.value; mutable produced : Flow.Eval.value }
+  type destination = {
+    buffer : Flow.Eval.value;
+    mutable produced : Flow.Eval.value;
+    clobber : bool;
+  }
   (** One CPU run of a region from a program's arena: [buffer] is a dead array its one output may
       overwrite (or [No_geo]); the run sets [produced] to its result as it returns, so the caller
       knows the block loop ran, rather than a fallback that might hold its inputs. *)
 
+  type registers = {
+    defs : int array;  (** an instruction's slot *)
+    run_code : instruction array;  (** the instructions over slots; array handles keep their register *)
+    run_outputs : int array array;
+    slots : int;
+    integer_slots : bool array;
+    text_slots : int array;  (** a text slot's place in the text bank, -1 for the others *)
+    dedicated : bool array;  (** a slot that is one register's alone *)
+  }
+
   type t = private {
     destination : destination option;
+    slot_plan : registers option Atomic.t;
+    float_slot_plan : registers option Atomic.t;
     residual : Flow.Eval.residual;
     term : Flow.Workspace.term;
     sources : (Flow.Eval.residual * Flow.Workspace.term) array;
@@ -385,6 +401,12 @@ module Region : sig
 
   val ints_for : t -> int -> int array
   val finished : t -> Flow.Eval.value -> unit
+
+  val clobbered : t -> bool
+  (** For tests: a run fills its register banks with NaN and [min_int], but for dedicated slots. *)
+
+  val registers : ?extra:(unit -> (int * int) list) -> t -> registers
+  (** A CPU run's linear-scan register slots. [extra] names further reads, (register, instruction). *)
 
   val rebuild :
     t ->

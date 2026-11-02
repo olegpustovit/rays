@@ -905,7 +905,7 @@ let arena_plan ~remember_loops ~excluded (program : C.program) =
     Some { first; last; dying = Array.map Array.of_list dying }
   end
 
-let prepare_invoke packed ~args ~result ~on_device ~keep =
+let prepare_invoke packed ~args ~result ~on_device ~keep ~clobber =
   let packed = if args = [] then Packed.Host.bind_arguments packed [||] else Ok packed in
   let kept = ref None in
   (* the arguments a resident device binds itself, refilled per call *)
@@ -978,9 +978,15 @@ let prepare_invoke packed ~args ~result ~on_device ~keep =
               | _ -> packed
             in
             let destination =
-              Option.map
-                (fun a -> { C.Region.buffer = arena_take a result; produced = E.No_geo })
-                st.arena
+              match st.arena with
+              | Some a ->
+                  Some
+                    {
+                      C.Region.buffer = arena_take a result;
+                      produced = E.No_geo;
+                      clobber = a.kills;
+                    }
+              | None -> if clobber then Some { C.Region.buffer = E.No_geo; produced = E.No_geo; clobber } else None
             in
             let packed =
               Option.fold ~none:packed ~some:(C.Region.with_destination packed) destination
@@ -1602,7 +1608,7 @@ let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspa
     | Invoke { region; args; result } -> (
         let run =
           prepare_invoke program.regions.(region) ~args ~result ~on_device:device_ok.(region)
-            ~keep:static_ok.(result)
+            ~keep:static_ok.(result) ~clobber
         in
         individual.(region) <- Some (s.source.span, run);
         match fused.(region) with

@@ -98,7 +98,7 @@ let () =
   let same _ = 30_000 in
   let program = core (chain ~count ~size:same) in
   let plain = X.prepare program and clobbered = X.prepare ~clobber:true program in
-  let result prepared = bits (fst (run prepared)) in
+  let result prepared = bits (Result.get_ok (X.execute ~strict:true ~force:(P.force ~strict:true ~live) prepared ~live)) in
   let reference = result plain in
   List.iter
     (fun domains ->
@@ -121,3 +121,30 @@ let () =
     failwith (Printf.sprintf "chain allocated %.0f bytes a run of %.0f fresh" spent fresh);
   Printf.printf "core chain, one size: %.0f KiB a run, %.0f KiB fresh\n%!" (spent /. 1024.)
     (fresh /. 1024.)
+
+(* A long body over few live values takes few slots, so it keeps its 1024 lanes; a guarded one keeps its
+   results' own slots; a dead register read in place of a live one would come back NaN. *)
+let () =
+  let links = 200 in
+  let buffer = Buffer.create 4096 in
+  Buffer.add_string buffer "tested (map (fn [(i : int)] (let* [x (+ (float i) t) v0 (+ x 1.0)\n";
+  for k = 1 to links do
+    Printf.bprintf buffer "v%d (+ (* v%d 0.5) (sin x))\n" k (k - 1)
+  done;
+  Printf.bprintf buffer "] (if (> x 100.0) v%d (- 0.0 v%d)))) (array/range 4096 :type int))" links links;
+  let program = core (Buffer.contents buffer) in
+  let region = program.regions.(0) in
+  let registers = C.Region.registers region in
+  let code = Array.length region.code in
+  if code < links || registers.slots > code / 10 then
+    failwith (Printf.sprintf "%d registers took %d slots" code registers.slots);
+  Printf.printf "registers: %d take %d slots, %d lanes a block\n%!" code registers.slots
+    (min 1024 (65536 / registers.slots));
+  let result prepared = bits (Result.get_ok (X.execute ~strict:true ~force:(P.force ~strict:true ~live) prepared ~live)) in
+  let plain = result (X.prepare program) in
+  List.iter
+    (fun domains ->
+      Parallel.run ~domains (fun () ->
+          if result (X.prepare ~clobber:true program) <> plain then
+            failwith "a register was read past its last use"))
+    [ 1; 8 ]
