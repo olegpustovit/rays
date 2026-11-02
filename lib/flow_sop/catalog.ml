@@ -56,6 +56,10 @@ let of_defnode (node : Flow.Defnode.t) =
 
 let context_of = Flow.Context.of_qualified
 
+(* the library, and what the lazies below derive from it *)
+let catalog_owner = Mem.plan "flow_sop.catalog"
+let catalog_roots : Obj.t list ref = ref []
+
 let embedded_sources =
   lazy
     (List.fold_left
@@ -93,9 +97,7 @@ let sources () =
   let first = not (Lazy.is_val embedded_sources) in
   let sources = Lazy.force embedded_sources in
   if first then
-    Result.iter
-      (fun forms -> Mem.charge (Mem.plan "flow_sop.catalog") (Flow.Syntax.memory_bytes forms))
-      sources;
+    Mem.root catalog_owner (fun () -> !catalog_roots);
   sources
 
 let definitions_of_sources forms =
@@ -163,6 +165,15 @@ let embedded_source_index =
     (match sources () with
     | Ok source_list -> Some (prepare_source_index source_list)
     | Error _ -> None)
+
+let () =
+  catalog_roots :=
+    [
+      Obj.repr embedded_sources;
+      Obj.repr embedded_node_definitions;
+      Obj.repr library_descriptors;
+      Obj.repr embedded_source_index;
+    ]
 
 let reachable_index index forms =
   let seen = Hashtbl.create 64 and queue = Queue.create () in

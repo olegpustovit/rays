@@ -853,23 +853,9 @@ let memory_boundary value =
       { value with memory_known = true }
     end
   in
-  (* the present document on the ledger, walked only when its text changed *)
-  let value =
-    let ws = value.core.doc.workspace.ws in
-    match value.memory_doc with
-    | Some (seen, _, _) when seen == ws -> value
-    | previous ->
-        let owner = Mem.document "editor.document" in
-        Option.iter (fun (_, bytes, _) -> Mem.release owner bytes) previous;
-        let scale =
-          match previous with
-          | Some (_, _, scale) -> scale
-          | None -> Document.present_scale value.core.doc
-        in
-        let bytes = Document.present_bytes ~scale value.core.doc in
-        Mem.charge owner bytes;
-        { value with memory_doc = Some (ws, bytes, scale) }
-  in
+  (* the present document, and its lowering, on the ledger when a report walks it *)
+  let doc = value.core.doc.workspace in
+  Mem.root (Mem.document "editor.document") (fun () -> [ Obj.repr doc ]);
   let core = ref value.core in
   let undo_past_16 () =
     let history = !core.Editor_model.history in
@@ -1003,9 +989,7 @@ let crash_dump value directory =
           ()))
 
 let close value =
-  Option.iter
-    (fun (_, bytes, _) -> Mem.release (Mem.document "editor.document") bytes)
-    value.memory_doc;
+  Mem.root (Mem.document "editor.document") (fun () -> []);
   let value = autosave ~force:true value ~now:value.state_checked in
   Option.iter prerr_endline value.state_error;
   Option.iter (fun (_, image) -> ignore (Image.destroy image)) value.map;

@@ -66,6 +66,64 @@ let rec release (account : owner) n =
 
 let reachable_bytes value = Obj.reachable_words (Obj.repr value) * (Sys.word_size / 8)
 
+(* Owners sized by a walk: what compiled programs and lowered records hold has no size to charge as
+   it is built. Named roots first, then every table holding nothing on the ledger, oldest first. *)
+let rooted : (owner * (unit -> Obj.t list)) list ref = ref []
+let tables : (owner * Obj.t Weak.t * (unit -> bool)) list ref = ref []
+let tables_added = ref 0
+let walked : (owner * int) list ref = ref []
+
+let root (account : owner) roots =
+  locked (fun () ->
+      rooted :=
+        if List.mem_assq account !rooted then
+          List.map (fun ((a, _) as e) -> if a == account then (a, roots) else e) !rooted
+        else !rooted @ [ (account, roots) ])
+
+let walk_table (account : owner) table ~uncharged =
+  let weak = Weak.create 1 in
+  Weak.set weak 0 (Some (Obj.repr table));
+  locked (fun () ->
+      incr tables_added;
+      if !tables_added land 255 = 0 then
+        tables := List.filter (fun (_, w, _) -> Weak.check w 0) !tables;
+      tables := (account, weak, uncharged) :: !tables)
+
+(* On a report, after its collection: each owner is what its roots reach beyond those walked before
+   it, so a plane or a catalog two owners reach is charged once. O(owners * reach): never per frame. *)
+let walk_roots () =
+  let named, counted = locked (fun () -> (!rooted, List.rev !tables)) in
+  (* one walk per owner, however many tables it has: a walk re-reads what came before it *)
+  let counted =
+    List.fold_left
+      (fun grouped (account, weak, uncharged) ->
+        match Weak.get weak 0 with
+        | Some table when uncharged () ->
+            (account, table :: Option.value ~default:[] (List.assq_opt account grouped))
+            :: List.remove_assq account grouped
+        | _ -> grouped)
+      [] counted
+    |> List.map (fun (account, held) -> (account, fun () -> held))
+  in
+  let seen = ref [] and total = ref 0 and now = ref [] in
+  List.iter
+    (fun ((account : owner), roots) ->
+      seen := roots () @ !seen;
+      let reach = Obj.reachable_words (Obj.repr !seen) * (Sys.word_size / 8) in
+      let extra = max 0 (reach - !total) in
+      total := reach;
+      now :=
+        (account, extra + Option.value ~default:0 (List.assq_opt account !now))
+        :: List.remove_assq account !now)
+    (named @ counted);
+  List.iter (fun (account, bytes) -> if not (List.mem_assq account !now) then release account bytes) !walked;
+  List.iter
+    (fun (account, bytes) ->
+      let before = Option.value ~default:0 (List.assq_opt account !walked) in
+      if bytes > before then charge account (bytes - before) else release account (before - bytes))
+    !now;
+  walked := !now
+
 let accounts_sum keep =
   locked (fun () ->
       Hashtbl.fold (fun _ (a : account) sum -> if keep a then sum + bytes a else sum) accounts 0)
@@ -389,7 +447,10 @@ let reset () =
           Atomic.set a.bytes 0;
           Atomic.set a.peak 0)
         accounts;
-      evictors := []);
+      evictors := [];
+      rooted := [];
+      tables := [];
+      walked := []);
   Atomic.set current_budget 0;
   Atomic.set budget_rank 0;
   Atomic.set lowered 0;
@@ -437,8 +498,11 @@ module Report = struct
   let to_string t = Format.asprintf "%a" pp t
 end
 
-let report ?(collect = true) ?(device = 0) ?budget:shown () =
+let report ?(collect = true) ?(walk = collect) ?(device = 0) ?budget:shown () =
   if collect then Gc.full_major ();
+  (* before the walk, whose hash set is the allocator's afterwards *)
+  let footprint = phys_footprint () in
+  if walk then walk_roots ();
   prune ();
   let stat = if collect then Gc.stat () else Gc.quick_stat () in
   let ocaml_live =
@@ -464,7 +528,7 @@ let report ?(collect = true) ?(device = 0) ?budget:shown () =
   in
   let host = sum Host and attributed_device = sum Device in
   let device = max 0 device in
-  let footprint = match phys_footprint () with Some n -> n | None -> ocaml_live + device in
+  let footprint = match footprint with Some n -> n | None -> ocaml_live + device in
   {
     Report.owners;
     attributed = host + attributed_device;

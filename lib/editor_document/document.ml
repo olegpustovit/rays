@@ -164,11 +164,6 @@ let snapshot value =
    their caches. *)
 let text_bytes value = Flow.Syntax.memory_bytes (value.workspace.ws.source @ value.workspace.ws.extra)
 
-let present_scale value =
-  float (Mem.reachable_bytes value.workspace.ws) /. float (max 1 (text_bytes value))
-
-let present_bytes ~scale value = int_of_float (scale *. float (text_bytes value))
-
 let snapshot_bytes saved =
   (* the checked workspace and the ids hold about as much again *)
   2 * Flow.Syntax.memory_bytes (saved.saved_ws.source @ saved.saved_ws.extra)

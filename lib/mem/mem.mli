@@ -31,6 +31,16 @@ val reachable_bytes : 'a -> int
 (** The size of plain data, by walking it: once per cache miss on a value about to be kept, never
     per frame. *)
 
+val root : owner -> (unit -> Obj.t list) -> unit
+(** This owner's size is what these roots reach beyond the owners registered before it, walked when a
+    {!report} walks. For what has no size to charge as it is built (a lowered document); a later call
+    replaces the roots, so a frame can name its current document, and the closure keeps what it names
+    alive: replace it with [fun () -> []] on close. *)
+
+val walk_table : owner -> 'a -> uncharged:(unit -> bool) -> unit
+(** {!Lru}'s: a table held weakly, walked by a {!report} while [uncharged] (a count-only cache has no
+    byte size to charge, and forgetting one must not leave its bytes on no owner). *)
+
 val bytes : owner -> int
 val peak : owner -> int
 
@@ -146,7 +156,7 @@ module Report : sig
   val format_bytes : int -> string
 end
 
-val report : ?collect:bool -> ?device:int -> ?budget:int -> unit -> Report.t
+val report : ?collect:bool -> ?walk:bool -> ?device:int -> ?budget:int -> unit -> Report.t
 (** [ocaml_live] is [Gc.stat] live words after a full major ([~collect:false], for a crash report:
     the heap's size, no collection). [device] is what the caller measured through OGPU.
     [footprint] is the process physical footprint when available, else [ocaml_live + device].

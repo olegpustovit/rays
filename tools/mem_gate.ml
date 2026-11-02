@@ -244,7 +244,7 @@ let check (budget : budget) (o : M.outcome) =
       if budget.refuses && not typed then note "ceiling %d: no E_MEMORY reached the frame" ceiling;
       if o.final.footprint > ceiling && not typed then
         note "footprint %d B over its ceiling %d with no E_MEMORY" o.final.footprint ceiling);
-  let peak = Option.value ~default:0 (Mem.peak_footprint ()) in
+  let peak = o.peak_footprint in
   Option.iter (fun max -> if peak > max then note "peak %d B over max_peak_bytes %d" peak max) budget.max_peak_bytes;
   Printf.printf
     "scenario %s: live %d (frame %d) -> %d (frame %d) %.2f%%, device %d, footprint %d, peak %d, alloc/frame %.0f, promoted/frame %.0f, readback %d\n%s%!"

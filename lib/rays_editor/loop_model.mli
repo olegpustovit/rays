@@ -33,7 +33,6 @@ type t = {
   context_error : string option;
   memory_error : string option;
   memory_known : bool;
-  memory_doc : (Editor_document.Workspace_doc.t * int * float) option;
   baked : Rays.World.baked option;
   baked_from : (Rays.World.t * Rays.World.baked) option;
   baked_views : (string * (Rays.World.t * Rays.World.baked)) list;
