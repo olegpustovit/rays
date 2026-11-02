@@ -22,6 +22,17 @@ type device_pressure
 external device_pressure : int -> device_pressure = "rays_flow_gpu_device_pressure"
 external uint32_word : B.floats -> int -> int = "rays_flow_gpu_uint32_word" [@@noalloc]
 
+(* What a holder's buffer has come to. Who only retires a holder (a session) or borrows its buffer (a
+   display's pin) keeps this, never the holder: a live holder means a reader can still come, so only a
+   reader may keep it alive, and a borrow's end then gives the buffer back with no further collection. *)
+type fate = {
+  lock : Mutex.t;  (** orders an invalidate against close's destroy; never held while converting *)
+  planes : float array array option Atomic.t;
+  mutable destroyed : bool;  (** its buffer is gone: closed (read first) or freed (never read) *)
+  mutable retired : bool;  (** handed out once: it stays readable from then on *)
+  readers : int Atomic.t;  (** conversions and pins in progress: its buffer is not reused under them *)
+}
+
 type kept = {
   id : int;
   kept_buffer : B.buffer;
@@ -29,15 +40,11 @@ type kept = {
   kept_count : int;
   kept_width : int;
   uint32 : bool;
-  lock : Mutex.t;  (** orders an invalidate against close's destroy; never held while converting *)
-  planes : float array array option Atomic.t;
-  mutable destroyed : bool;  (** its buffer is gone: closed (read first) or freed (never read) *)
-  mutable retired : bool;  (** handed out once: it stays readable from then on *)
+  fate : fate;
   placeholder : float array;
       (** one element of zeros: a later kernel's source that is this array reads the buffer *)
   kept_epoch : int64;
   settled : bool Atomic.t;  (** completed, its status read: CPU readers may read it *)
-  readers : int Atomic.t;  (** conversions in progress: its buffer is not reused under them *)
   mutable bounds_memo : float array option option;  (** its box once reduced: it never changes *)
   mutable thaw : unit -> unit;  (** materialise it (initial domain), so its buffer can be reused *)
   pressure : device_pressure; [@warning "-69"]  (** the buffer's size, told to the GC; never read *)
@@ -49,7 +56,7 @@ type kept = {
    which a reader may still hold: their buffers stay theirs until they are collected or read, and
    past {!retired_budget_for} bytes the oldest is read into owned planes so its buffer comes back. *)
 type pool = {
-  held : (int, B.buffer * B.floats * int * int Atomic.t) Hashtbl.t;
+  held : (int, B.buffer * B.floats * int * fate) Hashtbl.t;
   mutable free : (B.buffer * B.floats * int) list;
   mutable free_ages : (B.buffer * int) list;  (** the {!tick} each free buffer came back *)
   mutable tick : int;  (** drains so far: an idle device's clock, no real one *)
@@ -92,7 +99,7 @@ let held array =
       if p != array then None
       else
         Option.bind (Weak.get w 0) (fun kept ->
-            if Atomic.get kept.planes = None && not kept.destroyed then
+            if Atomic.get kept.fate.planes = None && not kept.fate.destroyed then
               Some (kept.kept_buffer, kept.kept_count * kept.kept_width)
             else None))
     !bindable
@@ -328,7 +335,7 @@ let drain_pool pool =
   List.iter
     (fun id ->
       match Hashtbl.find_opt pool.held id with
-      | Some (_, _, _, readers) when Atomic.get readers > 0 -> push pool.released id
+      | Some (_, _, _, fate) when Atomic.get fate.readers > 0 -> push pool.released id
       | Some (buffer, floats, capacity, _) ->
           Hashtbl.remove pool.held id;
           Mem.release held_owner capacity;
@@ -397,7 +404,7 @@ let reclaim pool ~device =
     (match pool.retired with
     | (_, w) :: rest ->
         pool.retired <- rest;
-        Option.iter (fun k -> if Atomic.get k.readers = 0 then k.thaw ()) (Weak.get w 0)
+        Option.iter (fun k -> if Atomic.get k.fate.readers = 0 then k.thaw ()) (Weak.get w 0)
     | [] -> ());
     drain_pool pool
   end
@@ -1107,7 +1114,7 @@ let release released id =
    the holder no longer needs the buffer: it goes back to the runner at once, not at collection. *)
 (* On the initial domain: the dispatch completed and its status read (once). *)
 let settle t kept =
-  if Atomic.get kept.settled || kept.destroyed then Ok ()
+  if Atomic.get kept.settled || kept.fate.destroyed then Ok ()
   else if Domain.self () <> t.domain then
     Error (Diagnostic.error ~code:"E_GPU" "A device output settles on its owner's domain.")
   else
@@ -1121,7 +1128,7 @@ let settle t kept =
       (check_status t ~epoch:kept.kept_epoch)
 
 let materialise t kept =
-  match Atomic.get kept.planes with
+  match Atomic.get kept.fate.planes with
   | Some planes -> planes
   | None ->
       (* a reader on the initial domain waits for the kernel itself; any other reader runs after its
@@ -1130,14 +1137,14 @@ let materialise t kept =
         if Domain.self () = t.domain then
           (match settle t kept with Ok () -> () | Error d -> raise (Diagnostic.Error d))
         else invalid_arg "Run.materialise: a device output was read before its cook settled";
-      if kept.destroyed then invalid_arg "Run.materialise: a device output was read after its free";
+      if kept.fate.destroyed then invalid_arg "Run.materialise: a device output was read after its free";
       let length = kept.kept_count * kept.kept_width in
       if kept.uint32 then
-        Mutex.protect kept.lock (fun () ->
-            match Atomic.get kept.planes with
+        Mutex.protect kept.fate.lock (fun () ->
+            match Atomic.get kept.fate.planes with
             | Some planes -> planes
             | None ->
-                if kept.destroyed then invalid_arg "Run.materialise: uint32 output was freed";
+                if kept.fate.destroyed then invalid_arg "Run.materialise: uint32 output was freed";
                 let floats = kept.kept_floats in
                 if length > 0 then get (B.invalidate_mapped kept.kept_buffer ~length:(length * 4));
                 let planes = Array.init kept.kept_width (fun component ->
@@ -1148,7 +1155,7 @@ let materialise t kept =
                         else Bigarray.Array1.unsafe_get floats index)) in
                 ignore (Atomic.fetch_and_add t.materialised_bytes (length * 4));
                 Atomic.incr t.materialised;
-                Atomic.set kept.planes (Some planes);
+                Atomic.set kept.fate.planes (Some planes);
                 release t.pool.released kept.id;
                 planes)
       else begin
@@ -1156,15 +1163,15 @@ let materialise t kept =
          the buffer is mapped, the range is its own, it is destroyed only under this lock after
          [destroyed] is set (its view stays valid), and the status check at [keep] covered the
          completion and every output's finiteness (the kernel flags a nonfinite output). *)
-      Mutex.protect kept.lock (fun () ->
-          if (not kept.destroyed) && length > 0 then
+      Mutex.protect kept.fate.lock (fun () ->
+          if (not kept.fate.destroyed) && length > 0 then
             match B.invalidate_mapped kept.kept_buffer ~length:(length * 4) with
             | Ok () -> ignore (Atomic.fetch_and_add t.materialised_bytes (length * 4))
             | Error e -> invalid_arg ("Run.materialise: " ^ Ogpu.Error.to_string e));
-      Atomic.incr kept.readers;
+      Atomic.incr kept.fate.readers;
       let planes =
         Fun.protect
-          ~finally:(fun () -> Atomic.decr kept.readers)
+          ~finally:(fun () -> Atomic.decr kept.fate.readers)
           (fun () ->
             match
               to_planes ~checked:true kept.kept_floats ~count:kept.kept_count ~width:kept.kept_width
@@ -1172,11 +1179,11 @@ let materialise t kept =
             | Ok planes -> planes
             | Error _ -> assert false)
       in
-      if Atomic.compare_and_set kept.planes None (Some planes) then begin
+      if Atomic.compare_and_set kept.fate.planes None (Some planes) then begin
         Atomic.incr t.materialised;
         release t.pool.released kept.id
       end;
-      Option.get (Atomic.get kept.planes)
+      Option.get (Atomic.get kept.fate.planes)
       end
 
 (* A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): one group of
@@ -1187,8 +1194,8 @@ let bounds_of t kept =
   if
     kept.kept_width <> 3 || kept.kept_count = 0 || t.closed
     || Domain.self () <> t.domain
-    || kept.destroyed
-    || Atomic.get kept.planes <> None
+    || kept.fate.destroyed
+    || Atomic.get kept.fate.planes <> None
     || not (Atomic.get kept.settled)
   then None
   else
@@ -1270,42 +1277,41 @@ let next_kept = Atomic.make 0
    handed out, now or before): it is retired, still readable; its buffer comes back when it is
    collected or read, or when {!reclaim} reads it. Otherwise no one reads it again: its buffer comes
    back at once. *)
-let release_kept t kept ~held =
-  if Atomic.get kept.planes = None then
+let release_kept t fate ~id ~weak ~held =
+  if Atomic.get fate.planes = None then
     let retire =
-      Mutex.protect kept.lock (fun () ->
-          if kept.destroyed then false
-          else if held || kept.retired then (
-            kept.retired <- true;
+      Mutex.protect fate.lock (fun () ->
+          if fate.destroyed then false
+          else if held || fate.retired then (
+            fate.retired <- true;
             true)
           else (
-            kept.destroyed <- true;
+            fate.destroyed <- true;
             Atomic.incr t.pool.freed;
-            release t.pool.released kept.id;
+            release t.pool.released id;
             false))
     in
-    if retire then begin
-      let w = Weak.create 1 in
-      Weak.set w 0 (Some kept);
-      push t.pool.retiring (kept.id, w)
-    end
+    if retire then push t.pool.retiring (id, weak)
 
 let hold t ~uint32 ~buffer ~floats ~capacity ~count ~width ~epoch ~settled =
   Mem.charge held_owner capacity;
   let kept =
     { id = Atomic.fetch_and_add next_kept 1;
       kept_buffer = buffer; kept_floats = floats; kept_count = count; kept_width = width;
-      uint32; lock = Mutex.create (); planes = Atomic.make None; destroyed = false;
-      retired = false; placeholder = Array.make width 0.; kept_epoch = epoch;
-      settled = Atomic.make settled; readers = Atomic.make 0; bounds_memo = None;
+      uint32;
+      fate =
+        { lock = Mutex.create (); planes = Atomic.make None; destroyed = false; retired = false;
+          readers = Atomic.make 0 };
+      placeholder = Array.make width 0.; kept_epoch = epoch;
+      settled = Atomic.make settled; bounds_memo = None;
       thaw = ignore; pressure = device_pressure capacity }
   in
   let weak = Weak.create 1 in
   Weak.set weak 0 (Some kept);
   t.kept <- (epoch, kept.settled, weak) :: t.kept;
   kept.thaw <- (fun () -> ignore (materialise t kept));
-  Hashtbl.replace t.pool.held kept.id (buffer, floats, capacity, kept.readers);
-  let id = kept.id and released = t.pool.released in
+  Hashtbl.replace t.pool.held kept.id (buffer, floats, capacity, kept.fate);
+  let id = kept.id and released = t.pool.released and fate = kept.fate in
   Gc.finalise (fun _ -> release released id) kept;
   if not uint32 then bindable := (kept.placeholder, weak) :: !bindable;
   let resident : Flow.Eval.value =
@@ -1317,7 +1323,7 @@ let hold t ~uint32 ~buffer ~floats ~capacity ~count ~width ~epoch ~settled =
      materialise = (fun () -> materialise t kept);
      resident = (if uint32 then None else Some resident);
      settle = (fun () -> settle t kept);
-     release = (fun ~held -> release_kept t kept ~held);
+     release = (fun ~held -> release_kept t fate ~id ~weak ~held);
      bounds = (fun () -> bounds_of t kept) }, Some kept)
 
 (* Hand the output's buffer to a lazy planar store: nothing is read or waited for now. *)
@@ -1362,15 +1368,19 @@ let keep_storage ~uint32 ?index output =
 
 let keep ?index output = Result.map fst (keep_storage ~uint32:false ?index output)
 
+(* The buffer, borrowed: [valid] until the unpin or its destruction. Closes over the fate only. *)
+let borrow kept =
+  let fate = kept.fate in
+  Atomic.incr fate.readers;
+  let pinned = Atomic.make true in
+  ( kept.kept_buffer,
+    kept.kept_count,
+    (fun () -> Atomic.get pinned && not fate.destroyed),
+    fun () -> if Atomic.exchange pinned false then Atomic.decr fate.readers )
+
 let pin_kept kept =
-  if kept.destroyed || not (Atomic.get kept.settled) || Atomic.get kept.planes <> None then None
-  else begin
-    Atomic.incr kept.readers;
-    let pinned = Atomic.make true in
-    Some (kept.kept_buffer, kept.kept_count,
-          (fun () -> Atomic.get pinned && not kept.destroyed),
-          fun () -> if Atomic.exchange pinned false then Atomic.decr kept.readers)
-  end
+  if kept.fate.destroyed || not (Atomic.get kept.settled) || Atomic.get kept.fate.planes <> None then None
+  else Some (borrow kept)
 
 type uint32_holder = {
   count : int;
@@ -1440,16 +1450,8 @@ let pin placeholder =
       if p != placeholder then None
       else
         Option.bind (Weak.get w 0) (fun kept ->
-            if kept.destroyed || not (Atomic.get kept.settled) then None
-            else begin
-              Atomic.incr kept.readers;
-              let pinned = Atomic.make true in
-              Some
-                ( kept.kept_buffer,
-                  kept.kept_count,
-                  (fun () -> Atomic.get pinned && not kept.destroyed),
-                  fun () -> if Atomic.exchange pinned false then Atomic.decr kept.readers )
-            end))
+            if kept.fate.destroyed || not (Atomic.get kept.settled) then None
+            else Some (borrow kept)))
     !bindable
 
 let buffer ?index output =
@@ -1489,7 +1491,7 @@ let close_pool pool =
   List.iter
     (fun w ->
       Option.iter
-        (fun kept -> Mutex.protect kept.lock (fun () -> kept.destroyed <- true))
+        (fun kept -> Mutex.protect kept.fate.lock (fun () -> kept.fate.destroyed <- true))
         (Weak.get w 0))
     pool.orphans;
   pool.orphans <- [];
@@ -1497,7 +1499,9 @@ let close_pool pool =
   ignore (Atomic.exchange pool.retiring []);
   pool.retired <- [];
   Hashtbl.iter
-    (fun _ (buffer, _, capacity, _) ->
+    (fun _ (buffer, _, capacity, fate) ->
+      (* a pin outlives a collected holder: its [valid] must see this *)
+      Mutex.protect fate.lock (fun () -> fate.destroyed <- true);
       Mem.release held_owner capacity;
       ignore (B.destroy_buffer buffer))
     pool.held;
@@ -1526,7 +1530,7 @@ let close ?(discard = false) t =
                 t.pool.orphans <- weak :: t.pool.orphans
             | Some (buffer, _, capacity, _) ->
                 (if not discard then try ignore (materialise t kept) with Diagnostic.Error _ -> ());
-                Mutex.protect kept.lock (fun () -> kept.destroyed <- true);
+                Mutex.protect kept.fate.lock (fun () -> kept.fate.destroyed <- true);
                 Mem.release held_owner capacity;
                 Hashtbl.remove t.pool.held kept.id;
                 ignore (B.destroy_buffer buffer)

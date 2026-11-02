@@ -11,6 +11,19 @@ let wrong_domain f =
            false
          with Invalid_argument _ -> true))
 
+(* a retired, pinned output with no reader left: only its stand-in, pin and release stay *)
+let[@inline never] pinned_holder run values =
+  let planes = Test_program.ok (R.keep (Test_program.ok (R.dispatch run values))) in
+  ignore (Test_program.ok (planes.settle ()));
+  let stand_in =
+    match planes.resident with
+    | Some (Float_array a | Vec2_array a | Vec3_array a | Vec4_array a) -> a
+    | _ -> failwith "the output has no stand-in"
+  in
+  let _, _, valid, unpin = Option.get (R.pin stand_in) in
+  planes.release ~held:true;
+  (stand_in, valid, unpin, planes.release)
+
 let () =
   let base = Ogpu.Impl.create_driver () in
   let live = Ogpu.Impl.live_handles in
@@ -292,6 +305,27 @@ let () =
       assert (Array.fold_left (fun n p -> n + Array.length p) 0 (kept.materialise ()) = kept.count * kept.width);
       R.close_pool pool;
       assert (match unread.materialise () with _ -> false | exception Invalid_argument _ -> true);
+      (* A display's pin and a session's release keep a holder's fate, not the holder: with no reader
+         left it is collected under the pin (a pin finds a holder through its weak entry, so [None]
+         is the holder gone), and the unpin alone gives the buffer back. *)
+      let pool = R.pool () in
+      let pooled = R.Private.create_owned ~pool device queue cache msl in
+      let stand_in, valid, unpin, release = pinned_holder pooled values in
+      Gc.full_major ();
+      Gc.full_major ();
+      assert (R.pin stand_in = None);
+      assert (valid () && R.Private.pool_held pool = 1);
+      unpin ();
+      assert ((not (valid ())) && R.Private.pool_held pool = 0);
+      release ~held:true;
+      (* ... and a pin of a collected holder learns of the pool's close *)
+      let _, valid, _, _ = pinned_holder pooled values in
+      Gc.full_major ();
+      Gc.full_major ();
+      assert (valid ());
+      R.close ~discard:true pooled;
+      R.close_pool pool;
+      assert (not (valid ()));
       (* a slot asking far under its size for long enough comes back down *)
       let big =
         Test_program.ok
