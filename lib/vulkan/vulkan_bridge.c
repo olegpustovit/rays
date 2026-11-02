@@ -6,6 +6,7 @@
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <windows.h>
+#undef interface /* objbase.h defines it as struct; the bridge names a parameter so */
 #endif
 #include "vendor/volk.h"
 #include "vendor/vk_mem_alloc.h"
