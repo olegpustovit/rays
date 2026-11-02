@@ -249,6 +249,73 @@ let reporting config =
       ^ String.concat "; " (List.map (fun (site, reason, _) -> site ^ ": " ^ reason) (F.seen ())));
   F.reset ()
 
+(* sketches/gpu_sea.rays lowered as the editor lowers it (deferred static maps, Lowering.of_workspace):
+   every card stays one program, nothing falls off the device, no payload is read back, and once the
+   measured placement has its CPU sample the mesh and its normals stay resident with nothing uploaded.
+   Any silent fall fails here by name. *)
+let sea_route gpu config =
+  let module F = Flow_ir.Fallback in
+  let side = 256 in
+  let text =
+    let text = In_channel.with_open_bin "../../../sketches/gpu_sea.rays" In_channel.input_all in
+    Str.global_replace (Str.regexp_string "(side : int 1000)") (Printf.sprintf "(side : int %d)" side) text
+  in
+  let stats () =
+    let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
+    host
+  in
+  F.reset ();
+  let lowered =
+    Flow_sop.Lower.workspace ~gpu:config ~defer:true ~extra:Editor_document.Kinds.descriptors
+      (Flow.Syntax.parse text |> ok)
+    |> ok
+  in
+  let graph = List.find (fun (g : Flow_sop.Lower.graph) -> g.name = "sea") lowered.graphs in
+  let lane = Flow_sop.Value_lane.create () in
+  let session = Sop.Session.create ~max_entries:64 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok in
+  let before = stats () in
+  Fun.protect
+    ~finally:(fun () -> Sop.Session.close session)
+    (fun () ->
+      let uploads = ref 0 in
+      for frame = 0 to 6 do
+        let time = float frame /. 60. in
+        let live = Input.at_time time in
+        let resolved = Flow_sop.Value_lane.resolve ~gpu:config ~live lane ~time graph.network |> ok in
+        let node =
+          Sop.Edit_graph.compile_node resolved.geometry ~node_id:(Option.get graph.root)
+          |> Result.get_ok
+        in
+        let output =
+          Sop.Session.cook ~cpu_consumers:0 session
+            ~context:(Sop.Context.create ~time ~input:live () |> Result.get_ok)
+            node
+          |> ok
+        in
+        let geometry = Result.get_ok (Sop.Payload.geometry output.payload) in
+        (* frame 2 is the placement's CPU sample of the chain *)
+        if frame >= 3 then begin
+          if not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)) then
+            failwith (Printf.sprintf "gpu_sea frame %d: P left the device" frame);
+          if Rdk.Attribute.holder (attribute geometry "N") = None then
+            failwith (Printf.sprintf "gpu_sea frame %d: N left the device" frame);
+          if frame > 3 && (stats ()).input_uploads <> !uploads then
+            failwith (Printf.sprintf "gpu_sea frame %d: an input was uploaded" frame);
+          uploads := (stats ()).input_uploads
+        end
+      done);
+  let after = stats () in
+  if after.payload_readback_bytes <> before.payload_readback_bytes then
+    failwith
+      (Printf.sprintf "gpu_sea read back %d payload bytes"
+         (after.payload_readback_bytes - before.payload_readback_bytes));
+  match F.seen () with
+  | [] -> ()
+  | off ->
+      failwith
+        ("gpu_sea left the device: "
+        ^ String.concat "; " (List.map (fun (site, reason, _) -> site ^ ": " ^ reason) off))
+
 let () =
   let gpu = Flow_native.Workspace_gpu.create () in
   Fun.protect
@@ -261,5 +328,6 @@ let () =
              abandons: every frame comes from the device *)
           traced_case gpu config;
           reporting config;
+          sea_route gpu config;
           resident_case gpu config ~side:128 ~frames:[ 0.; 0.01; 0.02; 0.03; 0.04 ] ~compare:false ~displayed:true));
   print_endline "Live mesh: P, N and Cd resident from the first cook; no uploads; equal to the CPU"

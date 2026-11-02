@@ -784,9 +784,11 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
       (fun ~node_id context geometries ->
         let cancelled () = Sop.Context.cancelled context in
         let error () = Error (Diagnostic.error ~code:"E_CANCELLED" "Mesh kernel cancelled.") in
+        (* planes never stay resident ([mesh_resident] keeps Vec3 points), so a device cook of them
+           reads its topology back: a static one, cooked once, has nothing to win *)
         let eligible =
           (not reference) && gpu.Flow_ir.Gpu.fast
-          && List.mem operation [ "sop/mesh"; "sop/mesh_planes" ]
+          && (operation = "sop/mesh" || (operation = "sop/mesh_planes" && E.frame_dependent data))
         in
         let placed =
           if eligible then

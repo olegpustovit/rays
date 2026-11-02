@@ -195,7 +195,9 @@
                primitive_count (cond point_mode 0 row_mode v_count column_mode u_count
                                 both_mode (int/add v_count u_count) quads cell_count :else (int/mul cell_count 2))
                vertex_indices (array/range vertex_count :type int)
-               ; The mode is chosen outside the map, so its kernel runs one mode's arithmetic.
+               ; The mode is chosen outside the map, so its kernel runs one mode's arithmetic and reads no text.
+               reverse (equal? connectivity "Reverse triangles")
+               alternate (equal? connectivity "Alternating triangles")
                vertices (cond point_mode (array/int 0)
                  row_mode vertex_indices
                  column_mode (exact (map (fn [(index : int)]
@@ -206,8 +208,7 @@
                        (int/add (int/mul (int/mod column_index v_count) u_count) (int/div column_index v_count)))))
                    vertex_indices))
                  :else (exact (map (fn [(index : int)]
-                   (grid_polygon_vertex index u_count u_cells quads
-                     (equal? connectivity "Reverse triangles") (equal? connectivity "Alternating triangles")))
+                   (grid_polygon_vertex index u_count u_cells quads reverse alternate))
                    vertex_indices)))
                offsets (exact (map (fn [(index : int)]
                  (cond row_mode (int/mul index u_count) column_mode (int/mul index v_count)
