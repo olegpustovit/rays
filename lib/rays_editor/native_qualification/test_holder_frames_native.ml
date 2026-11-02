@@ -5,12 +5,13 @@ module Loop = Rays_editor__.Loop_model
 module Editor_loop = Rays_editor__.Editor_loop
 module Cook = Rays_editor__.Cook
 
-(* gpu_sea, a small grid: P, N and a noise on the device, each frame new *)
-let text path =
-  Str.global_replace (Str.regexp_string "(side : int 1000)") "(side : int 128)"
+(* a sketch's frames at a small side: gpu_sea (P, N and a noise on the device), isogrid_city (a mesh
+   whose topology is on the device too) *)
+let text path ~side =
+  Str.global_replace (Str.regexp {|(side : int [0-9]+)|}) (Printf.sprintf "(side : int %d)" side)
     (In_channel.with_open_bin path In_channel.input_all)
 
-let frames = 12
+let frames = 6
 let ok = function Ok value -> value | Error message -> failwith message
 
 let frame tick : Rays.Frame.t =
@@ -29,15 +30,26 @@ let frame tick : Rays.Frame.t =
     mouse_delta = (0., 0.);
   }
 
-(* the placeholder of the P the editor shows, if the device still holds it unread *)
+(* what the editor shows of a device's: P's placeholder, and a weak hold on its topology's streams *)
 let shown (editor : Loop.t) =
   List.find_map
-    (fun (piece : Cook.piece) -> Flow_sop.Attribute_kernel.resident_vec3 piece.prepared.geometry "P")
+    (fun (piece : Cook.piece) ->
+      let geometry = piece.prepared.geometry in
+      Option.map
+        (fun p ->
+          ( p,
+            Option.map
+              (fun (vertices, offsets, kinds) ->
+                let streams = Weak.create 3 in
+                List.iteri (fun i s -> Weak.set streams i (Some s)) [ vertices; offsets; kinds ];
+                streams)
+              (Flow_sop.Topology_kernel.resident geometry) ))
+        (Flow_sop.Attribute_kernel.resident_vec3 geometry "P"))
     editor.core.cook.pieces
 
-let () =
+let frames_of path ~side ~topology =
   let workspace =
-    match Rays_editor.Workspace.load (text Sys.argv.(1)) with
+    match Rays_editor.Workspace.load (text path ~side) with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
   in
@@ -50,7 +62,7 @@ let () =
          (Loop.create ~gpu_owner ~ui_text_size:11 ~await:true ~domains:1 ~workspace ~prepare:Cook.prepare
             ~draw:Cook.draw ()))
   in
-  let previous = ref None and gone = ref 0 in
+  let previous = ref None and gone = ref 0 and meshes = ref 0 in
   for tick = 1 to frames do
     let at = frame tick in
     editor := Editor_loop.update !editor at;
@@ -58,19 +70,35 @@ let () =
     editor := Editor_loop.after_present !editor at;
     let now = shown !editor in
     (match (!previous, now) with
-    | Some old, Some current when old != current -> (
+    | Some (old, streams), Some (current, _) when old != current ->
         Gc.full_major ();
         Gc.full_major ();
-        match Flow_gpu.Run.pin old with
+        let fail what =
+          failwith (Printf.sprintf "%s, frame %d shown: the frame before still holds its %s" path tick what)
+        in
+        (match Flow_gpu.Run.pin old with
         | None -> incr gone
         | Some (_, _, _, unpin) ->
             unpin ();
-            failwith (Printf.sprintf "frame %d shown: the frame before it still has its holder" tick))
+            fail "P");
+        Option.iter
+          (fun streams ->
+            incr meshes;
+            for i = 0 to 2 do
+              if Weak.check streams i then fail "topology"
+            done)
+          streams
     | _ -> ());
     if now <> None then previous := now
   done;
   Editor_loop.close !editor;
   Flow_native.Workspace_gpu.close gpu_owner;
   ignore (Rays.Canvas.destroy canvas);
-  if !gone < frames / 2 then failwith (Printf.sprintf "only %d of %d frames drew a resident P" !gone frames);
-  Printf.printf "holder lifetime: %d frames' holders gone once the next was shown\n" !gone
+  if !gone < frames / 2 then failwith (Printf.sprintf "%s: only %d of %d frames drew a resident P" path !gone frames);
+  if topology && !meshes < frames / 2 then
+    failwith (Printf.sprintf "%s: only %d of %d frames drew a resident topology" path !meshes frames);
+  Printf.printf "holder lifetime, %s: %d frames' holders gone once the next was shown\n" path !gone
+
+let () =
+  frames_of Sys.argv.(1) ~side:128 ~topology:false;
+  frames_of Sys.argv.(2) ~side:8 ~topology:true

@@ -104,7 +104,9 @@
 (rule
  (enabled_if (= %{system} macosx))
  (alias test_holder_frames_native)
- (action (run %{exe:test_holder_frames_native.exe} %{dep:../../../sketches/gpu_sea.rays})))
+ (action
+  (run %{exe:test_holder_frames_native.exe} %{dep:../../../sketches/gpu_sea.rays}
+   %{dep:../../../sketches/isogrid_city.rays})))
 
 (alias (name runtest-native) (deps (alias test_holder_frames_native)))
 

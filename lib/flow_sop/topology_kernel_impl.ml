@@ -346,8 +346,10 @@ let mesh_resident (scope : Flow_ir.Gpu.residency) args =
                   let integer value = retain (fun (p : Flow_ir.Gpu.integers) -> p.release)
                       (scope.retain_uint32 value) in
                   let vertices = integer vertices and offsets = integer offsets and kinds = integer kinds in
-                  let release ~held = List.iter (fun (p : Flow_ir.Gpu.integers) -> p.release ~held)
+                  (* the session keeps this: the streams' releases, not the streams *)
+                  let releases = List.map (fun (p : Flow_ir.Gpu.integers) -> p.release)
                       [ vertices; offsets; kinds ] in
+                  let release ~held = List.iter (fun release -> release ~held) releases in
                   let topology = Rdk.Topology.deferred ~point_count ~vertex_count ~primitive_count
                       ~holder:(Resident_topology (vertices, offsets, kinds)) ~release (fun () ->
                         Rdk.Topology.create_owned ~point_count ~vertex_points:(vertices.materialise ())
