@@ -1192,8 +1192,10 @@ let () =
             rows
       in
       (* REPLAY_JOBS=J forks J workers, each owning the nodes that hash to it (so a node's prepared library is built once). *)
+      (* ponytail: Windows has no fork, so it checks the same rows in one process; add workers there when a Windows replay is too slow *)
       let jobs =
-        match Sys.getenv_opt "REPLAY_JOBS" with Some j -> max 1 (int_of_string j) | None -> 1
+        if Sys.win32 then 1
+        else match Sys.getenv_opt "REPLAY_JOBS" with Some j -> max 1 (int_of_string j) | None -> 1
       in
       let children =
         List.init
