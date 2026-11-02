@@ -2009,7 +2009,7 @@ CAMLprim value rv_cmd_set_accel(value commands, value index, value accel) {
   return Val_long(VK_SUCCESS);
 }
 
-/* The logical records (64 bytes: column-major transform, user id at 48, mask at 52, structure index
+/* The logical records (68 bytes: column-major transform, user id at 48, mask at 52, structure index
    at 56) become Vulkan's. Their bits are a host fact at build time, so the buffer must be host
    visible; a device-written instance buffer has no caller. */
 static VkResult native_instances(rv_cmd *c, rv_accel *a, VkDeviceAddress *address) {
@@ -2020,7 +2020,7 @@ static VkResult native_instances(rv_cmd *c, rv_accel *a, VkDeviceAddress *addres
   char *room = arena(c, bytes ? bytes : 64, 16, &chunk, &at);
   if (!room) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
   const char *from = a->instances->map + a->instances_offset;
-  for (uint32_t i = 0; i < a->instance_count; i++, from += 64) {
+  for (uint32_t i = 0; i < a->instance_count; i++, from += 68) {
     const float *m = (const float *)from;
     uint32_t user_id, mask, index;
     memcpy(&user_id, from + 48, 4);

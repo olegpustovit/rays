@@ -1052,8 +1052,9 @@ let create () =
               create_library;
               create_accel;
               (* A logical record the bridge turns into Vulkan's at build, when it knows the structures'
-                 addresses: 24-bit id and 8-bit mask share a word the portable packer cannot write. *)
-              instance_layout = (fun _ -> [| 64; 0; -1; 52; 56; 48; -1; -1; -1; -1; -1; -1 |]);
+                 addresses: 24-bit id and 8-bit mask share a word the portable packer cannot write. The record is
+                 68 bytes, the size OGPU requires of a user-id instance. *)
+              instance_layout = (fun _ -> [| 68; 0; -1; 52; 56; 48; -1; -1; -1; -1; -1; -1 |]);
               create_sampler;
               create_render_pipeline;
               create_icb;
