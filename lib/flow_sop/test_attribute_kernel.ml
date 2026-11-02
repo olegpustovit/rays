@@ -42,10 +42,16 @@ let geometry = function
   | Ok (output : Session.output) -> Result.get_ok (Sop.Payload.geometry output.payload)
   | Error d -> failwith (Diagnostic.error_to_string d)
 
+(* The authored write: the last, since an inlined Lisp node's own writes (a grid's N and P, a9037c13)
+   come first in the plan. *)
+let authored_write (l : L.t) =
+  Array.fold_left
+    (fun last (n : E.node) -> if n.kind = "sop/with_attr" then Some n else last)
+    None l.plan.nodes
+  |> Option.get
+
 let reference (l : L.t) node =
-  let n =
-    Array.find_opt (fun (n : E.node) -> n.kind = "sop/with_attr") l.plan.nodes |> Option.get
-  in
+  let n = authored_write l in
   let values = List.assoc "values" n.args in
   let sources =
     match List.assoc "geometry" n.args with
@@ -601,16 +607,32 @@ let () =
                             (fun reference ->
                               let actual = force reference |> flow_ok in
                               assert (bits actual = bits expected);
-                              (match actual with
-                              | E.Record fields -> (
-                                  (match List.assoc "values" fields with
-                                  | E.Float_array a | Vec2_array a | Vec3_array a | Vec4_array a ->
-                                      Array.fill a 0 (Array.length a) 99.
-                                  | _ -> assert false);
-                                  match List.assoc "valid" fields with
-                                  | E.Int_array a -> Array.fill a 0 (Array.length a) 99
-                                  | _ -> assert false)
-                              | _ -> assert false);
+                              let arrays = function
+                                | E.Record fields ->
+                                    let plane =
+                                      match List.assoc "values" fields with
+                                      | E.Float_array a | Vec2_array a | Vec3_array a | Vec4_array a -> a
+                                      | _ -> assert false
+                                    and valid =
+                                      match List.assoc "valid" fields with
+                                      | E.Int_array a -> a
+                                      | _ -> assert false
+                                    in
+                                    (plane, valid)
+                                | _ -> assert false
+                              in
+                              let plane, valid = arrays actual in
+                              (* a small read is the caller's own; a large one is immutable and
+                                 remembered by its storage, so a recook re-reads the same arrays and a
+                                 device holding them uploads nothing *)
+                              if count * width <= 4096 then begin
+                                Array.fill plane 0 (Array.length plane) 99.;
+                                Array.fill valid 0 (Array.length valid) 99
+                              end
+                              else if not reference then begin
+                                let plane', valid' = arrays (force reference |> flow_ok) in
+                                assert (plane' == plane && valid' == valid)
+                              end;
                               assert (bits (force reference |> flow_ok) = bits expected);
                               assert (geometry_bytes geo = before))
                             [ false; true ]))
@@ -1804,10 +1826,7 @@ let () =
         let lowered =
           lower (source (Printf.sprintf "(sop/with_attr g :%s (exact %s))" name body))
         in
-        let call =
-          Array.find_opt (fun (n : E.node) -> n.kind = "sop/with_attr") lowered.plan.nodes
-          |> Option.get
-        in
+        let call = authored_write lowered in
         let id =
           match List.assoc "geometry" call.args with E.Deferred (_, id) -> id | _ -> assert false
         in
@@ -1836,7 +1855,8 @@ let () =
                 Geometry.find_attribute ~owner:Attribute.Point "Cd" painted
                 |> Option.get |> float3_values |> Option.get |> Packed.Float3.View.view
               in
-              assert (old.x != copied.x && old.y != copied.y && old.z != copied.z);
+              (* every empty array is one atom: only a real plane can be distinct *)
+              assert (count = 0 || (old.x != copied.x && old.y != copied.y && old.z != copied.z));
               assert (
                 Marshal.to_string [| old.x; old.y; old.z |] [ Marshal.No_sharing ]
                 = Marshal.to_string [| copied.x; copied.y; copied.z |] [ Marshal.No_sharing ]);
@@ -2415,7 +2435,7 @@ let () =
       let l = lower (source ~columns:1025 body) in
       let node = compiled l in
       let call =
-        Array.find_opt (fun (n : E.node) -> n.kind = "sop/with_attr") l.plan.nodes |> Option.get
+        authored_write l
       in
       let values = List.assoc "values" call.args in
       let main =
@@ -2592,7 +2612,7 @@ let () =
   in
   let named = lower (source ~columns:1025 named_body) in
   let call =
-    Array.find_opt (fun (n : E.node) -> n.kind = "sop/with_attr") named.plan.nodes |> Option.get
+    authored_write named
   in
   assert (not (Flow.Eval.frame_dependent (List.assoc "values" call.args)));
   let session = session () in
@@ -2676,7 +2696,7 @@ let () =
   let result = Flow_graph.Projection.find pane [ "g"; "result" ] |> Option.get in
   assert (
     List.map (fun (r : Flow_graph.Projection.row) -> r.label) result.rows
-    = [ "geometry"; "attribute"; "values"; "owner"; "type"; "selection"; "default" ]);
+    = [ "geometry"; "attribute"; "values"; "owner"; "type"; "selection"; "default"; "when" ]);
   let fn =
     List.find
       (fun (node : Flow_graph.Projection.node) ->
@@ -3053,8 +3073,12 @@ let () =
                           in
                           if count > 0 then begin
                             Array.iteri (fun c plane -> assert (plane != data.(c))) owned;
-                            owned.(0).(0) <- 77.;
-                            assert (Int64.bits_of_float data.(0).(0) = Int64.bits_of_float (-0.))
+                            (* past 4096 a write's copies are remembered by its planes (0905edd2): a
+                               recook installs the same ones, so they are not this write's to change *)
+                            if count <= 4096 then begin
+                              owned.(0).(0) <- 77.;
+                              assert (Int64.bits_of_float data.(0).(0) = Int64.bits_of_float (-0.))
+                            end
                           end))
                     [ 1; 97; 4096 ])
                 [ 1; 4; 8 ];

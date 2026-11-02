@@ -695,8 +695,10 @@ let run () =
     check (!cooked >= 6) (Printf.sprintf "only %d graphs cooked" !cooked);
     (* Bloom (3 petals, the ref override 2): flower is 3 petals of (uv_sphere, transform, set_color,
      transform), a merge, the heart (uv_sphere, set_color) and the result
-     merge; the ref override with 7 petals is its own network. *)
+     merge; the ref override with 7 petals is its own network. A Lisp node inlines as its writes
+     under one card (72fe0a3c), so the authored calls are the cards, the merges flow.concat. *)
     let swap a b text = Str.global_replace (Str.regexp_string a) b text in
+    let cards graph = operations graph "flow.card" in
     let bloom =
       lower
         ~edit:(fun text ->
@@ -705,16 +707,16 @@ let run () =
     in
     (match bloom.graphs with
     | [ flower; small ] ->
-        check (nodes flower = (3 * 4) + 1 + 2 + 1) "bloom flower node count";
-        check (operations flower "merge" = 2) "bloom flower merges";
-        check (nodes small = (2 * 4) + 1 + 2 + 1) "bloom ref override node count";
+        check (cards flower = (3 * 4) + 1 + 2 + 1) "bloom flower card count";
+        check (operations flower "flow.concat" = 2) "bloom flower merges";
+        check (cards small = (2 * 4) + 1 + 2 + 1) "bloom ref override card count";
         check (small.instance <> flower.instance) "distinct instances";
         (* provenance: the ring merge's input k is petal k's last transform *)
         let ring =
           List.find_map
             (fun (n : Sop.Edit_graph.node_info) ->
               let inputs = n.inputs in
-              if n.operation = "merge" && Array.length inputs = 3 then Some n.id else None)
+              if n.operation = "flow.concat" && Array.length inputs = 3 then Some n.id else None)
             (Sop.Edit_graph.inspect flower.network.geometry)
           |> Option.get
         in
@@ -743,7 +745,7 @@ let run () =
       |> Result.get_ok
     in
     let graph = List.hd small.graphs in
-    check (nodes graph = 7) "merge loop node count";
+    check (cards graph = 7) "merge loop card count";
     let geometry = Option.get (cook ~domains:1 graph) in
     (match
        Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive Lower.source_attribute geometry

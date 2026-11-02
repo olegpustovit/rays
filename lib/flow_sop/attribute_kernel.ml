@@ -312,6 +312,10 @@ let interleave ~count planes =
    recook over unchanged geometry reads the same array, which a device already holding it does not
    upload again, and which needs no new finite scan.
    ponytail: the ring keeps up to 32 interleaved copies alive while their geometry lives. *)
+let same_planes seen planes =
+  (* a hit by the first plane can be a vector of another width sharing it *)
+  Array.length seen = Array.length planes && Array.for_all2 ( == ) seen planes
+
 let interleaved :
     float array -> (unit -> float array array * E.value) -> float array array * E.value =
   Flow.Value.remember ()
@@ -320,7 +324,7 @@ let interleaved :
    rebuilt *)
 let interleave_remembered ~count planes =
   match interleaved planes.(0) (fun () -> (planes, interleave ~count planes)) with
-  | seen, value when Array.for_all2 ( == ) seen planes -> value
+  | seen, value when same_planes seen planes -> value
   | _ -> interleave ~count planes
 
 let read ?component ~owner ~kind name geometry =
@@ -399,7 +403,7 @@ let read_checked ~component ~owner ~kind name geometry =
             else
               let memo = if component = "valid" then checked_valid else checked_values in
               match memo planes.(0) (fun () -> (planes, build ())) with
-              | seen, value when Array.for_all2 ( == ) seen planes -> value
+              | seen, value when same_planes seen planes -> value
               | _ -> build ()))
 
 let read_planes ~component ~owner name geometry =
@@ -894,7 +898,7 @@ let owned_copies ?(finite = fun _ -> true) planes =
   if Array.length planes = 0 || Array.length planes.(0) <= 4096 then copy ()
   else
     match plane_copies planes.(0) (fun () -> (planes, Option.value (copy ()) ~default:[||])) with
-    | seen, copies when Array.length copies > 0 && Array.for_all2 ( == ) seen planes -> Some copies
+    | seen, copies when Array.length copies > 0 && same_planes seen planes -> Some copies
     | _ -> copy ()
 
 let write_storage ~owned_fields ~grain ~owner ~kind name values geometry =
