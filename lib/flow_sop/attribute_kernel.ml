@@ -1877,7 +1877,16 @@ let node ?(clock = Unix.gettimeofday) ?state ?(reference = false) ?(strict = fal
                               ^ String.concat "," (List.map string_of_int iter)
                             in
                             asked := Some (backend, site, count);
-                            Display_sink.device_first backend site ~device_seconds
+                            (* with a declared CPU reader the device route reads back: a write the CPU
+                               is expected to cook faster than the device dispatches measures the CPU first *)
+                            let cpu_first =
+                              Option.value ~default:0 (Sop.Context.cpu_consumers context node_id) > 0
+                              && Option.fold ~none:false
+                                   ~some:(fun device ->
+                                     Flow_ir.Cost.(estimate (packed ~count) ~count) < device)
+                                   device_seconds
+                            in
+                            ((not cpu_first) && Display_sink.device_first backend site ~device_seconds)
                             || begin
                                  let budget =
                                    Flow_ir.Cost.probe_budget

@@ -113,7 +113,7 @@ let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") 
               notice_at = 0.;
               doc;
               gpu;
-              filed = doc;
+              filed = Document.text doc;
               panes =
                 Panel_map.make
                   {
@@ -165,10 +165,9 @@ let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") 
               last_dt = 0.;
               steady = 0;
               history =
-                Editor_core.History.create ~byte_capacity:(16 * 1024 * 1024)
-                  ~owner:(Mem.document "editor.history")
-                  ~bytes:(fun _ -> 0)
-                  doc;
+                Editor_core.History.create ~byte_capacity:(64 * 1024 * 1024)
+                  ~owner:(Mem.document "editor.history") ~keep:Document.snapshot
+                  ~bytes:Document.snapshot_bytes doc;
               focus = Editor_core.Panels.main;
               focus_path = None;
               pane_keys = [];

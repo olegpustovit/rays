@@ -157,7 +157,17 @@ type t = {
 let next = Atomic.make 1
 
 (* a slot's idle things are destroyed: none is in flight, since a fold run's close waits for it *)
+(* A placeholder is a host array of its full length: the evaluator takes a device array's count from
+   the block's header (Core_exec's [V.array_length], [array/count] and [array/range]), so the header
+   must say it. Float arrays are never written, so those pages stay untouched; an Int one is zeroed
+   for the collector. Kept slots' arrays are charged here. *)
+let placeholders = Mem.cache "flow_gpu.placeholders"
+let placeholder_bytes (kind, length) = 8 * max 1 length * max 1 kind
+
 let purge slot =
+  Hashtbl.iter
+    (fun key arrays -> Mem.release placeholders (placeholder_bytes key * List.length arrays))
+    slot.arrays;
   Hashtbl.iter
     (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
     slot.free;
@@ -509,6 +519,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         match Hashtbl.find_opt slot.arrays (kind, length) with
         | Some (a :: rest) ->
             Hashtbl.replace slot.arrays (kind, length) rest;
+            Mem.release placeholders (placeholder_bytes (kind, length));
             Obj.obj a
         | _ -> make ())
   in
@@ -606,18 +617,32 @@ let resident_scope ?(uint32 = false) ~fast t =
         | Some (b :: rest) ->
             Hashtbl.replace slot.free bytes rest;
             Ok (b, bytes)
-        | _ ->
+        | _ -> (
+            (* a large buffer comes from what retained outputs gave back; sizes by class, so a mesh
+               whose count moves between frames finds one *)
+            let large = bytes >= 1 lsl 20 in
+            let device = Renderer.gpu_device t.gpu in
+            match if large then Run.recycled t.shared ~device bytes else None with
+            | Some (b, _, _) -> Ok (b, bytes)
+            | None ->
+            let size =
+              if not large then bytes
+              else
+                let rec up n = if n >= bytes then n else up (2 * n) in
+                up (1 lsl 20)
+            in
+            if large then Run.created t.shared size;
             Result.map
               (fun b ->
                 t.resident_buffers <- t.resident_buffers + 1;
                 (b, bytes))
               (Result.map_error Run.Private.diagnostic
-                 (Result.map fst (Ogpu.Backend.create_mapped_buffer (Renderer.gpu_device t.gpu)
+                 (Result.map fst (Ogpu.Backend.create_mapped_buffer device
                     {
                       label = Some "Flow resident";
-                      size = Int64.of_int bytes;
+                      size = Int64.of_int size;
                       usage = [ Storage; Copy_src; Copy_dst ];
-                    }))))
+                    })))))
   in
   (* a site, its runner None when the device refuses its form; decided once per site *)
   let site (packed : Flow_ir.Packed.t) =
@@ -1156,6 +1181,7 @@ let resident_scope ?(uint32 = false) ~fast t =
       (fun p ->
         if p.slot.kept && not p.dead then
           let k = (p.kind, p.length) in
+          Mem.charge placeholders (placeholder_bytes k);
           Hashtbl.replace p.slot.arrays k
             (p.key :: Option.value ~default:[] (Hashtbl.find_opt p.slot.arrays k)))
       !table;
@@ -1164,6 +1190,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         if s.kept then
           List.iter
             (fun (k, a) ->
+              Mem.charge placeholders (placeholder_bytes k);
               Hashtbl.replace s.arrays k
                 (a :: Option.value ~default:[] (Hashtbl.find_opt s.arrays k)))
             s.spare_arrays;
@@ -1689,6 +1716,11 @@ let stats t =
     held_buffers = (if t.closed then 0 else Run.Private.pool_held t.shared);
     freed = Run.Private.pool_freed t.shared;
   }
+
+let forget_producer t identity =
+  let found = ref None in
+  Cache.iter t.runners (fun key runner -> if runner.identity = identity then found := Some key);
+  Option.iter (Cache.remove t.runners) !found
 
 let backend t =
   { (standard_backend t) with

@@ -3626,7 +3626,7 @@ module Host = struct
           | Some floats -> floats
           | None ->
               let floats = Array.map float_of_int values in
-              Lru.Identity_list.add cache values floats;
+              Lru.Identity_list.add cache ~bytes:(Array.length floats * 8) values floats;
               floats)
 
   let floats = function

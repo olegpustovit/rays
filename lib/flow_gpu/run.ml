@@ -46,7 +46,7 @@ type kept = {
    of any size class (capacity doubles, so a class is [length, 2 * length]), {!free_budget}; collected
    or read holders' ids, from any domain; retired holders, whose owner (a session) dropped them but
    which a reader may still hold: their buffers stay theirs until they are collected or read, and
-   past {!retired_budget} bytes the oldest is read into owned planes so its buffer comes back. *)
+   past {!retired_budget_for} bytes the oldest is read into owned planes so its buffer comes back. *)
 type pool = {
   held : (int, B.buffer * B.floats * int * int Atomic.t) Hashtbl.t;
   mutable free : (B.buffer * B.floats * int) list;
@@ -56,6 +56,8 @@ type pool = {
   mutable retired : (int * kept Weak.t) list;
       (** oldest first, by id: only the one {!reclaim} reads is ever [Weak.get], since a get while
           the GC marks keeps the holder alive another cycle *)
+  mutable collected_at : int;  (** bytes created by the pool's owner at its last requested cycle *)
+  mutable created : int;
 }
 
 let pool () =
@@ -66,6 +68,8 @@ let pool () =
     retiring = Atomic.make [];
     freed = Atomic.make 0;
     retired = [];
+    collected_at = 0;
+    created = 0;
   }
 
 (* Kept outputs a later dispatch may bind by their placeholder, on the initial domain. *)
@@ -296,7 +300,8 @@ let drain_pool pool =
       | Some (buffer, floats, capacity, _) ->
           Hashtbl.remove pool.held id;
           let free = List.fold_left (fun sum (_, _, c) -> sum + c) 0 pool.free in
-          if free + capacity <= free_budget then
+          (* a frame of big outputs must find its buffers again *)
+          if free + capacity <= max free_budget (8 * capacity) then
             pool.free <- (buffer, floats, capacity) :: pool.free
           else ignore (B.destroy_buffer buffer)
       | None -> ())
@@ -315,52 +320,73 @@ let take_free pool length =
       Some held
   | None -> None
 
-(* Past this many bytes of retired holders still unread, free the oldest without a reader (no
-   float32→double widen). A reader still pending thaws so later reads see the same values.
-   Derived from the device working set when known; falls back to 512 MiB. *)
+(* Past this many bytes of retired holders still unread, the oldest is read now (owned planes: its
+   later readers see the same values) and its buffer comes back, so device memory stays bounded. A
+   retired holder stays readable for as long as it is alive and nothing here can tell it has no future
+   reader, so a live one is always read; only a collected one goes unread. A quarter of the device's
+   working set, 512 MiB when it does not say. *)
 let retired_budget_for device =
   let recommended = Int64.to_int (B.recommended_working_set device) in
-  if recommended > 0 then max (64 lsl 20) (recommended / 4) else 512 lsl 20
+  if recommended > 0 then recommended / 4 else 512 lsl 20
 
 let reclaim pool ~device =
   drain_pool pool;
   let held (id, w) = Weak.check w 0 && Hashtbl.mem pool.held id in
-  pool.retired <- List.filter held (pool.retired @ List.rev (Atomic.exchange pool.retiring []));
+  let refresh () =
+    pool.retired <- List.filter held (pool.retired @ List.rev (Atomic.exchange pool.retiring []))
+  in
+  refresh ();
   let bytes sum (id, _) =
     match Hashtbl.find_opt pool.held id with
     | Some (_, _, capacity, _) -> sum + capacity
     | None -> sum
   in
-  let budget = retired_budget_for device in
-  if List.fold_left bytes 0 pool.retired > budget then begin
+  (* Only a collection can tell a dead retired holder from a live one, so device memory must not wait
+     for the collector's own pace: past this many retired bytes, and once per that many bytes the pool
+     has had to create, ask for one cycle. What it finds dead comes back unread. *)
+  if
+    List.fold_left bytes 0 pool.retired > free_budget
+    && pool.created - pool.collected_at >= free_budget
+  then begin
+    pool.collected_at <- pool.created;
+    Gc.major ();
+    drain_pool pool;
+    refresh ()
+  end;
+  if List.fold_left bytes 0 pool.retired > retired_budget_for device then begin
     (match pool.retired with
-    | (id, w) :: rest ->
+    | (_, w) :: rest ->
         pool.retired <- rest;
-        (match Weak.get w 0 with
-        | Some k when Atomic.get k.readers = 0 ->
-            (* No reader: destroy without widening into host doubles. *)
-            k.destroyed <- true;
-            Atomic.incr pool.freed;
-            push pool.released id
-        | Some k -> k.thaw ()
-        | None -> push pool.released id)
+        Option.iter (fun k -> if Atomic.get k.readers = 0 then k.thaw ()) (Weak.get w 0)
     | [] -> ());
     drain_pool pool
   end
 
+let recycled pool ~device length =
+  match take_free pool length with
+  | Some _ as found -> found
+  | None ->
+      reclaim pool ~device;
+      take_free pool length
+
+let created pool bytes = pool.created <- pool.created + bytes
+
 let create ?pool gpu = create_owned ?pool (Renderer.gpu_device gpu) (Renderer.gpu_queue gpu)
+
+(* An input the device now holds elsewhere: its upload buffer and the host array it was compared to
+   would otherwise stay pinned for the runner's life (a measurement's copy, a host P before the
+   chain went resident). *)
+let forget_input slot =
+  Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
+  slot.buffer <- None;
+  slot.floats <- None;
+  slot.capacity <- 0;
+  slot.uploaded <- None
 
 let ensure ?(mapped = false) t slot length =
   (if mapped && slot.buffer = None && length > 0 then
      (* an output slot whose last buffer a holder took: a recycled buffer of the size class *)
-     let found =
-       match take_free t.pool length with
-      | Some _ as found -> found
-      | None ->
-           reclaim t.pool ~device:t.device;
-           take_free t.pool length
-     in
-     match found with
+     match recycled t.pool ~device:t.device length with
      | Some (buffer, floats, capacity) ->
          slot.buffer <- Some buffer;
          slot.floats <- Some floats;
@@ -383,6 +409,7 @@ let ensure ?(mapped = false) t slot length =
     let fresh, floats =
       if mapped then
         let buffer, floats = get (B.create_mapped_buffer t.device descriptor) in
+        created t.pool !capacity;
         (buffer, Some floats)
       else (get (B.create_buffer t.device descriptor), None)
     in
@@ -586,7 +613,9 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
           Array.mapi
             (fun index slot ->
               match bound index with
-              | Some buffer -> buffer
+              | Some buffer ->
+                  forget_input slot;
+                  buffer
               | None ->
                   let length = values.count * msl.input_widths.(index) * 4 in
                   let buffer = ensure ~mapped:(not msl.input_uint32.(index)) t slot length in

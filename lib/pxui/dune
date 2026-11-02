@@ -2,7 +2,7 @@
  (name pxui)
  (public_name rays.pxui)
  (modules pxui theme ui ui_core ui_kit ui_text)
- (libraries rays rays_math param))
+ (libraries rays rays_math param mem))
 
 (executable
  (enabled_if
@@ -15,7 +15,7 @@
   test_input
   test_keyboard
   test_table)
- (libraries rays rays_math pxui scene_command sdl3 ogpu_metal))
+ (libraries rays rays_math pxui scene_command sdl3 ogpu_metal mem))
 
 (rule
  (enabled_if

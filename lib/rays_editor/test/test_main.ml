@@ -66,6 +66,7 @@ let tests =
         Test_workspace_source.run_library_navigation ();
         Test_workspace_source.run_vocabulary_refresh () );
     ("test_bloom_studio", Test_bloom_studio.run);
+    ("test_history_memory", Test_history_memory.run);
     ("sop_render_parity", Sop_render_parity.run);
   ]
 

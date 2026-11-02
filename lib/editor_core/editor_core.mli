@@ -5,7 +5,7 @@ module Panels = Panels
 
 (** Bounded immutable undo history with explicit edit merge rules. *)
 module History : sig
-  type 'a t
+  type ('a, 'e) t
 
   type merge =
     | Step
@@ -16,34 +16,52 @@ module History : sig
   val create :
     ?capacity:int ->
     ?byte_capacity:int ->
-    ?bytes:('a -> int) ->
+    ?bytes:('e -> int) ->
     ?owner:Mem.owner ->
+    keep:('a -> 'e) ->
     'a ->
-    'a t
-  (** [byte_capacity] bounds the sum of [bytes] over past entries; [owner] charges that sum. *)
+    ('a, 'e) t
+  (** The present is a live ['a]; an entry is only what [keep] takes from one, which restores it when
+      undo or redo steps there. [bytes] is an entry's size; [byte_capacity] bounds their sum over the
+      entries, oldest going first, the newest always staying; [owner] is charged that sum and
+      released it exactly once per entry, as {!byte_depth} says. *)
 
-  val present : 'a t -> 'a
+  val present : ('a, 'e) t -> 'a
 
   (* [Step] adds an undo entry; matching [Gesture] operation/target keys merge until [seal];
       matching [Burst] keys merge while edits stay within [window] seconds;
       [Repair] changes the current entry without adding a step. *)
-  val record : ?merge:merge -> ?label:string -> 'a -> 'a t -> 'a t
+  val record : ?merge:merge -> ?label:string -> 'a -> ('a, 'e) t -> ('a, 'e) t
   (** [label] (default ["Edit"]) names the entry, e.g. ["Connect"]. *)
 
-  val label : 'a t -> string
+  val label : ('a, 'e) t -> string
   (** The label of the edit that produced [present]: what [undo] reverts. *)
 
-  val redo_label : 'a t -> string option
+  val redo_label : ('a, 'e) t -> string option
 
-  val seal : ?gesture_only:bool -> 'a t -> 'a t
+  val seal : ?gesture_only:bool -> ('a, 'e) t -> ('a, 'e) t
   (** [gesture_only] preserves timed bursts when a pointer gesture ends. *)
 
-  val undo : 'a t -> 'a t option
-  val redo : 'a t -> 'a t option
-  val can_undo : 'a t -> bool
-  val can_redo : 'a t -> bool
-  val depth : 'a t -> int
-  val byte_depth : 'a t -> int
+  val undo : restore:('e -> ('a, 'x) result) -> ('a, 'e) t -> (('a, 'e) t, 'x) result option
+  (** [None] with nothing to undo. [restore] makes the entry live again, unless it is the last
+      present to become an entry, which stays live beside the entries. [Error]: nothing changed. *)
+
+  val redo : restore:('e -> ('a, 'x) result) -> ('a, 'e) t -> (('a, 'e) t, 'x) result option
+  val can_undo : ('a, 'e) t -> bool
+  val can_redo : ('a, 'e) t -> bool
+  val depth : ('a, 'e) t -> int
+
+  val byte_depth : ('a, 'e) t -> int
+  (** What [owner] is charged: the entries to undo and to redo. *)
+
+  val shed : keep:int -> ('a, 'e) t -> ('a, 'e) t
+  (** The oldest undo entries gone, down to [keep] (at least one). *)
+
+  val release : ('a, 'e) t -> ('a, 'e) t
+  (** No entries left, and none charged: the editor is closing. *)
+
+  val restart : 'a -> ('a, 'e) t -> ('a, 'e) t
+  (** A new document: [release], with this present. *)
 end
 
 module Keymap : sig

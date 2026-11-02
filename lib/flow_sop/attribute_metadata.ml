@@ -82,6 +82,9 @@ let delete ?guard ~owner ~pattern input =
           | Ok geometry -> Ok Sop.Node.Build.{ geometry; instances = None }
           | Error error ->
               Error (Diagnostic.error ~code:"E_ATTR_DELETE" (Rdk.Error.to_string error))))
+  (* dropping attributes reads no payload; a guard reads its own sources as it decides *)
+  |> Sop.Node.Build.with_input_use
+       (if guard = None then Sop.Node.Forward 0 else Sop.Node.Cpu)
   |> Sop.Node.Build.with_facts
        Sop.Node.
          {

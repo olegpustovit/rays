@@ -474,9 +474,12 @@ freed without a read). Retired buffers return to the host's pool (`Run.pool`, sh
 so a new runner after an edit reuses buffers by size class: any 8 free, more within 256 MiB) when
 they are read or collected. Each holder carries a custom block that tells the GC its buffer's size
 (`flow_gpu_stubs.c`, one major cycle per 64 MiB, as a Bigarray's data), so a dead result is
-collected within a few cooks and its buffer comes back without a read; past 2 GiB of retired outputs
+collected within a few cooks and its buffer comes back without a read; past a quarter of the device's working set of retired outputs
 still unread (all alive), the oldest is read into owned planes (same values) and its buffer reused,
-which bounds device memory. The pool never `Weak.get`s a retired holder it does not read: a get
+which bounds device memory. Only a collection tells a dead retired holder from a live one, so the pool asks for one
+major cycle (`Run.reclaim`) past 256 MiB retired, at most once per 256 MiB it has had to create, rather than
+waiting for the collector's pace. `Host.alloc` takes large buffers from this pool in power-of-two sizes.
+Mapped buffers are `mmap`ed, so a freed one leaves the footprint at once, not via the allocator's large cache. The pool never `Weak.get`s a retired holder it does not read: a get
 while the GC marks keeps the holder alive another cycle, which had kept every dead result alive.
 Nor does a settle: it marks the dispatch's other outputs through the epoch and settled flag the
 runner records beside each weak holder (a settle that got every live holder, once per cook, kept
@@ -484,7 +487,7 @@ every live graph's outputs alive forever: `sketches/gpu_sea.rays` read two back 
 buffer; `test_run_lifetime` retires 24 cooks and fails unless their buffers are reused unread). The
 same holds for `Flow.Value.remember`, which queries only a slot whose key hashes alike. A drawn
 result is held by its display's staging too: the native stage and prepared-layer caches keep at
-most four layers that draw a device's vertices (`Scene3_native_lowering.device_layer_capacity`),
+most two layers that draw a device's vertices (`Scene3_native_lowering.device_layer_capacity`),
 so a live cook's older frames, a new mesh each, are let go (`test_scene3_native_lowering`).
 Measured (`bench_chain_recook.exe`, 1M points, one session toggling an edit, 32 warm and 32
 measured cooks, medians of three interleaved rounds, loaded M1, 2026-10-28): results that die, 1.5-3.2
@@ -2198,12 +2201,15 @@ picking and inspection materialise on their gesture) unless it is probed, which 
 one; without a device owner it has one. This does not imply all internal opaque nodes
 are classified.
 
-**Mesh placement.** `sop/mesh`, `sop/mesh_planes` and `flow.geometry_select` choose their route per
+**Mesh placement.** `sop/mesh`, a frame-driven `sop/mesh_planes` and `flow.geometry_select` choose their route per
 authored site with `Lower.Chain` (specification/gpu-codegen.md): measured seconds per output float of each
 route, the CPU one plus the host display sink (`Attribute_kernel.Display_sink`), the device one plus the
 resident sink and the materialisation known CPU readers force, compared by `Flow_ir.Cost.choose` with one
 named reason in `Profile.placements`. No size threshold exists. A write beside host positions counts one
-reader; beside resident positions its CPU alternative is charged the measured host sink. Qualification
+reader; beside resident positions its CPU alternative is charged the measured host sink. A static
+`sop/mesh_planes` is not placed: it cooks once on the CPU, since planes never stay resident. An `error_rows` mask
+in a card's body is decided while the body evaluates even when the host defers static maps (the editor's
+`defer:true`), or the card would turn structural and end write fusion for everything downstream. Qualification
 forces the device and is used only by display tests and benchmarks. Placement state is weakly keyed by the
 backend and `Lower.forget_backend` (called by `Workspace_gpu.close`) drops the owner's nodes.
 

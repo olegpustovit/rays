@@ -159,7 +159,9 @@ consumers force the existing carriers. Unsupported stream shapes materialise
 before the scope closes and pass through the ordinary mesh constructor.
 Fused N/Cd writes stay resident when their own measured comparison selects the device.
 
-Mesh construction (`sop/mesh`, `sop/mesh_planes`) and `flow.geometry_select` enter the resident scope by a
+A static `sop/mesh_planes` cooks on the CPU, once: planes never stay resident (`mesh_resident` keeps Vec3
+points), so its device route could only read the topology back. Mesh construction (`sop/mesh`, a frame-driven
+`sop/mesh_planes`) and `flow.geometry_select` enter the resident scope by a
 whole-chain measured comparison (`Lower.Chain`): per authored site and output size class (log2 of the
 output's floats) each route keeps the cheaper of two measured cook rates (seconds per float, a route's first
 cook pays one-time preparation). The CPU alternative adds the upload of the mesh it displays and the device
@@ -170,7 +172,9 @@ under `Cost.probe_budget` (twice the device's cost, at least 20 ms), because a C
 the device takes milliseconds. A sample past its budget is abandoned through `Eval.with_interrupt`, which
 reaches worker chunks, is recorded at the budget and the frame cooks on the device; it costs a few device
 cooks, once. A body that fails on the device falls back to the CPU. Until it has numbers it reports (`no_cost_evidence`). A write that reads no attribute and deletes none forwards its input
-unread in the consumer census. A displayed root with a device owner has no CPU reader unless probed; a
+unread in the consumer census, and so does `flow.delete_attr` without a guard. A write over input the device
+holds takes no CPU sample (it would read that input back); a write with a declared CPU reader that the cost table
+prices under its device dispatch samples the CPU first, so a small capture is not dispatched and read back. A displayed root with a device owner has no CPU reader unless probed; a
 write beside host positions counts one reader, and beside resident positions its CPU alternative is charged the
 measured host display sink, so mesh and writes cannot split into a mixed mesh the display must convert.
 

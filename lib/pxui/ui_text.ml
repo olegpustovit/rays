@@ -48,6 +48,41 @@ let clipboard_command ~command = function
 
 type text_edit = { mutable text : string; mutable caret : int; mutable anchor : int }
 
+(* Snapshots hold the whole text, and five stacks of 200 at 100 KB is 100 MB: so one cap covers the
+   open stacks and the shelf together. The shelf's oldest stack goes first, then the open text's oldest
+   step; the newest step stays, so a text over the cap still undoes once. *)
+let text_undo_byte_cap = 8 * 1024 * 1024
+let text_undo_owner = Mem.document "pxui.text_undo"
+let stack_bytes stack = List.fold_left (fun sum (text, _, _) -> sum + String.length text) 0 stack
+
+let text_undo_bytes ui =
+  stack_bytes ui.edit_undo + stack_bytes ui.edit_redo
+  + List.fold_left
+      (fun sum (_, _, undo, redo) -> sum + stack_bytes undo + stack_bytes redo)
+      0 ui.edit_shelf
+
+(* the ledger follows the stacks' one running total *)
+let charge_text_undo ui bytes =
+  Mem.charge text_undo_owner (bytes - ui.edit_undo_charged);
+  Mem.release text_undo_owner (ui.edit_undo_charged - bytes);
+  ui.edit_undo_charged <- bytes
+
+let rec enforce_text_undo ui =
+  let bytes = text_undo_bytes ui in
+  let dropped =
+    bytes > text_undo_byte_cap
+    &&
+    match (ui.edit_shelf, ui.edit_undo) with
+    | _ :: _, _ ->
+        ui.edit_shelf <- List.take (List.length ui.edit_shelf - 1) ui.edit_shelf;
+        true
+    | [], _ :: _ :: _ ->
+        ui.edit_undo <- List.take (List.length ui.edit_undo - 1) ui.edit_undo;
+        true
+    | [], _ -> false
+  in
+  if dropped then enforce_text_undo ui else charge_text_undo ui bytes
+
 (* A text starts being edited: the caret at its end, the selection from [anchor], and nothing of
    the text edited before it (scroll, undo stacks, a double click's selection unit). *)
 let reset_edit ui key text ~anchor =
@@ -60,7 +95,8 @@ let reset_edit ui key text ~anchor =
   ui.edit_redo <- [];
   ui.edit_group <- -1;
   ui.edit_unit <- None;
-  ui.edit_column <- -1.
+  ui.edit_column <- -1.;
+  enforce_text_undo ui
 
 let load_text_edit ui key text =
   if ui.edit_focus <> key || ui.edit_value <> text then begin
@@ -74,7 +110,8 @@ let load_text_edit ui key text =
       (fun (_, _, undo, redo) ->
         ui.edit_undo <- undo;
         ui.edit_redo <- redo)
-      back
+      back;
+    enforce_text_undo ui
   end;
   { text; caret = ui.edit_caret; anchor = ui.edit_anchor }
 
@@ -238,24 +275,13 @@ let word_at text i =
 
 (* ---- undo inside the focused text: snapshots before each change, consecutive typing as one *)
 
-let text_undo_byte_cap = 1_048_576
-
 let rec bounded n = function x :: rest when n > 0 -> x :: bounded (n - 1) rest | _ -> []
-
-let entry_bytes (text, _, _) = String.length text
-
-let rec trim_bytes budget = function
-  | [] -> []
-  | entry :: rest ->
-      let n = entry_bytes entry in
-      if n > budget then [] else entry :: trim_bytes (budget - n) rest
 
 let remember ui edit ~typing =
   if not (typing && edit.caret = edit.anchor && ui.edit_group = edit.caret) then begin
-    ui.edit_undo <-
-      trim_bytes text_undo_byte_cap
-        (bounded 200 ((edit.text, edit.caret, edit.anchor) :: ui.edit_undo));
-    ui.edit_redo <- []
+    ui.edit_undo <- bounded 200 ((edit.text, edit.caret, edit.anchor) :: ui.edit_undo);
+    ui.edit_redo <- [];
+    enforce_text_undo ui
   end;
   ui.edit_group <- -1
 
@@ -274,6 +300,7 @@ let undo_text ui edit ~redo =
       edit.caret <- caret;
       edit.anchor <- anchor;
       ui.edit_group <- -1;
+      enforce_text_undo ui;
       true
 
 (* an exhausted stack hands the key to the host's own undo ([passed_undo]) *)
@@ -979,13 +1006,12 @@ let line_field ui ~at ~w ~h ?(grab = false) ?(placeholder = "") label value =
 
 (* The rows of a text: (start, stop, logical line) with [stop] exclusive and before the newline.
    Without [cols] a row is a line; with it a line continues every [cols] characters. *)
-(* ponytail: one-slot cache; same text+cols (physical) skips the O(text) walk (memory plan S7). *)
-let text_rows_cache : (int option * string * (int * int * int) array) option ref = ref None
-
-let text_rows ?cols text =
-  match !text_rows_cache with
-  | Some (c, t, rows) when c = cols && t == text -> rows
-  | _ ->
+(* An unchanged text costs no walk: the handle keeps the rows of the last few texts it laid out, one
+   per pane on screen, by physical text. ponytail: 8 panes showing text; a ninth walks. *)
+let text_rows ui ?cols text =
+  match List.find_opt (fun (c, t, _) -> t == text && c = cols) ui.text_rows_seen with
+  | Some (_, _, rows) -> rows
+  | None ->
       let n = String.length text in
       let rows = ref [] in
       let rec line start logical =
@@ -1009,7 +1035,7 @@ let text_rows ?cols text =
       in
       line 0 0;
       let rows = Array.of_list (List.rev !rows) in
-      text_rows_cache := Some (cols, text, rows);
+      ui.text_rows_seen <- List.take 8 ((cols, text, rows) :: ui.text_rows_seen);
       rows
 
 (* the row holding byte [index] *)
@@ -1666,7 +1692,7 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
   (* the gutter width follows the number of logical lines, the wrap width follows the gutter *)
   let rows_of text =
     let logical = 1 + String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 text in
-    text_rows ?cols:(columns_of logical) text
+    text_rows ui ?cols:(columns_of logical) text
   in
   let rows = rows_of text in
   let count = Array.length rows in

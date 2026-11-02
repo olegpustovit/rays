@@ -721,9 +721,9 @@ let prepared_bytes prepared =
 
 (* A layer drawing a device's vertices (a live cook's display) is one frame's: the next cook's
    display is a new mesh, so an older layer is never asked for again, and cached it holds its
-   scene, the geometry and the device outputs under it. A cache keeps at most this many (one per
-   viewport showing one), the newest; layers of host meshes are bounded only by the cache. *)
-let device_layer_capacity = 4
+   scene, the geometry and the device outputs under it. A cache keeps at most this many, the newest
+   (the frame shown and the one in flight; a further viewport rebuilds its layer); layers of host meshes are bounded only by the cache. *)
+let device_layer_capacity = 2
 
 let borrows_device prepared =
   Array.exists

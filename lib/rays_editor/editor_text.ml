@@ -441,14 +441,14 @@ let has_draft ?except value =
   || List.exists (fun (_, (l : local)) -> draft_applies ?except l.code <> []) value.locals
 
 (* What Command-S writes: the workspace text and, without a settings graph, the settings. *)
-let same_text (a : Document.t) (b : Document.t) =
-  a.workspace.ws == b.workspace.ws && a.settings == b.settings
+let same_text (a : Document.t) (b : Document.text) =
+  a.workspace.ws == b.text_ws && a.settings == b.text_settings
 
 (* Work a reload of the source file would lose: edits since the file's text, or a draft. *)
 let unsaved ?except value = (not (same_text value.doc value.filed)) || has_draft ?except value
 
 (* The document is the file's text now (saved over it). *)
-let filed value = { value with filed = value.doc }
+let filed value = { value with filed = Document.text value.doc }
 
 (* Command-S with a draft: every draft is applied first (each one its "Edit text" entry); a draft
    that does not check stays with its errors, and [Error] says the save must wait. *)

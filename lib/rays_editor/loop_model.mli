@@ -37,7 +37,7 @@ type t = {
   held : string option;
   open_dialog : int option;
   refused : string option;
-  opened : Editor_document.Document.t;
+  opened : Editor_document.Document.text;
   state_owned : bool;
   state_checked : float;
   saved_doc : (Editor_document.Document.t, unit) Ephemeron.K1.t;

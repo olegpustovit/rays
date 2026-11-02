@@ -359,6 +359,7 @@ module Residual_effect = struct
     | Observe_kernel : residual -> unit Effect.t
     | Kernel_value : residual -> value option Effect.t
     | Bulk_static : residual -> value option Effect.t
+    | Bulk_needed : residual -> value option Effect.t
     | Bulk_approx : residual -> value option Effect.t
     | Static_mode : (bool * bool * bool) Effect.t
     | Static_map :
@@ -409,6 +410,10 @@ module Residual_effect = struct
                           raise Needs_t;
                         bulk residual)
                       continuation)
+            | Bulk_needed residual ->
+                Some
+                  (fun (continuation : (a, result) Effect.Deep.continuation) ->
+                    resume (fun () -> bulk residual) continuation)
             | Bulk_approx residual ->
                 Some
                   (fun (continuation : (a, result) Effect.Deep.continuation) ->
@@ -1538,7 +1543,19 @@ and ev_raw c env (x : W.term) : value =
       let value =
         match (c.st.time, policy) with
         | None, W.First when c.card <> None -> (
-            match ev (sub c "0") env rows with Int_array _ as v -> v | _ -> raise Needs_t)
+            match ev (sub c "0") env rows with
+            | Int_array _ as v -> v
+            | Residual r -> (
+                (* a static map the host deferred: this check needs it now, or the card turns structural *)
+                let r =
+                  match r.rterm.node with
+                  | W.Op { op = "exact"; args = [ (_, inner) ]; _ } -> { r with rterm = inner }
+                  | _ -> r
+                in
+                match Effect.perform (Residual_effect.Bulk_needed r) with
+                | Some (Int_array _ as v) -> v
+                | _ -> raise Needs_t)
+            | _ -> raise Needs_t)
         | None, _ -> raise Needs_t
         | Some _, _ -> concrete_data c (ev (sub c "0") env rows)
       in

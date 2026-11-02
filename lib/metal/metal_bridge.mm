@@ -1860,9 +1860,16 @@ extern "C" CAMLprim value caml_rays_metal_buffer_write(
   CAMLreturn(result_unit());
 }
 
-// The memory belongs to the float32 Bigarray (CAML_BA_MANAGED frees it with free(), which
-// posix_memalign memory allows); the buffer wraps it with no deallocator, and the OCaml record
-// that owns the buffer keeps the Bigarray alive.
+// The memory is mapped directly, as newBufferWithBytesNoCopy asks, and belongs to the float32
+// Bigarray: its finaliser unmaps it, so a freed output returns to the system at once rather than
+// waiting in the allocator's large cache (hundreds of MB of footprint). The buffer wraps it with no
+// deallocator, and the OCaml record that owns the buffer keeps the Bigarray alive.
+static void mapped_floats_finalize(value v) {
+  struct caml_ba_array *b = Caml_ba_array_val(v);
+  const std::size_t page = static_cast<std::size_t>(getpagesize());
+  munmap(b->data, (static_cast<std::size_t>(b->dim[0]) * 4 + page - 1) / page * page);
+}
+
 extern "C" CAMLprim value caml_rays_metal_buffer_create_mapped(
     value raw_device, value raw_length, value raw_options) {
   CAMLparam3(raw_device, raw_length, raw_options);
@@ -1874,11 +1881,10 @@ extern "C" CAMLprim value caml_rays_metal_buffer_create_mapped(
   const std::size_t page = static_cast<std::size_t>(getpagesize());
   const std::size_t rounded =
       (static_cast<std::size_t>(length) + page - 1) / page * page;
-  void *memory = nullptr;
-  if (posix_memalign(&memory, page, rounded) != 0 || memory == nullptr) {
+  void *memory = mmap(nullptr, rounded, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  if (memory == MAP_FAILED) {
     CAMLreturn(result_error_text("mapped buffer allocation failed"));
   }
-  std::memset(memory, 0, rounded);
   @autoreleasepool {
     id<MTLDevice> device = object_of_handle(raw_device, Handle_kind::Device);
     id<MTLBuffer> buffer = [device
@@ -1887,11 +1893,17 @@ extern "C" CAMLprim value caml_rays_metal_buffer_create_mapped(
                          options:static_cast<MTLResourceOptions>(Int64_val(raw_options))
                      deallocator:nil];
     if (buffer == nil) {
-      std::free(memory);
+      munmap(memory, rounded);
       CAMLreturn(result_error_text("Metal rejected the mapped buffer"));
     }
-    floats = caml_ba_alloc_dims(CAML_BA_FLOAT32 | CAML_BA_C_LAYOUT | CAML_BA_MANAGED, 1,
+    floats = caml_ba_alloc_dims(CAML_BA_FLOAT32 | CAML_BA_C_LAYOUT | CAML_BA_EXTERNAL, 1,
                                 memory, static_cast<intnat>(length / 4));
+    static struct custom_operations mapped_ops = [] (const struct custom_operations *ops) {
+      struct custom_operations copy = *ops;
+      copy.finalize = mapped_floats_finalize;
+      return copy;
+    }(Custom_ops_val(floats));
+    Custom_ops_val(floats) = &mapped_ops;
     raw = allocate_handle(buffer, Handle_kind::Buffer);
   }
   pair = caml_alloc_tuple(2);

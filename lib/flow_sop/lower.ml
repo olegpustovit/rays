@@ -784,9 +784,11 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
       (fun ~node_id context geometries ->
         let cancelled () = Sop.Context.cancelled context in
         let error () = Error (Diagnostic.error ~code:"E_CANCELLED" "Mesh kernel cancelled.") in
+        (* planes never stay resident ([mesh_resident] keeps Vec3 points), so a device cook of them
+           reads its topology back: a static one, cooked once, has nothing to win *)
         let eligible =
           (not reference) && gpu.Flow_ir.Gpu.fast
-          && List.mem operation [ "sop/mesh"; "sop/mesh_planes" ]
+          && (operation = "sop/mesh" || (operation = "sop/mesh_planes" && E.frame_dependent data))
         in
         let placed =
           if eligible then
@@ -1700,7 +1702,10 @@ let cooked_sources value =
   sources value;
   List.sort_uniq Int.compare !ids
 
-let is_volatile lowered id = Network.Int_map.mem id lowered.volatile
+(* The set alone: the worker keeps this predicate past the lowering it came from. *)
+let is_volatile lowered =
+  let volatile = lowered.volatile in
+  fun id -> Network.Int_map.mem id volatile
 
 (* Fusion across cards (single-program design, E4). A point write whose geometry is, through card
    markers and deletions of other attributes, a point write that nothing else reads is rewritten to

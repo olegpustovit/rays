@@ -49,6 +49,7 @@ type snapshot = { payload : CPU.t; stamp : stamp }
 
 type entry = {
   key : string;
+  mutable plan_serial : int;  (** the plan that last asked for it: {!reserve} prunes the others *)
   mutable image : Image.t option;
   mutable cpu : snapshot option;
   mutable texture : (Texture.t, string) result Lazy.t option;
@@ -88,6 +89,17 @@ type t = {
   mutable readbacks : int;
 }
 
+(* A slot for one more image. The plan decides who goes: only entries the current plan has not asked
+   for (a deleted node's, an old time's), oldest first. A plan that truly needs more than the capacity
+   gets the typed refusal it always did, and no slot is consumed by asking. *)
+let reserve t request =
+  let rec room () =
+    Entries.length t.entries + request.pending_images < entry_capacity
+    || (Entries.drop_oldest t.entries && room ())
+  in
+  if room () then Ok ()
+  else Error (Diagnostic.error ~code:"E_IMAGE" "A workspace owns at most 64 image snapshots.")
+
 let entry_bytes (entry : entry) =
   match entry.cpu with
   | Some { payload; _ } -> CPU.width payload * CPU.height payload * 4
@@ -96,6 +108,7 @@ let entry_bytes (entry : entry) =
 let make_entry key =
   {
     key;
+    plan_serial = -1;
     image = None;
     cpu = None;
     texture = None;
@@ -156,6 +169,8 @@ let create ?(seed = 0L) ?(grain = 16384) ?(domains = Parallel.recommended_domain
       resolved = [||];
       entries =
         Entries.create ~owner:(Lru.cache "flow_native.images") ~release:release_entry
+          ~evictable:(fun _ entry ->
+            match !host with Some t -> entry.plan_serial <> t.serial | None -> true)
           entry_capacity;
       source_cooks = 0;
       attribute_flattens = 0;
@@ -728,13 +743,8 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                             match Entries.find_opt t.entries key with
                             | Some entry -> Ok entry
                             | None ->
+                                let* () = reserve t request in
                                 request.pending_images <- request.pending_images + 1;
-                                while
-                                  Entries.length t.entries + request.pending_images > entry_capacity
-                                  && Entries.drop_oldest t.entries
-                                do
-                                  ()
-                                done;
                                 Fun.protect
                                   ~finally:(fun () ->
                                     request.pending_images <- request.pending_images - 1)
@@ -769,6 +779,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                     let entry =
                                       {
                                         key;
+                                        plan_serial = -1;
                                         image = Some image;
                                         cpu = Some { payload; stamp };
                                         texture = Some (texture payload);
@@ -782,6 +793,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                           in
                           Result.map
                             (fun entry ->
+                              entry.plan_serial <- t.serial;
                               t.resolved.(id) <- Some entry;
                               entry)
                             result
@@ -833,16 +845,9 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                 Ok entry
                             | _ ->
                                 let reserved = previous = None in
-                                if reserved then begin
+                                let* () = if reserved then reserve t request else Ok () in
+                                if reserved then
                                   request.pending_images <- request.pending_images + 1;
-                                  while
-                                    Entries.length t.entries + request.pending_images
-                                    > entry_capacity
-                                    && Entries.drop_oldest t.entries
-                                  do
-                                    ()
-                                  done
-                                end;
                                 Fun.protect
                                   ~finally:(fun () ->
                                     if reserved then
@@ -1171,6 +1176,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                           in
                           Result.map
                             (fun entry ->
+                              entry.plan_serial <- t.serial;
                               t.resolved.(id) <- Some entry;
                               entry)
                             result

@@ -2,14 +2,22 @@ type t
 type output
 
 type pool
-(** Kept outputs' buffers that runners share, recycled by size class (any 8 free, more within 256
-    MiB). Each holder tells the GC its buffer's size, so a dead one is collected and its buffer
-    returns without a read; past 2 GiB of retired holders still unread, the oldest is read into
-    owned planes and its buffer reused. *)
+(** Kept outputs' buffers that runners share, recycled by size class (256 MiB free at most). Each
+    holder tells the GC its buffer's size, so a dead one is collected and its buffer returns without
+    a read; past a quarter of the device's working set of retired holders still unread, the oldest is
+    read into owned planes and its buffer reused. *)
 
 val pool : unit -> pool
 
 val close_pool : pool -> unit
+
+val recycled :
+  pool -> device:Ogpu.Backend.device -> int -> (Ogpu.Backend.buffer * Ogpu.Backend.floats * int) option
+(** A free buffer of at least that many bytes and at most twice it, after giving back what collected
+    holders released (and asking for a collection past the retired budget). *)
+
+val created : pool -> int -> unit
+(** Tell the pool's pacing of bytes made outside it. *)
 (** On the initial domain, after its runners are closed: destroys what it still holds. *)
 
 type scene = {

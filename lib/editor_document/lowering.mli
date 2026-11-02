@@ -39,6 +39,14 @@ val document_window : Document.t -> (window, Diagnostic.t) result
 
 val has_settings : Workspace_doc.t -> bool
 
+val restore :
+  ?factories:Sop.Edit_graph.factory list ->
+  current:Document.t ->
+  Document.snapshot ->
+  (Document.t, Diagnostic.t) result
+(** An undo entry made live: its text lowered under the ids it had, on top of the document now, so
+    what did not change stays physically. *)
+
 val of_workspace :
   ?factories:Sop.Edit_graph.factory list ->
   ?gpu:Flow_ir.Gpu.config ->
