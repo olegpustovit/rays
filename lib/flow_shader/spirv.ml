@@ -830,7 +830,7 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
       let in_range = compare e (if narrow.(header) then 176 else 177) index_phi index_last in
       let not_stopped =
         Option.fold
-          ~none:(compare e 171 (u e 0) (u e 0))
+          ~none:(compare e 170 (u e 0) (u e 0))
           ~some:(fun phi -> result e boolean 168 [ phi ])
           stop_phi
       in
