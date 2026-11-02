@@ -12,9 +12,9 @@
   (scenario ws_layout (max_live_bytes 54000000) (max_footprint_bytes 165000000))
   (scenario pxui (max_live_bytes 11000000) (max_footprint_bytes 82000000))
   (scenario recursive_signals (route device) (max_live_bytes 12500000) (max_footprint_bytes 80000000))
-  ; from frame 60: from 30 live moves 1.37% (339 KB), and 0.08% (21 KB) with a full collection every 15 frames, so
-  ; the rest is what one collection at a sample cannot free: cooks' bookkeeping left between major cycles. No owner
-  ; moves; its exact holder is not traced
+  ; from frame 60: from 30 live moves 1.37% (339 KB) with no owner moving. A walked report every 15 frames leaves
+  ; 0.08% (21 KB); two collections at the sample, or sweeping dead tables and evictors, leave 1.37%. What warms up is
+  ; not traced
   (scenario sea_128 (route device) (early 60) (max_live_bytes 27000000) (max_footprint_bytes 135000000) (max_readback_bytes 2949120) (max_payload_readback_bytes 0))
   (scenario sea_128_200m (route device) (ceiling 200000000) (frames 60))
   (scenario isogrid_small (max_live_bytes 37000000) (max_footprint_bytes 120000000))
