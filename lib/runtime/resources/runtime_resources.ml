@@ -35,7 +35,8 @@ let write_atomic ~filename write =
           ~finally:(fun () -> try Sys.remove temporary with Sys_error _ -> ())
           (fun () ->
             Result.bind (write temporary) (fun () ->
-                let fd = Unix.openfile temporary [ Unix.O_RDONLY ] 0 in
+                (* write access: Windows' FlushFileBuffers refuses a read-only handle *)
+                let fd = Unix.openfile temporary [ Unix.O_WRONLY ] 0 in
                 Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
                 Unix.rename temporary filename;
                 Ok ())))
