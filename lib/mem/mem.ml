@@ -10,6 +10,8 @@ type account = {
 type owner = account
 
 let accounts : (string * kind, account) Hashtbl.t = Hashtbl.create 32
+let evictors : (owner * (unit -> bool)) list ref = ref []
+let current_budget = ref 0
 
 let get kind name =
   let key = (name, kind) in
@@ -37,7 +39,61 @@ let charge (account : owner) n =
 let release (account : owner) n =
   if n > 0 then account.bytes <- max 0 (account.bytes - n)
 
-let reset () = Hashtbl.clear accounts
+let attributed () =
+  Hashtbl.fold (fun _ (a : account) sum -> sum + a.bytes) accounts 0
+
+let parse_budget s =
+  let len = String.length s in
+  if len = 0 then None
+  else
+    let scale, digits =
+      match Char.uppercase_ascii s.[len - 1] with
+      | 'G' -> (1_000_000_000, String.sub s 0 (len - 1))
+      | 'M' -> (1_000_000, String.sub s 0 (len - 1))
+      | 'K' -> (1_000, String.sub s 0 (len - 1))
+      | _ -> (1, s)
+    in
+    match int_of_string_opt digits with Some n when n >= 0 -> Some (n * scale) | _ -> None
+
+let set_budget n = current_budget := max 0 n
+let budget () = !current_budget
+
+let () =
+  match Sys.getenv_opt "RAYS_MEM_BUDGET" with
+  | Some s -> Option.iter set_budget (parse_budget s)
+  | None -> ()
+
+let register_evictor owner drop =
+  if kind owner = Cache then evictors := (owner, drop) :: !evictors
+
+let retreat ?(device = 0) () =
+  let limit = !current_budget in
+  if limit <= 0 then `Ok
+  else
+    let over () = attributed () + max 0 device > limit in
+    if not (over ()) then `Ok
+    else
+      let rec go () =
+        if not (over ()) then `Ok
+        else
+          (* Largest cache owner first among those that still hold bytes. *)
+          let ranked =
+            List.filter (fun (owner, _) -> bytes owner > 0) !evictors
+            |> List.sort (fun (a, _) (b, _) -> compare (bytes b) (bytes a))
+          in
+          match List.find_opt (fun (_, drop) -> drop ()) ranked with
+          | None -> `Still_over
+          | Some _ -> go ()
+      in
+      go ()
+
+let reset () =
+  Hashtbl.clear accounts;
+  evictors := [];
+  current_budget :=
+    match Sys.getenv_opt "RAYS_MEM_BUDGET" with
+    | Some s -> Option.value ~default:0 (parse_budget s)
+    | None -> 0
 
 external phys_footprint_raw : unit -> int option = "caml_rays_mem_phys_footprint"
 external instructions_raw : unit -> int64 option = "caml_rays_mem_instructions"
@@ -84,7 +140,7 @@ module Report = struct
   let to_string t = Format.asprintf "%a" pp t
 end
 
-let report ?(device = 0) ?(budget = 0) () =
+let report ?(device = 0) ?budget () =
   Gc.full_major ();
   let stat = Gc.stat () in
   let ocaml_live = stat.live_words * (Sys.word_size / 8) in
@@ -103,10 +159,9 @@ let report ?(device = 0) ?(budget = 0) () =
   let footprint =
     match phys_footprint () with Some n -> n | None -> ocaml_live + device
   in
-  (* Compare owners to explicit Rays memory (OCaml live + device). Footprint still includes
-     OS/Metal/shared mappings that no owner can claim; gating on it hides real gaps. *)
   let explicit = ocaml_live + device in
   let unattributed = max 0 (explicit - attributed) in
+  let budget = match budget with Some n -> max 0 n | None -> !current_budget in
   {
     Report.owners;
     attributed;
@@ -114,5 +169,5 @@ let report ?(device = 0) ?(budget = 0) () =
     device;
     footprint;
     unattributed;
-    budget = max 0 budget;
+    budget;
   }

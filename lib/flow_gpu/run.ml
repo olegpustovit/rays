@@ -282,8 +282,8 @@ let rec push cell value =
   let old = Atomic.get cell in
   if not (Atomic.compare_and_set cell old (value :: old)) then push cell value
 
-(* Free buffers kept for reuse: any 8, or more while their bytes stay under this. A collection returns
-   several dead holders' buffers at once, which the next cooks take. *)
+(* Free buffers kept for reuse while their bytes stay under this. A collection returns several dead
+   holders' buffers at once, which the next cooks take. Bytes only — never "any 8" of any size. *)
 let free_budget = 256 lsl 20
 
 (* on the initial domain: recycle or destroy what collected or read holders gave back (a buffer a
@@ -296,7 +296,7 @@ let drain_pool pool =
       | Some (buffer, floats, capacity, _) ->
           Hashtbl.remove pool.held id;
           let free = List.fold_left (fun sum (_, _, c) -> sum + c) 0 pool.free in
-          if List.length pool.free < 8 || free + capacity <= free_budget then
+          if free + capacity <= free_budget then
             pool.free <- (buffer, floats, capacity) :: pool.free
           else ignore (B.destroy_buffer buffer)
       | None -> ())
@@ -315,13 +315,14 @@ let take_free pool length =
       Some held
   | None -> None
 
-(* Past this many bytes of retired holders still unread (alive: the GC is told each one's size, so a
-   dead one is collected first), the oldest is read now (owned planes: its later readers see the same
-   values) and its buffer comes back, so device memory stays bounded. ponytail: a constant, the
-   device's working-set size if a smaller GPU needs it. *)
-let retired_budget = 2 lsl 30
+(* Past this many bytes of retired holders still unread, free the oldest without a reader (no
+   float32→double widen). A reader still pending thaws so later reads see the same values.
+   Derived from the device working set when known; falls back to 512 MiB. *)
+let retired_budget_for device =
+  let recommended = Int64.to_int (B.recommended_working_set device) in
+  if recommended > 0 then max (64 lsl 20) (recommended / 4) else 512 lsl 20
 
-let reclaim pool =
+let reclaim pool ~device =
   drain_pool pool;
   let held (id, w) = Weak.check w 0 && Hashtbl.mem pool.held id in
   pool.retired <- List.filter held (pool.retired @ List.rev (Atomic.exchange pool.retiring []));
@@ -330,11 +331,19 @@ let reclaim pool =
     | Some (_, _, capacity, _) -> sum + capacity
     | None -> sum
   in
-  if List.fold_left bytes 0 pool.retired > retired_budget then begin
+  let budget = retired_budget_for device in
+  if List.fold_left bytes 0 pool.retired > budget then begin
     (match pool.retired with
-    | (_, w) :: rest ->
+    | (id, w) :: rest ->
         pool.retired <- rest;
-        Option.iter (fun k -> if Atomic.get k.readers = 0 then k.thaw ()) (Weak.get w 0)
+        (match Weak.get w 0 with
+        | Some k when Atomic.get k.readers = 0 ->
+            (* No reader: destroy without widening into host doubles. *)
+            k.destroyed <- true;
+            Atomic.incr pool.freed;
+            push pool.released id
+        | Some k -> k.thaw ()
+        | None -> push pool.released id)
     | [] -> ());
     drain_pool pool
   end
@@ -346,9 +355,9 @@ let ensure ?(mapped = false) t slot length =
      (* an output slot whose last buffer a holder took: a recycled buffer of the size class *)
      let found =
        match take_free t.pool length with
-       | Some _ as found -> found
-       | None ->
-           reclaim t.pool;
+      | Some _ as found -> found
+      | None ->
+           reclaim t.pool ~device:t.device;
            take_free t.pool length
      in
      match found with

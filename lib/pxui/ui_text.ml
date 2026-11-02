@@ -238,11 +238,23 @@ let word_at text i =
 
 (* ---- undo inside the focused text: snapshots before each change, consecutive typing as one *)
 
+let text_undo_byte_cap = 1_048_576
+
 let rec bounded n = function x :: rest when n > 0 -> x :: bounded (n - 1) rest | _ -> []
+
+let entry_bytes (text, _, _) = String.length text
+
+let rec trim_bytes budget = function
+  | [] -> []
+  | entry :: rest ->
+      let n = entry_bytes entry in
+      if n > budget then [] else entry :: trim_bytes (budget - n) rest
 
 let remember ui edit ~typing =
   if not (typing && edit.caret = edit.anchor && ui.edit_group = edit.caret) then begin
-    ui.edit_undo <- bounded 200 ((edit.text, edit.caret, edit.anchor) :: ui.edit_undo);
+    ui.edit_undo <-
+      trim_bytes text_undo_byte_cap
+        (bounded 200 ((edit.text, edit.caret, edit.anchor) :: ui.edit_undo));
     ui.edit_redo <- []
   end;
   ui.edit_group <- -1

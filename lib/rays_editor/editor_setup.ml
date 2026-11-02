@@ -164,7 +164,11 @@ let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") 
               status_fps_at = Float.neg_infinity;
               last_dt = 0.;
               steady = 0;
-              history = Editor_core.History.create doc;
+              history =
+                Editor_core.History.create ~byte_capacity:(16 * 1024 * 1024)
+                  ~owner:(Mem.document "editor.history")
+                  ~bytes:(fun _ -> 0)
+                  doc;
               focus = Editor_core.Panels.main;
               focus_path = None;
               pane_keys = [];

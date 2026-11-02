@@ -35,19 +35,6 @@ module Make (K : Hashtbl.HashedType) = struct
   let charge_owner owner size = Mem.charge owner size
   let release_owner owner size = Mem.release owner size
 
-  let create ~owner ?(byte_capacity = max_int) ?(evictable = fun _ _ -> true)
-      ?(release = fun _ _ -> ()) capacity =
-    {
-      capacity;
-      byte_capacity;
-      owner;
-      evictable;
-      release;
-      table = Table.create (max 1 (min 1024 capacity));
-      oldest = [||];
-      bytes = 0;
-    }
-
   let unlink t node =
     if node.newer == node then t.oldest <- [||]
     else begin
@@ -153,6 +140,23 @@ module Make (K : Hashtbl.HashedType) = struct
     | Some node ->
         drop t node;
         true
+
+  let create ~owner ?(byte_capacity = max_int) ?(evictable = fun _ _ -> true)
+      ?(release = fun _ _ -> ()) capacity =
+    let t =
+      {
+        capacity;
+        byte_capacity;
+        owner;
+        evictable;
+        release;
+        table = Table.create (max 1 (min 1024 capacity));
+        oldest = [||];
+        bytes = 0;
+      }
+    in
+    Mem.register_evictor owner (fun () -> drop_oldest t);
+    t
 
   let find_first t f =
     if Array.length t.oldest = 0 then None

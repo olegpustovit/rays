@@ -1,6 +1,6 @@
 (** Leaf memory ledger: every large retained allocation names one owner. A cache, a plan, or a
-    document charges bytes here; {!report} compares the sum to the process footprint. No library
-    depends on this one; [Lru] takes an optional owner so the compiler will later list every site. *)
+    document charges bytes here; {!report} compares the sum to explicit Rays memory. [Lru] takes a
+    required owner and registers an evictor so {!retreat} can drop rebuildable data. *)
 
 type kind = Cache | Plan | Document
 
@@ -22,6 +22,21 @@ val release : owner -> int -> unit
 
 val bytes : owner -> int
 val peak : owner -> int
+
+val attributed : unit -> int
+(** Sum of every owner's current bytes. *)
+
+val set_budget : int -> unit
+(** Soft ceiling for attributed + device bytes. [0] means unlimited. Also set via [RAYS_MEM_BUDGET]
+    ([4G], [200M], bare bytes). *)
+
+val budget : unit -> int
+
+val register_evictor : owner -> (unit -> bool) -> unit
+(** [f ()] drops one rebuildable entry and returns [true] when it did. Cache owners only. *)
+
+val retreat : ?device:int -> unit -> [ `Ok | `Still_over ]
+(** Evict registered caches until under budget (or nothing left to drop). *)
 
 module Report : sig
   type entry = { name : string; kind : kind; bytes : int; peak : int }
@@ -47,7 +62,7 @@ val report : ?device:int -> ?budget:int -> unit -> Report.t
     [max 0 (ocaml_live + device - attributed)] — owners versus explicit Rays memory. *)
 
 val reset : unit -> unit
-(** Tests only: clear every owner. *)
+(** Tests only: clear every owner and evictor. *)
 
 (** Process metrics from [proc_pid_rusage]. Unavailable platforms return [None]. *)
 val phys_footprint : unit -> int option

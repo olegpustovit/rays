@@ -31,4 +31,18 @@ let () =
   (match Mem.instructions () with Some n -> check (n > 0L) "instructions" | None -> ());
   Mem.reset ();
   check (Mem.bytes meshes = 0 && (Mem.report ()).attributed = 0) "reset clears accounts";
+  Mem.set_budget 1_000;
+  let owner = Mem.cache "test.evict" in
+  let bag = ref [ 400; 400; 400 ] in
+  Mem.register_evictor owner (fun () ->
+      match !bag with
+      | [] -> false
+      | n :: rest ->
+          bag := rest;
+          Mem.release owner n;
+          true);
+  Mem.charge owner 1_200;
+  check (Mem.retreat () = `Ok && Mem.bytes owner = 800 && !bag = [ 400; 400 ]) "retreat drops until under budget";
+  Mem.set_budget 0;
+  Mem.reset ();
   print_endline "test_mem: ok"

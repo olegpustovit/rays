@@ -13,7 +13,15 @@ module History : sig
     | Burst of { key : string; at : float; window : float }
     | Repair
 
-  val create : ?capacity:int -> 'a -> 'a t
+  val create :
+    ?capacity:int ->
+    ?byte_capacity:int ->
+    ?bytes:('a -> int) ->
+    ?owner:Mem.owner ->
+    'a ->
+    'a t
+  (** [byte_capacity] bounds the sum of [bytes] over past entries; [owner] charges that sum. *)
+
   val present : 'a t -> 'a
 
   (* [Step] adds an undo entry; matching [Gesture] operation/target keys merge until [seal];
@@ -35,6 +43,7 @@ module History : sig
   val can_undo : 'a t -> bool
   val can_redo : 'a t -> bool
   val depth : 'a t -> int
+  val byte_depth : 'a t -> int
 end
 
 module Keymap : sig
