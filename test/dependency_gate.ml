@@ -306,7 +306,7 @@ let only =
     ("ogpu_metal_native", [ "ogpu_core"; "metal"; "lru" ]);
     ("ogpu_metal", [ "ogpu_metal_native"; "metal" ]);
     ("vulkan", [ "threads"; "native_layer_token" ]);
-    ("ogpu_vulkan", [ "ogpu_core"; "vulkan"; "lru" ]);
+    ("ogpu_vulkan", [ "ogpu_core"; "vulkan"; "native_layer_token" ]);
     ("ogpu_native", [ "ogpu_metal"; "ogpu_vulkan" ]);
     ("scene_execution_fixtures", [ "renderer"; "ogpu" ]);
     ("pxui", [ "rays"; "rays_math"; "param"; "mem" ]);

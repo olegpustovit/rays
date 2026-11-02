@@ -64,6 +64,7 @@ struct rv_device {
   VkPhysicalDeviceProperties properties;
   bool budget;
   VkPipelineCache pipeline_cache;
+  int64_t held; /* bytes of live resources: what allocated_size answers, atomic */
   /* Every submit signals this timeline too: deferred destruction counts on it, across queues. */
   VkSemaphore ticks;
   uint64_t next_tick;
@@ -148,6 +149,7 @@ typedef struct {
   VkFormat format;
   VkImageAspectFlags aspect;
   uint32_t width, height, depth, mips, samples;
+  VmaAllocationInfo info;
 } rv_texture;
 
 static int validation_messages = 0;
@@ -405,7 +407,7 @@ CAMLprim value rv_device_facts(value device) {
   CAMLreturn(out);
 }
 
-/* [device-local bytes in use; their budget] across device-local heaps */
+/* [bytes of live resources; the device-local heaps' budget] */
 CAMLprim value rv_device_memory(value device) {
   CAMLparam1(device);
   CAMLlocal1(out);
@@ -414,14 +416,13 @@ CAMLprim value rv_device_memory(value device) {
   vmaGetHeapBudgets(d->allocator, budgets);
   VkPhysicalDeviceMemoryProperties memory;
   vkGetPhysicalDeviceMemoryProperties(d->physical, &memory);
-  uint64_t used = 0, budget = 0;
+  uint64_t budget = 0;
   for (uint32_t i = 0; i < memory.memoryHeapCount; i++)
     if (memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-      used += budgets[i].usage;
       budget += budgets[i].budget;
     }
   out = caml_alloc_tuple(2);
-  Store_field(out, 0, Val_long((intnat)used));
+  Store_field(out, 0, Val_long((intnat)__atomic_load_n(&d->held, __ATOMIC_RELAXED)));
   Store_field(out, 1, Val_long((intnat)budget));
   CAMLreturn(out);
 }
@@ -851,6 +852,7 @@ CAMLprim value rv_buffer_create(value device, value size, value kind) {
   VmaAllocationInfo out;
   VkResult r = vmaCreateBuffer(d->allocator, &info, &alloc, &b->buffer, &b->allocation, &out);
   if (r != VK_SUCCESS) { free(b); return Val_long(r); }
+  __atomic_add_fetch(&d->held, (int64_t)b->size, __ATOMIC_RELAXED);
   b->map = out.pMappedData;
   if (b->map) memset(b->map, 0, b->size);
   return Val_h(b);
@@ -864,6 +866,7 @@ static void destroy_buffer_now(rv_device *d, void *payload) {
 
 CAMLprim value rv_buffer_destroy(value buffer) {
   rv_buffer *b = H(buffer);
+  __atomic_sub_fetch(&b->d->held, (int64_t)b->size, __ATOMIC_RELAXED);
   defer(b->d, destroy_buffer_now, b);
   return Val_unit;
 }
@@ -1337,8 +1340,9 @@ CAMLprim value rv_texture_create(value device, value descriptor) {
       .samples = (VkSampleCountFlagBits)t->samples, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage,
       .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
   VmaAllocationCreateInfo alloc = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
-  VkResult r = vmaCreateImage(d->allocator, &info, &alloc, &t->image, &t->allocation, NULL);
+  VkResult r = vmaCreateImage(d->allocator, &info, &alloc, &t->image, &t->allocation, &t->info);
   if (r != VK_SUCCESS) { free(t); return Val_long(r); }
+  __atomic_add_fetch(&d->held, (int64_t)t->info.size, __ATOMIC_RELAXED);
   VkImageViewCreateInfo view = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = t->image,
       .viewType = t->depth > 1 ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D, .format = t->format,
       .subresourceRange = {t->aspect, 0, t->mips, 0, 1}};
@@ -1357,6 +1361,7 @@ static void destroy_texture_now(rv_device *d, void *payload) {
 
 CAMLprim value rv_texture_destroy(value texture) {
   rv_texture *t = H(texture);
+  __atomic_sub_fetch(&t->d->held, (int64_t)t->info.size, __ATOMIC_RELAXED);
   defer(t->d, destroy_texture_now, t);
   return Val_unit;
 }
@@ -1848,6 +1853,7 @@ static VkResult accel_storage(rv_accel *a) {
   VmaAllocationCreateInfo alloc = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
   VkResult r = vmaCreateBuffer(d->allocator, &info, &alloc, &a->buffer, &a->allocation, NULL);
   if (r != VK_SUCCESS) return r;
+  __atomic_add_fetch(&d->held, (int64_t)a->structure_size, __ATOMIC_RELAXED);
   VkAccelerationStructureCreateInfoKHR create = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
       .buffer = a->buffer, .size = a->structure_size, .type = a->level};
   r = vkCreateAccelerationStructureKHR(d->device, &create, NULL, &a->handle);
@@ -1952,6 +1958,7 @@ static void destroy_accel_now(rv_device *d, void *payload) {
 
 CAMLprim value rv_accel_destroy(value accel) {
   rv_accel *a = H(accel);
+  __atomic_sub_fetch(&a->d->held, (int64_t)a->structure_size, __ATOMIC_RELAXED);
   defer(a->d, destroy_accel_now, a);
   return Val_unit;
 }

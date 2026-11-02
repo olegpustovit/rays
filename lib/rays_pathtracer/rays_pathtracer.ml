@@ -1445,6 +1445,7 @@ let create ?spp ?bounces ?exposure ?round_samples ?bsdf_only ?profile ~width ~he
 
 module Private = struct
   let device_bytes t = B.allocated_size t.device
+  let motion_blurs t = Ogpu.Caps.has (B.capabilities t.device) Ray_tracing_motion
 
   let scene_compaction t =
     ( t.gpu.scene_unpacked,

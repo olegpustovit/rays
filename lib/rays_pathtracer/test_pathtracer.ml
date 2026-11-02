@@ -424,10 +424,18 @@ let run ?(frame = fun _ _ -> ()) () =
       let moving_pixels = capture moving in
       assert (capture moving = moving_pixels);
       assert (channel_at static_pixels end_point 1 = 0);
-      assert (channel_at moving_pixels end_point 1 > 0);
-      assert (
-        channel_at moving_pixels right 1 > 0
-        && channel_at moving_pixels right 1 < channel_at static_pixels right 1);
+      (if P.Private.motion_blurs tracer then begin
+         assert (channel_at moving_pixels end_point 1 > 0);
+         assert (
+           channel_at moving_pixels right 1 > 0
+           && channel_at moving_pixels right 1 < channel_at static_pixels right 1)
+       end
+       else begin
+         (* no Ray_tracing_motion: the instance stands sharp at the shutter midpoint, x = 3.25 *)
+         let midpoint = Rays_math.Vec3.create 3.25 1. 0. in
+         assert (channel_at moving_pixels midpoint 1 > 200);
+         assert (moving_pixels <> static_pixels)
+       end);
       (match
          P.mesh_instanced ~prototype:(prepared sphere red) ~materials:[| red |]
            [| place 0.; place 1. |]
