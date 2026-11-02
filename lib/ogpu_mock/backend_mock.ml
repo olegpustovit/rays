@@ -20,6 +20,7 @@ type control = {
   mutable pipelines : int;
   mutable queues : int;
   mutable surfaces : int;
+  mutable max_allocations : int option;
 }
 
 let error op kind text = Error (Error.make op kind text)
@@ -188,6 +189,9 @@ let create () =
       pipelines = 0;
       queues = 0;
       surfaces = 0;
+      (* a discrete device's driver caps live allocations (Vulkan maxMemoryAllocationCount is 4096
+         on common drivers); Metal has no such limit *)
+      max_allocations = Some 4096;
     }
   in
   let should_fail field = match field with Some 0 -> true | None | Some _ -> false in
@@ -195,6 +199,10 @@ let create () =
     match field with None -> None | Some 0 -> None | Some remaining -> Some (remaining - 1)
   in
   let resource kind count set size =
+    match c.max_allocations with
+    | Some limit when c.buffers + c.textures >= limit ->
+        error "Backend_mock.allocate" Error.Capacity "allocation count limit"
+    | _ ->
     let id = token c and bytes = Bytes.make size '\000' in
     Hashtbl.add c.memory id bytes;
     set (count + 1);
