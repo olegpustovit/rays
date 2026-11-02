@@ -39,6 +39,8 @@ type budget = {
   refuses : bool;  (** its ceiling is under what it needs: the frame path must say E_MEMORY *)
   route : [ `Device | `Any ];
   ceiling : int option;  (** RAYS_MEM_BUDGET for this scenario: it passes or fails with E_MEMORY *)
+  device_ceiling : int option;  (** the device budget for this scenario (a discrete GPU only): E_MEMORY too *)
+  windows_only : bool;
   known_red : bool;  (** fails today; passing fails, so the marker is removed *)
 }
 
@@ -56,6 +58,18 @@ let parse_budget (form : Flow.Syntax.t) =
     | _ -> fail "memory-budgets.sexp: a scenario is (scenario name (field value) ...)"
   in
   let name, fields = fields in
+  (* a footprint is not the same measure on each OS: win.KEY replaces KEY on Windows *)
+  let fields =
+    if not Sys.win32 then fields
+    else
+      List.fold_left
+        (fun fields (key, value) ->
+          if String.starts_with ~prefix:"win." key then
+            (String.sub key 4 (String.length key - 4), value)
+            :: List.remove_assoc (String.sub key 4 (String.length key - 4)) fields
+          else fields)
+        fields fields
+  in
   let int key = Option.map int_of_string (List.assoc_opt key fields) in
   let float key = Option.map float_of_string (List.assoc_opt key fields) in
   {
@@ -80,6 +94,8 @@ let parse_budget (form : Flow.Syntax.t) =
     refuses = List.mem_assoc "refuses" fields;
     route = (if List.assoc_opt "route" fields = Some "device" then `Device else `Any);
     ceiling = int "ceiling";
+    device_ceiling = int "device_ceiling";
+    windows_only = List.mem_assoc "windows_only" fields;
     known_red = List.mem_assoc "known_red" fields;
   }
 
@@ -139,7 +155,7 @@ let scenario = function
   | "pxui" -> (sketch "pxui", no_step)
   | "recursive_signals" -> (sketch "recursive_signals", no_step)
   | "sea_128" | "sea_128_200m" -> (sea 128, no_step)
-  | "sea_256" | "sea_256_100m" -> (sea 256, no_step)
+  | "sea_256" | "sea_256_100m" | "sea_256_vram" -> (sea 256, no_step)
   | "sea_512_300m" -> (sea 512, no_step)
   | "isogrid_small" -> (set_input "volume" "resolution" 12 (sketch "isogrid"), no_step)
   | "city_small" -> (set_input "city" "side" 24 (sketch "isogrid_city"), no_step)
@@ -191,7 +207,7 @@ let check (budget : budget) (o : M.outcome) =
   let problems = ref [] in
   let note fmt = Printf.ksprintf (fun m -> problems := m :: !problems) fmt in
   let flat = growth o.early o.final in
-  if budget.ceiling = None && abs_float flat > budget.live_flat_pct then
+  if budget.ceiling = None && budget.device_ceiling = None && abs_float flat > budget.live_flat_pct then
     note "live moved %.2f%% from frame %d (%d B) to %d (%d B), limit %.2f%%; moved: %s" flat
       o.early.frame o.early.live o.final.frame o.final.live budget.live_flat_pct
       (moved o.early o.final);
@@ -239,7 +255,7 @@ let check (budget : budget) (o : M.outcome) =
           (String.concat "; "
              (List.map (fun (site, why, n) -> Printf.sprintf "%s: %s (%d)" site why n) o.fallbacks)));
   (* over its ceiling a scenario may only fail with the typed error, and never swap *)
-  (match budget.ceiling with
+  (match (if budget.ceiling <> None then budget.ceiling else budget.device_ceiling) with
   | None ->
       Option.iter (fun e -> note "unexpected %s" e) o.memory_error;
       Option.iter (fun e -> note "cook failed: %s" e) o.cook_error
@@ -258,7 +274,7 @@ let check (budget : budget) (o : M.outcome) =
         says o.memory_error || says o.cook_error
       in
       if budget.refuses && not typed then note "ceiling %d: no E_MEMORY reached the frame" ceiling;
-      if o.final.footprint > ceiling && not typed then
+      if budget.ceiling <> None && o.final.footprint > ceiling && not typed then
         note "footprint %d B over its ceiling %d with no E_MEMORY" o.final.footprint ceiling);
   let peak = o.peak_footprint in
   Option.iter (fun max -> if peak > max then note "peak %d B over max_peak_bytes %d" peak max) budget.max_peak_bytes;
@@ -273,6 +289,7 @@ let check (budget : budget) (o : M.outcome) =
 
 let run_one ?(sites = false) (budget : budget) =
   Option.iter (fun ceiling -> Mem.set_budget ceiling) budget.ceiling;
+  Option.iter (fun ceiling -> Mem.set_device_budget ceiling) budget.device_ceiling;
   let stop = if sites then M.track_sites () else fun () -> [] in
   let workspace, step = scenario budget.name in
   let outcome =
@@ -329,7 +346,9 @@ let run_children budgets =
 
 let () =
   string_ok (Mem.configure Sys.getenv_opt);
-  let budgets = load_budgets "specification/memory-budgets.sexp" in
+  let budgets =
+    List.filter (fun b -> Sys.win32 || not b.windows_only) (load_budgets "specification/memory-budgets.sexp")
+  in
   let find name =
     match List.find_opt (fun b -> b.name = name) budgets with
     | Some budget -> budget
