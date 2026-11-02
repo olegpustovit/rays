@@ -1340,3 +1340,28 @@ A one-pool device (Metal) never sets a device limit, so its behaviour is unchang
 memory from the driver (`VK_ERROR_OUT_OF_DEVICE_MEMORY`) is a typed `Capacity` error
 (`lib/ogpu/conformance/test_vulkan.ml`). `@tools/mem` on Windows reads `win.KEY` budgets over `KEY`, because
 a footprint there is committed private memory.
+
+## Vulkan on Windows
+
+`lib/vulkan` is a C bridge with one operation per OGPU driver operation, over volk and Vulkan Memory
+Allocator (`lib/vulkan/AGENTS.md` says why there is no generator); `lib/ogpu_vulkan` holds the driver
+records. `lib/ogpu_native` selects the platform's implementation; an executable names it. Required: Vulkan
+1.3, a discrete device, push descriptors, ray queries, acceleration structures, `VK_EXT_robustness2` and
+`VK_EXT_extended_dynamic_state3`. Missing any is a typed `No_adapter` at startup.
+
+- Memory: a mapped buffer is a device-local buffer plus a Bigarray view. `flush_mapped` copies the view into
+  staging and records the copy into an upload command buffer that the next submit runs first.
+  `invalidate_mapped` copies through a dedicated transfer queue with the runtime lock released, from any domain.
+- Hazards: a global barrier between dispatches and at each encoder's end, and every image in
+  `VK_IMAGE_LAYOUT_GENERAL`. Correct on any device; `ponytail:` comments name where it costs.
+- Binding: every stage shares one binding space, pushed at draw and dispatch, read from the module's own
+  SPIR-V. An unset binding is written null, as Metal leaves it unbound. An indirect command buffer is its
+  recorded calls replayed; an argument slice is a (texture, sampler) pair bound at a slot and the next.
+- Lifetime: destruction waits for the next submit's completion. One `VkInstance` lives for the process,
+  because destroying the last one unloads the driver under its own starting threads.
+- Ray tracing: ray queries; a primitive structure bound to a kernel is wrapped in a one-instance top level.
+  Instance records hold logical fields the bridge makes native at build, when structure addresses are known.
+  `Ray_tracing_motion` and `Ray_tracing_curves` are false: a moving scene builds at the shutter midpoint and
+  curves are the kernel's capsule loop.
+- Math and text: `specification/core.md`, "Goldens across operating systems".
+- Facts about the tested card: `specification/vulkan/rtx2080ti.json`.

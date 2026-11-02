@@ -3,13 +3,13 @@
 ## Purpose
 
 Rays is an OCaml creative-coding framework for interactive native desktop
-programs. It ships native Apple-Silicon Metal only, through OGPU, whose API is
+programs. It ships natively on Apple-Silicon Metal and on Windows Vulkan, through OGPU, whose API is
 backend-agnostic by design. Keep the public API small and functional where
 practical. Never add a CPU raster, browser/web, SDL2/Tsdl, or OpenGL fallback;
-Metal unavailability is a typed startup error. Web export (see Direction) is a
+Metal or Vulkan unavailability is a typed startup error. Web export (see Direction) is a
 separate compiler target, not a fallback: the native program never selects it.
 
-Nested `AGENTS.md` files hold subsystem rules: `lib/metal`, `lib/ogpu`
+Nested `AGENTS.md` files hold subsystem rules: `lib/metal`, `lib/vulkan`, `lib/ogpu`
 (also for `lib/ogpu_core`),
 `lib/runtime`, `lib/rdk`, `lib/rays_editor`, `lib/editor_document`, `lib/pxui_graph`, `lib/flow_sop`.
 Read the one for the directory you change. Design notes live in `specification/`;
@@ -70,8 +70,10 @@ task plan are `specification/web-export/plan.md`.
 | `parallel` | Shared Domainslib pool and deterministic coarse-grained work helpers |
 | `sdl3`, `sdl3_image/ttf/mixer` | SDL3 bindings (foundational) |
 | `metal` | Metal bindings: safe layer over a handwritten bridge (foundational) |
+| `vulkan` | Vulkan bridge: operations shaped like OGPU's driver records over volk and VMA, Windows only (foundational) |
 | `ogpu_core`, `ogpu` | Portable GPU core and virtual public API |
-| `ogpu_metal_native`, `ogpu_metal`, `ogpu_mock` | Native Metal detail and the two OGPU implementations |
+| `ogpu_metal_native`, `ogpu_metal`, `ogpu_vulkan`, `ogpu_mock` | Native Metal detail and the three OGPU implementations |
+| `ogpu_native` | The platform's OGPU implementation: what an executable that runs on the GPU names; one stanza per platform |
 | `runtime`, `runtime_input`, `runtime_resources` | SDL3/window lifecycle and frame facts, typed event translation, SDL image/ttf/mixer services, atomic file writes |
 | `renderer` | GPU execution, pipelines, Scene lowering caches, render stats and leases over one window or offscreen `Runtime`; contains `Scene_execution` |
 | `scene_command` | Pure renderer-neutral commands |
@@ -124,6 +126,8 @@ libraries cannot reach.
   layer handle); virtual `ogpu` depends only on `ogpu_core`. `ogpu_mock`
   stays portable; native Metal detail depends only on `ogpu_core`, `metal`
   and `lru`.
+- `Vulkan.` and `Ogpu_vulkan.` stay within the Vulkan backend, as `Metal.` does within Metal's. `ogpu_vulkan`
+  depends only on `ogpu_core`, `vulkan` and `native_layer_token`.
 - `Metal.`/`Ogpu_metal_native.` stay within the Metal backend; the runtime,
   path tracer, and their tests use the virtual `ogpu` only, and the gate lists
   no Metal exception.
@@ -239,6 +243,9 @@ release last tested); `dune exec tools/sdl3/bump.exe` records a new one. Native
 structs the stubs read are pinned in `lib/sdl3/abi.sexp`; the build fails and
 names a field an SDL release moved (`generate.exe accept` re-probes). See
 `specification/sdl3.md`.
+
+Windows setup, tests and the validation layer: `packaging/README.md`. Tests there run with
+`RAYS_VULKAN_VALIDATION=fatal`; the shell is MSYS2's bash, never Git Bash.
 
 Bootstrap: `opam switch create . 5.3.0 --no-install`, then `opam pin add
 --no-action --yes --recursive ./packaging`, `direnv allow` (or

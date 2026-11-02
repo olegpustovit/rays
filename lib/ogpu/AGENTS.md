@@ -5,8 +5,8 @@ encoders and backend-agnostic. It carries what the runtime
 and the path tracer call, plus what keeps it backend-agnostic (the virtual
 library, the driver records, `Caps`); an operation with no product caller is
 deleted, with its Metal binding, mock arm and conformance case, and comes
-back with its first caller. Metal (`ogpu_metal`) is the only backend today; a
-Vulkan backend must be addable without changing callers.
+back with its first caller. Metal (`ogpu_metal`) and Vulkan (`ogpu_vulkan`) are the
+backends; an executable names `ogpu_native`, its platform's.
 
 - `ogpu_core` depends only on `native_layer_token`. Virtual `ogpu` aliases
   the core and depends only on it. Backend types never appear in its interface.
@@ -23,8 +23,8 @@ Vulkan backend must be addable without changing callers.
   reflection at pipeline creation. Rays Lisp and the shared region IR are the
   shader source direction. Existing handwritten shaders are retired by the
   tracked path-tracer and raster phases; do not add another shader language.
-- Shape: dune virtual library with `ogpu_metal`/`ogpu_mock` implementations,
-  one backend per executable, conformance suite over the mock and Metal
+- Shape: dune virtual library with `ogpu_metal`/`ogpu_vulkan`/`ogpu_mock` implementations,
+  one backend per executable, conformance suite over the mock, Metal and Vulkan
   covering every capability that exists (compute and render pipelines, ray
   tracing incl. motion, curves and bounding boxes).
 - Workflow for a new capability: the `add-ogpu-feature` skill. Removing one:
