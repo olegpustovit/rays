@@ -456,7 +456,7 @@ let noise_table e (layout : Flow_ir.Kernel_layout.t) seed index =
   load_uint e (Option.get e.table) (result e e.uint 128 [ u e base; index ])
 
 (* One component of a prepared table's row [at] (a long), clamped into the table. *)
-let element e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width component =
+let element_word e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width component =
   let k = Option.get (List.find_index (fun (slot, _) -> slot = prepared) layout.gathers) in
   let size = result e (Option.get e.ulong) 113 [ uniform e layout.gather_lengths.(k) ] in
   let size = result e (long e) 124 [ size ] in
@@ -465,7 +465,7 @@ let element e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width compo
   let at = select e (long e) (compare e 177 at (l e 0L)) (l e 0L) at in
   let at = select e (long e) (compare e 173 at last) last at in
   let at = result e e.uint 113 [ at ] in
-  result e e.float 124 [ load_uint e gathers.(k) (offset e at width component) ]
+  load_uint e gathers.(k) (offset e at width component)
 
 (* A raster-stage intrinsic's operands: floats, but a store's table (its array uniform), a store's index
    and Int value and a group scan's operand as uint words *)
@@ -500,16 +500,17 @@ let stage_value e raster ~table_of ~low ~float_of ~integer ~wide stage r =
   | Some x -> x.intrinsic stage (stage_operands ~table_of ~low ~float_of ~integer stage r)
   | None -> trace_stage e stage (fun () -> Array.map float_of r) (fun () -> Array.map low r) ~wide
 
-let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
+let emit_program ?raster ?(input_uint32 = [||]) ?(gather_uint32 = [||]) ?(uint32_words = [])
+    ?(output_uint32 = [||]) e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
   let registers = Array.make (Array.length layout.view.code) 0 in
   let whole = Array.make (Array.length layout.view.code) None in
   let integer slot = Flow_ir.Core.Region.integer_register layout.view.code.(slot) in
   (* narrow Int registers (Kernel_layout.narrow) hold a 32-bit unsigned word *)
   let narrow = layout.narrow in
-  let widen slot =
-    result e (long e) 124 [ result e (Option.get e.ulong) 113 [ registers.(slot) ] ]
-  in
+  let widen_word word = result e (long e) 124 [ result e (Option.get e.ulong) 113 [ word ] ] in
+  let widen slot = widen_word registers.(slot) in
+  let is_uint32 words = List.mem words uint32_words in
   let known slot = narrow.(slot) || whole.(slot) <> None in
   let whole_of slot = if narrow.(slot) then widen slot else Option.get whole.(slot) in
   let float_of slot =
@@ -554,10 +555,15 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
          None
   in
   (* a narrow index is its low word read signed, as Metal's and WGSL's int(index) *)
-  let element prepared at =
-    element e layout gathers prepared
+  let element_word prepared at =
+    element_word e layout gathers prepared
       (if narrow.(at) then result e (long e) 114 [ result e e.sint 124 [ registers.(at) ] ]
        else int_of at)
+  in
+  let element prepared at width component =
+    let word = element_word prepared at width component in
+    let k = Option.get (List.find_index (fun (slot, _) -> slot = prepared) layout.gathers) in
+    result e e.float (if gather_uint32.(k) then 112 else 124) [ word ]
   in
   let rec expression slot instruction =
     if narrow.(slot) then
@@ -605,7 +611,11 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
         | Gather (p, at, w, c) -> r.gather (table_of p) (low at) w c
         | Int_gather (p, at) -> r.int_gather (table_of p) (low at)
         | _ -> assert false)
+    | Input (input, width, component) when input_uint32.(input) ->
+        result e float 112 [ load_uint e inputs.(input) (offset e index width component) ]
     | Input (input, width, component) -> load e inputs.(input) (offset e index width component)
+    | Uniform (input, component) when is_uint32 (layout.uniforms.(input) + component) ->
+        result e float 112 [ uniform e (layout.uniforms.(input) + component) ]
     | Uniform (input, component) -> uniform_float e (layout.uniforms.(input) + component)
     | Frame _ | Guarded _ -> assert false
     | Binary (((Add | Sub | Mul | Mod | Min | Max) as op), a, b) when known a && known b ->
@@ -632,9 +642,13 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
         whole.(slot) <- whole.(loop + 1 + component);
         registers.(loop + 1 + component)
     | Int_const value -> l e (Int64.of_int value)
+    | Int_input input when input_uint32.(input) -> widen_word (load_uint e inputs.(input) index)
     | Int_input input -> to_int (load e inputs.(input) index)
+    | Int_uniform input when is_uint32 layout.uniforms.(input) ->
+        widen_word (uniform e layout.uniforms.(input))
     | Int_uniform input -> to_int (uniform_float e layout.uniforms.(input))
     | Int_frame name when raster <> None -> (Option.get raster).builtin name
+    | Int_frame _ when is_uint32 layout.frames.(slot) -> widen_word (uniform e layout.frames.(slot))
     | Int_frame _ -> to_int (uniform_float e layout.frames.(slot))
     | Int_binary (op, a, b) ->
         let a = int_of a and b = int_of b in
@@ -650,6 +664,8 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
         if yes = no then int_of yes
         else select e (long e) (truth e (float_of condition)) (int_of yes) (int_of no)
     | Gather (prepared, at, width, component) -> element prepared at width component
+    | Int_gather (prepared, at) when gather_uint32.(Option.get (List.find_index (fun (slot, _) -> slot = prepared) layout.gathers)) ->
+        widen_word (element_word prepared at 1 0)
     | Int_gather (prepared, at) -> to_int (element prepared at 1 0)
     | Convert (To_float, a) ->
         whole.(slot) <- (if known a then Some (whole_of a) else None);
@@ -877,6 +893,18 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
             mark_invalid e invalid (non_finite e (float_of register));
           match raster with
           | Some r -> r.output output component (float_of register)
+          | None when output_uint32.(output) ->
+              let value = int_of register in
+              record_status e
+                (result e boolean 166
+                   [
+                     compare e 177 value (l e 0L);
+                     compare e 172 value (l e 0xffffffffL);
+                   ])
+                64;
+              store_uint e outputs.(output)
+                (offset e index (Array.length values) component)
+                (result e e.uint 113 [ value ])
           | None ->
               store e outputs.(output)
                 (offset e index (Array.length values) component)
@@ -915,7 +943,8 @@ let resident_count e (layout : Flow_ir.Kernel_layout.t) index buffers =
   | _ -> assert false
 
 let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = false)
-    ?(spheres = true) program =
+    ?(spheres = true) ?(uint32_scalars = false) ?(uint32_outputs = []) ?(uint32_inputs = [])
+    ?(uint32_tables = []) program =
   try
     (match P.gpu_refusals ~fused:true ~fast program with
     | [] -> ()
@@ -931,6 +960,47 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     in
     let layout =
       Noise.checked back (Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves program)
+    in
+    (* the exact uint32 buffers and scalars, validated as Emit does *)
+    let input_uint32 = Array.make (Array.length layout.view.widths) false in
+    List.iter
+      (fun i ->
+        if (not fast) || i < 0 || i >= Array.length layout.view.widths || layout.view.widths.(i) <> 1
+        then fail "Uint32 input requires a scalar buffer in fast precision.";
+        input_uint32.(i) <- true)
+      uint32_inputs;
+    let gather_uint32 = Array.make (List.length layout.gathers) false in
+    List.iter
+      (fun u ->
+        match List.find_index (fun (_, (index, width)) -> index = u && width = 1) layout.gathers with
+        | Some k when fast -> gather_uint32.(k) <- true
+        | _ -> fail "Uint32 table requires a scalar gathered buffer in fast precision.")
+      uint32_tables;
+    let output_uint32 = Array.make layout.output_count false in
+    List.iter
+      (fun index ->
+        if index < 0 || index >= layout.output_count then
+          fail "Uint32 output index is outside its producer.";
+        match layout.view.outputs.(index) with
+        | [| slot |]
+          when fast && Flow_ir.Core.Region.integer_register layout.view.code.(slot) ->
+            output_uint32.(index) <- true
+        | _ -> fail "Uint32 output requires a scalar integer result in fast precision.")
+      uint32_outputs;
+    let uint32_words =
+      if not uint32_scalars then []
+      else begin
+        if not fast then fail "Uint32 scalars require fast precision.";
+        List.sort_uniq Int.compare
+          (List.concat
+             (List.mapi
+                (fun slot code ->
+                  match unguarded code with
+                  | P.Int_uniform u -> [ layout.uniforms.(u) ]
+                  | P.Int_frame _ when layout.frames.(slot) >= 0 -> [ layout.frames.(slot) ]
+                  | _ -> [])
+                (Array.to_list layout.view.code)))
+      end
     in
     (* SPV_NV_ray_tracing_motion_blur moves only trace-rays pipelines, not ray queries *)
     if layout.scene_motion then
@@ -982,12 +1052,15 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     in
     let inputs =
       Array.mapi
-        (fun index used -> if used then bind storage 12 index Shader.Storage_buffer else 0)
+        (fun index used ->
+          if used then bind (if input_uint32.(index) then uint_storage else storage) 12 index Shader.Storage_buffer
+          else 0)
         layout.input_used
     in
     let outputs =
       Array.init layout.output_count (fun index ->
-          bind storage 12 (layout.input_count + index) Shader.Storage_buffer)
+          bind (if output_uint32.(index) then uint_storage else storage) 12 (layout.input_count + index)
+            Shader.Storage_buffer)
     in
     let uniform_buffer = bind uniform_type 2 layout.uniform_binding Shader.Uniform_buffer
     and status = bind uint_storage 12 layout.status_binding Shader.Storage_buffer in
@@ -1077,7 +1150,9 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     Words.instruction words.body 247 [ finish; 0 ];
     Words.instruction words.body 250 [ within; body; finish ];
     label e body;
-    let invalid = emit_program e layout inputs outputs gathers index in
+    let invalid = emit_program ~input_uint32 ~gather_uint32 ~uint32_words ~output_uint32 e layout inputs outputs gathers
+        index
+    in
     record_status e invalid 1;
     let bits = result e uint 61 [ e.status_bits ] in
     let flagged = compare e 171 bits (u e 0) in
