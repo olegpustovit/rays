@@ -95,7 +95,8 @@ let create ?(clock = Unix.gettimeofday) () =
     jobs_lock = Mutex.create ();
     jobs_ready = Condition.create ();
     wake =
-      (let r, w = Unix.pipe ~cloexec:true () in
+      (* a socket pair, not a pipe: Windows' select and set_nonblock take sockets only *)
+      (let r, w = Unix.socketpair ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
        Unix.set_nonblock r;
        Unix.set_nonblock w;
        (r, w));
