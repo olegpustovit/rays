@@ -216,12 +216,13 @@ let mem path ~frames =
   | Error message -> die "rays: %s" message
   | Ok outcome ->
       print_string (Mem.Report.to_string outcome.final.report);
-      Printf.printf "frames %d: live %s -> %s, allocated %s, promoted %s a frame, readback %s\n" frames
+      Printf.printf "frames %d: live %s -> %s, allocated %s, promoted %s a frame, readback %s (payload %s)\n" frames
         (Mem.Report.format_bytes outcome.early.live)
         (Mem.Report.format_bytes outcome.final.live)
         (Mem.Report.format_bytes (int_of_float (outcome.final.allocated /. float frames)))
         (Mem.Report.format_bytes (int_of_float (outcome.final.promoted /. float frames)))
-        (Mem.Report.format_bytes outcome.readback_bytes);
+        (Mem.Report.format_bytes outcome.readback_bytes)
+        (Mem.Report.format_bytes outcome.payload_readback_bytes);
       List.iter
         (fun (site, reason, n) -> Printf.printf "left the device: %s, %s (%d)\n" site reason n)
         outcome.fallbacks;
