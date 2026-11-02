@@ -89,6 +89,25 @@ external surface_discard : handle -> unit = "rv_surface_discard"
 external commit_present : handle -> handle -> handle -> int = "rv_commit_present"
 external surface_destroy : handle -> unit = "rv_surface_destroy"
 
+external accel_create_blas : handle -> int array array -> bool -> int = "rv_accel_create_blas"
+
+external accel_create_tlas : handle -> handle -> int -> int -> int array -> int
+  = "rv_accel_create_tlas"
+
+external accel_create_sized : handle -> int -> handle -> int = "rv_accel_create_sized"
+external accel_sizes : handle -> int * int * int = "rv_accel_sizes"
+external accel_destroy : handle -> unit = "rv_accel_destroy"
+external set_accel : handle -> int -> handle -> int = "rv_cmd_set_accel"
+external accel_build : handle -> handle -> handle -> int -> int = "rv_accel_build"
+
+external accel_refit : handle -> handle -> int array array -> handle -> int -> int
+  = "rv_accel_refit"
+
+external accel_compact : handle -> handle -> handle -> unit = "rv_accel_compact"
+
+external accel_write_compacted : handle -> handle -> handle -> int -> int
+  = "rv_accel_write_compacted"
+
 (* A SPIR-V module's entry points: (name, ids of the variables it uses, local size) and the
    bindings it declares in set 0, as (variable id, binding, kind): 0 uniform buffer, 1 storage
    buffer, 2 sampled image, 3 storage image, 4 sampler, 5 acceleration structure. *)

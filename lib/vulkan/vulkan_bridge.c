@@ -479,7 +479,8 @@ static rv_chunk *chunk_new(rv_device *d, VkDeviceSize size) {
   c = calloc(1, sizeof *c);
   c->size = size > CHUNK_BYTES ? size : CHUNK_BYTES;
   VkBufferCreateInfo info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = c->size,
-      .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT};
+      .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR};
   VmaAllocationCreateInfo alloc = {.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO};
   VmaAllocationInfo out;
   VkResult r = vmaCreateBuffer(d->allocator, &info, &alloc, &c->buffer, &c->allocation, &out);
@@ -1778,4 +1779,279 @@ CAMLprim value rv_surface_destroy(value surface) {
   vkDestroySurfaceKHR(d->instance, s->surface, NULL);
   free(s);
   return Val_unit;
+}
+
+/* ---- acceleration structures ---- */
+
+typedef struct {
+  rv_device *d;
+  VkAccelerationStructureKHR handle;
+  VkBuffer buffer;
+  VmaAllocation allocation;
+  VkAccelerationStructureTypeKHR level;
+  VkBuildAccelerationStructureFlagsKHR flags;
+  uint32_t geometry_count;
+  VkAccelerationStructureGeometryKHR *geometries;
+  uint32_t *primitives;
+  /* an instance structure: the logical records (Backend.instance_layout) and what they index */
+  rv_buffer *instances;
+  VkDeviceSize instances_offset;
+  uint32_t instance_count, structure_count;
+  void **structures;
+  VkDeviceSize structure_size, build_scratch, update_scratch;
+} rv_accel;
+
+static VkDeviceAddress buffer_address(rv_device *d, VkBuffer buffer) {
+  VkBufferDeviceAddressInfo info = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer};
+  return vkGetBufferDeviceAddress(d->device, &info);
+}
+
+static VkDeviceAddress accel_address(rv_accel *a) {
+  VkAccelerationStructureDeviceAddressInfoKHR info = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR, .accelerationStructure = a->handle};
+  return vkGetAccelerationStructureDeviceAddressKHR(a->d->device, &info);
+}
+
+/* geometries: arrays [| kind (0 triangles, 1 boxes); buffer; offset; stride; count; opaque; duplicate |] */
+static void set_geometries(rv_accel *a, value geometries) {
+  for (uint32_t i = 0; i < a->geometry_count; i++) {
+    value g = Field(geometries, i);
+    rv_buffer *b = H(Field(g, 1));
+    VkDeviceAddress at = buffer_address(a->d, b->buffer) + (VkDeviceSize)Long_val(Field(g, 2));
+    VkDeviceSize stride = Long_val(Field(g, 3));
+    uint32_t count = Long_val(Field(g, 4));
+    VkAccelerationStructureGeometryKHR *out = &a->geometries[i];
+    *out = (VkAccelerationStructureGeometryKHR){.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+    if (Long_val(Field(g, 0)) == 0) {
+      out->geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+      out->flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+      out->geometry.triangles = (VkAccelerationStructureGeometryTrianglesDataKHR){.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+          .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT, .vertexData = {.deviceAddress = at}, .vertexStride = stride, .maxVertex = count ? count - 1 : 0, .indexType = VK_INDEX_TYPE_NONE_KHR};
+      a->primitives[i] = count / 3;
+    } else {
+      out->geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+      out->flags = (Long_val(Field(g, 5)) ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0) | (Long_val(Field(g, 6)) ? 0 : VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR);
+      out->geometry.aabbs = (VkAccelerationStructureGeometryAabbsDataKHR){.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,
+          .data = {.deviceAddress = at}, .stride = stride};
+      a->primitives[i] = count;
+    }
+  }
+}
+
+static VkResult accel_storage(rv_accel *a) {
+  rv_device *d = a->d;
+  VkBufferCreateInfo info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = a->structure_size,
+      .usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
+  VmaAllocationCreateInfo alloc = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+  VkResult r = vmaCreateBuffer(d->allocator, &info, &alloc, &a->buffer, &a->allocation, NULL);
+  if (r != VK_SUCCESS) return r;
+  VkAccelerationStructureCreateInfoKHR create = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+      .buffer = a->buffer, .size = a->structure_size, .type = a->level};
+  r = vkCreateAccelerationStructureKHR(d->device, &create, NULL, &a->handle);
+  if (r != VK_SUCCESS) vmaDestroyBuffer(d->allocator, a->buffer, a->allocation);
+  return r;
+}
+
+static void build_info(rv_accel *a, VkAccelerationStructureBuildGeometryInfoKHR *info, VkAccelerationStructureGeometryKHR *instance_geometry) {
+  *info = (VkAccelerationStructureBuildGeometryInfoKHR){.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR, .type = a->level, .flags = a->flags};
+  if (a->level == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR) {
+    *instance_geometry = (VkAccelerationStructureGeometryKHR){.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR, .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+        .geometry = {.instances = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR}}};
+    info->geometryCount = 1;
+    info->pGeometries = instance_geometry;
+  } else {
+    info->geometryCount = a->geometry_count;
+    info->pGeometries = a->geometries;
+  }
+}
+
+/* The scratch address is aligned here, so the sizes it reports carry the slack. */
+static void measure(rv_accel *a) {
+  VkAccelerationStructureBuildGeometryInfoKHR info;
+  VkAccelerationStructureGeometryKHR instance_geometry;
+  build_info(a, &info, &instance_geometry);
+  uint32_t instances = a->instance_count;
+  VkAccelerationStructureBuildSizesInfoKHR sizes = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+  vkGetAccelerationStructureBuildSizesKHR(a->d->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
+      a->level == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR ? &instances : a->primitives, &sizes);
+  a->structure_size = sizes.accelerationStructureSize;
+  a->build_scratch = sizes.buildScratchSize + 128;
+  a->update_scratch = sizes.updateScratchSize + 128;
+}
+
+CAMLprim value rv_accel_create_blas(value device, value geometries, value refit) {
+  rv_accel *a = calloc(1, sizeof *a);
+  a->d = H(device);
+  a->level = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+  a->flags = Bool_val(refit) ? VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR
+                             : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+  a->geometry_count = Wosize_val(geometries);
+  a->geometries = calloc(a->geometry_count + 1, sizeof *a->geometries);
+  a->primitives = calloc(a->geometry_count + 1, sizeof *a->primitives);
+  set_geometries(a, geometries);
+  measure(a);
+  VkResult r = accel_storage(a);
+  if (r != VK_SUCCESS) { free(a->geometries); free(a->primitives); free(a); return Val_long(r); }
+  return Val_h(a);
+}
+
+/* structures: the bottom-level handles a record's structure index names */
+CAMLprim value rv_accel_create_tlas(value device, value instances, value offset, value count, value structures) {
+  rv_accel *a = calloc(1, sizeof *a);
+  a->d = H(device);
+  a->level = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+  a->flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+  a->instances = H(instances);
+  a->instances_offset = Long_val(offset);
+  a->instance_count = Long_val(count);
+  a->structure_count = Wosize_val(structures);
+  a->structures = calloc(a->structure_count + 1, sizeof *a->structures);
+  for (uint32_t i = 0; i < a->structure_count; i++) a->structures[i] = H(Field(structures, i));
+  measure(a);
+  VkResult r = accel_storage(a);
+  if (r != VK_SUCCESS) { free(a->structures); free(a); return Val_long(r); }
+  return Val_h(a);
+}
+
+/* An empty structure of [size] bytes shaped like [template], a compaction's destination. */
+CAMLprim value rv_accel_create_sized(value device, value size, value template_) {
+  rv_accel *t = H(template_);
+  rv_accel *a = calloc(1, sizeof *a);
+  a->d = H(device);
+  a->level = t->level;
+  a->structure_size = Long_val(size);
+  VkResult r = accel_storage(a);
+  if (r != VK_SUCCESS) { free(a); return Val_long(r); }
+  return Val_h(a);
+}
+
+CAMLprim value rv_accel_sizes(value accel) {
+  CAMLparam1(accel);
+  CAMLlocal1(out);
+  rv_accel *a = H(accel);
+  out = caml_alloc_tuple(3);
+  Store_field(out, 0, Val_long((intnat)a->structure_size));
+  Store_field(out, 1, Val_long((intnat)a->build_scratch));
+  Store_field(out, 2, Val_long((intnat)a->update_scratch));
+  CAMLreturn(out);
+}
+
+static void destroy_accel_now(rv_device *d, void *payload) {
+  rv_accel *a = payload;
+  vkDestroyAccelerationStructureKHR(d->device, a->handle, NULL);
+  vmaDestroyBuffer(d->allocator, a->buffer, a->allocation);
+  free(a->geometries);
+  free(a->primitives);
+  free(a->structures);
+  free(a);
+}
+
+CAMLprim value rv_accel_destroy(value accel) {
+  rv_accel *a = H(accel);
+  defer(a->d, destroy_accel_now, a);
+  return Val_unit;
+}
+
+CAMLprim value rv_cmd_set_accel(value commands, value index, value accel) {
+  rv_cmd *c = H(commands);
+  int i = Long_val(index);
+  if (i < 0 || i >= MAX_BIND) return Val_long(VK_ERROR_TOO_MANY_OBJECTS);
+  c->slots[i] = (rv_slot){.kind = 4, .accel = ((rv_accel *)H(accel))->handle};
+  c->dirty = true;
+  return Val_long(VK_SUCCESS);
+}
+
+/* The logical records (64 bytes: column-major transform, user id at 48, mask at 52, structure index
+   at 56) become Vulkan's. Their bits are a host fact at build time, so the buffer must be host
+   visible; a device-written instance buffer has no caller. */
+static VkResult native_instances(rv_cmd *c, rv_accel *a, VkDeviceAddress *address) {
+  if (!a->instances->map) return VK_ERROR_FEATURE_NOT_PRESENT;
+  VkBuffer chunk;
+  VkDeviceSize at;
+  VkDeviceSize bytes = (VkDeviceSize)a->instance_count * sizeof(VkAccelerationStructureInstanceKHR);
+  char *room = arena(c, bytes ? bytes : 64, 16, &chunk, &at);
+  if (!room) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+  const char *from = a->instances->map + a->instances_offset;
+  for (uint32_t i = 0; i < a->instance_count; i++, from += 64) {
+    const float *m = (const float *)from;
+    uint32_t user_id, mask, index;
+    memcpy(&user_id, from + 48, 4);
+    memcpy(&mask, from + 52, 4);
+    memcpy(&index, from + 56, 4);
+    if (index >= a->structure_count) return VK_ERROR_VALIDATION_FAILED_EXT;
+    VkAccelerationStructureInstanceKHR out = {
+        .transform = {.matrix = {{m[0], m[3], m[6], m[9]}, {m[1], m[4], m[7], m[10]}, {m[2], m[5], m[8], m[11]}}},
+        .instanceCustomIndex = user_id & 0xffffff, .mask = mask & 0xff,
+        .accelerationStructureReference = accel_address(a->structures[index])};
+    memcpy(room + i * sizeof out, &out, sizeof out);
+  }
+  *address = buffer_address(a->d, chunk) + at;
+  return VK_SUCCESS;
+}
+
+static VkResult record_build(rv_cmd *c, rv_accel *a, rv_buffer *scratch, VkDeviceSize offset, bool update) {
+  VkAccelerationStructureBuildGeometryInfoKHR info;
+  VkAccelerationStructureGeometryKHR instance_geometry;
+  build_info(a, &info, &instance_geometry);
+  VkAccelerationStructureBuildRangeInfoKHR ranges_stack[8];
+  VkAccelerationStructureBuildRangeInfoKHR *ranges = info.geometryCount > 8 ? malloc(info.geometryCount * sizeof *ranges) : ranges_stack;
+  memset(ranges, 0, info.geometryCount * sizeof *ranges);
+  if (a->level == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR) {
+    VkDeviceAddress data = 0;
+    VkResult r = native_instances(c, a, &data);
+    if (r != VK_SUCCESS) return r;
+    instance_geometry.geometry.instances.data.deviceAddress = data;
+    ranges[0].primitiveCount = a->instance_count;
+  } else {
+    for (uint32_t i = 0; i < info.geometryCount; i++) ranges[i].primitiveCount = a->primitives[i];
+  }
+  VkDeviceAddress scratch_at = buffer_address(a->d, scratch->buffer) + offset;
+  info.mode = update ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+  info.srcAccelerationStructure = update ? a->handle : VK_NULL_HANDLE;
+  info.dstAccelerationStructure = a->handle;
+  info.scratchData.deviceAddress = (scratch_at + 127) & ~(VkDeviceAddress)127;
+  const VkAccelerationStructureBuildRangeInfoKHR *pointer = ranges;
+  vkCmdBuildAccelerationStructuresKHR(c->cb, 1, &info, &pointer);
+  full_barrier(c->cb);
+  if (ranges != ranges_stack) free(ranges);
+  return VK_SUCCESS;
+}
+
+CAMLprim value rv_accel_build(value commands, value accel, value scratch, value offset) {
+  return Val_long(record_build(H(commands), H(accel), H(scratch), Long_val(offset), false));
+}
+
+CAMLprim value rv_accel_refit(value commands, value accel, value geometries, value scratch, value offset) {
+  rv_accel *a = H(accel);
+  if (Wosize_val(geometries) != a->geometry_count) return Val_long(VK_ERROR_VALIDATION_FAILED_EXT);
+  set_geometries(a, geometries);
+  return Val_long(record_build(H(commands), a, H(scratch), Long_val(offset), true));
+}
+
+CAMLprim value rv_accel_compact(value commands, value source, value destination) {
+  rv_cmd *c = H(commands);
+  VkCopyAccelerationStructureInfoKHR info = {.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR,
+      .src = ((rv_accel *)H(source))->handle, .dst = ((rv_accel *)H(destination))->handle, .mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR};
+  vkCmdCopyAccelerationStructureKHR(c->cb, &info);
+  full_barrier(c->cb);
+  return Val_unit;
+}
+
+static void destroy_query_pool_now(rv_device *d, void *payload) { vkDestroyQueryPool(d->device, payload, NULL); }
+
+/* The compacted size as a uint32 into the buffer, as Metal writes it. */
+CAMLprim value rv_accel_write_compacted(value commands, value accel, value buffer, value offset) {
+  rv_cmd *c = H(commands);
+  rv_accel *a = H(accel);
+  rv_device *d = a->d;
+  VkQueryPoolCreateInfo info = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, .queryCount = 1};
+  VkQueryPool pool;
+  VkResult r = vkCreateQueryPool(d->device, &info, NULL, &pool);
+  if (r != VK_SUCCESS) return Val_long(r);
+  vkCmdResetQueryPool(c->cb, pool, 0, 1);
+  vkCmdWriteAccelerationStructuresPropertiesKHR(c->cb, 1, &a->handle, VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, pool, 0);
+  full_barrier(c->cb);
+  vkCmdCopyQueryPoolResults(c->cb, pool, 0, 1, ((rv_buffer *)H(buffer))->buffer, Long_val(offset), 4, VK_QUERY_RESULT_WAIT_BIT);
+  full_barrier(c->cb);
+  defer(d, destroy_query_pool_now, pool);
+  return Val_long(VK_SUCCESS);
 }

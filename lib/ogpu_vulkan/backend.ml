@@ -106,7 +106,8 @@ let create () =
           (* An argument slice is a (texture, sampler) pair: binding the buffer at its offset binds
              those at the slot and the next one, the shape SPIR-V's fragments declare. *)
           and arguments : (int64 * int64, (V.handle * V.handle) ref) Hashtbl.t = Hashtbl.create 16
-          and frames : (int64, V.handle) Hashtbl.t = Hashtbl.create 4 in
+          and frames : (int64, V.handle) Hashtbl.t = Hashtbl.create 4
+          and accels : (int64, V.handle) Hashtbl.t = Hashtbl.create 8 in
           let queues = ref 0 in
           let handle_id = Ogpu_core.Handle.create_device () in
           let max_buffer, max_texture, max_samples, max_invocations, _local, _api =
@@ -123,10 +124,10 @@ let create () =
                 };
               compute_pipeline = true;
               render_pipeline = true;
-              ray_tracing = false;
+              ray_tracing = true;
               ray_tracing_curves = false;
               ray_tracing_motion = false;
-              ray_tracing_refit = false;
+              ray_tracing_refit = true;
               memoryless_attachments = false;
             }
           in
@@ -493,6 +494,84 @@ let create () =
                 destroy_argument = (fun () -> Ok ());
               }
           in
+          let geometry_records geometries =
+            let op = "Ogpu_vulkan.accel" in
+            let flag x = if x then 1 else 0 in
+            let record (geometry : B.driver_geometry) =
+              match geometry with
+              | Driver_triangles { vertices; offset; vertex_stride; vertex_count; length = _ } ->
+                  Result.map
+                    (fun (b : buffer) ->
+                      [| 0; b.buffer; Int64.to_int offset; vertex_stride; vertex_count; 1; 0 |])
+                    (find_buffer op vertices)
+              | Driver_boxes { boxes = [| (id, offset) |]; stride; count; opaque; duplicate } ->
+                  Result.map
+                    (fun (b : buffer) ->
+                      [| 1; b.buffer; Int64.to_int offset; stride; count; flag opaque; flag duplicate |])
+                    (find_buffer op id)
+              | Driver_boxes _ | Driver_motion_triangles _ | Driver_curves _ ->
+                  error op E.Unsupported "motion and curves have no Vulkan structure here"
+            in
+            Array.fold_right
+              (fun geometry rest ->
+                Result.bind rest (fun rest ->
+                    Result.map (fun r -> r :: rest) (record geometry)))
+              geometries (Ok [])
+            |> Result.map Array.of_list
+          in
+          let create_accel (descriptor : B.driver_accel_descriptor) =
+            let op = "Ogpu_vulkan.create_accel" in
+            let ( let* ) = Result.bind in
+            let* created =
+              match descriptor with
+              | Driver_blas { motion = Some _; _ } ->
+                  error op E.Unsupported "motion has no Vulkan structure here"
+              | Driver_blas { geometries; refit; motion = None } ->
+                  let* records = geometry_records geometries in
+                  Ok (V.accel_create_blas device records refit)
+              | Driver_tlas { kind = Motion_instances; _ } ->
+                  error op E.Unsupported "motion has no Vulkan structure here"
+              | Driver_tlas { instances; offset; instance_count; structures; _ } ->
+                  let* b = find_buffer op instances in
+                  let* handles =
+                    Array.fold_right
+                      (fun id rest ->
+                        let* rest = rest in
+                        match Hashtbl.find_opt accels id with
+                        | Some native -> Ok (native :: rest)
+                        | None -> error op E.Invalid_argument "acceleration structure graph is incomplete")
+                      structures (Ok [])
+                  in
+                  Ok
+                    (V.accel_create_tlas device b.buffer (Int64.to_int offset) instance_count
+                       (Array.of_list handles))
+              | Driver_sized { size; template } -> (
+                  match Hashtbl.find_opt accels template with
+                  | Some native -> Ok (V.accel_create_sized device (Int64.to_int size) native)
+                  | None -> error op E.Invalid_argument "acceleration structure graph is incomplete")
+            in
+            let* native = handle op created in
+            incr live;
+            let id = token () in
+            Hashtbl.add accels id native;
+            let structure, build, update = V.accel_sizes native in
+            Ok
+              {
+                B.accel_token = id;
+                accel_sizes =
+                  {
+                    structure_size = Int64.of_int structure;
+                    build_scratch_size = Int64.of_int build;
+                    refit_scratch_size = Int64.of_int update;
+                  };
+                destroy_accel =
+                  (fun () ->
+                    Hashtbl.remove accels id;
+                    decr live;
+                    V.accel_destroy native;
+                    Ok ());
+              }
+          in
           let create_queue () =
             let op = "Ogpu_vulkan.queue" in
             match handle op (V.queue_create device) with
@@ -576,7 +655,10 @@ let create () =
                                 Result.bind (find_texture op id) (fun t ->
                                     check_slot (V.set_texture commands index t.texture)));
                             set_accel =
-                              (fun ~index:_ _ -> error op E.Unsupported "acceleration structures");
+                              (fun ~index id ->
+                                match Hashtbl.find_opt accels id with
+                                | None -> error op E.Invalid_argument "acceleration structure graph is incomplete"
+                                | Some native -> check_slot (V.set_accel commands index native));
                             dispatch_threads =
                               (fun ~threads:(x, y, z) ~threadgroup:_ ->
                                 let gx, gy, gz = !local in
@@ -596,7 +678,50 @@ let create () =
                                 Ok ());
                           }
                       in
-                      let accel_encoder () = error op E.Unsupported "acceleration structures" in
+                      let accel_encoder () =
+                        let ( let* ) = Result.bind in
+                        let find id =
+                          match Hashtbl.find_opt accels id with
+                          | Some native -> Ok native
+                          | None -> error op E.Invalid_argument "acceleration structure graph is incomplete"
+                        in
+                        Ok
+                          {
+                            B.build =
+                              (fun id ~scratch ~scratch_offset ->
+                                let* a = find id in
+                                let* s = find_buffer op scratch in
+                                checked op
+                                  (V.accel_build commands a s.buffer (Int64.to_int scratch_offset)));
+                            compact =
+                              (fun ~src ~dst ->
+                                let* s = find src in
+                                let* d = find dst in
+                                V.accel_compact commands s d;
+                                Ok ());
+                            write_compacted_size =
+                              (fun id ~dst ~offset ->
+                                let* a = find id in
+                                let* b = find_buffer op dst in
+                                checked op
+                                  (V.accel_write_compacted commands a b.buffer (Int64.to_int offset)));
+                            refit =
+                              (fun id descriptor ~scratch ~scratch_offset ->
+                                let* a = find id in
+                                let* s = find_buffer op scratch in
+                                match descriptor with
+                                | B.Driver_blas { geometries; _ } ->
+                                    let* geometries = geometry_records geometries in
+                                    checked op
+                                      (V.accel_refit commands a geometries s.buffer
+                                         (Int64.to_int scratch_offset))
+                                | _ -> error op E.Invalid_argument "only a primitive structure refits");
+                            end_accel =
+                              (fun () ->
+                                V.encoder_end commands;
+                                Ok ());
+                          }
+                      in
                       let blit_encoder () =
                         Ok
                           {
@@ -909,7 +1034,6 @@ let create () =
                             Ok ());
                       })
           in
-          let unsupported_accel op = error op E.Unsupported "acceleration structures" in
           Ok
             {
               B.device_handle = handle_id;
@@ -926,8 +1050,10 @@ let create () =
                   error "Ogpu_vulkan.create_memoryless_texture" E.Unsupported
                     "this device has no tile memory");
               create_library;
-              create_accel = (fun _ -> unsupported_accel "Ogpu_vulkan.create_accel");
-              instance_layout = (fun _ -> [| 64; 0; 52; 51; -1; 48; -1; -1; -1; -1; -1; -1 |]);
+              create_accel;
+              (* A logical record the bridge turns into Vulkan's at build, when it knows the structures'
+                 addresses: 24-bit id and 8-bit mask share a word the portable packer cannot write. *)
+              instance_layout = (fun _ -> [| 64; 0; -1; 52; 56; 48; -1; -1; -1; -1; -1; -1 |]);
               create_sampler;
               create_render_pipeline;
               create_icb;
