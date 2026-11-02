@@ -69,10 +69,13 @@ let contains text needle =
     true
   with Not_found -> false
 
+(* Windows joins paths with a backslash; every path rule here is written with "/" *)
+let slashes path = if Sys.win32 then String.map (function '\\' -> '/' | c -> c) path else path
+
 let rec files dir =
   Sys.readdir dir |> Array.to_list
   |> List.concat_map (fun name ->
-      let path = Filename.concat dir name in
+      let path = slashes (Filename.concat dir name) in
       if Sys.file_exists path && Sys.is_directory path then
         if name = "_build" then [] else files path
       else [ path ])
@@ -492,6 +495,7 @@ let alias_references sexp =
   visit sexp
 
 let normalize_path path =
+  let path = slashes path in
   let absolute = String.starts_with ~prefix:"/" path in
   let parts =
     String.split_on_char '/' path
