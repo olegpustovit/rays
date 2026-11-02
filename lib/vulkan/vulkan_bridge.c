@@ -1783,9 +1783,10 @@ CAMLprim value rv_surface_destroy(value surface) {
 
 /* ---- acceleration structures ---- */
 
-typedef struct {
+typedef struct rv_accel {
   rv_device *d;
   VkAccelerationStructureKHR handle;
+  struct rv_accel *wrap; /* a primitive structure bound to a kernel, as a one-instance top-level structure */
   VkBuffer buffer;
   VmaAllocation allocation;
   VkAccelerationStructureTypeKHR level;
@@ -1937,6 +1938,7 @@ CAMLprim value rv_accel_sizes(value accel) {
 
 static void destroy_accel_now(rv_device *d, void *payload) {
   rv_accel *a = payload;
+  if (a->wrap) destroy_accel_now(d, a->wrap);
   vkDestroyAccelerationStructureKHR(d->device, a->handle, NULL);
   vmaDestroyBuffer(d->allocator, a->buffer, a->allocation);
   free(a->geometries);
@@ -1951,11 +1953,58 @@ CAMLprim value rv_accel_destroy(value accel) {
   return Val_unit;
 }
 
+/* A ray query traverses a top-level structure; Metal's intersector also takes a primitive one. A
+   bottom-level structure bound to a kernel is wrapped in a one-instance top-level structure, rebuilt at
+   each bind because a refit moves the bounds the wrapper holds. */
+static VkResult wrap_primitive(rv_cmd *c, rv_accel *a, VkAccelerationStructureKHR *out) {
+  rv_device *d = a->d;
+  if (!a->wrap) {
+    rv_accel *w = calloc(1, sizeof *w);
+    w->d = d;
+    w->level = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    w->flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    w->instance_count = 1;
+    measure(w);
+    VkResult r = accel_storage(w);
+    if (r != VK_SUCCESS) { free(w); return r; }
+    a->wrap = w;
+  }
+  rv_accel *w = a->wrap;
+  VkAccelerationStructureInstanceKHR instance = {
+      .transform = {.matrix = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}}, .mask = 0xff, .accelerationStructureReference = accel_address(a)};
+  VkBuffer chunk, scratch;
+  VkDeviceSize at, scratch_at;
+  char *room = arena(c, sizeof instance, 16, &chunk, &at);
+  if (!room) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+  memcpy(room, &instance, sizeof instance);
+  if (!arena(c, w->build_scratch, 256, &scratch, &scratch_at)) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+  VkAccelerationStructureBuildGeometryInfoKHR info;
+  VkAccelerationStructureGeometryKHR geometry;
+  build_info(w, &info, &geometry);
+  geometry.geometry.instances.data.deviceAddress = buffer_address(d, chunk) + at;
+  info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+  info.dstAccelerationStructure = w->handle;
+  info.scratchData.deviceAddress = (buffer_address(d, scratch) + scratch_at + 127) & ~(VkDeviceAddress)127;
+  VkAccelerationStructureBuildRangeInfoKHR range = {.primitiveCount = 1};
+  const VkAccelerationStructureBuildRangeInfoKHR *pointer = &range;
+  full_barrier(c->cb);
+  vkCmdBuildAccelerationStructuresKHR(c->cb, 1, &info, &pointer);
+  full_barrier(c->cb);
+  *out = w->handle;
+  return VK_SUCCESS;
+}
+
 CAMLprim value rv_cmd_set_accel(value commands, value index, value accel) {
   rv_cmd *c = H(commands);
+  rv_accel *a = H(accel);
   int i = Long_val(index);
   if (i < 0 || i >= MAX_BIND) return Val_long(VK_ERROR_TOO_MANY_OBJECTS);
-  c->slots[i] = (rv_slot){.kind = 4, .accel = ((rv_accel *)H(accel))->handle};
+  VkAccelerationStructureKHR handle = a->handle;
+  if (a->level == VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR) {
+    VkResult r = wrap_primitive(c, a, &handle);
+    if (r != VK_SUCCESS) return Val_long(r);
+  }
+  c->slots[i] = (rv_slot){.kind = 4, .accel = handle};
   c->dirty = true;
   return Val_long(VK_SUCCESS);
 }
