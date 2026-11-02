@@ -95,6 +95,22 @@ val validate : t -> (unit, string) result
 val identity : t -> string
 (** Exact identity of every frame field, including ordered events. *)
 
+type platform = Apple | Other
+(** The host's modifier conventions: Apple binds Command and Option, other platforms bind Ctrl. *)
+
+val platform_of_name : string -> platform
+(** Takes SDL's platform name: ["macOS"] (and ["Mac OS X"]) is [Apple]. *)
+
+val primary : platform -> key
+(** The command modifier: [Meta] on Apple, [Ctrl] elsewhere. *)
+
+val command_held : platform -> key list -> bool
+(** Command-like chords held: on Apple Command or Ctrl (Ctrl was always a twin there), elsewhere
+    Ctrl. *)
+
+val word_held : platform -> key list -> bool
+(** The word-motion modifier: Option on Apple, Ctrl elsewhere. *)
+
 val equal : t -> t -> bool
 (** Equality includes the exact bits of floating-point facts. *)
 

@@ -33,6 +33,13 @@ val validate_version :
 
 val check_version : ?release:bool -> unit -> (unit, error) result
 
+val platform_name : unit -> string
+(** The host platform's name as SDL reports it: ["macOS"], ["Windows"], ... *)
+
+val pref_path : org:string -> app:string -> string option
+(** SDL's per-user preference folder for [org] and [app], with its trailing separator; [None] when
+    SDL names none. *)
+
 type rgba = { width : int; height : int; pixels : bytes }
 (** Decoded pixels: tightly packed RGBA8 rows owned by the caller. *)
 
