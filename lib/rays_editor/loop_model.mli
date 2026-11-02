@@ -22,6 +22,8 @@ type t = {
   resolved :
     (Editor_document.Document.t * Input.t * Editor_document.Kind_graph.t * string option) option;
   context_error : string option;
+  memory_error : string option;
+  memory_known : bool;
   baked : Rays.World.baked option;
   baked_from : (Rays.World.t * Rays.World.baked) option;
   baked_views : (string * (Rays.World.t * Rays.World.baked)) list;

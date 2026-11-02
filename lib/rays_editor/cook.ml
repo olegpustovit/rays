@@ -186,6 +186,11 @@ let failure_of = function
       Some (code, (List.nth trace (List.length trace - 1)).Diagnostic.node_id)
   | _ -> None
 
+(* The last cook was refused for memory: worth another try once the process is under its limit. *)
+let out_of_memory value =
+  value.error <> None
+  && match !(value.failure) with Some ("E_MEMORY", _) -> true | _ -> false
+
 let failed_node value = if value.error = None then None else !(value.failure)
 let status value = Async_cook.status value.worker
 

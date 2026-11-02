@@ -1,381 +1,283 @@
-(* Memory gate: one process per scenario, window-free, one domain. Samples live bytes after a full
-   collection at frames 30 and 120, plus allocated/promoted per frame, device bytes and footprint.
-   Budgets live in specification/memory-budgets.sexp and may only go down. *)
+(* Memory gate: one process per scenario, one domain, no window. Each runs the real frame through
+   Rays_editor.Measure (update, offscreen render, after_present), the runner behind [rays mem], and
+   checks live bytes after a full collection at two frames, the footprint, what no owner claims, and
+   the route: a scenario that means the device must stay on it. Budgets are in
+   specification/memory-budgets.sexp and only go down. A failure names the owners that moved and runs
+   the scenario again with Memprof, printing the sites still live. *)
 
 module Doc = Editor_document.Workspace_doc
 module E3 = Rays_editor.Editor
+module M = Rays_editor.Measure
 module F = Flow_graph.Flow_edit
 
-let fail fmt = Printf.ksprintf (fun m -> prerr_endline ("mem_gate: " ^ m); exit 1) fmt
+let fail fmt =
+  Printf.ksprintf
+    (fun m ->
+      prerr_endline ("mem_gate: " ^ m);
+      exit 1)
+    fmt
 
 let ok = function Ok v -> v | Error d -> fail "%s" (Diagnostic.to_string d)
-
 let string_ok = function Ok v -> v | Error m -> fail "%s" m
-
 let read path = In_channel.with_open_bin path In_channel.input_all
+let parse_one text = List.hd (ok (Flow.Syntax.parse text))
 
-type sexp = Atom of string | List of sexp list
-
-let parse_sexps text =
-  let len = String.length text in
-  let i = ref 0 in
-  let rec skip () =
-    while
-      !i < len
-      &&
-      match text.[!i] with
-      | ' ' | '\n' | '\t' | '\r' ->
-          incr i;
-          true
-      | ';' ->
-          while !i < len && text.[!i] <> '\n' do
-            incr i
-          done;
-          true
-      | _ -> false
-    do
-      ()
-    done
-  in
-  let rec parse () =
-    skip ();
-    if !i >= len then fail "unexpected end of sexp";
-    match text.[!i] with
-    | '(' ->
-        incr i;
-        let items = ref [] in
-        let rec go () =
-          skip ();
-          if !i >= len then fail "unclosed list";
-          if text.[!i] = ')' then (
-            incr i;
-            List (List.rev !items))
-          else begin
-            items := parse () :: !items;
-            go ()
-          end
-        in
-        go ()
-    | '"' ->
-        incr i;
-        let buf = Buffer.create 16 in
-        let rec go () =
-          if !i >= len then fail "unclosed string";
-          match text.[!i] with
-          | '"' ->
-              incr i;
-              Atom (Buffer.contents buf)
-          | '\\' ->
-              incr i;
-              if !i >= len then fail "bad escape";
-              Buffer.add_char buf text.[!i];
-              incr i;
-              go ()
-          | c ->
-              Buffer.add_char buf c;
-              incr i;
-              go ()
-        in
-        go ()
-    | c when c = ')' -> fail "unexpected )"
-    | _ ->
-        let start = !i in
-        while
-          !i < len
-          &&
-          match text.[!i] with ' ' | '\n' | '\t' | '\r' | '(' | ')' | ';' -> false | _ -> true
-        do
-          incr i
-        done;
-        Atom (String.sub text start (!i - start))
-  in
-  let items = ref [] in
-  let rec go () =
-    skip ();
-    if !i >= len then List.rev !items
-    else begin
-      items := parse () :: !items;
-      go ()
-    end
-  in
-  go ()
-
-let catalog () = ok (Rays_editor.workspace_catalog ())
-
-let parse text = List.hd (ok (Flow.Syntax.parse text))
-
-let load_workspace text =
-  match Rays_editor.Workspace.load text with
-  | Ok ws -> ws
-  | Error ds -> fail "%s" (String.concat "\n" (List.map Diagnostic.to_string ds))
-
-let set_input form input value workspace =
-  ok (Doc.edit (catalog ()) workspace (F.Set_input_default { form; input; value = parse (string_of_int value) }))
-
-let frame tick : Rays.Frame.t =
-  {
-    input =
-      {
-        (Input.at_time (float tick /. 60.)) with
-        dt = 1. /. 60.;
-        frame = tick;
-        tick;
-        size = (960, 640);
-      };
-    pixel_scale = (1., 1.);
-    fps = 60.;
-    mouse_delta = (0., 0.);
-  }
-
-type sample = {
-  frame : int;
-  live : int;
-  device : int;
-  footprint : int;
-  allocated : float;
-  promoted : float;
-  report : Mem.Report.t option;
-}
-
-(* The editor already owns the OGPU device; querying another driver fails. Metal's system
-   default is the same MTLDevice, so its currentAllocatedSize is the process total. *)
-let device_bytes () =
-  match Metal.Device.system_default () with
-  | Error _ -> 0
-  | Ok device -> (
-      match Metal.Device.info device with
-      | Ok info ->
-          let n = Int64.to_int info.Metal.Device.current_allocated_size in
-          ignore (Metal.Device.destroy device);
-          max 0 n
-      | Error _ ->
-          ignore (Metal.Device.destroy device);
-          0)
-
-let sample ~frame ~allocated0 ~promoted0 ~ledger =
-  Gc.full_major ();
-  let live = (Gc.stat ()).live_words * (Sys.word_size / 8) in
-  let _, promoted, _ = Gc.counters () in
-  let allocated = Gc.allocated_bytes () in
-  let footprint = Option.value ~default:live (Mem.phys_footprint ()) in
-  let device = device_bytes () in
-  {
-    frame;
-    live;
-    device;
-    footprint;
-    allocated = allocated -. allocated0;
-    promoted = (promoted *. float (Sys.word_size / 8)) -. promoted0;
-    report = (if ledger then Some (Mem.report ~device ()) else None);
-  }
-
+(* the budgets file is forms the language's own reader reads *)
 type budget = {
   name : string;
   frames : int;
+  early : int;
   live_flat_pct : float;
   max_live_bytes : int option;
   max_footprint_bytes : int option;
   max_unattributed_pct : float option;
-  known_red : string option;
+  max_readback_bytes : int option;
+  route : [ `Device | `Any ];
+  ceiling : int option;  (** RAYS_MEM_BUDGET for this scenario: it passes or fails with E_MEMORY *)
+  known_red : bool;  (** fails today; passing fails, so the marker is removed *)
 }
 
-let assoc key = function
-  | List fields ->
-      let rec find = function
-        | [] -> None
-        | List (Atom k :: rest) :: _ when k = key -> Some rest
-        | _ :: xs -> find xs
-      in
-      find fields
-  | Atom _ -> None
-
-let float_field key sexp default =
-  match assoc key sexp with Some [ Atom s ] -> float_of_string s | None -> default | Some _ -> fail "bad float %s" key
-
-let parse_budget = function
-  | List (Atom "scenario" :: Atom name :: _) as sexp ->
-      let known_red = match assoc "known_red" sexp with Some [ Atom s ] -> Some s | _ -> None in
-      let max_live =
-        match assoc "max_live_bytes" sexp with Some [ Atom s ] -> Some (int_of_string s) | _ -> None
-      in
-      let max_foot =
-        match assoc "max_footprint_bytes" sexp with
-        | Some [ Atom s ] -> Some (int_of_string s)
-        | _ -> None
-      in
-      let max_unattr =
-        match assoc "max_unattributed_pct" sexp with
-        | Some [ Atom s ] -> Some (float_of_string s)
-        | _ -> None
-      in
-      {
-        name;
-        frames = (match assoc "frames" sexp with Some [ Atom s ] -> int_of_string s | _ -> 120);
-        live_flat_pct = float_field "live_flat_pct" sexp 5.;
-        max_live_bytes = max_live;
-        max_footprint_bytes = max_foot;
-        max_unattributed_pct = max_unattr;
-        known_red;
-      }
-  | _ -> fail "bad scenario in memory-budgets.sexp"
+let parse_budget (form : Flow.Syntax.t) =
+  let fields =
+    match form.node with
+    | List ({ node = Sym "scenario"; _ } :: { node = Sym name; _ } :: fields) ->
+        ( name,
+          List.filter_map
+            (fun (field : Flow.Syntax.t) ->
+              match field.node with
+              | List [ { node = Sym key; _ }; { node = Num value | Sym value; _ } ] -> Some (key, value)
+              | _ -> None)
+            fields )
+    | _ -> fail "memory-budgets.sexp: a scenario is (scenario name (field value) ...)"
+  in
+  let name, fields = fields in
+  let int key = Option.map int_of_string (List.assoc_opt key fields) in
+  let float key = Option.map float_of_string (List.assoc_opt key fields) in
+  {
+    name;
+    frames = Option.value ~default:120 (int "frames");
+    early = Option.value ~default:30 (int "early");
+    live_flat_pct = Option.value ~default:1. (float "live_flat_pct");
+    max_live_bytes = int "max_live_bytes";
+    max_footprint_bytes = int "max_footprint_bytes";
+    max_unattributed_pct = float "max_unattributed_pct";
+    max_readback_bytes = int "max_readback_bytes";
+    route = (if List.assoc_opt "route" fields = Some "device" then `Device else `Any);
+    ceiling = int "ceiling";
+    known_red = List.mem_assoc "known_red" fields;
+  }
 
 let load_budgets path =
-  match parse_sexps (read path) with
-  | [ List (Atom "memory_budgets" :: rest) ] ->
-      List.filter_map
-        (function List (Atom "scenario" :: _) as s -> Some (parse_budget s) | _ -> None)
-        rest
+  match ok (Flow.Syntax.parse (read path)) with
+  | [ { node = List ({ node = Sym "memory_budgets"; _ } :: forms); _ } ] -> List.map parse_budget forms
   | _ -> fail "memory-budgets.sexp: expected (memory_budgets ...)"
 
-let create_editor workspace =
-  string_ok
-    (E3.create ~ui_text_size:11 ~await:true ~domains:1 ~workspace ~prepare:E3.prepare ~draw:E3.draw
-       ())
+let catalog = lazy (ok (Rays_editor.workspace_catalog ()))
 
-let run_frames editor frames =
-  let allocated0 = Gc.allocated_bytes () in
-  let _, promoted0, _ = Gc.counters () in
-  let promoted0 = promoted0 *. float (Sys.word_size / 8) in
-  let early = ref None and final = ref None in
-  let editor = ref editor in
-  (* Steady-state flatness: frame 60 (after warmup) vs 120. Frame 30 still warms caches and sits
-     on a different phase of bounded cook oscillation, which is not retention. *)
-  let early_at = if frames >= 120 then 60 else min 30 frames in
-  for tick = 1 to frames do
-    editor := E3.update !editor (frame tick);
-    ignore (E3.scene !editor (frame tick));
-    if tick = early_at then
-      early := Some (sample ~frame:tick ~allocated0 ~promoted0 ~ledger:false);
-    if tick = frames || tick = 120 then
-      final := Some (sample ~frame:tick ~allocated0 ~promoted0 ~ledger:true)
-  done;
-  E3.close !editor;
-  let early =
-    Option.value ~default:(sample ~frame:0 ~allocated0 ~promoted0 ~ledger:false) !early
+let load text =
+  match Rays_editor.Workspace.load text with
+  | Ok workspace -> workspace
+  | Error diagnostics ->
+      fail "%s" (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
+
+let sketch name =
+  let path = Filename.concat "sketches" (name ^ ".rays") in
+  let text = read path in
+  match
+    Result.bind
+      (Rays_editor.Source.read_imports ~file:path text)
+      (fun imports -> Rays_editor.Workspace.load ~imports text)
+  with
+  | Ok workspace -> workspace
+  | Error diagnostics ->
+      fail "%s" (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
+
+let set_input form input value workspace =
+  ok
+    (Doc.edit (Lazy.force catalog) workspace
+       (F.Set_input_default { form; input; value = parse_one (string_of_int value) }))
+
+let edit editor op = string_ok (E3.edit editor op)
+
+let sea side = set_input "sea" "side" side (sketch "gpu_sea")
+
+(* a large document: the bindings an edit lowers again *)
+let large =
+  let bindings =
+    String.concat " " (List.init 300 (fun i -> Printf.sprintf "b%d (+ %d.0 1.0)" i i))
   in
-  let final = Option.get !final in
-  (early, final, frames)
+  Printf.sprintf
+    {|(workspace large
+  (graph picture :context draw
+    (let* [%s]
+      (draw/background "#14161c"))))|}
+    bindings
 
-let growth_pct (a : sample) (b : sample) =
+let no_step _ editor = editor
+
+let scenario = function
+  | "idle" ->
+      ( load {|(workspace idle (graph picture :context draw (draw/background "#14161c")))|},
+        no_step )
+  | "ws_layout" -> (sketch "ws_layout", no_step)
+  | "pxui" -> (sketch "pxui", no_step)
+  | "recursive_signals" -> (sketch "recursive_signals", no_step)
+  | "sea_128" | "sea_128_200m" -> (sea 128, no_step)
+  | "isogrid_small" -> (set_input "volume" "resolution" 12 (sketch "isogrid"), no_step)
+  | "image_graph" -> (sketch "flow_image", no_step)
+  | "scrubs_100" ->
+      ( sea 128,
+        fun tick editor ->
+          (* one literal, as a drag writes it, on the fast path *)
+          edit editor
+            (F.Set_input_default
+               { form = "sea"; input = "height"; value = parse_one (Printf.sprintf "0.%d" (10 + (tick mod 80))) }) )
+  | "edits_200" ->
+      ( load large,
+        fun tick editor ->
+          edit editor
+            (F.Add_node
+               {
+                 scope = [ "picture" ];
+                 name = Printf.sprintf "added_%d" tick;
+                 expr = parse_one (string_of_int tick);
+               }) )
+  | name -> fail "unknown scenario %s" name
+
+let growth (a : M.sample) (b : M.sample) =
   if a.live <= 0 then 100. else 100. *. float (b.live - a.live) /. float a.live
 
-let check_budget (budget : budget) early final frames =
-  let flat = growth_pct early final in
+(* the owners that moved between the samples, largest first; what none claims is its own line *)
+let moved (a : M.sample) (b : M.sample) =
+  let before (e : Mem.Report.entry) =
+    List.fold_left
+      (fun found (o : Mem.Report.entry) -> if o.name = e.name then o.bytes else found)
+      0 a.report.owners
+  in
+  let owners =
+    List.filter_map
+      (fun (e : Mem.Report.entry) ->
+        let d = e.bytes - before e in
+        if d = 0 then None else Some (d, e.name))
+      b.report.owners
+  in
+  let unclaimed = b.report.unattributed - a.report.unattributed in
+  (unclaimed, "unattributed") :: owners
+  |> List.sort (fun (x, _) (y, _) -> compare (abs y) (abs x))
+  |> List.filteri (fun i _ -> i < 6)
+  |> List.map (fun (d, name) -> Printf.sprintf "%s %+d" name d)
+  |> String.concat ", "
+
+let check (budget : budget) (o : M.outcome) =
   let problems = ref [] in
   let note fmt = Printf.ksprintf (fun m -> problems := m :: !problems) fmt in
-  if frames >= 120 && abs_float flat > budget.live_flat_pct then
-    note "live grew %.2f%% from frame %d (%d B) to %d (%d B); flatness limit %.2f%%" flat early.frame
-      early.live final.frame final.live budget.live_flat_pct;
+  let flat = growth o.early o.final in
+  if budget.ceiling = None && abs_float flat > budget.live_flat_pct then
+    note "live moved %.2f%% from frame %d (%d B) to %d (%d B), limit %.2f%%; moved: %s" flat
+      o.early.frame o.early.live o.final.frame o.final.live budget.live_flat_pct
+      (moved o.early o.final);
   Option.iter
-    (fun max -> if final.live > max then note "live %d B exceeds max_live_bytes %d" final.live max)
+    (fun max ->
+      if o.final.live > max then
+        note "live %d B over max_live_bytes %d; top: %s" o.final.live max (moved o.early o.final))
     budget.max_live_bytes;
   Option.iter
     (fun max ->
-      if final.footprint > max then
-        note "footprint %d B exceeds max_footprint_bytes %d" final.footprint max)
+      if o.final.footprint > max then
+        note "footprint %d B over max_footprint_bytes %d" o.final.footprint max)
     budget.max_footprint_bytes;
-  let report =
-    match final.report with
-    | Some report -> report
-    | None -> Mem.report ~device:final.device ()
-  in
+  let report = o.final.report in
   Option.iter
     (fun max_pct ->
       let explicit = report.ocaml_live + report.device in
-      let pct =
-        if explicit <= 0 then 0. else 100. *. float report.unattributed /. float explicit
-      in
-      if pct > max_pct then
-        note "unattributed %.1f%% of explicit exceeds max_unattributed_pct %.1f%%" pct max_pct)
+      let pct = if explicit <= 0 then 0. else 100. *. float report.unattributed /. float explicit in
+      if pct > max_pct then note "unattributed %.1f%% of explicit over %.1f%%" pct max_pct)
     budget.max_unattributed_pct;
+  Option.iter
+    (fun max ->
+      if o.readback_bytes > max then note "readback %d B over %d: the route left the device" o.readback_bytes max)
+    budget.max_readback_bytes;
+  (match budget.route with
+  | `Any -> ()
+  | `Device ->
+      if o.fallbacks <> [] then
+        note "left the device: %s"
+          (String.concat "; "
+             (List.map (fun (site, why, n) -> Printf.sprintf "%s: %s (%d)" site why n) o.fallbacks)));
+  (* over its ceiling a scenario may only fail with the typed error, and never swap *)
+  (match budget.ceiling with
+  | None ->
+      Option.iter (fun e -> note "unexpected %s" e) o.memory_error;
+      Option.iter (fun e -> note "cook failed: %s" e) o.cook_error
+  | Some ceiling ->
+      let typed =
+        let says text =
+          Option.fold ~none:false
+            ~some:(fun e ->
+              let word = "E_MEMORY" in
+              let n = String.length word in
+              Seq.exists
+                (fun i -> String.sub e i n = word)
+                (Seq.init (max 0 (String.length e - n + 1)) Fun.id))
+            text
+        in
+        says o.memory_error || says o.cook_error
+      in
+      if o.final.footprint > ceiling && not typed then
+        note "footprint %d B over its ceiling %d with no E_MEMORY" o.final.footprint ceiling);
   Printf.printf
-    "scenario %s: live %d→%d (%.2f%%) device=%d footprint=%d alloc/frame=%.0f promoted/frame=%.0f \
-     unattributed=%d\n\
-     %s%!"
-    budget.name early.live final.live flat final.device final.footprint
-    (final.allocated /. float frames)
-    (final.promoted /. float frames) report.unattributed (Mem.Report.to_string report);
-  match (!problems, budget.known_red) with
-  | [], Some reason ->
-      fail "scenario %s is marked known_red (%s) but passed; remove the known_red marker" budget.name
-        reason
-  | [], None -> ()
-  | problems, Some "growth" ->
-      Printf.printf "scenario %s: known_red growth (%s)\n%!" budget.name
-        (String.concat "; " (List.rev problems))
-  | problems, _ -> fail "scenario %s: %s" budget.name (String.concat "; " (List.rev problems))
+    "scenario %s: live %d (frame %d) -> %d (frame %d) %.2f%%, device %d, footprint %d, alloc/frame %.0f, promoted/frame %.0f, readback %d\n%s%!"
+    budget.name o.early.live o.early.frame o.final.live o.final.frame flat o.final.device
+    o.final.footprint
+    (o.final.allocated /. float budget.frames)
+    (o.final.promoted /. float budget.frames)
+    o.readback_bytes (Mem.Report.to_string report);
+  List.rev !problems
 
-let repo_file rel =
-  let candidates =
-    [
-      rel;
-      Filename.concat (Sys.getcwd ()) rel;
-      Filename.concat (Filename.dirname Sys.argv.(0)) (Filename.concat "../../.." rel);
-      Filename.concat (Filename.dirname Sys.argv.(0)) (Filename.concat "../../../.." rel);
-    ]
+let run_one ?(sites = false) (budget : budget) =
+  Option.iter (fun ceiling -> Mem.set_budget ceiling) budget.ceiling;
+  let workspace, step = scenario budget.name in
+  let outcome =
+    string_ok (M.run ~step ~sites ~early:(min budget.early budget.frames) ~frames:budget.frames workspace)
   in
-  match List.find_opt Sys.file_exists candidates with
-  | Some path -> path
-  | None -> fail "missing %s (cwd %s)" rel (Sys.getcwd ())
-
-let run_idle () =
-  load_workspace
-    {|
-(workspace idle
-  (graph picture :context draw
-    (draw/background "#14161c")))
-|}
-  |> create_editor
-
-let run_file name edits =
-  let text = read (repo_file (Filename.concat "sketches" (name ^ ".rays"))) in
-  let workspace = List.fold_left (fun ws edit -> edit ws) (load_workspace text) edits in
-  create_editor workspace
-
-let scenario_editor = function
-  | "idle" -> run_idle ()
-  | "ws_layout" -> run_file "ws_layout" []
-  | "recursive_signals" -> run_file "recursive_signals" []
-  | "sea_128" -> run_file "gpu_sea" [ set_input "sea" "side" 128 ]
-  | "isogrid_small" -> run_file "isogrid" [ set_input "volume" "resolution" 12 ]
-  | "pxui" -> run_file "pxui" []
-  | name -> fail "unknown scenario %s" name
-
-let run_one (budget : budget) =
-  Mem.reset ();
-  let editor = scenario_editor budget.name in
-  let early, final, frames = run_frames editor budget.frames in
-  check_budget budget early final frames
+  if sites then
+    List.iter (fun (bytes, site) -> Printf.printf "live %10d B  %s\n" bytes site) outcome.sites;
+  match check budget outcome with
+  | [] when budget.known_red ->
+      prerr_endline ("scenario " ^ budget.name ^ " passes: remove its known_red");
+      exit 3
+  | [] -> ()
+  | problems when budget.known_red ->
+      Printf.printf "scenario %s: known red: %s\n" budget.name (String.concat "; " problems)
+  | problems when not sites ->
+      prerr_endline (Printf.sprintf "scenario %s: %s" budget.name (String.concat "; " problems));
+      exit 3
+  | _ -> ()
 
 let self = Sys.executable_name
+let child args = Unix.system (Filename.quote_command self args)
 
 let run_child budget =
-  let cmd = Filename.quote_command self [ "run"; budget.name ] in
-  match Unix.system cmd with
+  match child [ "run"; budget.name ] with
   | WEXITED 0 -> ()
+  | WEXITED 3 ->
+      print_endline ("mem_gate: " ^ budget.name ^ " failed; the same run with Memprof:");
+      ignore (child [ "sites"; budget.name ]);
+      fail "scenario %s failed its budget" budget.name
   | WEXITED n -> fail "scenario %s exited %d" budget.name n
   | _ -> fail "scenario %s signalled" budget.name
 
 let () =
-  match Array.to_list Sys.argv with
-  | _ :: "run" :: name :: _ ->
-      let budgets = load_budgets (repo_file "specification/memory-budgets.sexp") in
-      (match List.find_opt (fun b -> b.name = name) budgets with
-      | None -> fail "no budget for %s" name
-      | Some budget -> run_one budget)
-  | _ :: names ->
-      let budgets = load_budgets (repo_file "specification/memory-budgets.sexp") in
-      let selected =
-        match names with
-        | [] | [ "all" ] -> budgets
-        | names ->
-            List.map
-              (fun name ->
-                match List.find_opt (fun b -> b.name = name) budgets with
-                | Some b -> b
-                | None -> fail "unknown scenario %s" name)
-              names
-      in
-      List.iter run_child selected;
+  string_ok (Mem.configure Sys.getenv_opt);
+  let budgets = load_budgets "specification/memory-budgets.sexp" in
+  let find name =
+    match List.find_opt (fun b -> b.name = name) budgets with
+    | Some budget -> budget
+    | None -> fail "no budget for %s" name
+  in
+  match List.tl (Array.to_list Sys.argv) with
+  | [ "run"; name ] -> run_one (find name)
+  | [ "sites"; name ] -> run_one ~sites:true (find name)
+  | names ->
+      List.iter run_child (if names = [] then budgets else List.map find names);
       print_endline "mem_gate: ok"
-  | [] -> assert false

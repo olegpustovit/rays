@@ -66,6 +66,11 @@ val node_seconds : t -> int -> float option
 (** The seconds node [id] took the last time it was really cooked (its own work, not its inputs'; a
     cache hit leaves it). Safe to read from another domain; at most 4,096 nodes are kept. *)
 
+val shed : t -> bool
+(** One cached entry gone, [false] when none can go. On the domain cooking, or while none is. *)
+
+val payload_owner : t -> Mem.owner
+val payload_bytes : t -> int
 val stats : t -> stats
 val clear : t -> unit
 val close : t -> unit

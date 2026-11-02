@@ -472,3 +472,39 @@ module Workspace : sig
       ([rays FILE.rays]); [text] opens that text instead, saved to [path] (the empty editor). On a
       failure it returns diagnostics without printing or exiting. *)
 end
+
+(** One workspace's real frames without a window: update, render into an offscreen canvas, and the
+    frame boundary ([after_present]), on one domain. The one runner behind [rays mem] and
+    [tools/mem_gate]. *)
+module Measure : sig
+  type sample = {
+    frame : int;
+    live : int;  (** After a full collection. *)
+    device : int;  (** The device's allocated bytes, through OGPU. *)
+    footprint : int;
+    allocated : float;  (** Since the first frame. *)
+    promoted : float;
+    report : Mem.Report.t;
+  }
+
+  type outcome = {
+    early : sample;
+    final : sample;
+    fallbacks : (string * string * int) list;  (** {!Flow_ir.Fallback.seen}. *)
+    readback_bytes : int;
+    memory_error : string option;
+    cook_error : string option;
+    sites : (int * string) list;  (** With [~sites]: live bytes by allocation site, largest first. *)
+  }
+
+  val run :
+    ?width:int ->
+    ?height:int ->
+    ?step:(int -> Editor.t -> Editor.t) ->
+    ?sites:bool ->
+    early:int ->
+    frames:int ->
+    Workspace_doc.t ->
+    (outcome, string) result
+  (** [step] runs before each frame's update, for scripted edits. *)
+end

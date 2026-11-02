@@ -284,6 +284,20 @@ let apply_pressure () =
   end;
   !critical
 
+(* what the status shows, from a quarter below the limit up: a frame pays for nothing else *)
+let near_line : string option Atomic.t = Atomic.make None
+let status_line () = Atomic.get near_line
+
+let note_near used bound =
+  Atomic.set near_line
+    (if bound > 0 && used / 3 >= bound / 4 then
+       Some
+         (Printf.sprintf "mem %s of %s%s" (format_bytes used) (format_bytes bound)
+            (match total_owner () with
+            | Some (name, bytes) -> Printf.sprintf " \xc2\xb7 top %s %s" name (format_bytes bytes)
+            | None -> ""))
+     else None)
+
 let retreat ?device ?usage ?(later = []) () =
   Atomic.incr epoch_counter;
   let critical = apply_pressure () in
@@ -299,9 +313,13 @@ let retreat ?device ?usage ?(later = []) () =
     | Over overdraft -> Atomic.set over_latch (Some overdraft));
     verdict
   in
-  if bound <= 0 then finish Within
+  if bound <= 0 then begin
+    Atomic.set near_line None;
+    finish Within
+  end
   else
     let used = read () - if usage = None then credit () else 0 in
+    note_near used bound;
     if used <= bound then finish Within
     else begin
       let before = attributed () in

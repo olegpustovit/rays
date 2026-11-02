@@ -111,7 +111,10 @@ val overdraft : unit -> overdraft option
 val describe : overdraft -> string
 
 val total_owner : unit -> (string * int) option
-(** The largest owner now, for a status line. *)
+(** The largest owner now. *)
+
+val status_line : unit -> string option
+(** Set by {!retreat} from three quarters of the limit up: the total and the top owner. *)
 
 (** {1 Reports} *)
 

@@ -595,6 +595,25 @@ let frame ?keep t =
     List.iter (fun (_, release) -> release ()) due
   end
 
+let device_limits t =
+  let read gpu =
+    let device = X.gpu_device gpu in
+    ( Int64.to_int (Ogpu.Backend.allocated_size device),
+      Int64.to_int (Ogpu.Backend.recommended_working_set device) )
+  in
+  if t.closed then None
+  else
+    match t.owner with
+    | Some (gpu, _) -> Some (read gpu)
+    | None -> (
+        (* a read must not start this owner's host: a lease of the one process device *)
+        match X.acquire_gpu () with
+        | Ok gpu ->
+            let limits = read gpu in
+            X.release_gpu gpu;
+            Some limits
+        | Error _ -> None)
+
 let held_displays t = Hashtbl.length t.bound + List.length t.releasing
 
 (* A point cloud's or a triangle mesh's resident P (and N; a mesh without N takes normals made from

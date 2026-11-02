@@ -92,6 +92,7 @@ let status_text ?(brief = false) value =
       let cook =
         match Flow_ir.Fallback.summary () with Some off -> cook ^ " · " ^ off | None -> cook
       in
+      let cook = match Mem.status_line () with Some line -> cook ^ " · " ^ line | None -> cook in
       let phases = Flow.Phase_timer.summary value.edit_phases in
       let cook = cook ^ if phases = "" then "" else " · " ^ phases in
       (* What the open level's keys do, so the World and the menu are findable. *)

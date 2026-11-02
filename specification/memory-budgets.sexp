@@ -1,26 +1,15 @@
 ; Memory gate budgets. Numbers may only go down; a raise needs a stated reason in the commit.
-; max_unattributed_pct gates owners vs ocaml_live+device. Idle/shell chrome is charged in S7.
+; Each scenario runs the real frame (tools/mem_gate.ml, Rays_editor.Measure). Flatness is 1% from frame
+; 30 to the last unless a scenario grows by design. known_red fails today and says so; passing fails.
 (memory_budgets
-  (scenario idle
-    (frames 120)
-    (live_flat_pct 5)
-    (max_live_bytes 250000000)
-    (max_footprint_bytes 500000000))
-  (scenario recursive_signals
-    (frames 120)
-    (live_flat_pct 5)
-    (max_live_bytes 400000000)
-    (max_footprint_bytes 800000000))
-  (scenario sea_128
-    (frames 120)
-    (live_flat_pct 5)
-    (max_live_bytes 350000000)
-    (max_footprint_bytes 1200000000)
-    ; ponytail: ratchet from measured S2; drive toward 20 as more owners land
-    (max_unattributed_pct 70))
-  (scenario isogrid_small
-    (frames 120)
-    (live_flat_pct 10)
-    (max_live_bytes 800000000)
-    ; most live bytes are cook intermediates not yet owned; ratchet with S5
-    (max_unattributed_pct 97)))
+  (scenario idle (route device))
+  (scenario ws_layout)
+  (scenario pxui)
+  (scenario recursive_signals (route device))
+  (scenario sea_128 (route device) (known_red S1))
+  (scenario sea_128_200m (ceiling 200000000) (frames 60))
+  (scenario isogrid_small)
+  (scenario image_graph)
+  (scenario scrubs_100 (frames 100) (known_red S1))
+  ; history grows by design, up to its byte cap: the limit is the live bytes
+  (scenario edits_200 (frames 200) (live_flat_pct 100) (max_live_bytes 110000000)))

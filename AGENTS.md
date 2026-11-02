@@ -44,7 +44,7 @@ library is retained. The internal OCaml API has no frozen manifest.
 
 One binary, `rays` (`bin/rays.ml`), interprets `.rays` files; nothing generates OCaml from Lisp.
 `dune exec rays` opens an empty editor (Command-S writes `./untitled.rays`), `dune exec rays -- FILE.rays`
-opens a workspace natively, and `rays check FILE...` / `rays fmt FILE` check and format.
+opens a workspace natively, `rays check FILE...` / `rays fmt FILE` check and format, and `rays mem FILE [--frames N]` prints the memory ledger of its real frames, window-free (`specification/memory-budgets.sexp` holds the budgets `@tools/mem` checks with the same runner).
 
 Web export: `dune exec rays -- web FILE.rays -o DIR` writes static files, nothing more: preview them with
 `npx serve DIR`, which reads the worker pool's cross-origin isolation headers from the emitted `serve.json`.

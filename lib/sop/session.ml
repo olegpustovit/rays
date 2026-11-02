@@ -132,7 +132,9 @@ let create ~max_entries ~max_payload_bytes =
         max_entries;
         max_payload_bytes;
         cache =
-          Entry_cache.create ~owner:(Lru.cache "sop.session") max_entries ~release:(fun _ entry ->
+          (* Never: only the cook's domain touches it; Async_cook sheds it while that one is idle *)
+          Entry_cache.create ~owner:(Lru.cache "sop.session") ~shed:Never max_entries
+            ~release:(fun _ entry ->
               release_components payload entry.components);
         payload;
         volatile_owner = Lru.cache "sop.volatile";
@@ -162,6 +164,15 @@ let create ~max_entries ~max_payload_bytes =
 
 let set_clock session clock = session.clock <- clock
 let now session = session.clock ()
+
+(* One cached entry gone, on the domain that owns the session or while that one is known idle. *)
+let shed session =
+  let dropped = Entry_cache.drop_oldest session.cache in
+  if dropped then session.evictions <- session.evictions + 1;
+  dropped
+
+let payload_owner session = session.payload.owner
+let payload_bytes session = session.payload.bytes
 
 let insert session key entry =
   (match session.journal with
@@ -1043,6 +1054,15 @@ and evaluate_uncached memo session context node =
                   (* no CPU reader sees device work still in flight *)
                   if Context.settle context <> [] then Error settle_failed
                   else
+                    (* a parallel branch's journal replays later: only the cook's own domain sheds *)
+                    match
+                      Mem.admit
+                        ~shed:(fun () -> session.journal = None && shed session)
+                        ()
+                    with
+                    | Error overdraft ->
+                        Error (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))
+                    | Ok () ->
                     match cook_node memo session context node geometries with
                     | Error _ as error -> error
                     | Ok cooked -> Ok (cooked, delta node geometries cooked))
