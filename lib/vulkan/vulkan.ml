@@ -89,15 +89,18 @@ external surface_discard : handle -> unit = "rv_surface_discard"
 external commit_present : handle -> handle -> handle -> int = "rv_commit_present"
 external surface_destroy : handle -> unit = "rv_surface_destroy"
 
-(* The bindings a SPIR-V module declares in set 0, as (binding, kind): 0 uniform buffer, 1 storage
+(* A SPIR-V module's entry points: (name, ids of the variables it uses, local size) and the
+   bindings it declares in set 0, as (variable id, binding, kind): 0 uniform buffer, 1 storage
    buffer, 2 sampled image, 3 storage image, 4 sampler, 5 acceleration structure. *)
-let reflect bytes =
+let scan bytes =
   let words = Bytes.length bytes / 4 in
   let word i = Int32.to_int (Bytes.get_int32_le bytes (i * 4)) land 0xffffffff in
   let bindings = Hashtbl.create 16
   and block = Hashtbl.create 16
   and pointers = Hashtbl.create 16
   and kinds = Hashtbl.create 16
+  and locals = Hashtbl.create 4
+  and entries = ref []
   and variables = ref [] in
   let i = ref 5 in
   while !i < words do
@@ -105,6 +108,15 @@ let reflect bytes =
     let length = head lsr 16 and op = head land 0xffff in
     if length = 0 then invalid_arg "Vulkan.reflect: malformed module";
     (match op with
+    | 15 ->
+        let start = (!i + 3) * 4 in
+        let stop = Bytes.index_from bytes start '\000' in
+        let name = Bytes.sub_string bytes start (stop - start) in
+        let used = (!i + 3 + ((stop - start) / 4) + 1) in
+        entries :=
+          (name, word (!i + 2), List.init (!i + length - used) (fun k -> word (used + k))) :: !entries
+    | 16 when word (!i + 2) = 17 ->
+        Hashtbl.replace locals (word (!i + 1)) (word (!i + 3), word (!i + 4), word (!i + 5))
     | 71 when word (!i + 2) = 33 -> Hashtbl.replace bindings (word (!i + 1)) (word (!i + 3))
     | 71 when word (!i + 2) = 2 -> Hashtbl.replace block (word (!i + 1)) ()
     | 32 -> Hashtbl.replace pointers (word (!i + 1)) (word (!i + 3))
@@ -115,16 +127,39 @@ let reflect bytes =
     | _ -> ());
     i := !i + length
   done;
-  List.filter_map
-    (fun (id, pointer, storage) ->
-      match Hashtbl.find_opt bindings id with
-      | None -> None
-      | Some binding ->
-          let pointee = Option.value ~default:(-1) (Hashtbl.find_opt pointers pointer) in
-          let kind =
-            match Hashtbl.find_opt kinds pointee with
-            | Some kind -> kind
-            | None -> if storage = 2 && Hashtbl.mem block pointee then 0 else 1
-          in
-          Some (binding, kind))
-    !variables
+  ( List.rev_map
+      (fun (name, id, used) ->
+        (name, used, Option.value ~default:(1, 1, 1) (Hashtbl.find_opt locals id)))
+      !entries,
+    List.filter_map
+      (fun (id, pointer, storage) ->
+        match Hashtbl.find_opt bindings id with
+        | None -> None
+        | Some binding ->
+            let pointee = Option.value ~default:(-1) (Hashtbl.find_opt pointers pointer) in
+            let kind =
+              match Hashtbl.find_opt kinds pointee with
+              | Some kind -> kind
+              | None -> if storage = 2 && Hashtbl.mem block pointee then 0 else 1
+            in
+            Some (id, binding, kind))
+      !variables )
+
+(* Every binding of a module (one entry per stage, as the render path declares). *)
+let reflect bytes = List.map (fun (_, binding, kind) -> (binding, kind)) (snd (scan bytes))
+
+(* The bindings and local size of one entry point, None if the module has no such entry. *)
+let reflect_entry bytes entry =
+  let entries, bindings = scan bytes in
+  List.find_map
+    (fun (name, used, local) ->
+      if name <> entry then None
+      else
+        Some
+          ( List.sort_uniq compare
+              (List.filter_map
+                 (fun (id, binding, kind) ->
+                   if List.mem id used then Some (binding, kind) else None)
+                 bindings),
+            local ))
+    entries

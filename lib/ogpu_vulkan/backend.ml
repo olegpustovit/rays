@@ -100,7 +100,7 @@ let create () =
           in
           let buffers : (int64, buffer) Hashtbl.t = Hashtbl.create 32
           and textures : (int64, texture) Hashtbl.t = Hashtbl.create 32
-          and pipelines : (int64, V.handle) Hashtbl.t = Hashtbl.create 16
+          and pipelines : (int64, V.handle * (int * int * int)) Hashtbl.t = Hashtbl.create 16
           and samplers : (int64, V.handle) Hashtbl.t = Hashtbl.create 8
           and icbs : (int64, icb_command array) Hashtbl.t = Hashtbl.create 8
           (* An argument slice is a (texture, sampler) pair: binding the buffer at its offset binds
@@ -250,10 +250,10 @@ let create () =
                         Ok ());
                   }
           in
-          let own_pipeline native ~max_threads =
+          let own_pipeline ?(local = (1, 1, 1)) native ~max_threads =
             incr live;
             let id = token () in
-            Hashtbl.add pipelines id native;
+            Hashtbl.add pipelines id (native, local);
             {
               B.pipeline_token = id;
               max_threads;
@@ -272,17 +272,34 @@ let create () =
             | Error _ as e -> e
             | Ok modul ->
                 incr live;
-                let interface = Array.of_list (V.reflect bytes) in
+                
                 Ok
                   {
                     B.create_compute_pipeline_in =
-                      (fun ~entry ~constants ~interface:_ ->
+                      (fun ~entry ~constants ~interface:declared ->
+                        let space : Ogpu_core.Shader.binding_kind -> int = function
+                          | Uniform_buffer | Storage_buffer -> 0
+                          | Sampled_texture | Storage_texture -> 1
+                          | Sampler -> 2
+                          | Acceleration_structure -> 3
+                        and reflected_space = function 0 | 1 -> 0 | 2 | 3 -> 1 | 4 -> 2 | _ -> 3 in
                         if constants <> [] then
                           error op E.Unsupported "SPIR-V kernels take no named function constants"
                         else
-                          Result.map
-                            (fun native -> own_pipeline native ~max_threads:max_invocations)
-                            (handle op (V.compute_pipeline_create device modul entry interface)));
+                          match V.reflect_entry bytes entry with
+                          | None -> error op E.Invalid_argument "the module has no such entry point"
+                          | Some (reflected, local) ->
+                              let classes f l = List.sort compare (List.map f l) in
+                              if
+                                classes (fun (b : Ogpu_core.Shader.binding) -> (b.binding, space b.kind)) declared
+                                <> classes (fun (b, k) -> (b, reflected_space k)) reflected
+                              then error op E.Invalid_argument "SPIR-V reflection does not match the interface"
+                              else
+                                Result.map
+                                  (fun native -> own_pipeline ~local native ~max_threads:max_invocations)
+                                  (handle op
+                                     (V.compute_pipeline_create device modul entry
+                                        (Array.of_list reflected))));
                     destroy_library =
                       (fun () ->
                         decr live;
@@ -398,6 +415,7 @@ let create () =
             | Some pipeline -> Ok pipeline
             | None -> error op E.Invalid_argument "pipeline graph is incomplete"
           in
+          let find_handle op id = Result.map fst (find_pipeline op id) in
           let create_icb ~max_commands =
             let id = token () in
             incr live;
@@ -534,11 +552,18 @@ let create () =
                       in
                       let compute_encoder () =
                         V.compute_begin commands;
+                        (* A kernel runs in groups of its own local size: the threadgroup a caller names is Metal's, and
+                           SPIR-V cannot change it. *)
+                        let local = ref (1, 1, 1) in
                         Ok
                           {
                             B.set_pipeline =
                               (fun id ->
-                                Result.map (V.set_pipeline commands) (find_pipeline op id));
+                                Result.map
+                                  (fun (pipeline, size) ->
+                                    local := size;
+                                    V.set_pipeline commands pipeline)
+                                  (find_pipeline op id));
                             set_buffer =
                               (fun ~index ~offset id ->
                                 Result.bind (find_buffer op id) (fun b ->
@@ -553,8 +578,9 @@ let create () =
                             set_accel =
                               (fun ~index:_ _ -> error op E.Unsupported "acceleration structures");
                             dispatch_threads =
-                              (fun ~threads:(x, y, z) ~threadgroup:(gx, gy, gz) ->
-                                let groups t g = (t + g - 1) / max 1 g in
+                              (fun ~threads:(x, y, z) ~threadgroup:_ ->
+                                let gx, gy, gz = !local in
+                                let groups t g = (t + g - 1) / g in
                                 V.dispatch commands (groups x gx) (groups y gy) (groups z gz);
                                 Ok ());
                             dispatch_indirect =
@@ -656,7 +682,7 @@ let create () =
                                 (V.set_buffer commands index (Int64.to_int offset) b.buffer)
                         in
                         let render_set_pipeline id =
-                          Result.map (V.set_pipeline commands) (find_pipeline op id)
+                          Result.map (V.set_pipeline commands) (find_handle op id)
                         in
                         let rec encoder : B.driver_render_encoder =
                           {
