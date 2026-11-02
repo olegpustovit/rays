@@ -69,7 +69,8 @@
  (alias test_draw_snapshots)
  (deps
   (source_tree ../sketches)
-  (source_tree draw_snapshots))
+  (source_tree draw_snapshots)
+  (source_tree draw_snapshots_windows))
  (action
   (setenv
    SDL_VIDEODRIVER

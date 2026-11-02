@@ -118,6 +118,28 @@ let cross_unfused a b =
     (product a.z b.x -. product a.x b.z)
     (product a.x b.y -. product a.y b.x)
 
+(* Lisp cross is fused. arm64 contracts V.cross to match; x86 does not, so Windows
+   compares with the same fma form as prelude.rays vec3_cross. *)
+let cross_native a b =
+  if not Sys.win32 then V.cross a b
+  else
+    let f l r l2 r2 = Rays_math.Fma.fma (-1.0 *. l) r (l2 *. r2) in
+    V.create (f a.V.z b.y a.y b.z) (f a.x b.z a.z b.x) (f a.y b.x a.x b.y)
+
+(* Same for M.mul: the Lisp mat4_mul chains fma over the inner index. *)
+let mul_native a b =
+  if not Sys.win32 then M.mul a b
+  else
+    let component i j =
+      let result = ref 0. in
+      for k = 0 to 3 do
+        result := Rays_math.Fma.fma (M.get a ~row:i ~column:k) (M.get b ~row:k ~column:j) !result
+      done;
+      !result
+    in
+    let row i = (component i 0, component i 1, component i 2, component i 3) in
+    M.of_rows (row 0) (row 1) (row 2) (row 3)
+
 let mul_unfused a b =
   let row i =
     let component j =
@@ -206,7 +228,7 @@ let () =
           List.iter
             (fun name ->
               let result = call name [ triple a; triple b ] in
-              let native = V.cross a b and unfused = cross_unfused a b in
+              let native = cross_native a b and unfused = cross_unfused a b in
               List.iter2 audit_unfused [ native.x; native.y; native.z ]
                 [ unfused.x; unfused.y; unfused.z ];
               List.iter2 (observe_native name) [ native.x; native.y; native.z ] (floats result);
@@ -260,7 +282,7 @@ let () =
       List.iter
         (fun right ->
           let result = call "mat4_mul" [ matrix m; matrix right ] in
-          let native = M.mul m right and unfused = mul_unfused m right in
+          let native = mul_native m right and unfused = mul_unfused m right in
           for i = 0 to 3 do
             for j = 0 to 3 do
               audit_unfused (M.get native ~row:i ~column:j) (M.get unfused ~row:i ~column:j)
@@ -274,7 +296,7 @@ let () =
                     (fun j actual ->
                       observe_native
                         (Printf.sprintf "multiply[%d,%d]" i j)
-                        (M.get (M.mul m right) ~row:i ~column:j)
+                        (M.get native ~row:i ~column:j)
                         actual)
                     (floats (List.assoc name fields)))
                 [ "r0"; "r1"; "r2"; "r3" ]

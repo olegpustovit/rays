@@ -630,6 +630,27 @@ doubles frequency and halves amplitude each octave, then divides sum by
 weights. Packed noise supports octaves 1..64 (Metal and WGSL, 1..32) with a constant seed and constant
 octave count; non-constant or out-of-range settings keep their current refusals.
 
+### Goldens across operating systems
+
+Integer and structural results (counts, topology, ordering, indices, text, diagnostics) are exact bytes
+on every platform; a difference there is a bug. Floating results are exact where the operation is: IEEE
+`+ - * /`, `sqrt`, `fma` and conversions. `Float.fma` is exact on every platform: Windows' OCaml runtime
+emulation rounded subnormal results wrongly, so `Rays_math.Fma.fma` calls the C library's `fma`
+(hardware or ucrtbase). Windows links its math from ucrtbase, which agrees with the Mac's libm except in
+the last bit: measured over 6000 arguments, `sin` and `cos` differ in about 5 percent of
+them by one ulp, `exp`, `pow` and `log` in under 1 percent, `tan` in 40 percent by up to two. Native OCaml geometry differs too, because ocamlopt on arm64
+contracts `a*b+c` into a fused multiply-add and on x86 it does not; the Lisp helpers write their fused
+forms with `fma` explicitly and are the same everywhere.
+
+The Mac's expected bytes, hashes and digests stay untouched and are the only ones the Mac accepts.
+A test whose result is a float-derived hash or digest keeps a second expected value for Windows, selected
+by `Sys.win32` (or a Windows data file beside the Mac's), adopted only after the two machines' floats were
+compared: same counts and topology, every float within a few ulp. A native check of an operation the
+Lisp fuses compares on Windows with a test-local form written with `fma`, never a looser tolerance. Text
+drawn with the system font (SF Mono on the Mac, Segoe UI on Windows) has per-platform glyph rectangles.
+Windows files: `lib/flow_sop/goldens/data/windows.txt`, `test/draw_snapshots_windows/`, and the
+`Sys.win32` values in `test_remesh.ml` and `test_marks_scene.ml`.
+
 ## List model
 
 The core represents lists of at most 4,096 elements. This is a representation

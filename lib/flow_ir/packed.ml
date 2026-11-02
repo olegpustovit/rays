@@ -1218,7 +1218,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
         | Fma (a, b, c) when (not banks.(a)) && (not banks.(b)) && not banks.(c) ->
             let a = a * block_size and b = b * block_size and c = c * block_size in
             for j = first to last - 1 do
-              floats.(at + j) <- finite (Float.fma floats.(a + j) floats.(b + j) floats.(c + j))
+              floats.(at + j) <- finite (Rays_math.Fma.fma floats.(a + j) floats.(b + j) floats.(c + j))
             done
         | Checked_mul (p, a, b) when (not banks.(a)) && not banks.(b) -> (
             let a = a * block_size and b = b * block_size in
@@ -1241,14 +1241,14 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
                   let a = finite floats.(a + j)
                   and b = finite floats.(b + j)
                   and c = finite floats.(c + j) in
-                  floats.(at + j) <- checked_projection Value (Float.fma a b c)
+                  floats.(at + j) <- checked_projection Value (Rays_math.Fma.fma a b c)
                 done
             | Valid ->
                 for j = first to last - 1 do
                   let a = finite floats.(a + j)
                   and b = finite floats.(b + j)
                   and c = finite floats.(c + j) in
-                  floats.(at + j) <- checked_projection Valid (Float.fma a b c)
+                  floats.(at + j) <- checked_projection Valid (Rays_math.Fma.fma a b c)
                 done)
         | Binary (op, a, b) ->
             for j = first to last - 1 do
@@ -1256,7 +1256,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
             done
         | Fma (a, b, c) ->
             for j = first to last - 1 do
-              floats.(at + j) <- finite (Float.fma (numeric a j) (numeric b j) (numeric c j))
+              floats.(at + j) <- finite (Rays_math.Fma.fma (numeric a j) (numeric b j) (numeric c j))
             done
         | Checked_mul (p, a, b) ->
             for j = first to last - 1 do
@@ -1268,7 +1268,7 @@ let run_typed ?measure ?column_source ?plane_outputs ?expected_count ~evaluate ~
               let a = finite (numeric a j)
               and b = finite (numeric b j)
               and c = finite (numeric c j) in
-              floats.(at + j) <- checked_projection p (Float.fma a b c)
+              floats.(at + j) <- checked_projection p (Rays_math.Fma.fma a b c)
             done
         | Trace (field, r) ->
             for j = first to last - 1 do
@@ -2227,7 +2227,7 @@ let rec block_instruction r b slot instruction first last =
   | Fma (a, b, c) ->
       let a = a * block_size and b = b * block_size and c = c * block_size in
       for j = first to last - 1 do
-        let value = Float.fma scratch.(a + j) scratch.(b + j) scratch.(c + j) in
+        let value = Rays_math.Fma.fma scratch.(a + j) scratch.(b + j) scratch.(c + j) in
         if not (Float.is_finite value) then nonfinite ();
         scratch.(at + j) <- value
       done
@@ -2243,7 +2243,7 @@ let rec block_instruction r b slot instruction first last =
       for j = first to last - 1 do
         let a = scratch.(a + j) and b = scratch.(b + j) and c = scratch.(c + j) in
         if not (Float.is_finite a && Float.is_finite b && Float.is_finite c) then nonfinite ();
-        scratch.(at + j) <- checked_projection p (Float.fma a b c)
+        scratch.(at + j) <- checked_projection p (Rays_math.Fma.fma a b c)
       done
   | Unary (operation, a) -> (
       let a = a * block_size in

@@ -7,7 +7,11 @@
    or as the diagnostic code when the frame cannot be drawn headless.
    The digest covers Image resource ids, which come from the process-global
    texture counter (rendered text allocates two per new string), so each
-   workspace must run in its own process, as the dune rule does. *)
+   workspace must run in its own process, as the dune rule does.
+   draw_snapshots_windows/ holds the Windows files of the five sketches whose scene differs there:
+   recursive_rectangles and drawing by 1 ulp in a few doubles (no fused multiply-add on x86), and the
+   sketches that draw text (audio, basic, drawing, file_dialog) by the glyph rectangles of Segoe UI
+   against the Mac's SF Mono. *)
 
 let width = 640
 let height = 480
@@ -122,7 +126,9 @@ let () =
                    [ Filename.remove_extension name ]
                    ~stdout:out)
             in
-            status <> 0 || read out <> read ("draw_snapshots/" ^ name))
+            let windows = "draw_snapshots_windows/" ^ name in
+            let golden = if Sys.win32 && Sys.file_exists windows then windows else "draw_snapshots/" ^ name in
+            status <> 0 || read out <> read golden)
           workspaces
       in
       if failed <> [] then
