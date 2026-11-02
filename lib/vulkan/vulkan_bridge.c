@@ -80,6 +80,7 @@ typedef struct {
   int kind; /* 0 unbound, 1 buffer, 2 image, 3 sampler, 4 acceleration structure */
   VkBuffer buffer;
   VkDeviceSize offset;
+  VkDeviceSize range; /* bytes from offset */
   VkImageView view;
   VkSampler sampler;
   VkAccelerationStructureKHR accel;
@@ -1129,7 +1130,7 @@ CAMLprim value rv_cmd_set_buffer(value commands, value index, value offset, valu
   rv_buffer *b = H(buffer);
   int i = Long_val(index);
   if (i < 0 || i >= MAX_BIND) return Val_long(VK_ERROR_TOO_MANY_OBJECTS);
-  c->slots[i] = (rv_slot){.kind = 1, .buffer = b->buffer, .offset = (VkDeviceSize)Long_val(offset)};
+  c->slots[i] = (rv_slot){.kind = 1, .buffer = b->buffer, .offset = (VkDeviceSize)Long_val(offset), .range = b->size - (VkDeviceSize)Long_val(offset)};
   c->dirty = true;
   return Val_long(VK_SUCCESS);
 }
@@ -1144,7 +1145,7 @@ CAMLprim value rv_cmd_set_bytes(value commands, value index, value bytes) {
   char *room = arena(c, length ? length : 16, c->q->d->properties.limits.minUniformBufferOffsetAlignment, &chunk, &at);
   if (!room) return Val_long(VK_ERROR_OUT_OF_DEVICE_MEMORY);
   memcpy(room, Bytes_val(bytes), length);
-  c->slots[i] = (rv_slot){.kind = 1, .buffer = chunk, .offset = at};
+  c->slots[i] = (rv_slot){.kind = 1, .buffer = chunk, .offset = at, .range = length ? length : 16};
   c->dirty = true;
   return Val_long(VK_SUCCESS);
 }
@@ -1184,7 +1185,8 @@ static void push_descriptors(rv_cmd *c) {
     VkWriteDescriptorSet *w = &writes[n];
     *w = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = binding, .descriptorCount = 1, .descriptorType = type};
     if (s->kind == 1) {
-      buffers[n] = (VkDescriptorBufferInfo){s->buffer, s->offset, VK_WHOLE_SIZE};
+      VkDeviceSize limit = type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ? p->d->properties.limits.maxUniformBufferRange : p->d->properties.limits.maxStorageBufferRange;
+      buffers[n] = (VkDescriptorBufferInfo){s->buffer, s->offset, s->range < limit ? s->range : limit};
       w->pBufferInfo = &buffers[n];
     } else if (s->kind == 2) {
       images[n] = (VkDescriptorImageInfo){.imageView = s->view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
