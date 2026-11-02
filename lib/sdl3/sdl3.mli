@@ -61,6 +61,7 @@ module Window : sig
     | Hidden
     | High_pixel_density
     | Metal
+    | Native_view  (** what the platform's {!Native_view} needs: SDL_WINDOW_METAL on macOS *)
         (** What SDL's window flags say about showing. SDL sends an event when a window becomes
             occluded and none when it stops, so a caller that saw [Event.Occluded] reads [state] to
             learn it is uncovered again. *)
@@ -253,3 +254,7 @@ module Metal_view : sig
   val layer : t -> (layer, error) result
   val destroy : t -> (unit, error) result
 end
+
+(** The window's presentation surface, as an opaque token for the GPU backend: a Metal view on macOS,
+    the window's handle on Windows, from which the backend makes its own surface. *)
+module Native_view = Metal_view

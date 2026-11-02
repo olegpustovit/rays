@@ -37,7 +37,7 @@ type cursor_shape = [ `Default | `Horizontal_resize | `Vertical_resize | `Text ]
 
 type window = {
   handle : Sdl3.Window.t;
-  view : Sdl3.Metal_view.t;
+  view : Sdl3.Native_view.t;
   vsync : bool;
   mutable cursors : (cursor_shape * Sdl3.Cursor.t) list;
   mutable cursor_shape : cursor_shape option;
@@ -116,15 +116,15 @@ let create ?(vsync = true) ?(hidden = true) ?(high_density = true) ?(title = "Ra
       (* SDL itself turns a Control-click into the secondary click. *)
       let* () = sdl op (Sdl3.Hint.control_click_is_right_click true) in
       let flags : Sdl3.Window.flag list =
-        (Sdl3.Window.Metal :: (if high_density then [ Sdl3.Window.High_pixel_density ] else []))
+        (Sdl3.Window.Native_view :: (if high_density then [ Sdl3.Window.High_pixel_density ] else []))
         @ if hidden then [ Sdl3.Window.Hidden ] else []
       in
       let* window =
         acquire (Sdl3.Window.create ~title ~width ~height ~flags ()) Sdl3.Window.destroy
       in
       let* () = if hidden then Ok () else sdl op (reveal window) in
-      let* view = acquire (Sdl3.Metal_view.create window) Sdl3.Metal_view.destroy in
-      let* _token = sdl op (Sdl3.Metal_view.layer view) in
+      let* view = acquire (Sdl3.Native_view.create window) Sdl3.Native_view.destroy in
+      let* _token = sdl op (Sdl3.Native_view.layer view) in
       (* Size the renderer for the actual drawable once, rather than
          allocating a logical-size target and immediately resizing it. *)
       let* facts = facts window in
@@ -411,7 +411,7 @@ let destroy (value : t) =
           (fun (_, cursor) -> record (sdl "Runtime.destroy" (Sdl3.Cursor.destroy cursor)))
           window.cursors;
         window.cursors <- [];
-        record (sdl "Runtime.destroy" (Sdl3.Metal_view.destroy window.view));
+        record (sdl "Runtime.destroy" (Sdl3.Native_view.destroy window.view));
         record (sdl "Runtime.destroy" (Sdl3.Window.destroy window.handle));
         record (sdl "Runtime.destroy" (Sdl3.Init.quit_subsystems [ Sdl3.Init.Video ])))
       value.window;
@@ -425,7 +425,7 @@ let surface_configuration (value : t) =
     | None -> Ok None
     | Some window ->
         Result.map Option.some
-          (sdl "Runtime.surface_configuration" (Sdl3.Metal_view.layer window.view))
+          (sdl "Runtime.surface_configuration" (Sdl3.Native_view.layer window.view))
   in
   Result.map
     (fun layer ->

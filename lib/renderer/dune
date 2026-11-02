@@ -3,6 +3,7 @@
  (public_name rays.renderer)
  (wrapped false)
  (modules
+  renderer_spirv
   renderer
   renderer_pipeline
   renderer_shaders
@@ -21,6 +22,7 @@
   metal_scene3_sun_depth_source
   metal_scene3_points_source)
  (private_modules
+  renderer_spirv
   renderer_shaders
   renderer_retained_plans
   renderer_leases
@@ -40,6 +42,34 @@
 (executable
  (name embed_shader)
  (modules embed_shader))
+
+; Vulkan's stages, beside the MSL below
+
+(rule
+ (target renderer_spirv.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    %{exe:embed_shader.exe}
+    %{dep:marks.vert.spv}
+    %{dep:marks.frag.spv}
+    %{dep:ui.vert.spv}
+    %{dep:ui.frag.spv}
+    %{dep:scene3.vert.spv}
+    %{dep:scene3.frag.spv}
+    %{dep:scene3_points.vert.spv}
+    %{dep:scene3_points.frag.spv}
+    %{dep:scene3_textured.vert.spv}
+    %{dep:scene3_textured.frag.spv}
+    %{dep:scene3_sun_depth.vert.spv}
+    %{dep:scene3_sun_depth.frag.spv}
+    %{dep:scene3_world.vert.spv}
+    %{dep:scene3_world.frag.spv}
+    %{dep:geometry.vert.spv}
+    %{dep:geometry.frag.spv}
+    %{dep:quad.vert.spv}
+    %{dep:quad.frag.spv}))))
 
 ; the pipelines' stages, printed from shaders/NAME.rays (image_rgba8 is flow_gpu's image sink)
 

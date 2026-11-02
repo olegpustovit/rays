@@ -1,6 +1,8 @@
 type msl = {
   source : string;
   entry : string;
+  spirv : (bytes * string, Diagnostic.t) result Lazy.t;
+      (** the same kernel as a Vulkan SPIR-V module and its entry, printed when first asked *)
   interface : Ogpu_core.Shader.binding list;
   uniform_layout : (string * int * int) list;
   uniform_bytes : int;

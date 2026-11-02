@@ -2,6 +2,7 @@
  (name flow_gpu)
  (public_name rays.flow_gpu)
  (modules
+  spirv_kernels
   compact_source
   compact_uint32_source
   indices_source
@@ -15,8 +16,10 @@
   run
   host
   image_sink
-  image_rgba8_source)
+  image_rgba8_source
+  image_rgba8_spirv)
  (private_modules
+  spirv_kernels
   compact_source
   compact_uint32_source
   indices_source
@@ -26,7 +29,8 @@
   bounds_source
   normals_source
   kernels
-  image_rgba8_source)
+  image_rgba8_source
+  image_rgba8_spirv)
  (foreign_stubs
   (language c)
   (names flow_gpu_stubs))
@@ -35,6 +39,22 @@
  (libraries flow flow_ir flow_shader ogpu renderer rays_math lru mem parallel))
 
 ; the compute stages, printed from shaders/NAME.rays
+
+(rule
+ (target spirv_kernels.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    %{exe:../renderer/embed_shader.exe}
+    %{dep:compact.comp.spv}
+    %{dep:compact_uint32.comp.spv}
+    %{dep:indices.comp.spv}
+    %{dep:topology.comp.spv}
+    %{dep:triangles.comp.spv}
+    %{dep:bounds.comp.spv}
+    %{dep:normals.comp.spv}
+    %{dep:dispatch.comp.spv}))))
 
 (rule
  (targets
@@ -174,6 +194,16 @@
     (echo "|msl}\n")))))
 
 ; the image sink's stages, printed from ../renderer/shaders/image.rays
+
+(rule
+ (target image_rgba8_spirv.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    %{exe:../renderer/embed_shader.exe}
+    %{dep:../renderer/image_rgba8.vert.spv}
+    %{dep:../renderer/image_rgba8.frag.spv}))))
 
 (rule
  (target image_rgba8_source.ml)

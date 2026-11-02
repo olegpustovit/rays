@@ -5,7 +5,9 @@
 #define VK_NO_PROTOTYPES
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#undef interface /* windows.h makes it a macro */
 #endif
 #include "vendor/volk.h"
 #include "vendor/vk_mem_alloc.h"

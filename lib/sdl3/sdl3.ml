@@ -147,12 +147,12 @@ module Hint = struct
 end
 
 module Window = struct
-  type flag = Hidden | High_pixel_density | Metal
+  type flag = Hidden | High_pixel_density | Metal | Native_view
   type t = { raw : nativeint; mutable destroyed : bool; metal_views : int Atomic.t }
 
   (* The bits stubs.c maps to SDL_WINDOW_HIDDEN, SDL_WINDOW_HIGH_PIXEL_DENSITY
      and SDL_WINDOW_METAL. *)
-  let flag = function Hidden -> 1 | High_pixel_density -> 2 | Metal -> 4
+  let flag = function Hidden -> 1 | High_pixel_density -> 2 | Metal | Native_view -> 4
   let flags_mask values = List.fold_left (fun bits value -> bits lor flag value) 0 values
 
   let live operation value callback =
@@ -431,6 +431,7 @@ module Clipboard = struct
         | Some text -> Ok text
         | None -> sdl_error "SDL3.Clipboard.get_text")
 end
+module Native_view = Metal_view
 
 module Text_input = struct
   let live operation window callback =

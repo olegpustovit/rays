@@ -90,7 +90,9 @@ CAMLprim value caml_sdl3_create_window(
   CAMLparam4(title, width, height, flags);
   if ((Int_val(flags) & WINDOW_FLAG_HIDDEN) != 0) native |= SDL_WINDOW_HIDDEN;
   if ((Int_val(flags) & WINDOW_FLAG_HIGH_PIXEL_DENSITY) != 0) native |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+  #ifndef _WIN32 /* a window on Windows needs no flag: the backend makes a surface from its handle */
   if ((Int_val(flags) & WINDOW_FLAG_METAL) != 0) native |= SDL_WINDOW_METAL;
+#endif
   window = SDL_CreateWindow(
       String_val(title), Int_val(width), Int_val(height), native);
   rays_window_plain_titlebar(window);
@@ -324,18 +326,33 @@ CAMLprim value caml_sdl3_create_metal_view(value raw_window)
 {
   SDL_MetalView view;
   CAMLparam1(raw_window);
+#ifdef _WIN32
+  view = (SDL_MetalView)SDL_GetPointerProperty(SDL_GetWindowProperties(window_of_value(raw_window)),
+      SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+#else
   view = SDL_Metal_CreateView(window_of_value(raw_window));
+#endif
   CAMLreturn(caml_copy_nativeint((intnat)view));
 }
 
 CAMLprim value caml_sdl3_destroy_metal_view(value raw_view)
 {
+#ifndef _WIN32
   SDL_Metal_DestroyView((SDL_MetalView)(intnat)Nativeint_val(raw_view));
+#else
+  (void)raw_view;
+#endif
   return Val_unit;
 }
 
 CAMLprim value caml_sdl3_metal_layer_token(value raw_view,value owner,value generation)
-{ CAMLparam3(raw_view,owner,generation);void*layer=SDL_Metal_GetLayer((SDL_MetalView)(intnat)Nativeint_val(raw_view));CAMLreturn(rays_sdl_layer_token(layer,Int64_val(owner),Int64_val(generation))); }
+{ CAMLparam3(raw_view,owner,generation);
+#ifdef _WIN32
+  void*layer=(void*)(intnat)Nativeint_val(raw_view);
+#else
+  void*layer=SDL_Metal_GetLayer((SDL_MetalView)(intnat)Nativeint_val(raw_view));
+#endif
+  CAMLreturn(rays_sdl_layer_token(layer,Int64_val(owner),Int64_val(generation))); }
 CAMLprim value caml_sdl3_invalidate_metal_layer_token(value token)
 { rays_native_layer_token_invalidate(token);return Val_unit; }
 

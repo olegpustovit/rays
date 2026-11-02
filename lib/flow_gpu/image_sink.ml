@@ -26,13 +26,19 @@ let create_owned device queue =
   if not (Domain.is_main_domain ()) then error "E_GPU" "Image sinks require the initial domain."
   else
     let ( let* ) = Result.bind in
+    let vulkan = Ogpu.Impl.backend = "vulkan" in
+    let backend = if vulkan then "vulkan" else "metal" in
     let shader stage bindings =
       gpu
         (Ogpu.Shader.create
            {
-             backend = "metal";
+             backend;
              label = Some "Flow image RGBA8";
-             bytes = Bytes.of_string Image_rgba8_source.source;
+             bytes =
+               Bytes.of_string
+                 (if not vulkan then Image_rgba8_source.source
+                  else if stage = Ogpu.Shader.Vertex then Image_rgba8_spirv.image_rgba8_vert
+                  else Image_rgba8_spirv.image_rgba8_frag);
              entry_points =
                [
                  { name = "image_vertex"; stage = Vertex };
@@ -68,7 +74,7 @@ let create_owned device queue =
     match
       B.create_render_pipeline ~blend:Replace ~topology:Triangle_list ~indirect:false device
         {
-          backend = "metal";
+          backend;
           label = Some "Flow image RGBA8";
           layout;
           vertex;

@@ -4,6 +4,7 @@ module S = Ogpu_core.Shader
 type msl = {
   source : string;
   entry : string;
+  spirv : (bytes * string, Diagnostic.t) result Lazy.t;
   interface : S.binding list;
   uniform_layout : (string * int * int) list;
   uniform_bytes : int;
@@ -332,10 +333,29 @@ let group_intrinsic ~scans ~(raster : raster) (current : Scope.t) guards stage (
         (if ty = Flow.Ty.Array Flow.Ty.Int then low r.(2) else float_of r.(2))
   | _ -> fail "Not a workgroup intrinsic."
 
+let no_spirv = lazy (Error (Diagnostic.error ~code:"E_GPU_FORM" "This body has no SPIR-V form."))
+
 let rec kernel ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs
     ?uint32_inputs ?uint32_tables program =
-  generate ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs ?uint32_inputs
-    ?uint32_tables program
+  let spirv =
+    lazy
+      (if
+         uint32_scalars = Some true || uint32_outputs <> None || uint32_inputs <> None
+         || uint32_tables <> None
+       then
+         (* ponytail: exact uint32 buffers are MSL-only so far; Spirv learns them with their first
+            Vulkan caller, until then the kernel is refused and the value stays on the CPU *)
+         Error (Diagnostic.error ~code:"E_GPU_FORM" "SPIR-V kernels have no exact uint32 buffers yet.")
+       else
+         Result.map
+           (fun (k : Spirv.t) -> (k.bytes, k.entry))
+           (Spirv.kernel ?fast ?instanced ?motion
+              ~curves:(curves <> None) ?spheres program))
+  in
+  Result.map
+    (fun msl -> { msl with spirv })
+    (generate ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs
+       ?uint32_inputs ?uint32_tables program)
 
 and stage_body ~raster program =
   Result.map (fun msl -> msl.source) (generate ~fast:true ~raster program)
@@ -872,6 +892,7 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
         {
           source = "  uint sb=0u;\n" ^ Buffer.contents body;
           entry = "";
+          spirv = no_spirv;
           interface = [];
           uniform_layout = [];
           uniform_bytes = 0;
@@ -1024,6 +1045,7 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
         {
           source;
           entry;
+          spirv = no_spirv;
           interface;
           uniform_layout;
           uniform_bytes;

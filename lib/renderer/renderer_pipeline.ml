@@ -15,20 +15,24 @@ let make_sun_depth_pipeline backend backend_device =
   let buffer binding =
     { Ogpu.Shader.group = 0; binding; kind = Storage_buffer; visibility = [ Vertex ] }
   in
-  let artifact bindings =
+  let artifact stage bindings =
     Ogpu.Shader.create
       {
         backend;
         label = Some "scene-sun-depth";
-        bytes = Bytes.of_string source_scene3_sun_depth;
+        bytes =
+          Bytes.of_string
+            (if backend <> "vulkan" then source_scene3_sun_depth
+             else if stage = Vertex then Renderer_spirv.scene3_sun_depth_vert
+             else Renderer_spirv.scene3_sun_depth_frag);
         entry_points =
           [ { name = "sun_vertex"; stage = Vertex }; { name = "sun_fragment"; stage = Fragment } ];
         bindings;
       }
   in
   let ( let* ) = Result.bind in
-  let* vertex = artifact (List.map buffer [ 0; 2; 3; 4 ]) in
-  let* fragment = artifact [] in
+  let* vertex = artifact Vertex (List.map buffer [ 0; 2; 3; 4 ]) in
+  let* fragment = artifact Fragment [] in
   let* bindings =
     Ogpu.Binding.create_layout
       (List.map
@@ -57,7 +61,7 @@ let make_sun_depth_pipeline backend backend_device =
     }
 
 let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configuration () =
-  if backend <> "metal" then
+  if backend <> "metal" && backend <> "vulkan" then
     Error
       (Ogpu.Error.make "Renderer.create" Ogpu.Error.Unsupported
          ("no renderer shaders for backend " ^ backend))
@@ -109,7 +113,22 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
           {
             backend;
             label = Some "runtime-next";
-            bytes = Bytes.of_string source;
+            bytes =
+              Bytes.of_string
+                (if backend <> "vulkan" then source
+                 else
+                   let vertex, fragment =
+                     match family with
+                     | Scene_execution.Scene2 -> Renderer_spirv.(geometry_vert, geometry_frag)
+                     | Scene2_textured -> Renderer_spirv.(quad_vert, quad_frag)
+                     | Scene3 -> Renderer_spirv.(scene3_vert, scene3_frag)
+                     | Scene3_points -> Renderer_spirv.(scene3_points_vert, scene3_points_frag)
+                     | Scene3_textured -> Renderer_spirv.(scene3_textured_vert, scene3_textured_frag)
+                     | Scene3_world -> Renderer_spirv.(scene3_world_vert, scene3_world_frag)
+                     | Ui -> Renderer_spirv.(ui_vert, ui_frag)
+                     | Marks -> Renderer_spirv.(marks_vert, marks_frag)
+                   in
+                   if stage = Vertex then vertex else fragment);
             entry_points =
               [
                 { name = vertex_entry; stage = Vertex }; { name = fragment_entry; stage = Fragment };
