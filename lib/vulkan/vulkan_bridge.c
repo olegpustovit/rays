@@ -18,6 +18,7 @@
 #include <caml/mlvalues.h>
 #include <caml/threads.h>
 #include <pthread.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1396,6 +1397,15 @@ CAMLprim value rv_sampler_destroy(value device, value sampler) {
 
 static const VkAttachmentLoadOp load_ops[] = {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_LOAD_OP_DONT_CARE};
 
+/* Metal converts a clear to 8-bit unorm rounding half up (0.5 is 0x80); this device rounds the tie
+   down. Quantize here so the GPU converts an exact multiple of 1/255, the one place a clear is made. */
+static float clear_component(const rv_texture *t, double v) {
+  bool unorm8 = t->format == VK_FORMAT_R8G8B8A8_UNORM || t->format == VK_FORMAT_B8G8R8A8_UNORM || t->format == VK_FORMAT_R8_UNORM;
+  if (!unorm8) return (float)v;
+  float c = v < 0 ? 0.f : v > 1 ? 1.f : (float)v;
+  return floorf(c * 255.f + 0.5f) / 255.f;
+}
+
 /* colors: array of (texture, resolve or 0, load, store, r, g, b, a) as (int array, float array);
    depth: 0, or (texture, load, store, clear) likewise. store: 0 Store, 1 Discard, 2 Resolve */
 CAMLprim value rv_render_begin(value commands, value colors, value depth, value size) {
@@ -1412,7 +1422,7 @@ CAMLprim value rv_render_begin(value commands, value colors, value depth, value 
     attachments[i] = (VkRenderingAttachmentInfo){.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = t->view,
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = load_ops[Int_val(Field(ints, 2))],
         .storeOp = store == 0 ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .clearValue = {.color = {.float32 = {(float)Double_flat_field(clear, 0), (float)Double_flat_field(clear, 1), (float)Double_flat_field(clear, 2), (float)Double_flat_field(clear, 3)}}}};
+        .clearValue = {.color = {.float32 = {clear_component(t, Double_flat_field(clear, 0)), clear_component(t, Double_flat_field(clear, 1)), clear_component(t, Double_flat_field(clear, 2)), clear_component(t, Double_flat_field(clear, 3))}}}};
     if (resolve) {
       attachments[i].resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
       attachments[i].resolveImageView = resolve->view;
