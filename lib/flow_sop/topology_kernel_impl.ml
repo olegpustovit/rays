@@ -25,8 +25,9 @@ let kept geometry kind component make =
 let topology geometry component =
   let view = Rdk.Topology.View.view (G.topology geometry) in
   match component with
-  | "vertex_points" -> Ok (E.Int_array (Array.copy view.vertex_points))
-  | "primitive_offsets" -> Ok (E.Int_array (Array.copy view.primitive_offsets))
+  (* Topology arrays are immutable; alias rather than copy (memory plan S5). *)
+  | "vertex_points" -> Ok (E.Int_array view.vertex_points)
+  | "primitive_offsets" -> Ok (E.Int_array view.primitive_offsets)
   | "kinds" ->
       Ok
         (E.Int_array
@@ -37,7 +38,7 @@ let topology geometry component =
 (* The point incidence (CSR of vertices by point) is the Point_index's, without the edges a
    Topology_index hashes: a million-cell grid's normals ask only for it. *)
 let adjacency geometry component =
-  let array a = Ok (E.Int_array (Array.copy a)) in
+  let array a = Ok (E.Int_array a) in
   let points () = Rdk.Point_index.View.view (Rdk.Point_index.create (G.topology geometry)) in
   let view () = Rdk.Topology_index.View.view (Rdk.Topology_index.create (G.topology geometry)) in
   match component with
