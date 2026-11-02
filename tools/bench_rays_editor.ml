@@ -172,7 +172,7 @@ let measure nodes =
   let started = Unix.gettimeofday () in
   let frame = frame ~events:[ Input.Key_pressed (Input.KeyChar 'z') ] !count in
   environment :=
-    E.update !environment { frame with input = { frame.input with keys = [ Input.Meta ] } };
+    E.update !environment { frame with input = { frame.input with keys = [ Input.Ctrl ] } };
   undo.(0) <- Unix.gettimeofday () -. started;
   report "rays_editor_undo_frame" nodes undo (Gc.allocated_bytes () -. before);
   if E.can_redo !environment |> not then failwith "undo did not step the history";

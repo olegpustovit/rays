@@ -152,6 +152,7 @@ and painter = paint -> rect -> unit
 and ui = {
   mutable theme : Theme.t;
   mutable font_size : int;
+  platform : Input.platform;  (* the modifier conventions of this host *)
   (* owned kit faces by size; [None] caches a failed load *)
   faces : Font.t option Int_table.t;
   kit_font : string option Lazy.t; (* the kit face's file, found on first use *)
@@ -581,12 +582,13 @@ let text_width ui ?size text = float (text_width_px ui ?size text) /. float ui.d
 
 (* ----------------------------------------------------------- create *)
 
-let create ?(font_size = Theme.font_size) ?font_path () =
+let create ~platform ?(font_size = Theme.font_size) ?font_path () =
   if font_size <= 0 then invalid_arg "Ui.create: font_size must be positive";
   let capacity = 64 in
   let kit_font = kit_font_path font_path in
   {
     theme = Theme.default;
+    platform;
     font_size;
     faces = Int_table.create 4;
     kit_font;
@@ -843,7 +845,11 @@ let prune ui =
 (* -------------------------------------------------------------- input *)
 
 let contains (x, y, w, h) (px, py) = px >= x && py >= y && px < x +. w && py < y +. h
-let command_modifiers keys = List.mem Input.Meta keys || List.mem Input.Ctrl keys
+let platform ui = ui.platform
+let command_modifiers ui keys = Input.command_held ui.platform keys
+
+(* Command moves and deletes by lines on Apple only; elsewhere Ctrl is the word modifier. *)
+let line_modifiers ui keys = ui.platform = Input.Apple && command_modifiers ui keys
 
 let accumulator ui key =
   match Int_table.find_opt ui.signals key with
@@ -1024,7 +1030,7 @@ let route ui (frame : Frame.t) =
   List.iteri
     (fun event_index (event : Input.event) ->
       modifiers := Input.keys_after !modifiers event;
-      let command = command_modifiers !modifiers in
+      let command = command_modifiers ui !modifiers in
       (match event with
       | Input.Key_pressed Input.Tab when not command ->
           if flags_of_key ui ui.focus land keep_tab = 0 then

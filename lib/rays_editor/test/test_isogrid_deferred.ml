@@ -47,7 +47,7 @@ let () =
   in
   let current =
     ref
-      (Editor.create ~workspace ~await:false ~domains:8 ~prepare
+      (Editor.create ~platform:Input.Apple ~workspace ~await:false ~domains:8 ~prepare
          ~draw:(fun _ _ -> Rays.Scene.D3.empty) () |> Result.get_ok)
   in
   let monitor = ref None in

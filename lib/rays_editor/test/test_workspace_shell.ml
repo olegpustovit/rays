@@ -3815,7 +3815,7 @@ let run_spreadsheet () =
       let layouts = Layout.geometry shell.tree (frame (0., 0.) [] !count) in
       let leaf = List.find (fun (leaf : Layout.leaf) -> leaf.path = [ 1; 0 ]) layouts.leaves in
       let x, y, w, _ = leaf.body in
-      let ui = Pxui.Ui.create () in
+      let ui = Pxui.Ui.create ~platform:Input.Apple () in
       let detail_width = Pxui.Ui.text_width ui "Detail" in
       Pxui.Ui.destroy ui;
       let point = (float (x + w) -. 8. -. (detail_width /. 2.), float y +. 12.) in
@@ -4275,7 +4275,7 @@ let run_outline_button () =
     | Error d -> fail (Diagnostic.to_string d)
   in
   let header = (Option.get (leaf ())).header in
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let from =
     Pxui_shell.Chrome.tools_start ui ~focused:true ~floating:false ~collapsed:false
       ("Graph\t" ^ dump_line !e "pane graph" ^ " / value")

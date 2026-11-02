@@ -240,6 +240,7 @@ end
 
 module Which_key : sig
   val sheet_sections :
+    Input.platform ->
     ?category:(('scope, 'action) Editor_core.Command.t -> string) ->
     ?text_keys:(string * Editor_core.Keymap.trigger) list ->
     ('scope, 'action) Editor_core.Command.t list ->

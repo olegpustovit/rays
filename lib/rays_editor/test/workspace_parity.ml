@@ -256,7 +256,7 @@ let check ?directory ?(commands = false) ?(factories = Sop.Nodes.factories) ~nam
                         Array.exists (fun (n : E.node) -> n.ty = Flow.Ty.image) evaluated.plan.nodes
                       then
                         Some
-                          (Rays_editor.Editor.create ~workspace ~factories ~domains ~await:true
+                          (Rays_editor.Editor.create ~platform:Input.Apple ~workspace ~factories ~domains ~await:true
                              ~prepare:Editor_prepare.empty
                              ~draw:(fun _ _ -> Rays.Scene.D3.empty)
                              ()

@@ -34,6 +34,10 @@ let compiled_version : version = version_of_number (Private_raw.compiled_version
 let version_number value = (value.major * 1_000_000) + (value.minor * 1_000) + value.patch
 let stable_version value = value.minor mod 2 = 0 && value.patch mod 2 = 0
 let linked_version () = version_of_number (Private_raw.linked_version_number ())
+let platform_name () = Private_raw.platform_name ()
+
+let pref_path ~org ~app =
+  match Private_raw.pref_path org app with "" -> None | path -> Some path
 let version_string value = Printf.sprintf "%d.%d.%d" value.major value.minor value.patch
 
 let validate_version ?(library = "SDL") ?(compiled = compiled_version) ~release ~linked () =

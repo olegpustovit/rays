@@ -192,7 +192,7 @@ let () =
   and qq = alias (Leader "qq") "second leader alias" in
   let aliases = [ view; graph; ctrl; qj; qq ] in
   let _, matched, _ =
-    Editor_core.Router.step aliases ~focus:Graph ~text_focus:false
+    Editor_core.Router.step ~platform:Apple aliases ~focus:Graph ~text_focus:false
       ~frame:
         (let frame = frame [ Input.Key_pressed (Input.KeyChar 'c') ] in
          { frame with input = { frame.input with keys = [ Input.Meta ] } })
@@ -200,7 +200,7 @@ let () =
   in
   assert (matched = [ graph ]);
   let _, matched, _ =
-    Editor_core.Router.step aliases ~focus:Graph ~text_focus:false
+    Editor_core.Router.step ~platform:Apple aliases ~focus:Graph ~text_focus:false
       ~frame:
         (let frame = frame [ Input.Key_pressed (Input.KeyChar 'c') ] in
          { frame with input = { frame.input with keys = [ Input.Ctrl ] } })
@@ -208,7 +208,7 @@ let () =
   in
   assert (matched = [ ctrl ]);
   let _, matched, _ =
-    Editor_core.Router.step aliases ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple aliases ~focus:View ~text_focus:false
       ~frame:
         (frame
            [
@@ -220,7 +220,7 @@ let () =
   in
   assert (matched = [ qq ]);
   let traversed, activated, remaining =
-    Editor_core.Router.step bindings ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple bindings ~focus:View ~text_focus:false
       ~frame:(frame [ Input.Key_pressed Input.Tab; Input.Key_pressed (Input.KeyChar '/') ])
       Idle
   in
@@ -234,7 +234,7 @@ let () =
       `Add
   in
   let state, actions, remaining =
-    Editor_core.Router.step [ add ] ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple [ add ] ~focus:View ~text_focus:false
       ~frame:
         (frame
            [
@@ -249,7 +249,7 @@ let () =
     && List.map (fun c -> c.Editor_core.Command.action) actions = [ `Add ]
     && remaining.input.events = [ Input.Key_pressed (Input.KeyChar '/'); Input.Text_input " " ]);
   let state, actions, remaining =
-    Editor_core.Router.step [ add ] ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple [ add ] ~focus:View ~text_focus:false
       ~frame:
         (frame
            [
@@ -265,7 +265,7 @@ let () =
     && List.mem (Input.Key_pressed Input.Tab) remaining.input.events
     && List.mem (Input.Key_pressed (Input.KeyChar '/')) remaining.input.events);
   let step ?(focus = View) ?(text_focus = false) state keys =
-    Editor_core.Router.step bindings ~focus ~text_focus
+    Editor_core.Router.step ~platform:Apple bindings ~focus ~text_focus
       ~frame:(frame (List.map (fun key -> Input.Key_pressed key) keys))
       state
   in
@@ -275,13 +275,13 @@ let () =
     && List.map (fun c -> c.Editor_core.Command.action) actions = [ `Toggle ]
     && passed.input.events = []);
   let state, actions, _ =
-    Editor_core.Router.step bindings ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple bindings ~focus:View ~text_focus:false
       ~frame:(frame [ Input.Key_pressed (Input.KeyChar '/'); Input.Text_input " " ])
       Idle
   in
   assert (state = Pending "" && List.map (fun c -> c.Editor_core.Command.action) actions = []);
   let state, actions, passed =
-    Editor_core.Router.step bindings ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple bindings ~focus:View ~text_focus:false
       ~frame:(frame [ Input.Key_pressed (Input.KeyChar 'g'); Input.Text_input "g" ])
       state
   in
@@ -319,7 +319,7 @@ let () =
     && List.map (fun c -> c.Editor_core.Command.action) actions = []
     && passed.input.events = [ Input.Key_pressed (Input.KeyChar 'g') ]);
   let chord ?(focus = View) ?(text_focus = false) keys events =
-    Editor_core.Router.step bindings ~focus ~text_focus
+    Editor_core.Router.step ~platform:Apple bindings ~focus ~text_focus
       ~frame:
         (let frame = frame events in
          { frame with input = { frame.input with keys } })
@@ -350,7 +350,7 @@ let () =
   in
   assert (List.map (fun c -> c.Editor_core.Command.action) actions = []);
   let _, actions, _ =
-    Editor_core.Router.step ~previous_keys:[ Input.Meta ] bindings ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple ~previous_keys:[ Input.Meta ] bindings ~focus:View ~text_focus:false
       ~frame:
         (frame
            [
@@ -362,7 +362,7 @@ let () =
   in
   assert (List.map (fun c -> c.Editor_core.Command.action) actions = [ `Undo ]);
   let _, actions, _ =
-    Editor_core.Router.step ~previous_keys:[ Input.Meta ] bindings ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple ~previous_keys:[ Input.Meta ] bindings ~focus:View ~text_focus:false
       ~frame:
         (let frame =
            frame
@@ -377,7 +377,7 @@ let () =
   in
   assert (List.map (fun c -> c.Editor_core.Command.action) actions = [ `Undo; `Undo ]);
   let _, actions, _ =
-    Editor_core.Router.step ~previous_keys:[] bindings ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple ~previous_keys:[] bindings ~focus:View ~text_focus:false
       ~frame:(frame [ Input.Key_pressed (Input.KeyChar 'z'); Input.Key_released Input.Meta ])
       Idle
   in
@@ -416,7 +416,7 @@ let () =
   in
   assert (ended && passed.input.events = [ Input.Key_pressed (Input.KeyChar '/') ]);
   let state, actions, passed =
-    Editor_core.Router.step bindings ~focus:View ~text_focus:false ~frame:passed Idle
+    Editor_core.Router.step ~platform:Apple bindings ~focus:View ~text_focus:false ~frame:passed Idle
   in
   assert (
     state = Pending ""
@@ -440,7 +440,7 @@ let () =
       `Frame
   in
   let typing events =
-    Editor_core.Router.step (save :: scoped :: bindings) ~focus:View ~text_focus:true
+    Editor_core.Router.step ~platform:Apple (save :: scoped :: bindings) ~focus:View ~text_focus:true
       ~frame:
         (let frame = frame events in
          { frame with input = { frame.input with keys = [ Input.Meta ] } })
@@ -462,7 +462,7 @@ let () =
   in
   let run events =
     let state, actions, _ =
-      Editor_core.Router.step [ play; reset ] ~focus:View ~text_focus:false ~frame:(frame events)
+      Editor_core.Router.step ~platform:Apple [ play; reset ] ~focus:View ~text_focus:false ~frame:(frame events)
         Idle
     in
     (state, actions)
@@ -485,7 +485,7 @@ let () =
       `Frame
   in
   let _, actions, _ =
-    Editor_core.Router.step [ palette; keys ] ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple [ palette; keys ] ~focus:View ~text_focus:false
       ~frame:
         (frame
            [
@@ -497,14 +497,14 @@ let () =
   in
   assert (actions = [ keys ]);
   let _, actions, _ =
-    Editor_core.Router.step [ palette; keys ] ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple [ palette; keys ] ~focus:View ~text_focus:false
       ~frame:
         (frame [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar '/') ])
       Idle
   in
   assert (actions = [ palette ]);
   let _, actions, _ =
-    Editor_core.Router.step [ plus ] ~focus:View ~text_focus:false
+    Editor_core.Router.step ~platform:Apple [ plus ] ~focus:View ~text_focus:false
       ~frame:
         (let frame = frame [ Input.Key_pressed (Input.KeyChar '=') ] in
          { frame with input = { frame.input with keys = [ Input.Meta; Input.Shift ] } })
@@ -512,3 +512,37 @@ let () =
   in
   assert (actions = [ plus ]);
   print_endline "editor router: leader/chord scope, text focus, event consumption ok"
+
+(* The platform is an argument: Command is Meta on Apple and Ctrl elsewhere, in triggers and labels. *)
+let () =
+  let open Rays in
+  let open Editor_core.Router in
+  let undo =
+    Editor_core.Command.make ~id:"undo" ~label:"undo"
+      ~trigger:(Chord (Input.KeyChar 'z', [ Input.Meta ]))
+      `Undo
+  and redo =
+    Editor_core.Command.make ~id:"redo" ~label:"redo"
+      ~trigger:(Chord (Input.KeyChar 'z', [ Input.Meta; Input.Shift ]))
+      `Redo
+  in
+  let press platform held key =
+    let frame = frame [ Input.Key_pressed key ] in
+    let frame = { frame with input = { frame.input with keys = held } } in
+    let _, matched, _ =
+      Editor_core.Router.step ~platform [ undo; redo ] ~focus:View ~text_focus:false ~frame Idle
+    in
+    List.map (fun c -> c.Editor_core.Command.action) matched
+  in
+  let open Input in
+  assert (press Apple [ Meta ] (KeyChar 'z') = [ `Undo ]);
+  assert (press Apple [ Meta; Shift ] (KeyChar 'z') = [ `Redo ]);
+  assert (press Other [ Ctrl ] (KeyChar 'z') = [ `Undo ]);
+  assert (press Other [ Ctrl; Shift ] (KeyChar 'z') = [ `Redo ]);
+  assert (press Other [ Meta ] (KeyChar 'z') = []);
+  let open Editor_core.Keymap in
+  assert (label Apple (Chord (KeyChar 's', [ Meta ])) = "⌘S");
+  assert (label Other (Chord (KeyChar 's', [ Meta ])) = "Ctrl-S");
+  assert (label Other (Chord (KeyChar 'd', [ Meta; Shift ])) = "Ctrl-Shift-D");
+  assert (label Other (Chord (KeyChar 'x', [ Meta; Ctrl ])) = "Ctrl-X");
+  print_endline "editor router: command modifier follows the platform, labels say Ctrl elsewhere ok"

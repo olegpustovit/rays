@@ -51,7 +51,7 @@ let label scale = Printf.sprintf "%gx: %s" scale
 
 let scale_1 scale =
   let label = label scale in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let roots events =
     Ui.frame ui (frame ~scale ~time:0.5 events) (fun ui ->
         let root = Ui.box ui ~flags:Ui.clickable ~w:(Ui.Px 100.) ~h:(Ui.Px 100.) "root" in
@@ -81,7 +81,7 @@ let scale_2 scale =
   let settle = settle scale in
   let label = label scale in
   (* Toggle commits on release inside, never on press alone. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let value = ref false in
   let build ui = value := Ui.toggle ui "Enabled" !value in
   settle ui build;
@@ -109,7 +109,7 @@ let scale_3 scale =
     in
     compact := value
   in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   ignore (Ui.frame ui (frame ~scale ~time:0. []) build);
   (* the first page of 1024 x 256 texels: alpha only on the host *)
   if Ui.atlas_mirror_bytes ui <> 1024 * 256 then fail (label "the glyph mirror is not alpha only");
@@ -149,7 +149,7 @@ let scale_3 scale =
   (* The track keeps the pointer from press to release, even outside the field; a lost window or a
      cancelled pointer ends the capture. *)
   compact := "0";
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let tick time events = ignore (Ui.frame ui (frame ~scale ~time events) build) in
   tick 0. [];
   tick 0.5 [ press (50, 30) ];
@@ -174,7 +174,7 @@ let scale_4 scale =
   (* Buttons fire on release inside only. *)
   let clicks = ref 0 in
   let build ui = if Ui.button ui "Apply" then incr clicks in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   settle ui build;
   step ui [ press (20, row 0); move (300, row 0); release (300, row 0) ] build;
   if !clicks <> 0 then fail (label "button fired after release outside");
@@ -195,7 +195,7 @@ let scale_5 scale =
            ignore (Ui.toggle ui "Nested" false)));
     opened := Ui.expanded ui "Advanced"
   in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   settle ui build;
   if !built || !opened <> Some false then fail (label "a collapsed section built its rows");
   step ui [ press (20, row 0); release (20, row 0) ] build;
@@ -215,7 +215,7 @@ let scale_6 scale =
     in
     count := value
   in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
   and clock = ref 0. in
   let fstep ?(keys = []) ?(dt = 0.5) ui events build =
     clock := !clock +. dt;
@@ -283,7 +283,7 @@ let scale_7 scale =
           (fun index value -> toggles.(index) <- Ui.toggle ui (Printf.sprintf "Row %d" index) value)
           toggles)
   in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let scroll_step events =
     time := !time +. 0.5;
     Ui.frame ui (frame ~scale ~time:!time events) scrolled
@@ -296,7 +296,7 @@ let scale_7 scale =
     fail (label "scrolled panel did not route the hit to the scrolled row");
 
   let fixed = Array.make 4 false in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let fixed_panel events =
     time := !time +. 0.5;
     Ui.frame ui (frame ~scale ~time:!time events) (fun ui ->
@@ -312,7 +312,7 @@ let scale_7 scale =
   if (not fixed.(2)) || fixed.(0) || fixed.(1) then
     fail (label "fixed-height inspector panel did not scroll its rows");
 
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let child_y = ref 0. in
   let rubber events =
     time := !time +. 0.5;
@@ -335,7 +335,7 @@ let scale_7 scale =
   rubber [];
   if Float.abs !child_y > 0.25 then fail (label "rubber scroll did not spring back to the edge");
 
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let scroll_dir events =
     time := !time +. 0.5;
     Ui.frame ui (frame ~scale ~time:!time events) (fun ui ->
@@ -362,7 +362,7 @@ let scale_8 scale =
      fingers move the content point for point, a lift in motion coasts to rest, an edge is
      overshot and returned to, a stretch is held until the lift, and content that fits stays. *)
   let pad ?(content = 2000.) ?(start = 0.) ?(h = Ui.Px 80.) ~dt () =
-    let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
+    let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
     and clock = ref 100. in
     let step events =
       clock := !clock +. dt;
@@ -464,7 +464,7 @@ let scale_9 scale =
   let label = label scale in
   (* A pinch goes where the wheel goes: to the scrollable box under the pointer,
      its factors multiplied within a frame, and nowhere else. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let pinched events =
     time := !time +. 0.5;
     let seen = ref 1. in
@@ -494,7 +494,7 @@ let scale_10 scale =
   (* Text fields: UTF-8 entry, Backspace/Delete, focus kept on cancel. *)
   let title = ref "" in
   let build ui = title := Ui.text_field ui "Title" !title in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   settle ui build;
   step ui
     [
@@ -570,7 +570,7 @@ let scale_10 scale =
     short := Ui.text_field ui "Short" !short;
     long := Ui.text_field ui "Long" !long
   in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   settle ui build;
   step ui [ press (150, row 1); release (150, row 1) ] build;
   step ui [] build;
@@ -592,7 +592,7 @@ let scale_11 scale =
     number := value;
     typing := open_
   in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let clock = ref 0. in
   let tick events =
     clock := !clock +. 0.05;
@@ -620,7 +620,7 @@ let scale_11 scale =
     in
     field := value
   in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let field_time = ref 0. in
   let field_step ?(keys = []) events =
     field_time := !field_time +. 0.5;
@@ -672,7 +672,7 @@ let with_scale scale =
   ()
 
 let tooltip_rest () =
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Fun.protect
     ~finally:(fun () -> Ui.destroy ui)
     (fun () ->
@@ -725,7 +725,7 @@ let tooltip_rest () =
 
 let hover_cursor () =
   (* Hover: the topmost control under the pointer, from last frame's rects. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let hovered = ref false in
   let build ui =
     Ui.panel ui ~x:0. ~y:0. ~width:240. "panel" (fun () ->
@@ -738,7 +738,7 @@ let hover_cursor () =
   Ui.frame ui (frame ~scale:2. ~time:0.2 [ move (300, 200) ]) build;
   if !hovered || Ui.wants_pointer ui then fail "hover outlived the pointer";
   (* text fields show the I-beam under the pointer, and only there *)
-  let field_ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let field_ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let title = ref "" in
   let field ui = title := Ui.text_field ui "Title" !title in
   Ui.frame field_ui (frame ~scale:1. ~time:0.6 []) field;
@@ -746,7 +746,7 @@ let hover_cursor () =
   if Ui.cursor field_ui <> Some `Text then fail "a text field did not request the I-beam";
   Ui.frame field_ui (frame ~scale:1. ~time:0.8 [ move (300, 200) ]) field;
   if Ui.cursor field_ui <> None then fail "the I-beam outlived hover";
-  let area_ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let area_ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let area ui = ignore (Ui.text_area_submit ui ~at:(0., 0.) ~w:200. ~h:100. "area" "hello") in
   Ui.frame area_ui (frame ~scale:1. ~time:0.9 []) area;
   Ui.frame area_ui (frame ~scale:1. ~time:1.0 [ move (50, 30) ]) area;
@@ -757,7 +757,7 @@ let hover_cursor () =
 
 let retained_keys () =
   (* Keys that come and go (150,000 of them, 500 a frame) leave the retained state the size it was. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () and next = ref 0 in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () and next = ref 0 in
   let churn () =
     Ui.frame ui (frame ~scale:1. ~time:0. []) (fun ui ->
         for _ = 1 to 500 do
@@ -781,8 +781,8 @@ let retained_keys () =
 let text_memory () =
   let module T = Pxui__Ui_text in
   let module C = Pxui__Ui_core in
-  let ui = C.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
-  let other = C.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = C.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let other = C.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let owner = Mem.document "pxui.text_undo" in
   let at_start = Mem.bytes owner in
   let text_of key step = Printf.sprintf "%d %d %s" key step (String.make 100_000 'x') in
@@ -822,7 +822,7 @@ let text_memory () =
 
 let fit_box () =
   (* A box with no extent of its own (Fit, its one child placed with ~at) shows the child. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let placed events =
     Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
         let group = Ui.box ui ~w:Ui.Fit ~h:Ui.Fit "group" in
@@ -838,7 +838,7 @@ let fit_box () =
 
 let batches () =
   (* One panel paints in a handful of batches, not one draw per label. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Ui.frame ui (frame ~scale:2. ~time:0. []) (fun ui ->
       Ui.panel ui "panel" (fun () ->
           Ui.label ui "PXUI";
@@ -868,7 +868,7 @@ let picker () =
     Array.of_list
       (List.filter (fun (label, _) -> Ui.fuzzy_match ~query label) (Array.to_list items))
   in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
   and query = ref ""
   and last = ref `None in
   let off = ref (fun _ -> false) in
@@ -950,7 +950,7 @@ let picker () =
 let context_menu () =
   (* Context menu: rows commit on release inside, disabled rows are inert,
      a press outside dismisses; the host keeps it open on `Open. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
   and result = ref `Open in
   let menu events =
     Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -973,7 +973,7 @@ let context_menu () =
 
 let submenu () =
   (* Text areas: the text_field edit and IME path over lines. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let submenu events =
     Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
         Ui.context_menu ui ~at:(20., 20.) ~width:150.
@@ -1002,7 +1002,7 @@ type area_step =
   Input.event list ->
   unit
 
-let text_area_start () =
+let text_area_start ?(platform = Input.Apple) () =
   let area = ref ""
   and errors = ref []
   and wrapped = ref false
@@ -1011,7 +1011,8 @@ let text_area_start () =
   and context = ref None
   and scrubs = ref []
   and scrub_edits = ref [] in
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
+  let ui = Ui.create ~platform ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
+  and command_key = Input.primary platform
   and time = ref 0. in
   let selected = ref (0, 0) in
   let area_step ?(keys = []) ?reveal ?reveal_nonce ?select ?splice events =
@@ -1073,23 +1074,23 @@ let text_area_start () =
       match previous_clipboard with Ok text -> ignore (Clipboard.set_text text) | Error _ -> ())
     (fun () ->
       area_step ~keys:[ Input.Shift ] [ Input.Key_pressed Input.ArrowLeft ];
-      area_step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'c') ];
+      area_step ~keys:[ command_key ] [ Input.Key_pressed (Input.KeyChar 'c') ];
       if Clipboard.get_text () <> Ok "é" then fail "text area copy ignored the selection";
-      area_step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'a') ];
-      area_step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'x') ];
+      area_step ~keys:[ command_key ] [ Input.Key_pressed (Input.KeyChar 'a') ];
+      area_step ~keys:[ command_key ] [ Input.Key_pressed (Input.KeyChar 'x') ];
       expect "cut all" "";
       if Clipboard.get_text () <> Ok "_abX\ncé" then fail "text area cut lost the text";
-      area_step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'v') ];
+      area_step ~keys:[ command_key ] [ Input.Key_pressed (Input.KeyChar 'v') ];
       expect "paste keeps the newline" "_abX\ncé";
       (* copy and cut with no selection take the caret's line: of an empty area, nothing *)
       area := "";
       area_step [ press (150, 12); release (150, 12) ];
-      area_step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'c') ];
-      area_step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'x') ];
+      area_step ~keys:[ command_key ] [ Input.Key_pressed (Input.KeyChar 'c') ];
+      area_step ~keys:[ command_key ] [ Input.Key_pressed (Input.KeyChar 'x') ];
       expect "copy and cut of an empty area" "";
       area := "ab\ncd";
       area_step [ press (150, 12); release (150, 12) ];
-      area_step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'x') ];
+      area_step ~keys:[ command_key ] [ Input.Key_pressed (Input.KeyChar 'x') ];
       expect "cut with no selection takes the caret's line" "cd");
   ( ui,
     area,
@@ -1495,6 +1496,32 @@ let text_area_4 rig =
   expect "the caret stays where the rewrite put it" "ab!!";
   language := None
 
+(* Windows conventions: Ctrl moves and deletes by words, Home and End are the lines, Ctrl-Z, Ctrl-Y
+   and Ctrl-Shift-Z undo and redo *)
+let text_area_windows rig =
+  let _, area, _, _, _, _, _, _, _, _, _, area_step, _, expect = rig in
+  let area_step : area_step = area_step in
+  area := "one two three";
+  area_step [ press (150, 12); release (150, 12) ];
+  area_step ~keys:[ Input.Ctrl ] [ Input.Key_pressed Input.ArrowDown ];
+  area_step ~keys:[ Input.Ctrl ] [ Input.Key_pressed Input.ArrowLeft ];
+  area_step [ Input.Text_input "X" ];
+  expect "Ctrl-Left moves to the start of the word" "one two Xthree";
+  area_step [ Input.Key_pressed Input.End ];
+  area_step ~keys:[ Input.Ctrl ] [ Input.Key_pressed Input.Backspace ];
+  expect "Ctrl-Backspace takes the word before the caret" "one two ";
+  area_step ~keys:[ Input.Ctrl ] [ Input.Key_pressed (Input.KeyChar 'z') ];
+  expect "Ctrl-Z undoes the deletion" "one two Xthree";
+  area_step ~keys:[ Input.Ctrl ] [ Input.Key_pressed (Input.KeyChar 'y') ];
+  expect "Ctrl-Y redoes it" "one two ";
+  area_step ~keys:[ Input.Ctrl ] [ Input.Key_pressed (Input.KeyChar 'z') ];
+  area_step ~keys:[ Input.Ctrl; Input.Shift ] [ Input.Key_pressed (Input.KeyChar 'z') ];
+  expect "Ctrl-Shift-Z redoes" "one two ";
+  area_step [ Input.Key_pressed Input.Home; Input.Text_input "_" ];
+  expect "Home is the start of the line" "_one two ";
+  area_step [ Input.Key_pressed Input.End; Input.Text_input "$" ];
+  expect "End is the end of the line" "_one two $"
+
 let text_area_5 rig =
   let ui, area, _, _, _, _, _, _, _, _, _, area_step, _, expect = rig in
   let area_step : area_step = area_step in
@@ -1575,7 +1602,7 @@ let text_area_5 rig =
 
 let modal_1 () =
   (* Modal: centered, and Escape or a press outside dismisses it. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
   and shown = ref None in
   let modal events =
     Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -1594,7 +1621,7 @@ let modal_1 () =
   Ui.destroy ui
 
 let modal_2 () =
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") ()
   and shown = ref None in
   let popup events =
     Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -1612,7 +1639,7 @@ let modal_2 () =
   Ui.destroy ui
 
 let modal_3 () =
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let menu events =
     Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
         Ui.context_menu ui ~at:(20., 20.) ~width:240. ~selected:1 "choices"
@@ -1625,7 +1652,7 @@ let modal_3 () =
   Ui.destroy ui
 
 let modal_4 () =
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let front_key = ref 0 in
   let raised events =
     Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -1662,7 +1689,7 @@ let two_widgets () =
   (* Two text widgets share nothing: a double click's word in one and its undo stack do not
      reach the numeric editor opened after it (a drag there stays inside its own text, and
      Command-Z with nothing typed is the host's). *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let words = ref "alpha beta gamma" and number = ref "240" and clock = ref 0. in
   let tick ?(keys = []) ?(dt = 0.05) events =
     clock := !clock +. dt;
@@ -1699,7 +1726,7 @@ let carry () =
   (* A carry: held once the pointer has left the 4-point dead zone of the press, seen as hover
      by a box that does not own the press, put once on release, and gone after a pointer
      cancellation or a focus loss.  A key starts one with no capture: a press is the put. *)
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let clicked = ref false and popup = ref false in
   let carried events =
     Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -1793,7 +1820,7 @@ let carry () =
   Ui.destroy ui
 
 let retired_callbacks () =
-  let ui = Ui.create () and held = Weak.create 5 and seen = Array.make 5 false in
+  let ui = Ui.create ~platform:Input.Apple () and held = Weak.create 5 and seen = Array.make 5 false in
   let payload index =
     let bytes = Bytes.make 32 'x' in
     Weak.set held index (Some bytes);
@@ -1855,6 +1882,7 @@ let run () =
   text_area_3 rig;
   text_area_4 rig;
   text_area_5 rig;
+  text_area_windows (text_area_start ~platform:Input.Other ());
 
   modal_1 ();
   modal_2 ();

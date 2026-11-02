@@ -1167,7 +1167,7 @@ let render_mode_click ?(native = false) () =
       step view [ Input.Pointer_pressed (Input.LeftButton, view);
                   Input.Pointer_released (Input.LeftButton, view) ];
       step view [];
-      let ui = Pxui.Ui.create ~font_size:(if native then 13 else 11) () in
+      let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:(if native then 13 else 11) () in
       Fun.protect ~finally:(fun () -> Pxui.Ui.destroy ui) (fun () ->
           let x =
             Pxui_shell.Chrome.tools_start ui ~focused:true ~floating:false ~collapsed:false

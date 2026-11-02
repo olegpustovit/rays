@@ -414,7 +414,8 @@ A `?language` (`Ui.language`: `colorize`, `brackets`, `indent`, `pairs`) makes i
 teaching it a language: coloured runs by byte span, the bracket pair at the caret lit, Enter followed by
 the language's indentation, openers typed in pairs (wrapping a selection), closers stepping over
 themselves and Backspace taking an empty pair; `?on_context` reports a right-click for the host's menu.
-Every text widget edits as macOS does (word selection by double click, line by triple, Option and
+Every text widget edits as its host binds it: macOS with Command and Option, elsewhere Ctrl for both
+(word selection by double click, line by triple, Option and
 Command with the arrows, Backspace and Delete, Shift extending, Command-Z/Shift-Command-Z undo and
 redo kept per focused text with consecutive typing as one step); `Ui.signal.clicks` counts a
 double or triple click.  A language's optional `rewrite` runs after each edited frame and maps

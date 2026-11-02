@@ -6,7 +6,7 @@ let first_word label = List.hd (String.split_on_char ' ' label)
 
 (* One page per typed prefix: a key that continues into longer sequences
      shows as a "+group" row named by the first word of its first command. *)
-let page keymap ~prefix scope =
+let page platform keymap ~prefix scope =
   List.fold_left
     (fun rows command ->
       match command.trigger with
@@ -24,7 +24,7 @@ let page keymap ~prefix scope =
                   else "+" ^ first_word command.label );
               ]
       | Some (Chord (key, modifiers)) when prefix = "" && command.scope = scope ->
-          rows @ [ (Editor_core.Keymap.label (Chord (key, modifiers)), command.label) ]
+          rows @ [ (Editor_core.Keymap.label platform (Chord (key, modifiers)), command.label) ]
       | _ -> rows)
     [] keymap
 
@@ -34,7 +34,7 @@ let category_order = [ "Add"; "Panel"; "Layout"; "Go"; "Time"; "File" ]
 (* The leader's page by category: one-letter continuations only, no chords.  A key that
      continues into longer sequences is "+" and a name from [describe], else the first word of its
      first command. *)
-let by_category keymap ~prefix ~focus ~category ~describe ~order =
+let by_category platform keymap ~prefix ~focus ~category ~describe ~order =
   let rows =
     List.fold_left
       (fun rows command ->
@@ -131,11 +131,14 @@ let panel ui ?category ?(describe = fun _ -> None) ?(order = fun _ -> []) keymap
   let theme = Ui.theme ui in
   let sections =
     match category with
-    | Some category -> by_category keymap ~prefix ~focus ~category ~describe ~order
+    | Some category -> by_category (Ui.platform ui) keymap ~prefix ~focus ~category ~describe ~order
     | None ->
         List.filter
           (fun (_, rows) -> rows <> [])
-          [ ("Global", page keymap ~prefix None); (focus_name, page keymap ~prefix (Some focus)) ]
+          [
+              ("Global", page (Ui.platform ui) keymap ~prefix None);
+              (focus_name, page (Ui.platform ui) keymap ~prefix (Some focus));
+            ]
   in
   let view_w, view_h = Ui.view_size ui in
   let row = float (Ui.row_height ui) in
@@ -176,7 +179,7 @@ let panel ui ?category ?(describe = fun _ -> None) ?(order = fun _ -> []) keymap
 (* The key sheet's sections: every command a key reaches, once per id with all its keys (the
      Ctrl twins of the Command chords left out), under the section [category] gives it, the
      leader sheet's sections first. *)
-let sheet_sections ?(category = fun _ -> "Keys") ?(text_keys = []) keymap =
+let sheet_sections platform ?(category = fun _ -> "Keys") ?(text_keys = []) keymap =
   let commands =
     List.fold_left
       (fun seen command ->
@@ -207,8 +210,10 @@ let sheet_sections ?(category = fun _ -> "Keys") ?(text_keys = []) keymap =
                       if alias.id <> command.id then None
                       else
                         match alias.trigger with
-                        | Some (Chord (_, modifiers)) when List.mem Input.Ctrl modifiers -> None
-                        | Some trigger -> Some (Editor_core.Keymap.label trigger)
+                        | Some (Chord (_, modifiers))
+                          when platform = Input.Apple && List.mem Input.Ctrl modifiers ->
+                            None
+                        | Some trigger -> Some (Editor_core.Keymap.label platform trigger)
                         | None -> None)
                     keymap
                   |> List.sort_uniq String.compare |> String.concat " / "
@@ -223,12 +228,14 @@ let sheet_sections ?(category = fun _ -> "Keys") ?(text_keys = []) keymap =
   | keys ->
       sections
       @ [
-          ("Text", List.map (fun (label, trigger) -> (Editor_core.Keymap.label trigger, label)) keys);
+          ( "Text",
+            List.map (fun (label, trigger) -> (Editor_core.Keymap.label platform trigger, label)) keys
+          );
         ]
 
 let sheet ui ?(context = "") ?category ?text_keys keymap =
   let module Ui = Pxui.Ui in
-  let sections = sheet_sections ?category ?text_keys keymap in
+  let sections = sheet_sections (Pxui.Ui.platform ui) ?category ?text_keys keymap in
   match
     Ui.modal ui ~width:572. "guide-keys" (fun () ->
         let theme = Ui.theme ui in

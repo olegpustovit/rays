@@ -1,4 +1,7 @@
 type event = Input.event
+
+val platform : Input.platform
+(** The host's modifier conventions, read once from SDL. The only place the platform is read. *)
 type snapshot = { pointer : float * float; mouse_delta : float * float; visible : bool }
 type t
 

@@ -6,7 +6,7 @@ let frame count events =
   { frame with input = { frame.input with size = (360, 240) } }
 
 let run () =
-  let ui = Ui.create ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Fun.protect
     ~finally:(fun () -> Ui.destroy ui)
     (fun () ->

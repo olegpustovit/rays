@@ -358,7 +358,8 @@ let settle_layout ~(value : t) ~vw ~workspace ~(frame : Frame.t) ~keymap ~shortc
               Pxui_shell.Chrome.panel_menu ~state:(panel_state value)
                 ~key_of:(fun id ->
                   match List.find_opt (fun (c : Editor_commands.command) -> c.id = id) keymap with
-                  | Some { trigger = Some trigger; _ } -> Editor_core.Keymap.label trigger
+                  | Some { trigger = Some trigger; _ } ->
+                      Editor_core.Keymap.label (Pxui.Ui.platform value.ui) trigger
                   | _ -> "")
                 ui leaf box ~at:(Pxui.Ui.context_at ui box)))
       timeline_leaves
@@ -919,7 +920,8 @@ let hud_of ~(value : t) ~leader ~(frame : Frame.t) (commands : Editor_commands.c
     match List.rev commands with
     | command :: _ ->
         Some
-          ( Editor_core.Keymap.label (Option.get command.trigger) ^ " · " ^ command.label,
+          ( Editor_core.Keymap.label (Pxui.Ui.platform value.ui) (Option.get command.trigger)
+            ^ " · " ^ command.label,
             frame.input.t +. 1.5 )
     | [] -> (
         match leader with
@@ -979,7 +981,8 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
   let keymap = live_keymap ~all_ui_visible keymap in
   let held_keys = frame.input.keys in
   let leader, commands, frame =
-    Editor_core.Router.step ~previous_keys:value.held_keys keymap
+    Editor_core.Router.step ~previous_keys:value.held_keys
+      ~platform:(Pxui.Ui.platform value.ui) keymap
       ~focus:(Editor_commands.scope focus) ~text_focus ~frame value.leader
   in
   let hud = hud_of ~value ~leader ~frame commands in
@@ -1159,7 +1162,8 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
         ~title:(panel_title vw) ~groups:header_groups
         ~key_of:(fun id ->
           match List.find_opt (fun (c : Editor_commands.command) -> c.id = id) keymap with
-          | Some { trigger = Some trigger; _ } -> Editor_core.Keymap.label trigger
+          | Some { trigger = Some trigger; _ } ->
+              Editor_core.Keymap.label (Pxui.Ui.platform value.ui) trigger
           | _ -> "")
         ?focus:header_focus (shell_tree value workspace) ui shortcut_frame
     in

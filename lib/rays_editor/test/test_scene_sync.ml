@@ -649,7 +649,7 @@ let run () =
     "a World layer could not be deleted by its binding";
   (* through the editor: a workspace with no scene graph gets one when an object is added *)
   let env =
-    Rays_editor.Editor.create ~ui_text_size:11
+    Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11
       ~workspace:(Ws_fixture.of_text "(workspace bare (graph g :context sop (sop/box)))")
       ~prepare:Editor_prepare.surface
       ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)

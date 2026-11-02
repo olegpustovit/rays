@@ -128,7 +128,7 @@ module Graph_pane = struct
         | Some workspace, _ -> workspace
         | None, _ -> failwith (name ^ " did not check"))
 
-  let ui = Pxui.Ui.create ~font_size:11 ()
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 ()
 
   let step view (frame : Frame.t) =
     let settle = { frame with input = { frame.input with events = [] } } in

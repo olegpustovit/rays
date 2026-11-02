@@ -69,7 +69,7 @@ end
 module Keymap : sig
   type trigger = Leader of string | Chord of Input.key * Input.key list
 
-  val label : trigger -> string
+  val label : Input.platform -> trigger -> string
   (** Shared key spelling for guides, which-key and command feedback. *)
 end
 
@@ -116,6 +116,7 @@ module Router : sig
 
   val step :
     ?previous_keys:Input.key list ->
+    platform:Input.platform ->
     ('scope, 'action) Command.t list ->
     focus:'scope ->
     text_focus:bool ->

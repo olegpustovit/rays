@@ -21,7 +21,7 @@ let background = Rays_math.Color.rgb 228 139 161
 (* The second frame of a fresh UI with the pointer parked away from every widget, rendered
    [scale] pixels a point. *)
 let render ?(height = 300) build =
-  let ui = Pxui.Ui.create ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let frame count : Frame.t =
     {
       input =
@@ -131,7 +131,7 @@ let commands () =
     (fun density ->
       List.iter
         (fun (name, height, build) ->
-          let ui = Pxui.Ui.create ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+          let ui = Pxui.Ui.create ~platform:Input.Apple ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
           Fun.protect
             ~finally:(fun () -> Pxui.Ui.destroy ui)
             (fun () ->

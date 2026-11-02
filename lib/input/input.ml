@@ -236,3 +236,16 @@ module Gate = struct
         },
         blocked )
 end
+
+type platform = Apple | Other
+
+let platform_of_name = function "macOS" | "Mac OS X" -> Apple | _ -> Other
+let primary = function Apple -> Meta | Other -> Ctrl
+
+(* On Apple the Ctrl twin of Command stays a command, as it has always been. *)
+let command_held platform keys =
+  match platform with
+  | Apple -> List.mem Meta keys || List.mem Ctrl keys
+  | Other -> List.mem Ctrl keys
+
+let word_held platform keys = List.mem (match platform with Apple -> Alt | Other -> Ctrl) keys

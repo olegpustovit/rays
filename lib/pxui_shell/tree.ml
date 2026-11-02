@@ -332,7 +332,7 @@ let update t ui (_frame : Rays.Frame.t) ~bounds:(x, y, w, h) ?(title = "") ~colu
                       Option.value ~default:k (Option.bind t.anchor (position rows shown))
                     in
                     row.id :: List.filter (( <> ) row.id) (span rows shown anchor k)
-                  else if modifier Input.Meta || modifier Input.Ctrl then
+                  else if Input.command_held (Ui.platform ui) (Ui.press_keys ui box) then
                     if is_selected row.id then List.filter (( <> ) row.id) selected
                     else row.id :: selected
                   else if is_selected row.id then row.id :: List.filter (( <> ) row.id) selected

@@ -179,10 +179,12 @@ module Editor = struct
     { value with extra = { value.extra with Viewport.renderer_request = Some mode } }
 
   let create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains ?max_entries
-      ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ~workspace ?source
+      ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?platform ?ui_font
+      ~workspace ?source
       ~prepare ~draw () =
     Loop_model.create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains ?max_entries
-      ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ~workspace ?source
+      ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?platform ?ui_font
+      ~workspace ?source
       ~prepare ~draw ()
 
   let run ?inputs ?name ?factories ?camera ?seed ?grain ?max_entries ?max_payload_bytes ~config

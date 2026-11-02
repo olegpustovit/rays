@@ -175,6 +175,7 @@ module Editor : sig
     ?carry_budget:float ->
     ?preferences:string ->
     ?ui_text_size:int ->
+    ?platform:Input.platform ->
     ?ui_font:string ->
     workspace:Workspace_doc.t ->
     ?source:Source.t ->

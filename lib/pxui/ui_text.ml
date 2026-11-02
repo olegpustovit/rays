@@ -354,14 +354,17 @@ let point_text_caret ui ?size edit signal ~shift ~x ~right =
     drag_select ui edit ~line_of (at signal.pointer)
   end
 
-(* The keys every text widget shares, as macOS binds them: Command-A/C/X/V, Command-Z and
-   Shift-Command-Z (or Command-Y) undo and redo, Option-arrows move by words, Command-arrows
-   and Home/End by lines, Option-Backspace/Delete take a word, Command-Backspace/Delete the
-   line to the caret.  Returns whether the text changed. *)
+(* The keys every text widget shares, as the host binds them. On Apple: Command-A/C/X/V, Command-Z
+   and Shift-Command-Z (or Command-Y) undo and redo, Option-arrows move by words, Command-arrows
+   and Home/End by lines, Option-Backspace/Delete take a word, Command-Backspace/Delete the line to
+   the caret. Elsewhere Ctrl replaces Command and Option (Ctrl-arrows and Ctrl-Backspace move and
+   delete by words; Home and End are the lines). Returns whether the text changed. *)
 let edit_text_event ?(multiline = false) ui edit ~accept ~modifiers event =
-  let command = command_modifiers modifiers
-  and shift = List.mem Input.Shift modifiers
-  and alt = List.mem Input.Alt modifiers in
+  let command = command_modifiers ui modifiers in
+  let shift = List.mem Input.Shift modifiers in
+  (* Command moves and deletes by lines on Apple only; elsewhere Ctrl moves by words *)
+  let line = line_modifiers ui modifiers in
+  let word = Input.word_held ui.platform modifiers in
   let selected () = edit.caret <> edit.anchor in
   let move target =
     edit.caret <- target;
@@ -424,25 +427,25 @@ let edit_text_event ?(multiline = false) ui edit ~accept ~modifiers event =
       true
   | Input.Key_pressed Input.Backspace ->
       delete_to
-        (if command then line_start edit.text edit.caret
-         else if alt then word_left edit.text edit.caret
+        (if line then line_start edit.text edit.caret
+         else if word then word_left edit.text edit.caret
          else previous_utf8 edit.text edit.caret)
   | Input.Key_pressed Input.Delete ->
       delete_to
-        (if command then line_end edit.text edit.caret
-         else if alt then word_right edit.text edit.caret
+        (if line then line_end edit.text edit.caret
+         else if word then word_right edit.text edit.caret
          else next_utf8 edit.text edit.caret)
   | Input.Key_pressed Input.ArrowLeft ->
       move
-        (if command then line_start edit.text edit.caret
-         else if alt then word_left edit.text edit.caret
+        (if line then line_start edit.text edit.caret
+         else if word then word_left edit.text edit.caret
          else if selected () && not shift then fst (text_selection edit)
          else previous_utf8 edit.text edit.caret);
       false
   | Input.Key_pressed Input.ArrowRight ->
       move
-        (if command then line_end edit.text edit.caret
-         else if alt then word_right edit.text edit.caret
+        (if line then line_end edit.text edit.caret
+         else if word then word_right edit.text edit.caret
          else if selected () && not shift then snd (text_selection edit)
          else next_utf8 edit.text edit.caret);
       false
@@ -517,7 +520,7 @@ let rec numeric_editor ?size ?control ?(click_to_edit = false) ?(edit_request = 
     ?(alt_to_edit = false) ?(align_right = false) ?(accept = String.for_all numeric_character) ui
     row signal ~keys ~current ~parse =
   let enter = function
-    | Input.Key_pressed Input.Enter, modifiers -> not (command_modifiers modifiers)
+    | Input.Key_pressed Input.Enter, modifiers -> not (command_modifiers ui modifiers)
     | _ -> false
   in
   let bounds = ints (rect ui row) in
@@ -555,7 +558,7 @@ let rec numeric_editor ?size ?control ?(click_to_edit = false) ?(edit_request = 
       List.iter
         (fun ((event : Input.event), modifiers) ->
           match event with
-          | Input.Key_pressed Input.Enter when not (command_modifiers modifiers) -> (
+          | Input.Key_pressed Input.Enter when not (command_modifiers ui modifiers) -> (
               match parse edit.text with
               | Some value -> committed := Some value
               | None -> state := 0)
@@ -974,7 +977,7 @@ let line_field ui ~at ~w ~h ?(grab = false) ?(placeholder = "") label value =
     List.iter
       (fun ((event : Input.event), modifiers) ->
         match event with
-        | Input.Key_pressed Input.Enter when not (command_modifiers modifiers) ->
+        | Input.Key_pressed Input.Enter when not (command_modifiers ui modifiers) ->
             step := if List.mem Input.Shift modifiers then `Previous else `Next
         | Input.Key_pressed Input.ArrowDown -> step := `Next
         | Input.Key_pressed Input.ArrowUp -> step := `Previous
@@ -1383,7 +1386,7 @@ let handle_keys ~body ~stop_of ~page ~typed ~language ~suggest ~open_ ~accept ~s
     ~items ~submitted ~changed ~closed ~shown ~row_text ~start_of ~edit ~rows_of ui =
   List.iter
     (fun ((event : Input.event), modifiers) ->
-      let command = command_modifiers modifiers and shift = List.mem Input.Shift modifiers in
+      let command = command_modifiers ui modifiers and shift = List.mem Input.Shift modifiers in
       let rows = rows_of edit.text in
       let count = Array.length rows in
       let x_of line index =
@@ -1618,10 +1621,10 @@ let handle_keys ~body ~stop_of ~page ~typed ~language ~suggest ~open_ ~accept ~s
       | Input.Key_pressed Input.PageUp -> vertical (-page)
       | Input.Key_pressed Input.PageDown -> vertical page
       | Input.Key_pressed (Input.Home | Input.ArrowLeft)
-        when command || event = Input.Key_pressed Input.Home ->
+        when line_modifiers ui modifiers || event = Input.Key_pressed Input.Home ->
           move (start_of rows line)
       | Input.Key_pressed (Input.End | Input.ArrowRight)
-        when command || event = Input.Key_pressed Input.End ->
+        when line_modifiers ui modifiers || event = Input.Key_pressed Input.End ->
           move (stop_of rows line)
       | event ->
           if edit_text_event ~multiline:true ui edit ~accept:(fun _ -> true) ~modifiers event then begin
@@ -1953,7 +1956,7 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
   (match on_click with
   | Some f when signal.clicked && signal.button = Some Input.LeftButton && scrub_state >= 0 ->
       Option.iter
-        (fun byte -> f byte (command_modifiers (press_keys ui body)))
+        (fun byte -> f byte (command_modifiers ui (press_keys ui body)))
         (point_in ~strict:true text rows signal.release_point)
   | _ -> ());
   (* a payload in flight over the area: the byte under the pointer, hovering or released *)

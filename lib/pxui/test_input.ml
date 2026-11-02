@@ -22,7 +22,7 @@ let frame ?(buttons = []) ?(keys = []) events : Frame.t =
   }
 
 let run () =
-  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let ui = Ui.create ~platform:Input.Apple ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Fun.protect
     ~finally:(fun () -> Ui.destroy ui)
     (fun () ->

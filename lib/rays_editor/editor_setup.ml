@@ -33,12 +33,17 @@ let workspace_doc ?gpu ?opened ~factories ~seed_scene workspace =
   in
   Ok doc
 
-let preferences_file = function
+let user_folder platform =
+  Editor_core.Store.user_folder platform
+    ~pref:
+      (match platform with
+      | Input.Apple -> None
+      | Other -> Sdl3.pref_path ~org:"rays" ~app:"editor")
+    ~home:(Option.value ~default:"." (Sys.getenv_opt "HOME"))
+
+let preferences_file platform = function
   | Some path when path <> "" -> path
-  | Some _ | None ->
-      Filename.concat
-        (Filename.concat (Option.value ~default:"." (Sys.getenv_opt "HOME")) ".rays")
-        "preferences.rays"
+  | Some _ | None -> Filename.concat (user_folder platform) "preferences.rays"
 
 let read_preferences filename = Editor_core.Store.Settings.load ~sketch:"rays-editor" filename
 
@@ -62,7 +67,8 @@ let browse value query =
 let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") ?presets
     ?(state_key = name) ?(factories = []) ?(seed = 0L) ?(grain = 16_384) ?domains
     ?(max_entries = 512) ?(max_payload_bytes = 256 * 1024 * 1024) ?await ?(carry_budget = 0.5)
-    ?(clock = Unix.gettimeofday) ?preferences ?(ui_text_size = default_text_size) ?ui_font ?opened
+    ?(clock = Unix.gettimeofday) ?preferences ?(ui_text_size = default_text_size)
+    ?(platform = Runtime_input.platform) ?ui_font ?opened
     ~workspace ~prepare () =
   let factories = if factories = [] then Sop.Nodes.factories else factories in
   let settings = Option.value settings ~default:workspace.Workspace_doc.settings in
@@ -86,12 +92,10 @@ let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") 
             match presets with
             | Some directory -> directory
             | None ->
-                Filename.concat
-                  (Filename.concat (Option.value ~default:"." (Sys.getenv_opt "HOME")) ".rays")
-                  (Preset.sanitize name)
+                Filename.concat (user_folder platform) (Preset.sanitize name)
           in
           let level = Document.Scene in
-          let preferences = preferences_file preferences in
+          let preferences = preferences_file platform preferences in
           (* a machine's setting, beside the guide: an override from the process still wins *)
           (match read_preferences preferences with
           | Ok values ->
@@ -159,7 +163,7 @@ let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") 
               sketch_blocked = [];
               window_focus = 2;
               ui =
-                (let ui = Pxui.Ui.create ?font_path:ui_font () in
+                (let ui = Pxui.Ui.create ~platform ?font_path:ui_font () in
                  Pxui.Ui.set_font_size ui ui_text_size;
                  ui);
               workspace;

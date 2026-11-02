@@ -7,6 +7,10 @@ val write_text : filename:string -> string -> (unit, string) result
 
 val read_text : filename:string -> (string, string) result
 
+val user_folder : Input.platform -> pref:string option -> home:string -> string
+(** The editor's per-user folder for presets and preferences. Apple keeps [home/.rays]; elsewhere
+    it is the platform's preference folder [pref] (SDL's), and [home/.rays] when SDL names none. *)
+
 module Viewport : sig
   val encode : Rays.Easy_camera.t -> look_through:bool -> Flow.Syntax.t
   val decode : Rays.Easy_camera.t -> Flow.Syntax.t -> Rays.Easy_camera.t * bool

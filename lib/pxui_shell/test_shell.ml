@@ -16,7 +16,7 @@ let bindings =
     ]
 
 let instances focus =
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   ignore
     (Pxui.Ui.frame ui frame (fun ui ->
          Pxui_shell.Which_key.panel ui bindings ~prefix:"" ~focus ~focus_name:"View"));
@@ -30,7 +30,7 @@ let instances focus =
         0 staged.layers
 
 let status_instances height =
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   ignore
     (Pxui.Ui.frame ui frame (fun ui ->
          Pxui_shell.Status_bar.draw ui ~bounds:(0, 272, 400, height) ~text:"Cook complete"
@@ -45,7 +45,7 @@ let status_instances height =
         0 staged.layers
 
 let () =
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let pane events =
     Pxui.Ui.frame ui
       { frame with input = { frame.input with events } }
@@ -80,7 +80,7 @@ let () =
   if (view_width, graph_width, inspector_width) <> (449, 349, 200) then
     failwith "shell layout defaults are not 45/35/20";
   let divider_x = view_width in
-  let hit_ui = Pxui.Ui.create ~font_size:11 () in
+  let hit_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let chrome events =
     ignore
       (Pxui.Ui.frame hit_ui
@@ -308,7 +308,7 @@ let () =
   | _ -> failwith "a 24-point timeline is not its strip");
   (* where a header's tools begin: after the title, 8, the 1-point rule between 4-point margins, 8;
      the focus square adds 12; a window sets its path in the label size *)
-  let tools_ui = Pxui.Ui.create ~font_size:11 () in
+  let tools_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let from ?(focused = false) ?(floating = false) text =
     Pxui_shell.Chrome.tools_start tools_ui ~focused ~floating ~collapsed:false text
   in
@@ -331,7 +331,7 @@ let () =
       if ah + 22 >= bh + 22 then failwith "a vertical split ignored its ratio"
   | _ -> failwith "vertical split lost a panel");
   (* dragging a splitter reports a ratio, and the header menu reports its intents *)
-  let drag_ui = Pxui.Ui.create ~font_size:11 () in
+  let drag_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let chrome tree ?(mouse = (0., 0.)) events =
     let f =
       {
@@ -434,7 +434,7 @@ let () =
   if instances "view" <= instances "other" then failwith "focused leader bindings were not drawn";
   if status_instances 24 <= 0 || status_instances 0 <> 0 then
     failwith "status strip visibility or drawing failed";
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let intents =
     Pxui.Ui.frame ui frame (fun ui ->
         Pxui_shell.Timeline_bar.draw ui ~bounds:(0, 270, 400, 30) ~playing:false ~frame:12L
@@ -501,7 +501,7 @@ let () =
     failwith "macro prompt changed its state or submitted on its own";
   (* a window saved past the right edge is drawn inside the frame, and a drag moves it from
      where it is drawn: the pointer is followed at once *)
-  let window_ui = Pxui.Ui.create ~font_size:11 () in
+  let window_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let past = { Editor_core.Panels.default_state with window = Some (900, 50, 300, 200) } in
   let windowed ?(mouse = (0., 0.)) events =
     let f =
@@ -529,7 +529,7 @@ let () =
   | _ -> failwith "a header drag did not move its window");
   Pxui.Ui.destroy window_ui;
   (* the parts of a docked header's breadcrumb before its last are buttons *)
-  let crumb_ui = Pxui.Ui.create ~font_size:11 () in
+  let crumb_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let crumbed ?(mouse = (0., 0.)) events =
     let f =
       {
@@ -560,7 +560,7 @@ let () =
       (Printf.sprintf "breadcrumb clicks reported %s, not the first three parts"
          (String.concat "," (List.map string_of_int (List.sort compare !hit))));
   Pxui.Ui.destroy crumb_ui;
-  let hidden = Pxui.Ui.create ~font_size:11 () in
+  let hidden = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   ignore
     (Pxui.Ui.frame hidden frame (fun ui ->
          Pxui_shell.Status_bar.draw ui ~bounds:(0, 272, 400, 28) ~text:"Overlay" ~fps:None ()));
@@ -590,7 +590,7 @@ let () =
             ();
         ])
   in
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let click =
     [
       Input.Pointer_pressed (Input.LeftButton, (115., 15.));
@@ -661,7 +661,7 @@ let () =
   expect "the enter key activates" intents [ T.Activate 2 ];
   let filtering, _ = run t T.Filter in
   expect "/ opens the filter" (T.editing filtering) true;
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let center k = (200., 24. +. (24. *. float_of_int k) +. 12.) in
   let step t ?(mouse = (0., 0.)) events =
     Pxui.Ui.frame ui
@@ -728,7 +728,7 @@ let () =
     (List.filter (function T.Activate _ -> true | _ -> false) intents)
     [ T.Activate 4 ];
   let scroll_rows = Array.init 20 (fun index -> row (index + 1) 0 (string_of_int (index + 1))) in
-  let scroll_ui = Pxui.Ui.create ~font_size:11 () in
+  let scroll_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let scroll_step t events =
     Pxui.Ui.frame scroll_ui
       { frame with input = { frame.input with events; pointer = (200., 60.) } }
@@ -745,7 +745,7 @@ let () =
     Array.init 21 (fun index ->
         row (index + 1) (if index = 0 then 0 else 1) (string_of_int (index + 1)))
   in
-  let sticky_ui = Pxui.Ui.create ~font_size:11 () in
+  let sticky_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let sticky_step t ?(at = (200., 60.)) events =
     Pxui.Ui.frame sticky_ui
       { frame with input = { frame.input with events; pointer = at } }
@@ -810,7 +810,7 @@ let () =
   in
   (* one press at each place per UI: a second one there would be a double-click, which types *)
   let pass gesture =
-    let vector_ui = Pxui.Ui.create ~font_size:11 () in
+    let vector_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
     let cells ?(mouse = (0., 0.)) events =
       Pxui.Ui.frame vector_ui
         { frame with input = { frame.input with events; pointer = mouse } }
@@ -862,7 +862,7 @@ let () =
     ]
   in
   let edits value gesture =
-    let ui = Pxui.Ui.create ~font_size:11 () in
+    let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
     let build ~mouse events =
       Pxui.Ui.frame ui
         { frame with input = { frame.input with events; pointer = mouse } }
@@ -921,7 +921,7 @@ let () =
       ]
   in
   let sections =
-    Pxui_shell.Which_key.sheet_sections
+    Pxui_shell.Which_key.sheet_sections Input.Apple
       ~category:(fun (c : _ Editor_core.Command.t) ->
         if c.scope <> None then "Graph"
         else if String.starts_with ~prefix:"panel." c.id then "Panel"
@@ -939,7 +939,7 @@ let () =
    for no tips, and a card under a tip does not change what is drawn. *)
 let () =
   let tip_instances ?avoid tips =
-    let ui = Pxui.Ui.create ~font_size:11 () in
+    let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
     ignore
       (Pxui.Ui.frame ui frame (fun ui ->
            Pxui_shell.Status_bar.tips ui ~bounds:(0, 0, 400, 300) ?avoid tips));
@@ -1005,7 +1005,7 @@ let () =
 let () =
   (* the status strip's rule between the lead and the labels: the lead takes the room the labels
      and hints leave (not a quarter of the strip), and the rule drags to resize it *)
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let strip ?(mouse = (0., 0.)) events =
     ignore
       (Pxui.Ui.frame ui

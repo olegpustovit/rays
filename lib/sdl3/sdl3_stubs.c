@@ -44,6 +44,24 @@ CAMLprim value caml_sdl3_get_error(value unit)
   CAMLreturn(caml_copy_string(message != NULL ? message : ""));
 }
 
+CAMLprim value caml_sdl3_platform_name(value unit)
+{
+  (void)unit;
+  return caml_copy_string(SDL_GetPlatform());
+}
+
+/* The per-user preference folder SDL names for an organization and app, with its trailing
+   separator, or "" when SDL cannot say. */
+CAMLprim value caml_sdl3_pref_path(value org, value app)
+{
+  CAMLparam2(org, app);
+  CAMLlocal1(result);
+  char *path = SDL_GetPrefPath(String_val(org), String_val(app));
+  result = caml_copy_string(path != NULL ? path : "");
+  SDL_free(path);
+  CAMLreturn(result);
+}
+
 CAMLprim value caml_sdl3_clear_error(value unit)
 {
   (void)unit;

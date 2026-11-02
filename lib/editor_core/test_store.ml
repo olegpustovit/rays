@@ -53,3 +53,12 @@ let () =
   assert (look && abs_float (Easy_camera.distance loaded3 -. 9.) < 0.000001);
   assert (Easy_camera.fov_y loaded3 = Easy_camera.fov_y view3);
   print_endline "editor store: atomic s-expression round-trip"
+
+(* The per-user folder is a function of the platform and the facts it is given. *)
+let () =
+  let folder = Editor_core.Store.user_folder ~home:"/h" in
+  let pref = Some "C:/AppData/rays/editor/" in
+  assert (folder Input.Apple ~pref = Filename.concat "/h" ".rays");
+  assert (folder Input.Other ~pref = "C:/AppData/rays/editor/");
+  assert (folder Input.Other ~pref:None = Filename.concat "/h" ".rays");
+  print_endline "editor store: user folder follows the platform's preference folder ok"

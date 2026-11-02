@@ -97,3 +97,5 @@ let snapshot value =
     mouse_delta = (value.mouse_delta.px, value.mouse_delta.py);
     visible = value.visible;
   }
+
+let platform = Input.platform_of_name (Sdl3.platform_name ())
