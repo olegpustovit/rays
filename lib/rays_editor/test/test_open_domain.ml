@@ -349,7 +349,7 @@ let () =
   let host =
     ref
       (match
-         E.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~presets
+         E.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~presets
            ~prepare:Editor_prepare.empty
            ~draw:(fun _ _ -> Scene.D3.create [])
            ()

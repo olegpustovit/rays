@@ -15,7 +15,7 @@ let frame n = Test_editor_input.frame (450., 300.) [] n
 let step e n = E.update e (frame n)
 
 let create ?camera ?settings ?presets ?source ?(native = false) ws =
-  E.create ~ui_text_size:(if native then 13 else 11) ?camera ?settings ?presets ?source ~await:true
+  E.create ~platform:Input.Apple ~ui_text_size:(if native then 13 else 11) ?camera ?settings ?presets ?source ~await:true
     ~workspace:ws
     ~prepare:(if native then E.prepare else Editor_prepare.surface)
     ~draw:
@@ -755,7 +755,7 @@ let live_light_determinism () =
         let prepares = ref 0 and drawings = ref 0 in
         let e =
           ref
-            (E.create ~ui_text_size:11 ~workspace:ws ~presets ~await:true ~domains ~seed:42L
+            (E.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:ws ~presets ~await:true ~domains ~seed:42L
                ~prepare:(fun settings output ->
                  incr prepares;
                  Editor_prepare.surface settings output)
@@ -964,7 +964,7 @@ let named_inspector () =
       in
       let e =
         ref
-          (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories
+          (E.create ~platform:Input.Apple ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories
              ~prepare:Editor_prepare.empty
              ~draw:(fun _ _ -> Scene.D3.empty)
              ()
@@ -1214,7 +1214,7 @@ let stale_inspector_draft () =
       in
       let e =
         ref
-          (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories
+          (E.create ~platform:Input.Apple ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories
              ~prepare:Editor_prepare.empty
              ~draw:(fun _ _ -> Scene.D3.empty)
              ()
@@ -1284,7 +1284,7 @@ let failed_renderer_modes () =
       in
       let e =
         ref
-          (E.create ~ui_text_size:11 ~await:true ~presets ~workspace:ws
+          (E.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~presets ~workspace:ws
              ~prepare:Editor_prepare.surface
              ~draw:(fun _ prepared ->
                Scene.D3.create
@@ -1360,7 +1360,7 @@ let run_native () =
                   title = "Preview failure isolation";
                 }
               ~init:(fun _ ->
-                E.create ~ui_text_size:11 ~await:true ~workspace:ws
+                E.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:ws
                   ~presets:(Filename.concat directory "presets")
                   ~prepare:Editor_prepare.surface
                   ~draw:(fun _ prepared ->

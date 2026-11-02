@@ -29,7 +29,7 @@ let run () =
   let draws = Atomic.make 0 in
   let current =
     ref
-      (E.create ~ui_text_size:11 ~workspace ~factories:(factory :: Sop.Nodes.factories)
+      (E.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~factories:(factory :: Sop.Nodes.factories)
          ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ ->
            Atomic.incr draws;

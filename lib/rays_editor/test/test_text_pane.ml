@@ -448,7 +448,7 @@ let start_env text =
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   ref
-    (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
+    (E.create ~platform:Input.Apple ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
        ~workspace ~prepare:Editor_prepare.surface
        ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
        ()
@@ -483,7 +483,7 @@ let editor_text () =
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env =
     ref
-      (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
+      (E.create ~platform:Input.Apple ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
          ~workspace ~prepare:Editor_prepare.surface
          ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
          ()
@@ -758,7 +758,7 @@ let editor_binding () =
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env =
     ref
-      (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
+      (E.create ~platform:Input.Apple ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
          ~workspace ~prepare:Editor_prepare.surface
          ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
          ()
@@ -1153,7 +1153,7 @@ let editor_w9 () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_rosette ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let start () =
-    E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
+    E.create ~platform:Input.Apple ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
       ~workspace ~prepare:Editor_prepare.surface
       ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
       ()
@@ -1355,7 +1355,7 @@ let editor_active_scrub () =
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env =
     ref
-      (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
+      (E.create ~platform:Input.Apple ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
          ~workspace ~prepare:Editor_prepare.surface
          ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
          ()
@@ -1437,7 +1437,7 @@ let editor_literal_scrub () =
       let presets = Filename.temp_dir "rays-token-presets" "" in
       let env =
         ref
-          (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
+          (E.create ~platform:Input.Apple ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
              ~domains:1 ~workspace ~prepare:Editor_prepare.empty
              ~draw:(fun _ _ -> Scene.D3.empty)
              ()
@@ -1619,7 +1619,7 @@ let editor_text_drop () =
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env =
     ref
-      (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
+      (E.create ~platform:Input.Apple ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true
          ~carry_budget:Float.infinity ~workspace ~prepare:Editor_prepare.surface
          ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
          ()

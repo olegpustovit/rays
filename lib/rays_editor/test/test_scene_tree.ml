@@ -89,7 +89,7 @@ let domains_agree () =
                       :roughness 0.5 :recompute_normals true)))|}
     in
     let env =
-      E.create ~ui_text_size:11 ~await:true ~workspace ~domains ~grain:16 ~max_entries:4
+      E.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace ~domains ~grain:16 ~max_entries:4
         ~max_payload_bytes:(16 * 1024 * 1024)
         ~prepare:Editor_prepare.surface
         ~draw:(fun _ _ -> Scene.D3.create [])
@@ -113,7 +113,7 @@ let domains_agree () =
 let run () =
   let cooks = Atomic.make 0 in
   let env =
-    E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text) ~max_entries:4
+    E.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text) ~max_entries:4
       ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun settings output ->
         Atomic.incr cooks;
@@ -491,7 +491,7 @@ let run () =
   check (not (contains (source env) "(scene/geometry")) "deleting geo1 left it in the text";
   (* what was written opens as the same scene *)
   let reopened =
-    E.create ~ui_text_size:11 ~await:true
+    E.create ~platform:Input.Apple ~ui_text_size:11 ~await:true
       ~workspace:(Ws_fixture.of_text (source env))
       ~prepare:Editor_prepare.surface
       ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
@@ -531,7 +531,7 @@ let run () =
    a scene graph is authoritative, so a reload does not seed it again. *)
 let run_host () =
   let open_text text =
-    E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
+    E.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
       ~prepare:Editor_prepare.surface
       ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
       ()
@@ -597,7 +597,7 @@ let run_surface_errors () =
   let module Host = Rays_editor__.Loop_model in
   let current =
     ref
-      (Host.create ~ui_text_size:11 ~await:true
+      (Host.create ~platform:Input.Apple ~ui_text_size:11 ~await:true
          ~workspace:
            (Ws_fixture.of_text
               {|(workspace surface_error
