@@ -51,7 +51,12 @@
  (action
   (with-stdout-to
    node_sources.ml
-   (run %{exe:../flow/embed.exe} %{deps}))))
+   (run %{exe:gen/embed_forms.exe} %{deps}))))
+
+(test
+ (name test_catalog_load)
+ (modules test_catalog_load)
+ (libraries flow flow_sop rays_diagnostic))
 
 (tests
  (names test_units test_units_geometry)

@@ -59,33 +59,33 @@ let context_of = Flow.Context.of_qualified
 let embedded_sources =
   lazy
     (List.fold_left
-       (fun result (file, text) ->
+       (fun result (file, forms) ->
          Result.bind result (fun loaded ->
-             Result.bind (Flow.Syntax.parse text) (fun forms ->
-                 let forms =
-                   List.concat_map
-                     (fun (form : Flow.Syntax.t) ->
-                       match form.node with
-                       | Flow.Syntax.List
-                           ({ node = Flow.Syntax.Sym "workspace"; _ } :: _ :: children) ->
-                           children
-                       | _ -> [ form ])
-                     forms
-                 in
-                 match
-                   List.find_opt
-                     (fun form ->
-                       not
-                         (List.mem (Flow.Syntax.head form)
-                            [ Some "defnode"; Some "defn"; Some "defmacro" ]))
-                     forms
-                 with
-                 | Some form ->
-                     Error
-                       (Diagnostic.error ~span:form.span ~code:"E_FORM"
-                          (file ^ ": node sources contain only defnode, defn and defmacro forms"))
-                 | None -> Ok (loaded @ forms))))
-       (Ok []) Node_sources.files)
+             let forms =
+               List.concat_map
+                 (fun (form : Flow.Syntax.t) ->
+                   match form.node with
+                   | Flow.Syntax.List ({ node = Flow.Syntax.Sym "workspace"; _ } :: _ :: children)
+                     ->
+                       children
+                   | _ -> [ form ])
+                 forms
+             in
+             match
+               List.find_opt
+                 (fun form ->
+                   not
+                     (List.mem (Flow.Syntax.head form)
+                        [ Some "defnode"; Some "defn"; Some "defmacro" ]))
+                 forms
+             with
+             | Some form ->
+                 Error
+                   (Diagnostic.error ~span:form.span ~code:"E_FORM"
+                      (file ^ ": node sources contain only defnode, defn and defmacro forms"))
+             | None -> Ok (loaded @ forms)))
+       (Ok [])
+       (Marshal.from_string Node_sources.forms 0 : (string * Flow.Syntax.t list) list))
 
 let sources () = Lazy.force embedded_sources
 
