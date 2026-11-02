@@ -319,6 +319,7 @@ module Private : sig
 
   val pool_free_floats : pool -> Ogpu.Backend.floats list
   val pool_drain : pool -> unit
+  val pool_give : pool -> Ogpu.Backend.device -> int -> unit
   val slot_shrink_after : int
   val pool_freed : pool -> int
   (** Holders freed unread ([release ~held:false]). *)

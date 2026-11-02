@@ -339,7 +339,9 @@ let drain_pool pool =
       | Some (buffer, floats, capacity, _) ->
           Hashtbl.remove pool.held id;
           Mem.release held_owner capacity;
-          let free = List.fold_left (fun sum (_, _, c) -> sum + c) 0 pool.free in
+          (* the size class's own free bytes: another class's big buffers must not turn this
+             one's away (they would be destroyed and made again each frame) *)
+          let free = List.fold_left (fun sum (_, _, c) -> if c = capacity then sum + c else sum) 0 pool.free in
           (* a frame of big outputs must find its buffers again *)
           if free + capacity <= max free_budget (8 * capacity) then begin
             Mem.charge free_owner capacity;
@@ -1574,6 +1576,16 @@ module Private = struct
   let pool_freed pool = Atomic.get pool.freed
   let pool_free_floats pool = List.map (fun (_, floats, _) -> floats) pool.free
   let pool_drain = drain_pool
+
+  (* a free buffer of [bytes] put into the pool, as if a holder of that size had come back *)
+  let pool_give pool device bytes =
+    let descriptor : Ogpu.Types.buffer_descriptor =
+      { label = Some "test free"; size = Int64.of_int bytes; usage = [ Storage; Copy_src; Copy_dst ] }
+    in
+    let buffer, floats = get (B.create_mapped_buffer device descriptor) in
+    Mem.charge free_owner bytes;
+    pool.free_ages <- (buffer, pool.tick) :: pool.free_ages;
+    pool.free <- (buffer, floats, bytes) :: pool.free
   let slot_shrink_after = slot_shrink_after
 
   let pool_held pool =
