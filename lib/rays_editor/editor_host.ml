@@ -33,7 +33,7 @@ let scene_edit value mode ?(active_camera = value.doc.active_camera) scene =
           | `Reset ->
               Editor_core.History.create ~byte_capacity:(16 * 1024 * 1024)
                 ~owner:(Mem.document "editor.history") doc
-          | `Amend -> commit ~merge:Repair doc value.history
+          | `Amend -> commit ~merge:Editor_core.History.Repair doc value.history
         in
         (* camera bookkeeping is not unsaved work: a document that was the file's still is *)
         {
