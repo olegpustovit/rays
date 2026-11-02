@@ -1,3 +1,12 @@
+(* pkg-config reads a backslash as an escape, so this test's paths use slashes on Windows too *)
+module Filename = struct
+  include Filename
+
+  let slashes = String.map (function '\\' when Sys.win32 -> '/' | c -> c)
+  let concat a b = slashes (Filename.concat a b)
+  let temp_dir prefix suffix = slashes (Filename.temp_dir prefix suffix)
+end
+
 type component = {
   executable : string;
   key : string;
@@ -110,7 +119,7 @@ let atoms contents =
 let output_flags directory name = Sdl3_lock.read_file (Filename.concat directory name) |> atoms
 
 let require_flag label flag flags =
-  if not (List.mem flag flags) then fail "%s lacks %S in [%s]" label flag (String.concat "; " flags)
+  if not (List.mem flag (List.map Filename.slashes flags)) then fail "%s lacks %S in [%s]" label flag (String.concat "; " flags)
 
 let reject_flag label flag flags =
   if List.mem flag flags then
@@ -263,7 +272,7 @@ let test_overrides root components =
           ~library_override:library_directory component
       in
       (match cflags with
-      | first :: _ when first = "-I" ^ include_directory -> ()
+      | first :: _ when Filename.slashes first = "-I" ^ include_directory -> ()
       | _ -> fail "%s explicit include override did not take precedence" component.package);
       require_flag
         (component.package ^ " explicit dynamic libraries")

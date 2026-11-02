@@ -245,7 +245,7 @@
   ../lib/flow_web/test_wgsl.exe
   (glob_files ../lib/flow_web/goldens/*.js))
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then mkdir -p kt && ../lib/flow_web/test_wgsl.exe --write-kernel-table kt && node web/test/gpu_check.mjs kt/kernels.json ../lib/web_export/runtime/gpu.js ../lib/flow_web/goldens; else echo 'gpu_check: skipped (node not found)'; fi")))
 
 ; Fast precision on the web (native parity): the fast WGSL kernels (64-bit integer pairs, gathers, count records,
@@ -262,7 +262,7 @@
   ../lib/web_export/dispatch.wgsl
   ../lib/flow_web/test_wgsl.exe)
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then mkdir -p fkt && ../lib/flow_web/test_wgsl.exe --write-fast-table fkt ../lib/web_export/compact.wgsl ../lib/web_export/dispatch.wgsl && node web/test/gpu_fast_check.mjs fkt ../lib/web_export/runtime/gpu.js; else echo 'gpu_fast_check: skipped (node not found)'; fi")))
 
 (rule
@@ -281,7 +281,7 @@
   marks_shot.exe
   ../sketches/recursive_rectangles.rays)
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then FRAMES=12 FAST=1 POINTER='320,405;320,410;320,415;320,420;320,425;320,430;320,435;320,440;320,445;320,450;320,455;320,460' node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays; else echo 'fast present_e2e: skipped (node not found)'; fi")))
 
 ; recursive_signals' resident fold as its density grows each frame: its counts outgrow the capacities the
@@ -303,7 +303,7 @@
   marks_shot.exe
   ../sketches/recursive_signals.rays)
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then FRAMES=10 FAST=1 POINTER='320,200;320,230;320,260;320,290;320,320;320,350;320,380;320,410;320,440;320,470' node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_signals.rays; else echo 'fast present_e2e: skipped (node not found)'; fi")))
 
 ; The live page as a person uses it: index.html's rAF loop driven by real mouse events must animate, and once the
@@ -325,7 +325,7 @@
   marks_shot.exe
   ../sketches/recursive_rectangles.rays)
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then node web/test/live_check.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays 400 520; else echo 'live_check: skipped (node not found)'; fi")))
 
 ; Real-Chrome check of the presenter: hand-built mark tables with pixel probes, then
@@ -350,7 +350,7 @@
   ../sketches/basic.rays
   ../sketches/particles.rays)
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then node web/test/present_check.mjs ../lib/web_export/runtime ../lib/web_export/marks.wgsl && node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/flow_vectors.rays sketches/basic.rays sketches/particles.rays; else echo 'present_check: skipped (node not found)'; fi")))
 
 (executable
@@ -413,7 +413,7 @@
   marks_shot.exe
   ../sketches/flow_particles_gpu.rays)
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then node web/test/gpu_marks_e2e.mjs ../bin/rays.exe marks_shot.exe ..; else echo 'gpu_marks_e2e: skipped (node not found)'; fi")))
 
 (alias
@@ -443,7 +443,7 @@
   ../sketches/flow_image.rays
   (source_tree ../lib/sdl3_image/fixtures))
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then node web/test/gpu_images_e2e.mjs ../bin/rays.exe marks_shot.exe ..; else echo 'gpu_images_e2e: skipped (node not found)'; fi")))
 
 ; Plan P6.R: each of the 15 workspaces with a draw graph either opens in headless Chrome (the frame loop runs, no error, a
@@ -463,7 +463,7 @@
   ../lib/web_export/marks.wgsl
   (source_tree ../sketches))
  (action
-  (system
+  (bash
    "if command -v node >/dev/null 2>&1; then node web/test/open_all.mjs ../bin/rays.exe .. sketches/audio.rays sketches/basic.rays sketches/drawing.rays sketches/file_dialog.rays sketches/generative.rays sketches/noise.rays sketches/particles.rays sketches/pxui.rays sketches/recursive_rectangles.rays sketches/flow_contours.rays sketches/flow_image.rays sketches/flow_image_kernel.rays sketches/flow_particles_gpu.rays sketches/flow_shader.rays sketches/flow_vectors.rays; else echo 'open_all: skipped (node not found)'; fi")))
 
 (executable

@@ -6,7 +6,7 @@
  (deps
   (glob_files sketches/*.rays))
  (action
-  (system
+  (bash
    "ls sketches/*.rays | xargs -P 8 -n 1 sh -c 'out=$(%{bin:rays} check \"$0\" 2>&1) || { echo \"$out\"; exit 255; }'")))
 
 (rule
@@ -30,7 +30,7 @@
   (setenv
    RAYS_MAX_FRAMES
    30
-   (system
+   (bash
     "for f in sketches/*.rays; do case $f in *_lib.rays) continue;; esac; %{bin:rays} $f || exit 1; done"))))
 
 ; tools/codemod builds with --profile codemod: the dev warnings plus unused
