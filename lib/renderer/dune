@@ -239,7 +239,7 @@
   test_scene2_argument
   test_scene3_instances
   test_scene3_lighting)
- (libraries renderer scene_command ogpu ogpu_native unix))
+ (libraries renderer scene_command ogpu ogpu_native mem unix))
 
 (rule
  (enabled_if

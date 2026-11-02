@@ -164,7 +164,9 @@ let gc_snapshot () =
 let bytes_of_words words = words *. float_of_int (Sys.word_size / 8)
 let int_bytes_of_words words = words * (Sys.word_size / 8)
 
+(* Windows has no ps: the process footprint (committed private KiB, see Mem) is reported in its place. *)
 let resident_kib () =
+  if Sys.win32 then Option.map (fun bytes -> bytes / 1024) (Mem.phys_footprint ()) else
   let arguments = [| "/bin/ps"; "-o"; "rss="; "-p"; string_of_int (Unix.getpid ()) |] in
   try
     let channel = Unix.open_process_args_in arguments.(0) arguments in

@@ -5,7 +5,7 @@
    (= %{system} mingw64)))
  (name runtime_native_qualification)
  (modules runtime_native_qualification)
- (libraries renderer runtime runtime_input ogpu ogpu_native sdl3 unix yojson))
+ (libraries renderer runtime runtime_input ogpu ogpu_native sdl3 mem unix yojson))
 
 (rule
  (enabled_if
