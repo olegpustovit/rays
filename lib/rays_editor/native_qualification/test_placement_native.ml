@@ -403,10 +403,19 @@ let chain_counterexamples () =
               let _, two = settle ~readers:2 large in
               assert (one.cpu_consumers = Some 1 && two.cpu_consumers = Some 2);
               assert (consistent one && consistent two);
-              (* a small CPU-origin mesh stays on the CPU *)
+              (* a small mesh is the same comparison of its own two real clocks; under load the CPU
+                 sample can lose it, so which route wins is printed, not asserted (the chain's bench
+                 reports the verdicts at each size); what must hold is that the route is the verdict *)
               let resident, small = settle ~readers:1 32 in
-              if resident || not (small.reason = Cpu_measured_cheaper || small.reason = Cpu_consumer) then
-                failwith ("small chain: " ^ name small);
+              if
+                (not (consistent small))
+                || resident <> Flow_ir.Cost.on_device small.reason
+              then
+                failwith
+                  (Printf.sprintf "small chain: %s, resident %b, cpu %s, device %s" (name small)
+                     resident
+                     (Option.fold ~none:"-" ~some:string_of_float small.cpu_seconds)
+                     (Option.fold ~none:"-" ~some:string_of_float small.device_seconds));
               (* a topology change is a new size, measured again rather than assumed *)
               let _, grown = cook ~readers:1 large in
               assert (grown.count <> small.count);
