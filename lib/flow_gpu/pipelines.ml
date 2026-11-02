@@ -32,27 +32,27 @@ let create ~clock:_ device =
     releases;
   }
 
-let body (msl : Emit.msl) =
-  if Ogpu.Impl.backend = "vulkan" then Lazy.force msl.spirv
-  else Ok (Bytes.of_string msl.source, msl.entry, msl.interface)
+let body (kernel : Emit.kernel) =
+  if Ogpu.Impl.backend = "vulkan" then Lazy.force kernel.spirv
+  else Ok (Bytes.of_string kernel.source, kernel.entry, kernel.interface)
 
-let get t (msl : Emit.msl) =
+let get t (kernel : Emit.kernel) =
   if t.closed || Domain.self () <> t.domain then
     Error
       (Diagnostic.error ~code:"E_GPU" "GPU pipeline owner is closed or called from another domain.")
   else
-    match Cache.find t.cache msl.entry with
+    match Cache.find t.cache kernel.entry with
     | owned -> Ok owned.compiled
     | exception Not_found -> (
         let ( let* ) = Result.bind in
         let gpu result = Result.map_error diagnostic result in
-        let* bytes, entry, interface = body msl in
+        let* bytes, entry, interface = body kernel in
         let* shader =
           gpu
             (Ogpu.Shader.of_source
                {
                  backend = (if Ogpu.Impl.backend = "vulkan" then "vulkan" else "metal");
-                 label = Some msl.entry;
+                 label = Some kernel.entry;
                  bytes;
                  entry_points = [ { name = entry; stage = Compute } ];
                  bindings = interface;
@@ -68,7 +68,7 @@ let get t (msl : Emit.msl) =
         | Ok pipeline ->
             t.compilations <- t.compilations + 1;
             let compiled = { pipeline } in
-            Cache.add t.cache msl.entry { compiled; library };
+            Cache.add t.cache kernel.entry { compiled; library };
             Ok compiled)
 
 let close t =

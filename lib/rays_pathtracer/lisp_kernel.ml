@@ -174,7 +174,7 @@ let text f ~preview:set =
 
 type kernel = {
   runner : Flow_gpu.Run.t;
-  msl : Flow_shader.Emit.msl;
+  msl : Flow_shader.Emit.kernel;
   base : Flow_ir.Packed.Host.inputs;
   slots : (string * Flow.Ty.t) option array; (* the placeholder each uniform reads *)
 }
@@ -281,7 +281,7 @@ let check_sketch () =
       | _, ds -> Error (diagnostics ds))
 
 (* The front end's result for one kernel: its MSL, its inputs, and the placeholder each uniform reads. *)
-type front = Flow_shader.Emit.msl * Flow_ir.Packed.Host.inputs * (string * Flow.Ty.t) option array
+type front = Flow_shader.Emit.kernel * Flow_ir.Packed.Host.inputs * (string * Flow.Ty.t) option array
 
 let front t name =
   let* fn = fn t name in

@@ -1,4 +1,4 @@
-type msl = {
+type kernel = {
   source : string;
   entry : string;
   spirv : (bytes * string * Ogpu_core.Shader.binding list, Diagnostic.t) result Lazy.t;
@@ -24,8 +24,8 @@ type msl = {
    count is the dispatch count, or its minimum with [count_in[0] * mul / div] when use is set,
    and is written as the 24-byte count record {n, 6n, 1, 0, 0, 0} to [count_out] (buffers after the
    gathers): from byte 4 it is the indexed indirect draw of n six-index quads. *)
-(** [msl] as plain data, for a disk cache: the SPIR-V printed if [vulkan], dropped otherwise. *)
-val settled : vulkan:bool -> msl -> msl
+(** The kernel as plain data, for a disk cache: the SPIR-V printed if [vulkan], dropped otherwise. *)
+val settled : vulkan:bool -> kernel -> kernel
 
 val names : string list
 
@@ -40,7 +40,7 @@ val kernel :
   ?uint32_inputs:int list ->
   ?uint32_tables:int list ->
   Flow_ir.Packed.t ->
-  (msl, Diagnostic.t) result
+  (kernel, Diagnostic.t) result
 (** [uint32_outputs] selects scalar integer outputs to store as exact uint32 words, with range
     status validation. [uint32_inputs] selects scalar source buffers and [uint32_tables] selects
     uniform-table indices to read as raw uint32. Those require explicit device bindings. Other

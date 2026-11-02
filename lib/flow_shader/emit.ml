@@ -1,7 +1,7 @@
 module P = Flow_ir.Packed
 module S = Ogpu_core.Shader
 
-type msl = {
+type kernel = {
   source : string;
   entry : string;
   spirv : (bytes * string * Ogpu_core.Shader.binding list, Diagnostic.t) result Lazy.t;

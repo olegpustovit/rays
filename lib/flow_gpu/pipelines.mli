@@ -2,7 +2,7 @@ type t
 type compiled = { pipeline : Ogpu.Backend.pipeline }
 
 val create : clock:(unit -> float) -> Ogpu.Backend.device -> t
-val get : t -> Emit.msl -> (compiled, Diagnostic.t) result
+val get : t -> Emit.kernel -> (compiled, Diagnostic.t) result
 val close : t -> unit
 
 module Private : sig

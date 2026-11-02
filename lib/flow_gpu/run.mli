@@ -45,7 +45,7 @@ type extras = {
 
 val no_extras : extras
 
-val create : ?pool:pool -> Renderer.gpu -> Pipelines.t -> Emit.msl -> t
+val create : ?pool:pool -> Renderer.gpu -> Pipelines.t -> Emit.kernel -> t
 (** [pool] (default: its own, closed with it) is where its kept outputs' buffers come from and go.
 *)
 
@@ -161,7 +161,7 @@ val pin : float array -> (Ogpu.Backend.buffer * int * (unit -> bool) * (unit -> 
 
 val count_record : output -> Ogpu.Backend.buffer option
 
-(* A fast kernel's 24-byte count record {n, 6n, 1, 0, 0, 0} (see {!Emit.msl}); [None] for an exact
+(* A fast kernel's 24-byte count record {n, 6n, 1, 0, 0, 0} (see {!Emit.kernel}); [None] for an exact
    kernel or a superseded output. *)
 val count : output -> int
 val epoch : output -> int64
@@ -315,7 +315,7 @@ module Private : sig
   (** Buffers kept outputs hold, after destroying those of collected holders. *)
 
   val create_owned :
-    ?pool:pool -> Ogpu.Backend.device -> Ogpu.Backend.queue -> Pipelines.t -> Emit.msl -> t
+    ?pool:pool -> Ogpu.Backend.device -> Ogpu.Backend.queue -> Pipelines.t -> Emit.kernel -> t
 
   val pool_free_floats : pool -> Ogpu.Backend.floats list
   val pool_drain : pool -> unit

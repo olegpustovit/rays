@@ -118,7 +118,7 @@ type entry =
   | Spheres_at of int
   | Frame_at of int * int  (** frame instruction, offset *)
 
-let entries (msl : Emit.msl) =
+let entries (kernel : Emit.kernel) =
   Array.of_list
     (List.map
        (fun (name, offset, width) ->
@@ -131,13 +131,13 @@ let entries (msl : Emit.msl) =
            | [ "scene"; "spheres" ] -> Spheres_at offset
            | [ "frame"; index; _ ] -> Frame_at (int_of_string index, offset)
            | _ -> invalid_arg ("Run: uniform layout entry " ^ name))
-       msl.uniform_layout)
+       kernel.uniform_layout)
 
 type t = {
   device : B.device;
   queue : B.queue;
   pipelines : Pipelines.t;
-  msl : Emit.msl;
+  kernel : Emit.kernel;
   inputs : slot array;
   outputs : slot array;
   table : slot;
@@ -262,22 +262,22 @@ let unpack_array bytes length =
   done;
   (values, !finite)
 
-let create_owned ?pool:shared device queue pipelines (msl : Emit.msl) =
+let create_owned ?pool:shared device queue pipelines (kernel : Emit.kernel) =
   if not (Domain.is_main_domain ()) then invalid_arg "Run.create: initial domain required";
   {
     device;
     queue;
     pipelines;
-    msl;
-    inputs = Array.map (fun _ -> slot ()) msl.input_widths;
-    outputs = Array.map (fun _ -> slot ()) msl.output_widths;
+    kernel;
+    inputs = Array.map (fun _ -> slot ()) kernel.input_widths;
+    outputs = Array.map (fun _ -> slot ()) kernel.output_widths;
     table = slot ();
-    gathers = Array.map (fun _ -> slot ()) msl.gathers;
+    gathers = Array.map (fun _ -> slot ()) kernel.gathers;
     status = slot ();
     counted = slot ();
     groups = slot ();
-    uniforms = Bytes.create msl.uniform_bytes;
-    layout = entries msl;
+    uniforms = Bytes.create kernel.uniform_bytes;
+    layout = entries kernel;
     arguments = Bytes.create 16;
     closed = false;
     bounds_out = None;
@@ -502,7 +502,7 @@ let ensure ?(mapped = false) t slot length =
 (* [wait] false leaves the dispatch in flight (no completion wait, no status read): a resident fold
    chains its regions and waits once.  [bound i] / [bound_table u] name a device buffer that already
    holds input [i] / the table of uniform [u] (and its length in floats), which is then not uploaded. *)
-let msl_scene t = t.msl.Emit.scene
+let kernel_scene t = t.kernel.Emit.scene
 
 (* Encodes into [encoder] the threadgroup counts of a dispatch of at most [capacity] threads in
    groups of [group] whose count is the uint in [cell] x mul / div (Kernels.dispatch_arguments),
@@ -534,8 +534,8 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
     match bound_table u with
     | Some _ as b -> b
     | None
-      when match Array.find_index (fun (index, _) -> index = u) t.msl.gathers with
-           | Some k -> t.msl.gather_uint32.(k)
+      when match Array.find_index (fun (index, _) -> index = u) t.kernel.gathers with
+           | Some k -> t.kernel.gather_uint32.(k)
            | None -> false ->
         None
     | None when u < Array.length values.tables && Array.length values.tables.(u) <= 4 ->
@@ -546,12 +546,12 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
   let bound index =
     match bound index with
     | Some _ as b -> b
-    | None when index >= 0 && index < Array.length t.msl.input_uint32 && t.msl.input_uint32.(index)
+    | None when index >= 0 && index < Array.length t.kernel.input_uint32 && t.kernel.input_uint32.(index)
       ->
         None
     | None when index < Array.length values.arrays && Array.length values.arrays.(index) <= 4 ->
         held_input values.arrays.(index)
-          ~length:(values.count * t.msl.input_widths.(min index (Array.length t.inputs - 1)))
+          ~length:(values.count * t.kernel.input_widths.(min index (Array.length t.inputs - 1)))
     | None -> None
   in
   (* the scene's buffers after its spheres, in Kernel_layout's order; the kernel's interface names at most
@@ -571,16 +571,16 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
   else if
     values.count < 0
     || values.count > Int32.to_int Int32.max_int
-    || values.count > Sys.max_string_length / 4 / Array.fold_left max 1 t.msl.output_widths
+    || values.count > Sys.max_string_length / 4 / Array.fold_left max 1 t.kernel.output_widths
   then error "GPU count exceeds native storage bounds."
   else if
-    msl_scene t <> None <> (scene <> None)
+    kernel_scene t <> None <> (scene <> None)
     ||
-    match msl_scene t with
+    match kernel_scene t with
     | None -> false
     | Some b ->
         List.length
-          (List.filter (fun (x : Ogpu.Shader.binding) -> x.binding > b + 2) t.msl.interface)
+          (List.filter (fun (x : Ogpu.Shader.binding) -> x.binding > b + 2) t.kernel.interface)
         > List.length scene_tail
   then error "GPU scene binding changed."
   else if Array.length values.arrays <> Array.length t.inputs then error "GPU input arity changed."
@@ -592,16 +592,16 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
       (fun i typed ->
         if typed && explicit_input i = None && ((not uint32_cpu) || held values.arrays.(i) <> None)
         then missing := true)
-      t.msl.input_uint32;
+      t.kernel.input_uint32;
     Array.iteri
       (fun k typed ->
-        let u = fst t.msl.gathers.(k) in
+        let u = fst t.kernel.gathers.(k) in
         if
           typed
           && explicit_table u = None
           && ((not uint32_cpu) || u >= Array.length values.tables || held values.tables.(u) <> None)
         then missing := true)
-      t.msl.gather_uint32;
+      t.kernel.gather_uint32;
     !missing
   then
     Error
@@ -612,7 +612,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
     for index = 0 to Array.length t.inputs - 1 do
       if
         bound index = None
-        && Array.length values.arrays.(index) < values.count * t.msl.input_widths.(index)
+        && Array.length values.arrays.(index) < values.count * t.kernel.input_widths.(index)
       then short := true
     done;
     !short
@@ -627,7 +627,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
         {
           owner = t;
           count = 0;
-          width = t.msl.output_widths.(0);
+          width = t.kernel.output_widths.(0);
           index = 0;
           gpu_seconds = None;
           generation = t.generation;
@@ -637,9 +637,9 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
     end
     else
       try
-        let msl = t.msl in
+        let kernel = t.kernel in
         let compiled =
-          match Pipelines.get t.pipelines msl with
+          match Pipelines.get t.pipelines kernel with
           | Ok compiled -> compiled
           | Error error -> raise (Diagnostic.Error error)
         in
@@ -655,12 +655,12 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                   (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU uniform type changed."));
               for component = 0 to width - 1 do
                 let at = offset + (component * 4) in
-                (if List.mem at msl.uint32_uniforms then pack_uint32 else pack)
+                (if List.mem at kernel.uint32_uniforms then pack_uint32 else pack)
                   t.uniforms at
                   values.uniforms.(index).(component)
               done
           | Gather_at (k, offset) ->
-              let u, width = msl.gathers.(k) in
+              let u, width = kernel.gathers.(k) in
               if u >= Array.length values.tables then
                 raise
                   (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
@@ -679,7 +679,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
               if index >= Array.length values.frame then
                 raise
                   (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU frame uniform changed."));
-              (if List.mem offset msl.uint32_uniforms then pack_uint32 else pack)
+              (if List.mem offset kernel.uint32_uniforms then pack_uint32 else pack)
                 t.uniforms offset values.frame.(index)
         done;
         (* a buffer this runner's last dispatch still reads is not rewritten under it *)
@@ -693,8 +693,8 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                   forget_input slot;
                   buffer
               | None ->
-                  let length = values.count * msl.input_widths.(index) * 4 in
-                  let buffer = ensure ~mapped:(not msl.input_uint32.(index)) t slot length in
+                  let length = values.count * kernel.input_widths.(index) * 4 in
+                  let buffer = ensure ~mapped:(not kernel.input_uint32.(index)) t slot length in
                   let source = values.arrays.(index) in
                   if
                     not
@@ -704,7 +704,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                   then begin
                     (* A failed write may have partially replaced the previous source. *)
                     slot.uploaded <- None;
-                    if msl.input_uint32.(index) then upload_uint32 buffer slot source (length / 4)
+                    if kernel.input_uint32.(index) then upload_uint32 buffer slot source (length / 4)
                     else begin
                       pack_floats (Option.get slot.floats) source (length / 4);
                       get (B.flush_mapped buffer ~length)
@@ -722,7 +722,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
           | _ ->
               Array.mapi
                 (fun k slot ->
-                  ensure ~mapped:true t slot (values.count * msl.output_widths.(k) * 4))
+                  ensure ~mapped:true t slot (values.count * kernel.output_widths.(k) * 4))
                 t.outputs
         in
         let status = ensure t t.status 4 in
@@ -740,7 +740,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
               Bytes.set_int32_le t.uniforms (offset + 4) (Int32.of_int div);
               Bytes.set_int32_le t.uniforms (offset + 8) (Int32.of_int use);
               (cell, out))
-            msl.counts
+            kernel.counts
         in
         if reset_status then begin
           (* the last dispatch's status, if no one settled it, is kept before this one resets it *)
@@ -757,9 +757,9 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
           t.status_checked <- false
         end;
         let table =
-          if msl.table_seeds = [||] then None
+          if kernel.table_seeds = [||] then None
           else begin
-            let length = Array.length msl.table_seeds * 512 * 4 in
+            let length = Array.length kernel.table_seeds * 512 * 4 in
             let fresh = not t.table_ready in
             let buffer = ensure t t.table length in
             if fresh then begin
@@ -772,7 +772,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                         (((index * 512) + entry) * 4)
                         (Int32.of_int value))
                     permutation)
-                msl.table_seeds;
+                kernel.table_seeds;
               get (B.write_buffer buffer ~offset:0L t.table.bytes);
               t.table_ready <- true
             end;
@@ -783,12 +783,12 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
         let gathers =
           Array.mapi
             (fun k slot ->
-              match bound_table (fst msl.gathers.(k)) with
+              match bound_table (fst kernel.gathers.(k)) with
               | Some (buffer, _) -> buffer
               | None ->
-                  let source = values.tables.(fst msl.gathers.(k)) in
+                  let source = values.tables.(fst kernel.gathers.(k)) in
                   let length = max 4 (Array.length source * 4) in
-                  let buffer = ensure ~mapped:(not msl.gather_uint32.(k)) t slot length in
+                  let buffer = ensure ~mapped:(not kernel.gather_uint32.(k)) t slot length in
                   if
                     not
                       (match slot.uploaded with
@@ -796,7 +796,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                       | None -> false)
                   then begin
                     slot.uploaded <- None;
-                    if msl.gather_uint32.(k) then
+                    if kernel.gather_uint32.(k) then
                       upload_uint32 buffer slot source (Array.length source)
                     else begin
                       pack_floats (Option.get slot.floats) source (Array.length source);
@@ -850,7 +850,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                 counted;
               Option.iter
                 (fun { accel; vertices; spheres; _ } ->
-                  let index = Option.get msl.scene in
+                  let index = Option.get kernel.scene in
                   get (B.set_accel encoder ~index accel);
                   get (B.set_buffer encoder ~index:(index + 1) vertices);
                   get (B.set_buffer encoder ~index:(index + 2) spheres);
@@ -878,7 +878,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
               {
                 owner = t;
                 count = values.count;
-                width = msl.output_widths.(0);
+                width = kernel.output_widths.(0);
                 index = 0;
                 gpu_seconds = None;
                 generation = t.generation;
@@ -903,7 +903,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                 {
                   owner = t;
                   count = values.count;
-                  width = msl.output_widths.(0);
+                  width = kernel.output_widths.(0);
                   index = 0;
                   gpu_seconds = None;
                   generation = t.generation;
@@ -921,7 +921,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                 {
                   owner = t;
                   count = values.count;
-                  width = msl.output_widths.(0);
+                  width = kernel.output_widths.(0);
                   index = 0;
                   gpu_seconds = B.gpu_duration queue receipt;
                   generation = t.generation;
@@ -938,7 +938,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
 
 let select_output ~index output =
   if index < 0 || index >= Array.length output.owner.outputs then None
-  else Some { output with index; width = output.owner.msl.output_widths.(index) }
+  else Some { output with index; width = output.owner.kernel.output_widths.(index) }
 
 let check_status t ~epoch =
   try
@@ -976,7 +976,7 @@ let ready ?index output =
          match check_status output.owner ~epoch:output.epoch with
          | Ok () -> ()
          | Error diagnostic -> raise (Diagnostic.Error diagnostic));
-      Ok (output.owner.outputs.(index), output.owner.msl.output_widths.(index))
+      Ok (output.owner.outputs.(index), output.owner.kernel.output_widths.(index))
     with Diagnostic.Error error -> Error error
 
 (* A completed, status-checked output's mapped contents, [count * width] floats. *)
@@ -1013,8 +1013,8 @@ let unpack_floats (floats : B.floats) length =
 let uint32_output ?index output =
   let index = Option.value ~default:output.index index in
   index >= 0
-  && index < Array.length output.owner.msl.output_uint32
-  && output.owner.msl.output_uint32.(index)
+  && index < Array.length output.owner.kernel.output_uint32
+  && output.owner.kernel.output_uint32.(index)
 
 let read_uint32 queue buffer ~epoch ~length =
   try
@@ -1352,7 +1352,7 @@ let keep_storage ~uint32 ?index output =
          (if uint32 then "Expected a uint32 output for a typed topology holder."
           else "Uint32 outputs require a typed topology holder."))
   else
-    let slot = t.outputs.(index) and width = t.msl.output_widths.(index) in
+    let slot = t.outputs.(index) and width = t.kernel.output_widths.(index) in
     match (slot.buffer, slot.floats) with
     | Some buffer, Some floats when output.count > 0 && output.epoch > 0L ->
         let holder = hold t ~uint32 ~buffer ~floats ~capacity:slot.capacity
@@ -1483,7 +1483,7 @@ let count_record output =
     output.owner.closed
     || Domain.self () <> output.owner.domain
     || output.generation <> output.owner.generation
-    || output.owner.msl.counts = None
+    || output.owner.kernel.counts = None
   then None
   else output.owner.counted.buffer
 
@@ -1495,7 +1495,7 @@ let gpu_seconds output = output.gpu_seconds
 let max_total_threads t =
   Result.map
     (fun (compiled : Pipelines.compiled) -> B.max_total_threads compiled.pipeline)
-    (Pipelines.get t.pipelines t.msl)
+    (Pipelines.get t.pipelines t.kernel)
 
 (* on the initial domain, once its runners are closed *)
 let close_pool pool =
