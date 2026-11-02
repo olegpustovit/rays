@@ -49,6 +49,7 @@
   rays_math
   input
   runtime_input
+  sdl3
   rdk_rays
   rays_pathtracer
   sop

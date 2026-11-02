@@ -33,12 +33,17 @@ let workspace_doc ?gpu ?opened ~factories ~seed_scene workspace =
   in
   Ok doc
 
-let preferences_file = function
+let user_folder platform =
+  Editor_core.Store.user_folder platform
+    ~pref:
+      (match platform with
+      | Input.Apple -> None
+      | Other -> Sdl3.pref_path ~org:"rays" ~app:"editor")
+    ~home:(Option.value ~default:"." (Sys.getenv_opt "HOME"))
+
+let preferences_file platform = function
   | Some path when path <> "" -> path
-  | Some _ | None ->
-      Filename.concat
-        (Filename.concat (Option.value ~default:"." (Sys.getenv_opt "HOME")) ".rays")
-        "preferences.rays"
+  | Some _ | None -> Filename.concat (user_folder platform) "preferences.rays"
 
 let read_preferences filename = Editor_core.Store.Settings.load ~sketch:"rays-editor" filename
 
@@ -87,12 +92,10 @@ let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") 
             match presets with
             | Some directory -> directory
             | None ->
-                Filename.concat
-                  (Filename.concat (Option.value ~default:"." (Sys.getenv_opt "HOME")) ".rays")
-                  (Preset.sanitize name)
+                Filename.concat (user_folder platform) (Preset.sanitize name)
           in
           let level = Document.Scene in
-          let preferences = preferences_file preferences in
+          let preferences = preferences_file platform preferences in
           (* a machine's setting, beside the guide: an override from the process still wins *)
           (match read_preferences preferences with
           | Ok values ->

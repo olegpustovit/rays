@@ -4,6 +4,11 @@ let read_text ~filename =
   try Ok (In_channel.with_open_bin filename In_channel.input_all)
   with Sys_error message -> Error message
 
+let user_folder (platform : Input.platform) ~pref ~home =
+  match (platform, pref) with
+  | Other, Some folder -> folder
+  | Apple, _ | Other, None -> Filename.concat home ".rays"
+
 (* ---- the forms stored beside the documents: all s-expressions ---- *)
 module S = Flow.Syntax
 
