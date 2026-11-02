@@ -31,17 +31,25 @@ let run () =
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
   in
   let presets = Filename.temp_dir "history-memory" "" in
-  let charged = Mem.document "editor.history" in
   let e =
     ref
       (ok
          (E3.create ~ui_text_size:11 ~presets ~await:true ~domains:1 ~workspace ~prepare:E3.prepare
             ~draw:E3.draw ()))
   in
+  (* the entries the ledger holds: named at a frame's boundary, sized when a report walks *)
+  let walked () =
+    ignore (Mem.report ());
+    Mem.bytes (Mem.document "editor.history")
+  in
+  let held () =
+    e := E3.after_present !e (Test_editor_input.frame (-100., -100.) [] 0);
+    walked ()
+  in
   Fun.protect
     ~finally:(fun () ->
       E3.close !e;
-      check (Mem.bytes charged = 0) "closing releases the history's charge")
+      check (walked () < 1024) "closing lets the history's entries go")
     (fun () ->
       let tick = ref 0 in
       let step ?(keys = []) events =
@@ -72,7 +80,7 @@ let run () =
       in
       step [];
       let start = dump () in
-      check (Mem.bytes charged = 0) "no entry yet, nothing charged";
+      check (held () < 1024) "no entry yet, nothing held";
       (* the lowering of the document before any edit *)
       let weak = Weak.create 1 in
       Weak.set weak 0 (Some (E3.Private.image_plan !e));
@@ -80,18 +88,19 @@ let run () =
       let after_one = dump () in
       Gc.full_major ();
       check (Weak.check weak 0) "the last present stays live, one slot";
-      check (Mem.bytes charged > 0) "an entry is charged";
+      check (held () > 1024) "an entry is held";
       edit 2;
+      ignore (held ());
       Gc.full_major ();
       Gc.full_major ();
       check (not (Weak.check weak 0)) "an old lowering is gone after two edits";
       edit 3;
-      let three = Mem.bytes charged in
+      let three = held () in
       (* the last present comes back as it was; older ones are lowered again, to the same document *)
       undo ();
       undo ();
       check (dump () = after_one) "undo past the kept one lowers to the same document";
-      check (Mem.bytes charged >= three / 2) "the entries moved to redo stay charged";
+      check (held () >= three / 2) "the entries moved to redo stay held";
       undo ();
       check (dump () = start) "undo all the way back gives the first document";
       check (not (E3.can_undo !e)) "nothing left to undo";

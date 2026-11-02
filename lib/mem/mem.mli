@@ -32,8 +32,9 @@ val reachable_bytes : 'a -> int
     per frame. *)
 
 val root : owner -> (unit -> Obj.t list) -> unit
-(** This owner's size is what these roots reach beyond the owners registered before it, walked when a
-    {!report} walks. For what has no size to charge as it is built (a lowered document); a later call
+(** This owner's size is what these roots reach beyond the owners registered before it and every table
+    that charges its own bytes, walked when a {!report} walks. For what has no size to charge as it is
+    built (a lowered document); a later call
     replaces the roots, so a frame can name its current document, and the closure keeps what it names
     alive: replace it with [fun () -> []] on close. *)
 
@@ -119,6 +120,16 @@ val admit : ?shed:(unit -> bool) -> unit -> (unit, overdraft) result
 (** A cook about to run, on its own domain: [Error] when usage is over the limit after [shed] (the
     caller's own cache, which it alone may touch) and at most one collection per crossing. Reads the
     footprint: one syscall, for work that takes far longer. *)
+
+exception Refused of overdraft
+(** A large allocation that would pass the limit, refused by {!admit_bytes}. Not a {!Diagnostic}: no
+    kernel's fallback path can take it for a form the device declined and run on the CPU. A cook's
+    node turns it into [E_MEMORY]. *)
+
+val admit_bytes : int -> unit
+(** Called before a large allocation, from any domain; no owner sheds here, the cook's boundary did.
+    One footprint read, at most one collection per crossing.
+    @raise Refused when usage plus [n] passes the limit. *)
 
 val retry_worthwhile : unit -> bool
 (** Whether the limit rose since {!admit} last refused: only then is a refused cook worth another

@@ -60,7 +60,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_workspace_pixels)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (deps
   (source_tree ../../../sketches)
   ../../../specification/pxui-kit/kit.rays
@@ -76,7 +76,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_scene3_float32_gallery)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (deps
   (source_tree ../../../sketches)
   ../../../specification/pxui-kit/kit.rays
@@ -301,7 +301,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_workspace_images_native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_workspace_images_native.exe})))
 
@@ -415,7 +415,7 @@
   (= %{system} macosx))
  (alias test_editor_consistency_native)
  (deps ../../../sketches/gpu_sea.rays)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_editor_consistency_native)))
 
@@ -423,7 +423,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias sop_render_parity)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} sop_render_parity)))
 
@@ -450,7 +450,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_rays_editor)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_rays_editor)))
 
@@ -661,7 +661,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_workspace_shell_native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (deps
   (glob_files ../../../specification/workspace/cases/*.lisp))
  (action
@@ -671,7 +671,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_workspace_roots_native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_workspace_roots_native)))
 
@@ -679,7 +679,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_workspace_view_native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (deps ../../../sketches/shattered_cube.rays)
  (action
   (run %{exe:test_main.exe} test_workspace_view_native)))
@@ -843,7 +843,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias runtest-native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (deps (glob_files ../../../sketches/*.rays))
  (action
   (setenv
@@ -853,9 +853,23 @@
 
 (rule
  (enabled_if
+  (and
+   (= %{system} macosx)
+   (= %{env:RAYS_SLOW=0} 1)))
+ (alias runtest-native)
+ (locks %{workspace_root}/smoke_window)
+ (deps (glob_files ../../../sketches/*.rays))
+ (action
+  (setenv
+   SDL_AUDIODRIVER
+   dummy
+   (run %{exe:test_2d_ports.exe} --rest /tmp/rays-2d-ports-rest))))
+
+(rule
+ (enabled_if
   (= %{system} macosx))
  (alias runtest-native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (setenv
    SDL_AUDIODRIVER

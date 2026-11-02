@@ -585,7 +585,7 @@
 (rule
  (enabled_if (= %{system} macosx))
  (alias isogrid-selector-lifetimes)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (deps ../sketches/isogrid.rays isogrid_24.expected)
  (action
   (chdir ..

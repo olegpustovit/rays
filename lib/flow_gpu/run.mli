@@ -326,3 +326,6 @@ module Private : sig
   val pool_held : pool -> int
   (** Buffers its kept outputs hold now, after recycling what collected or read ones gave back. *)
 end
+
+val free_budget : int
+(** Idle bytes kept for reuse: the pool's free list, and a host's display storage. *)

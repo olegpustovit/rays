@@ -6,23 +6,26 @@ let check condition message = if not condition then fail message
 
 let () =
   Mem.reset ();
-  (* a walked owner is what its roots reach beyond those before it; a charged table is not walked *)
-  let shared = Array.make 10_000 0 in
+  (* a walked owner is what its roots reach beyond those before it; a charged table is not walked,
+     and what it holds is on the ledger already, however a root reaches it *)
+  let shared = Array.make 100_000 0 in
+  let held = Array.make 50_000 0 in
   let named = Mem.plan "walk.named" and counted = Mem.cache "walk.counted" in
   let charged = Mem.cache "walk.charged" in
-  Mem.root named (fun () -> [ Obj.repr shared ]);
-  let own = Array.make 1_000 0 in
+  Mem.root named (fun () -> [ Obj.repr (shared, held) ]);
+  let own = Array.make 10_000 0 in
   let table = (shared, own) in
   Mem.walk_table counted table ~uncharged:(fun () -> true);
-  Mem.walk_table charged table ~uncharged:(fun () -> false);
+  Mem.walk_table charged held ~uncharged:(fun () -> false);
+  Mem.charge charged 400_000;
   ignore (Mem.report ());
-  check (abs (Mem.bytes named - 80_000) < 100) "a named root is its reach";
-  check (abs (Mem.bytes counted - 8_000) < 100) "a table is what it reaches beyond the roots before it";
-  check (Mem.bytes charged = 0) "a table on the ledger is not walked";
+  check (abs (Mem.bytes named - 800_000) < 100) "a named root is its reach beyond what a table charges";
+  check (abs (Mem.bytes counted - 80_000) < 100) "a table is what it reaches beyond the roots before it";
+  check (Mem.bytes charged = 400_000) "a table on the ledger is not walked";
   Mem.root named (fun () -> []);
   ignore (Mem.report ());
-  ignore (Sys.opaque_identity table);
-  check (abs (Mem.bytes counted - 88_000) < 100) "what a root let go of falls to the next";
+  ignore (Sys.opaque_identity (table, held));
+  check (abs (Mem.bytes counted - 880_000) < 100) "what a root let go of falls to the next";
   check (Mem.bytes named = 0) "a dropped root leaves the ledger";
   Mem.reset ();
   let meshes = Mem.cache "renderer.meshes" in
@@ -197,6 +200,16 @@ let () =
   let session = Mem.cache "cook.session" in
   Mem.charge session 123;
   check (Mem.admit () = Ok ()) "unlimited admits";
+  Mem.admit_bytes max_int;
+  let footprint = Option.value ~default:0 (Mem.phys_footprint ()) in
+  Mem.set_budget ~source:Override (footprint + (1 lsl 30));
+  Mem.admit_bytes (1 lsl 20);
+  check
+    (match Mem.admit_bytes (2 lsl 30) with
+    | () -> false
+    | exception Mem.Refused o -> o.used > o.limit)
+    "an allocation that would pass the limit is refused before it is made";
+  Mem.set_budget ~source:Override 0;
   Mem.set_budget 1;
   let shed_calls = ref 0 in
   (match

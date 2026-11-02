@@ -169,16 +169,19 @@ let create ~max_entries ~max_payload_bytes =
         handed = Hashtbl.create 16;
       }
     in
+    let cache =
+      (* Never: only the cook's domain touches it; Async_cook sheds it while that one is idle *)
+      Entry_cache.create ~owner:(Lru.cache "sop.session") ~shed:Never max_entries
+        ~release:(fun _ entry -> release_components payload entry.components)
+    in
+    (* the planes its entries hold, charged one by one: what a report's walk must not claim again *)
+    Mem.walk_table owner cache ~uncharged:(fun () -> false);
     Ok
       {
         clock = Unix.gettimeofday;
         max_entries;
         max_payload_bytes;
-        cache =
-          (* Never: only the cook's domain touches it; Async_cook sheds it while that one is idle *)
-          Entry_cache.create ~owner:(Lru.cache "sop.session") ~shed:Never max_entries
-            ~release:(fun _ entry ->
-              release_components payload entry.components);
+        cache;
         payload;
         volatile_owner = Lru.cache "sop.volatile";
         cooks = 0;
@@ -415,6 +418,7 @@ let settle_failed =
 let node_result f =
   try f () with
   | Invalid_facts message -> Error (Diagnostic.error ~code:"E_NODE_FACTS" message)
+  | Mem.Refused overdraft -> Error (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))
   | exn ->
       Error
         (Diagnostic.error ~code:"uncaught_node_exception" ~cause:(Printexc.to_string exn)

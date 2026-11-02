@@ -61,7 +61,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_scene_primitives_native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_scene_primitives.exe} native)))
 
@@ -134,7 +134,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_retained_view_native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_retained_view_native)))
 
@@ -198,7 +198,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_canvas_native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_canvas_native)))
 

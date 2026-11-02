@@ -102,7 +102,7 @@ let reserve t request =
 
 let entry_bytes (entry : entry) =
   match entry.cpu with
-  | Some { payload; _ } -> CPU.width payload * CPU.height payload * 4
+  | Some { payload; _ } -> CPU.width payload * CPU.height payload * 4 * 8 (* doubles, four a pixel *)
   | None -> 0
 
 let make_entry key =

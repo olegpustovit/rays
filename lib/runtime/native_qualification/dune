@@ -9,7 +9,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias qualification)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:runtime_native_qualification.exe})))
 
@@ -27,7 +27,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias runtime_autorelease)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:runtime_autorelease.exe})))
 
@@ -42,7 +42,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias runtime_live_resize)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:runtime_live_resize.exe} --auto)))
 

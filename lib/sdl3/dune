@@ -134,7 +134,7 @@
 
 (rule
  (alias test_sdl3_metal)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_sdl3_metal)))
 
@@ -164,7 +164,7 @@
 
 (rule
  (alias qualification)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (setenv
    SDL_VIDEODRIVER

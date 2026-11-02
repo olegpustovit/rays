@@ -468,6 +468,7 @@ let ensure ?(mapped = false) t slot length =
         usage = [ Storage; Copy_src; Copy_dst ];
       }
     in
+    if !capacity >= 1 lsl 20 then Mem.admit_bytes !capacity;
     let fresh, floats =
       if mapped then
         let buffer, floats = get (B.create_mapped_buffer t.device descriptor) in

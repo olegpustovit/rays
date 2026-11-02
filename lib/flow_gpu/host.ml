@@ -133,8 +133,9 @@ type t = {
   mutable iota : (Ogpu.Backend.buffer * int) option;
   mutable iota_uint32 : (Ogpu.Backend.buffer * int) option;
       (* 0., 1., 2., ... on the device, for range sources *)
-  mutable retired_buffers : Ogpu.Backend.buffer list;
-      (* outgrown index buffers, destroyed at close *)
+  mutable retired_buffers : (Ogpu.Backend.buffer * int64 option) list;
+      (* outgrown index buffers, each with the newest epoch that can read it: named at the next
+         scope, when the scope that outgrew it has committed; destroyed once that epoch completes *)
   buffers : (int, Ogpu.Backend.buffer list) Hashtbl.t; (* display normals' buffers by byte size *)
   mutable closed : bool;
   mutable resident_buffers : int;  (** buffers a resident fold's slots made *)
@@ -153,6 +154,13 @@ type t = {
 }
 
 let next = Atomic.make 1
+let iota_owner = Mem.plan ~pool:Device "flow_gpu.iota"
+let display_owner = Mem.plan ~pool:Device "flow_gpu.display"
+let buffer_bytes b = Int64.to_int (Ogpu.Backend.buffer_size b)
+
+let destroy_owned owner b =
+  Mem.release owner (buffer_bytes b);
+  ignore (Ogpu.Backend.destroy_buffer b)
 
 (* a slot's idle things are destroyed: none is in flight, since a fold run's close waits for it *)
 (* a resident fold's buffers: its slots' and free lists', until a holder adopts one ({!Run.hold}) *)
@@ -318,8 +326,8 @@ let iota t length =
             ignore (Ogpu.Backend.destroy_buffer buffer);
             None)
           else begin
-            (* the old buffer may still be read by work in flight: keep it until the host closes *)
-            Option.iter (fun (old, _) -> t.retired_buffers <- old :: t.retired_buffers) old;
+            Mem.charge iota_owner (buffer_bytes buffer);
+            Option.iter (fun (old, _) -> t.retired_buffers <- (old, None) :: t.retired_buffers) old;
             t.iota <- Some (buffer, capacity);
             Some buffer
           end)
@@ -436,10 +444,27 @@ type residency = {
   uint32_stream : Flow.Eval.value -> (Ogpu.Backend.buffer * int) option;
 }
 
+(* An outgrown index buffer goes when nothing can read it. A scope may still encode with one it
+   outgrew, so it is named at the next scope, by the newest dispatch then. *)
+let drain_retired t queue =
+  let newest = match t.flight with e :: _ -> e | [] -> 0L in
+  let completed = Ogpu.Backend.completed_epoch queue in
+  t.retired_buffers <-
+    List.filter_map
+      (fun (b, epoch) ->
+        let epoch = Option.value ~default:newest epoch in
+        if completed >= epoch then begin
+          destroy_owned iota_owner b;
+          None
+        end
+        else Some (b, Some epoch))
+      t.retired_buffers
+
 let resident_scope ?(uint32 = false) ~fast t =
   let module E = Flow.Eval in
   let module P = Flow_ir.Packed.Host in
   let queue = Renderer.gpu_queue t.gpu in
+  if t.retired_buffers <> [] then drain_retired t queue;
   let read_count cell ~epoch =
     Result.map
       (fun count ->
@@ -559,6 +584,7 @@ let resident_scope ?(uint32 = false) ~fast t =
       | Some (buffer, capacity) when capacity >= length -> Some buffer
       | old -> (
           let capacity = max 1 (max length (2 * Option.fold ~none:0 ~some:snd old)) in
+          if capacity >= 1 lsl 18 then Mem.admit_bytes (capacity * 4);
           match
             Result.map fst (Ogpu.Backend.create_mapped_buffer (Renderer.gpu_device t.gpu)
               {
@@ -575,7 +601,8 @@ let resident_scope ?(uint32 = false) ~fast t =
                   ignore (Ogpu.Backend.destroy_buffer buffer);
                   None
               | Ok () ->
-                  Option.iter (fun (b, _) -> t.retired_buffers <- b :: t.retired_buffers) old;
+                  Mem.charge iota_owner (buffer_bytes buffer);
+                  Option.iter (fun (b, _) -> t.retired_buffers <- (b, None) :: t.retired_buffers) old;
                   t.iota_uint32 <- Some (buffer, capacity);
                   Some buffer))
   in
@@ -615,7 +642,10 @@ let resident_scope ?(uint32 = false) ~fast t =
                 let rec up n = if n >= bytes then n else up (2 * n) in
                 up (1 lsl 20)
             in
-            if large then Run.created t.shared size;
+            if large then begin
+              Mem.admit_bytes size;
+              Run.created t.shared size
+            end;
             Result.map
               (fun b ->
                 t.resident_buffers <- t.resident_buffers + 1;
@@ -1352,9 +1382,12 @@ let resident_scope ?(uint32 = false) ~fast t =
     (* the holder's now: [flow_gpu.held] charges it *)
     if p.owned then Mem.release resident_owner (resident_bytes buffer);
     let same b = fst b == buffer in
-    if Option.fold ~none:false ~some:same t.iota then t.iota <- None;
-    if Option.fold ~none:false ~some:same t.iota_uint32 then t.iota_uint32 <- None;
-    t.retired_buffers <- List.filter (fun b -> b != buffer) t.retired_buffers;
+    let adopted = ref false in
+    if Option.fold ~none:false ~some:same t.iota then (t.iota <- None; adopted := true);
+    if Option.fold ~none:false ~some:same t.iota_uint32 then (t.iota_uint32 <- None; adopted := true);
+    if List.exists (fun (b, _) -> b == buffer) t.retired_buffers then adopted := true;
+    t.retired_buffers <- List.filter (fun (b, _) -> b != buffer) t.retired_buffers;
+    if !adopted then Mem.release iota_owner (buffer_bytes buffer);
     List.iter (fun alias ->
         if fst alias.buffer == buffer then begin
           if alias.owned then
@@ -1481,38 +1514,43 @@ let close t =
                       runners_released = !(t.retired).runners_released + 1 }) t.ownership;
     t.ownership <- None;
     Run.close_pool t.shared;
-    List.iter
-      (fun b -> ignore (Ogpu.Backend.destroy_buffer b))
+    List.iter (destroy_owned iota_owner)
       (Option.fold ~none:[] ~some:(fun (b, _) -> [ b ]) t.iota
       @ Option.fold ~none:[] ~some:(fun (b, _) -> [ b ]) t.iota_uint32
-      @ t.retired_buffers);
+      @ List.map fst t.retired_buffers);
     t.iota <- None;
     t.iota_uint32 <- None;
     Option.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) t.validation_status;
     t.validation_status <- None;
     t.retired_buffers <- [];
-    Hashtbl.iter
-      (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
-      t.buffers;
+    Hashtbl.iter (fun _ bs -> List.iter (destroy_owned display_owner) bs) t.buffers;
     Hashtbl.reset t.buffers;
     Lru.Identity_list.clear t.tables;
     Pipelines.close t.pipelines;
     t.closed <- true
   end
 
-(* Shared display storage: at most four free buffers per size and 64 sizes. *)
+(* Shared display storage: at most four free buffers per size and 64 sizes, and the kept outputs'
+   free bytes in all: a mesh whose count moves each frame finds no size again. *)
 let return_display_buffer t bytes out =
   if Domain.self () <> t.domain then invalid_arg "Host display buffer released on another domain";
   let free = Option.value ~default:[] (Hashtbl.find_opt t.buffers bytes) in
+  let idle = Hashtbl.fold (fun size bs sum -> sum + (size * List.length bs)) t.buffers 0 in
   if live t && List.length free < 4
      && (Hashtbl.mem t.buffers bytes || Hashtbl.length t.buffers < 64)
+     && idle + bytes <= max Run.free_budget (4 * bytes)
   then Hashtbl.replace t.buffers bytes (out :: free)
-  else ignore (Ogpu.Backend.destroy_buffer out)
+  else destroy_owned display_owner out
 
 let display_buffer t bytes =
   match Hashtbl.find_opt t.buffers bytes with
   | Some (b :: rest) -> Hashtbl.replace t.buffers bytes rest; Ok b
-  | _ -> Result.map (fun buffer -> t.resident_buffers <- t.resident_buffers + 1; buffer)
+  | _ ->
+      if bytes >= 1 lsl 20 then Mem.admit_bytes bytes;
+      Result.map (fun buffer ->
+          t.resident_buffers <- t.resident_buffers + 1;
+          Mem.charge display_owner (buffer_bytes buffer);
+          buffer)
       (Result.map_error Run.Private.diagnostic
         (Ogpu.Backend.create_buffer (Renderer.gpu_device t.gpu)
           { label = Some "Flow display storage"; size = Int64.of_int bytes; usage = [ Storage; Index ] }))

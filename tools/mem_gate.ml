@@ -35,6 +35,7 @@ type budget = {
   max_readback_bytes : int option;
   max_payload_readback_bytes : int option;
   max_peak_bytes : int option;  (** the process's highest footprint, over a ceiling too *)
+  owner_caps : (string * int) list;  (** [(max.OWNER bytes)]: the document is its text at any mesh size *)
   refuses : bool;  (** its ceiling is under what it needs: the frame path must say E_MEMORY *)
   route : [ `Device | `Any ];
   ceiling : int option;  (** RAYS_MEM_BUDGET for this scenario: it passes or fails with E_MEMORY *)
@@ -69,6 +70,13 @@ let parse_budget (form : Flow.Syntax.t) =
     max_readback_bytes = int "max_readback_bytes";
     max_payload_readback_bytes = int "max_payload_readback_bytes";
     max_peak_bytes = int "max_peak_bytes";
+    owner_caps =
+      List.filter_map
+        (fun (key, value) ->
+          if String.starts_with ~prefix:"max." key then
+            Some (String.sub key 4 (String.length key - 4), int_of_string value)
+          else None)
+        fields;
     refuses = List.mem_assoc "refuses" fields;
     route = (if List.assoc_opt "route" fields = Some "device" then `Device else `Any);
     ceiling = int "ceiling";
@@ -132,7 +140,9 @@ let scenario = function
   | "recursive_signals" -> (sketch "recursive_signals", no_step)
   | "sea_128" | "sea_128_200m" -> (sea 128, no_step)
   | "sea_256" | "sea_256_100m" -> (sea 256, no_step)
+  | "sea_512_300m" -> (sea 512, no_step)
   | "isogrid_small" -> (set_input "volume" "resolution" 12 (sketch "isogrid"), no_step)
+  | "city_small" -> (set_input "city" "side" 24 (sketch "isogrid_city"), no_step)
   | "image_graph" -> (sketch "flow_image", no_step)
   | "scrubs_100" ->
       ( sea 128,
@@ -196,6 +206,12 @@ let check (budget : budget) (o : M.outcome) =
         note "footprint %d B over max_footprint_bytes %d" o.final.footprint max)
     budget.max_footprint_bytes;
   let report = o.final.report in
+  List.iter
+    (fun (e : Mem.Report.entry) ->
+      Option.iter
+        (fun max -> if e.bytes > max then note "%s %d B over its cap %d" e.name e.bytes max)
+        (List.assoc_opt e.name budget.owner_caps))
+    report.owners;
   Option.iter
     (fun max_pct ->
       let explicit = report.ocaml_live + report.device in

@@ -7,6 +7,11 @@ open Loop_source
 open Loop_model
 open Loop_view
 
+(* A refused allocation in a canvas's kernels, as a cook's node says it: the last picture stays. *)
+let refusal_typed f =
+  try f ()
+  with Mem.Refused overdraft -> Error (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))
+
 (* each canvas panel's picture: reused while its plan, size and preview stand, else rendered *)
 let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core : Editor_model.t)
     ~control () =
@@ -105,17 +110,18 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
                     ~fast:(Editor_document.Lowering.fast core.doc)
                     value.host.gpu
                 in
-                let prepared =
+                let prepared = lazy (
                   match previous with
                   | Some { prepared = Some p; preview = held; _ } when same_plan && held = preview
                     ->
                       Ok p
                   | _ ->
                       Flow_native.Drawing.prepare ~gpu ~profile:lowered.profile
-                        ~states:lowered.states lowered.plan drawing
+                        ~states:lowered.states lowered.plan drawing)
                 in
                 match
-                  Result.bind prepared (fun p ->
+                  refusal_typed @@ fun () ->
+                  Result.bind (Lazy.force prepared) (fun p ->
                       Result.map
                         (fun scene -> (p, scene))
                         (Flow_native.Workspace_gpu.with_backend
@@ -856,9 +862,14 @@ let memory_boundary value =
       { value with memory_known = true }
     end
   in
-  (* the present document, and its lowering, on the ledger when a report walks it *)
-  let doc = value.core.doc.workspace in
-  Mem.root (Mem.document "editor.document") (fun () -> [ Obj.repr doc ]);
+  (* on the ledger when a report walks them: the document is its text; what the frame made from that
+     text (its lowering, the plan's lifetime) is sized apart and replaced with the text's next edit.
+     Undo entries share what an edit did not touch, so they are walked, not summed. *)
+  let doc = value.core.doc in
+  let entries, recent = Editor_core.History.retained value.core.history in
+  Mem.root (Mem.document "editor.document") (fun () -> [ Obj.repr doc.workspace.ws ]);
+  Mem.root (Mem.document "editor.history") (fun () -> [ Obj.repr entries ]);
+  Mem.root (Mem.plan "editor.lowering") (fun () -> [ Obj.repr doc; Obj.repr recent ]);
   let core = ref value.core in
   let undo_past_16 () =
     let history = !core.Editor_model.history in
@@ -993,6 +1004,8 @@ let crash_dump value directory =
 
 let close value =
   Mem.root (Mem.document "editor.document") (fun () -> []);
+  Mem.root (Mem.document "editor.history") (fun () -> []);
+  Mem.root (Mem.plan "editor.lowering") (fun () -> []);
   let value = autosave ~force:true value ~now:value.state_checked in
   Option.iter prerr_endline value.state_error;
   Option.iter (fun (_, image) -> ignore (Image.destroy image)) value.map;

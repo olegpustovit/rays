@@ -655,6 +655,10 @@ let lane_aliases dune_files =
               (stanza_names stanza)
         | List (Atom "rule" :: _) as stanza ->
             let aliases = atoms (field "alias" stanza) @ atoms (field "aliases" stanza) in
+            (* a lock name is per directory unless rooted: windows contend in the window server across
+               every directory *)
+            if List.mem "smoke_window" (atoms (field "locks" stanza)) then
+              coupled := (path ^ ": (locks smoke_window) locks one directory; use %{workspace_root}/smoke_window") :: !coupled;
             if List.length aliases > 1 then
               coupled :=
                 (path ^ ": coupled rule aliases; use one focused alias and lane dependencies")
