@@ -15,6 +15,9 @@
   (scenario sea_128 (route device) (early 60) (max_live_bytes 27000000) (max_footprint_bytes 135000000) (max_readback_bytes 2949120) (max_payload_readback_bytes 0))
   (scenario sea_128_200m (route device) (ceiling 200000000) (frames 60))
   (scenario isogrid_small (max_live_bytes 37000000) (max_footprint_bytes 120000000))
+  ; an index buffer outgrown each frame comes back: 8 MB a frame at side 128 before it did (device 8.19 GB at 500
+  ; frames). Live moves while a voxel count new each frame fills the size-keyed pools to their byte caps
+  (scenario city_small (route device) (early 60) (frames 120) (live_flat_pct 6) (max.flow_gpu.iota 1000000))
   (scenario image_graph (max_live_bytes 31000000) (max_footprint_bytes 115000000))
   ; history and the kernels a scrub compiled grow by design, to their caps (a plateau by 400 frames).
   ; over 20: 54 MB host no walked owner reaches (live sites: Flow.Eval.term_index 19 MB,
@@ -24,6 +27,6 @@
   (scenario edits_200 (frames 200) (early 100) (live_flat_pct 100) (max_live_bytes 65000000) (max_footprint_bytes 320000000))
   ; at 65,536 points a double count shows, as gpu_sea's 189.6 MB did at a million (7% here). The document is its
   ; text: its lowering, evaluated captures and all, is a plan (editor.lowering), and what caches charge is not walked again
-  (scenario sea_256 (route device) (frames 30) (max_payload_readback_bytes 0) (max_document_bytes 3000000))
+  (scenario sea_256 (route device) (frames 30) (max_payload_readback_bytes 0) (max.editor.document 3000000))
   ; under what it needs: the real frame path refuses, typed, and holds the last good frame
   (scenario sea_256_100m (route device) (ceiling 100000000) (frames 30) (refuses true) (max_peak_bytes 155000000)))
