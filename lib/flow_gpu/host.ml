@@ -155,10 +155,16 @@ type t = {
 let next = Atomic.make 1
 
 (* a slot's idle things are destroyed: none is in flight, since a fold run's close waits for it *)
+(* a resident fold's buffers: its slots' and free lists', until a holder adopts one ({!Run.hold}) *)
+let resident_owner = Mem.plan ~pool:Device "flow_gpu.resident"
+let resident_bytes b = Int64.to_int (Ogpu.Backend.buffer_size b)
+
+let destroy_resident b =
+  Mem.release resident_owner (resident_bytes b);
+  ignore (Ogpu.Backend.destroy_buffer b)
+
 let purge slot =
-  Hashtbl.iter
-    (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
-    slot.free;
+  Hashtbl.iter (fun _ bs -> List.iter destroy_resident bs) slot.free;
   Hashtbl.reset slot.free
 
 let retire slot =
@@ -599,7 +605,9 @@ let resident_scope ?(uint32 = false) ~fast t =
             let large = bytes >= 1 lsl 20 in
             let device = Renderer.gpu_device t.gpu in
             match if large then Run.recycled t.shared ~device bytes else None with
-            | Some (b, _, _) -> Ok (b, bytes)
+            | Some (b, _, _) ->
+                Mem.charge resident_owner (resident_bytes b);
+                Ok (b, bytes)
             | None ->
             let size =
               if not large then bytes
@@ -611,6 +619,7 @@ let resident_scope ?(uint32 = false) ~fast t =
             Result.map
               (fun b ->
                 t.resident_buffers <- t.resident_buffers + 1;
+                Mem.charge resident_owner (resident_bytes b);
                 (b, bytes))
               (Result.map_error Run.Private.diagnostic
                  (Result.map fst (Ogpu.Backend.create_mapped_buffer device
@@ -1143,7 +1152,7 @@ let resident_scope ?(uint32 = false) ~fast t =
          [] buffers);
     List.iter
       (fun (slot, b) ->
-        if slot.kept then give_back slot b else ignore (Ogpu.Backend.destroy_buffer (fst b)))
+        if slot.kept then give_back slot b else destroy_resident (fst b))
       buffers;
     List.iter
       (fun s ->
@@ -1340,6 +1349,8 @@ let resident_scope ?(uint32 = false) ~fast t =
   in
   let detach p =
     let buffer = fst p.buffer in
+    (* the holder's now: [flow_gpu.held] charges it *)
+    if p.owned then Mem.release resident_owner (resident_bytes buffer);
     let same b = fst b == buffer in
     if Option.fold ~none:false ~some:same t.iota then t.iota <- None;
     if Option.fold ~none:false ~some:same t.iota_uint32 then t.iota_uint32 <- None;

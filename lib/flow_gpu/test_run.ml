@@ -528,6 +528,9 @@ let resident_fold ?(n = 9000) ?(levels = 3) ?(keep = "(>= (int/mod (int i) 3) 1)
       in
       let actual = points ~resident prepared' in
       if !ran = 0 then failwith "resident fold: no region ran on the device";
+      (* the buffers its slots keep for the next draw are on the ledger *)
+      if Mem.bytes (Mem.plan ~pool:Device "flow_gpu.resident") = 0 then
+        failwith "resident fold: its kept buffers have no owner";
       if actual <> expected then failwith "resident fold: device points differ from the CPU";
       let bad_body =
         "(let* [p (fold [b (map (fn [i] [i (* i 2) 0]) (array/range 9000))] [d (range 2)] (map (fn \

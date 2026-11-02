@@ -204,6 +204,7 @@
  (name test_run)
  (modules test_run)
  (libraries
+  mem
   flow_gpu
   flow
   flow_ir
