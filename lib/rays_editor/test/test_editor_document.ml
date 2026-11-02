@@ -191,7 +191,7 @@ let run () =
       let module E3 = Rays_editor.Editor in
       exercise
         ~create:(fun () ->
-          E3.create ~ui_text_size:11 ~await:true ~workspace ~presets:directory ~factories ~prepare
+          E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace ~presets:directory ~factories ~prepare
             ~draw:(fun _ _ -> Scene.D3.create [])
             ()
           |> Result.get_ok)

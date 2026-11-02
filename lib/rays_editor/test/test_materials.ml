@@ -156,7 +156,7 @@ let frame ?(buttons = []) ?(keys = []) mouse events count : Frame.t =
   }
 
 let editor () =
-  E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace follow_source)
+  E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(workspace follow_source)
     ~prepare:Editor_prepare.surface
     ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
     ()
@@ -406,7 +406,7 @@ let carry_tests () =
   (* an unbounded budget unless a check is about the budget: a shown preview never depends on how
      loaded the machine is (it was once held back under a full parallel suite) *)
   let make ?(source = carry_source) ?(carry_budget = Float.infinity) () =
-    E3.create ~ui_text_size:11 ~await:true ~carry_budget
+    E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~carry_budget
       ~workspace:(workspace (with_editor source))
       ~prepare:Editor_prepare.empty
       ~draw:(fun _ _ -> Scene.D3.create [])
@@ -857,7 +857,7 @@ let viewport_source =
 let viewport_carry_tests () =
   let e =
     ref
-      ( E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace viewport_source)
+      ( E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(workspace viewport_source)
           ~prepare:Editor_prepare.surface
           ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
           ()

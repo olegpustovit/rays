@@ -308,7 +308,7 @@ let run () =
   let module E3 = Rays_editor.Editor in
   exercise ~name:"Editor"
     ~create:(fun () ->
-      E3.create ~ui_text_size:11 ~workspace
+      E3.create ~platform:Input.Apple ~ui_text_size:11 ~workspace
         ~camera:(Easy_camera.create ~inertia:false ())
         ~prepare:Editor_prepare.empty
         ~draw:(fun _ _ -> Scene.D3.empty)

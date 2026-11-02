@@ -212,7 +212,7 @@ let flat text clicks =
   (* the cook is awaited, not waited for: the editor blocks on the job each frame submits *)
   let env =
     ref
-      (E3.create ~ui_text_size:11 ~await:true ~workspace
+      (E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace
          ~camera:(Easy_camera.create ~inertia:false ())
          ~prepare:Editor_prepare.surface
          ~draw:(fun _ _ -> Scene.D3.empty)

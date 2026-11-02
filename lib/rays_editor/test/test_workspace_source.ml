@@ -147,7 +147,7 @@ let run_find () =
 (* ---- through the editor ---- *)
 
 let editor ?presets ?(imports = []) ~source text =
-  E3.create ~ui_text_size:11 ~await:true
+  E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true
     ~workspace:(Result.get_ok (Doc.of_text ~imports catalog text))
     ?presets ~source ~prepare:Editor_prepare.surface
     ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)

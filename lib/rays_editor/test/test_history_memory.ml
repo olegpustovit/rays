@@ -34,7 +34,7 @@ let run () =
   let e =
     ref
       (ok
-         (E3.create ~ui_text_size:11 ~presets ~await:true ~domains:1 ~workspace ~prepare:E3.prepare
+         (E3.create ~platform:Input.Apple ~ui_text_size:11 ~presets ~await:true ~domains:1 ~workspace ~prepare:E3.prepare
             ~draw:E3.draw ()))
   in
   (* the entries the ledger holds: named at a frame's boundary, sized when a report walks *)

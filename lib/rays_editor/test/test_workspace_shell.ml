@@ -158,7 +158,7 @@ let frame ?(buttons = []) mouse events count = Test_editor_input.frame ~buttons 
 (* every editor here awaits the cook its frame submits: what a frame shows is settled, never racing
    the worker *)
 let editor ?camera ?presets text =
-  E3.create ~ui_text_size:11 ?camera ?presets ~await:true ~workspace:(of_text text)
+  E3.create ~platform:Input.Apple ~ui_text_size:11 ?camera ?presets ~await:true ~workspace:(of_text text)
     ~prepare:Editor_prepare.surface
     ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
     ()
@@ -3681,7 +3681,7 @@ let run_atomic_frame () =
   let at = (200., 300.) in
   let e =
     ref
-      (E3.create ~ui_text_size:11 ~await:true
+      (E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true
          ~workspace:
            (of_text
               "(workspace solo (graph g :context sop (sop/box)) (graph editor :context editor \
@@ -4509,7 +4509,7 @@ let run_view_native () =
               domains = Some 1;
             }
           ~init:(fun _ ->
-            E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
+            E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(of_text text)
               ~presets:(Filename.concat directory "presets")
               ~seed:7349L ~grain:2
               ~camera:
@@ -4658,7 +4658,7 @@ let run_renderers_native ?(authored = false) () =
           ~config:
             { Sketch.default_config with width = 900; height = 640; title = "shared renderer" }
           ~init:(fun _ ->
-            E3.create ~ui_text_size:11 ~await:true ~workspace
+            E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace
               ~presets:(Filename.concat directory "presets")
               ~prepare:Editor_prepare.surface
               ~draw:(fun _ (prepared : Rays_editor__.Cook.prepared) ->
@@ -4996,7 +4996,7 @@ let run_roots_native () =
        (Sketch.run_state ~max_frames:200
           ~config:{ Sketch.default_config with width; height = 640; title = "two roots" }
           ~init:(fun _ ->
-            E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
+            E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(of_text text)
               ~presets:(Filename.concat directory "presets")
               ~prepare:Editor_prepare.surface
               ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)
@@ -5188,7 +5188,7 @@ let run_budget_native () =
        (Sketch.run_state ~max_frames:120
           ~config:{ Sketch.default_config with width = 900; height = 640; title = "budget" }
           ~init:(fun _ ->
-            E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
+            E3.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(of_text text)
               ~presets:(Filename.concat directory "presets")
               ~prepare:Editor_prepare.surface
               ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)

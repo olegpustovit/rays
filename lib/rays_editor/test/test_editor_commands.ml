@@ -38,7 +38,7 @@ let canvas_preview () =
   in
   let editor =
     Result.get_ok
-      (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+      (E3.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())
   in
@@ -103,7 +103,7 @@ let canvas_frame_size () =
   in
   let editor =
     Result.get_ok
-      (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+      (E3.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())
   in
@@ -173,7 +173,7 @@ let with_editor text f =
   in
   let editor =
     Result.get_ok
-      (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+      (E3.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())
   in
@@ -394,9 +394,9 @@ let run () =
         "Tab is not the graph's add key alone")
     Pxui_shell.Layout.[ (Graph, [ L.Add_node ]); (View "", []); (Outline, []); (Inspector, []) ];
   check
-    (Keymap.label (Chord (Input.KeyChar '/', [ Input.Shift ])) = "?"
-    && Keymap.label (Chord (Input.ArrowLeft, [])) = "←"
-    && Keymap.label (Chord (Input.KeyChar 'z', [ Input.Shift; Input.Meta ])) = "⌘⇧Z")
+    (Keymap.label Input.Apple (Chord (Input.KeyChar '/', [ Input.Shift ])) = "?"
+    && Keymap.label Input.Apple (Chord (Input.ArrowLeft, [])) = "←"
+    && Keymap.label Input.Apple (Chord (Input.KeyChar 'z', [ Input.Shift; Input.Meta ])) = "⌘⇧Z")
     "shared key labels lost a modifier or alias";
   let module Scope = Pxui_graph.Scope in
   let ids context =
@@ -515,7 +515,7 @@ let run () =
   let directory = Filename.temp_dir "rays-guide" "" in
   let filename = Filename.concat directory "preferences.rays" in
   let create () =
-    E3.create ~ui_text_size:11 ~preferences:filename ~workspace ~prepare:Editor_prepare.empty
+    E3.create ~platform:Input.Apple ~ui_text_size:11 ~preferences:filename ~workspace ~prepare:Editor_prepare.empty
       ~draw:(fun _ _ -> Scene.D3.empty)
       ()
     |> Result.get_ok
