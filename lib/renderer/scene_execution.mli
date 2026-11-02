@@ -155,6 +155,9 @@ val sun_map_size : int
 (** Width and height of the sun map. *)
 
 module Private : sig
+  val memoryless_attachments : t -> bool * int
+  (** Whether the device has memoryless attachments, and how many the pool holds that ask for them. *)
+
   type gpu_vertices
   type nonrec gpu_vertices_owner = gpu_vertices_owner
 

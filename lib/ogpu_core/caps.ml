@@ -10,6 +10,7 @@ type feature =
   | Ray_tracing_curves
   | Ray_tracing_motion
   | Ray_tracing_refit
+  | Memoryless_attachments
   | Unknown of string
 
 type limits = {
@@ -27,6 +28,7 @@ type t = {
   ray_tracing_curves : bool;
   ray_tracing_motion : bool;
   ray_tracing_refit : bool;
+  memoryless_attachments : bool;
 }
 
 let minimum_m1 =
@@ -44,6 +46,7 @@ let minimum_m1 =
     ray_tracing_curves = false;
     ray_tracing_motion = false;
     ray_tracing_refit = false;
+    memoryless_attachments = false;
   }
 
 let validate value =
@@ -63,6 +66,7 @@ let has value = function
   | Ray_tracing_curves -> value.ray_tracing_curves
   | Ray_tracing_motion -> value.ray_tracing_motion
   | Ray_tracing_refit -> value.ray_tracing_refit
+  | Memoryless_attachments -> value.memoryless_attachments
   | Unknown _ -> false
 
 let require ?(operation = "Ogpu.Caps.require") value feature =

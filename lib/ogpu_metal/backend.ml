@@ -110,6 +110,7 @@ let create () =
           let buffer_memory = function
             | Ogpu_core.Types.Shared -> Buffer.Shared
             | Ogpu_core.Types.Device_local -> Buffer.Device_local
+            | Ogpu_core.Types.Memoryless -> invalid_arg "Backend.create_buffer checked this"
           in
           let register_buffer created =
             match created with
@@ -235,6 +236,12 @@ let create () =
           in
           let create_depth_texture descriptor =
             create_texture_format ~format:Texture.Depth32_float ~host_read:false descriptor
+          in
+          let create_memoryless_texture ~depth (descriptor : Ogpu_core.Types.texture_descriptor) =
+            register_texture ~host_read:false descriptor
+              (Texture.create device ~memory:Texture.Memoryless
+                 ~format:(if depth then Texture.Depth32_float else color_format descriptor)
+                 descriptor)
           in
           let native_resource token = Hashtbl.find_opt c.resources token in
           let own_pipeline pipeline =
@@ -1050,6 +1057,7 @@ let create () =
               create_mapped_buffer;
               create_texture;
               create_depth_texture;
+              create_memoryless_texture;
               create_library;
               create_accel;
               instance_layout;

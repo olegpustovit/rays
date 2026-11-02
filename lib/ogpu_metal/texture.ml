@@ -7,7 +7,7 @@ type format = Ogpu_core.Types.texture_format =
   | Rgba32_float
   | Depth32_float
 
-type memory = Ogpu_core.Types.memory = Shared | Device_local
+type memory = Ogpu_core.Types.memory = Shared | Device_local | Memoryless
 
 type t = {
   metal : Metal.Texture.t;
@@ -105,6 +105,7 @@ let native_descriptor ~operation device ~memory ~format
                   match memory with
                   | Device_local -> Metal.Buffer.Private
                   | Shared -> Metal.Buffer.Shared
+                  | Memoryless -> Metal.Buffer.Memoryless
                 in
                 let native_usage = usage descriptor.usage in
                 let base =

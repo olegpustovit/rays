@@ -312,6 +312,8 @@ type driver_device = {
   create_mapped_buffer : Types.buffer_descriptor -> (driver_mapped, Error.t) result;
   create_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
   create_depth_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
+  create_memoryless_texture :
+    depth:bool -> Types.texture_descriptor -> (driver_resource, Error.t) result;
   create_library : Shader.t -> (driver_library, Error.t) result;
   create_accel : driver_accel_descriptor -> (driver_accel, Error.t) result;
   instance_layout : instance_kind -> Acceleration.instance_layout;
@@ -410,6 +412,8 @@ let create_buffer ?(memory = Types.Shared) device descriptor =
   | Ok () -> (
       match Validation.validate_buffer device.raw.capabilities descriptor with
       | Error _ as e -> e
+      | Ok () when memory = Types.Memoryless ->
+          error "Backend.create_buffer" Error.Invalid_argument "a buffer cannot be memoryless"
       | Ok () -> (
           match device.raw.create_buffer memory descriptor with
           | Error _ as e -> e
@@ -490,6 +494,26 @@ let create_depth_texture device descriptor =
           | Ok raw ->
               device.children <- device.children + 1;
               Ok { resource = make_resource device raw; texture_descriptor = descriptor }))
+
+let create_memoryless_texture device ~depth descriptor =
+  let operation = "Backend.create_memoryless_texture" in
+  match live operation device with
+  | Error _ as e -> e
+  | Ok () -> (
+      match Caps.require ~operation device.raw.capabilities Caps.Memoryless_attachments with
+      | Error _ as e -> e
+      | Ok () -> (
+          match Validation.validate_texture device.raw.capabilities descriptor with
+          | Error _ as e -> e
+          | Ok () when descriptor.usage <> [ Types.Render_attachment ] ->
+              error operation Error.Invalid_argument
+                "memoryless textures are render-attachment only"
+          | Ok () -> (
+              match device.raw.create_memoryless_texture ~depth descriptor with
+              | Error _ as e -> e
+              | Ok raw ->
+                  device.children <- device.children + 1;
+                  Ok { resource = make_resource device raw; texture_descriptor = descriptor })))
 
 let create_queue device =
   let operation = "Backend.create_queue" in

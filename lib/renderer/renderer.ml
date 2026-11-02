@@ -1724,6 +1724,8 @@ module Native = struct
   let replay = replay_step
   let cancel = close_submission
 
+  let memoryless_attachments value = Scene_execution.Private.memoryless_attachments value.renderer
+
   let retained_scene2_segment_stats value =
     ( Renderer_retained_plans.segment_count value.retained_plans,
       value.retained_scene2_segment_hits,

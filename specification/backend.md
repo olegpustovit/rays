@@ -489,8 +489,13 @@ function tables or linked functions. `compute_use_accels` declares
 the built bottom-level structures an instance structure references as read by
 a dispatch (Metal `useResource:usage:`; they are otherwise evicted over time).
 `Caps` is the live set: `Compute_pipeline`, `Render_pipeline`, `Ray_tracing`,
-`Ray_tracing_motion`, `Ray_tracing_refit`, and `Ray_tracing_curves` (Metal: Apple9 and later; the M1
-answers curves with typed `Unsupported`).
+`Ray_tracing_motion`, `Ray_tracing_refit`, `Ray_tracing_curves` (Metal: Apple9 and later; the M1
+answers curves with typed `Unsupported`) and `Memoryless_attachments`.
+Memoryless (`create_memoryless_texture`): a render attachment with no memory, whose contents live only
+inside one pass, so it clears and stores nothing but a resolve (Metal `MTLStorageModeMemoryless` on the
+Apple families; Vulkan would be `TRANSIENT_ATTACHMENT` over lazily allocated memory). `Scene_attachment_pool`
+asks for one when no later pass of the frame loads the attachment and falls back to an ordinary attachment
+on a backend without the feature, with the same pass.
 Refit (`Ray_tracing_refit`, the path tracer's device meshes): `create_accel ~refit:true` builds a
 primitive structure that can be updated (Metal `MTLAccelerationStructureUsageRefit`, Vulkan
 `ALLOW_UPDATE`), `accel_sizes.refit_scratch_size` is the update's scratch (Metal's refit scratch,

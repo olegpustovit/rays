@@ -10,6 +10,9 @@ type feature =
   | Ray_tracing_curves
   | Ray_tracing_motion
   | Ray_tracing_refit
+  | Memoryless_attachments
+      (** Render attachments with no memory: their contents exist only inside one pass (tile memory).
+          A backend without them draws to ordinary attachments. *)
   | Unknown of string
 
 type limits = {
@@ -27,6 +30,7 @@ type t = {
   ray_tracing_curves : bool;
   ray_tracing_motion : bool;
   ray_tracing_refit : bool;
+  memoryless_attachments : bool;
 }
 
 val minimum_m1 : t

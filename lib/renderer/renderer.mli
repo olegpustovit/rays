@@ -252,5 +252,8 @@ module Native : sig
 
   (* Idempotently releases an unsubmitted transaction. *)
   val cancel : submission -> unit
+  val memoryless_attachments : t -> bool * int
+  (** Whether the device has memoryless attachments, and how many this renderer's pool holds. *)
+
   val retained_scene2_segment_stats : t -> int * int64 * int64
 end

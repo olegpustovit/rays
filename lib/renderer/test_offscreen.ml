@@ -179,6 +179,9 @@ let run () =
           "offscreen resized clear pixel";
         let red = scene3_draw "retained-red" 1. in
         test_retained execution red;
+        (* one batch: its depth lives and dies in the pass *)
+        let tiled, passing = Renderer.Native.memoryless_attachments execution in
+        require ((not tiled) || passing > 0) "a single batch's depth took memory";
         let image =
           get_resource
             (Runtime_resources.Image.create ~width:1 ~height:1
