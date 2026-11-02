@@ -129,6 +129,7 @@ let create () =
               ray_tracing_motion = false;
               ray_tracing_refit = true;
               memoryless_attachments = false;
+              unified_memory = false;
             }
           in
           let register_buffer op created size =

@@ -69,6 +69,7 @@ let system_default () =
                   ray_tracing_motion = info.raytracing;
                   ray_tracing_refit = info.raytracing;
                   memoryless_attachments = tiled;
+                  unified_memory = true;
                 }
               in
               match Ogpu_core.Caps.validate capabilities with

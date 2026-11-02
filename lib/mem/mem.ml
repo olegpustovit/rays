@@ -224,6 +224,19 @@ let set_budget ?(source = Override) n =
 
 let budget () = Atomic.get current_budget
 
+(* The device's own ceiling, only where its bytes are not in the footprint (a discrete GPU's VRAM).
+   Unset ([0]) is the one-pool case: the budget above covers the device and nothing below changes. *)
+let device_cell = Atomic.make 0
+let device_rank = Atomic.make 0
+
+let set_device_budget ?(source = Override) n =
+  if rank source >= Atomic.get device_rank then begin
+    Atomic.set device_rank (rank source);
+    Atomic.set device_cell (max 0 n)
+  end
+
+let device_budget () = Atomic.get device_cell
+
 let machine_budget ~working_set =
   let ram = physical_ram () * 6 / 10 in
   match (working_set > 0, ram > 0) with
@@ -293,12 +306,13 @@ let score now e = float (1 + max 0 (now - e.last_use ())) *. float (e.held ()) /
 
 (* One entry of the best-scoring cache that can drop one right now. A cache that cannot (busy, on
    another domain, all pinned) stays out for the rest of this retreat. *)
-let drop_coldest ~refused =
+let drop_coldest ?pool ~refused () =
   let now = epoch () in
   let ranked =
     locked (fun () -> !evictors)
     |> List.filter_map (fun e ->
-        if List.memq e !refused || not (e.live ()) then None
+        if List.memq e !refused || (not (e.live ())) || (pool <> None && Some e.owner.pool <> pool)
+        then None
         else
           let s = score now e in
           if s > 0. then Some (s, e) else None)
@@ -320,8 +334,12 @@ let drop_coldest ~refused =
 type overdraft = { used : int; limit : int; top : (string * int) list }
 type verdict = Within | Over of overdraft
 
-let top_owners n =
-  locked (fun () -> Hashtbl.fold (fun _ (a : account) acc -> (a.name, bytes a) :: acc) accounts [])
+let top_owners ?pool n =
+  locked (fun () ->
+      Hashtbl.fold
+        (fun _ (a : account) acc ->
+          if pool = None || Some a.pool = pool then (a.name, bytes a) :: acc else acc)
+        accounts [])
   |> List.filter (fun (_, b) -> b > 0)
   |> List.sort (fun (a, x) (b, y) ->
       let c = compare y x in
@@ -430,7 +448,11 @@ let retreat ?device ?usage ?(later = []) () =
   Atomic.incr epoch_counter;
   let critical = apply_pressure () in
   let bound = limit () in
-  let read = match usage with Some f -> f | None -> measured ?device in
+  let dbound = device_budget () in
+  (* with a device limit of its own the device's bytes are not the footprint's: each limit sheds its own pool *)
+  let host_pool = if dbound > 0 then Some Host else None in
+  let held () = match host_pool with Some p -> accounts_sum (fun a -> a.pool = p) | None -> attributed () in
+  let read = match usage with Some f -> f | None -> measured ?device:(if dbound > 0 then None else device) in
   let finish verdict =
     if critical then begin
       Gc.full_major ();
@@ -441,46 +463,73 @@ let retreat ?device ?usage ?(later = []) () =
     | Over overdraft -> Atomic.set over_latch (Some overdraft));
     verdict
   in
-  if bound <= 0 then begin
-    Atomic.set near_line None;
-    finish Within
-  end
-  else
-    let used = read () - if usage = None then credit () else 0 in
-    note_near used bound;
-    if used <= bound then finish Within
-    else begin
-      let before = attributed () in
-      let excess = used - bound in
-      let shed () = before - attributed () in
-      let refused = ref [] in
-      while shed () < excess && drop_coldest ~refused do
-        ()
-      done;
-      List.iter
-        (fun step ->
-          while shed () < excess && step () do
-            ()
-          done)
-        later;
-      let dropped = max 0 (shed ()) in
-      note_shed dropped;
-      if dropped >= excess then finish Within
-      else
-        (* Everything rebuildable went. Dead blocks may still be most of the footprint, so a verdict
-           comes from a full collection, once per crossing: never per frame. *)
-        let latched = Atomic.get over_latch <> None in
-        let used =
-          if (not latched) && usage = None && collected_now () then read () else used - dropped
-        in
-        if used <= bound then finish Within
-        else finish (Over { used; limit = bound; top = top_owners 4 })
+  let host () =
+    if bound <= 0 then begin
+      Atomic.set near_line None;
+      Within
     end
+    else
+      let used = read () - if usage = None then credit () else 0 in
+      note_near used bound;
+      if used <= bound then Within
+      else begin
+        let before = held () in
+        let excess = used - bound in
+        let shed () = before - held () in
+        let refused = ref [] in
+        while shed () < excess && drop_coldest ?pool:host_pool ~refused () do
+          ()
+        done;
+        List.iter
+          (fun step ->
+            while shed () < excess && step () do
+              ()
+            done)
+          later;
+        let dropped = max 0 (shed ()) in
+        note_shed dropped;
+        if dropped >= excess then Within
+        else
+          (* Everything rebuildable went. Dead blocks may still be most of the footprint, so a verdict
+             comes from a full collection, once per crossing: never per frame. *)
+          let latched = Atomic.get over_latch <> None in
+          let used =
+            if (not latched) && usage = None && collected_now () then read () else used - dropped
+          in
+          if used <= bound then Within else Over { used; limit = bound; top = top_owners 4 }
+      end
+  in
+  (* the same order for the device's bytes: caches coldest and largest first, then [Over]. Undo and the
+     other [later] steps free host bytes only, so they stay out. Dropped buffers are destroyed after the
+     next submit, so the backend still counts them here: the verdict credits them. *)
+  let on_device () =
+    match device with
+    | Some read when dbound > 0 ->
+        let used = read () in
+        if used <= dbound then Within
+        else begin
+          let before = attributed_device () in
+          let excess = used - dbound in
+          let refused = ref [] in
+          while before - attributed_device () < excess && drop_coldest ~pool:Device ~refused () do
+            ()
+          done;
+          let used = used - max 0 (before - attributed_device ()) in
+          if used <= dbound then Within
+          else Over { used; limit = dbound; top = top_owners ~pool:Device 4 }
+        end
+    | _ -> Within
+  in
+  finish (match host () with Within -> on_device () | over -> over)
 
 (* The limit a cook was last refused under: the same cook under the same limit would only reach past
    it again, with the caches it dropped to make room to rebuild. *)
 let refused_under = Atomic.make 0
-let retry_worthwhile () = let bound = limit () in bound <= 0 || bound > Atomic.get refused_under
+let refused_device_under = Atomic.make 0
+
+let retry_worthwhile () =
+  let bound = limit () and dbound = device_budget () in
+  (bound <= 0 || bound > Atomic.get refused_under) && (dbound <= 0 || dbound > Atomic.get refused_device_under)
 
 
 let admit ?(shed = fun () -> false) () =
@@ -509,7 +558,17 @@ let admit ?(shed = fun () -> false) () =
 
 exception Refused of overdraft
 
-let admit_bytes n =
+let admit_bytes ?(pool = Host) n =
+  let dbound = device_budget () in
+  if pool = Device && dbound > 0 then begin
+    (* ponytail: the ledger's device bytes, not the backend's: the driver's own are charged at the first boundary *)
+    let used = attributed_device () + n in
+    if used > dbound then begin
+      Atomic.set refused_device_under dbound;
+      raise (Refused { used; limit = dbound; top = top_owners ~pool:Device 4 })
+    end
+  end
+  else
   let bound = limit () in
   if bound > 0 then begin
     let used () = measured ?device:None () - credit () in
@@ -539,6 +598,9 @@ let reset () =
   Atomic.set lowered 0;
   Atomic.set over_latch None;
   Atomic.set refused_under 0;
+  Atomic.set refused_device_under 0;
+  Atomic.set device_cell 0;
+  Atomic.set device_rank 0;
   Atomic.set shed_bytes 0;
   Atomic.set last_collect min_int
 

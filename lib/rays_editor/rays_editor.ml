@@ -541,7 +541,7 @@ module Measure = struct
             let promoted0 = (fun (_, promoted, _) -> bytes_of promoted) (Gc.counters ()) in
             let measure ?(walk = false) tick =
               let device =
-                Option.fold ~none:0 ~some:fst
+                Option.fold ~none:0 ~some:(fun (bytes, _, _) -> bytes)
                   (Flow_native.Workspace_gpu.device_limits (!editor).Loop_model.host.gpu)
               in
               (* one walk, the last: a walk's hash set stays in the footprint of the next sample *)

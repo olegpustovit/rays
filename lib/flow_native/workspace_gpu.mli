@@ -67,8 +67,9 @@ val displays : t -> int
 
 val close : t -> unit
 
-val device_limits : t -> (int * int) option
-(** The device's allocated bytes and its working set, through OGPU; [None] with no device. *)
+val device_limits : t -> (int * int * bool) option
+(** The device's allocated bytes, its working set and whether its memory is the host's (one pool),
+    through OGPU; [None] with no device. *)
 
 val image_stats : t -> Flow_gpu.Host.stats * int * int * int * int
 (** Host totals, sinks created/closed and sink buffer/texture creations, including failed

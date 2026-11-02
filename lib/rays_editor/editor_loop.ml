@@ -846,15 +846,21 @@ let memory_boundary value =
         Some message
   in
   let device () =
-    Option.fold ~none:0 ~some:fst (Flow_native.Workspace_gpu.device_limits value.host.gpu)
+    Option.fold ~none:0 ~some:(fun (bytes, _, _) -> bytes) (Flow_native.Workspace_gpu.device_limits value.host.gpu)
   in
   let value =
     if value.memory_known then value
     else begin
       ignore (Mem.pressure_start ());
+      (* one pool: the working set bounds the footprint. A discrete device keeps its own limit (its
+         working set), and the footprint is host RAM's alone. *)
       Option.iter
-        (fun (_, working_set) ->
-          Mem.set_budget ~source:Machine (Mem.machine_budget ~working_set))
+        (fun (_, working_set, unified) ->
+          if unified then Mem.set_budget ~source:Machine (Mem.machine_budget ~working_set)
+          else begin
+            Mem.set_budget ~source:Machine (Mem.machine_budget ~working_set:0);
+            Mem.set_device_budget ~source:Machine working_set
+          end)
         (Flow_native.Workspace_gpu.device_limits value.host.gpu);
       (* what the device holds at the first boundary beyond any owner: the driver's own, and the first
          frame's pipelines *)
@@ -999,7 +1005,7 @@ let crash_dump value directory =
     (Mem.Report.to_string
        (Mem.report ~collect:false
           ~device:
-            (Option.fold ~none:0 ~some:fst (Flow_native.Workspace_gpu.device_limits value.host.gpu))
+            (Option.fold ~none:0 ~some:(fun (bytes, _, _) -> bytes) (Flow_native.Workspace_gpu.device_limits value.host.gpu))
           ()))
 
 let close value =

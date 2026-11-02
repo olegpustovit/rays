@@ -606,11 +606,13 @@ let frame ?keep t =
     List.iter (fun (_, release) -> release ()) due
   end
 
+(* the device's allocated bytes, its working set and whether its memory is the host's (one pool) *)
 let device_limits t =
   let read gpu =
     let device = X.gpu_device gpu in
     ( Int64.to_int (Ogpu.Backend.allocated_size device),
-      Int64.to_int (Ogpu.Backend.recommended_working_set device) )
+      Int64.to_int (Ogpu.Backend.recommended_working_set device),
+      (Ogpu.Backend.capabilities device).unified_memory )
   in
   if t.closed then None
   else

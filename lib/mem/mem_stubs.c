@@ -128,10 +128,12 @@ CAMLprim value caml_rays_mem_pressure_relief(value unit) {
   return Val_unit;
 }
 
-/* Not ported: 0 is unknown, as the stub answered before. */
+/* Installed RAM, as macOS's hw.memsize: the 60% default budget needs it. */
 CAMLprim value caml_rays_mem_physical_ram(value unit) {
   (void)unit;
-  return Val_long(0);
+  MEMORYSTATUSEX status = {.dwLength = sizeof status};
+  if (!GlobalMemoryStatusEx(&status) || status.ullTotalPhys > (ULONGLONG)Max_long) return Val_long(0);
+  return Val_long((intnat)status.ullTotalPhys);
 }
 #else
 CAMLprim value caml_rays_mem_pressure_start(value unit) {

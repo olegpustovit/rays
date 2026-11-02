@@ -584,7 +584,7 @@ let resident_scope ?(uint32 = false) ~fast t =
       | Some (buffer, capacity) when capacity >= length -> Some buffer
       | old -> (
           let capacity = max 1 (max length (2 * Option.fold ~none:0 ~some:snd old)) in
-          if capacity >= 1 lsl 18 then Mem.admit_bytes (capacity * 4);
+          if capacity >= 1 lsl 18 then Mem.admit_bytes ~pool:Device (capacity * 4);
           match
             Result.map fst (Ogpu.Backend.create_mapped_buffer (Renderer.gpu_device t.gpu)
               {
@@ -643,7 +643,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                 up (1 lsl 20)
             in
             if large then begin
-              Mem.admit_bytes size;
+              Mem.admit_bytes ~pool:Device size;
               Run.created t.shared size
             end;
             Result.map
@@ -1546,7 +1546,7 @@ let display_buffer t bytes =
   match Hashtbl.find_opt t.buffers bytes with
   | Some (b :: rest) -> Hashtbl.replace t.buffers bytes rest; Ok b
   | _ ->
-      if bytes >= 1 lsl 20 then Mem.admit_bytes bytes;
+      if bytes >= 1 lsl 20 then Mem.admit_bytes ~pool:Device bytes;
       Result.map (fun buffer ->
           t.resident_buffers <- t.resident_buffers + 1;
           Mem.charge display_owner (buffer_bytes buffer);
