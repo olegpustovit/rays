@@ -75,6 +75,7 @@ let attributed () = accounts_sum (fun _ -> true)
 (* ---- process facts, one small function per OS each in the stubs *)
 
 external phys_footprint : unit -> int option = "caml_rays_mem_phys_footprint"
+external peak_footprint : unit -> int option = "caml_rays_mem_peak_footprint"
 external instructions : unit -> int64 option = "caml_rays_mem_instructions"
 external physical_ram : unit -> int = "caml_rays_mem_physical_ram"
 external pressure_start : unit -> bool = "caml_rays_mem_pressure_start"
@@ -351,6 +352,12 @@ let retreat ?device ?usage ?(later = []) () =
         else finish (Over { used; limit = bound; top = top_owners 4 })
     end
 
+(* The limit a cook was last refused under: the same cook under the same limit would only reach past
+   it again, with the caches it dropped to make room to rebuild. *)
+let refused_under = Atomic.make 0
+let retry_worthwhile () = let bound = limit () in bound <= 0 || bound > Atomic.get refused_under
+
+
 let admit ?(shed = fun () -> false) () =
   let bound = limit () in
   if bound <= 0 then Ok ()
@@ -367,7 +374,11 @@ let admit ?(shed = fun () -> false) () =
       else begin
         ignore (collected_now ());
         let used = used () in
-        if used <= bound then Ok () else Error { used; limit = bound; top = top_owners 4 }
+        if used <= bound then Ok ()
+        else begin
+          Atomic.set refused_under bound;
+          Error { used; limit = bound; top = top_owners 4 }
+        end
       end
     end
 
@@ -383,6 +394,7 @@ let reset () =
   Atomic.set budget_rank 0;
   Atomic.set lowered 0;
   Atomic.set over_latch None;
+  Atomic.set refused_under 0;
   Atomic.set shed_bytes 0;
   Atomic.set last_collect min_int
 

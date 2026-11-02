@@ -48,11 +48,11 @@ type payload_pool = {
   refs : (int, int * int) Hashtbl.t;
   mutable bytes : int;
   owner : Mem.owner;
-  device_owner : Mem.owner;
   ledgered : bool;  (** false in a worker's snapshot: the parent charges when it replays *)
-  charged : (int, Mem.owner * int) Hashtbl.t;
-      (** what the ledger holds per component. A resident one lives on the device, as float32, though
-          its budget size counts it as the doubles it would become. *)
+  charged : (int, Mem.owner * int * int) Hashtbl.t;
+      (** what the ledger holds per component and how many entries and slots hold it: a plane shared
+          along a chain is charged once. A resident one is [flow_gpu.held]'s bytes, charged nothing
+          here. *)
   resident : (int, held:bool -> unit) Hashtbl.t;
   mutable dropped : int list;
   handed : (int, unit) Hashtbl.t;
@@ -81,7 +81,6 @@ type t = {
   cache : entry Entry_cache.t;
   payload : payload_pool;
   volatile_owner : Mem.owner;
-  volatile_device : Mem.owner;
   mutable cooks : int;
   mutable hits : int;
   mutable misses : int;
@@ -91,7 +90,7 @@ type t = {
       (* Resident ids registered when a volatile slot was written. Geometry.releasers becomes
          empty after a deferred attribute is materialised, so replacement must drop these ids
          rather than asking the (now forced) geometry again. *)
-  slot_bytes : (int, int * int) Hashtbl.t; (* volatile node id -> charged host and device bytes *)
+  slot_bytes : (int, int list) Hashtbl.t; (* volatile node id -> the components it charged *)
   mutable volatile_hits : int;
   mutable volatile_misses : int;
   mutable evictions : int;
@@ -119,25 +118,25 @@ let drop payload id =
 let releasers (output : output) =
   match output.payload with Geometry g -> Rdk.Geometry.releasers g | Image _ | Kernel _ -> []
 
-let charge_component payload id bytes =
-  if payload.ledgered then begin
-    let owner, size =
-      if Hashtbl.mem payload.resident id then (payload.device_owner, bytes / 2)
-      else (payload.owner, bytes)
-    in
-    Hashtbl.replace payload.charged id (owner, size);
-    Mem.charge owner size
-  end
+let charge_component payload owner id bytes =
+  if payload.ledgered then
+    match Hashtbl.find_opt payload.charged id with
+    | Some (first, size, holders) -> Hashtbl.replace payload.charged id (first, size, holders + 1)
+    | None ->
+        let size = if Hashtbl.mem payload.resident id then 0 else bytes in
+        Hashtbl.replace payload.charged id (owner, size, 1);
+        Mem.charge owner size
 
 let discharge_component payload id =
   match Hashtbl.find_opt payload.charged id with
   | None -> ()
-  | Some (owner, size) ->
+  | Some (owner, size, 1) ->
       Hashtbl.remove payload.charged id;
       Mem.release owner size
+  | Some (owner, size, holders) -> Hashtbl.replace payload.charged id (owner, size, holders - 1)
 
 let discharge_all payload =
-  Hashtbl.iter (fun _ (owner, size) -> Mem.release owner size) payload.charged;
+  Hashtbl.iter (fun _ (owner, size, _) -> Mem.release owner size) payload.charged;
   Hashtbl.reset payload.charged
 
 let release_components payload components =
@@ -163,7 +162,6 @@ let create ~max_entries ~max_payload_bytes =
         refs = Hashtbl.create (min (max_entries * 4) 4096);
         bytes = 0;
         owner;
-        device_owner = Lru.cache ~pool:Device "sop.session.resident";
         ledgered = true;
         charged = Hashtbl.create 16;
         resident = Hashtbl.create 16;
@@ -183,7 +181,6 @@ let create ~max_entries ~max_payload_bytes =
               release_components payload entry.components);
         payload;
         volatile_owner = Lru.cache "sop.volatile";
-        volatile_device = Lru.cache ~pool:Device "sop.volatile.resident";
         cooks = 0;
         hits = 0;
         misses = 0;
@@ -235,7 +232,7 @@ let insert session key entry =
         | None ->
             Hashtbl.add payload.refs id (bytes, 1);
             payload.bytes <- payload.bytes + bytes;
-            charge_component payload id bytes
+            charge_component payload payload.owner id bytes
         | Some (known_bytes, references) ->
             Hashtbl.replace payload.refs id (known_bytes, references + 1))
       components;
@@ -271,12 +268,9 @@ let lookup session ~volatile node key =
 let release_slot_bytes session id =
   match Hashtbl.find_opt session.slot_bytes id with
   | None -> ()
-  | Some (host, device) ->
+  | Some components ->
       Hashtbl.remove session.slot_bytes id;
-      if session.payload.ledgered then begin
-        Mem.release session.volatile_owner host;
-        Mem.release session.volatile_device device
-      end
+      List.iter (discharge_component session.payload) components
 
 let store_slot session id key entry =
   (match session.journal with
@@ -309,21 +303,9 @@ let store_slot session id key entry =
     List.iter (fun (i, r) -> Hashtbl.replace payload.resident i r) fresh;
     session.written <- Right id :: session.written;
     Hashtbl.replace session.slot_residents id fresh_ids;
-    let host, device =
-      List.fold_left
-        (fun (host, device) (component, n) ->
-          (* a resident component is float32 on the device, though its size says doubles *)
-          if List.mem component fresh_ids then (host, device + (n / 2)) else (host + n, device))
-        (0, 0)
-        (Payload.payload_components entry.output.payload)
-    in
-    if host + device > 0 then begin
-      Hashtbl.replace session.slot_bytes id (host, device);
-      if payload.ledgered then begin
-        Mem.charge session.volatile_owner host;
-        Mem.charge session.volatile_device device
-      end
-    end;
+    let components = Payload.payload_components entry.output.payload in
+    List.iter (fun (c, bytes) -> charge_component payload session.volatile_owner c bytes) components;
+    Hashtbl.replace session.slot_bytes id (List.map fst components);
     Hashtbl.replace session.slots id (key, entry)
   end
 
@@ -628,7 +610,6 @@ let snapshot session =
       refs = Hashtbl.copy session.payload.refs;
       bytes = session.payload.bytes;
       owner = session.payload.owner;
-      device_owner = session.payload.device_owner;
       ledgered = false;
       charged = Hashtbl.create 1;
       resident = Hashtbl.create 1;

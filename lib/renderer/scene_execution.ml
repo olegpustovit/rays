@@ -714,7 +714,7 @@ let create ?device ?gpu_vertices ?sun_depth:sun_factory ~offscreen driver config
                           next_uniform_page = 0;
                           uniform_low = 0;
                           previous_uniforms = [||];
-                          prepared_cache = String_table.create ~owner:(Lru.cache "renderer.prepared") 64 ~byte_capacity:cache_byte_capacity;
+                          prepared_cache = String_table.create ~owner:(Lru.cache "renderer.prepared") ~charges:false 64 ~byte_capacity:cache_byte_capacity (* the meshes' bytes: rays.native_stage holds them *);
                           prepared_submission = None;
                           automatic_submission = None;
                           automatic_candidate = None;

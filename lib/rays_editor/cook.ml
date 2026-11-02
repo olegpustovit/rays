@@ -434,6 +434,11 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
           ~busy:((busy value && not value.probe_job) || framing <> None)
           ~frame
       in
+      (* refused for memory: the last good frame stays. Time alone does not cook again, or each frame
+         rebuilds what the refusal dropped, on top of the garbage of the last try *)
+      let submit =
+        submit && (changed || value.force || (not (out_of_memory value)) || Mem.retry_worthwhile ())
+      in
       (* Unchanged objects keep their prepared value: the worker only cooks
      (a session cache hit) and re-prepares what changed. *)
       let previous = pieces in

@@ -223,18 +223,10 @@ let measure ?inputs:prepared t ~fast packed ~count =
                   | Ok kernel -> (
                       let producer = ref None in
                       let once () =
-                        (* New immutable CPU inputs must pay their transfer on every
-                           sample; reusing identities only measures the upload cache. *)
-                        let inputs =
-                          {
-                            inputs with
-                            arrays = Array.mapi (fun i values ->
-                                if indices.(i) || sources.(i) <> None then values
-                                else Array.copy values) inputs.arrays;
-                            tables = Array.mapi (fun i values ->
-                                if tables.(i) <> None then values else Array.copy values) inputs.tables;
-                          }
-                        in
+                        (* Every sample pays its transfer: each runs on a new runner, whose upload
+                           cache is empty. Copies of the inputs for that cost 620 MB at a million
+                           points, in one cook, past any budget. *)
+                        Option.iter (H.forget_producer host) !producer;
                         let start = t.clock () in
                         match kernel.run inputs with
                         | Error _ -> None

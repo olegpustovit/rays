@@ -109,6 +109,10 @@ val admit : ?shed:(unit -> bool) -> unit -> (unit, overdraft) result
     caller's own cache, which it alone may touch) and at most one collection per crossing. Reads the
     footprint: one syscall, for work that takes far longer. *)
 
+val retry_worthwhile : unit -> bool
+(** Whether the limit rose since {!admit} last refused: only then is a refused cook worth another
+    try (a pressure event ending, a raised budget). An edit makes a new cook of its own. *)
+
 val overdraft : unit -> overdraft option
 (** The latched [Over], if the process is still over. *)
 
@@ -154,6 +158,9 @@ val reset : unit -> unit
 
 (** Process metrics from [proc_pid_rusage]. Unavailable platforms return [None]. *)
 val phys_footprint : unit -> int option
+
+val peak_footprint : unit -> int option
+(** The process's highest footprint so far, what [/usr/bin/time -l] prints. *)
 
 val instructions : unit -> int64 option
 

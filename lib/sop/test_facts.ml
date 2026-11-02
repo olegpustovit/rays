@@ -553,9 +553,31 @@ let test_chain_peak () =
   Printf.printf "chain peak: %d KiB live, neighbours+one %d KiB, sum of all %d KiB\n%!"
     (!peak / 1024) ((neighbours + largest) / 1024) (all / 1024)
 
+(* a plane two volatile slots share is on the ledger once, and leaves when the last one goes *)
+let test_shared_plane_charge () =
+  let owner = Mem.cache "sop.volatile" in
+  let before = Mem.bytes owner in
+  let shared = Rdk.Line_geometry.points (Array.make 1000 (1., 2., 3.)) in
+  let holder name =
+    Node.Build.make_geometry ~operation:name ~version:1 ~parameters:"" ~cook_mode:Node.Generic
+      ~dependencies:Context.Dependencies.static ~inputs:[||]
+      (fun ~node_id:_ _ _ -> Ok Node.Build.{ geometry = shared; instances = None })
+  in
+  let a = holder "volatile_a" and b = holder "volatile_b" in
+  let e = session () in
+  Session.set_volatile e (fun id -> id = Node.id a || id = Node.id b);
+  ignore (cook e 1 a);
+  let once = Mem.bytes owner - before in
+  ignore (cook e 1 b);
+  if once <= 0 || Mem.bytes owner - before <> once then
+    fail (Printf.sprintf "shared plane: %d once, %d with two slots" once (Mem.bytes owner - before));
+  Session.close e;
+  if Mem.bytes owner <> before then fail "closing left a slot's charge on the ledger"
+
 let () =
   test_consumer_facts ();
   test_chain_peak ();
+  test_shared_plane_charge ();
   test_reuse false;
   test_reuse true;
   test_dependencies ();

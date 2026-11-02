@@ -831,6 +831,14 @@ let update value (frame : Frame.t) =
    frame is rendered ([Renderer]), so past the caches only undo beyond 16 entries is left. The
    document on screen and the last good frame stay; the error says so until usage is back. *)
 let memory_boundary value =
+  (* once per crossing: a window with no eyes on its status strip still says it *)
+  let said message =
+    match value.memory_error with
+    | Some _ as already -> already
+    | None ->
+        prerr_endline ("rays: " ^ message);
+        Some message
+  in
   let device () =
     Option.fold ~none:0 ~some:fst (Flow_native.Workspace_gpu.device_limits value.host.gpu)
   in
@@ -877,18 +885,19 @@ let memory_boundary value =
         value with
         core = !core;
         memory_error =
-          (match value.memory_error with
-          | Some _ as said -> said
-          | None ->
-              Some
-                (Diagnostic.to_string
-                   (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))));
+          said (Diagnostic.to_string (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft)));
       }
   | Within ->
       let core =
-        if Cook.out_of_memory !core.cook then { !core with cook = Cook.force !core.cook } else !core
+        if Cook.out_of_memory !core.cook && Mem.retry_worthwhile () then
+          { !core with cook = Cook.force !core.cook }
+        else !core
       in
-      { value with core; memory_error = None }
+      (* a refused cook stays refused, though the process is back under: the last good frame shows *)
+      let memory_error =
+        if Cook.out_of_memory core.cook then said (Option.get core.cook.error) else None
+      in
+      { value with core; memory_error }
 
 let after_present value frame =
   let value = observe_presented value in
