@@ -494,14 +494,16 @@ module Measure : sig
     readback_bytes : int;
     memory_error : string option;
     cook_error : string option;
-    sites : (int * string) list;  (** With [~sites]: live bytes by allocation site, largest first. *)
   }
+
+  val track_sites : unit -> unit -> (int * string) list
+  (** Starts sampling allocations; the function it returns stops and gives the live bytes by site,
+      largest first. *)
 
   val run :
     ?width:int ->
     ?height:int ->
     ?step:(int -> Editor.t -> Editor.t) ->
-    ?sites:bool ->
     early:int ->
     frames:int ->
     Workspace_doc.t ->

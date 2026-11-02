@@ -356,6 +356,8 @@ type t = ui
 let atlas_width = 1024
 let atlas_max_height = 4096
 
+let atlas_owner = Mem.plan "pxui.atlas"
+
 let create_atlas () =
   {
     width = atlas_width;
@@ -702,7 +704,10 @@ let create ?(font_size = Theme.font_size) ?font_path () =
     scene_layers = [];
     borrowed_images = [];
     scene = [];
-    atlas = create_atlas ();
+    atlas =
+      (let atlas = create_atlas () in
+       Mem.charge atlas_owner (Bytes.length atlas.pixels);
+       atlas);
     destroyed = false;
   }
 
@@ -710,6 +715,7 @@ let destroy ui =
   Mem.release (Mem.document "pxui.text_undo") ui.edit_undo_charged;
   ui.edit_undo_charged <- 0;
   if not ui.destroyed then begin
+    Mem.release atlas_owner (Bytes.length ui.atlas.pixels);
     ui.destroyed <- true;
     Option.iter (fun image -> ignore (Image.destroy image)) ui.atlas.image;
     ui.atlas.image <- None;

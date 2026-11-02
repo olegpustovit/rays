@@ -60,7 +60,7 @@ let parse_budget (form : Flow.Syntax.t) =
     live_flat_pct = Option.value ~default:1. (float "live_flat_pct");
     max_live_bytes = int "max_live_bytes";
     max_footprint_bytes = int "max_footprint_bytes";
-    max_unattributed_pct = float "max_unattributed_pct";
+    max_unattributed_pct = Some (Option.value ~default:20. (float "max_unattributed_pct"));
     max_readback_bytes = int "max_readback_bytes";
     route = (if List.assoc_opt "route" fields = Some "device" then `Device else `Any);
     ceiling = int "ceiling";
@@ -190,8 +190,11 @@ let check (budget : budget) (o : M.outcome) =
   Option.iter
     (fun max_pct ->
       let explicit = report.ocaml_live + report.device in
-      let pct = if explicit <= 0 then 0. else 100. *. float report.unattributed /. float explicit in
-      if pct > max_pct then note "unattributed %.1f%% of explicit over %.1f%%" pct max_pct)
+      let share bytes = if explicit <= 0 then 0. else 100. *. float bytes /. float explicit in
+      if share report.unattributed > max_pct then
+        note "unattributed %.1f%% of explicit over %.1f%%" (share report.unattributed) max_pct;
+      if share report.overclaimed > max_pct then
+        note "owners overclaim %.1f%% of explicit, over %.1f%%" (share report.overclaimed) max_pct)
     budget.max_unattributed_pct;
   Option.iter
     (fun max ->
@@ -236,12 +239,12 @@ let check (budget : budget) (o : M.outcome) =
 
 let run_one ?(sites = false) (budget : budget) =
   Option.iter (fun ceiling -> Mem.set_budget ceiling) budget.ceiling;
+  let stop = if sites then M.track_sites () else fun () -> [] in
   let workspace, step = scenario budget.name in
   let outcome =
-    string_ok (M.run ~step ~sites ~early:(min budget.early budget.frames) ~frames:budget.frames workspace)
+    string_ok (M.run ~step ~early:(min budget.early budget.frames) ~frames:budget.frames workspace)
   in
-  if sites then
-    List.iter (fun (bytes, site) -> Printf.printf "live %10d B  %s\n" bytes site) outcome.sites;
+  List.iter (fun (bytes, site) -> Printf.printf "live %10d B  %s\n" bytes site) (stop ());
   match check budget outcome with
   | [] when budget.known_red ->
       prerr_endline ("scenario " ^ budget.name ^ " passes: remove its known_red");
@@ -255,17 +258,38 @@ let run_one ?(sites = false) (budget : budget) =
   | _ -> ()
 
 let self = Sys.executable_name
-let child args = Unix.system (Filename.quote_command self args)
 
-let run_child budget =
-  match child [ "run"; budget.name ] with
-  | WEXITED 0 -> ()
-  | WEXITED 3 ->
-      print_endline ("mem_gate: " ^ budget.name ^ " failed; the same run with Memprof:");
-      ignore (child [ "sites"; budget.name ]);
-      fail "scenario %s failed its budget" budget.name
-  | WEXITED n -> fail "scenario %s exited %d" budget.name n
-  | _ -> fail "scenario %s signalled" budget.name
+let spawn args =
+  Unix.create_process self (Array.of_list (self :: args)) Unix.stdin Unix.stdout Unix.stderr
+
+(* each scenario in its own process, one domain each, three at a time: its bytes are its own *)
+let rec run_all failed = function
+  | [] -> List.rev failed
+  | budgets ->
+      let batch = List.filteri (fun i _ -> i < 3) budgets in
+      let running = List.map (fun b -> (b, spawn [ "run"; b.name ])) batch in
+      let failed =
+        List.fold_left
+          (fun failed (b, pid) ->
+            match snd (Unix.waitpid [] pid) with
+            | WEXITED 0 -> failed
+            | WEXITED 3 -> b :: failed
+            | WEXITED n -> fail "scenario %s exited %d" b.name n
+            | _ -> fail "scenario %s signalled" b.name)
+          failed running
+      in
+      run_all failed (List.filteri (fun i _ -> i >= 3) budgets)
+
+let run_children budgets =
+  match run_all [] budgets with
+  | [] -> ()
+  | failed ->
+      List.iter
+        (fun b ->
+          print_endline ("mem_gate: " ^ b.name ^ " failed; the same run with Memprof:");
+          ignore (Unix.waitpid [] (spawn [ "sites"; b.name ])))
+        failed;
+      fail "over budget: %s" (String.concat ", " (List.map (fun b -> b.name) failed))
 
 let () =
   string_ok (Mem.configure Sys.getenv_opt);
@@ -279,5 +303,5 @@ let () =
   | [ "run"; name ] -> run_one (find name)
   | [ "sites"; name ] -> run_one ~sites:true (find name)
   | names ->
-      List.iter run_child (if names = [] then budgets else List.map find names);
+      run_children (if names = [] then budgets else List.map find names);
       print_endline "mem_gate: ok"

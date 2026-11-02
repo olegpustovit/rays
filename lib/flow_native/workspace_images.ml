@@ -123,6 +123,7 @@ let create ?(seed = 0L) ?(grain = 16384) ?(domains = Parallel.recommended_domain
     Sources.create ~owner:(Lru.cache "flow_native.capture") ~byte_capacity:capture_limit 64
   in
   let source_cache =
+    (* count only: a source is its network, which the document holds; captures are charged *)
     Sources.create ~owner:(Lru.cache "flow_native.sources")
       ~release:(fun id _ -> Sources.remove capture_cache id)
       64

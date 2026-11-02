@@ -459,7 +459,6 @@ module Measure = struct
     readback_bytes : int;
     memory_error : string option;
     cook_error : string option;
-    sites : (int * string) list;
   }
 
   let frame ~width ~height tick : Rays.Frame.t =
@@ -507,16 +506,14 @@ module Measure = struct
       Hashtbl.fold (fun site bytes all -> (bytes, site) :: all) sites []
       |> List.filter (fun (bytes, _) -> bytes > 0)
       |> List.sort (fun (a, _) (b, _) -> compare b a)
-      |> List.filteri (fun i _ -> i < 12)
+      |> List.filteri (fun i _ -> i < 60)
 
-  let run ?(width = 960) ?(height = 640) ?(step = fun _ editor -> editor) ?(sites = false) ~early
-      ~frames workspace =
+  let run ?(width = 960) ?(height = 640) ?(step = fun _ editor -> editor) ~early ~frames workspace =
     let ( let* ) = Result.bind in
     let* canvas = Rays.Canvas.create ~width ~height in
     Fun.protect
       ~finally:(fun () -> ignore (Rays.Canvas.destroy canvas))
       (fun () ->
-        let finish_sites = if sites then track_sites () else fun () -> [] in
         let* editor =
           Editor.create ~ui_text_size:11 ~await:true ~domains:1 ~workspace ~prepare:Editor.prepare
             ~draw:Editor.draw ()
@@ -573,6 +570,5 @@ module Measure = struct
                     readback_bytes = stats.readback_bytes;
                     memory_error = (!editor).Loop_model.memory_error;
                     cook_error = (!editor).Loop_model.core.cook.error;
-                    sites = finish_sites ();
                   }))
 end

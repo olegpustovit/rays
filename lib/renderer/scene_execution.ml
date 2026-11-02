@@ -355,16 +355,16 @@ let texture_cache_entry_capacity = 256
 let texture_cache_byte_capacity = 256 * 1024 * 1024
 
 let mesh_table retired =
-  String_table.create ~owner:(Lru.cache "renderer.mesh") mesh_cache_entry_capacity ~byte_capacity:cache_byte_capacity
+  String_table.create ~owner:(Lru.cache ~pool:Device "renderer.mesh") mesh_cache_entry_capacity ~byte_capacity:cache_byte_capacity
     ~release:(fun _ (item : cached) ->
       retired.retired_buffers <- item.buffer :: retired.retired_buffers)
 
 let texture_table retired =
-  String_table.create ~owner:(Lru.cache "renderer.texture") texture_cache_entry_capacity ~byte_capacity:texture_cache_byte_capacity
+  String_table.create ~owner:(Lru.cache ~pool:Device "renderer.texture") texture_cache_entry_capacity ~byte_capacity:texture_cache_byte_capacity
     ~release:(fun _ item -> retired.retired_textures <- item.texture :: retired.retired_textures)
 
 let auxiliary_table retired =
-  String_table.create ~owner:(Lru.cache "renderer.gpu_item") 64 ~byte_capacity:cache_byte_capacity ~release:(fun _ item ->
+  String_table.create ~owner:(Lru.cache ~pool:Device "renderer.gpu_item") 64 ~byte_capacity:cache_byte_capacity ~release:(fun _ item ->
       retired.retired_buffers <- item.auxiliary_buffer :: retired.retired_buffers)
 
 let drain_retired retired destroy_buffer destroy_texture =

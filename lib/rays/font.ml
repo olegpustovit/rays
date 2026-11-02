@@ -20,6 +20,12 @@ type t = {
 
 let text_cache_capacity = 256
 
+(* the pixels an image of a cached text holds *)
+let image_bytes image =
+  match (Image.get_width image, Image.get_height image) with
+  | Ok width, Ok height -> width * height * 4
+  | _ -> 0
+
 let text_cache () =
   Text_cache.create ~owner:(Lru.cache "rays.font.text") ~release:(fun _ image -> ignore (Image.destroy image)) text_cache_capacity
 
@@ -85,7 +91,7 @@ let cached_text ?wrap ?(align = Left) ?(density = 1) font text mode =
       match paint ~density ?wrap ~align font text mode with
       | Error _ as error -> error
       | Ok image ->
-          Text_cache.add font.cache key image;
+          Text_cache.add font.cache ~bytes:(image_bytes image) key image;
           Ok image)
 
 let clear_cache font = Text_cache.clear font.cache
@@ -139,6 +145,7 @@ module Raster = struct
           ~release:(fun _ entry ->
             entry.cached <- false;
             if entry.references = 0 then ignore (Image.destroy entry.image));
+      (* count only: an open font per size, its memory in the font library *)
       automatic_fonts = Font_cache.create ~owner:(Lru.cache "rays.font.auto") font_capacity ~release:(fun _ font -> destroy font);
       automatic_references = 0;
     }
@@ -201,7 +208,8 @@ module Raster = struct
                                 entry.references = 0))
                     in
                     let entry = { image; references = 1; cached = can_cache } in
-                    if can_cache then Text_cache.add context.automatic_cache key entry;
+                    if can_cache then
+                      Text_cache.add context.automatic_cache ~bytes:(image_bytes image) key entry;
                     context.automatic_references <- context.automatic_references + 1;
                     Ok { entry; context = Some context; released = false })))
 

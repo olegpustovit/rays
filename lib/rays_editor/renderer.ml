@@ -187,7 +187,9 @@ let traced_scene meshes scene =
                   in
                   let* traced = P.mesh [ (trace_mesh, traced_material drawing.material) ] in
                   let cached = { trace_source = trace_mesh; traced } in
-                  Mesh_cache.add cache (drawing.mesh, drawing.material) cached;
+                  Mesh_cache.add cache
+                    ~bytes:(Mem.reachable_bytes trace_mesh)
+                    (drawing.mesh, drawing.material) cached;
                   Ok cached
             in
             let* mesh =

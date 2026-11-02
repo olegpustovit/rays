@@ -21,6 +21,7 @@ module Make (K : Hashtbl.HashedType) : sig
     owner:Mem.owner ->
     ?shed:shed ->
     ?rebuild:float ->
+    ?charges:bool ->
     ?byte_capacity:int ->
     ?evictable:(K.t -> 'v -> bool) ->
     ?release:(K.t -> 'v -> unit) ->
@@ -31,7 +32,8 @@ module Make (K : Hashtbl.HashedType) : sig
       entry can hold the table over its limits until it is released. [release] runs exactly once for
       every entry that leaves the table, including [clear]. [owner] charges and releases the entry
       byte sizes on the memory ledger. [shed] (default [Home]) says when {!Mem.retreat} may drop an
-      entry, [rebuild] its relative cost to make again (default 1, cheaper first). The retreat holds
+      entry, [rebuild] its relative cost to make again (default 1, cheaper first). [~charges:false]:
+      an entry's bytes bound this table but another owner already holds them. The retreat holds
       the table weakly, and what a dead table still charged leaves the ledger with it. *)
 
   val find : 'v t -> K.t -> 'v

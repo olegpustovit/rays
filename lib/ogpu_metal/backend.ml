@@ -76,7 +76,8 @@ let create () =
       icbs = Hashtbl.create 8;
       arguments = Hashtbl.create 4;
       depth_states =
-        Depth_state_table.create ~owner:(Lru.cache "ogpu_metal.depth_state") depth_state_capacity ~release:(fun _ native ->
+        (* Never, count only: a handful of small state objects *)
+        Depth_state_table.create ~owner:(Lru.cache "ogpu_metal.depth_state") ~shed:Never depth_state_capacity ~release:(fun _ native ->
             ignore (Metal.Depth_stencil.destroy native));
       acquired_frames = Hashtbl.create 4;
       cleanup_error = None;

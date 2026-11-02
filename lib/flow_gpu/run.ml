@@ -8,6 +8,7 @@ type slot = {
   mutable floats : B.floats option;
       (** a mapped slot's contents (inputs, gathers, outputs): written and read in place *)
   mutable uploaded : (float array * int) option;
+  mutable low : int;  (** dispatches in a row asking under a quarter of [capacity] *)
 }
 
 (* An output buffer a lazy planar store holds after its dispatch completed and passed its status
@@ -50,6 +51,8 @@ type kept = {
 type pool = {
   held : (int, B.buffer * B.floats * int * int Atomic.t) Hashtbl.t;
   mutable free : (B.buffer * B.floats * int) list;
+  mutable free_ages : (B.buffer * int) list;  (** the {!tick} each free buffer came back *)
+  mutable tick : int;  (** drains so far: an idle device's clock, no real one *)
   released : int list Atomic.t;
   retiring : (int * kept Weak.t) list Atomic.t;
   freed : int Atomic.t;  (** holders freed unread *)
@@ -62,6 +65,8 @@ let pool () =
   {
     held = Hashtbl.create 16;
     free = [];
+    free_ages = [];
+    tick = 0;
     released = Atomic.make [];
     retiring = Atomic.make [];
     freed = Atomic.make 0;
@@ -182,7 +187,8 @@ type output = {
 
 let diagnostic error = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
 let get = function Ok value -> value | Error error -> raise (Diagnostic.Error (diagnostic error))
-let slot () = { buffer = None; capacity = 0; bytes = Bytes.empty; floats = None; uploaded = None }
+let slot () =
+  { buffer = None; capacity = 0; bytes = Bytes.empty; floats = None; uploaded = None; low = 0 }
 
 let nonfinite () =
   Diagnostic.Error
@@ -285,19 +291,47 @@ let rec push cell value =
 (* Free buffers kept for reuse while their bytes stay under this. A collection returns several dead
    holders' buffers at once, which the next cooks take. Bytes only — never "any 8" of any size. *)
 let free_budget = 256 lsl 20
+let held_owner = Mem.plan ~pool:Device "flow_gpu.held"
+let free_owner = Mem.cache ~pool:Device "flow_gpu.free"
+let slot_owner = Mem.plan ~pool:Device "flow_gpu.slots"
+let free_idle_drains = 1024
+let slot_shrink_after = 240
+let slot_shrink_floor = 1 lsl 20
 
 (* on the initial domain: recycle or destroy what collected or read holders gave back (a buffer a
    reader is still converting waits for the next drain) *)
 let drain_pool pool =
+  pool.tick <- pool.tick + 1;
+  (* a free buffer nothing has taken for this long goes back to the device *)
+  if pool.free <> [] && pool.tick mod 64 = 0 then begin
+    let stale (buffer, _, _) =
+      pool.tick - Option.value ~default:pool.tick (List.assq_opt buffer pool.free_ages)
+      > free_idle_drains
+    in
+    let old, young = List.partition stale pool.free in
+    pool.free <- young;
+    List.iter
+      (fun (buffer, _, capacity) ->
+        Mem.release free_owner capacity;
+        pool.free_ages <- List.remove_assq buffer pool.free_ages;
+        ignore (B.destroy_buffer buffer))
+      old
+  end;
   List.iter
     (fun id ->
       match Hashtbl.find_opt pool.held id with
       | Some (_, _, _, readers) when Atomic.get readers > 0 -> push pool.released id
       | Some (buffer, floats, capacity, _) ->
           Hashtbl.remove pool.held id;
+          Mem.release held_owner capacity;
           let free = List.fold_left (fun sum (_, _, c) -> sum + c) 0 pool.free in
-          if free + capacity <= free_budget then
+          if free + capacity <= free_budget then begin
+            Mem.charge free_owner capacity;
+            (* a dead buffer: under RAYS_MEM_CLOBBER a wrong lifetime reads NaN at once *)
+            if Mem.clobber () then Bigarray.Array1.fill floats Float.nan;
+            pool.free_ages <- (buffer, pool.tick) :: pool.free_ages;
             pool.free <- (buffer, floats, capacity) :: pool.free
+          end
           else ignore (B.destroy_buffer buffer)
       | None -> ())
     (Atomic.exchange pool.released [])
@@ -310,8 +344,10 @@ let take_free pool length =
   match
     List.find_opt (fun (_, _, capacity) -> capacity >= length && capacity <= 2 * length) pool.free
   with
-  | Some held ->
+  | Some ((buffer, _, capacity) as held) ->
       pool.free <- List.filter (( != ) held) pool.free;
+      pool.free_ages <- List.remove_assq buffer pool.free_ages;
+      Mem.release free_owner capacity;
       Some held
   | None -> None
 
@@ -369,8 +405,23 @@ let ensure ?(mapped = false) t slot length =
          slot.buffer <- Some buffer;
          slot.floats <- Some floats;
          slot.capacity <- capacity;
+         Mem.charge slot_owner capacity;
          slot.uploaded <- None
      | None -> ());
+  (* a slot that has asked for under a quarter of its size for this long comes back down *)
+  if length > 0 && length * 4 < slot.capacity && slot.capacity > slot_shrink_floor then begin
+    slot.low <- slot.low + 1;
+    if slot.low >= slot_shrink_after then begin
+      Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
+      Mem.release slot_owner slot.capacity;
+      slot.buffer <- None;
+      slot.floats <- None;
+      slot.uploaded <- None;
+      slot.capacity <- 0;
+      slot.low <- 0
+    end
+  end
+  else slot.low <- 0;
   if length > slot.capacity then begin
     let capacity = ref (max 256 slot.capacity) in
     while !capacity < length do
@@ -391,6 +442,8 @@ let ensure ?(mapped = false) t slot length =
       else (get (B.create_buffer t.device descriptor), None)
     in
     Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
+    Mem.release slot_owner slot.capacity;
+    Mem.charge slot_owner !capacity;
     slot.uploaded <- None;
     slot.buffer <- Some fresh;
     slot.capacity <- !capacity;
@@ -1211,6 +1264,7 @@ let release_kept t kept ~held =
     end
 
 let hold t ~uint32 ~buffer ~floats ~capacity ~count ~width ~epoch ~settled =
+  Mem.charge held_owner capacity;
   let kept =
     { id = Atomic.fetch_and_add next_kept 1;
       kept_buffer = buffer; kept_floats = floats; kept_count = count; kept_width = width;
@@ -1258,6 +1312,7 @@ let keep_storage ~uint32 ?index output =
     | Some buffer, Some floats when output.count > 0 && output.epoch > 0L ->
         let holder = hold t ~uint32 ~buffer ~floats ~capacity:slot.capacity
             ~count:output.count ~width ~epoch:output.epoch ~settled:false in
+        Mem.release slot_owner slot.capacity;
         slot.buffer <- None;
         slot.floats <- None;
         slot.capacity <- 0;
@@ -1407,10 +1462,19 @@ let close_pool pool =
   ignore (Atomic.exchange pool.released []);
   ignore (Atomic.exchange pool.retiring []);
   pool.retired <- [];
-  Hashtbl.iter (fun _ (buffer, _, _, _) -> ignore (B.destroy_buffer buffer)) pool.held;
+  Hashtbl.iter
+    (fun _ (buffer, _, capacity, _) ->
+      Mem.release held_owner capacity;
+      ignore (B.destroy_buffer buffer))
+    pool.held;
   Hashtbl.reset pool.held;
-  List.iter (fun (buffer, _, _) -> ignore (B.destroy_buffer buffer)) pool.free;
-  pool.free <- []
+  List.iter
+    (fun (buffer, _, capacity) ->
+      Mem.release free_owner capacity;
+      ignore (B.destroy_buffer buffer))
+    pool.free;
+  pool.free <- [];
+  pool.free_ages <- []
 
 let close ?(discard = false) t =
   if Domain.self () <> t.domain then invalid_arg "Run.close: creating domain required";
@@ -1423,9 +1487,10 @@ let close ?(discard = false) t =
         Option.iter
           (fun kept ->
             match Hashtbl.find_opt t.pool.held kept.id with
-            | Some (buffer, _, _, _) ->
+            | Some (buffer, _, capacity, _) ->
                 (if not discard then try ignore (materialise t kept) with Diagnostic.Error _ -> ());
                 Mutex.protect kept.lock (fun () -> kept.destroyed <- true);
+                Mem.release held_owner capacity;
                 Hashtbl.remove t.pool.held kept.id;
                 ignore (B.destroy_buffer buffer)
             | None -> ())
@@ -1438,6 +1503,7 @@ let close ?(discard = false) t =
     Array.iter
       (fun slot ->
         Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
+        Mem.release slot_owner slot.capacity;
         slot.buffer <- None;
         slot.bytes <- Bytes.empty;
         slot.floats <- None;
@@ -1464,6 +1530,9 @@ module Private = struct
     Hashtbl.length t.pool.held
 
   let pool_freed pool = Atomic.get pool.freed
+  let pool_free_floats pool = List.map (fun (_, floats, _) -> floats) pool.free
+  let pool_drain = drain_pool
+  let slot_shrink_after = slot_shrink_after
 
   let pool_held pool =
     drain_pool pool;

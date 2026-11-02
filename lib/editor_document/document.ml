@@ -158,20 +158,20 @@ let snapshot value =
 
 (* The text and its checked form, by the syntax tree they grow from: what an entry retains that its
    neighbours do not share. [test_history_memory] holds it to the measured size of real entries. *)
+(* The document on screen, by its text's forms at [scale] bytes each. A checked form can be hundreds
+   of times its text (macros), so the first document measures what a form costs in this workspace:
+   one walk at the start, a multiply after each edit. The arrays a plan's values hold are charged by
+   their caches. *)
+let text_bytes value = Flow.Syntax.memory_bytes (value.workspace.ws.source @ value.workspace.ws.extra)
+
+let present_scale value =
+  float (Mem.reachable_bytes value.workspace.ws) /. float (max 1 (text_bytes value))
+
+let present_bytes ~scale value = int_of_float (scale *. float (text_bytes value))
+
 let snapshot_bytes saved =
-  let rec node_words (form : Flow.Syntax.t) =
-    let strings = List.fold_left (fun sum s -> sum + 3 + (String.length s / 8)) 0 in
-    13 + strings form.notes + strings form.meta + strings form.tail
-    +
-    match form.node with
-    | Sym text | Kw text | Num text | Str text -> 3 + (String.length text / 8)
-    | List forms | Vec forms | Map forms ->
-        List.fold_left (fun sum form -> sum + 3 + node_words form) 0 forms
-    | Quote (_, form) -> node_words form
-  in
-  let forms = List.fold_left (fun sum form -> sum + node_words form) 0 in
   (* the checked workspace and the ids hold about as much again *)
-  2 * 8 * (forms saved.saved_ws.source + forms saved.saved_ws.extra)
+  2 * Flow.Syntax.memory_bytes (saved.saved_ws.source @ saved.saved_ws.extra)
 
 (* What the list shows: the scene's objects, or inside an object its SOP network or the World's
    layers. *)

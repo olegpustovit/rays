@@ -22,16 +22,41 @@ module Identity_cache = struct
     mutex : Mutex.t;
   }
 
+  (* The oldest entry gone: an index is rebuilt from its topology on the next ask. *)
+  let drop_oldest cache =
+    let count = Array.length cache.slots in
+    let rec go offset =
+      offset < count
+      &&
+      let index = (cache.next + offset) mod count in
+      match cache.slots.(index) with
+      | Empty -> go (offset + 1)
+      | Entry (_, size, _) ->
+          Option.iter (fun owner -> Mem.release owner size) cache.owner;
+          cache.slots.(index) <- Empty;
+          true
+    in
+    go 0
+
   let create ~id ?owner ?(bytes = fun _ -> 0) capacity =
     if capacity <= 0 then invalid_arg "Identity_cache.create: capacity";
-    {
-      id;
+    let cache =
+      {
+        id;
+        owner;
+        bytes;
+        slots = Array.make capacity Empty;
+        next = 0;
+        mutex = Mutex.create ();
+      }
+    in
+    Option.iter
+      (fun owner ->
+        Mem.register_evictor owner ~rebuild:2. (fun () ->
+            Mutex.try_lock cache.mutex
+            && Fun.protect ~finally:(fun () -> Mutex.unlock cache.mutex) (fun () -> drop_oldest cache)))
       owner;
-      bytes;
-      slots = Array.make capacity Empty;
-      next = 0;
-      mutex = Mutex.create ();
-    }
+    cache
 
   let find cache id key =
     let rec scan slot =

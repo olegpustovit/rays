@@ -203,9 +203,9 @@ module Make (K : Hashtbl.HashedType) = struct
       charged = ref 0;
     }
 
-  let create ~owner ?(shed = Home) ?(rebuild = 1.) ?(byte_capacity = max_int)
+  let create ~owner ?(shed = Home) ?(rebuild = 1.) ?(charges = true) ?(byte_capacity = max_int)
       ?(evictable = fun _ _ -> true) ?(release = fun _ _ -> ()) capacity =
-    let t = make ~owner ~charges:true ~byte_capacity ~evictable ~release capacity in
+    let t = make ~owner ~charges ~byte_capacity ~evictable ~release capacity in
     register owner shed ~rebuild ~charged:t.charged t
       ~bytes:(fun t -> !(t.charged))
       ~last_use:(fun t -> t.last_use)

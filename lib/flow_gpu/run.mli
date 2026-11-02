@@ -309,6 +309,9 @@ module Private : sig
   val create_owned :
     ?pool:pool -> Ogpu.Backend.device -> Ogpu.Backend.queue -> Pipelines.t -> Emit.msl -> t
 
+  val pool_free_floats : pool -> Ogpu.Backend.floats list
+  val pool_drain : pool -> unit
+  val slot_shrink_after : int
   val pool_freed : pool -> int
   (** Holders freed unread ([release ~held:false]). *)
 

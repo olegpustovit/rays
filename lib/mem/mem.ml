@@ -64,6 +64,8 @@ let rec release (account : owner) n =
     if not (Atomic.compare_and_set account.bytes seen (max 0 (seen - n))) then release account n
   end
 
+let reachable_bytes value = Obj.reachable_words (Obj.repr value) * (Sys.word_size / 8)
+
 let accounts_sum keep =
   locked (fun () ->
       Hashtbl.fold (fun _ (a : account) sum -> if keep a then sum + bytes a else sum) accounts 0)
@@ -395,6 +397,7 @@ module Report = struct
     device : int;
     footprint : int;
     unattributed : int;
+    overclaimed : int;
     budget : int;
   }
 
@@ -413,9 +416,11 @@ module Report = struct
       if explicit <= 0 then 0 else int_of_float (100. *. float t.unattributed /. float explicit)
     in
     Format.fprintf fmt
-      "ocaml live %s · device %s · footprint %s · unattributed %s (%d%% of explicit) · budget %s@."
+      "ocaml live %s · device %s · footprint %s · unattributed %s (%d%% of explicit)%s · budget %s@."
       (format_bytes t.ocaml_live) (format_bytes t.device) (format_bytes t.footprint)
-      (format_bytes t.unattributed) pct (format_bytes t.budget)
+      (format_bytes t.unattributed) pct
+      (if t.overclaimed = 0 then "" else " · overclaimed " ^ format_bytes t.overclaimed)
+      (format_bytes t.budget)
 
   let to_string t = Format.asprintf "%a" pp t
 end
@@ -456,6 +461,7 @@ let report ?(collect = true) ?(device = 0) ?budget:shown () =
     device;
     footprint;
     unattributed = max 0 (ocaml_live - host) + max 0 (device - attributed_device);
+    overclaimed = max 0 (host - ocaml_live) + max 0 (attributed_device - device);
     budget = (match shown with Some n -> max 0 n | None -> budget ());
   }
 

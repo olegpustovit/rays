@@ -86,7 +86,7 @@ let kept (converted : converted option) key (d : float array) build =
       | Some (old, bytes) when old == d -> bytes
       | _ ->
           let bytes = build () in
-          Kept.add table key (d, bytes);
+          Kept.add table ~bytes:(Bytes.length bytes) key (d, bytes);
           bytes)
 
 (* Floats of [width] per instance: constant pairs and scalars take stride 0. *)
@@ -244,6 +244,7 @@ end)
 type cache = { nodes : (M.entry * float array list * Scene.node) Nodes.t; converted : converted }
 
 (* a frame's mark sets and device attributes are the working set: more than this and the oldest go *)
+(* nodes: count only, a node is a handle to the arrays the plan holds and [converted] charges *)
 let cache () : cache = { nodes = Nodes.create ~owner:(Lru.cache "flow_native.marks.nodes") 1024; converted = Kept.create ~owner:(Lru.cache "flow_native.marks.kept") 4096 }
 let cache_size cache = Nodes.length cache.nodes
 

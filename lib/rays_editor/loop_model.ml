@@ -26,6 +26,8 @@ type t = {
   context_error : string option;
   memory_error : string option;  (** E_MEMORY while the process stays over its limit *)
   memory_known : bool;  (** the machine's budget and the pressure source are set *)
+  memory_doc : (Workspace_doc.t * int * float) option;
+      (** what the ledger holds for the present document, and its bytes per byte of text *)
   (* The scene, open level (ghosts), and viewport membership used by the picture. *)
   baked : World.baked option;
   baked_from : (World.t * World.baked) option;
@@ -129,6 +131,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?(lights = [])
            context_error = None;
            memory_error = None;
            memory_known = false;
+           memory_doc = None;
            canvases = [];
            host;
            baked = None;

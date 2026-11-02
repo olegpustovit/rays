@@ -1632,7 +1632,8 @@ module Executor = struct
   let region_display ?(gpu = Gpu.default) ?profile ?(approx = W.Paths.empty) () =
     let kernels = ref [] in
     let module Ranges = Lru.Make (Int) in
-    let ranges = Ranges.create ~owner:(Lru.cache "flow_ir.ranges") ~byte_capacity:(64 * 1024 * 1024) 16 in
+    (* Never: on whichever domain lowers; its byte cap is the bound *)
+    let ranges = Ranges.create ~owner:(Lru.cache "flow_ir.ranges") ~shed:Never ~byte_capacity:(64 * 1024 * 1024) 16 in
     let rec source residual (term : W.term) =
       match term.node with
       | Ref_binding (name, []) -> (

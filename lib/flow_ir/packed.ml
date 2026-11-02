@@ -3573,7 +3573,10 @@ module Host = struct
      once per topology (a CSR, a selection) is converted once, and stays the array a device's
      identity check finds uploaded, instead of a fresh copy uploaded with every prepare. *)
   let int_floats =
-    let cache = Lru.Identity_list.create ~owner:(Lru.cache "flow_ir.packed") ~equal:( == ) 8 and lock = Mutex.create () in
+    let lock = Mutex.create () in
+    let cache =
+      Lru.Identity_list.create ~owner:(Lru.cache "flow_ir.packed") ~shed:(Locked lock) ~equal:( == ) 8
+    in
     fun (values : int array) ->
       Mutex.protect lock (fun () ->
           match Lru.Identity_list.find cache values with

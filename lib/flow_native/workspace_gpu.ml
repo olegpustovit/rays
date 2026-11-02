@@ -82,8 +82,9 @@ let create ?(clock = Unix.gettimeofday) () =
   {
     clock;
     owner = None;
-    mark_sets = Slots.create ~owner:(Lru.cache "flow_native.mark_sets") ~release:(fun _ -> X.close_gpu_marks) 64;
-    images = Images.create ~owner:(Lru.cache "flow_native.gpu_images") ~release:(fun _ -> close_image image_stats) 64;
+    (* plans, not caches: what the frame draws. Their buffers are device bytes, on the device's total *)
+    mark_sets = Slots.create ~owner:(Lru.plan ~pool:Device "flow_native.mark_sets") ~release:(fun _ -> X.close_gpu_marks) 64;
+    images = Images.create ~owner:(Lru.plan ~pool:Device "flow_native.gpu_images") ~release:(fun _ -> close_image image_stats) 64;
     image_stats;
     closed_host = H.zero;
     measurement_ready = false;
@@ -100,10 +101,12 @@ let create ?(clock = Unix.gettimeofday) () =
        (r, w));
     jobs = Queue.create ();
     mailbox_closed = false;
-    measured = Measurements.create ~owner:(Lru.cache "flow_native.measured")
+    (* Never, count only: a float per kernel, and a measurement is not free to take again *)
+    measured = Measurements.create ~owner:(Lru.cache "flow_native.measured") ~shed:Never
         ~equal:(fun (a, n, layout) (b, m, other) ->
           String.equal a b && n = m && layout = other) 64;
-    entries = Entries.create ~owner:(Lru.cache "flow_native.entries") ~equal:(fun (a, fast) (b, other) -> a == b && fast = other) 64;
+    (* Never, count only: compiled kernels, small and slow to make again *)
+    entries = Entries.create ~owner:(Lru.cache "flow_native.entries") ~shed:Never ~equal:(fun (a, fast) (b, other) -> a == b && fast = other) 64;
     dropped = Atomic.make [];
     displays = 0;
     display_refusal = None;

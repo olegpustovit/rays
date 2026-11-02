@@ -144,6 +144,7 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
   let await = match await with Some flag -> flag | None -> false in
   if grain <= 0 then invalid_arg "Rays_editor: grain must be positive";
   let domains = Option.value ~default:(max 1 (Parallel.recommended_domains () - 1)) domains in
+  let prepared_lock = Mutex.create () in
   if domains <= 0 then invalid_arg "Rays_editor: domains must be positive";
   Result.map
     (fun worker ->
@@ -156,8 +157,12 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
         await;
         prepare;
         clock = Option.value ~default:Unix.gettimeofday clock;
-        prepared_cache = Prepared_cache.create ~owner:(Lru.cache "editor.prepared") ~byte_capacity:prepared_byte_capacity 16;
-        prepared_lock = Mutex.create ();
+        prepared_cache =
+          (* its byte count is a conservative bound, of geometry the session already charges *)
+          Prepared_cache.create ~owner:(Lru.cache "editor.prepared") ~shed:(Locked prepared_lock)
+            ~charges:false
+            ~byte_capacity:prepared_byte_capacity 16;
+        prepared_lock;
         schedule = Schedule.initial;
         pieces = [];
         settings = None;

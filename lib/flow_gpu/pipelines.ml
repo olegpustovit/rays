@@ -24,7 +24,8 @@ let create ~clock:_ device =
   in
   {
     device;
-    cache = Cache.create ~owner:(Lru.cache "flow_gpu.pipelines") ~release 64;
+    cache = (* Never, count only: a pipeline is small and slow to compile again *)
+      Cache.create ~owner:(Lru.cache "flow_gpu.pipelines") ~shed:Never ~release 64;
     domain = Domain.self ();
     closed = false;
     compilations = 0;

@@ -27,6 +27,10 @@ val charge : owner -> int -> unit
 val release : owner -> int -> unit
 (** Drop [n] retained bytes, floored at zero. *)
 
+val reachable_bytes : 'a -> int
+(** The size of plain data, by walking it: once per cache miss on a value about to be kept, never
+    per frame. *)
+
 val bytes : owner -> int
 val peak : owner -> int
 
@@ -129,6 +133,7 @@ module Report : sig
     device : int;
     footprint : int;
     unattributed : int;
+    overclaimed : int;  (** Owners claim more than exists: a wrong size, which would hide the rest. *)
     budget : int;
   }
 
