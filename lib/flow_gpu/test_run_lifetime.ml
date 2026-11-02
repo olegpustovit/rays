@@ -31,6 +31,12 @@ let () =
   let fail_table = ref false and table_writes = ref 0 in
   let fail_input = ref false and input_writes = ref 0 and creates = ref 0 in
   let working_set = ref None in
+  let group = ref 0 in
+  let in_group (x, y, z) =
+    if x * y * z > !group then
+      Error (Ogpu.Error.make "test" Invalid_argument "threadgroup over the pipeline's limit")
+    else Ok ()
+  in
   (* This driver checks ownership and failed-command lifetimes only. It does
      not execute a shader or stand in for native numerical qualification. *)
   let driver =
@@ -111,12 +117,15 @@ let () =
                           {
                             library with
                             create_compute_pipeline_in =
-                              (fun ~entry:_ ~constants:_ ~interface:_ ->
+                              (fun ~entry ~constants:_ ~interface:_ ->
                                 incr pipelines;
+                                (* a discrete device: flow kernels run in groups of 256, compact and bounds in 1,024
+                                   (lib/flow_shader/print_shader.ml); the token carries the limit to the encoder *)
+                                let limit = if entry = "compact_mask" || entry = "compact_mask_uint32" || entry = "chunk_bounds" then 1024 else 256 in
                                 Ok
                                   {
-                                    max_threads = 1024;
-                                    pipeline_token = 1L;
+                                    max_threads = limit;
+                                    pipeline_token = Int64.of_int limit;
                                     destroy_pipeline =
                                       (fun () ->
                                         decr pipelines;
@@ -149,16 +158,16 @@ let () =
                                         (fun () ->
                                           Ok
                                             {
-                                              set_pipeline = (fun _ -> Ok ());
+                                              set_pipeline = (fun token -> group := Int64.to_int token; Ok ());
                                               set_buffer = (fun ~index:_ ~offset:_ _ -> Ok ());
                                               set_bytes = (fun ~index:_ _ -> Ok ());
                                               set_texture = (fun ~index:_ _ -> assert false);
                                               set_accel = (fun ~index:_ _ -> assert false);
                                               compute_use_accels = (fun _ -> assert false);
                                               dispatch_threads =
-                                                (fun ~threads:_ ~threadgroup:_ -> Ok ());
+                                                (fun ~threads:_ ~threadgroup -> in_group threadgroup);
                                               dispatch_indirect =
-                                                (fun _ ~offset:_ ~threadgroup:_ -> Ok ());
+                                                (fun _ ~offset:_ ~threadgroup -> in_group threadgroup);
                                               end_compute = (fun () -> Ok ());
                                             });
                                     })
