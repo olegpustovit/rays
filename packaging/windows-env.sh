@@ -3,6 +3,7 @@
 # msys runtimes on one PATH lose environment variables. .envrc sources it for direnv.
 rays_opam="$(cygpath -F 28)/opam/rays-win" # 28: the local application data folder
 export OPAMSWITCH=rays-win
+export TEMP="$(cygpath -w /tmp)" TMP="$(cygpath -w /tmp)" # without one, dune writes its temporary files into the tree
 export OPAM_SWITCH_PREFIX="$(cygpath -w "$rays_opam")"
 export CAML_LD_LIBRARY_PATH="$OPAM_SWITCH_PREFIX\\lib\\stublibs;$OPAM_SWITCH_PREFIX\\lib\\ocaml\\stublibs;$OPAM_SWITCH_PREFIX\\lib\\ocaml"
 export MSYSTEM=MINGW64 MSYSTEM_PREFIX=/mingw64 MSYSTEM_CARCH=x86_64 MSYSTEM_CHOST=x86_64-w64-mingw32

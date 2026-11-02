@@ -54,6 +54,7 @@ typedef struct rv_garbage {
 } rv_garbage;
 
 struct rv_device {
+  rv_device *next_live;
   VkInstance instance;
   VkDebugUtilsMessengerEXT messenger;
   VkPhysicalDevice physical;
@@ -155,7 +156,7 @@ typedef struct {
 static int validation_messages = 0;
 static bool validation_fatal = false;
 static bool validation_silent = false;
-static rv_device *exit_device = NULL;
+static rv_device *exit_devices = NULL; /* every live device under validation */
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                  VkDebugUtilsMessageTypeFlagsEXT types,
@@ -197,14 +198,15 @@ static int family_with(rv_device *d, VkQueueFlags want, VkQueueFlags refuse) {
 /* A process leaving with a live device (a failing test) must release it here: the validation layer
    joins its threads in DLL shutdown, under the loader lock, and never returns. */
 static void leave_device(void) {
-  rv_device *d = exit_device;
-  if (!d) return;
-  exit_device = NULL;
   validation_silent = true;
-  vkDeviceWaitIdle(d->device);
-  vkDestroyDevice(d->device, NULL);
-  if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
-  vkDestroyInstance(d->instance, NULL);
+  while (exit_devices) {
+    rv_device *d = exit_devices;
+    exit_devices = d->next_live;
+    vkDeviceWaitIdle(d->device);
+    vkDestroyDevice(d->device, NULL);
+    if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
+    vkDestroyInstance(d->instance, NULL);
+  }
 }
 
 /* A dedicated copy queue where the device has one; otherwise a second queue of the main family, or
@@ -373,7 +375,8 @@ CAMLprim value rv_device_create(value validation, value fatal) {
     static bool registered = false;
     if (!registered) atexit(leave_device);
     registered = true;
-    exit_device = (rv_device *)created;
+    ((rv_device *)created)->next_live = exit_devices;
+    exit_devices = (rv_device *)created;
   }
   return Val_long(created);
 }
@@ -793,7 +796,8 @@ CAMLprim value rv_queue_destroy(value queue) {
 
 CAMLprim value rv_device_destroy(value device) {
   rv_device *d = H(device);
-  if (exit_device == d) exit_device = NULL;
+  for (rv_device **at = &exit_devices; *at; at = &(*at)->next_live)
+    if (*at == d) { *at = d->next_live; break; }
   caml_enter_blocking_section();
   vkDeviceWaitIdle(d->device);
   caml_leave_blocking_section();
