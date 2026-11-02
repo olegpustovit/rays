@@ -200,6 +200,16 @@ let () =
   let session = Mem.cache "cook.session" in
   Mem.charge session 123;
   check (Mem.admit () = Ok ()) "unlimited admits";
+  Mem.admit_bytes max_int;
+  let footprint = Option.value ~default:0 (Mem.phys_footprint ()) in
+  Mem.set_budget ~source:Override (footprint + (1 lsl 30));
+  Mem.admit_bytes (1 lsl 20);
+  check
+    (match Mem.admit_bytes (2 lsl 30) with
+    | () -> false
+    | exception Mem.Refused o -> o.used > o.limit)
+    "an allocation that would pass the limit is refused before it is made";
+  Mem.set_budget ~source:Override 0;
   Mem.set_budget 1;
   let shed_calls = ref 0 in
   (match

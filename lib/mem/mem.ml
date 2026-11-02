@@ -493,6 +493,22 @@ let admit ?(shed = fun () -> false) () =
       end
     end
 
+exception Refused of overdraft
+
+let admit_bytes n =
+  let bound = limit () in
+  if bound > 0 then begin
+    let used () = measured ?device:None () - credit () in
+    if used () + n > bound then begin
+      ignore (collected_now ());
+      let used = used () in
+      if used + n > bound then begin
+        Atomic.set refused_under bound;
+        raise (Refused { used = used + n; limit = bound; top = top_owners 4 })
+      end
+    end
+  end
+
 let reset () =
   locked (fun () ->
       Hashtbl.iter

@@ -7,6 +7,11 @@ open Loop_source
 open Loop_model
 open Loop_view
 
+(* A refused allocation in a canvas's kernels, as a cook's node says it: the last picture stays. *)
+let refusal_typed f =
+  try f ()
+  with Mem.Refused overdraft -> Error (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))
+
 (* each canvas panel's picture: reused while its plan, size and preview stand, else rendered *)
 let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core : Editor_model.t)
     ~control () =
@@ -105,17 +110,18 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
                     ~fast:(Editor_document.Lowering.fast core.doc)
                     value.host.gpu
                 in
-                let prepared =
+                let prepared = lazy (
                   match previous with
                   | Some { prepared = Some p; preview = held; _ } when same_plan && held = preview
                     ->
                       Ok p
                   | _ ->
                       Flow_native.Drawing.prepare ~gpu ~profile:lowered.profile
-                        ~states:lowered.states lowered.plan drawing
+                        ~states:lowered.states lowered.plan drawing)
                 in
                 match
-                  Result.bind prepared (fun p ->
+                  refusal_typed @@ fun () ->
+                  Result.bind (Lazy.force prepared) (fun p ->
                       Result.map
                         (fun scene -> (p, scene))
                         (Flow_native.Workspace_gpu.with_backend

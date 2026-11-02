@@ -418,6 +418,7 @@ let settle_failed =
 let node_result f =
   try f () with
   | Invalid_facts message -> Error (Diagnostic.error ~code:"E_NODE_FACTS" message)
+  | Mem.Refused overdraft -> Error (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))
   | exn ->
       Error
         (Diagnostic.error ~code:"uncaught_node_exception" ~cause:(Printexc.to_string exn)

@@ -33,4 +33,7 @@
   ; text: its lowering, evaluated captures and all, is a plan (editor.lowering), and what caches charge is not walked again
   (scenario sea_256 (route device) (frames 30) (max_payload_readback_bytes 0) (max.editor.document 3000000))
   ; under what it needs: the real frame path refuses, typed, and holds the last good frame
+  ; the limit holds inside a node: a kernel's buffer is admitted before it is made, and a refusal stops the cook
+  ; rather than falling to the CPU (route). The sketch needs about 380 MB here
+  (scenario sea_512_300m (route device) (ceiling 300000000) (frames 20) (refuses true) (max_peak_bytes 315000000))
   (scenario sea_256_100m (route device) (ceiling 100000000) (frames 30) (refuses true) (max_peak_bytes 155000000)))

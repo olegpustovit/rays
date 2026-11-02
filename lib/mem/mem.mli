@@ -121,6 +121,16 @@ val admit : ?shed:(unit -> bool) -> unit -> (unit, overdraft) result
     caller's own cache, which it alone may touch) and at most one collection per crossing. Reads the
     footprint: one syscall, for work that takes far longer. *)
 
+exception Refused of overdraft
+(** A large allocation that would pass the limit, refused by {!admit_bytes}. Not a {!Diagnostic}: no
+    kernel's fallback path can take it for a form the device declined and run on the CPU. A cook's
+    node turns it into [E_MEMORY]. *)
+
+val admit_bytes : int -> unit
+(** Called before a large allocation, from any domain; no owner sheds here, the cook's boundary did.
+    One footprint read, at most one collection per crossing.
+    @raise Refused when usage plus [n] passes the limit. *)
+
 val retry_worthwhile : unit -> bool
 (** Whether the limit rose since {!admit} last refused: only then is a refused cook worth another
     try (a pressure event ending, a raised budget). An edit makes a new cook of its own. *)
