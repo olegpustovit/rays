@@ -295,6 +295,7 @@ let () =
       R.close_pool pool;
       (* free buffers of one size class past the budget do not turn another class's buffer away:
          it would be destroyed and made again each frame, a cook asking for a collection *)
+      working_set := Some (Int64.of_int (2048 lsl 20));
       let pool = R.pool () in
       let pooled = R.Private.create_owned ~pool device queue cache msl in
       for _ = 1 to 5 do
@@ -305,6 +306,17 @@ let () =
       small.release ~held:false;
       R.Private.pool_drain pool;
       assert (List.length (R.Private.pool_free_floats pool) = 6);
+      (* and all the classes together stop at a quarter of the device's working set: the small
+         buffer the dispatch took comes back to no room, and is destroyed *)
+      for _ = 1 to 2 do
+        R.Private.pool_give pool device (128 lsl 20)
+      done;
+      let over = Test_program.ok (R.keep (Test_program.ok (R.dispatch pooled values))) in
+      ignore (Test_program.ok (over.settle ()));
+      over.release ~held:false;
+      R.Private.pool_drain pool;
+      assert (List.length (R.Private.pool_free_floats pool) = 7);
+      working_set := None;
       R.close ~discard:true pooled;
       R.close_pool pool;
       (* an evicted runner on a shared pool reads nothing: its live holder stays unread and readable,

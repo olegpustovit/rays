@@ -70,6 +70,7 @@ type pool = {
   mutable orphans : kept Weak.t list;
       (** live holders of closed runners: settled, unread, theirs until {!close_pool} *)
   mutable created : int;
+  mutable free_limit : int;  (** {!retired_budget_for}, known from the first {!reclaim} *)
 }
 
 let pool () =
@@ -84,6 +85,7 @@ let pool () =
     retired = [];
     collected_at = 0;
     created = 0;
+    free_limit = 512 lsl 20;
     orphans = [];
   }
 
@@ -341,9 +343,14 @@ let drain_pool pool =
           Mem.release held_owner capacity;
           (* the size class's own free bytes: another class's big buffers must not turn this
              one's away (they would be destroyed and made again each frame) *)
-          let free = List.fold_left (fun sum (_, _, c) -> if c = capacity then sum + c else sum) 0 pool.free in
+          let fits free limit = free + capacity <= max limit (8 * capacity) in
+          let total, own =
+            List.fold_left
+              (fun (total, own) (_, _, c) -> (total + c, if c = capacity then own + c else own))
+              (0, 0) pool.free
+          in
           (* a frame of big outputs must find its buffers again *)
-          if free + capacity <= max free_budget (8 * capacity) then begin
+          if fits own free_budget && fits total pool.free_limit then begin
             Mem.charge free_owner capacity;
             (* a dead buffer: under RAYS_MEM_CLOBBER a wrong lifetime reads NaN at once *)
             if Mem.clobber () then Bigarray.Array1.fill floats Float.nan;
@@ -379,6 +386,7 @@ let retired_budget_for device =
   if recommended > 0 then recommended / 4 else 512 lsl 20
 
 let reclaim pool ~device =
+  pool.free_limit <- retired_budget_for device;
   drain_pool pool;
   let held (id, w) = Weak.check w 0 && Hashtbl.mem pool.held id in
   let refresh () =
