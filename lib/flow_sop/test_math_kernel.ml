@@ -166,6 +166,25 @@ let () =
     "Quaternion finite-overflow guards match strict reference bytes at one/eight domains on 32769 \
      elements"
 
+(* arm64 contracts Vec3.cross and Mat4.mul to fused multiply-adds, as the Lisp helpers are written;
+   x86 does not, so Windows computes the same fused forms here (see test_math_helpers). *)
+let cross_native (a : Rays_math.Vec3.t) =
+  if not Sys.win32 then Rays_math.Vec3.cross a a
+  else
+    let f l r l2 r2 = Rays_math.Fma.fma (-1.0 *. l) r (l2 *. r2) in
+    Rays_math.Vec3.create (f a.z a.y a.y a.z) (f a.x a.z a.z a.x) (f a.y a.x a.x a.y)
+
+(* row 0 of left * right, element [column] *)
+let mul_native left right ~column =
+  if not Sys.win32 then Rays_math.Mat4.get (Rays_math.Mat4.mul left right) ~row:0 ~column
+  else
+    let result = ref 0. in
+    for k = 0 to 3 do
+      result :=
+        Rays_math.Fma.fma (Rays_math.Mat4.get left ~row:0 ~column:k) (Rays_math.Mat4.get right ~row:k ~column) !result
+    done;
+    !result
+
 let () =
   let text = In_channel.with_open_text "nodes/prelude.rays" In_channel.input_all in
   let sources =
@@ -264,7 +283,7 @@ let () =
   let expected =
     Array.init (count * 3) (fun i ->
         let v = cases.(i / 3 mod Array.length cases) in
-        let v = Rays_math.Vec3.cross v v in
+        let v = cross_native v in
         match i mod 3 with 0 -> v.x | 1 -> v.y | _ -> v.z)
   in
   List.iter
@@ -286,7 +305,7 @@ let () =
             rows.(i / 4 mod Array.length rows)
             (0., 0., 0., 0.) (0., 0., 0., 0.) (0., 0., 0., 0.)
         in
-        Rays_math.Mat4.get (Rays_math.Mat4.mul left right) ~row:0 ~column:(i mod 4))
+        mul_native left right ~column:(i mod 4))
   in
   proof Flow.Ty.Vec4 Flow.Ty.Vec4 (E.Vec4_array input)
     "(get (mat4_mul {:r0 x :r1 [0.0 0.0 0.0 0.0] :r2 [0.0 0.0 0.0 0.0] :r3 [0.0 0.0 0.0 0.0]} {:r0 \
