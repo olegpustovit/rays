@@ -161,7 +161,13 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlag
   __atomic_add_fetch(&validation_messages, 1, __ATOMIC_RELAXED);
   fprintf(stderr, "vulkan validation: %s\n", data->pMessage);
   fflush(stderr);
-  if (validation_fatal) _exit(70); /* any message fails the test that caused it */
+  /* Any message fails the test that caused it. ExitProcess from inside the driver's call detaches
+     DLLs the call still holds locks in and hangs, so Windows ends the process outright. */
+#ifdef _WIN32
+  if (validation_fatal) TerminateProcess(GetCurrentProcess(), 70);
+#else
+  if (validation_fatal) _exit(70);
+#endif
   return VK_FALSE;
 }
 
