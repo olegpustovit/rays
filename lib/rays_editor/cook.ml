@@ -77,6 +77,7 @@ type t = {
   displayed : (int * int) list; (* the display node each graph compiles *)
   probe_job : bool; (* the job in flight only counts footers: a display cook may supersede it *)
   probing : (int * int) list; (* the (object, node) pairs the last submission asked to summarise *)
+  probes_owed : bool; (* the last update wanted other pairs: a quiet moment will count them *)
   quiet : int; (* updates since the last edit: footers are counted once an edit settles *)
   summaries : summary list;
   sources : ((int * int) * Rdk_rays.Geometry_view.t) list;
@@ -174,6 +175,7 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
         displayed = [];
         probe_job = false;
         probing = [];
+        probes_owed = false;
         quiet = 0;
         summaries = [];
         sources = [];
@@ -248,8 +250,8 @@ let context value timeline frame =
 let busy value = match status value with Async_cook.Idle -> false | Cooking _ -> true
 let force value = { value with force = true }
 
-(* no cook running or owed, and past the quiet updates footers wait for ([update]'s [settled]) *)
-let at_rest value = (not (busy value)) && (not value.schedule.dirty) && value.quiet > 8
+(* no cook running or owed, and no footers waiting for their quiet updates ([update]'s [settled]) *)
+let at_rest value = (not (busy value)) && (not value.schedule.dirty) && not value.probes_owed
 let dependencies value = value.schedule.dependencies
 
 (* Preparation, probes and framing are CPU-capable readers of published geometry.
@@ -453,6 +455,11 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
         split && settled && (not submit) && probes <> [] && probes <> value.probing
         && framing = None
         && ((not (busy value)) || value.probe_job)
+      in
+      let probing =
+        if inline || probe_only then probes
+        else if submit && (changed || value.probe_job) then []
+        else value.probing
       in
       let probed =
         if not (inline || probe_only) then []
@@ -677,10 +684,8 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty)
             displayed;
             probe_job = probe_only;
             quiet;
-            probing =
-              (if inline || probe_only then probes
-               else if submit && (changed || value.probe_job) then []
-               else value.probing);
+            probing;
+            probes_owed = probes <> probing;
             summaries = !summaries;
             sources = !sources;
           };
