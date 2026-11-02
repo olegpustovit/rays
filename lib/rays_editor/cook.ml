@@ -223,7 +223,13 @@ let prepare_cached ?gpu value ~id ~context settings output =
               (Payload.geometry output.payload)
           in
           let bytes = Rdk.Geometry.payload_bytes prepared.geometry in
-          if source <= prepared_byte_capacity && bytes <= (prepared_byte_capacity - source) / 2 then begin
+          (* preparing a device's output is a few records, and cached it holds the frame's buffers,
+             bytes this budget never sees: a live cook's old frames, asked for never again *)
+          if
+            Flow_sop.Attribute_kernel.resident_vec3 prepared.geometry "P" = None
+            && source <= prepared_byte_capacity
+            && bytes <= (prepared_byte_capacity - source) / 2
+          then begin
             let bytes = source + (bytes * 2) in
             let instances = Option.fold ~none:0 ~some:Array.length output.instances in
             if instances <= (prepared_byte_capacity - bytes) / 128 then

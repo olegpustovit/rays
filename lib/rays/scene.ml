@@ -1117,8 +1117,7 @@ module Layer = struct
   let native_stage_cache_capacity = 16
   let native_stage_cache_byte_capacity = 256 * 1024 * 1024
 
-  (* a stage drawing a device's vertices: at most {!Scene3_native_lowering.device_layer_capacity}
-     are cached, as layers are *)
+  (* a stage drawing a device's vertices: only the newest is cached, as layers are *)
   let borrows_device stage =
     List.exists
       (function
@@ -1333,12 +1332,7 @@ module Layer = struct
                   let devices = ref [] in
                   Native_stage_table.iter context.native_stages (fun key cached ->
                       if cached.cached_device then devices := key :: !devices);
-                  (* newest first: what is past the capacity, with room for this one, goes *)
-                  List.iteri
-                    (fun i key ->
-                      if i >= Scene3_native_lowering.device_layer_capacity - 1 then
-                        Native_stage_table.remove context.native_stages key)
-                    !devices
+                  List.iter (Native_stage_table.remove context.native_stages) !devices
                 end;
                 Native_stage_table.add context.native_stages ~bytes:(native_stage_bytes stage) key
                   entry;

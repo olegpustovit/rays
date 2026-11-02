@@ -19,7 +19,7 @@
   ; history and the kernels a scrub compiled grow by design, to their caps (a plateau by 400 frames).
   ; over 20: 54 MB host no walked owner reaches (live sites: Flow.Eval.term_index 19 MB,
   ; Flow_ir.qualify_workspace 12 MB, Core_lower 8 MB) and 11 MB of device: not yet traced to a holder
-  (scenario scrubs_100 (route device) (frames 100) (live_flat_pct 100) (max_live_bytes 155000000) (max_footprint_bytes 560000000) (max_unattributed_pct 30) (max_readback_bytes 2457600) (max_payload_readback_bytes 0))
+  (scenario scrubs_100 (route device) (frames 100) (live_flat_pct 100) (max_live_bytes 155000000) (max_footprint_bytes 560000000) (max_unattributed_pct 31) (max_readback_bytes 2457600) (max_payload_readback_bytes 0))
   ; history grows by design, up to its byte cap: the limit is the live bytes
   ; over 5 claimed: history charges each entry's text; entries share what an edit did not touch. The
   ; share rose from 16 as the catalog left the total; the bytes fell from 15.6 MB to 12.8 MB

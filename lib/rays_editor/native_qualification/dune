@@ -15,6 +15,7 @@
   test_placement_native
   test_chain_frames_native
   test_live_mesh_native
+  test_holder_frames_native
   test_scrub_gpu_native)
  (modules
   test_workspace_gpu_native
@@ -30,6 +31,7 @@
   test_placement_native
   test_chain_frames_native
   test_live_mesh_native
+  test_holder_frames_native
   test_scrub_gpu_native)
  (libraries
   rays
@@ -98,6 +100,13 @@
  (action (run %{exe:test_live_mesh_native.exe})))
 
 (alias (name runtest-native) (deps (alias test_live_mesh_native)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_holder_frames_native)
+ (action (run %{exe:test_holder_frames_native.exe} %{dep:../../../sketches/gpu_sea.rays})))
+
+(alias (name runtest-native) (deps (alias test_holder_frames_native)))
 
 (rule
  (enabled_if

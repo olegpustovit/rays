@@ -721,10 +721,9 @@ let prepared_bytes prepared =
 
 (* A layer drawing a device's vertices (a live cook's display) is one frame's: the next cook's
    display is a new mesh, so an older layer is never asked for again, and cached it holds its
-   scene, the geometry and the device outputs under it. A cache keeps at most this many, the newest
-   (the frame shown and the one in flight; a further viewport rebuilds its layer); layers of host meshes are bounded only by the cache. *)
-let device_layer_capacity = 2
-
+   scene, the geometry and the device outputs under it. A cache keeps only the newest scene's layers
+   (one per viewport); the frame in flight is its pins', not the cache's. Layers of host meshes are
+   bounded only by the cache. *)
 let borrows_device prepared =
   Array.exists
     (fun (entry : Renderer.Scene_execution.scene3_entry) ->
@@ -734,18 +733,23 @@ let borrows_device prepared =
 let trim_prepared_cache
     (prepared_cache :
       (Scene3.t * Camera.t * (int * int * int * int), prepared_cache_entry) Prepared_cache.t) =
-  let count = ref 0 and bytes = ref 0 and devices = ref 0 in
+  let count = ref 0 and bytes = ref 0 and newest_device = ref None in
   Prepared_cache.filter prepared_cache (fun _ (cached : prepared_cache_entry) ->
       let size = prepared_bytes cached.prepared in
       let device = borrows_device cached.prepared in
       if
         !count < prepared_cache_capacity
         && size <= retained_payload_byte_capacity - !bytes
-        && ((not device) || !devices < device_layer_capacity)
+        && ((not device)
+           ||
+           match !newest_device with
+           | None ->
+               newest_device := Some cached.scene;
+               true
+           | Some scene -> Scene3.same scene cached.scene)
       then begin
         incr count;
         bytes := !bytes + size;
-        if device then incr devices;
         true
       end
       else false)

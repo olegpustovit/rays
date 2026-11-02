@@ -486,9 +486,12 @@ runner records beside each weak holder (a settle that got every live holder, onc
 every live graph's outputs alive forever: `sketches/gpu_sea.rays` read two back per frame to free a
 buffer; `test_run_lifetime` retires 24 cooks and fails unless their buffers are reused unread). The
 same holds for `Flow.Value.remember`, which queries only a slot whose key hashes alike. A drawn
-result is held by its display's staging too: the native stage and prepared-layer caches keep at
-most two layers that draw a device's vertices (`Scene3_native_lowering.device_layer_capacity`),
-so a live cook's older frames, a new mesh each, are let go (`test_scene3_native_lowering`).
+result is held by its display's staging too: the native stage cache keeps only the newest stage
+that draws a device's vertices and the prepared-layer cache only the newest scene's layers, one per
+viewport (`test_scene3_native_lowering`), `Cook`'s prepared cache keeps no resident output, and a
+display's pin and a session's release keep a holder's fate, not the holder (`Run.fate`): once the
+next frame has been shown, no root holds the old frame's holder (`test_holder_frames_native`), and
+its buffer waits for the collector, or for an unpin, whichever is last.
 Measured (`bench_chain_recook.exe`, 1M points, one session toggling an edit, 32 warm and 32
 measured cooks, medians of three interleaved rounds, loaded M1, 2026-10-28): results that die, 1.5-3.2
 ms against dev's 6.0-12.1 ms (and 42-69 ms for the earlier read-the-oldest pool); the last 16 results

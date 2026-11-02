@@ -359,9 +359,9 @@ let resident_streams () =
 
 let () = resident_streams ()
 
-(* A live cook's display is a new device mesh each frame: the staging caches keep the newest few
-   and let the older frames go (each holds its scene, its geometry and the device outputs under
-   it), and the newest staged again is a hit. *)
+(* A live cook's display is a new device mesh each frame: the staging caches keep the newest and let
+   the older frames go (each holds its scene, its geometry and the device outputs under it), and the
+   newest staged again is a hit. *)
 let device_frames () =
   Scene.Layer.with_cache_context (Scene.Layer.create_cache_context ()) (fun () ->
       let camera =
@@ -393,8 +393,7 @@ let device_frames () =
       for i = 0 to 11 do
         if Weak.check meshes i then incr alive
       done;
-      if !alive > Scene3_native_lowering.device_layer_capacity then
-        failwith (Printf.sprintf "staging kept %d of 12 device frames alive" !alive);
+      if !alive > 1 then failwith (Printf.sprintf "staging kept %d of 12 device frames alive" !alive);
       ignore (Sys.opaque_identity !newest));
   print_endline "native Scene3 lowering: older device frames are let go, the newest is a hit"
 
