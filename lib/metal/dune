@@ -145,7 +145,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_presentation_lifecycle_native)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (deps test_presentation_lifecycle_native.exe)
  (action
   (run ./test_presentation_lifecycle_native.exe)))

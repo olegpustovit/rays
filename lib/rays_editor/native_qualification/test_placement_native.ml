@@ -403,22 +403,74 @@ let chain_counterexamples () =
               let _, two = settle ~readers:2 large in
               assert (one.cpu_consumers = Some 1 && two.cpu_consumers = Some 2);
               assert (consistent one && consistent two);
-              (* a small mesh is the same comparison of its own two real clocks; under load the CPU
-                 sample can lose it, so which route wins is printed, not asserted (the chain's bench
-                 reports the verdicts at each size); what must hold is that the route is the verdict *)
-              let resident, small = settle ~readers:1 32 in
-              if
-                (not (consistent small))
-                || resident <> Flow_ir.Cost.on_device small.reason
-              then
+              (* on the real clock a small mesh is the same comparison; under load the CPU sample can
+                 lose it, so the record is the verdict and the priced chain below asserts which, and
+                 its route (these planes are host arrays: a device route is not a resident position) *)
+              let _, small = settle ~readers:1 32 in
+              if not (consistent small) then
                 failwith
-                  (Printf.sprintf "small chain: %s, resident %b, cpu %s, device %s" (name small)
-                     resident
+                  (Printf.sprintf "small chain: %s, cpu %s, device %s" (name small)
                      (Option.fold ~none:"-" ~some:string_of_float small.cpu_seconds)
                      (Option.fold ~none:"-" ~some:string_of_float small.device_seconds));
               (* a topology change is a new size, measured again rather than assumed *)
               let _, grown = cook ~readers:1 large in
               assert (grown.count <> small.count);
+              (* The verdict, deterministic: the same lowering, cook and placement with the clock priced,
+                 not read. A read after the device route ran costs its fixed submit, any other read the
+                 CPU's cost for this size, so a small mesh stays on the CPU and a large one leaves it at
+                 any machine load. The wrapped backend keeps its own evidence, apart from the real clock's. *)
+              let priced_chain n ~readers =
+                let backend = Option.get config.backend in
+                let device_ran = ref false and on_device = ref false in
+                let backend =
+                  {
+                    backend with
+                    residency =
+                      (fun ~fast ->
+                        device_ran := true;
+                        on_device := true;
+                        backend.residency ~fast);
+                  }
+                in
+                let now = ref 0. in
+                let clock () =
+                  now := !now +. (if !device_ran then 1e-3 else 1e-6 *. float n);
+                  device_ran := false;
+                  !now
+                in
+                let lowered =
+                  ok
+                    (Flow_sop.Lower.workspace
+                       ~gpu:{ config with backend = Some backend }
+                       ~defer:true ~clock
+                       (ok (Flow.Syntax.parse (source n))))
+                in
+                let graph = List.hd lowered.graphs in
+                let node =
+                  string_ok
+                    (Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
+                in
+                let context = string_ok (Sop.Context.create ~domains:1 ()) in
+                let cook () =
+                  on_device := false;
+                  ignore (ok (Sop.Session.cook ~cpu_consumers:readers session ~context node));
+                  (!on_device, List.hd (Flow_ir.Profile.placements lowered.profile))
+                in
+                for _ = 1 to 5 do ignore (cook ()) done;
+                cook ()
+              in
+              let verdict n ~readers (reason : Flow_ir.placement_reason) =
+                let on_device, (p : Flow_ir.placement) = priced_chain n ~readers in
+                if on_device <> Flow_ir.Cost.on_device reason || p.reason <> reason then
+                  failwith
+                    (Printf.sprintf "%d points priced: %s, ran on the device %b, cpu %s, device %s" n (name p)
+                       on_device
+                       (Option.fold ~none:"-" ~some:string_of_float p.cpu_seconds)
+                       (Option.fold ~none:"-" ~some:string_of_float p.device_seconds))
+              in
+              verdict 32 ~readers:1 Cpu_consumer;
+              verdict 32 ~readers:0 Cpu_measured_cheaper;
+              verdict large ~readers:0 Device_measured_cheaper;
               Printf.printf
                 "Measured chain placement: %d points %s (cpu %.6f s, device %.6f s; one reader: \
                  device %.6f s); small %s (cpu %.6f s, device %.6f s); unknown consumers stay CPU \

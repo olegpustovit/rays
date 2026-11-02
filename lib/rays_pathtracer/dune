@@ -75,7 +75,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_pathtracer_exact_m1)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_pathtracer_exact_m1)))
 
@@ -83,6 +83,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_world)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_world)))
 
@@ -90,7 +91,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_gpu_film)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_gpu_film)))
 
@@ -98,7 +99,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias qualification)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_parity)))
 

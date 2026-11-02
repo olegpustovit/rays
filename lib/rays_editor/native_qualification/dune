@@ -176,7 +176,7 @@
 (rule
  (enabled_if (= %{system} macosx))
  (alias bench_isogrid_present)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (deps ../../../sketches/isogrid.rays)
  (action
   (progn

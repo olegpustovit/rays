@@ -186,8 +186,9 @@ and fix it in the same change that made it worse.
 - Record it. When you find or fix a slow test, add one row to `specification/test-times.md` (date, test,
   before, after, what changed); when you add a test that takes over 5 s, add the row with the reason. Check
   the file before you add a slow one: a similar test may already exist to extend.
-- Tests that open a window stay in `@runtest-native` (see Loops); an unbounded wait, a sleep or a real clock
-  in a test is a bug.
+- Tests that open a window stay in `@runtest-native` (see Loops) and hold `(locks %{workspace_root}/smoke_window)`:
+  a bare lock name is per directory, and a window opening anywhere stalls another's `nextDrawable`. An unbounded
+  wait, a sleep or a real clock in a test is a bug.
 
 ## Find breakage when it happens
 

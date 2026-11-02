@@ -209,7 +209,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_runtime_render)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_runtime_render)))
 
@@ -217,7 +217,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_scene2_argument)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_scene2_argument)))
 
@@ -232,7 +232,7 @@
  (enabled_if
   (= %{system} macosx))
  (alias test_scene3_lighting)
- (locks smoke_window)
+ (locks %{workspace_root}/smoke_window)
  (action
   (run %{exe:test_main.exe} test_scene3_lighting)))
 
