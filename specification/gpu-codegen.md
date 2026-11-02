@@ -345,7 +345,7 @@ installed.
   encoded before the dispatch in the same pass, which then runs as `Backend.dispatch_threadgroups_indirect`
   (Metal `dispatchThreadgroupsWithIndirectBuffer:`) or `dispatchWorkgroupsIndirect`. At least one group
   runs, so thread 0 writes the consumer's count record also for n = 0; every kernel keeps its `i >= n`
-  guard for the last, partial group. The capacity sizes the host's placeholders and the device buffers.
+  guard for the last, partial group. The capacity is what the host records for a placeholder and sizes the device buffers.
   Narrowing reads a store's and a scan's operands as uint words, so the stage counts in 32 bits.
 - A **slot** is a resident region site's call in one fold run (`Host.resident`, web `resident.js`;
   64 a site, the 32 latest sites). Inside the loop a call takes the site's first slot none of the

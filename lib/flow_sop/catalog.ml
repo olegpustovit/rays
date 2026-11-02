@@ -83,9 +83,10 @@ let embedded_sources =
                  Error
                    (Diagnostic.error ~span:form.span ~code:"E_FORM"
                       (file ^ ": node sources contain only defnode, defn and defmacro forms"))
-             | None -> Ok (loaded @ forms)))
+             | None -> Ok (forms :: loaded)))
        (Ok [])
-       (Marshal.from_string Node_sources.forms 0 : (string * Flow.Syntax.t list) list))
+       (Marshal.from_string Node_sources.forms 0 : (string * Flow.Syntax.t list) list)
+    |> Result.map (fun files -> List.concat (List.rev files)))
 
 (* The embedded library, parsed once and kept for the process: the largest thing a small sketch has. *)
 let sources () =

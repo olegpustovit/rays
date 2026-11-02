@@ -349,6 +349,7 @@ let proxy t =
                         coerce = (fun ty v -> route t (fun () -> r.coerce ty v));
                         finish = (fun v -> route t (fun () -> r.finish v));
                         count = (fun v -> route t (fun () -> r.count v));
+                        capacity = (fun v -> route t (fun () -> r.capacity v));
                         close = (fun () -> route t r.close);
                         settle = (fun () -> route t r.settle);
                         range =

@@ -503,6 +503,7 @@ module Measure : sig
   val run :
     ?width:int ->
     ?height:int ->
+    ?device:bool ->
     ?step:(int -> Editor.t -> Editor.t) ->
     early:int ->
     frames:int ->

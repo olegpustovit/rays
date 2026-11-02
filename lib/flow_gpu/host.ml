@@ -81,12 +81,10 @@ type slot = {
   mutable capacity : int;
   mutable kept : bool;  (** false once its site left the host: its things are destroyed at close *)
   free : (int, Ogpu.Backend.buffer list) Hashtbl.t;  (** buffers by byte size *)
-  arrays : (int * int, Obj.t list) Hashtbl.t;  (** placeholders by (kind, length) *)
   mutable held : placeholder list;  (** this run's placeholders in it *)
   mutable spent : (Ogpu.Backend.buffer * int) list;  (** this run's compaction scratch in it *)
   mutable spare : (Ogpu.Backend.buffer * int) list;
       (** this run's buffers it took back (ping-pong), for its next use in the run *)
-  mutable spare_arrays : ((int * int) * Obj.t) list;  (** and their placeholders *)
 }
 
 and placeholder = {
@@ -157,22 +155,11 @@ type t = {
 let next = Atomic.make 1
 
 (* a slot's idle things are destroyed: none is in flight, since a fold run's close waits for it *)
-(* A placeholder is a host array of its full length: the evaluator takes a device array's count from
-   the block's header (Core_exec's [V.array_length], [array/count] and [array/range]), so the header
-   must say it. Float arrays are never written, so those pages stay untouched; an Int one is zeroed
-   for the collector. Kept slots' arrays are charged here. *)
-let placeholders = Mem.cache "flow_gpu.placeholders"
-let placeholder_bytes (kind, length) = 8 * max 1 length * max 1 kind
-
 let purge slot =
-  Hashtbl.iter
-    (fun key arrays -> Mem.release placeholders (placeholder_bytes key * List.length arrays))
-    slot.arrays;
   Hashtbl.iter
     (fun _ bs -> List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b)) bs)
     slot.free;
-  Hashtbl.reset slot.free;
-  Hashtbl.reset slot.arrays
+  Hashtbl.reset slot.free
 
 let retire slot =
   slot.kept <- false;
@@ -409,7 +396,7 @@ let standard_backend t : G.backend =
 
 (* A resident fold: from a region of 256 elements, a loop's regions and compactions are encoded level
    by level, committed without a wait, into buffers the fold owns; nothing is read until the loop ends.  A
-   region's value is a placeholder (an uninitialized array of its capacity, an upper bound) the table below maps,
+   region's value is a placeholder (a small array standing for its capacity, an upper bound) the table below maps,
    physically, to its buffer and to the count cell the device wrote, so the next region's count
    ([array/range] of an array's count) is taken on the device.  [finish] reads a count, then the
    array.
@@ -509,31 +496,16 @@ let resident_scope ?(uint32 = false) ~fast t =
     | Int_array a -> lookup (Obj.repr a) !table
     | _ -> None
   in
-  (* a slot's capacities repeat the last draw's, so its placeholders come back from it *)
-  let pooled slot kind length make =
-    match List.find_opt (fun ((k, n), _) -> k = kind && n = length) slot.spare_arrays with
-    | Some ((_, a) as x) ->
-        slot.spare_arrays <- List.filter (fun y -> y != x) slot.spare_arrays;
-        Obj.obj a
-    | None -> (
-        match Hashtbl.find_opt slot.arrays (kind, length) with
-        | Some (a :: rest) ->
-            Hashtbl.replace slot.arrays (kind, length) rest;
-            Mem.release placeholders (placeholder_bytes (kind, length));
-            Obj.obj a
-        | _ -> make ())
-  in
+  (* A placeholder is an identity and a type: one element of its width, never read. Its length is
+     [p.length] ([capacity], {!Flow_ir.Core_exec.resident}), so it costs no host memory by its size. *)
   let placeholder ?(counted = false) ?(clamped = max_int) ?origin slot ty buffer cell length =
-    (* Empty arrays share OCaml's atom: a placeholder needs its own identity even at count zero. *)
-    let capacity = max 1 length in
     let v : E.value =
       match ty with
-      | Flow.Ty.Array Flow.Ty.Int ->
-          Int_array (pooled slot 0 length (fun () -> Array.make capacity 0))
-      | Array Float -> Float_array (pooled slot 1 length (fun () -> Array.create_float capacity))
-      | Array Vec2 -> Vec2_array (pooled slot 2 length (fun () -> Array.create_float (2 * capacity)))
-      | Array Vec3 -> Vec3_array (pooled slot 3 length (fun () -> Array.create_float (3 * capacity)))
-      | _ -> Vec4_array (pooled slot 4 length (fun () -> Array.create_float (4 * capacity)))
+      | Flow.Ty.Array Flow.Ty.Int -> Int_array (Array.make 1 0)
+      | Array Float -> Float_array (Array.create_float 1)
+      | Array Vec2 -> Vec2_array (Array.create_float 2)
+      | Array Vec3 -> Vec3_array (Array.create_float 3)
+      | _ -> Vec4_array (Array.create_float 4)
     in
     let kind =
       match v with
@@ -602,6 +574,10 @@ let resident_scope ?(uint32 = false) ~fast t =
                   Some buffer))
   in
   let bound v = Option.map (fun p -> fst p.buffer) (find v) in
+  (* a placeholder's elements, a capacity; its one-element block is never read *)
+  let capacity v = Option.map (fun p -> p.length) (find v) in
+  let table_floats p = p.length * max 1 p.kind in
+  let bound_table_of v = Option.map (fun p -> (fst p.buffer, table_floats p)) (find v) in
   let give_back slot (b, bytes) =
     Hashtbl.replace slot.free bytes
       (b :: Option.value ~default:[] (Hashtbl.find_opt slot.free bytes))
@@ -717,7 +693,6 @@ let resident_scope ?(uint32 = false) ~fast t =
             given := fst p.buffer :: !given;
             slot.spare <- p.buffer :: slot.spare
           end;
-          slot.spare_arrays <- ((p.kind, p.length), p.key) :: slot.spare_arrays
         end)
       slot.held;
     slot.held <- [];
@@ -743,11 +718,9 @@ let resident_scope ?(uint32 = false) ~fast t =
             capacity = 0;
             kept = Dynarray.length site.slots < site_slots;
             free = Hashtbl.create 4;
-            arrays = Hashtbl.create 4;
             held = [];
             spent = [];
             spare = [];
-            spare_arrays = [];
           }
         in
         if slot.kept then Dynarray.add_last site.slots slot;
@@ -834,11 +807,7 @@ let resident_scope ?(uint32 = false) ~fast t =
       | P.Argument i -> bound args.(i)
       | Argument_range _ -> iota ~integer:(integer_source (snd (Option.get site.shape)) s) !n
     in
-    let bound_table u =
-      Option.map
-        (fun b -> (b, Array.length inputs.tables.(u)))
-        (bound args.(plan.plan_uniforms.(u)))
-    in
+    let bound_table u = bound_table_of args.(plan.plan_uniforms.(u)) in
     for s = 0 to Array.length plan.plan_sources - 1 do
       inputs.arrays.(s) <-
         (match plan.plan_sources.(s) with
@@ -847,7 +816,7 @@ let resident_scope ?(uint32 = false) ~fast t =
     done;
     for u = 0 to Array.length plan.plan_uniforms - 1 do
       let v = args.(plan.plan_uniforms.(u)) in
-      match P.floats v with
+      match if find v <> None then Some [||] else P.floats v with
       | Some table -> inputs.tables.(u) <- table
       | None -> (
           inputs.tables.(u) <- [||];
@@ -871,6 +840,7 @@ let resident_scope ?(uint32 = false) ~fast t =
     if not !agree then Error ()
     else Ok (!device, (if !n = max_int then 0 else !n), !held, inputs, bound_source, bound_table)
   in
+  let unbound_table v = if find v = None then v else E.Float_array [||] in
   let prepared packed ~live =
     match device_count packed with
     | Error () -> Error ()
@@ -885,7 +855,7 @@ let resident_scope ?(uint32 = false) ~fast t =
           | _ -> None
         in
         let indices = P.index_sources packed in
-        match P.prepare_values ~index:uint32 ~lengths packed ~live with
+        match P.prepare_values ~index:uint32 ~lengths ~capacity packed ~live with
         | Error _ -> Error ()
         | Ok values ->
             let resident_input = Array.exists (fun v -> find v <> None) in
@@ -907,6 +877,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                     Array.mapi
                       (fun i v -> if bound_inputs.(i) = None then v else E.Float_array [||])
                       values.arrays;
+                  uniforms = Array.map unbound_table values.uniforms;
                 }
             in
             Ok
@@ -915,10 +886,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                 resident_input values.arrays || resident_input values.uniforms,
                 inputs,
                 (fun i -> bound_inputs.(i)),
-                fun u ->
-                  Option.map
-                    (fun b -> (b, Array.length inputs.tables.(u)))
-                    (bound values.uniforms.(u)) ))
+                fun u -> bound_table_of values.uniforms.(u) ))
   in
   (* [packed] is the region with its arguments unbound ([args] are them) *)
   let off (packed : Flow_ir.Packed.t) reason =
@@ -1053,7 +1021,7 @@ let resident_scope ?(uint32 = false) ~fast t =
   let coerce ty v =
     match (ty, find v) with
     | Flow.Ty.Array Flow.Ty.Float, Some p when not p.uint32 ->
-        let v = E.Float_array (pooled p.slot 1 p.length (fun () -> Array.create_float (max 1 p.length))) in
+        let v = E.Float_array (Array.create_float 1) in
         let alias = { p with key = Option.get (raw v); kind = 1 } in
         table := alias :: !table;
         p.slot.held <- alias :: p.slot.held;
@@ -1178,26 +1146,10 @@ let resident_scope ?(uint32 = false) ~fast t =
         if slot.kept then give_back slot b else ignore (Ogpu.Backend.destroy_buffer (fst b)))
       buffers;
     List.iter
-      (fun p ->
-        if p.slot.kept && not p.dead then
-          let k = (p.kind, p.length) in
-          Mem.charge placeholders (placeholder_bytes k);
-          Hashtbl.replace p.slot.arrays k
-            (p.key :: Option.value ~default:[] (Hashtbl.find_opt p.slot.arrays k)))
-      !table;
-    List.iter
       (fun s ->
-        if s.kept then
-          List.iter
-            (fun (k, a) ->
-              Mem.charge placeholders (placeholder_bytes k);
-              Hashtbl.replace s.arrays k
-                (a :: Option.value ~default:[] (Hashtbl.find_opt s.arrays k)))
-            s.spare_arrays;
         s.held <- [];
         s.spent <- [];
-        s.spare <- [];
-        s.spare_arrays <- [])
+        s.spare <- [])
       touched_slots;
     table := [];
     integers := [];
@@ -1211,11 +1163,9 @@ let resident_scope ?(uint32 = false) ~fast t =
         capacity = 0;
         kept = false;
         free = Hashtbl.create 4;
-        arrays = Hashtbl.create 4;
         held = [];
         spent = [];
         spare = [];
-        spare_arrays = [];
       }
   in
   let range ty v ~div ~length =
@@ -1240,9 +1190,9 @@ let resident_scope ?(uint32 = false) ~fast t =
               let kind, a =
                 match ty with
                 | Flow.Ty.Array Flow.Ty.Float ->
-                    let a = pooled p.slot 1 length (fun () -> Array.create_float (max 1 length)) in
+                    let a = Array.create_float 1 in
                     (1, E.Float_array a)
-                | _ -> (0, E.Int_array (pooled p.slot 0 length (fun () -> Array.make (max 1 length) 0)))
+                | _ -> (0, E.Int_array (Array.make 1 0))
               in
               table :=
                 {
@@ -1305,7 +1255,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                     Some (n * mul / div)
                 | _ -> None
               in
-              match P.prepare_values ~lengths packed ~live with
+              match P.prepare_values ~lengths ~capacity packed ~live with
               | Error _ -> None
               | Ok values when values.count = 0 -> None
               | Ok values -> (
@@ -1343,6 +1293,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                           Array.mapi
                             (fun i v -> if bound_inputs.(i) = None then v else E.Float_array [||])
                             values.arrays;
+                        uniforms = Array.map unbound_table values.uniforms;
                       }
                   in
                   match (runner, flush (), admit t) with
@@ -1352,10 +1303,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                       match
                         Run.dispatch ~wait:false ?count
                           ~bound:(fun i -> bound_inputs.(i))
-                          ~bound_table:(fun u ->
-                            Option.map
-                              (fun b -> (b, Array.length inputs.tables.(u)))
-                              (bound values.uniforms.(u)))
+                          ~bound_table:(fun u -> bound_table_of values.uniforms.(u))
                           runner.run inputs
                       with
                       | Error _ -> None
@@ -1477,7 +1425,7 @@ let resident_scope ?(uint32 = false) ~fast t =
     post := true;
     t.showing <- Some show
   in
-  { executor = { invoke; compact; coerce; finish; count = count_value; close; settle; range; fill };
+  { executor = { invoke; compact; coerce; finish; count = count_value; capacity; close; settle; range; fill };
     retain_uint32; retain_float;
     uint32_stream = (fun value -> match find value with
         | Some p when p.uint32 -> settle (); Some (fst p.buffer, count p)

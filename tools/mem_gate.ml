@@ -242,7 +242,9 @@ let run_one ?(sites = false) (budget : budget) =
   let stop = if sites then M.track_sites () else fun () -> [] in
   let workspace, step = scenario budget.name in
   let outcome =
-    string_ok (M.run ~step ~early:(min budget.early budget.frames) ~frames:budget.frames workspace)
+    string_ok
+      (M.run ~device:(budget.route = `Device) ~step ~early:(min budget.early budget.frames)
+         ~frames:budget.frames workspace)
   in
   List.iter (fun (bytes, site) -> Printf.printf "live %10d B  %s\n" bytes site) (stop ());
   match check budget outcome with

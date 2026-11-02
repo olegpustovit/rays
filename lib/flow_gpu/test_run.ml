@@ -511,6 +511,18 @@ let resident_fold ?(n = 9000) ?(levels = 3) ?(keep = "(>= (int/mod (int i) 3) 1)
             (fun p args ~locals ~live ->
               let v = r.invoke p args ~locals ~live in
               if v <> None then incr ran;
+              (* a placeholder costs its identity, never its capacity: the length is the host's *)
+              Option.iter
+                (fun v ->
+                  let block =
+                    match v with
+                    | Flow.Eval.Int_array a -> Array.length a
+                    | Float_array a | Vec2_array a | Vec3_array a | Vec4_array a -> Array.length a
+                    | _ -> max_int
+                  in
+                  if block > 4 then failwith "resident fold: a placeholder's block has its capacity";
+                  if r.capacity v = None then failwith "resident fold: a placeholder has no capacity")
+                v;
               v);
         }
       in

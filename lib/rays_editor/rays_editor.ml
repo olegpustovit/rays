@@ -508,15 +508,21 @@ module Measure = struct
       |> List.sort (fun (a, _) (b, _) -> compare b a)
       |> List.filteri (fun i _ -> i < 60)
 
-  let run ?(width = 960) ?(height = 640) ?(step = fun _ editor -> editor) ~early ~frames workspace =
+  let run ?(width = 960) ?(height = 640) ?(device = false) ?(step = fun _ editor -> editor) ~early
+      ~frames workspace =
     let ( let* ) = Result.bind in
     let* canvas = Rays.Canvas.create ~width ~height in
     Fun.protect
       ~finally:(fun () -> ignore (Rays.Canvas.destroy canvas))
       (fun () ->
+        (* a run that states its route bypasses the clock: measured placement can move a small
+           mesh's writes between runs. Set before the document opens, which keeps the policy. *)
+        let gpu_owner = Flow_native.Workspace_gpu.create () in
+        if device then Flow_native.Workspace_gpu.qualification gpu_owner;
+        Fun.protect ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu_owner) @@ fun () ->
         let* editor =
-          Editor.create ~ui_text_size:11 ~await:true ~domains:1 ~workspace ~prepare:Editor.prepare
-            ~draw:Editor.draw ()
+          Loop_model.create ~gpu_owner ~ui_text_size:11 ~await:true ~domains:1 ~workspace
+            ~prepare:Editor.prepare ~draw:Editor.draw ()
         in
         let editor = ref editor in
         Fun.protect
