@@ -6,6 +6,12 @@ microbenchmarks name their clock and report allocation separately.
 
 | Date | Test | Before | After | What changed |
 |---|---|---|---|---|
+| 2026-11-02 | `@tools/mem` (fourteen scenarios) | 12-37 s, 14.6 s for twelve before this change's attribution | 21.6 s, target 20 | A report already walked once per scenario. Tables under 256 KB are sized alone rather than each walking all before it, and one walk decides whether a walker needs each table's two: scrubs_100's report 8.6 s, scenario 17 to 10.7 s. Its 100 scrubs are the rest |
+| 2026-11-02 | `test_drawing` particles native | 11.5 s under parallel windows, 6.8 s alone | 4.1 s alone | 4 exported frames to 2: the export path and its byte compare are the same |
+| 2026-11-02 | `test_workspace_gpu_native` | 12.1 s under parallel windows | 3.7 s alone, 5.8 s in whole native | no change: the time was contention, gone with the one window lock |
+| 2026-11-02 | `test_live_mesh_native` | 14 s under parallel windows | 6.4 s alone, 8.5 s in whole native | no change: as above |
+| 2026-11-02 | `test_2d_ports` native | 13.3 s alone | 6.6 s alone, 6.1 s in whole native | one PNG-mode port of a kind by default (marks, fields, paths, a UI), the other five under `RAYS_SLOW` (a second each to start three exports); every port's commands stay compared in the default test |
+| 2026-11-02 | whole `@runtest-native`, uncached | 91 s with the window lock | 84.7 s, slowest test_world 9.6 s | the rows above |
 | 2026-11-02 | whole `@runtest-native`, uncached (`--force`) | 100-172 s at load 20-35 | 80 s at load 15 (before the chain group's 256) | The rows below. Still over the 10 s section budget at that load: `test_2d_ports` 25.8 s (13.5 s alone), `test_live_mesh_native` 14 s, `test_workspace_gpu_native` 12.1 s, `test_drawing` particles 11.5 s. |
 | 2026-11-02 | `test_chain_frames_native` group (`@runtest-native`, `GRID_SIDE`) | 19.1 s | whole native_qualification alias 15.9 s | 512 to 256: the same assertions hold; `test_scrub_gpu_native`'s own alias keeps 512. |
 | 2026-11-02 | `test_fast_path` run_bounded | 12.9 s at load 5 | under 5.0 s (focused run with the soak) | 180 scrubs to 120: 40 past the warm-up still tell 8M retained words from the 4M limit. |

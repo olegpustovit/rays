@@ -401,7 +401,7 @@ let pure workspace =
 let native workspace directory =
   let path name = Filename.concat directory name in
   let config = { Rays.Sketch.default_config with width = 800; height = 600; fps = None } in
-  let frames = 4 in
+  let frames = 2 in
   let view particles _ =
     let points = Scene_command.Ui_batch.Builder.create ~capacity:(Array.length particles) () in
     Array.iter

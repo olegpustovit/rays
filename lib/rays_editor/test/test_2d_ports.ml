@@ -133,7 +133,7 @@ let save_roundtrip name workspace =
 let modes = [ ("lisp", 1); ("cpu-1", 1); ("cpu-8", 8) ]
 let export_frames = 2
 
-let pictures ?(synthetic = true) ?(first = 0) name workspace domains =
+let pictures ?(synthetic = true) ?(first = 0) ?(count = 4) name workspace domains =
   Parallel.run ~domains (fun () ->
       let evaluated =
         ok (E.static ~inputs:workspace.Editor_document.Workspace_doc.inputs workspace.checked)
@@ -144,7 +144,7 @@ let pictures ?(synthetic = true) ?(first = 0) name workspace domains =
              (List.assoc "picture" evaluated.results))
       in
       let state = E.create_state () in
-      Array.init 4 (fun count ->
+      Array.init count (fun count ->
           let frame = frame ~synthetic name (first + count) in
           let live = Flow_native.Live_frame.of_frame frame in
           ok (Flow_native.Drawing.render_prepared ~state prepared ~live ~size:frame.input.size)))
@@ -186,18 +186,16 @@ let native_modes directory name workspace =
   let config =
     { Sketch.default_config with width; height; clock = Sketch.Fixed (1. /. 60.); fps = None }
   in
-  let all =
-    List.map
-      (fun (mode, domains) -> (mode, pictures ~synthetic:false ~first:1 name workspace domains))
-      modes
-  in
   (* A native export counts frames from one, like Workspace.export. *)
   List.iter
-    (fun (mode, scenes) ->
+    (fun (mode, domains) ->
       let directory = directory ^ "/" ^ name ^ "/" ^ mode in
       if mode = "lisp" then
         ignore (ok (Rays_editor.Workspace.export ~directory ~frames:export_frames workspace))
       else
+        let scenes =
+          pictures ~synthetic:false ~first:1 ~count:export_frames name workspace domains
+        in
         Parallel.run
           ~domains:(if String.ends_with ~suffix:"8" mode then 8 else 1)
           (fun () ->
@@ -207,7 +205,7 @@ let native_modes directory name workspace =
                  ~update:(fun () _ -> ())
                  ~view:(fun () frame -> scenes.(frame.input.frame - 1))
                  ())))
-    all;
+    modes;
   for count = 0 to export_frames - 1 do
     let path mode = Printf.sprintf "%s/%s/%s/frame-%06d.png" directory name mode count in
     let expected = read (path "lisp") in
@@ -218,16 +216,23 @@ let native_modes directory name workspace =
       modes
   done
 
-let native directory =
+(* Three exports a port, a second each to start: the default loop keeps one of a kind (marks, fields,
+   vector paths, a UI); the rest run under RAYS_SLOW. Every port's commands are compared in [mode_parity]. *)
+let native_default = [ "moving_circles"; "noise"; "drawing"; "pxui" ]
+
+let native ports directory =
   List.iter
     (fun name ->
       native_modes directory name (if name = "moving_circles" then moving_circles () else load name);
       Printf.printf "port %s: three PNG modes byte-identical\n%!" name)
-    ("moving_circles" :: names)
+    ports
 
 let () =
-  if Array.length Sys.argv > 1 then native Sys.argv.(1)
-  else begin
+  match Array.to_list Sys.argv with
+  | [ _; directory ] -> native native_default directory
+  | [ _; "--rest"; directory ] ->
+      native (List.filter (fun name -> not (List.mem name native_default)) names) directory
+  | _ ->
     mode_parity ();
     List.iter (fun name -> save_roundtrip name (load name)) names;
     let workspace = moving_circles () in
@@ -235,4 +240,3 @@ let () =
     assert (Array.map serialize (pictures "moving_circles" workspace 8) = expected);
     assert (expected.(0) <> expected.(3));
     print_endline "10000 moving circles: four synthetic frames, 1/8-domain command parity"
-  end

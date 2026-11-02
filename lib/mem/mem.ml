@@ -119,13 +119,19 @@ let walk_roots ~live:heap_live =
           Some (account, ref (max 0 (Atomic.get account.bytes - walked_before)), held))
       ledger
   in
+  let tables_held = List.map (fun (_, _, held) -> held) ledger in
+  let with_tables = ref (words tables_held) in
   let already_charged before after extra =
-    if extra < 65_536 then 0
+    (* most walks add nothing a table holds: one walk says so, or each table's two *)
+    let now = words (after, tables_held) in
+    let inside_any = extra - (now - !with_tables) in
+    with_tables := now;
+    if extra < 65_536 || inside_any < 65_536 then 0
     else
       List.fold_left
         (fun sum (_, left, held) ->
           (* of what this walk adds, what lies in the table *)
-          if !left < 65_536 then sum
+          if !left < 65_536 || sum >= extra then sum
           else
             let inside = extra - (words (after, held) - words (before, held)) in
             let credit = max 0 (min (extra - sum) (min !left inside)) in
@@ -137,12 +143,20 @@ let walk_roots ~live:heap_live =
   let seen = ref [] and total = ref 0 and now = ref [] in
   List.iter
     (fun ((account : owner), roots) ->
-      let before = !seen in
-      seen := roots () @ before;
-      let reach = words !seen in
-      let extra = max 0 (reach - !total) in
-      total := reach;
-      let extra = max 0 (extra - already_charged before !seen extra) in
+      let roots = roots () in
+      let own = words roots in
+      (* tens of small tables: each its own size, or every one of them walks all that came before *)
+      let extra =
+        if own < 262_144 then own
+        else begin
+          let before = !seen in
+          seen := roots @ before;
+          let reach = words !seen in
+          let extra = max 0 (reach - !total) in
+          total := reach;
+          max 0 (extra - already_charged before !seen extra)
+        end
+      in
       now :=
         (account, extra + Option.value ~default:0 (List.assq_opt account !now))
         :: List.remove_assq account !now)

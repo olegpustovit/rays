@@ -853,6 +853,20 @@
 
 (rule
  (enabled_if
+  (and
+   (= %{system} macosx)
+   (= %{env:RAYS_SLOW=0} 1)))
+ (alias runtest-native)
+ (locks %{workspace_root}/smoke_window)
+ (deps (glob_files ../../../sketches/*.rays))
+ (action
+  (setenv
+   SDL_AUDIODRIVER
+   dummy
+   (run %{exe:test_2d_ports.exe} --rest /tmp/rays-2d-ports-rest))))
+
+(rule
+ (enabled_if
   (= %{system} macosx))
  (alias runtest-native)
  (locks %{workspace_root}/smoke_window)
