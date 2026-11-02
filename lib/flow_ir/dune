@@ -2,6 +2,7 @@
  (name flow_ir)
  (public_name rays.flow_ir)
  (modules
+  fallback
   packed
   core
   core_region

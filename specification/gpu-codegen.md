@@ -193,6 +193,11 @@ consumers learn capacities and replay the complete producer chain on overflow.
 Host mesh eligibility uses a nonmaterialising count check, which settles work
 without switching into the post-fold phase or disabling later capacity history.
 
+Work meant for the device that runs on the CPU reports to `Flow_ir.Fallback` with its site and reason: a
+refused kernel (interpreted element by element), a region the device passes over, a record that does not lower, a
+refused display. The editor's status line shows the first; a measured choice of the CPU is not a fallback, nor is a
+region under 256 elements. It resets when a document lowers.
+
 A chain of point writes over a `sop/mesh` nothing else reads is folded into the mesh's
 record (`Lower.fold_mesh_writes`), so their maps share its producers. As separate writes each would
 evaluate a captured compacted list on the CPU (`Packed.Host.prepare`) and upload it every frame.

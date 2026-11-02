@@ -726,6 +726,7 @@ let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
 
 let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?(defer = true) ?previous
     (workspace : Workspace_doc.t) =
+  Flow_ir.Fallback.reset ();
   let gpu =
     Option.value gpu
       ~default:

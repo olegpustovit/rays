@@ -230,6 +230,25 @@ let traced_case gpu config =
             failwith (Printf.sprintf "channel %d: device and host differ by %.2f of 255" channel difference))
         [ 0; 1; 2 ])
 
+(* A kernel that cannot compile says so, by name and reason, and a clean chain says nothing. *)
+let reporting config =
+  let module F = Flow_ir.Fallback in
+  let clean = F.seen () in
+  if clean <> [] then
+    failwith
+      (String.concat "; " (List.map (fun (site, reason, _) -> site ^ ": " ^ reason) clean));
+  let broken =
+    Str.global_replace (Str.regexp_string "(mod vertex 4)")
+      "(mod vertex (+ 4 (* 0 (array/count vertices))))" (text 8)
+  in
+  cook ~gpu:config broken [ 0. ] ~each:(fun _ _ -> ());
+  let named (site, reason, _) = String.ends_with ~suffix:"positions" site && reason <> "" in
+  if not (List.exists named (F.seen ())) then
+    failwith
+      ("a refused kernel left no report: "
+      ^ String.concat "; " (List.map (fun (site, reason, _) -> site ^ ": " ^ reason) (F.seen ())));
+  F.reset ()
+
 let () =
   let gpu = Flow_native.Workspace_gpu.create () in
   Fun.protect
@@ -241,5 +260,6 @@ let () =
           (* 12.6M mask elements, over 4M vertices. Its third cook samples the CPU, whose minutes a budget
              abandons: every frame comes from the device *)
           traced_case gpu config;
+          reporting config;
           resident_case gpu config ~side:128 ~frames:[ 0.; 0.01; 0.02; 0.03; 0.04 ] ~compare:false ~displayed:true));
   print_endline "Live mesh: P, N and Cd resident from the first cook; no uploads; equal to the CPU"

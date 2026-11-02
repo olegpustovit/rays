@@ -1,3 +1,5 @@
+module Fallback = Fallback
+
 module Packed = Packed
 module Core = Core
 module Core_region = Core_region
@@ -178,7 +180,12 @@ module Profile = struct
     if not (Atomic.compare_and_set profile.placements previous next) then
       record_placement profile placement
 
-  let place profile placement =
+  let place profile (placement : placement) =
+    let off reason = Fallback.note ~site:(String.concat "/" (fst placement.owner)) reason in
+    (match placement.reason with
+    | Unsupported_form -> off "its form is refused on the device"
+    | Missing_consumer -> off "nothing says who reads it"
+    | _ -> ());
     let profile =
       match profile with Some _ -> profile | None -> Option.map fst (Domain.DLS.get current)
     in
@@ -1366,7 +1373,10 @@ module Executor = struct
                                     match
                                       Core_lower.lower ~value ?trace:program.trace ~strict root
                                     with
-                                    | Error _ -> None
+                                    | Error name ->
+                                        Fallback.note ~site:(String.concat "/" (E.Residual.residual_view root).site)
+                                          ("record does not lower: " ^ name);
+                                        None
                                     | Ok core ->
                                         let prepared = Core_exec.prepare core in
                                         Atomic.set program.root_core (Some (strict, prepared));

@@ -896,6 +896,11 @@ let resident_scope ?(uint32 = false) ~fast t =
                     (bound values.uniforms.(u)) ))
   in
   (* [packed] is the region with its arguments unbound ([args] are them) *)
+  let off (packed : Flow_ir.Packed.t) reason =
+    let _, path, _ = Flow_ir.Packed.site packed in
+    Flow_ir.Fallback.note ~site:(String.concat "/" path) reason;
+    None
+  in
   let invoke packed args ~locals ~live =
     if (not (live_ok t)) || not fast then None
     else
@@ -905,7 +910,11 @@ let resident_scope ?(uint32 = false) ~fast t =
         site.shape <- Some ((P.view packed).uniform_widths, packed.code)
       end;
       match site.run with
-      | None -> None
+      | None ->
+          off packed
+            (match Flow_ir.Packed.gpu_refusals ~fused:true ~fast:true packed with
+            | d :: _ -> d.message
+            | [] -> "its output type or kernel is refused")
       | Some run -> (
           let level =
             match site.plan with
@@ -916,7 +925,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                 | Error _ -> Error ())
           in
           match level with
-          | Error () -> None
+          | Error () -> off packed "its inputs could not be bound"
           | Ok (count, n, held, inputs, bound_source, bound_table) -> (
               let slot = slot site ~locals and order = !invoked in
               incr invoked;
@@ -947,11 +956,9 @@ let resident_scope ?(uint32 = false) ~fast t =
                  too, so its arrays never cross; a capacity past 64M (upper bounds double with
                  each level) settles the counts on the host instead. Metal dispatches a grid of
                  any size, so the web's 4M reach (65,535 groups of 64) is not a limit here *)
-              if
-                n = 0
-                || n > 1 lsl 26
-                || not (held || n >= 256 || Dynarray.exists (fun s -> s.capacity > 0) site.slots)
+              if n = 0 || not (held || n >= 256 || Dynarray.exists (fun s -> s.capacity > 0) site.slots)
               then None
+              else if n > 1 lsl 26 then off packed "over 64M elements"
               else
                 match commands () with
                 | Error _ -> None

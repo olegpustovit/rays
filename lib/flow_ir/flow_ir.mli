@@ -1,3 +1,5 @@
+module Fallback = Fallback
+
 module Packed = Packed
 (** Specialized, renderer-independent dataflow. The reference evaluator remains in [flow];
     downstream hosts own catalog cooking and display sinks. *)

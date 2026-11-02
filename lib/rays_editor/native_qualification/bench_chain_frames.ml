@@ -158,4 +158,7 @@ let () =
           Printf.printf "median_cook_s=%.6f over last %d frames\n%!"
             (List.nth (List.sort Float.compare late) (List.length late / 2))
             (List.length late);
+          List.iter
+            (fun (site, reason, count) -> Printf.printf "off_gpu %s: %s (%d)\n%!" site reason count)
+            (Flow_ir.Fallback.seen ());
           Sop.Session.close session))

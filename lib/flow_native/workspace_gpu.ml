@@ -733,6 +733,7 @@ let display t geometry =
         | Ok result -> Some result
         | Error reason ->
             release_all ();
+            Flow_ir.Fallback.note ~site:"display" reason;
             t.display_refusal <- Some reason;
             None)
     | None, _, _ ->

@@ -1010,6 +1010,7 @@ struct
              | _ -> false)
            (E.Residual.free_names x)
     in
+    let why = ref None in
     let packed =
       let sop = Option.fold ~none:false ~some:static_sop !current in
       if (not candidate) || not (strict || initial <> None || draw <> None || sop || state_parent || reads_state ())
@@ -1060,15 +1061,24 @@ struct
               let r = E.Residual.with_bindings parent ~term:x bindings in
               if E.state_dependent (V.Residual r) then None
               else
-                Option.bind (Packed.compile ?trace r x) (fun p ->
-                    let region = p in
-                    if region_allowed region then Some (r, region, !arguments) else None)
+                match Packed.compile_result ?trace r x with
+                | Error d ->
+                    why := Some d;
+                    None
+                | Ok region -> if region_allowed region then Some (r, region, !arguments) else None
             with Unsupported _ -> None)
     in
     match packed with
     | Some (r, packed, args) -> region ~args statements packed (E.Residual.residual_view r)
     | None -> (
         if numeric_candidate && strict then refuse "packed_kernel";
+        (* the costliest fallback there is: an interpreted loop, element by element *)
+        (match (!why, !current) with
+        | Some ((d : Diagnostic.t) :: _), Some parent ->
+            Fallback.note
+              ~site:(String.concat "/" (E.Residual.residual_view parent).site)
+              ("no kernel, interpreted: " ^ d.message)
+        | _ -> ());
         match x.node with
         | W.Lit (Param.Int_value n) -> Known (V.Int n)
         | Lit (Param.Float_value f) -> Known (V.Float f)
