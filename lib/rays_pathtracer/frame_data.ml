@@ -115,13 +115,16 @@ let allocate_film device ~width ~height =
       resolved;
     }
 
-let destroy_film film =
+(* [keep]: an output the image still samples, left alive *)
+let destroy_film ?keep film =
   List.iter
     (fun value -> ignore (B.destroy_buffer value))
     (film.accum :: film.pixels :: film.linear :: film.order :: film.resolved
      :: Array.to_list film.history_color
     @ Array.to_list film.history_geometry);
-  Array.iter (fun texture -> ignore (B.destroy_texture texture)) film.outputs
+  Array.iteri
+    (fun slot texture -> if keep <> Some slot then ignore (B.destroy_texture texture))
+    film.outputs
 
 let camera_fov camera =
   match Rays.Camera.projection camera with
