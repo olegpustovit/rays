@@ -1,0 +1,28 @@
+; The suite's shaders for Vulkan: one GLSL file per stage, entry renamed to the name the suite uses,
+; the library's kernels linked into one module. Test-only.
+
+(rule
+ (enabled_if
+  (= %{system} mingw64))
+ (targets
+  sample_lod.spv
+  library.spv
+  flat_vertex.spv
+  flat_fragment.spv
+  argument_fragment.spv
+  textured_fragment.spv)
+ (deps
+  (glob_files *.comp)
+  (glob_files *.vert)
+  (glob_files *.frag))
+ (action
+  (progn
+   (run glslangValidator --target-env vulkan1.3 -e sample_lod --source-entrypoint main -o sample_lod.spv sample_lod.comp)
+   (run glslangValidator --target-env vulkan1.3 -e scale2 --source-entrypoint main -o scale2.spv scale2.comp)
+   (run glslangValidator --target-env vulkan1.3 -e scale3 --source-entrypoint main -o scale3.spv scale3.comp)
+   (run glslangValidator --target-env vulkan1.3 -e fill --source-entrypoint main -o fill.spv fill.comp)
+   (run spirv-link scale2.spv scale3.spv fill.spv -o library.spv)
+   (run glslangValidator --target-env vulkan1.3 -o flat_vertex.spv flat_vertex.vert)
+   (run glslangValidator --target-env vulkan1.3 -o flat_fragment.spv flat_fragment.frag)
+   (run glslangValidator --target-env vulkan1.3 -o argument_fragment.spv argument_fragment.frag)
+   (run glslangValidator --target-env vulkan1.3 -o textured_fragment.spv textured_fragment.frag))))
