@@ -1478,7 +1478,7 @@ CAMLprim value rv_render_begin(value commands, value colors, value depth, value 
   vkCmdSetViewport(c->cb, 0, 1, &viewport);
   vkCmdSetScissor(c->cb, 0, 1, &scissor);
   vkCmdSetCullMode(c->cb, VK_CULL_MODE_NONE);
-  vkCmdSetFrontFace(c->cb, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+  vkCmdSetFrontFace(c->cb, VK_FRONT_FACE_CLOCKWISE);
   vkCmdSetDepthTestEnable(c->cb, VK_FALSE);
   vkCmdSetDepthWriteEnable(c->cb, VK_FALSE);
   vkCmdSetDepthCompareOp(c->cb, VK_COMPARE_OP_ALWAYS);
@@ -1515,9 +1515,9 @@ CAMLprim value rv_render_cull(value commands, value mode) {
   return Val_unit;
 }
 
-/* Metal winding is seen on screen, with Y down; so is Vulkan's area sign, under its other name. */
+/* Metal winding is as seen on screen, Y down; Vulkan's area in framebuffer coordinates has the same sense. */
 CAMLprim value rv_render_winding(value commands, value clockwise) {
-  vkCmdSetFrontFace(((rv_cmd *)H(commands))->cb, Bool_val(clockwise) ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE);
+  vkCmdSetFrontFace(((rv_cmd *)H(commands))->cb, Bool_val(clockwise) ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
   return Val_unit;
 }
 
