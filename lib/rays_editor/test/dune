@@ -1051,7 +1051,7 @@
   (run
    %{exe:test_drawing.exe}
    %{dep:../../../sketches/particles.rays}
-   /tmp/rays-drawing-export)))
+   rays-drawing-export)))
 
 (alias (name runtest-native) (deps (alias test_drawing_native)))
 

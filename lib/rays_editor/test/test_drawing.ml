@@ -465,7 +465,7 @@ let native workspace directory =
   done;
   assert (
     read (Filename.concat (path "lisp-a") "frame-000000.png")
-    <> read (Filename.concat (path "lisp-a") "frame-000003.png"));
+    <> read (Filename.concat (path "lisp-a") (Printf.sprintf "frame-%06d.png" (frames - 1))));
   Printf.printf "Particles native exports match byte for byte: %s\n" directory
 
 let benchmark workspace =
