@@ -19,8 +19,15 @@ static void pressure_store(int level) {
   }
 }
 
+#if defined(_WIN32)
+static void poll_low_memory(void);
+#endif
+
 CAMLprim value caml_rays_mem_pressure_state(value unit) {
   (void)unit;
+#if defined(_WIN32)
+  poll_low_memory();
+#endif
   return Val_long(atomic_load(&pressure));
 }
 
@@ -80,6 +87,52 @@ CAMLprim value caml_rays_mem_physical_ram(value unit) {
     return Val_long(0);
   return Val_long((intnat)bytes);
 }
+#elif defined(_WIN32)
+#include <malloc.h>
+#include <windows.h>
+#include <psapi.h>
+
+/* Windows has one low-memory signal: level 1 (warning) while the system reports low memory, 0 once it
+   stops. Critical (2) is never stored. The handle is queried by the state read, which the frame
+   boundary makes, so no OS thread runs OCaml and a change is stored once. */
+static HANDLE low_memory = NULL;
+static int low_memory_seen = 0;
+
+static void poll_low_memory(void) {
+  BOOL low = FALSE;
+  if (low_memory == NULL || !QueryMemoryResourceNotification(low_memory, &low)) return;
+  int level = low ? 1 : 0;
+  if (level != low_memory_seen) {
+    low_memory_seen = level;
+    pressure_store(level);
+  }
+}
+
+static int read_counters(PROCESS_MEMORY_COUNTERS_EX *counters) {
+  counters->cb = (DWORD)sizeof *counters;
+  return GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)counters,
+                              (DWORD)sizeof *counters);
+}
+
+CAMLprim value caml_rays_mem_pressure_start(value unit) {
+  (void)unit;
+  if (low_memory == NULL) low_memory = CreateMemoryResourceNotification(LowMemoryResourceNotification);
+  return low_memory != NULL ? Val_true : Val_false;
+}
+
+/* Critical only, as on macOS: the CRT's heap minimum. OCaml's own heap is not the CRT's, so this
+   mostly returns nothing. */
+CAMLprim value caml_rays_mem_pressure_relief(value unit) {
+  (void)unit;
+  _heapmin();
+  return Val_unit;
+}
+
+/* Not ported: 0 is unknown, as the stub answered before. */
+CAMLprim value caml_rays_mem_physical_ram(value unit) {
+  (void)unit;
+  return Val_long(0);
+}
 #else
 CAMLprim value caml_rays_mem_pressure_start(value unit) {
   (void)unit;
@@ -97,6 +150,9 @@ CAMLprim value caml_rays_mem_physical_ram(value unit) {
 }
 #endif
 
+/* macOS's footprint is the dirty and compressed memory the process owns. Windows has no such number
+   here: PrivateUsage is committed private memory (resident or paged out, shared file mappings
+   excluded), so memory reserved and committed but never touched counts on Windows and not on macOS. */
 CAMLprim value caml_rays_mem_phys_footprint(value unit) {
   CAMLparam1(unit);
   CAMLlocal1(result);
@@ -107,12 +163,20 @@ CAMLprim value caml_rays_mem_phys_footprint(value unit) {
   } else {
     result = Val_none;
   }
+#elif defined(_WIN32)
+  PROCESS_MEMORY_COUNTERS_EX counters;
+  if (read_counters(&counters) && counters.PrivateUsage <= (SIZE_T)Max_long) {
+    result = caml_alloc_some(Val_long((intnat)counters.PrivateUsage));
+  } else {
+    result = Val_none;
+  }
 #else
   result = Val_none;
 #endif
   CAMLreturn(result);
 }
 
+/* Windows: PeakPagefileUsage, the peak committed private memory (the peak of what PrivateUsage reads). */
 CAMLprim value caml_rays_mem_peak_footprint(value unit) {
   CAMLparam1(unit);
   CAMLlocal1(result);
@@ -123,12 +187,21 @@ CAMLprim value caml_rays_mem_peak_footprint(value unit) {
   } else {
     result = Val_none;
   }
+#elif defined(_WIN32)
+  PROCESS_MEMORY_COUNTERS_EX counters;
+  if (read_counters(&counters) && counters.PeakPagefileUsage <= (SIZE_T)Max_long) {
+    result = caml_alloc_some(Val_long((intnat)counters.PeakPagefileUsage));
+  } else {
+    result = Val_none;
+  }
 #else
   result = Val_none;
 #endif
   CAMLreturn(result);
 }
 
+/* Windows and other ports: None. Windows has no per-process retired-instruction count (its cycle
+   counter is not instructions), so none is approximated. */
 CAMLprim value caml_rays_mem_instructions(value unit) {
   CAMLparam1(unit);
   CAMLlocal1(result);
