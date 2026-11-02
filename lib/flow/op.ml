@@ -1690,9 +1690,9 @@ let all =
               let x, y, z = comps (List.assoc "a" args) and a, b, c = comps (List.assoc "b" args) in
               let product x y = Sys.opaque_identity (x *. y) in
               Vec3
-                ( fin name (Float.fma (-.z) b (product y c)),
-                  fin name (Float.fma (-.x) c (product z a)),
-                  fin name (Float.fma (-.y) a (product x b)) ));
+                ( fin name (Rays_math.Fma.fma (-.z) b (product y c)),
+                  fin name (Rays_math.Fma.fma (-.x) c (product z a)),
+                  fin name (Rays_math.Fma.fma (-.y) a (product x b)) ));
         };
       mk ~category:"Vector" "normalize"
         [ ("vector", Ty.Vec3) ]
@@ -1733,7 +1733,7 @@ let all =
             (fun ~name ~node:_ args ->
               let input n = fin name (num (List.assoc n args)) in
               let a = input "a" and b = input "b" and c = input "c" in
-              Float (fin name (Float.fma a b c)));
+              Float (fin name (Rays_math.Fma.fma a b c)));
         };
       mk ~category:"Math" "float/next_after"
         [ ("x", Ty.Float); ("y", Ty.Float) ]
@@ -1765,7 +1765,7 @@ let all =
             (fun ~name ~node:_ args ->
               let input key = fin name (num (List.assoc key args)) in
               let a = input "a" and b = input "b" and c = input "c" in
-              let value = Float.fma a b c in
+              let value = Rays_math.Fma.fma a b c in
               let valid = Float.is_finite value in
               Record [ ("value", Float (if valid then value else 0.)); ("valid", Bool valid) ]);
         };

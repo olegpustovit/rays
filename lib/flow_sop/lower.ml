@@ -5105,9 +5105,9 @@ let field_calls ?state ~live ~resolve lowered =
                             else
                               let p =
                                 [|
-                                  Float.fma (float (k mod nx)) ((hx -. lx) /. rx) lx;
-                                  Float.fma (float (k / nx mod ny)) ((hy -. ly) /. ry) ly;
-                                  Float.fma (float (k / (nx * ny))) ((hz -. lz) /. rz) lz;
+                                  Rays_math.Fma.fma (float (k mod nx)) ((hx -. lx) /. rx) lx;
+                                  Rays_math.Fma.fma (float (k / nx mod ny)) ((hy -. ly) /. ry) ly;
+                                  Rays_math.Fma.fma (float (k / (nx * ny))) ((hz -. lz) /. rz) lz;
                                 |]
                               in
                               Result.bind
