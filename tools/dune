@@ -126,6 +126,7 @@
   sop
   rays_editor
   ogpu_native
+  mem
   unix
   parallel))
 

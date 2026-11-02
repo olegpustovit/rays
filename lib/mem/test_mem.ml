@@ -50,6 +50,22 @@ let () =
   (match Mem.phys_footprint () with
   | Some n -> check (n > 0) "phys_footprint on macOS"
   | None -> ());
+  (* a touched 100 MB block raises the footprint by about its size: tolerance 10 MB, for the
+     allocator's bookkeeping. Windows must report it (the stub answers None there until ported). *)
+  (let grew () =
+     let before = Mem.phys_footprint () in
+     let block = Bytes.make 100_000_000 'x' in
+     let after = Mem.phys_footprint () in
+     ignore (Sys.opaque_identity block);
+     (before, after)
+   in
+   match grew () with
+   | Some a, Some b ->
+       check
+         (abs (b - a - 100_000_000) < 10_000_000)
+         (Printf.sprintf "footprint rose by %d bytes for a touched 100 MB block (tolerance 10 MB)" (b - a))
+   | _ when Sys.win32 -> fail "phys_footprint is unavailable on Windows"
+   | _ -> ());
   (match Mem.instructions () with Some n -> check (n > 0L) "instructions" | None -> ());
   Mem.reset ();
   check (Mem.bytes meshes = 0 && (Mem.report ()).attributed = 0) "reset clears accounts";

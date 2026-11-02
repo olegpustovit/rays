@@ -12,7 +12,14 @@ let get_ir = function Ok value -> value | Error _ -> failwith "render IR fixture
 let expect_error message = function Error _ -> () | Ok _ -> failwith message
 let live_handles = Ogpu.Impl.live_handles
 
+(* Windows has no ps: the process footprint (committed private KiB, see Mem) is the growth signal. *)
+let windows_kib () =
+  match Mem.phys_footprint () with
+  | Some bytes -> bytes / 1024
+  | None -> failwith "Mem.phys_footprint is unavailable on Windows"
+
 let rss_kib () =
+  if Sys.win32 then windows_kib () else
   let argv = [| "/bin/ps"; "-o"; "rss="; "-p"; string_of_int (Unix.getpid ()) |] in
   let input = Unix.open_process_args_in argv.(0) argv in
   Fun.protect

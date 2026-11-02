@@ -16,7 +16,15 @@ let create width height =
 
 let live_handles = Ogpu.Impl.live_handles
 
+(* Windows has neither ps nor the macOS footprint tool: the process footprint (committed private KiB,
+   see Mem) stands in for both. *)
+let windows_kib () =
+  match Mem.phys_footprint () with
+  | Some bytes -> bytes / 1024
+  | None -> failwith "Mem.phys_footprint is unavailable on Windows"
+
 let rss_kib () =
+  if Sys.win32 then windows_kib () else
   let argv = [| "/bin/ps"; "-o"; "rss="; "-p"; string_of_int (Unix.getpid ()) |] in
   let input = Unix.open_process_args_in argv.(0) argv in
   Fun.protect
@@ -29,6 +37,7 @@ let rss_kib () =
    memory a leak would add to, stayed flat. The plateau check reads the
    footprint; RSS stays in the report. *)
 let footprint_kib () =
+  if Sys.win32 then windows_kib () else
   let argv = [| "/usr/bin/footprint"; "-p"; string_of_int (Unix.getpid ()); "-f"; "bytes" |] in
   let input = Unix.open_process_args_in argv.(0) argv in
   Fun.protect
