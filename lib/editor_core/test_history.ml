@@ -1,5 +1,9 @@
 let () =
   let open Editor_core.History in
+  let keep = Fun.id in
+  let create = create ~keep in
+  let undo h = Option.map Result.get_ok (undo ~restore:Result.ok h) in
+  let redo h = Option.map Result.get_ok (redo ~restore:Result.ok h) in
   let h = create ~capacity:3 0 in
   let h = record 1 h |> record 2 |> record ~merge:Repair 3 in
   assert (present h = 3 && depth h = 2);
@@ -29,6 +33,77 @@ let () =
   assert (label h = "Move");
   let h = Option.get (undo h) in
   assert (label h = "Connect" && redo_label h = Some "Move");
+  (* The owner is charged exactly the entries to undo and to redo, at every step of any sequence. *)
+  Mem.reset ();
+  let owner = Mem.document "test.history" in
+  let bytes n = 10 + n in
+  let check h =
+    assert (Mem.bytes owner = byte_depth h);
+    assert (byte_depth h >= 0)
+  in
+  let h = create ~owner ~bytes ~byte_capacity:200 0 in
+  assert (Mem.bytes owner = 0);
+  let step h f =
+    let h = f h in
+    check h;
+    h
+  in
+  let h = step h (record 1) in
+  assert (Mem.bytes owner = bytes 0);
+  let h = step h (record 2) in
+  let h = step h (record ~merge:(Gesture "a") 3) in
+  let at_three = Mem.bytes owner in
+  let h = step h (record ~merge:(Gesture "a") 4) in
+  assert (Mem.bytes owner = at_three);
+  let h = step h (fun h -> Option.get (undo h)) in
+  assert (present h = 2);
+  let h = step h (fun h -> Option.get (undo h)) in
+  let h = step h (fun h -> Option.get (redo h)) in
+  (* a commit abandons what redo held, releasing it once *)
+  let h = step h (record 50) in
+  assert (not (can_redo h));
+  (* the byte cap goes oldest first and keeps the newest *)
+  let h = List.fold_left (fun h n -> step h (record n)) h [ 60; 70; 80; 90; 100; 110 ] in
+  assert (byte_depth h <= 200 && can_undo h);
+  let huge = create ~owner ~bytes ~byte_capacity:1 1000 in
+  let huge = record 1001 huge in
+  assert (depth huge = 1 && Mem.bytes owner = byte_depth h + bytes 1000);
+  let huge = release huge in
+  assert (depth huge = 0 && byte_depth huge = 0 && present huge = 1001);
+  check h;
+  (* the retreat's step: only the oldest go *)
+  let shed_from = depth h in
+  let h = record 7 h |> record 8 |> record 9 in
+  let shed_from = max shed_from (depth h) in
+  let h = step h (shed ~keep:2) in
+  assert (depth h = 2 && shed_from > 2);
+  let h = step h (fun h -> restart 5 h) in
+  assert (present h = 5 && depth h = 0 && not (can_undo h) && Mem.bytes owner = 0);
+  Mem.reset ();
+  (* an entry is only what [keep] took; the last present stays live, older ones come from [restore] *)
+  let restored = ref [] in
+  let restore entry =
+    restored := entry :: !restored;
+    if entry = "refuse" then Error "no" else Ok (String.length entry)
+  in
+  let h = Editor_core.History.create ~keep:(fun n -> String.make n 'x') 1 in
+  let h = record 2 h |> record 3 in
+  let back h = Result.get_ok (Option.get (Editor_core.History.undo ~restore h)) in
+  let forth h = Result.get_ok (Option.get (Editor_core.History.redo ~restore h)) in
+  let h = back h in
+  assert (present h = 2 && !restored = []);
+  let h = forth h in
+  assert (present h = 3 && !restored = []);
+  let h = back h |> back in
+  assert (present h = 1 && !restored = [ "x" ]);
+  let bad = Editor_core.History.create ~keep:(fun _ -> "refuse") 1 in
+  let bad = record 2 bad |> record 3 in
+  let bad = Result.get_ok (Option.get (Editor_core.History.undo ~restore:(fun _ -> Ok 9) bad)) in
+  assert (present bad = 2);
+  let bad = record 4 bad in
+  (match Editor_core.History.undo ~restore bad with
+  | Some (Ok _) -> ()
+  | _ -> assert false);
   print_endline "editor history: merge, seal, undo/redo, capacity, labels ok"
 
 type scope = View | Graph

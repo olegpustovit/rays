@@ -7,7 +7,7 @@
 (test
  (name test_history)
  (modules test_history)
- (libraries editor_core rays ogpu_mock))
+ (libraries editor_core mem rays ogpu_mock))
 
 (test
  (name test_store)

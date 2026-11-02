@@ -1137,6 +1137,42 @@ let of_workspace ?(factories = Sop.Nodes.factories) ?gpu ?(defer = true) ?previo
         };
     }
 
+(* An undo entry live again: the entry's text lowered under the ids it had, on top of the document
+   now, so what did not change stays physically. What the text does not say comes from the entry. *)
+let restore ?factories ~(current : Document.t) (saved : Document.snapshot) =
+  let previous =
+    {
+      current with
+      scene = saved.saved_scene;
+      layers = saved.saved_layers;
+      active_camera = saved.saved_camera;
+      homes = saved.saved_homes;
+      workspace =
+        {
+          current.workspace with
+          lowered =
+            {
+              current.workspace.lowered with
+              compiled_ids = saved.saved_ids;
+              sites = saved.saved_sites;
+            };
+        };
+    }
+  in
+  Result.map
+    (fun (doc : Document.t) ->
+      {
+        doc with
+        scene = saved.saved_scene;
+        layers = saved.saved_layers;
+        active_camera = saved.saved_camera;
+        homes = saved.saved_homes;
+        settings =
+          (if same_settings doc.settings saved.saved_settings then saved.saved_settings
+           else doc.settings);
+      })
+    (of_workspace ?factories ~previous saved.saved_ws)
+
 (* Only the recorded live fields run; SOP networks, source and panel identities
    stay untouched. Errors leave the caller's last successful picture available. *)
 let scene_reads (document : Document.t) =

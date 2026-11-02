@@ -123,9 +123,55 @@ type t = {
   (* Residual light fields, resolved for composition; never written into history. *)
   workspace : workspace;
       (* the authored document and its lowering: [scene] and [networks] are that lowering, one
-     geometry object per [sop] graph; the lowering (compiled ids, volatile set) is history
-     state so undo restores both *)
+     geometry object per [sop] graph *)
 }
+
+(* A document's text as of a save or an opening: what [same_text] compares, and no lowering. *)
+type text = { text_ws : Workspace_doc.t; text_settings : Settings.t }
+
+let text value = { text_ws = value.workspace.ws; text_settings = value.settings }
+
+(* An undo entry: the text and what the text does not say (what the host made, the ids a lowering
+   gave). No evaluated value, lowering or GPU handle: [Lowering.restore] makes the document again. *)
+type snapshot = {
+  saved_ws : Workspace_doc.t;
+  saved_scene : Kind_graph.t;
+  saved_layers : Kind_graph.t Int_map.t;
+  saved_camera : int option;
+  saved_homes : homes;
+  saved_settings : Settings.t;
+  saved_ids : int Flow_sop.Lower.Path_map.t;
+  saved_sites : Flow.Workspace.path list;
+}
+
+let snapshot value =
+  {
+    saved_ws = value.workspace.ws;
+    saved_scene = value.scene;
+    saved_layers = value.layers;
+    saved_camera = value.active_camera;
+    saved_homes = value.homes;
+    saved_settings = value.settings;
+    saved_ids = value.workspace.lowered.compiled_ids;
+    saved_sites = value.workspace.lowered.sites;
+  }
+
+(* The text and its checked form, by the syntax tree they grow from: what an entry retains that its
+   neighbours do not share. [test_history_memory] holds it to the measured size of real entries. *)
+let snapshot_bytes saved =
+  let rec node_words (form : Flow.Syntax.t) =
+    let strings = List.fold_left (fun sum s -> sum + 3 + (String.length s / 8)) 0 in
+    13 + strings form.notes + strings form.meta + strings form.tail
+    +
+    match form.node with
+    | Sym text | Kw text | Num text | Str text -> 3 + (String.length text / 8)
+    | List forms | Vec forms | Map forms ->
+        List.fold_left (fun sum form -> sum + 3 + node_words form) 0 forms
+    | Quote (_, form) -> node_words form
+  in
+  let forms = List.fold_left (fun sum form -> sum + node_words form) 0 in
+  (* the checked workspace and the ids hold about as much again *)
+  2 * 8 * (forms saved.saved_ws.source + forms saved.saved_ws.extra)
 
 (* What the list shows: the scene's objects, or inside an object its SOP network or the World's
    layers. *)

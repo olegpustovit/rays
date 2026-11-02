@@ -41,7 +41,7 @@ type t = {
   held : string option; (* the file's changed text, waiting while the document has unsaved work *)
   open_dialog : int option; (* Command-O's system dialog, until it answers *)
   refused : string option; (* the file's text that did not check: the Document tab shows it *)
-  opened : Document.t; (* the document this session started from *)
+  opened : Document.text; (* the document this session started from *)
   state_owned : bool; (* this session wrote the recovery file *)
   state_checked : float;
   saved_doc : (Document.t, unit) Ephemeron.K1.t;
@@ -142,7 +142,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?(lights = [])
            held = None;
            open_dialog = None;
            refused = None;
-           opened = core.doc;
+           opened = Document.text core.doc;
            state_owned = false;
            cameras = [];
            viewing = None;

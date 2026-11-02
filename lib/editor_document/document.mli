@@ -81,6 +81,27 @@ type t = {
   workspace : workspace;
 }
 
+type text = { text_ws : Workspace_doc.t; text_settings : Settings.t }
+(** A document's text as of a save or an opening: nothing evaluated. *)
+
+val text : t -> text
+
+type snapshot = {
+  saved_ws : Workspace_doc.t;
+  saved_scene : Kind_graph.t;
+  saved_layers : Kind_graph.t Int_map.t;
+  saved_camera : int option;
+  saved_homes : homes;
+  saved_settings : Settings.t;
+  saved_ids : int Flow_sop.Lower.Path_map.t;
+  saved_sites : Flow.Workspace.path list;
+}
+(** An undo entry: the text and what the text does not say. No evaluated value, lowering or GPU
+    handle; [Lowering.restore] makes the document again. *)
+
+val snapshot : t -> snapshot
+val snapshot_bytes : snapshot -> int
+
 type level = Scene | Inside of int
 
 val network : t -> int -> network option
