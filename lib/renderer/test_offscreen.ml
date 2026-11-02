@@ -285,6 +285,8 @@ let run () =
                  (Renderer.Native.lower_scene2 exception_probe ~density:1 ~resource:resolve image_ir));
             ignore (get_resource (replace image));
             Renderer.Native.cancel exception_probe;
+            let calm = get (Renderer.Native.begin_submission execution) in
+            ignore (get (Renderer.Native.step calm []));
             let succeeded = get (Renderer.Native.begin_submission execution) in
             let succeeded_batch =
               get (Renderer.Native.lower_scene2 succeeded ~density:1 ~resource:resolve image_ir)
@@ -293,6 +295,9 @@ let run () =
             ignore (get (Renderer.Native.step succeeded [ succeeded_batch ]));
             let submitted = get (Renderer.capture execution) in
             pixel submitted 0 expected "successful transaction changed snapshot pixels";
+            require
+              (Renderer.Native.staging_bytes execution = 0)
+              "a single upload kept its staging past the frame";
             (* Replacing pixels behind a stable identity must reach the GPU
                texture instead of the static-image reuse path. *)
             ignore (get_resource (replace image));
@@ -305,6 +310,14 @@ let run () =
             pixel
               (get (Renderer.capture execution))
               0 expected "replaced image pixels did not reach the presented frame";
+            require
+              (Renderer.Native.staging_bytes execution > 0)
+              "uploads frame after frame lost their staging";
+            let quiet = get (Renderer.Native.begin_submission execution) in
+            ignore (get (Renderer.Native.step quiet []));
+            require
+              (Renderer.Native.staging_bytes execution = 0)
+              "a frame without uploads kept the staging";
             ignore (get_resource (replace image));
             let labels =
               Array.init 45 (fun index ->

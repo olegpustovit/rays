@@ -252,6 +252,9 @@ module Native : sig
 
   (* Idempotently releases an unsubmitted transaction. *)
   val cancel : submission -> unit
+  val staging_bytes : t -> int
+  (** What this renderer holds to stage texture uploads through. *)
+
   val memoryless_attachments : t -> bool * int
   (** Whether the device has memoryless attachments, and how many this renderer's pool holds. *)
 

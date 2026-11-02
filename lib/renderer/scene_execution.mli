@@ -155,6 +155,9 @@ val sun_map_size : int
 (** Width and height of the sun map. *)
 
 module Private : sig
+  val staging_bytes : t -> int
+  (** What the texture upload scratch holds, on the device and on the host each. *)
+
   val memoryless_attachments : t -> bool * int
   (** Whether the device has memoryless attachments, and how many the pool holds that ask for them. *)
 

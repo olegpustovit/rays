@@ -409,6 +409,8 @@ type t = {
   retired : retired;
   mutable frame : int;
   mutable texture_upload_scratch : texture_upload_scratch option;
+  mutable staged_frame : int; (* the last frame that uploaded a texture *)
+  mutable staged_stream : bool; (* and the frame before it did too *)
   samplers : (Ogpu.Types.sampler_descriptor, Ogpu.Backend.sampler) Hashtbl.t;
   mutable arguments : argument_pool option;
   icb_stats : icb_stats;
@@ -718,6 +720,8 @@ let create ?device ?gpu_vertices ?sun_depth:sun_factory ~offscreen driver config
                           auxiliary_cache = auxiliary_table retired;
                           texture_cache = texture_table retired;
                           texture_upload_scratch = None;
+                          staged_frame = -1;
+                          staged_stream = false;
                           samplers = Hashtbl.create 8;
                           arguments = None;
                           icb_stats =
@@ -1135,6 +1139,10 @@ let valid_texture (source : sampled_texture) =
          |> Array.for_all Fun.id
 
 let texture_upload_scratch value total =
+  if value.staged_frame <> value.frame then begin
+    value.staged_stream <- value.staged_frame = value.frame - 1;
+    value.staged_frame <- value.frame
+  end;
   match value.texture_upload_scratch with
   | Some scratch when scratch.scratch_size = total -> Ok scratch
   | previous -> (
@@ -1150,6 +1158,16 @@ let texture_upload_scratch value total =
           value.texture_upload_scratch <- Some scratch;
           Option.iter (fun old -> ignore (Ogpu.Backend.destroy_buffer old.scratch_buffer)) previous;
           Ok scratch)
+
+(* Uploads complete inside their frame, so what they staged through goes at its end: an image uploads
+   once, and two copies of it should not outlive that. A canvas that uploads frame after frame keeps
+   them, or each frame would pay for a new pair. *)
+let release_texture_staging value =
+  match value.texture_upload_scratch with
+  | Some scratch when not (value.staged_stream && value.staged_frame = value.frame) ->
+      ignore (Ogpu.Backend.destroy_buffer scratch.scratch_buffer);
+      value.texture_upload_scratch <- None
+  | _ -> ()
 
 let image_or_canvas_key key =
   String.starts_with ~prefix:"canvas:" key
@@ -2967,6 +2985,7 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                 drain_retired value.retired
                   (fun b -> ignore (Ogpu.Backend.destroy_buffer b))
                   (fun t -> ignore (Ogpu.Backend.destroy_texture t));
+                release_texture_staging value;
                 result
               in
               let scratch = value.prepared_scratch in
@@ -3221,6 +3240,11 @@ let resize value configuration =
 let upload_bytes value = value.uploaded
 
 module Private = struct
+  let staging_bytes value =
+    Option.fold ~none:0
+      ~some:(fun scratch -> scratch.scratch_size)
+      value.texture_upload_scratch
+
   let memoryless_attachments value =
     ( Ogpu.Caps.has (Ogpu.Backend.capabilities value.device) Ogpu.Caps.Memoryless_attachments,
       List.length
