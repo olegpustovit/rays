@@ -834,6 +834,16 @@ module Executor = struct
 
   let stricts = Domain.DLS.new_key (fun () -> Strict.create 64)
 
+  (* the table's keys, which an ephemeron table cannot list, for the ledger's walk *)
+  let strict_keys = Domain.DLS.new_key (fun () -> (Weak.create 4096, ref 0))
+
+  let kept_programs () =
+    let table = Domain.DLS.get stricts and keys, used = Domain.DLS.get strict_keys in
+    List.filter_map
+      (fun i ->
+        Option.bind (Weak.get keys i) (fun key -> Option.map Obj.repr (Strict.find_opt table key)))
+      (List.init !used Fun.id)
+
   let strict_lower ?trace residual =
     let lower () =
       let inline = ref [] in
@@ -852,8 +862,14 @@ module Executor = struct
       | None ->
           let kept = lower () in
           (* ponytail: a whole clear at 4096 residuals, as Eval's free-name memo *)
-          if Strict.length table >= 4096 then Strict.clear table;
+          let keys, used = Domain.DLS.get strict_keys in
+          if Strict.length table >= 4096 || !used >= 4096 then begin
+            Strict.clear table;
+            used := 0
+          end;
           Strict.replace table residual kept;
+          Weak.set keys !used (Some residual);
+          incr used;
           kept
 
   let compile ?trace ?profile ?(strict = false) ?(approx = W.Paths.empty) ?sink

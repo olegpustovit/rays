@@ -236,6 +236,10 @@ module Profile : sig
 end
 
 module Executor : sig
+  val kept_programs : unit -> Obj.t list
+  (** This domain's strict lowerings still kept: the ledger walks them, since a walk does not enter
+      an ephemeron. *)
+
   type program
 
   val compile :

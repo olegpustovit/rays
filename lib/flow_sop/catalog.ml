@@ -95,6 +95,7 @@ let () = Mem.root catalog_owner (fun () -> [ Obj.repr entries ])
 
 (* The remembered arrays: an ephemeron's data no walk of a table reaches, every ring's in one line. *)
 let () = Mem.root (Mem.cache "flow.remembered") Flow.Value.remembered
+let () = Mem.root (Mem.cache "flow_ir.programs") Flow_ir.Executor.kept_programs
 
 let embedded_sources = lazy (Ok (List.map (fun e -> Lazy.force e.form) (Array.to_list (Lazy.force entries))))
 
