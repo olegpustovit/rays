@@ -240,20 +240,49 @@ let () =
   let expected = E.Record (List.tl (fields original)) in
   let result = E.Host.force_reference ~resolve:resolver queried ~live |> flow in
   check (result = expected) "C1 topology kind codes or plane order differ";
-  (* the query's arrays are copies (kept per topology, as immutable Flow values), never the
-     geometry's own storage *)
+  (* memory plan S5: the query aliases the geometry's storage (a Flow array is immutable), so every
+     reader of it must leave the geometry's bytes alone *)
   let native = Topology.View.view (Geometry.topology original) in
   (match result with
   | E.Record fields ->
-      List.iter
-        (function
-          | _, E.Int_array a ->
-              check
-                (a != native.vertex_points && a != native.primitive_offsets)
-                "C1 topology query aliases native storage"
-          | _ -> assert false)
-        fields
+      let field name = match List.assoc name fields with E.Int_array a -> a | _ -> assert false in
+      check
+        (field "vertex_points" == native.vertex_points
+        && field "primitive_offsets" == native.primitive_offsets)
+        "C1 topology query copies native storage"
   | _ -> assert false);
+  let before = geometry_bytes original in
+  List.iter
+    (fun read ->
+      let expression = "(let* [topo (sop/topology geo)] " ^ read ^ ")" in
+      ignore (E.Host.force_reference ~resolve:resolver (evaluate expression) ~live |> flow);
+      check (geometry_bytes original = before) ("C1 topology reader wrote its source: " ^ read))
+    [
+      "(map (fn [(i : int)] (int/add i 1)) topo.vertex_points)";
+      "(array/grade topo.vertex_points)";
+      "(array/scan_sum topo.vertex_points)";
+      "(array/slice topo.primitive_offsets 0 1)";
+      "(array/concat topo.vertex_points topo.primitive_offsets)";
+      "(array/compact (map (fn [(i : int)] (if (= i 0) 1 0)) topo.vertex_points))";
+      "(array/segment_sum topo.vertex_points topo.primitive_offsets)";
+      "(array/scatter_add topo.vertex_points topo.vertex_points 64)";
+      "(array/sum topo.vertex_points)";
+    ];
+  with_session (fun session ->
+      List.iter
+        (fun domains ->
+          let source =
+            Printf.sprintf
+              {|(workspace test
+        (defnode sop/rebuild [(geo : geometry)] %s)
+        (graph g :context sop (sop/rebuild (sop/ext_src))))|}
+              rebuild
+          in
+          ignore
+            (geometry
+               (cook session ~domains (lower source (Lisp_sop.snapshot original) |> compile |> snd)));
+          check (geometry_bytes original = before) "C1 compiled topology reader wrote its source")
+        [ 1; 8 ]);
   let source = Lisp_sop.snapshot original in
   let origins =
     List.map
@@ -305,7 +334,7 @@ let () =
             ^ Format.asprintf "%a" Flow_ir.Core.pp core))
   | _ -> fail "C1 dynamic test did not retain its source");
   print_endline
-    "C1 topology copies, captured count origins and actual 2D host-source refusal are explicit"
+    "C1 topology aliases, captured count origins and actual 2D host-source refusal are explicit"
 
 let () =
   let input = List.nth (fixtures ()) 1 in
