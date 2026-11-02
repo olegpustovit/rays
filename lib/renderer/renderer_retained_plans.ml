@@ -47,14 +47,14 @@ type t = {
 let create () =
   let by_ir = Hashtbl.create 16 in
   let by_fingerprint =
-    Int_table.create 16
+    Int_table.create ~owner:(Lru.cache "renderer.plans") 16
       ~byte_capacity:(64 * 1024 * 1024)
       ~release:(fun _ plan ->
         match Hashtbl.find_opt by_ir plan.plan_ir_id with
         | Some current when current == plan -> Hashtbl.remove by_ir plan.plan_ir_id
         | _ -> ())
   in
-  { by_fingerprint; by_ir; segments = Segment_table.create 256 ~byte_capacity:(64 * 1024 * 1024) }
+  { by_fingerprint; by_ir; segments = Segment_table.create ~owner:(Lru.cache "renderer.segments") 256 ~byte_capacity:(64 * 1024 * 1024) }
 
 let find t fingerprint = Int_table.find t.by_fingerprint fingerprint
 let find_ir t ir_id = Hashtbl.find_opt t.by_ir ir_id

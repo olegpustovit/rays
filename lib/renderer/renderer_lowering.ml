@@ -267,11 +267,11 @@ type t = {
 
 let create () =
   {
-    quad_cache = Quad_table.create 1024;
-    quad_payload_cache = Quad_payload_table.create 256;
+    quad_cache = Quad_table.create ~owner:(Lru.cache "renderer.quad") 1024;
+    quad_payload_cache = Quad_payload_table.create ~owner:(Lru.cache "renderer.quad_payload") 256;
     out_slots = [||];
     out_list = [];
-    ui_slots = Int_table.create ui_slot_capacity;
+    ui_slots = Int_table.create ~owner:(Lru.cache "renderer.ui_slots") ui_slot_capacity;
     ui_indices_scratch = Bytes.empty;
     ui_affine_scratch = Bytes.make 24 '\000';
   }

@@ -72,11 +72,12 @@ module Report = struct
         Format.fprintf fmt "%-8s  %-28s  %10s  %10s@." (kind_label e.kind) e.name
           (format_bytes e.bytes) (format_bytes e.peak))
       t.owners;
+    let explicit = t.ocaml_live + t.device in
     let pct =
-      if t.footprint <= 0 then 0 else int_of_float (100. *. float t.unattributed /. float t.footprint)
+      if explicit <= 0 then 0 else int_of_float (100. *. float t.unattributed /. float explicit)
     in
     Format.fprintf fmt
-      "ocaml live %s · device %s · footprint %s · unattributed %s (%d%%) · budget %s@."
+      "ocaml live %s · device %s · footprint %s · unattributed %s (%d%% of explicit) · budget %s@."
       (format_bytes t.ocaml_live) (format_bytes t.device) (format_bytes t.footprint)
       (format_bytes t.unattributed) pct (format_bytes t.budget)
 
@@ -98,19 +99,19 @@ let report ?(device = 0) ?(budget = 0) () =
            if c <> 0 then c else String.compare a.name b.name)
   in
   let attributed = List.fold_left (fun sum (e : Report.entry) -> sum + e.bytes) 0 owners in
+  let device = max 0 device in
   let footprint =
-    match phys_footprint () with Some n -> n | None -> ocaml_live + max 0 device
+    match phys_footprint () with Some n -> n | None -> ocaml_live + device
   in
-  let unattributed =
-    match phys_footprint () with
-    | Some _ -> max 0 (footprint - attributed)
-    | None -> max 0 (ocaml_live - attributed)
-  in
+  (* Compare owners to explicit Rays memory (OCaml live + device). Footprint still includes
+     OS/Metal/shared mappings that no owner can claim; gating on it hides real gaps. *)
+  let explicit = ocaml_live + device in
+  let unattributed = max 0 (explicit - attributed) in
   {
     Report.owners;
     attributed;
     ocaml_live;
-    device = max 0 device;
+    device;
     footprint;
     unattributed;
     budget = max 0 budget;

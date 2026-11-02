@@ -88,17 +88,17 @@ module Instance_frames = Lru.Identity_list
 let world_capacity = 2
 
 let make_world_maps_cache () =
-  World_maps.create
+  World_maps.create ~owner:(Lru.cache "rays.scene3_world_maps")
     ~equal:(fun (maps_a, pixels_a) (maps_b, pixels_b) -> maps_a == maps_b && pixels_a == pixels_b)
     world_capacity
 
 let make_worlds_cache () =
-  Worlds.create
+  Worlds.create ~owner:(Lru.cache "rays.scene3_worlds")
     ~equal:(fun (baked_a, sun_a) (baked_b, sun_b) -> baked_a == baked_b && sun_a = sun_b)
     world_capacity
 
 let make_instance_frames_cache () =
-  Instance_frames.create
+  Instance_frames.create ~owner:(Lru.cache "rays.scene3_instances")
     ~equal:(fun (parent_a, transforms_a) (parent_b, transforms_b) ->
       parent_a = parent_b && transforms_a == transforms_b)
     8
@@ -257,7 +257,7 @@ let same_caster a b =
   | _ -> false
 
 let make_sun_fits_cache () =
-  Sun_fits.create
+  Sun_fits.create ~owner:(Lru.cache "rays.scene3_sun")
     ~equal:(fun (casters_a, direction_a) (casters_b, direction_b) ->
       direction_a = direction_b && List.equal same_caster casters_a casters_b)
     world_capacity
@@ -632,7 +632,7 @@ let retained_payload_byte_capacity = 256 * 1024 * 1024
 module Packed_meshes = Lru.Identity_list
 
 let make_packed_meshes () =
-  Packed_meshes.create
+  Packed_meshes.create ~owner:(Lru.cache "rays.scene3_packed")
     ~equal:(fun (mesh_a, mode_a) (mesh_b, mode_b) -> mesh_a == mesh_b && mode_a = mode_b)
     packed_mesh_capacity
 
@@ -655,7 +655,7 @@ let prepared_cache_capacity = 16
 module Prepared_cache = Lru.Identity_list
 
 let make_prepared_cache () =
-  Prepared_cache.create
+  Prepared_cache.create ~owner:(Lru.cache "rays.scene3_prepared")
     ~equal:(fun (scene_a, camera_a, viewport_a) (scene_b, camera_b, viewport_b) ->
       Scene3.same scene_a scene_b && camera_a = camera_b && viewport_a = viewport_b)
     prepared_cache_capacity

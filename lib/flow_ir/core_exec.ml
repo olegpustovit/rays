@@ -713,7 +713,7 @@ let rec same_input a b =
    anyway, at most 4 of them kept alive; add a byte cap if a loop's results grow past tens of MB *)
 let remember (reads, writes) run =
   let table =
-    Lru.Identity_list.create
+    Lru.Identity_list.create ~owner:(Lru.cache "flow_ir.core_exec")
       ~equal:(fun left right ->
         Array.length left = Array.length right && Array.for_all2 same_input left right)
       4

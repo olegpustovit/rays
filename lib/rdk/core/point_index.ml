@@ -33,7 +33,16 @@ let create_uncached ?cancel topology =
 
 (* Bounded: at most [cache_capacity] live indices, released with their topology. *)
 let cache_capacity = 64
-let cache = Support.Identity_cache.create ~id:Topology.data_id cache_capacity
+
+let index_bytes (value : t) =
+  let words = Sys.word_size / 8 in
+  (Array.length value.primitive_of_vertex * words)
+  + (Array.length value.point_offsets * words)
+  + (Array.length value.point_vertices * words)
+
+let cache =
+  Support.Identity_cache.create ~id:Topology.data_id ~owner:(Mem.cache "rdk.point_index")
+    ~bytes:index_bytes cache_capacity
 
 let create ?cancel topology =
   Cancel.check_opt cancel;

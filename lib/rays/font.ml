@@ -21,7 +21,7 @@ type t = {
 let text_cache_capacity = 256
 
 let text_cache () =
-  Text_cache.create ~release:(fun _ image -> ignore (Image.destroy image)) text_cache_capacity
+  Text_cache.create ~owner:(Lru.cache "rays.font.text") ~release:(fun _ image -> ignore (Image.destroy image)) text_cache_capacity
 
 let message operation error =
   `Msg (Format.asprintf "%s: %a" operation Runtime_resources.pp_error error)
@@ -134,12 +134,12 @@ module Raster = struct
   let create_cache_context () =
     {
       automatic_cache =
-        Text_cache.create capacity
+        Text_cache.create ~owner:(Lru.cache "rays.font.text_ctx") capacity
           ~evictable:(fun _ entry -> entry.references = 0)
           ~release:(fun _ entry ->
             entry.cached <- false;
             if entry.references = 0 then ignore (Image.destroy entry.image));
-      automatic_fonts = Font_cache.create font_capacity ~release:(fun _ font -> destroy font);
+      automatic_fonts = Font_cache.create ~owner:(Lru.cache "rays.font.auto") font_capacity ~release:(fun _ font -> destroy font);
       automatic_references = 0;
     }
 

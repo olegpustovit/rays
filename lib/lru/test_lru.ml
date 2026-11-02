@@ -13,7 +13,7 @@ let keys cache =
 
 let () =
   let released = ref [] in
-  let cache = Cache.create ~release:(fun k v -> released := (k, v) :: !released) 3 in
+  let cache = Cache.create ~owner:(Lru.cache "test.lru.release") ~release:(fun k v -> released := (k, v) :: !released) 3 in
   Cache.add cache 1 "a";
   Cache.add cache 2 "b";
   Cache.add cache 3 "c";
@@ -61,7 +61,7 @@ let () =
     "drop_oldest";
   (* Byte capacity and pinned entries. *)
   let pinned = ref 10 in
-  let cache = Cache.create ~byte_capacity:10 ~evictable:(fun k _ -> k <> !pinned) 100 in
+  let cache = Cache.create ~owner:(Lru.cache "test.lru.pin") ~byte_capacity:10 ~evictable:(fun k _ -> k <> !pinned) 100 in
   Cache.add cache ~bytes:4 10 "p";
   Cache.add cache ~bytes:4 11 "q";
   Cache.add cache ~bytes:4 12 "r";
@@ -76,7 +76,7 @@ let () =
   Cache.add cache ~bytes:8 14 "s";
   check (keys cache = [ 14 ] && Cache.bytes cache = 8) "unpinned entry evicts";
   let count = ref 0 in
-  let cache = Cache.create ~release:(fun _ _ -> incr count) 8 in
+  let cache = Cache.create ~owner:(Lru.cache "test.lru.count") ~release:(fun _ _ -> incr count) 8 in
   for i = 1 to 20 do
     Cache.add cache i i
   done;
@@ -85,7 +85,7 @@ let () =
   let module Identity = Lru.Identity_list in
   let evicted = ref [] in
   let identity =
-    Identity.create ~equal:( == ) ~release:(fun key value -> evicted := (key, value) :: !evicted) 2
+    Identity.create ~owner:(Lru.cache "test.lru.identity") ~equal:( == ) ~release:(fun key value -> evicted := (key, value) :: !evicted) 2
   in
   let a = [| 1 |] and b = [| 2 |] and c = [| 3 |] in
   Identity.add identity a "a";
@@ -117,7 +117,7 @@ let () =
   Identity.clear identity;
   check (List.length !evicted = 5) "identity source keeps its original release policy";
   (* Steady-state hits and re-adds of present keys allocate nothing. *)
-  let cache = Cache.create 64 in
+  let cache = Cache.create ~owner:(Lru.cache "test.lru.alloc") 64 in
   for i = 0 to 63 do
     Cache.add cache i i
   done;
@@ -133,7 +133,7 @@ let () =
   let keys = Array.init 64 (fun i -> [| i |]) in
   let old_entries = Array.to_list (Array.map (fun key -> (key, key.(0))) keys) in
   let module Identity = Lru.Identity_list in
-  let identity = Identity.create ~equal:( == ) 64 in
+  let identity = Identity.create ~owner:(Lru.cache "test.lru.id_bench") ~equal:( == ) 64 in
   Array.iter (fun key -> Identity.add identity key key.(0)) keys;
   let rounds = 100_000 in
   let measure f =

@@ -17,7 +17,7 @@ open Flow.Lisp_scan
    several times and the next frame asks again, so a text is lexed once per version.  A hit moves
    to the front so the long text outlives the caret prefixes the completions lex.  ponytail: the
    result is shared, never mutated by readers. *)
-let lexed = Lru.Identity_list.create ~equal:String.equal 4
+let lexed = Lru.Identity_list.create ~owner:(Lru.cache "editor.lisp_text") ~equal:String.equal 4
 
 let lex text =
   match Lru.Identity_list.find lexed text with

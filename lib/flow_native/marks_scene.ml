@@ -244,7 +244,7 @@ end)
 type cache = { nodes : (M.entry * float array list * Scene.node) Nodes.t; converted : converted }
 
 (* a frame's mark sets and device attributes are the working set: more than this and the oldest go *)
-let cache () : cache = { nodes = Nodes.create 1024; converted = Kept.create 4096 }
+let cache () : cache = { nodes = Nodes.create ~owner:(Lru.cache "flow_native.marks.nodes") 1024; converted = Kept.create ~owner:(Lru.cache "flow_native.marks.kept") 4096 }
 let cache_size cache = Nodes.length cache.nodes
 
 let arrays buffers (kind : M.kind) =

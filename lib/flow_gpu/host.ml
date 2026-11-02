@@ -177,7 +177,7 @@ let create ~clock gpu =
     created;
     retired;
     sites =
-      Lru.Identity_list.create
+      Lru.Identity_list.create ~owner:(Lru.cache "flow_gpu.sites")
         ~equal:(fun (a, u) (b, v) -> a == b && u = v)
         ~release:(fun _ site ->
           Option.iter
@@ -203,7 +203,7 @@ let create ~clock gpu =
     retired_buffers = [];
     buffers = Hashtbl.create 16;
     runners =
-      Cache.create
+      Cache.create ~owner:(Lru.cache "flow_gpu.runners")
         ~release:(fun _ runner ->
           runner.output <- None;
           Run.close ~discard:!discarding runner.run;
@@ -222,7 +222,7 @@ let create ~clock gpu =
     shared = Run.pool ();
     ownership = None;
     tables =
-      Lru.Identity_list.create ~equal:( == )
+      Lru.Identity_list.create ~owner:(Lru.cache "flow_gpu.tables") ~equal:( == )
         ~release:(fun _ ->
           Option.iter (List.iter (fun b -> ignore (Ogpu.Backend.destroy_buffer b))))
         8;

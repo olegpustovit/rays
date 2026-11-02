@@ -33,7 +33,7 @@ type cached_mesh = { trace_source : Mesh.t; traced : P.mesh }
 module Mesh_cache = Lru.Identity_list
 
 let same_mesh_key (a, material_a) (b, material_b) = a == b && material_a = material_b
-let empty_meshes () = Mesh_cache.create ~equal:same_mesh_key 64
+let empty_meshes () = Mesh_cache.create ~owner:(Lru.cache "editor.meshes") ~equal:same_mesh_key 64
 
 (* how one viewport renders: the root of its scene instance, else the document's.  The sample cap
    is not part of it: a cap is read each frame, so raising one continues the accumulation while any

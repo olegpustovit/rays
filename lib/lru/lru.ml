@@ -1,3 +1,7 @@
+let cache = Mem.cache
+let plan = Mem.plan
+let document = Mem.document
+
 module Make (K : Hashtbl.HashedType) = struct
   module Table = Hashtbl.Make (K)
 
@@ -18,7 +22,7 @@ module Make (K : Hashtbl.HashedType) = struct
   type 'v t = {
     capacity : int;
     byte_capacity : int;
-    owner : Mem.owner option;
+    owner : Mem.owner;
     evictable : K.t -> 'v -> bool;
     release : K.t -> 'v -> unit;
     table : 'v node Table.t;
@@ -28,13 +32,10 @@ module Make (K : Hashtbl.HashedType) = struct
     mutable bytes : int;
   }
 
-  let charge_owner owner size =
-    match owner with None -> () | Some owner -> Mem.charge owner size
+  let charge_owner owner size = Mem.charge owner size
+  let release_owner owner size = Mem.release owner size
 
-  let release_owner owner size =
-    match owner with None -> () | Some owner -> Mem.release owner size
-
-  let create ?owner ?(byte_capacity = max_int) ?(evictable = fun _ _ -> true)
+  let create ~owner ?(byte_capacity = max_int) ?(evictable = fun _ _ -> true)
       ?(release = fun _ _ -> ()) capacity =
     {
       capacity;
@@ -179,7 +180,7 @@ module Make (K : Hashtbl.HashedType) = struct
 
   let copy ~release t =
     let result =
-      create ?owner:t.owner ~byte_capacity:t.byte_capacity ~evictable:t.evictable ~release
+      create ~owner:t.owner ~byte_capacity:t.byte_capacity ~evictable:t.evictable ~release
         t.capacity
     in
     if Array.length t.oldest > 0 then begin
@@ -217,19 +218,19 @@ end
 module Identity_list = struct
   type ('key, 'value) t = {
     capacity : int;
-    owner : Mem.owner option;
+    owner : Mem.owner;
     equal : 'key -> 'key -> bool;
     release : 'key -> 'value -> unit;
-    mutable entries : ('key * 'value) list;
+    mutable entries : ('key * 'value * int) list;
   }
 
-  let create ?owner ?(release = fun _ _ -> ()) ~equal capacity =
+  let create ~owner ?(release = fun _ _ -> ()) ~equal capacity =
     { capacity = max 0 capacity; owner; equal; release; entries = [] }
 
   let split equal key entries =
     let rec go before = function
       | [] -> None
-      | ((candidate, _) as entry) :: rest ->
+      | ((candidate, _, _) as entry) :: rest ->
           if equal key candidate then Some (entry, List.rev_append before rest)
           else go (entry :: before) rest
     in
@@ -237,7 +238,7 @@ module Identity_list = struct
 
   let rec peek_entries equal key = function
     | [] -> None
-    | (candidate, value) :: rest ->
+    | (candidate, value, _) :: rest ->
         if equal key candidate then Some value else peek_entries equal key rest
 
   let peek t key = peek_entries t.equal key t.entries
@@ -245,35 +246,41 @@ module Identity_list = struct
   let find t key =
     match split t.equal key t.entries with
     | None -> None
-    | Some (((_, value) as entry), rest) ->
+    | Some (((_, value, _) as entry), rest) ->
         t.entries <- entry :: rest;
         Some value
 
   let remove t key =
     match split t.equal key t.entries with
     | None -> ()
-    | Some ((old_key, value), rest) ->
+    | Some ((old_key, value, size), rest) ->
         t.entries <- rest;
+        if size > 0 then Mem.release t.owner size;
         t.release old_key value
 
-  let add t key value =
+  let add t ?(bytes = 0) key value =
     remove t key;
-    let entries = (key, value) :: t.entries in
+    let size = max 0 bytes in
+    if size > 0 then Mem.charge t.owner size;
+    let entries = (key, value, size) :: t.entries in
     t.entries <- List.take t.capacity entries;
     List.iter
-      (fun (old_key, old_value) -> t.release old_key old_value)
+      (fun (old_key, old_value, old_size) ->
+        if old_size > 0 then Mem.release t.owner old_size;
+        t.release old_key old_value)
       (List.drop t.capacity entries)
 
-  let head t = match t.entries with [] -> None | entry :: _ -> Some entry
-  let copy ~release t = { t with release }
-  let iter t f = List.iter (fun (key, value) -> f key value) (List.rev t.entries)
+  let head t = match t.entries with [] -> None | (key, value, _) :: _ -> Some (key, value)
+  let copy ~release t = { t with release; entries = List.map (fun (k, v, s) -> (k, v, s)) t.entries }
+  let iter t f = List.iter (fun (key, value, _) -> f key value) (List.rev t.entries)
 
   let filter t keep =
     let rec loop kept = function
       | [] -> t.entries <- List.rev kept
-      | ((key, value) as entry) :: rest ->
+      | ((key, value, size) as entry) :: rest ->
           if keep key value then loop (entry :: kept) rest
           else (
+            if size > 0 then Mem.release t.owner size;
             t.release key value;
             loop kept rest)
     in
@@ -282,6 +289,10 @@ module Identity_list = struct
   let length t = List.length t.entries
 
   let clear t =
-    List.iter (fun (key, value) -> t.release key value) t.entries;
+    List.iter
+      (fun (key, value, size) ->
+        if size > 0 then Mem.release t.owner size;
+        t.release key value)
+      t.entries;
     t.entries <- []
 end

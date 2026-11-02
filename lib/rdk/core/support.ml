@@ -11,25 +11,34 @@ module Bits = struct
 end
 
 module Identity_cache = struct
-  type ('k, 'v) slot = Empty | Entry of int * ('k, 'v) Ephemeron.K1.t
+  type ('k, 'v) slot = Empty | Entry of int * int * ('k, 'v) Ephemeron.K1.t
 
   type ('k, 'v) t = {
     id : 'k -> int;
+    owner : Mem.owner option;
+    bytes : 'v -> int;
     slots : ('k, 'v) slot array;
     mutable next : int;
     mutex : Mutex.t;
   }
 
-  let create ~id capacity =
+  let create ~id ?owner ?(bytes = fun _ -> 0) capacity =
     if capacity <= 0 then invalid_arg "Identity_cache.create: capacity";
-    { id; slots = Array.make capacity Empty; next = 0; mutex = Mutex.create () }
+    {
+      id;
+      owner;
+      bytes;
+      slots = Array.make capacity Empty;
+      next = 0;
+      mutex = Mutex.create ();
+    }
 
   let find cache id key =
     let rec scan slot =
       if slot = Array.length cache.slots then None
       else
         match cache.slots.(slot) with
-        | Entry (entry_id, entry) when entry_id = id -> (
+        | Entry (entry_id, _, entry) when entry_id = id -> (
             match Ephemeron.K1.query entry key with
             | Some _ as found -> found
             | None -> scan (slot + 1))
@@ -47,7 +56,13 @@ module Identity_cache = struct
             match find cache id key with
             | Some existing -> existing
             | None ->
-                cache.slots.(cache.next) <- Entry (id, Ephemeron.K1.make key built);
+                let size = max 0 (cache.bytes built) in
+                (match cache.slots.(cache.next) with
+                | Entry (_, old, _) when old > 0 ->
+                    Option.iter (fun owner -> Mem.release owner old) cache.owner
+                | Empty | Entry _ -> ());
+                if size > 0 then Option.iter (fun owner -> Mem.charge owner size) cache.owner;
+                cache.slots.(cache.next) <- Entry (id, size, Ephemeron.K1.make key built);
                 cache.next <- (cache.next + 1) mod Array.length cache.slots;
                 built)
 end

@@ -165,9 +165,9 @@ and prepared = {
 
 let create_cache () =
   {
-    inputs = Input_cache.create 256;
-    prepared = Prepared_cache.create 4;
-    lowered = Lowered_cache.create 64;
+    inputs = Input_cache.create ~owner:(Lru.cache "flow_sop.replay.inputs") 256;
+    prepared = Prepared_cache.create ~owner:(Lru.cache "flow_sop.replay.prepared") 4;
+    lowered = Lowered_cache.create ~owner:(Lru.cache "flow_sop.replay.lowered") 64;
   }
 
 let stable_error message =
@@ -1078,7 +1078,7 @@ let benchmark_inputs directory rounds =
     |> List.filter (fun file -> String.ends_with ~suffix:".sexp" file)
     |> List.sort String.compare
   in
-  let cache = Input_cache.create 256 in
+  let cache = Input_cache.create ~owner:(Lru.cache "flow_sop.replay.input2") 256 in
   let allocated = Gc.allocated_bytes () and started = Unix.gettimeofday () in
   for _ = 1 to rounds do
     List.iter

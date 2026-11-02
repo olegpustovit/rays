@@ -66,7 +66,7 @@ task plan are `specification/web-export/plan.md`.
 
 | Library | Owns |
 |---|---|
-| `diagnostic`, `native_layer_token`, `mem`, `lru`, `param`, `input`, `rays_math` | Leaves with no dependencies: shared diagnostics, the opaque presentation-layer handle, the memory ledger, a bounded LRU (optional [`Mem.owner`](lib/mem/mem.mli)), typed parameter schemas, immutable logical frame facts, and pure math |
+| `diagnostic`, `native_layer_token`, `mem`, `lru`, `param`, `input`, `rays_math` | Leaves with no dependencies: shared diagnostics, the opaque presentation-layer handle, the memory ledger, a bounded LRU (required [`Mem.owner`](lib/mem/mem.mli) / [`Lru.cache`](lib/lru/lru.mli)), typed parameter schemas, immutable logical frame facts, and pure math |
 | `parallel` | Shared Domainslib pool and deterministic coarse-grained work helpers |
 | `sdl3`, `sdl3_image/ttf/mixer` | SDL3 bindings (foundational) |
 | `metal` | Metal bindings: safe layer over a handwritten bridge (foundational) |

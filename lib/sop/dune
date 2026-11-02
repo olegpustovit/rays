@@ -1,7 +1,7 @@
 (library
  (name sop)
  (public_name rays.sop)
- (libraries param input rays_diagnostic rays_math rdk lru unix parallel)
+ (libraries param input rays_diagnostic rays_math rdk mem lru unix parallel)
  (preprocess
   (pps rays.ppx -- -inside-sop))
  (modules

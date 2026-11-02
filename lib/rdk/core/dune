@@ -1,7 +1,7 @@
 (library
  (name rdk_core)
  (public_name rays.rdk.core)
- (libraries rays_math parallel)
+ (libraries rays_math parallel mem)
  (modules
   support
   face_normals

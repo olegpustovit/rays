@@ -44,7 +44,7 @@ val report : ?device:int -> ?budget:int -> unit -> Report.t
 (** [ocaml_live] is [Gc.stat] live words after a full major. [device] is what the caller measured
     (Metal [currentAllocatedSize], or the mock's count). [footprint] is the process physical
     footprint when available, else [ocaml_live + device]. [unattributed] is
-    [max 0 (footprint - attributed)] when footprint is known, else [max 0 (ocaml_live - attributed)]. *)
+    [max 0 (ocaml_live + device - attributed)] — owners versus explicit Rays memory. *)
 
 val reset : unit -> unit
 (** Tests only: clear every owner. *)

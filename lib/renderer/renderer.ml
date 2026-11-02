@@ -399,7 +399,7 @@ let finish_create ?(shared_device_lease = false) ?(owns_device_lease = false) gp
     assets = Runtime_resources.Assets.create ();
     dead = false;
     snapshots =
-      Snapshot_table.create snapshot_cache_capacity ~byte_capacity:snapshot_cache_byte_capacity;
+      Snapshot_table.create ~owner:(Lru.cache "renderer.snapshot") snapshot_cache_capacity ~byte_capacity:snapshot_cache_byte_capacity;
     lowering = Renderer_lowering.create ();
     retained_plans = Renderer_retained_plans.create ();
     retained_scene2_segment_hits = 0L;
@@ -408,7 +408,7 @@ let finish_create ?(shared_device_lease = false) ?(owns_device_lease = false) gp
     last_step_draws = [];
     last_step_prepared = [];
     retained_views =
-      Lru.Identity_list.create ~equal:( == )
+      Lru.Identity_list.create ~owner:(Lru.cache "renderer.identity") ~equal:( == )
         ~release:(fun _ view -> !release_retained_view view)
         retained_view_capacity;
     retain_after = ref retain_soon;

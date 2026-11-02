@@ -47,6 +47,7 @@ module Entry_cache = Lru.Make (String)
 type payload_pool = {
   refs : (int, int * int) Hashtbl.t;
   mutable bytes : int;
+  owner : Mem.owner;
   resident : (int, held:bool -> unit) Hashtbl.t;
   mutable dropped : int list;
   handed : (int, unit) Hashtbl.t;
@@ -59,6 +60,7 @@ type t = {
   max_payload_bytes : int;
   cache : entry Entry_cache.t;
   payload : payload_pool;
+  volatile_owner : Mem.owner;
   mutable cooks : int;
   mutable hits : int;
   mutable misses : int;
@@ -68,6 +70,7 @@ type t = {
       (* Resident ids registered when a volatile slot was written. Geometry.releasers becomes
          empty after a deferred attribute is materialised, so replacement must drop these ids
          rather than asking the (now forced) geometry again. *)
+  slot_bytes : (int, int) Hashtbl.t; (* volatile node id -> charged payload bytes *)
   mutable volatile_hits : int;
   mutable volatile_misses : int;
   mutable evictions : int;
@@ -103,7 +106,8 @@ let release_components payload components =
       | Some (_, 1) ->
           Hashtbl.remove payload.refs id;
           drop payload id;
-          payload.bytes <- payload.bytes - bytes
+          payload.bytes <- payload.bytes - bytes;
+          Mem.release payload.owner bytes
       | Some (_, references) -> Hashtbl.replace payload.refs id (bytes, references - 1))
     components
 
@@ -111,10 +115,12 @@ let create ~max_entries ~max_payload_bytes =
   if max_entries < 0 then Error "Session.create: max_entries must be non-negative"
   else if max_payload_bytes < 0 then Error "Session.create: max_payload_bytes must be non-negative"
   else
+    let owner = Lru.cache "sop.session.payload" in
     let payload =
       {
         refs = Hashtbl.create (min (max_entries * 4) 4096);
         bytes = 0;
+        owner;
         resident = Hashtbl.create 16;
         dropped = [];
         handed = Hashtbl.create 16;
@@ -126,9 +132,10 @@ let create ~max_entries ~max_payload_bytes =
         max_entries;
         max_payload_bytes;
         cache =
-          Entry_cache.create max_entries ~release:(fun _ entry ->
+          Entry_cache.create ~owner:(Lru.cache "sop.session") max_entries ~release:(fun _ entry ->
               release_components payload entry.components);
         payload;
+        volatile_owner = Lru.cache "sop.volatile";
         cooks = 0;
         hits = 0;
         misses = 0;
@@ -136,6 +143,7 @@ let create ~max_entries ~max_payload_bytes =
         volatile = (fun _ -> false);
         slots = Hashtbl.create 16;
         slot_residents = Hashtbl.create 16;
+        slot_bytes = Hashtbl.create 16;
         volatile_hits = 0;
         volatile_misses = 0;
         last_node = None;
@@ -169,12 +177,14 @@ let insert session key entry =
         match Hashtbl.find_opt payload.refs id with
         | None ->
             Hashtbl.add payload.refs id (bytes, 1);
-            payload.bytes <- payload.bytes + bytes
+            payload.bytes <- payload.bytes + bytes;
+            Mem.charge payload.owner bytes
         | Some (known_bytes, references) ->
             Hashtbl.replace payload.refs id (known_bytes, references + 1))
       components;
     let before = Entry_cache.length session.cache
     and replaced = Option.is_some (Entry_cache.peek session.cache key) in
+    (* Payload planes are charged on [payload.owner]; the entry itself is a small handle. *)
     Entry_cache.add session.cache key { entry with components };
     while payload.bytes > session.max_payload_bytes && Entry_cache.drop_oldest session.cache do
       ()
@@ -201,6 +211,13 @@ let lookup session ~volatile node key =
         Some (Read ((if volatile then Some (Node.id node) else None), key, result) :: events));
   result
 
+let release_slot_bytes session id =
+  match Hashtbl.find_opt session.slot_bytes id with
+  | None -> ()
+  | Some bytes ->
+      Hashtbl.remove session.slot_bytes id;
+      Mem.release session.volatile_owner bytes
+
 let store_slot session id key entry =
   (match session.journal with
   | None -> ()
@@ -216,6 +233,7 @@ let store_slot session id key entry =
         old_ids
     in
     let gone slot_id (_, (old : entry)) =
+      release_slot_bytes session slot_id;
       match Hashtbl.find_opt session.slot_residents slot_id with
       | Some ids -> drop_old ids
       | None -> drop_old (List.map fst (releasers old.output))
@@ -224,12 +242,20 @@ let store_slot session id key entry =
     if Hashtbl.length session.slots >= session.max_entries then begin
       Hashtbl.iter (fun slot_id slot -> gone slot_id slot) session.slots;
       Hashtbl.reset session.slots;
-      Hashtbl.reset session.slot_residents
+      Hashtbl.reset session.slot_residents;
+      Hashtbl.reset session.slot_bytes
     end;
     Option.iter (gone id) (Hashtbl.find_opt session.slots id);
     List.iter (fun (i, r) -> Hashtbl.replace payload.resident i r) fresh;
     session.written <- Right id :: session.written;
     Hashtbl.replace session.slot_residents id fresh_ids;
+    let bytes =
+      List.fold_left (fun sum (_, n) -> sum + n) 0 (Payload.payload_components entry.output.payload)
+    in
+    if bytes > 0 then begin
+      Hashtbl.replace session.slot_bytes id bytes;
+      Mem.charge session.volatile_owner bytes
+    end;
     Hashtbl.replace session.slots id (key, entry)
   end
 
@@ -237,10 +263,20 @@ let store_volatile session node key entry = store_slot session (Node.id node) ke
 
 let set_volatile session predicate =
   session.volatile <- predicate;
-  Hashtbl.filter_map_inplace (fun id slot -> if predicate id then Some slot else None) session.slots;
+  Hashtbl.filter_map_inplace
+    (fun id slot ->
+      if predicate id then Some slot
+      else begin
+        release_slot_bytes session id;
+        None
+      end)
+    session.slots;
   Hashtbl.filter_map_inplace
     (fun id ids -> if predicate id then Some ids else None)
-    session.slot_residents
+    session.slot_residents;
+  Hashtbl.filter_map_inplace
+    (fun id bytes -> if predicate id then Some bytes else None)
+    session.slot_bytes
 
 (* An opaque, unambiguous cache identity: integers are fixed-width binary and
    every variable-length string is length-prefixed, so no field boundary can
@@ -499,11 +535,13 @@ let snapshot session =
     {
       refs = Hashtbl.copy session.payload.refs;
       bytes = session.payload.bytes;
+      owner = session.payload.owner;
       resident = Hashtbl.create 1;
       dropped = [];
       handed = Hashtbl.create 1;
     }
   in
+  (* Snapshot shares the ledger account; bytes stay charged by the parent until both release. *)
   {
     session with
     cache =
@@ -513,6 +551,7 @@ let snapshot session =
     payload;
     slots = Hashtbl.copy session.slots;
     slot_residents = Hashtbl.copy session.slot_residents;
+    slot_bytes = Hashtbl.copy session.slot_bytes;
     times = Hashtbl.create 16;
     times_lock = Mutex.create ();
     cooks = 0;
@@ -1094,6 +1133,7 @@ let cook ?cpu_consumers session ~context node =
               (function
                 | Either.Left key -> Entry_cache.remove session.cache key
                 | Right id ->
+                    release_slot_bytes session id;
                     Hashtbl.remove session.slots id;
                     Hashtbl.remove session.slot_residents id)
               session.written;
@@ -1132,9 +1172,12 @@ let clear session =
   Mutex.protect session.times_lock (fun () -> Hashtbl.reset session.times);
   ();
   Entry_cache.clear session.cache;
+  Hashtbl.iter (fun id _ -> release_slot_bytes session id) session.slots;
   Hashtbl.reset session.slots;
   Hashtbl.reset session.slot_residents;
+  Hashtbl.reset session.slot_bytes;
   Hashtbl.clear session.payload.refs;
+  if session.payload.bytes > 0 then Mem.release session.payload.owner session.payload.bytes;
   session.payload.bytes <- 0;
   forget_resident session
 
@@ -1158,9 +1201,12 @@ module Private = struct
 
   let clear_cache_keep_timings session =
     Entry_cache.clear session.cache;
+    Hashtbl.iter (fun id _ -> release_slot_bytes session id) session.slots;
     Hashtbl.reset session.slots;
     Hashtbl.reset session.slot_residents;
+    Hashtbl.reset session.slot_bytes;
     Hashtbl.reset session.payload.refs;
+    if session.payload.bytes > 0 then Mem.release session.payload.owner session.payload.bytes;
     session.payload.bytes <- 0;
     forget_resident session;
     session.materialized <- []

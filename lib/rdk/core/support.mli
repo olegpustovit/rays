@@ -18,9 +18,10 @@ module Identity_cache : sig
       replaced first-in first-out. Lookup is O(capacity) integer comparisons and never cleans or
       rehashes the table. *)
 
-  val create : id:('k -> int) -> int -> ('k, 'v) t
+  val create :
+    id:('k -> int) -> ?owner:Mem.owner -> ?bytes:('v -> int) -> int -> ('k, 'v) t
   (** [create ~id capacity]; [id] is a cheap stable identifier for a key, compared before physical
-      identity. *)
+      identity. [owner]/[bytes] charge the ledger on insert and release on FIFO overwrite. *)
 
   val find_or_add : ('k, 'v) t -> 'k -> (unit -> 'v) -> 'v
   (** Return the cached value for a key, or build, insert, and return it. The builder runs outside

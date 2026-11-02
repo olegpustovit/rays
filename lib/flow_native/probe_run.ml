@@ -10,7 +10,7 @@ let same_count (a : reports) (b : reports) = List.compare_lengths a b = 0
 (* Prepared programs survive live frames (64, most recent), while values and state remain local to
    each probe snapshot. *)
 let force () : Flow_graph.Probe.force =
-  let programs = Lru.Identity_list.create ~equal:( == ) 64 in
+  let programs = Lru.Identity_list.create ~owner:(Lru.cache "flow_native.probe") ~equal:( == ) 64 in
   fun ?state ?elems ?resolve value ~live ->
     let prepared =
       match value with

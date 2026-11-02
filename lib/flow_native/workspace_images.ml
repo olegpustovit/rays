@@ -13,7 +13,10 @@ module Sources = Lru.Make (struct
   let hash = Hashtbl.hash
 end)
 
+module Entries = Lru.Make (String)
+
 let capture_limit = 64 * 1024 * 1024
+let entry_capacity = 64
 
 type captured = { geometry : Rdk.Geometry.t; attributes : (string * E.value) list; bytes : int }
 
@@ -45,6 +48,7 @@ type stamp = { serial : int; frame : Input.t; state_stamp : string; sources : (i
 type snapshot = { payload : CPU.t; stamp : stamp }
 
 type entry = {
+  key : string;
   mutable image : Image.t option;
   mutable cpu : snapshot option;
   mutable texture : (Texture.t, string) result Lazy.t option;
@@ -75,7 +79,7 @@ type t = {
   mutable maps : (int * int * E.fn * Flow_sop.Image_kernel.t) option array;
   mutable sizes : (bool * bool) array;
   mutable resolved : entry option array;
-  mutable entries : (string * entry) list;
+  entries : entry Entries.t;
   mutable source_cooks : int;
   mutable attribute_flattens : int;
   mutable canvases_created : int;
@@ -84,39 +88,85 @@ type t = {
   mutable readbacks : int;
 }
 
+let entry_bytes (entry : entry) =
+  match entry.cpu with
+  | Some { payload; _ } -> CPU.width payload * CPU.height payload * 4
+  | None -> 0
+
+let make_entry key =
+  {
+    key;
+    image = None;
+    cpu = None;
+    texture = None;
+    borrowed = None;
+    display = None;
+    canvas = None;
+  }
+
 let create ?(seed = 0L) ?(grain = 16384) ?(domains = Parallel.recommended_domains ()) ~gpu resources
     =
-  let capture_cache = Sources.create ~byte_capacity:capture_limit 64 in
-  let source_cache = Sources.create ~release:(fun id _ -> Sources.remove capture_cache id) 64 in
-  {
-    resources;
-    gpu;
-    seed;
-    grain;
-    domains;
-    plan = None;
-    serial = 0;
-    lowered = None;
-    request = None;
-    revision = 0;
-    source_cache;
-    capture_cache;
-    source_ids = [||];
-    freshness = [||];
-    qualification = None;
-    arguments = [||];
-    drawings = [||];
-    maps = [||];
-    sizes = [||];
-    resolved = [||];
-    entries = [];
-    source_cooks = 0;
-    attribute_flattens = 0;
-    canvases_created = 0;
-    canvases_destroyed = 0;
-    captures = 0;
-    readbacks = 0;
-  }
+  let capture_cache =
+    Sources.create ~owner:(Lru.cache "flow_native.capture") ~byte_capacity:capture_limit 64
+  in
+  let source_cache =
+    Sources.create ~owner:(Lru.cache "flow_native.sources")
+      ~release:(fun id _ -> Sources.remove capture_cache id)
+      64
+  in
+  let host = ref None in
+  let release_entry _key (entry : entry) =
+    (match (!host, entry.canvas) with
+    | Some t, Some canvas ->
+        let captures, readbacks = Canvas.pixel_stats canvas in
+        ignore (Canvas.destroy canvas);
+        t.canvases_destroyed <- t.canvases_destroyed + 1;
+        t.captures <- t.captures + captures;
+        t.readbacks <- t.readbacks + readbacks
+    | _, Some canvas -> ignore (Canvas.destroy canvas)
+    | _ -> ());
+    entry.canvas <- None;
+    entry.image <- None;
+    entry.cpu <- None;
+    entry.texture <- None;
+    entry.borrowed <- None;
+    entry.display <- None
+  in
+  let t =
+    {
+      resources;
+      gpu;
+      seed;
+      grain;
+      domains;
+      plan = None;
+      serial = 0;
+      lowered = None;
+      request = None;
+      revision = 0;
+      source_cache;
+      capture_cache;
+      source_ids = [||];
+      freshness = [||];
+      qualification = None;
+      arguments = [||];
+      drawings = [||];
+      maps = [||];
+      sizes = [||];
+      resolved = [||];
+      entries =
+        Entries.create ~owner:(Lru.cache "flow_native.images") ~release:release_entry
+          entry_capacity;
+      source_cooks = 0;
+      attribute_flattens = 0;
+      canvases_created = 0;
+      canvases_destroyed = 0;
+      captures = 0;
+      readbacks = 0;
+    }
+  in
+  host := Some t;
+  t
 
 let capture_stats t =
   if not (Domain.is_main_domain ()) then
@@ -361,17 +411,15 @@ let destroy_canvas t canvas =
   t.readbacks <- t.readbacks + readbacks
 
 let render_stats t =
-  let captures, readbacks =
-    List.fold_left
-      (fun (c, r) (_, entry) ->
-        match entry.canvas with
-        | None -> (c, r)
-        | Some canvas ->
-            let captures, readbacks = Canvas.pixel_stats canvas in
-            (c + captures, r + readbacks))
-      (t.captures, t.readbacks) t.entries
-  in
-  (t.canvases_created, t.canvases_destroyed, captures, readbacks)
+  let captures = ref t.captures and readbacks = ref t.readbacks in
+  Entries.iter t.entries (fun _ entry ->
+      match entry.canvas with
+      | None -> ()
+      | Some canvas ->
+          let c, r = Canvas.pixel_stats canvas in
+          captures := !captures + c;
+          readbacks := !readbacks + r);
+  (t.canvases_created, t.canvases_destroyed, !captures, !readbacks)
 
 let authored_key prefix (node : E.node) =
   prefix ^ Marshal.to_string (node.inst, node.site, node.iter) [ Marshal.No_sharing ]
@@ -642,7 +690,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                        current ~sources:old.sources t ~state ~live plan node old)
                                      entry.display)
                               then invalidate_display entry)
-                            (List.assoc_opt (authored_key "render:" node) t.entries)
+                            (Entries.find_opt t.entries (authored_key "render:" node))
                     | _ -> ());
                     let* () = prepare t plan in
                     match value with
@@ -677,57 +725,60 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                 [ Marshal.No_sharing ]
                           in
                           let result =
-                            match List.assoc_opt key t.entries with
+                            match Entries.find_opt t.entries key with
                             | Some entry -> Ok entry
                             | None ->
-                                if List.length t.entries + request.pending_images >= 64 then
-                                  Error (error "A workspace owns at most 64 image snapshots.")
-                                else begin
-                                  request.pending_images <- request.pending_images + 1;
-                                  Fun.protect
-                                    ~finally:(fun () ->
-                                      request.pending_images <- request.pending_images - 1)
-                                    (fun () ->
-                                      let payload = ref None in
-                                      let* image =
-                                        Workspace_resources.image t.resources key (fun () ->
-                                            (* Admission precedes the read. Pixels returns owned bytes;
+                                request.pending_images <- request.pending_images + 1;
+                                while
+                                  Entries.length t.entries + request.pending_images > entry_capacity
+                                  && Entries.drop_oldest t.entries
+                                do
+                                  ()
+                                done;
+                                Fun.protect
+                                  ~finally:(fun () ->
+                                    request.pending_images <- request.pending_images - 1)
+                                  (fun () ->
+                                    let payload = ref None in
+                                    let* image =
+                                      Workspace_resources.image t.resources key (fun () ->
+                                          (* Admission precedes the read. Pixels returns owned bytes;
                        the native image copies them and the CPU snapshot owns them. *)
-                                            let ( let* ) = Result.bind in
-                                            let* bytes = Image.pixels source in
-                                            let* cpu =
-                                              Result.map_error
-                                                (fun d -> d.Diagnostic.message)
-                                                (CPU.of_owned_rgba8 ~width ~height bytes)
-                                            in
-                                            let* image =
-                                              Image.upload_rgba ~width ~height ~rgba:bytes ()
-                                            in
-                                            payload := Some cpu;
-                                            Ok image)
-                                      in
-                                      let payload = Option.get !payload in
-                                      let stamp =
-                                        {
-                                          serial = t.serial;
-                                          frame = live;
-                                          state_stamp = "";
-                                          sources = [];
-                                        }
-                                      in
-                                      let entry =
-                                        {
-                                          image = Some image;
-                                          cpu = Some { payload; stamp };
-                                          texture = Some (texture payload);
-                                          borrowed = None;
-                                          display = Some stamp;
-                                          canvas = None;
-                                        }
-                                      in
-                                      t.entries <- (key, entry) :: t.entries;
-                                      Ok entry)
-                                end
+                                          let ( let* ) = Result.bind in
+                                          let* bytes = Image.pixels source in
+                                          let* cpu =
+                                            Result.map_error
+                                              (fun d -> d.Diagnostic.message)
+                                              (CPU.of_owned_rgba8 ~width ~height bytes)
+                                          in
+                                          let* image =
+                                            Image.upload_rgba ~width ~height ~rgba:bytes ()
+                                          in
+                                          payload := Some cpu;
+                                          Ok image)
+                                    in
+                                    let payload = Option.get !payload in
+                                    let stamp =
+                                      {
+                                        serial = t.serial;
+                                        frame = live;
+                                        state_stamp = "";
+                                        sources = [];
+                                      }
+                                    in
+                                    let entry =
+                                      {
+                                        key;
+                                        image = Some image;
+                                        cpu = Some { payload; stamp };
+                                        texture = Some (texture payload);
+                                        borrowed = None;
+                                        display = Some stamp;
+                                        canvas = None;
+                                      }
+                                    in
+                                    Entries.add t.entries ~bytes:(entry_bytes entry) key entry;
+                                    Ok entry)
                           in
                           Result.map
                             (fun entry ->
@@ -765,7 +816,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                             | _ -> V.fail "E_IMAGE" "Unknown image producer."
                           in
                           let stateful, _ = t.freshness.(node.id) in
-                          let previous = List.assoc_opt key t.entries in
+                          let previous = Entries.find_opt t.entries key in
                           let state_stamp = if stateful then E.state_stamp state else "" in
                           let stamp =
                             { serial = t.serial; frame = live; state_stamp; sources = source_stamp }
@@ -782,14 +833,16 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                 Ok entry
                             | _ ->
                                 let reserved = previous = None in
-                                let* () =
-                                  if
-                                    reserved && List.length t.entries + request.pending_images >= 64
-                                  then Error (error "A workspace owns at most 64 image snapshots.")
-                                  else Ok ()
-                                in
-                                if reserved then
+                                if reserved then begin
                                   request.pending_images <- request.pending_images + 1;
+                                  while
+                                    Entries.length t.entries + request.pending_images
+                                    > entry_capacity
+                                    && Entries.drop_oldest t.entries
+                                  do
+                                    ()
+                                  done
+                                end;
                                 Fun.protect
                                   ~finally:(fun () ->
                                     if reserved then
@@ -798,15 +851,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                     let entry =
                                       match previous with
                                       | Some entry -> entry
-                                      | None ->
-                                          {
-                                            image = None;
-                                            cpu = None;
-                                            texture = None;
-                                            borrowed = None;
-                                            display = None;
-                                            canvas = None;
-                                          }
+                                      | None -> make_entry key
                                     in
                                     if display then invalidate_display entry;
                                     let upload ~width ~height payload =
@@ -980,16 +1025,9 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                                                  ~height
                                                                  ~rgba:(bytes_of_image payload) ())
                                                         | None ->
-                                                            let key =
-                                                              fst
-                                                                (List.find
-                                                                   (fun (_, candidate) ->
-                                                                     candidate == child)
-                                                                   t.entries)
-                                                            in
                                                             let* image =
                                                               Workspace_resources.image t.resources
-                                                                key (fun () ->
+                                                                child.key (fun () ->
                                                                   Image.upload_rgba ~width ~height
                                                                     ~rgba:(bytes_of_image payload)
                                                                     ())
@@ -1128,7 +1166,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                       end
                                     in
                                     if display then entry.display <- Some stamp;
-                                    if previous = None then t.entries <- (key, entry) :: t.entries;
+                                    Entries.add t.entries ~bytes:(entry_bytes entry) key entry;
                                     Ok entry)
                           in
                           Result.map
@@ -1158,7 +1196,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                    Option.iter
                      (fun prefix ->
                        Option.iter invalidate_display
-                         (List.assoc_opt (authored_key prefix node) t.entries))
+                         (Entries.find_opt t.entries (authored_key prefix node)))
                      prefix
                | _ -> ());
             result))
@@ -1178,8 +1216,7 @@ let image ?gpu ?(display = true) t ~state ~live plan value =
             message
               (Image.upload_rgba ~into:image ~width ~height ~rgba:(bytes_of_image cpu.payload) ())
         | None ->
-            let key = fst (List.find (fun (_, candidate) -> candidate == entry) t.entries) in
-            Workspace_resources.image t.resources key (fun () ->
+            Workspace_resources.image t.resources entry.key (fun () ->
                 Image.upload_rgba ~width ~height ~rgba:(bytes_of_image cpu.payload) ())
       in
       entry.image <- Some image;
@@ -1197,7 +1234,7 @@ let texture ?gpu t ~state ~live plan value =
       message (Lazy.force (Option.get entry.texture)))
 
 let close t =
-  List.iter (fun (_, entry) -> Option.iter (destroy_canvas t) entry.canvas) t.entries;
+  Entries.clear t.entries;
   t.plan <- None;
   t.qualification <- None;
   t.arguments <- [||];
@@ -1209,5 +1246,4 @@ let close t =
   t.freshness <- [||];
   t.maps <- [||];
   t.sizes <- [||];
-  t.resolved <- [||];
-  t.entries <- []
+  t.resolved <- [||]

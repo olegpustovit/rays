@@ -134,6 +134,7 @@ type sample = {
   footprint : int;
   allocated : float;
   promoted : float;
+  report : Mem.Report.t option;
 }
 
 (* The editor already owns the OGPU device; querying another driver fails. Metal's system
@@ -151,19 +152,21 @@ let device_bytes () =
           ignore (Metal.Device.destroy device);
           0)
 
-let sample ~frame ~allocated0 ~promoted0 =
+let sample ~frame ~allocated0 ~promoted0 ~ledger =
   Gc.full_major ();
   let live = (Gc.stat ()).live_words * (Sys.word_size / 8) in
   let _, promoted, _ = Gc.counters () in
   let allocated = Gc.allocated_bytes () in
   let footprint = Option.value ~default:live (Mem.phys_footprint ()) in
+  let device = device_bytes () in
   {
     frame;
     live;
-    device = device_bytes ();
+    device;
     footprint;
     allocated = allocated -. allocated0;
     promoted = (promoted *. float (Sys.word_size / 8)) -. promoted0;
+    report = (if ledger then Some (Mem.report ~device ()) else None);
   }
 
 type budget = {
@@ -172,6 +175,7 @@ type budget = {
   live_flat_pct : float;
   max_live_bytes : int option;
   max_footprint_bytes : int option;
+  max_unattributed_pct : float option;
   known_red : string option;
 }
 
@@ -199,12 +203,18 @@ let parse_budget = function
         | Some [ Atom s ] -> Some (int_of_string s)
         | _ -> None
       in
+      let max_unattr =
+        match assoc "max_unattributed_pct" sexp with
+        | Some [ Atom s ] -> Some (float_of_string s)
+        | _ -> None
+      in
       {
         name;
         frames = (match assoc "frames" sexp with Some [ Atom s ] -> int_of_string s | _ -> 120);
         live_flat_pct = float_field "live_flat_pct" sexp 5.;
         max_live_bytes = max_live;
         max_footprint_bytes = max_foot;
+        max_unattributed_pct = max_unattr;
         known_red;
       }
   | _ -> fail "bad scenario in memory-budgets.sexp"
@@ -234,11 +244,15 @@ let run_frames editor frames =
   for tick = 1 to frames do
     editor := E3.update !editor (frame tick);
     ignore (E3.scene !editor (frame tick));
-    if tick = early_at then early := Some (sample ~frame:tick ~allocated0 ~promoted0);
-    if tick = frames || tick = 120 then final := Some (sample ~frame:tick ~allocated0 ~promoted0)
+    if tick = early_at then
+      early := Some (sample ~frame:tick ~allocated0 ~promoted0 ~ledger:false);
+    if tick = frames || tick = 120 then
+      final := Some (sample ~frame:tick ~allocated0 ~promoted0 ~ledger:true)
   done;
   E3.close !editor;
-  let early = Option.value ~default:(sample ~frame:0 ~allocated0 ~promoted0) !early in
+  let early =
+    Option.value ~default:(sample ~frame:0 ~allocated0 ~promoted0 ~ledger:false) !early
+  in
   let final = Option.get !final in
   (early, final, frames)
 
@@ -260,7 +274,20 @@ let check_budget (budget : budget) early final frames =
       if final.footprint > max then
         note "footprint %d B exceeds max_footprint_bytes %d" final.footprint max)
     budget.max_footprint_bytes;
-  let report = Mem.report ~device:final.device () in
+  let report =
+    match final.report with
+    | Some report -> report
+    | None -> Mem.report ~device:final.device ()
+  in
+  Option.iter
+    (fun max_pct ->
+      let explicit = report.ocaml_live + report.device in
+      let pct =
+        if explicit <= 0 then 0. else 100. *. float report.unattributed /. float explicit
+      in
+      if pct > max_pct then
+        note "unattributed %.1f%% of explicit exceeds max_unattributed_pct %.1f%%" pct max_pct)
+    budget.max_unattributed_pct;
   Printf.printf
     "scenario %s: live %d→%d (%.2f%%) device=%d footprint=%d alloc/frame=%.0f promoted/frame=%.0f \
      unattributed=%d\n\

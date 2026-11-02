@@ -133,9 +133,9 @@ let current_shape_cache_context = Domain.DLS.new_key (fun () -> None)
 
 let create_shape_cache_context () =
   {
-    path_geometry = Path_geometry_table.create path_geometry_cache_capacity;
-    rounded = Rounded_table.create rounded_cache_capacity;
-    ellipse = Ellipse_table.create ellipse_cache_capacity;
+    path_geometry = Path_geometry_table.create ~owner:(Lru.cache "rays.path_geometry") path_geometry_cache_capacity;
+    rounded = Rounded_table.create ~owner:(Lru.cache "rays.rounded") rounded_cache_capacity;
+    ellipse = Ellipse_table.create ~owner:(Lru.cache "rays.ellipse") ellipse_cache_capacity;
     fonts = Font.Raster.create_cache_context ();
   }
 
@@ -794,9 +794,9 @@ module Layer = struct
 
   let create_lower_cache_context () =
     {
-      texture_levels = Id_table.create 64 ~byte_capacity:converted_byte_capacity;
+      texture_levels = Id_table.create ~owner:(Lru.cache "rays.texture_levels") 64 ~byte_capacity:converted_byte_capacity;
       scene2_layers =
-        Layer_table.create scene2_layer_cache_capacity
+        Layer_table.create ~owner:(Lru.cache "rays.scene2_layers") scene2_layer_cache_capacity
           ~byte_capacity:scene2_layer_cache_byte_capacity;
     }
 
@@ -1154,7 +1154,7 @@ module Layer = struct
       lower = create_lower_cache_context ();
       scene3 = Scene3_native_lowering.create_cache_context ();
       native_stages =
-        Native_stage_table.create native_stage_cache_capacity
+        Native_stage_table.create ~owner:(Lru.cache "rays.native_stage") native_stage_cache_capacity
           ~byte_capacity:native_stage_cache_byte_capacity;
       next_identity = 0L;
     }

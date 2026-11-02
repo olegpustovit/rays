@@ -40,7 +40,7 @@ module Retained_table = Lru.Make (Retained_key)
 type cache_context = { retained_draws : retained_draws Retained_table.t }
 
 let current_cache_context = Domain.DLS.new_key (fun () -> None)
-let create_cache_context () = { retained_draws = Retained_table.create retained_draw_capacity }
+let create_cache_context () = { retained_draws = Retained_table.create ~owner:(Lru.cache "rays.retained_draws") retained_draw_capacity }
 
 let with_cache_context context f =
   let previous = Domain.DLS.get current_cache_context in

@@ -923,7 +923,7 @@ module Cache = Lru.Make (Key)
 type cache_context = { cache : baked Cache.t }
 
 let current_cache = Domain.DLS.new_key (fun () -> None)
-let create_cache_context () = { cache = Cache.create 4 }
+let create_cache_context () = { cache = Cache.create ~owner:(Lru.cache "rays.world") 4 }
 
 let with_cache_context context f =
   let previous = Domain.DLS.get current_cache in

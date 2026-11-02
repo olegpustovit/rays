@@ -159,7 +159,32 @@ let create_from_point_index ?cancel point_index topology =
 
 (* Bounded: at most [cache_capacity] live indices, released with their topology. *)
 let cache_capacity = 64
-let cache = Support.Identity_cache.create ~id:Topology.data_id cache_capacity
+
+let index_bytes (value : t) =
+  let words = Sys.word_size / 8 in
+  List.fold_left
+    (fun sum arr -> sum + (Array.length arr * words))
+    0
+    [
+      value.primitive_of_vertex;
+      value.next_vertex;
+      value.previous_vertex;
+      value.edge_of_vertex;
+      value.opposite_vertex;
+      value.edge_a;
+      value.edge_b;
+      value.edge_slots;
+      value.edge_offsets;
+      value.edge_vertices;
+      value.point_offsets;
+      value.point_vertices;
+      value.point_edge_offsets;
+      value.point_edges;
+    ]
+
+let cache =
+  Support.Identity_cache.create ~id:Topology.data_id ~owner:(Mem.cache "rdk.topology_index")
+    ~bytes:index_bytes cache_capacity
 
 let create ?cancel topology =
   Cancel.check_opt cancel;

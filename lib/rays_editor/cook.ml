@@ -156,7 +156,7 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
         await;
         prepare;
         clock = Option.value ~default:Unix.gettimeofday clock;
-        prepared_cache = Prepared_cache.create ~byte_capacity:prepared_byte_capacity 16;
+        prepared_cache = Prepared_cache.create ~owner:(Lru.cache "editor.prepared") ~byte_capacity:prepared_byte_capacity 16;
         prepared_lock = Mutex.create ();
         schedule = Schedule.initial;
         pieces = [];

@@ -3,21 +3,26 @@
     GPU buffers. A hit or an add allocates nothing beyond the entry itself. Not domain-safe: keep
     one table per domain ([Domain.DLS]) when several domains cache. *)
 
+val cache : string -> Mem.owner
+val plan : string -> Mem.owner
+val document : string -> Mem.owner
+(** Ledger owners for {!Make.create} / {!Identity_list.create}; same accounts as [Mem]. *)
+
 module Make (K : Hashtbl.HashedType) : sig
   type 'v t
 
   val create :
-    ?owner:Mem.owner ->
+    owner:Mem.owner ->
     ?byte_capacity:int ->
     ?evictable:(K.t -> 'v -> bool) ->
     ?release:(K.t -> 'v -> unit) ->
     int ->
     'v t
-  (** [create capacity] keeps at most [capacity] entries and [byte_capacity] bytes (unbounded by
-      default). Only [evictable] entries are eviction candidates (all by default), so a pinned entry
-      can hold the table over its limits until it is released. [release] runs exactly once for every
-      entry that leaves the table, including [clear]. [owner], when set, charges and releases the
-      entry byte sizes on the memory ledger. *)
+  (** [create ~owner capacity] keeps at most [capacity] entries and [byte_capacity] bytes (unbounded
+      by default). Only [evictable] entries are eviction candidates (all by default), so a pinned
+      entry can hold the table over its limits until it is released. [release] runs exactly once for
+      every entry that leaves the table, including [clear]. [owner] charges and releases the entry
+      byte sizes on the memory ledger. *)
 
   val find : 'v t -> K.t -> 'v
   (** A hit marks the entry recently used; a miss raises [Not_found]. This is the frame-path lookup:
@@ -63,14 +68,14 @@ module Identity_list : sig
   type ('key, 'value) t
 
   val create :
-    ?owner:Mem.owner ->
+    owner:Mem.owner ->
     ?release:('key -> 'value -> unit) ->
     equal:('key -> 'key -> bool) ->
     int ->
     ('key, 'value) t
   (** A bounded MRU list for typed keys whose equality is identity-based or otherwise cheap.
-      [release] runs when an entry leaves the list. [owner] is accepted for the shared ledger
-      surface; entry sizes are charged when a later stage passes them. *)
+      [release] runs when an entry leaves the list. [owner] names the ledger account; entry sizes are
+      charged when a later stage passes them through {!add}. *)
 
   val find : ('key, 'value) t -> 'key -> 'value option
   (** A hit moves the entry to the front. *)
@@ -78,7 +83,9 @@ module Identity_list : sig
   val peek : ('key, 'value) t -> 'key -> 'value option
   (** Look up without changing recency. *)
 
-  val add : ('key, 'value) t -> 'key -> 'value -> unit
+  val add : ('key, 'value) t -> ?bytes:int -> 'key -> 'value -> unit
+  (** [bytes], when set, charges [owner] until the entry leaves. *)
+
   val remove : ('key, 'value) t -> 'key -> unit
   val head : ('key, 'value) t -> ('key * 'value) option
 
