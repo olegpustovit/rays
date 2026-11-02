@@ -138,7 +138,7 @@ let make device family blend samples =
 (* The production pipelines (generated shaders, production binding slots), so a
    Metal test cannot drift from what the renderer binds. *)
 let create_offscreen driver configuration =
-  Renderer_pipeline.create_renderer ~backend:"metal" ~offscreen:true ~driver ~configuration ()
+  Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend ~offscreen:true ~driver ~configuration ()
 
 (* Production-ABI geometry covering the whole target with one triangle (Scene2, Scene3) or one quad
    (Scene2_textured). *)

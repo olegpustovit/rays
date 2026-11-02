@@ -45,7 +45,7 @@ let cook_elsewhere text =
   let file = Filename.temp_file "scrub" ".rays" in
   Out_channel.with_open_bin file (fun oc -> output_string oc text);
   let ic = Unix.open_process_args_in Sys.executable_name [| Sys.executable_name; file |] in
-  let digest = input_line ic in
+  let digest = String.trim (input_line ic) (* a Windows child ends its line with CR LF *) in
   (match Unix.close_process_in ic with
   | Unix.WEXITED 0 -> ()
   | _ -> failwith "the fresh cook failed");

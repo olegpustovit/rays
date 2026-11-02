@@ -169,8 +169,18 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlag
   (void)user;
   if (severity < VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT || validation_silent) return VK_FALSE;
   __atomic_add_fetch(&validation_messages, 1, __ATOMIC_RELAXED);
+#ifdef _WIN32
+  { /* The mingw CRT's stderr lock faults when the layer calls in here; write the handle directly. */
+    DWORD n;
+    HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+    WriteFile(h, "vulkan validation: ", 19, &n, NULL);
+    WriteFile(h, data->pMessage, (DWORD)strlen(data->pMessage), &n, NULL);
+    WriteFile(h, "\n", 1, &n, NULL);
+  }
+#else
   fprintf(stderr, "vulkan validation: %s\n", data->pMessage);
   fflush(stderr);
+#endif
   /* Any message fails the test that caused it. ExitProcess from inside the driver's call detaches
      DLLs the call still holds locks in and hangs, so Windows ends the process outright. */
 #ifdef _WIN32

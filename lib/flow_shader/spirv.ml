@@ -267,15 +267,24 @@ let integer_binary e operation a b =
       let a = if operation = Ishr then op 199 [ a; l e Int64.max_int ] else a in
       op (if operation = Ishl then 196 else 194) [ a; op 199 [ b; l e 63L ] ]
   | Idiv | Imod ->
+      (* Truncating, as Emit's [/] and [%], from the magnitudes with unsigned operations: the NVIDIA
+         driver's OpSRem and OpSDiv by a constant returned the unsigned result for a negative
+         dividend. Min_int / -1 and Min_int % -1 come out as Emit's wrap and 0 with no special case. *)
       let zero = compare e 170 b (l e 0L) in
-      let overflow =
-        result e e.boolean 167 [ compare e 170 a (l e Int64.min_int); compare e 170 b (l e (-1L)) ]
+      let negative x = compare e 177 x (l e 0L) in
+      let negate x = op 130 [ l e 0L; x ] in
+      let magnitude x = select e (long e) (negative x) (negate (x)) x in
+      let divisor = select e (long e) zero (l e 1L) (magnitude b) in
+      let unsigned x = result e (Option.get e.ulong) 124 [ x ] in
+      let value =
+        op 124
+          [ result e (Option.get e.ulong) (if operation = Idiv then 134 else 137)
+              [ unsigned (magnitude a); unsigned divisor ] ]
       in
-      let unsafe = result e e.boolean 166 [ zero; overflow ] in
-      let divisor = select e (long e) unsafe (l e 1L) b in
-      let value = op (if operation = Idiv then 135 else 138) [ a; divisor ] in
-      let value = select e (long e) overflow (if operation = Idiv then a else l e 0L) value in
-      select e (long e) zero (l e 0L) value
+      let flip =
+        if operation = Idiv then result e e.boolean 165 [ negative a; negative b ] else negative a
+      in
+      select e (long e) zero (l e 0L) (select e (long e) flip (negate value) value)
 
 let wrap_integer e value =
   let shifted = result e (long e) 196 [ value; l e 1L ] in

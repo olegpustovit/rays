@@ -1,3 +1,8 @@
+(* Vulkan leaves the last bit of a linear blend to the device: the 127.5 of four texels may round to 127. *)
+let linear_near (a, b, c) (x, y, z) =
+  let t = if Ogpu.Impl.backend = "vulkan" then 1 else 0 in
+  abs (a - x) <= t && abs (b - y) <= t && abs (c - z) <= t
+
 (* Tuple shorthand for the record-based [Scene_execution.submit]. *)
 let sampled ?texture ?auxiliary ?vertex_attributes ?(samples = 1) family blend draw :
     Scene_execution.sampled_draw =
@@ -373,7 +378,7 @@ let run () =
               Char.code (Bytes.get bytes 1),
               Char.code (Bytes.get bytes 2) )
           in
-          begin if actual <> expected then
+          begin if not (if index = 1 then linear_near actual expected else actual = expected) then
             let r, g, b = actual in
             failwith (Printf.sprintf "scene execution Metal texture case %d: %d,%d,%d" index r g b)
           end;
@@ -424,7 +429,7 @@ let run () =
       let bytes = get (Scene_execution.read_pixels renderer ~bytes_per_row:16) in
       if
         (Char.code (Bytes.get bytes 0), Char.code (Bytes.get bytes 1), Char.code (Bytes.get bytes 2))
-        <> (128, 128, 128)
+        |> fun p -> not (linear_near p (128, 128, 128))
       then failwith "sampler cache eviction changed the linear sampler result")
     frames;
   let replacement =
