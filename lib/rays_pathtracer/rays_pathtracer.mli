@@ -214,6 +214,11 @@ val resize : t -> width:int -> height:int -> (unit, string) result
 (** Match a new viewport: waits for the in-flight frame, reallocates the film, and restarts
     accumulation. Scene geometry is kept. No-op at the same size. *)
 
+val release_film : t -> (unit, string) result
+(** The tracer is done sampling for now: frees the working film, keeping what [image] shows. The next
+    [render] allocates it again and accumulates from no samples, its preview without history for one
+    frame. A frame still in flight leaves the film in place; call again later. *)
+
 val size : t -> int * int
 
 val image : t -> Rays.Image.t
@@ -223,6 +228,12 @@ val image : t -> Rays.Image.t
 val destroy : t -> unit
 
 module Private : sig
+  val scene_compaction : t -> int64 * int64
+  (** The scene's bottom-level structures, built and then compacted, in bytes. *)
+
+  val device_bytes : t -> int64
+  (** What the tracer's device has allocated, for its tests. *)
+
   val cpu_trace : t -> Rays.Camera.t -> accum:float array -> (float array, string) result
   (** The CPU walker's accumulation frame of the current scene (the device kernel's oracle): [accum]
       plus this frame's samples, a vec4 per pixel in row order. Scene traces go to the

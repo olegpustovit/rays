@@ -66,7 +66,8 @@ type gpu_mesh = {
   instance_buffer : B.buffer option;
   motion_buffer : B.buffer option;
   prototype_key : (bytes * bytes * bytes * bytes * bytes) option;
-  scene_blas : B.accel list;
+  mutable scene_blas : B.accel list;
+  mutable scene_unpacked : int64; (* what they took before compaction *)
   tables : tables; (* owned even when the prototype is borrowed *)
   mutable owns_prototype : bool;
   shape : shape;
@@ -84,6 +85,7 @@ type mesh_build = {
   mutable extra_scratch : B.buffer option;
   mutable size_buffer : B.buffer option;
   mutable uncompacted : B.accel option;
+  mutable uncompacted_scene : B.accel list;
   mutable stage : stage;
   instance_count : int;
 }
@@ -532,6 +534,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
                     [ extras.sphere_bytes; extras.strand_points; mesh.mesh_colors ] )
           | _ -> None);
         scene_blas;
+        scene_unpacked = 0L;
         tables;
         owns_prototype = reused = None;
         shape;
@@ -539,21 +542,15 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
     in
     let instance_count = match mesh.instances with None -> 0 | Some i -> Array.length i.records in
     if scene_blas <> [] then begin
-      (* ponytail: scene BLASes are not compacted (one stage instead of two);
-         compaction would save roughly half their memory. *)
+      (* each writes its compacted size, read once they are built *)
+      let* size_buffer =
+        buffer device ~label:"pathtracer-compacted-sizes"
+          ~usage:[ Ogpu.Types.Storage; Copy_src ]
+          (8 * List.length scene_blas)
+      in
+      buffers := size_buffer :: !buffers;
       let* command = gpu (B.begin_commands queue) in
       commands := Some command;
-      let build =
-        {
-          gpu = gpu_mesh;
-          scratch = work;
-          extra_scratch = None;
-          size_buffer = None;
-          uncompacted = None;
-          stage = Ready;
-          instance_count;
-        }
-      in
       let* encoder = gpu (B.accel_encoder command) in
       let* () =
         List.fold_left2
@@ -562,13 +559,30 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
             gpu (B.build_accel encoder blas ~scratch:work ~scratch_offset:(Int64.of_int offset) ()))
           (Ok ()) scene_blas scratch_offsets
       in
+      let* () =
+        List.fold_left
+          (fun acc (index, blas) ->
+            let* () = acc in
+            gpu
+              (B.write_compacted_size encoder blas ~dst:size_buffer
+                 ~offset:(Int64.of_int (8 * index))
+                 ()))
+          (Ok ())
+          (List.mapi (fun index blas -> (index, blas)) scene_blas)
+      in
       let* () = gpu (B.end_accel encoder) in
-      let* () = encode_instances device build command in
-      structures := build.gpu.structure :: !structures;
-      Option.iter (fun extra -> buffers := extra :: !buffers) build.extra_scratch;
       let* receipt = gpu (B.commit command) in
-      build.stage <- Compacting receipt;
-      Ok build
+      Ok
+        {
+          gpu = gpu_mesh;
+          scratch = work;
+          extra_scratch = None;
+          size_buffer = Some size_buffer;
+          uncompacted = None;
+          uncompacted_scene = [];
+          stage = Building receipt;
+          instance_count;
+        }
     end
     else if build_primitive then begin
       let* size_buffer =
@@ -607,6 +621,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
           extra_scratch = curve_scratch;
           size_buffer = Some size_buffer;
           uncompacted = None;
+          uncompacted_scene = [];
           stage = Building receipt;
           instance_count;
         }
@@ -620,6 +635,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
           extra_scratch = None;
           size_buffer = None;
           uncompacted = None;
+          uncompacted_scene = [];
           stage = Ready;
           instance_count;
         }
@@ -643,9 +659,59 @@ let wait queue (receipt : B.receipt) =
   else gpu (B.complete_through queue receipt.epoch)
 
 (* Stage two: build the instance structure over the compacted primitive. *)
+(* The scene's structures are built: compact them, then build the instances over the compacted ones. *)
+let compact_scene device queue (build : mesh_build) =
+  let* size_bytes =
+    match build.size_buffer with
+    | Some size_buffer ->
+        gpu (B.read_buffer size_buffer ~offset:0L ~length:(8 * List.length build.gpu.scene_blas))
+    | None -> Error "path tracer build lost its compacted sizes"
+  in
+  let built = build.gpu.scene_blas in
+  let rec sized index made = function
+    | [] -> Ok (List.rev made)
+    | template :: rest -> (
+        let size = Bytes.get_int64_le size_bytes (8 * index) in
+        match gpu (B.create_accel device (B.Sized { size; template })) with
+        | Ok compacted -> sized (index + 1) (compacted :: made) rest
+        | Error _ as failure ->
+            List.iter (fun blas -> ignore (B.destroy_accel blas)) made;
+            failure)
+  in
+  let* compacted = sized 0 [] built in
+  build.uncompacted_scene <- built;
+  build.gpu.scene_unpacked <-
+    List.fold_left
+      (fun total blas -> Int64.add total (B.accel_sizes blas).structure_size)
+      0L built;
+  build.gpu.scene_blas <- compacted;
+  build.gpu.structure <- List.hd compacted;
+  let* command = gpu (B.begin_commands queue) in
+  let encoded =
+    let* encoder = gpu (B.accel_encoder command) in
+    let* () =
+      List.fold_left2
+        (fun acc src dst ->
+          let* () = acc in
+          gpu (B.compact_accel encoder ~src ~dst))
+        (Ok ()) built compacted
+    in
+    let* () = gpu (B.end_accel encoder) in
+    let* () = encode_instances device build command in
+    gpu (B.commit command)
+  in
+  match encoded with
+  | Ok receipt ->
+      build.stage <- Compacting receipt;
+      Ok ()
+  | Error _ as failure ->
+      ignore (B.abandon command);
+      failure
+
 let advance_build device queue (build : mesh_build) =
   match build.stage with
   | Ready -> Ok ()
+  | Building _ when build.gpu.scene_blas <> [] -> compact_scene device queue build
   | Building _ -> (
       let uncompacted = build.gpu.structure in
       let* size_bytes =
@@ -676,6 +742,8 @@ let advance_build device queue (build : mesh_build) =
   | Compacting _ ->
       Option.iter (fun structure -> ignore (B.destroy_accel structure)) build.uncompacted;
       build.uncompacted <- None;
+      List.iter (fun structure -> ignore (B.destroy_accel structure)) build.uncompacted_scene;
+      build.uncompacted_scene <- [];
       Option.iter (fun size_buffer -> ignore (B.destroy_buffer size_buffer)) build.size_buffer;
       build.size_buffer <- None;
       build.stage <- Ready;
@@ -697,6 +765,7 @@ let finish_build device queue (build : mesh_build) =
   | Ok () -> Ok build.gpu
   | Error _ as failure ->
       Option.iter (fun structure -> ignore (B.destroy_accel structure)) build.uncompacted;
+      List.iter (fun structure -> ignore (B.destroy_accel structure)) build.uncompacted_scene;
       Option.iter (fun size_buffer -> ignore (B.destroy_buffer size_buffer)) build.size_buffer;
       destroy_gpu build.gpu;
       failure
@@ -708,5 +777,6 @@ let discard_build queue (build : mesh_build) =
   ignore (B.destroy_buffer build.scratch);
   Option.iter (fun extra -> ignore (B.destroy_buffer extra)) build.extra_scratch;
   Option.iter (fun structure -> ignore (B.destroy_accel structure)) build.uncompacted;
+  List.iter (fun structure -> ignore (B.destroy_accel structure)) build.uncompacted_scene;
   Option.iter (fun size_buffer -> ignore (B.destroy_buffer size_buffer)) build.size_buffer;
   destroy_gpu build.gpu

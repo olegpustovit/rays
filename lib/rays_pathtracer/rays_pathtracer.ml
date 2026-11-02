@@ -123,7 +123,9 @@ type t = {
   mutable world_buffer : B.buffer;
   mutable cdf_buffer : B.buffer; (* the World's CDF alone, for the Lisp kernel *)
   bsdf_only : bool;
-  mutable film : film;
+  mutable film : film option; (* the working film; None once released, [render] makes it again *)
+  mutable published : int option; (* the output the image samples *)
+  mutable shown : B.texture option; (* that output, kept from a released film *)
   shared_film : bool;
   mutable next_output_slot : int;
   mutable history_slot : int;
@@ -488,7 +490,9 @@ let create_tracer ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4
           world_buffer;
           cdf_buffer;
           bsdf_only;
-          film;
+          film = Some film;
+          published = None;
+          shown = None;
           shared_film = Renderer.gpu_shared lease;
           next_output_slot = 0;
           history_slot = 0;
@@ -544,6 +548,8 @@ let restart t =
   t.history_camera <- None;
   t.history_epoch <- t.history_epoch + 1
 
+let live_film t = Option.get t.film
+
 let reset t =
   restart t;
   t.scene_edited <- false
@@ -592,12 +598,19 @@ let publish t (pending : pending) =
   if pending.history_epoch = t.history_epoch then t.history_camera <- Some pending.camera;
   if pending.stale || not pending.last then Ok ()
   else
-    let film = t.film.outputs.(pending.slot) in
+    let film = (live_film t).outputs.(pending.slot) in
     let* () =
       if t.shared_film then
-        Result.map_error
-          (Format.asprintf "%a" Runtime_resources.pp_error)
-          (Runtime_resources.Image.replace_gpu t.resource film)
+        let* () =
+          Result.map_error
+            (Format.asprintf "%a" Runtime_resources.pp_error)
+            (Runtime_resources.Image.replace_gpu t.resource film)
+        in
+        t.published <- Some pending.slot;
+        (* the image has left a released film's output *)
+        Option.iter (fun shown -> ignore (B.destroy_texture shown)) t.shown;
+        t.shown <- None;
+        Ok ()
       else
         let* rgba = gpu (B.read_texture film ~bytes_per_row:(t.width * 4)) in
         ();
@@ -647,6 +660,7 @@ let move_async t (moved : mesh) =
             extra_scratch = None;
             size_buffer = None;
             uncompacted = None;
+            uncompacted_scene = [];
             stage = Ready;
             instance_count = Array.length instances.records;
           }
@@ -828,6 +842,7 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
                 motion_buffer = None;
                 prototype_key = None;
                 scene_blas = [];
+                scene_unpacked = 0L;
                 tables;
                 owns_prototype = true;
                 shape = mesh_shape mesh;
@@ -836,6 +851,7 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
             extra_scratch = None;
             size_buffer = None;
             uncompacted = None;
+            uncompacted_scene = [];
             stage = Compacting receipt;
             instance_count = 0;
           }
@@ -960,7 +976,6 @@ let resize t ~width ~height =
   else begin
     restart t;
     let* () = flush t in
-    let* (film : film) = allocate_film t.device ~width ~height in
     let pixels = Bytes.make (width * height * 4) '\000' in
     (* The image stops sampling the old film before that film is destroyed. *)
     let* () =
@@ -968,13 +983,13 @@ let resize t ~width ~height =
         (Format.asprintf "%a" Runtime_resources.pp_error)
         (Runtime_resources.Image.replace t.resource ~width ~height ~rgba:pixels)
     in
-    destroy_film t.film;
-    t.film <- film;
+    Option.iter destroy_film t.film;
+    t.film <- None;
+    Option.iter (fun shown -> ignore (B.destroy_texture shown)) t.shown;
+    t.shown <- None;
+    t.published <- None;
     t.width <- width;
     t.height <- height;
-    t.next_output_slot <- 0;
-    t.history_slot <- 0;
-    ();
     Ok ()
   end
 
@@ -993,6 +1008,35 @@ let rec poll t =
       | Error message ->
           t.pending <- rest;
           Error ("path tracer frame failed: " ^ message))
+
+(* Only a tracer drawing samples needs its film, 116 of its 120 bytes a pixel: the image keeps the
+   one output it samples. The next frame starts from no samples and no history, like a resize. *)
+let release_film t =
+  match t.film with
+  | None -> Ok ()
+  | Some film ->
+      let* free = poll t in
+      if not free then Ok ()
+      else begin
+        let keep = t.published in
+        let shown = Option.map (Array.get film.outputs) keep in
+        destroy_film ?keep film;
+        t.shown <- shown;
+        t.film <- None;
+        Ok ()
+      end
+
+let restore_film t =
+  match t.film with
+  | Some _ -> Ok ()
+  | None ->
+      let* film = allocate_film t.device ~width:t.width ~height:t.height in
+      t.film <- Some film;
+      restart t;
+      t.next_output_slot <- 0;
+      t.history_slot <- 0;
+      t.from_accum <- false;
+      Ok ()
 
 (* The kernels' scene facts: what the static stage folds. *)
 let lisp_facts t =
@@ -1133,17 +1177,17 @@ let lisp_table t (tables : Mesh_build.tables) ~geo ~pgeo ~pcol name =
   | "inst" -> (tables.inst, 4 * tables.instance_count)
   | "nrm" -> (t.gpu.normals, count t.gpu.normals 12)
   | "cols" -> (t.gpu.colors, count t.gpu.colors 12)
-  | "accum" -> (t.film.accum, n)
+  | "accum" -> ((live_film t).accum, n)
   | "geo" -> (geo, n)
   | "pgeo" -> (pgeo, n)
-  | "order" -> (t.film.order, n)
+  | "order" -> ((live_film t).order, n)
   | _ -> (pcol, n)
 
 (* Flow's RGBA8 conversion of the resolved film into output [slot]. *)
 let encode_rgba t commands slot =
   Result.map_error Diagnostic.to_string
-    (Flow_gpu.Image_sink.encode t.convert commands ~source:t.film.resolved ~width:t.width
-       ~height:t.height t.film.outputs.(slot))
+    (Flow_gpu.Image_sink.encode t.convert commands ~source:(live_film t).resolved ~width:t.width
+       ~height:t.height (live_film t).outputs.(slot))
 
 (* The Lisp kernels' frame (pathtrace.rays): a preview traces its primary hits, then one centre sample
    reprojected onto the history, then the 3x3 resolve; an accumulation band adds its pixels' samples to the
@@ -1171,12 +1215,12 @@ let encode_lisp t kernels commands camera fov ~row_offset ~rows ~last ~slot ~pre
   let words =
     lisp_words t camera fov ~lo:(row_offset * t.width) ~hi:(min n ((row_offset + rows) * t.width))
   in
-  let geo = t.film.history_geometry.(next) and pgeo = t.film.history_geometry.(previous) in
-  let history = if t.from_accum then t.film.accum else t.film.history_color.(previous) in
+  let geo = (live_film t).history_geometry.(next) and pgeo = (live_film t).history_geometry.(previous) in
+  let history = if t.from_accum then (live_film t).accum else (live_film t).history_color.(previous) in
   let run ?(traced = true) ?(pcol = history) name into =
     Lisp_kernel.dispatch kernels ~lease:t.lease ~pipelines:t.flow_pipelines ~commands ~count:n
-      ~pixels:(if traced then t.film.pixels else t.film.linear)
-      ~slots:t.film.linear ~cell:t.cell ~into
+      ~pixels:(if traced then (live_film t).pixels else (live_film t).linear)
+      ~slots:(live_film t).linear ~cell:t.cell ~into
       ?scene:(if traced then Some scene else None)
       ~extras
       ~resident:(Option.to_list t.gpu.primitive @ t.gpu.scene_blas)
@@ -1187,12 +1231,12 @@ let encode_lisp t kernels commands camera fov ~row_offset ~rows ~last ~slot ~pre
   let* () =
     if t.moving then
       let* () = run "preview-geometry" geo in
-      let* () = run "preview" t.film.history_color.(next) in
-      run ~traced:false ~pcol:t.film.history_color.(next) "preview-resolve" t.film.resolved
+      let* () = run "preview" (live_film t).history_color.(next) in
+      run ~traced:false ~pcol:(live_film t).history_color.(next) "preview-resolve" (live_film t).resolved
     else
       let* () = if row_offset = 0 && t.frame = 0 then run "geometry" geo else Ok () in
-      let* () = run "trace" t.film.accum in
-      if last then run ~traced:false "resolve" t.film.resolved else Ok ()
+      let* () = run "trace" (live_film t).accum in
+      if last then run ~traced:false "resolve" (live_film t).resolved else Ok ()
   in
   if last then encode_rgba t commands slot else Ok ()
 
@@ -1207,6 +1251,7 @@ let encode_lisp t kernels commands camera fov ~row_offset ~rows ~last ~slot ~pre
    depend on it. *)
 let render t (camera : camera) =
   let* fov = camera_fov camera in
+  let* () = restore_film t in
   (* A camera change, or the first frame over newly installed geometry,
      lights, or World, is a preview frame; the first frame after creation or
      [reset] renders at full quality. *)
@@ -1382,7 +1427,8 @@ let destroy t =
   List.iter
     (fun value -> release (fun () -> B.destroy_buffer value))
     [ t.panels; t.lights; t.world_buffer; t.cdf_buffer; t.cell ];
-  destroy_film t.film;
+  Option.iter destroy_film t.film;
+  Option.iter (fun shown -> ignore (B.destroy_texture shown)) t.shown;
   Renderer.release_gpu t.lease
 
 let create ?spp ?bounces ?exposure ?round_samples ?bsdf_only ?profile ~width ~height scene =
@@ -1398,8 +1444,17 @@ let create ?spp ?bounces ?exposure ?round_samples ?bsdf_only ?profile ~width ~he
         Result.map (fun () -> t) failure
 
 module Private = struct
+  let device_bytes t = B.allocated_size t.device
+
+  let scene_compaction t =
+    ( t.gpu.scene_unpacked,
+      List.fold_left
+        (fun total blas -> Int64.add total (B.accel_sizes blas).structure_size)
+        0L t.gpu.scene_blas )
+
   let cpu_trace t camera ~accum =
     let* fov = camera_fov camera in
+    let* () = restore_film t in
     let* kernels = lisp_kernels t (lisp_facts t) in
     let n = t.width * t.height in
     let words = lisp_words t camera fov ~lo:0 ~hi:n in
@@ -1408,7 +1463,7 @@ module Private = struct
       else
         let ty = List.assoc name Lisp_kernel.tables in
         let buffer, count =
-          lisp_table t t.gpu.tables ~geo:t.film.accum ~pgeo:t.film.accum ~pcol:t.film.accum name
+          lisp_table t t.gpu.tables ~geo:(live_film t).accum ~pgeo:(live_film t).accum ~pcol:(live_film t).accum name
         in
         let length = count * Lisp_kernel.width ty in
         let bytes = Result.get_ok (B.read_buffer buffer ~offset:0L ~length:(4 * length)) in

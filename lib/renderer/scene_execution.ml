@@ -410,6 +410,8 @@ type t = {
   retired : retired;
   mutable frame : int;
   mutable texture_upload_scratch : texture_upload_scratch option;
+  mutable staged_frame : int; (* the last frame that uploaded a texture *)
+  mutable staged_stream : bool; (* and the frame before it did too *)
   samplers : (Ogpu.Types.sampler_descriptor, Ogpu.Backend.sampler) Hashtbl.t;
   mutable arguments : argument_pool option;
   icb_stats : icb_stats;
@@ -720,6 +722,8 @@ let create ?device ?gpu_vertices ?sun_depth:sun_factory ~offscreen driver config
                           auxiliary_cache = auxiliary_table retired;
                           texture_cache = texture_table retired;
                           texture_upload_scratch = None;
+                          staged_frame = -1;
+                          staged_stream = false;
                           samplers = Hashtbl.create 8;
                           arguments = None;
                           icb_stats =
@@ -1159,6 +1163,10 @@ let valid_texture (source : sampled_texture) =
          |> Array.for_all Fun.id
 
 let texture_upload_scratch value total =
+  if value.staged_frame <> value.frame then begin
+    value.staged_stream <- value.staged_frame = value.frame - 1;
+    value.staged_frame <- value.frame
+  end;
   match value.texture_upload_scratch with
   | Some scratch when scratch.scratch_size = total -> Ok scratch
   | previous -> (
@@ -1174,6 +1182,16 @@ let texture_upload_scratch value total =
           value.texture_upload_scratch <- Some scratch;
           Option.iter (fun old -> ignore (Ogpu.Backend.destroy_buffer old.scratch_buffer)) previous;
           Ok scratch)
+
+(* Uploads complete inside their frame, so what they staged through goes at its end: an image uploads
+   once, and two copies of it should not outlive that. A canvas that uploads frame after frame keeps
+   them, or each frame would pay for a new pair. *)
+let release_texture_staging value =
+  match value.texture_upload_scratch with
+  | Some scratch when not (value.staged_stream && value.staged_frame = value.frame) ->
+      ignore (Ogpu.Backend.destroy_buffer scratch.scratch_buffer);
+      value.texture_upload_scratch <- None
+  | _ -> ()
 
 let image_or_canvas_key key =
   String.starts_with ~prefix:"canvas:" key
@@ -1874,10 +1892,16 @@ let automatic_candidate_fingerprint scratch =
   !fingerprint
 
 (* Attachments and encoder state for one render pass over [target]. *)
-let render_target value family samples (state : state) load clear =
+let render_target value family samples (state : state) load clear ~later_color ~later_depth =
+  (* an attachment no other pass reads needs no memory: it clears here and only its resolve stays *)
+  let color_passes = load = Ogpu.Render_pass.Clear && not later_color
+  and depth_passes = state.depth_load = Ogpu.Render_pass.Clear && not later_depth in
   let keys =
-    (if samples = 1 then [] else [ (Scene_attachment_pool.Color, samples) ])
-    @ match family with Scene2 | Scene2_textured | Ui | Marks -> [] | _ -> [ (Depth, samples) ]
+    (if samples = 1 then [] else [ (Scene_attachment_pool.Color, samples, color_passes) ])
+    @
+    match family with
+    | Scene2 | Scene2_textured | Ui | Marks -> []
+    | _ -> [ (Depth, samples, depth_passes) ]
   in
   match Scene_attachment_pool.acquire_many value.attachments keys with
   | Error _ as e -> e
@@ -1900,7 +1924,7 @@ let render_target value family samples (state : state) load clear =
               {
                 Ogpu.Backend.depth_texture = take ();
                 depth_load = state.depth_load;
-                depth_store = Store;
+                depth_store = (if depth_passes then Discard else Store);
                 depth_clear = state.depth_clear;
               }
       in
@@ -2056,12 +2080,20 @@ let plain_draws draws =
     (fun draw -> draw.plan_textures = [] && draw.plan_samplers = [] && draw.plan_indirect = None)
     draws
 
-let encode_batch value commands ~clear (batch : batch_plan) =
+let encode_batch value commands ~clear ~later (batch : batch_plan) =
   let ( let* ) = Result.bind in
+  let same_samples (next : batch_plan) = next.batch_samples = batch.batch_samples in
   let* target, _ =
     render_target value batch.batch_family batch.batch_samples batch.batch_state
       (if batch.batch_first then Ogpu.Render_pass.Clear else Load)
       clear
+      ~later_color:(List.exists same_samples later)
+      ~later_depth:
+        (List.exists
+           (fun (next : batch_plan) ->
+             same_samples next && has_depth next.batch_family
+             && next.batch_state.depth_load = Ogpu.Render_pass.Load)
+           later)
   in
   let* encoder = Ogpu.Backend.render_encoder commands target in
   let bound_w = value.configuration.Ogpu.Surface.physical_width
@@ -2223,13 +2255,12 @@ let encode_frame value frame ~clear batches =
       discard frame;
       e
   | Ok commands -> (
-      let encoded =
-        List.fold_left
-          (fun result batch ->
-            Result.bind result (fun () -> encode_batch value commands ~clear batch))
-          (Ok ()) batches
+      let rec encode = function
+        | [] -> Ok ()
+        | batch :: later ->
+            Result.bind (encode_batch value commands ~clear ~later batch) (fun () -> encode later)
       in
-      match encoded with
+      match encode batches with
       | Error _ as e ->
           ignore (Ogpu.Backend.abandon commands);
           discard frame;
@@ -2978,6 +3009,7 @@ let submit ?prepared ?(after_prepare = Fun.id) ?(clear = (0., 0., 0., 0.)) value
                 drain_retired value.retired
                   (fun b -> ignore (Ogpu.Backend.destroy_buffer b))
                   (fun t -> ignore (Ogpu.Backend.destroy_texture t));
+                release_texture_staging value;
                 result
               in
               let scratch = value.prepared_scratch in
@@ -3200,8 +3232,8 @@ let resize value configuration =
       in
       let rec restore = function
         | [] -> Ok ()
-        | (kind, samples, _) :: rest -> (
-            match Scene_attachment_pool.acquire attachments kind ~samples with
+        | (kind, samples, passing, _) :: rest -> (
+            match Scene_attachment_pool.acquire ~passing attachments kind ~samples with
             | Error _ as e -> e
             | Ok _ -> restore rest)
       in
@@ -3236,6 +3268,19 @@ module Private = struct
     match value.uniform_pages.(0) with Some page -> page.page_capacity | None -> 0
 
   let uniform_shrink_after = uniform_shrink_after
+
+  let staging_bytes value =
+    Option.fold ~none:0
+      ~some:(fun scratch -> scratch.scratch_size)
+      value.texture_upload_scratch
+
+  let memoryless_attachments value =
+    ( Ogpu.Caps.has (Ogpu.Backend.capabilities value.device) Ogpu.Caps.Memoryless_attachments,
+      List.length
+        (List.filter
+           (fun (_, _, passing, _) -> passing)
+           (Scene_attachment_pool.allocated value.attachments)) )
+
   type nonrec gpu_vertices = gpu_vertices
   type nonrec gpu_vertices_owner = gpu_vertices_owner
 

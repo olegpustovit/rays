@@ -51,6 +51,8 @@ let system_default () =
                 match Metal.Device.supports_family metal f with Ok true -> true | _ -> false
               in
               let curves = family Metal.Device.Apple9 in
+              (* tile memory: every Apple family *)
+              let tiled = family Metal.Device.Apple7 in
               let capabilities : Ogpu_core.Caps.t =
                 {
                   limits =
@@ -66,6 +68,7 @@ let system_default () =
                   ray_tracing_curves = info.raytracing && curves;
                   ray_tracing_motion = info.raytracing;
                   ray_tracing_refit = info.raytracing;
+                  memoryless_attachments = tiled;
                 }
               in
               match Ogpu_core.Caps.validate capabilities with

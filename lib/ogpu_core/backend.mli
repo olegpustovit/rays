@@ -317,6 +317,8 @@ type driver_device = {
   create_mapped_buffer : Types.buffer_descriptor -> (driver_mapped, Error.t) result;
   create_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
   create_depth_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
+  create_memoryless_texture :
+    depth:bool -> Types.texture_descriptor -> (driver_resource, Error.t) result;
   create_library : Shader.t -> (driver_library, Error.t) result;
   create_accel : driver_accel_descriptor -> (driver_accel, Error.t) result;
   instance_layout : instance_kind -> Acceleration.instance_layout;
@@ -378,6 +380,11 @@ val mapped_view : buffer -> floats option
 
 val create_texture : device -> Types.texture_descriptor -> (texture, Error.t) result
 val create_depth_texture : device -> Types.texture_descriptor -> (texture, Error.t) result
+
+val create_memoryless_texture :
+  device -> depth:bool -> Types.texture_descriptor -> (texture, Error.t) result
+(** A render attachment whose contents live only inside one pass: it must clear or not load, and store
+    nothing but a resolve. Needs [Caps.Memoryless_attachments], [Unsupported] otherwise. *)
 val create_queue : device -> (queue, Error.t) result
 val create_surface : device -> Surface.configuration -> (surface, Error.t) result
 val buffer_id : buffer -> int64

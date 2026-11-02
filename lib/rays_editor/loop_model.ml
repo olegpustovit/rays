@@ -9,8 +9,19 @@ module V = Viewport
 
 type layout = Pxui_shell.Layout.t
 
+(* The last full frame, once nothing but the clock could change it: its picture, and how many full
+   frames in a row drew the same one. *)
+type rest = {
+  rested : Editor_model.t;
+  viewed : V.extra;
+  picture : Scene.t;
+  still : int;
+  shown : Frame.t;
+}
+
 type t = {
   core : Editor_model.t;
+  rest : rest option;
   camera : V.camera; (* the orbit of the focused viewport *)
   cameras : (string * V.camera) list; (* the orbits of the other viewports, by key *)
   viewing : string option; (* the viewport [camera] belongs to *)
@@ -119,6 +130,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?(lights = [])
          in
          {
            core;
+           rest = None;
            camera;
            control = V.create_control ();
            draw;

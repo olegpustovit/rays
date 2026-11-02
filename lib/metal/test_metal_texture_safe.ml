@@ -97,6 +97,17 @@ let test_swizzle_and_compression device queue =
   get (Buffer.destroy output);
   get (Texture.destroy plain);
   get (Texture.destroy texture);
+  let memoryless =
+    Texture.descriptor_2d ~storage:Buffer.Memoryless ~usage:[ Texture.Render_target ]
+      ~format:Texture.Depth32_float ~width:4 ~height:4 ()
+  in
+  (match Device.supports_family device Device.Apple7 with
+  | Ok true -> get (Texture.destroy (get (Texture.create ~device memoryless)))
+  | _ -> ());
+  without_handles "a memoryless texture is a render target, a buffer is not memoryless" (fun () ->
+      reject Invalid_argument
+        (Texture.create ~device { memoryless with usage = [ Texture.Shader_read ] });
+      reject Invalid_argument (Buffer.create ~device ~length:16L ~storage:Buffer.Memoryless ()));
   without_handles "invalid writable swizzles" (fun () ->
       List.iter
         (fun usage ->

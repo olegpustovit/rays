@@ -96,7 +96,7 @@ end
 
 module Buffer : sig
   type t
-  type storage_mode = Shared | Managed | Private
+  type storage_mode = Shared | Managed | Private | Memoryless
   type cpu_cache_mode = Default_cache | Write_combined
   type hazard_tracking_mode = Default_hazard_tracking | Untracked | Tracked
 

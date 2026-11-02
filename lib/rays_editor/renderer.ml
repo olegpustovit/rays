@@ -357,7 +357,15 @@ let update state ~mode ~custom ~focus views =
           (* at its cap with nothing changed (the focused one too), or not this frame's turn: the
              picture it had stays *)
           match previous with
-          | Some slot -> { slot with keys; cap }
+          | Some slot -> (
+              let slot = { slot with keys; cap } in
+              match slot.tracer with
+              | Some tracer when not plan.wants -> (
+                  match P.release_film tracer with
+                  | Ok () -> slot
+                  | Error message ->
+                      { slot with failure = Some ("Renderer [" ^ view.key ^ "]: " ^ message) })
+              | _ -> slot)
           | None -> blank)
       | Path_traced -> (
           let prior = Option.value ~default:blank previous in

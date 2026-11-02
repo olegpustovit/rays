@@ -7,7 +7,7 @@ type format = Ogpu_core.Types.texture_format =
   | Rgba32_float
   | Depth32_float
 
-type memory = Ogpu_core.Types.memory = Shared | Device_local
+type memory = Ogpu_core.Types.memory = Shared | Device_local | Memoryless
 type t
 
 val create :

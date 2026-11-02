@@ -390,6 +390,10 @@ let create () =
                       add c (Printf.sprintf "destroy-depth-texture:%Ld" id);
                       Ok ());
                 }));
+        create_memoryless_texture =
+          (fun ~depth:_ _ ->
+            error "Backend_mock.create_memoryless_texture" Error.Unsupported
+              "the mock has no memoryless attachments");
         create_queue =
           (fun () ->
             let id = token c and clock = { epoch = 0L; completed = 0L } in

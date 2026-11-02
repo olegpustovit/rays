@@ -4297,6 +4297,92 @@ let run_outline_button () =
   check (has (source !e) "(ui/outline)") "the Outline button did not split an Outline in";
   E3.close !e
 
+(* An idle frame is the last one again: no input, no cook, a clock nothing reads.  The frames that
+   must not rest are as much the contract as the one that must. *)
+let run_idle_rest () =
+  let run ?(until = 30) text =
+    let e = ref (editor text) and count = ref 0 in
+    let tick ?(mouse = (450., 300.)) ?(step = 1) events =
+      count := !count + step;
+      let f = frame mouse events !count in
+      e := E3.update !e f;
+      let scene = E3.scene !e f in
+      e := E3.after_present !e f;
+      scene
+    in
+    for _ = 1 to until do
+      ignore (tick [])
+    done;
+    (e, count, tick)
+  in
+  let e, _, tick =
+    run {|(workspace idle (graph picture :context draw (draw/background "#14161c")))|}
+  in
+  let before = Rays_editor.Timeline.time (E3.timeline !e) in
+  let rested = tick [] in
+  check (tick [] == rested) "an idle frame was built again";
+  (* a rest frame allocates nothing that scales with the UI, and the unread clock keeps running;
+     measured just after the once-a-second frame, so ten frames hold none *)
+  ignore (tick ~step:61 []);
+  let bytes = Gc.allocated_bytes () in
+  for _ = 1 to 10 do
+    ignore (tick [])
+  done;
+  let spent = (Gc.allocated_bytes () -. bytes) /. 10. in
+  check (spent < 4096.) (Printf.sprintf "a rest frame allocated %.0f bytes" spent);
+  check (Rays_editor.Timeline.time (E3.timeline !e) > before) "the clock stopped at rest";
+  check (tick [] == tick []) "still at rest";
+  (* what wakes it: a moved pointer, an event, the second that what polls runs on *)
+  let after_rest wake what =
+    check (wake () != tick []) (what ^ " did not build a frame");
+    for _ = 1 to 12 do
+      ignore (tick [])
+    done;
+    let p = tick [] in
+    check (tick [] == p) (what ^ ": the editor did not come back to rest")
+  in
+  after_rest (fun () -> tick ~mouse:(451., 300.) []) "a moved pointer";
+  after_rest (fun () -> tick ~mouse:(451., 300.) [ Input.Focus_lost ]) "an event";
+  after_rest (fun () -> tick ~mouse:(451., 300.) ~step:61 []) "a second";
+  E3.close !e;
+  (* a graph that reads the clock never rests while it plays, even while its picture holds still *)
+  let e, _, tick =
+    run
+      {|(workspace clock (graph picture :context draw
+          (draw/merge (draw/background "#14161c")
+            (draw/circle [10 10 0] (+ 4 (int (/ (frame/index) 100000))) :fill "#5aaaf0")))
+        (graph editor :context editor (ui/workspace (ui/canvas (ref picture) :focus true))))|}
+  in
+  check (tick [] != tick []) "a playing clock with a reader rested";
+  (* stopped, it does *)
+  ignore (tick [ Input.Key_pressed Input.Space ]);
+  (* the key's hud runs out *)
+  ignore (tick ~step:100 []);
+  for _ = 1 to 12 do
+    ignore (tick [])
+  done;
+  check (Rays_editor.Timeline.mode (E3.timeline !e) <> Rays_editor.Timeline.Playing) "the space key did not pause";
+  let p = tick [] in
+  check (tick [] == p) "a stopped clock did not rest";
+  E3.close !e;
+  (* the full layout with its timeline: the playing clock is on screen; stopped, the frame is idle *)
+  let text = In_channel.with_open_bin "../../../sketches/ws_layout.rays" In_channel.input_all in
+  let e, _, tick = run ~until:20 text in
+  check (tick [] != tick []) "a clock on screen rested";
+  ignore (tick [ Input.Key_pressed Input.Space ]);
+  ignore (tick ~step:100 []);
+  for _ = 1 to 20 do
+    ignore (tick [])
+  done;
+  let bytes = Gc.allocated_bytes () in
+  for _ = 1 to 120 do
+    ignore (tick [])
+  done;
+  let spent = (Gc.allocated_bytes () -. bytes) /. 120. in
+  Printf.printf "idle full layout: %.0f bytes a frame\n%!" spent;
+  check (spent < 100_000.) (Printf.sprintf "the idle full layout allocated %.0f bytes a frame" spent);
+  E3.close !e
+
 (* The default loop runs every section but the slow ones (1.5-12 s each); RAYS_SLOW=1 runs all. *)
 let slow =
   [
@@ -4360,6 +4446,7 @@ let run ?part () =
       ("run_studio_keywords", run_studio_keywords);
       ("run_copy_lisp", run_copy_lisp);
       ("run_hide_and_order", run_hide_and_order);
+      ("run_idle_rest", run_idle_rest);
       ("run_root_section", run_root_section);
       ("run_idle_follow", run_idle_follow);
       ("run_layouts", run_layouts);

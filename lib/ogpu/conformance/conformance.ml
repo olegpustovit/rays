@@ -1584,6 +1584,53 @@ let run driver =
     }
   in
   let target = get (Backend.create_texture device target_descriptor) in
+  let transient = { target_descriptor with label = Some "pass"; usage = [ Render_attachment ] } in
+  (if Caps.has profile Caps.Memoryless_attachments then begin
+     let color = get (Backend.create_memoryless_texture device ~depth:false transient)
+     and depth = get (Backend.create_memoryless_texture device ~depth:true transient) in
+     let commands = get (Backend.begin_commands queue) in
+     let encoder =
+       get
+         (Backend.render_encoder commands
+            {
+              colors =
+                [
+                  {
+                    texture = color;
+                    resolve = None;
+                    load = Clear;
+                    store = Discard;
+                    clear = (0., 0., 0., 1.);
+                  };
+                ];
+              depth =
+                Some
+                  {
+                    depth_texture = depth;
+                    depth_load = Clear;
+                    depth_store = Discard;
+                    depth_clear = 1.;
+                  };
+            })
+     in
+     get (Backend.end_render encoder);
+     poll_epoch (get (Backend.commit commands)) 1000;
+     get (Backend.destroy_texture color);
+     get (Backend.destroy_texture depth);
+     match Backend.create_memoryless_texture device ~depth:false target_descriptor with
+     | Error { Error.kind = Invalid_argument; _ } -> ()
+     | _ -> failwith "a memoryless texture accepted a use beyond its pass"
+   end
+   else
+     match Backend.create_memoryless_texture device ~depth:true transient with
+     | Error { Error.kind = Unsupported; _ } -> ()
+     | _ -> failwith "unavailable memoryless attachments were not typed Unsupported");
+  (match
+     Backend.create_buffer ~memory:Memoryless device
+       { label = Some "pass"; size = 16L; usage = [ Storage ] }
+   with
+  | Error { Error.kind = Invalid_argument; _ } -> ()
+  | _ -> failwith "a memoryless buffer was accepted");
   let offsets =
     get (Backend.create_buffer device { label = Some "offsets"; size = 8L; usage = [ Storage ] })
   in

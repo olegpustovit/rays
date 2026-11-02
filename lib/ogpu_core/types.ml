@@ -1,5 +1,5 @@
 type buffer_usage = Copy_src | Copy_dst | Uniform | Storage | Vertex | Index
-type memory = Shared | Device_local
+type memory = Shared | Device_local | Memoryless
 type buffer_descriptor = { label : string option; size : int64; usage : buffer_usage list }
 
 type texture_usage =

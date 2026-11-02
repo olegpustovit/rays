@@ -114,7 +114,36 @@ let run () =
                 Hashtbl.replace textures (Ogpu.Backend.texture_id texture) ()
             | _ -> failwith "GPU film reverted to CPU storage"
           done;
-          assert (Hashtbl.length textures = 3)));
+          assert (Hashtbl.length textures = 3);
+          (* a tracer at rest: the film goes, the picture stays, and the next frame is a first one *)
+          let shown = Test_pathtracer.pixels tracer in
+          let before = P.Private.device_bytes tracer in
+          get (P.release_film tracer);
+          let released = Int64.sub before (P.Private.device_bytes tracer) in
+          assert (Int64.to_int released >= 116 * 48 * 32);
+          assert (Test_pathtracer.pixels tracer = shown);
+          assert (P.samples tracer = 31);
+          get (P.release_film tracer);
+          get (P.render tracer camera);
+          assert (P.samples tracer = 0);
+          get (P.flush tracer);
+          assert (P.samples tracer = 1);
+          assert (Test_pathtracer.pixels tracer = expected);
+          (* released and resized, then drawn at the new size *)
+          get (P.release_film tracer);
+          get (P.resize tracer ~width:32 ~height:24);
+          get (P.render tracer camera);
+          get (P.flush tracer);
+          assert (Bytes.length (Test_pathtracer.pixels tracer) = 32 * 24 * 4);
+          (* what a rest gives back at a real size: 116 of the film's 120 bytes a pixel *)
+          get (P.resize tracer ~width:960 ~height:540);
+          get (P.render tracer camera);
+          get (P.flush tracer);
+          let before = P.Private.device_bytes tracer in
+          get (P.release_film tracer);
+          let after = P.Private.device_bytes tracer in
+          Printf.printf "GPU film at rest: device %Ld -> %Ld bytes at 960x540\n%!" before after;
+          assert (Int64.to_int (Int64.sub before after) >= 116 * 960 * 540)));
   let after = live_handles () in
   assert (after = baseline);
   print_endline

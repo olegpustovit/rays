@@ -1,8 +1,9 @@
 type kind = Color | Depth
-type entry = { kind : kind; samples : int; texture : Ogpu.Backend.texture }
+type entry = { kind : kind; samples : int; passing : bool; texture : Ogpu.Backend.texture }
 
 type t = {
   device : Ogpu.Backend.device;
+  memoryless : bool;
   sample_counts : int list;
   configuration : Ogpu.Surface.configuration;
   mutable entries : entry list;
@@ -18,7 +19,15 @@ let create ~device ~configuration ~sample_counts =
     || List.exists (( >= ) 0) sample_counts
     || List.length (List.sort_uniq Int.compare sample_counts) <> List.length sample_counts
   then invalid_arg "Scene_attachment_pool.create: sample counts must be unique and positive";
-  { device; sample_counts; configuration; entries = []; dead = false }
+  {
+    device;
+    memoryless =
+      Ogpu.Caps.has (Ogpu.Backend.capabilities device) Ogpu.Caps.Memoryless_attachments;
+    sample_counts;
+    configuration;
+    entries = [];
+    dead = false;
+  }
 
 let descriptor configuration kind samples : Ogpu.Types.texture_descriptor =
   let prefix = match kind with Color -> "color" | Depth -> "depth" in
@@ -33,9 +42,11 @@ let descriptor configuration kind samples : Ogpu.Types.texture_descriptor =
     usage = [ Ogpu.Types.Render_attachment ];
   }
 
-let allocate value configuration kind samples =
+let allocate value configuration kind samples ~passing =
   let descriptor = descriptor configuration kind samples in
   match kind with
+  | _ when passing ->
+      Ogpu.Backend.create_memoryless_texture value.device ~depth:(kind = Depth) descriptor
   | Color -> Ogpu.Backend.create_texture value.device descriptor
   | Depth -> Ogpu.Backend.create_depth_texture value.device descriptor
 
@@ -44,15 +55,19 @@ let destroy_entries entries =
 
 let acquire_many value keys =
   if value.dead then error "pool is destroyed"
-  else if List.exists (fun (_, samples) -> not (List.mem samples value.sample_counts)) keys then
+  else if List.exists (fun (_, samples, _) -> not (List.mem samples value.sample_counts)) keys then
     error "unsupported sample count"
   else
     let rec loop made textures = function
       | [] ->
           value.entries <- List.rev_append made value.entries;
           Ok (List.rev textures)
-      | (kind, samples) :: rest -> (
-          let matches entry = entry.kind = kind && entry.samples = samples in
+      | (kind, samples, passing) :: rest -> (
+          (* a backend without memoryless attachments keeps one ordinary attachment for both *)
+          let passing = passing && value.memoryless in
+          let matches entry =
+            entry.kind = kind && entry.samples = samples && entry.passing = passing
+          in
           let found =
             match List.find_opt matches made with
             | Some _ as entry -> entry
@@ -61,15 +76,17 @@ let acquire_many value keys =
           match found with
           | Some entry -> loop made (entry.texture :: textures) rest
           | None -> (
-              match allocate value value.configuration kind samples with
+              match allocate value value.configuration kind samples ~passing with
               | Error failure ->
                   destroy_entries made;
                   Error failure
-              | Ok texture -> loop ({ kind; samples; texture } :: made) (texture :: textures) rest))
+              | Ok texture ->
+                  loop ({ kind; samples; passing; texture } :: made) (texture :: textures) rest))
     in
     loop [] [] keys
 
-let acquire value kind ~samples = Result.map List.hd (acquire_many value [ (kind, samples) ])
+let acquire ?(passing = false) value kind ~samples =
+  Result.map List.hd (acquire_many value [ (kind, samples, passing) ])
 
 let destroy value =
   if not value.dead then begin
@@ -80,5 +97,5 @@ let destroy value =
 
 let allocated value =
   List.rev_map
-    (fun entry -> (entry.kind, entry.samples, Ogpu.Backend.texture_id entry.texture))
+    (fun entry -> (entry.kind, entry.samples, entry.passing, Ogpu.Backend.texture_id entry.texture))
     value.entries

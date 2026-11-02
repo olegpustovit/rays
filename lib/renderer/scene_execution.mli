@@ -157,6 +157,11 @@ val sun_map_size : int
 module Private : sig
   val uniform_capacity : t -> int
   val uniform_shrink_after : int
+  val staging_bytes : t -> int
+  (** What the texture upload scratch holds, on the device and on the host each. *)
+
+  val memoryless_attachments : t -> bool * int
+  (** Whether the device has memoryless attachments, and how many the pool holds that ask for them. *)
 
   type gpu_vertices
   type nonrec gpu_vertices_owner = gpu_vertices_owner

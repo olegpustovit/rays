@@ -138,7 +138,7 @@ let destroy_parent operation lifetime raw detach_parent =
         end)
 
 type device = { raw : Metal_raw.handle; lifetime : lifetime; registry_id : int64 }
-type buffer_storage_mode = Shared | Managed | Private
+type buffer_storage_mode = Shared | Managed | Private | Memoryless
 
 type texture_kind =
   | Texture_1d
@@ -973,7 +973,7 @@ let ensure_same_device operation expected actual =
   if same_device expected actual then Ok ()
   else error operation Device_mismatch "resources belong to different Metal devices"
 
-let storage_code = function Shared -> 0 | Managed -> 1 | Private -> 2
+let storage_code = function Shared -> 0 | Managed -> 1 | Private -> 2 | Memoryless -> 3
 let cache_code = function Default_cache -> 0 | Write_combined -> 1
 let hazard_code = function Default_hazard_tracking -> 0 | Untracked -> 1 | Tracked -> 2
 
@@ -1122,7 +1122,7 @@ end
 
 module Buffer = struct
   type t = buffer
-  type storage_mode = buffer_storage_mode = Shared | Managed | Private
+  type storage_mode = buffer_storage_mode = Shared | Managed | Private | Memoryless
   type cpu_cache_mode = resource_cpu_cache_mode = Default_cache | Write_combined
 
   type hazard_tracking_mode = resource_hazard_tracking_mode =
@@ -1199,6 +1199,11 @@ module Buffer = struct
     on_main "Metal.Buffer.create" (fun () ->
         let* () = ensure_live "Metal.Buffer.create" device.lifetime in
         let* () = validate_create "Metal.Buffer.create" device ~length ~label in
+        let* () =
+          if storage = Memoryless then
+            error "Metal.Buffer.create" Invalid_argument "a buffer cannot be memoryless"
+          else Ok ()
+        in
         let options = resource_options_code ~storage ~cpu_cache ~hazard_tracking in
         let* raw =
           native_result "Metal.Buffer.create" (Metal_raw.buffer_create device.raw length options)
@@ -1952,6 +1957,8 @@ module Texture = struct
     then invalid "texture usage contains duplicates"
     else if descriptor.swizzle <> default_swizzle && has_writable_usage descriptor.usage then
       invalid "texture swizzling is incompatible with shader-write and shader-atomic usage"
+    else if descriptor.storage = Memoryless && descriptor.usage <> [ Render_target ] then
+      invalid "a memoryless texture is a render target and nothing else"
     else if descriptor.compression = Lossy && descriptor.storage <> Private then
       invalid "lossy texture compression requires private storage"
     else if descriptor.compression = Lossy && not descriptor.allow_gpu_optimized_contents then
@@ -2178,7 +2185,7 @@ module Texture = struct
   let validate_transfer operation (value : t) ~region ~mip_level ~slice ~bytes_per_row
       ~bytes_per_image =
     let invalid message = error operation Invalid_argument message in
-    if value.descriptor.storage = Private then
+    if value.descriptor.storage = Private || value.descriptor.storage = Memoryless then
       error operation Unsupported "private textures have no CPU transfer mapping"
     else if is_multisample value.descriptor.kind then
       error operation Unsupported "multisample textures do not support CPU transfer"

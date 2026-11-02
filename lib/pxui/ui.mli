@@ -85,6 +85,13 @@ val text_input_focused : t -> bool
 (** A focused control owns keyboard input (including text and numeric entry). Hosts suppress their
     shortcuts while a control owns it. *)
 
+val at_rest : t -> bool
+(** Time alone changes nothing in the last frame's UI: no gesture, focused text, scroll in motion or
+    hover delay running. A host may skip frames while its input stands still. *)
+
+val atlas_mirror_bytes : t -> int
+(** What the glyph atlas keeps on the host: a byte a texel. *)
+
 val passed_undo : t -> [ `Undo | `Redo ] option
 (** Command-Z or Shift-Command-Z (Command-Y) pressed in the focused text last frame while its own
     stack was empty: the host runs its document undo or redo instead. *)
@@ -641,6 +648,9 @@ type language = {
 }
 (** What a code editor knows about its text. A host supplies one (the editor's Lisp); the text area
     itself is language-free. *)
+
+val text_colors : t -> language -> string -> (int * int * Rays_math.Color.t) list
+(** The language's colours for a text; a text a pane shows again is not coloured again. *)
 
 val text_area_submit :
   t ->

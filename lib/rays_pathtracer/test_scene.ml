@@ -128,6 +128,9 @@ let run () =
         Test_pathtracer.pixels tracer
       in
       get (P.replace_mesh tracer placed);
+      let unpacked, packed = P.Private.scene_compaction tracer in
+      Printf.printf "scene BLASes: %Ld -> %Ld bytes compacted\n%!" unpacked packed;
+      assert (packed > 0L && packed < unpacked);
       let scene_pixels = render ~frames:4 () in
       assert (scene_pixels = render ~frames:4 ());
       let capture mesh =
