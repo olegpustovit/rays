@@ -59,17 +59,6 @@ let colorize_now (theme : Pxui.Theme.t) text =
        tokens)
   |> List.concat
 
-(* the colours of the last text, for the theme it was made with *)
-let coloured : (Pxui.Theme.t * string * (int * int * Rays_math.Color.t) list) option ref = ref None
-
-let colorize theme text =
-  match !coloured with
-  | Some (t, s, spans) when t == theme && String.equal s text -> spans
-  | _ ->
-      let spans = colorize_now theme text in
-      coloured := Some (theme, text, spans);
-      spans
-
 let brackets text =
   let _, pairs, _ = lex text in
   pairs
@@ -708,7 +697,7 @@ let language ?(vocab = empty_vocab) ?(names = no_names) ?(imports = []) ?(parinf
     Pxui.Ui.language =
   let infer = parinfer in
   {
-    colorize = colorize theme;
+    colorize = colorize_now theme;
     brackets;
     indent;
     pairs = [ ('(', ')'); ('[', ']'); ('{', '}'); ('"', '"') ];

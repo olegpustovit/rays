@@ -113,6 +113,30 @@ let scale_3 scale =
   ignore (Ui.frame ui (frame ~scale ~time:0. []) build);
   (* the first page of 1024 x 256 texels: alpha only on the host *)
   if Ui.atlas_mirror_bytes ui <> 1024 * 256 then fail (label "the glyph mirror is not alpha only");
+  (* two panes' texts, frame after frame: each is coloured once *)
+  let coloured = ref 0 in
+  let counting : Ui.language =
+    {
+      colorize =
+        (fun _ ->
+          incr coloured;
+          []);
+      brackets = (fun _ -> []);
+      indent = (fun _ _ -> "");
+      pairs = [];
+      complete = (fun _ _ -> []);
+      describe = (fun _ _ -> None);
+      number_at = (fun _ _ -> None);
+      context_at = (fun _ _ -> `Code);
+      comment = ";";
+      rewrite = None;
+    }
+  in
+  for _ = 1 to 3 do
+    ignore (Ui.text_colors ui counting "(first)");
+    ignore (Ui.text_colors ui counting "(second)")
+  done;
+  if !coloured <> 2 then fail (label "a text a pane shows again was coloured again");
   ignore (Ui.frame ui (frame ~scale ~time:0.5 [ press (70, 30); release (70, 30) ]) build);
   if abs_float (Option.get (float_of_string_opt !compact) -. 0.5) > 0.02 || Ui.text_input_focused ui
   then fail (label "compact slider click did not jump to the pointer");

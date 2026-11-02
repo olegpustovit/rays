@@ -251,6 +251,7 @@ and ui = {
   mutable edit_undo : (string * int * int) list;
   mutable edit_undo_charged : int;
   mutable text_rows_seen : (int option * string * (int * int * int) array) list;
+  mutable text_colors_seen : (Theme.t * string * (int * int * Rays_math.Color.t) list) list;
   mutable edit_redo : (string * int * int) list;
   mutable edit_group : int;
   (* the undo and redo stacks of texts left behind (key, value, undo, redo), newest first: a text
@@ -670,6 +671,7 @@ let create ?(font_size = Theme.font_size) ?font_path () =
     edit_undo = [];
     edit_undo_charged = 0;
     text_rows_seen = [];
+    text_colors_seen = [];
     edit_redo = [];
     edit_group = -1;
     edit_shelf = [];

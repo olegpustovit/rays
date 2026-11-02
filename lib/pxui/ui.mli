@@ -649,6 +649,9 @@ type language = {
 (** What a code editor knows about its text. A host supplies one (the editor's Lisp); the text area
     itself is language-free. *)
 
+val text_colors : t -> language -> string -> (int * int * Rays_math.Color.t) list
+(** The language's colours for a text; a text a pane shows again is not coloured again. *)
+
 val text_area_submit :
   t ->
   at:float * float ->

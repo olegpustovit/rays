@@ -1158,6 +1158,8 @@ let paint_text_area ~colors ~composition ~messages ~chips ~hovered_number ~scrub
           in
           Paint.fill paint ~x:(text_x +. x0) ~y ~w:(Float.max 1. (x1 -. x0)) ~h:row color
       in
+      (* the colours are sorted and the rows come in order: one walk of them, whatever the rows *)
+      let colors_ahead = ref colors in
       for line = first to last do
         let y = by -. offset +. pad +. (float (slot_of notes line) *. row) in
         let text_y = y +. float (max 0 ((text_line_height ui - ui.font_size) / 2)) in
@@ -1258,24 +1260,24 @@ let paint_text_area ~colors ~composition ~messages ~chips ~hovered_number ~scrub
         else if colors = [] then
           Paint.text paint ~at:(text_x, text_y) ~color:theme.foreground line_str
         else begin
-          (* the row in coloured runs, the gaps in the foreground colour; ponytail: every row scans
-           the whole colour list (visible rows x tokens), fine for workspace-sized text *)
+          (* the row in coloured runs, the gaps in the foreground colour *)
           let at a = text_x +. width (String.sub final ls (a - ls)) in
           let run a b color =
             if a < b then Paint.text paint ~at:(at a, text_y) ~color (String.sub final a (b - a))
           in
-          let pos =
-            List.fold_left
-              (fun pos (a, b, color) ->
+          let rec past = function (_, b, _) :: rest when b <= ls -> past rest | ahead -> ahead in
+          colors_ahead := past !colors_ahead;
+          let rec runs pos = function
+            | (a, b, color) :: rest when a < le ->
                 let a = max a ls and b = min b le in
-                if a >= b || a < pos then pos
+                if a >= b || a < pos then runs pos rest
                 else (
                   run pos a theme.foreground;
                   run a b color;
-                  b))
-              ls colors
+                  runs b rest)
+            | _ -> pos
           in
-          run pos le theme.foreground
+          run (runs ls !colors_ahead) le theme.foreground
         end
       done;
       (* the message rows: the diagnostic at the label size, under the indent of its line *)
@@ -1663,6 +1665,21 @@ let arm_scrub ~scrubbing ~scrub_state ~on_scrub ~point_at ~text ~on_handle ~sign
   | _ -> ());
   ()
 
+(* A language's colours for a text, kept like its rows: one list a pane on screen. A theme is part of
+   the colours. ponytail: 8 panes showing text; a ninth colours again. *)
+let text_colors ui (language : language) text =
+  let theme = ui.theme in
+  match
+    List.find_opt
+      (fun (seen, known, _) -> seen == theme && String.equal known text)
+      ui.text_colors_seen
+  with
+  | Some (_, _, colors) -> colors
+  | None ->
+      let colors = language.colorize text in
+      ui.text_colors_seen <- List.take 8 ((theme, text, colors) :: ui.text_colors_seen);
+      colors
+
 let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []) ?(spans = [])
     ?reveal ?(reveal_nonce = 0) ?select ?(splice = []) ?language ?on_context ?on_scrub
     ?on_scrub_edit ?on_click ?on_caret ?on_caret_move ?on_select ?on_drop ?(chips = []) label text =
@@ -2001,7 +2018,7 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
   let offset = scroll_position ui body and horizontal = !horizontal in
   let theme = ui.theme and composition = ui.composition in
   (* the language's colours and the bracket pair at the caret, once per frame *)
-  let colors = match language with Some l -> l.colorize final | None -> [] in
+  let colors = match language with Some l -> text_colors ui l final | None -> [] in
   let matched =
     match language with
     | Some l when focused ->
