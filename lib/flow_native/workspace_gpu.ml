@@ -218,6 +218,7 @@ let measure ?inputs:prepared t ~fast packed ~count =
                   match (H.backend host).prepare ~fast packed with
                   | Error _ -> None
                   | Ok kernel -> (
+                      let producer = ref None in
                       let once () =
                         (* New immutable CPU inputs must pay their transfer on every
                            sample; reusing identities only measures the upload cache. *)
@@ -235,6 +236,7 @@ let measure ?inputs:prepared t ~fast packed ~count =
                         match kernel.run inputs with
                         | Error _ -> None
                         | Ok output -> (
+                            producer := Some output.G.identity;
                             match kernel.planes output with
                             | Error _ -> None
                             | Ok planes ->
@@ -245,12 +247,16 @@ let measure ?inputs:prepared t ~fast packed ~count =
                                     | Error _ -> None
                                     | Ok () -> Some (t.clock () -. start)))
                       in
-                      match once () with
-                      | None -> None
-                      | Some _ ->
-                          let runs = List.filter_map (fun _ -> once ()) [ 1; 2; 3 ] in
-                          if List.length runs < 3 then None
-                          else Some (List.nth (List.sort Float.compare runs) 1)))
+                      (* a measurement's runner would keep its inputs' copies and upload buffers *)
+                      Fun.protect
+                        ~finally:(fun () -> Option.iter (H.forget_producer host) !producer)
+                        (fun () ->
+                          match once () with
+                          | None -> None
+                          | Some _ ->
+                              let runs = List.filter_map (fun _ -> once ()) [ 1; 2; 3 ] in
+                              if List.length runs < 3 then None
+                              else Some (List.nth (List.sort Float.compare runs) 1))))
             in
             (* Actual frame/data errors need not hold on the next invocation. *)
             if Option.is_none prepared || Option.is_some seconds then

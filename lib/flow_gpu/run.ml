@@ -56,6 +56,8 @@ type pool = {
   mutable retired : (int * kept Weak.t) list;
       (** oldest first, by id: only the one {!reclaim} reads is ever [Weak.get], since a get while
           the GC marks keeps the holder alive another cycle *)
+  mutable collected_at : int;  (** bytes created by the pool's owner at its last requested cycle *)
+  mutable created : int;
 }
 
 let pool () =
@@ -66,6 +68,8 @@ let pool () =
     retiring = Atomic.make [];
     freed = Atomic.make 0;
     retired = [];
+    collected_at = 0;
+    created = 0;
   }
 
 (* Kept outputs a later dispatch may bind by their placeholder, on the initial domain. *)
@@ -296,7 +300,8 @@ let drain_pool pool =
       | Some (buffer, floats, capacity, _) ->
           Hashtbl.remove pool.held id;
           let free = List.fold_left (fun sum (_, _, c) -> sum + c) 0 pool.free in
-          if free + capacity <= free_budget then
+          (* a frame of big outputs must find its buffers again *)
+          if free + capacity <= max free_budget (8 * capacity) then
             pool.free <- (buffer, floats, capacity) :: pool.free
           else ignore (B.destroy_buffer buffer)
       | None -> ())
@@ -327,12 +332,27 @@ let retired_budget_for device =
 let reclaim pool ~device =
   drain_pool pool;
   let held (id, w) = Weak.check w 0 && Hashtbl.mem pool.held id in
-  pool.retired <- List.filter held (pool.retired @ List.rev (Atomic.exchange pool.retiring []));
+  let refresh () =
+    pool.retired <- List.filter held (pool.retired @ List.rev (Atomic.exchange pool.retiring []))
+  in
+  refresh ();
   let bytes sum (id, _) =
     match Hashtbl.find_opt pool.held id with
     | Some (_, _, capacity, _) -> sum + capacity
     | None -> sum
   in
+  (* Only a collection can tell a dead retired holder from a live one, so device memory must not wait
+     for the collector's own pace: past this many retired bytes, and once per that many bytes the pool
+     has had to create, ask for one cycle. What it finds dead comes back unread. *)
+  if
+    List.fold_left bytes 0 pool.retired > free_budget
+    && pool.created - pool.collected_at >= free_budget
+  then begin
+    pool.collected_at <- pool.created;
+    Gc.major ();
+    drain_pool pool;
+    refresh ()
+  end;
   if List.fold_left bytes 0 pool.retired > retired_budget_for device then begin
     (match pool.retired with
     | (_, w) :: rest ->
@@ -341,6 +361,15 @@ let reclaim pool ~device =
     | [] -> ());
     drain_pool pool
   end
+
+let recycled pool ~device length =
+  match take_free pool length with
+  | Some _ as found -> found
+  | None ->
+      reclaim pool ~device;
+      take_free pool length
+
+let created pool bytes = pool.created <- pool.created + bytes
 
 let create ?pool gpu = create_owned ?pool (Renderer.gpu_device gpu) (Renderer.gpu_queue gpu)
 
@@ -357,14 +386,7 @@ let forget_input slot =
 let ensure ?(mapped = false) t slot length =
   (if mapped && slot.buffer = None && length > 0 then
      (* an output slot whose last buffer a holder took: a recycled buffer of the size class *)
-     let found =
-       match take_free t.pool length with
-      | Some _ as found -> found
-      | None ->
-           reclaim t.pool ~device:t.device;
-           take_free t.pool length
-     in
-     match found with
+     match recycled t.pool ~device:t.device length with
      | Some (buffer, floats, capacity) ->
          slot.buffer <- Some buffer;
          slot.floats <- Some floats;
@@ -387,6 +409,7 @@ let ensure ?(mapped = false) t slot length =
     let fresh, floats =
       if mapped then
         let buffer, floats = get (B.create_mapped_buffer t.device descriptor) in
+        created t.pool !capacity;
         (buffer, Some floats)
       else (get (B.create_buffer t.device descriptor), None)
     in

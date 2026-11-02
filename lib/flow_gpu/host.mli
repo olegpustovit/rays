@@ -108,3 +108,7 @@ val zero : stats
 val stats : t -> stats
 (** Cumulative successful operations, including evicted runners and closed owners. Inspect on the
     creating domain, outside measured frame work. *)
+
+val forget_producer : t -> int -> unit
+(** Closes the runner of a prepared kernel, by its output's identity: its upload buffers and the
+    inputs they were compared to go with it. A later run of that kernel makes a new one. *)

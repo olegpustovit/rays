@@ -10,6 +10,14 @@ type pool
 val pool : unit -> pool
 
 val close_pool : pool -> unit
+
+val recycled :
+  pool -> device:Ogpu.Backend.device -> int -> (Ogpu.Backend.buffer * Ogpu.Backend.floats * int) option
+(** A free buffer of at least that many bytes and at most twice it, after giving back what collected
+    holders released (and asking for a collection past the retired budget). *)
+
+val created : pool -> int -> unit
+(** Tell the pool's pacing of bytes made outside it. *)
 (** On the initial domain, after its runners are closed: destroys what it still holds. *)
 
 type scene = {

@@ -138,7 +138,7 @@ libraries cannot reach.
   `rays_math`, `scene_command`, `lru` and `parallel` and never reaches `rays`, `pxui*`, `sop`, `rdk` or `rays_editor`;
   `flow_shader` depends only on `flow`, `flow_ir` and `ogpu_core` (a build rule running its
   `print_shader.exe` adds no library edge); `flow_gpu` depends only on `flow`, `flow_ir`, `flow_shader`, `param`, `rays_math`,
-  `ogpu_core`, `ogpu`, `renderer`, `lru` and `parallel` and never reaches
+  `ogpu_core`, `ogpu`, `renderer`, `lru`, `mem` and `parallel` and never reaches
   `sop`, `rdk`, `flow_sop` or any UI library; `flow_web` depends only on `flow`, `flow_ir`,
   `param`, `rays_math`, `scene_command` and `parallel` and never reaches `rays`, `sop`, `rdk`, `flow_sop`,
   `flow_gpu`, any UI library or the GPU libraries;

@@ -617,18 +617,32 @@ let resident_scope ?(uint32 = false) ~fast t =
         | Some (b :: rest) ->
             Hashtbl.replace slot.free bytes rest;
             Ok (b, bytes)
-        | _ ->
+        | _ -> (
+            (* a large buffer comes from what retained outputs gave back; sizes by class, so a mesh
+               whose count moves between frames finds one *)
+            let large = bytes >= 1 lsl 20 in
+            let device = Renderer.gpu_device t.gpu in
+            match if large then Run.recycled t.shared ~device bytes else None with
+            | Some (b, _, _) -> Ok (b, bytes)
+            | None ->
+            let size =
+              if not large then bytes
+              else
+                let rec up n = if n >= bytes then n else up (2 * n) in
+                up (1 lsl 20)
+            in
+            if large then Run.created t.shared size;
             Result.map
               (fun b ->
                 t.resident_buffers <- t.resident_buffers + 1;
                 (b, bytes))
               (Result.map_error Run.Private.diagnostic
-                 (Result.map fst (Ogpu.Backend.create_mapped_buffer (Renderer.gpu_device t.gpu)
+                 (Result.map fst (Ogpu.Backend.create_mapped_buffer device
                     {
                       label = Some "Flow resident";
-                      size = Int64.of_int bytes;
+                      size = Int64.of_int size;
                       usage = [ Storage; Copy_src; Copy_dst ];
-                    }))))
+                    })))))
   in
   (* a site, its runner None when the device refuses its form; decided once per site *)
   let site (packed : Flow_ir.Packed.t) =
@@ -1702,6 +1716,11 @@ let stats t =
     held_buffers = (if t.closed then 0 else Run.Private.pool_held t.shared);
     freed = Run.Private.pool_freed t.shared;
   }
+
+let forget_producer t identity =
+  let found = ref None in
+  Cache.iter t.runners (fun key runner -> if runner.identity = identity then found := Some key);
+  Option.iter (Cache.remove t.runners) !found
 
 let backend t =
   { (standard_backend t) with
