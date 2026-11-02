@@ -470,8 +470,8 @@ depth pass binds the borrowed positions and reads them at word 79's stride too, 
 draw (`Scene3_world`) binds them as the plain one does. Ordering is explicit: the display binds only a settled output (its
 dispatch completed, on the producer's queue). A display is dropped when the editor's drawn scenes
 no longer name its key (`Workspace_gpu.frame ~keep`, once a frame, when they change) or its mesh is
-collected, and its buffers are unregistered and unpinned two frames later (the renderer keeps one
-presented frame in flight), not when the presenting queue completes. ponytail: that needs the renderer's
+collected, and its buffers are unregistered and unpinned a frame later (the renderer settles its one
+presented frame in flight before it draws again), not when the presenting queue completes. ponytail: that needs the renderer's
 completion epoch exposed to the producer, which a discrete backend will want anyway. The buffers
 carry `Storage` usage only: the vertex stage pulls them as storage, so no vertex-input layout is
 assumed.

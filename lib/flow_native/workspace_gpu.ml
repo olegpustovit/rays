@@ -575,11 +575,14 @@ let drop_display t key =
       (match Hashtbl.find_opt t.shown id with
       | Some (shown, _, _, _, _) when String.equal shown key -> Hashtbl.remove t.shown id
       | _ -> ());
-      t.releasing <- (t.frames + 2, release) :: t.releasing
+      t.releasing <- (t.frames + 1, release) :: t.releasing
   | None -> ()
 
-(* ponytail: a dropped display's buffers wait two frames, not for the presenting queue's completion,
-   which needs the renderer's epoch; the renderer keeps one presented frame in flight *)
+(* A dropped display's buffers wait for the next frame: the frame that last drew it is the one in flight
+   when it is dropped, and the renderer settles that before it draws again ([Scene_execution.settle]).
+   ponytail: counted in frames, not the presenting queue's completion, which needs the renderer's
+   epoch; a window not drawn (hidden) ticks with no settle, so a slower frame could see its buffers
+   reused, in a picture nobody sees. *)
 let frame ?keep t =
   if (not t.closed) && Domain.is_main_domain () then begin
     t.frames <- t.frames + 1;

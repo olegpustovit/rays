@@ -755,11 +755,11 @@ which reads P, is never made) and the pixels equal the host display's under the 
 A display is released when the editor stops drawing it: each frame `Editor_loop` calls
 `Workspace_gpu.frame`, with the device keys its drawn scenes name (`Loop_model.display_keys`) when
 they changed, and a binding left out (its node removed, its mesh recooked) or whose mesh was
-collected is unregistered and unpinned two frames later (one presented frame stays in flight), so
+collected is unregistered and unpinned a frame later (one presented frame stays in flight), so
 its buffers return to the pool. It had waited for its mesh's collection (a one-word token, no GC
 pressure) and then three more bound displays: removing the last displayed node kept its buffers
 pinned until close, and a dropped one could be freed while the frame that drew it was in flight.
-`test_chain_frames_native` removes the node and fails unless every binding is released two frames
+`test_chain_frames_native` removes the node and fails unless every binding is released a frame
 later without a collection and, once its results die, the pool holds no buffer (16 stayed held
 without the release).
 A lit triangle mesh without N (2026-10-29) is drawn with the normals the host display would make

@@ -56,7 +56,7 @@ val display_refusal : t -> string option
 
 val frame : ?keep:string list -> t -> unit
 (** One presented frame (initial domain): [keep] is every display key the frame's scenes still draw,
-    when they changed; a bound display left out is dropped. Displays dropped two frames ago are
+    when they changed; a bound display left out is dropped. Displays dropped the frame before are
     unregistered and unpinned, so their buffers return to the pool. *)
 
 val held_displays : t -> int

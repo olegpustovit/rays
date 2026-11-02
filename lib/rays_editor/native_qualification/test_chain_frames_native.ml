@@ -12,7 +12,7 @@
    equal the host scan exactly. A lit mesh is also drawn under a World sun: the sun's fit reads
    the device mesh's bounds (24 KB), its host copy is never made (P stays unread), and its pixels
    equal the host display's under the same World. Removing the node (its scenes draw no display)
-   releases every binding two Workspace_gpu.frames later, without a collection, and once its results
+   releases every binding one Workspace_gpu.frame later, without a collection, and once its results
    die the pool holds no buffer. The median frame on the CPU and the GPU, and the median device
    display (lowering and drawing a 256 x 256 canvas) are printed. A fifth case recomputes the
    normals of a displaced triangle grid in the driven transform: after the first frame two
@@ -513,7 +513,7 @@ let run (drive, xdrive, connectivity) =
                 done;
                 Flow_native.Workspace_gpu.frame gpu
               done;
-              (* the node removed: its scenes draw no display, so two frames later every binding is
+              (* the node removed: its scenes draw no display, so one frame later every binding is
                  released (no collection needed), and once its results die the pool holds nothing *)
               Option.iter P.destroy !device_tracer;
               Option.iter P.destroy !host_tracer;
@@ -525,11 +525,11 @@ let run (drive, xdrive, connectivity) =
                    %!"
                   count (median !trace_times) (median !host_trace_times) (frames - 1);
               if Flow_native.Workspace_gpu.held_displays gpu = 0 then failwith "no display is held";
-              for _ = 0 to 2 do
+              for _ = 0 to 1 do
                 Flow_native.Workspace_gpu.frame ~keep:[] gpu
               done;
               if Flow_native.Workspace_gpu.held_displays gpu <> 0 then
-                failwith "a removed display is still bound two frames later";
+                failwith "a removed display is still bound a frame later";
               gpu_close ();
               Gc.full_major ();
               Flow_native.Workspace_gpu.frame gpu;
