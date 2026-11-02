@@ -527,19 +527,6 @@ let input_geometry session (output : output) =
 let memo_find memo node =
   List.find_opt (fun (seen, _) -> seen == node) (Hashtbl.find_all memo (Node.id node))
 
-let memo_remove memo node =
-  let id = Node.id node in
-  match Hashtbl.find_all memo id with
-  | [] -> ()
-  | entries ->
-      Hashtbl.remove memo id;
-      List.iter
-        (fun ((seen, _) as entry) -> if seen != node then Hashtbl.add memo id entry)
-        entries
-
-(* Remaining planned CPU consumers for this cook; drop a memo entry at last use (S5). *)
-let remaining_consumers = Hashtbl.create 64
-
 (* Snapshot metadata, not payload planes. Exact CLOCK touch bits matter when
    an earlier branch evicts an entry a later branch initially found. *)
 let snapshot session =
@@ -806,29 +793,12 @@ let cached session ~context node =
     | Deferred_refresh | Missing -> None
 
 let rec evaluate memo session context node =
-  let result =
-    match memo_find memo node with
-    | Some (_, result) -> result
-    | None ->
-        let result = evaluate_uncached memo session context node in
-        Hashtbl.add memo (Node.id node) (node, result);
-        result
-  in
-  (match Context.cpu_consumers context (Node.id node) with
-  | Some total when total > 0 ->
-      let id = Node.id node in
-      let left =
-        match Hashtbl.find_opt remaining_consumers id with
-        | None -> total - 1
-        | Some n -> n - 1
-      in
-      if left <= 0 then begin
-        Hashtbl.remove remaining_consumers id;
-        memo_remove memo node
-      end
-      else Hashtbl.replace remaining_consumers id left
-  | _ -> ());
-  result
+  match memo_find memo node with
+  | Some (_, result) -> result
+  | None ->
+      let result = evaluate_uncached memo session context node in
+      Hashtbl.add memo (Node.id node) (node, result);
+      result
 
 (* Complete the same sequential DFS prefix that reaches every shared node.
    Once it is memoized, the remaining branch DAGs have disjoint mutable state.
@@ -1154,7 +1124,6 @@ let cook ?cpu_consumers session ~context node =
            more node, so it ends) *)
         let rec attempt () =
           session.written <- [];
-          Hashtbl.clear remaining_consumers;
           let refused = Context.refusals context in
           let result = evaluate (Hashtbl.create 64) session context node in
           ignore (Context.settle ~all:true context);
