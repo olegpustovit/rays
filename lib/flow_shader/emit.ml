@@ -345,18 +345,10 @@ let rec kernel ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32
     ?uint32_inputs ?uint32_tables program =
   let spirv =
     lazy
-      (if
-         uint32_scalars = Some true || uint32_outputs <> None || uint32_inputs <> None
-         || uint32_tables <> None
-       then
-         (* ponytail: exact uint32 buffers are MSL-only so far; Spirv learns them with their first
-            Vulkan caller, until then the kernel is refused and the value stays on the CPU *)
-         Error (Diagnostic.error ~code:"E_GPU_FORM" "SPIR-V kernels have no exact uint32 buffers yet.")
-       else
-         Result.map
-           (fun (k : Spirv.t) -> (k.bytes, k.entry, k.interface))
-           (Spirv.kernel ?fast ?instanced ?motion
-              ~curves:(curves <> None) ?spheres program))
+      (Result.map
+         (fun (k : Spirv.t) -> (k.bytes, k.entry, k.interface))
+         (Spirv.kernel ?fast ?instanced ?motion ~curves:(curves <> None) ?spheres ?uint32_scalars
+            ?uint32_outputs ?uint32_inputs ?uint32_tables program))
   in
   Result.map
     (fun msl -> { msl with spirv })

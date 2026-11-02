@@ -13,6 +13,10 @@ val kernel :
   ?motion:bool ->
   ?curves:bool ->
   ?spheres:bool ->
+  ?uint32_scalars:bool ->
+  ?uint32_outputs:int list ->
+  ?uint32_inputs:int list ->
+  ?uint32_tables:int list ->
   Flow_ir.Packed.t ->
   (t, Diagnostic.t) result
 (** A moving scene ([motion]) is refused ([E_GPU_FORM]): SPIR-V ray queries have no motion form.
