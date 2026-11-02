@@ -95,8 +95,13 @@ let create ?(clock = Unix.gettimeofday) () =
     jobs_lock = Mutex.create ();
     jobs_ready = Condition.create ();
     wake =
-      (* a socket pair, not a pipe: Windows' select and set_nonblock take sockets only *)
-      (let r, w = Unix.socketpair ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+      (* a socket pair, not a pipe: Windows' select and set_nonblock take sockets only. There it
+         goes through a temporary path that another process can take first, so it may try again. *)
+      (let rec pair attempts =
+         try Unix.socketpair ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0
+         with Unix.Unix_error ((EADDRINUSE | ENOENT), _, _) when attempts > 0 -> pair (attempts - 1)
+       in
+       let r, w = pair 16 in
        Unix.set_nonblock r;
        Unix.set_nonblock w;
        (r, w));
