@@ -979,30 +979,38 @@ let line_field ui ~at ~w ~h ?(grab = false) ?(placeholder = "") label value =
 
 (* The rows of a text: (start, stop, logical line) with [stop] exclusive and before the newline.
    Without [cols] a row is a line; with it a line continues every [cols] characters. *)
+(* ponytail: one-slot cache; same text+cols (physical) skips the O(text) walk (memory plan S7). *)
+let text_rows_cache : (int option * string * (int * int * int) array) option ref = ref None
+
 let text_rows ?cols text =
-  let n = String.length text in
-  let rows = ref [] in
-  let rec line start logical =
-    let stop = match String.index_from_opt text start '\n' with Some i -> i | None -> n in
-    let rec chunk from =
-      match cols with
-      | None -> rows := (from, stop, logical) :: !rows
-      | Some cols ->
-          let rec advance i k =
-            if k = 0 || i >= stop then i
-            else advance (i + Uchar.utf_decode_length (String.get_utf_8_uchar text i)) (k - 1)
-          in
-          let upto = advance from (max 1 cols) in
-          if upto >= stop then rows := (from, stop, logical) :: !rows
-          else (
-            rows := (from, upto, logical) :: !rows;
-            chunk upto)
-    in
-    chunk start;
-    if stop < n then line (stop + 1) (logical + 1)
-  in
-  line 0 0;
-  Array.of_list (List.rev !rows)
+  match !text_rows_cache with
+  | Some (c, t, rows) when c = cols && t == text -> rows
+  | _ ->
+      let n = String.length text in
+      let rows = ref [] in
+      let rec line start logical =
+        let stop = match String.index_from_opt text start '\n' with Some i -> i | None -> n in
+        let rec chunk from =
+          match cols with
+          | None -> rows := (from, stop, logical) :: !rows
+          | Some cols ->
+              let rec advance i k =
+                if k = 0 || i >= stop then i
+                else advance (i + Uchar.utf_decode_length (String.get_utf_8_uchar text i)) (k - 1)
+              in
+              let upto = advance from (max 1 cols) in
+              if upto >= stop then rows := (from, stop, logical) :: !rows
+              else (
+                rows := (from, upto, logical) :: !rows;
+                chunk upto)
+        in
+        chunk start;
+        if stop < n then line (stop + 1) (logical + 1)
+      in
+      line 0 0;
+      let rows = Array.of_list (List.rev !rows) in
+      text_rows_cache := Some (cols, text, rows);
+      rows
 
 (* the row holding byte [index] *)
 let row_at rows index =

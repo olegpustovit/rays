@@ -705,7 +705,9 @@ let create ?device ?gpu_vertices ?sun_depth:sun_factory ~offscreen driver config
                           cache = mesh_table retired;
                           retired;
                           frame = 0;
-                          uniform_pages = Array.make 3 None;
+                          (* One page: settle waits for the previous frame before the next
+                             prepare, so a ring of three never overlaps (memory plan S6). *)
+                          uniform_pages = Array.make 1 None;
                           next_uniform_page = 0;
                           previous_uniforms = [||];
                           prepared_cache = String_table.create ~owner:(Lru.cache "renderer.prepared") 64 ~byte_capacity:cache_byte_capacity;
