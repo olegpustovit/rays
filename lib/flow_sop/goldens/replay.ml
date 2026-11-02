@@ -608,6 +608,23 @@ let compare_check cache source factories with_ =
       and cached = output (lower ~cache source factories ops with_) in
       if normal <> cached then fail ("prepared cook differs for " ^ key)
 
+(* The recorded digests are the Mac's. libm rounds the last bit of sin and cos differently on Windows
+   (ucrtbase vs Apple), so a few rows have a Windows digest of their own in data/windows.txt, one
+   "node/fixture/case digest" per line, each confirmed against the Mac as last-bit differences. *)
+let windows_digests =
+  let table = Hashtbl.create 16 in
+  fun directory ->
+    if Hashtbl.length table = 0 then begin
+      let path = Filename.concat directory "windows.txt" in
+      if Sys.file_exists path then
+        String.split_on_char '\n' (read_file path)
+        |> List.iter (fun line ->
+            match String.split_on_char ' ' (String.trim line) with
+            | [ label; digest ] -> Hashtbl.replace table label digest
+            | _ -> ())
+    end;
+    table
+
 let check_row ?capture ?(prepared = true) ?(times : replay_times option) (cache : replay_cache)
     directory row =
   match children "golden" row with
@@ -653,6 +670,13 @@ let check_row ?capture ?(prepared = true) ?(times : replay_times option) (cache 
         | List [ { node = Sym "error"; _ }; code; message ], `Error (actual_code, actual_message) ->
             string code <> "" && string code = actual_code && string message = actual_message
         | _ -> false
+      in
+      let matches =
+        matches
+        || Sys.win32
+           && (match actual with
+              | `Ok digest -> Hashtbl.find_opt (windows_digests directory) label = Some digest
+              | `Error _ -> false)
       in
       if Sys.getenv_opt "REPLAY_TRACE" = Some "1" then
         Printf.eprintf "%s %s\n%!" (if matches then "done" else "mismatch") label;

@@ -1,0 +1,6 @@
+uv_sphere/none/defaults 973edd8e274e63777c1187c1d2643b05
+tube/none/defaults 7ba4a2c9ddc52e1486bba8f025e8abe0
+torus/none/defaults 25a7ff344ffde116405890cb9f150860
+spiral/none/defaults 4b25b29246a2c5b1b3aeaacdd3ea94a7
+revolve/curves/defaults 9f3bbdc94a5d68c5715839519fa91bba
+circle/none/defaults 6feff5e6d6c83b148d723ea4875e9d59

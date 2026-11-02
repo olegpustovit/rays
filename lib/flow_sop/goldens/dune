@@ -30,6 +30,7 @@
  (deps
   data/ports.sexp.gz
   data/coverage.sexp.gz
+  data/windows.txt
   (glob_files data/inputs/*.gz))
  (action
   (setenv
@@ -44,6 +45,7 @@
  (deps
   data/ports.sexp.gz
   data/coverage.sexp.gz
+  data/windows.txt
   (glob_files data/inputs/*.gz))
  (action
   (setenv
@@ -56,5 +58,5 @@
 
 (rule
  (alias replay_profile)
- (deps data/ports.sexp.gz data/coverage.sexp.gz (glob_files data/inputs/*.gz))
+ (deps data/ports.sexp.gz data/coverage.sexp.gz data/windows.txt (glob_files data/inputs/*.gz))
  (action (setenv REPLAY_JOBS 1 (run %{exe:replay.exe} --profile data))))
