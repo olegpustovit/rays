@@ -23,9 +23,7 @@ let render_blended ?clear r draws =
     (List.map (fun (blend, draw) -> sampled Scene_execution.Scene2 blend draw) draws)
 
 let get = function Ok x -> x | Error e -> failwith (Ogpu.Error.to_string e)
-
-(* Past the ring of frames in flight (three); the 600-frame soak is RAYS_SLOW's. *)
-let frames = List.init (if Sys.getenv_opt "RAYS_SLOW" = Some "1" then 600 else 8) succ
+let frames = List.init 600 succ
 
 let run () =
   let driver = Ogpu.Impl.create_driver () in

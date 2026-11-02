@@ -109,7 +109,7 @@
    (run %{exe:test_workspace_gpu_native.exe})
    (setenv
     GRID_SIDE
-    512
+    256
     (progn
      (run %{exe:test_grid_gpu_native.exe})
      (run %{exe:test_chain_gpu_native.exe})

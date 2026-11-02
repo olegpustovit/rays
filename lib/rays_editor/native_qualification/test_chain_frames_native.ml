@@ -1,5 +1,5 @@
 (* On the real device: the animated chain of bench_chain_frames as assertions. grid (GRID_SIDE
-   squared Points, or CONNECTIVITY Triangles: a lit mesh with its point N; 512 in @runtest-native) >
+   squared Points, or CONNECTIVITY Triangles: a lit mesh with its point N; 256 in @runtest-native) >
    attribute_noise with its offset driven by frame/input's
    t > transform, cooked frame after frame as the editor does (Value_lane.resolve, one session
    cook). The frame-driven offset is the fused write's data, a frame input of its one region: after

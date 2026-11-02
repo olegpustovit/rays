@@ -6,7 +6,11 @@ microbenchmarks name their clock and report allocation separately.
 
 | Date | Test | Before | After | What changed |
 |---|---|---|---|---|
-| 2026-11-02 | `test_scene_execution_metal` (`@runtest-native`) | 63.8 s | 0.5 s (RAYS_SLOW 600-frame soak: see commit) | The uniform-page shrink ran inside the 600-frame loop: 241 submits a frame. It runs once; the other loops take 8 frames, past the ring in flight, and 600 under `RAYS_SLOW=1`. |
+| 2026-11-02 | whole `@runtest-native`, uncached (`--force`) | 100-172 s at load 20-35 | 80 s at load 15 (before the chain group's 256) | The rows below. Still over the 10 s section budget at that load: `test_2d_ports` 25.8 s (13.5 s alone), `test_live_mesh_native` 14 s, `test_workspace_gpu_native` 12.1 s, `test_drawing` particles 11.5 s. |
+| 2026-11-02 | `test_chain_frames_native` group (`@runtest-native`, `GRID_SIDE`) | 19.1 s | whole native_qualification alias 15.9 s | 512 to 256: the same assertions hold; `test_scrub_gpu_native`'s own alias keeps 512. |
+| 2026-11-02 | `test_fast_path` run_bounded | 12.9 s at load 5 | under 5.0 s (focused run with the soak) | 180 scrubs to 120: 40 past the warm-up still tell 8M retained words from the 4M limit. |
+| 2026-11-02 | `@lib/rays_editor/test/runtest`, `@lib/flow_sop/runtest` | 28-65 s; up to 101 s cold | 27.2 s, 21.7 s (`--force`, load 5-6) | Measured only: flow_sop's `test_units` is 20.7 s beside others and about 8 s alone (its domains contend), no line over 1.8 s, so nothing to shrink; cold is compile time. |
+| 2026-11-02 | `test_scene_execution_metal` (`@runtest-native`) | 63.8 s | 3.1 s | The uniform-page shrink ran inside the 600-frame loop: 241 submits a frame. It runs once; the 600-frame soak of the others stays. |
 | 2026-11-02 | `test_2d_ports` native / default | 45.7 s native | 17 s native | `lisp-a`, `lisp-b` and `cpu-1` were one code path three times: `Workspace.export` against `Sketch.export` at one and eight domains, and the command parity is 1 against 8; PNG parity at 2 frames (the synthetic command parity keeps 4). |
 | 2026-11-02 | `test_scene2_argument` | 19.2 s | 6.4 s | 1000 managed-image generations to 300 (live handles sampled flat at 100/200/300), 600 mixed frames to 100, 400 affine to 100; exact counters kept. |
 | 2026-11-02 | `test_retained_eviction` | 13.4 s | 3.8 s | 60 eviction frames to 20, pixels at 1, 2 and the last. |
