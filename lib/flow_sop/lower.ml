@@ -1702,7 +1702,10 @@ let cooked_sources value =
   sources value;
   List.sort_uniq Int.compare !ids
 
-let is_volatile lowered id = Network.Int_map.mem id lowered.volatile
+(* The set alone: the worker keeps this predicate past the lowering it came from. *)
+let is_volatile lowered =
+  let volatile = lowered.volatile in
+  fun id -> Network.Int_map.mem id volatile
 
 (* Fusion across cards (single-program design, E4). A point write whose geometry is, through card
    markers and deletions of other attributes, a point write that nothing else reads is rewritten to

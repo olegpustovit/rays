@@ -1,46 +1,107 @@
 type kind = Cache | Plan | Document
+type pool = Host | Device
 
 type account = {
   name : string;
   kind : kind;
-  mutable bytes : int;
-  mutable peak : int;
+  pool : pool;
+  bytes : int Atomic.t;
+  peak : int Atomic.t;
 }
 
 type owner = account
 
-let accounts : (string * kind, account) Hashtbl.t = Hashtbl.create 32
-let evictors : (owner * (unit -> bool)) list ref = ref []
-let current_budget = ref 0
+type evictor = {
+  owner : owner;
+  rebuild : float;
+  held : unit -> int;
+  last_use : unit -> int;
+  drop : unit -> bool;
+  live : unit -> bool;
+  forget : unit -> unit;
+}
 
-let get kind name =
-  let key = (name, kind) in
-  match Hashtbl.find_opt accounts key with
-  | Some account -> account
-  | None ->
-      let account = { name; kind; bytes = 0; peak = 0 } in
-      Hashtbl.add accounts key account;
-      account
+(* The tables below change when an owner or a table is made, never per charge: a charge touches only
+   its account's atomics. *)
+let lock = Mutex.create ()
+let accounts : (string * kind * pool, account) Hashtbl.t = Hashtbl.create 32
+let evictors : evictor list ref = ref []
+let evictor_mark = ref 16
+let locked f = Mutex.protect lock f
 
-let cache name = get Cache name
-let plan name = get Plan name
-let document name = get Document name
+let get ?(pool = Host) kind name =
+  let key = (name, kind, pool) in
+  locked (fun () ->
+      match Hashtbl.find_opt accounts key with
+      | Some account -> account
+      | None ->
+          let account =
+            { name; kind; pool; bytes = Atomic.make 0; peak = Atomic.make 0 }
+          in
+          Hashtbl.add accounts key account;
+          account)
+
+let cache ?pool name = get ?pool Cache name
+let plan ?pool name = get ?pool Plan name
+let document ?pool name = get ?pool Document name
 let name (account : owner) = account.name
 let kind (account : owner) = account.kind
-let bytes (account : owner) = account.bytes
-let peak (account : owner) = account.peak
+let pool (account : owner) = account.pool
+let bytes (account : owner) = Atomic.get account.bytes
+let peak (account : owner) = Atomic.get account.peak
+
+let rec raise_peak (account : owner) value =
+  let seen = Atomic.get account.peak in
+  if value > seen && not (Atomic.compare_and_set account.peak seen value) then
+    raise_peak account value
 
 let charge (account : owner) n =
+  if n > 0 then raise_peak account (Atomic.fetch_and_add account.bytes n + n)
+
+let rec release (account : owner) n =
   if n > 0 then begin
-    account.bytes <- account.bytes + n;
-    if account.bytes > account.peak then account.peak <- account.bytes
+    let seen = Atomic.get account.bytes in
+    if not (Atomic.compare_and_set account.bytes seen (max 0 (seen - n))) then release account n
   end
 
-let release (account : owner) n =
-  if n > 0 then account.bytes <- max 0 (account.bytes - n)
+let accounts_sum keep =
+  locked (fun () ->
+      Hashtbl.fold (fun _ (a : account) sum -> if keep a then sum + bytes a else sum) accounts 0)
 
-let attributed () =
-  Hashtbl.fold (fun _ (a : account) sum -> sum + a.bytes) accounts 0
+let attributed () = accounts_sum (fun _ -> true)
+
+(* ---- process facts, one small function per OS each in the stubs *)
+
+external phys_footprint : unit -> int option = "caml_rays_mem_phys_footprint"
+external instructions : unit -> int64 option = "caml_rays_mem_instructions"
+external physical_ram : unit -> int = "caml_rays_mem_physical_ram"
+external pressure_start : unit -> bool = "caml_rays_mem_pressure_start"
+external pressure_state : unit -> int = "caml_rays_mem_pressure_state" [@@noalloc]
+external pressure_inject : int -> unit = "caml_rays_mem_pressure_inject" [@@noalloc]
+external pressure_relief : unit -> unit = "caml_rays_mem_pressure_relief"
+
+(* ---- the budget: who set it wins by rank *)
+
+type source = Machine | Preference | Override
+
+let rank = function Machine -> 1 | Preference -> 2 | Override -> 3
+let current_budget = Atomic.make 0
+let budget_rank = Atomic.make 0
+
+let set_budget ?(source = Override) n =
+  if rank source >= Atomic.get budget_rank then begin
+    Atomic.set budget_rank (rank source);
+    Atomic.set current_budget (max 0 n)
+  end
+
+let budget () = Atomic.get current_budget
+
+let machine_budget ~working_set =
+  let ram = physical_ram () * 6 / 10 in
+  match (working_set > 0, ram > 0) with
+  | true, true -> min working_set ram
+  | true, false -> working_set
+  | false, _ -> ram
 
 let parse_budget s =
   let len = String.length s in
@@ -55,58 +116,263 @@ let parse_budget s =
     in
     match int_of_string_opt digits with Some n when n >= 0 -> Some (n * scale) | _ -> None
 
-let set_budget n = current_budget := max 0 n
-let budget () = !current_budget
+let clobbering = Atomic.make false
+let clobber () = Atomic.get clobbering
 
-let () =
-  match Sys.getenv_opt "RAYS_MEM_BUDGET" with
-  | Some s -> Option.iter set_budget (parse_budget s)
-  | None -> ()
+let configure read =
+  Atomic.set clobbering (read "RAYS_MEM_CLOBBER" = Some "1");
+  match read "RAYS_MEM_BUDGET" with
+  | None | Some "" -> Ok ()
+  | Some text -> (
+      match parse_budget text with
+      | Some n ->
+          set_budget n;
+          Ok ()
+      | None -> Error (Printf.sprintf "RAYS_MEM_BUDGET: %S is not a size like 4G, 200M or 1000" text))
 
-let register_evictor owner drop =
-  if kind owner = Cache then evictors := (owner, drop) :: !evictors
+(* ---- evictors *)
 
-let retreat ?(device = 0) () =
-  let limit = !current_budget in
-  if limit <= 0 then `Ok
-  else
-    let over () = attributed () + max 0 device > limit in
-    if not (over ()) then `Ok
-    else
-      let rec go () =
-        if not (over ()) then `Ok
+let prune () =
+  let dead =
+    locked (fun () ->
+        let live, dead = List.partition (fun e -> e.live ()) !evictors in
+        evictors := live;
+        evictor_mark := max 16 (2 * List.length live);
+        dead)
+  in
+  List.iter (fun e -> e.forget ()) dead
+
+let epoch_counter = Atomic.make 0
+let epoch () = Atomic.get epoch_counter
+
+let register_evictor owner ?(rebuild = 1.) ?held ?(last_use = fun () -> 0) ?(live = fun () -> true)
+    ?(forget = ignore) drop =
+  if kind owner = Cache then begin
+    let held = match held with Some held -> held | None -> fun () -> bytes owner in
+    let full =
+      locked (fun () ->
+          evictors := { owner; rebuild; held; last_use; drop; live; forget } :: !evictors;
+          List.compare_length_with !evictors !evictor_mark > 0)
+    in
+    (* amortised: a table made per call (a host session) does not pay a walk each *)
+    if full then prune ()
+  end
+
+let evictor_count () = locked (fun () -> List.length !evictors)
+
+(* Coldest and largest per rebuild cost: frames since last use weigh the bytes a drop would free. *)
+let score now e = float (1 + max 0 (now - e.last_use ())) *. float (e.held ()) /. e.rebuild
+
+(* One entry of the best-scoring cache that can drop one right now. A cache that cannot (busy, on
+   another domain, all pinned) stays out for the rest of this retreat. *)
+let drop_coldest ~refused =
+  let now = epoch () in
+  let ranked =
+    locked (fun () -> !evictors)
+    |> List.filter_map (fun e ->
+        if List.memq e !refused || not (e.live ()) then None
         else
-          (* Largest cache owner first among those that still hold bytes. *)
-          let ranked =
-            List.filter (fun (owner, _) -> bytes owner > 0) !evictors
-            |> List.sort (fun (a, _) (b, _) -> compare (bytes b) (bytes a))
-          in
-          match List.find_opt (fun (_, drop) -> drop ()) ranked with
-          | None -> `Still_over
-          | Some _ -> go ()
-      in
-      go ()
+          let s = score now e in
+          if s > 0. then Some (s, e) else None)
+    |> List.sort (fun (a, _) (b, _) -> Float.compare b a)
+  in
+  let rec go = function
+    | [] -> false
+    | (_, e) :: rest ->
+        if e.drop () then true
+        else begin
+          refused := e :: !refused;
+          go rest
+        end
+  in
+  go ranked
+
+(* ---- the retreat *)
+
+type overdraft = { used : int; limit : int; top : (string * int) list }
+type verdict = Within | Over of overdraft
+
+let top_owners n =
+  locked (fun () -> Hashtbl.fold (fun _ (a : account) acc -> (a.name, bytes a) :: acc) accounts [])
+  |> List.filter (fun (_, b) -> b > 0)
+  |> List.sort (fun (a, x) (b, y) ->
+      let c = compare y x in
+      if c <> 0 then c else String.compare a b)
+  |> List.filteri (fun i _ -> i < n)
+
+let format_bytes n =
+  if n >= 1_000_000_000 then Printf.sprintf "%.2f GB" (float n /. 1e9)
+  else if n >= 1_000_000 then Printf.sprintf "%.1f MB" (float n /. 1e6)
+  else if n >= 1_000 then Printf.sprintf "%.1f KB" (float n /. 1e3)
+  else Printf.sprintf "%d B" n
+
+let describe { used; limit; top } =
+  Printf.sprintf "%s in use over the %s budget; largest owners: %s" (format_bytes used)
+    (format_bytes limit)
+    (match top with
+    | [] -> "none attributed"
+    | top ->
+        String.concat ", "
+          (List.map (fun (name, bytes) -> name ^ " " ^ format_bytes bytes) top))
+
+let total_owner () = match top_owners 1 with [ top ] -> Some top | _ -> None
+
+(* What the footprint still shows of bytes already dropped: garbage until a major cycle passes, so
+   the next boundary and a cook do not count it again. *)
+let shed_bytes = Atomic.make 0
+let shed_cycle = Atomic.make 0
+let major_cycles () = (Gc.quick_stat ()).major_collections
+
+let credit () =
+  let pending = Atomic.get shed_bytes in
+  if pending = 0 then 0
+  else if major_cycles () >= Atomic.get shed_cycle + 2 then begin
+    Atomic.set shed_bytes 0;
+    0
+  end
+  else pending
+
+let note_shed n =
+  if n > 0 then begin
+    if Atomic.get shed_bytes = 0 then Atomic.set shed_cycle (major_cycles ());
+    ignore (Atomic.fetch_and_add shed_bytes n)
+  end
+
+(* The footprint is what the OS charges, the device on one memory pool included. Where it cannot be
+   read: what the host owners claim, plus what the backend measures. *)
+let measured ?(device = fun () -> 0) () =
+  match phys_footprint () with
+  | Some n -> n
+  | None -> accounts_sum (fun a -> a.pool = Host) + max 0 (device ())
+
+(* A pressure event's lowered limit, until the system says normal again. *)
+let lowered = Atomic.make 0
+let seen_pressure = Atomic.make 0
+
+let limit () =
+  let base = budget () and low = Atomic.get lowered in
+  if low > 0 && (base = 0 || low < base) then low else base
+
+(* Below this many frames since the last one, a crossing is not worth a stop-the-world: a process
+   hovering at its limit must not stall on each crossing. *)
+let collect_gap = 120
+let last_collect = Atomic.make min_int
+
+let collected_now () =
+  let now = epoch () in
+  if now - Atomic.get last_collect < collect_gap && Atomic.get last_collect <> min_int then false
+  else begin
+    Atomic.set last_collect now;
+    Gc.full_major ();
+    Atomic.set shed_bytes 0;
+    true
+  end
+
+let over_latch : overdraft option Atomic.t = Atomic.make None
+let overdraft () = Atomic.get over_latch
+
+let apply_pressure () =
+  let state = pressure_state () in
+  let critical = ref false in
+  if state <> Atomic.exchange seen_pressure state then begin
+    match state land 3 with
+    | 0 -> Atomic.set lowered 0
+    | level ->
+        (* below the footprint, so the same steps run *)
+        Atomic.set lowered (max 1 (measured ?device:None () * 9 / 10));
+        critical := level = 2
+  end;
+  !critical
+
+let retreat ?device ?usage ?(later = []) () =
+  Atomic.incr epoch_counter;
+  let critical = apply_pressure () in
+  let bound = limit () in
+  let read = match usage with Some f -> f | None -> measured ?device in
+  let finish verdict =
+    if critical then begin
+      Gc.full_major ();
+      pressure_relief ()
+    end;
+    (match verdict with
+    | Within -> Atomic.set over_latch None
+    | Over overdraft -> Atomic.set over_latch (Some overdraft));
+    verdict
+  in
+  if bound <= 0 then finish Within
+  else
+    let used = read () - if usage = None then credit () else 0 in
+    if used <= bound then finish Within
+    else begin
+      let before = attributed () in
+      let excess = used - bound in
+      let shed () = before - attributed () in
+      let refused = ref [] in
+      while shed () < excess && drop_coldest ~refused do
+        ()
+      done;
+      List.iter
+        (fun step ->
+          while shed () < excess && step () do
+            ()
+          done)
+        later;
+      let dropped = max 0 (shed ()) in
+      note_shed dropped;
+      if dropped >= excess then finish Within
+      else
+        (* Everything rebuildable went. Dead blocks may still be most of the footprint, so a verdict
+           comes from a full collection, once per crossing: never per frame. *)
+        let latched = Atomic.get over_latch <> None in
+        let used =
+          if (not latched) && usage = None && collected_now () then read () else used - dropped
+        in
+        if used <= bound then finish Within
+        else finish (Over { used; limit = bound; top = top_owners 4 })
+    end
+
+let admit ?(shed = fun () -> false) () =
+  let bound = limit () in
+  if bound <= 0 then Ok ()
+  else
+    let used () = measured ?device:None () - credit () in
+    if used () <= bound then Ok ()
+    else begin
+      let before = attributed () in
+      while before - attributed () < used () - bound && shed () do
+        ()
+      done;
+      note_shed (max 0 (before - attributed ()));
+      if used () <= bound then Ok ()
+      else begin
+        ignore (collected_now ());
+        let used = used () in
+        if used <= bound then Ok () else Error { used; limit = bound; top = top_owners 4 }
+      end
+    end
 
 let reset () =
-  Hashtbl.clear accounts;
-  evictors := [];
-  current_budget :=
-    match Sys.getenv_opt "RAYS_MEM_BUDGET" with
-    | Some s -> Option.value ~default:0 (parse_budget s)
-    | None -> 0
-
-external phys_footprint_raw : unit -> int option = "caml_rays_mem_phys_footprint"
-external instructions_raw : unit -> int64 option = "caml_rays_mem_instructions"
-
-let phys_footprint = phys_footprint_raw
-let instructions = instructions_raw
+  locked (fun () ->
+      Hashtbl.iter
+        (fun _ (a : account) ->
+          Atomic.set a.bytes 0;
+          Atomic.set a.peak 0)
+        accounts;
+      evictors := []);
+  Atomic.set current_budget 0;
+  Atomic.set budget_rank 0;
+  Atomic.set lowered 0;
+  Atomic.set over_latch None;
+  Atomic.set shed_bytes 0;
+  Atomic.set last_collect min_int
 
 module Report = struct
-  type entry = { name : string; kind : kind; bytes : int; peak : int }
+  type entry = { name : string; kind : kind; pool : pool; bytes : int; peak : int }
 
   type t = {
     owners : entry list;
     attributed : int;
+    attributed_device : int;
     ocaml_live : int;
     device : int;
     footprint : int;
@@ -115,18 +381,14 @@ module Report = struct
   }
 
   let kind_label = function Cache -> "cache" | Plan -> "plan" | Document -> "document"
-
-  let format_bytes n =
-    if n >= 1_000_000_000 then Printf.sprintf "%.2f GB" (float n /. 1e9)
-    else if n >= 1_000_000 then Printf.sprintf "%.1f MB" (float n /. 1e6)
-    else if n >= 1_000 then Printf.sprintf "%.1f KB" (float n /. 1e3)
-    else Printf.sprintf "%d B" n
+  let pool_label = function Host -> "host" | Device -> "device"
+  let format_bytes = format_bytes
 
   let pp fmt t =
     List.iter
       (fun (e : entry) ->
-        Format.fprintf fmt "%-8s  %-28s  %10s  %10s@." (kind_label e.kind) e.name
-          (format_bytes e.bytes) (format_bytes e.peak))
+        Format.fprintf fmt "%-8s  %-6s  %-30s  %10s  %10s@." (kind_label e.kind)
+          (pool_label e.pool) e.name (format_bytes e.bytes) (format_bytes e.peak))
       t.owners;
     let explicit = t.ocaml_live + t.device in
     let pct =
@@ -140,34 +402,46 @@ module Report = struct
   let to_string t = Format.asprintf "%a" pp t
 end
 
-let report ?(device = 0) ?budget () =
-  Gc.full_major ();
-  let stat = Gc.stat () in
-  let ocaml_live = stat.live_words * (Sys.word_size / 8) in
+let report ?(collect = true) ?(device = 0) ?budget:shown () =
+  if collect then Gc.full_major ();
+  prune ();
+  let stat = if collect then Gc.stat () else Gc.quick_stat () in
+  let ocaml_live =
+    (if collect then stat.live_words else stat.heap_words) * (Sys.word_size / 8)
+  in
   let owners =
-    Hashtbl.fold
-      (fun _ (a : account) acc ->
-        if a.peak = 0 && a.bytes = 0 then acc
-        else { Report.name = a.name; kind = a.kind; bytes = a.bytes; peak = a.peak } :: acc)
-      accounts []
+    locked (fun () ->
+        Hashtbl.fold
+          (fun _ (a : account) acc ->
+            if peak a = 0 && bytes a = 0 then acc
+            else
+              { Report.name = a.name; kind = a.kind; pool = a.pool; bytes = bytes a; peak = peak a }
+              :: acc)
+          accounts [])
     |> List.sort (fun (a : Report.entry) b ->
-           let c = compare b.bytes a.bytes in
-           if c <> 0 then c else String.compare a.name b.name)
+        let c = compare b.bytes a.bytes in
+        if c <> 0 then c else String.compare a.name b.name)
   in
-  let attributed = List.fold_left (fun sum (e : Report.entry) -> sum + e.bytes) 0 owners in
+  let sum pool =
+    List.fold_left
+      (fun sum (e : Report.entry) -> if e.pool = pool then sum + e.bytes else sum)
+      0 owners
+  in
+  let host = sum Host and attributed_device = sum Device in
   let device = max 0 device in
-  let footprint =
-    match phys_footprint () with Some n -> n | None -> ocaml_live + device
-  in
-  let explicit = ocaml_live + device in
-  let unattributed = max 0 (explicit - attributed) in
-  let budget = match budget with Some n -> max 0 n | None -> !current_budget in
+  let footprint = match phys_footprint () with Some n -> n | None -> ocaml_live + device in
   {
     Report.owners;
-    attributed;
+    attributed = host + attributed_device;
+    attributed_device;
     ocaml_live;
     device;
     footprint;
-    unattributed;
-    budget;
+    unattributed = max 0 (ocaml_live - host) + max 0 (device - attributed_device);
+    budget = (match shown with Some n -> max 0 n | None -> budget ());
   }
+
+module Private = struct
+  let pressure_inject = pressure_inject
+  let major_cycles = major_cycles
+end

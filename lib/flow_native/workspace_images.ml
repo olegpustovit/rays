@@ -38,6 +38,7 @@ type source = {
 
 type request = {
   mutable active : (E.plan * int) list;
+  mutable pending_images : int;
   mutable session : P.Session.t option;
   mutable contexts : (E.plan * L.image_context) list;
   mutable cooked : (int * int * captured) list;
@@ -48,6 +49,7 @@ type snapshot = { payload : CPU.t; stamp : stamp }
 
 type entry = {
   key : string;
+  mutable plan_serial : int;  (** the plan that last asked for it: {!reserve} prunes the others *)
   mutable image : Image.t option;
   mutable cpu : snapshot option;
   mutable texture : (Texture.t, string) result Lazy.t option;
@@ -87,20 +89,33 @@ type t = {
   mutable readbacks : int;
 }
 
+(* A slot for one more image. The plan decides who goes: only entries the current plan has not asked
+   for (a deleted node's, an old time's), oldest first. A plan that truly needs more than the capacity
+   gets the typed refusal it always did, and no slot is consumed by asking. *)
+let reserve t request =
+  let rec room () =
+    Entries.length t.entries + request.pending_images < entry_capacity
+    || (Entries.drop_oldest t.entries && room ())
+  in
+  if room () then Ok ()
+  else Error (Diagnostic.error ~code:"E_IMAGE" "A workspace owns at most 64 image snapshots.")
+
 let entry_bytes (entry : entry) =
   match entry.cpu with
   | Some { payload; _ } -> CPU.width payload * CPU.height payload * 4
   | None -> 0
 
-(* a refreshed entry is the one the cache holds: re-adding it must not release it *)
-let store_entry entries key entry =
-  (match Entries.find_opt entries key with
-  | Some old when old == entry -> ignore (Entries.take entries key)
-  | _ -> ());
-  Entries.add entries ~bytes:(entry_bytes entry) key entry
-
 let make_entry key =
-  { key; image = None; cpu = None; texture = None; borrowed = None; display = None; canvas = None }
+  {
+    key;
+    plan_serial = -1;
+    image = None;
+    cpu = None;
+    texture = None;
+    borrowed = None;
+    display = None;
+    canvas = None;
+  }
 
 let create ?(seed = 0L) ?(grain = 16384) ?(domains = Parallel.recommended_domains ()) ~gpu resources
     =
@@ -153,7 +168,10 @@ let create ?(seed = 0L) ?(grain = 16384) ?(domains = Parallel.recommended_domain
       sizes = [||];
       resolved = [||];
       entries =
-        Entries.create ~owner:(Lru.cache "flow_native.images") ~release:release_entry entry_capacity;
+        Entries.create ~owner:(Lru.cache "flow_native.images") ~release:release_entry
+          ~evictable:(fun _ entry ->
+            match !host with Some t -> entry.plan_serial <> t.serial | None -> true)
+          entry_capacity;
       source_cooks = 0;
       attribute_flattens = 0;
       canvases_created = 0;
@@ -192,6 +210,7 @@ let with_request t ?context plan run =
       let request =
         {
           active = [];
+          pending_images = 0;
           session = None;
           contexts = Option.fold ~none:[] ~some:(fun context -> [ (plan, context) ]) context;
           cooked = [];
@@ -724,49 +743,57 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                             match Entries.find_opt t.entries key with
                             | Some entry -> Ok entry
                             | None ->
-                                let payload = ref None in
-                                let* image =
-                                  Workspace_resources.image t.resources key (fun () ->
-                                      (* Admission precedes the read. Pixels returns owned bytes;
+                                let* () = reserve t request in
+                                request.pending_images <- request.pending_images + 1;
+                                Fun.protect
+                                  ~finally:(fun () ->
+                                    request.pending_images <- request.pending_images - 1)
+                                  (fun () ->
+                                    let payload = ref None in
+                                    let* image =
+                                      Workspace_resources.image t.resources key (fun () ->
+                                          (* Admission precedes the read. Pixels returns owned bytes;
                        the native image copies them and the CPU snapshot owns them. *)
-                                      let ( let* ) = Result.bind in
-                                      let* bytes = Image.pixels source in
-                                      let* cpu =
-                                        Result.map_error
-                                          (fun d -> d.Diagnostic.message)
-                                          (CPU.of_owned_rgba8 ~width ~height bytes)
-                                      in
-                                      let* image =
-                                        Image.upload_rgba ~width ~height ~rgba:bytes ()
-                                      in
-                                      payload := Some cpu;
-                                      Ok image)
-                                in
-                                let payload = Option.get !payload in
-                                let stamp =
-                                  {
-                                    serial = t.serial;
-                                    frame = live;
-                                    state_stamp = "";
-                                    sources = [];
-                                  }
-                                in
-                                let entry =
-                                  {
-                                    key;
-                                    image = Some image;
-                                    cpu = Some { payload; stamp };
-                                    texture = Some (texture payload);
-                                    borrowed = None;
-                                    display = Some stamp;
-                                    canvas = None;
-                                  }
-                                in
-                                store_entry t.entries key entry;
-                                Ok entry
+                                          let ( let* ) = Result.bind in
+                                          let* bytes = Image.pixels source in
+                                          let* cpu =
+                                            Result.map_error
+                                              (fun d -> d.Diagnostic.message)
+                                              (CPU.of_owned_rgba8 ~width ~height bytes)
+                                          in
+                                          let* image =
+                                            Image.upload_rgba ~width ~height ~rgba:bytes ()
+                                          in
+                                          payload := Some cpu;
+                                          Ok image)
+                                    in
+                                    let payload = Option.get !payload in
+                                    let stamp =
+                                      {
+                                        serial = t.serial;
+                                        frame = live;
+                                        state_stamp = "";
+                                        sources = [];
+                                      }
+                                    in
+                                    let entry =
+                                      {
+                                        key;
+                                        plan_serial = -1;
+                                        image = Some image;
+                                        cpu = Some { payload; stamp };
+                                        texture = Some (texture payload);
+                                        borrowed = None;
+                                        display = Some stamp;
+                                        canvas = None;
+                                      }
+                                    in
+                                    Entries.add t.entries ~bytes:(entry_bytes entry) key entry;
+                                    Ok entry)
                           in
                           Result.map
                             (fun entry ->
+                              entry.plan_serial <- t.serial;
                               t.resolved.(id) <- Some entry;
                               entry)
                             result
@@ -817,309 +844,339 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan : E.plan) value =
                                        entry.cpu ->
                                 Ok entry
                             | _ ->
-                                let entry =
-                                  match previous with Some entry -> entry | None -> make_entry key
-                                in
-                                if display then invalidate_display entry;
-                                let upload ~width ~height payload =
-                                  match entry.image with
-                                  | Some image ->
-                                      message
-                                        (Image.upload_rgba ~into:image ~width ~height
-                                           ~rgba:(bytes_of_image payload) ())
-                                  | None ->
-                                      Workspace_resources.image t.resources key (fun () ->
-                                          Image.upload_rgba ~width ~height
-                                            ~rgba:(bytes_of_image payload) ())
-                                in
-                                let* () =
-                                  if node.kind = "image/map" then begin
-                                    let width = int "width" 256 and height = int "height" 256 in
-                                    let fn =
-                                      match List.assoc "function" args with
-                                      | E.Fn fn -> fn
-                                      | _ -> V.fail "E_IMAGE" "Image map needs a pixel function."
+                                let reserved = previous = None in
+                                let* () = if reserved then reserve t request else Ok () in
+                                if reserved then
+                                  request.pending_images <- request.pending_images + 1;
+                                Fun.protect
+                                  ~finally:(fun () ->
+                                    if reserved then
+                                      request.pending_images <- request.pending_images - 1)
+                                  (fun () ->
+                                    let entry =
+                                      match previous with
+                                      | Some entry -> entry
+                                      | None -> make_entry key
                                     in
-                                    let ids = Flow_sop.Attribute_kernel.sources (E.Fn fn) in
-                                    let inputs =
-                                      List.map
-                                        (fun id -> Option.get (List.assoc id sources).root)
-                                        ids
+                                    if display then invalidate_display entry;
+                                    let upload ~width ~height payload =
+                                      match entry.image with
+                                      | Some image ->
+                                          message
+                                            (Image.upload_rgba ~into:image ~width ~height
+                                               ~rgba:(bytes_of_image payload) ())
+                                      | None ->
+                                          Workspace_resources.image t.resources key (fun () ->
+                                              Image.upload_rgba ~width ~height
+                                                ~rgba:(bytes_of_image payload) ())
                                     in
-                                    let prepare () =
-                                      let path, approx =
-                                        match t.qualification with
-                                        | Some (bound, approx, image_sites) when bound == plan ->
-                                            (image_sites.(id), approx)
-                                        | _ -> (None, Flow.Workspace.Paths.empty)
-                                      in
-                                      Result.map
-                                        (fun p ->
-                                          t.maps.(id) <- Some (width, height, fn, p);
-                                          p)
-                                        (Flow_sop.Image_kernel.prepare ?path ~approx
-                                           ~site:(node.inst, node.site, node.iter)
-                                           ~identity:(Sop.Node.Build.fresh_id ()) ~width ~height ~fn
-                                           ~sources:ids inputs)
-                                    in
-                                    let* prepared =
-                                      match t.maps.(id) with
-                                      | Some (w, h, f, p) when w = width && h = height && f == fn
-                                        -> (
-                                          match Flow_sop.Image_kernel.with_inputs p inputs with
-                                          | Ok p ->
+                                    let* () =
+                                      if node.kind = "image/map" then begin
+                                        let width = int "width" 256 and height = int "height" 256 in
+                                        let fn =
+                                          match List.assoc "function" args with
+                                          | E.Fn fn -> fn
+                                          | _ ->
+                                              V.fail "E_IMAGE" "Image map needs a pixel function."
+                                        in
+                                        let ids = Flow_sop.Attribute_kernel.sources (E.Fn fn) in
+                                        let inputs =
+                                          List.map
+                                            (fun id -> Option.get (List.assoc id sources).root)
+                                            ids
+                                        in
+                                        let prepare () =
+                                          let path, approx =
+                                            match t.qualification with
+                                            | Some (bound, approx, image_sites) when bound == plan
+                                              ->
+                                                (image_sites.(id), approx)
+                                            | _ -> (None, Flow.Workspace.Paths.empty)
+                                          in
+                                          Result.map
+                                            (fun p ->
                                               t.maps.(id) <- Some (width, height, fn, p);
-                                              Ok p
-                                          | Error _ -> prepare ())
-                                      | _ -> prepare ()
-                                    in
-                                    let cook () =
-                                      match entry.cpu with
-                                      | Some cpu when valid cpu.stamp -> Ok cpu.payload
-                                      | _ ->
-                                          let source =
-                                            Flow_sop.Image_kernel.node ~state:(E.fork_state state)
-                                              prepared
-                                          in
-                                          let* context = cook_context t live in
-                                          let* session = session request in
-                                          let* payload =
-                                            let* cooked =
-                                              diagnostic (Sop.Session.cook session ~context source)
-                                            in
-                                            diagnostic (Sop.Payload.image cooked.payload)
-                                          in
-                                          entry.cpu <- Some { payload; stamp };
-                                          Ok payload
-                                    in
-                                    if not display then Result.map ignore (cook ())
-                                    else
-                                      let selected () =
-                                        match gpu with
-                                        | Some gpu ->
-                                            I.try_display ~gpu ~state
-                                              ~resolve:(resolve_capture t request ~live sources)
-                                              (Flow_sop.Image_kernel.program prepared)
-                                              ~live
-                                        | None ->
-                                            Workspace_gpu.with_backend t.gpu (fun gpu ->
+                                              p)
+                                            (Flow_sop.Image_kernel.prepare ?path ~approx
+                                               ~site:(node.inst, node.site, node.iter)
+                                               ~identity:(Sop.Node.Build.fresh_id ()) ~width ~height
+                                               ~fn ~sources:ids inputs)
+                                        in
+                                        let* prepared =
+                                          match t.maps.(id) with
+                                          | Some (w, h, f, p)
+                                            when w = width && h = height && f == fn -> (
+                                              match Flow_sop.Image_kernel.with_inputs p inputs with
+                                              | Ok p ->
+                                                  t.maps.(id) <- Some (width, height, fn, p);
+                                                  Ok p
+                                              | Error _ -> prepare ())
+                                          | _ -> prepare ()
+                                        in
+                                        let cook () =
+                                          match entry.cpu with
+                                          | Some cpu when valid cpu.stamp -> Ok cpu.payload
+                                          | _ ->
+                                              let source =
+                                                Flow_sop.Image_kernel.node
+                                                  ~state:(E.fork_state state) prepared
+                                              in
+                                              let* context = cook_context t live in
+                                              let* session = session request in
+                                              let* payload =
+                                                let* cooked =
+                                                  diagnostic
+                                                    (Sop.Session.cook session ~context source)
+                                                in
+                                                diagnostic (Sop.Payload.image cooked.payload)
+                                              in
+                                              entry.cpu <- Some { payload; stamp };
+                                              Ok payload
+                                        in
+                                        if not display then Result.map ignore (cook ())
+                                        else
+                                          let selected () =
+                                            match gpu with
+                                            | Some gpu ->
                                                 I.try_display ~gpu ~state
                                                   ~resolve:(resolve_capture t request ~live sources)
                                                   (Flow_sop.Image_kernel.program prepared)
-                                                  ~live)
-                                      in
-                                      let* selected = selected () in
-                                      match selected with
-                                      | None ->
-                                          let* payload = cook () in
-                                          let* image = upload ~width ~height payload in
-                                          entry.image <- Some image;
-                                          entry.texture <- Some (texture payload);
-                                          Ok ()
-                                      | Some (Cpu _) ->
+                                                  ~live
+                                            | None ->
+                                                Workspace_gpu.with_backend t.gpu (fun gpu ->
+                                                    I.try_display ~gpu ~state
+                                                      ~resolve:
+                                                        (resolve_capture t request ~live sources)
+                                                      (Flow_sop.Image_kernel.program prepared)
+                                                      ~live)
+                                          in
+                                          let* selected = selected () in
+                                          match selected with
+                                          | None ->
+                                              let* payload = cook () in
+                                              let* image = upload ~width ~height payload in
+                                              entry.image <- Some image;
+                                              entry.texture <- Some (texture payload);
+                                              Ok ()
+                                          | Some (Cpu _) ->
+                                              Error
+                                                (error
+                                                   "Image display unexpectedly requested a GPU \
+                                                    readback.")
+                                          | Some (Gpu value) ->
+                                              Workspace_gpu.image t.gpu ~key ~width ~height value
+                                                ~publish:(fun output ->
+                                                  let source () =
+                                                    Flow_gpu.Image_sink.texture output
+                                                  in
+                                                  publish t key entry ~width ~height ~source)
+                                      end
+                                      else if node.kind = "image/render" then begin
+                                        let width = int "width" (fst live.Input.size)
+                                        and height = int "height" (snd live.size) in
+                                        if
+                                          width <= 0 || height <= 0
+                                          || width > Sys.max_string_length / 4 / height
+                                        then
                                           Error
-                                            (error
-                                               "Image display unexpectedly requested a GPU \
-                                                readback.")
-                                      | Some (Gpu value) ->
-                                          Workspace_gpu.image t.gpu ~key ~width ~height value
-                                            ~publish:(fun output ->
-                                              let source () = Flow_gpu.Image_sink.texture output in
-                                              publish t key entry ~width ~height ~source)
-                                  end
-                                  else if node.kind = "image/render" then begin
-                                    let width = int "width" (fst live.Input.size)
-                                    and height = int "height" (snd live.size) in
-                                    if
-                                      width <= 0 || height <= 0
-                                      || width > Sys.max_string_length / 4 / height
-                                    then
-                                      Error (error "Image dimensions exceed native storage bounds.")
-                                    else
-                                      let drawing = List.assoc "drawing" args in
-                                      let* prepared =
-                                        match t.drawings.(id) with
-                                        | Some p -> Ok p
-                                        | None ->
-                                            Result.map
-                                              (fun p ->
-                                                t.drawings.(id) <- Some p;
-                                                p)
-                                              (Drawing.prepare plan drawing)
-                                      in
-                                      let temporary = ref [] in
-                                      Fun.protect
-                                        ~finally:(fun () ->
-                                          List.iter
-                                            (fun image -> ignore (Image.destroy image))
-                                            !temporary)
-                                        (fun () ->
-                                          let* scene =
-                                            Drawing.render_prepared ~state
-                                              ~image:(fun value ->
-                                                let* child =
-                                                  resolve t ~display ~state ~live plan value
-                                                in
-                                                if display then Ok (Option.get child.image)
-                                                else
-                                                  let payload = (Option.get child.cpu).payload in
-                                                  let width = CPU.width payload
-                                                  and height = CPU.height payload in
-                                                  if
-                                                    Option.fold ~none:false
-                                                      ~some:(( == ) (Option.get child.cpu).stamp)
-                                                      child.display
-                                                  then Ok (Option.get child.image)
-                                                  else
-                                                    match child.image with
-                                                    | Some image
-                                                      when Runtime_resources.Image.gpu_snapshot
-                                                             (Image.resource image)
-                                                           = Ok None ->
-                                                        child.display <- None;
-                                                        message
-                                                          (Image.upload_rgba ~into:image ~width
-                                                             ~height ~rgba:(bytes_of_image payload)
-                                                             ())
-                                                    | None ->
-                                                        let* image =
-                                                          Workspace_resources.image t.resources
-                                                            child.key (fun () ->
-                                                              Image.upload_rgba ~width ~height
-                                                                ~rgba:(bytes_of_image payload) ())
-                                                        in
-                                                        child.image <- Some image;
-                                                        Ok image
-                                                    | Some _ ->
-                                                        let* image =
-                                                          message
-                                                            (Image.upload_rgba ~width ~height
-                                                               ~rgba:(bytes_of_image payload) ())
-                                                        in
-                                                        temporary := image :: !temporary;
-                                                        Ok image)
-                                              prepared ~live ~size:(width, height)
+                                            (error "Image dimensions exceed native storage bounds.")
+                                        else
+                                          let drawing = List.assoc "drawing" args in
+                                          let* prepared =
+                                            match t.drawings.(id) with
+                                            | Some p -> Ok p
+                                            | None ->
+                                                Result.map
+                                                  (fun p ->
+                                                    t.drawings.(id) <- Some p;
+                                                    p)
+                                                  (Drawing.prepare plan drawing)
                                           in
-                                          if display then begin
-                                            let previous = entry.canvas in
-                                            let* canvas, created =
-                                              match previous with
-                                              | Some canvas ->
-                                                  let* size = message (Canvas.size canvas) in
-                                                  if size = (width, height) then Ok (canvas, false)
-                                                  else
-                                                    Result.map
-                                                      (fun canvas -> (canvas, true))
-                                                      (create_canvas t ~width ~height)
-                                              | _ ->
-                                                  Result.map
-                                                    (fun canvas -> (canvas, true))
-                                                    (create_canvas t ~width ~height)
-                                            in
-                                            let accepted = ref false in
-                                            Fun.protect
-                                              ~finally:(fun () ->
-                                                if created && not !accepted then
-                                                  destroy_canvas t canvas)
-                                              (fun () ->
-                                                let* () = message (Canvas.render canvas scene) in
-                                                let* width, height, source =
-                                                  message (Canvas.gpu_source canvas)
+                                          let temporary = ref [] in
+                                          Fun.protect
+                                            ~finally:(fun () ->
+                                              List.iter
+                                                (fun image -> ignore (Image.destroy image))
+                                                !temporary)
+                                            (fun () ->
+                                              let* scene =
+                                                Drawing.render_prepared ~state
+                                                  ~image:(fun value ->
+                                                    let* child =
+                                                      resolve t ~display ~state ~live plan value
+                                                    in
+                                                    if display then Ok (Option.get child.image)
+                                                    else
+                                                      let payload =
+                                                        (Option.get child.cpu).payload
+                                                      in
+                                                      let width = CPU.width payload
+                                                      and height = CPU.height payload in
+                                                      if
+                                                        Option.fold ~none:false
+                                                          ~some:
+                                                            (( == ) (Option.get child.cpu).stamp)
+                                                          child.display
+                                                      then Ok (Option.get child.image)
+                                                      else
+                                                        match child.image with
+                                                        | Some image
+                                                          when Runtime_resources.Image.gpu_snapshot
+                                                                 (Image.resource image)
+                                                               = Ok None ->
+                                                            child.display <- None;
+                                                            message
+                                                              (Image.upload_rgba ~into:image ~width
+                                                                 ~height
+                                                                 ~rgba:(bytes_of_image payload) ())
+                                                        | None ->
+                                                            let* image =
+                                                              Workspace_resources.image t.resources
+                                                                child.key (fun () ->
+                                                                  Image.upload_rgba ~width ~height
+                                                                    ~rgba:(bytes_of_image payload)
+                                                                    ())
+                                                            in
+                                                            child.image <- Some image;
+                                                            Ok image
+                                                        | Some _ ->
+                                                            let* image =
+                                                              message
+                                                                (Image.upload_rgba ~width ~height
+                                                                   ~rgba:(bytes_of_image payload) ())
+                                                            in
+                                                            temporary := image :: !temporary;
+                                                            Ok image)
+                                                  prepared ~live ~size:(width, height)
+                                              in
+                                              if display then begin
+                                                let previous = entry.canvas in
+                                                let* canvas, created =
+                                                  match previous with
+                                                  | Some canvas ->
+                                                      let* size = message (Canvas.size canvas) in
+                                                      if size = (width, height) then
+                                                        Ok (canvas, false)
+                                                      else
+                                                        Result.map
+                                                          (fun canvas -> (canvas, true))
+                                                          (create_canvas t ~width ~height)
+                                                  | _ ->
+                                                      Result.map
+                                                        (fun canvas -> (canvas, true))
+                                                        (create_canvas t ~width ~height)
                                                 in
-                                                let* () =
-                                                  publish t key entry ~width ~height ~source
-                                                in
-                                                entry.canvas <- Some canvas;
-                                                accepted := true;
-                                                if created then
-                                                  Option.iter (destroy_canvas t) previous;
-                                                Ok ())
-                                          end
-                                          else
-                                            let* canvas = create_canvas t ~width ~height in
-                                            Fun.protect
-                                              ~finally:(fun () -> destroy_canvas t canvas)
-                                              (fun () ->
-                                                let* () = message (Canvas.render canvas scene) in
-                                                let* image = message (Canvas.to_image canvas) in
+                                                let accepted = ref false in
                                                 Fun.protect
-                                                  ~finally:(fun () -> ignore (Image.destroy image))
+                                                  ~finally:(fun () ->
+                                                    if created && not !accepted then
+                                                      destroy_canvas t canvas)
                                                   (fun () ->
-                                                    let* payload = cpu_of_image image in
-                                                    entry.cpu <- Some { payload; stamp };
-                                                    Ok ())))
-                                  end
-                                  else begin
-                                    entry.display <- None;
-                                    let* image, payload =
-                                      match node.kind with
-                                      | "image/load" ->
-                                          let path =
-                                            match List.assoc "path" args with
-                                            | E.Text path -> path
-                                            | _ -> assert false
-                                          in
-                                          let* image =
-                                            Workspace_resources.image t.resources key (fun () ->
-                                                Image.load path)
-                                          in
-                                          let* payload = cpu_of_image image in
-                                          Ok (image, payload)
-                                      | "image/noise" ->
-                                          let factory = Sop.Image_nodes.noise_factory in
-                                          let* source =
-                                            Result.map_error error
-                                              (Sop.Edit_graph.instantiate factory [])
-                                          in
-                                          let changes =
-                                            Sop.Edit_graph.factory_fields factory
-                                            |> List.filter_map (fun (field : Param.field_view) ->
-                                                Option.map
-                                                  (fun value ->
-                                                    ( field.name,
-                                                      match field.kind with
-                                                      | Integer_view _ ->
-                                                          Param.Int_value (V.int_of value)
-                                                      | Floating_view _ ->
-                                                          Param.Float_value (V.num value)
-                                                      | _ -> assert false ))
-                                                  (List.assoc_opt field.name args))
-                                          in
-                                          let* source, _ =
-                                            Result.map_error error
-                                              (Sop.Node.apply_parameters source changes)
-                                          in
-                                          let* context =
-                                            Result.map_error error (Sop.Context.create ())
-                                          in
-                                          let* cooked =
-                                            Result.map_error
-                                              (fun d -> error d.Diagnostic.message)
-                                              (Sop.Node.Build.cook source context [||])
-                                          in
-                                          let* payload =
-                                            Result.map_error
-                                              (fun d -> error d.Diagnostic.message)
-                                              (Sop.Payload.image cooked.payload)
-                                          in
-                                          let width = Sop.Image.width payload
-                                          and height = Sop.Image.height payload in
-                                          let* image = upload ~width ~height payload in
-                                          Ok (image, payload)
-                                      | _ -> assert false
+                                                    let* () =
+                                                      message (Canvas.render canvas scene)
+                                                    in
+                                                    let* width, height, source =
+                                                      message (Canvas.gpu_source canvas)
+                                                    in
+                                                    let* () =
+                                                      publish t key entry ~width ~height ~source
+                                                    in
+                                                    entry.canvas <- Some canvas;
+                                                    accepted := true;
+                                                    if created then
+                                                      Option.iter (destroy_canvas t) previous;
+                                                    Ok ())
+                                              end
+                                              else
+                                                let* canvas = create_canvas t ~width ~height in
+                                                Fun.protect
+                                                  ~finally:(fun () -> destroy_canvas t canvas)
+                                                  (fun () ->
+                                                    let* () =
+                                                      message (Canvas.render canvas scene)
+                                                    in
+                                                    let* image = message (Canvas.to_image canvas) in
+                                                    Fun.protect
+                                                      ~finally:(fun () ->
+                                                        ignore (Image.destroy image))
+                                                      (fun () ->
+                                                        let* payload = cpu_of_image image in
+                                                        entry.cpu <- Some { payload; stamp };
+                                                        Ok ())))
+                                      end
+                                      else begin
+                                        entry.display <- None;
+                                        let* image, payload =
+                                          match node.kind with
+                                          | "image/load" ->
+                                              let path =
+                                                match List.assoc "path" args with
+                                                | E.Text path -> path
+                                                | _ -> assert false
+                                              in
+                                              let* image =
+                                                Workspace_resources.image t.resources key (fun () ->
+                                                    Image.load path)
+                                              in
+                                              let* payload = cpu_of_image image in
+                                              Ok (image, payload)
+                                          | "image/noise" ->
+                                              let factory = Sop.Image_nodes.noise_factory in
+                                              let* source =
+                                                Result.map_error error
+                                                  (Sop.Edit_graph.instantiate factory [])
+                                              in
+                                              let changes =
+                                                Sop.Edit_graph.factory_fields factory
+                                                |> List.filter_map
+                                                     (fun (field : Param.field_view) ->
+                                                       Option.map
+                                                         (fun value ->
+                                                           ( field.name,
+                                                             match field.kind with
+                                                             | Integer_view _ ->
+                                                                 Param.Int_value (V.int_of value)
+                                                             | Floating_view _ ->
+                                                                 Param.Float_value (V.num value)
+                                                             | _ -> assert false ))
+                                                         (List.assoc_opt field.name args))
+                                              in
+                                              let* source, _ =
+                                                Result.map_error error
+                                                  (Sop.Node.apply_parameters source changes)
+                                              in
+                                              let* context =
+                                                Result.map_error error (Sop.Context.create ())
+                                              in
+                                              let* cooked =
+                                                Result.map_error
+                                                  (fun d -> error d.Diagnostic.message)
+                                                  (Sop.Node.Build.cook source context [||])
+                                              in
+                                              let* payload =
+                                                Result.map_error
+                                                  (fun d -> error d.Diagnostic.message)
+                                                  (Sop.Payload.image cooked.payload)
+                                              in
+                                              let width = Sop.Image.width payload
+                                              and height = Sop.Image.height payload in
+                                              let* image = upload ~width ~height payload in
+                                              Ok (image, payload)
+                                          | _ -> assert false
+                                        in
+                                        entry.cpu <- Some { payload; stamp };
+                                        entry.image <- Some image;
+                                        entry.texture <- Some (texture payload);
+                                        Ok ()
+                                      end
                                     in
-                                    entry.cpu <- Some { payload; stamp };
-                                    entry.image <- Some image;
-                                    entry.texture <- Some (texture payload);
-                                    Ok ()
-                                  end
-                                in
-                                if display then entry.display <- Some stamp;
-                                store_entry t.entries key entry;
-                                Ok entry
+                                    if display then entry.display <- Some stamp;
+                                    Entries.add t.entries ~bytes:(entry_bytes entry) key entry;
+                                    Ok entry)
                           in
                           Result.map
                             (fun entry ->
+                              entry.plan_serial <- t.serial;
                               t.resolved.(id) <- Some entry;
                               entry)
                             result

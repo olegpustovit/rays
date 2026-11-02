@@ -46,7 +46,7 @@ type kept = {
    of any size class (capacity doubles, so a class is [length, 2 * length]), {!free_budget}; collected
    or read holders' ids, from any domain; retired holders, whose owner (a session) dropped them but
    which a reader may still hold: their buffers stay theirs until they are collected or read, and
-   past {!retired_budget} bytes the oldest is read into owned planes so its buffer comes back. *)
+   past {!retired_budget_for} bytes the oldest is read into owned planes so its buffer comes back. *)
 type pool = {
   held : (int, B.buffer * B.floats * int * int Atomic.t) Hashtbl.t;
   mutable free : (B.buffer * B.floats * int) list;
@@ -315,12 +315,14 @@ let take_free pool length =
       Some held
   | None -> None
 
-(* Past this many bytes of retired holders still unread, free the oldest without a reader (no
-   float32→double widen). A reader still pending thaws so later reads see the same values.
-   Derived from the device working set when known; falls back to 512 MiB. *)
+(* Past this many bytes of retired holders still unread, the oldest is read now (owned planes: its
+   later readers see the same values) and its buffer comes back, so device memory stays bounded. A
+   retired holder stays readable for as long as it is alive and nothing here can tell it has no future
+   reader, so a live one is always read; only a collected one goes unread. A quarter of the device's
+   working set, 512 MiB when it does not say. *)
 let retired_budget_for device =
   let recommended = Int64.to_int (B.recommended_working_set device) in
-  if recommended > 0 then max (64 lsl 20) (recommended / 4) else 512 lsl 20
+  if recommended > 0 then recommended / 4 else 512 lsl 20
 
 let reclaim pool ~device =
   drain_pool pool;
@@ -331,19 +333,11 @@ let reclaim pool ~device =
     | Some (_, _, capacity, _) -> sum + capacity
     | None -> sum
   in
-  let budget = retired_budget_for device in
-  if List.fold_left bytes 0 pool.retired > budget then begin
+  if List.fold_left bytes 0 pool.retired > retired_budget_for device then begin
     (match pool.retired with
-    | (id, w) :: rest ->
+    | (_, w) :: rest ->
         pool.retired <- rest;
-        (match Weak.get w 0 with
-        | Some k when Atomic.get k.readers = 0 ->
-            (* No reader: destroy without widening into host doubles. *)
-            k.destroyed <- true;
-            Atomic.incr pool.freed;
-            push pool.released id
-        | Some k -> k.thaw ()
-        | None -> push pool.released id)
+        Option.iter (fun k -> if Atomic.get k.readers = 0 then k.thaw ()) (Weak.get w 0)
     | [] -> ());
     drain_pool pool
   end

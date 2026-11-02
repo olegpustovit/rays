@@ -8,22 +8,27 @@ module History = struct
     | Burst of { key : string; at : float; window : float }
     | Repair
 
-  (* Each entry carries the label of the edit that produced it. *)
-  type 'a t = {
-    past : ('a * string * int) list;
+  (* The present is the live value; an entry keeps only what restores it ([keep]). [recent] is the
+     one live value kept beside the entries: the last present to become one, so stepping back to it
+     recomputes nothing. [byte_depth] is what the owner is charged: every entry in [past] and
+     [future], each exactly once, at the size it had when it became an entry. *)
+  type ('a, 'e) t = {
+    past : ('e * string * int) list;
     present : 'a;
     label : string;
-    future : ('a * string * int) list;
+    future : ('e * string * int) list;
+    recent : ('e * 'a) option;
     capacity : int;
     byte_capacity : int;
-    size : 'a -> int;
+    keep : 'a -> 'e;
+    size : 'e -> int;
     owner : Mem.owner option;
     depth : int;
     byte_depth : int;
     merge : merge option;
   }
 
-  let create ?(capacity = 128) ?(byte_capacity = max_int) ?(bytes = fun _ -> 0) ?owner present =
+  let create ?(capacity = 128) ?(byte_capacity = max_int) ?(bytes = fun _ -> 0) ?owner ~keep present =
     if capacity < 1 then invalid_arg "Editor_core.History.create: capacity must be positive";
     if byte_capacity < 0 then invalid_arg "Editor_core.History.create: byte_capacity must be non-negative";
     {
@@ -31,8 +36,10 @@ module History = struct
       present;
       label = "";
       future = [];
+      recent = None;
       capacity;
       byte_capacity;
+      keep;
       size = bytes;
       owner;
       depth = 0;
@@ -47,37 +54,56 @@ module History = struct
   let can_redo t = t.future <> []
   let depth t = t.depth
   let byte_depth t = t.byte_depth
+  let charge t n = Option.iter (fun owner -> Mem.charge owner n) t.owner
+  let discharge t n = Option.iter (fun owner -> Mem.release owner n) t.owner
+  let entries_bytes entries = List.fold_left (fun sum (_, _, n) -> sum + n) 0 entries
 
-  let charge owner n = Option.iter (fun owner -> Mem.charge owner n) owner
-  let release owner n = Option.iter (fun owner -> Mem.release owner n) owner
+  (* the entry the present becomes, charged *)
+  let entry_of t =
+    let entry = t.keep t.present in
+    let n = max 0 (t.size entry) in
+    charge t n;
+    (entry, t.label, n)
+
+  (* Oldest first, down to [limit] entries and the byte cap. The newest entry stays whatever it
+     weighs: one edit of a document over the cap can still be undone. *)
+  let trim_to ~limit t =
+    let excess = t.depth - limit in
+    if excess <= 0 && (t.byte_depth <= t.byte_capacity || t.depth <= 1) then t
+    else
+      let rec drop dropped bytes depth oldest_first =
+        match oldest_first with
+        | (_, _, n) :: rest
+          when dropped < excess || (bytes > t.byte_capacity && depth > 1) ->
+            discharge t n;
+            drop (dropped + 1) (bytes - n) (depth - 1) rest
+        | rest -> (List.rev rest, bytes, depth)
+      in
+      let past, byte_depth, depth = drop 0 t.byte_depth t.depth (List.rev t.past) in
+      { t with past; byte_depth; depth }
+
+  let trim t = trim_to ~limit:t.capacity t
 
   (* ponytail: the bound is enforced by walking the list, O(capacity) per
      commit; switch to a deque if capacities grow past a few hundred. *)
   let commit value label t =
     if value == t.present then t
     else
-      let entry_bytes = max 0 (t.size t.present) in
-      let past = (t.present, t.label, entry_bytes) :: t.past in
-      let rec drop_oldest = function
-        | [] -> ([], 0)
-        | [ (_, _, n) ] -> ([], n)
-        | x :: xs ->
-            let rest, n = drop_oldest xs in
-            (x :: rest, n)
-      in
-      let rec trim past depth byte_depth =
-        if depth <= t.capacity && byte_depth <= t.byte_capacity then (past, depth, byte_depth)
-        else
-          match drop_oldest past with
-          | past, dropped ->
-              release t.owner dropped;
-              trim past (depth - 1) (max 0 (byte_depth - dropped))
-      in
-      let past, depth, byte_depth = trim past (t.depth + 1) (t.byte_depth + entry_bytes) in
-      charge t.owner entry_bytes;
-      (* Dropping future on a new commit releases its charged bytes. *)
-      List.iter (fun (_, _, n) -> release t.owner n) t.future;
-      { t with past; present = value; label; future = []; depth; byte_depth; merge = None }
+      let ((entry, _, n) as made) = entry_of t in
+      let abandoned = entries_bytes t.future in
+      discharge t abandoned;
+      trim
+        {
+          t with
+          past = made :: t.past;
+          present = value;
+          label;
+          future = [];
+          recent = Some (entry, t.present);
+          depth = t.depth + 1;
+          byte_depth = t.byte_depth + n - abandoned;
+          merge = None;
+        }
 
   (* the present replaced in place: a continued gesture, or a repair that is no edit of the
      user's (camera bookkeeping), which leaves what redo would restore *)
@@ -102,39 +128,61 @@ module History = struct
     | Some _ when not gesture_only -> { t with merge = None }
     | Some _ -> t
 
-  let undo t =
+  let revive ~restore t entry =
+    match t.recent with Some (kept, live) when kept == entry -> Ok live | _ -> restore entry
+
+  let undo ~restore t =
     match t.past with
     | [] -> None
-    | (previous, label, entry_bytes) :: past ->
-        let present_bytes = max 0 (t.size t.present) in
+    | (previous, label, n) :: past ->
         Some
-          {
-            t with
-            past;
-            present = previous;
-            label;
-            future = (t.present, t.label, present_bytes) :: t.future;
-            depth = t.depth - 1;
-            byte_depth = max 0 (t.byte_depth - entry_bytes);
-            merge = None;
-          }
+          (Result.map
+             (fun live ->
+               let ((entry, _, m) as made) = entry_of t in
+               discharge t n;
+               {
+                 t with
+                 past;
+                 present = live;
+                 label;
+                 future = made :: t.future;
+                 recent = Some (entry, t.present);
+                 depth = t.depth - 1;
+                 byte_depth = t.byte_depth + m - n;
+                 merge = None;
+               })
+             (revive ~restore t previous))
 
-  let redo t =
+  let redo ~restore t =
     match t.future with
     | [] -> None
-    | (next, label, entry_bytes) :: future ->
-        let present_bytes = max 0 (t.size t.present) in
+    | (next, label, n) :: future ->
         Some
-          {
-            t with
-            past = (t.present, t.label, present_bytes) :: t.past;
-            present = next;
-            label;
-            future;
-            depth = t.depth + 1;
-            byte_depth = t.byte_depth + present_bytes;
-            merge = None;
-          }
+          (Result.map
+             (fun live ->
+               let ((entry, _, m) as made) = entry_of t in
+               discharge t n;
+               trim
+                 {
+                   t with
+                   past = made :: t.past;
+                   present = live;
+                   label;
+                   future;
+                   recent = Some (entry, t.present);
+                   depth = t.depth + 1;
+                   byte_depth = t.byte_depth + m - n;
+                   merge = None;
+                 })
+             (revive ~restore t next))
+
+  let shed ~keep t = trim_to ~limit:(max 1 keep) t
+
+  let release t =
+    discharge t t.byte_depth;
+    { t with past = []; future = []; recent = None; depth = 0; byte_depth = 0; merge = None }
+
+  let restart value t = { (release t) with present = value; label = "" }
 end
 
 module Keymap = struct

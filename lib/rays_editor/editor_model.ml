@@ -291,7 +291,7 @@ type t = {
   notice_at : float; (* when the notice last changed: the echo tip shows it for a while *)
   doc : Document.t; (* always the history's present *)
   gpu : Flow_native.Workspace_gpu.policy; (* the workspace owner's immutable execution policy *)
-  filed : Document.t;
+  filed : Document.text;
       (* the document as its source file has it: an external change may replace it *)
   panes : graph_pane Panel_map.t;
   (* the graph panels' own canvas, level, selection, graph and route, by panel key; the one in use
@@ -332,7 +332,7 @@ type t = {
   status_fps_at : float;
   last_dt : float; (* the step of the last frame, and how many frames in a row had exactly it: *)
   steady : int; (* three or more is a fixed step, the timeline header says so *)
-  history : Document.t Editor_core.History.t;
+  history : (Document.t, Document.snapshot) Editor_core.History.t;
   focus : Pxui_shell.Layout.panel;
   focus_path : Pxui_shell.Layout.path option;
       (* which leaf of that kind: every leaf is an
@@ -406,11 +406,13 @@ type 'panel update = {
   input : Frame.t;
 }
 
+(* the parts it reads, never the document: this lazy outlives the document it was made from *)
 let vocabulary factories (doc : Document.t) =
+  let ops = doc.workspace.ws.checked.ops and lowered = doc.workspace.lowered.factories in
   lazy
-    (Lisp_text.vocab ~ops:doc.workspace.ws.checked.ops
+    (Lisp_text.vocab ~ops
        (Flow_sop.Catalog.with_library
-          (List.map Flow_sop.Catalog.descriptor (factories @ doc.workspace.lowered.factories))
+          (List.map Flow_sop.Catalog.descriptor (factories @ lowered))
        @ Kinds.descriptors))
 
 let vocabulary_for value (doc : Document.t) =

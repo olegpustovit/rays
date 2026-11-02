@@ -2,10 +2,10 @@ type t
 type output
 
 type pool
-(** Kept outputs' buffers that runners share, recycled by size class (any 8 free, more within 256
-    MiB). Each holder tells the GC its buffer's size, so a dead one is collected and its buffer
-    returns without a read; past 2 GiB of retired holders still unread, the oldest is read into
-    owned planes and its buffer reused. *)
+(** Kept outputs' buffers that runners share, recycled by size class (256 MiB free at most). Each
+    holder tells the GC its buffer's size, so a dead one is collected and its buffer returns without
+    a read; past a quarter of the device's working set of retired holders still unread, the oldest is
+    read into owned planes and its buffer reused. *)
 
 val pool : unit -> pool
 

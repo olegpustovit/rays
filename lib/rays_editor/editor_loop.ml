@@ -722,8 +722,8 @@ let after_present value frame =
   in
   let value =
     match Mem.retreat () with
-    | `Ok -> value
-    | `Still_over ->
+    | Within -> value
+    | Over _ ->
         (* Budget is attributed+device; last good frame stays. *)
         {
           value with

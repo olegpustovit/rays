@@ -249,6 +249,8 @@ and ui = {
   (* the focused text's undo and redo stacks (text, caret, anchor), and the caret after the
      last typed character so consecutive typing undoes as one step *)
   mutable edit_undo : (string * int * int) list;
+  mutable edit_undo_charged : int;
+  mutable text_rows_seen : (int option * string * (int * int * int) array) list;
   mutable edit_redo : (string * int * int) list;
   mutable edit_group : int;
   (* the undo and redo stacks of texts left behind (key, value, undo, redo), newest first: a text
@@ -661,6 +663,8 @@ let create ?(font_size = Theme.font_size) ?font_path () =
     gesture_time = Float.nan;
     gesture_velocity = 0.;
     edit_undo = [];
+    edit_undo_charged = 0;
+    text_rows_seen = [];
     edit_redo = [];
     edit_group = -1;
     edit_shelf = [];
@@ -703,6 +707,8 @@ let create ?(font_size = Theme.font_size) ?font_path () =
   }
 
 let destroy ui =
+  Mem.release (Mem.document "pxui.text_undo") ui.edit_undo_charged;
+  ui.edit_undo_charged <- 0;
   if not ui.destroyed then begin
     ui.destroyed <- true;
     Option.iter (fun image -> ignore (Image.destroy image)) ui.atlas.image;

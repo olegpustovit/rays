@@ -17,6 +17,7 @@ let () =
   let fail = ref false and pipelines = ref 0 and submitted = ref 0 and invalid_output = ref false in
   let fail_table = ref false and table_writes = ref 0 in
   let fail_input = ref false and input_writes = ref 0 and creates = ref 0 in
+  let working_set = ref None in
   (* This driver checks ownership and failed-command lifetimes only. It does
      not execute a shader or stand in for native numerical qualification. *)
   let driver =
@@ -29,6 +30,11 @@ let () =
                 {
                   raw with
                   capabilities = { raw.capabilities with compute_pipeline = true };
+                  recommended_working_set =
+                    (fun () ->
+                      match !working_set with
+                      | Some bytes -> bytes
+                      | None -> raw.recommended_working_set ());
                   create_buffer =
                     (fun memory descriptor ->
                       incr creates;
@@ -223,6 +229,28 @@ let () =
       assert (R.Private.materialisations run = thaws);
       assert (R.Private.held_buffers run <= 2);
       assert (R.Private.buffer_creations run - creations <= 4);
+      (* Over the retired budget the oldest holder's buffer comes back, and it stays readable: a
+         retired holder may still have a reader, so it is read first, never freed unread. *)
+      working_set := Some 4L;
+      let oldest = Test_program.ok (R.keep (Test_program.ok (R.dispatch run values))) in
+      ignore (Test_program.ok (oldest.settle ()));
+      let expected_count = oldest.count * oldest.width in
+      oldest.release ~held:true;
+      let before = R.Private.materialisations run in
+      let later =
+        List.init 8 (fun _ ->
+            let next = Test_program.ok (R.keep (Test_program.ok (R.dispatch run values))) in
+            ignore (Test_program.ok (next.settle ()));
+            next)
+      in
+      assert (R.Private.materialisations run > before);
+      (match oldest.materialise () with
+      | planes -> assert (Array.fold_left (fun n p -> n + Array.length p) 0 planes = expected_count)
+      | exception Invalid_argument message ->
+          failwith ("a retired holder was freed under a live reader: " ^ message));
+      List.iter (fun (next : Flow_ir.Gpu.planes) -> next.release ~held:false) later;
+      working_set := None;
+      let thaws = R.Private.materialisations run in
       (* a host's shutdown closes with [~discard:true]: a live holder is not read back *)
       let live = Test_program.ok (R.keep (Test_program.ok (R.dispatch run values))) in
       ignore (Test_program.ok (live.settle ()));

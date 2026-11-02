@@ -749,6 +749,51 @@ let retained_keys () =
   if words () > 2 * settled then fail "churned keys grew the UI's retained tables";
   Ui.destroy ui
 
+(* Text undo: one byte cap over the open stacks and the shelf (five stacks of 200 snapshots would
+   otherwise be 100 MB at 100 KB of text), and the ledger follows it. The rows of an unchanged text
+   are not walked again, with several panes on screen, and belong to the handle. *)
+let text_memory () =
+  let module T = Pxui__Ui_text in
+  let module C = Pxui__Ui_core in
+  let ui = C.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let other = C.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
+  let owner = Mem.document "pxui.text_undo" in
+  let at_start = Mem.bytes owner in
+  let text_of key step = Printf.sprintf "%d %d %s" key step (String.make 100_000 'x') in
+  for key = 1 to 5 do
+    let last = ref "" in
+    for step = 1 to 200 do
+      last := text_of key step;
+      let edit = T.load_text_edit ui key (if step = 1 then !last else ui.edit_value) in
+      edit.text <- !last;
+      T.remember ui edit ~typing:false;
+      ui.edit_value <- !last
+    done
+  done;
+  let bytes = T.text_undo_bytes ui in
+  if bytes > T.text_undo_byte_cap then fail "text undo passed its byte cap across stacks";
+  if bytes < T.text_undo_byte_cap / 2 then fail "text undo kept far less than its cap";
+  if Mem.bytes owner - at_start <> bytes then fail "text undo's charge is not what it holds";
+  if ui.edit_undo = [] then fail "the open text keeps its newest steps";
+  let oversize = String.make (2 * T.text_undo_byte_cap) 'y' in
+  let edit = T.load_text_edit ui 9 "small" in
+  edit.text <- oversize;
+  T.remember ui edit ~typing:false;
+  edit.text <- "after";
+  T.remember ui edit ~typing:false;
+  if ui.edit_undo = [] then fail "a text over the cap still undoes once";
+  let a = "alpha\nbeta" and b = "gamma\ndelta" in
+  let first_a = T.text_rows ui a and first_b = T.text_rows ui b in
+  for _ = 1 to 4 do
+    if T.text_rows ui a != first_a || T.text_rows ui b != first_b then
+      fail "rows were walked again for an unchanged text"
+  done;
+  if T.text_rows other a == first_a then fail "the rows belong to the handle";
+  if T.text_rows ui ~cols:3 a == first_a then fail "rows are per wrap width";
+  C.destroy ui;
+  C.destroy other;
+  if Mem.bytes owner <> at_start then fail "destroying the handle releases its charge"
+
 let fit_box () =
   (* A box with no extent of its own (Fit, its one child placed with ~at) shows the child. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
@@ -1791,6 +1836,7 @@ let run () =
   modal_4 ();
   two_widgets ();
   carry ();
+  text_memory ();
   (match Sdl3.Init.quit_subsystems [ Sdl3.Init.Video ] with
   | Ok () -> ()
   | Error error -> fail (Format.asprintf "%a" Sdl3.pp_error error));

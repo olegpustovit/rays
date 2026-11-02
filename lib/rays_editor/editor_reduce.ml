@@ -805,13 +805,26 @@ let projections_of ~outlined ~actions (result : _ frame_result) (value' : t) =
 
 (* Command-Z / Shift-Command-Z: the history step, its notice and the document it leaves *)
 let undo_step ~(value : t) ~carrying ~actions ~notice history =
+  (* an entry holds no lowering: stepping there lowers its text again, unless it is the last present *)
+  let restore =
+    Editor_document.Lowering.restore ~factories:value.factories
+      ~current:(Editor_core.History.present history)
+  in
   let stepped =
-    if List.mem Editor_commands.Redo actions then Editor_core.History.redo history
-    else if List.mem Editor_commands.Undo actions then Editor_core.History.undo history
+    if List.mem Editor_commands.Redo actions then Editor_core.History.redo ~restore history
+    else if List.mem Editor_commands.Undo actions then Editor_core.History.undo ~restore history
     else None
   in
+  let refused =
+    match stepped with
+    | Some (Error diagnostic) -> Some (Refusal, "Undo refused: " ^ Diagnostic.to_string diagnostic)
+    | _ -> None
+  in
+  let stepped = match stepped with Some (Ok history) -> Some history | _ -> None in
+  let was_step = refused <> None in
   let notice =
     match stepped with
+    | None when was_step -> refused
     | None when List.mem Editor_commands.Redo actions -> Some (Refusal, "Redo: nothing to redo")
     | None when List.mem Editor_commands.Undo actions -> Some (Refusal, "Undo: nothing to undo")
     | None -> notice

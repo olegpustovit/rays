@@ -30,9 +30,7 @@ let scene_edit value mode ?(active_camera = value.doc.active_camera) scene =
     | Ok doc ->
         let history =
           match mode with
-          | `Reset ->
-              Editor_core.History.create ~byte_capacity:(16 * 1024 * 1024)
-                ~owner:(Mem.document "editor.history") doc
+          | `Reset -> Editor_core.History.restart doc value.history
           | `Amend -> commit ~merge:Editor_core.History.Repair doc value.history
         in
         (* camera bookkeeping is not unsaved work: a document that was the file's still is *)
@@ -40,7 +38,7 @@ let scene_edit value mode ?(active_camera = value.doc.active_camera) scene =
           value with
           doc;
           history;
-          filed = (if same_text value.doc value.filed then doc else value.filed);
+          filed = (if same_text value.doc value.filed then Document.text doc else value.filed);
         }
 
 let machinery ?under value ~all_ui_visible =
@@ -48,6 +46,7 @@ let machinery ?under value ~all_ui_visible =
   else []
 
 let close value =
+  ignore (Editor_core.History.release value.history);
   Pxui.Ui.destroy value.ui;
   Cook.close value.cook
 
@@ -359,7 +358,7 @@ let reload ?imports value ~name text =
         value with
         notice = Some (Info, "Reloaded " ^ name);
         text = clean value.text;
-        filed = value.doc;
+        filed = Document.text value.doc;
         locals = List.map (fun (key, l) -> (key, { l with code = clean l.code })) value.locals;
       })
     (text_edit ?imports ~label:("Reload " ^ name) value text)
