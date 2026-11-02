@@ -160,3 +160,5 @@ current focused aliases before treating these historical timings as current.
 | 2026-11-02 | memory plan: `test_history_memory` (Weak over two edits, E_MEMORY frames) | new | 5.3 s (under load 30+) | one fixture, 50 and 30 small frames through `Measure` |
 | 2026-11-02 | `@tools/mem` (ten scenarios, real offscreen frame) | 8.4 s, `update` only, no present | 39 s wall at load average 50, about 25 s alone (55 s CPU) | over the 20 s target: real frames; scrubs_100 is 10 s of relowering |
 | 2026-11-02 | `@lib/scene_execution/runtest-native` | 600 frames | adds 241 submissions (uniform low-water) | the page comes back down after 240 frames |
+| 2026-11-03 | `@tools/mem` on Windows (twelve scenarios, `sea_256_vram` added) | not run there | 43 s warm, validation unset | per-platform `win.` budgets; Windows runs the same real frames, one scenario (5 s) is the VRAM limit |
+| 2026-11-03 | `test_vulkan` (conformance plus device-local exhaustion to a typed `Capacity`) | 10 s total with the suite | 10 s total | the new case takes buffers of up to 1 GiB until the driver refuses, then frees them |

@@ -1329,3 +1329,14 @@ The environment (`RAYS_MEM_BUDGET`, `RAYS_MEM_CLOBBER`) reaches `Mem.configure` 
 `rays mem FILE [--frames N]` prints the ledger of a workspace's real frames, window-free, through
 `Rays_editor.Measure`, the same runner `tools/mem_gate` checks `specification/memory-budgets.sexp` with
 (`@tools/mem`).
+A discrete device (`Caps.unified_memory = false`: Vulkan, the mock) has a second limit: its working set
+(VMA's device-local budget on Vulkan) bounds the device's own bytes (`Mem.set_device_budget`), and the host
+budget, 60% of RAM (`GlobalMemoryStatusEx` on Windows), bounds the footprint alone. `Mem.retreat` checks
+the host first and then the device at the same frame boundary, from the backend's `allocated_size` (the
+only poll; it is read once there). Each limit sheds only its own pool's caches in the same order; the
+host limit's `later` steps (undo) are not run for VRAM. A large kernel buffer is admitted against the device
+limit with `Mem.admit_bytes ~pool:Device`, so a refusal is `E_MEMORY` and the last good frame stays.
+A one-pool device (Metal) never sets a device limit, so its behaviour is unchanged. Out of device
+memory from the driver (`VK_ERROR_OUT_OF_DEVICE_MEMORY`) is a typed `Capacity` error
+(`lib/ogpu/conformance/test_vulkan.ml`). `@tools/mem` on Windows reads `win.KEY` budgets over `KEY`, because
+a footprint there is committed private memory.
