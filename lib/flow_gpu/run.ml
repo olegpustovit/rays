@@ -350,6 +350,16 @@ let reclaim pool ~device =
 
 let create ?pool gpu = create_owned ?pool (Renderer.gpu_device gpu) (Renderer.gpu_queue gpu)
 
+(* An input the device now holds elsewhere: its upload buffer and the host array it was compared to
+   would otherwise stay pinned for the runner's life (a measurement's copy, a host P before the
+   chain went resident). *)
+let forget_input slot =
+  Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
+  slot.buffer <- None;
+  slot.floats <- None;
+  slot.capacity <- 0;
+  slot.uploaded <- None
+
 let ensure ?(mapped = false) t slot length =
   (if mapped && slot.buffer = None && length > 0 then
      (* an output slot whose last buffer a holder took: a recycled buffer of the size class *)
@@ -586,7 +596,9 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
           Array.mapi
             (fun index slot ->
               match bound index with
-              | Some buffer -> buffer
+              | Some buffer ->
+                  forget_input slot;
+                  buffer
               | None ->
                   let length = values.count * msl.input_widths.(index) * 4 in
                   let buffer = ensure ~mapped:(not msl.input_uint32.(index)) t slot length in

@@ -256,14 +256,14 @@ let only =
   [
     ("param", []);
     ("native_layer_token", []);
-    ("lru", []);
+    ("lru", [ "mem" ]);
     ("rays_diagnostic", []);
     ("input", []);
     ("runtime", [ "sdl3"; "ogpu" ]);
     ("runtime_input", [ "sdl3"; "input" ]);
     ("renderer", [ "ogpu"; "scene_command"; "runtime"; "lru"; "rays_math"; "runtime_resources" ]);
     ("flow", [ "param"; "input"; "rays_diagnostic"; "rays_math" ]);
-    ("sop", [ "param"; "input"; "rays_diagnostic"; "rays_math"; "rdk"; "lru"; "unix"; "parallel" ]);
+    ("sop", [ "param"; "input"; "rays_diagnostic"; "rays_math"; "rdk"; "lru"; "mem"; "unix"; "parallel" ]);
     ( "flow_sop",
       [
         "flow"; "flow_ir"; "lru"; "param"; "sop"; "rays_diagnostic"; "rays_math"; "unix"; "parallel";
@@ -311,6 +311,7 @@ let only =
         "ogpu";
         "renderer";
         "lru";
+        "mem";
         "parallel";
       ] );
     ("flow_web", [ "flow"; "flow_ir"; "param"; "rays_math"; "scene_command"; "parallel" ]);
