@@ -99,7 +99,7 @@ let create ?(clock = Unix.gettimeofday) () =
          goes through a temporary path that another process can take first, so it may try again. *)
       (let rec pair attempts =
          try Unix.socketpair ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0
-         with Unix.Unix_error ((EADDRINUSE | ENOENT), _, _) when attempts > 0 -> pair (attempts - 1)
+         with Unix.Unix_error ((EADDRINUSE | ENOENT | EINVAL), _, _) when attempts > 0 -> pair (attempts - 1)
        in
        let r, w = pair 16 in
        Unix.set_nonblock r;
