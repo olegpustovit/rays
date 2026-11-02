@@ -1,0 +1,169 @@
+{
+ "note": "S0 of the Vulkan plan: the RTX 2080 Ti as vulkaninfo reports it. Trimmed by hand to the rows the plan asks about.",
+ "date": "2026-11-02",
+ "device": "NVIDIA GeForce RTX 2080 Ti",
+ "deviceID": "0x1e07",
+ "driver": "591.86",
+ "apiVersion": "1.4.325",
+ "instanceVersion": "1.4.321",
+ "os": "Windows 11 Pro 10.0.26200",
+ "extensions": {
+  "VK_KHR_push_descriptor": 2,
+  "VK_KHR_acceleration_structure": 13,
+  "VK_KHR_ray_query": 1,
+  "VK_EXT_memory_budget": 1,
+  "VK_KHR_swapchain": 70,
+  "VK_KHR_deferred_host_operations": 4,
+  "VK_KHR_synchronization2": 1,
+  "VK_KHR_dynamic_rendering": 1,
+  "VK_KHR_timeline_semaphore": 2,
+  "VK_KHR_buffer_device_address": 1,
+  "VK_KHR_ray_tracing_position_fetch": 1,
+  "VK_NV_ray_tracing_motion_blur": null,
+  "VK_EXT_memory_priority": 1,
+  "VK_EXT_pageable_device_local_memory": 1
+ },
+ "features": {
+  "core": {
+   "shaderFloat64": true,
+   "shaderInt64": true,
+   "shaderInt16": true,
+   "multiDrawIndirect": true,
+   "drawIndirectFirstInstance": true,
+   "sampleRateShading": true,
+   "samplerAnisotropy": true,
+   "fragmentStoresAndAtomics": true,
+   "vertexPipelineStoresAndAtomics": true,
+   "textureCompressionBC": true,
+   "textureCompressionASTC_LDR": false,
+   "independentBlend": true,
+   "dualSrcBlend": true,
+   "fillModeNonSolid": true,
+   "depthClamp": true,
+   "wideLines": true,
+   "imageCubeArray": true
+  },
+  "vulkan12": {
+   "timelineSemaphore": true,
+   "bufferDeviceAddress": true,
+   "descriptorIndexing": true,
+   "scalarBlockLayout": true,
+   "storageBuffer8BitAccess": true,
+   "shaderInt8": true,
+   "shaderFloat16": true,
+   "hostQueryReset": true,
+   "uniformAndStorageBuffer8BitAccess": true,
+   "runtimeDescriptorArray": true,
+   "vulkanMemoryModel": true
+  },
+  "vulkan13": {
+   "dynamicRendering": true,
+   "synchronization2": true,
+   "maintenance4": true
+  },
+  "accelerationStructure": {
+   "accelerationStructure": true,
+   "accelerationStructureCaptureReplay": true,
+   "accelerationStructureIndirectBuild": false,
+   "accelerationStructureHostCommands": false,
+   "descriptorBindingAccelerationStructureUpdateAfterBind": true
+  },
+  "rayQuery": {
+   "rayQuery": true
+  }
+ },
+ "limits": {
+  "maxMemoryAllocationCount": 4294967295,
+  "maxComputeWorkGroupInvocations": 1024,
+  "maxComputeWorkGroupSize": [
+   1024,
+   1024,
+   64
+  ],
+  "maxComputeWorkGroupCount": [
+   2147483647,
+   65535,
+   65535
+  ],
+  "maxPushConstantsSize": 256,
+  "maxStorageBufferRange": 4294967295,
+  "maxBoundDescriptorSets": 32,
+  "maxPerStageDescriptorStorageBuffers": 1048576,
+  "maxColorAttachments": 8,
+  "maxImageDimension2D": 32768,
+  "minStorageBufferOffsetAlignment": 16,
+  "minUniformBufferOffsetAlignment": 64,
+  "nonCoherentAtomSize": 64,
+  "framebufferColorSampleCounts": [
+   "VK_SAMPLE_COUNT_1_BIT",
+   "VK_SAMPLE_COUNT_2_BIT",
+   "VK_SAMPLE_COUNT_4_BIT",
+   "VK_SAMPLE_COUNT_8_BIT"
+  ],
+  "maxSamplerAnisotropy": 16
+ },
+ "subgroupSize": 32,
+ "maxPushDescriptors": 32,
+ "accelerationStructure": {
+  "maxGeometryCount": 16777215,
+  "maxInstanceCount": 16777215,
+  "maxPrimitiveCount": 536870911,
+  "maxPerStageDescriptorAccelerationStructures": 1048576,
+  "maxPerStageDescriptorUpdateAfterBindAccelerationStructures": 1048576,
+  "maxDescriptorSetAccelerationStructures": 1048576,
+  "maxDescriptorSetUpdateAfterBindAccelerationStructures": 1048576,
+  "minAccelerationStructureScratchOffsetAlignment": 128
+ },
+ "queueFamilies": [
+  {
+   "count": 16,
+   "flags": "graphics compute transfer sparse"
+  },
+  {
+   "count": 2,
+   "flags": "transfer sparse"
+  },
+  {
+   "count": 8,
+   "flags": "compute transfer sparse"
+  },
+  {
+   "count": 1,
+   "flags": "transfer sparse video-decode"
+  },
+  {
+   "count": 1,
+   "flags": "transfer sparse video-encode"
+  }
+ ],
+ "memoryHeaps": [
+  {
+   "index": 0,
+   "bytes": 11562647552,
+   "deviceLocal": true
+  },
+  {
+   "index": 1,
+   "bytes": 17044230144,
+   "deviceLocal": false
+  },
+  {
+   "index": 2,
+   "bytes": 224395264,
+   "deviceLocal": true
+  }
+ ],
+ "memoryTypes": {
+  "deviceLocal": "heap 0",
+  "hostVisibleCoherent": "heap 1",
+  "hostVisibleCoherentCached": "heap 1",
+  "deviceLocalHostVisibleCoherent": "heap 2 (214 MiB)"
+ },
+ "presentModes": [
+  "FIFO",
+  "FIFO_RELAXED",
+  "MAILBOX",
+  "IMMEDIATE",
+  "FIFO_LATEST_READY"
+ ]
+}
