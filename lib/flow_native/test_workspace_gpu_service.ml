@@ -29,6 +29,7 @@ let () =
                 coerce = (fun _ v -> owner (); Some v);
                 finish = (fun v -> owner (); v);
                 count = (fun _ -> owner (); Some 1);
+                capacity = (fun _ -> owner (); Some 1);
                 close = owner; settle = owner;
                 range = (fun _ _ ~div:_ ~length:_ -> owner (); Some (Flow.Eval.Int_array [| 0 |]));
                 fill = (fun _ ~length:_ _ -> owner (); Some (Flow.Eval.Int_array [| 0 |]));

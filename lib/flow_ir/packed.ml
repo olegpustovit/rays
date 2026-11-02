@@ -3390,8 +3390,8 @@ module Host = struct
               | _ -> false)
             p.outputs.(0))
 
-  let prepare_values ?state ?resolve ?measure ?(lengths = fun _ -> None) ?(index = false) ?resident
-      ?(source = fun _ _ -> None) (t : t) ~live =
+  let prepare_values ?state ?resolve ?measure ?(lengths = fun _ -> None)
+      ?(capacity = fun _ -> None) ?(index = false) ?resident ?(source = fun _ _ -> None) (t : t) ~live =
     let state = match state with Some state -> state | None -> E.create_state () in
     E.transaction state (fun () ->
         try
@@ -3502,7 +3502,10 @@ module Host = struct
                     | Some value -> value
                     | None -> evaluate_source i residual term
                 in
-                if t.iteration = Product && V.array_length value = 0 && known.(i) = None then
+                let measured =
+                  match capacity value with Some n -> n | None -> V.array_length value
+                in
+                if t.iteration = Product && measured = 0 && known.(i) = None then
                   empty_product := true;
                 value)
               t.sources
@@ -3510,7 +3513,8 @@ module Host = struct
           let length i value =
             match (known.(i), placed.(i)) with
             | Some n, _ | None, Some n -> n
-            | None, None -> V.array_length value
+            | None, None -> (
+                match capacity value with Some n -> n | None -> V.array_length value)
           in
           Array.iteri
             (fun index value ->

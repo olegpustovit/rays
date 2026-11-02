@@ -20,6 +20,7 @@ let guarded shed drop =
 (* The retreat holds a table weakly: a table made per call dies with its caller, and what it still
    charged leaves with it. *)
 let register owner shed ~rebuild ~charged table ~bytes ~last_use ~drop =
+  Mem.walk_table owner table ~uncharged:(fun () -> !charged = 0);
   if shed <> Never then begin
     let weak = Weak.create 1 in
     Weak.set weak 0 (Some table);

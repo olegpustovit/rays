@@ -492,6 +492,8 @@ module Measure : sig
     final : sample;
     fallbacks : (string * string * int) list;  (** {!Flow_ir.Fallback.seen}. *)
     readback_bytes : int;
+    payload_readback_bytes : int;  (** arrays read back; the rest is bounds a selection box asks for *)
+    peak_footprint : int;  (** the process's highest, read before the last report's walk *)
     memory_error : string option;
     cook_error : string option;
   }
@@ -503,6 +505,7 @@ module Measure : sig
   val run :
     ?width:int ->
     ?height:int ->
+    ?device:bool ->
     ?step:(int -> Editor.t -> Editor.t) ->
     early:int ->
     frames:int ->

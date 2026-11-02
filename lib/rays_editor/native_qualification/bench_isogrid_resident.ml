@@ -65,6 +65,7 @@ let () =
                   coerce = (fun ty v -> time 4 (fun () -> r.coerce ty v));
                   count = (fun v -> time 5 (fun () -> r.count v));
                   finish = (fun v -> time 6 (fun () -> r.finish v));
+                  capacity = r.capacity;
                   settle = (fun () -> time 7 r.settle);
                   close = (fun () -> time 8 r.close);
                 };

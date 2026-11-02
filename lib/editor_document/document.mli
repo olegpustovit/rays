@@ -99,10 +99,6 @@ type snapshot = {
 (** An undo entry: the text and what the text does not say. No evaluated value, lowering or GPU
     handle; [Lowering.restore] makes the document again. *)
 
-val present_scale : t -> float
-(** Bytes per byte of text, by one walk of this document. Not for a frame path. *)
-
-val present_bytes : scale:float -> t -> int
 val snapshot : t -> snapshot
 val snapshot_bytes : snapshot -> int
 

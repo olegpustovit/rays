@@ -831,6 +831,14 @@ let update value (frame : Frame.t) =
    frame is rendered ([Renderer]), so past the caches only undo beyond 16 entries is left. The
    document on screen and the last good frame stay; the error says so until usage is back. *)
 let memory_boundary value =
+  (* once per crossing: a window with no eyes on its status strip still says it *)
+  let said message =
+    match value.memory_error with
+    | Some _ as already -> already
+    | None ->
+        prerr_endline ("rays: " ^ message);
+        Some message
+  in
   let device () =
     Option.fold ~none:0 ~some:fst (Flow_native.Workspace_gpu.device_limits value.host.gpu)
   in
@@ -842,26 +850,15 @@ let memory_boundary value =
         (fun (_, working_set) ->
           Mem.set_budget ~source:Machine (Mem.machine_budget ~working_set))
         (Flow_native.Workspace_gpu.device_limits value.host.gpu);
+      (* what the device holds at the first boundary beyond any owner: the driver's own, and the first
+         frame's pipelines *)
+      Mem.charge (Mem.plan ~pool:Device "metal.driver") (device () - Mem.attributed_device ());
       { value with memory_known = true }
     end
   in
-  (* the present document on the ledger, walked only when its text changed *)
-  let value =
-    let ws = value.core.doc.workspace.ws in
-    match value.memory_doc with
-    | Some (seen, _, _) when seen == ws -> value
-    | previous ->
-        let owner = Mem.document "editor.document" in
-        Option.iter (fun (_, bytes, _) -> Mem.release owner bytes) previous;
-        let scale =
-          match previous with
-          | Some (_, _, scale) -> scale
-          | None -> Document.present_scale value.core.doc
-        in
-        let bytes = Document.present_bytes ~scale value.core.doc in
-        Mem.charge owner bytes;
-        { value with memory_doc = Some (ws, bytes, scale) }
-  in
+  (* the present document, and its lowering, on the ledger when a report walks it *)
+  let doc = value.core.doc.workspace in
+  Mem.root (Mem.document "editor.document") (fun () -> [ Obj.repr doc ]);
   let core = ref value.core in
   let undo_past_16 () =
     let history = !core.Editor_model.history in
@@ -877,18 +874,19 @@ let memory_boundary value =
         value with
         core = !core;
         memory_error =
-          (match value.memory_error with
-          | Some _ as said -> said
-          | None ->
-              Some
-                (Diagnostic.to_string
-                   (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))));
+          said (Diagnostic.to_string (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft)));
       }
   | Within ->
       let core =
-        if Cook.out_of_memory !core.cook then { !core with cook = Cook.force !core.cook } else !core
+        if Cook.out_of_memory !core.cook && Mem.retry_worthwhile () then
+          { !core with cook = Cook.force !core.cook }
+        else !core
       in
-      { value with core; memory_error = None }
+      (* a refused cook stays refused, though the process is back under: the last good frame shows *)
+      let memory_error =
+        if Cook.out_of_memory core.cook then said (Option.get core.cook.error) else None
+      in
+      { value with core; memory_error }
 
 let after_present value frame =
   let value = observe_presented value in
@@ -994,9 +992,7 @@ let crash_dump value directory =
           ()))
 
 let close value =
-  Option.iter
-    (fun (_, bytes, _) -> Mem.release (Mem.document "editor.document") bytes)
-    value.memory_doc;
+  Mem.root (Mem.document "editor.document") (fun () -> []);
   let value = autosave ~force:true value ~now:value.state_checked in
   Option.iter prerr_endline value.state_error;
   Option.iter (fun (_, image) -> ignore (Image.destroy image)) value.map;

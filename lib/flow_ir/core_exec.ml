@@ -6,7 +6,7 @@ module E = Flow.Eval
 exception Resident_overflow
 
 (* A resident fold's device: inside a qualifying top-level loop of a drawing, a region's array may stay
-   on the GPU, standing in the locals as a placeholder (zeros of its capacity) the device knows. *)
+   on the GPU, standing in the locals as a placeholder (an identity, its block small) the device knows. *)
 type resident = {
   fill : Flow.Ty.t -> length:int -> Flow.Eval.value -> Flow.Eval.value option;
   invoke : Packed.t -> E.value array -> locals:E.value array -> live:Input.t -> E.value option;
@@ -18,6 +18,9 @@ type resident = {
       (* the host array a placeholder stands for; any other value as it is *)
   count : E.value -> int option;
       (* a placeholder's settled element count, without reading its payload *)
+  capacity : E.value -> int option;
+      (* a placeholder's length, an upper bound of its count, with no wait: a placeholder's block
+         does not say it; None for an ordinary host value *)
   close : unit -> unit;
       (* the loop (or the draw keeping its arrays) is over: forget its placeholders *)
   settle : unit -> unit;
@@ -174,6 +177,12 @@ type state = {
   mutable kept : int array;
       (* after a resident loop, the locals that may hold its device arrays (Core_exec.resident_tail) *)
 }
+
+(* an array's length; a placeholder's is its capacity, which its block does not say *)
+let held_length st value =
+  match st.resident with
+  | None -> V.array_length value
+  | Some r -> ( match r.capacity value with Some n -> n | None -> V.array_length value)
 
 type scalar = {
   code : int array;
@@ -390,7 +399,7 @@ let primitive ~track ~locals op args =
         fun st ->
           V.Float (V.fin "remainder" (Float.rem (V.num st.values.(a)) (V.num st.values.(b))))
     | Array_count when List.map fst args = [ "array" ] ->
-        fun st -> V.Int (V.array_length st.values.(first))
+        fun st -> V.Int (held_length st st.values.(first))
     | Array_nth when List.map fst args = [ "array"; "index" ] -> (
         (* A whole index inside native storage, as the operator checks; anything else is its own body. *)
         let array = a_ "array"
@@ -1402,7 +1411,7 @@ let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspa
               | Some v -> st.values.(n) <- v
               | None ->
                   if st.kept <> [||] then release_kept r st;
-                  st.values.(count) <- V.Int (V.array_length st.values.(source) / div);
+                  st.values.(count) <- V.Int (held_length st st.values.(source) / div);
                   st.values.(n) <- value st))
     | Assign (n, (Prim (Array_range, args) as e)) ->
         let value = expression e and count = List.assoc "count" args in

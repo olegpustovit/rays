@@ -1506,7 +1506,7 @@ an `array/range` lowers to an Int mask region and `array/compact`, so a fold's f
 Inside a top-level loop whose body holds only regions, scalars, ifs, compaction, retyping and
 counts, the **resident fold** (`Host.resident`, `Core_exec.draw ?resident`) keeps the arrays on
 the device from the first region of 256 elements. A region runs into buffers the fold owns and
-stands in the locals as a placeholder (zeros of its *capacity*, an upper bound); its kernel writes
+stands in the locals as a small placeholder (its *capacity*, an upper bound, lives on the host); its kernel writes
 its true count to a 4-byte cell. A region whose source is `array/range` of an array's count times
 a constant or `int/div` by one, or the array itself, takes its count from that cell on the
 device (`Packed.Host.source_shapes`; the fast kernel's `count_in`, mul, div and `count_out`),

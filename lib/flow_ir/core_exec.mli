@@ -60,6 +60,7 @@ type resident = {
   coerce : Flow.Ty.t -> Flow.Eval.value -> Flow.Eval.value option;
   finish : Flow.Eval.value -> Flow.Eval.value;
   count : Flow.Eval.value -> int option;
+  capacity : Flow.Eval.value -> int option;
   close : unit -> unit;
   settle : unit -> unit;
   range : Flow.Ty.t -> Flow.Eval.value -> div:int -> length:int -> Flow.Eval.value option;
@@ -67,9 +68,10 @@ type resident = {
 (** A resident fold's device. Inside a top-level loop of a drawing whose body holds only regions,
     scalar statements, [array/compact], retyping and [array/count] ([~remember_loops] programs), a
     region's array may stay on the device: [invoke] runs a region there and returns a placeholder
-    (an array of its length the device knows), [compact] and [coerce] work on placeholders, [finish]
-    reads one back. [count] settles and returns a known placeholder's element count without payload,
-    or [None] for an ordinary host value. A declined region gets its placeholder inputs back first;
+    (an identity the device knows: its block is small and its length unread), [compact] and [coerce]
+    work on placeholders, [finish] reads one back. [count] settles and returns a known placeholder's
+    element count without payload, or [None] for an ordinary host value. [capacity] is its length,
+    an upper bound of that count, with no wait, or [None] for a host value. A declined region gets its placeholder inputs back first;
     the loop's arrays are read back as it ends, then [close].
 
     When the statements after such a loop only count its arrays, divide the count by a constant,

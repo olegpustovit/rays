@@ -260,6 +260,7 @@ module Host : sig
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
     ?measure:(unit -> float) * (t -> seconds:float -> reference:bool -> unit) ->
     ?lengths:(int -> int option) ->
+    ?capacity:(Flow.Eval.value -> int option) ->
     ?index:bool ->
     ?resident:(Flow.Eval.value -> (Flow.Eval.value * int) option) ->
     ?source:(Flow.Eval.residual -> Flow.Workspace.term -> Flow.Eval.value option) ->

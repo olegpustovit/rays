@@ -113,6 +113,22 @@ CAMLprim value caml_rays_mem_phys_footprint(value unit) {
   CAMLreturn(result);
 }
 
+CAMLprim value caml_rays_mem_peak_footprint(value unit) {
+  CAMLparam1(unit);
+  CAMLlocal1(result);
+#if defined(__APPLE__)
+  struct rusage_info_v4 info;
+  if (read_rusage(&info) && info.ri_lifetime_max_phys_footprint <= (uint64_t)Max_long) {
+    result = caml_alloc_some(Val_long((intnat)info.ri_lifetime_max_phys_footprint));
+  } else {
+    result = Val_none;
+  }
+#else
+  result = Val_none;
+#endif
+  CAMLreturn(result);
+}
+
 CAMLprim value caml_rays_mem_instructions(value unit) {
   CAMLparam1(unit);
   CAMLlocal1(result);

@@ -31,7 +31,11 @@ type budget = {
   max_live_bytes : int option;
   max_footprint_bytes : int option;
   max_unattributed_pct : float option;
+  max_overclaimed_pct : float;
   max_readback_bytes : int option;
+  max_payload_readback_bytes : int option;
+  max_peak_bytes : int option;  (** the process's highest footprint, over a ceiling too *)
+  refuses : bool;  (** its ceiling is under what it needs: the frame path must say E_MEMORY *)
   route : [ `Device | `Any ];
   ceiling : int option;  (** RAYS_MEM_BUDGET for this scenario: it passes or fails with E_MEMORY *)
   known_red : bool;  (** fails today; passing fails, so the marker is removed *)
@@ -61,7 +65,11 @@ let parse_budget (form : Flow.Syntax.t) =
     max_live_bytes = int "max_live_bytes";
     max_footprint_bytes = int "max_footprint_bytes";
     max_unattributed_pct = Some (Option.value ~default:20. (float "max_unattributed_pct"));
+    max_overclaimed_pct = Option.value ~default:5. (float "max_overclaimed_pct");
     max_readback_bytes = int "max_readback_bytes";
+    max_payload_readback_bytes = int "max_payload_readback_bytes";
+    max_peak_bytes = int "max_peak_bytes";
+    refuses = List.mem_assoc "refuses" fields;
     route = (if List.assoc_opt "route" fields = Some "device" then `Device else `Any);
     ceiling = int "ceiling";
     known_red = List.mem_assoc "known_red" fields;
@@ -123,6 +131,7 @@ let scenario = function
   | "pxui" -> (sketch "pxui", no_step)
   | "recursive_signals" -> (sketch "recursive_signals", no_step)
   | "sea_128" | "sea_128_200m" -> (sea 128, no_step)
+  | "sea_256" | "sea_256_100m" -> (sea 256, no_step)
   | "isogrid_small" -> (set_input "volume" "resolution" 12 (sketch "isogrid"), no_step)
   | "image_graph" -> (sketch "flow_image", no_step)
   | "scrubs_100" ->
@@ -193,13 +202,19 @@ let check (budget : budget) (o : M.outcome) =
       let share bytes = if explicit <= 0 then 0. else 100. *. float bytes /. float explicit in
       if share report.unattributed > max_pct then
         note "unattributed %.1f%% of explicit over %.1f%%" (share report.unattributed) max_pct;
-      if share report.overclaimed > max_pct then
-        note "owners overclaim %.1f%% of explicit, over %.1f%%" (share report.overclaimed) max_pct)
+      if share report.overclaimed > budget.max_overclaimed_pct then
+        note "owners overclaim %.1f%% of explicit, over %.1f%%: a double count hides what no owner holds"
+          (share report.overclaimed) budget.max_overclaimed_pct)
     budget.max_unattributed_pct;
   Option.iter
     (fun max ->
       if o.readback_bytes > max then note "readback %d B over %d: the route left the device" o.readback_bytes max)
     budget.max_readback_bytes;
+  Option.iter
+    (fun max ->
+      if o.payload_readback_bytes > max then
+        note "payload readback %d B over %d: arrays left the device" o.payload_readback_bytes max)
+    budget.max_payload_readback_bytes;
   (match budget.route with
   | `Any -> ()
   | `Device ->
@@ -226,12 +241,15 @@ let check (budget : budget) (o : M.outcome) =
         in
         says o.memory_error || says o.cook_error
       in
+      if budget.refuses && not typed then note "ceiling %d: no E_MEMORY reached the frame" ceiling;
       if o.final.footprint > ceiling && not typed then
         note "footprint %d B over its ceiling %d with no E_MEMORY" o.final.footprint ceiling);
+  let peak = o.peak_footprint in
+  Option.iter (fun max -> if peak > max then note "peak %d B over max_peak_bytes %d" peak max) budget.max_peak_bytes;
   Printf.printf
-    "scenario %s: live %d (frame %d) -> %d (frame %d) %.2f%%, device %d, footprint %d, alloc/frame %.0f, promoted/frame %.0f, readback %d\n%s%!"
+    "scenario %s: live %d (frame %d) -> %d (frame %d) %.2f%%, device %d, footprint %d, peak %d, alloc/frame %.0f, promoted/frame %.0f, readback %d\n%s%!"
     budget.name o.early.live o.early.frame o.final.live o.final.frame flat o.final.device
-    o.final.footprint
+    o.final.footprint peak
     (o.final.allocated /. float budget.frames)
     (o.final.promoted /. float budget.frames)
     o.readback_bytes (Mem.Report.to_string report);
@@ -242,7 +260,9 @@ let run_one ?(sites = false) (budget : budget) =
   let stop = if sites then M.track_sites () else fun () -> [] in
   let workspace, step = scenario budget.name in
   let outcome =
-    string_ok (M.run ~step ~early:(min budget.early budget.frames) ~frames:budget.frames workspace)
+    string_ok
+      (M.run ~device:(budget.route = `Device) ~step ~early:(min budget.early budget.frames)
+         ~frames:budget.frames workspace)
   in
   List.iter (fun (bytes, site) -> Printf.printf "live %10d B  %s\n" bytes site) (stop ());
   match check budget outcome with

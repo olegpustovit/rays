@@ -6,6 +6,25 @@ let check condition message = if not condition then fail message
 
 let () =
   Mem.reset ();
+  (* a walked owner is what its roots reach beyond those before it; a charged table is not walked *)
+  let shared = Array.make 10_000 0 in
+  let named = Mem.plan "walk.named" and counted = Mem.cache "walk.counted" in
+  let charged = Mem.cache "walk.charged" in
+  Mem.root named (fun () -> [ Obj.repr shared ]);
+  let own = Array.make 1_000 0 in
+  let table = (shared, own) in
+  Mem.walk_table counted table ~uncharged:(fun () -> true);
+  Mem.walk_table charged table ~uncharged:(fun () -> false);
+  ignore (Mem.report ());
+  check (abs (Mem.bytes named - 80_000) < 100) "a named root is its reach";
+  check (abs (Mem.bytes counted - 8_000) < 100) "a table is what it reaches beyond the roots before it";
+  check (Mem.bytes charged = 0) "a table on the ledger is not walked";
+  Mem.root named (fun () -> []);
+  ignore (Mem.report ());
+  ignore (Sys.opaque_identity table);
+  check (abs (Mem.bytes counted - 88_000) < 100) "what a root let go of falls to the next";
+  check (Mem.bytes named = 0) "a dropped root leaves the ledger";
+  Mem.reset ();
   let meshes = Mem.cache "renderer.meshes" in
   let history = Mem.document "editor.history" in
   check (Mem.bytes meshes = 0 && Mem.peak meshes = 0) "fresh owner is empty";

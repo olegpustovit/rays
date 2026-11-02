@@ -457,6 +457,8 @@ module Measure = struct
     final : sample;
     fallbacks : (string * string * int) list;
     readback_bytes : int;
+    payload_readback_bytes : int;
+    peak_footprint : int;
     memory_error : string option;
     cook_error : string option;
   }
@@ -508,15 +510,25 @@ module Measure = struct
       |> List.sort (fun (a, _) (b, _) -> compare b a)
       |> List.filteri (fun i _ -> i < 60)
 
-  let run ?(width = 960) ?(height = 640) ?(step = fun _ editor -> editor) ~early ~frames workspace =
+  let run ?(width = 960) ?(height = 640) ?(device = false) ?(step = fun _ editor -> editor) ~early
+      ~frames workspace =
     let ( let* ) = Result.bind in
     let* canvas = Rays.Canvas.create ~width ~height in
     Fun.protect
       ~finally:(fun () -> ignore (Rays.Canvas.destroy canvas))
       (fun () ->
+        (* a run that states its route bypasses the clock: measured placement can move a small
+           mesh's writes between runs. Set before the document opens, which keeps the policy. *)
+        let gpu_owner = Flow_native.Workspace_gpu.create () in
+        if device then Flow_native.Workspace_gpu.qualification gpu_owner;
+        (* its pixels: a walk of the canvas would reach the renderer's charged caches too *)
+        let canvas_owner = Mem.plan "rays.canvas" and canvas_bytes = width * height * 4 in
+        Mem.charge canvas_owner canvas_bytes;
+        Fun.protect ~finally:(fun () -> Mem.release canvas_owner canvas_bytes) @@ fun () ->
+        Fun.protect ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu_owner) @@ fun () ->
         let* editor =
-          Editor.create ~ui_text_size:11 ~await:true ~domains:1 ~workspace ~prepare:Editor.prepare
-            ~draw:Editor.draw ()
+          Loop_model.create ~gpu_owner ~ui_text_size:11 ~await:true ~domains:1 ~workspace
+            ~prepare:Editor.prepare ~draw:Editor.draw ()
         in
         let editor = ref editor in
         Fun.protect
@@ -525,12 +537,13 @@ module Measure = struct
             let bytes_of words = words *. float (Sys.word_size / 8) in
             let allocated0 = Gc.allocated_bytes () in
             let promoted0 = (fun (_, promoted, _) -> bytes_of promoted) (Gc.counters ()) in
-            let measure tick =
+            let measure ?(walk = false) tick =
               let device =
                 Option.fold ~none:0 ~some:fst
                   (Flow_native.Workspace_gpu.device_limits (!editor).Loop_model.host.gpu)
               in
-              let report = Mem.report ~device () in
+              (* one walk, the last: a walk's hash set stays in the footprint of the next sample *)
+              let report = Mem.report ~walk ~device () in
               {
                 frame = tick;
                 live = report.ocaml_live;
@@ -557,7 +570,8 @@ module Measure = struct
             match !failure with
             | Some message -> Error message
             | None ->
-                let final = measure frames in
+                let peak_footprint = Option.value ~default:0 (Mem.peak_footprint ()) in
+                let final = measure ~walk:true frames in
                 let early = Option.value !first ~default:final in
                 let stats, _, _, _, _ =
                   Flow_native.Workspace_gpu.image_stats (!editor).Loop_model.host.gpu
@@ -568,6 +582,8 @@ module Measure = struct
                     final;
                     fallbacks = Flow_ir.Fallback.seen ();
                     readback_bytes = stats.readback_bytes;
+                    payload_readback_bytes = stats.payload_readback_bytes;
+                    peak_footprint;
                     memory_error = (!editor).Loop_model.memory_error;
                     cook_error = (!editor).Loop_model.core.cook.error;
                   }))

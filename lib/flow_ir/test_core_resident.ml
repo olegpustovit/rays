@@ -91,6 +91,7 @@ let device ?(decline = false) ?(overflow = false) ?(error = false) () =
           incr closes;
           held := []);
       settle;
+      capacity = (fun _ -> None);
       range = (fun _ _ ~div:_ ~length:_ -> None);
       fill = (fun _ ~length:_ _ -> None);
     }
