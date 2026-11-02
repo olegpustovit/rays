@@ -923,6 +923,9 @@ let violations graph ~scan =
       (fun (path, text) ->
         if
           (not (String.starts_with ~prefix:"lib/" path && Filename.check_suffix path ".ml"))
+          (* the validation layer switch, read where the instance is made as Metal reads
+             MTL_DEBUG_LAYER: it selects no behaviour, and no test can name the backend to set it *)
+          || path = "lib/ogpu_vulkan/backend.ml"
           || String.starts_with ~prefix:"test_" (Filename.basename path)
           || contains path "/test/"
         then None
