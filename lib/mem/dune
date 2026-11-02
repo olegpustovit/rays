@@ -1,0 +1,12 @@
+(library
+ (name mem)
+ (public_name rays.mem)
+ (modules mem)
+ (foreign_stubs
+  (language c)
+  (names mem_stubs)))
+
+(test
+ (name test_mem)
+ (modules test_mem)
+ (libraries mem))

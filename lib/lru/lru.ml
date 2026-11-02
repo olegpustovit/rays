@@ -18,6 +18,7 @@ module Make (K : Hashtbl.HashedType) = struct
   type 'v t = {
     capacity : int;
     byte_capacity : int;
+    owner : Mem.owner option;
     evictable : K.t -> 'v -> bool;
     release : K.t -> 'v -> unit;
     table : 'v node Table.t;
@@ -27,11 +28,18 @@ module Make (K : Hashtbl.HashedType) = struct
     mutable bytes : int;
   }
 
-  let create ?(byte_capacity = max_int) ?(evictable = fun _ _ -> true) ?(release = fun _ _ -> ())
-      capacity =
+  let charge_owner owner size =
+    match owner with None -> () | Some owner -> Mem.charge owner size
+
+  let release_owner owner size =
+    match owner with None -> () | Some owner -> Mem.release owner size
+
+  let create ?owner ?(byte_capacity = max_int) ?(evictable = fun _ _ -> true)
+      ?(release = fun _ _ -> ()) capacity =
     {
       capacity;
       byte_capacity;
+      owner;
       evictable;
       release;
       table = Table.create (max 1 (min 1024 capacity));
@@ -72,6 +80,7 @@ module Make (K : Hashtbl.HashedType) = struct
     unlink t node;
     Table.remove t.table node.key;
     t.bytes <- t.bytes - node.size;
+    release_owner t.owner node.size;
     t.release node.key node.value
 
   let over t = Table.length t.table > t.capacity || t.bytes > t.byte_capacity
@@ -122,6 +131,7 @@ module Make (K : Hashtbl.HashedType) = struct
     Table.replace t.table key node;
     link_newest t node;
     t.bytes <- t.bytes + bytes;
+    charge_owner t.owner bytes;
     evict t
 
   let remove t key = match Table.find_opt t.table key with None -> () | Some node -> drop t node
@@ -133,6 +143,7 @@ module Make (K : Hashtbl.HashedType) = struct
         unlink t node;
         Table.remove t.table node.key;
         t.bytes <- t.bytes - node.size;
+        release_owner t.owner node.size;
         Some node.value
 
   let drop_oldest t =
@@ -167,7 +178,10 @@ module Make (K : Hashtbl.HashedType) = struct
   let length t = Table.length t.table
 
   let copy ~release t =
-    let result = create ~byte_capacity:t.byte_capacity ~evictable:t.evictable ~release t.capacity in
+    let result =
+      create ?owner:t.owner ~byte_capacity:t.byte_capacity ~evictable:t.evictable ~release
+        t.capacity
+    in
     if Array.length t.oldest > 0 then begin
       let oldest = t.oldest.(0) in
       let rec go source =
@@ -184,6 +198,7 @@ module Make (K : Hashtbl.HashedType) = struct
         Table.add result.table node.key node;
         link_newest result node;
         result.bytes <- result.bytes + node.size;
+        charge_owner result.owner node.size;
         if source.newer != oldest then go source.newer
       in
       go oldest
@@ -202,13 +217,14 @@ end
 module Identity_list = struct
   type ('key, 'value) t = {
     capacity : int;
+    owner : Mem.owner option;
     equal : 'key -> 'key -> bool;
     release : 'key -> 'value -> unit;
     mutable entries : ('key * 'value) list;
   }
 
-  let create ?(release = fun _ _ -> ()) ~equal capacity =
-    { capacity = max 0 capacity; equal; release; entries = [] }
+  let create ?owner ?(release = fun _ _ -> ()) ~equal capacity =
+    { capacity = max 0 capacity; owner; equal; release; entries = [] }
 
   let split equal key entries =
     let rec go before = function

@@ -311,6 +311,8 @@ type driver_queue = {
 type driver_device = {
   device_handle : Handle.device;
   capabilities : Caps.t;
+  allocated_size : unit -> int64;
+  recommended_working_set : unit -> int64;
   create_buffer : Types.memory -> Types.buffer_descriptor -> (driver_resource, Error.t) result;
   create_mapped_buffer : Types.buffer_descriptor -> (driver_mapped, Error.t) result;
   create_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
@@ -341,6 +343,13 @@ type frame
 val create_device : driver -> (device, Error.t) result
 val capabilities : device -> Caps.t
 val device_handle : device -> Handle.device
+
+val allocated_size : device -> int64
+(** Bytes this device currently holds (Metal [currentAllocatedSize], or the mock's counted
+    payloads). *)
+
+val recommended_working_set : device -> int64
+(** Soft working-set ceiling for budgeting. *)
 
 val create_buffer :
   ?memory:Types.memory -> device -> Types.buffer_descriptor -> (buffer, Error.t) result

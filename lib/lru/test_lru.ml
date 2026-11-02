@@ -151,4 +151,14 @@ let () =
   let new_time, new_allocated = measure (Identity.peek identity) in
   Printf.printf "lru identity-list lookup (%d hits): old %.4fs/%.0fB new %.4fs/%.0fB\n%!" rounds
     old_time old_allocated new_time new_allocated;
+  Mem.reset ();
+  let owner = Mem.cache "test.lru" in
+  let charged = Cache.create ~owner ~byte_capacity:10 8 in
+  Cache.add charged ~bytes:4 1 "a";
+  Cache.add charged ~bytes:4 2 "b";
+  check (Mem.bytes owner = 8) "owner tracks cache bytes";
+  Cache.add charged ~bytes:4 3 "c";
+  check (Mem.bytes owner = 8 && Cache.bytes charged = 8) "eviction releases the owner charge";
+  Cache.clear charged;
+  check (Mem.bytes owner = 0) "clear releases the owner charge";
   print_endline "lru: order, eviction, bytes, pinning, release, allocation-free hits"

@@ -302,6 +302,12 @@ type driver_queue = {
 type driver_device = {
   device_handle : Handle.device;
   capabilities : Caps.t;
+  allocated_size : unit -> int64;
+      (** Bytes the backend currently holds for this device (Metal [currentAllocatedSize], or the
+          mock's counted buffer and texture payloads). *)
+  recommended_working_set : unit -> int64;
+      (** Soft ceiling for the device working set (Metal [recommendedMaxWorkingSetSize]; mock: a
+          fixed large default so tests can override with [RAYS_MEM_BUDGET]). *)
   create_buffer : Types.memory -> Types.buffer_descriptor -> (driver_resource, Error.t) result;
   create_mapped_buffer : Types.buffer_descriptor -> (driver_mapped, Error.t) result;
   create_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
@@ -389,6 +395,8 @@ let create_device driver =
 
 let capabilities (value : device) = value.raw.capabilities
 let device_handle (value : device) = value.handle
+let allocated_size (value : device) = value.raw.allocated_size ()
+let recommended_working_set (value : device) = value.raw.recommended_working_set ()
 
 let live op (device : device) =
   if device.dead then error op Error.Stale_handle "device is destroyed" else Ok ()

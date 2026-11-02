@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstdio>
 #include <deque>
 #include <atomic>
 #include <cmath>
@@ -4355,11 +4357,25 @@ extern "C" CAMLprim value caml_rays_metal_command_buffer_wait(value raw) {
   CAMLparam1(raw);
   id<MTLCommandBuffer> buffer =
       object_of_handle(raw, Handle_kind::Command_buffer);
+  const auto started = std::chrono::steady_clock::now();
   caml_enter_blocking_section();
   @autoreleasepool {
     [buffer waitUntilCompleted];
   }
   caml_leave_blocking_section();
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  const auto seconds =
+      std::chrono::duration_cast<std::chrono::duration<double>>(elapsed).count();
+  if (seconds > 1.0) {
+    @autoreleasepool {
+      const auto status = static_cast<long long>(buffer.status);
+      const NSUInteger allocated = buffer.device.currentAllocatedSize;
+      fprintf(stderr,
+              "rays: Metal wait %.3fs status=%lld device_allocated=%zu\n",
+              seconds, status, static_cast<size_t>(allocated));
+      fflush(stderr);
+    }
+  }
   CAMLreturn(Val_unit);
 }
 

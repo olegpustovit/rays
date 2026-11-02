@@ -1,9 +1,10 @@
 (library
  (name lru)
  (public_name rays.lru)
- (modules lru))
+ (modules lru)
+ (libraries mem))
 
 (test
  (name test_lru)
  (modules test_lru)
- (libraries lru))
+ (libraries lru mem))

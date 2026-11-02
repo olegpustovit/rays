@@ -237,12 +237,18 @@ let create () =
             Ok ());
       }
   in
+  let allocated_size () =
+    Hashtbl.fold (fun _ bytes total -> total + Bytes.length bytes) c.memory 0 |> Int64.of_int
+  in
   let create_device () =
     let _device_token = token c and device_handle = Handle.create_device () in
     Ok
       {
         Backend.device_handle;
         capabilities;
+        allocated_size;
+        recommended_working_set =
+          (fun () -> Int64.mul 8L (Int64.mul 1024L (Int64.mul 1024L 1024L)));
         create_buffer =
           (fun _memory d ->
             resource "buffer" c.buffers (fun n -> c.buffers <- n) (Int64.to_int d.Types.size));

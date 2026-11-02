@@ -1032,10 +1032,20 @@ let create () =
               | Ok (), None -> Ok ()
             end
           in
+          let metal_size project =
+            match Metal.Device.info (Device.Private.metal device) with
+            | Ok info -> project info
+            | Error _ -> 0L
+          in
           Ok
             {
               Ogpu_core.Backend.device_handle = Device.Private.handle device;
               capabilities = Device.capabilities device;
+              allocated_size =
+                (fun () -> metal_size (fun info -> info.Metal.Device.current_allocated_size));
+              recommended_working_set =
+                (fun () ->
+                  metal_size (fun info -> info.Metal.Device.recommended_max_working_set_size));
               create_buffer;
               create_mapped_buffer;
               create_texture;

@@ -592,3 +592,35 @@
    (run %{exe:../lib/rays_editor/native_qualification/bench_isogrid.exe} --flips 24 200))))
 
 (alias (name qualification-scale) (deps (alias isogrid-selector-lifetimes)))
+
+(executable
+ (enabled_if
+  (= %{system} macosx))
+ (name mem_gate)
+ (modules mem_gate)
+ (libraries
+  mem
+  metal
+  ogpu_metal
+  rays
+  rays_editor
+  editor_document
+  flow
+  flow_graph
+  flow_sop
+  sop
+  input
+  unix
+  parallel))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias mem)
+ (deps
+  ../specification/memory-budgets.sexp
+  (glob_files ../sketches/*.rays))
+ (action
+  (chdir
+   ..
+   (run %{exe:mem_gate.exe}))))

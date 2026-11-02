@@ -7,6 +7,7 @@ module Make (K : Hashtbl.HashedType) : sig
   type 'v t
 
   val create :
+    ?owner:Mem.owner ->
     ?byte_capacity:int ->
     ?evictable:(K.t -> 'v -> bool) ->
     ?release:(K.t -> 'v -> unit) ->
@@ -15,7 +16,8 @@ module Make (K : Hashtbl.HashedType) : sig
   (** [create capacity] keeps at most [capacity] entries and [byte_capacity] bytes (unbounded by
       default). Only [evictable] entries are eviction candidates (all by default), so a pinned entry
       can hold the table over its limits until it is released. [release] runs exactly once for every
-      entry that leaves the table, including [clear]. *)
+      entry that leaves the table, including [clear]. [owner], when set, charges and releases the
+      entry byte sizes on the memory ledger. *)
 
   val find : 'v t -> K.t -> 'v
   (** A hit marks the entry recently used; a miss raises [Not_found]. This is the frame-path lookup:
@@ -61,9 +63,14 @@ module Identity_list : sig
   type ('key, 'value) t
 
   val create :
-    ?release:('key -> 'value -> unit) -> equal:('key -> 'key -> bool) -> int -> ('key, 'value) t
+    ?owner:Mem.owner ->
+    ?release:('key -> 'value -> unit) ->
+    equal:('key -> 'key -> bool) ->
+    int ->
+    ('key, 'value) t
   (** A bounded MRU list for typed keys whose equality is identity-based or otherwise cheap.
-      [release] runs when an entry leaves the list. *)
+      [release] runs when an entry leaves the list. [owner] is accepted for the shared ledger
+      surface; entry sizes are charged when a later stage passes them. *)
 
   val find : ('key, 'value) t -> 'key -> 'value option
   (** A hit moves the entry to the front. *)
