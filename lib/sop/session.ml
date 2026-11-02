@@ -64,6 +64,10 @@ type t = {
   mutable misses : int;
   mutable volatile : int -> bool;
   slots : (int, string * entry) Hashtbl.t; (* volatile node id -> latest *)
+  slot_residents : (int, int list) Hashtbl.t;
+      (* Resident ids registered when a volatile slot was written. Geometry.releasers becomes
+         empty after a deferred attribute is materialised, so replacement must drop these ids
+         rather than asking the (now forced) geometry again. *)
   mutable volatile_hits : int;
   mutable volatile_misses : int;
   mutable evictions : int;
@@ -131,6 +135,7 @@ let create ~max_entries ~max_payload_bytes =
         evictions = 0;
         volatile = (fun _ -> false);
         slots = Hashtbl.create 16;
+        slot_residents = Hashtbl.create 16;
         volatile_hits = 0;
         volatile_misses = 0;
         last_node = None;
@@ -203,20 +208,28 @@ let store_slot session id key entry =
   if session.max_entries > 0 then begin
     let payload = session.payload in
     let fresh = releasers entry.output in
-    let gone (_, (old : entry)) =
+    let fresh_ids = List.map fst fresh in
+    let drop_old old_ids =
       List.iter
-        (fun (i, _) ->
-          if (not (Hashtbl.mem payload.refs i)) && not (List.mem_assoc i fresh) then drop payload i)
-        (releasers old.output)
+        (fun i ->
+          if (not (Hashtbl.mem payload.refs i)) && not (List.mem i fresh_ids) then drop payload i)
+        old_ids
+    in
+    let gone slot_id (_, (old : entry)) =
+      match Hashtbl.find_opt session.slot_residents slot_id with
+      | Some ids -> drop_old ids
+      | None -> drop_old (List.map fst (releasers old.output))
     in
     (* bounded: one slot per node id, dropped wholesale past max_entries *)
     if Hashtbl.length session.slots >= session.max_entries then begin
-      Hashtbl.iter (fun _ slot -> gone slot) session.slots;
-      Hashtbl.reset session.slots
+      Hashtbl.iter (fun slot_id slot -> gone slot_id slot) session.slots;
+      Hashtbl.reset session.slots;
+      Hashtbl.reset session.slot_residents
     end;
-    Option.iter gone (Hashtbl.find_opt session.slots id);
+    Option.iter (gone id) (Hashtbl.find_opt session.slots id);
     List.iter (fun (i, r) -> Hashtbl.replace payload.resident i r) fresh;
     session.written <- Right id :: session.written;
+    Hashtbl.replace session.slot_residents id fresh_ids;
     Hashtbl.replace session.slots id (key, entry)
   end
 
@@ -224,7 +237,10 @@ let store_volatile session node key entry = store_slot session (Node.id node) ke
 
 let set_volatile session predicate =
   session.volatile <- predicate;
-  Hashtbl.filter_map_inplace (fun id slot -> if predicate id then Some slot else None) session.slots
+  Hashtbl.filter_map_inplace (fun id slot -> if predicate id then Some slot else None) session.slots;
+  Hashtbl.filter_map_inplace
+    (fun id ids -> if predicate id then Some ids else None)
+    session.slot_residents
 
 (* An opaque, unambiguous cache identity: integers are fixed-width binary and
    every variable-length string is length-prefixed, so no field boundary can
@@ -496,6 +512,7 @@ let snapshot session =
         session.cache;
     payload;
     slots = Hashtbl.copy session.slots;
+    slot_residents = Hashtbl.copy session.slot_residents;
     times = Hashtbl.create 16;
     times_lock = Mutex.create ();
     cooks = 0;
@@ -1023,10 +1040,14 @@ let release_dropped session (result : (output, Diagnostic.t) result) =
   let held = root @ session.previous_root in
   session.previous_root <- root;
   if payload.dropped <> [] then begin
+    (* Prefer slot_residents: Geometry.releasers is empty after a deferred plane is materialised. *)
     let slots =
-      Hashtbl.fold
-        (fun _ (_, entry) ids -> List.map fst (releasers entry.output) @ ids)
-        session.slots []
+      Hashtbl.fold (fun _ ids acc -> ids @ acc) session.slot_residents []
+      @ Hashtbl.fold
+          (fun id (_, entry) ids ->
+            if Hashtbl.mem session.slot_residents id then ids
+            else List.map fst (releasers entry.output) @ ids)
+          session.slots []
     in
     let dropped = payload.dropped in
     payload.dropped <- [];
@@ -1072,7 +1093,9 @@ let cook ?cpu_consumers session ~context node =
             List.iter
               (function
                 | Either.Left key -> Entry_cache.remove session.cache key
-                | Right id -> Hashtbl.remove session.slots id)
+                | Right id ->
+                    Hashtbl.remove session.slots id;
+                    Hashtbl.remove session.slot_residents id)
               session.written;
             attempt ()
           end
@@ -1110,6 +1133,7 @@ let clear session =
   ();
   Entry_cache.clear session.cache;
   Hashtbl.reset session.slots;
+  Hashtbl.reset session.slot_residents;
   Hashtbl.clear session.payload.refs;
   session.payload.bytes <- 0;
   forget_resident session
@@ -1130,9 +1154,12 @@ module Private = struct
     Entry_cache.iter session.cache (fun key _ -> keys := key :: !keys);
     List.sort String.compare !keys
 
+  let resident_count session = Hashtbl.length session.payload.resident
+
   let clear_cache_keep_timings session =
     Entry_cache.clear session.cache;
     Hashtbl.reset session.slots;
+    Hashtbl.reset session.slot_residents;
     Hashtbl.reset session.payload.refs;
     session.payload.bytes <- 0;
     forget_resident session;

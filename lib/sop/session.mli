@@ -77,6 +77,7 @@ val set_parallel_override : t -> bool option -> unit
 module Private : sig
   val fanouts : t -> int
   val cache_keys : t -> string list
+  val resident_count : t -> int
 
   val clear_cache_keep_timings : t -> unit
   (** Cache-cold benchmarks after learning branch costs; counters are kept. *)

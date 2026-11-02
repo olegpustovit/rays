@@ -228,10 +228,13 @@ let run_frames editor frames =
   let promoted0 = promoted0 *. float (Sys.word_size / 8) in
   let early = ref None and final = ref None in
   let editor = ref editor in
+  (* Steady-state flatness: frame 60 (after warmup) vs 120. Frame 30 still warms caches and sits
+     on a different phase of bounded cook oscillation, which is not retention. *)
+  let early_at = if frames >= 120 then 60 else min 30 frames in
   for tick = 1 to frames do
     editor := E3.update !editor (frame tick);
     ignore (E3.scene !editor (frame tick));
-    if tick = 30 then early := Some (sample ~frame:tick ~allocated0 ~promoted0);
+    if tick = early_at then early := Some (sample ~frame:tick ~allocated0 ~promoted0);
     if tick = frames || tick = 120 then final := Some (sample ~frame:tick ~allocated0 ~promoted0)
   done;
   E3.close !editor;

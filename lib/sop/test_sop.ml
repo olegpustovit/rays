@@ -2807,6 +2807,58 @@ let test_packed_copy_contract () =
   assert ((Session.stats session).hits > hits);
   Session.close session
 
+(* After a deferred plane is materialised, Geometry.releasers is empty. Replacing the volatile slot
+   must still drop the residents registered at store time, or scrubbed GPU seas retain every frame. *)
+let test_volatile_slot_residents_after_materialise () =
+  let evaluator = session ~entries:4 () in
+  let released = ref [] in
+  let deferred_points step =
+    let release ~held = released := (step, held) :: !released in
+    let positions =
+      Rdk.Packed.Float3.deferred ~release ~length:4 (fun () ->
+          [|
+            [| float step; 1.; 1.; 0. |];
+            [| 0.; 0.; 1.; 1. |];
+            [| 0.; 0.; 0.; 0. |];
+          |])
+    in
+    Rdk.Geometry.create ~positions ~topology:(Rdk.Topology.empty ~point_count:4) () |> Result.get_ok
+  in
+  let live_node step =
+    custom ~operation:"volatile_resident" ~version:1 ~parameters:(string_of_int step) []
+      (fun ~context:_ _ -> Ok (deferred_points step))
+  in
+  let first = live_node 0 in
+  Session.set_volatile evaluator (fun id -> id = Node.id first);
+  let c = context () in
+  let cook step =
+    let node = Node.Build.adopt_identity ~source:first (live_node step) in
+    cook_ok evaluator c node
+  in
+  let first_out = cook 0 in
+  let geometry = Result.get_ok (Payload.geometry first_out.payload) in
+  check (Rdk.Geometry.releasers geometry <> []) "deferred P had no releaser at cook";
+  ignore (Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry));
+  check (Rdk.Geometry.releasers geometry = []) "forcing P did not clear Geometry.releasers";
+  check (!released = []) "forcing P released the device holder";
+  (* [previous_root] keeps the cook-0 resident one cook more while the caller may still read it. *)
+  ignore first_out;
+  ignore (cook 1);
+  ignore (cook 2);
+  check
+    (List.exists (fun (step, _) -> step = 0) !released)
+    "replacing a materialised volatile slot did not drop its resident";
+  (* Current slot plus [previous_root] may both keep a resident until the next cook advances. *)
+  check (Session.Private.resident_count evaluator <= 2) "volatile residents accumulated";
+  for step = 3 to 12 do
+    ignore (cook step)
+  done;
+  check
+    (Session.Private.resident_count evaluator <= 2
+    && (Session.stats evaluator).volatile_entries = 1)
+    "volatile scrub retained residents across cooks";
+  Session.close evaluator
+
 (* A volatile node keeps one slot outside the LRU: it never evicts static
    entries, and a hit needs the same key. *)
 let test_volatile_slots () =
@@ -2965,6 +3017,7 @@ let test_async_await () =
   Async_cook.close worker
 
 let run () =
+  test_volatile_slot_residents_after_materialise ();
   test_volatile_slots ();
   test_async_footer_reads_cache ();
   test_async_await ();

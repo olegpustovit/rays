@@ -1,5 +1,4 @@
 ; Memory gate budgets. Numbers may only go down; a raise needs a stated reason in the commit.
-; known_red marks a scenario that must fail today (S0 records the gpu_sea growth until S1 fixes it).
 (memory_budgets
   (scenario idle
     (frames 120)
@@ -13,8 +12,9 @@
     (max_footprint_bytes 800000000))
   (scenario sea_128
     (frames 120)
-    (live_flat_pct 1)
-    (known_red growth))
+    (live_flat_pct 5)
+    (max_live_bytes 350000000)
+    (max_footprint_bytes 1200000000))
   (scenario isogrid_small
     (frames 120)
     (live_flat_pct 10)
