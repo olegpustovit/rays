@@ -161,4 +161,75 @@ let () =
   check (Mem.bytes owner = 8 && Cache.bytes charged = 8) "eviction releases the owner charge";
   Cache.clear charged;
   check (Mem.bytes owner = 0) "clear releases the owner charge";
+  (* A copy shares its source's values: no second charge, no evictor, and dropping it changes nothing. *)
+  Cache.add charged ~bytes:4 1 "a";
+  let attributed = Mem.attributed () and evictors = Mem.evictor_count () in
+  let copied = ref (Some (Cache.copy ~release:(fun _ _ -> ()) charged)) in
+  check (Mem.attributed () = attributed) "a copy charges nothing";
+  check (Mem.evictor_count () = evictors) "a copy registers no evictor";
+  Cache.clear (Option.get !copied);
+  check (Mem.attributed () = attributed) "clearing a copy releases nothing";
+  copied := None;
+  Gc.full_major ();
+  check (Mem.attributed () = attributed && Mem.evictor_count () = evictors) "a dropped copy leaves no trace";
+  let list_owner = Mem.cache "test.lru.list" in
+  let listed = Identity.create ~owner:list_owner ~equal:( == ) 4 in
+  let key = ref 0 in
+  Identity.add listed ~bytes:5 key "a";
+  let attributed = Mem.attributed () and evictors = Mem.evictor_count () in
+  let list_copy = Identity.copy ~release:(fun _ _ -> ()) listed in
+  Identity.clear list_copy;
+  check (Mem.attributed () = attributed && Mem.evictor_count () = evictors) "nor does an identity list's";
+  check (Mem.bytes list_owner = 5) "the source still holds its charge";
+  (* the same value added again changes its size, it does not leave *)
+  let released = ref 0 in
+  let resized = Cache.create ~owner ~release:(fun _ _ -> incr released) 8 in
+  let value = "kept" in
+  Cache.add resized ~bytes:1 1 value;
+  let before = Mem.bytes owner in
+  Cache.add resized ~bytes:9 1 value;
+  check (!released = 0 && Cache.peek resized 1 = Some value) "re-adding a value does not release it";
+  check (Mem.bytes owner = before + 8) "re-adding a value charges the difference";
+  Cache.add resized ~bytes:1 1 "other";
+  check (!released = 1) "a different value does";
+  Cache.clear resized;
+  (* a table made per call does not live on through the ledger, and takes its bytes along *)
+  Mem.reset ();
+  let dying = Mem.cache "test.lru.dying" in
+  (let table = Cache.create ~owner:dying 4 in
+   Cache.add table ~bytes:64 1 "x";
+   check (Mem.bytes dying = 64 && Mem.evictor_count () = 1) "a table charges and registers");
+  ignore (Mem.report ());
+  ignore (Mem.report ());
+  check (Mem.evictor_count () = 0) "a dead table's evictor leaves";
+  check (Mem.bytes dying = 0) "a dead table's bytes leave";
+  (* the retreat follows a table's own rule *)
+  let budgeted name shed =
+    Mem.reset ();
+    let owner = Mem.cache name in
+    let table = Cache.create ~owner ?shed 4 in
+    Cache.add table ~bytes:64 1 "x";
+    Mem.set_budget 1;
+    (owner, table)
+  in
+  let usage () = 1 + Mem.attributed () in
+  let owner, table = budgeted "test.lru.home" None in
+  ignore (Mem.retreat ~usage ());
+  check (Cache.length table = 0 && Mem.bytes owner = 0) "Home: dropped from its domain";
+  let owner, table = budgeted "test.lru.away" None in
+  ignore (Domain.join (Domain.spawn (fun () -> Mem.retreat ~usage ())));
+  check (Cache.length table = 1 && Mem.bytes owner = 64) "Home: never from another domain";
+  let lock = Mutex.create () in
+  let owner, table = budgeted "test.lru.locked" (Some (Lru.Locked lock)) in
+  Mutex.lock lock;
+  ignore (Mem.retreat ~usage ());
+  check (Cache.length table = 1) "Locked: skipped while its user holds the lock";
+  Mutex.unlock lock;
+  ignore (Mem.retreat ~usage ());
+  check (Cache.length table = 0 && Mem.bytes owner = 0 && not (Mutex.try_lock lock && (Mutex.unlock lock; false)))
+    "Locked: dropped once free, the lock given back";
+  let owner, table = budgeted "test.lru.never" (Some Lru.Never) in
+  ignore (Mem.retreat ~usage ());
+  check (Cache.length table = 1 && Mem.bytes owner = 64) "Never: not dropped";
+  Mem.reset ();
   print_endline "lru: order, eviction, bytes, pinning, release, allocation-free hits"

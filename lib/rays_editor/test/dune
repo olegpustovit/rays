@@ -836,7 +836,7 @@
   (= %{system} macosx))
  (alias runtest-native)
  (locks smoke_window)
- (deps)
+ (deps (glob_files ../../../sketches/*.rays))
  (action
   (setenv
    SDL_AUDIODRIVER
