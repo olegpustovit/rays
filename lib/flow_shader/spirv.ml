@@ -1192,7 +1192,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     Words.instruction module_bytes 15
       ((5 :: main :: Words.string_words entry)
       @ if scene = None then [ invocation ] else List.rev !globals);
-    Words.instruction module_bytes 16 [ main; 17; 64; 1; 1 ];
+    Words.instruction module_bytes 16 [ main; 17; 256; 1; 1 ];
     List.iter (Buffer.add_buffer module_bytes) [ words.annotations; words.declarations; words.body ];
     Ok
       {
