@@ -1080,6 +1080,17 @@ pool preserve table constructors and diagnostics; worker failure order is the
 lowest failing chunk, independent of completion order. Live tables stay in
 structured Core instead of being frozen as export constants.
 
+Native CPU memory, unobservable in values (memory plan S5). A `Collect` region
+without carried loops runs over linear-scan register slots: a slot returns to
+its bank after its register's last read, never to an operand of the instruction
+it defines; a guarded result and a guard condition keep their own slot. A pure
+CPU program (no device, no resident fold, no enclosing shared run) drops a
+top-level region's array result at its last read when only regions and
+`array/count` read it (the rule of `resident_tail`) and every reader's block
+loop ran; a greedy-by-size plan over the top-level intervals reuses the arrays
+of an exact size two locals share, and the collector takes the rest. Printers
+and the web target see the SSA code: neither change reaches them.
+
 ## State slots and frame facts
 
 A state-slot descriptor has the evaluator's graph instance, lexical
