@@ -22,6 +22,8 @@ let () =
     |> List.map (Filename.concat fixtures)
   in
   if List.length fixtures < 12 then failwith "missing generated workspace fixtures";
+  (* Windows joins with a backslash; the lists below are written with slashes *)
+  let paths = List.map (String.map (function '\\' -> '/' | c -> c)) paths in
   let selected path =
     match Sys.getenv_opt "RAYS_WORKSPACE_FILTER" with
     | None -> true
