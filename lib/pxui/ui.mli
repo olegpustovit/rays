@@ -32,10 +32,13 @@
 
 type t
 
-val create : ?font_size:int -> ?font_path:string -> unit -> t
-(** [font_path] names the kit face's file (default: Pragmasevka found from the working directory or
-    the executable upward; the environment is never read); [font_size] is the logical size of kit
-    text. *)
+val create : platform:Input.platform -> ?font_size:int -> ?font_path:string -> unit -> t
+(** [platform] is the host's modifier conventions: the text keys and every Command check follow it
+    (see {!Input.platform}). [font_path] names the kit face's file (default: Pragmasevka found from
+    the working directory or the executable upward; the environment is never read); [font_size] is
+    the logical size of kit text. *)
+
+val platform : t -> Input.platform
 
 val destroy : t -> unit
 (** Release the glyph atlas and the kit faces this UI loaded. The handle must not be used
@@ -596,13 +599,13 @@ val paint_switch : Paint.t -> Theme.t -> x:float -> y:float -> bool -> unit
 val toggle : t -> string -> bool -> bool
 
 val text_field : t -> string -> string -> string
-(** A single-line field. Every text widget edits as macOS does: a click places the caret and
-    Shift-click or a drag extends the selection, a double click selects the word (a triple the
-    line), Option-arrows move by words and Command-arrows (or Home/End) by lines, each with Shift
-    extending, Option-Backspace/Delete take a word and Command-Backspace/Delete the line to the
-    caret, Command-A/C/X/V select all, copy, cut and paste, and Command-Z and Shift-Command-Z (or
-    Command-Y) undo and redo the focused text (consecutive typing is one step; the stack is dropped
-    when the focus or the value changes from outside). *)
+(** A single-line field. Every text widget edits as the host's conventions say (Apple: Command
+    and Option; elsewhere Ctrl): a click places the caret and Shift-click or a drag extends the
+    selection, a double click selects the word (a triple the line), the word keys (Option, or Ctrl
+    off Apple) move and delete by words, Command-arrows (Apple) and Home/End move by lines (Home and
+    End everywhere), Command-A/C/X/V select all, copy, cut and paste, and Command-Z, Shift-Command-Z
+    (or Command-Y) undo and redo the focused text (consecutive typing is one step; the stack is
+    dropped when the focus or the value changes from outside). *)
 
 type completion = {
   replace : int * int;  (** the byte span [insert] replaces *)

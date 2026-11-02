@@ -97,7 +97,7 @@ let save_roundtrip name workspace =
       let editor =
         ref
           (Result.get_ok
-             (Editor.create ~ui_text_size:11 ~workspace ~await:true ~domains:1
+             (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~await:true ~domains:1
                 ~presets:(Filename.concat directory "presets")
                 ~source:
                   (Rays_editor.Source.at ~file ~digest:(Editor_document.Lowering.sha256 source))

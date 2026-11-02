@@ -247,7 +247,7 @@ let run () =
   let header = (graph_leaf ()).header in
   (* the header names the route taken as a breadcrumb, scene / flower after the clicks above,
      and ends with the graph's context *)
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let from =
     Pxui_shell.Chrome.tools_start ui ~focused:true ~floating:false ~collapsed:false
       ("Graph\t"

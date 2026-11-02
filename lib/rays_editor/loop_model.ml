@@ -84,7 +84,7 @@ let seed_lights lights scene =
 let create ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?(lights = [])
     ?(camera = V.default_camera ()) ?(background = Rays_math.Color.hex_exn "#f4f5f0") ?seed ?grain
     ?domains ?max_entries ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size
-    ?ui_font ?opened ~workspace ?source ~prepare ~draw () =
+    ?platform ?ui_font ?opened ~workspace ?source ~prepare ~draw () =
   let workspace =
     match inputs with None -> workspace | Some inputs -> { workspace with Workspace_doc.inputs }
   in
@@ -112,7 +112,8 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?(lights = [])
     Editor_setup.create ~gpu ?settings
       ~seed_scene:(fun scene -> V.seed_scene camera (seed_lights lights scene))
       ~name ~state_key ?presets ?factories ?seed ?grain ?domains ?max_entries ?max_payload_bytes
-      ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ?opened ~workspace ~prepare ()
+      ?await ?carry_budget ?preferences ?ui_text_size ?platform ?ui_font ?opened ~workspace ~prepare
+      ()
   in
   match created with
   | Error error ->

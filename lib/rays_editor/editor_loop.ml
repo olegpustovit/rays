@@ -1015,7 +1015,7 @@ let close value =
 
 let run ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?lights ?camera ?background ?seed
     ?grain ?domains ?max_entries ?max_payload_bytes ?max_frames ?crash_dir ?profile ?preferences
-    ?ui_font ?opened ~config ~workspace ?source ~prepare ~draw () =
+    ?platform ?ui_font ?opened ~config ~workspace ?source ~prepare ~draw () =
   let name = Option.value name ~default:(Workspace_doc.name workspace) in
   (* [opened], the caller's document of this workspace, is handed to the editor once and not
      kept by the loop: after an edit or a reload only the history decides how long it lives. *)
@@ -1025,7 +1025,7 @@ let run ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?lights ?camera ?
     handed := None;
     let value =
       create ?inputs ~name ?presets ?factories ?gpu_owner ?settings ?lights ?camera ?background
-        ?seed ?grain ?domains ?max_entries ?max_payload_bytes ?preferences ?ui_font
+        ?seed ?grain ?domains ?max_entries ?max_payload_bytes ?preferences ?platform ?ui_font
         ?await:(Option.map (fun _ -> true) max_frames)
         ?opened ~workspace ?source ~prepare ~draw ()
       |> Result.get_ok

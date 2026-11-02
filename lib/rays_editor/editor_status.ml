@@ -240,7 +240,8 @@ let status_box value ui (frame : Frame.t) ~render_status ~error_status ~context 
     List.find_map
       (fun (c : Editor_commands.command) ->
         if c.id = "scene.jump" then
-          Option.map (fun t -> (Editor_core.Keymap.label t, "jump")) c.trigger
+          let platform = Pxui.Ui.platform value.ui in
+          Option.map (fun t -> (Editor_core.Keymap.label platform t, "jump")) c.trigger
         else None)
       Editor_commands.keymap
   in

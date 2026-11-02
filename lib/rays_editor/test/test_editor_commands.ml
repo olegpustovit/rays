@@ -323,7 +323,7 @@ let text_keys_are_handled () =
         | Editor_core.Keymap.Chord (k, m) -> (k, m)
         | _ -> failwith "text key without a chord"
       in
-      let ui = Pxui.Ui.create ~font_size:11 () in
+      let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
       Fun.protect
         ~finally:(fun () -> Pxui.Ui.destroy ui)
         (fun () ->

@@ -607,7 +607,7 @@ let benchmark ?domains ?(warmup = 8) ?(cycles = false) ?(roots = false) ?(switch
       let current =
         ref
           (measured "cold" (fun () ->
-               Editor.create ?domains ?gpu_owner:(no_device_owner ()) ~workspace:(load text)
+               Editor.create ~platform:Input.Apple ?domains ?gpu_owner:(no_device_owner ()) ~workspace:(load text)
                  ~await:true ~presets ~prepare ~draw:Editor.draw ()
                |> string_ok))
       in

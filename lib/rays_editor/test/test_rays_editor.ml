@@ -144,7 +144,7 @@ let camera_nodes () =
      without one, exactly one is ACTIVE, deleting the last re-adds it inside
      the same undo entry, and a viewport drag is one coalesced undo entry. *)
   let environment =
-    Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
+    Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
       ~max_entries:4
       ~max_payload_bytes:(16 * 1024 * 1024)
@@ -362,7 +362,7 @@ let sketch_settings () =
   let module Settings = Rays_editor.Settings in
   let seen = Atomic.make (-1) in
   let environment =
-    Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
+    Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~settings:(Settings.make mode_schema 0) ~max_entries:4
       ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun settings output ->
@@ -405,7 +405,7 @@ let preset_and_look_through () =
     Rdk_rays.Surface.scene3 prepared.surface
   in
   let environment =
-    Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
+    Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
       ~max_entries:4
       ~max_payload_bytes:(16 * 1024 * 1024)
@@ -593,7 +593,7 @@ let layout_panes () =
     && abs (width initial.inspector - 200) <= 1)
     "workspace defaults are not 45/35/20 after splitter space";
   let splitter_x = width initial.view + 2 in
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let workspace_step workspace frame =
     Pxui.Ui.frame ui frame (fun ui ->
         let a = Pxui_shell.Chrome.update workspace ui frame in
@@ -637,7 +637,7 @@ let run () =
   layout_panes ();
 
   let environment =
-    Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~max_entries:4
+    Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~max_entries:4
       ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:Editor_prepare.surface
       ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface)

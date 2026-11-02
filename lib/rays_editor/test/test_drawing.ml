@@ -331,7 +331,7 @@ let pure workspace =
   let module Editor = Rays_editor.Editor in
   let editor =
     Result.get_ok
-      (Editor.create ~ui_text_size:11 ~workspace ~await:true ~prepare:Editor_prepare.empty
+      (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~await:true ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.create [])
          ())
   in
@@ -365,7 +365,7 @@ let pure workspace =
             let editor =
               ref
                 (Result.get_ok
-                   (Editor.create ~ui_text_size:11 ~workspace ~await:true
+                   (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~await:true
                       ~prepare:Editor_prepare.empty
                       ~draw:(fun _ _ -> Rays.Scene.D3.create [])
                       ()))
@@ -473,7 +473,7 @@ let benchmark workspace =
   let editor =
     ref
       (Result.get_ok
-         (Editor.create ~ui_text_size:11 ~workspace ~await:true ~domains:1
+         (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace ~await:true ~domains:1
             ~prepare:Editor_prepare.empty
             ~draw:(fun _ _ -> Rays.Scene.D3.empty)
             ()))

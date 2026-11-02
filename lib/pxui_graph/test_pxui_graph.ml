@@ -35,7 +35,7 @@ module Node_menu = Pxui_graph.Node_menu
 
 (* The menu is built inside a UI frame; hit rectangles come from the previous frame, so each
    step first settles the layout without events. *)
-let menu_ui = Pxui.Ui.create ~font_size:11 ()
+let menu_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 ()
 let bounds = (20, 30, 800, 520)
 
 let menu_step menu (frame : Frame.t) =
@@ -182,7 +182,7 @@ let load_workspace name =
       | Some w, _ -> w
       | None, _ -> fail (name ^ " did not check"))
 
-let scope_ui = Pxui.Ui.create ~font_size:11 ()
+let scope_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 ()
 
 let scope_step view (frame : Frame.t) =
   let settle = { frame with input = { frame.input with events = [] } } in
@@ -686,7 +686,7 @@ let big_scope n =
    of a 2,001-node graph allocates a small constant (it was 6.3 MB when every wire was cut into
    hit boxes before the viewport test), and the level keys answer for every node at once. *)
 let scope_idle_frame () =
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let view =
     ref (Scope.create ~width:16 ~height:16 () |> Scope.with_scope ~key:"g" (big_scope 2001))
   in
@@ -2596,7 +2596,7 @@ let run () =
    dune exec test/test_main.exe -- bench_scope_big *)
 let bench_scope_big () =
   let scope = big_scope 2001 in
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let time label runs f =
     let started = Unix.gettimeofday () in
     for _ = 1 to runs do

@@ -226,7 +226,7 @@ let () =
   check
     (M.port_color Pxui.default_theme geometry = color)
     "custom operator ignored its built-in result color";
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   Fun.protect
     ~finally:(fun () -> Pxui.Ui.destroy ui)
     (fun () ->

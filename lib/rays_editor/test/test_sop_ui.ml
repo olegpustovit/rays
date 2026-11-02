@@ -198,7 +198,7 @@ let run () =
     || List.length (Param.fields parameters_schema) <> 5
   then fail "sop_params defaults or ignored-field policy is incorrect";
   let graph = inspectable_node parameters_default in
-  let ui = Pxui.Ui.create ~font_size:11 () in
+  let ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let frame time events : Rays.Frame.t =
     {
       input = { (Input.at_time time) with size = (320, 240); events };
@@ -279,7 +279,7 @@ let run () =
     (Node.parameter_fields normalized |> List.find (fun field -> field.Param.name = "count"))
       .current <> Param.Int_value 10
   then fail "hard range normalization changed";
-  let flow_ui = Pxui.Ui.create ~font_size:11 () in
+  let flow_ui = Pxui.Ui.create ~platform:Input.Apple ~font_size:11 () in
   let count = { (field graph "count") with Param.folder = [] } in
   let flow_row ?drive ?(locked = false) () : Pxui_shell.Inspector.flow_row =
     { path = "count"; fields = [ count ]; shown = true; locked; drive; live = Some "3" }

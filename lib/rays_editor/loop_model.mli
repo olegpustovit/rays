@@ -78,6 +78,7 @@ val create :
   ?carry_budget:float ->
   ?preferences:string ->
   ?ui_text_size:int ->
+  ?platform:Input.platform ->
   ?ui_font:string ->
   ?opened:Editor_document.Document.t ->
   workspace:Editor_document.Workspace_doc.t ->

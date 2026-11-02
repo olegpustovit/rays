@@ -20,7 +20,7 @@ let () =
   let owner =
     ref
       (Result.get_ok
-         (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
+         (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
             ~prepare:Editor_prepare.empty
             ~draw:(fun _ _ -> Rays.Scene.D3.empty)
             ()))
@@ -80,7 +80,7 @@ let () =
   in
   let owner domains =
     Result.get_ok
-      (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
+      (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains
          ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())
@@ -198,7 +198,7 @@ let () =
     in
     let owner =
       Result.get_ok
-        (Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
+        (Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
            ~prepare:Editor_prepare.empty
            ~draw:(fun _ _ -> Rays.Scene.D3.empty)
            ())
@@ -247,7 +247,7 @@ let () =
   in
   let owner =
     Result.get_ok
-      (Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
+      (Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
          ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())
@@ -270,7 +270,7 @@ let () =
           Parallel.run ~domains (fun () ->
               let fresh =
                 Result.get_ok
-                  (Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
+                  (Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains
                      ~prepare:Editor_prepare.empty
                      ~draw:(fun _ _ -> Rays.Scene.D3.empty)
                      ())
@@ -330,7 +330,7 @@ let () =
   let owner =
     ref
       (Result.get_ok
-         (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
+         (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
             ~source:
               (Rays_editor.Source.at ~file:source ~digest:(Editor_document.Lowering.sha256 initial))
             ~prepare:Editor_prepare.empty
@@ -556,7 +556,7 @@ let () =
   in
   let owner domains =
     Result.get_ok
-      (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
+      (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains
          ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())
@@ -641,7 +641,7 @@ let () =
   in
   let owner =
     Result.get_ok
-      (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
+      (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
          ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())
@@ -679,7 +679,7 @@ let () =
   in
   let owner =
     Result.get_ok
-      (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
+      (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
          ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())
@@ -756,7 +756,7 @@ let () =
   let owner =
     ref
       (Result.get_ok
-         (Editor.create ~ui_text_size:11 ~workspace:(load initial) ~await:true ~domains:1
+         (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:(load initial) ~await:true ~domains:1
             ~source:
               (Rays_editor.Source.at ~file:source ~digest:(Editor_document.Lowering.sha256 initial))
             ~prepare:Editor_prepare.empty
@@ -954,7 +954,7 @@ let () =
   in
   let owner =
     Result.get_ok
-      (Editor.create ~ui_text_size:11 ~workspace:(doc 8) ~await:true ~domains:1
+      (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:(doc 8) ~await:true ~domains:1
          ~prepare:Editor_prepare.empty
          ~draw:(fun _ _ -> Rays.Scene.D3.empty)
          ())

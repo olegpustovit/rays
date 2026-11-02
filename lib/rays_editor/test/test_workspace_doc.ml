@@ -172,7 +172,7 @@ let char c = key (Input.KeyChar c)
 
 let editor ?presets text =
   let workspace = of_text text in
-  Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace ?presets
+  Rays_editor.Editor.create ~platform:Input.Apple ~ui_text_size:11 ~await:true ~workspace ?presets
     ~prepare:Editor_prepare.surface
     ~draw:(fun _ _ -> Scene.D3.create [])
     ()

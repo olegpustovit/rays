@@ -206,7 +206,10 @@ module Keymap = struct
     | '0' -> Some ')'
     | _ -> None
 
-  let label = function
+  (* In a trigger, Meta is the platform's primary modifier: Command on Apple, Ctrl elsewhere. *)
+  let resolve platform = function Input.Meta -> Input.primary platform | m -> m
+
+  let label platform = function
     | Leader sequence ->
         (* the sheets write each key apart: / o v *)
         "/ "
@@ -214,6 +217,7 @@ module Keymap = struct
             (List.init (String.length sequence) (fun i -> String.make 1 sequence.[i]))
     | Chord (key, modifiers) ->
         let open Input in
+        let modifiers = List.sort_uniq compare (List.map (resolve platform) modifiers) in
         let key, modifiers =
           match key with
           | KeyChar c when List.mem Shift modifiers && shifted c <> None ->
@@ -260,11 +264,15 @@ module Keymap = struct
           | F12 -> "F12"
           | Unknown code -> "Key " ^ string_of_int code
         in
+        let glyphs =
+          match platform with
+          | Apple -> [ (Meta, "⌘"); (Ctrl, "⌃"); (Alt, "⌥"); (Shift, "⇧") ]
+          | Other -> [ (Ctrl, "Ctrl-"); (Alt, "Alt-"); (Shift, "Shift-") ]
+        in
         List.fold_left
           (fun label (modifier, name) ->
             if List.mem modifier modifiers then label ^ name else label)
-          ""
-          [ (Meta, "⌘"); (Ctrl, "⌃"); (Alt, "⌥"); (Shift, "⇧") ]
+          "" glyphs
         ^ key
 end
 
@@ -318,21 +326,24 @@ module Router = struct
     | Input.KeyChar a, Input.KeyChar b -> Char.lowercase_ascii a = Char.lowercase_ascii b
     | _ -> a = b
 
-  let chord commands focus keys key =
+  let chord platform commands focus keys key =
     visible commands focus
     |> List.filter_map (fun command ->
         match command.trigger with
-        | Some (Chord (bound, modifiers))
-          when same_key bound key
-               && List.for_all (fun modifier -> List.mem modifier keys) modifiers
-               && (bound <> Input.Tab
-                  || List.for_all
-                       (fun modifier -> List.mem modifier keys = List.mem modifier modifiers)
-                       [ Input.Shift; Input.Alt ])
-               && List.for_all
-                    (fun modifier -> (not (List.mem modifier keys)) || List.mem modifier modifiers)
-                    [ Input.Meta; Input.Ctrl ] ->
-            Some (List.length modifiers, command)
+        | Some (Chord (bound, modifiers)) ->
+            let modifiers = List.map (resolve platform) modifiers in
+            if
+              same_key bound key
+              && List.for_all (fun modifier -> List.mem modifier keys) modifiers
+              && (bound <> Input.Tab
+                 || List.for_all
+                      (fun modifier -> List.mem modifier keys = List.mem modifier modifiers)
+                      [ Input.Shift; Input.Alt ])
+              && List.for_all
+                   (fun modifier -> (not (List.mem modifier keys)) || List.mem modifier modifiers)
+                   [ Input.Meta; Input.Ctrl ]
+            then Some (List.length modifiers, command)
+            else None
         | _ -> None)
     |> List.fold_left
          (fun best candidate ->
@@ -375,7 +386,7 @@ module Router = struct
   (* A text field owns the keyboard except the Command/Ctrl chords it has no use for (its own are
      select all, copy, cut, paste, undo and redo): Command-S saves with the caret in a field.
      Only commands of every pane run; a pane's own keys wait for the field to close. *)
-  let text_chords keymap ~focus ~previous_keys ~(frame : Rays.Frame.t) =
+  let text_chords platform keymap ~focus ~previous_keys ~(frame : Rays.Frame.t) =
     let open Rays in
     let global = List.filter (fun command -> command.scope = None) keymap in
     let owned = function
@@ -393,9 +404,9 @@ module Router = struct
           match event with
           | Input.Key_pressed key
             when (not (owned key))
-                 && (List.mem Input.Meta !modifiers || List.mem Input.Ctrl !modifiers
+                 && (Input.command_held platform !modifiers
                    || key = Input.F12) -> (
-              match chord global focus !modifiers key with
+              match chord platform global focus !modifiers key with
               | Some command -> (command :: actions, passed)
               | None -> (actions, event :: passed))
           | _ -> (actions, event :: passed))
@@ -403,10 +414,10 @@ module Router = struct
     in
     (List.rev actions, { frame with input = { frame.input with events = List.rev passed } })
 
-  let step ?(previous_keys = []) keymap ~focus ~text_focus ~(frame : Rays.Frame.t) state =
+  let step ?(previous_keys = []) ~platform keymap ~focus ~text_focus ~(frame : Rays.Frame.t) state =
     let open Rays in
     if text_focus then
-      let actions, frame = text_chords keymap ~focus ~previous_keys ~frame in
+      let actions, frame = text_chords platform keymap ~focus ~previous_keys ~frame in
       (Idle, actions, frame)
     else
       let modifiers =
@@ -417,13 +428,13 @@ module Router = struct
         List.fold_left
           (fun (state, actions, passed) event ->
             modifiers := Input.keys_after !modifiers event;
-            let command = List.mem Input.Meta !modifiers || List.mem Input.Ctrl !modifiers in
+            let command = Input.command_held platform !modifiers in
             if !traversing then (Idle, actions, event :: passed)
             else
               match (state, event) with
               | _, Input.Key_pressed Input.Tab when not command -> (
                   traversing := true;
-                  match chord keymap focus !modifiers Input.Tab with
+                  match chord platform keymap focus !modifiers Input.Tab with
                   | None -> (Idle, actions, event :: passed)
                   | Some action -> (Idle, action :: actions, passed))
               | Idle, Input.Key_pressed (Input.KeyChar '/')
@@ -435,11 +446,13 @@ module Router = struct
                     match key with
                     | Input.KeyChar c when List.mem Input.Shift !modifiers ->
                         Option.bind (shifted c) (fun s ->
-                            chord keymap focus !modifiers (Input.KeyChar s))
+                            chord platform keymap focus !modifiers (Input.KeyChar s))
                     | _ -> None
                   in
                   match
-                    match typed with Some _ -> typed | None -> chord keymap focus !modifiers key
+                    match typed with
+                    | Some _ -> typed
+                    | None -> chord platform keymap focus !modifiers key
                   with
                   | Some action -> (Idle, action :: actions, passed)
                   | None -> (Idle, actions, event :: passed))

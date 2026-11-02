@@ -10,7 +10,7 @@ let load text =
 
 let editor doc =
   Result.get_ok
-    (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
+    (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
        ~prepare:Editor_prepare.empty
        ~draw:(fun _ _ -> Rays.Scene.D3.empty)
        ())
@@ -60,7 +60,7 @@ let () =
     let grain = 257 in
     let owner =
       Result.get_ok
-        (Editor.create ~ui_text_size:11 ~workspace:doc ~factories ~seed ~grain ~await:true ~domains
+        (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~factories ~seed ~grain ~await:true ~domains
            ~prepare:Editor_prepare.empty
            ~draw:(fun _ _ -> Rays.Scene.D3.empty)
            ())
@@ -114,7 +114,7 @@ let () =
   let run domains =
     let owner =
       Result.get_ok
-        (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
+        (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains
            ~prepare:Editor_prepare.empty
            ~draw:(fun _ _ -> Rays.Scene.D3.empty)
            ())
@@ -193,7 +193,7 @@ let () =
   let snapshot ~first domains =
     let owner =
       Result.get_ok
-        (Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
+        (Editor.create ~platform:Input.Apple ~ui_text_size:11 ~workspace:doc ~await:true ~domains
            ~prepare:Editor_prepare.empty
            ~draw:(fun _ _ -> Rays.Scene.D3.empty)
            ())
@@ -311,7 +311,7 @@ let () =
       assert (Result.get_ok (Rays.Image.get_size image) = (2, 2));
       assert (ok (Editor.Private.image owner value) == image);
       let oracle = Result.get_ok (Rays.Image.pixels image) in
-      let ui = Pxui.Ui.create () in
+      let ui = Pxui.Ui.create ~platform:Input.Apple () in
       Fun.protect
         ~finally:(fun () -> Pxui.Ui.destroy ui)
         (fun () ->
