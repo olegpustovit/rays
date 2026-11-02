@@ -56,7 +56,6 @@ typedef struct rv_garbage {
 struct rv_device {
   rv_device *next_live;
   VkInstance instance;
-  VkDebugUtilsMessengerEXT messenger;
   VkPhysicalDevice physical;
   VkDevice device;
   VmaAllocator allocator;
@@ -157,6 +156,10 @@ static int validation_messages = 0;
 static bool validation_fatal = false;
 static bool validation_silent = false;
 static rv_device *exit_devices = NULL; /* every live device under validation */
+/* One instance for the process, whatever devices come and go: destroying the last one unloads the
+   driver while its worker threads may still be starting, which faults inside the driver. */
+static VkInstance process_instance = VK_NULL_HANDLE;
+static VkDebugUtilsMessengerEXT process_messenger = VK_NULL_HANDLE;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                  VkDebugUtilsMessageTypeFlagsEXT types,
@@ -204,8 +207,11 @@ static void leave_device(void) {
     exit_devices = d->next_live;
     vkDeviceWaitIdle(d->device);
     vkDestroyDevice(d->device, NULL);
-    if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
-    vkDestroyInstance(d->instance, NULL);
+  }
+  if (process_instance) {
+    if (process_messenger) vkDestroyDebugUtilsMessengerEXT(process_instance, process_messenger, NULL);
+    vkDestroyInstance(process_instance, NULL);
+    process_instance = VK_NULL_HANDLE;
   }
 }
 
@@ -236,17 +242,20 @@ static intnat device_create(bool validation) {
                                         .ppEnabledLayerNames = layers,
                                         .enabledExtensionCount = extension_count - (validation ? 0 : 1),
                                         .ppEnabledExtensionNames = extensions};
-  r = vkCreateInstance(&instance_info, NULL, &d->instance);
-  if (r != VK_SUCCESS) { free(d); return r; }
-  volkLoadInstance(d->instance);
-  if (validation) {
+  if (!process_instance) {
+    r = vkCreateInstance(&instance_info, NULL, &process_instance);
+    if (r != VK_SUCCESS) { free(d); return r; }
+    volkLoadInstance(process_instance);
+  }
+  d->instance = process_instance;
+  if (validation && !process_messenger) {
     VkDebugUtilsMessengerCreateInfoEXT info = {
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
         .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
         .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = on_message};
-    vkCreateDebugUtilsMessengerEXT(d->instance, &info, NULL, &d->messenger);
+    vkCreateDebugUtilsMessengerEXT(d->instance, &info, NULL, &process_messenger);
   }
   VkPhysicalDevice physicals[8];
   uint32_t physical_count = 8;
@@ -275,8 +284,6 @@ static intnat device_create(bool validation) {
     enabled[enabled_count++] = required[i];
   }
   if (failure) {
-    if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
-    vkDestroyInstance(d->instance, NULL);
     free(d);
     return failure;
   }
@@ -284,8 +291,6 @@ static intnat device_create(bool validation) {
      never reads it. Both are one extension here; neither is optional for the renderer's pipelines. */
   if (!has_extension(available, available_count, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) ||
       !has_extension(available, available_count, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {
-    if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
-    vkDestroyInstance(d->instance, NULL);
     free(d);
     return RV_MISSING;
   }
@@ -331,8 +336,6 @@ static intnat device_create(bool validation) {
       .enabledExtensionCount = enabled_count, .ppEnabledExtensionNames = enabled};
   r = vkCreateDevice(d->physical, &device_info, NULL, &d->device);
   if (r != VK_SUCCESS) {
-    if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
-    vkDestroyInstance(d->instance, NULL);
     free(d);
     return r == VK_ERROR_FEATURE_NOT_PRESENT || r == VK_ERROR_EXTENSION_NOT_PRESENT ? RV_MISSING : r;
   }
@@ -823,8 +826,6 @@ CAMLprim value rv_device_destroy(value device) {
   vkDestroyPipelineCache(d->device, d->pipeline_cache, NULL);
   vmaDestroyAllocator(d->allocator);
   vkDestroyDevice(d->device, NULL);
-  if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
-  vkDestroyInstance(d->instance, NULL);
   pthread_mutex_destroy(&d->qlock);
   pthread_mutex_destroy(&d->xlock);
   free(d);
