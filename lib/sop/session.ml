@@ -48,6 +48,11 @@ type payload_pool = {
   refs : (int, int * int) Hashtbl.t;
   mutable bytes : int;
   owner : Mem.owner;
+  device_owner : Mem.owner;
+  ledgered : bool;  (** false in a worker's snapshot: the parent charges when it replays *)
+  charged : (int, Mem.owner * int) Hashtbl.t;
+      (** what the ledger holds per component. A resident one lives on the device, as float32, though
+          its budget size counts it as the doubles it would become. *)
   resident : (int, held:bool -> unit) Hashtbl.t;
   mutable dropped : int list;
   handed : (int, unit) Hashtbl.t;
@@ -61,6 +66,7 @@ type t = {
   cache : entry Entry_cache.t;
   payload : payload_pool;
   volatile_owner : Mem.owner;
+  volatile_device : Mem.owner;
   mutable cooks : int;
   mutable hits : int;
   mutable misses : int;
@@ -70,7 +76,7 @@ type t = {
       (* Resident ids registered when a volatile slot was written. Geometry.releasers becomes
          empty after a deferred attribute is materialised, so replacement must drop these ids
          rather than asking the (now forced) geometry again. *)
-  slot_bytes : (int, int) Hashtbl.t; (* volatile node id -> charged payload bytes *)
+  slot_bytes : (int, int * int) Hashtbl.t; (* volatile node id -> charged host and device bytes *)
   mutable volatile_hits : int;
   mutable volatile_misses : int;
   mutable evictions : int;
@@ -98,6 +104,27 @@ let drop payload id =
 let releasers (output : output) =
   match output.payload with Geometry g -> Rdk.Geometry.releasers g | Image _ | Kernel _ -> []
 
+let charge_component payload id bytes =
+  if payload.ledgered then begin
+    let owner, size =
+      if Hashtbl.mem payload.resident id then (payload.device_owner, bytes / 2)
+      else (payload.owner, bytes)
+    in
+    Hashtbl.replace payload.charged id (owner, size);
+    Mem.charge owner size
+  end
+
+let discharge_component payload id =
+  match Hashtbl.find_opt payload.charged id with
+  | None -> ()
+  | Some (owner, size) ->
+      Hashtbl.remove payload.charged id;
+      Mem.release owner size
+
+let discharge_all payload =
+  Hashtbl.iter (fun _ (owner, size) -> Mem.release owner size) payload.charged;
+  Hashtbl.reset payload.charged
+
 let release_components payload components =
   List.iter
     (fun (id, bytes) ->
@@ -107,7 +134,7 @@ let release_components payload components =
           Hashtbl.remove payload.refs id;
           drop payload id;
           payload.bytes <- payload.bytes - bytes;
-          Mem.release payload.owner bytes
+          discharge_component payload id
       | Some (_, references) -> Hashtbl.replace payload.refs id (bytes, references - 1))
     components
 
@@ -121,6 +148,9 @@ let create ~max_entries ~max_payload_bytes =
         refs = Hashtbl.create (min (max_entries * 4) 4096);
         bytes = 0;
         owner;
+        device_owner = Lru.cache ~pool:Device "sop.session.resident";
+        ledgered = true;
+        charged = Hashtbl.create 16;
         resident = Hashtbl.create 16;
         dropped = [];
         handed = Hashtbl.create 16;
@@ -132,10 +162,13 @@ let create ~max_entries ~max_payload_bytes =
         max_entries;
         max_payload_bytes;
         cache =
-          Entry_cache.create ~owner:(Lru.cache "sop.session") max_entries ~release:(fun _ entry ->
+          (* Never: only the cook's domain touches it; Async_cook sheds it while that one is idle *)
+          Entry_cache.create ~owner:(Lru.cache "sop.session") ~shed:Never max_entries
+            ~release:(fun _ entry ->
               release_components payload entry.components);
         payload;
         volatile_owner = Lru.cache "sop.volatile";
+        volatile_device = Lru.cache ~pool:Device "sop.volatile.resident";
         cooks = 0;
         hits = 0;
         misses = 0;
@@ -163,6 +196,15 @@ let create ~max_entries ~max_payload_bytes =
 let set_clock session clock = session.clock <- clock
 let now session = session.clock ()
 
+(* One cached entry gone, on the domain that owns the session or while that one is known idle. *)
+let shed session =
+  let dropped = Entry_cache.drop_oldest session.cache in
+  if dropped then session.evictions <- session.evictions + 1;
+  dropped
+
+let payload_owner session = session.payload.owner
+let payload_bytes session = session.payload.bytes
+
 let insert session key entry =
   (match session.journal with
   | None -> ()
@@ -178,7 +220,7 @@ let insert session key entry =
         | None ->
             Hashtbl.add payload.refs id (bytes, 1);
             payload.bytes <- payload.bytes + bytes;
-            Mem.charge payload.owner bytes
+            charge_component payload id bytes
         | Some (known_bytes, references) ->
             Hashtbl.replace payload.refs id (known_bytes, references + 1))
       components;
@@ -214,9 +256,12 @@ let lookup session ~volatile node key =
 let release_slot_bytes session id =
   match Hashtbl.find_opt session.slot_bytes id with
   | None -> ()
-  | Some bytes ->
+  | Some (host, device) ->
       Hashtbl.remove session.slot_bytes id;
-      Mem.release session.volatile_owner bytes
+      if session.payload.ledgered then begin
+        Mem.release session.volatile_owner host;
+        Mem.release session.volatile_device device
+      end
 
 let store_slot session id key entry =
   (match session.journal with
@@ -249,12 +294,20 @@ let store_slot session id key entry =
     List.iter (fun (i, r) -> Hashtbl.replace payload.resident i r) fresh;
     session.written <- Right id :: session.written;
     Hashtbl.replace session.slot_residents id fresh_ids;
-    let bytes =
-      List.fold_left (fun sum (_, n) -> sum + n) 0 (Payload.payload_components entry.output.payload)
+    let host, device =
+      List.fold_left
+        (fun (host, device) (component, n) ->
+          (* a resident component is float32 on the device, though its size says doubles *)
+          if List.mem component fresh_ids then (host, device + (n / 2)) else (host + n, device))
+        (0, 0)
+        (Payload.payload_components entry.output.payload)
     in
-    if bytes > 0 then begin
-      Hashtbl.replace session.slot_bytes id bytes;
-      Mem.charge session.volatile_owner bytes
+    if host + device > 0 then begin
+      Hashtbl.replace session.slot_bytes id (host, device);
+      if payload.ledgered then begin
+        Mem.charge session.volatile_owner host;
+        Mem.charge session.volatile_device device
+      end
     end;
     Hashtbl.replace session.slots id (key, entry)
   end
@@ -536,12 +589,15 @@ let snapshot session =
       refs = Hashtbl.copy session.payload.refs;
       bytes = session.payload.bytes;
       owner = session.payload.owner;
+      device_owner = session.payload.device_owner;
+      ledgered = false;
+      charged = Hashtbl.create 1;
       resident = Hashtbl.create 1;
       dropped = [];
       handed = Hashtbl.create 1;
     }
   in
-  (* Snapshot shares the ledger account; bytes stay charged by the parent until both release. *)
+  (* The snapshot charges nothing: what it writes the parent charges when it replays. *)
   {
     session with
     cache =
@@ -1043,6 +1099,15 @@ and evaluate_uncached memo session context node =
                   (* no CPU reader sees device work still in flight *)
                   if Context.settle context <> [] then Error settle_failed
                   else
+                    (* a parallel branch's journal replays later: only the cook's own domain sheds *)
+                    match
+                      Mem.admit
+                        ~shed:(fun () -> session.journal = None && shed session)
+                        ()
+                    with
+                    | Error overdraft ->
+                        Error (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))
+                    | Ok () ->
                     match cook_node memo session context node geometries with
                     | Error _ as error -> error
                     | Ok cooked -> Ok (cooked, delta node geometries cooked))
@@ -1177,7 +1242,7 @@ let clear session =
   Hashtbl.reset session.slot_residents;
   Hashtbl.reset session.slot_bytes;
   Hashtbl.clear session.payload.refs;
-  if session.payload.bytes > 0 then Mem.release session.payload.owner session.payload.bytes;
+  discharge_all session.payload;
   session.payload.bytes <- 0;
   forget_resident session
 
@@ -1206,7 +1271,7 @@ module Private = struct
     Hashtbl.reset session.slot_residents;
     Hashtbl.reset session.slot_bytes;
     Hashtbl.reset session.payload.refs;
-    if session.payload.bytes > 0 then Mem.release session.payload.owner session.payload.bytes;
+    discharge_all session.payload;
     session.payload.bytes <- 0;
     forget_resident session;
     session.materialized <- []

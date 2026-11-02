@@ -147,7 +147,7 @@ let path_geometry_cached key make =
       | value -> value
       | exception Not_found ->
           let value = make () in
-          Path_geometry_table.add context.path_geometry key value;
+          Path_geometry_table.add context.path_geometry ~bytes:(Mem.reachable_bytes value) key value;
           value)
 
 let rounded_cached key make =
@@ -158,7 +158,7 @@ let rounded_cached key make =
       | value -> value
       | exception Not_found ->
           let value = make () in
-          Rounded_table.add context.rounded key value;
+          Rounded_table.add context.rounded ~bytes:(Mem.reachable_bytes value) key value;
           value)
 
 let ellipse_cached key make =
@@ -169,7 +169,7 @@ let ellipse_cached key make =
       | value -> value
       | exception Not_found ->
           let value = make () in
-          Ellipse_table.add context.ellipse key value;
+          Ellipse_table.add context.ellipse ~bytes:(Mem.reachable_bytes value) key value;
           value)
 
 let line ~from_ ~to_ ?(color = default_color) ?(width = 1) () =

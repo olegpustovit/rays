@@ -32,6 +32,9 @@ and node =
   | Map of t list  (** [{}]: the children alternate key and value *)
   | Quote of quote_kind * t
 
+val memory_bytes : t list -> int
+(** What these forms hold, by walking them: for the memory ledger. *)
+
 module Text_lexer : sig
   type word = Symbol of string | Keyword of string | Number of string
 

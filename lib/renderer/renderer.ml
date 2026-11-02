@@ -408,6 +408,7 @@ let finish_create ?(shared_device_lease = false) ?(owns_device_lease = false) gp
     last_step_draws = [];
     last_step_prepared = [];
     retained_views =
+      (* count only: views of layers the scene's cache charges *)
       Lru.Identity_list.create ~owner:(Lru.cache "renderer.identity") ~equal:( == )
         ~release:(fun _ view -> !release_retained_view view)
         retained_view_capacity;

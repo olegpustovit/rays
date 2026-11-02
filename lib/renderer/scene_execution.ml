@@ -355,16 +355,16 @@ let texture_cache_entry_capacity = 256
 let texture_cache_byte_capacity = 256 * 1024 * 1024
 
 let mesh_table retired =
-  String_table.create ~owner:(Lru.cache "renderer.mesh") mesh_cache_entry_capacity ~byte_capacity:cache_byte_capacity
+  String_table.create ~owner:(Lru.cache ~pool:Device "renderer.mesh") mesh_cache_entry_capacity ~byte_capacity:cache_byte_capacity
     ~release:(fun _ (item : cached) ->
       retired.retired_buffers <- item.buffer :: retired.retired_buffers)
 
 let texture_table retired =
-  String_table.create ~owner:(Lru.cache "renderer.texture") texture_cache_entry_capacity ~byte_capacity:texture_cache_byte_capacity
+  String_table.create ~owner:(Lru.cache ~pool:Device "renderer.texture") texture_cache_entry_capacity ~byte_capacity:texture_cache_byte_capacity
     ~release:(fun _ item -> retired.retired_textures <- item.texture :: retired.retired_textures)
 
 let auxiliary_table retired =
-  String_table.create ~owner:(Lru.cache "renderer.gpu_item") 64 ~byte_capacity:cache_byte_capacity ~release:(fun _ item ->
+  String_table.create ~owner:(Lru.cache ~pool:Device "renderer.gpu_item") 64 ~byte_capacity:cache_byte_capacity ~release:(fun _ item ->
       retired.retired_buffers <- item.auxiliary_buffer :: retired.retired_buffers)
 
 let drain_retired retired destroy_buffer destroy_texture =
@@ -396,6 +396,7 @@ type t = {
   cache : cached String_table.t;
   uniform_pages : uniform_page option array;
   mutable next_uniform_page : int;
+  mutable uniform_low : int;  (** frames in a row needing under a quarter of the page *)
   mutable previous_uniforms : uniform_slice option array;
   prepared_cache : prepared_run String_table.t;
   mutable prepared_submission : prepared_submission option;
@@ -709,6 +710,7 @@ let create ?device ?gpu_vertices ?sun_depth:sun_factory ~offscreen driver config
                              prepare, so a ring of three never overlaps (memory plan S6). *)
                           uniform_pages = Array.make 1 None;
                           next_uniform_page = 0;
+                          uniform_low = 0;
                           previous_uniforms = [||];
                           prepared_cache = String_table.create ~owner:(Lru.cache "renderer.prepared") 64 ~byte_capacity:cache_byte_capacity;
                           prepared_submission = None;
@@ -971,10 +973,30 @@ let geometry_constants affine =
 
 (* ponytail: a changed transform repacks the frame; use dirty ranges only if
    sparse-change profiles justify tracking them beside P3-2 scene identities. *)
+let uniform_owner = Mem.plan ~pool:Device "renderer.uniform_page"
+let uniform_shrink_after = 240
+
 let prepare_uniforms value ~defer sources =
   let previous = value.previous_uniforms in
+  (* one page per plan S6: a frame's needs far under it for long enough bring it back down, also
+     when the uniforms stop changing *)
+  let capacity =
+    match value.uniform_pages.(value.next_uniform_page) with
+    | Some page -> page.page_capacity
+    | None -> 0
+  in
+  let wanted =
+    Array.fold_left
+      (fun sum -> function Some bytes -> sum + align256 (Bytes.length bytes) | None -> sum)
+      0 sources
+  in
+  value.uniform_low <-
+    (if capacity > 65536 && wanted * 4 < capacity then value.uniform_low + 1 else 0);
+  let shrink = value.uniform_low >= uniform_shrink_after in
+  if shrink then value.uniform_low <- 0;
   let same =
-    Array.length sources = Array.length previous
+    (not shrink)
+    && Array.length sources = Array.length previous
     && Array.for_all2
          (fun source retained ->
            match (source, retained) with
@@ -1040,7 +1062,7 @@ let prepare_uniforms value ~defer sources =
       let page_index = value.next_uniform_page in
       let page =
         match value.uniform_pages.(page_index) with
-        | Some page when page.page_capacity >= !needed -> Ok page
+        | Some page when page.page_capacity >= !needed && not shrink -> Ok page
         | old ->
             let rec capacity current =
               if current >= !needed then current
@@ -1058,8 +1080,10 @@ let prepare_uniforms value ~defer sources =
               (fun buffer ->
                 Option.iter
                   (fun page ->
+                    Mem.release uniform_owner page.page_capacity;
                     defer (fun () -> ignore (Ogpu.Backend.destroy_buffer page.page_buffer)))
                   old;
+                Mem.charge uniform_owner capacity;
                 let page = { page_buffer = buffer; page_capacity = capacity } in
                 value.uniform_pages.(page_index) <- Some page;
                 page)
@@ -3208,6 +3232,10 @@ let resize value configuration =
 let upload_bytes value = value.uploaded
 
 module Private = struct
+  let uniform_capacity value =
+    match value.uniform_pages.(0) with Some page -> page.page_capacity | None -> 0
+
+  let uniform_shrink_after = uniform_shrink_after
   type nonrec gpu_vertices = gpu_vertices
   type nonrec gpu_vertices_owner = gpu_vertices_owner
 
@@ -3277,7 +3305,9 @@ let destroy value =
     Array.iteri
       (fun index page ->
         Option.iter
-          (fun page -> named "uniform page" (Ogpu.Backend.destroy_buffer page.page_buffer))
+          (fun page ->
+            Mem.release uniform_owner page.page_capacity;
+            named "uniform page" (Ogpu.Backend.destroy_buffer page.page_buffer))
           page;
         value.uniform_pages.(index) <- None)
       value.uniform_pages;

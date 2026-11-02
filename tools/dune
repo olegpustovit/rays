@@ -600,18 +600,12 @@
  (modules mem_gate)
  (libraries
   mem
-  metal
   ogpu_metal
-  rays
   rays_editor
   editor_document
   flow
   flow_graph
-  flow_sop
-  sop
-  input
-  unix
-  parallel))
+  unix))
 
 (rule
  (enabled_if

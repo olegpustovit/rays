@@ -105,3 +105,68 @@ let run () =
       check (stated >= real) (Printf.sprintf "an entry's size covers its text: %d < %d" stated real);
       check (stated < 16 * real) (Printf.sprintf "and stays near it: %d, %d" stated real));
   print_endline "history memory: no lowering in an entry, gone after two edits, undo and redo relower"
+
+(* Over its budget a cook fails with the typed E_MEMORY naming the largest owners, the last good
+   frame stays, the error clears when usage is back and the cook runs again; over budget costs no
+   collection per frame. *)
+let budget_text =
+  {|
+(workspace budget
+  (graph g :context sop
+    (sop/transform (sop/grid :columns 8 :rows 8) :translate [(sin t) 0 0])))
+|}
+
+let contains text word =
+  let n = String.length word in
+  Seq.exists
+    (fun i -> String.sub text i n = word)
+    (Seq.init (max 0 (String.length text - n + 1)) Fun.id)
+
+let run_budget () =
+  let workspace =
+    match Doc.of_text catalog budget_text with
+    | Ok d -> d
+    | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
+  in
+  let measure ~frames step =
+    match
+      Rays_editor.Measure.run ~width:64 ~height:64 ~step ~early:1 ~frames workspace
+    with
+    | Ok outcome -> outcome
+    | Error message -> failwith ("test_budget: " ^ message)
+  in
+  let cycles () = (Gc.quick_stat ()).major_collections in
+  let latched_from = ref 0 and latched_cycles = ref 0 and had_frame = ref false in
+  let over =
+    measure ~frames:50 (fun tick editor ->
+        if tick = 5 then begin
+          check (E3.prepared editor <> None) "a first good frame";
+          Mem.set_budget 1
+        end;
+        if tick = 10 then latched_from := cycles ();
+        if tick = 50 then begin
+          latched_cycles := cycles () - !latched_from;
+          had_frame := E3.prepared editor <> None
+        end;
+        editor)
+  in
+  let says = function Some text -> contains text "E_MEMORY" | None -> false in
+  check (says over.memory_error) "the boundary reports E_MEMORY";
+  check (says over.cook_error) "the cook that would pass the limit fails with E_MEMORY";
+  check (Option.fold ~none:false ~some:(fun t -> contains t "largest owners") over.memory_error)
+    "E_MEMORY names the largest owners";
+  check !had_frame "the last good frame stays";
+  check (!latched_cycles < 20)
+    (Printf.sprintf "no collection per frame while over: %d cycles in 40 frames" !latched_cycles);
+  Mem.reset ();
+  (* recovery: the same process, the limit lifted *)
+  let recovered =
+    measure ~frames:30 (fun tick editor ->
+        if tick = 2 then Mem.set_budget 1;
+        if tick = 15 then Mem.set_budget 100_000_000_000;
+        editor)
+  in
+  check (recovered.memory_error = None) "E_MEMORY clears on recovery";
+  check (recovered.cook_error = None) "the cook runs again on recovery";
+  Mem.reset ();
+  print_endline "memory budget: typed E_MEMORY, last good frame, clears on recovery, no stall"

@@ -447,6 +447,7 @@ let update_with value frame ~inspector =
               ~camera_panel ~view_handles ~render_status:value.render_status
               ~error_status:
                 (if image_errors <> [] then Some (String.concat "; " image_errors)
+                 else if value.memory_error <> None then value.memory_error
                  else
                    match value.state_error with
                    | Some _ as error -> error
@@ -713,6 +714,70 @@ let update_with value frame ~inspector =
 
 let update value frame = fst (update_with value frame ~inspector:ignore)
 
+(* One frame boundary of the budget (the retreat's order is [Mem.retreat]'s). Nothing an editor's
+   renderer keeps counts as a plan nothing shows: a tracer no drawn view wants is destroyed when the
+   frame is rendered ([Renderer]), so past the caches only undo beyond 16 entries is left. The
+   document on screen and the last good frame stay; the error says so until usage is back. *)
+let memory_boundary value =
+  let device () =
+    Option.fold ~none:0 ~some:fst (Flow_native.Workspace_gpu.device_limits value.host.gpu)
+  in
+  let value =
+    if value.memory_known then value
+    else begin
+      ignore (Mem.pressure_start ());
+      Option.iter
+        (fun (_, working_set) ->
+          Mem.set_budget ~source:Machine (Mem.machine_budget ~working_set))
+        (Flow_native.Workspace_gpu.device_limits value.host.gpu);
+      { value with memory_known = true }
+    end
+  in
+  (* the present document on the ledger, walked only when its text changed *)
+  let value =
+    let ws = value.core.doc.workspace.ws in
+    match value.memory_doc with
+    | Some (seen, _, _) when seen == ws -> value
+    | previous ->
+        let owner = Mem.document "editor.document" in
+        Option.iter (fun (_, bytes, _) -> Mem.release owner bytes) previous;
+        let scale =
+          match previous with
+          | Some (_, _, scale) -> scale
+          | None -> Document.present_scale value.core.doc
+        in
+        let bytes = Document.present_bytes ~scale value.core.doc in
+        Mem.charge owner bytes;
+        { value with memory_doc = Some (ws, bytes, scale) }
+  in
+  let core = ref value.core in
+  let undo_past_16 () =
+    let history = !core.Editor_model.history in
+    Editor_core.History.depth history > 16
+    && begin
+         core := { !core with history = Editor_core.History.shed ~keep:16 history };
+         true
+       end
+  in
+  match Mem.retreat ~device ~later:[ undo_past_16 ] () with
+  | Over overdraft ->
+      {
+        value with
+        core = !core;
+        memory_error =
+          (match value.memory_error with
+          | Some _ as said -> said
+          | None ->
+              Some
+                (Diagnostic.to_string
+                   (Diagnostic.error ~code:"E_MEMORY" (Mem.describe overdraft))));
+      }
+  | Within ->
+      let core =
+        if Cook.out_of_memory !core.cook then { !core with cook = Cook.force !core.cook } else !core
+      in
+      { value with core; memory_error = None }
+
 let after_present value frame =
   let value = observe_presented value in
   let value =
@@ -720,17 +785,7 @@ let after_present value frame =
     | Ok () -> value
     | Error diagnostic -> { value with context_error = Some (Diagnostic.to_string diagnostic) }
   in
-  let value =
-    match Mem.retreat () with
-    | Within -> value
-    | Over _ ->
-        (* Budget is attributed+device; last good frame stays. *)
-        {
-          value with
-          context_error =
-            Some ("E_MEMORY: over budget after cache retreat\n" ^ Mem.Report.to_string (Mem.report ()));
-        }
-  in
+  let value = memory_boundary value in
   match save_status ~save:V.save ~filename:V.filename value.pending_render value.rendered with
   | Some status ->
       refresh_hidden { value with render_status = Some status; pending_render = None } frame
@@ -826,9 +881,19 @@ let crash_dump value directory =
     core.presets;
   Printf.bprintf editor "last edit: %.3f ms\nphases: %s\n" (core.edit_phases.total *. 1000.)
     (Flow.Phase_timer.summary core.edit_phases);
-  write "editor.txt" (Buffer.contents editor)
+  write "editor.txt" (Buffer.contents editor);
+  (* no collection: a crashing process should not start one *)
+  write "memory.txt"
+    (Mem.Report.to_string
+       (Mem.report ~collect:false
+          ~device:
+            (Option.fold ~none:0 ~some:fst (Flow_native.Workspace_gpu.device_limits value.host.gpu))
+          ()))
 
 let close value =
+  Option.iter
+    (fun (_, bytes, _) -> Mem.release (Mem.document "editor.document") bytes)
+    value.memory_doc;
   let value = autosave ~force:true value ~now:value.state_checked in
   Option.iter prerr_endline value.state_error;
   Option.iter (fun (_, image) -> ignore (Image.destroy image)) value.map;

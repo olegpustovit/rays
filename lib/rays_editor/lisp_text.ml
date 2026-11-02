@@ -24,7 +24,7 @@ let lex text =
   | Some tokens -> tokens
   | None ->
       let tokens = Flow.Lisp_scan.lex text in
-      Lru.Identity_list.add lexed text tokens;
+      Lru.Identity_list.add lexed ~bytes:(String.length text + Mem.reachable_bytes tokens) text tokens;
       tokens
 
 let colorize_now (theme : Pxui.Theme.t) text =

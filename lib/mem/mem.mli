@@ -27,6 +27,10 @@ val charge : owner -> int -> unit
 val release : owner -> int -> unit
 (** Drop [n] retained bytes, floored at zero. *)
 
+val reachable_bytes : 'a -> int
+(** The size of plain data, by walking it: once per cache miss on a value about to be kept, never
+    per frame. *)
+
 val bytes : owner -> int
 val peak : owner -> int
 
@@ -111,7 +115,10 @@ val overdraft : unit -> overdraft option
 val describe : overdraft -> string
 
 val total_owner : unit -> (string * int) option
-(** The largest owner now, for a status line. *)
+(** The largest owner now. *)
+
+val status_line : unit -> string option
+(** Set by {!retreat} from three quarters of the limit up: the total and the top owner. *)
 
 (** {1 Reports} *)
 
@@ -126,6 +133,7 @@ module Report : sig
     device : int;
     footprint : int;
     unattributed : int;
+    overclaimed : int;  (** Owners claim more than exists: a wrong size, which would hide the rest. *)
     budget : int;
   }
 

@@ -812,6 +812,7 @@ let () =
      same-owner acyclic and changed-plan recovery, CPU domains and clean close pass"
 
 let () =
+  Result.get_ok (Mem.configure Sys.getenv_opt);
   let handles = Ogpu.Impl.live_handles in
   let before = handles () in
   let owner = Flow_native.Workspace_gpu.create () in

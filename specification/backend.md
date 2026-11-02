@@ -1310,3 +1310,17 @@ A read-modify-write float film needs no new sink: a one-output kernel whose inpu
 whose output goes `~into` that same buffer reads and writes only its own pixel. A second kernel divides by the sample
 count and `Image_sink.convert` makes RGBA8 (ties to even). `lib/flow_gpu/test_film.ml` runs four accumulations and the
 resolve on Metal and checks every pixel exactly.
+
+## Memory
+
+`lib/mem` is the ledger: a leaf (`lru` depends on it) of owners in host or device bytes, safe from any
+domain, one budget and one retreat (the plan's order, in `Mem.retreat`, run by the editor at each frame
+boundary). `Lru.create ?shed` states when the retreat may touch a table: `Home` (its domain only),
+`Locked` (skipped while its user holds the lock), `Never`. The session is shed by its own domain or
+while `Async_cook`'s worker is provably idle. A cook over budget fails per node with `E_MEMORY`; the last
+good frame stays, and the error clears with usage. Process facts and the pressure source are one small
+function each per OS in `lib/mem/mem_stubs.c`; the source only stores a level the next boundary reads.
+The environment (`RAYS_MEM_BUDGET`, `RAYS_MEM_CLOBBER`) reaches `Mem.configure` from the process boundary.
+`rays mem FILE [--frames N]` prints the ledger of a workspace's real frames, window-free, through
+`Rays_editor.Measure`, the same runner `tools/mem_gate` checks `specification/memory-budgets.sexp` with
+(`@tools/mem`).

@@ -53,6 +53,7 @@ let cook_elsewhere text =
   digest
 
 let () =
+  Result.get_ok (Mem.configure Sys.getenv_opt);
   let owner = Flow_native.Workspace_gpu.create () in
   Flow_native.Workspace_gpu.qualification owner;
   Fun.protect

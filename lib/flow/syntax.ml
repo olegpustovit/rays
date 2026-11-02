@@ -374,3 +374,16 @@ let attribute_args head args =
       enums args
 
 let rec pairs = function a :: b :: rest -> (a, b) :: pairs rest | _ -> []
+
+let memory_bytes forms =
+  let strings = List.fold_left (fun sum s -> sum + 3 + (String.length s / 8)) 0 in
+  let rec form (t : t) =
+    13 + strings t.notes + strings t.meta + strings t.tail
+    +
+    match t.node with
+    | Sym text | Kw text | Num text | Str text -> 3 + (String.length text / 8)
+    | List forms | Vec forms | Map forms ->
+        List.fold_left (fun sum child -> sum + 3 + form child) 0 forms
+    | Quote (_, child) -> form child
+  in
+  8 * List.fold_left (fun sum t -> sum + form t) 0 forms

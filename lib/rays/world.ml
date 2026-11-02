@@ -949,7 +949,7 @@ let bake_cached ~width ~height (world : t) =
         | baked -> baked
         | exception Not_found ->
             let baked = bake ~light_radius ~width ~height plain in
-            Cache.add context.cache key baked;
+            Cache.add context.cache ~bytes:(Mem.reachable_bytes baked) key baked;
             baked)
   in
   { baked with background = world.background; exposure = world.exposure }

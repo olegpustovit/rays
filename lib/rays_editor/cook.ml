@@ -144,6 +144,7 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
   let await = match await with Some flag -> flag | None -> false in
   if grain <= 0 then invalid_arg "Rays_editor: grain must be positive";
   let domains = Option.value ~default:(max 1 (Parallel.recommended_domains () - 1)) domains in
+  let prepared_lock = Mutex.create () in
   if domains <= 0 then invalid_arg "Rays_editor: domains must be positive";
   Result.map
     (fun worker ->
@@ -156,8 +157,12 @@ let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payloa
         await;
         prepare;
         clock = Option.value ~default:Unix.gettimeofday clock;
-        prepared_cache = Prepared_cache.create ~owner:(Lru.cache "editor.prepared") ~byte_capacity:prepared_byte_capacity 16;
-        prepared_lock = Mutex.create ();
+        prepared_cache =
+          (* its byte count is a conservative bound, of geometry the session already charges *)
+          Prepared_cache.create ~owner:(Lru.cache "editor.prepared") ~shed:(Locked prepared_lock)
+            ~charges:false
+            ~byte_capacity:prepared_byte_capacity 16;
+        prepared_lock;
         schedule = Schedule.initial;
         pieces = [];
         settings = None;
@@ -185,6 +190,11 @@ let failure_of = function
   | Async_cook.Cook_error { code; trace; _ } when trace <> [] ->
       Some (code, (List.nth trace (List.length trace - 1)).Diagnostic.node_id)
   | _ -> None
+
+(* The last cook was refused for memory: worth another try once the process is under its limit. *)
+let out_of_memory value =
+  value.error <> None
+  && match !(value.failure) with Some ("E_MEMORY", _) -> true | _ -> false
 
 let failed_node value = if value.error = None then None else !(value.failure)
 let status value = Async_cook.status value.worker

@@ -113,6 +113,7 @@ let normals geometry =
   | None -> failwith "no N attribute"
 
 let () =
+  Result.get_ok (Mem.configure Sys.getenv_opt);
   let count = side * side in
   let unplaced = node () in
   let cpu_seconds, cpu = median (fun () -> cook unplaced) in

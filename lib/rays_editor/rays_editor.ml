@@ -440,3 +440,135 @@ module Workspace = struct
       (fun diagnostic -> [ diagnostic ])
       (run ?process ~source:{ path; digest = Lowering.sha256 text } doc)
 end
+
+module Measure = struct
+  type sample = {
+    frame : int;
+    live : int;
+    device : int;
+    footprint : int;
+    allocated : float;
+    promoted : float;
+    report : Mem.Report.t;
+  }
+
+  type outcome = {
+    early : sample;
+    final : sample;
+    fallbacks : (string * string * int) list;
+    readback_bytes : int;
+    memory_error : string option;
+    cook_error : string option;
+  }
+
+  let frame ~width ~height tick : Rays.Frame.t =
+    {
+      input =
+        {
+          (Input.at_time (float tick /. 60.)) with
+          dt = 1. /. 60.;
+          frame = tick;
+          tick;
+          size = (width, height);
+          pointer = (-100., -100.);
+        };
+      pixel_scale = (1., 1.);
+      fps = 60.;
+      mouse_delta = (0., 0.);
+    }
+
+  (* What survives, by allocation site, sampled. Trackers may run on the cook's domain too. *)
+  let track_sites () =
+    let rate = 1e-4 and lock = Mutex.create () and sites = Hashtbl.create 256 in
+    let add site n =
+      Mutex.protect lock (fun () ->
+          Hashtbl.replace sites site (n + Option.value ~default:0 (Hashtbl.find_opt sites site)))
+    in
+    let alloc (info : Gc.Memprof.allocation) =
+      let lines = String.split_on_char '\n' (Printexc.raw_backtrace_to_string info.callstack) in
+      let site = String.concat " < " (List.take 5 lines) in
+      let bytes = int_of_float (float (info.n_samples * (Sys.word_size / 8)) /. rate) in
+      add site bytes;
+      Some (site, bytes)
+    in
+    let dealloc (site, bytes) = add site (-bytes) in
+    ignore
+      (Gc.Memprof.start ~sampling_rate:rate ~callstack_size:12
+         {
+           alloc_minor = alloc;
+           alloc_major = alloc;
+           promote = (fun s -> Some s);
+           dealloc_minor = dealloc;
+           dealloc_major = dealloc;
+         });
+    fun () ->
+      Gc.Memprof.stop ();
+      Hashtbl.fold (fun site bytes all -> (bytes, site) :: all) sites []
+      |> List.filter (fun (bytes, _) -> bytes > 0)
+      |> List.sort (fun (a, _) (b, _) -> compare b a)
+      |> List.filteri (fun i _ -> i < 60)
+
+  let run ?(width = 960) ?(height = 640) ?(step = fun _ editor -> editor) ~early ~frames workspace =
+    let ( let* ) = Result.bind in
+    let* canvas = Rays.Canvas.create ~width ~height in
+    Fun.protect
+      ~finally:(fun () -> ignore (Rays.Canvas.destroy canvas))
+      (fun () ->
+        let* editor =
+          Editor.create ~ui_text_size:11 ~await:true ~domains:1 ~workspace ~prepare:Editor.prepare
+            ~draw:Editor.draw ()
+        in
+        let editor = ref editor in
+        Fun.protect
+          ~finally:(fun () -> Editor.close !editor)
+          (fun () ->
+            let bytes_of words = words *. float (Sys.word_size / 8) in
+            let allocated0 = Gc.allocated_bytes () in
+            let promoted0 = (fun (_, promoted, _) -> bytes_of promoted) (Gc.counters ()) in
+            let measure tick =
+              let device =
+                Option.fold ~none:0 ~some:fst
+                  (Flow_native.Workspace_gpu.device_limits (!editor).Loop_model.host.gpu)
+              in
+              let report = Mem.report ~device () in
+              {
+                frame = tick;
+                live = report.ocaml_live;
+                device;
+                footprint = report.footprint;
+                allocated = Gc.allocated_bytes () -. allocated0;
+                promoted = (fun (_, p, _) -> bytes_of p -. promoted0) (Gc.counters ());
+                report;
+              }
+            in
+            let first = ref None and failure = ref None in
+            let tick = ref 0 in
+            while !failure = None && !tick < frames do
+              incr tick;
+              let at = frame ~width ~height !tick in
+              editor := step !tick !editor;
+              editor := Editor.update !editor at;
+              (match Rays.Canvas.render ~density:1 canvas (Editor.scene !editor at) with
+              | Ok () -> ()
+              | Error message -> failure := Some message);
+              editor := Editor.after_present !editor at;
+              if !tick = early then first := Some (measure !tick)
+            done;
+            match !failure with
+            | Some message -> Error message
+            | None ->
+                let final = measure frames in
+                let early = Option.value !first ~default:final in
+                let stats, _, _, _, _ =
+                  Flow_native.Workspace_gpu.image_stats (!editor).Loop_model.host.gpu
+                in
+                Ok
+                  {
+                    early;
+                    final;
+                    fallbacks = Flow_ir.Fallback.seen ();
+                    readback_bytes = stats.readback_bytes;
+                    memory_error = (!editor).Loop_model.memory_error;
+                    cook_error = (!editor).Loop_model.core.cook.error;
+                  }))
+end

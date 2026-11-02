@@ -34,6 +34,7 @@ let positions run =
       | Error d -> failwith (Diagnostic.error_to_string d))
 
 let () =
+  Result.get_ok (Mem.configure Sys.getenv_opt);
   let count = side * side in
   let cpu, cpu_seconds = positions (fun f -> f Flow_ir.Gpu.default) in
   let reads gpu =

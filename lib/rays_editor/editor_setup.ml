@@ -92,6 +92,13 @@ let create ?gpu ?settings ?(seed_scene = fun scene -> scene) ?(name = "sketch") 
           in
           let level = Document.Scene in
           let preferences = preferences_file preferences in
+          (* a machine's setting, beside the guide: an override from the process still wins *)
+          (match read_preferences preferences with
+          | Ok values ->
+              Option.iter
+                (Mem.set_budget ~source:Preference)
+                (Editor_core.Store.Settings.int values "memory_budget")
+          | Error _ -> ());
           let guide =
             match read_preferences preferences with
             | Ok values ->

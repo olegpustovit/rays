@@ -198,12 +198,48 @@ let native ?text path =
         diagnostics;
       exit 1
 
+(* The ledger of a workspace's real frames, without a window. *)
+let mem path ~frames =
+  let text = try read path with Sys_error message -> die "rays: %s" message in
+  let workspace =
+    match
+      Result.bind
+        (Rays_editor.Source.read_imports ~file:path text)
+        (fun imports -> Rays_editor.Workspace.load ~imports text)
+    with
+    | Ok workspace -> workspace
+    | Error diagnostics ->
+        List.iter (fun d -> prerr_endline (D.report ~file:path ~source:text d)) diagnostics;
+        exit 1
+  in
+  match Rays_editor.Measure.run ~early:(min 30 frames) ~frames workspace with
+  | Error message -> die "rays: %s" message
+  | Ok outcome ->
+      print_string (Mem.Report.to_string outcome.final.report);
+      Printf.printf "frames %d: live %s -> %s, allocated %s, promoted %s a frame, readback %s\n" frames
+        (Mem.Report.format_bytes outcome.early.live)
+        (Mem.Report.format_bytes outcome.final.live)
+        (Mem.Report.format_bytes (int_of_float (outcome.final.allocated /. float frames)))
+        (Mem.Report.format_bytes (int_of_float (outcome.final.promoted /. float frames)))
+        (Mem.Report.format_bytes outcome.readback_bytes);
+      List.iter
+        (fun (site, reason, n) -> Printf.printf "left the device: %s, %s (%d)\n" site reason n)
+        outcome.fallbacks;
+      Option.iter print_endline outcome.memory_error;
+      Option.iter print_endline outcome.cook_error
+
 let () =
+  (match Mem.configure Sys.getenv_opt with Ok () -> () | Error message -> die "rays: %s" message);
   match List.tl (Array.to_list Sys.argv) with
   | [] when Sys.file_exists "untitled.rays" -> native "untitled.rays"
   | [] -> native ~text:empty "untitled.rays"
   | [ path ] when Filename.check_suffix path ".rays" -> native path
   | "check" :: (_ :: _ as files) -> check files
   | [ "fmt"; f ] -> fmt f
+  | [ "mem"; f ] -> mem f ~frames:120
+  | [ "mem"; f; "--frames"; n ] -> (
+      match int_of_string_opt n with
+      | Some frames when frames > 0 -> mem f ~frames
+      | _ -> die "rays: --frames takes a positive count")
   | [ "web"; f; "-o"; dir ] -> web f dir
-  | _ -> die "usage: rays [FILE.rays] | rays check FILE... | rays fmt FILE | rays web FILE -o DIR"
+  | _ -> die "usage: rays [FILE.rays] | rays check FILE... | rays fmt FILE | rays mem FILE [--frames N] | rays web FILE -o DIR"

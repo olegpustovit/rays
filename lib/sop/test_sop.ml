@@ -304,6 +304,45 @@ let test_async_cook_latest_request () =
   Async_cook.close worker;
   Async_cook.close worker
 
+(* The retreat runs on the frame's domain: it leaves the session alone while the worker cooks, and
+   sheds it once the worker is idle. *)
+let test_async_cook_retreat () =
+  Mem.reset ();
+  let worker = Async_cook.create ~max_entries:4 ~max_payload_bytes:4_000_000 |> get_ok in
+  let prepare _ = Ok () in
+  let cook node =
+    ignore (Async_cook.submit worker ~context:(context ~domains:1 ()) ~node ~prepare |> get_ok)
+  in
+  cook (Lisp_sop.snapshot (Rdk.Line_geometry.points [| (0., 0., 0.); (1., 0., 0.) |]));
+  ignore (Async_cook.await worker);
+  let owner = Mem.cache "sop.session.payload" in
+  let held = Mem.bytes owner in
+  check (held > 0) "a cooked entry is charged";
+  let usage () = 1 + Mem.attributed () in
+  let entered = Atomic.make false and leave = Atomic.make false in
+  cook
+    (custom ~operation:"async_retreat" ~version:1 ~parameters:"hold=1"
+       [ Lisp_sop.snapshot (Rdk.Line_geometry.points [| (5., 0., 0.) |]) ]
+       (fun ~context:_ inputs ->
+         Atomic.set entered true;
+         while not (Atomic.get leave) do
+           Domain.cpu_relax ()
+         done;
+         Ok inputs.(0)));
+  ignore (wait_until (fun () -> if Atomic.get entered then Some () else None));
+  let during = Mem.bytes owner in
+  Mem.set_budget 1;
+  ignore (Mem.retreat ~usage ());
+  check (Mem.bytes owner = during) "the retreat touched a session while its worker cooked";
+  Mem.set_budget 0;
+  Atomic.set leave true;
+  ignore (Async_cook.await worker);
+  Mem.set_budget 1;
+  ignore (Mem.retreat ~usage ());
+  check (Mem.bytes owner = 0) "the retreat sheds an idle session";
+  Async_cook.close worker;
+  Mem.reset ()
+
 let test_lru_limits_and_lifetime () =
   let box = Lisp_sop.node {|(sop/box :normals "Auto" :connectivity "Triangles")|} in
   let graph = Lisp_sop.node ~with_:[ ("box", box) ] "(sop/null (sop/ext_box))" in
@@ -3023,6 +3062,7 @@ let run () =
   test_async_await ();
   test_async_volatile_on_worker ();
   test_async_cook_latest_request ();
+  test_async_cook_retreat ();
   test_node_owned_parameters_and_graph_edit ();
   test_encoded_parameter ();
   test_lru_limits_and_lifetime ();

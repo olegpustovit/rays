@@ -77,6 +77,7 @@ let draws_of_prepared (staged : Scene.Layer.staged_native) prepared =
                     (draw_of_scene3_entry (Array.unsafe_get entries index) :: reversed)
               in
               let draws = build 0 [] in
+              (* no bytes: draws over a layer the scene's own cache charges *)
               Retained_table.add context.retained_draws key { layer = prepared; draws };
               draws))
 

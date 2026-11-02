@@ -87,7 +87,15 @@ let embedded_sources =
                  | None -> Ok (loaded @ forms))))
        (Ok []) Node_sources.files)
 
-let sources () = Lazy.force embedded_sources
+(* The embedded library, parsed once and kept for the process: the largest thing a small sketch has. *)
+let sources () =
+  let first = not (Lazy.is_val embedded_sources) in
+  let sources = Lazy.force embedded_sources in
+  if first then
+    Result.iter
+      (fun forms -> Mem.charge (Mem.plan "flow_sop.catalog") (Flow.Syntax.memory_bytes forms))
+      sources;
+  sources
 
 let definitions_of_sources forms =
   List.fold_left

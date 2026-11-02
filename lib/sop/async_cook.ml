@@ -129,6 +129,17 @@ let create ~max_entries ~max_payload_bytes =
                 worker_loop value none_volatile))
       in
       value.worker <- Some worker;
+      (* The retreat runs on the frame's domain. Only the worker touches the session, and only while
+         [active] is set, which it does under [mutex]: holding that with nothing active, the session
+         is this domain's until the lock is given back. A cook in progress is left alone. *)
+      Mem.register_evictor (Session.payload_owner session) ~rebuild:8.
+        ~held:(fun () -> Session.payload_bytes session)
+        ~live:(fun () -> not value.closed)
+        (fun () ->
+          Mutex.try_lock value.mutex
+          && Fun.protect
+               ~finally:(fun () -> Mutex.unlock value.mutex)
+               (fun () -> value.active = None && (not value.closed) && Session.shed session));
       value)
     (Session.create ~max_entries ~max_payload_bytes)
 

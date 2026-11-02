@@ -1659,8 +1659,9 @@ let build_call ~gpu ~lower_call ~record_profile ~checked ~(definition : Workspac
    capacity is the bound on a scrub's residue (2048 held 2-3 GB after a minute of scrubbing). *)
 module Built = Lru.Make (String)
 
-let built = Built.create ~owner:(Lru.cache "flow_sop.built") 64
+(* count only: a kernel node over inputs the lowering holds *)
 let built_lock = Mutex.create ()
+let built = Built.create ~owner:(Lru.cache "flow_sop.built") ~shed:(Locked built_lock) 64
 
 let built_for keep =
   let found = ref [] in
@@ -2328,8 +2329,12 @@ let same_digest_key a b =
   && same_content_list a.graph_forms b.graph_forms
   && same_content_list a.extra_definitions b.extra_definitions
 
-let digest_cache = Lru.Identity_list.create ~owner:(Lru.cache "flow_sop.digest") ~equal:same_digest_key 8
+(* count only: eight digests *)
 let digest_lock = Mutex.create ()
+
+let digest_cache =
+  Lru.Identity_list.create ~owner:(Lru.cache "flow_sop.digest") ~shed:(Locked digest_lock)
+    ~equal:same_digest_key 8
 
 let cached_digest (checked : Workspace.t) extra compute =
   (* elementwise: a one-call lowering rebuilds the lists (graphs = [call]) but shares their forms *)
