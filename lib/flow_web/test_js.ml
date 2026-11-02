@@ -4,7 +4,8 @@
 module P = Flow_ir.Packed
 module R = Flow_ir.Core.Region
 
-let node = Sys.command "command -v node >/dev/null 2>&1" = 0
+let node =
+  Sys.command (if Sys.win32 then "where node >NUL 2>&1" else "command -v node >/dev/null 2>&1") = 0
 
 let numbers values =
   String.concat "," (List.map (fun value -> Param.float_text value) (Array.to_list values))
