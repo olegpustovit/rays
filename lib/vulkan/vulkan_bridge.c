@@ -150,6 +150,8 @@ typedef struct {
 
 static int validation_messages = 0;
 static bool validation_fatal = false;
+static bool validation_silent = false;
+static rv_device *exit_device = NULL;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                  VkDebugUtilsMessageTypeFlagsEXT types,
@@ -157,7 +159,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlag
                                                  void *user) {
   (void)types;
   (void)user;
-  if (severity < VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) return VK_FALSE;
+  if (severity < VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT || validation_silent) return VK_FALSE;
   __atomic_add_fetch(&validation_messages, 1, __ATOMIC_RELAXED);
   fprintf(stderr, "vulkan validation: %s\n", data->pMessage);
   fflush(stderr);
@@ -180,6 +182,19 @@ static int family_with(rv_device *d, VkQueueFlags want, VkQueueFlags refuse) {
   for (uint32_t i = 0; i < count; i++)
     if ((families[i].queueFlags & want) == want && !(families[i].queueFlags & refuse)) return (int)i;
   return -1;
+}
+
+/* A process leaving with a live device (a failing test) must release it here: the validation layer
+   joins its threads in DLL shutdown, under the loader lock, and never returns. */
+static void leave_device(void) {
+  rv_device *d = exit_device;
+  if (!d) return;
+  exit_device = NULL;
+  validation_silent = true;
+  vkDeviceWaitIdle(d->device);
+  vkDestroyDevice(d->device, NULL);
+  if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
+  vkDestroyInstance(d->instance, NULL);
 }
 
 /* A dedicated copy queue where the device has one; otherwise a second queue of the main family, or
@@ -241,7 +256,7 @@ static intnat device_create(bool validation) {
   const char *required[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
                             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
                             VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
-  const char *enabled[8];
+  const char *enabled[12];
   uint32_t enabled_count = 0;
   for (uint32_t i = 0; !failure && i < sizeof required / sizeof *required; i++) {
     if (!has_extension(available, available_count, required[i])) failure = RV_MISSING;
@@ -253,6 +268,17 @@ static intnat device_create(bool validation) {
     free(d);
     return failure;
   }
+  /* Metal fixes a pipeline to no topology class and lets a draw leave a binding unwritten when it
+     never reads it. Both are one extension here; neither is optional for the renderer's pipelines. */
+  if (!has_extension(available, available_count, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) ||
+      !has_extension(available, available_count, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {
+    if (d->messenger) vkDestroyDebugUtilsMessengerEXT(d->instance, d->messenger, NULL);
+    vkDestroyInstance(d->instance, NULL);
+    free(d);
+    return RV_MISSING;
+  }
+  enabled[enabled_count++] = VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME;
+  enabled[enabled_count++] = VK_EXT_ROBUSTNESS_2_EXTENSION_NAME;
   if (has_extension(available, available_count, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
     enabled[enabled_count++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
     d->budget = true;
@@ -269,7 +295,8 @@ static intnat device_create(bool validation) {
        .queueCount = shared_family ? 2 : 1, .pQueuePriorities = priorities},
       {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = d->transfer_family,
        .queueCount = 1, .pQueuePriorities = priorities}};
-  VkPhysicalDeviceRayQueryFeaturesKHR ray_query = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .rayQuery = VK_TRUE};
+  VkPhysicalDeviceRobustness2FeaturesEXT robustness = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT, .nullDescriptor = VK_TRUE};
+  VkPhysicalDeviceRayQueryFeaturesKHR ray_query = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &robustness, .rayQuery = VK_TRUE};
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accel = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .pNext = &ray_query, .accelerationStructure = VK_TRUE};
   VkPhysicalDeviceVulkan13Features v13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = &accel,
@@ -331,7 +358,14 @@ static intnat device_create(bool validation) {
 
 CAMLprim value rv_device_create(value validation, value fatal) {
   validation_fatal = Bool_val(fatal);
-  return Val_long(device_create(Bool_val(validation)));
+  intnat created = device_create(Bool_val(validation));
+  if (created > 0 && Bool_val(validation)) {
+    static bool registered = false;
+    if (!registered) atexit(leave_device);
+    registered = true;
+    exit_device = (rv_device *)created;
+  }
+  return Val_long(created);
 }
 
 CAMLprim value rv_validation_messages(value unit) {
@@ -747,6 +781,7 @@ CAMLprim value rv_queue_destroy(value queue) {
 
 CAMLprim value rv_device_destroy(value device) {
   rv_device *d = H(device);
+  if (exit_device == d) exit_device = NULL;
   caml_enter_blocking_section();
   vkDeviceWaitIdle(d->device);
   caml_leave_blocking_section();
@@ -1183,10 +1218,16 @@ static void push_descriptors(rv_cmd *c) {
     VkDescriptorType type = p->bindings[i].type;
     if (binding >= MAX_BIND) continue;
     rv_slot *s = &c->slots[binding];
-    if (s->kind == 0) continue;
+    if (s->kind == 0 && type == VK_DESCRIPTOR_TYPE_SAMPLER) continue; /* a sampler has no null form */
     VkWriteDescriptorSet *w = &writes[n];
     *w = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = binding, .descriptorCount = 1, .descriptorType = type};
-    if (s->kind == 1) {
+    if (s->kind == 0 && (type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER || type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)) {
+      buffers[n] = (VkDescriptorBufferInfo){VK_NULL_HANDLE, 0, VK_WHOLE_SIZE};
+      w->pBufferInfo = &buffers[n];
+    } else if (s->kind == 0 && (type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)) {
+      images[n] = (VkDescriptorImageInfo){.imageView = VK_NULL_HANDLE, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
+      w->pImageInfo = &images[n];
+    } else if (s->kind == 1) {
       VkDeviceSize limit = type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ? c->q->d->properties.limits.maxUniformBufferRange : s->range;
       buffers[n] = (VkDescriptorBufferInfo){s->buffer, s->offset, s->range < limit ? s->range : limit};
       w->pBufferInfo = &buffers[n];
