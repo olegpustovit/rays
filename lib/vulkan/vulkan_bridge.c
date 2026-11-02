@@ -104,6 +104,7 @@ typedef struct {
 
 struct rv_cmd {
   rv_cmd *next;
+  rv_cmd *all; /* every command the queue made: one a caller began and dropped goes with the queue */
   rv_queue *q;
   VkCommandBuffer cb;
   VkQueryPool timestamps;
@@ -124,7 +125,7 @@ struct rv_queue {
   VkSemaphore timeline;
   uint64_t next_epoch;
   VkCommandPool pool;
-  rv_cmd *free_list, *flight_head, *flight_tail;
+  rv_cmd *free_list, *flight_head, *flight_tail, *commands;
   double total_seconds;
   uint64_t duration_epochs[DURATIONS];
   double durations[DURATIONS];
@@ -546,6 +547,8 @@ static rv_cmd *cmd_take(rv_queue *q) {
   } else {
     c = calloc(1, sizeof *c);
     c->q = q;
+    c->all = q->commands;
+    q->commands = c;
     VkCommandBufferAllocateInfo alloc = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = q->pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
     VkResult r = vkAllocateCommandBuffers(d->device, &alloc, &c->cb);
@@ -767,9 +770,9 @@ CAMLprim value rv_queue_total_seconds(value queue) { return caml_copy_double(((r
 
 static void queue_free(rv_queue *q) {
   VkDevice device = q->d->device;
-  while (q->free_list) {
-    rv_cmd *c = q->free_list;
-    q->free_list = c->next;
+  while (q->commands) {
+    rv_cmd *c = q->commands;
+    q->commands = c->all;
     chunks_release(q->d, c->chunks);
     vkDestroyQueryPool(device, c->timestamps, NULL);
     free(c);

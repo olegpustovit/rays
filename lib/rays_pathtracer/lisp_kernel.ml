@@ -359,7 +359,9 @@ let rec mkdir_p dir =
 
 let store dir file (value : front) =
   mkdir_p dir;
-  let payload = Marshal.to_string value [] in
+  let msl, inputs, types = value in
+  let settled = Flow_shader.Emit.settled ~vulkan:(Ogpu.Impl.backend = "vulkan") msl in
+  let payload = Marshal.to_string (settled, inputs, types) [] in
   let temp = Filename.temp_file ~temp_dir:dir "kernel" ".part" in
   Out_channel.with_open_bin temp (fun out ->
       output_string out (Digest.string payload);

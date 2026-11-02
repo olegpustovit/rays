@@ -1,8 +1,9 @@
 type msl = {
   source : string;
   entry : string;
-  spirv : (bytes * string, Diagnostic.t) result Lazy.t;
-      (** the same kernel as a Vulkan SPIR-V module and its entry, printed when first asked *)
+  spirv : (bytes * string * Ogpu_core.Shader.binding list, Diagnostic.t) result Lazy.t;
+      (** the same kernel as a Vulkan SPIR-V module, its entry and its bindings, printed when first
+          asked *)
   interface : Ogpu_core.Shader.binding list;
   uniform_layout : (string * int * int) list;
   uniform_bytes : int;
@@ -23,6 +24,9 @@ type msl = {
    count is the dispatch count, or its minimum with [count_in[0] * mul / div] when use is set,
    and is written as the 24-byte count record {n, 6n, 1, 0, 0, 0} to [count_out] (buffers after the
    gathers): from byte 4 it is the indexed indirect draw of n six-index quads. *)
+(** [msl] as plain data, for a disk cache: the SPIR-V printed if [vulkan], dropped otherwise. *)
+val settled : vulkan:bool -> msl -> msl
+
 val names : string list
 
 val kernel :

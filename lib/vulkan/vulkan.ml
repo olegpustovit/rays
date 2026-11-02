@@ -170,6 +170,9 @@ let reflect bytes = List.map (fun (_, binding, kind) -> (binding, kind)) (snd (s
 (* The bindings and local size of one entry point, None if the module has no such entry. *)
 let reflect_entry bytes entry =
   let entries, bindings = scan bytes in
+  (* before SPIR-V 1.4 an entry lists only its inputs and outputs: its module holds one entry, so
+     all of its bindings are that entry's *)
+  let whole = Int32.to_int (Bytes.get_int32_le bytes 4) land 0xffffffff < 0x00010400 in
   List.find_map
     (fun (name, used, local) ->
       if name <> entry then None
@@ -178,7 +181,7 @@ let reflect_entry bytes entry =
           ( List.sort_uniq compare
               (List.filter_map
                  (fun (id, binding, kind) ->
-                   if List.mem id used then Some (binding, kind) else None)
+                   if whole || List.mem id used then Some (binding, kind) else None)
                  bindings),
             local ))
     entries

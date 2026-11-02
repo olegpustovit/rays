@@ -4,7 +4,7 @@ module S = Ogpu_core.Shader
 type msl = {
   source : string;
   entry : string;
-  spirv : (bytes * string, Diagnostic.t) result Lazy.t;
+  spirv : (bytes * string * Ogpu_core.Shader.binding list, Diagnostic.t) result Lazy.t;
   interface : S.binding list;
   uniform_layout : (string * int * int) list;
   uniform_bytes : int;
@@ -335,6 +335,12 @@ let group_intrinsic ~scans ~(raster : raster) (current : Scope.t) guards stage (
 
 let no_spirv = lazy (Error (Diagnostic.error ~code:"E_GPU_FORM" "This body has no SPIR-V form."))
 
+let settled ~vulkan msl =
+  {
+    msl with
+    spirv = Lazy.from_val (if vulkan then Lazy.force msl.spirv else Lazy.force no_spirv);
+  }
+
 let rec kernel ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs
     ?uint32_inputs ?uint32_tables program =
   let spirv =
@@ -348,7 +354,7 @@ let rec kernel ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32
          Error (Diagnostic.error ~code:"E_GPU_FORM" "SPIR-V kernels have no exact uint32 buffers yet.")
        else
          Result.map
-           (fun (k : Spirv.t) -> (k.bytes, k.entry))
+           (fun (k : Spirv.t) -> (k.bytes, k.entry, k.interface))
            (Spirv.kernel ?fast ?instanced ?motion
               ~curves:(curves <> None) ?spheres program))
   in

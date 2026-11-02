@@ -34,7 +34,7 @@ let create ~clock:_ device =
 
 let body (msl : Emit.msl) =
   if Ogpu.Impl.backend = "vulkan" then Lazy.force msl.spirv
-  else Ok (Bytes.of_string msl.source, msl.entry)
+  else Ok (Bytes.of_string msl.source, msl.entry, msl.interface)
 
 let get t (msl : Emit.msl) =
   if t.closed || Domain.self () <> t.domain then
@@ -46,7 +46,7 @@ let get t (msl : Emit.msl) =
     | exception Not_found -> (
         let ( let* ) = Result.bind in
         let gpu result = Result.map_error diagnostic result in
-        let* bytes, entry = body msl in
+        let* bytes, entry, interface = body msl in
         let* shader =
           gpu
             (Ogpu.Shader.of_source
@@ -55,12 +55,12 @@ let get t (msl : Emit.msl) =
                  label = Some msl.entry;
                  bytes;
                  entry_points = [ { name = entry; stage = Compute } ];
-                 bindings = msl.interface;
+                 bindings = interface;
                })
         in
         let* library = gpu (B.create_library t.device shader) in
         match
-          B.create_compute_pipeline_from library ~entry ~interface:msl.interface ()
+          B.create_compute_pipeline_from library ~entry ~interface ()
         with
         | Error error ->
             ignore (B.destroy_library library);

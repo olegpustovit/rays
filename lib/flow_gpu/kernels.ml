@@ -1,7 +1,12 @@
 (* The compute stages Run and Host dispatch, printed at build time from shaders/NAME.rays (dune). *)
 module S = Ogpu.Shader
 
-let spirv bytes = lazy (Ok (Bytes.of_string bytes, "main"))
+let spirv bytes interface =
+  lazy
+    (Ok
+       ( Bytes.of_string bytes,
+         "main",
+         List.map (fun binding -> S.{ group = 0; binding; kind = Storage_buffer; visibility = [ Compute ] }) interface ))
 
 (* Stream compaction for a resident fold: the indices of a mask's nonzero elements, in order, as
    floats, and their count; three dispatches over blocks of 1,024 (count, scan the counts, scatter).
@@ -9,7 +14,7 @@ let spirv bytes = lazy (Ok (Bytes.of_string bytes, "main"))
 let compaction =
   {
     Emit.source = Compact_source.source;
-    spirv = spirv Spirv_kernels.compact_comp;
+    spirv = spirv Spirv_kernels.compact_comp (List.init 6 Fun.id);
     entry = "compact_mask";
     uniform_layout = [];
     uniform_bytes = 12;
@@ -40,7 +45,7 @@ let compaction_uint32 =
   {
     compaction with
     source = Compact_uint32_source.source;
-    spirv = spirv Spirv_kernels.compact_uint32_comp;
+    spirv = spirv Spirv_kernels.compact_uint32_comp (List.init 6 Fun.id);
     entry = "compact_mask_uint32";
     output_uint32 = [| true |];
   }
@@ -49,7 +54,7 @@ let indices =
   {
     compaction_uint32 with
     source = Indices_source.source;
-    spirv = spirv Spirv_kernels.indices_comp;
+    spirv = spirv Spirv_kernels.indices_comp (List.init 2 Fun.id);
     entry = "write_indices";
     uniform_bytes = 12;
     interface =
@@ -69,7 +74,7 @@ let triangles =
   {
     compaction_uint32 with
     source = Triangles_source.source;
-    spirv = spirv Spirv_kernels.triangles_comp;
+    spirv = spirv Spirv_kernels.triangles_comp (List.init 8 Fun.id);
     entry = "triangle_indices";
     uniform_bytes = 16;
     interface = List.init 8 (fun binding ->
@@ -81,7 +86,7 @@ let topology =
   {
     compaction_uint32 with
     source = Topology_source.source;
-    spirv = spirv Spirv_kernels.topology_comp;
+    spirv = spirv Spirv_kernels.topology_comp (List.init 5 Fun.id);
     entry = "topology_check";
     uniform_bytes = 20;
     interface =
@@ -97,7 +102,7 @@ let dispatch_arguments =
   {
     compaction with
     source = Dispatch_source.source;
-    spirv = spirv Spirv_kernels.dispatch_comp;
+    spirv = spirv Spirv_kernels.dispatch_comp (List.init 3 Fun.id);
     entry = "dispatch_arguments";
     uniform_bytes = 16;
     interface =
@@ -120,7 +125,7 @@ let bounds =
   {
     compaction with
     source = Bounds_source.source;
-    spirv = spirv Spirv_kernels.bounds_comp;
+    spirv = spirv Spirv_kernels.bounds_comp (List.init 3 Fun.id);
     entry = "chunk_bounds";
     uniform_bytes = 4;
     output_widths = [| 6 |];
@@ -145,7 +150,7 @@ let normals =
   {
     compaction with
     source = Normals_source.source;
-    spirv = spirv Spirv_kernels.normals_comp;
+    spirv = spirv Spirv_kernels.normals_comp (List.init 6 Fun.id);
     entry = "point_normal";
     uniform_bytes = 4;
     output_widths = [| 3 |];
