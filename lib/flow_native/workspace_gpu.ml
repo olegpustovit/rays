@@ -77,7 +77,7 @@ type t = {
          presenting queue, which this owner does not see *)
 }
 
-let create ?(clock = Unix.gettimeofday) () =
+let create ?(clock = Rays_math.Clock.now) () =
   let image_stats = { created = 0; closed = 0; buffers = 0; textures = 0 } in
   {
     clock;

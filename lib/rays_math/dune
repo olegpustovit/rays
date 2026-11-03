@@ -1,10 +1,10 @@
 (library
  (name rays_math)
  (public_name rays.math)
- (modules vec2 vec3 mat4 quat rand noise color hash fma)
+ (modules vec2 vec3 mat4 quat rand noise color hash fma clock)
  (foreign_stubs
   (language c)
-  (names fma_stubs)))
+  (names fma_stubs clock_stubs)))
 
 (test
  (name test_color)
@@ -14,4 +14,9 @@
 (test
  (name test_fma)
  (modules test_fma)
+ (libraries rays_math))
+
+(test
+ (name test_clock)
+ (modules test_clock)
  (libraries rays_math))
