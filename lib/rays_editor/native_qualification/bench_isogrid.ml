@@ -557,6 +557,12 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
         current := measured name (fun () -> Editor.edit !current op |> string_ok)
       in
       let retention snapshot name =
+        (* On Windows, Parallel resizes a domain's minor heap at the end of each major cycle by what it
+           allocated since the previous one. The collections below end cycles with nothing allocated, so
+           they halved the main domain's heap from 8M words to the 256k default, and recipe 0's evaluate
+           after a snapshot ran 92 minor collections instead of 6. The snapshot leaves the heap the size
+           the workload made it. *)
+        let minor_heap = (Gc.get ()).minor_heap_size in
         (* the ledger's report collects, then drops its registry's dead tables: what is left for the two
            collections below is what the workload holds, not how many tables died since the 256th *)
         ignore (Mem.report ~walk:false ());
@@ -678,7 +684,9 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
           gc.heap_words history stats.retained_entries stats.retained_payload_bytes compiled lanes
           drawn converted ids host.pipeline_compilations host.held_buffers preparations
           preparation_bytes !prepare_calls
-          native.pipeline_cache_entries registrations host.buffer_creations (Ogpu.Impl.live_handles ())
+          native.pipeline_cache_entries registrations host.buffer_creations (Ogpu.Impl.live_handles ());
+        if (Gc.get ()).minor_heap_size <> minor_heap then
+          Gc.set { (Gc.get ()) with minor_heap_size = minor_heap }
       in
       if flips > 0 then begin
         (* One closed eight-recipe cycle returns to the initial recipe 1.
