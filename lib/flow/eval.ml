@@ -10,6 +10,23 @@ end)
 
 module Names = Set.Make (String)
 
+module Text_table = Hashtbl.Make (struct
+  type t = string
+
+  let equal = String.equal
+  let hash = Hashtbl.hash
+end)
+
+(* Records keyed by path. A noted value looks its path up once; the hash reads every segment, as
+   [Hashtbl.hash] reads only the first five, so the many paths of one zone, which differ last, no
+   longer share a bucket; a path physically shared with its term compares in one step. *)
+module Path_table = Hashtbl.Make (struct
+  type t = string list
+
+  let equal a b = a == b || List.equal String.equal a b
+  let hash path = List.fold_left (fun h s -> (h * 31) + Hashtbl.hash (s : string)) 0 path
+end)
+
 let rec pattern_names names = function
   | Workspace.Name name -> Names.add name names
   | Seq patterns -> List.fold_left pattern_names names patterns
@@ -247,9 +264,11 @@ and st = {
   mutable rids : int;
   record : bool;
   elems : value Smap.t; (* live evaluation: the element bound in each geometry zone *)
-  recs : (W.path, int * (int list * value) list) Hashtbl.t;
+  recs : records;
   graphs : (string, W.graph) Hashtbl.t;
   defs : (string, W.graph) Hashtbl.t;
+  def_paths : (W.path * W.path list) Text_table.t;
+      (* each defn's zone and its inputs' record paths, made with the state *)
   kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
   node_defs :
     ( string,
@@ -274,6 +293,17 @@ and st = {
       (* while an inlined body evaluates: its deferred checks, newest first. A test that reads only
          frame facts and selects an arm that fails statically is checked when the card cooks: the
          card fails with that diagnostic when the test is [bool] *)
+}
+
+and record_cell = { mutable count : int; mutable values : (int list * value) list }
+
+(* Records by path, with the cells of the last few noted ([record]). *)
+and records = {
+  table : record_cell Path_table.t;
+  recent : (W.path * string * record_cell) array;
+      (* the last few (path, no_name) or (zone, parameter) noted, emptied when the evaluation
+         returns: the walker's, not the result's *)
+  mutable next : int;
 }
 
 and node = {
@@ -563,6 +593,21 @@ let rec pat_key = function
 
 let path_text p = String.concat "/" p
 
+(* a defn's zone and the record path of each input *)
+let def_record_paths (d : W.graph) =
+  let base = [ "def:" ^ d.name ] in
+  (base, List.map (fun (name, _, _) -> base @ [ ":" ^ name ]) d.inputs)
+
+(* [String.starts_with ~prefix:"$elem:"] without its closure: most names fail on the first byte *)
+let elem_name b = String.length b >= 6 && b.[0] = '$' && String.starts_with ~prefix:"$elem:" b
+
+(* [List.mem_assoc] and [List.assoc_opt] for names, without polymorphic compare *)
+let rec named name = function [] -> false | (n, _) :: rest -> String.equal n name || named name rest
+
+let rec slot name = function
+  | [] -> None
+  | (n, v) :: rest -> if String.equal n name then Some v else slot name rest
+
 (* ---- str formatting (register C2) ---- *)
 
 (* ---- context helpers ---- *)
@@ -574,12 +619,48 @@ let span_of (x : W.term) =
   let s = x.form.span in
   if s.start = 0 && s.finish = 0 then None else Some s
 
-let note c path v =
-  let st = c.st in
-  if st.record && c.rec_ then begin
-    let n, l = match Hashtbl.find_opt st.recs path with Some p -> p | None -> (0, []) in
-    if n < max_iterations then Hashtbl.replace st.recs path (n + 1, (c.iter, v) :: l)
+(* never noted: [recent] starts with this entry, whose path and name no term shares *)
+let no_path = [ "" ]
+let no_name = String.make 1 '\000'
+let no_cell = { count = 0; values = [] }
+let no_entry = (no_path, no_name, no_cell)
+let new_records size = { table = Path_table.create size; recent = Array.make 8 no_entry; next = 0 }
+let forget_recent records = Array.fill records.recent 0 (Array.length records.recent) no_entry
+
+let rec recent_cell recent zone name i =
+  if i = Array.length recent then no_cell
+  else
+    let noted, noted_name, cell = recent.(i) in
+    if noted == zone && noted_name == name then cell else recent_cell recent zone name (i + 1)
+
+(* Record [v] under [zone], or under [zone @ [":" ^ name]] for a parameter, made only when neither
+   is among the last few noted: a map's elements note the same few, which then skip the hash. *)
+let record c zone name v =
+  let records = c.st.recs in
+  let cell =
+    match recent_cell records.recent zone name 0 with
+    | cell when cell != no_cell -> cell
+    | _ ->
+        let path = if name == no_name then zone else zone @ [ ":" ^ name ] in
+        let cell =
+          match Path_table.find_opt records.table path with
+          | Some cell -> cell
+          | None ->
+              let cell = { count = 0; values = [] } in
+              Path_table.add records.table path cell;
+              cell
+        in
+        records.recent.(records.next) <- (zone, name, cell);
+        records.next <- (records.next + 1) mod Array.length records.recent;
+        cell
+  in
+  if cell.count < max_iterations then begin
+    cell.count <- cell.count + 1;
+    cell.values <- (c.iter, v) :: cell.values
   end
+
+let note c path v = if c.st.record && c.rec_ then record c path no_name v
+let note_param c zone name v = if c.st.record && c.rec_ then record c zone name v
 
 let mk_node c ?(authored = 0) ?(ty = Ty.geometry) kind args =
   let st = c.st in
@@ -1205,7 +1286,7 @@ let guardable v =
     | Fn (Closure cl) -> Smap.for_all (fun _ v -> free v) cl.env && not (reads_elem cl.body)
     | _ -> true
   and reads_elem (t : W.term) =
-    (match t.node with W.Ref_binding (b, _) -> String.starts_with ~prefix:"$elem:" b | _ -> false)
+    (match t.node with W.Ref_binding (b, _) -> elem_name b | _ -> false)
     || List.exists reads_elem (W.children t)
   in
   frame_dependent v && (not (state_dependent v)) && free v
@@ -1237,6 +1318,14 @@ and force_res c r =
       let v = slow () in
       Hashtbl.replace c.st.memo r.rid v;
       v
+
+(* [ev (sub c seg)]: a term with a path replaces the route, and a literal or a plain name never
+   reads it, so neither takes the context copy. *)
+and ev_at c seg env (x : W.term) =
+  match (x.path, x.node) with
+  | Some _, _ | None, (W.Lit _ | W.Text _) -> ev c env x
+  | None, W.Ref_binding (b, []) when not (elem_name b) -> ev c env x
+  | None, _ -> ev (sub c seg) env x
 
 and ev c env (x : W.term) : value =
   let st = c.st in
@@ -1321,7 +1410,7 @@ and ev c env (x : W.term) : value =
           if st.record && c.rec_ then Option.iter (fun p -> note c p v) x.path;
           v)
 
-and evs c env prefix ts = List.mapi (fun i t -> ev (sub c (prefix ^ string_of_int i)) env t) ts
+and evs c env prefix ts = List.mapi (fun i t -> ev_at c (prefix ^ string_of_int i) env t) ts
 
 (* a live test of an inlined body's [if]/[cond] that can be a deferred check *)
 and guarding c v = Option.is_some c.st.guards && guardable v
@@ -1356,10 +1445,10 @@ and eval_named c env args =
      small scan becomes measurable. *)
   let rec distinct = function
     | [] -> true
-    | (name, _) :: rest -> (not (List.mem_assoc name rest)) && distinct rest
+    | (name, _) :: rest -> (not (named name rest)) && distinct rest
   in
   if List.compare_length_with args 16 <= 0 && distinct args then
-    List.map (fun (name, term) -> (name, ev (sub c name) env term)) args
+    List.map (fun (name, term) -> (name, ev_at c name env term)) args
   else
     let counts = Hashtbl.create 4 in
     List.map
@@ -1367,7 +1456,7 @@ and eval_named c env args =
         let n = Option.value (Hashtbl.find_opt counts name) ~default:0 in
         Hashtbl.replace counts name (n + 1);
         let seg = if n = 0 then name else name ^ "#" ^ string_of_int n in
-        (name, ev (sub c seg) env t))
+        (name, ev_at c seg env t))
       args
 
 and field c v f name = lookup_field name (concrete c v) f
@@ -1414,18 +1503,18 @@ and ev_raw c env (x : W.term) : value =
   | W.Nil -> No_geo
   | W.Time -> ( match c.st.time with Some t -> Float t.t | None -> raise Needs_t)
   | W.Vec [ a; b ] ->
-      let f i t = num (concrete c (ev (sub c (string_of_int i)) env t)) in
+      let f i t = num (concrete c (ev_at c (string_of_int i) env t)) in
       let a = f 0 a in
       let b = f 1 b in
       Vec2 (a, b)
   | W.Vec [ a; b; d ] ->
-      let f i t = num (concrete c (ev (sub c (string_of_int i)) env t)) in
+      let f i t = num (concrete c (ev_at c (string_of_int i) env t)) in
       let a = f 0 a in
       let b = f 1 b in
       let d = f 2 d in
       Vec3 (a, b, d)
   | W.Vec [ a; b; d; e ] ->
-      let f i t = num (concrete c (ev (sub c (string_of_int i)) env t)) in
+      let f i t = num (concrete c (ev_at c (string_of_int i) env t)) in
       let a = f 0 a in
       let b = f 1 b in
       let d = f 2 d in
@@ -1433,7 +1522,7 @@ and ev_raw c env (x : W.term) : value =
       Vec4 (a, b, d, e)
   | W.Vec cs ->
       failf "E_VECTOR" "A vector has 2, 3 or 4 components; this one has %d." (List.length cs)
-  | W.Ref_binding (b, []) when String.starts_with ~prefix:"$elem:" b -> (
+  | W.Ref_binding (b, []) when elem_name b -> (
       match Smap.find_opt b c.st.elems with Some v -> v | None -> raise Needs_t)
   | W.Ref_binding (b, fs) -> (
       match Smap.find_opt b env with
@@ -1471,10 +1560,10 @@ and ev_raw c env (x : W.term) : value =
   | W.Op { op = ("and" | "or") as op; args = [ (na, a); (nb, b) ]; _ } -> (
       (* a decided first operand short-circuits: [(and (not blank) (has_attr g name))] never asks
          for a blank name, and a cooked second operand does not defer a decided result *)
-      match ev (sub c na) env a with
+      match ev_at c na env a with
       | Bool v when v = (op = "or") -> Bool v
-      | va -> apply_op c ~authored:x.form.id op [ (na, va); (nb, ev (sub c nb) env b) ])
-  | W.Op { op = "live?"; args = [ (na, a) ]; _ } -> Bool (is_live (ev (sub c na) env a))
+      | va -> apply_op c ~authored:x.form.id op [ (na, va); (nb, ev_at c nb env b) ])
+  | W.Op { op = "live?"; args = [ (na, a) ]; _ } -> Bool (is_live (ev_at c na env a))
   | W.Op { op; args; _ } -> apply_op c ~authored:x.form.id op (eval_named c env args)
   | W.Call_fn { fn; args; body } -> (
       let vals = evs c env "a" args in
@@ -1494,10 +1583,14 @@ and ev_raw c env (x : W.term) : value =
             let v =
               match v with Residual _ when diagnostic_effect c.st env t -> concrete c v | _ -> v
             in
-            let pfx =
-              match t.path with Some p -> List.take (max 0 (List.length p - 1)) p | None -> []
-            in
-            bind_pat c ~mk:(Some (fun n -> pfx @ [ n ])) ~whole:false pat v env)
+            (* a plain name binds without a record; a destructuring pattern records its parts *)
+            match pat with
+            | W.Name n -> Smap.add n v env
+            | _ ->
+                let pfx =
+                  match t.path with Some p -> List.take (max 0 (List.length p - 1)) p | None -> []
+                in
+                bind_pat c ~mk:(Some (fun n -> pfx @ [ n ])) ~whole:false pat v env)
           env binds
       in
       ev c env res
@@ -1548,7 +1641,7 @@ and ev_raw c env (x : W.term) : value =
       let value =
         match (c.st.time, policy) with
         | None, W.First when c.card <> None -> (
-            match ev (sub c "0") env rows with
+            match ev_at c "0" env rows with
             | Int_array _ as v -> v
             | Residual r -> (
                 (* a static map the host deferred: this check needs it now, or the card turns structural *)
@@ -1562,7 +1655,7 @@ and ev_raw c env (x : W.term) : value =
                 | _ -> raise Needs_t)
             | _ -> raise Needs_t)
         | None, _ -> raise Needs_t
-        | Some _, _ -> concrete_data c (ev (sub c "0") env rows)
+        | Some _, _ -> concrete_data c (ev_at c "0" env rows)
       in
       Value.diagnose_rows value
         ~select:(fun rows first ->
@@ -1580,14 +1673,14 @@ and ev_raw c env (x : W.term) : value =
               | Int index -> index
               | _ -> fail "E_DIAGNOSTIC_CONTEXT" "Host diagnosis returns one integer row."))
         ~map:(fun index ->
-          match concrete c (ev (sub c "1") env mapper) with
+          match concrete c (ev_at c "1" env mapper) with
           | Fn fn -> concrete_data c (call_fn c fn [ index ])
           | _ -> fail "E_DIAGNOSTIC_MAP" "A row mapper is a function.")
   | W.With_error (protected, mapper) ->
       if c.st.time = None then raise Needs_t;
       Value.with_error
         ~protected:(fun () ->
-          let value = concrete_data c (ev (sub c "0") env protected) in
+          let value = concrete_data c (ev_at c "0" env protected) in
           match (value, c.st.resolve) with
           | Deferred (ty, _), Some resolve when Ty.is_cooked ty ->
               resolve_source resolve (Source ("$core/complete", ty, [ ("value", value) ]))
@@ -1595,28 +1688,28 @@ and ev_raw c env (x : W.term) : value =
               fail "E_DATA_SOURCE" "A protected cooked result needs its host."
           | _ -> value)
         ~map:(fun diagnostic ->
-          match concrete c (ev (sub c "1") env mapper) with
+          match concrete c (ev_at c "1" env mapper) with
           | Fn fn -> concrete_data c (call_fn c fn [ diagnostic ])
           | _ -> fail "E_DIAGNOSTIC_MAP" "An error mapper is a function.")
   | W.If (cnd, a, b) -> (
-      match ev (sub c "if") env cnd with
+      match ev_at c "if" env cnd with
       | Residual _ as test when guarding c test -> (
           match arm_error c env (sub c "then") a with
           | Some d ->
               add_guard c test true d;
-              ev (sub c "else") env b
+              ev_at c "else" env b
           | None -> (
               match arm_error c env (sub c "else") b with
               | Some d ->
                   add_guard c test false d;
-                  ev (sub c "then") env a
+                  ev_at c "then" env a
               | None -> raise Needs_t))
-      | v -> if truthy (concrete c v) then ev (sub c "then") env a else ev (sub c "else") env b)
+      | v -> if truthy (concrete c v) then ev_at c "then" env a else ev_at c "else" env b)
   | W.Cond (arms, default) ->
       let rec go i = function
-        | [] -> ev (sub c "else") env default
+        | [] -> ev_at c "else" env default
         | (t, e) :: rest -> (
-            match ev (sub c ("test" ^ string_of_int i)) env t with
+            match ev_at c ("test" ^ string_of_int i) env t with
             | Residual _ as test when guarding c test -> (
                 match arm_error c env (sub c ("arm" ^ string_of_int i)) e with
                 | Some d ->
@@ -1624,16 +1717,16 @@ and ev_raw c env (x : W.term) : value =
                     go (i + 1) rest
                 | None -> raise Needs_t)
             | v ->
-                if truthy (concrete c v) then ev (sub c ("arm" ^ string_of_int i)) env e
+                if truthy (concrete c v) then ev_at c ("arm" ^ string_of_int i) env e
                 else go (i + 1) rest)
       in
       go 0 arms
   | W.Case (scrut, arms, default) ->
-      let sv = concrete c (ev (sub c "case") env scrut) in
+      let sv = concrete c (ev_at c "case" env scrut) in
       let rec go i = function
-        | [] -> ev (sub c "else") env default
+        | [] -> ev_at c "else" env default
         | (lit, e) :: rest ->
-            if case_matches sv (case_literal lit) then ev (sub c ("arm" ^ string_of_int i)) env e
+            if case_matches sv (case_literal lit) then ev_at c ("arm" ^ string_of_int i) env e
             else go (i + 1) rest
       in
       go 0 arms
@@ -1672,7 +1765,7 @@ and ev_raw c env (x : W.term) : value =
   | W.Hof (kind, f :: rest) -> hof c env x kind f rest
   | W.Hof (_, []) -> fail "E_ARITY" "A higher-order form takes a function."
   | W.List_lit ts -> List (join_values (Array.of_list (evs c env "" ts)))
-  | W.Record fs -> Record (List.map (fun (n, t) -> (n, ev (sub c n) env t)) fs)
+  | W.Record fs -> Record (List.map (fun (n, t) -> (n, ev_at c n env t)) fs)
   | W.Get (r, f) -> field c (ev c env r) f (Lisp.flat r.form)
   | W.Assoc (r, ups) ->
       let fs =
@@ -1683,7 +1776,7 @@ and ev_raw c env (x : W.term) : value =
       let fs =
         List.fold_left
           (fun fs (n, t) ->
-            let v = ev (sub c n) env t in
+            let v = ev_at c n env t in
             match List.assoc_opt n fs with
             | Some old ->
                 List.map (fun (k, x) -> if k = n then (k, coerce_like c old v) else (k, x)) fs
@@ -1701,7 +1794,7 @@ and ev_raw c env (x : W.term) : value =
       List xs
   | W.Bypass t -> (
       match W.bypass_input t with
-      | Some input -> coerce_to t.ty (ev (sub c "bypass") env input)
+      | Some input -> coerce_to t.ty (ev_at c "bypass" env input)
       | None -> fail "E_BYPASS" "Nothing to pass through.")
   | W.Expanded { body; _ } -> ev c env body
 
@@ -1775,7 +1868,7 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
   in
   let vals =
     match o.shape with
-    | Op.Scalar when o.ctx = Context.value ->
+    | Op.Scalar when Context.equal o.ctx Context.value ->
         let rec data_type = function
           | Ty.Float | Int | Bool | Vec2 | Vec3 | Vec4 | Text | Color -> true
           | Ty.List ty | Array ty -> data_type ty
@@ -1783,12 +1876,10 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
           | Ty.Any | Named _ | Fn _ -> false
         in
         let declared n =
-          match List.assoc_opt n o.signature.pos with
+          match slot n o.signature.pos with
           | Some _ as ty -> ty
           | None -> (
-              match List.assoc_opt n o.signature.opt with
-              | Some _ as ty -> ty
-              | None -> List.assoc_opt n o.signature.kw)
+              match slot n o.signature.opt with Some _ as ty -> ty | None -> slot n o.signature.kw)
         in
         List.map
           (fun (n, v) ->
@@ -1796,10 +1887,12 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
               match declared n with
               | Some _ as ty -> ty
               | None -> (
-                  match o.signature.rest with Some (name, ty) when name = n -> Some ty | _ -> None)
+                  match o.signature.rest with
+                  | Some (name, ty) when String.equal name n -> Some ty
+                  | _ -> None)
             in
             let deep =
-              o.name = "equal?"
+              String.equal o.name "equal?"
               || match ty with Some ((Ty.List _ | Record _) as ty) -> data_type ty | _ -> false
             in
             (n, if deep then concrete_data c v else concrete c v))
@@ -2139,20 +2232,24 @@ and apply_def ?body c name (vals : value list) : value =
   in
   if c.depth > max_depth then fail "E_DEPTH" "Call depth exceeds 64.";
   List.iter (fun t -> Hashtbl.replace t name ()) c.st.watching;
-  let base = [ "def:" ^ name ] in
+  let base, paths =
+    match Text_table.find_opt c.st.def_paths name with
+    | Some paths -> paths
+    | None -> def_record_paths d
+  in
   let c' = { c with prefix = site c; base; route = []; depth = c.depth + 1 } in
   let env, _ =
-    List.fold_left
-      (fun (env, i) (pname, ty, default) ->
+    List.fold_left2
+      (fun (env, i) (pname, ty, default) path ->
         let v =
           match (List.nth_opt vals i, default) with
           | Some v, _ -> coerce_to ty v
           | None, Some t -> coerce_to ty (ev (sub c' pname) env t)
           | None, None -> failf "E_ARGS" "%s needs :%s." name pname
         in
-        note c' (base @ [ ":" ^ pname ]) v;
+        note c' path v;
         (Smap.add pname v env, i + 1))
-      (Smap.empty, 0) d.inputs
+      (Smap.empty, 0) d.inputs paths
   in
   ev c' env (Option.value body ~default:d.body)
 
@@ -2182,7 +2279,12 @@ and call_fn ?body c f (vals : value list) : value =
         List.fold_left2
           (fun env (pat, ty) v ->
             let v = match ty with Some t -> coerce_to t v | None -> v in
-            bind_pat c' ~mk ~whole:true pat v env)
+            match pat with
+            | W.Name n ->
+                (* [bind_pat ~whole:true]; [record] makes the path [zone @ [":" ^ n]] on a miss *)
+                note_param c' cl.zone n v;
+                Smap.add n v env
+            | _ -> bind_pat c' ~mk ~whole:true pat v env)
           cl.env cl.params vals
       in
       ev c' env (Option.value body ~default:cl.body)
@@ -2251,7 +2353,7 @@ and hof c env term kind f rest =
   in
   let work () =
     let fv =
-      match concrete c (ev (sub c "f") env f) with
+      match concrete c (ev_at c "f" env f) with
       | Fn f -> f
       | _ -> fail "E_TYPE" "Expected a function."
     in
@@ -2280,7 +2382,7 @@ and hof c env term kind f rest =
     let lists_of ts =
       List.mapi
         (fun i t ->
-          let v = concrete c (ev (sub c ("l" ^ string_of_int i)) env t) in
+          let v = concrete c (ev_at c ("l" ^ string_of_int i) env t) in
           match v with
           | List xs -> (Array.length xs, fun k -> xs.(k))
           | Text_array _ | Int_array _ | Float_array _ | Vec2_array _ | Vec3_array _ | Vec4_array _
@@ -2522,7 +2624,7 @@ and hof c env term kind f rest =
             in
             List (Array.of_list (List.map (fun (_, _, x) -> x) sorted)))
     | `Reduce, [ init; l ] ->
-        let init = ev (sub c "init") env init in
+        let init = ev_at c "init" env init in
         let count, get = List.hd (lists_of [ l ]) in
         let acc = ref init in
         for i = 0 to count - 1 do
@@ -2531,13 +2633,13 @@ and hof c env term kind f rest =
         done;
         !acc
     | `Iterate, init :: n :: until ->
-        let init = ev (sub c "init") env init in
-        let passes = Value.int_of (concrete c (ev (sub c "n") env n)) in
+        let init = ev_at c "init" env init in
+        let passes = Value.int_of (concrete c (ev_at c "n" env n)) in
         let stop =
           match until with
           | [] -> None
           | g :: _ -> (
-              match concrete c (ev (sub c "until") env g) with
+              match concrete c (ev_at c "until" env g) with
               | Fn f -> Some f
               | _ -> fail "E_TYPE" "Expected a function.")
         in
@@ -2894,6 +2996,10 @@ let new_state ?(budget = max_steps) ~record ws =
   let graphs = Hashtbl.create 8 and defs = Hashtbl.create 8 in
   List.iter (fun (g : W.graph) -> Hashtbl.replace graphs g.name g) ws.W.graphs;
   List.iter (fun (g : W.graph) -> Hashtbl.replace defs g.name g) ws.W.defs;
+  let def_paths = Text_table.create 16 in
+  List.iter
+    (fun (g : W.graph) -> Text_table.replace def_paths g.name (def_record_paths g))
+    ws.W.defs;
   {
     time = None;
     resolve = None;
@@ -2913,7 +3019,8 @@ let new_state ?(budget = max_steps) ~record ws =
     rids = 0;
     record;
     elems = Smap.empty;
-    recs = Hashtbl.create 64;
+    recs = new_records 64;
+    def_paths;
     graphs;
     defs;
     kind_fns = ws.W.kind_fns;
@@ -3003,8 +3110,9 @@ let static_impl ?budget ?(record = false) ?(inputs = []) ws =
                 })
             |> Array.of_list
           in
+          forget_recent st.recs;
           let records =
-            Hashtbl.fold (fun p (_, l) acc -> (p, List.rev l) :: acc) st.recs []
+            Path_table.fold (fun p cell acc -> (p, List.rev cell.values) :: acc) st.recs.table []
             |> List.sort (fun (a, _) (b, _) -> compare a b)
           in
           {
@@ -3336,7 +3444,7 @@ module Host = struct
                     {
                       c.st with
                       record = true;
-                      recs = Hashtbl.create 16;
+                      recs = new_records 16;
                       fn_calls = Hashtbl.create 1;
                       memo = Hashtbl.copy c.st.memo;
                       steps = 0;
@@ -3346,9 +3454,11 @@ module Host = struct
                   Hashtbl.add st.fn_calls fid (offset + k);
                   let selected = { c with st; rec_ = true; kernel_requests = false } in
                   ignore (concrete selected (call_fn selected fn (List.map (fun v -> get v k) arrays)));
-                  Hashtbl.fold
-                    (fun path (_, values) all -> (path, List.rev values) :: all)
-                    st.recs [])
+                  forget_recent st.recs;
+                  Path_table.fold
+                    (fun path cell all -> (path, List.rev cell.values) :: all)
+                    st.recs.table []
+                  |> List.sort (fun (a, _) (b, _) -> compare a b))
             in
             (count, at)
         | _ -> fail "E_TYPE" "A map probe needs a checked map.")

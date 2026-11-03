@@ -2395,21 +2395,21 @@ let all =
   @ [ noise3; hsl; hsla; gradient; text_float ]
 
 let table =
-  let h = Hashtbl.create 64 in
+  let h = Text_keys.create 64 in
   List.iter
     (fun o ->
-      if Hashtbl.mem h o.name then invalid_arg ("Duplicate operator: " ^ o.name);
-      Hashtbl.add h o.name o)
+      if Text_keys.mem h o.name then invalid_arg ("Duplicate operator: " ^ o.name);
+      Text_keys.add h o.name o)
     all;
   h
 
 let lookup extra name =
   match extra with
-  | [] -> Hashtbl.find_opt table name
+  | [] -> Text_keys.find_opt table name
   | _ -> (
       match List.find_opt (fun op -> op.name = name) extra with
       | Some _ as op -> op
-      | None -> Hashtbl.find_opt table name)
+      | None -> Text_keys.find_opt table name)
 
 let find ?(extra = []) name ctx =
   match lookup extra name with
@@ -2422,12 +2422,14 @@ let find ?(extra = []) name ctx =
 (* [find ~extra] for many names: the extras are indexed once (the first of a name wins, as in the
    list), where [find] scans the list for each of its three tries. Read-only once made. *)
 let finder extra =
-  let index = Hashtbl.create ((2 * List.length extra) + 1) in
-  List.iter (fun op -> if not (Hashtbl.mem index op.name) then Hashtbl.add index op.name op) extra;
+  let index = Text_keys.create ((2 * List.length extra) + 1) in
+  List.iter
+    (fun op -> if not (Text_keys.mem index op.name) then Text_keys.add index op.name op)
+    extra;
   let lookup name =
-    match Hashtbl.find_opt index name with
+    match Text_keys.find_opt index name with
     | Some _ as op -> op
-    | None -> Hashtbl.find_opt table name
+    | None -> Text_keys.find_opt table name
   in
   fun name ctx ->
     match lookup name with
@@ -2446,12 +2448,14 @@ let result_type op args =
   match op.out_args with
   | Some out -> out args
   | None ->
-      let positional name =
-        List.mem_assoc name op.signature.pos || List.mem_assoc name op.signature.opt
+      let rec named name = function
+        | [] -> false
+        | (n, _) :: rest -> String.equal n name || named name rest
       in
+      let positional name = named name op.signature.pos || named name op.signature.opt in
       op.out (List.filter_map (fun (name, ty, _) -> if positional name then Some ty else None) args)
 
-let arith name = Option.bind (Hashtbl.find_opt table name) (fun o -> o.arithmetic)
+let arith name = Option.bind (Text_keys.find_opt table name) (fun o -> o.arithmetic)
 
 let valid_extension op =
   match op.packed_extension with
@@ -2501,14 +2505,14 @@ let builtin_kind op =
 
 (* A builtin's kind, computed once at load (read-only after, so any domain may read it), not per call. *)
 let builtin_kinds =
-  let kinds = Hashtbl.create 256 in
-  Hashtbl.iter (fun name op -> Hashtbl.replace kinds name (builtin_kind op)) table;
+  let kinds = Text_keys.create 256 in
+  Text_keys.iter (fun name op -> Text_keys.replace kinds name (builtin_kind op)) table;
   kinds
 
 let packed_kind op =
   if op.ctx <> Context.value || op.shape <> Scalar then None
-  else if Option.fold ~none:false ~some:(( == ) op) (Hashtbl.find_opt table op.name) then
-    Hashtbl.find builtin_kinds op.name
+  else if Option.fold ~none:false ~some:(( == ) op) (Text_keys.find_opt table op.name) then
+    Text_keys.find builtin_kinds op.name
   else
     match op.packed_extension with Some Noise3 when valid_extension op -> Some Noise3 | _ -> None
 
@@ -2522,7 +2526,7 @@ let validate extra =
         | [ prefix; name ] -> Symbol.valid_name prefix && Symbol.valid_name name
         | _ -> false
       in
-      if (not valid) || Hashtbl.mem table op.name || Hashtbl.mem seen op.name then
+      if (not valid) || Text_keys.mem table op.name || Hashtbl.mem seen op.name then
         Some
           (Diagnostic.error ~code:"E_OP_DECLARATION"
              ("Invalid or duplicate extra operator " ^ op.name))

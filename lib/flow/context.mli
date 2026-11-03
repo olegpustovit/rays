@@ -23,6 +23,7 @@ val editor : t
 val material : t
 val descriptor : t -> descriptor
 val all : unit -> t list
+val equal : t -> t -> bool
 val name : t -> string
 val of_string : string -> (t, Diagnostic.t) result
 val result : t -> Ty.t
