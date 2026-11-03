@@ -56,3 +56,19 @@ Applied (Windows only, 8): 300 frames flow_particles_gpu 31.72 s to 27.25 s, gpu
   Measured placement quantises a sub-millisecond cook to 0 or 1 ms. No placement was decided on one in these sketches.
 - Barriers (`full_barrier` 6,000 for 100 isogrid frames), pushed descriptors and the per-call Hashtbl lookups are not
   where a frame goes: GPU time is 0.86 s of 100 frames' 2.7 s, and the CPU wait on it is the same. Left unchanged.
+
+## Minor heap per domain, Windows (vulkan-lat)
+
+A stop-the-world leader (runtime events) took 1.9 ms per stop at 8 domains and 10 to 16 ms at 24 on this machine. The
+256k-word default minor heap made `bench_isogrid --flips 24 64` run 16838 minor collections at 24 domains (3.4 GB of
+`OCAMLRUNPARAM s=` sweep: evaluate p95 1M 175 ms, 2M 156, 4M 141, 8M 140, 32M 156). Each domain now sets its own heap
+once (`Gc.set` sizes only the calling domain): 64 MB on the main domain, 8 MB on a worker. Windows only.
+
+| `bench_isogrid --flips 24 64`, evaluate | minor collections | p50 | p95 | max |
+|---|---|---|---|---|
+| 24 domains, before | 16838 | 52 ms | 218 ms | 279 ms |
+| 24 domains, after | 1080 | 39 ms | 132 ms | 150 ms |
+| 8 domains (the cap), before | n/a | 44 ms | 208 ms | 213 ms |
+| 8 domains (the cap), after | 986 | 36 ms | 133 ms | 150 ms |
+
+`rays mem` footprint of flow_particles_gpu at 8 domains: 1.01 GB to 1.33 GB.

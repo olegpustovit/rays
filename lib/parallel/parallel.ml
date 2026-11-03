@@ -14,6 +14,24 @@ let recommended_domains () =
   let n = Domain.recommended_domain_count () in
   max 1 (if Sys.win32 then min n 8 else n)
 
+(* A minor collection stops every domain, and on Windows each stop wakes every idle domain through the kernel (a
+   stop-the-world leader measured 1.9 ms at 8 domains, 10 to 16 ms at 24). bench_isogrid at 24 domains ran 16838 minor
+   collections in 64 flips (46 s wall) with the 256k-word default and 966 (31 s) with 8M words. Gc.set sizes only the
+   calling domain and a spawned domain starts at the default, so each domain sets its own once: the main domain at
+   program start (64 MB, where the serial evaluator allocates), a worker at its first pooled task (8 MB). Windows only:
+   the Mac keeps the runtime default until it is measured there. *)
+let heap_ready = Domain.DLS.new_key (fun () -> false)
+
+let ensure_heap () =
+  if Sys.win32 && not (Domain.DLS.get heap_ready) then begin
+    Domain.DLS.set heap_ready true;
+    let words = if Domain.is_main_domain () then 8 * 1024 * 1024 else 1024 * 1024 in
+    let gc = Gc.get () in
+    Gc.set { gc with minor_heap_size = max gc.minor_heap_size words }
+  end
+
+let () = ensure_heap ()
+
 let get_pool domains =
   let key = (Domain.self (), domains) in
   Mutex.lock pools_lock;
@@ -47,6 +65,7 @@ let release_current_domain_pools () =
   List.iter (fun (_, pooled) -> Task.teardown_pool pooled.pool) owned
 
 let with_context context operation =
+  (match context with Pooled _ -> ensure_heap () | Outside | Sequential -> ());
   let previous = Domain.DLS.get active_context in
   Domain.DLS.set active_context context;
   Fun.protect ~finally:(fun () -> Domain.DLS.set active_context previous) operation
