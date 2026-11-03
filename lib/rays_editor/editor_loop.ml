@@ -845,9 +845,7 @@ let memory_boundary value =
         prerr_endline ("rays: " ^ message);
         Some message
   in
-  let device () =
-    Option.fold ~none:0 ~some:(fun (bytes, _, _) -> bytes) (Flow_native.Workspace_gpu.device_limits value.host.gpu)
-  in
+  let device () = Flow_native.Workspace_gpu.device_bytes value.host.gpu in
   let value =
     if value.memory_known then value
     else begin
@@ -864,7 +862,9 @@ let memory_boundary value =
         (Flow_native.Workspace_gpu.device_limits value.host.gpu);
       (* what the device holds at the first boundary beyond any owner: the driver's own, and the first
          frame's pipelines *)
-      Mem.charge (Mem.plan ~pool:Device "gpu.driver") (device () - Mem.attributed_device ());
+      Mem.charge (Mem.plan ~pool:Device "gpu.driver")
+        (Option.fold ~none:0 ~some:(fun (bytes, _, _) -> bytes) (Flow_native.Workspace_gpu.device_limits value.host.gpu)
+        - Mem.attributed_device ());
       { value with memory_known = true }
     end
   in

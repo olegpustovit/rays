@@ -67,6 +67,9 @@ val displays : t -> int
 
 val close : t -> unit
 
+val device_bytes : t -> int
+(** The device bytes this owner's host sees, without starting one: 0 before it has one. *)
+
 val device_limits : t -> (int * int * bool) option
 (** The device's allocated bytes, its working set and whether its memory is the host's (one pool),
     through OGPU; [None] with no device. *)

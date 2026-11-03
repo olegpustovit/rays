@@ -627,6 +627,12 @@ let device_limits t =
             Some limits
         | Error _ -> None)
 
+(* The frame boundary's read: an owner with no host yet holds nothing, and a lease per frame is not free. *)
+let device_bytes t =
+  match t.owner with
+  | Some (gpu, _) when not t.closed -> Int64.to_int (Ogpu.Backend.allocated_size (X.gpu_device gpu))
+  | _ -> 0
+
 let held_displays t = Hashtbl.length t.bound + List.length t.releasing
 
 (* A point cloud's or a triangle mesh's resident P (and N; a mesh without N takes normals made from
