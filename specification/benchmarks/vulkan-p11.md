@@ -126,3 +126,19 @@ parked workers costs about 0.15 ms (`Gc.minor` in a loop), so parked domains are
 particles sketch is still about 10 % slower at 24 than at 8. Capping each job at 8 participants with 24 workers recovers
 half of that gap. Neither a 1 ms Windows timer resolution (`timeBeginPeriod`; the runtime's spin back-off calls `Sleep`)
 nor 32 MB worker minor heaps changed the walls, so neither is applied.
+
+## The evaluate gate after these changes
+
+`bench_isogrid --flips 24 200` (the isogrid-selector-lifetimes command), recipe-0 evaluate over its 25 samples, min / p50 /
+max, and the gate (all recipes, max under 150 ms):
+
+| machine | build | recipe 0 | gate |
+|---|---|---|---|
+| Mac | vulkan-windows tip (bf3df3a9) | 90.0 / 92.7 / 96.0 ms | pass, max 96 ms |
+| Mac | vulkan-par | 70.1 / 74.0 / 78.6 ms | 2 of 3 pass (max 78 ms); one failed on one recipe-3 flip at 160 ms |
+| Windows, another workload at 33 to 50 % CPU | vulkan-windows tip | 123.7 / 133.7 / 148.3, 121.9 / 139.3 / 319.9 ms | pass (148.3), fail (319.9) |
+| Windows, same | vulkan-par | 100.9 / 117.7 / 173.2, 103.3 / 111.7 / 145.8 ms | fail (173.2), pass (145.8) |
+
+Recipe 0 is 16 to 20 % faster on both machines. On Windows its evaluation inside the editor process takes 110 to 120 ms where
+the same `Flow_sop.Lower.of_checked` call takes 71 ms in a small process (main-domain GC about 27 ms of it: 4 to 5 minor
+collections promoting the walker's live stack, 1.35 ms each, plus their stops), so the gate has no headroom there yet.
