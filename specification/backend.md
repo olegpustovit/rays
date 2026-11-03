@@ -1365,3 +1365,8 @@ records. `lib/ogpu_native` selects the platform's implementation; an executable 
   curves are the kernel's capsule loop.
 - Math and text: `specification/core.md`, "Goldens across operating systems".
 - Facts about the tested card: `specification/vulkan/rtx2080ti.json`.
+
+OGPU has no barrier call: a serial encoder orders its dispatches, and each backend makes that true. So nothing
+above the backend can omit a barrier, and the mock has no such check to make; on Vulkan the backend inserts them
+and synchronization validation is what checks it, on the tested GPU. What the API does leave to its callers is the
+flush and invalidate contract, which the mock enforces by keeping the two copies apart, and a live allocation limit.
