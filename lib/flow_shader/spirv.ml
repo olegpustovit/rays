@@ -221,11 +221,21 @@ let binary e operation a b =
   | Hypot -> fail "Native-safe hypot is not supported by the SPIR-V kernel target."
   | Ldexp -> ext e 53 [ a; result e e.sint 110 [ b ] ]
 
+(* GLSL.std.450 promises Sin, Cos and Tan only near [-pi, pi], and a driver may lose every bit past it:
+   the hash idiom `sin(i * 12.9898) * 43758.5` collapses to a few values. So the angle is reduced first,
+   Cody-Waite in two parts of 2 pi with exact Fma, which leaves an angle under pi unchanged. *)
+let reduced_angle e value =
+  let turns = ext e 1 [ result e e.float 133 [ value; f e (1. /. (2. *. Float.pi)) ] ] in
+  let minus = result e e.float 127 [ turns ] in
+  let high = Int32.float_of_bits 0x40C90FDBl in
+  let first = ext e 50 [ minus; f e high; value ] in
+  ext e 50 [ minus; f e ((2. *. Float.pi) -. high); first ]
+
 let unary e operation value =
   match operation with
-  | P.Sin -> ext e 13 [ value ]
-  | Cos -> ext e 14 [ value ]
-  | Tan -> ext e 15 [ value ]
+  | P.Sin -> ext e 13 [ reduced_angle e value ]
+  | Cos -> ext e 14 [ reduced_angle e value ]
+  | Tan -> ext e 15 [ reduced_angle e value ]
   | Abs -> ext e 4 [ value ]
   | Sqrt -> ext e 31 [ ext e 4 [ value ] ]
   | Rsqrt -> ext e 32 [ ext e 4 [ value ] ]

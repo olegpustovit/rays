@@ -57,7 +57,8 @@ let () =
                             Printf.printf "%s,%d,max_abs_error=%.9g\n%!" name count !maximum;
                             (* Native rows, Apple M1:
                  noise 8.82e-7 at 1,024 and 9.89e-5 at 65,536 elements. *)
-                            if name <> "noise" then assert (!maximum = 0.)
+                            if name = "large-angle" then assert (!maximum <= 1e-5)
+                            else if name <> "noise" then assert (!maximum = 0.)
                             else assert (!maximum <= 2e-4);
                             let created = Flow_gpu.Run.Private.buffer_creations runner in
                             ignore (Test_program.ok (Flow_gpu.Run.dispatch runner values));
@@ -92,7 +93,14 @@ let () =
                               assert (animated.(0) = 0. && animated.(1) = 2.);
                               assert (Flow_gpu.Run.Private.input_uploads runner = 3)
                             end))
-                      (Test_program.fixtures count @ Test_program.vector_fixtures count))
+                      (Test_program.fixtures count
+                      (* angles far past 2 pi, the hash idiom of sketches: exact floats, so the CPU agrees *)
+                      @ [
+                          ( "large-angle",
+                            Test_program.compile
+                              ("(map (fn [x] (sin (+ (* x 4096.0) (* t 0.0)))) (array/range " ^ string_of_int count ^ "))") );
+                        ]
+                      @ Test_program.vector_fixtures count))
                   [ 1024; 65536 ];
                 (* fast precision: int32 arithmetic and a gather from a live vec3 table match the CPU kernel *)
                 List.iter
