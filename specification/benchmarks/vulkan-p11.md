@@ -60,8 +60,7 @@ Applied (Windows only, 8): 300 frames flow_particles_gpu 31.72 s to 27.25 s, gpu
 ## Minor heap per domain, Windows (vulkan-lat)
 
 A stop-the-world leader (runtime events) took 1.9 ms per stop at 8 domains and 10 to 16 ms at 24 on this machine. The
-256k-word default minor heap made `bench_isogrid --flips 24 64` run 16838 minor collections at 24 domains (3.4 GB of
-`OCAMLRUNPARAM s=` sweep: evaluate p95 1M 175 ms, 2M 156, 4M 141, 8M 140, 32M 156). Each domain now sets its own heap
+256k-word default minor heap made `bench_isogrid --flips 24 64` run 16838 minor collections at 24 domains. An `OCAMLRUNPARAM s=` sweep at 24 domains gave evaluate p95 175 ms at 1M words, 156 at 2M, 141 at 4M, 140 at 8M and 156 at 32M. Each domain now sets its own heap
 once (`Gc.set` sizes only the calling domain): 64 MB on the main domain, 8 MB on a worker. Windows only.
 
 | `bench_isogrid --flips 24 64`, evaluate | minor collections | p50 | p95 | max |
@@ -72,3 +71,18 @@ once (`Gc.set` sizes only the calling domain): 64 MB on the main domain, 8 MB on
 | 8 domains (the cap), after | 986 | 36 ms | 133 ms | 150 ms |
 
 `rays mem` footprint of flow_particles_gpu at 8 domains: 1.01 GB to 1.33 GB.
+
+## All 24 domains on Windows (vulkan-lat)
+
+The `min n 8` cap is gone, at the owner's request. With the per-domain minor heap above, 100 frames, whole process:
+
+| workload | 8 | 16 | 24 |
+|---|---|---|---|
+| flow_particles_gpu | 9.32 s | 9.91 s | 11.25 s |
+| gpu_sea | 6.63 s | 6.90 s | 7.38 s |
+| isogrid_city | 2.67 s | 2.62 s | 2.69 s |
+| bench_isogrid evaluate p50 / p95 / max | 36 / 133 / 150 ms | (12: 36 / 135 / 145) | 39 / 132 / 150 ms |
+
+flow_particles_gpu and gpu_sea are slower at 24 than at 8 (+21 % and +11 %): their parallel regions are 101 bursts and
+0.2 s of 9 s, and what grows with the domain count is the stop-the-world cost (357 stops, leader 1.0 s at 8 domains, 5.1 s
+at 24), not the work. Not capped silently: the decision to restore a cap is the owner's.
