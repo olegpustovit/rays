@@ -33,6 +33,8 @@ external buffer_zero : handle -> int = "rv_buffer_zero"
 external buffer_destroy : handle -> unit = "rv_buffer_destroy"
 external buffer_write : handle -> int -> bytes -> int = "rv_buffer_write"
 external buffer_read : handle -> int -> bytes -> int -> int -> int = "rv_buffer_read"
+(* A zeroed float32 view that the OS zeroes lazily: Bigarray.create plus fill touches every page. *)
+external zeroed_view : int -> floats = "rv_zeroed_view"
 external buffer_flush : handle -> floats -> int -> int = "rv_buffer_flush"
 external buffer_invalidate : handle -> floats -> int -> int = "rv_buffer_invalidate"
 external shader_create : handle -> bytes -> int = "rv_shader_create"

@@ -173,8 +173,20 @@ let create () =
           let create_buffer memory (descriptor : Ogpu_core.Types.buffer_descriptor) =
             let op = "Ogpu_vulkan.create_buffer" in
             let size = Int64.to_int descriptor.size in
-            let kind = match memory with Ogpu_core.Types.Device_local -> 1 | _ -> 0 in
-            Result.map snd (register_buffer op (V.buffer_create device size kind) descriptor.size)
+            (* Both kinds are device-local: a Shared buffer in host memory is read by kernels over PCIe, 100x
+               slower than VRAM (isogrid_city's triangle kernel: 160 ms to 4 ms). Host writes stage into the next
+               submit and reads go through the transfer queue; Shared reads as zeros, so it is filled like a mapped
+               buffer is. ponytail: a host-visible tier for a buffer the host rewrites every frame and the GPU reads
+               once, if a measurement ever shows the staging copy. *)
+            match register_buffer op (V.buffer_create device size 1) descriptor.size with
+            | Error _ as e -> e
+            | Ok (native, resource) when memory = Ogpu_core.Types.Shared -> (
+                match checked op (V.buffer_zero native) with
+                | Ok () -> Ok resource
+                | Error _ as e ->
+                    ignore (resource.B.destroy ());
+                    e)
+            | Ok (_, resource) -> Ok resource
           in
           let create_mapped_buffer (descriptor : Ogpu_core.Types.buffer_descriptor) =
             let op = "Ogpu_vulkan.create_mapped_buffer" in
@@ -182,8 +194,7 @@ let create () =
             match register_buffer op (V.buffer_create device size 1) descriptor.size with
             | Error _ as e -> e
             | Ok (native, resource) -> (
-                let view = Bigarray.(Array1.create float32 c_layout (size / 4)) in
-                Bigarray.Array1.fill view 0.;
+                let view = V.zeroed_view (size / 4) in
                 match checked op (V.buffer_zero native) with
                 | Error _ as e -> e
                 | Ok () ->

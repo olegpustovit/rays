@@ -1007,6 +1007,14 @@ CAMLprim value rv_buffer_read(value buffer, value offset, value bytes, value at,
   CAMLreturn(Val_long(r));
 }
 
+/* calloc of a large block is fresh zero pages from the OS, untouched until the host writes them. */
+CAMLprim value rv_zeroed_view(value count) {
+  intnat n = Long_val(count);
+  void *data = calloc(n ? n : 1, 4);
+  if (!data) caml_raise_out_of_memory();
+  return caml_ba_alloc_dims(CAML_BA_FLOAT32 | CAML_BA_C_LAYOUT | CAML_BA_MANAGED, 1, data, n);
+}
+
 /* A mapped buffer's view is an OCaml Bigarray: valid after the buffer goes, and fixed in memory. */
 CAMLprim value rv_buffer_flush(value buffer, value view, value length) {
   CAMLparam2(buffer, view);
@@ -2035,29 +2043,34 @@ CAMLprim value rv_cmd_set_accel(value commands, value index, value accel) {
 }
 
 /* The logical records (68 bytes: column-major transform, user id at 48, mask at 52, structure index
-   at 56) become Vulkan's. Their bits are a host fact at build time, so the buffer must be host
-   visible; a device-written instance buffer has no caller. */
+   at 56) become Vulkan's. Their bits are a host fact at build time: read back from the buffer (the
+   pending uploads run and are waited for); a device-written instance buffer has no caller.
+   ponytail: one wait a build; shadow the host's writes if an animated top level ever shows it. */
 static VkResult native_instances(rv_cmd *c, rv_accel *a, VkDeviceAddress *address) {
-  if (!a->instances->map) return VK_ERROR_FEATURE_NOT_PRESENT;
   VkBuffer chunk;
   VkDeviceSize at;
   VkDeviceSize bytes = (VkDeviceSize)a->instance_count * sizeof(VkAccelerationStructureInstanceKHR);
   char *room = arena(c, bytes ? bytes : 64, 16, &chunk, &at);
   if (!room) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-  const char *from = a->instances->map + a->instances_offset;
+  VkDeviceSize records = (VkDeviceSize)a->instance_count * 68;
+  char *host = malloc(records ? records : 1);
+  VkResult read = host ? staged_read(a->instances, a->instances_offset, records, host) : VK_ERROR_OUT_OF_HOST_MEMORY;
+  if (read != VK_SUCCESS) { free(host); return read; }
+  const char *from = host;
   for (uint32_t i = 0; i < a->instance_count; i++, from += 68) {
     const float *m = (const float *)from;
     uint32_t user_id, mask, index;
     memcpy(&user_id, from + 48, 4);
     memcpy(&mask, from + 52, 4);
     memcpy(&index, from + 56, 4);
-    if (index >= a->structure_count) return VK_ERROR_VALIDATION_FAILED_EXT;
+    if (index >= a->structure_count) { free(host); return VK_ERROR_VALIDATION_FAILED_EXT; }
     VkAccelerationStructureInstanceKHR out = {
         .transform = {.matrix = {{m[0], m[3], m[6], m[9]}, {m[1], m[4], m[7], m[10]}, {m[2], m[5], m[8], m[11]}}},
         .instanceCustomIndex = user_id & 0xffffff, .mask = mask & 0xff,
         .accelerationStructureReference = accel_address(a->structures[index])};
     memcpy(room + i * sizeof out, &out, sizeof out);
   }
+  free(host);
   *address = buffer_address(a->d, chunk) + at;
   return VK_SUCCESS;
 }

@@ -7,7 +7,12 @@ let pools : (Domain.id * int, pooled) Hashtbl.t = Hashtbl.create 4
 let pools_lock = Mutex.create ()
 let active_context = Domain.DLS.new_key (fun () -> Outside)
 let stopped = ref false
-let recommended_domains () = max 1 (Domain.recommended_domain_count ())
+(* ponytail: on Windows a pool wider than 8 only adds stop-the-world participants and wake-ups (flow_particles_gpu on 24
+   threads: 12.3 s for 100 frames, 9.1 s on 8 or fewer; benchmarks/vulkan-p11.md); a measured width per machine if
+   a 16-core part ever wants more. *)
+let recommended_domains () =
+  let n = Domain.recommended_domain_count () in
+  max 1 (if Sys.win32 then min n 8 else n)
 
 let get_pool domains =
   let key = (Domain.self (), domains) in
