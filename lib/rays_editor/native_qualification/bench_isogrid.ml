@@ -390,7 +390,10 @@ let no_device_owner () =
     Some owner
   end
 
-let benchmark ?domains ?(warmup = 8) ?(cycles = false) ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(empty = false)
+(* A discrete card's measured placement keeps up to eight timing samples per route and site, and the
+   8-entry flow_sop.digest cache fills as kernels appear: both are bounded but take more than one cycle
+   to saturate there (3 digest entries after one cycle, 8 after two), so Windows warms eight cycles. *)
+let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false) ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(empty = false)
     ?(present = true) ?(retainers = false) base side single =
   let handles = Ogpu.Impl.live_handles () in
   let retainers = if retainers then Some (Retainers.start ()) else None in
