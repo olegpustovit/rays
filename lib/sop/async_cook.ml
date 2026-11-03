@@ -125,8 +125,7 @@ let create ~max_entries ~max_payload_bytes =
       in
       let worker =
         Domain.spawn (fun () ->
-            Fun.protect ~finally:Parallel.release_current_domain_pools (fun () ->
-                worker_loop value none_volatile))
+            worker_loop value none_volatile)
       in
       value.worker <- Some worker;
       (* The retreat runs on the frame's domain. Only the worker touches the session, and only while

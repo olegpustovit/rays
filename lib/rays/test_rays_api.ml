@@ -121,8 +121,7 @@ let random () =
   check
     (Rays_math.Noise.sample3 noise ~x:0.25 ~y:0.5 ~z:0.75
     = Rays_math.Noise.sample3 (Rays_math.Noise.create 42) ~x:0.25 ~y:0.5 ~z:0.75)
-    "Noise seed";
-  Parallel.release_current_domain_pools ()
+    "Noise seed"
 
 let camera () =
   (* A camera's lens: pinhole by default, focus on the target unless set. *)

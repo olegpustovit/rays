@@ -488,17 +488,14 @@ with a later equal wrapper. There is still exactly one eight-edit warmup and
 200 measured edits, with every recipe and geometry digest checked. The edit loop
 returns before collection, releasing its temporary arguments.
 
-Read-only owner/global measurements locate the residual scheduler growth in
-Saturn 1.0.0's task rings (Domainslib 0.5.2, OCaml 5.3.0). A first push installs
-a two-word reference; a pop/steal clears its task to `()` but retains that empty
-cell. Different slots are first used at different edits. The benchmark counts
-only these exact empty cells, rejects any retained task, and requires unchanged
-total ring capacity. It also counts the actual distinct boxes of the three
-frame/FPS/recovery timestamps: their sharing depends on which frame sampled a
-timer. Retained workload words are exactly raw live words minus those counted
-empty cells and timer boxes. All other heap growth remains a failure. No cache
+The scheduler's task rings (Saturn 1.0.0 under Domainslib 0.5.2) once retained an empty two-word
+cell per used slot, which the benchmark counted and subtracted. `Parallel` no longer uses
+Domainslib and keeps no task slots, so nothing is subtracted for it. The benchmark counts the actual
+distinct boxes of the three frame/FPS/recovery timestamps: their sharing depends on which frame
+sampled a timer. Retained workload words are exactly raw live words minus those timer boxes. All
+other heap growth remains a failure. No cache
 is cleared, no arbitrary byte allowance is used, and no numeric latency gate
-changes. The probe validates the installed layout and fails if it changes.
+changes.
 The source guard admits only the read-only standard-library symbol lookup at
 this qualification tool's path; loading a module or using the lookup in product
 code remains rejected by injected checks.

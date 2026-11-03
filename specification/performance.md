@@ -184,17 +184,20 @@ use locally owned mutation and packed storage without exposing mutable aliases.
 
 ## Parallel execution
 
-Only pure CPU phases run on Domainslib. Work partitions use stable integer
-ranges and disjoint output slices. Scheduling grain is configurable, with a
-sequential cutoff chosen from benchmarks. The reusable pool is process-scoped;
-creating domains per frame or geometry operation is forbidden.
+Only pure CPU phases run on the `Parallel` pool. Work partitions use stable integer
+ranges and disjoint output slices. The pool is process-scoped: `recommended_domains () - 1`
+worker domains, started at first use and joined at exit, serve every calling domain, so the
+editor's frame domain and its cook domain share them rather than each owning a pool (with
+Domainslib's pool per owner the editor ran 47 domains on 24 hardware threads, and every
+stop-the-world waited on all of them). Creating domains per frame or geometry operation is
+forbidden.
 
-`Parallel.run` selects and exclusively borrows the cached pool for the complete
-operation. Each parallel helper opens a bounded Domainslib task scope and
-submits stable contiguous chunks; domain-local pool context is installed once
-per chunk rather than once per element. Nested helpers reuse that context and
-still honor their sequential grain cutoff. Keeping task scopes at helper
-boundaries avoids retaining scheduler state across unrelated algorithm phases.
+A helper's job is its index range cut into chunks of at least its grain, about 16 per participant;
+a range of one chunk runs on the caller. The caller and idle workers claim chunks from one atomic
+counter. The caller wakes one parked worker and each worker that joins wakes the next while chunks
+remain, so a small job ends before many workers wake. An idle worker polls briefly before it parks.
+`Parallel.run ~domains` caps the participants of every nested helper; `~domains:1` is sequential.
+Results are the sequential bytes, and a raised exception is the lowest failing chunk's.
 
 Parallel candidates include field sampling, point transforms, independent
 vertex attributes, classifications, and per-cell geometry counts/fills.

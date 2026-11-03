@@ -1355,8 +1355,7 @@ component classification, attribute extraction, and packed render-mesh
 construction. It must retain and check the request context's cancellation
 token in long loops. Keep the prior successful mesh visible while `status`
 reports elapsed cook time. Use a foreground `Sketch` domain count of one and
-reserve one hardware domain from the background cook context; the persistent
-coordinator releases its domain-owned cached Domainslib pools before exit.
+reserve one hardware domain from the background cook context.
 `Async_cook.close` cancels work, joins the coordinator, closes its session, and
 belongs in `Sketch.run_state ~on_stop`.
 

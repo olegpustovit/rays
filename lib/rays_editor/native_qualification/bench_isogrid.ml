@@ -27,49 +27,6 @@ let source = "sketches/isogrid.rays"
 let frozen = "75686b00542de41aba26b5ff4cc63f88805924f4a625e8ad44c033d66664eeda"
 let parse text = List.hd (ok (Flow.Syntax.parse text))
 
-module Scheduler_slots = struct
-  (* Read-only qualification probe for the installed Domainslib/Saturn layout.
-     Saturn leaves a two-word [ref ()] in each used task-ring slot. These empty
-     cells fill lazily across edits, even though the task was cleared. Count
-     exactly those cells; a payload, a changed layout or a capacity increase
-     must still fail. No cache is cleared and no heap tolerance is applied. *)
-  let field value index =
-    if Obj.is_int value || Obj.tag value <> 0 || Obj.size value <= index then
-      failwith "scheduler qualification layout changed";
-    Obj.field value index
-
-  let create () = Parallel.qualification_pools ()
-
-  let counts table =
-    let capacity = ref 0 and empty_words = ref 0 in
-    let rec bucket entry =
-      if Obj.is_block entry then begin
-        let pooled = field entry 1 in
-        let data = field (field (field pooled 0) 0) 0 in
-        let channels = field (field data 1) 0 in
-        for index = 0 to Obj.size channels - 1 do
-          let slots = field (field channels index) 3 in
-          capacity := !capacity + Obj.size slots;
-          for index = 0 to Obj.size slots - 1 do
-            let cell = Obj.field slots index in
-            if Obj.is_block cell then begin
-              if Obj.tag cell <> 0 || Obj.size cell <> 1 || field cell 0 != Obj.repr () then
-                failwith "scheduler still retains a task";
-              empty_words := !empty_words + 2
-            end
-            else if cell != Obj.repr () then failwith "scheduler slot layout changed"
-          done
-        done;
-        bucket (field entry 2)
-      end
-    in
-    let buckets = field table 1 in
-    for index = 0 to Obj.size buckets - 1 do
-      bucket (Obj.field buckets index)
-    done;
-    (!capacity, !empty_words)
-end
-
 module Retainers = struct
   type cell = { site : string; words : int Atomic.t }
   type t = { profile : Gc.Memprof.t; cells : (string, cell) Hashtbl.t; lock : Mutex.t }
@@ -447,8 +404,7 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
   let allocated_total = Array.make 1 0. in
   (* Keeping a freshly allocated baseline tuple would itself count as growth. *)
   let retained_words = Array.make 3 0 in
-  let cache_snapshots = Array.init 3 (fun _ -> Array.make 17 0) in
-  let scheduler = if flips = 0 then None else Some (Scheduler_slots.create ()) in
+  let cache_snapshots = Array.init 3 (fun _ -> Array.make 16 0) in
   let began = Unix.gettimeofday () in
   let facts count =
     let value = frame count in
@@ -618,9 +574,6 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
         let ids = Flow_sop.Lower.Path_map.cardinal core.doc.workspace.lowered.compiled_ids in
         let preparations = Rays_editor__.Cook.Prepared_cache.length core.cook.prepared_cache in
         let preparation_bytes = Rays_editor__.Cook.Prepared_cache.bytes core.cook.prepared_cache in
-        let scheduler_capacity, scheduler_empty_words =
-          Scheduler_slots.counts (Option.get scheduler)
-        in
         (* Timers sometimes share the current frame's boxed float. Count their
            actual distinct blocks, so merely sampling FPS/recovery on different
            frames cannot look like retained workload data. *)
@@ -632,7 +585,7 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
           ]
         in
         let timer_words = Obj.reachable_words (Obj.repr timers) - 9 in
-        let workload_words = gc.live_words - scheduler_empty_words - timer_words in
+        let workload_words = gc.live_words - timer_words in
         retained_words.(snapshot) <- workload_words;
         Array.blit
           [|
@@ -649,12 +602,11 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
             preparations;
             preparation_bytes;
             native.pipeline_cache_entries;
-            scheduler_capacity;
             registrations;
             host.buffer_creations;
             Ogpu.Impl.live_handles ();
           |]
-          0 cache_snapshots.(snapshot) 0 17;
+          0 cache_snapshots.(snapshot) 0 16;
         if roots then begin
           let rec fields depth path o =
             if Obj.is_block o && Obj.tag o < Obj.no_scan_tag && depth > 0 then
@@ -710,13 +662,13 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
             ]
         end;
         Printf.printf
-          "retention %s live_words=%d workload_words=%d scheduler_empty_words=%d \
-           scheduler_capacity=%d timer_words=%d heap_words=%d history=%d entries=%d \
+          "retention %s live_words=%d workload_words=%d timer_words=%d heap_words=%d history=%d \
+           entries=%d \
            payload_bytes=%d compiled=%d lanes=%d drawn=%d converted=%d ids=%d pipelines=%d held=%d \
            preparations=%d preparation_bytes=%d prepare_calls=%d \
            renderer_pipelines=%d registrations=%d flow_buffers_created=%d live_handles=%d\n\
            %!"
-          name gc.live_words workload_words scheduler_empty_words scheduler_capacity timer_words
+          name gc.live_words workload_words timer_words
           gc.heap_words history stats.retained_entries stats.retained_payload_bytes compiled lanes
           drawn converted ids host.pipeline_compilations host.held_buffers preparations
           preparation_bytes !prepare_calls
@@ -768,7 +720,7 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
         if flips mod 8 = 0 then begin
           (* past 24³ the recipes outgrow the session and the buffer pool, so flips recook and
              creations are turnover: live_handles and retained words are what bound the buffers *)
-          let turnover = 15 in
+          let turnover = 14 in
           if side <> 24 then begin
             Printf.printf "buffer_creations warm=%d final=%d\n%!" cache_snapshots.(0).(turnover)
               cache_snapshots.(1).(turnover);
@@ -778,7 +730,7 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
             let names =
               [| "history"; "session_entries"; "session_payload_bytes"; "compiled"; "lanes"; "drawn";
                  "converted"; "ids"; "pipelines"; "held_buffers"; "preparations";
-                 "preparation_bytes"; "renderer_pipelines"; "scheduler_capacity"; "registrations";
+                 "preparation_bytes"; "renderer_pipelines"; "registrations";
                  "buffer_creations"; "live_handles" |]
             in
             Array.iteri
