@@ -1196,3 +1196,32 @@ let () =
   print_endline
     "Workspace qualification: actual captures, empty/vector/loop/noise kernels, limits, ambiguity, \
      callable ownership and repeated/zero IDs passed"
+
+(* An iterate's body map is observed on every pass. Passes that repeat a capture reuse its accepted
+   lowering, a later pass whose capture is a nonfinite constant still refuses the producer. *)
+let () =
+  let module W = Flow.Workspace in
+  let qualify c =
+    let source =
+      Printf.sprintf
+        "(workspace gpu (graph g :context value (let* [walked (iterate 6 0.0 (fn [(k : float)] \
+         (let* [c (if (> k 3.5) %s 1.0) mapped (map (fn [x] (+ x c)) (array/range 8))] (+ k \
+         (array/sum mapped)))))] walked)))"
+        c
+    in
+    let gpu = { Gpu.default with fast = true } in
+    let catalog = Flow.Catalog.{ version = 1; kinds = [] } in
+    match W.check catalog (Result.get_ok (Flow.Syntax.parse source)) with
+    | Some workspace, [] -> fst (Result.get_ok (qualify_workspace ~gpu ~record:true workspace))
+    | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
+  in
+  let path = [ "g"; "walked#2"; "mapped" ] in
+  assert (W.Paths.mem path (qualify "1.0").approx);
+  let refused = qualify "1e39" in
+  assert (not (W.Paths.mem path refused.approx));
+  assert (
+    List.exists
+      (fun (d : Diagnostic.t) -> d.code = "E_GPU_FORM")
+      (List.assoc path refused.approx_reasons));
+  print_endline
+    "Repeated iterate captures reuse an accepted lowering; a later nonfinite capture refuses"

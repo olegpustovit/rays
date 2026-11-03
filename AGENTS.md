@@ -67,7 +67,7 @@ task plan are `specification/web-export/plan.md`.
 | Library | Owns |
 |---|---|
 | `diagnostic`, `native_layer_token`, `mem`, `lru`, `param`, `input`, `rays_math` | Leaves with no dependencies: shared diagnostics, the opaque presentation-layer handle, the memory ledger, a bounded LRU (required [`Mem.owner`](lib/mem/mem.mli) / [`Lru.cache`](lib/lru/lru.mli)), typed parameter schemas, immutable logical frame facts, and pure math |
-| `parallel` | Shared Domainslib pool and deterministic coarse-grained work helpers |
+| `parallel` | One process-wide worker pool and deterministic coarse-grained work helpers |
 | `sdl3`, `sdl3_image/ttf/mixer` | SDL3 bindings (foundational) |
 | `metal` | Metal bindings: safe layer over a handwritten bridge (foundational) |
 | `vulkan` | Vulkan bridge: operations shaped like OGPU's driver records over volk and VMA, Windows only (foundational) |
@@ -282,7 +282,7 @@ GPU backend. Details: `lib/runtime/AGENTS.md`.
 
 - SDL, Metal, texture, font, audio, event, and cache operations run on the
   initial domain. Never create a domain or thread per frame or item.
-- Use the shared `Parallel` Domainslib pool for coarse pure work on immutable
+- Use the shared `Parallel` worker pool for coarse pure work on immutable
   or disjointly owned data, with a tunable grain and a sequential cutoff.
 - Parallel results are byte-identical to the sequential path; every parallel
   change has an exact one-domain vs multi-domain regression.

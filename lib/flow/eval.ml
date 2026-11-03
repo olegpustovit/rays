@@ -1375,7 +1375,7 @@ and field c v f name = lookup_field name (concrete c v) f
 and bind_parts c ~mk pat v env =
   match pat with
   | W.Name n ->
-      (match mk with Some mk -> note c (mk n) v | None -> ());
+      (match mk with Some mk when c.st.record && c.rec_ -> note c (mk n) v | _ -> ());
       Smap.add n v env
   | W.Seq ps ->
       let xs =
@@ -1399,7 +1399,8 @@ and bind_parts c ~mk pat v env =
 (* [whole]: also record the value of a destructuring pattern under its printed name *)
 and bind_pat c ~mk ~whole pat v env =
   (match (pat, mk) with
-  | (W.Seq _ | W.Keys _), Some mk when whole -> note c (mk (pat_key pat)) v
+  | (W.Seq _ | W.Keys _), Some mk when whole && c.st.record && c.rec_ ->
+      note c (mk (pat_key pat)) v
   | _ -> ());
   match pat with W.Name n when not whole -> Smap.add n v env | _ -> bind_parts c ~mk pat v env
 
@@ -1437,7 +1438,11 @@ and ev_raw c env (x : W.term) : value =
   | W.Ref_binding (b, fs) -> (
       match Smap.find_opt b env with
       | None -> failf "E_UNBOUND" "%s is not bound." b
-      | Some v -> fst (List.fold_left (fun (v, p) f -> (field c v f p, p ^ "." ^ f)) (v, b) fs))
+      | Some v -> (
+          (* the dotted name is only for a diagnostic: one field, the common case, builds none *)
+          match fs with
+          | [ f ] -> field c v f b
+          | _ -> fst (List.fold_left (fun (v, p) f -> (field c v f p, p ^ "." ^ f)) (v, b) fs)))
   | W.Call { kind; ctx; args } -> (
       let vals = eval_named c env args in
       let vals =
@@ -1777,11 +1782,18 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
           | Ty.Record fields -> fields <> [] && List.for_all (fun (_, ty) -> data_type ty) fields
           | Ty.Any | Named _ | Fn _ -> false
         in
-        let declared = o.signature.pos @ o.signature.opt @ o.signature.kw in
+        let declared n =
+          match List.assoc_opt n o.signature.pos with
+          | Some _ as ty -> ty
+          | None -> (
+              match List.assoc_opt n o.signature.opt with
+              | Some _ as ty -> ty
+              | None -> List.assoc_opt n o.signature.kw)
+        in
         List.map
           (fun (n, v) ->
             let ty =
-              match List.assoc_opt n declared with
+              match declared n with
               | Some _ as ty -> ty
               | None -> (
                   match o.signature.rest with Some (name, ty) when name = n -> Some ty | _ -> None)

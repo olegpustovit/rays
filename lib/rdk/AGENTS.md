@@ -142,7 +142,7 @@ cleanup step.
   adjacency storage where possible. Avoid polymorphic comparison/hash in hot
   paths when a specialized integer key is available. Avoid repeated global
   scans for local queries.
-- Reuse the process-wide Domainslib pool. Never create or tear down domains per
+- Reuse the process-wide `Parallel` pool. Never create or tear down domains per
   frame, algorithm iteration, collection, or asset. Parallel APIs must expose a
   tunable grain, retain a benchmarked sequential cutoff, and write only to
   disjoint owned output ranges.

@@ -500,5 +500,5 @@
  (deps
   (glob_files *.spv)
   (glob_files ../renderer/*.spv)
-  (glob_files ../ogpu_native/*.spv))
+  (glob_files ../ogpu_metal/*.spv))
  (libraries test_support))

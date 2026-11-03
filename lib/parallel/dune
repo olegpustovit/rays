@@ -2,5 +2,9 @@
  (name parallel)
  (public_name rays.parallel)
  (wrapped false)
- (modules parallel)
- (libraries domainslib))
+ (modules parallel))
+
+(test
+ (name test_parallel)
+ (modules test_parallel)
+ (libraries parallel))

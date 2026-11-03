@@ -143,9 +143,7 @@ let () =
           let domain =
             Domain.spawn (fun () ->
                 Fun.protect
-                  ~finally:(fun () ->
-                    Atomic.set finished true;
-                    Parallel.release_current_domain_pools ())
+                  ~finally:(fun () -> Atomic.set finished true)
                   (fun () ->
                     Atomic.set service_seen (Option.is_some gpu.Flow_ir.Gpu.backend);
                     cook ~gpu graph))

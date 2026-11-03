@@ -544,6 +544,33 @@ let qualify_workspace ?record ?inputs ?observe ?(replay = false) ?(verify = fals
           walk collect owner graph.body)
         (workspace.graphs @ workspace.defs))
     [ true; false ];
+  (* A map's iteration tuple only names its sites (a loop's tuple selects its skips), and a closure
+     has no value key, so a view holding one is never matched. *)
+  let accepted = Hashtbl.create 64 in
+  let acceptance_key (view : E.Residual.residual_view) =
+    let rec plain : E.value -> bool = function
+      | Fn _ -> false
+      | List xs -> Array.for_all plain xs
+      | Record fs | Struct (_, _, fs) | Source (_, _, fs) -> List.for_all (fun (_, v) -> plain v) fs
+      | _ -> true
+    in
+    if not (List.for_all (fun (_, v) -> plain v) view.bindings) then None
+    else
+      let iter = match view.term.node with W.Hof _ -> [] | _ -> view.iter in
+      Some
+        (Marshal.to_string
+           ( view.term.form.id,
+             view.site,
+             view.owner,
+             iter,
+             view.instance,
+             view.prefix,
+             (view.previous, view.host, view.geometry, Flow.Context.name view.context),
+             List.map
+               (fun (name, v) -> (name, Flow.Value.key_of ~residual:E.Residual.residual_id v))
+               view.bindings )
+           [])
+  in
   let pending path =
     [
       Diagnostic.error ~code:"E_PACKED_PENDING"
@@ -624,32 +651,50 @@ let qualify_workspace ?record ?inputs ?observe ?(replay = false) ?(verify = fals
                         ]))
       | _ -> Ok residual
     in
+    (* A producer's first refusal stands (below), and an accepted lowering is a function of the
+       residual's view, so a map observed again with the same captures, as an iterate's body is on
+       every pass, is not lowered again: isogrid recipe 0 lowered 501, now 196. *)
+    let settled path =
+      match Hashtbl.find_opt outcomes path with
+      | Some ((d : Diagnostic.t) :: _) -> d.code <> "E_PACKED_PENDING"
+      | _ -> false
+    in
+    let key = lazy (acceptance_key view) in
+    let seen path =
+      match Lazy.force key with
+      | Some key ->
+          Hashtbl.find_all accepted key |> List.exists (fun (p, t) -> t == view.term && p = path)
+      | None -> false
+    in
     Option.iter
       (fun path ->
-        let reasons =
-          match adapted with
-          | Error reasons -> reasons
-          | Ok residual -> (
-              match Packed.compile_result residual (E.Residual.residual_view residual).term with
-              | Error reasons -> reasons
-              | Ok packed -> Packed.gpu_refusals ~fused:true ~fast:gpu.fast packed)
-        in
-        let reasons =
-          List.map
-            (fun (d : Diagnostic.t) ->
-              {
-                d with
-                span = (match d.span with Some _ -> d.span | None -> Some view.term.form.span);
-                message =
-                  Printf.sprintf "%s (producer %s, instance %d, tuple [%s])" d.message
-                    (String.concat "/" path) view.instance
-                    (String.concat "," (List.map string_of_int view.iter));
-              })
-            reasons
-        in
-        match Hashtbl.find_opt outcomes path with
-        | Some ((d : Diagnostic.t) :: _) when d.code <> "E_PACKED_PENDING" || reasons = [] -> ()
-        | _ -> Hashtbl.replace outcomes path reasons)
+        if not (settled path || seen path) then
+          let reasons =
+            match adapted with
+            | Error reasons -> reasons
+            | Ok residual -> (
+                match Packed.compile_result residual (E.Residual.residual_view residual).term with
+                | Error reasons -> reasons
+                | Ok packed -> Packed.gpu_refusals ~fused:true ~fast:gpu.fast packed)
+          in
+          let reasons =
+            List.map
+              (fun (d : Diagnostic.t) ->
+                {
+                  d with
+                  span = (match d.span with Some _ -> d.span | None -> Some view.term.form.span);
+                  message =
+                    Printf.sprintf "%s (producer %s, instance %d, tuple [%s])" d.message
+                      (String.concat "/" path) view.instance
+                      (String.concat "," (List.map string_of_int view.iter));
+                })
+              reasons
+          in
+          if reasons = [] then
+            Option.iter (fun key -> Hashtbl.add accepted key (path, view.term)) (Lazy.force key);
+          match Hashtbl.find_opt outcomes path with
+          | Some (_ :: _) when reasons = [] -> ()
+          | _ -> Hashtbl.replace outcomes path reasons)
       producer;
     Option.iter (fun callback -> callback producer (Result.value adapted ~default:residual)) observe
   in

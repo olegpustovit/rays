@@ -106,3 +106,58 @@ What stays is the driver's: each device-local allocation adds its own size to co
 device-local buffers take a probe from 222 MB to 2,274 MB, eight mapped ones without views to 4,328 MB). Device bytes
 went up on isogrid_city to the Mac's 3.72 GB; the cause is not traced. The Mac's footprints are
 unchanged (Metal's view is its device memory, made eagerly as before).
+## Recipe 0's evaluate (vulkan-par)
+
+Recipe 0 (Labyrinth) is serial by construction: `maze-links` is an Aldous-Broder walk, an `iterate` of 368 passes whose
+body maps 6, 64 and 384 elements, each under the 4,096-element walker head, so the walker evaluates them and nothing
+spreads. Its evaluate at side 24 was 120 to 150 ms at every domain count. Probe: `Flow_sop.Lower.of_checked` of the
+recipe-0 workspace, 30 runs, p50 (`lower` without a device, `gpu` with the editor's fast device config).
+
+| change | measure | before | after |
+|---|---|---|---|
+| Walker: a binding's record path is built only when recording, one-field reads build no dotted name, an operator's declared types and positional names are read in place | probe `lower` p50 / allocation | 73 ms / 251 MB | 71 ms / 236 MB |
+| Qualification lowers an observed map again only when it can change the producer's outcome: a settled refusal stands, and an accepted lowering is kept by the residual's view (captures by value, a map's tuple left out: it only names sites). 501 lowerings to 196 on recipe 0 with the fast device config | probe `gpu` p50 / allocation | 80 ms / 275 MB | 71 ms / 236 MB |
+| | `bench_isogrid --flips 24 64`, recipe 0 evaluate (8 flips) | 118 to 161 ms | 105 to 120 ms |
+| | evaluate p95 / max, all recipes | 136 / 161 ms | 114 / 120 ms |
+
+## One worker pool for every domain (vulkan-par)
+
+Domainslib made a pool per owning domain: the editor's 24-wide pool and its cook domain's 23-wide one ran 47 domains on
+24 hardware threads (runtime events: domain ids up to 47, main stop-the-world leader 5.2 ms a stop on average, 1046
+stops in 128 isogrid flips). `Parallel` now owns one process-wide set of `recommended_domains () - 1` workers that every
+domain's jobs share; jobs are cut into about 16 chunks per participant, the caller wakes one worker and each joining
+worker the next, idle workers poll briefly and then park. `rays mem --frames 100`, whole process, two rounds (the second
+had another workload on the machine, about 50 % CPU, so its walls are high for both builds):
+
+| sketch | domains | before | after | footprint before | after |
+|---|---|---|---|---|---|
+| flow_particles_gpu | 8 | 9.43 / 9.18 s | (first run 13.29) / 9.04 s | 1.38 GB | 1.26 GB |
+| | 16 | 12.04 / 11.09 s | 8.99 / 10.06 s | 1.51 GB | 1.35 GB |
+| | 24 | 12.43 / 12.69 s | 9.53 / 11.29 s | 1.66 GB | 1.47 GB |
+| gpu_sea | 8 | 7.30 / 7.07 s | 7.55 / 7.57 s | 3.36 GB | 3.33 GB |
+| | 24 | 8.51 / 8.38 s | 8.09 / 9.12 s | 3.39 GB | 3.58 GB |
+| isogrid_city | 8 | 2.74 / 3.49 s | 3.55 / 3.79 s | 6.68 GB | 6.43 GB |
+| | 24 | 2.70 / 3.39 s | 3.06 / 3.74 s | 6.77 GB | 6.67 GB |
+
+Earlier quiet runs of the same builds: flow_particles_gpu at 24 domains 11.8 to 12.1 s before, 9.2 to 10.1 s after; at 8
+domains 9.0 to 9.6 s before, 8.3 to 8.7 s after; gpu_sea at 24 7.43 s before, 7.41 s after (8: 7.25 s). A stop with 23
+parked workers costs about 0.15 ms (`Gc.minor` in a loop), so parked domains are no longer what a stop pays for; the
+particles sketch is still about 10 % slower at 24 than at 8. Capping each job at 8 participants with 24 workers recovers
+half of that gap. Neither a 1 ms Windows timer resolution (`timeBeginPeriod`; the runtime's spin back-off calls `Sleep`)
+nor 32 MB worker minor heaps changed the walls, so neither is applied.
+
+## The evaluate gate after these changes
+
+`bench_isogrid --flips 24 200` (the isogrid-selector-lifetimes command), recipe-0 evaluate over its 25 samples, min / p50 /
+max, and the gate (all recipes, max under 150 ms):
+
+| machine | build | recipe 0 | gate |
+|---|---|---|---|
+| Mac | vulkan-windows tip (bf3df3a9) | 90.0 / 92.7 / 96.0 ms | pass, max 96 ms |
+| Mac | vulkan-par | 70.1 / 74.0 / 78.6 ms | 2 of 3 pass (max 78 ms); one failed on one recipe-3 flip at 160 ms |
+| Windows, another workload at 33 to 50 % CPU | vulkan-windows tip | 123.7 / 133.7 / 148.3, 121.9 / 139.3 / 319.9 ms | pass (148.3), fail (319.9) |
+| Windows, same | vulkan-par | 100.9 / 117.7 / 173.2, 103.3 / 111.7 / 145.8 ms | fail (173.2), pass (145.8) |
+
+Recipe 0 is 16 to 20 % faster on both machines. On Windows its evaluation inside the editor process takes 110 to 120 ms where
+the same `Flow_sop.Lower.of_checked` call takes 71 ms in a small process (main-domain GC about 27 ms of it: 4 to 5 minor
+collections promoting the walker's live stack, 1.35 ms each, plus their stops), so the gate has no headroom there yet.

@@ -24,7 +24,6 @@
   dune-configurator
   ppxlib
   (odoc :with-doc)
-  domainslib
   yojson
   conf-sdl3
   conf-sdl3-image
