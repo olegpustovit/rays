@@ -80,13 +80,14 @@ let root (account : owner) roots =
           List.map (fun ((a, _) as e) -> if a == account then (a, roots) else e) !rooted
         else !rooted @ [ (account, roots) ])
 
+let drop_dead_tables () = tables := List.filter (fun (_, w, _) -> Weak.check w 0) !tables
+
 let walk_table (account : owner) table ~uncharged =
   let weak = Weak.create 1 in
   Weak.set weak 0 (Some (Obj.repr table));
   locked (fun () ->
       incr tables_added;
-      if !tables_added land 255 = 0 then
-        tables := List.filter (fun (_, w, _) -> Weak.check w 0) !tables;
+      if !tables_added land 255 = 0 then drop_dead_tables ();
       tables := (account, weak, uncharged) :: !tables)
 
 (* On a report, after its collection: each owner is what its roots reach beyond those walked before
@@ -658,6 +659,9 @@ let report ?(collect = true) ?(walk = collect) ?(device = 0) ?budget:shown () =
   in
   if walk then walk_roots ~live:ocaml_live;
   prune ();
+  (* after a collection, a dead table's weak pointer is cleared: the registry holds the tables alive,
+     not those made since the 256th add (17 words each, one a flip in bench_isogrid) *)
+  if collect then locked drop_dead_tables;
   let owners =
     locked (fun () ->
         Hashtbl.fold

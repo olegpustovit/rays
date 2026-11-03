@@ -557,6 +557,9 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
         current := measured name (fun () -> Editor.edit !current op |> string_ok)
       in
       let retention snapshot name =
+        (* the ledger's report collects, then drops its registry's dead tables: what is left for the two
+           collections below is what the workload holds, not how many tables died since the 256th *)
+        ignore (Mem.report ~walk:false ());
         Gc.full_major ();
         Gc.full_major ();
         let gc = Gc.stat () in
