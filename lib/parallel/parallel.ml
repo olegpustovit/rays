@@ -154,3 +154,5 @@ let rec both left right =
           let left_task = Task.async pooled.pool (fun _ -> with_context (Pooled pooled) left) in
           let right_value = right () in
           (Task.await pooled.pool left_task, right_value))
+
+let qualification_pools () = Obj.repr pools

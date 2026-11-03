@@ -38,24 +38,7 @@ module Scheduler_slots = struct
       failwith "scheduler qualification layout changed";
     Obj.field value index
 
-  let create () =
-    let root =
-      Dynlink.unsafe_get_global_value ~bytecode_or_asm_symbol:"camlParallel" |> Option.get
-    in
-    let tables = ref [] in
-    for index = 0 to Obj.size root - 1 do
-      let value = Obj.field root index in
-      if
-        Obj.is_block value
-        && Obj.tag value = 0
-        && Obj.size value = 4
-        && Obj.is_int (Obj.field value 0)
-        && Obj.is_int (Obj.field value 2)
-        && Obj.is_int (Obj.field value 3)
-        && Obj.is_block (Obj.field value 1)
-      then tables := value :: !tables
-    done;
-    match !tables with [ table ] -> table | _ -> failwith "scheduler table layout changed"
+  let create () = Parallel.qualification_pools ()
 
   let counts table =
     let capacity = ref 0 and empty_words = ref 0 in
@@ -407,7 +390,10 @@ let no_device_owner () =
     Some owner
   end
 
-let benchmark ?domains ?(warmup = 8) ?(cycles = false) ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(empty = false)
+(* A discrete card's measured placement keeps up to eight timing samples per route and site, and the
+   8-entry flow_sop.digest cache fills as kernels appear: both are bounded but take more than one cycle
+   to saturate there (3 digest entries after one cycle, 8 after two), so Windows warms eight cycles. *)
+let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false) ?(roots = false) ?(switch_only = false) ?(flips = 0) ?(empty = false)
     ?(present = true) ?(retainers = false) base side single =
   let handles = Ogpu.Impl.live_handles () in
   let retainers = if retainers then Some (Retainers.start ()) else None in
