@@ -30,7 +30,10 @@
    (= %{system} macosx)
    (= %{system} mingw64)))
  (alias dependency_gate)
+ ; sandboxed: the scan sees the declared sources only, never a target another rule is writing
+ ; (a ppx step deleting its .pp.mli under the walk crashed it on Windows)
  (deps
+  (sandbox always)
   (source_tree ../lib)
   (source_tree ../ppx)
   (source_tree ../sketches)
