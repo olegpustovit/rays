@@ -88,9 +88,9 @@ module Gpu = struct
   }
 
   type policy = Measured | Qualification
-  type config = { backend : backend option; fast : bool; policy : policy }
+  type config = { backend : backend option; fast : bool; policy : policy; readback_per_float : float option }
 
-  let default = { backend = None; fast = false; policy = Measured }
+  let default = { backend = None; fast = false; policy = Measured; readback_per_float = None }
 end
 
 type id = W.path * int list
@@ -354,13 +354,14 @@ module Cost = struct
     | Device_measured_cheaper -> "device_measured_cheaper"
     | Held_on_device -> "held_on_device"
 
-  let readback ~count ~width =
+  let readback ?(gpu = Gpu.default) ~count ~width () =
     let cost = table Gpu_readback in
-    cost.fixed +. (cost.per_element *. float count *. float width)
+    let per_float = Option.value gpu.readback_per_float ~default:cost.per_element in
+    cost.fixed +. (per_float *. float count *. float width)
 
-  let outputs_readback (packed : Packed.t) ~count =
+  let outputs_readback ?gpu (packed : Packed.t) ~count =
     Array.fold_left
-      (fun total lanes -> total +. readback ~count ~width:(Array.length lanes))
+      (fun total lanes -> total +. readback ?gpu ~count ~width:(Array.length lanes) ())
       0. packed.outputs
 end
 
@@ -687,7 +688,7 @@ let qualify_workspace ?record ?inputs ?observe ?(replay = false) ?(verify = fals
                             Option.bind (backend.cost ?inputs ~fast packed ~count)
                               (fun seconds ->
                                 if not (Float.is_finite seconds && seconds >= 0.) then None
-                                else Some (seconds +. Cost.outputs_readback packed ~count))
+                                else Some (seconds +. Cost.outputs_readback ~gpu packed ~count))
                           in
                           let reason = Cost.choose ~cpu_seconds ~device_seconds
                               ~resident:false ~cpu_consumers:1 in
@@ -1540,7 +1541,7 @@ module Executor = struct
                       Some
                         (seconds
                         +.
-                        if readback then Cost.outputs_readback packed ~count
+                        if readback then Cost.outputs_readback ~gpu packed ~count
                         else Cost.display_sink Gpu ~count))
               in
               let cpu_consumers = if readback then 1 else 0 in
@@ -1844,7 +1845,7 @@ module Executor = struct
                     if not (Float.is_finite seconds && seconds >= 0.) then None
                     else Some (seconds +.
                       if readers = 0 then 0.
-                      else Cost.outputs_readback merged ~count))
+                      else Cost.outputs_readback ~gpu merged ~count))
               in
               let reason = Cost.choose ~cpu_seconds ~device_seconds ~resident:held ~cpu_consumers:readers in
               report merged (Some count) reason cpu_seconds device_seconds;
@@ -1886,7 +1887,7 @@ module Executor = struct
                         | Vec4_array _ -> 4
                         | _ -> 1
                       in
-                      held_readback := !held_readback +. Cost.readback ~count ~width
+                      held_readback := !held_readback +. Cost.readback ~gpu ~count ~width ()
                   | _ -> ());
                   found)
                 resident

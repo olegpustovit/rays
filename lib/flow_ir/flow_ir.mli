@@ -91,7 +91,14 @@ module Gpu : sig
   }
 
   type policy = Measured | Qualification
-  type config = { backend : backend option; fast : bool; policy : policy }
+  type config = {
+    backend : backend option;
+    fast : bool;
+    policy : policy;
+    readback_per_float : float option;
+        (** Seconds to move one float between device and host, measured on this device. [None]
+            keeps the M1-fitted {!Cost.table}, which unified memory matches. *)
+  }
 
   val default : config
   (** Exact CPU execution with no device backend. *)
@@ -174,8 +181,9 @@ module Cost : sig
   (** Compare total time to the known consumers, including transfers, validation and sinks. Missing,
       negative or nonfinite evidence keeps CPU. Ties keep CPU. *)
 
-  val readback : count:int -> width:int -> float
-  (** Measured seconds to move [count] elements of [width] floats between host and device. *)
+  val readback : ?gpu:Gpu.config -> count:int -> width:int -> unit -> float
+  (** Seconds to move [count] elements of [width] floats between host and device: the M1 table, or
+      [gpu.readback_per_float] when the device measured its own. *)
 
   val probe_budget : device_seconds:float -> float
   (** How long a CPU cook sampled for comparison may run. Past it the CPU has lost: the abandoned

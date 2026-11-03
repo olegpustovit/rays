@@ -52,6 +52,7 @@ type t = {
   mutable closed : bool;
   mutable policy : G.policy;
   mutable measurement_ready : bool;
+  mutable readback : float option option;  (** the device's measured readback, once taken *)
   jobs_lock : Mutex.t;
   jobs_ready : Condition.t;
   wake : Unix.file_descr * Unix.file_descr;
@@ -88,6 +89,7 @@ let create ?(clock = Rays_math.Clock.now) () =
     image_stats;
     closed_host = H.zero;
     measurement_ready = false;
+    readback = None;
     backend = None;
     proxy = None;
     closed = false;
@@ -474,15 +476,55 @@ let wait t ~timeout =
     | exception Unix.Unix_error (Unix.EINTR, _, _) -> ()
   end
 
+(* Seconds per float of reading a device-local buffer back through [invalidate_mapped], taken once
+   per owner on the first config after the service is ready. Unified memory (the M1) keeps the
+   table in [Flow_ir.Cost]; a discrete card crosses PCIe and the transfer queue, and says so here. *)
+let readback_rate t =
+  match t.readback with
+  | Some rate -> rate
+  | None when (not t.measurement_ready) || not (Domain.is_main_domain ()) -> None
+  | None ->
+      let rate =
+        match owner t with
+        | Error _ -> None
+        | Ok (gpu, _) -> (
+            let device = X.gpu_device gpu in
+            if (Ogpu.Backend.capabilities device).unified_memory then None
+            else
+              let floats = 1 lsl 20 in
+              match
+                Ogpu.Backend.create_mapped_buffer device
+                  { label = Some "Flow readback calibration"; size = Int64.of_int (floats * 4);
+                    usage = [ Storage; Copy_src; Copy_dst ] }
+              with
+              | Error _ -> None
+              | Ok (buffer, _) ->
+                  let once () =
+                    let start = t.clock () in
+                    match Ogpu.Backend.invalidate_mapped buffer ~length:(floats * 4) with
+                    | Ok () -> Some ((t.clock () -. start) /. float floats)
+                    | Error _ -> None
+                  in
+                  let runs =
+                    ignore (once ());
+                    List.filter_map (fun _ -> once ()) [ 1; 2; 3 ]
+                  in
+                  ignore (Ogpu.Backend.destroy_buffer buffer);
+                  if List.length runs < 3 then None
+                  else Some (List.nth (List.sort Float.compare runs) 1))
+      in
+      t.readback <- Some rate;
+      rate
+
 (* The frame is the pump: cook workers queue device requests, served here between frames' work. *)
-let config ?(fast = false) t : G.config = { backend = Some (proxy t); fast; policy = t.policy }
+let config ?(fast = false) t : G.config = { backend = Some (proxy t); fast; policy = t.policy; readback_per_float = readback_rate t }
 
 let with_backend ?(fast = false) t run =
-  let gpu = config ~fast t in
   pump t;
   (* Static lowering can ask for a cost before the render owner is serving frames. Defer the
      count-sized calibration until the persistent workspace service has entered its pump loop. *)
   t.measurement_ready <- true;
+  let gpu = config ~fast t in
   Fun.protect ~finally:(fun () -> pump t) (fun () -> run gpu)
 
 let resident gpu t =

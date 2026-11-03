@@ -128,7 +128,7 @@ let () =
           (fun () ->
             let config =
               Flow_ir.Gpu.
-                { backend = Some (Flow_gpu.Host.backend host); fast = true; policy = Qualification }
+                { backend = Some (Flow_gpu.Host.backend host); fast = true; policy = Qualification; readback_per_float = None }
             in
             let dispatched = ref [] in
             let observe path residual =

@@ -75,7 +75,7 @@ let () =
                   time 11 (fun () -> scope.validate_topology ~point_count ~vertices ~offsets ~kinds ~max_polygon_size));
               }) (backend.residency ~fast)) } in
           let config = if !cpu then { Flow_ir.Gpu.default with fast = true }
-            else Flow_ir.Gpu.{ backend = Some backend; fast = true; policy = Qualification } in
+            else Flow_ir.Gpu.{ backend = Some backend; fast = true; policy = Qualification; readback_per_float = None } in
           let lowered = ok (Flow_sop.Lower.of_checked ~gpu:config ~defer:true
                               ~inputs:workspace.inputs workspace.checked) in
           let graph = List.find (fun (g : Flow_sop.Lower.graph) -> g.default && g.name = "sculpture") lowered.graphs in

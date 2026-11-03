@@ -475,7 +475,7 @@ let device_inputs () =
             });
     }
   in
-  let gpu = { G.backend = Some backend; fast = true; policy = G.Qualification } in
+  let gpu = { G.backend = Some backend; fast = true; policy = G.Qualification; readback_per_float = None } in
   let display = Flow_ir.Executor.region_display ~gpu () in
   let prepared count =
     let body =

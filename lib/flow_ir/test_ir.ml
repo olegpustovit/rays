@@ -151,7 +151,7 @@ let () =
     (map (fn [i] (+ (float i) 0.25)) (array/range 4097))))" in
   (* Callback/placement coverage; the readback is computed on CPU. Native
      shader conformance is exercised by the owner qualification tests. *)
-  let run ?(width = 1) ~shape ~actual expected dispatched =
+  let run ?(width = 1) ?readback_per_float ~shape ~actual expected dispatched =
     let ws = if width = 1 then ws else
       check "(workspace static (graph g :context host\n\
         (map (fn [i] [(float i) 0.25 0.5 1.]) (array/range 4097))))" in
@@ -170,7 +170,7 @@ let () =
         planes = (fun _ -> failwith "static map uses readback, not planes");
       });
     } in
-    let gpu = { Gpu.default with backend = Some backend; fast = true } in
+    let gpu = { Gpu.default with backend = Some backend; fast = true; readback_per_float } in
     let _, result = Profile.sample profile (fun () ->
         ok (qualify_workspace ~gpu ~record:true ws)) in
     let expected_value = if width = 1 then
@@ -191,6 +191,11 @@ let () =
   let price = Some (cpu -. Cost.estimate Gpu_readback ~count:8194) in
   run ~shape:price ~actual:price Device_measured_cheaper 1;
   run ~width:4 ~shape:price ~actual:price Cpu_consumer 0;
+  (* a card whose readback is twice the table prices the same site off the device, one that is
+     free keeps it there *)
+  let per_float = (Cost.estimate Gpu_readback ~count:2048 -. Cost.estimate Gpu_readback ~count:1024) /. 1024. in
+  run ~readback_per_float:(2. *. per_float) ~shape:price ~actual:price Cpu_consumer 0;
+  run ~readback_per_float:0. ~shape:price ~actual:price Device_measured_cheaper 1;
   print_endline "Static approximable maps: shared measured comparison, prepared-only evidence, invalid costs, CPU reader and output-width readback pass"
 
 let rec same_bits a b =

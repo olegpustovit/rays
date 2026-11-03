@@ -113,7 +113,7 @@ let () =
                           count);
                         close = (fun () -> if !dispatched then incr device_closes; scope.executor.close ()) } })
                   (backend.residency ~fast)) } in
-          let config = Flow_ir.Gpu.{ backend = Some backend; fast = true; policy = Qualification } in
+          let config = Flow_ir.Gpu.{ backend = Some backend; fast = true; policy = Qualification; readback_per_float = None } in
           let lowered = ok (Flow_sop.Lower.workspace ~defer:true ~gpu:config (ok (Flow.Syntax.parse (source ~host:host_call case)))) in
           let graph = List.hd lowered.graphs in
           let resolved = ok (Flow_sop.Value_lane.resolve ~gpu:config (Flow_sop.Value_lane.create ())

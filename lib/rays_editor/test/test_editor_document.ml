@@ -67,7 +67,7 @@ let run () =
         }
       in
       let gpu : Flow_ir.Gpu.config =
-        { backend = Some backend; fast = true; policy = Flow_ir.Gpu.Qualification }
+        { backend = Some backend; fast = true; policy = Flow_ir.Gpu.Qualification; readback_per_float = None }
       in
       let carries_gpu doc =
         let lowered = doc.Document.workspace.lowered.Flow_sop.Lower.gpu in

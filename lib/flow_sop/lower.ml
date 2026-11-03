@@ -612,7 +612,7 @@ module Chain = struct
                 samples)
       in
       let device_cost state samples floats =
-        let moved = Flow_ir.Cost.readback ~count:floats ~width:1 in
+        let moved = Flow_ir.Cost.readback ~gpu ~count:floats ~width:1 () in
         let rate r fallback = if r < infinity then r *. float floats else fallback in
         let _, resident_sink =
           Option.fold ~none:(infinity, infinity) ~some:Attribute_kernel.Display_sink.rates gpu.backend
@@ -626,7 +626,7 @@ module Chain = struct
       let decide state samples (floats, points) =
         let cpu_consumers = Option.value ~default:0 readers in
         Mutex.protect lock (fun () ->
-            let moved = Flow_ir.Cost.readback ~count:floats ~width:1 in
+            let moved = Flow_ir.Cost.readback ~gpu ~count:floats ~width:1 () in
             let rate r fallback = if r < infinity then r *. float floats else fallback in
             let host_sink, _ =
               Option.fold ~none:(infinity, infinity) ~some:Attribute_kernel.Display_sink.rates gpu.backend

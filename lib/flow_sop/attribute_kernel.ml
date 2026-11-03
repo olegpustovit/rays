@@ -1852,12 +1852,12 @@ let node ?(clock = Unix.gettimeofday) ?state ?(reference = false) ?(strict = fal
                   (* the CPU route leaves a host or mixed mesh, which the display converts and uploads *)
                   let cpu_penalty =
                     match (Sop.Context.cpu_consumers context node_id, gpu) with
-                    | Some 0, Some { Flow_ir.Gpu.backend = Some backend; _ } when whole ->
+                    | Some 0, Some ({ Flow_ir.Gpu.backend = Some backend; _ } as gpu) when whole ->
                         let g = geometries.(0) in
                         let floats = (G.point_count g * 9) + (G.primitive_count g * 6) in
                         let host, _ = Display_sink.rates backend in
                         if host < infinity then host *. float floats
-                        else Flow_ir.Cost.readback ~count:floats ~width:1
+                        else Flow_ir.Cost.readback ~gpu ~count:floats ~width:1 ()
                     | _ -> 0.
                   in
                   let cpu_cost =

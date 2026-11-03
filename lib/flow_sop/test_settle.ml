@@ -60,7 +60,7 @@ let backend : Flow_ir.Gpu.backend =
           });
   }
 
-let gpu = { Flow_ir.Gpu.backend = Some backend; fast = true; policy = Qualification }
+let gpu = { Flow_ir.Gpu.backend = Some backend; fast = true; policy = Qualification; readback_per_float = None }
 
 let node ?gpu y =
   let lowered = Flow_sop.Lower.workspace ?gpu (Flow.Syntax.parse (text y) |> ok) |> ok in
