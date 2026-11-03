@@ -28,3 +28,18 @@ host writes). Committed private memory (the `mem` footprint) is unchanged: the v
 | isogrid_city (300 frames) | 13.75 s | 8.13 s | 3,170 MiB (100 frames) | 429 MiB (100 frames) |
 | gpu_sea | 13.76 s | 12.73 s | | 1,197 MiB |
 | flow_particles_gpu | 31.45 s | 31.72 s | | |
+
+## Windows pools are at most 8 domains wide
+
+`Parallel.recommended_domains` was `Domain.recommended_domain_count ()`, 24 here, and Domainslib makes a pool per
+owning domain, so a stop-the-world minor or major collection waited on 48 participants.
+`RAYS_DOMAINS` (a temporary override) 100 frames, whole process:
+
+| sketch | 24 | 12 | 8 | 4 | 1 |
+|---|---|---|---|---|---|
+| flow_particles_gpu | 12.29 s | 9.38 s | 9.06 s | 9.06 s | 9.67 s |
+| gpu_sea | 7.44 s | 6.67 s | 6.47 s | 6.50 s | |
+| million_marks | 0.88 s | 0.79 s | 0.80 s | 0.79 s | |
+| isogrid_city | 2.75 s | 2.64 s | 2.68 s | 2.65 s | |
+
+Applied (Windows only, 8): 300 frames flow_particles_gpu 31.72 s to 27.25 s, gpu_sea 12.73 s to 11.80 s.
