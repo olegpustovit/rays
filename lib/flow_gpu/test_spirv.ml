@@ -108,7 +108,7 @@ let fast_cases () =
 
 let () =
   let writing = Array.to_list Sys.argv = [ Sys.argv.(0); "--write-goldens" ] in
-  let validator = Sys.command "command -v spirv-val >/dev/null 2>&1" = 0 in
+  let validator = Sys.command ("spirv-val --version > " ^ Filename.null ^ " 2>&1") = 0 in
   let golden = Buffer.create 512 in
   List.iter
     (fun (name, fast, program) ->

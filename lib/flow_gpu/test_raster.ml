@@ -2,7 +2,7 @@
    run by each owner's dune). This validates the printed SPIR-V modules with spirv-val when it is
    installed. *)
 
-let validator = Sys.command "command -v spirv-val >/dev/null 2>&1" = 0
+let validator = Sys.command ("spirv-val --version > " ^ Filename.null ^ " 2>&1") = 0
 
 let () =
   if validator then

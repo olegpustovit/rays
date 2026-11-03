@@ -124,7 +124,7 @@ let native (lowered : Web_export.lowered) =
       | Ok marks -> Printf.sprintf {|{"ok":%s}|} (list (entry buffers) (Array.to_list marks))
       | Error d -> Printf.sprintf {|{"error":"%s"}|} d.code)
 
-let node_available () = Sys.command "command -v node >/dev/null 2>&1" = 0
+let node_available () = Sys.command ("node --version > " ^ Filename.null ^ " 2>&1") = 0
 
 let span_text text (d : Diagnostic.t) =
   match d.span with
