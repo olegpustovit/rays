@@ -1592,8 +1592,23 @@ let test_local_subdivide_contract () =
       ~triangle_policy:Rdk.Subdivide.Subdivide_triangles_smooth triangle_source
     |> Result.get_ok
   in
+  (* The native expected value is unfused OCaml on x86 and fused on arm64, while the Lisp node writes its
+     fma explicitly. Windows therefore pins the Lisp positions' digest, which is bit-identical to the
+     Mac's (measured on both machines, equal to the native result there), with the native point count. *)
+  let detail_geometry = Result.get_ok (Sop.Payload.geometry detail_output.payload) in
+  let detail_digest geometry =
+    let view = Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry) in
+    let buffer = Buffer.create 4096 in
+    List.iter
+      (Array.iter (fun f -> Buffer.add_int64_le buffer (Int64.bits_of_float f)))
+      [ view.x; view.y; view.z ];
+    Digest.to_hex (Digest.string (Buffer.contents buffer))
+  in
   check
-    (equal_positions (Result.get_ok (Sop.Payload.geometry detail_output.payload)) expected_detail)
+    (if Sys.win32 then
+       detail_digest detail_geometry = "48d124c5a462cfb5919f7ccf5ad0354d"
+       && Rdk.Geometry.point_count detail_geometry = Rdk.Geometry.point_count expected_detail
+     else equal_positions detail_geometry expected_detail)
     "procedural Subdivide did not honor input detail overrides";
   check
     (List.for_all
