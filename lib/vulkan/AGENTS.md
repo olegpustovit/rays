@@ -12,6 +12,9 @@ The Vulkan bridge: `vulkan_bridge.c` and the externals in `vulkan.ml`. Only `lib
   `VK_IMAGE_LAYOUT_GENERAL`. Each simplification has a `ponytail:` comment naming its ceiling.
 - Uploads record into one command buffer that the next submit runs first; destruction is deferred
   past the next submit. Host reads go through the dedicated transfer queue and work from any domain.
+- Every OGPU buffer is device-local (Shared too: a kernel reading host memory crosses PCIe, 40x slower on
+  isogrid_city). Host writes stage into the next submit, host reads use the transfer queue, and a mapped view is
+  `calloc`'d so its pages are never touched until the host writes them.
 - Never hold the runtime lock across a wait. `qlock` guards the main queue and pending uploads,
   `xlock` the transfer queue.
 - Tests run with `RAYS_VULKAN_VALIDATION=fatal` (`rw` sets it): the Khronos layer with synchronization

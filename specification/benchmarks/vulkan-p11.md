@@ -43,3 +43,16 @@ owning domain, so a stop-the-world minor or major collection waited on 48 partic
 | isogrid_city | 2.75 s | 2.64 s | 2.68 s | 2.65 s | |
 
 Applied (Windows only, 8): 300 frames flow_particles_gpu 31.72 s to 27.25 s, gpu_sea 12.73 s to 11.80 s.
+
+## Open
+
+- Committed memory (`mem` footprint, 5.7 GB on isogrid_city, 3.0 GB on gpu_sea) is twice the device bytes: each mapped
+  buffer has a full-size host view that is reserved, though now untouched (resident 0.4 GB). Cutting it needs a lazy
+  `driver_mapped.view` (an OGPU interface change: a view created at first host access).
+- flow_particles_gpu (27.3 s against the Mac's 22 s) is CPU-bound, not GPU-bound: GPU 0.53 s for 100 frames. The main
+  thread is in `Packed.bounds` (six `Float.min`/`max` calls, each a C `caml_signbit` call, per point on 1M points
+  a frame), the 12 MB a frame readback, and `rays mem`'s own `Obj.reachable_words`.
+- `Unix.gettimeofday` on this machine steps by about 0.9 ms (577 distinct values in 0.5 s) and `Sys.time` by 15.6 ms:
+  Measured placement quantises a sub-millisecond cook to 0 or 1 ms. No placement was decided on one in these sketches.
+- Barriers (`full_barrier` 6,000 for 100 isogrid frames), pushed descriptors and the per-call Hashtbl lookups are not
+  where a frame goes: GPU time is 0.86 s of 100 frames' 2.7 s, and the CPU wait on it is the same. Left unchanged.
