@@ -424,12 +424,20 @@ buffer the *device copy*; they meet only at two explicit calls, the same on ever
 `flush_mapped buffer ~length` after host writes and before encoding work that reads them, and
 `invalidate_mapped buffer ~length` once the work writing the buffer has completed (the caller waits
 for its epoch first) and before the host reads the view. Nothing assumes shared memory is always
-coherent. Metal on Apple silicon aliases the two copies: the view is page-aligned memory the
-Bigarray owns (`CAML_BA_MANAGED`), wrapped with `newBufferWithBytesNoCopy` and kept alive by the
-buffer record, so both calls only check their range and the view stays valid after `destroy`. A
-discrete backend (Vulkan on a PCIe GPU, a later phase) may give the view staging memory and copy on
-the two calls; the mock already keeps the copies apart, so a caller that skips a call reads stale
-data in tests. Over PCIe a readback costs its transfer, so readback stays explicit and lazy: a value
+coherent. The host asks for the view (`Backend.mapped_view`, or `invalidate_mapped`, which fills it)
+and says when it is done (`Backend.release_mapped_view`); a buffer only the device touches never
+has one on a discrete backend. Metal on Apple silicon aliases the two copies: the view is
+page-aligned memory the Bigarray owns (`CAML_BA_MANAGED`), made with the buffer, wrapped with
+`newBufferWithBytesNoCopy` and kept alive by the buffer record, so both calls only check their range,
+release keeps it, and the view stays valid after `destroy`. A discrete backend (Vulkan on a PCIe GPU)
+makes the host copy on first ask, copies on the two calls, and drops the copy on release or destroy
+(the GC frees it as any Bigarray's data, so a view still referenced stays valid memory); a flush
+with no view since creation or release is `Invalid_argument`, since the host wrote nothing. The mock
+keeps the copies apart and makes its view on ask too, so a caller that skips a call reads stale data
+in tests, and a released view, or the view after it before an invalidate, reads NaN. `Flow_gpu.Run`
+asks at each host use (packing an input, reading an output or a holder) and releases when a buffer
+comes back to the shared pool; input and output slots keep theirs, since the host rewrites or reads
+them at every dispatch. Over PCIe a readback costs its transfer, so readback stays explicit and lazy: a value
 is materialised on the CPU only when it is read (`Flow_gpu.Run.readback`/`planes` after the
 dispatch's completion and status check). `Run.keep` hands an output's buffer, still in flight, to
 a lazy holder (a SOP write's deferred attribute, specification/sop.md, Device placement) without
@@ -1293,8 +1301,8 @@ holder semantics. Ordinary backends may decline the scope with `None`.
 Shared mesh cooking uses this capability, when `Lower.Chain` selects the device (Qualification
 forces it in tests), to validate and install deferred positions/topology. Resident storage is mapped: workers
 invalidate its owned view and decode uint32 words without initial-domain-only
-buffer reads. `Backend.mapped_view` exposes the existing live mapped view,
-with shared mock/Metal conformance checks for identity and destroyed/unmapped
+buffer reads. `Backend.mapped_view` exposes the live mapped view (made on first ask on a
+discrete device), with shared conformance checks for identity, release and destroyed/unmapped
 buffers. Fused attributes stay resident when their measured comparison selects the
 device. `Workspace_gpu.close` calls `Lower.forget_backend`, so no lowered node or
 placement state outlives its owner.
@@ -1349,7 +1357,9 @@ records. `lib/ogpu_native` selects the platform's implementation; an executable 
 1.3, a discrete device, push descriptors, ray queries, acceleration structures, `VK_EXT_robustness2` and
 `VK_EXT_extended_dynamic_state3`. Missing any is a typed `No_adapter` at startup.
 
-- Memory: a mapped buffer is a device-local buffer plus a Bigarray view. `flush_mapped` copies the view into
+- Memory: a mapped buffer is a device-local buffer plus a Bigarray view, `calloc`'d on its first ask and
+  dropped on release or destroy, so committed host memory follows what the host reads and writes, not device
+  bytes. `flush_mapped` copies the view into
   staging and records the copy into an upload command buffer that the next submit runs first.
   `invalidate_mapped` copies through a dedicated transfer queue with the runtime lock released, from any domain.
 - Hazards: a global barrier between dispatches and at each encoder's end, and every image in

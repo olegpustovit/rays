@@ -194,17 +194,34 @@ let create () =
             match register_buffer op (V.buffer_create device size 1) descriptor.size with
             | Error _ as e -> e
             | Ok (native, resource) -> (
-                let view = V.zeroed_view (size / 4) in
+                (* The host copy exists only while the host uses it: made on its first ask (any
+                   domain; a loser's copy is collected), dropped on release and destroy, and then
+                   the GC frees it as any Bigarray's data. *)
+                let cell = Atomic.make None in
+                let rec view () =
+                  match Atomic.get cell with
+                  | Some _ as v -> v
+                  | None ->
+                      let v = Some (V.zeroed_view (size / 4)) in
+                      if Atomic.compare_and_set cell None v then v else view ()
+                in
                 match checked op (V.buffer_zero native) with
                 | Error _ as e -> e
                 | Ok () ->
                     Ok
                       {
-                        B.mapped_resource = resource;
+                        B.mapped_resource =
+                          { resource with destroy = (fun () -> Atomic.set cell None; resource.destroy ()) };
                         view;
-                        flush = (fun length -> checked op (V.buffer_flush native view length));
+                        release_view = (fun () -> Atomic.set cell None);
+                        flush =
+                          (fun length ->
+                            match Atomic.get cell with
+                            | Some v -> checked op (V.buffer_flush native v length)
+                            | None -> error op E.Invalid_argument "no host view was written");
                         invalidate =
-                          (fun length -> checked op (V.buffer_invalidate native view length));
+                          (fun length ->
+                            checked op (V.buffer_invalidate native (Option.get (view ())) length));
                       })
           in
           let register_texture ~format (descriptor : Ogpu_core.Types.texture_descriptor) =

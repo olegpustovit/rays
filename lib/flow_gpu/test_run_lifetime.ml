@@ -31,6 +31,7 @@ let () =
   let fail_table = ref false and table_writes = ref 0 in
   let fail_input = ref false and input_writes = ref 0 and creates = ref 0 in
   let working_set = ref None in
+  let views = ref 0 and view_releases = ref 0 in
   let group = ref 0 in
   let in_group (x, y, z) =
     if x * y * z > !group then
@@ -96,6 +97,8 @@ let () =
                         (fun (mapped : B.driver_mapped) ->
                           {
                             mapped with
+                            view = (fun () -> incr views; mapped.view ());
+                            release_view = (fun () -> incr view_releases; mapped.release_view ());
                             flush =
                               (fun length ->
                                 if descriptor.Ogpu.Types.size >= 4096L then begin
@@ -240,8 +243,11 @@ let () =
          flags without a Weak.get, which during marking would keep every one of them alive. *)
       let values = Test_program.ok (Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 1.)) in
       let creations = R.Private.buffer_creations run and thaws = R.Private.materialisations run in
-      for _ = 1 to 24 do
+      let views_before = ref 0 and releases_before = !view_releases in
+      for i = 1 to 24 do
         let output = Test_program.ok (R.dispatch run values) in
+        (* the first packs the fresh inputs into their views; the rest upload nothing *)
+        if i = 1 then views_before := !views;
         let planes = Test_program.ok (R.keep output) in
         ignore (Test_program.ok (planes.settle ()));
         planes.release ~held:true;
@@ -251,6 +257,9 @@ let () =
       assert (R.Private.materialisations run = thaws);
       assert (R.Private.held_buffers run <= 2);
       assert (R.Private.buffer_creations run - creations <= 4);
+      (* nothing read them on the host: no host view was asked for, and each buffer back in the pool
+         dropped any it had (a discrete device frees its host copy) *)
+      assert (!views = !views_before && !view_releases > releases_before);
       (* Over the retired budget the oldest holder's buffer comes back, and it stays readable: a
          retired holder may still have a reader, so it is read first, never freed unread. *)
       working_set := Some 4L;

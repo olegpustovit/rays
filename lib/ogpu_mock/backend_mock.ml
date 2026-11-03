@@ -262,27 +262,47 @@ let create () =
             resource "buffer" c.buffers (fun n -> c.buffers <- n) (Int64.to_int d.Types.size));
         create_mapped_buffer =
           (fun d ->
-            (* a discrete device: the view is a separate host copy, synchronised only by flush and
-               invalidate, so a caller that skips one reads stale data *)
+            (* a discrete device: the view is a separate host copy, made when asked for and
+               synchronised only by flush and invalidate, so a caller that skips one reads stale
+               data; a released view turns NaN and its successor starts NaN, so a caller that keeps
+               one, or reads a new one before an invalidate, reads NaN *)
             let size = Int64.to_int d.Types.size in
-            let view = Bigarray.(Array1.create float32 c_layout (size / 4)) in
-            Bigarray.Array1.fill view 0.;
+            let cell = Atomic.make None and released = ref false in
+            let rec view () =
+              match Atomic.get cell with
+              | Some _ as v -> v
+              | None ->
+                  let floats = Bigarray.(Array1.create float32 c_layout (size / 4)) in
+                  Bigarray.Array1.fill floats (if !released then Float.nan else 0.);
+                  if Atomic.compare_and_set cell None (Some floats) then Atomic.get cell else view ()
+            in
             Result.map
               (fun (r : Backend.driver_resource) ->
                 let device = Hashtbl.find c.memory r.token in
                 {
                   Backend.mapped_resource = r;
                   view;
+                  release_view =
+                    (fun () ->
+                      released := true;
+                      Option.iter
+                        (fun floats -> Bigarray.Array1.fill floats Float.nan)
+                        (Atomic.exchange cell None));
                   flush =
                     (fun n ->
-                      for i = 0 to (n / 4) - 1 do
-                        Bytes.set_int32_le device (4 * i) (Int32.bits_of_float view.{i})
-                      done;
-                      Ok ());
+                      match Atomic.get cell with
+                      | None ->
+                          error "Backend_mock.flush" Error.Invalid_argument "no host view was written"
+                      | Some floats ->
+                          for i = 0 to (n / 4) - 1 do
+                            Bytes.set_int32_le device (4 * i) (Int32.bits_of_float floats.{i})
+                          done;
+                          Ok ());
                   invalidate =
                     (fun n ->
+                      let floats = Option.get (view ()) in
                       for i = 0 to (n / 4) - 1 do
-                        view.{i} <- Int32.float_of_bits (Bytes.get_int32_le device (4 * i))
+                        floats.{i} <- Int32.float_of_bits (Bytes.get_int32_le device (4 * i))
                       done;
                       Ok ());
                 })

@@ -12,7 +12,7 @@ val pool : unit -> pool
 val close_pool : pool -> unit
 
 val recycled :
-  pool -> device:Ogpu.Backend.device -> int -> (Ogpu.Backend.buffer * Ogpu.Backend.floats * int) option
+  pool -> device:Ogpu.Backend.device -> int -> (Ogpu.Backend.buffer * int) option
 (** A free buffer of at least that many bytes and at most twice it, after giving back what collected
     holders released (and asking for a collection past the retired budget). *)
 

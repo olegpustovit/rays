@@ -159,11 +159,13 @@ let create () =
             | Ok (buffer, floats) ->
                 (* shared storage on unified memory: the view is the buffer's memory, so flush and
                    invalidate have nothing to copy; completion waits order host and GPU access *)
+                let view = Some floats in
                 Result.map
                   (fun resource ->
                     {
                       Ogpu_core.Backend.mapped_resource = resource;
-                      view = floats;
+                      view = (fun () -> view);
+                      release_view = ignore;
                       flush = (fun _ -> Ok ());
                       invalidate = (fun _ -> Ok ());
                     })

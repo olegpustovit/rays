@@ -586,7 +586,7 @@ let resident_scope ?(uint32 = false) ~fast t =
           let capacity = max 1 (max length (2 * Option.fold ~none:0 ~some:snd old)) in
           if capacity >= 1 lsl 18 then Mem.admit_bytes ~pool:Device (capacity * 4);
           match
-            Result.map fst (Ogpu.Backend.create_mapped_buffer (Renderer.gpu_device t.gpu)
+            (Ogpu.Backend.create_mapped_buffer (Renderer.gpu_device t.gpu)
               {
                 label = Some "Flow uint32 indices";
                 size = Int64.of_int (capacity * 4);
@@ -632,7 +632,7 @@ let resident_scope ?(uint32 = false) ~fast t =
             let large = bytes >= 1 lsl 20 in
             let device = Renderer.gpu_device t.gpu in
             match if large then Run.recycled t.shared ~device bytes else None with
-            | Some (b, _, _) ->
+            | Some (b, _) ->
                 Mem.charge resident_owner (resident_bytes b);
                 Ok (b, bytes)
             | None ->
@@ -652,7 +652,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                 Mem.charge resident_owner (resident_bytes b);
                 (b, bytes))
               (Result.map_error Run.Private.diagnostic
-                 (Result.map fst (Ogpu.Backend.create_mapped_buffer device
+                 ((Ogpu.Backend.create_mapped_buffer device
                     {
                       label = Some "Flow resident";
                       size = Int64.of_int size;

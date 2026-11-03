@@ -5,8 +5,8 @@ type slot = {
   mutable buffer : B.buffer option;
   mutable capacity : int;
   mutable bytes : bytes;
-  mutable floats : B.floats option;
-      (** a mapped slot's contents (inputs, gathers, outputs): written and read in place *)
+  mutable mapped : bool;
+      (** a mapped slot (inputs, gathers, outputs): its view is written and read in place *)
   mutable uploaded : (float array * int) option;
   mutable low : int;  (** dispatches in a row asking under a quarter of [capacity] *)
 }
@@ -36,7 +36,6 @@ type fate = {
 type kept = {
   id : int;
   kept_buffer : B.buffer;
-  kept_floats : B.floats;
   kept_count : int;
   kept_width : int;
   uint32 : bool;
@@ -56,8 +55,8 @@ type kept = {
    which a reader may still hold: their buffers stay theirs until they are collected or read, and
    past {!retired_budget_for} bytes the oldest is read into owned planes so its buffer comes back. *)
 type pool = {
-  held : (int, B.buffer * B.floats * int * fate) Hashtbl.t;
-  mutable free : (B.buffer * B.floats * int) list;
+  held : (int, B.buffer * int * fate) Hashtbl.t;
+  mutable free : (B.buffer * int) list;
   mutable free_ages : (B.buffer * int) list;  (** the {!tick} each free buffer came back *)
   mutable tick : int;  (** drains so far: an idle device's clock, no real one *)
   released : int list Atomic.t;
@@ -204,7 +203,7 @@ type output = {
 let diagnostic error = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
 let get = function Ok value -> value | Error error -> raise (Diagnostic.Error (diagnostic error))
 let slot () =
-  { buffer = None; capacity = 0; bytes = Bytes.empty; floats = None; uploaded = None; low = 0 }
+  { buffer = None; capacity = 0; bytes = Bytes.empty; mapped = false; uploaded = None; low = 0 }
 
 let nonfinite () =
   Diagnostic.Error
@@ -244,6 +243,9 @@ let upload_uint32 buffer slot source count =
     pack_uint32 slot.bytes (i * 4) source.(i)
   done;
   if count > 0 then get (B.write_buffer buffer ~offset:0L slot.bytes)
+
+(* a mapped buffer's host view, made on a discrete device when first asked for *)
+let view buffer = Option.get (B.mapped_view buffer)
 
 (* Straight into the mapped buffer the kernel reads: one float32 rounding per element, no staging
    bytes and no copy. A finite double past float32's range rounds to infinity and is refused. *)
@@ -322,14 +324,14 @@ let drain_pool pool =
   if pool.tick mod 64 = 0 then pool.orphans <- List.filter (fun w -> Weak.check w 0) pool.orphans;
   (* a free buffer nothing has taken for this long goes back to the device *)
   if pool.free <> [] && pool.tick mod 64 = 0 then begin
-    let stale (buffer, _, _) =
+    let stale (buffer, _) =
       pool.tick - Option.value ~default:pool.tick (List.assq_opt buffer pool.free_ages)
       > free_idle_drains
     in
     let old, young = List.partition stale pool.free in
     pool.free <- young;
     List.iter
-      (fun (buffer, _, capacity) ->
+      (fun (buffer, capacity) ->
         Mem.release free_owner capacity;
         pool.free_ages <- List.remove_assq buffer pool.free_ages;
         ignore (B.destroy_buffer buffer))
@@ -338,8 +340,8 @@ let drain_pool pool =
   List.iter
     (fun id ->
       match Hashtbl.find_opt pool.held id with
-      | Some (_, _, _, fate) when Atomic.get fate.readers > 0 -> push pool.released id
-      | Some (buffer, floats, capacity, _) ->
+      | Some (_, _, fate) when Atomic.get fate.readers > 0 -> push pool.released id
+      | Some (buffer, capacity, _) ->
           Hashtbl.remove pool.held id;
           Mem.release held_owner capacity;
           (* the size class's own free bytes: another class's big buffers must not turn this
@@ -347,16 +349,19 @@ let drain_pool pool =
           let fits free limit = free + capacity <= max limit (8 * capacity) in
           let total, own =
             List.fold_left
-              (fun (total, own) (_, _, c) -> (total + c, if c = capacity then own + c else own))
+              (fun (total, own) (_, c) -> (total + c, if c = capacity then own + c else own))
               (0, 0) pool.free
           in
           (* a frame of big outputs must find its buffers again *)
           if fits own free_budget && fits total pool.free_limit then begin
             Mem.charge free_owner capacity;
             (* a dead buffer: under RAYS_MEM_CLOBBER a wrong lifetime reads NaN at once *)
-            if Mem.clobber () then Bigarray.Array1.fill floats Float.nan;
+            if Mem.clobber () then
+              Option.iter (fun v -> Bigarray.Array1.fill v Float.nan) (B.mapped_view buffer);
+            (* the host is done with it: a discrete device drops its host copy *)
+            ignore (B.release_mapped_view buffer);
             pool.free_ages <- (buffer, pool.tick) :: pool.free_ages;
-            pool.free <- (buffer, floats, capacity) :: pool.free
+            pool.free <- (buffer, capacity) :: pool.free
           end
           else ignore (B.destroy_buffer buffer)
       | None -> ())
@@ -368,9 +373,9 @@ let drain t =
 
 let take_free pool length =
   match
-    List.find_opt (fun (_, _, capacity) -> capacity >= length && capacity <= 2 * length) pool.free
+    List.find_opt (fun (_, capacity) -> capacity >= length && capacity <= 2 * length) pool.free
   with
-  | Some ((buffer, _, capacity) as held) ->
+  | Some ((buffer, capacity) as held) ->
       pool.free <- List.filter (( != ) held) pool.free;
       pool.free_ages <- List.remove_assq buffer pool.free_ages;
       Mem.release free_owner capacity;
@@ -396,7 +401,7 @@ let reclaim pool ~device =
   refresh ();
   let bytes sum (id, _) =
     match Hashtbl.find_opt pool.held id with
-    | Some (_, _, capacity, _) -> sum + capacity
+    | Some (_, capacity, _) -> sum + capacity
     | None -> sum
   in
   (* Only a collection can tell a dead retired holder from a live one, so device memory must not wait
@@ -437,7 +442,7 @@ let create ?pool gpu = create_owned ?pool (Renderer.gpu_device gpu) (Renderer.gp
 let forget_input slot =
   Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
   slot.buffer <- None;
-  slot.floats <- None;
+  slot.mapped <- false;
   slot.capacity <- 0;
   slot.uploaded <- None
 
@@ -445,9 +450,9 @@ let ensure ?(mapped = false) t slot length =
   (if mapped && slot.buffer = None && length > 0 then
      (* an output slot whose last buffer a holder took: a recycled buffer of the size class *)
      match recycled t.pool ~device:t.device length with
-     | Some (buffer, floats, capacity) ->
+     | Some (buffer, capacity) ->
          slot.buffer <- Some buffer;
-         slot.floats <- Some floats;
+         slot.mapped <- true;
          slot.capacity <- capacity;
          Mem.charge slot_owner capacity;
          slot.uploaded <- None
@@ -459,7 +464,7 @@ let ensure ?(mapped = false) t slot length =
       Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
       Mem.release slot_owner slot.capacity;
       slot.buffer <- None;
-      slot.floats <- None;
+      slot.mapped <- false;
       slot.uploaded <- None;
       slot.capacity <- 0;
       slot.low <- 0
@@ -480,12 +485,13 @@ let ensure ?(mapped = false) t slot length =
       }
     in
     if !capacity >= 1 lsl 20 then Mem.admit_bytes ~pool:Device !capacity;
-    let fresh, floats =
-      if mapped then
-        let buffer, floats = get (B.create_mapped_buffer t.device descriptor) in
+    let fresh =
+      if mapped then begin
+        let buffer = get (B.create_mapped_buffer t.device descriptor) in
         created t.pool !capacity;
-        (buffer, Some floats)
-      else (get (B.create_buffer t.device descriptor), None)
+        buffer
+      end
+      else get (B.create_buffer t.device descriptor)
     in
     Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
     Mem.release slot_owner slot.capacity;
@@ -494,7 +500,7 @@ let ensure ?(mapped = false) t slot length =
     slot.buffer <- Some fresh;
     slot.capacity <- !capacity;
     slot.bytes <- (if mapped then Bytes.empty else Bytes.create !capacity);
-    slot.floats <- floats;
+    slot.mapped <- mapped;
     t.creations <- t.creations + 1
   end;
   Option.get slot.buffer
@@ -706,7 +712,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                     slot.uploaded <- None;
                     if kernel.input_uint32.(index) then upload_uint32 buffer slot source (length / 4)
                     else begin
-                      pack_floats (Option.get slot.floats) source (length / 4);
+                      pack_floats (view buffer) source (length / 4);
                       get (B.flush_mapped buffer ~length)
                     end;
                     slot.uploaded <- Some (source, length);
@@ -799,7 +805,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                     if kernel.gather_uint32.(k) then
                       upload_uint32 buffer slot source (Array.length source)
                     else begin
-                      pack_floats (Option.get slot.floats) source (Array.length source);
+                      pack_floats (view buffer) source (Array.length source);
                       get (B.flush_mapped buffer ~length:(Array.length source * 4))
                     end;
                     slot.uploaded <- Some (source, length);
@@ -985,10 +991,10 @@ let completed ?index output =
   try
     let length = output.count * width in
     output.owner.readback_bytes <- output.owner.readback_bytes + (length * 4);
-    match slot.floats with
-    | Some floats when length > 0 ->
-        get (B.invalidate_mapped (Option.get slot.buffer) ~length:(length * 4));
-        Ok (`Floats (floats, width))
+    match slot.buffer with
+    | Some buffer when slot.mapped && length > 0 ->
+        get (B.invalidate_mapped buffer ~length:(length * 4));
+        Ok (`Floats (view buffer, width))
     | _ ->
         if length = 0 then Ok (`Floats (Bigarray.(Array1.create float32 c_layout 0), width))
         else
@@ -1157,8 +1163,8 @@ let materialise t kept =
             | Some planes -> planes
             | None ->
                 if kept.fate.destroyed then invalid_arg "Run.materialise: uint32 output was freed";
-                let floats = kept.kept_floats in
                 if length > 0 then get (B.invalidate_mapped kept.kept_buffer ~length:(length * 4));
+                let floats = view kept.kept_buffer in
                 let planes = Array.init kept.kept_width (fun component ->
                     Array.init kept.kept_count (fun i ->
                         let index = i * kept.kept_width + component in
@@ -1173,20 +1179,33 @@ let materialise t kept =
       else begin
       (* Nothing here can fail, so no reader (an rdk accessor on any domain) ever sees an error:
          the buffer is mapped, the range is its own, it is destroyed only under this lock after
-         [destroyed] is set (its view stays valid), and the status check at [keep] covered the
-         completion and every output's finiteness (the kernel flags a nonfinite output). *)
-      Mutex.protect kept.fate.lock (fun () ->
-          if (not kept.fate.destroyed) && length > 0 then
-            match B.invalidate_mapped kept.kept_buffer ~length:(length * 4) with
-            | Ok () -> ignore (Atomic.fetch_and_add t.materialised_bytes (length * 4))
-            | Error e -> invalid_arg ("Run.materialise: " ^ Ogpu.Error.to_string e));
+         [destroyed] is set (a view taken before stays valid), and the status check at [keep] covered
+         the completion and every output's finiteness (the kernel flags a nonfinite output). *)
+      let floats =
+        Mutex.protect kept.fate.lock (fun () ->
+            if length = 0 then Some (Bigarray.(Array1.create float32 c_layout 0))
+            else if kept.fate.destroyed then None
+            else
+              match B.invalidate_mapped kept.kept_buffer ~length:(length * 4) with
+              | Ok () ->
+                  ignore (Atomic.fetch_and_add t.materialised_bytes (length * 4));
+                  B.mapped_view kept.kept_buffer
+              | Error e -> invalid_arg ("Run.materialise: " ^ Ogpu.Error.to_string e))
+      in
+      match floats with
+      | None -> (
+          (* destroyed after its read: the planes that read made *)
+          match Atomic.get kept.fate.planes with
+          | Some planes -> planes
+          | None -> invalid_arg "Run.materialise: a device output was read after its free")
+      | Some floats ->
       Atomic.incr kept.fate.readers;
       let planes =
         Fun.protect
           ~finally:(fun () -> Atomic.decr kept.fate.readers)
           (fun () ->
             match
-              to_planes ~checked:true kept.kept_floats ~count:kept.kept_count ~width:kept.kept_width
+              to_planes ~checked:true floats ~count:kept.kept_count ~width:kept.kept_width
             with
             | Ok planes -> planes
             | Error _ -> assert false)
@@ -1305,11 +1324,11 @@ let release_kept t fate ~id ~weak ~held =
     in
     if retire then push t.pool.retiring (id, weak)
 
-let hold t ~uint32 ~buffer ~floats ~capacity ~count ~width ~epoch ~settled =
+let hold t ~uint32 ~buffer ~capacity ~count ~width ~epoch ~settled =
   Mem.charge held_owner capacity;
   let kept =
     { id = Atomic.fetch_and_add next_kept 1;
-      kept_buffer = buffer; kept_floats = floats; kept_count = count; kept_width = width;
+      kept_buffer = buffer; kept_count = count; kept_width = width;
       uint32;
       fate =
         { lock = Mutex.create (); planes = Atomic.make None; destroyed = false; retired = false;
@@ -1322,7 +1341,7 @@ let hold t ~uint32 ~buffer ~floats ~capacity ~count ~width ~epoch ~settled =
   Weak.set weak 0 (Some kept);
   t.kept <- (epoch, kept.settled, weak) :: t.kept;
   kept.thaw <- (fun () -> ignore (materialise t kept));
-  Hashtbl.replace t.pool.held kept.id (buffer, floats, capacity, kept.fate);
+  Hashtbl.replace t.pool.held kept.id (buffer, capacity, kept.fate);
   let id = kept.id and released = t.pool.released and fate = kept.fate in
   Gc.finalise (fun _ -> release released id) kept;
   if not uint32 then bindable := (kept.placeholder, weak) :: !bindable;
@@ -1353,13 +1372,13 @@ let keep_storage ~uint32 ?index output =
           else "Uint32 outputs require a typed topology holder."))
   else
     let slot = t.outputs.(index) and width = t.kernel.output_widths.(index) in
-    match (slot.buffer, slot.floats) with
-    | Some buffer, Some floats when output.count > 0 && output.epoch > 0L ->
-        let holder = hold t ~uint32 ~buffer ~floats ~capacity:slot.capacity
+    match slot.buffer with
+    | Some buffer when slot.mapped && output.count > 0 && output.epoch > 0L ->
+        let holder = hold t ~uint32 ~buffer ~capacity:slot.capacity
             ~count:output.count ~width ~epoch:output.epoch ~settled:false in
         Mem.release slot_owner slot.capacity;
         slot.buffer <- None;
-        slot.floats <- None;
+        slot.mapped <- false;
         slot.capacity <- 0;
         slot.uploaded <- None;
         Ok holder
@@ -1438,11 +1457,11 @@ let adopt_storage t ~uint32 ~buffer ~count ~width =
   else if width < 1 || width > 4 || (uint32 && width <> 1) || count < 0
           || Int64.of_int count > Int64.div (B.buffer_size buffer) (Int64.of_int (4 * width)) then
     Error (Diagnostic.error ~code:"E_GPU" "Adopted array exceeds its buffer or has an invalid width.")
-  else match B.mapped_view buffer with
-  | None -> Error (Diagnostic.error ~code:"E_GPU" "Adopted array requires mapped storage for worker reads.")
-  | Some floats -> begin
+  else match B.release_mapped_view buffer with
+  | Error _ -> Error (Diagnostic.error ~code:"E_GPU" "Adopted array requires mapped storage for worker reads.")
+  | Ok () -> begin
     drain t;
-    Ok (hold t ~uint32 ~buffer ~floats ~capacity:(Int64.to_int (B.buffer_size buffer))
+    Ok (hold t ~uint32 ~buffer ~capacity:(Int64.to_int (B.buffer_size buffer))
           ~count ~width ~epoch:(B.completed_epoch t.queue) ~settled:true)
   end
 
@@ -1511,7 +1530,7 @@ let close_pool pool =
   ignore (Atomic.exchange pool.retiring []);
   pool.retired <- [];
   Hashtbl.iter
-    (fun _ (buffer, _, capacity, fate) ->
+    (fun _ (buffer, capacity, fate) ->
       (* a pin outlives a collected holder: its [valid] must see this *)
       Mutex.protect fate.lock (fun () -> fate.destroyed <- true);
       Mem.release held_owner capacity;
@@ -1519,7 +1538,7 @@ let close_pool pool =
     pool.held;
   Hashtbl.reset pool.held;
   List.iter
-    (fun (buffer, _, capacity) ->
+    (fun (buffer, capacity) ->
       Mem.release free_owner capacity;
       ignore (B.destroy_buffer buffer))
     pool.free;
@@ -1540,7 +1559,7 @@ let close ?(discard = false) t =
             match Hashtbl.find_opt t.pool.held kept.id with
             | Some _ when (not discard) && (not t.own_pool) && settle t kept = Ok () ->
                 t.pool.orphans <- weak :: t.pool.orphans
-            | Some (buffer, _, capacity, _) ->
+            | Some (buffer, capacity, _) ->
                 (if not discard then try ignore (materialise t kept) with Diagnostic.Error _ -> ());
                 Mutex.protect kept.fate.lock (fun () -> kept.fate.destroyed <- true);
                 Mem.release held_owner capacity;
@@ -1559,7 +1578,7 @@ let close ?(discard = false) t =
         Mem.release slot_owner slot.capacity;
         slot.buffer <- None;
         slot.bytes <- Bytes.empty;
-        slot.floats <- None;
+        slot.mapped <- false;
         slot.capacity <- 0;
         slot.uploaded <- None)
       (Array.concat
@@ -1583,7 +1602,7 @@ module Private = struct
     Hashtbl.length t.pool.held
 
   let pool_freed pool = Atomic.get pool.freed
-  let pool_free_floats pool = List.map (fun (_, floats, _) -> floats) pool.free
+  let pool_free_floats pool = List.map (fun (buffer, _) -> view buffer) pool.free
   let pool_drain = drain_pool
 
   (* a free buffer of [bytes] put into the pool, as if a holder of that size had come back *)
@@ -1591,10 +1610,10 @@ module Private = struct
     let descriptor : Ogpu.Types.buffer_descriptor =
       { label = Some "test free"; size = Int64.of_int bytes; usage = [ Storage; Copy_src; Copy_dst ] }
     in
-    let buffer, floats = get (B.create_mapped_buffer device descriptor) in
+    let buffer = get (B.create_mapped_buffer device descriptor) in
     Mem.charge free_owner bytes;
     pool.free_ages <- (buffer, pool.tick) :: pool.free_ages;
-    pool.free <- (buffer, floats, bytes) :: pool.free
+    pool.free <- (buffer, bytes) :: pool.free
   let slot_shrink_after = slot_shrink_after
 
   let pool_held pool =

@@ -45,12 +45,13 @@ let run ?shaders driver =
     (get (Backend.read_buffer source ~offset:0L ~length:16) = bytes)
     "buffer round trip differs";
   (* a mapped buffer: host view and device copy meet only at flush and invalidate (the mock keeps
-     them apart as a discrete device does); the view outlives the buffer *)
-  let mapped, floats =
+     them apart as a discrete device does); a view outlives the buffer *)
+  let mapped =
     get
       (Backend.create_mapped_buffer device
          { label = Some "mapped"; size = 16L; usage = [ Storage; Copy_src; Copy_dst ] })
   in
+  let floats = Option.get (Backend.mapped_view mapped) in
   require (Bigarray.Array1.dim floats = 4 && floats.{3} = 0.) "mapped view is not 4 zeroed floats";
   require (Option.get (Backend.mapped_view mapped) == floats) "mapped view accessor copied storage";
   require (Backend.mapped_view source = None) "unmapped buffer exposed a mapped view";
@@ -65,6 +66,38 @@ let run ?shaders driver =
   get (Backend.write_buffer mapped ~offset:8L three);
   get (Backend.invalidate_mapped mapped ~length:16);
   require (floats.{2} = 3. && floats.{1} = 1.5) "an invalidated view lacks the buffer's contents";
+  (* released, the host copy of a discrete device goes: a flush has nothing to write, and the next
+     view is new and holds the device copy once invalidated; unified memory keeps its one view *)
+  get (Backend.release_mapped_view mapped);
+  (if capabilities.unified_memory then
+     require (Option.get (Backend.mapped_view mapped) == floats) "a unified view changed on release"
+   else begin
+     (match Backend.flush_mapped mapped ~length:16 with
+     | Error { Error.kind = Invalid_argument; _ } -> ()
+     | _ -> failwith "a released view was flushed");
+     get (Backend.invalidate_mapped mapped ~length:16);
+     let fresh = Option.get (Backend.mapped_view mapped) in
+     require (fresh != floats && fresh.{2} = 3. && fresh.{1} = 1.5)
+       "a view made by invalidate lacks the buffer's contents"
+   end);
+  let floats = Option.get (Backend.mapped_view mapped) in
+  (match Backend.release_mapped_view source with
+  | Error { Error.kind = Invalid_argument; _ } -> ()
+  | _ -> failwith "an unmapped buffer's view was released");
+  (* a buffer only the device touches: no view until the host asks, then the device copy once invalidated *)
+  let device_only =
+    get
+      (Backend.create_mapped_buffer device
+         { label = Some "device only"; size = 16L; usage = [ Storage; Copy_src; Copy_dst ] })
+  in
+  get (Backend.write_buffer device_only ~offset:8L three);
+  (if not capabilities.unified_memory then
+     match Backend.flush_mapped device_only ~length:16 with
+     | Error { Error.kind = Invalid_argument; _ } -> ()
+     | _ -> failwith "a view nobody asked for was flushed");
+  get (Backend.invalidate_mapped device_only ~length:16);
+  require ((Option.get (Backend.mapped_view device_only)).{2} = 3.) "a device-only buffer's first view";
+  get (Backend.destroy_buffer device_only);
   (match Backend.flush_mapped mapped ~length:20 with
   | Error { Error.kind = Invalid_argument; _ } -> ()
   | _ -> failwith "a flush past the buffer was accepted");

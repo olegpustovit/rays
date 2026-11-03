@@ -86,3 +86,23 @@ The `min n 8` cap is gone, at the owner's request. With the per-domain minor hea
 flow_particles_gpu and gpu_sea are slower at 24 than at 8 (+21 % and +11 %): their parallel regions are 101 bursts and
 0.2 s of 9 s, and what grows with the domain count is the stop-the-world cost (357 stops, leader 1.0 s at 8 domains, 5.1 s
 at 24), not the work. Not capped silently: the decision to restore a cap is the owner's.
+
+## A mapped buffer's host copy exists only while the host uses it (vulkan-view)
+
+`create_mapped_buffer` gave every buffer a full-size `calloc`'d view at creation. Calloc'd pages stay untouched, so
+the working set was low, but Windows charges commit for them: the footprint was device bytes twice. The view is now
+made on the host's first ask (`mapped_view`, `invalidate_mapped`) and dropped by `release_mapped_view` when a buffer
+comes back to Flow's pool. Over isogrid_city's 60 frames the views ever made add up to 4 MB, the readback calibration.
+`rays mem --frames 60`, no validation:
+
+| sketch | device before | footprint before | device after | footprint after |
+|---|---|---|---|---|
+| isogrid_city | 3.10 GB | 6.67 GB | 3.72 GB | 4.68 GB |
+| gpu_sea | 864.7 MB | 3.66 GB | 969.5 MB | 2.91 GB |
+| flow_particles_gpu | 69.5 MB | 2.13 GB | 69.5 MB | 1.55 GB |
+| million_marks | 48.5 MB | 648.0 MB | 48.5 MB | 629.8 MB |
+
+What stays is the driver's: each device-local allocation adds its own size to committed private memory (eight 256 MB
+device-local buffers take a probe from 222 MB to 2,274 MB, eight mapped ones without views to 4,328 MB). Device bytes
+went up on isogrid_city to the Mac's 3.72 GB; the cause is not traced. The Mac's footprints are
+unchanged (Metal's view is its device memory, made eagerly as before).

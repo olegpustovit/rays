@@ -10,12 +10,16 @@ type driver_resource = {
   destroy : unit -> (unit, Error.t) result;
 }
 
-(* A host-visible buffer and its host view. [flush n] makes the view's first [n] bytes the device
-   copy's; [invalidate n] the reverse. A unified-memory backend aliases the two (both are
-   bookkeeping); a discrete one copies through staging. *)
+(* A host-visible buffer and its host view. [view ()] is the view, made on its first call (always
+   [Some], one value per view, so asking allocates nothing); [release_view ()] says the host is done
+   with it. [flush n] makes the view's first [n] bytes the device copy's; [invalidate n] the reverse,
+   making the view first. A unified-memory backend aliases the two (the view is the buffer's memory,
+   made with it; release and both calls are bookkeeping); a discrete one copies through staging and
+   frees its host copy on release. *)
 type driver_mapped = {
   mapped_resource : driver_resource;
-  view : floats;
+  view : unit -> floats option;
+  release_view : unit -> unit;
   flush : int -> (unit, Error.t) result;
   invalidate : int -> (unit, Error.t) result;
 }
@@ -442,13 +446,12 @@ let create_mapped_buffer device (descriptor : Types.buffer_descriptor) =
           | Ok mapped ->
               device.children <- device.children + 1;
               Ok
-                ( {
-                    resource = make_resource device mapped.mapped_resource;
-                    buffer_descriptor = descriptor;
-                    memory = Types.Shared;
-                    mapping = Some mapped;
-                  },
-                  mapped.view )))
+                {
+                  resource = make_resource device mapped.mapped_resource;
+                  buffer_descriptor = descriptor;
+                  memory = Types.Shared;
+                  mapping = Some mapped;
+                }))
 
 let sync operation f (value : buffer) ~length =
   match value.mapping with
@@ -461,7 +464,10 @@ let sync operation f (value : buffer) ~length =
 let flush_mapped = sync "Backend.flush_mapped" (fun m -> m.flush)
 let invalidate_mapped = sync "Backend.invalidate_mapped" (fun m -> m.invalidate)
 let mapped_view (value : buffer) =
-  if value.resource.dead then None else Option.map (fun m -> m.view) value.mapping
+  match value.mapping with Some m when not value.resource.dead -> m.view () | _ -> None
+
+let release_mapped_view =
+  sync "Backend.release_mapped_view" (fun m _ -> Ok (m.release_view ())) ~length:0
 let buffer_size (value : buffer) = value.buffer_descriptor.size
 
 let create_texture device descriptor =

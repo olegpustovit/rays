@@ -10,12 +10,16 @@ type driver_resource = {
   destroy : unit -> (unit, Error.t) result;
 }
 
-(* A host-visible buffer and its host view. [flush n] makes the view's first [n] bytes the device
-   copy's; [invalidate n] the reverse. A unified-memory backend aliases the two (both are
-   bookkeeping); a discrete one copies through staging. *)
+(* A host-visible buffer and its host view. [view ()] is the view, made on its first call (always
+   [Some], one value per view, so asking allocates nothing); [release_view ()] says the host is done
+   with it. [flush n] makes the view's first [n] bytes the device copy's; [invalidate n] the reverse,
+   making the view first. A unified-memory backend aliases the two (the view is the buffer's memory,
+   made with it; release and both calls are bookkeeping); a discrete one copies through staging and
+   frees its host copy on release. *)
 type driver_mapped = {
   mapped_resource : driver_resource;
-  view : floats;
+  view : unit -> floats option;
+  release_view : unit -> unit;
   flush : int -> (unit, Error.t) result;
   invalidate : int -> (unit, Error.t) result;
 }
@@ -356,27 +360,39 @@ val recommended_working_set : device -> int64
 val create_buffer :
   ?memory:Types.memory -> device -> Types.buffer_descriptor -> (buffer, Error.t) result
 
-val create_mapped_buffer : device -> Types.buffer_descriptor -> (buffer * floats, Error.t) result
-(** A host-visible buffer and its host view, [size / 4] zeroed float32s ([size] a multiple of 4):
-    the host fills and reads the view in place, with no byte staging and no conversion pass. The
-    view is the host copy; the device copy is the buffer. Synchronisation is explicit and the same
-    on every backend: {!flush_mapped} after host writes and before encoding GPU work that reads
-    them; {!invalidate_mapped} after the GPU work writing the buffer has completed and before the
-    host reads the view. A unified-memory backend (Metal on Apple silicon) aliases the two copies
-    and both calls only check their range; a discrete one copies, and the mock keeps them apart, so
-    a missing call reads stale data in tests. The view is owned memory, valid after
-    {!destroy_buffer}. {!write_buffer} and {!read_buffer} address the device copy. *)
+val create_mapped_buffer : device -> Types.buffer_descriptor -> (buffer, Error.t) result
+(** A host-visible buffer with a host view, [size / 4] float32s ([size] a multiple of 4), which the
+    host fills and reads in place, with no byte staging and no conversion pass. The view is the host
+    copy; the device copy is the buffer, zeroed. Synchronisation is explicit and the same on every
+    backend: {!flush_mapped} after host writes and before encoding GPU work that reads them;
+    {!invalidate_mapped} after the GPU work writing the buffer has completed and before the host
+    reads the view. A unified-memory backend (Metal on Apple silicon) aliases the two copies: the
+    view is made with the buffer and the calls only check their range. A discrete one copies and
+    makes its host copy only when the host asks for it ({!mapped_view} or {!invalidate_mapped}), so
+    a buffer only the device touches costs no host memory; the mock keeps them apart, so a missing
+    call reads stale data in tests. {!write_buffer} and {!read_buffer} address the device copy. *)
 
 val flush_mapped : buffer -> length:int -> (unit, Error.t) result
-(** Host writes to the view's first [length] bytes become the device copy. *)
+(** Host writes to the view's first [length] bytes become the device copy. On a discrete backend a
+    buffer with no view (none asked for since creation or {!release_mapped_view}) has no host writes
+    to flush: [Invalid_argument]. *)
 
 val invalidate_mapped : buffer -> length:int -> (unit, Error.t) result
-(** The device copy's first [length] bytes become the view's; call once the writing work completed.
-*)
+(** The device copy's first [length] bytes become the view's, made first if there is none; call
+    once the writing work completed. Any domain. *)
 
 val mapped_view : buffer -> floats option
-(** The existing owned view of a live mapped buffer, without queue work. [None] for an unmapped
-    or destroyed buffer. The same invalidate/flush rules as [create_mapped_buffer] apply. *)
+(** The view of a live mapped buffer, without queue work, made on the first call on a discrete
+    backend (zeroed; any domain, one view however many ask at once) and the same value until
+    {!release_mapped_view}. [None] for an unmapped or destroyed buffer. A view stays valid owned
+    memory while referenced, after {!destroy_buffer} too. *)
+
+val release_mapped_view : buffer -> (unit, Error.t) result
+(** The host is done with the view: a discrete backend drops its host copy, and a later
+    {!mapped_view} or {!invalidate_mapped} makes a new one whose contents are unspecified until
+    an invalidate. The released view must not be read or written again: the mock fills it with NaN.
+    A unified-memory backend keeps the view, its device memory. Call it only when no reader holds
+    the view. [Invalid_argument] for an unmapped buffer. *)
 
 val create_texture : device -> Types.texture_descriptor -> (texture, Error.t) result
 val create_depth_texture : device -> Types.texture_descriptor -> (texture, Error.t) result

@@ -14,7 +14,8 @@ The Vulkan bridge: `vulkan_bridge.c` and the externals in `vulkan.ml`. Only `lib
   past the next submit. Host reads go through the dedicated transfer queue and work from any domain.
 - Every OGPU buffer is device-local (Shared too: a kernel reading host memory crosses PCIe, 40x slower on
   isogrid_city). Host writes stage into the next submit, host reads use the transfer queue, and a mapped view is
-  `calloc`'d so its pages are never touched until the host writes them.
+  `calloc`'d on its first ask (`mapped_view`, `invalidate_mapped`) and dropped on release or destroy: a buffer only
+  the device touches has no host copy.
 - Never hold the runtime lock across a wait. `qlock` guards the main queue and pending uploads,
   `xlock` the transfer queue.
 - Tests run with `RAYS_VULKAN_VALIDATION=fatal` (`rw` sets it): the Khronos layer with synchronization

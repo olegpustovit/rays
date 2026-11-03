@@ -498,7 +498,7 @@ let readback_rate t =
                     usage = [ Storage; Copy_src; Copy_dst ] }
               with
               | Error _ -> None
-              | Ok (buffer, _) ->
+              | Ok buffer ->
                   let once () =
                     let start = t.clock () in
                     match Ogpu.Backend.invalidate_mapped buffer ~length:(floats * 4) with
