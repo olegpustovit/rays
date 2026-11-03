@@ -9,5 +9,6 @@ export CAML_LD_LIBRARY_PATH="$OPAM_SWITCH_PREFIX\\lib\\stublibs;$OPAM_SWITCH_PRE
 export MSYSTEM=MINGW64 MSYSTEM_PREFIX=/mingw64 MSYSTEM_CARCH=x86_64 MSYSTEM_CHOST=x86_64-w64-mingw32
 export MINGW_CHOST=x86_64-w64-mingw32 MINGW_PREFIX=/mingw64 MINGW_PACKAGE_PREFIX=mingw-w64-x86_64
 export PKG_CONFIG_PATH='C:\msys64\mingw64\lib\pkgconfig;C:\msys64\mingw64\share\pkgconfig'
-export PATH="$rays_opam/bin:/mingw64/bin:/usr/bin:$PATH"
+# Node, for the web-export tests, comes from ucrt64 (mingw64 has no package); last, so mingw64 wins
+export PATH="$rays_opam/bin:/mingw64/bin:/usr/bin:$PATH:/ucrt64/bin"
 unset rays_opam

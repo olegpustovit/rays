@@ -47,6 +47,7 @@ variables), with [opam 2.2 or later](https://github.com/ocaml/opam/releases) on 
 P=mingw-w64-x86_64
 pacman -S --needed $P-gcc $P-pkgconf $P-sdl3 $P-sdl3-image $P-sdl3-ttf $P-sdl3-mixer \
   $P-vulkan-headers $P-vulkan-validation-layers $P-spirv-tools $P-glslang make diffutils rsync patch m4 unzip
+pacman -S --needed mingw-w64-ucrt-x86_64-nodejs   # the web-export tests run their JavaScript in Node
 opam init --bare --disable-sandboxing --no-setup --cygwin-location='C:\msys64'
 opam switch create rays-win --packages=ocaml-base-compiler.5.3.0,system-mingw
 opam pin add --switch=rays-win --no-action --yes --recursive ./packaging
