@@ -499,3 +499,38 @@ let () =
     "Captured uniform packed/reference parity, ordered named reductions, changing inputs, errors \
      and rollback passed";
   flush stdout
+
+(* A map of fourteen 1,024-lane blocks splits into five chunks, which the domains share: values, the
+   first error and an ordered sum are those of one domain. *)
+let () =
+  let source = "(array/range 13824 :type int)" in
+  List.iter
+    (fun body ->
+      let text = "(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.0)))" in
+      let checked =
+        let forms = ok (Flow.Syntax.parse text) in
+        match Flow.Workspace.check { Flow.Catalog.version = 1; kinds = [] } forms with
+        | Some w, [] -> w
+        | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
+      in
+      let value =
+        List.assoc [ "g"; "tested" ] (ok (E.static ~record:true checked)).records |> List.hd |> snd
+      in
+      let residual = match value with E.Residual residual -> residual | _ -> assert false in
+      let packed = Option.get (P.compile residual (E.Residual.residual_view residual).term) in
+      let live = { (Input.at_time 0.25) with frame = 3 } in
+      let expected = E.Host.force_reference value ~live in
+      List.iter
+        (fun domains ->
+          Parallel.run ~domains (fun () ->
+              if not (same expected (P.force ~strict:true packed ~live)) then
+                failwith ("Small chunk parity: " ^ body)))
+        [ 1; 4; 8 ])
+    [
+      "(map (fn [x] [(- (float x) t) (float (int/mod x 6))]) " ^ source ^ ")";
+      "(map (fn [x] (if (int/ge x 9000) (int/div x 0) (int/add x (frame/index)))) " ^ source ^ ")";
+      "(array/sum (map (fn [x] (* (float x) (+ t 0.1))) " ^ source ^ "))";
+    ];
+  print_endline
+    "Small maps: five chunks of three blocks, exact values, first error and ordered sum at \
+     one/four/eight domains"

@@ -410,8 +410,11 @@ let rec integer_range residual (term : W.term) =
 
 let block_layout ~count ~limit =
   let block_size = max 1 (min count limit) in
-  let blocks_per_chunk = 16 in
   let blocks = if count = 0 then 0 else ((count - 1) / block_size) + 1 in
+  (* Sixteen blocks a chunk, or fewer so that a smaller map still makes four or more chunks: a
+     13,824-voxel map was one chunk, run by one domain. Each chunk allocates its lane scratch, so
+     chunks stay several blocks. Chunks only schedule; sums run them in order. *)
+  let blocks_per_chunk = max 1 (min 16 (blocks / 4)) in
   let chunks = if blocks = 0 then 0 else ((blocks - 1) / blocks_per_chunk) + 1 in
   (block_size, blocks, blocks_per_chunk, chunks)
 
