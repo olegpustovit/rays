@@ -325,6 +325,17 @@ let run () =
             require
               (Renderer.Native.staging_bytes execution = 0)
               "a frame without uploads kept the staging";
+            let upload () =
+              ignore (get_resource (replace image));
+              let frame = get (Renderer.Native.begin_submission execution) in
+              let batch = get (Renderer.Native.lower_scene2 frame ~density:1 ~resource:resolve image_ir) in
+              ignore (get (Renderer.Native.step frame [ batch ]))
+            in
+            upload ();
+            upload ();
+            require (Renderer.Native.staging_bytes execution > 0) "a second upload in a row lost its staging";
+            get (Renderer.release_staging execution);
+            require (Renderer.Native.staging_bytes execution = 0) "release_staging kept the staging";
             ignore (get_resource (replace image));
             let labels =
               Array.init 45 (fun index ->

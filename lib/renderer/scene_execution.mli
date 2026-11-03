@@ -224,4 +224,8 @@ type retained_stats = { plan_hits : int64; plan_misses : int64 }
 val retained_stats : t -> retained_stats
 val pipeline_count : t -> int
 val read_pixels : t -> bytes_per_row:int -> (bytes, Ogpu.Error.t) result
+val release_staging : t -> unit
+(** Destroys the texture staging a run of uploading frames keeps for the next one; the next upload
+    makes it again. *)
+
 val destroy : t -> (unit, Ogpu.Error.t) result

@@ -34,6 +34,10 @@ module Private : sig
   val native_stats : t -> (native_stats, string) result
 end
 
+val release_staging : t -> (unit, string) result
+(** Releases the texture staging its renderer keeps while frame after frame uploads, which the next
+    upload makes again: a settled reading of the canvas then does not depend on the last two frames. *)
+
 val save_png : t -> string -> (unit, string) result
 val save_screen_png : string -> (unit, string) result
 val destroy : t -> (unit, string) result

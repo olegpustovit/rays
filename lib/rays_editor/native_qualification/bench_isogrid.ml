@@ -560,6 +560,9 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
         (* the ledger's report collects, then drops its registry's dead tables: what is left for the two
            collections below is what the workload holds, not how many tables died since the 256th *)
         ignore (Mem.report ~walk:false ());
+        (* two frames in a row that uploaded a texture (a new glyph's atlas, 1 MiB) keep its staging
+           buffer and bytes for a third: settled, a snapshot does not depend on the last two frames *)
+        Rays.Canvas.release_staging canvas |> string_ok;
         Gc.full_major ();
         Gc.full_major ();
         let gc = Gc.stat () in

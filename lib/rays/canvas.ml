@@ -159,6 +159,12 @@ module Private = struct
         |> Result.map_error (renderer_message "Canvas.Private.native_stats")
 end
 
+let release_staging value =
+  match value.execution with
+  | None -> Ok ()
+  | Some execution ->
+      Renderer.release_staging execution |> Result.map_error (renderer_message "Canvas.release_staging")
+
 let gpu_seconds value =
   Result.map
     (fun (stats : Renderer.stats) -> stats.gpu_duration_seconds)

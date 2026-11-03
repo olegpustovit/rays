@@ -536,6 +536,9 @@ let ensure_submission operation submission =
     fail operation Ogpu.Error.Stale_handle "submission is already closed"
   else ensure operation submission.owner
 
+let release_staging value =
+  Result.map (fun () -> Scene_execution.release_staging value.renderer) (ensure "Renderer.release_staging" value)
+
 let stats value =
   match ensure "Renderer.stats" value with
   | Error _ as e -> e

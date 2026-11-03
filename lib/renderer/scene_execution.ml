@@ -1193,6 +1193,10 @@ let release_texture_staging value =
       value.texture_upload_scratch <- None
   | _ -> ()
 
+let release_staging value =
+  value.staged_stream <- false;
+  release_texture_staging value
+
 let image_or_canvas_key key =
   String.starts_with ~prefix:"canvas:" key
   || String.starts_with ~prefix:"image:" key

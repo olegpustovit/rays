@@ -79,6 +79,11 @@ type stats = {
 val zero_stats : stats
 val stats : t -> (stats, error) result
 
+val release_staging : t -> (unit, error) result
+(** Releases what only a further frame would reuse: the texture staging that frames which each
+    uploaded a texture keep for the next. For an owner going idle, or a reading that must not depend
+    on whether the last two frames uploaded. *)
+
 type presentation_facts = Runtime.presentation_facts
 
 val capture : t -> (bytes, error) result
