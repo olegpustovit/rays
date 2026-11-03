@@ -495,7 +495,12 @@ let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
    cooks on the device: at most a few device cooks, once. Then [Flow_ir.Cost.choose] decides. The state is weakly keyed by
    the backend, so a closed owner's evidence goes with it. *)
 module Chain = struct
-  type samples = { mutable cpu : (int * float) list; mutable device : (int * float) list }
+  (* [measured] counts the CPU cooks that finished: an abandoned probe is only a lower bound. *)
+  type samples = {
+    mutable cpu : (int * float) list;
+    mutable device : (int * float) list;
+    mutable measured : int;
+  }
 
   type state = {
     sites : (string, samples) Hashtbl.t;
@@ -602,7 +607,7 @@ module Chain = struct
                   Hashtbl.reset state.sites;
                   Hashtbl.reset state.last
                 end;
-                let samples = { cpu = []; device = [] } in
+                let samples = { cpu = []; device = []; measured = 0 } in
                 Hashtbl.add state.sites site samples;
                 samples)
       in
@@ -659,7 +664,10 @@ module Chain = struct
                   let sample = (floats, seconds /. float floats) in
                   let keep l = sample :: List.filteri (fun i _ -> i < 7) l in
                   if device then samples.device <- keep samples.device
-                  else samples.cpu <- keep samples.cpu;
+                  else begin
+                    samples.cpu <- keep samples.cpu;
+                    samples.measured <- samples.measured + 1
+                  end;
                   Hashtbl.replace state.last site (floats, points));
               if readers <> None then ignore (decide state samples (floats, points))
             end
@@ -677,9 +685,18 @@ module Chain = struct
           let size = Mutex.protect lock (fun () -> Hashtbl.find_opt state.last site) in
           match size with
           | Some ((floats, _) as size) when List.length samples.device >= 2 ->
-              if List.length samples.cpu >= 2 then
-                placed (if Flow_ir.Cost.on_device (decide state samples size) then Device else Cpu) ignore
-              else
+              (* The CPU runs unbudgeted only on measured cooks: a bound left by an abandoned probe
+                 can lose to one noisy device sample while the true cost is minutes, so it is probed
+                 again under a budget that follows the device's present cost. *)
+              let on_device =
+                if List.length samples.cpu >= 2 then
+                  Some (Flow_ir.Cost.on_device (decide state samples size))
+                else None
+              in
+              (match on_device with
+              | Some true -> placed Device ignore
+              | Some false when samples.measured >= 2 -> placed Cpu ignore
+              | _ ->
                 let budget =
                   Flow_ir.Cost.probe_budget
                     ~device_seconds:
@@ -690,7 +707,7 @@ module Chain = struct
                     Mutex.protect lock (fun () ->
                         let sample = (floats, budget /. float floats) in
                         samples.cpu <- sample :: sample :: samples.cpu);
-                    ignore (decide state samples size))
+                    ignore (decide state samples size)))
           | _ ->
               report ~points:None No_cost_evidence None None;
               placed Device ignore)
