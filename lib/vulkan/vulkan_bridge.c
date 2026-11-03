@@ -997,6 +997,14 @@ CAMLprim value rv_buffer_read(value buffer, value offset, value bytes, value at,
   CAMLreturn(Val_long(r));
 }
 
+/* calloc of a large block is fresh zero pages from the OS, untouched until the host writes them. */
+CAMLprim value rv_zeroed_view(value count) {
+  intnat n = Long_val(count);
+  void *data = calloc(n ? n : 1, 4);
+  if (!data) caml_raise_out_of_memory();
+  return caml_ba_alloc_dims(CAML_BA_FLOAT32 | CAML_BA_C_LAYOUT | CAML_BA_MANAGED, 1, data, n);
+}
+
 /* A mapped buffer's view is an OCaml Bigarray: valid after the buffer goes, and fixed in memory. */
 CAMLprim value rv_buffer_flush(value buffer, value view, value length) {
   CAMLparam2(buffer, view);

@@ -194,8 +194,7 @@ let create () =
             match register_buffer op (V.buffer_create device size 1) descriptor.size with
             | Error _ as e -> e
             | Ok (native, resource) -> (
-                let view = Bigarray.(Array1.create float32 c_layout (size / 4)) in
-                Bigarray.Array1.fill view 0.;
+                let view = V.zeroed_view (size / 4) in
                 match checked op (V.buffer_zero native) with
                 | Error _ as e -> e
                 | Ok () ->
