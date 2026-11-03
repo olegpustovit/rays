@@ -97,3 +97,6 @@ recipe-0 workspace, 30 runs, p50 (`lower` without a device, `gpu` with the edito
 | change | measure | before | after |
 |---|---|---|---|
 | Walker: a binding's record path is built only when recording, one-field reads build no dotted name, an operator's declared types and positional names are read in place | probe `lower` p50 / allocation | 73 ms / 251 MB | 71 ms / 236 MB |
+| Qualification lowers an observed map again only when it can change the producer's outcome: a settled refusal stands, and an accepted lowering is kept by the residual's view (captures by value, a map's tuple left out: it only names sites). 501 lowerings to 196 on recipe 0 with the fast device config | probe `gpu` p50 / allocation | 80 ms / 275 MB | 71 ms / 236 MB |
+| | `bench_isogrid --flips 24 64`, recipe 0 evaluate (8 flips) | 118 to 161 ms | 105 to 120 ms |
+| | evaluate p95 / max, all recipes | 136 / 161 ms | 114 / 120 ms |
