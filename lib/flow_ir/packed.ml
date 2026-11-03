@@ -3632,6 +3632,8 @@ module Host = struct
           match Lru.Identity_list.find cache values with
           | Some floats -> floats
           | None ->
+              let bytes = Array.length values * 8 in
+              if bytes >= 1 lsl 20 then Mem.admit_bytes bytes;
               let floats = Array.map float_of_int values in
               Lru.Identity_list.add cache ~bytes:(Array.length floats * 8) values floats;
               floats)
