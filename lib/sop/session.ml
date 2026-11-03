@@ -176,6 +176,11 @@ let create ~max_entries ~max_payload_bytes =
     in
     (* the planes its entries hold, charged one by one: what a report's walk must not claim again *)
     Mem.walk_table owner cache ~uncharged:(fun () -> false);
+    (* and its volatile slots: a component keeps the owner that charged it first, so a plane the
+       cache charged stays on [owner] while only a slot holds it, once the cache entry is dropped *)
+    let slots = Hashtbl.create 16 and volatile_owner = Lru.cache "sop.volatile" in
+    Mem.walk_table owner slots ~uncharged:(fun () -> false);
+    Mem.walk_table volatile_owner slots ~uncharged:(fun () -> false);
     Ok
       {
         clock = Unix.gettimeofday;
@@ -183,13 +188,13 @@ let create ~max_entries ~max_payload_bytes =
         max_payload_bytes;
         cache;
         payload;
-        volatile_owner = Lru.cache "sop.volatile";
+        volatile_owner;
         cooks = 0;
         hits = 0;
         misses = 0;
         evictions = 0;
         volatile = (fun _ -> false);
-        slots = Hashtbl.create 16;
+        slots;
         slot_residents = Hashtbl.create 16;
         slot_bytes = Hashtbl.create 16;
         volatile_hits = 0;

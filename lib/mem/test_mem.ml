@@ -272,6 +272,35 @@ let () =
   | Error { limit = 1; top = [ ("cook.session", 123) ]; _ } when !shed_calls = 1 -> ()
   | _ -> fail "admit over budget");
   Mem.reset ();
+  (* a drop whose bytes something else still holds frees nothing: its credit lets that boundary
+     stand, but neither the next boundary nor a cook's admission takes it for freed memory *)
+  (match Mem.phys_footprint () with
+  | None -> ()
+  | Some footprint ->
+      let held = Mem.cache "held.elsewhere" and big = 1 lsl 30 in
+      let dropped () =
+        Mem.reset ();
+        Mem.charge held big;
+        Mem.register_evictor held (fun () ->
+            Mem.bytes held > 0
+            && begin
+                 Mem.release held big;
+                 true
+               end);
+        Mem.set_budget ~source:Override (footprint / 2);
+        Mem.retreat ()
+      in
+      check (dropped () = Mem.Within) "the boundary that drops stands on its credit";
+      check (Mem.retreat () <> Mem.Within) "the next boundary reads what is still there";
+      ignore (dropped ());
+      check (Result.is_error (Mem.admit ())) "a cook is not admitted on credit";
+      ignore (dropped ());
+      check
+        (match Mem.admit_bytes (1 lsl 20) with
+        | () -> false
+        | exception Mem.Refused _ -> true)
+        "nor is an allocation");
+  Mem.reset ();
   (* every charge from four domains lands: the counters are atomic *)
   let shared = Mem.cache "shared" in
   let run () =

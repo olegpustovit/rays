@@ -156,7 +156,7 @@ let scenario = function
   | "recursive_signals" -> (sketch "recursive_signals", no_step)
   | "sea_128" | "sea_128_200m" -> (sea 128, no_step)
   | "sea_256" | "sea_256_100m" | "sea_256_vram" -> (sea 256, no_step)
-  | "sea_512_300m" -> (sea 512, no_step)
+  | "sea_592_300m" -> (sea 592, no_step)
   | "isogrid_small" -> (set_input "volume" "resolution" 12 (sketch "isogrid"), no_step)
   | "city_small" -> (set_input "city" "side" 24 (sketch "isogrid_city"), no_step)
   | "image_graph" -> (sketch "flow_image", no_step)

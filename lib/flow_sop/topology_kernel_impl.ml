@@ -62,6 +62,8 @@ let fans geometry component =
   let t = Rdk.Topology.View.view (G.topology geometry) in
   let p = Rdk.Point_index.View.view (Rdk.Point_index.create (G.topology geometry)) in
   let slots pick =
+    let bytes = Array.length p.point_vertices * 8 in
+    if bytes >= 1 lsl 20 then Mem.admit_bytes bytes;
     Ok
       (E.Int_array
          (Array.map
@@ -265,6 +267,8 @@ let mesh args =
               error "E_TOPOLOGY_KIND"
                 "Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline)."
             else
+              let bytes = (Array.length vertices + Array.length offsets + Array.length kinds) * 8 in
+              if bytes >= 1 lsl 20 then Mem.admit_bytes bytes;
               let kinds =
                 Array.map
                   (function 0 -> Rdk.Topology.Polygon | 1 -> Open_polyline | _ -> Closed_polyline)

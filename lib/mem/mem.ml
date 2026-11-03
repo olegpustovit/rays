@@ -363,16 +363,19 @@ let describe { used; limit; top } =
 
 let total_owner () = match top_owners 1 with [ top ] -> Some top | _ -> None
 
-(* What the footprint still shows of bytes already dropped: garbage until a major cycle passes, so
-   the next boundary and a cook do not count it again. *)
+(* What the footprint may still show of bytes already dropped: garbage until a major cycle passes, so
+   the boundary that dropped them does not evict the next cache for them. A drop frees nothing while
+   something else still holds the entry, so the credit is a guess: it ends at the next boundary, and
+   a cook's admission asks a collection before it believes it. *)
 let shed_bytes = Atomic.make 0
 let shed_cycle = Atomic.make 0
+let shed_epoch = Atomic.make 0
 let major_cycles () = (Gc.quick_stat ()).major_collections
 
 let credit () =
   let pending = Atomic.get shed_bytes in
   if pending = 0 then 0
-  else if major_cycles () >= Atomic.get shed_cycle + 2 then begin
+  else if major_cycles () >= Atomic.get shed_cycle + 2 || epoch () <> Atomic.get shed_epoch then begin
     Atomic.set shed_bytes 0;
     0
   end
@@ -380,7 +383,10 @@ let credit () =
 
 let note_shed n =
   if n > 0 then begin
-    if Atomic.get shed_bytes = 0 then Atomic.set shed_cycle (major_cycles ());
+    if credit () = 0 then begin
+      Atomic.set shed_cycle (major_cycles ());
+      Atomic.set shed_epoch (epoch ())
+    end;
     ignore (Atomic.fetch_and_add shed_bytes n)
   end
 
@@ -537,22 +543,21 @@ let admit ?(shed = fun () -> false) () =
   if bound <= 0 then Ok ()
   else
     let used () = measured ?device:None () - credit () in
-    if used () <= bound then Ok ()
+    (* credit alone never admits: a drop frees nothing while something else holds the entry. A
+       collection says what was freed; only where none may run yet does the credit stand *)
+    if measured ?device:None () <= bound then Ok ()
     else begin
       let before = attributed () in
       while before - attributed () < used () - bound && shed () do
         ()
       done;
       note_shed (max 0 (before - attributed ()));
-      if used () <= bound then Ok ()
+      ignore (collected_now ());
+      let used = used () in
+      if used <= bound then Ok ()
       else begin
-        ignore (collected_now ());
-        let used = used () in
-        if used <= bound then Ok ()
-        else begin
-          Atomic.set refused_under bound;
-          Error { used; limit = bound; top = top_owners 4 }
-        end
+        Atomic.set refused_under bound;
+        Error { used; limit = bound; top = top_owners 4 }
       end
     end
 
@@ -572,7 +577,7 @@ let admit_bytes ?(pool = Host) n =
   let bound = limit () in
   if bound > 0 then begin
     let used () = measured ?device:None () - credit () in
-    if used () + n > bound then begin
+    if measured ?device:None () + n > bound then begin
       ignore (collected_now ());
       let used = used () in
       if used + n > bound then begin

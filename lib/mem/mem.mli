@@ -115,8 +115,9 @@ val retreat :
     [usage] (default: the physical footprint, which on one memory pool includes the device) decides
     if anything goes. Over: caches, coldest and largest per rebuild cost first; then each of [later]
     in order, called until it answers [false] (plans nothing shows, undo past 16 entries); then
-    [Over]. Bytes already dropped are credited until the collector could have freed them, so a late
-    collection does not evict the next cache. Going [Over] runs at most one full collection per
+    [Over]. Bytes dropped are credited until the collector could have freed them, so a late collection
+    does not evict the next cache; but a drop frees nothing while another holder keeps the entry, so
+    the credit lasts only to the next boundary, which reads what is still there. Going [Over] runs at most one full collection per
     crossing, then latches until usage is back under the limit: never a stall per frame.
 
     With a device budget (see {!set_device_budget}) the footprint is the host pool and the backend's bytes
@@ -128,8 +129,9 @@ val retreat :
 
 val admit : ?shed:(unit -> bool) -> unit -> (unit, overdraft) result
 (** A cook about to run, on its own domain: [Error] when usage is over the limit after [shed] (the
-    caller's own cache, which it alone may touch) and at most one collection per crossing. Reads the
-    footprint: one syscall, for work that takes far longer. *)
+    caller's own cache, which it alone may touch) and at most one collection per crossing. Over the
+    limit, what was dropped counts as freed only once that collection says so, or while none may run
+    yet. Reads the footprint: one syscall, for work that takes far longer. *)
 
 exception Refused of overdraft
 (** A large allocation that would pass the limit, refused by {!admit_bytes}. Not a {!Diagnostic}: no
@@ -138,7 +140,7 @@ exception Refused of overdraft
 
 val admit_bytes : ?pool:pool -> int -> unit
 (** Called before a large allocation, from any domain; no owner sheds here, the cook's boundary did.
-    One footprint read, at most one collection per crossing. [~pool:Device] under a device budget
+    One footprint read, at most one collection per crossing; credit as for {!admit}. [~pool:Device] under a device budget
     compares the ledger's device bytes plus [n] with it instead.
     @raise Refused when usage plus [n] passes the limit. *)
 

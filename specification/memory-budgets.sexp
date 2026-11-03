@@ -37,8 +37,8 @@
   (scenario sea_256 (route device) (frames 30) (max_payload_readback_bytes 0) (max.editor.document 3000000))
   ; under what it needs: the real frame path refuses, typed, and holds the last good frame
   ; the limit holds inside a node: a kernel's buffer is admitted before it is made, and a refusal stops the cook
-  ; rather than falling to the CPU (route). The sketch needs about 380 MB here
-  (scenario sea_512_300m (route device) (ceiling 300000000) (frames 20) (refuses true) (max_peak_bytes 315000000) (win.max_peak_bytes 650000000))
+  ; rather than falling to the CPU (route). Unlimited, the sketch peaks at 366-370 MB here on the Mac
+  (scenario sea_592_300m (route device) (ceiling 300000000) (frames 20) (refuses true) (max_peak_bytes 315000000) (win.max_peak_bytes 650000000))
   (scenario sea_256_100m (route device) (ceiling 100000000) (frames 30) (refuses true) (max_peak_bytes 155000000) (win.max_peak_bytes 580000000))
   ; a discrete device's own limit (VRAM), under what the sketch needs: the same typed refusal, the footprint untouched
   (scenario sea_256_vram (windows_only true) (route device) (device_ceiling 20000000) (frames 30) (refuses true)))
