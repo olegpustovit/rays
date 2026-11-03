@@ -175,6 +175,10 @@ let retained_generations () =
   let string_ok = function Ok value -> value | Error message -> failwith message in
   Fun.protect ~finally:(fun () -> Gpu.close gpu) (fun () ->
       Gpu.with_backend ~fast:true gpu (fun config ->
+          (* The contract is the lifetime of the resident mesh with the table's readback price, which keeps this
+             attribute write on the CPU. A discrete card's measured price (0.7 ns a float against the table's
+             7.9) makes the device plus a readback cheaper for it (1.0 ms against 4.3 ms), a legitimate payload read. *)
+          let config = { config with Flow_ir.Gpu.readback_per_float = None } in
           let wave = List.fold_left (fun x _ -> "(sin " ^ x ^ ")") "(+ (float i) t)"
               (List.init 16 Fun.id) in
           let displacement time =
