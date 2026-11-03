@@ -406,14 +406,23 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
   let retained_words = Array.make 3 0 in
   let cache_snapshots = Array.init 3 (fun _ -> Array.make 16 0) in
   let began = Unix.gettimeofday () in
+  (* Every frame time the flips make, held weakly. The editor keeps some of them (the UI's input, the
+     last autosave check, the fps sample, a rest frame), and whether two keepers share one box depends on
+     the frames they were sampled on. A snapshot subtracts the boxes still alive, each once, so their
+     sharing cannot move the workload's words. Sized for three frames a measured edit. *)
+  let clocks = Weak.create (if flips = 0 then 0 else 3 * (1 + warmup + flips)) and clocks_made = ref 0 in
   let facts count =
     let value = frame count in
     if flips = 0 then value
-    else
+    else begin
       (* These are interactive edits, taking about 0.1 s each. Recovery and
          other timed services must see that time, rather than two fictitious
          60-Hz frames per edit (which left their first use after warmup). *)
-      { value with input = { value.input with t = Unix.gettimeofday () -. began } }
+      let input = { value.input with t = Unix.gettimeofday () -. began } in
+      Weak.set clocks !clocks_made (Some (Obj.repr input.t));
+      incr clocks_made;
+      { value with input }
+    end
   in
   let sample_index = ref (-1) in
   let expected () =
@@ -586,18 +595,12 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
         let ids = Flow_sop.Lower.Path_map.cardinal core.doc.workspace.lowered.compiled_ids in
         let preparations = Rays_editor__.Cook.Prepared_cache.length core.cook.prepared_cache in
         let preparation_bytes = Rays_editor__.Cook.Prepared_cache.bytes core.cook.prepared_cache in
-        (* Timers sometimes share the current frame's boxed float. Count their
-           actual distinct blocks, so merely sampling FPS/recovery on different
-           frames cannot look like retained workload data. *)
-        let timers =
-          [
-            Obj.repr value.state_checked;
-            Obj.repr core.status_fps_at;
-            Obj.repr (Pxui.Ui.input core.ui).input.t;
-          ]
-        in
-        let timer_words = Obj.reachable_words (Obj.repr timers) - 9 in
-        let workload_words = gc.live_words - timer_words in
+        (* a boxed float is a header and one word *)
+        let clock_words = ref 0 in
+        for i = 0 to !clocks_made - 1 do
+          if Weak.check clocks i then clock_words := !clock_words + 2
+        done;
+        let workload_words = gc.live_words - !clock_words in
         retained_words.(snapshot) <- workload_words;
         Array.blit
           [|
@@ -674,13 +677,13 @@ let benchmark ?domains ?(warmup = if Sys.win32 then 64 else 8) ?(cycles = false)
             ]
         end;
         Printf.printf
-          "retention %s live_words=%d workload_words=%d timer_words=%d heap_words=%d history=%d \
+          "retention %s live_words=%d workload_words=%d clock_words=%d heap_words=%d history=%d \
            entries=%d \
            payload_bytes=%d compiled=%d lanes=%d drawn=%d converted=%d ids=%d pipelines=%d held=%d \
            preparations=%d preparation_bytes=%d prepare_calls=%d \
            renderer_pipelines=%d registrations=%d flow_buffers_created=%d live_handles=%d\n\
            %!"
-          name gc.live_words workload_words timer_words
+          name gc.live_words workload_words !clock_words
           gc.heap_words history stats.retained_entries stats.retained_payload_bytes compiled lanes
           drawn converted ids host.pipeline_compilations host.held_buffers preparations
           preparation_bytes !prepare_calls
