@@ -61,7 +61,6 @@
   rdk_test_support
   str
   unix
-  dynlink
   parallel))
 
 (rule

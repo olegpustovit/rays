@@ -30,3 +30,7 @@ val for_ : ?chunk_size:int -> start:int -> finish:int -> (int -> unit) -> unit
 
 val both : (unit -> 'a) -> (unit -> 'b) -> 'a * 'b
 (** Evaluate two sufficiently expensive computations in parallel. *)
+
+val qualification_pools : unit -> Obj.t
+(** The pool table, for the isogrid retention qualification to count the scheduler's empty task
+    slots. Read-only; nothing else uses it. *)
