@@ -519,6 +519,9 @@ module Measure = struct
     Fun.protect
       ~finally:(fun () -> ignore (Rays.Canvas.destroy canvas))
       (fun () ->
+        (* its renderer and pipelines before the document opens, as a window makes them at startup:
+           a canvas makes them at its first render, which would land them on the first cook's peak *)
+        let* () = Rays.Canvas.render ~density:1 canvas Rays.Scene.empty in
         (* a run that states its route bypasses the clock: measured placement can move a small
            mesh's writes between runs. Set before the document opens, which keeps the policy. *)
         let gpu_owner = Flow_native.Workspace_gpu.create () in
