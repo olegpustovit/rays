@@ -16,5 +16,11 @@ val relative : t -> bool
     absolute pointer differences. *)
 
 val add_motion : t -> dx:float -> dy:float -> unit
+
+val set_unit : t -> float -> unit
+(** Window coordinates per logical point; SDL positions and motion are divided by it as they are
+    pushed (1 on macOS, the monitor's scaling on Windows). A non-positive value is ignored. *)
+
+val unit : t -> float
 val set_extent : t -> logical_width:int -> logical_height:int -> (unit, string) result
 val snapshot : t -> snapshot

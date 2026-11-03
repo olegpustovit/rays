@@ -148,6 +148,12 @@ module Hint = struct
     on_main operation (fun () ->
         Private_raw.clear_error ();
         if Private_raw.set_control_click_right_click enabled then Ok () else sdl_error operation)
+
+  let mouse_relative_system_scale enabled =
+    let operation = "SDL3.Hint.mouse_relative_system_scale" in
+    on_main operation (fun () ->
+        Private_raw.clear_error ();
+        if Private_raw.set_mouse_relative_system_scale enabled then Ok () else sdl_error operation)
 end
 
 module Window = struct
@@ -214,6 +220,7 @@ module Window = struct
         if Float.is_finite scale && scale > 0. then Ok scale else sdl_error operation)
 
   let pixel_density = positive_scale "SDL3.Window.pixel_density" Private_raw.window_pixel_density
+  let display_scale = positive_scale "SDL3.Window.display_scale" Private_raw.window_display_scale
 
   let position value =
     live "SDL3.Window.position" value (fun raw ->

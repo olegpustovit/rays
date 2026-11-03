@@ -59,6 +59,9 @@ end
 module Hint : sig
   val control_click_is_right_click : bool -> (unit, error) result
   (** macOS: let SDL turn a Control-click into a right click. *)
+
+  val mouse_relative_system_scale : bool -> (unit, error) result
+  (** Relative motion with the system's pointer speed and acceleration (Windows reports raw counts). *)
 end
 
 module Window : sig
@@ -81,6 +84,10 @@ module Window : sig
   val size : t -> (int * int, error) result
   val size_in_pixels : t -> (int * int, error) result
   val pixel_density : t -> (float, error) result
+
+  val display_scale : t -> (float, error) result
+  (** The display's content scale. Over {!pixel_density} it is the window coordinates per logical
+      point: 1 on macOS, the monitor's scaling (1.5 at 150%) on Windows, where coordinates are pixels. *)
   val position : t -> (int * int, error) result
   val title : t -> (string, error) result
   val center : t -> (unit, error) result

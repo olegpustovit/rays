@@ -85,7 +85,21 @@ let translate : Sdl3.Event.t -> Runtime_input.event option = function
   | Dialog { id; outcome = Cancelled } -> Some (File_dialog { id; result = Ok [] })
   | Dialog { id; outcome = Failed message } -> Some (File_dialog { id; result = Error message })
 
+(* SDL's positions, motion and window sizes are window coordinates; Rays reads logical points.
+   Wheel notches and trackpad deltas are not positions and pass unchanged. *)
+let in_points unit (event : Sdl3.Event.t) : Sdl3.Event.t =
+  if unit = 1. then event
+  else
+    let p v = v /. unit and size v = max 1 (Float.to_int (Float.round (float v /. unit))) in
+    match event with
+    | Mouse_motion { x; y; dx; dy } -> Mouse_motion { x = p x; y = p y; dx = p dx; dy = p dy }
+    | Mouse_button m -> Mouse_button { m with x = p m.x; y = p m.y }
+    | Drop d -> Drop { d with x = p d.x; y = p d.y }
+    | Window (Resized (w, h)) when positive w h -> Window (Resized (size w, size h))
+    | event -> event
+
 let push value (event : Sdl3.Event.t) =
+  let event = in_points (Runtime_input.unit value) event in
   match event with
   | Mouse_motion { x; y; dx; dy } ->
       Runtime_input.add_motion value ~dx ~dy;

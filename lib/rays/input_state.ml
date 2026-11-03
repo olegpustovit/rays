@@ -61,6 +61,7 @@ let configure state ~logical_width ~logical_height =
   | Error _ as error -> error
 
 let set_relative state enabled = Runtime_input.set_relative state.source enabled
+let set_unit state unit = Runtime_input.set_unit state.source unit
 
 let set_visible state visible =
   ignore (Runtime_input.push state.source (Input.Visibility_changed visible))

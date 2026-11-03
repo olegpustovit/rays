@@ -203,6 +203,14 @@ CAMLprim value caml_sdl3_window_pixel_density(value raw)
   CAMLreturn(caml_copy_double(SDL_GetWindowPixelDensity(window_of_value(raw))));
 }
 
+/* Content scale of the window's display: 2 on a Retina Mac (with density 2), 1.5 on a Windows
+   monitor at 150% (with density 1, where window coordinates are pixels). */
+CAMLprim value caml_sdl3_window_display_scale(value raw)
+{
+  CAMLparam1(raw);
+  CAMLreturn(caml_copy_double(SDL_GetWindowDisplayScale(window_of_value(raw))));
+}
+
 CAMLprim value caml_sdl3_window_position(value raw)
 {
   int x = 0;
@@ -287,6 +295,13 @@ CAMLprim value caml_sdl3_set_control_click_right_click(value enabled)
 {
   return Val_bool(SDL_SetHint(SDL_HINT_MAC_CTRL_CLICK_EMULATE_RIGHT_CLICK,
       Bool_val(enabled) ? "1" : "0"));
+}
+
+/* Relative motion with the system's pointer speed and acceleration: Windows otherwise reports raw
+   device counts in relative mode, where macOS already applies them. */
+CAMLprim value caml_sdl3_set_mouse_relative_system_scale(value enabled)
+{
+  return Val_bool(SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, Bool_val(enabled) ? "1" : "0"));
 }
 
 CAMLprim value caml_sdl3_clipboard_set_text(value text)
@@ -614,6 +629,15 @@ static value window_change_of_event(const SDL_Event *event)
     Store_field(change, 0, Val_int(event->window.data1));
     Store_field(change, 1, Val_int(event->window.data2));
     CAMLreturn(change);
+  case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: {
+    /* a new monitor's scale with the same pixels still changes the logical size */
+    int width = 0, height = 0;
+    SDL_GetWindowSizeInPixels(SDL_GetWindowFromEvent(event), &width, &height);
+    change = caml_alloc(2, WINDOW_PIXEL_SIZE_CHANGED);
+    Store_field(change, 0, Val_int(width));
+    Store_field(change, 1, Val_int(height));
+    CAMLreturn(change);
+  }
   default: break;
   }
   CAMLreturn(Val_unit); /* unreachable: the caller filters the type first */
@@ -647,6 +671,7 @@ static bool translate_event(const SDL_Event *event, value *out)
   case SDL_EVENT_WINDOW_MINIMIZED: case SDL_EVENT_WINDOW_RESTORED:
   case SDL_EVENT_WINDOW_OCCLUDED: case SDL_EVENT_WINDOW_FOCUS_GAINED:
   case SDL_EVENT_WINDOW_FOCUS_LOST: case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+  case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
   case SDL_EVENT_WINDOW_RESIZED: case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
     payload = window_change_of_event(event);
     ALLOC_EVENT(EVENT_WINDOW, 1);

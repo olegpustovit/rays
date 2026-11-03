@@ -48,6 +48,10 @@ val create_offscreen :
 
 val resize : t -> width:int -> height:int -> (unit, Ogpu.Error.t) result
 val frame_facts : t -> frame_facts
+
+val window_unit_of : t -> float
+(** Window coordinates per logical point: 1 on macOS and offscreen, the monitor's scaling (1.5 at
+    150%) on Windows, whose SDL events and sizes are in pixels. Input divides by it. *)
 val map_logical_rect : frame_facts -> int * int * int * int -> int * int * int * int
 
 val presentation_facts : t -> (presentation_facts, Ogpu.Error.t) result

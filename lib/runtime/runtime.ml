@@ -43,6 +43,8 @@ type window = {
   mutable cursor_shape : cursor_shape option;
   mutable text_input : bool;
   changed : Change_flag.t;
+  mutable unit : float;
+      (** window coordinates per logical point: SDL's display scale over its pixel density *)
 }
 
 (* One render target: a presenting window, or ([window = None]) an owned
@@ -62,9 +64,24 @@ let sdl op = function Ok x -> Ok x | Error e -> error op (Format.asprintf "%a" S
 let clipboard_set_text text = sdl "Runtime.clipboard_set_text" (Sdl3.Clipboard.set_text text)
 let clipboard_get_text () = sdl "Runtime.clipboard_get_text" (Sdl3.Clipboard.get_text ())
 
-let facts window =
+(* macOS reports window coordinates in points (display scale 2 over density 2: one coordinate a
+   point); Windows reports pixels with density 1 and the monitor's scaling as the display scale
+   (1.5 at 150%). Rays lays out in points, so window coordinates are divided by that ratio here
+   and multiplied back where a size or a rect goes to SDL. *)
+let window_unit window =
+  match (Sdl3.Window.display_scale window, Sdl3.Window.pixel_density window) with
+  | Ok scale, Ok density ->
+      let unit = scale /. density in
+      Ok (if Float.abs (unit -. 1.) < 1e-3 then 1. else unit)
+  | Error e, _ | _, Error e -> sdl "Runtime.window_unit" (Error e)
+
+let to_points unit size = max 1 (Float.to_int (Float.round (float size /. unit)))
+let to_window unit size = max 1 (Float.to_int (Float.round (float size *. unit)))
+
+let facts_in unit window =
   match (Sdl3.Window.size window, Sdl3.Window.size_in_pixels window) with
   | Ok (lw, lh), Ok (dw, dh) when lw > 0 && lh > 0 && dw > 0 && dh > 0 ->
+      let lw = to_points unit lw and lh = to_points unit lh in
       Ok
         {
           logical_width = lw;
@@ -77,6 +94,8 @@ let facts window =
   | Error e, _ -> sdl "Runtime.facts" (Error e)
   | _, Error e -> sdl "Runtime.facts" (Error e)
   | _ -> error "Runtime.facts" "window dimensions are invalid"
+
+let facts window = Result.bind (window_unit window) (fun unit -> facts_in unit window)
 
 (* Every step is checked: the first failure is the result. *)
 let reveal window =
@@ -115,12 +134,20 @@ let create ?(vsync = true) ?(hidden = true) ?(high_density = true) ?(title = "Ra
       in
       (* SDL itself turns a Control-click into the secondary click. *)
       let* () = sdl op (Sdl3.Hint.control_click_is_right_click true) in
+      let* () = if Sys.win32 then sdl op (Sdl3.Hint.mouse_relative_system_scale true) else Ok () in
       let flags : Sdl3.Window.flag list =
         (Sdl3.Window.Native_view :: (if high_density then [ Sdl3.Window.High_pixel_density ] else []))
         @ if hidden then [ Sdl3.Window.Hidden ] else []
       in
       let* window =
         acquire (Sdl3.Window.create ~title ~width ~height ~flags ()) Sdl3.Window.destroy
+      in
+      let* unit = window_unit window in
+      let* () =
+        if unit = 1. then Ok ()
+        else
+          sdl op
+            (Sdl3.Window.set_size window ~width:(to_window unit width) ~height:(to_window unit height))
       in
       let* () = if hidden then Ok () else sdl op (reveal window) in
       let* view = acquire (Sdl3.Native_view.create window) Sdl3.Native_view.destroy in
@@ -140,6 +167,7 @@ let create ?(vsync = true) ?(hidden = true) ?(high_density = true) ?(title = "Ra
                 cursor_shape = None;
                 text_input = false;
                 changed = Change_flag.create ();
+                unit;
               };
           facts;
           presentation = None;
@@ -194,7 +222,12 @@ let sync_facts (value : t) =
   match value.window with
   | None -> Ok ()
   | Some window -> (
-      match Change_flag.refresh window.changed (fun () -> facts window.handle) with
+      match
+        Change_flag.refresh window.changed (fun () ->
+            Result.bind (window_unit window.handle) (fun unit ->
+                window.unit <- unit;
+                facts_in unit window.handle))
+      with
       | None -> Ok ()
       | Some (Error _ as error) -> error
       | Some (Ok live)
@@ -214,7 +247,11 @@ let resize (value : t) ~width ~height =
   else
     match value.window with
     | Some window -> (
-        match sdl op (Sdl3.Window.set_size window.handle ~width ~height) with
+        match
+          sdl op
+            (Sdl3.Window.set_size window.handle ~width:(to_window window.unit width)
+               ~height:(to_window window.unit height))
+        with
         | Error _ as e -> e
         | Ok () ->
             value.presentation <- None;
@@ -225,6 +262,7 @@ let resize (value : t) ~width ~height =
           (offscreen_facts ~logical_width:width ~logical_height:height ~width ~height)
 
 let frame_facts (value : t) = value.facts
+let window_unit_of (value : t) = match value.window with Some w -> w.unit | None -> 1.
 
 let live_window operation (value : t) callback =
   if value.dead then stale operation
@@ -245,10 +283,11 @@ let query_presentation (value : t) =
           drawable_height = facts.drawable_height;
           pixel_density = facts.pixel_scale_x;
         }
-  | Some { handle = window; _ } -> (
+  | Some { handle = window; unit; _ } -> (
       let op = "Runtime.presentation_facts" in
       match sdl op (Sdl3.Window.pixel_density window) with
-      | Ok pixel_density ->
+      | Ok density ->
+          let pixel_density = density *. unit in
           let facts = value.facts in
           Ok
             {
@@ -354,8 +393,11 @@ let set_text_input value area =
               window.text_input <- true;
               Ok ()
           in
+          let scale v = Float.to_int (Float.round (float v *. window.unit)) in
           sdl operation
-            (Sdl3.Text_input.set_area window.handle { Sdl3.x; y; width; height } ~cursor))
+            (Sdl3.Text_input.set_area window.handle
+               { Sdl3.x = scale x; y = scale y; width = scale width; height = scale height }
+               ~cursor:(scale cursor)))
 
 let show (value : t) =
   live_window "Runtime.show" value (fun window ->

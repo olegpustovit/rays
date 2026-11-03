@@ -218,5 +218,31 @@ let run () =
   then failwith "input queue is not bounded";
   if (Source.snapshot bounded).pointer <> (100_000., 0.) then
     failwith "events dropped from a full queue did not update the pointer";
+  (* Windows at 150%: SDL reports pixels; positions, motion, drops and window sizes reach Rays in
+     points, and wheel notches are not positions. *)
+  let scaled = get (Source.create ~max_events:16 ~logical_width:1 ~logical_height:1) in
+  Source.set_unit scaled 1.5;
+  Source.set_relative scaled true;
+  List.iter
+    (fun event -> get (Runtime_input_sdl3.push scaled event))
+    [
+      Sdl3.Event.Mouse_motion { x = 300.; y = 150.; dx = 3.; dy = -1.5 };
+      Mouse_button { button = Left; down = true; x = 30.; y = 45. };
+      Drop { change = Drop_position; x = 15.; y = 3. };
+      window (Resized (1500, 900));
+      wheel ~x:0. ~y:1. Normal;
+    ];
+  if
+    Source.drain scaled
+    <> [
+         Input.Pointer_moved (200., 100.);
+         Pointer_pressed (LeftButton, (20., 30.));
+         File_drag_moved (10., 2.);
+         Resized (1000, 600);
+         Scrolled (0., 1.);
+       ]
+  then failwith "window coordinates at a 1.5 unit did not reach Rays in points";
+  if (Source.snapshot scaled).mouse_delta <> (2., -1.) then
+    failwith "relative motion at a 1.5 unit is not in points";
   print_endline
-    "runtime input: native trace33, Retina, reset, capture, window, pinch, drop, bounded"
+    "runtime input: native trace33, Retina, reset, capture, window, pinch, drop, bounded, window unit"

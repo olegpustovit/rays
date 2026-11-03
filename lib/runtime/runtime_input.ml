@@ -17,6 +17,7 @@ type t = {
   (* Relative (captured) pointer mode: motion deltas come from the device's
      relative motion, since absolute positions stop at the window edge. *)
   mutable relative : bool;
+  mutable unit : float;  (** window coordinates per logical point (Runtime.window_unit_of) *)
 }
 
 let create ~max_events ~logical_width ~logical_height =
@@ -31,6 +32,7 @@ let create ~max_events ~logical_width ~logical_height =
         mouse_delta = { px = 0.; py = 0. };
         visible = true;
         relative = false;
+        unit = 1.;
       }
 
 let apply value = function
@@ -76,6 +78,8 @@ let drain value =
 
 let set_relative value relative = value.relative <- relative
 let relative value = value.relative
+let set_unit value unit = if Float.is_finite unit && unit > 0. then value.unit <- unit
+let unit value = value.unit
 
 let add_motion value ~dx ~dy =
   if value.relative then begin

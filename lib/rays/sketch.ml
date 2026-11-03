@@ -500,6 +500,7 @@ let run_state_internal ?(config = default_config) ?max_frames ?crash_dir ?(profi
               let shown = ref None and quiet = ref 0 in
               let one_frame () =
                 Time.update time;
+                Input_state.set_unit input (Runtime.window_unit_of runtime);
                 let polled =
                   match Input_state.poll input with
                   | Ok polled -> polled
