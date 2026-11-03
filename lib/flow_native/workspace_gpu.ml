@@ -173,7 +173,7 @@ let measure ?inputs:prepared t ~fast packed ~count =
             Result.to_option
               (Result.map
                  (fun (msl : Flow_shader.Emit.kernel) -> msl.entry)
-                 (Flow_shader.Emit.kernel ~fast packed))
+                 (Flow_shader.Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast packed))
           in
           Entries.add t.entries (code, fast) entry;
           entry

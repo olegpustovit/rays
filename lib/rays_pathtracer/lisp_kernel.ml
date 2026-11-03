@@ -312,7 +312,7 @@ let front t name =
   let* msl =
     Result.map_error
       (fun d -> name ^ ": " ^ Diagnostic.to_string d)
-      (Flow_shader.Emit.kernel ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion
+      (Flow_shader.Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion
          ?curves:t.facts.curves ~spheres:t.facts.spheres template)
   in
   let* base =
@@ -500,7 +500,7 @@ let gather_kernel ~lease ~pipelines =
     Option.to_result ~none:"path tracer gather has no device template"
       (Packed.compile_template residual (E.Residual.residual_view residual).term)
   in
-  let* msl = Result.map_error Diagnostic.to_string (Flow_shader.Emit.kernel ~fast:true ~uint32_scalars:true ~uint32_inputs:[ 0 ] template)
+  let* msl = Result.map_error Diagnostic.to_string (Flow_shader.Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true ~uint32_scalars:true ~uint32_inputs:[ 0 ] template)
   in
   let* base =
     Result.map_error Diagnostic.to_string

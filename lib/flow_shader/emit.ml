@@ -341,9 +341,12 @@ let settled ~vulkan msl =
     spirv = Lazy.from_val (if vulkan then Lazy.force msl.spirv else Lazy.force no_spirv);
   }
 
-let rec kernel ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs
+let rec kernel ?(spirv = true) ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs
     ?uint32_inputs ?uint32_tables program =
+  (* the thunk keeps the program alive until it is forced: a Metal host must not hold one *)
   let spirv =
+    if not spirv then no_spirv
+    else
     lazy
       (Result.map
          (fun (k : Spirv.t) -> (k.bytes, k.entry, k.interface))

@@ -342,7 +342,7 @@ let standard_backend t : G.backend =
         else
           (* a range source ([Packed.Host.index_sources]) is the host's index buffer, never uploaded *)
           let index = Flow_ir.Packed.Host.index_sources packed in
-          Result.bind (Emit.kernel ~fast packed) (fun msl ->
+          Result.bind (Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast packed) (fun msl ->
               Result.map
                 (fun _compiled ->
                   (* Each prepared producer owns an output generation. Sharing only its
@@ -678,7 +678,7 @@ let resident_scope ?(uint32 = false) ~fast t =
             Result.to_option
               (Result.map
                  (fun msl -> Run.create t.gpu t.pipelines msl)
-                 (if not uint32 then Emit.kernel ~fast:true packed
+                 (if not uint32 then Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true packed
                   else
                     let inputs = ref [] and tables = ref [] in
                     Array.iter
@@ -688,7 +688,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                         | Array_prepare (u, Flow.Ty.Array Flow.Ty.Int) -> tables := u :: !tables
                         | _ -> ())
                       packed.code;
-                    Emit.kernel ~fast:true ~uint32_scalars:true
+                    Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true ~uint32_scalars:true
                       ~uint32_inputs:(List.sort_uniq Int.compare !inputs)
                       ~uint32_tables:(List.sort_uniq Int.compare !tables)
                       ~uint32_outputs:(if ty = Flow.Ty.Array Flow.Ty.Int then [ 0 ] else [])
@@ -1315,7 +1315,7 @@ let resident_scope ?(uint32 = false) ~fast t =
                             incr t.created;
                             site.shown <- Some runner;
                             runner)
-                          (Emit.kernel ~fast:true packed)
+                          (Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true packed)
                   in
                   let input i =
                     match (bound values.arrays.(i), shapes.(i)) with

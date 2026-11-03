@@ -30,6 +30,7 @@ val settled : vulkan:bool -> kernel -> kernel
 val names : string list
 
 val kernel :
+  ?spirv:bool ->
   ?fast:bool ->
   ?instanced:bool ->
   ?motion:bool ->
@@ -41,6 +42,8 @@ val kernel :
   ?uint32_tables:int list ->
   Flow_ir.Packed.t ->
   (kernel, Diagnostic.t) result
+(** [spirv] (default true) also keeps the means to print the SPIR-V form, which holds the program until
+    it is printed: a host that will never ask, Metal's, passes false. *)
 (** [uint32_outputs] selects scalar integer outputs to store as exact uint32 words, with range
     status validation. [uint32_inputs] selects scalar source buffers and [uint32_tables] selects
     uniform-table indices to read as raw uint32. Those require explicit device bindings. Other
