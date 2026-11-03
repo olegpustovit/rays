@@ -32,9 +32,10 @@ let run gpu config workspace recipe =
   Fun.protect
     ~finally:(fun () -> Sop.Session.close session)
     (fun () ->
-      (* Ordinary measured policy, as the viewport's display root is cooked (no host reader): each
-         route runs until the shared comparison has numbers, so cook again until the whole mesh is
-         resident. *)
+      (* The contract is residency and the display binding, so the test states the Qualification
+         policy (always the device): the measured policy picks the CPU when it times cheaper, as on a
+         discrete card for a small mesh, and flow_ir tests that placement. Cooked as the viewport's
+         display root is (no host reader), cooking until the whole mesh is resident. *)
       let cook () =
         let output =
           ok
@@ -337,7 +338,9 @@ let () =
   Fun.protect
     ~finally:(fun () -> Gpu.close gpu)
     (fun () ->
-      Gpu.with_backend ~fast:true gpu (fun config -> List.iter (run gpu config workspace)
+      Gpu.with_backend ~fast:true gpu (fun config ->
+          let config = { config with policy = Flow_ir.Gpu.Qualification } in
+          List.iter (run gpu config workspace)
             (if Array.mem "--all-recipes" Sys.argv then [ 0; 1; 2; 3; 4; 5; 6; 7 ] else [ 0; 3 ])));
   assert (Ogpu.Impl.live_handles () = baseline);
   assert (
