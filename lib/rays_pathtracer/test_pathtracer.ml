@@ -279,6 +279,26 @@ let run ?(frame = fun _ _ -> ()) () =
       assert (run () = pinhole);
       P.destroy tracer;
       check_instance_residency floor;
+      (* A 64-sample cap reached at 960x540: every frame completes with no device loss (validation
+         is fatal), the film changed from its first frame and settled toward its mean. *)
+      let tracer = get (P.create ~spp:16 ~width:960 ~height:540 scene) in
+      let distance a b =
+        let sum = ref 0 in
+        Bytes.iteri (fun i v -> sum := !sum + abs (Char.code v - Char.code (Bytes.get b i))) a;
+        !sum
+      in
+      let frame () = get (P.render tracer camera); get (P.flush tracer) in
+      frame ();
+      let first = pixels tracer in
+      while P.samples tracer < 48 do frame () done;
+      let near = pixels tracer in
+      while P.samples tracer < 64 do frame () done;
+      assert (P.samples tracer = 64);
+      let last = pixels tracer in
+      assert (distance first last > 0);
+      assert (distance near last * 2 < distance first last);
+      P.destroy tracer;
+      print_endline "pathtracer: 64 samples accumulate at 960x540";
       print_endline "pathtracer: deterministic lit render ok";
       (* Furnace: an albedo-0.8 floor under a uniform white dome reflects
          exactly 0.8 along every path, which the ACES/2.2 resolve maps to 224.
