@@ -22,18 +22,36 @@ let recommended_domains () = max 1 (Domain.recommended_domain_count ())
 
 (* A minor collection stops every domain, and on Windows each stop wakes every idle domain through the kernel (a
    stop-the-world leader measured 1.9 ms at 8 domains, 10 to 16 ms at 24). bench_isogrid at 24 domains ran 16838 minor
-   collections in 64 flips (46 s wall) with the 256k-word default and 966 (31 s) with 8M words. Gc.set sizes only the
-   calling domain and a spawned domain starts at the default, so each domain sets its own once: the main domain at
-   program start (64 MB, where the serial evaluator allocates), a worker when it starts (8 MB). Windows only:
-   the Mac keeps the runtime default until it is measured there. *)
+   collections in 64 flips (46 s wall) with the 256k-word default and 966 (31 s) with 8M words. But a fixed size
+   commits it whether the domain works or not: 64 MB for the main domain and 8 MB for each of 23 workers put an idle
+   editor 110 MB over its footprint budget. So the size follows what the domain allocates. Gc.set sizes only the
+   calling domain, and a GC alarm is a finaliser run by the domain that made it, so each domain keeps its own: at the
+   end of every major cycle it doubles its minor heap (up to 64 MB on the main domain, where the serial evaluator
+   allocates, 8 MB on a worker) when it alone filled it 8 times since the last one, and halves it back towards the
+   default when it filled it less than once. A parked worker runs no alarm and keeps its size until it works again.
+   Windows only: the Mac keeps the runtime default until it is measured there. *)
 let heap_ready = Domain.DLS.new_key (fun () -> false)
+
+let adapt_heap ~smallest ~largest =
+  let last = ref (Gc.minor_words ()) in
+  ignore
+    (Gc.create_alarm (fun () ->
+         let now = Gc.minor_words () in
+         let size = (Gc.get ()).minor_heap_size in
+         let fills = (now -. !last) /. float size in
+         last := now;
+         let wanted =
+           if fills >= 8. then min largest (2 * size)
+           else if fills < 1. then max smallest (size / 2)
+           else size
+         in
+         if wanted <> size then Gc.set { (Gc.get ()) with minor_heap_size = wanted }))
 
 let ensure_heap () =
   if Sys.win32 && not (Domain.DLS.get heap_ready) then begin
     Domain.DLS.set heap_ready true;
-    let words = if Domain.is_main_domain () then 8 * 1024 * 1024 else 1024 * 1024 in
-    let gc = Gc.get () in
-    Gc.set { gc with minor_heap_size = max gc.minor_heap_size words }
+    let largest = if Domain.is_main_domain () then 8 * 1024 * 1024 else 1024 * 1024 in
+    adapt_heap ~smallest:(Gc.get ()).minor_heap_size ~largest
   end
 
 let () = ensure_heap ()

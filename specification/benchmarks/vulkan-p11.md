@@ -161,3 +161,12 @@ max, and the gate (all recipes, max under 150 ms):
 Recipe 0 is 16 to 20 % faster on both machines. On Windows its evaluation inside the editor process takes 110 to 120 ms where
 the same `Flow_sop.Lower.of_checked` call takes 71 ms in a small process (main-domain GC about 27 ms of it: 4 to 5 minor
 collections promoting the walker's live stack, 1.35 ms each, plus their stops), so the gate has no headroom there yet.
+
+## Adaptive minor heaps (Windows, 2026-11-03)
+
+`Parallel` sized every domain's minor heap once (64 MB main, 8 MB per worker), committed whether the domain worked
+or not: idle footprint 491 MB against the 410 MB budget, eight `@tools/mem` scenarios over. Each domain now starts at
+the runtime default and a per-domain GC alarm doubles its heap (to the same caps) when it filled it 8 times in a
+major cycle and halves it when it filled it less than once. Idle 491 to 379 MB, `@tools/mem` green twice.
+`bench_isogrid --bench 64`, three runs each: fixed 13.3-13.4 s (minor collections 381-393), adaptive 13.2-14.9 s
+(749-950). Jumping straight to the cap gave 13.5-13.7 s (751-798) and put recursive_signals over its footprint.
