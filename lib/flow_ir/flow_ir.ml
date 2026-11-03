@@ -475,6 +475,7 @@ let qualify_workspace ?record ?inputs ?observe ?(replay = false) ?(verify = fals
       ((term.form, owner, W.Paths.union old producers)
       :: List.filter (fun e -> not (same e)) entries)
   in
+  let called = Hashtbl.create 64 in
   let rec walk collect owner (term : W.term) =
     let owner = Option.value term.path ~default:owner in
     let visit = walk collect in
@@ -508,7 +509,19 @@ let qualify_workspace ?record ?inputs ?observe ?(replay = false) ?(verify = fals
                   if form == body.form then Some owner else None)
               |> List.sort_uniq compare
             in
-            visit (match owners with [ owner ] -> owner | _ -> owner) body)
+            let owner = match owners with [ owner ] -> owner | _ -> owner in
+            (* A body walked again with the same owner adds nothing, and a call nested in calls
+               would walk it once per path through them. *)
+            let walked = Option.value ~default:[] (Hashtbl.find_opt called body.form.id) in
+            if
+              not
+                (List.exists
+                   (fun (seen, path) -> seen == body && List.equal String.equal path owner)
+                   walked)
+            then begin
+              Hashtbl.replace called body.form.id ((body, owner) :: walked);
+              visit owner body
+            end)
           body
     | State { init; step; zone; _ } ->
         visit owner init;
@@ -533,6 +546,7 @@ let qualify_workspace ?record ?inputs ?observe ?(replay = false) ?(verify = fals
   List.iter (fun (graph : W.graph) -> callable [ "def:" ^ graph.name ] graph.body) workspace.defs;
   List.iter
     (fun collect ->
+      Hashtbl.reset called;
       List.iter
         (fun (graph : W.graph) ->
           let owner =

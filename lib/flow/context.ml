@@ -40,6 +40,7 @@ let descriptors =
 
 let all () = List.map (fun descriptor -> descriptor.name) descriptors
 let descriptor id = List.find (fun descriptor -> descriptor.name = id) descriptors
+let equal = String.equal
 let name id = (descriptor id).name
 let result id = (descriptor id).result
 let supports_values id = (descriptor id).supports_values
