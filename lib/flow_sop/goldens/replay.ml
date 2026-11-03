@@ -619,9 +619,13 @@ let windows_digests =
       if Sys.file_exists path then
         String.split_on_char '\n' (read_file path)
         |> List.iter (fun line ->
-            match String.split_on_char ' ' (String.trim line) with
-            | [ label; digest ] -> Hashtbl.replace table label digest
-            | _ -> ())
+            (* a label may hold spaces ("polywire/one open/defaults"): the digest follows the last one *)
+            let line = String.trim line in
+            match String.rindex_opt line ' ' with
+            | Some at ->
+                Hashtbl.replace table (String.sub line 0 at)
+                  (String.sub line (at + 1) (String.length line - at - 1))
+            | None -> ())
     end;
     table
 
