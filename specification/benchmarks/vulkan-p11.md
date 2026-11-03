@@ -86,3 +86,14 @@ The `min n 8` cap is gone, at the owner's request. With the per-domain minor hea
 flow_particles_gpu and gpu_sea are slower at 24 than at 8 (+21 % and +11 %): their parallel regions are 101 bursts and
 0.2 s of 9 s, and what grows with the domain count is the stop-the-world cost (357 stops, leader 1.0 s at 8 domains, 5.1 s
 at 24), not the work. Not capped silently: the decision to restore a cap is the owner's.
+
+## Recipe 0's evaluate (vulkan-par)
+
+Recipe 0 (Labyrinth) is serial by construction: `maze-links` is an Aldous-Broder walk, an `iterate` of 368 passes whose
+body maps 6, 64 and 384 elements, each under the 4,096-element walker head, so the walker evaluates them and nothing
+spreads. Its evaluate at side 24 was 120 to 150 ms at every domain count. Probe: `Flow_sop.Lower.of_checked` of the
+recipe-0 workspace, 30 runs, p50 (`lower` without a device, `gpu` with the editor's fast device config).
+
+| change | measure | before | after |
+|---|---|---|---|
+| Walker: a binding's record path is built only when recording, one-field reads build no dotted name, an operator's declared types and positional names are read in place | probe `lower` p50 / allocation | 73 ms / 251 MB | 71 ms / 236 MB |

@@ -2446,12 +2446,10 @@ let result_type op args =
   match op.out_args with
   | Some out -> out args
   | None ->
-      let positional = List.map fst (op.signature.pos @ op.signature.opt) in
-      op.out
-        (List.filter_map
-           (fun (name, ty, _) ->
-             if List.exists (String.equal name) positional then Some ty else None)
-           args)
+      let positional name =
+        List.mem_assoc name op.signature.pos || List.mem_assoc name op.signature.opt
+      in
+      op.out (List.filter_map (fun (name, ty, _) -> if positional name then Some ty else None) args)
 
 let arith name = Option.bind (Hashtbl.find_opt table name) (fun o -> o.arithmetic)
 
