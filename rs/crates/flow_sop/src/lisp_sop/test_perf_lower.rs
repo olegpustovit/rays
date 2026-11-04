@@ -73,3 +73,39 @@ fn perf_check_phases() {
 fn perf_lower_garden() {
     eprintln!("PERF garden: {}", time("(workspace w (graph garden :context sop [(seed : int 1) (count : int 40)] (let* [bed (sop/tube :top_radius 1 :bottom_radius 1 :height 0.04 :columns 48) spots (sop/scatter bed :count count :seed seed) dot (sop/uv_sphere :radius 0.06 :segments 8 :rings 4) dots (sop/copy_to_points dot spots) result (sop/set_color (sop/merge bed dots) :color \"#3b7d4e\")] result)))"));
 }
+
+// ---- perf gate: a DEBUG build lowers faster than native OCaml (rs/port/eval-design.md) ----
+// OCaml native `Lower.lower_checked` times on the reference Windows host (ms, cold: first lowering in the process).
+const GARDEN: &str = "(workspace w (graph garden :context sop [(seed : int 1) (count : int 40)] (let* [bed (sop/tube :top_radius 1 :bottom_radius 1 :height 0.04 :columns 48) spots (sop/scatter bed :count count :seed seed) dot (sop/uv_sphere :radius 0.06 :segments 8 :rings 4) dots (sop/copy_to_points dot spots) result (sop/set_color (sop/merge bed dots) :color \"#3b7d4e\")] result)))";
+const OCAML_BASELINE_MS: [(&str, &str, f64); 4] = [
+    ("box", "(workspace w (graph g :context sop (sop/box)))", 36.0),
+    ("transform", "(workspace w (graph g :context sop (sop/transform (sop/box) :translate [1 0 0])))", 45.0),
+    ("sphere", "(workspace w (graph g :context sop (sop/uv_sphere :radius 0.5)))", 205.0),
+    ("garden", GARDEN, 260.0),
+];
+
+/// Cold lowering seconds of a checked workspace (the catalog and the check are not timed).
+fn cold_lower_seconds(text: &str) -> (f64, f64) {
+    let forms = parse(text);
+    let factories = sop::nodes::factories();
+    let cat = catalog::of_factories(crate::manifest::VERSION, &[], None, &factories).unwrap();
+    let checked = catalog::check_workspace(ops::all(), false, None, &cat, &forms).0.unwrap();
+    let start = Instant::now();
+    let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || start.elapsed().as_secs_f64()));
+    lower::of_checked(Some(factories), lower::Options::default(), &checked).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let phases = guard.finish();
+    (start.elapsed().as_secs_f64(), flow_syntax::phase_timer::seconds(&phases, "evaluate"))
+}
+
+#[test]
+#[ignore = "perf gate: run in a DEBUG build with `RAYS_SLOW=1 cargo t -p flow_sop debug_lowering_beats -- --ignored --nocapture`"]
+fn debug_lowering_beats_native_ocaml() {
+    // deep Lisp recursion: the garden needs the main thread's stack in a debug build
+    let report = std::thread::Builder::new().stack_size(256 << 20).spawn(|| {
+        OCAML_BASELINE_MS.iter().map(|(name, text, ocaml)| { let (total, evaluate) = cold_lower_seconds(text); (*name, total * 1000.0, *ocaml, evaluate * 1000.0) }).collect::<Vec<_>>()
+    }).unwrap().join().unwrap();
+    let build = if cfg!(debug_assertions) { "debug" } else { "release" };
+    for (name, ms, ocaml, evaluate) in &report { eprintln!("GATE {build} {name}: {ms:.0} ms (evaluator {evaluate:.0} ms; OCaml native {ocaml:.0} ms, {:.1}x)", ms / ocaml); }
+    let slower: Vec<_> = report.iter().filter(|(_, ms, ocaml, _)| ms >= ocaml).map(|(name, ms, ocaml, _)| format!("{name} {ms:.0} ms >= {ocaml:.0} ms")).collect();
+    assert!(slower.is_empty(), "{build} lowering is not faster than native OCaml: {}", slower.join(", "));
+}
