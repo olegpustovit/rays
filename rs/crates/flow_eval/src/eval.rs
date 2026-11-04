@@ -336,6 +336,9 @@ struct Arena {
     observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
     state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<AddrMap<Arc<Path>>>, ops_seen: Shared<AddrMap<(String, &'static str, OpRef)>>, names: Shared<AddrMap<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, pure: Shared<AddrMap<(usize, &'static str, Option<usize>)>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<String>>)>>,
+    // while an inlined body with a live argument evaluates: its deferred checks, oldest first (OCaml st.guards, newest first). A test that reads
+    // only frame facts and selects an arm that fails statically is checked when the card cooks: the card fails with that diagnostic when the test is that bool
+    guards: Option<Vec<(Value, bool, Diagnostic)>>,
 }
 static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::new(Workspace {
     name: String::new(), graphs: Vec::new().into(), defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: Vec::new().into(),
@@ -349,7 +352,7 @@ impl Arena {
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
             states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, policies: Shared::default(), record,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
-            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), names: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), frees: Shared::default(),
+            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), names: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), frees: Shared::default(), guards: None,
         }
     }
     /// What stands in for an arena while it is lent (never read: `owns_index` false marks it).
@@ -651,6 +654,53 @@ fn eval_error(code: &str, message: &str) -> Result<Value, Diagnostic> {
     Err(error(code, message))
 }
 fn need_time() -> Result<Value, Diagnostic> { Err(error("$NEEDS_TIME", "")) }
+// ---- deferred checks (OCaml guardable / guarding / add_guard / arm_error) ----
+// A deferred check's test reads frame facts only: no cooked data, fold state or zone element, so the card forces it with its cook's input alone.
+// A residual or closure of another evaluation is not one (its environment is not at hand): the call stays the plain catalog node.
+fn guardable(a: &Arena, v: &Value) -> bool {
+    fn reads_elem(t: &Term) -> bool {
+        matches!(&t.node, TermNode::RefBinding(name, _) if name.starts_with("$elem:")) || children(t).into_iter().any(reads_elem)
+    }
+    // residual environments share values: each residual is walked once
+    fn free(a: &Arena, v: &Value, seen: &mut HashSet<ResidualId>) -> bool {
+        match v {
+            Value::Residual(id) => seen.contains(id) || {
+                seen.insert(*id);
+                own_res(a, id).is_some_and(|r| { let (env, term) = (r.env.clone(), r.term.clone()); env.values().all(|v| free(a, v, seen)) && !reads_elem(&term) })
+            },
+            Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => false,
+            Value::Deferred(ty, _) => !flow_syntax::ty::is_cooked(ty),
+            Value::List(xs) => xs.iter().all(|x| free(a, x, seen)),
+            Value::Record(fs) | Value::Struct(_, _, fs) => fs.iter().all(|(_, v)| free(a, v, seen)),
+            Value::Fn(id) => match own_fn(a, id) {
+                Some(Function::Closure(cl)) => { let cl = cl.clone(); cl.env.values().all(|v| free(a, v, seen)) && !reads_elem(&cl.body) }
+                Some(Function::Named(_)) => true,
+                None => false,
+            },
+            _ => true,
+        }
+    }
+    dep_value(a, v, true, &mut HashSet::new()) && !dep_value(a, v, false, &mut HashSet::new()) && free(a, v, &mut HashSet::new())
+}
+// a live test of an inlined body's if/cond that can be a deferred check
+fn guarding(a: &Arena, v: &Value) -> bool { a.guards.is_some() && matches!(v, Value::Residual(_)) && guardable(a, v) }
+fn add_guard(a: &mut Arena, test: Value, fails: bool, d: Diagnostic) { if let Some(guards) = a.guards.as_mut() { guards.push((test, fails, d)); } }
+// the diagnostic an arm fails with whatever the frame, or None: the nodes it made are dropped
+fn arm_error(a: &mut Arena, c: &ExecCtx, env: &Env, arm: &Term) -> Result<Option<Diagnostic>, Diagnostic> {
+    let (nodes, authored) = (a.nodes.len(), a.authored.len());
+    let result = eval_at(a, c, env, arm);
+    a.nodes.truncate(nodes);
+    a.authored.truncate(authored);
+    match result {
+        Ok(_) => Ok(None),
+        // OCaml's Needs_t passes through arm_error
+        Err(d) if d.code == "$NEEDS_TIME" => Err(d),
+        Err(d) if ["cancelled", "E_CANCELLED", "E_EVAL_BUDGET", "E_DEPTH"].contains(&d.code.as_str()) => Err(d),
+        Err(d) => Ok(Some(d)),
+    }
+}
+// a validation refusal (OCaml `refusal`): E_LOWER naming the validation's code, an E_PARAM by its message alone
+fn refusal(code: &str, message: &str) -> Diagnostic { error("E_LOWER", &if code == "E_PARAM" { message.to_owned() } else { format!("{code}: {message}") }) }
 fn force_res(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
     // a residual a closure carried in from another evaluation (a library body called with the graph's function) is forced where it lives;
     // it reads cooked sources through the evaluation that is forcing it
@@ -737,6 +787,7 @@ struct InlineRegion { nodes: usize, authored: usize, residuals: usize, functions
 struct InlineEntry {
     nodes: Vec<Node>, authored: Vec<i64>, value: Value, observed: Vec<ResidualId>, lo: i64, inputs: Vec<i64>, site: Path, iter: Vec<i64>,
     residuals: Vec<(ResidualId, ResidualData)>, functions: Vec<(FnId, Function, Option<i64>)>,
+    guards: Vec<(Value, bool, Diagnostic)>, // the body's deferred checks, oldest first
 }
 #[derive(Default)]
 struct InlineMemo { entries: HashMap<Vec<u8>, Arc<InlineEntry>>, sites: HashMap<(Path, Vec<i64>, i64), Vec<Vec<u8>>> }
@@ -818,7 +869,7 @@ fn value_ids(value: &Value, residuals: &mut Vec<ResidualId>, functions: &mut Vec
     }
 }
 // None when the body's results point at anything it did not make: such a body is evaluated again each time.
-fn inline_entry(a: &Arena, c: &ExecCtx, region: &InlineRegion, value: &Value, inputs: Vec<i64>) -> Option<InlineEntry> {
+fn inline_entry(a: &Arena, c: &ExecCtx, region: &InlineRegion, value: &Value, inputs: Vec<i64>, guards: &[(Value, bool, Diagnostic)]) -> Option<InlineEntry> {
     let mut residuals = Vec::new();
     for id in &a.res_log[region.residuals..] { residuals.push((*id, a.residuals.get(id)?.clone())); }
     let mut functions = Vec::new();
@@ -827,6 +878,7 @@ fn inline_entry(a: &Arena, c: &ExecCtx, region: &InlineRegion, value: &Value, in
     let made_f: HashSet<FnId> = functions.iter().map(|(id, _, _)| *id).collect();
     let (mut rs, mut fs) = (Vec::new(), Vec::new());
     value_ids(value, &mut rs, &mut fs);
+    for (test, _, _) in guards { value_ids(test, &mut rs, &mut fs); }
     let nodes: Vec<Node> = a.nodes[region.nodes..].to_vec();
     for node in &nodes { for (_, v) in &node.args { value_ids(v, &mut rs, &mut fs); } }
     for (_, residual) in &residuals { for v in residual.env.values() { value_ids(v, &mut rs, &mut fs); } }
@@ -836,7 +888,7 @@ fn inline_entry(a: &Arena, c: &ExecCtx, region: &InlineRegion, value: &Value, in
     if !rs.iter().all(|id| made_r.contains(id)) || !fs.iter().all(|id| made_f.contains(id)) { return None; }
     Some(InlineEntry {
         nodes, authored: a.authored[region.authored..].to_vec(), value: value.clone(), observed, lo: region.nodes as i64, inputs,
-        site: site(c), iter: (*c.iter).clone(), residuals, functions,
+        site: site(c), iter: (*c.iter).clone(), residuals, functions, guards: guards.to_vec(),
     })
 }
 struct Reloc { lo: i64, count: i64, new_lo: i64, inputs: Vec<(i64, i64)>, rmap: HashMap<ResidualId, ResidualId>, fmap: HashMap<FnId, FnId>, site: Path, iter: Vec<i64>, new_site: Path, new_iter: Vec<i64>, arena: i64, inst: i64 }
@@ -874,7 +926,7 @@ impl Reloc {
 }
 // An inline body's kept evaluation, in this evaluation: its nodes at the next ids over these inputs, its residuals and functions at fresh ids,
 // its sites and iterations under this call's, its kernels offered again. The value equals what evaluating the body here gives.
-fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) -> Option<Value> {
+fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) -> Option<(Value, Vec<(Value, bool, Diagnostic)>)> {
     if inputs.len() != e.inputs.len() { return None; }
     let mut reloc = Reloc {
         lo: e.lo, count: e.nodes.len() as i64, new_lo: a.nodes.len() as i64, inputs: e.inputs.iter().copied().zip(inputs.iter().copied()).collect(),
@@ -902,6 +954,7 @@ fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) ->
         (reloc.fmap[id], f, *calls)
     }).collect();
     let value = reloc.value(&e.value);
+    let guards: Vec<(Value, bool, Diagnostic)> = e.guards.iter().map(|(test, fails, d)| (reloc.value(test), *fails, d.clone())).collect();
     let observed: Vec<ResidualId> = e.observed.iter().map(|id| reloc.rmap[id]).collect();
     for (node, form) in nodes.into_iter().zip(e.authored.iter()) { a.nodes.push(node); a.authored.push(*form); }
     for (id, residual) in residuals { insert_residual(a, id, residual); }
@@ -910,7 +963,7 @@ fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) ->
         a.observed.push(id);
         ACTIVE_OBSERVED_RESIDUALS.with(|queues| { if let Some(queue) = queues.borrow_mut().last_mut() { queue.push(id); } });
     }
-    Some(value)
+    Some((value, guards))
 }
 
 fn inline_policy_for(a: &mut Arena, kind: &str) -> Option<Arc<InlineParameterPolicy>> {
@@ -947,55 +1000,18 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
     let was_replayed = replayed.is_some();
     let mut body_nodes = region.nodes;
     let mut body_authored = region.authored;
-    let mut outer_steps = a.step_count;
-    let evaluated = if let Some(value) = replayed { Ok(value) } else {
-    let mut env = Env::empty();
-    for (name, ty, default) in &definition.body.inputs {
-        let mut value = if definition.slots.iter().any(|slot| slot.rest && slot.name == *name) {
-            let mut flattened = Vec::new();
-            for (_, value) in args.iter().filter(|(arg_name, _)| arg_name == name) {
-                match value {
-                    Value::List(items) => flattened.extend(items.iter().filter(|item| !matches!(item, Value::No_geo)).cloned()),
-                    Value::No_geo => (),
-                    value => flattened.push(value.clone()),
-                }
-            }
-            Value::List(Arc::new(flattened))
-        } else if let Some(value) = parameters.iter().find(|(arg_name, _)| arg_name == name).or_else(|| args.iter().find(|(arg_name, _)| arg_name == name)).map(|(_, value)| value.clone()) {
-            value
-        } else if let Some(default) = default {
-            eval_named(a, &context, name, &env, default)?
-        } else {
-            Value::No_geo
-        };
-        value = coerce(ty, &value)?;
-        env.bind(intern(a, name), value);
-    }
-    let validation_nodes = (a.nodes.len(), a.authored.len());
-    for (predicate, code, message) in &definition.validations {
-        // a validation that reads a live argument (OCaml's `Needs_t` in the call) makes the plain catalog node, not a residual of the whole call
-        let checked = match eval_concrete(a, &sub(&context, "validate".into()), &env, predicate) {
-            Err(d) if d.code == "$NEEDS_TIME" => {
-                a.nodes.truncate(validation_nodes.0);
-                a.authored.truncate(validation_nodes.1);
-                return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
-            }
-            other => other?,
-        };
-        match checked {
-            Value::Bool(true) => (),
-            Value::Bool(false) => return Err(error("E_LOWER", &format!("{}: {}", code, message))),
-            _ => return Err(error("E_TYPE", "A node validation must return bool.")),
+    // the body's deferred checks (a replay brings its own); gathered only while an argument is live, as OCaml's st.guards
+    let guards;
+    let evaluated = if let Some((value, replayed_guards)) = replayed { guards = replayed_guards; Ok(value) } else {
+        let gathers = args.iter().any(|(_, value)| matches!(value, Value::Residual(_)));
+        let outer = std::mem::replace(&mut a.guards, if gathers { Some(Vec::new()) } else { None });
+        let body = inline_body(a, &context, definition, &parameters, args, &mut body_nodes, &mut body_authored);
+        guards = std::mem::replace(&mut a.guards, outer).unwrap_or_default();
+        match body? {
+            Some(evaluated) => evaluated,
+            // a validation that reads a live argument it cannot defer (OCaml's Needs_t in the call): the plain catalog node
+            None => return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec()),
         }
-    }
-    
-    body_nodes = a.nodes.len();
-    body_authored = a.authored.len();
-    outer_steps = a.step_count;
-    a.step_count = 0;
-    let evaluated = eval_at(a, &context, &env, &definition.body.body);
-    a.step_count = outer_steps;
-    evaluated
     };
     let result = match evaluated {
         Ok(value) => value,
@@ -1032,7 +1048,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
         return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
     }
     if !was_replayed && a.approx == region.approx && a.states.len() == region.states && a.cells.len() == region.cells {
-        if let Some((key, entry)) = key.and_then(|key| inline_entry(a, c, &region, &result, inputs).map(|entry| (key, entry))) { inline_store(definition.body.body.form.id, key, entry); }
+        if let Some((key, entry)) = key.and_then(|key| inline_entry(a, c, &region, &result, inputs, &guards).map(|entry| (key, entry))) { inline_store(definition.body.body.form.id, key, entry); }
     }
     let geometry = match &result {
         Value::Deferred(ty, _) if flow_syntax::ty::is_geometry(ty) => true,
@@ -1052,8 +1068,72 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
         ("parameters".into(), Value::Record(parameters)),
         ("slots".into(), Value::Record(slot_values)),
     ];
+    // its deferred checks, oldest first: test, fails (the test's failing value) and error (the diagnostic as `code: message`, which the
+    // host's check_guards decodes; OCaml marshals it)
+    if !guards.is_empty() {
+        marker_args.push(("guards".into(), Value::List(Arc::new(guards.into_iter().map(|(test, fails, d)| Value::Record(vec![
+            ("test".into(), test), ("fails".into(), Value::Bool(fails)), ("error".into(), text(&format!("{}: {}", d.code, d.message))),
+        ])).collect()))));
+    }
     marker_args.extend(args.iter().filter(|(_, value)| function_value(value)).cloned());
     push_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)
+}
+// An inlined body's fresh evaluation: its inputs bound, its validations checked (one of a live argument deferred to the card's cook while
+// a.guards gathers), its body evaluated. Ok(None) when a validation reads a live argument it cannot defer (OCaml's Needs_t): the plain node.
+fn inline_body(a: &mut Arena, context: &ExecCtx, definition: &W::NodeDefinition, parameters: &[(String, Value)], args: &[(String, Value)], body_nodes: &mut usize, body_authored: &mut usize) -> Result<Option<Result<Value, Diagnostic>>, Diagnostic> {
+    let context = context.clone();
+    let mut env = Env::empty();
+    for (name, ty, default) in &definition.body.inputs {
+        let mut value = if definition.slots.iter().any(|slot| slot.rest && slot.name == *name) {
+            let mut flattened = Vec::new();
+            for (_, value) in args.iter().filter(|(arg_name, _)| arg_name == name) {
+                match value {
+                    Value::List(items) => flattened.extend(items.iter().filter(|item| !matches!(item, Value::No_geo)).cloned()),
+                    Value::No_geo => (),
+                    value => flattened.push(value.clone()),
+                }
+            }
+            Value::List(Arc::new(flattened))
+        } else if let Some(value) = parameters.iter().find(|(arg_name, _)| arg_name == name).or_else(|| args.iter().find(|(arg_name, _)| arg_name == name)).map(|(_, value)| value.clone()) {
+            value
+        } else if let Some(default) = default {
+            eval_named(a, &context, name, &env, default)?
+        } else {
+            Value::No_geo
+        };
+        value = coerce(ty, &value)?;
+        env.bind(intern(a, name), value);
+    }
+    let validation_nodes = (a.nodes.len(), a.authored.len());
+    for (predicate, code, message) in &definition.validations {
+        // a validation of a live argument is checked as the card cooks, refusing as here; so are the checks its own if/cond deferred
+        let before = a.guards.as_ref().map_or(0, Vec::len);
+        let refuse_later = |a: &mut Arena| if let Some(guards) = a.guards.as_mut() { for guard in &mut guards[before..] { guard.2 = refusal(&guard.2.code, &guard.2.message); } };
+        let value = match eval_at(a, &sub(&context, "validate".into()), &env, predicate) { Ok(value) => value, Err(e) => return Err(refusal(&e.code, &e.message)) };
+        if matches!(value, Value::Residual(_)) && a.guards.is_some() && guardable(a, &value) {
+            refuse_later(a);
+            add_guard(a, value, false, refusal(code, message));
+            continue;
+        }
+        match concrete(a, value) {
+            Ok(Value::Bool(true)) => refuse_later(a),
+            Ok(Value::Bool(false)) => return Err(refusal(code, message)),
+            Err(d) if d.code == "$NEEDS_TIME" => {
+                a.nodes.truncate(validation_nodes.0);
+                a.authored.truncate(validation_nodes.1);
+                return Ok(None);
+            }
+            Err(e) => return Err(refusal(&e.code, &e.message)),
+            Ok(_) => return Err(error("E_TYPE", "A node validation must return bool.")),
+        }
+    }
+    *body_nodes = a.nodes.len();
+    *body_authored = a.authored.len();
+    let outer_steps = a.step_count;
+    a.step_count = 0;
+    let evaluated = eval_at(a, &context, &env, &definition.body.body);
+    a.step_count = outer_steps;
+    Ok(Some(evaluated))
 }
 // ---- temporary profiler (perf4) ----
 pub static PROFILE_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1122,7 +1202,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         TermNode::Text(bytes) => Ok(Value::Text(bytes.clone())),
         TermNode::Nil => Ok(Value::No_geo),
         TermNode::Time => if let Some(frame) = &a.time { Ok(Value::Float(frame.t)) } else { need_time() },
-        TermNode::Vec(terms) => {
+        TermNode::Vec(terms) => (|| -> Result<Value, Diagnostic> {
             let mut values = Vec::with_capacity(terms.len());
             for (i, term) in terms.iter().enumerate() {
                 let context = sub(c, Seg::Index("", i));
@@ -1134,15 +1214,15 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 [x, y, z, w] => Ok(Value::Vec4(*x, *y, *z, *w)),
                 _ => Err(errorf("E_VECTOR", format!("A vector has 2, 3 or 4 components; this one has {}.", values.len()))),
             }
-        }
-        TermNode::RefBinding(name, fields) => {
+        })(),
+        TermNode::RefBinding(name, fields) => (|| -> Result<Value, Diagnostic> {
             if fields.is_empty() && name.starts_with("$elem:") { return a.elems.get(name).cloned().ok_or_else(|| error("E_ELEMENT", "A geometry element is not bound.")); }
             let mut value = env.get(name).ok_or_else(|| errorf("E_UNBOUND", format!("{} is not bound.", name)))?;
             let mut path = name.clone();
             for field_name in fields { value = field(concrete(a, value)?, field_name, &path)?; path = format!("{}.{}", path, field_name); }
             Ok(value)
-        }
-        TermNode::Call { kind, ctx, args } => {
+        })(),
+        TermNode::Call { kind, ctx, args } => (|| -> Result<Value, Diagnostic> {
             let mut args = named_args(a, c, env, args)?;
             if kind == "sop/merge" {
                 let mut flattened = Vec::new();
@@ -1159,8 +1239,8 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 Some(policy) => inline_node(a, c, t.form.id, &policy, &args, t),
                 None => catalog_call(a, c, t.form.id, kind.clone(), ctx.clone(), args),
             }
-        }
-        TermNode::Op { op: name, args, .. } if (name == "and" || name == "or") && args.len() == 2 => {
+        })(),
+        TermNode::Op { op: name, args, .. } if (name == "and" || name == "or") && args.len() == 2 => (|| -> Result<Value, Diagnostic> {
             let (first_name, first_term) = &args[0];
             let first = eval_named(a, c, first_name, env, first_term)?;
             if let Value::Bool(value) = &first {
@@ -1169,11 +1249,11 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             let (second_name, second_term) = &args[1];
             let second = eval_named(a, c, second_name, env, second_term)?;
             apply_op(a, c, t.form.id, name, vec![(args[0].0.clone(), first), (second_name.clone(), second)])
-        }
-        TermNode::Op { op: name, args, skip } if name == "live?" && args.len() == 1 => {
+        })(),
+        TermNode::Op { op: name, args, skip } if name == "live?" && args.len() == 1 => (|| -> Result<Value, Diagnostic> {
             Ok(Value::Bool(is_live_value(&eval_named(a, c, &args[0].0, env, &args[0].1)?)))
-        }
-        TermNode::Op { op: name, args, skip } => {
+        })(),
+        TermNode::Op { op: name, args, skip } => (|| -> Result<Value, Diagnostic> {
             let values = if name == "scene/merge" && !skip.is_empty() {
                 let mut counts = HashMap::<String, usize>::new();
                 let mut kept = Vec::new();
@@ -1205,21 +1285,21 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 return result;
             };
             apply_op(a, c, t.form.id, name, values)
-        }
-        TermNode::CallFn { fn_name, args, body } => {
+        })(),
+        TermNode::CallFn { fn_name, args, body } => (|| -> Result<Value, Diagnostic> {
             let mut values = vec![Value::No_geo; args.len()];
             for index in 0..args.len() { values[index] = eval_sub(a, c, Seg::Index("a", index), env, &args[index])?; }
             match env.get(fn_name) {
                 Some(Value::Fn(id)) => call_fn(a, c, id, &values, body.as_deref()),
                 _ => apply_def(a, c, fn_name, &values, body.as_deref()),
             }
-        }
+        })(),
         TermNode::FnRef(name) => Ok(Value::Fn(closure_id(a, Function::Named(NamedData { name: name.clone(), calls: 0 })))),
-        TermNode::GraphRef { graph, inputs } => {
+        TermNode::GraphRef { graph, inputs } => (|| -> Result<Value, Diagnostic> {
             let values = named_args(a, c, env, inputs)?;
             graph_value(a, c, graph, &values, values.is_empty())
-        }
-        TermNode::Let(bindings, body) => {
+        })(),
+        TermNode::Let(bindings, body) => (|| -> Result<Value, Diagnostic> {
             let mut local = env.clone();
             for (pattern, term) in bindings {
                 let mut value = eval_at(a, c, &local, term)?;
@@ -1233,9 +1313,9 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 }
             }
             eval_at(a, c, &local, body)
-        }
+        })(),
         TermNode::Loop { kind, accs, clauses, skip, body, zone } => eval_loop(a, c, env, t, kind, accs, clauses, skip, body, zone),
-        TermNode::State { binder, init, step, zone } => {
+        TermNode::State { binder, init, step, zone } => (|| -> Result<Value, Diagnostic> {
             if c.geometry { return eval_error("E_STATE_ELEMENT", "Frame state belongs to the workspace value lane; bind it outside a loop over cooked geometry."); }
             let previous = if a.time.is_none() {
                 Value::Residual(make_residual(a, t, env, c, true, None))
@@ -1252,19 +1332,38 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 let value = coerce(&t.ty, &eval_at(a, c, &local, step)?)?;
                 state_write(a, c, zone, value)
             }
-        }
-        TermNode::If(test, yes, no) => {
+        })(),
+        TermNode::If(test, yes, no) => (|| -> Result<Value, Diagnostic> {
             let test = eval_sub(a, c, "if".into(), env, test)?;
+            // a live test whose one arm fails statically: the other arm, the test checked as the card cooks
+            if guarding(a, &test) {
+                if let Some(d) = arm_error(a, &sub(c, "then".into()), env, yes)? {
+                    add_guard(a, test, true, d);
+                    return eval_sub(a, c, "else".into(), env, no);
+                }
+                if let Some(d) = arm_error(a, &sub(c, "else".into()), env, no)? {
+                    add_guard(a, test, false, d);
+                    return eval_sub(a, c, "then".into(), env, yes);
+                }
+                return need_time();
+            }
             if truth(&concrete(a, test)?)? { eval_sub(a, c, "then".into(), env, yes) } else { eval_sub(a, c, "else".into(), env, no) }
-        }
-        TermNode::Cond(arms, default) => {
+        })(),
+        TermNode::Cond(arms, default) => (|| -> Result<Value, Diagnostic> {
             for (i, (test, body)) in arms.iter().enumerate() {
                 let context = sub(c, Seg::Index("test", i));
-                if truth(&eval_concrete(a, &context, env, test)?)? { return eval_sub(a, c, Seg::Index("arm", i), env, body); }
+                let test = eval_at(a, &context, env, test)?;
+                if guarding(a, &test) {
+                    match arm_error(a, &sub(c, Seg::Index("arm", i)), env, body)? {
+                        Some(d) => { add_guard(a, test, true, d); continue; }
+                        None => return need_time(),
+                    }
+                }
+                if truth(&concrete(a, test)?)? { return eval_sub(a, c, Seg::Index("arm", i), env, body); }
             }
             eval_sub(a, c, "else".into(), env, default)
-        }
-        TermNode::Case(subject, arms, default) => {
+        })(),
+        TermNode::Case(subject, arms, default) => (|| -> Result<Value, Diagnostic> {
             let value = eval_concrete(a, &sub(c, "case".into()), env, subject)?;
             for (i, (literal, body)) in arms.iter().enumerate() {
                 let literal = literal_case(literal)?;
@@ -1281,8 +1380,8 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 if matches { return eval_sub(a, c, Seg::Index("arm", i), env, body); }
             }
             eval_sub(a, c, "else".into(), env, default)
-        }
-        TermNode::Fn { params, body, zone, capture } => {
+        })(),
+        TermNode::Fn { params, body, zone, capture } => (|| -> Result<Value, Diagnostic> {
             if let Some(original) = capture {
                 let Value::Fn(id) = eval_at(a, c, env, original)? else { return eval_error("E_TYPE", "A function port requires a function."); };
                 match get_fn(a, id)? {
@@ -1292,23 +1391,23 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             } else {
                 { let (shared, captured) = (shared_term(a, body), capture_in(a, body, env)); Ok(Value::Fn(closure_id(a, Function::Closure(Arc::new(ClosureData { params: params.clone(), replayable: true, body: shared, env: Arc::new(captured), zone: zone.clone(), calls: 0, at: c.clone() }))))) }
             }
-        }
-        TermNode::Hof(kind, terms) => {
+        })(),
+        TermNode::Hof(kind, terms) => (|| -> Result<Value, Diagnostic> {
             if terms.is_empty() { return eval_error("E_ARITY", "A higher-order form takes a function."); }
             eval_hof(a, c, env, t, kind, &terms[0], &terms[1..])
-        }
-        TermNode::ListLit(terms) => {
+        })(),
+        TermNode::ListLit(terms) => (|| -> Result<Value, Diagnostic> {
             let mut values = Vec::with_capacity(terms.len());
             for (i, term) in terms.iter().enumerate() { values.push(eval_sub(a, c, Seg::Index("", i), env, term)?); }
             Ok(join_list(values))
-        }
-        TermNode::Record(fields) => {
+        })(),
+        TermNode::Record(fields) => (|| -> Result<Value, Diagnostic> {
             let mut values = Vec::with_capacity(fields.len());
             for (name, term) in fields { values.push((name.clone(), eval_named(a, c, name, env, term)?)); }
             Ok(Value::Record(values))
-        }
+        })(),
         TermNode::Get(record, name) => field(eval_concrete(a, c, env, record)?, name, "value"),
-        TermNode::Assoc(record, updates) => {
+        TermNode::Assoc(record, updates) => (|| -> Result<Value, Diagnostic> {
             let Value::Record(mut fields) = eval_concrete(a, c, env, record)? else { return eval_error("E_TYPE", "assoc updates a record."); };
             for (name, term) in updates {
                 let value = eval_named(a, c, name, env, term)?;
@@ -1318,8 +1417,8 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 } else { fields.push((name.clone(), value)); }
             }
             Ok(Value::Record(fields))
-        }
-        TermNode::Str(terms) => {
+        })(),
+        TermNode::Str(terms) => (|| -> Result<Value, Diagnostic> {
             let mut bytes = Vec::new();
             for (i, term) in terms.iter().enumerate() {
                 let context = sub(c, Seg::Index("", i));
@@ -1329,8 +1428,8 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 bytes.extend(value::show_with(&|value| value.clone(), &value));
             }
             Ok(Value::Text(bytes))
-        }
-        TermNode::ListOp(_, terms) => {
+        })(),
+        TermNode::ListOp(_, terms) => (|| -> Result<Value, Diagnostic> {
             let mut values = Vec::new();
             for (i, term) in terms.iter().enumerate() {
                 let context = sub(c, Seg::Index("", i));
@@ -1341,7 +1440,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             }
             if values.len() > MAX_ITERATIONS { return eval_error("E_ITER_BOUND", "concat exceeds 4,096 elements."); }
             Ok(join_list(values))
-        }
+        })(),
         TermNode::Bypass(call) => match W::bypass_input(call) { Some(input) => coerce(&t.ty, &eval_sub(a, c, "bypass".into(), env, &input)?), None => Err(error("E_BYPASS", "Nothing to pass through.")) },
         TermNode::Expanded { body, .. } => eval_at(a, c, env, body),
         TermNode::WithError(protected, mapper) => eval_with_error(a, c, env, protected, mapper),

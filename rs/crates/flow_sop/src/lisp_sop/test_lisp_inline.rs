@@ -228,23 +228,10 @@ fn cooked_data_arguments_resolve_once_per_cook() {
     assert!(large <= 12.0 * small + 0.05, "step E2: 4x points took {large:.3}s vs {small:.3}s");
 }
 
-/// sop/transform's `:validate` reads the live `:shear_xy`: the call is the plain node (OCaml's
-/// `Needs_t` fallback to the catalog node), not as a residual of the whole call.
-#[test]
-fn a_live_validation_keeps_the_plain_node() {
-    let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse("(workspace x (graph g :context sop (sop/transform (sop/box) :shear_xy (* t 0.25))))"))
-        .unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    let kinds: Vec<&str> = l.plan.nodes.iter().map(|n| n.kind.as_str()).collect();
-    assert!(kinds.contains(&"sop/transform"), "a live validation residualized the call: {kinds:?}");
-}
-
 /// OCaml `test_lisp_inline.ml` ("a driven transform"): a card whose `:validate` or `if` reads a live
-/// argument stays inlined, its check deferred as a guard of the card (`Eval.guards`, `card ~guards`).
-/// The Rust evaluator has no guards, so such a call falls back to the plain catalog node: on gpu_sea
-/// that left `sop/attribute_noise` a cooked-selection node whose kernels were rebuilt every frame
-/// (a new device site and slot set per frame) and could not bind their `Source("sop/attr")`.
+/// argument stays inlined, its check deferred as a guard of the card (`Eval.guards`, `card ~guards`),
+/// not the plain catalog node rebuilt per frame (on gpu_sea: a new device site and slot set per frame).
 #[test]
-#[ignore = "needs the evaluator's deferred guards (flow_eval): a live validation inlines the card"]
 fn a_live_validation_inlines_the_card_as_a_guard() {
     let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse("(workspace x (graph g :context sop (sop/transform (sop/grid :rows 5 :columns 7) :recompute_normals true :shear_xy (* t 2.0))))"))
         .unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));

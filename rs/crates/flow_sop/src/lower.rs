@@ -2483,18 +2483,34 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
             _ => None,
         }
     };
-    fn recounts(nodes: &Vec<ENode>, v: &Value, recount: &dyn Fn(&Vec<ENode>, &Value) -> Option<Value>) -> bool {
+    // residual and closure environments share values: each residual or function is answered once per node (without the memo the walk is
+    // exponential in the sharing: a driven transform's inlined body took 30 s). The answer is a function of the id, so the memo is exact.
+    #[derive(Default)]
+    struct Seen { residuals: HashMap<ResidualId, bool>, functions: HashMap<FnId, bool> }
+    fn recounts(nodes: &Vec<ENode>, v: &Value, recount: &dyn Fn(&Vec<ENode>, &Value) -> Option<Value>, seen: &mut Seen) -> bool {
         match v {
             Value::Source(..) | Value::Struct(..) if recount(nodes, v).is_some() => true,
-            Value::Residual(r) => E::Residual::residual_view(*r).map(|view| view.bindings.iter().any(|(_, v)| recounts(nodes, v, recount))).unwrap_or(false),
-            Value::Fn(f) => E::Residual::function_bindings(*f).iter().any(|(_, v)| recounts(nodes, v, recount)),
-            Value::List(vs) => vs.iter().any(|v| recounts(nodes, v, recount)),
-            Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => fs.iter().any(|(_, v)| recounts(nodes, v, recount)),
+            Value::Residual(r) => {
+                if let Some(known) = seen.residuals.get(r) { return *known; }
+                seen.residuals.insert(*r, false);
+                let found = E::Residual::residual_view(*r).map(|view| view.bindings.iter().any(|(_, v)| recounts(nodes, v, recount, seen))).unwrap_or(false);
+                seen.residuals.insert(*r, found);
+                found
+            }
+            Value::Fn(f) => {
+                if let Some(known) = seen.functions.get(f) { return *known; }
+                seen.functions.insert(*f, false);
+                let found = E::Residual::function_bindings(*f).iter().any(|(_, v)| recounts(nodes, v, recount, seen));
+                seen.functions.insert(*f, found);
+                found
+            }
+            Value::List(vs) => vs.iter().any(|v| recounts(nodes, v, recount, seen)),
+            Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => fs.iter().any(|(_, v)| recounts(nodes, v, recount, seen)),
             _ => false,
         }
     }
     for id in 0..nodes.len() {
-        if !templ[id] && nodes[id].args.iter().any(|(_, v)| recounts(&nodes, v, &recount)) {
+        if !templ[id] && nodes[id].args.iter().any(|(_, v)| recounts(&nodes, v, &recount, &mut Seen::default())) {
             let snapshot = nodes.clone();
             let args: Vec<(String, Value)> =
                 nodes[id].args.iter().map(|(k, v)| (k.clone(), E::Host::rewrite_with(v, &|x: &Value| recount(&snapshot, x), &fresh, &|_, _| None))).collect();

@@ -1283,12 +1283,12 @@ impl Lowerer {
             Node::Lit(param::Value::Bool(b)) => Ok(Known(Value::Bool(*b))),
             Node::Text(t) => Ok(Known(Value::Text(t.clone()))),
             Node::Nil => Ok(Known(Value::No_geo)),
-            Node::Record(fields) => {
+            Node::Record(fields) => (|| -> R<Lowered> {
                 let mut out = Vec::new();
                 for (name, t) in fields { out.push((name.clone(), self.term(borrow, s, source, env, t)?)); }
                 Ok(Record_fields(out))
-            }
-            Node::ListLit(items) => {
+            })(),
+            Node::ListLit(items) => (|| -> R<Lowered> {
                 if items.len() > 4096 && !geometry_collection(&x.ty) { return Err(refusal("list_limit")); }
                 let mut lowered = Vec::new();
                 for t in items { lowered.push(self.term(false, s, source, env, t)?); }
@@ -1307,17 +1307,17 @@ impl Lowerer {
                         Ok(self.emit(s, source, &x.ty, C::Expr::Items(ids)))
                     }
                 }
-            }
-            Node::ListOp(_, items) => {
+            })(),
+            Node::ListOp(_, items) => (|| -> R<Lowered> {
                 let mut args = Vec::new();
                 for item in items { args.push(("list", self.term(false, s, source, env, item)?)); }
                 self.primitive(s, source, &x.ty, C::Primitive::Sequence_concat, args)
-            }
-            Node::Get(value, name) => {
+            })(),
+            Node::Get(value, name) => (|| -> R<Lowered> {
                 let v = self.term(borrow, s, source, env, value)?;
                 self.field(s, source, &x.ty, &v, name)
-            }
-            Node::Assoc(record, updates) => {
+            })(),
+            Node::Assoc(record, updates) => (|| -> R<Lowered> {
                 let mut record = self.term(false, s, source, env, record)?;
                 for (name, t) in updates {
                     let value = self.term(false, s, source, env, t)?;
@@ -1333,8 +1333,8 @@ impl Lowerer {
                     })?;
                 }
                 Ok(record)
-            }
-            Node::Str(ts) => {
+            })(),
+            Node::Str(ts) => (|| -> R<Lowered> {
                 let mut values = Vec::new();
                 for t in ts { values.push(self.term(false, s, source, env, t)?); }
                 let mut texts = Vec::new();
@@ -1353,10 +1353,10 @@ impl Lowerer {
                     }
                     None => self.primitive(s, source, &Ty::Text, C::Primitive::Text_concat, texts.into_iter().map(|v| ("part", v)).collect()),
                 }
-            }
+            })(),
             Node::Time => Ok(self.frame(s, source, &Ty::Float, C::FrameField::Time)),
             Node::State { .. } => self.state_term(s, source, env, x, false),
-            Node::Vec(ts) if ts.len() >= 2 && ts.len() <= 4 => {
+            Node::Vec(ts) if ts.len() >= 2 && ts.len() <= 4 => (|| -> R<Lowered> {
                 let mut args = Vec::new();
                 for t in ts { args.push(self.term(false, s, source, env, t)?); }
                 let pairs: Vec<(String, Lowered)> = args.iter().map(|v| (String::new(), v.clone())).collect();
@@ -1372,9 +1372,9 @@ impl Lowerer {
                         Ok(self.emit(s, source, &x.ty, C::Expr::Vec(ids)))
                     }
                 }
-            }
+            })(),
             Node::RefBinding(name, _) if name.starts_with("$elem:") => Err(refusal("element")),
-            Node::RefBinding(name, fields) => {
+            Node::RefBinding(name, fields) => (|| -> R<Lowered> {
                 let start = match env.get(name) {
                     Some(v) => self.resolve(s, v)?,
                     None => return Err(refusal("binding")),
@@ -1382,11 +1382,11 @@ impl Lowerer {
                 let mut value = start;
                 for f in fields { value = self.field(s, source, &x.ty, &value, f)?; }
                 if borrow { self.descriptor(s, source, &value) } else { Ok(value) }
-            }
+            })(),
             // a program runs over values at hand: nothing it reads is live
             Node::Op { op, .. } if op == "live?" => Ok(boolean(false)),
             Node::Op { op, args, .. } => self.op_term(borrow, s, source, env, x, op, args),
-            Node::Call { kind, ctx, args } => {
+            Node::Call { kind, ctx, args } => (|| -> R<Lowered> {
                 if !ty::is_cooked(&x.ty) { return Err(refusal("call")); }
                 let mut lowered = Vec::new();
                 for (name, t) in args {
@@ -1398,16 +1398,16 @@ impl Lowerer {
                 all.push(("$context".to_owned(), self.ensure(s, source, &Known(text(context::name(*ctx))))?));
                 all.extend(lowered);
                 Ok(self.emit(s, source, &x.ty, C::Expr::Host_source { name: "$core/catalog".into(), ty: x.ty.clone(), args: all }))
-            }
-            Node::Let(bindings, body) => {
+            })(),
+            Node::Let(bindings, body) => (|| -> R<Lowered> {
                 let mut env = env.clone();
                 for (pattern, value) in bindings {
                     let v = self.term(false, s, source, &env, value)?;
                     env = self.bind(s, source, env, pattern, v)?;
                 }
                 self.term(borrow, s, source, &env, body)
-            }
-            Node::ErrorRows { rows, policy, mapper } => {
+            })(),
+            Node::ErrorRows { rows, policy, mapper } => (|| -> R<Lowered> {
                 let rows = self.term(false, s, source, env, rows)?;
                 let rows = self.ensure(s, source, &rows)?;
                 let mut handler = Scope::fresh();
@@ -1420,8 +1420,8 @@ impl Lowerer {
                 let result = self.local(&x.ty);
                 self.push(s, source, C::StatementNode::Diagnose_rows { rows, policy: *policy, index, handler: handler.st, diagnostic, result });
                 Ok(Computed(result, x.ty.clone()))
-            }
-            Node::WithError(protected, mapper) => {
+            })(),
+            Node::WithError(protected, mapper) => (|| -> R<Lowered> {
                 let mut body = Scope::fresh();
                 let mut handler = Scope::fresh();
                 let protected_value = self.term(false, &mut body, source, env, protected)?;
@@ -1440,19 +1440,19 @@ impl Lowerer {
                 let result = self.local(&x.ty);
                 self.push(s, source, C::StatementNode::Protect { body: body.st, value, failure, handler: handler.st, mapped, result });
                 Ok(Computed(result, x.ty.clone()))
-            }
-            Node::If(condition, yes, no) => {
+            })(),
+            Node::If(condition, yes, no) => (|| -> R<Lowered> {
                 let c = self.term(false, s, source, env, condition)?;
                 self.branch(s, source, &x.ty, &c,
                     &mut |l, sc| l.term(borrow, sc, source, env, yes),
                     &mut |l, sc| l.term(borrow, sc, source, env, no))
-            }
+            })(),
             Node::Cond(arms, default) => self.cond_arms(borrow, s, source, env, &x.ty, arms, default),
-            Node::Case(scrutinee, arms, default) => {
+            Node::Case(scrutinee, arms, default) => (|| -> R<Lowered> {
                 let scrutinee = self.term(false, s, source, env, scrutinee)?;
                 self.case_arms(borrow, s, source, env, &x.ty, &scrutinee, arms, default)
-            }
-            Node::CallFn { fn_name, args, body } => {
+            })(),
+            Node::CallFn { fn_name, args, body } => (|| -> R<Lowered> {
                 let mut values = Vec::new();
                 for a in args { values.push(self.term(false, s, source, env, a)?); }
                 let value = match env.get(fn_name) {
@@ -1463,14 +1463,14 @@ impl Lowerer {
                     None => self.definition(borrow, s, source, fn_name, body.as_deref(), &values)?,
                 };
                 if borrow { self.descriptor(s, source, &value) } else { Ok(value) }
-            }
-            Node::FnRef(name) => {
+            })(),
+            Node::FnRef(name) => (|| -> R<Lowered> {
                 let identity = self.new_identity();
                 let slot = self.call_slot(identity);
                 self.push(s, source, C::StatementNode::Reset_call(slot));
                 Ok(Callable(Callable::Named { name: name.clone(), identity }))
-            }
-            Node::Fn { params, body, zone, capture } => {
+            })(),
+            Node::Fn { params, body, zone, capture } => (|| -> R<Lowered> {
                 let closure = match capture {
                     Some(original) => {
                         let o = self.term(false, s, source, env, original)?;
@@ -1490,7 +1490,7 @@ impl Lowerer {
                     }
                 };
                 Ok(Callable(Callable::Closure(Arc::new(closure))))
-            }
+            })(),
             Node::Expanded { body, .. } => self.term(borrow, s, source, env, body),
             Node::Bypass(inner) => match W::bypass_input(inner) {
                 Some(input) => {
@@ -1503,7 +1503,7 @@ impl Lowerer {
             // lowering's scope, as the inline fn reads them), which packs like any map (all cores, or the
             // device in fast precision), then array/compact keeps the indices.  Any other filter, or a mask
             // that does not pack, keeps the element loop below.
-            Node::Hof(HofKind::Filter, ts) if (self.has_draw || self.initial.is_some()) && filter_range(ts, &x.ty).is_some() => {
+            Node::Hof(HofKind::Filter, ts) if (self.has_draw || self.initial.is_some()) && filter_range(ts, &x.ty).is_some() => (|| -> R<Lowered> {
                 let (fn_term, items, elem) = filter_range(ts, &x.ty).unwrap();
                 let Node::Fn { body, .. } = &fn_term.node else { unreachable!() };
                 let lit = |n: i64| Term { node: Node::Lit(param::Value::Int(n)), ty: Ty::Int, path: None, ..(**body).clone() };
@@ -1518,14 +1518,14 @@ impl Lowerer {
                 let mask = self.term(false, s, source, env, &map)?;
                 let kept = self.primitive(s, source, &Ty::Array(Box::new(Ty::Int)), C::Primitive::Array_compact, vec![("mask", mask)])?;
                 if elem == Ty::Int { Ok(kept) } else { self.primitive(s, source, &x.ty, C::Primitive::Coerce(x.ty.clone()), vec![("value", kept)]) }
-            }
-            Node::Hof(kind, ts) if !ts.is_empty() => {
+            })(),
+            Node::Hof(kind, ts) if !ts.is_empty() => (|| -> R<Lowered> {
                 let f = self.term(false, s, source, env, &ts[0])?;
                 let f = self.as_callable(source, &f)?;
                 self.hof(s, source, env, &x.ty, *kind, &f, &ts[1..])
-            }
+            })(),
             Node::Hof(_, _) => Err(refusal("higher_order")),
-            Node::GraphRef { graph, inputs } if inputs.is_empty() => {
+            Node::GraphRef { graph, inputs } if inputs.is_empty() => (|| -> R<Lowered> {
                 // The referenced graph's body in its own default instance, as the live walker re-runs it.
                 let root = self.root()?;
                 let g = E::Residual::residual_graph(root, graph).ok_or_else(|| refusal("ref"))?;
@@ -1552,7 +1552,7 @@ impl Lowerer {
                 let value = self.term(false, s, &src2, &genv, &g.body)?;
                 self.plane = saved;
                 Ok(value)
-            }
+            })(),
             Node::Loop { kind: kind @ (LoopKind::For | LoopKind::Sum), accs, clauses, skip, body, zone }
                 if accs.is_empty() && clauses.len() == 1 && skip.is_empty() && matches!(clauses[0].0, Pattern::Name(_)) =>
             {
@@ -1599,10 +1599,10 @@ impl Lowerer {
                     _ => self.loop_(s, source, env, &x.ty, *kind, &[], &[(Pattern::Name(name.clone()), None)], &[], body, zone, Some(items.clone())),
                 }
             }
-            Node::Loop { kind, accs, clauses, skip, body, zone } => {
+            Node::Loop { kind, accs, clauses, skip, body, zone } => (|| -> R<Lowered> {
                 let clauses: Vec<(Pattern, Option<&Term>)> = clauses.iter().map(|(p, t)| (p.clone(), Some(t))).collect();
                 self.loop_(s, source, env, &x.ty, *kind, accs, &clauses, skip, body, zone, None)
-            }
+            })(),
             Node::Vec(_) => Err(refusal("vector")),
             Node::Lit(_) => Err(refusal("literal")),
             Node::GraphRef { .. } => Err(refusal("ref")),
