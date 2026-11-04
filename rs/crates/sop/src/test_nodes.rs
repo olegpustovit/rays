@@ -80,7 +80,21 @@ fn group_transfer_declares_its_schema_and_cooks() {
 #[test]
 fn registry_lists_the_ported_factories_in_order() {
     let keys: Vec<String> = crate::nodes::factories().iter().map(|f| edit_graph::factory_key(f).to_owned()).collect();
-    assert_eq!(keys, ["switch", "group_transfer", "null"]);
+    // The registry is shared by every wave, so other waves' keys may interleave: the attribute
+    // wave's keys must appear in OCaml order.
+    let mut rest = keys.iter();
+    for key in [
+        "image_texels",
+        "distance_from_geometry",
+        "uv_flatten",
+        "uv_relax",
+        "attribute_mirror",
+        "attribute_transfer",
+        "attribute_transfer_surface",
+        "attribute_transfer_all",
+    ] {
+        assert!(rest.any(|k| k == key), "{key} is missing or out of OCaml order in {keys:?}");
+    }
 }
 
 #[test]

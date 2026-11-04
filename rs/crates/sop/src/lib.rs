@@ -28,6 +28,8 @@ mod test_facts;
 mod test_manifest;
 #[cfg(test)]
 mod test_nodes;
+#[cfg(test)]
+mod test_parallel_branches;
 // Deferred: node-definition files, filled by a later wave with the pattern in PORTING.md.
 pub mod sop_topology;
 pub mod attributes;

@@ -1,11 +1,9 @@
 //! Port of lib/sop/session.ml: explicit, bounded graph-evaluation state. A session is
 //! single-caller. Cache keys are opaque byte strings (`Vec<u8>`).
 //!
-//! ponytail: the OCaml session also fans independent branches out to the shared pool (snapshot,
-//! journal, ordered replay; `costly`, `shared_prefix`, `evaluate_many`'s parallel arm). This port
-//! evaluates branches in input order only, which is what the OCaml code does when it does not fan
-//! out, so results are identical; `Private::fanouts` stays 0 and `set_parallel_override` is stored
-//! but inert. Port the fan-out when branch timings show it matters.
+//! Independent branches fan out to the shared pool: workers cook on a `snapshot` of the cache
+//! metadata and journal their cache traffic; the parent validates and replays the journals in input
+//! order (`evaluate_many`), so CLOCK order, retention and counters equal input-order execution.
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -74,6 +72,7 @@ struct Delta {
     attributes: Vec<(rdk::attribute::Owner, String, Option<rdk::attribute::T>)>,
 }
 
+#[derive(Clone)]
 struct Entry {
     output: Output,
     components: Vec<(i64, i64)>,
@@ -95,6 +94,8 @@ struct Pool {
     dropped: Vec<i64>,
     /// resident ids a cook's root held: a caller may read them, so they are only retired
     handed: HashSet<i64>,
+    /// false in a worker snapshot: the parent charges when it replays
+    ledgered: bool,
 }
 
 type SharedPool = Arc<Mutex<Pool>>;
@@ -113,6 +114,9 @@ fn releasers(output: &Output) -> Vec<(i64, Release)> {
 }
 
 fn charge_component(pool: &mut Pool, owner: &Owner, id: i64, bytes: i64) {
+    if !pool.ledgered {
+        return;
+    }
     match pool.charged.get_mut(&id) {
         Some((_, _, holders)) => *holders += 1,
         None => {
@@ -171,6 +175,7 @@ fn serial_of(census: &Census, n: &node::T) -> Option<usize> {
     census.serials.get(&node::id(n))?.iter().find(|(seen, _)| node::ptr_eq(seen, n)).map(|(_, s)| *s)
 }
 
+#[derive(Clone)]
 struct ConsumerPlan {
     root: node::T,
     readers: Option<i64>,
@@ -182,6 +187,15 @@ struct ConsumerPlan {
 enum Written {
     Key(Vec<u8>),
     Slot(i64),
+}
+
+/// One cache interaction of a worker branch, replayed on the parent in input order.
+enum CacheEvent {
+    Read(Option<i64>, Vec<u8>, Option<Arc<Entry>>),
+    Write(Option<i64>, Vec<u8>, Entry),
+    MaterializedRead(Output, Option<rdk::geometry::T>),
+    MaterializedWrite(Output, rdk::geometry::T),
+    Time(NodeTiming),
 }
 
 pub struct T {
@@ -209,6 +223,8 @@ pub struct T {
     times: Arc<Mutex<HashMap<i64, NodeTiming>>>,
     closed: bool,
     materialized: Vec<(Output, rdk::geometry::T)>,
+    /// Some in a worker snapshot while it records its cache traffic
+    journal: Option<Vec<CacheEvent>>,
     parallel_override: Option<bool>,
     fanouts: i64,
     /// the resident components of the root the last cook returned
@@ -245,6 +261,7 @@ pub fn create(max_entries: i64, max_payload_bytes: i64) -> Result<T, String> {
         resident: HashMap::new(),
         dropped: Vec::new(),
         handed: HashSet::new(),
+        ledgered: true,
     }));
     let release_pool = Arc::clone(&pool);
     let cache = Cache::with_options(
@@ -287,6 +304,7 @@ pub fn create(max_entries: i64, max_payload_bytes: i64) -> Result<T, String> {
         times: Arc::new(Mutex::new(HashMap::new())),
         closed: false,
         materialized: Vec::new(),
+        journal: None,
         parallel_override: None,
         fanouts: 0,
         previous_root: Vec::new(),
@@ -329,6 +347,9 @@ pub fn payload_pool(session: &T) -> Arc<dyn Fn() -> i64 + Send + Sync> {
 }
 
 fn insert(session: &mut T, key: &[u8], entry: Entry) {
+    if let Some(events) = &mut session.journal {
+        events.push(CacheEvent::Write(None, key.to_vec(), entry.clone()));
+    }
     if session.max_entries <= 0 {
         return;
     }
@@ -362,15 +383,19 @@ fn insert(session: &mut T, key: &[u8], entry: Entry) {
     session.evictions += before + i64::from(!replaced) - session.cache.length();
 }
 
-fn lookup(session: &T, volatile: bool, node_value: &node::T, key: &[u8]) -> Option<Arc<Entry>> {
-    if !volatile {
+fn lookup(session: &mut T, volatile: bool, node_value: &node::T, key: &[u8]) -> Option<Arc<Entry>> {
+    let result = if !volatile {
         session.cache.find_opt(&key_of(key)).map(|v| entry_of(&v))
     } else {
         match session.slots.get(&node::id(node_value)) {
             Some((latest, output)) if latest.as_slice() == key => Some(Arc::clone(output)),
             _ => None,
         }
+    };
+    if let Some(events) = &mut session.journal {
+        events.push(CacheEvent::Read(volatile.then(|| node::id(node_value)), key.to_vec(), result.clone()));
     }
+    result
 }
 
 fn release_slot_bytes(session: &mut T, id: i64) {
@@ -383,6 +408,9 @@ fn release_slot_bytes(session: &mut T, id: i64) {
 }
 
 fn store_slot(session: &mut T, id: i64, key: &[u8], entry: Entry) {
+    if let Some(events) = &mut session.journal {
+        events.push(CacheEvent::Write(Some(id), key.to_vec(), entry.clone()));
+    }
     if session.max_entries <= 0 {
         return;
     }
@@ -664,7 +692,10 @@ fn timing(n: &node::T, geometries: &[payload::T], points: i64, seconds: f64, cac
 /// a cache hit keeps the node's last real cook time; bounded: a full table starts over
 const TIMES_CAPACITY: usize = 4096;
 
-fn record_time(session: &T, sample: NodeTiming) {
+fn record_time(session: &mut T, sample: NodeTiming) {
+    if let Some(events) = &mut session.journal {
+        events.push(CacheEvent::Time(sample.clone()));
+    }
     let mut times = session.times.lock().unwrap();
     if times.len() >= TIMES_CAPACITY {
         times.clear();
@@ -698,8 +729,12 @@ fn input_geometry(session: &mut T, output: &Output) -> Result<payload::T, Diagno
     let (payload::T::Geometry(source), Some(transforms)) = (&output.payload, &output.instances) else {
         return Ok(output.payload.clone());
     };
-    if let Some((_, geometry)) = session.materialized.iter().find(|(o, _)| same_output(o, output)) {
-        return Ok(payload::T::Geometry(geometry.clone()));
+    let existing = session.materialized.iter().find(|(o, _)| same_output(o, output)).map(|(_, g)| g.clone());
+    if let Some(events) = &mut session.journal {
+        events.push(CacheEvent::MaterializedRead(output.clone(), existing.clone()));
+    }
+    if let Some(geometry) = existing {
+        return Ok(payload::T::Geometry(geometry));
     }
     match rdk::instance_copy::materialize_instances(transforms, source) {
         Err(error) => Err(crate::support::diagnostic_with(
@@ -709,6 +744,9 @@ fn input_geometry(session: &mut T, output: &Output) -> Result<payload::T, Diagno
             Vec::new(),
         )),
         Ok(geometry) => {
+            if let Some(events) = &mut session.journal {
+                events.push(CacheEvent::MaterializedWrite(output.clone(), geometry.clone()));
+            }
             session.materialized.insert(0, (output.clone(), geometry.clone()));
             session.materialized.truncate(8);
             Ok(payload::T::Geometry(geometry))
@@ -924,12 +962,26 @@ enum Prediction {
     Missing,
 }
 
-fn cached_output(predictions: &mut HashMap<i64, Vec<(node::T, Prediction)>>, session: &T, context: &context::T, n: &node::T) -> Prediction {
+type Results = HashMap<i64, Vec<(node::T, Result<Output, Diagnostic>)>>;
+type Predictions = HashMap<i64, Vec<(node::T, Prediction)>>;
+
+fn cached_output(predictions: &mut Predictions, results: &Results, session: &T, context: &context::T, n: &node::T) -> Prediction {
     if let Some(found) = predictions.get(&node::id(n)).and_then(|v| v.iter().find(|(seen, _)| node::ptr_eq(seen, n))) {
         return found.1.clone();
     }
+    let remembered = results.get(&node::id(n)).and_then(|v| v.iter().find(|(seen, _)| node::ptr_eq(seen, n))).map(|(_, r)| r.clone());
+    let prediction = match remembered {
+        Some(Ok(output)) => Prediction::Known(output),
+        Some(Err(_)) => Prediction::Missing,
+        None => predict(predictions, results, session, context, n),
+    };
+    predictions.entry(node::id(n)).or_default().push((n.clone(), prediction.clone()));
+    prediction
+}
+
+fn predict(predictions: &mut Predictions, results: &Results, session: &T, context: &context::T, n: &node::T) -> Prediction {
     let inputs = selected_inputs(n);
-    let input_predictions: Vec<Prediction> = inputs.iter().map(|i| cached_output(predictions, session, context, i)).collect();
+    let input_predictions: Vec<Prediction> = inputs.iter().map(|i| cached_output(predictions, results, session, context, i)).collect();
     let values: Vec<Option<payload::T>> = input_predictions
         .iter()
         .map(|p| match p {
@@ -944,7 +996,7 @@ fn cached_output(predictions: &mut HashMap<i64, Vec<(node::T, Prediction)>>, ses
             _ => None,
         })
         .collect();
-    let prediction = if input_predictions.iter().any(|p| matches!(p, Prediction::DeferredRefresh)) {
+    if input_predictions.iter().any(|p| matches!(p, Prediction::DeferredRefresh)) {
         Prediction::DeferredRefresh
     } else if values.iter().any(Option::is_none) {
         Prediction::Missing
@@ -966,9 +1018,7 @@ fn cached_output(predictions: &mut HashMap<i64, Vec<(node::T, Prediction)>>, ses
                 _ => Prediction::Known(entry.output.clone()),
             },
         }
-    };
-    predictions.entry(node::id(n)).or_default().push((n.clone(), prediction.clone()));
-    prediction
+    }
 }
 
 /// What `cook` would answer from the cache for this node under `context`, without cooking,
@@ -978,7 +1028,7 @@ pub fn cached(session: &T, context: &context::T, n: &node::T) -> Option<Output> 
     if session.closed {
         return None;
     }
-    match cached_output(&mut HashMap::new(), session, context, n) {
+    match cached_output(&mut HashMap::new(), &HashMap::new(), session, context, n) {
         Prediction::Known(output) => Some(output),
         _ => None,
     }
@@ -996,13 +1046,402 @@ fn evaluate(memo: &mut Memo, session: &mut T, context: &context::T, n: &node::T)
     result
 }
 
-/// Branches evaluate in input order (see the module note).
-fn evaluate_many(memo: &mut Memo, session: &mut T, context: &context::T, roots: &[node::T]) -> Result<Vec<(Output, payload::T)>, Diagnostic> {
-    let mut outputs = Vec::with_capacity(roots.len());
+const BRANCH_MIN_SECONDS: f64 = 0.002;
+const BRANCH_MIN_POINTS: i64 = 10_000;
+
+/// Snapshot metadata, not payload planes. Exact CLOCK touch bits matter when an earlier branch
+/// evicts an entry a later branch initially found.
+fn snapshot(session: &T) -> T {
+    // a worker's drops are the parent's to decide when it replays the worker's writes
+    let pool: SharedPool = {
+        let source = session.payload.lock().unwrap();
+        Arc::new(Mutex::new(Pool {
+            refs: source.refs.clone(),
+            bytes: source.bytes,
+            owner: source.owner.clone(),
+            charged: HashMap::new(),
+            resident: HashMap::new(),
+            dropped: Vec::new(),
+            handed: HashSet::new(),
+            ledgered: false,
+        }))
+    };
+    let release_pool = Arc::clone(&pool);
+    // The snapshot charges nothing: what it writes the parent charges when it replays.
+    let cache = session.cache.copy(Arc::new(move |_, value| {
+        let entry = entry_of(value);
+        release_components(&mut release_pool.lock().unwrap(), &entry.components);
+    }));
+    T {
+        clock: Arc::clone(&session.clock),
+        max_entries: session.max_entries,
+        max_payload_bytes: session.max_payload_bytes,
+        cache,
+        payload: pool,
+        volatile_owner: session.volatile_owner.clone(),
+        cooks: 0,
+        hits: 0,
+        misses: 0,
+        volatile: Arc::clone(&session.volatile),
+        slots: session.slots.clone(),
+        slot_residents: session.slot_residents.clone(),
+        slot_bytes: session.slot_bytes.clone(),
+        volatile_hits: 0,
+        volatile_misses: 0,
+        evictions: 0,
+        last_node: None,
+        times: Arc::new(Mutex::new(HashMap::new())),
+        closed: session.closed,
+        materialized: session.materialized.clone(),
+        journal: None,
+        parallel_override: Some(false),
+        fanouts: 0,
+        previous_root: session.previous_root.clone(),
+        written: Vec::new(),
+        consumer_plan: session.consumer_plan.clone(),
+        consumer_scans: session.consumer_scans,
+    }
+}
+
+/// OCaml `==` on cached entries: the same entry, or the same output with no delta.
+fn same_entry(a: &Arc<Entry>, b: &Arc<Entry>) -> bool {
+    Arc::ptr_eq(a, b) || (same_output(&a.output, &b.output) && a.delta.is_none() && b.delta.is_none())
+}
+
+/// Applies one journaled event; `false` when a read no longer observes what the worker saw.
+fn replay_event(session: &mut T, event: &CacheEvent) -> bool {
+    match event {
+        CacheEvent::Read(volatile, key, expected) => {
+            let observed = match volatile {
+                None => session.cache.find_opt(&key_of(key)).map(|v| entry_of(&v)),
+                Some(id) => match session.slots.get(id) {
+                    Some((stored, entry)) if stored == key => Some(Arc::clone(entry)),
+                    _ => None,
+                },
+            };
+            match (observed, expected) {
+                (None, None) => true,
+                (Some(a), Some(b)) => same_entry(&a, b),
+                _ => false,
+            }
+        }
+        CacheEvent::Write(None, key, entry) => {
+            insert(session, key, entry.clone());
+            true
+        }
+        CacheEvent::Write(Some(id), key, entry) => {
+            store_slot(session, *id, key, entry.clone());
+            true
+        }
+        CacheEvent::MaterializedRead(output, expected) => {
+            let found = session.materialized.iter().find(|(o, _)| same_output(o, output)).map(|(_, g)| g);
+            match (found, expected) {
+                (None, None) => true,
+                (Some(a), Some(b)) => rdk::geometry::data_id(a) == rdk::geometry::data_id(b),
+                _ => false,
+            }
+        }
+        CacheEvent::MaterializedWrite(output, geometry) => {
+            session.materialized.insert(0, (output.clone(), geometry.clone()));
+            session.materialized.truncate(8);
+            true
+        }
+        CacheEvent::Time(sample) => {
+            record_time(session, sample.clone());
+            true
+        }
+    }
+}
+
+fn results_find<'a>(results: &'a Results, n: &node::T) -> Option<&'a Result<Output, Diagnostic>> {
+    results.get(&node::id(n))?.iter().find(|(seen, _)| node::ptr_eq(seen, n)).map(|(_, r)| r)
+}
+
+/// A node list keyed by id with the physical check, for visited sets.
+type Seen = HashMap<i64, Vec<node::T>>;
+
+fn seen_has(seen: &Seen, n: &node::T) -> bool {
+    seen.get(&node::id(n)).is_some_and(|v| v.iter().any(|s| node::ptr_eq(s, n)))
+}
+
+fn seen_add(seen: &mut Seen, n: &node::T) {
+    seen.entry(node::id(n)).or_default().push(n.clone());
+}
+
+/// The root's own time excludes its inputs. Placement budgets the uncached subtree, otherwise a
+/// cheap final operator hides an expensive branch.
+fn costly(predictions: &mut Predictions, results: &Results, session: &T, context: &context::T, n: &node::T) -> bool {
+    match session.parallel_override {
+        Some(forced) => forced,
+        None => {
+            struct Budget {
+                visited: Seen,
+                seconds: f64,
+                large: bool,
+            }
+            fn enough(b: &Budget) -> bool {
+                b.seconds >= BRANCH_MIN_SECONDS || b.large
+            }
+            fn visit(
+                b: &mut Budget,
+                predictions: &mut Predictions,
+                results: &Results,
+                session: &T,
+                context: &context::T,
+                n: &node::T,
+            ) {
+                if enough(b)
+                    || seen_has(&b.visited, n)
+                    || results_find(results, n).is_some()
+                    || !matches!(cached_output(predictions, results, session, context, n), Prediction::Missing)
+                {
+                    return;
+                }
+                seen_add(&mut b.visited, n);
+                match node_seconds(session, node::id(n)) {
+                    Some(elapsed) => b.seconds += elapsed,
+                    None => {
+                        let id = node::id(n);
+                        b.large = session
+                            .cache
+                            .find_first(&|key, _| {
+                                key.as_any()
+                                    .downcast_ref::<Vec<u8>>()
+                                    .is_some_and(|k| k.len() >= 8 && k[..8] == id.to_le_bytes())
+                            })
+                            .is_some_and(|value| payload::element_count(&entry_of(&value).output.payload) >= BRANCH_MIN_POINTS);
+                    }
+                }
+                for input in selected_inputs(n) {
+                    visit(b, predictions, results, session, context, &input);
+                }
+            }
+            let mut budget = Budget { visited: HashMap::new(), seconds: 0.0, large: false };
+            visit(&mut budget, predictions, results, session, context, n);
+            enough(&budget)
+        }
+    }
+}
+
+/// Complete the same sequential DFS prefix that reaches every shared node. Once it is memoized, the
+/// remaining branch DAGs have disjoint mutable state. ponytail: opaque expansions stay sequential
+/// until their concrete roots exist; broaden scheduling only if nested-zone measurements justify it.
+fn shared_prefix(memo: &mut Memo, session: &mut T, context: &context::T, roots: &[node::T]) -> Option<Result<(), Diagnostic>> {
+    let mut counts: HashMap<i64, Vec<(node::T, usize)>> = HashMap::new();
+    let mut opaque = false;
     for root in roots {
-        let output = evaluate(memo, session, context, root)?;
-        let geometry = input_geometry(session, &output)?;
-        outputs.push((output, geometry));
+        let mut visited: Seen = HashMap::new();
+        fn visit(
+            n: &node::T,
+            memo: &Memo,
+            visited: &mut Seen,
+            counts: &mut HashMap<i64, Vec<(node::T, usize)>>,
+            opaque: &mut bool,
+        ) {
+            if results_find(&memo.results, n).is_some() || seen_has(visited, n) {
+                return;
+            }
+            seen_add(visited, n);
+            let list = counts.entry(node::id(n)).or_default();
+            match list.iter_mut().find(|(seen, _)| node::ptr_eq(seen, n)) {
+                Some((_, count)) => *count += 1,
+                None => list.push((n.clone(), 1)),
+            }
+            if build::has_expand(n) {
+                *opaque = true;
+            }
+            for input in selected_inputs(n) {
+                visit(&input, memo, visited, counts, opaque);
+            }
+        }
+        visit(root, memo, &mut visited, &mut counts, &mut opaque);
+    }
+    if opaque {
+        return None;
+    }
+    let mut pending: Vec<node::T> =
+        counts.into_values().flatten().filter(|(_, count)| *count > 1).map(|(n, _)| n).collect();
+    // ponytail: shared-node membership scans this coarse DAG frontier; use a physical-node set if
+    // large shared frontiers dominate cook measurements.
+    fn contains(n: &node::T, memo: &Memo, pending: &[node::T]) -> bool {
+        results_find(&memo.results, n).is_none()
+            && (pending.iter().any(|p| node::ptr_eq(p, n)) || selected_inputs(n).iter().any(|c| contains(c, memo, pending)))
+    }
+    fn prefix(
+        n: &node::T,
+        memo: &mut Memo,
+        session: &mut T,
+        context: &context::T,
+        pending: &mut Vec<node::T>,
+    ) -> Result<(), Diagnostic> {
+        if pending.is_empty() || results_find(&memo.results, n).is_some() {
+            return Ok(());
+        }
+        if pending.iter().any(|p| node::ptr_eq(p, n)) || !contains(n, memo, pending) {
+            evaluate(memo, session, context, n)?;
+            pending.retain(|shared| results_find(&memo.results, shared).is_none());
+            return Ok(());
+        }
+        for child in selected_inputs(n) {
+            if pending.is_empty() {
+                break;
+            }
+            prefix(&child, memo, session, context, pending).map_err(|e| traced(n, e))?;
+        }
+        Ok(())
+    }
+    for root in roots {
+        if pending.is_empty() {
+            break;
+        }
+        if let Err(error) = prefix(root, memo, session, context, &mut pending) {
+            return Some(Err(error));
+        }
+    }
+    Some(Ok(()))
+}
+
+fn clone_memo(memo: &Memo, left: Vec<i64>) -> Memo {
+    Memo { results: memo.results.clone(), census: Arc::clone(&memo.census), left }
+}
+
+/// OCaml `==` on memoized results (a worker's copy of the parent's entry is the same value).
+fn same_result(a: &Result<Output, Diagnostic>, b: &Result<Output, Diagnostic>) -> bool {
+    match (a, b) {
+        (Ok(a), Ok(b)) => same_output(a, b),
+        (Err(a), Err(b)) => rays_diagnostic::error_to_string(a) == rays_diagnostic::error_to_string(b),
+        _ => false,
+    }
+}
+
+type Branch = Result<(Output, payload::T), Diagnostic>;
+
+fn evaluate_branch(memo: &mut Memo, session: &mut T, context: &context::T, root: &node::T) -> Branch {
+    let output = evaluate(memo, session, context, root)?;
+    let geometry = input_geometry(session, &output)?;
+    Ok((output, geometry))
+}
+
+/// Workers mutate only copied cache metadata and disjoint memo tables. Reads are validated against
+/// the current parent before any journal is applied; a prior branch's eviction may require a
+/// sequential recook. This keeps CLOCK order, retention and counters identical to input-order
+/// execution.
+fn evaluate_many(memo: &mut Memo, session: &mut T, context: &context::T, roots: &[node::T]) -> Result<Vec<(Output, payload::T)>, Diagnostic> {
+    let count = roots.len();
+    let candidates = |memo: &Memo, session: &T| -> Vec<usize> {
+        let mut predictions: Predictions = HashMap::new();
+        (0..count)
+            .filter(|i| {
+                let n = &roots[*i];
+                results_find(&memo.results, n).is_none()
+                    && costly(&mut predictions, &memo.results, session, context, n)
+                    && matches!(cached_output(&mut predictions, &memo.results, session, context, n), Prediction::Missing)
+            })
+            .collect()
+    };
+    let sequential = |memo: &mut Memo, session: &mut T| -> Result<Vec<(Output, payload::T)>, Diagnostic> {
+        roots.iter().map(|root| evaluate_branch(memo, session, context, root)).collect()
+    };
+    if count < 2
+        || context::domains(context) < 2
+        || session.parallel_override == Some(false)
+        || candidates(memo, session).len() < 2
+    {
+        return sequential(memo, session);
+    }
+    match shared_prefix(memo, session, context, roots) {
+        None => return sequential(memo, session),
+        Some(Err(error)) => return Err(error),
+        Some(Ok(())) => {}
+    }
+    let indices = candidates(memo, session);
+    if indices.len() < 2 {
+        return sequential(memo, session);
+    }
+    // the shared prefix's device work settles before branches read it
+    context::settle(context, true);
+    session.fanouts += 1;
+    let forked = memo.left.clone();
+    type Worker = (T, Memo);
+    let workers: Vec<Mutex<Option<Worker>>> = indices
+        .iter()
+        .map(|_| Mutex::new(Some((snapshot(session), clone_memo(memo, forked.clone())))))
+        .collect();
+    type Transaction = (T, Memo, Branch);
+    let transactions: Vec<Mutex<Option<Transaction>>> = (0..count).map(|_| Mutex::new(None)).collect();
+    let _ = parallel::for_(1, 0, indices.len() as i64 - 1, &|worker_index| {
+        let i = indices[worker_index as usize];
+        let (mut local, mut local_memo) = workers[worker_index as usize].lock().unwrap().take().expect("worker taken once");
+        local.journal = Some(Vec::new());
+        let result = evaluate_branch(&mut local_memo, &mut local, context, &roots[i]);
+        *transactions[i].lock().unwrap() = Some((local, local_memo, result));
+        Ok(())
+    });
+    let cancelled_error = |transactions: &[Mutex<Option<Transaction>>], from: usize| -> Diagnostic {
+        for i in from..count {
+            match &*transactions[i].lock().unwrap() {
+                Some((_, _, Err(error))) => return error.clone(),
+                Some((_, _, Ok(_))) => {}
+                None => return cancellation_error(&roots[i]),
+            }
+        }
+        cancellation_error(&roots[0])
+    };
+    let mut outputs: Vec<(Output, payload::T)> = Vec::with_capacity(count);
+    for i in 0..count {
+        if context::cancelled(context) {
+            return Err(cancelled_error(&transactions, i));
+        }
+        let transaction = transactions[i].lock().unwrap().take();
+        let result: Branch = match transaction {
+            None => evaluate_branch(memo, session, context, &roots[i]),
+            Some((local, local_memo, result)) => {
+                let events = local.journal.as_ref().expect("worker journal");
+                let compatible = local_memo.results.values().flatten().all(|(n, worker_result)| {
+                    results_find(&memo.results, n).is_none_or(|parent_result| same_result(worker_result, parent_result))
+                });
+                let mut probe = snapshot(session);
+                if compatible && events.iter().all(|event| replay_event(&mut probe, event)) {
+                    for event in events {
+                        replay_event(session, event);
+                    }
+                    session.cooks += local.cooks;
+                    session.hits += local.hits;
+                    session.misses += local.misses;
+                    session.volatile_hits += local.volatile_hits;
+                    session.volatile_misses += local.volatile_misses;
+                    if local.last_node.is_some() {
+                        session.last_node = local.last_node.clone();
+                    }
+                    // the worker's completed consumers count against the parent's readers
+                    for (serial, left) in local_memo.left.iter().enumerate() {
+                        let completed = forked[serial] - left;
+                        if completed > 0 {
+                            memo.left[serial] -= completed;
+                            if memo.left[serial] == 0 {
+                                let census = Arc::clone(&memo.census);
+                                memo_remove(memo, &census.nodes[serial]);
+                            }
+                        }
+                    }
+                    for (id, list) in &local_memo.results {
+                        for (n, value) in list {
+                            let wanted = match serial_of(&memo.census, n) {
+                                None => true,
+                                Some(serial) => memo.left[serial] > 0,
+                            };
+                            if wanted && results_find(&memo.results, n).is_none() {
+                                memo.results.entry(*id).or_default().push((n.clone(), value.clone()));
+                            }
+                        }
+                    }
+                    result
+                } else {
+                    evaluate_branch(memo, session, context, &roots[i])
+                }
+            }
+        };
+        outputs.push(result?);
     }
     Ok(outputs)
 }
@@ -1031,7 +1470,9 @@ fn evaluate_uncached(memo: &mut Memo, session: &mut T, context: &context::T, n: 
     }
     let outputs = evaluate_many(memo, session, context, &selected_inputs(n)).map_err(|e| traced(n, e))?;
     let geometries: Vec<payload::T> = outputs.into_iter().map(|(_, p)| p).collect();
-    let cache_active = session.max_entries > 0;
+    // Zero-entry sessions need only the per-cook memo. Speculative worker journals still need semantic
+    // keys for ordered parent replay.
+    let cache_active = session.max_entries > 0 || session.journal.is_some();
     let key = if cache_active { cache_key(n, context, &geometries) } else { Vec::new() };
     let volatile = (session.volatile)(node::id(n));
     let found = if cache_active { lookup(session, volatile, n, &key) } else { None };
@@ -1067,12 +1508,13 @@ fn evaluate_uncached(memo: &mut Memo, session: &mut T, context: &context::T, n: 
         if !context::settle(context, false).is_empty() {
             return Err(settle_failed());
         }
-        // only the cook's own thread sheds
+        // a parallel branch.s journal replays later: only the cook.s own thread sheds
         let admitted = {
             let cache = &session.cache;
+            let journaling = session.journal.is_some();
             let evictions = RefCell::new(0_i64);
             let result = mem::admit_with(&mut || {
-                let dropped = cache.drop_oldest();
+                let dropped = !journaling && cache.drop_oldest();
                 if dropped {
                     *evictions.borrow_mut() += 1;
                 }
@@ -1265,7 +1707,7 @@ pub fn close(session: &mut T) {
     }
 }
 
-/// Force or disable the coarse branch gate for exactness checks (inert here; see the module note).
+/// Force or disable the coarse branch gate for exactness checks.
 pub fn set_parallel_override(session: &mut T, value: Option<bool>) {
     session.parallel_override = value;
 }

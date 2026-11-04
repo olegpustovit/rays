@@ -14,11 +14,10 @@ fn quoted(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// `Manifest.number`: the shortest of %.15g and %.17g that round-trips (what `Flow.Lisp.float` prints,
-/// without a trailing `.0`).
+/// `Manifest.number`: `Flow.Lisp.float` (decimal) without a trailing `.0`.
 fn number(v: f64) -> String {
-    let short = cfmt::g(v, 15);
-    if short.parse::<f64>() == Ok(v) { short } else { cfmt::g(v, 17) }
+    let text = param::float_text_with_decimal(v, true);
+    text.strip_suffix(".0").map_or(text.clone(), str::to_owned)
 }
 
 fn render_value(value: &Value) -> String {
@@ -102,8 +101,13 @@ fn render(factory: &Factory) -> String {
             let folder: String = f.folder.iter().map(|p| format!(" {}", quoted(p))).collect();
             let vec3 = f.vec3.as_ref().map_or("(vec3)".to_owned(), |(g, i)| format!("(vec3 {} {i})", quoted(g)));
             let description = f.description.as_ref().map_or(String::new(), |d| format!(" (description {})", quoted(d)));
+            let impact = match f.impact {
+                param::Impact::Cook => "",
+                param::Impact::View => " (impact view)",
+                param::Impact::Export => " (impact export)",
+            };
             format!(
-                "(field {} {} (folder{folder}) {} {} (primary {}) {vec3}{description})",
+                "(field {} {} (folder{folder}) {} {} (primary {}) {vec3}{description}{impact})",
                 quoted(&f.name),
                 quoted(&f.label),
                 render_kind(&f.kind),
