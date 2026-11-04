@@ -242,7 +242,7 @@ impl Arena {
             id, workspace: Shared::new(workspace.clone()), functions: Shared::default(), residuals: Shared::default(),
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
             states: Shared::default(), records: Shared::default(), observed: Vec::new(), record,
-            time: None, resolve: None, state: None, elems: BTreeMap::new(), step_count: 0,
+            time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
             budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index: true,
         }));
         ARENAS.lock().unwrap().insert(id, Arc::downgrade(&arena));
@@ -1124,6 +1124,7 @@ fn state_key(c: &ExecCtx, zone: &[String]) -> StateKey {
     StateKey { instance: c.inst, path, iter: c.iter.clone() }
 }
 fn begin_frame(state: &mut StateData, source: &str, frame: i64) {
+    if frame == 0 && state.frame == Some(1) { eprintln!("BF regress {}", std::backtrace::Backtrace::force_capture()); }
     if state.source != source || state.frame.is_some_and(|old| frame < old) {
         state.source = source.into();
         state.frame = None;
@@ -1649,6 +1650,7 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
         Value::Residual(id) => {
             let arena = arena_for_residual(id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
             let forced = {
+                let _scope = StateScope::new(&arena);
                 let mut arena = arena.lock().unwrap();
                 arena.time = Some(live.clone());
                 arena.state = state.cloned().or(arena.state.clone());
@@ -1665,6 +1667,7 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
         Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
             let arena = arena_for_value(value);
             if let Some(arena) = arena {
+                let _scope = StateScope::new(&arena);
                 let mut arena = arena.lock().unwrap();
                 arena.time = Some(live.clone());
                 arena.state = state.cloned().or(arena.state.clone());
@@ -1694,9 +1697,22 @@ fn resolve_source_with(resolve: &Arc<dyn Fn(&Value) -> Result<Value, Diagnostic>
     value::validate(&value)?;
     Ok(value)
 }
+/// OCaml's `with_live` scopes the live state to the call: the arena's previous state returns on every exit (Drop).
+/// Create it BEFORE locking the arena, so it drops after the lock guard.
+struct StateScope { arena: Arc<Mutex<Arena>>, previous: Option<State> }
+impl StateScope {
+    fn new(arena: &Arc<Mutex<Arena>>) -> StateScope {
+        let previous = arena.lock().unwrap().state.clone();
+        StateScope { arena: arena.clone(), previous }
+    }
+}
+impl Drop for StateScope {
+    fn drop(&mut self) { if let Ok(mut arena) = self.arena.lock() { arena.state = self.previous.take(); } }
+}
 fn arena_for_residual(id: &ResidualId) -> Option<Arc<Mutex<Arena>>> { find_home(&HOME_RESIDUAL, id.0) }
 pub fn residual_eval(id: ResidualId, live: &Frame, state: Option<&State>) -> Result<Value, Diagnostic> {
     let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+    let _scope = StateScope::new(&arena);
     let mut arena = arena.lock().unwrap();
     fail_frame(live)?;
     arena.time = Some(live.clone());
@@ -2228,6 +2244,7 @@ pub mod Residual {
     pub fn residual_eval(id: ResidualId, live: &Frame, state: Option<&State>) -> Result<Value, Diagnostic> { super::residual_eval(id, live, state) }
     pub fn eval_term(id: ResidualId, term: &Term, live: &Frame, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>>) -> Result<Value, Diagnostic> {
         let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let _scope = StateScope::new(&arena);
         let mut arena = arena.lock().unwrap();
         fail_frame(live)?;
         arena.time = Some(live.clone());

@@ -1666,9 +1666,6 @@ struct Run {
     t: T,
     live: Live,
     state: State,
-    /// no state was supplied: `state` is a private default, so the reference interpreter keeps the residual's own
-    /// (OCaml scopes `with_live`'s state; the arena here would keep the private one and strand the caller's writes)
-    ambient: bool,
     elems: Option<Vec<(String, Value)>>,
     resolve: Option<Resolve>,
     measure: Option<Measure>,
@@ -1680,7 +1677,7 @@ struct Run {
 }
 
 fn run_state(run: &Run) -> Option<&State> {
-    if run.ambient { None } else { Some(&run.state) }
+    Some(&run.state)
 }
 
 fn seconds_since(measure: &Measure, started: f64) -> f64 {
@@ -3865,7 +3862,6 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
                 t: program,
                 live: run.live.clone(),
                 state: run.state.clone(),
-                ambient: run.ambient,
                 elems: run.elems.clone(),
                 resolve: run.resolve.clone(),
                 measure: run.measure.clone(),
@@ -4078,7 +4074,6 @@ fn make_run(t: &T, live: &Live, o: &ForceOptions, column_source: Option<ColumnSo
         t: t.clone(),
         live: live.clone(),
         state: o.state.clone().unwrap_or_else(E::create_state),
-        ambient: o.state.is_none(),
         elems: o.elems.clone(),
         resolve: o.resolve.clone(),
         measure: o.measure.clone(),
@@ -4521,7 +4516,6 @@ pub mod host {
             t: pv.t.clone(),
             live: pv.live.clone(),
             state: pv.state.clone(),
-            ambient: false,
             elems: None,
             resolve: resolve.clone(),
             measure: pv.measure.clone(),
