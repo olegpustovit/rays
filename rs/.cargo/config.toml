@@ -5,4 +5,9 @@ t = "run -q -p rays-t --"
 # The -B path is the pinned toolchain's gcc-ld dir (rust-toolchain.toml); update it if the pin or user changes.
 # If a link fails with "undefined reference ... llvm...": `cargo clean -p <flow crates>` in that target dir.
 [target.x86_64-pc-windows-gnu]
-rustflags = ["-Clink-arg=-fuse-ld=lld", "-Clink-arg=-BC:/Users/snowbear/.rustup/toolchains/1.99.1-x86_64-pc-windows-gnu/lib/rustlib/x86_64-pc-windows-gnu/bin/gcc-ld"]
+rustflags = ["-Clink-arg=-Wl,--stack,268435456", "-Clink-arg=-fuse-ld=lld", "-Clink-arg=-BC:/Users/snowbear/.rustup/toolchains/1.99.1-x86_64-pc-windows-gnu/lib/rustlib/x86_64-pc-windows-gnu/bin/gcc-ld"]
+
+# Main-thread stack 256 MB on every binary (tests, harness=false targets run cases on the main thread,
+# and the app): deep Lisp recursion, as in the plan's §9. Windows: in the rustflags above.
+[target.aarch64-apple-darwin]
+rustflags = ["-Clink-arg=-Wl,-stack_size,0x10000000"]
