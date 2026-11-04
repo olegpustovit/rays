@@ -1,0 +1,3732 @@
+FILE audio.rays
+W audio graphs=5 defs=0 macros=0 nodes=0
+G notes host rec{active:int,effects:list:effect}
+G picture draw drawing
+G actions host any
+G editor editor editor
+G window settings settings
+L actions/@result
+L editor/@result
+L editor/@result#0
+L notes/@result
+L notes/@result/~for/@result
+L notes/active
+L notes/active/:event
+L notes/active/:note
+L notes/active/@result
+L notes/active/@result#else
+L notes/active/@result#else/@result
+L notes/active/@result#test0
+L notes/active/@result#test1
+L notes/active/@result#test2
+L notes/active/@result#test3
+L notes/active/@result#test4
+L notes/active/@result#test5
+L notes/active/@result#test6
+L notes/active/@result#test7
+L notes/active/@result#test8
+L notes/active/@result#test9
+L notes/active/@result#then
+L notes/active/@result#then/@result
+L notes/active/@result#then~10
+L notes/active/@result#then~10/@result
+L notes/active/@result#then~10/@result#0
+L notes/frame
+L picture/@result
+L picture/@result/~for/@result
+L picture/@result/~for/@result#:fill
+L picture/@result/~for/@result#:fill#test
+L picture/notes
+P actions/@result candidate notes/@result/~for,notes/active
+P notes/@result candidate notes/@result/~for,notes/active
+P notes/@result/~for refused 1
+P notes/@result/~for/@result candidate notes/@result/~for
+P notes/active refused 1
+P notes/active/@result candidate notes/active
+P notes/active/@result#else candidate notes/active
+P notes/active/@result#else/@result candidate notes/active
+P notes/active/@result#test0 candidate notes/active
+P notes/active/@result#test1 candidate notes/active
+P notes/active/@result#test2 candidate notes/active
+P notes/active/@result#test3 candidate notes/active
+P notes/active/@result#test4 candidate notes/active
+P notes/active/@result#test5 candidate notes/active
+P notes/active/@result#test6 candidate notes/active
+P notes/active/@result#test7 candidate notes/active
+P notes/active/@result#test8 candidate notes/active
+P notes/active/@result#test9 candidate notes/active
+P notes/active/@result#then candidate notes/active
+P notes/active/@result#then/@result candidate notes/active
+P notes/active/@result#then~10 candidate notes/active
+P notes/active/@result#then~10/@result candidate notes/active
+P notes/active/@result#then~2 candidate notes/active
+P notes/active/@result#then~2/@result candidate notes/active
+P notes/active/@result#then~3 candidate notes/active
+P notes/active/@result#then~3/@result candidate notes/active
+P notes/active/@result#then~4 candidate notes/active
+P notes/active/@result#then~4/@result candidate notes/active
+P notes/active/@result#then~5 candidate notes/active
+P notes/active/@result#then~5/@result candidate notes/active
+P notes/active/@result#then~6 candidate notes/active
+P notes/active/@result#then~6/@result candidate notes/active
+P notes/active/@result#then~7 candidate notes/active
+P notes/active/@result#then~7/@result candidate notes/active
+P notes/active/@result#then~8 candidate notes/active
+P notes/active/@result#then~8/@result candidate notes/active
+P notes/active/@result#then~9 candidate notes/active
+P notes/active/@result#then~9/@result candidate notes/active
+P picture/@result/~for refused 1
+P picture/@result/~for/@result candidate picture/@result/~for
+P picture/@result/~for/@result#:fill candidate notes/@result/~for,notes/active,picture/@result/~for
+P picture/@result/~for/@result#:fill#else candidate picture/@result/~for
+P picture/@result/~for/@result#:fill#else/@result candidate picture/@result/~for
+P picture/@result/~for/@result#:fill#test candidate notes/@result/~for,notes/active,picture/@result/~for
+P picture/@result/~for/@result#:fill#then candidate picture/@result/~for
+P picture/@result/~for/@result#:fill#then/@result candidate picture/@result/~for
+P picture/notes candidate notes/@result/~for,notes/active
+PLAN instances=5 nodes=27
+N 0 audio/synth notes/samples/0
+N 1 audio/synth notes/samples/1
+N 2 audio/synth notes/samples/2
+N 3 audio/synth notes/samples/3
+N 4 audio/synth notes/samples/4
+N 5 audio/synth notes/samples/5
+N 6 audio/synth notes/samples/6
+N 7 audio/synth notes/samples/7
+N 8 host/play notes/@result/~for/@result
+N 9 host/play notes/@result/~for/@result
+N 10 host/play notes/@result/~for/@result
+N 11 host/play notes/@result/~for/@result
+N 12 host/play notes/@result/~for/@result
+N 13 host/play notes/@result/~for/@result
+N 14 host/play notes/@result/~for/@result
+N 15 host/play notes/@result/~for/@result
+N 16 draw/background picture/@result#0
+N 17 draw/text picture/@result#1
+N 18 draw/rect picture/@result/~for/@result
+N 19 draw/rect picture/@result/~for/@result
+N 20 draw/rect picture/@result/~for/@result
+N 21 draw/rect picture/@result/~for/@result
+N 22 draw/rect picture/@result/~for/@result
+N 23 draw/rect picture/@result/~for/@result
+N 24 draw/rect picture/@result/~for/@result
+N 25 draw/rect picture/@result/~for/@result
+N 26 draw/merge picture/@result
+R notes {:active -1 :effects [effect effect effect effect effect effect effect effect]}
+R picture drawing
+R actions [effect effect effect effect effect effect effect effect]
+R editor editor
+R window settings
+FILE basic.rays
+W basic graphs=3 defs=0 macros=0 nodes=0
+G picture draw drawing
+G editor editor editor
+G window settings settings
+L editor/@result
+L editor/@result#0
+L picture/@result
+L picture/@result#1
+L picture/@result#1#0
+L picture/@result#1#0~1
+L picture/@result#2
+L picture/phase
+L picture/phase/:previous
+L picture/phase/@result
+L picture/phase/@result#1
+PLAN instances=3 nodes=4
+N 0 draw/background picture/@result#0
+N 1 draw/circle picture/@result#1
+N 2 draw/text picture/@result#2
+N 3 draw/merge picture/@result
+R picture drawing
+R editor editor
+R window settings
+FILE drawing.rays
+W drawing graphs=5 defs=3 macros=0 nodes=0
+G model host rec{strokes:list:any,active:bool,current:rec{color:int,width:int,points:array:vec3},color:int,width:int,status:text,save:bool}
+G picture draw drawing
+G actions host effect
+G editor editor editor
+G window settings settings
+L actions/@result
+L def:add-point/@result
+L def:add-point/@result#else
+L def:add-point/@result#else/@result
+L def:add-point/@result#else/@result#else
+L def:add-point/@result#else/@result#else/@result
+L def:add-point/@result#else/@result#else/@result#else
+L def:add-point/@result#else/@result#else/@result#else/@result
+L def:add-point/@result#else/@result#else/@result#else/@result#1
+L def:add-point/@result#else/@result#else/@result#test
+L def:add-point/@result#else/@result#else/@result#then
+L def:add-point/@result#else/@result#else/@result#then/@result
+L def:add-point/@result#else/@result#else/dx
+L def:add-point/@result#else/@result#else/dy
+L def:add-point/@result#else/@result#else/last
+L def:add-point/@result#else/@result#test
+L def:add-point/@result#else/@result#then
+L def:add-point/@result#else/@result#then/@result
+L def:add-point/@result#test
+L def:add-point/@result#then
+L def:add-point/@result#then/@result
+L def:add-point/n
+L def:finish/@result
+L def:finish/@result#else
+L def:finish/@result#else/@result
+L def:finish/@result#test
+L def:finish/@result#then
+L def:finish/@result#then/@result
+L def:finish/@result#then/@result#else
+L def:finish/@result#then/@result#else/@result
+L def:finish/@result#then/@result#then
+L def:finish/@result#then/@result#then/@result
+L def:inside/@result
+L editor/@result
+L editor/@result#0
+L model/@result
+L model/@result/:previous
+L model/@result/@result
+L model/@result/@result/:event
+L model/@result/@result/:model
+L model/@result/@result/@result
+L model/@result/@result/@result#else
+L model/@result/@result/@result#else/@result
+L model/@result/@result/@result#test0
+L model/@result/@result/@result#test1
+L model/@result/@result/@result#test2
+L model/@result/@result/@result#test3
+L model/@result/@result/@result#test4
+L model/@result/@result/@result#then
+L model/@result/@result/@result#then/@result
+L model/@result/@result/@result#then/@result#else
+L model/@result/@result/@result#then/@result#else/@result
+L model/@result/@result/@result#then/@result#test
+L model/@result/@result/@result#then/@result#then
+L model/@result/@result/@result#then/@result#then/@result
+L model/@result/@result/@result#then/@result#then/@result#else
+L model/@result/@result/@result#then/@result#then/@result#else/@result
+L model/@result/@result/@result#then/@result#then/@result#test0
+L model/@result/@result/@result#then/@result#then/@result#test1
+L model/@result/@result/@result#then/@result#then/@result#test2
+L model/@result/@result/@result#then/@result#then/@result#test3
+L model/@result/@result/@result#then/@result#then/@result#test4
+L model/@result/@result/@result#then/@result#then/@result#test5
+L model/@result/@result/@result#then/@result#then/@result#test6
+L model/@result/@result/@result#then/@result#then/@result#test7
+L model/@result/@result/@result#then/@result#then/@result#test8
+L model/@result/@result/@result#then/@result#then/@result#then
+L model/@result/@result/@result#then/@result#then/@result#then/@result
+L model/@result/@result/@result#then/@result#then/@result#then~2
+L model/@result/@result/@result#then/@result#then/@result#then~2/@result
+L model/@result/@result/@result#then/@result#then/@result#then~3
+L model/@result/@result/@result#then/@result#then/@result#then~3/@result
+L model/@result/@result/@result#then/@result#then/@result#then~4
+L model/@result/@result/@result#then/@result#then/@result#then~4/@result
+L model/@result/@result/@result#then/@result#then/@result#then~5
+L model/@result/@result/@result#then/@result#then/@result#then~5/@result
+L model/@result/@result/@result#then/@result#then/@result#then~6
+L model/@result/@result/@result#then/@result#then/@result#then~6/@result
+L model/@result/@result/@result#then/@result#then/@result#then~7
+L model/@result/@result/@result#then/@result#then/@result#then~7/@result
+L model/@result/@result/@result#then/@result#then/@result#then~8
+L model/@result/@result/@result#then/@result#then/@result#then~8/@result
+L model/@result/@result/@result#then/@result#then/@result#then~9
+L model/@result/@result/@result#then/@result#then/@result#then~9/@result
+L model/@result/@result/@result#then/@result#then/inactive
+L model/@result/@result/@result#then~2
+L model/@result/@result/@result#then~2/@result
+L model/@result/@result/@result#then~2/@result#else
+L model/@result/@result/@result#then~2/@result#else/@result
+L model/@result/@result/@result#then~2/@result#test
+L model/@result/@result/@result#then~2/@result#then
+L model/@result/@result/@result#then~2/@result#then/@result
+L model/@result/@result/@result#then~3
+L model/@result/@result/@result#then~3/@result
+L model/@result/@result/@result#then~4
+L model/@result/@result/@result#then~4/@result
+L model/@result/@result/@result#then~5
+L model/@result/@result/@result#then~5/@result
+L model/@result/@result/@result#then~5/@result#else
+L model/@result/@result/@result#then~5/@result#else/@result
+L model/@result/@result/@result#then~5/@result#test0
+L model/@result/@result/@result#then~5/@result#test1
+L model/@result/@result/@result#then~5/@result#test2
+L model/@result/@result/@result#then~5/@result#test3
+L model/@result/@result/@result#then~5/@result#test4
+L model/@result/@result/@result#then~5/@result#then
+L model/@result/@result/@result#then~5/@result#then/@result
+L model/@result/@result/@result#then~5/@result#then~2
+L model/@result/@result/@result#then~5/@result#then~2/@result
+L model/@result/@result/@result#then~5/@result#then~3
+L model/@result/@result/@result#then~5/@result#then~3/@result
+L model/@result/@result/@result#then~5/@result#then~4
+L model/@result/@result/@result#then~5/@result#then~4/@result
+L model/@result/@result/@result#then~5/@result#then~5
+L model/@result/@result/@result#then~5/@result#then~5/@result
+L model/@result/@result/p
+L picture/@result
+L picture/@result/~for/@result
+L picture/@result/~for/@result#0
+L picture/@result/~for/@result#0#1
+L picture/@result/~for/@result#0#:fill
+L picture/@result/~for/@result#0#:fill#test
+L picture/@result/~for/@result#0#:fill#then
+L picture/@result/~for/@result#0#:fill#then/@result
+L picture/@result/~for/@result#1
+L picture/@result/~for/@result#1#0
+L picture/@result/~for/@result#1#1
+L picture/@result/~for/@result#1#1#1
+L picture/@result/~for/@result#1#1#1#test
+L picture/@result/~for/first
+L picture/@result/~for/first#test
+L picture/@result/~for/first#then
+L picture/@result/~for/first#then/@result
+L picture/@result/~for/n
+L picture/@result/~for/stroke
+L picture/@result/~for/stroke#else
+L picture/@result/~for/stroke#else/@result
+L picture/@result/~for/stroke#else/@result#test
+L picture/@result/~for/stroke#else/@result#then
+L picture/@result/~for/stroke#else/@result#then/@result
+L picture/@result/~for/stroke#then
+L picture/@result/~for/stroke#then/@result
+L picture/@result/~for/stroke#then/@result#test
+L picture/@result/~for/stroke#then/@result#then
+L picture/@result/~for/stroke#then/@result#then/@result
+L picture/@result/~for~2/@result
+L picture/@result/~for~2/@result#1
+L picture/@result/~for~2/@result#1#test
+L picture/@result#2
+L picture/@result#6
+L picture/@result#6#1
+L picture/@result#7
+L picture/@result#8
+L picture/@result#8#0
+L picture/model
+P def:finish/@result candidate model/@result/@result
+P def:finish/@result#else candidate model/@result/@result
+P def:finish/@result#else/@result candidate model/@result/@result
+P def:finish/@result#test candidate model/@result/@result
+P def:finish/@result#then candidate model/@result/@result
+P def:finish/@result#then/@result candidate model/@result/@result
+P def:inside/@result candidate model/@result/@result
+P model/@result/@result refused 1
+P model/@result/@result/@result candidate model/@result/@result
+P model/@result/@result/@result#else candidate model/@result/@result
+P model/@result/@result/@result#else/@result candidate model/@result/@result
+P model/@result/@result/@result#test0 candidate model/@result/@result
+P model/@result/@result/@result#test1 candidate model/@result/@result
+P model/@result/@result/@result#test2 candidate model/@result/@result
+P model/@result/@result/@result#test3 candidate model/@result/@result
+P model/@result/@result/@result#test4 candidate model/@result/@result
+P model/@result/@result/@result#then candidate model/@result/@result
+P model/@result/@result/@result#then/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#else candidate model/@result/@result
+P model/@result/@result/@result#then/@result#else/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#test candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#else candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#else/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test0 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test1 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test2 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test3 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test4 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test5 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test6 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test7 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#test8 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~2 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~2/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~3 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~3/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~4 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~4/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~5 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~5/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~6 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~6/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~7 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~7/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~8 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~8/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~9 candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/@result#then~9/@result candidate model/@result/@result
+P model/@result/@result/@result#then/@result#then/inactive candidate model/@result/@result
+P model/@result/@result/@result#then~2 candidate model/@result/@result
+P model/@result/@result/@result#then~2/@result candidate model/@result/@result
+P model/@result/@result/@result#then~2/@result#else candidate model/@result/@result
+P model/@result/@result/@result#then~2/@result#else/@result candidate model/@result/@result
+P model/@result/@result/@result#then~2/@result#test candidate model/@result/@result
+P model/@result/@result/@result#then~2/@result#then candidate model/@result/@result
+P model/@result/@result/@result#then~2/@result#then/@result candidate model/@result/@result
+P model/@result/@result/@result#then~3 candidate model/@result/@result
+P model/@result/@result/@result#then~3/@result candidate model/@result/@result
+P model/@result/@result/@result#then~4 candidate model/@result/@result
+P model/@result/@result/@result#then~4/@result candidate model/@result/@result
+P model/@result/@result/@result#then~5 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#else candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#else/@result candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#test0 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#test1 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#test2 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#test3 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#test4 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then/@result candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then~2 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then~2/@result candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then~3 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then~3/@result candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then~4 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then~4/@result candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then~5 candidate model/@result/@result
+P model/@result/@result/@result#then~5/@result#then~5/@result candidate model/@result/@result
+P model/@result/@result/p candidate model/@result/@result
+P picture/@result/~for refused 1
+P picture/@result/~for/@result candidate picture/@result/~for
+P picture/@result/~for/@result#0 candidate picture/@result/~for
+P picture/@result/~for/@result#0#:fill candidate picture/@result/~for
+P picture/@result/~for/@result#0#:fill#else candidate picture/@result/~for
+P picture/@result/~for/@result#0#:fill#else/@result candidate picture/@result/~for
+P picture/@result/~for/@result#0#:fill#test candidate picture/@result/~for
+P picture/@result/~for/@result#0#:fill#then candidate picture/@result/~for
+P picture/@result/~for/@result#0#:fill#then/@result candidate picture/@result/~for
+P picture/@result/~for/@result#1 candidate picture/@result/~for
+P picture/@result/~for/@result#1#1#1 candidate picture/@result/~for
+P picture/@result/~for/@result#1#1#1#else candidate picture/@result/~for
+P picture/@result/~for/@result#1#1#1#else/@result candidate picture/@result/~for
+P picture/@result/~for/@result#1#1#1#test candidate picture/@result/~for
+P picture/@result/~for/@result#1#1#1#then candidate picture/@result/~for
+P picture/@result/~for/@result#1#1#1#then/@result candidate picture/@result/~for
+P picture/@result/~for/first candidate picture/@result/~for
+P picture/@result/~for/first#else candidate picture/@result/~for
+P picture/@result/~for/first#else/@result candidate picture/@result/~for
+P picture/@result/~for/first#test candidate picture/@result/~for
+P picture/@result/~for/first#then candidate picture/@result/~for
+P picture/@result/~for/first#then/@result candidate picture/@result/~for
+P picture/@result/~for/j candidate picture/@result/~for
+P picture/@result/~for/n candidate picture/@result/~for
+P picture/@result/~for/stroke candidate picture/@result/~for
+P picture/@result/~for/stroke#else candidate picture/@result/~for
+P picture/@result/~for/stroke#else/@result candidate picture/@result/~for
+P picture/@result/~for/stroke#else/@result#else candidate picture/@result/~for
+P picture/@result/~for/stroke#else/@result#else/@result candidate picture/@result/~for
+P picture/@result/~for/stroke#else/@result#test candidate picture/@result/~for
+P picture/@result/~for/stroke#else/@result#then candidate picture/@result/~for
+P picture/@result/~for/stroke#else/@result#then/@result candidate picture/@result/~for
+P picture/@result/~for/stroke#test candidate picture/@result/~for
+P picture/@result/~for/stroke#then candidate picture/@result/~for
+P picture/@result/~for/stroke#then/@result candidate picture/@result/~for
+P picture/@result/~for/stroke#then/@result#else candidate picture/@result/~for
+P picture/@result/~for/stroke#then/@result#else/@result candidate picture/@result/~for
+P picture/@result/~for/stroke#then/@result#test candidate picture/@result/~for
+P picture/@result/~for/stroke#then/@result#then candidate picture/@result/~for
+P picture/@result/~for/stroke#then/@result#then/@result candidate picture/@result/~for
+P picture/@result/~for~1 refused 1
+P picture/@result/~for~1/@result candidate picture/@result/~for~1
+P picture/@result/~for~1/@result#0 candidate picture/@result/~for~1
+P picture/@result/~for~1/@result#1 candidate picture/@result/~for~1
+P picture/@result/~for~2 refused 1
+P picture/@result/~for~2/@result candidate picture/@result/~for~2
+P picture/@result/~for~2/@result#1 candidate picture/@result/~for~2
+P picture/@result/~for~2/@result#1#else candidate picture/@result/~for~2
+P picture/@result/~for~2/@result#1#else/@result candidate picture/@result/~for~2
+P picture/@result/~for~2/@result#1#test candidate picture/@result/~for~2
+P picture/@result/~for~2/@result#1#then candidate picture/@result/~for~2
+P picture/@result/~for~2/@result#1#then/@result candidate picture/@result/~for~2
+P picture/@result/~for~3 refused 1
+P picture/@result/~for~3/@result candidate picture/@result/~for~3
+P picture/@result/~for~3/@result#0 candidate picture/@result/~for~3
+P picture/@result/~for~3/@result#1 candidate picture/@result/~for~3
+PLAN instances=5 nodes=413
+N 0 draw/background picture/@result#0
+N 1 draw/circle picture/@result/~for/@result#0
+N 2 draw/lines picture/@result/~for/@result#1
+N 3 draw/merge picture/@result/~for/@result
+N 4 draw/circle picture/@result/~for/@result#0
+N 5 draw/lines picture/@result/~for/@result#1
+N 6 draw/merge picture/@result/~for/@result
+N 7 draw/circle picture/@result/~for/@result#0
+N 8 draw/lines picture/@result/~for/@result#1
+N 9 draw/merge picture/@result/~for/@result
+N 10 draw/circle picture/@result/~for/@result#0
+N 11 draw/lines picture/@result/~for/@result#1
+N 12 draw/merge picture/@result/~for/@result
+N 13 draw/circle picture/@result/~for/@result#0
+N 14 draw/lines picture/@result/~for/@result#1
+N 15 draw/merge picture/@result/~for/@result
+N 16 draw/circle picture/@result/~for/@result#0
+N 17 draw/lines picture/@result/~for/@result#1
+N 18 draw/merge picture/@result/~for/@result
+N 19 draw/circle picture/@result/~for/@result#0
+N 20 draw/lines picture/@result/~for/@result#1
+N 21 draw/merge picture/@result/~for/@result
+N 22 draw/circle picture/@result/~for/@result#0
+N 23 draw/lines picture/@result/~for/@result#1
+N 24 draw/merge picture/@result/~for/@result
+N 25 draw/circle picture/@result/~for/@result#0
+N 26 draw/lines picture/@result/~for/@result#1
+N 27 draw/merge picture/@result/~for/@result
+N 28 draw/circle picture/@result/~for/@result#0
+N 29 draw/lines picture/@result/~for/@result#1
+N 30 draw/merge picture/@result/~for/@result
+N 31 draw/circle picture/@result/~for/@result#0
+N 32 draw/lines picture/@result/~for/@result#1
+N 33 draw/merge picture/@result/~for/@result
+N 34 draw/circle picture/@result/~for/@result#0
+N 35 draw/lines picture/@result/~for/@result#1
+N 36 draw/merge picture/@result/~for/@result
+N 37 draw/circle picture/@result/~for/@result#0
+N 38 draw/lines picture/@result/~for/@result#1
+N 39 draw/merge picture/@result/~for/@result
+N 40 draw/circle picture/@result/~for/@result#0
+N 41 draw/lines picture/@result/~for/@result#1
+N 42 draw/merge picture/@result/~for/@result
+N 43 draw/circle picture/@result/~for/@result#0
+N 44 draw/lines picture/@result/~for/@result#1
+N 45 draw/merge picture/@result/~for/@result
+N 46 draw/circle picture/@result/~for/@result#0
+N 47 draw/lines picture/@result/~for/@result#1
+N 48 draw/merge picture/@result/~for/@result
+N 49 draw/circle picture/@result/~for/@result#0
+N 50 draw/lines picture/@result/~for/@result#1
+N 51 draw/merge picture/@result/~for/@result
+N 52 draw/circle picture/@result/~for/@result#0
+N 53 draw/lines picture/@result/~for/@result#1
+N 54 draw/merge picture/@result/~for/@result
+N 55 draw/circle picture/@result/~for/@result#0
+N 56 draw/lines picture/@result/~for/@result#1
+N 57 draw/merge picture/@result/~for/@result
+N 58 draw/circle picture/@result/~for/@result#0
+N 59 draw/lines picture/@result/~for/@result#1
+N 60 draw/merge picture/@result/~for/@result
+N 61 draw/circle picture/@result/~for/@result#0
+N 62 draw/lines picture/@result/~for/@result#1
+N 63 draw/merge picture/@result/~for/@result
+N 64 draw/circle picture/@result/~for/@result#0
+N 65 draw/lines picture/@result/~for/@result#1
+N 66 draw/merge picture/@result/~for/@result
+N 67 draw/circle picture/@result/~for/@result#0
+N 68 draw/lines picture/@result/~for/@result#1
+N 69 draw/merge picture/@result/~for/@result
+N 70 draw/circle picture/@result/~for/@result#0
+N 71 draw/lines picture/@result/~for/@result#1
+N 72 draw/merge picture/@result/~for/@result
+N 73 draw/circle picture/@result/~for/@result#0
+N 74 draw/lines picture/@result/~for/@result#1
+N 75 draw/merge picture/@result/~for/@result
+N 76 draw/circle picture/@result/~for/@result#0
+N 77 draw/lines picture/@result/~for/@result#1
+N 78 draw/merge picture/@result/~for/@result
+N 79 draw/circle picture/@result/~for/@result#0
+N 80 draw/lines picture/@result/~for/@result#1
+N 81 draw/merge picture/@result/~for/@result
+N 82 draw/circle picture/@result/~for/@result#0
+N 83 draw/lines picture/@result/~for/@result#1
+N 84 draw/merge picture/@result/~for/@result
+N 85 draw/circle picture/@result/~for/@result#0
+N 86 draw/lines picture/@result/~for/@result#1
+N 87 draw/merge picture/@result/~for/@result
+N 88 draw/circle picture/@result/~for/@result#0
+N 89 draw/lines picture/@result/~for/@result#1
+N 90 draw/merge picture/@result/~for/@result
+N 91 draw/circle picture/@result/~for/@result#0
+N 92 draw/lines picture/@result/~for/@result#1
+N 93 draw/merge picture/@result/~for/@result
+N 94 draw/circle picture/@result/~for/@result#0
+N 95 draw/lines picture/@result/~for/@result#1
+N 96 draw/merge picture/@result/~for/@result
+N 97 draw/circle picture/@result/~for/@result#0
+N 98 draw/lines picture/@result/~for/@result#1
+N 99 draw/merge picture/@result/~for/@result
+N 100 draw/circle picture/@result/~for/@result#0
+N 101 draw/lines picture/@result/~for/@result#1
+N 102 draw/merge picture/@result/~for/@result
+N 103 draw/circle picture/@result/~for/@result#0
+N 104 draw/lines picture/@result/~for/@result#1
+N 105 draw/merge picture/@result/~for/@result
+N 106 draw/circle picture/@result/~for/@result#0
+N 107 draw/lines picture/@result/~for/@result#1
+N 108 draw/merge picture/@result/~for/@result
+N 109 draw/circle picture/@result/~for/@result#0
+N 110 draw/lines picture/@result/~for/@result#1
+N 111 draw/merge picture/@result/~for/@result
+N 112 draw/circle picture/@result/~for/@result#0
+N 113 draw/lines picture/@result/~for/@result#1
+N 114 draw/merge picture/@result/~for/@result
+N 115 draw/circle picture/@result/~for/@result#0
+N 116 draw/lines picture/@result/~for/@result#1
+N 117 draw/merge picture/@result/~for/@result
+N 118 draw/circle picture/@result/~for/@result#0
+N 119 draw/lines picture/@result/~for/@result#1
+N 120 draw/merge picture/@result/~for/@result
+N 121 draw/circle picture/@result/~for/@result#0
+N 122 draw/lines picture/@result/~for/@result#1
+N 123 draw/merge picture/@result/~for/@result
+N 124 draw/circle picture/@result/~for/@result#0
+N 125 draw/lines picture/@result/~for/@result#1
+N 126 draw/merge picture/@result/~for/@result
+N 127 draw/circle picture/@result/~for/@result#0
+N 128 draw/lines picture/@result/~for/@result#1
+N 129 draw/merge picture/@result/~for/@result
+N 130 draw/circle picture/@result/~for/@result#0
+N 131 draw/lines picture/@result/~for/@result#1
+N 132 draw/merge picture/@result/~for/@result
+N 133 draw/circle picture/@result/~for/@result#0
+N 134 draw/lines picture/@result/~for/@result#1
+N 135 draw/merge picture/@result/~for/@result
+N 136 draw/circle picture/@result/~for/@result#0
+N 137 draw/lines picture/@result/~for/@result#1
+N 138 draw/merge picture/@result/~for/@result
+N 139 draw/circle picture/@result/~for/@result#0
+N 140 draw/lines picture/@result/~for/@result#1
+N 141 draw/merge picture/@result/~for/@result
+N 142 draw/circle picture/@result/~for/@result#0
+N 143 draw/lines picture/@result/~for/@result#1
+N 144 draw/merge picture/@result/~for/@result
+N 145 draw/circle picture/@result/~for/@result#0
+N 146 draw/lines picture/@result/~for/@result#1
+N 147 draw/merge picture/@result/~for/@result
+N 148 draw/circle picture/@result/~for/@result#0
+N 149 draw/lines picture/@result/~for/@result#1
+N 150 draw/merge picture/@result/~for/@result
+N 151 draw/circle picture/@result/~for/@result#0
+N 152 draw/lines picture/@result/~for/@result#1
+N 153 draw/merge picture/@result/~for/@result
+N 154 draw/circle picture/@result/~for/@result#0
+N 155 draw/lines picture/@result/~for/@result#1
+N 156 draw/merge picture/@result/~for/@result
+N 157 draw/circle picture/@result/~for/@result#0
+N 158 draw/lines picture/@result/~for/@result#1
+N 159 draw/merge picture/@result/~for/@result
+N 160 draw/circle picture/@result/~for/@result#0
+N 161 draw/lines picture/@result/~for/@result#1
+N 162 draw/merge picture/@result/~for/@result
+N 163 draw/circle picture/@result/~for/@result#0
+N 164 draw/lines picture/@result/~for/@result#1
+N 165 draw/merge picture/@result/~for/@result
+N 166 draw/circle picture/@result/~for/@result#0
+N 167 draw/lines picture/@result/~for/@result#1
+N 168 draw/merge picture/@result/~for/@result
+N 169 draw/circle picture/@result/~for/@result#0
+N 170 draw/lines picture/@result/~for/@result#1
+N 171 draw/merge picture/@result/~for/@result
+N 172 draw/circle picture/@result/~for/@result#0
+N 173 draw/lines picture/@result/~for/@result#1
+N 174 draw/merge picture/@result/~for/@result
+N 175 draw/circle picture/@result/~for/@result#0
+N 176 draw/lines picture/@result/~for/@result#1
+N 177 draw/merge picture/@result/~for/@result
+N 178 draw/circle picture/@result/~for/@result#0
+N 179 draw/lines picture/@result/~for/@result#1
+N 180 draw/merge picture/@result/~for/@result
+N 181 draw/circle picture/@result/~for/@result#0
+N 182 draw/lines picture/@result/~for/@result#1
+N 183 draw/merge picture/@result/~for/@result
+N 184 draw/circle picture/@result/~for/@result#0
+N 185 draw/lines picture/@result/~for/@result#1
+N 186 draw/merge picture/@result/~for/@result
+N 187 draw/circle picture/@result/~for/@result#0
+N 188 draw/lines picture/@result/~for/@result#1
+N 189 draw/merge picture/@result/~for/@result
+N 190 draw/circle picture/@result/~for/@result#0
+N 191 draw/lines picture/@result/~for/@result#1
+N 192 draw/merge picture/@result/~for/@result
+N 193 draw/circle picture/@result/~for/@result#0
+N 194 draw/lines picture/@result/~for/@result#1
+N 195 draw/merge picture/@result/~for/@result
+N 196 draw/circle picture/@result/~for/@result#0
+N 197 draw/lines picture/@result/~for/@result#1
+N 198 draw/merge picture/@result/~for/@result
+N 199 draw/circle picture/@result/~for/@result#0
+N 200 draw/lines picture/@result/~for/@result#1
+N 201 draw/merge picture/@result/~for/@result
+N 202 draw/circle picture/@result/~for/@result#0
+N 203 draw/lines picture/@result/~for/@result#1
+N 204 draw/merge picture/@result/~for/@result
+N 205 draw/circle picture/@result/~for/@result#0
+N 206 draw/lines picture/@result/~for/@result#1
+N 207 draw/merge picture/@result/~for/@result
+N 208 draw/circle picture/@result/~for/@result#0
+N 209 draw/lines picture/@result/~for/@result#1
+N 210 draw/merge picture/@result/~for/@result
+N 211 draw/circle picture/@result/~for/@result#0
+N 212 draw/lines picture/@result/~for/@result#1
+N 213 draw/merge picture/@result/~for/@result
+N 214 draw/circle picture/@result/~for/@result#0
+N 215 draw/lines picture/@result/~for/@result#1
+N 216 draw/merge picture/@result/~for/@result
+N 217 draw/circle picture/@result/~for/@result#0
+N 218 draw/lines picture/@result/~for/@result#1
+N 219 draw/merge picture/@result/~for/@result
+N 220 draw/circle picture/@result/~for/@result#0
+N 221 draw/lines picture/@result/~for/@result#1
+N 222 draw/merge picture/@result/~for/@result
+N 223 draw/circle picture/@result/~for/@result#0
+N 224 draw/lines picture/@result/~for/@result#1
+N 225 draw/merge picture/@result/~for/@result
+N 226 draw/circle picture/@result/~for/@result#0
+N 227 draw/lines picture/@result/~for/@result#1
+N 228 draw/merge picture/@result/~for/@result
+N 229 draw/circle picture/@result/~for/@result#0
+N 230 draw/lines picture/@result/~for/@result#1
+N 231 draw/merge picture/@result/~for/@result
+N 232 draw/circle picture/@result/~for/@result#0
+N 233 draw/lines picture/@result/~for/@result#1
+N 234 draw/merge picture/@result/~for/@result
+N 235 draw/circle picture/@result/~for/@result#0
+N 236 draw/lines picture/@result/~for/@result#1
+N 237 draw/merge picture/@result/~for/@result
+N 238 draw/circle picture/@result/~for/@result#0
+N 239 draw/lines picture/@result/~for/@result#1
+N 240 draw/merge picture/@result/~for/@result
+N 241 draw/circle picture/@result/~for/@result#0
+N 242 draw/lines picture/@result/~for/@result#1
+N 243 draw/merge picture/@result/~for/@result
+N 244 draw/circle picture/@result/~for/@result#0
+N 245 draw/lines picture/@result/~for/@result#1
+N 246 draw/merge picture/@result/~for/@result
+N 247 draw/circle picture/@result/~for/@result#0
+N 248 draw/lines picture/@result/~for/@result#1
+N 249 draw/merge picture/@result/~for/@result
+N 250 draw/circle picture/@result/~for/@result#0
+N 251 draw/lines picture/@result/~for/@result#1
+N 252 draw/merge picture/@result/~for/@result
+N 253 draw/circle picture/@result/~for/@result#0
+N 254 draw/lines picture/@result/~for/@result#1
+N 255 draw/merge picture/@result/~for/@result
+N 256 draw/circle picture/@result/~for/@result#0
+N 257 draw/lines picture/@result/~for/@result#1
+N 258 draw/merge picture/@result/~for/@result
+N 259 draw/circle picture/@result/~for/@result#0
+N 260 draw/lines picture/@result/~for/@result#1
+N 261 draw/merge picture/@result/~for/@result
+N 262 draw/circle picture/@result/~for/@result#0
+N 263 draw/lines picture/@result/~for/@result#1
+N 264 draw/merge picture/@result/~for/@result
+N 265 draw/circle picture/@result/~for/@result#0
+N 266 draw/lines picture/@result/~for/@result#1
+N 267 draw/merge picture/@result/~for/@result
+N 268 draw/circle picture/@result/~for/@result#0
+N 269 draw/lines picture/@result/~for/@result#1
+N 270 draw/merge picture/@result/~for/@result
+N 271 draw/circle picture/@result/~for/@result#0
+N 272 draw/lines picture/@result/~for/@result#1
+N 273 draw/merge picture/@result/~for/@result
+N 274 draw/circle picture/@result/~for/@result#0
+N 275 draw/lines picture/@result/~for/@result#1
+N 276 draw/merge picture/@result/~for/@result
+N 277 draw/circle picture/@result/~for/@result#0
+N 278 draw/lines picture/@result/~for/@result#1
+N 279 draw/merge picture/@result/~for/@result
+N 280 draw/circle picture/@result/~for/@result#0
+N 281 draw/lines picture/@result/~for/@result#1
+N 282 draw/merge picture/@result/~for/@result
+N 283 draw/circle picture/@result/~for/@result#0
+N 284 draw/lines picture/@result/~for/@result#1
+N 285 draw/merge picture/@result/~for/@result
+N 286 draw/circle picture/@result/~for/@result#0
+N 287 draw/lines picture/@result/~for/@result#1
+N 288 draw/merge picture/@result/~for/@result
+N 289 draw/circle picture/@result/~for/@result#0
+N 290 draw/lines picture/@result/~for/@result#1
+N 291 draw/merge picture/@result/~for/@result
+N 292 draw/circle picture/@result/~for/@result#0
+N 293 draw/lines picture/@result/~for/@result#1
+N 294 draw/merge picture/@result/~for/@result
+N 295 draw/circle picture/@result/~for/@result#0
+N 296 draw/lines picture/@result/~for/@result#1
+N 297 draw/merge picture/@result/~for/@result
+N 298 draw/circle picture/@result/~for/@result#0
+N 299 draw/lines picture/@result/~for/@result#1
+N 300 draw/merge picture/@result/~for/@result
+N 301 draw/circle picture/@result/~for/@result#0
+N 302 draw/lines picture/@result/~for/@result#1
+N 303 draw/merge picture/@result/~for/@result
+N 304 draw/circle picture/@result/~for/@result#0
+N 305 draw/lines picture/@result/~for/@result#1
+N 306 draw/merge picture/@result/~for/@result
+N 307 draw/circle picture/@result/~for/@result#0
+N 308 draw/lines picture/@result/~for/@result#1
+N 309 draw/merge picture/@result/~for/@result
+N 310 draw/circle picture/@result/~for/@result#0
+N 311 draw/lines picture/@result/~for/@result#1
+N 312 draw/merge picture/@result/~for/@result
+N 313 draw/circle picture/@result/~for/@result#0
+N 314 draw/lines picture/@result/~for/@result#1
+N 315 draw/merge picture/@result/~for/@result
+N 316 draw/circle picture/@result/~for/@result#0
+N 317 draw/lines picture/@result/~for/@result#1
+N 318 draw/merge picture/@result/~for/@result
+N 319 draw/circle picture/@result/~for/@result#0
+N 320 draw/lines picture/@result/~for/@result#1
+N 321 draw/merge picture/@result/~for/@result
+N 322 draw/circle picture/@result/~for/@result#0
+N 323 draw/lines picture/@result/~for/@result#1
+N 324 draw/merge picture/@result/~for/@result
+N 325 draw/circle picture/@result/~for/@result#0
+N 326 draw/lines picture/@result/~for/@result#1
+N 327 draw/merge picture/@result/~for/@result
+N 328 draw/circle picture/@result/~for/@result#0
+N 329 draw/lines picture/@result/~for/@result#1
+N 330 draw/merge picture/@result/~for/@result
+N 331 draw/circle picture/@result/~for/@result#0
+N 332 draw/lines picture/@result/~for/@result#1
+N 333 draw/merge picture/@result/~for/@result
+N 334 draw/circle picture/@result/~for/@result#0
+N 335 draw/lines picture/@result/~for/@result#1
+N 336 draw/merge picture/@result/~for/@result
+N 337 draw/circle picture/@result/~for/@result#0
+N 338 draw/lines picture/@result/~for/@result#1
+N 339 draw/merge picture/@result/~for/@result
+N 340 draw/circle picture/@result/~for/@result#0
+N 341 draw/lines picture/@result/~for/@result#1
+N 342 draw/merge picture/@result/~for/@result
+N 343 draw/circle picture/@result/~for/@result#0
+N 344 draw/lines picture/@result/~for/@result#1
+N 345 draw/merge picture/@result/~for/@result
+N 346 draw/circle picture/@result/~for/@result#0
+N 347 draw/lines picture/@result/~for/@result#1
+N 348 draw/merge picture/@result/~for/@result
+N 349 draw/circle picture/@result/~for/@result#0
+N 350 draw/lines picture/@result/~for/@result#1
+N 351 draw/merge picture/@result/~for/@result
+N 352 draw/circle picture/@result/~for/@result#0
+N 353 draw/lines picture/@result/~for/@result#1
+N 354 draw/merge picture/@result/~for/@result
+N 355 draw/circle picture/@result/~for/@result#0
+N 356 draw/lines picture/@result/~for/@result#1
+N 357 draw/merge picture/@result/~for/@result
+N 358 draw/circle picture/@result/~for/@result#0
+N 359 draw/lines picture/@result/~for/@result#1
+N 360 draw/merge picture/@result/~for/@result
+N 361 draw/circle picture/@result/~for/@result#0
+N 362 draw/lines picture/@result/~for/@result#1
+N 363 draw/merge picture/@result/~for/@result
+N 364 draw/circle picture/@result/~for/@result#0
+N 365 draw/lines picture/@result/~for/@result#1
+N 366 draw/merge picture/@result/~for/@result
+N 367 draw/circle picture/@result/~for/@result#0
+N 368 draw/lines picture/@result/~for/@result#1
+N 369 draw/merge picture/@result/~for/@result
+N 370 draw/circle picture/@result/~for/@result#0
+N 371 draw/lines picture/@result/~for/@result#1
+N 372 draw/merge picture/@result/~for/@result
+N 373 draw/circle picture/@result/~for/@result#0
+N 374 draw/lines picture/@result/~for/@result#1
+N 375 draw/merge picture/@result/~for/@result
+N 376 draw/circle picture/@result/~for/@result#0
+N 377 draw/lines picture/@result/~for/@result#1
+N 378 draw/merge picture/@result/~for/@result
+N 379 draw/circle picture/@result/~for/@result#0
+N 380 draw/lines picture/@result/~for/@result#1
+N 381 draw/merge picture/@result/~for/@result
+N 382 draw/circle picture/@result/~for/@result#0
+N 383 draw/lines picture/@result/~for/@result#1
+N 384 draw/merge picture/@result/~for/@result
+N 385 draw/circle picture/@result/~for/@result#0
+N 386 draw/lines picture/@result/~for/@result#1
+N 387 draw/merge picture/@result/~for/@result
+N 388 draw/rect picture/@result#2
+N 389 draw/rounded_rect picture/@result/~for~1/@result#0
+N 390 draw/text picture/@result/~for~1/@result#1
+N 391 draw/merge picture/@result/~for~1/@result
+N 392 draw/rounded_rect picture/@result/~for~1/@result#0
+N 393 draw/text picture/@result/~for~1/@result#1
+N 394 draw/merge picture/@result/~for~1/@result
+N 395 draw/rounded_rect picture/@result/~for~1/@result#0
+N 396 draw/text picture/@result/~for~1/@result#1
+N 397 draw/merge picture/@result/~for~1/@result
+N 398 draw/circle picture/@result/~for~2/@result
+N 399 draw/circle picture/@result/~for~2/@result
+R model {:strokes [] :active false :current {:color 0 :width 10 :points 0 × vec3} :color 0 :width 10 :status Drag to draw :save false}
+R picture drawing
+R actions effect
+R editor editor
+R window settings
+FILE file_dialog.rays
+W file_dialog graphs=5 defs=0 macros=0 nodes=0
+G model host rec{lines:list:text,dragging:bool,position:vec3,zoom:float}
+G picture draw drawing
+G actions host list:effect
+G editor editor editor
+G window settings settings
+L actions/@result
+L actions/@result#1
+L actions/@result#1~1
+L actions/@result#1~2
+L editor/@result
+L editor/@result#0
+L model/@result
+L model/@result/:previous
+L model/@result/@result
+L model/@result/@result/:event
+L model/@result/@result/:model
+L model/@result/@result/@result
+L model/@result/@result/@result#else
+L model/@result/@result/@result#else/@result
+L model/@result/@result/@result#test
+L model/@result/@result/@result#test0
+L model/@result/@result/@result#test1
+L model/@result/@result/@result#then
+L model/@result/@result/@result#then/@result
+L model/@result/@result/line
+L model/@result/@result/line#test0
+L model/@result/@result/line#test1
+L model/@result/@result/line#test2
+L model/@result/@result/line#test3
+L model/@result/@result/line#then
+L model/@result/@result/line#then/@result
+L model/@result/@result/line#then~2
+L model/@result/@result/line#then~2/@result
+L model/@result/@result/line#then~3
+L model/@result/@result/line#then~3/@result
+L model/@result/@result/line#then~4
+L model/@result/@result/line#then~4/@result
+L model/@result/@result/lines
+L model/@result/@result/lines#else
+L model/@result/@result/lines#else/@result
+L model/@result/@result/lines#test
+L model/@result/@result/lines#then
+L model/@result/@result/lines#then/@result
+L model/@result/@result/outcomes
+L model/@result/@result/outcomes#else
+L model/@result/@result/outcomes#else/@result
+L model/@result/@result/outcomes#test
+L model/@result/@result/outcomes#then
+L model/@result/@result/outcomes#then/@result
+L model/@result/@result/outcomes#then/@result/:outcomes
+L model/@result/@result/outcomes#then/@result/:path
+L model/@result/@result/outcomes#then/@result/@result
+L picture/@result
+L picture/@result/~let/@result
+L picture/@result/~let/@result/@result
+L picture/@result/~let/@result/@result#1
+L picture/@result/~let/@result/@result#1#test
+L picture/@result/~let/@result/@result#1#then
+L picture/@result/~let/@result/@result#1#then/@result
+L picture/@result/~let/lines
+L picture/@result#2
+L picture/@result#2#0
+L picture/@result#2#0#0
+L picture/@result#2#1
+L picture/@result#3
+L picture/@result#3#:fill
+L picture/@result#3#:fill#test
+L picture/model
+L picture/side
+P model/@result/@result refused 1
+P model/@result/@result/@result candidate model/@result/@result,model/@result/@result/outcomes#then/@result
+P model/@result/@result/line candidate model/@result/@result
+P model/@result/@result/line#else candidate model/@result/@result
+P model/@result/@result/line#else/@result candidate model/@result/@result
+P model/@result/@result/line#test0 candidate model/@result/@result
+P model/@result/@result/line#test1 candidate model/@result/@result
+P model/@result/@result/line#test2 candidate model/@result/@result
+P model/@result/@result/line#test3 candidate model/@result/@result
+P model/@result/@result/line#then candidate model/@result/@result
+P model/@result/@result/line#then/@result candidate model/@result/@result
+P model/@result/@result/line#then~2 candidate model/@result/@result
+P model/@result/@result/line#then~2/@result candidate model/@result/@result
+P model/@result/@result/line#then~3 candidate model/@result/@result
+P model/@result/@result/line#then~3/@result candidate model/@result/@result
+P model/@result/@result/line#then~4 candidate model/@result/@result
+P model/@result/@result/line#then~4/@result candidate model/@result/@result
+P model/@result/@result/lines candidate model/@result/@result
+P model/@result/@result/lines#else candidate model/@result/@result
+P model/@result/@result/lines#else/@result candidate model/@result/@result
+P model/@result/@result/lines#test candidate model/@result/@result
+P model/@result/@result/lines#then candidate model/@result/@result
+P model/@result/@result/lines#then/@result candidate model/@result/@result
+P model/@result/@result/outcomes candidate model/@result/@result,model/@result/@result/outcomes#then/@result
+P model/@result/@result/outcomes#else candidate model/@result/@result
+P model/@result/@result/outcomes#else/@result candidate model/@result/@result
+P model/@result/@result/outcomes#test candidate model/@result/@result
+P model/@result/@result/outcomes#then candidate model/@result/@result,model/@result/@result/outcomes#then/@result
+P model/@result/@result/outcomes#then/@result refused 1
+P model/@result/@result/outcomes#then/@result/@result candidate model/@result/@result/outcomes#then/@result
+P picture/@result/~let/@result refused 1
+P picture/@result/~let/@result/@result candidate picture/@result/~let/@result
+P picture/@result/~let/@result/@result#1 candidate picture/@result/~let/@result
+P picture/@result/~let/@result/@result#1#else candidate picture/@result/~let/@result
+P picture/@result/~let/@result/@result#1#else/@result candidate picture/@result/~let/@result
+P picture/@result/~let/@result/@result#1#test candidate picture/@result/~let/@result
+P picture/@result/~let/@result/@result#1#then candidate picture/@result/~let/@result
+P picture/@result/~let/@result/@result#1#then/@result candidate picture/@result/~let/@result
+PLAN instances=5 nodes=16
+N 0 draw/background picture/@result#0
+N 1 draw/text picture/@result#1
+N 2 draw/rect picture/@result#2
+N 3 draw/circle picture/@result#3
+N 4 draw/text picture/@result/~let/@result/@result
+N 5 draw/text picture/@result/~let/@result/@result
+N 6 draw/text picture/@result/~let/@result/@result
+N 7 draw/text picture/@result/~let/@result/@result
+N 8 draw/text picture/@result/~let/@result/@result
+N 9 draw/text picture/@result/~let/@result/@result
+N 10 draw/text picture/@result/~let/@result/@result
+N 11 draw/text picture/@result/~let/@result/@result
+N 12 draw/merge picture/@result
+N 13 host/dialog actions/@result/0
+N 14 host/dialog actions/@result/1
+N 15 host/dialog actions/@result/2
+R model {:lines [] :dragging false :position [0 0 0] :zoom 1}
+R picture drawing
+R actions [effect effect effect]
+R editor editor
+R window settings
+FILE flow_contours.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE flow_field.rays
+W flow_field graphs=4 defs=0 macros=0 nodes=0
+G surface sop geometry
+G scene scene scene
+G settings settings settings
+G editor editor editor
+L editor/@result
+L editor/@result#0
+L editor/preview
+L editor/work
+L scene/@result
+L scene/mesh
+L surface/@result
+L surface/field
+L surface/field/@result
+L surface/radius
+PLAN instances=4 nodes=1
+N 0 sop/iso_surface surface/@result
+R surface geometry
+R scene scene
+R settings settings
+R editor editor
+FILE flow_image.rays
+W flow_image graphs=6 defs=0 macros=0 nodes=0
+G image image image
+G picture draw drawing
+G surface sop geometry
+G scene scene scene
+G settings settings settings
+G editor editor editor
+PLAN instances=6 nodes=6
+N 0 image/noise image/@result
+N 1 draw/background picture/@result#0
+N 2 draw/image picture/@result#1
+N 3 draw/merge picture/@result
+N 4 sop/grid surface/grid
+N 5 sop/attr_from_image surface/sampled
+R image image
+R picture drawing
+R surface geometry
+R scene scene
+R settings settings
+R editor editor
+FILE flow_image_kernel.rays
+W flow_image_kernel graphs=4 defs=0 macros=0 nodes=0
+G image image image
+G picture draw drawing
+G settings settings settings
+G editor editor editor
+L editor/@result
+L editor/@result#0
+L editor/@result#0#1
+L editor/preview
+L image/@result
+L image/bias
+L image/pixels
+L image/pixels#0
+L image/pixels#0/@result
+L picture/@result
+P image/@result candidate image/pixels
+P image/pixels candidate image/pixels
+P image/pixels#0 candidate image/pixels
+P image/pixels#0/@result candidate image/pixels
+PLAN instances=4 nodes=2
+N 0 image/map image/pixels
+N 1 draw/image picture/@result
+R image image
+R picture drawing
+R settings settings
+R editor editor
+FILE flow_kernel.rays
+D E_UNKNOWN_KIND: Unknown operator “sop/attr”.
+D E_UNKNOWN_KIND: Unknown operator “sop/attr”.
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+NONE
+FILE flow_particles_gpu.rays
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+NONE
+FILE flow_shader.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE flow_survey.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE flow_vectors.rays
+W flow_vectors graphs=3 defs=0 macros=0 nodes=0
+G picture draw drawing
+G settings settings settings
+G editor editor editor
+L editor/@result
+L editor/@result#0
+L editor/@result#0#1
+L picture/@result
+L picture/@result#1
+L picture/at
+L picture/offset
+L picture/position
+PLAN instances=3 nodes=3
+N 0 draw/background picture/@result#0
+N 1 draw/circle picture/@result#1
+N 2 draw/merge picture/@result
+R picture drawing
+R settings settings
+R editor editor
+FILE generative.rays
+W generative graphs=4 defs=0 macros=0 nodes=0
+G picture draw drawing
+G actions host list:effect
+G editor editor editor
+G window settings settings
+L actions/@result
+L actions/@result#0
+L actions/@result#1
+L editor/@result
+L editor/@result#0
+L picture/@result
+L picture/@result#1
+L picture/@result#1#0
+L picture/@result#1#0~1
+L picture/@result#1#1
+L picture/@result#1#1#1
+L picture/@result#1#1#1#1
+L picture/@result#1#1#1#1#0
+L picture/@result#1#1#1#1~1
+L picture/@result#1#1#1#1~1#0
+L picture/@result#1#1#1#1~2
+L picture/@result#1#1#1#1~2#1
+L picture/positions
+L picture/positions#0
+L picture/positions#0/@result
+L picture/radii
+L picture/radii#0
+L picture/radii#0/@result
+L picture/time
+L picture/time/:previous
+L picture/time/@result
+L picture/time/@result#1
+P picture/colors candidate picture/colors
+P picture/colors#0 candidate picture/colors
+P picture/colors#0/@result candidate picture/colors
+P picture/positions candidate picture/positions
+P picture/positions#0 candidate picture/positions
+P picture/positions#0/@result candidate picture/positions
+P picture/radii candidate picture/radii
+P picture/radii#0 candidate picture/radii
+P picture/radii#0/@result candidate picture/radii
+PLAN instances=4 nodes=8
+N 0 draw/background picture/@result#0
+N 1 draw/circles picture/@result#1#1#1#1~2#1
+N 2 draw/scale picture/@result#1#1#1#1~2
+N 3 draw/translate picture/@result#1#1#1
+N 4 draw/rotate picture/@result#1#1
+N 5 draw/translate picture/@result#1
+N 6 draw/merge picture/@result
+N 7 host/quit actions/@result/0
+R picture drawing
+R actions [effect]
+R editor editor
+R window settings
+FILE gpu_sea.rays
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+NONE
+FILE isogrid.rays
+D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean remesh?
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+NONE
+FILE isogrid_city.rays
+D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean remesh?
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+NONE
+FILE isogrid_drift.rays
+D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean remesh?
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+NONE
+FILE million_marks.rays
+W million_marks graphs=4 defs=0 macros=1 nodes=0
+G view host rec{x:float,y:float,zoom:float,px:float,py:float}
+G picture draw drawing
+G settings settings settings
+G editor editor editor
+L editor/@result
+L editor/@result#0
+L picture/@result
+L picture/@result#1
+L picture/@result#1#0
+L picture/@result#1#0#0
+L picture/@result#1#0~1
+L picture/@result#1#0~1#0
+L picture/@result#1#1
+L picture/@result#1#1#1
+L picture/marks
+L picture/positions
+L picture/positions#0
+L picture/positions#0/@result
+L picture/view
+L view/@result
+L view/@result/:previous
+L view/@result/@result
+L view/@result/@result#0
+L view/@result/@result#0~1
+L view/@result/@result#0~1#test
+L view/@result/@result#0~2
+L view/@result/@result#0~3
+L view/@result/@result#0~3#test
+L view/@result/@result#1
+L view/@result/@result#1#test
+L view/@result/@result#1~1
+L view/@result/@result#1~1#test
+L view/@result/drag
+L view/@result/drag#test
+L view/@result/dt
+L view/@result/dt#1
+L view/@result/step
+L view/@result/zoom
+L view/@result/zoom#0
+L view/@result/zoom#0#test
+L view/@result/zoom#1
+L view/@result/zoom#1#test
+P picture/positions candidate picture/positions
+P picture/positions#0 candidate picture/positions
+P picture/positions#0/@result candidate picture/positions
+P picture/positions#0/x candidate picture/positions
+P picture/positions#0/y candidate picture/positions
+P picture/tick_from candidate picture/tick_from
+P picture/tick_from#0 candidate picture/tick_from
+P picture/tick_from#0/@result candidate picture/tick_from
+P picture/tick_to candidate picture/tick_to
+P picture/tick_to#0 candidate picture/tick_to
+P picture/tick_to#0/@result candidate picture/tick_to
+EVAL_ERROR SKIPPED: heavy
+FILE noise.rays
+W noise graphs=3 defs=0 macros=0 nodes=0
+G picture draw drawing
+G editor editor editor
+G window settings settings
+L editor/@result
+L editor/@result#0
+L picture/@result
+L picture/@result#1
+L picture/colors
+L picture/colors#0/:sample
+L picture/colors#0/@result
+L picture/columns
+L picture/columns#0
+L picture/columns#0#0
+L picture/indices
+L picture/phase
+L picture/phase/:previous
+L picture/phase/@result
+L picture/phase/@result#0
+L picture/positions
+L picture/positions#0
+L picture/positions#0/:i
+L picture/positions#0/@result
+L picture/positions#0/@result#0
+L picture/rows
+L picture/rows#0
+L picture/rows#0#0
+L picture/samples
+L picture/samples#0
+L picture/samples#0/:i
+L picture/samples#0/@result
+L picture/samples#0/@result#0
+P picture/colors candidate picture/colors
+P picture/colors#0 candidate picture/colors
+P picture/colors#0/:sample candidate picture/samples
+P picture/colors#0/@result candidate picture/colors,picture/samples
+P picture/positions candidate picture/positions
+P picture/positions#0 candidate picture/positions
+P picture/positions#0/@result candidate picture/positions
+P picture/samples candidate picture/samples
+P picture/samples#0 candidate picture/samples
+P picture/samples#0/@result candidate picture/samples
+PLAN instances=3 nodes=3
+N 0 draw/background picture/@result#0
+N 1 draw/rects picture/@result#1
+N 2 draw/merge picture/@result
+R picture drawing
+R editor editor
+R window settings
+FILE particles.rays
+W particles graphs=3 defs=0 macros=0 nodes=0
+G picture draw drawing
+G editor editor editor
+G settings settings settings
+L editor/@result
+L editor/@result#0
+L editor/@result#0#0
+L editor/@result#0#1
+L editor/@result#0#1#1
+L picture/@result
+L picture/@result#1
+L picture/particles
+L picture/particles/:previous
+L picture/particles/@result
+L picture/particles/bounced_velocity
+L picture/particles/bounced_velocity#0
+L picture/particles/bounced_velocity#0/:p
+L picture/particles/bounced_velocity#0/:v
+L picture/particles/bounced_velocity#0/@result
+L picture/particles/bounced_velocity#0/@result#else
+L picture/particles/bounced_velocity#0/@result#else/@result
+L picture/particles/bounced_velocity#0/@result#test
+L picture/particles/bounced_velocity#0/@result#test#1
+L picture/particles/bounced_velocity#0/@result#test#1~1
+L picture/particles/bounced_velocity#0/@result#then
+L picture/particles/bounced_velocity#0/@result#then/@result
+L picture/particles/position
+L picture/particles/position#0
+L picture/particles/position#0/:p
+L picture/particles/position#0/:v
+L picture/particles/position#0/@result
+L picture/particles/position#0/@result#1
+P picture/initial_velocity candidate picture/initial_velocity
+P picture/initial_velocity#0 candidate picture/initial_velocity
+P picture/initial_velocity#0/@result candidate picture/initial_velocity
+P picture/initial_velocity#0/angle candidate picture/initial_velocity
+P picture/initial_velocity#0/speed candidate picture/initial_velocity
+P picture/particles/@result candidate picture/particles/bounced_velocity,picture/particles/position
+P picture/particles/bounced_velocity candidate picture/particles/bounced_velocity
+P picture/particles/bounced_velocity#0 candidate picture/particles/bounced_velocity
+P picture/particles/bounced_velocity#0/:p candidate picture/particles/position
+P picture/particles/bounced_velocity#0/@result candidate picture/particles/bounced_velocity,picture/particles/position
+P picture/particles/bounced_velocity#0/@result#else candidate picture/particles/bounced_velocity
+P picture/particles/bounced_velocity#0/@result#else/@result candidate picture/particles/bounced_velocity
+P picture/particles/bounced_velocity#0/@result#test candidate picture/particles/bounced_velocity,picture/particles/position
+P picture/particles/bounced_velocity#0/@result#then candidate picture/particles/bounced_velocity
+P picture/particles/bounced_velocity#0/@result#then/@result candidate picture/particles/bounced_velocity
+P picture/particles/position candidate picture/particles/position
+P picture/particles/position#0 candidate picture/particles/position
+P picture/particles/position#0/@result candidate picture/particles/position
+PLAN instances=3 nodes=3
+N 0 draw/background picture/@result#0
+N 1 draw/points picture/@result#1
+N 2 draw/merge picture/@result
+R picture drawing
+R editor editor
+R settings settings
+FILE pathtracer.rays
+D W_SOFT_RANGE: :size 400 is outside the slider range 0.01–10. Allowed, but check it
+W pathtracer graphs=3 defs=1 macros=0 nodes=0
+G table sop geometry
+G scene scene scene
+G world world world
+PLAN instances=3 nodes=17
+N 0 sop/box table/@result/input/def:cube/@result/in0
+N 1 sop/material table/@result/input/def:cube/@result
+N 2 sop/box table/@result/input#1/def:cube/@result/in0
+N 3 sop/material table/@result/input#1/def:cube/@result
+N 4 sop/box table/@result/input#2/def:cube/@result/in0
+N 5 sop/material table/@result/input#2/def:cube/@result
+N 6 sop/box table/@result/input#3/def:cube/@result/in0
+N 7 sop/material table/@result/input#3/def:cube/@result
+N 8 sop/box table/@result/input#4/def:cube/@result/in0
+N 9 sop/material table/@result/input#4/def:cube/@result
+N 10 sop/box table/@result/input#5/def:cube/@result/in0
+N 11 sop/material table/@result/input#5/def:cube/@result
+N 12 sop/box table/@result/input#6/def:cube/@result/in0
+N 13 sop/material table/@result/input#6/def:cube/@result
+N 14 sop/box table/@result/input#7/in0
+N 15 sop/material table/@result/input#7
+N 16 sop/merge table/@result
+R table geometry
+R scene scene
+R world world
+FILE procedural_modeling.rays
+W procedural_modeling graphs=6 defs=0 macros=0 nodes=0
+G tube sop geometry
+G tiles sop geometry
+G copies sop geometry
+G scene scene scene
+G settings settings settings
+G editor editor editor
+PLAN instances=6 nodes=22
+N 0 sop/spiral tube/@result/in0/in0/in0
+N 1 sop/sweep_circle tube/@result/in0/in0
+N 2 sop/set_color tube/@result/in0
+N 3 sop/transform tube/@result
+N 4 sop/grid tiles/@result/in0/in0/in0/in0/in0/in0/in0/in0
+N 5 sop/mountain tiles/@result/in0/in0/in0/in0/in0/in0/in0
+N 6 sop/group_random tiles/@result/in0/in0/in0/in0/in0/in0
+N 7 sop/group_edge_depth tiles/@result/in0/in0/in0/in0/in0
+N 8 sop/group_random tiles/@result/in0/in0/in0/in0
+N 9 sop/poly_extrude tiles/@result/in0/in0/in0
+N 10 sop/facet tiles/@result/in0/in0
+N 11 sop/set_color tiles/@result/in0
+N 12 sop/transform tiles/@result
+N 13 sop/box copies/prototype/in0/in0
+N 14 sop/facet copies/prototype/in0
+N 15 sop/set_color copies/prototype
+N 16 sop/points copies/targets/in0/in0
+N 17 sop/transform copies/targets/in0
+N 18 sop/attribute_randomize copies/targets
+N 19 sop/copy_to_points copies/@result/in0/in0
+N 20 sop/connectivity copies/@result/in0
+N 21 sop/groups_from_name copies/@result
+R tube geometry
+R tiles geometry
+R copies geometry
+R scene scene
+R settings settings
+R editor editor
+FILE pxui.rays
+W pxui graphs=5 defs=0 macros=0 nodes=0
+G controls host rec{animate:bool,radius:float,center:vec3,band:vec3,palette:text,caption:text,quit:bool}
+G picture draw drawing
+G actions host effect
+G editor editor editor
+G window settings settings
+L editor/@result
+L editor/@result#0
+L editor/@result#0#2
+L picture/@result
+L picture/@result#2
+L picture/angle
+L picture/angle/:previous
+L picture/angle/@result
+L picture/angle/@result#else
+L picture/angle/@result#else/@result
+L picture/angle/@result#then
+L picture/angle/@result#then/@result
+L picture/angle/@result#then/@result#1
+L picture/color
+L picture/color#else
+L picture/color#else/@result
+L picture/color#then
+L picture/color#then/@result
+L picture/color#then~2
+L picture/color#then~2/@result
+L picture/pulse
+P picture/dots candidate picture/dots
+P picture/dots#0 candidate picture/dots
+P picture/dots#0/@result candidate picture/dots
+PLAN instances=5 nodes=5
+N 0 draw/background picture/@result#0
+N 1 draw/points picture/@result#1
+N 2 draw/circle picture/@result#2
+N 3 draw/merge picture/@result
+N 4 host/quit actions/@result
+R controls {:animate true :radius 48 :center [470 180 0] :band [0.2 0.8 0] :palette ocean :caption Functional UI :quit false}
+R picture drawing
+R actions effect
+R editor editor
+R window settings
+FILE recursive_rectangles.rays
+W recursive_rectangles graphs=5 defs=3 macros=0 nodes=0
+G model host rec{scheme:int,control:float}
+G picture draw drawing
+G actions host effect
+G editor editor editor
+G window settings settings
+L actions/@result
+L actions/@result#0
+L actions/@result#1
+L def:palette-color/@result
+L def:palette-color/harmony
+L def:palette-color/harmony#0
+L def:palette-color/hash
+L def:palette-color/hash#0
+L def:palette-color/hash#0#0
+L def:palette-color/hash#0#1
+L def:palette-color/hash#0#1#0
+L def:palette-color/hue
+L def:palette-color/jitter
+L def:palette-color/jitter#0
+L def:palette-color/jitter#0#0
+L def:palette-color/lightness
+L def:palette-color/lightness#1
+L def:palette-color/lightness#1#0
+L def:palette-color/offset
+L def:palette-color/offset#else
+L def:palette-color/offset#else/@result
+L def:palette-color/offset#else/@result#0
+L def:palette-color/offset#test0
+L def:palette-color/offset#test1
+L def:palette-color/offset#test2
+L def:palette-color/offset#test3
+L def:palette-color/offset#test4
+L def:palette-color/offset#test5
+L def:palette-color/offset#test6
+L def:palette-color/offset#then
+L def:palette-color/offset#then/@result
+L def:palette-color/offset#then~2
+L def:palette-color/offset#then~2/@result
+L def:palette-color/offset#then~3
+L def:palette-color/offset#then~3/@result
+L def:palette-color/offset#then~4
+L def:palette-color/offset#then~4/@result
+L def:palette-color/offset#then~5
+L def:palette-color/offset#then~5/@result
+L def:palette-color/offset#then~6
+L def:palette-color/offset#then~6/@result
+L def:palette-color/offset#then~7
+L def:palette-color/offset#then~7/@result
+L def:palette-color/offset#then~7/@result#0
+L def:palette-color/saturation
+L def:palette-color/saturation#1
+L def:palette-color/saturation#1#0
+L def:palette-color/seed
+L def:palette-color/slot
+L def:scheme-hash/@result
+L def:scheme-hash/@result#0
+L def:split-level/@result
+L def:split-level/@result#0
+L def:split-level/@result#0/:i
+L def:split-level/@result#0/@result
+L def:split-level/@result#0/@result#0
+L def:split-level/@result#0/@result#0#1
+L def:split-level/@result#1
+L def:split-level/@result#1#0
+L def:split-level/kept
+L def:split-level/kept#0
+L def:split-level/kept#0/:i
+L def:split-level/kept#0/@result
+L def:split-level/kept#0/s
+L def:split-level/kept#1
+L def:split-level/kept#1#0
+L def:split-level/kept#1#0#0
+L def:split-level/raw
+L def:split-level/raw#0
+L def:split-level/raw#0/:i
+L def:split-level/raw#0/@result
+L def:split-level/raw#0/@result#else
+L def:split-level/raw#0/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else
+L def:split-level/raw#0/@result#else/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#else
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#else
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#test
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#then
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#then/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#test
+L def:split-level/raw#0/@result#else/@result#else/@result#then
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#else
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#test
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#then
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#then/@result
+L def:split-level/raw#0/@result#else/@result#test
+L def:split-level/raw#0/@result#else/@result#then
+L def:split-level/raw#0/@result#else/@result#then/@result
+L def:split-level/raw#0/@result#else/@result#then/@result#else
+L def:split-level/raw#0/@result#else/@result#then/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#then/@result#test
+L def:split-level/raw#0/@result#else/@result#then/@result#then
+L def:split-level/raw#0/@result#else/@result#then/@result#then/@result
+L def:split-level/raw#0/@result#test
+L def:split-level/raw#0/@result#then
+L def:split-level/raw#0/@result#then/@result
+L def:split-level/raw#0/@result#then/@result#else
+L def:split-level/raw#0/@result#then/@result#else/@result
+L def:split-level/raw#0/@result#then/@result#else/@result#test
+L def:split-level/raw#0/@result#then/@result#else/@result#then
+L def:split-level/raw#0/@result#then/@result#else/@result#then/@result
+L def:split-level/raw#0/@result#then/@result#test
+L def:split-level/raw#0/@result#then/@result#then
+L def:split-level/raw#0/@result#then/@result#then/@result
+L def:split-level/raw#0/@result#then/@result#then/@result#else
+L def:split-level/raw#0/@result#then/@result#then/@result#else/@result
+L def:split-level/raw#0/@result#then/@result#then/@result#test
+L def:split-level/raw#0/@result#then/@result#then/@result#then
+L def:split-level/raw#0/@result#then/@result#then/@result#then/@result
+L def:split-level/raw#0/child
+L def:split-level/raw#0/child#0
+L def:split-level/raw#0/first
+L def:split-level/raw#0/first#0
+L def:split-level/raw#0/first#0#else
+L def:split-level/raw#0/first#0#else/@result
+L def:split-level/raw#0/first#0#test
+L def:split-level/raw#0/first#0#then
+L def:split-level/raw#0/first#0#then/@result
+L def:split-level/raw#0/first#0~1
+L def:split-level/raw#0/first#0~1#else
+L def:split-level/raw#0/first#0~1#else/@result
+L def:split-level/raw#0/first#0~1#test
+L def:split-level/raw#0/first#0~1#then
+L def:split-level/raw#0/first#0~1#then/@result
+L def:split-level/raw#0/horizontal
+L def:split-level/raw#0/orientation
+L def:split-level/raw#0/orientation#0
+L def:split-level/raw#0/orientation#0#0
+L def:split-level/raw#0/p
+L def:split-level/raw#0/parent
+L def:split-level/raw#0/part
+L def:split-level/raw#0/ratio
+L def:split-level/raw#0/s
+L def:split-level/raw#0/split-x
+L def:split-level/raw#0/split-y
+L def:split-level/raw#1
+L def:split-level/raw#1#0
+L editor/@result
+L editor/@result#0
+L model/@result
+L model/@result/:previous
+L model/@result/@result
+L model/@result/@result#0
+L model/@result/@result#0#0
+L model/@result/@result#0#1
+L model/@result/@result#0#1~1
+L model/@result/@result#1
+L model/@result/@result#1#test
+L model/@result/@result#1#test/:event
+L model/@result/@result#1#test/:pressed
+L model/@result/@result#1#test/@result
+L model/@result/@result#1~1
+L picture/@result
+L picture/@result#0
+L picture/@result#0#0
+L picture/@result#0#0#0
+L picture/@result#1
+L picture/@result#1#0
+L picture/@result#1#0~1
+L picture/@result#1#1
+L picture/@result#1#1#1
+L picture/@result#1#1#1#1
+L picture/boxes
+L picture/boxes/:boxes
+L picture/boxes/:depth
+L picture/boxes/@result
+L picture/boxes#1
+L picture/colors
+L picture/colors#0
+L picture/colors#0/:i
+L picture/colors#0/@result
+L picture/colors#0/p
+L picture/indices
+L picture/indices#0
+L picture/indices#0#0
+L picture/iterations
+L picture/iterations#0
+L picture/iterations#0#0
+L picture/iterations#0#1
+L picture/iterations#0#1~1
+L picture/model
+L picture/positions
+L picture/positions#0
+L picture/positions#0/:i
+L picture/positions#0/@result
+L picture/positions#0/p
+L picture/side
+L picture/side#0
+L picture/side#0#0
+L picture/side#0#1
+L picture/sizes
+L picture/sizes#0
+L picture/sizes#0/:i
+L picture/sizes#0/@result
+L picture/sizes#0/s
+P def:palette-color/@result candidate picture/boxes,picture/colors
+P def:palette-color/harmony candidate picture/colors
+P def:palette-color/hash candidate picture/boxes,picture/colors
+P def:palette-color/hash#0 candidate picture/boxes
+P def:palette-color/hash#0#0 candidate picture/boxes
+P def:palette-color/hash#0#1 candidate picture/boxes
+P def:palette-color/hash#0#1#0 candidate picture/boxes
+P def:palette-color/hue candidate picture/colors
+P def:palette-color/jitter candidate picture/boxes,picture/colors
+P def:palette-color/jitter#0 candidate picture/boxes
+P def:palette-color/jitter#0#0 candidate picture/boxes
+P def:palette-color/lightness candidate picture/boxes,picture/colors
+P def:palette-color/lightness#1 candidate picture/boxes
+P def:palette-color/offset candidate picture/boxes,picture/colors
+P def:palette-color/offset#else candidate picture/boxes,picture/colors
+P def:palette-color/offset#else/@result candidate picture/boxes,picture/colors
+P def:palette-color/offset#else/@result#0 candidate picture/boxes
+P def:palette-color/offset#test0 candidate picture/colors
+P def:palette-color/offset#test1 candidate picture/boxes,picture/colors
+P def:palette-color/offset#test2 candidate picture/colors
+P def:palette-color/offset#test3 candidate picture/boxes,picture/colors
+P def:palette-color/offset#test4 candidate picture/boxes,picture/colors
+P def:palette-color/offset#test5 candidate picture/colors
+P def:palette-color/offset#test6 candidate picture/colors
+P def:palette-color/offset#then candidate picture/boxes,picture/colors
+P def:palette-color/offset#then/@result candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~2 candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~2/@result candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~3 candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~3/@result candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~4 candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~4/@result candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~5 candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~5/@result candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~6 candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~6/@result candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~7 candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~7/@result candidate picture/boxes,picture/colors
+P def:palette-color/offset#then~7/@result#0 candidate picture/boxes
+P def:palette-color/saturation candidate picture/boxes,picture/colors
+P def:palette-color/saturation#1 candidate picture/boxes
+P def:palette-color/seed candidate picture/colors
+P def:palette-color/slot candidate picture/boxes,picture/colors
+P def:scheme-hash/@result candidate picture/colors
+P def:split-level/@result candidate def:split-level/@result
+P def:split-level/@result#0 candidate def:split-level/@result
+P def:split-level/@result#0/:i candidate def:split-level/kept
+P def:split-level/@result#0/@result candidate def:split-level/@result,def:split-level/kept,def:split-level/raw
+P def:split-level/@result#0/@result#0 candidate def:split-level/kept
+P def:split-level/@result#0/@result#0#1 candidate def:split-level/kept
+P def:split-level/@result#1 candidate def:split-level/kept
+P def:split-level/@result#1#0 candidate def:split-level/kept
+P def:split-level/kept refused 1
+P def:split-level/kept#0 candidate def:split-level/kept
+P def:split-level/kept#0/:i candidate def:split-level/raw
+P def:split-level/kept#0/@result candidate def:split-level/kept,def:split-level/raw
+P def:split-level/kept#0/s candidate def:split-level/kept,def:split-level/raw
+P def:split-level/kept#1 candidate def:split-level/raw
+P def:split-level/kept#1#0 candidate def:split-level/raw
+P def:split-level/kept#1#0#0 candidate def:split-level/raw
+P def:split-level/raw candidate def:split-level/raw
+P def:split-level/raw#0 candidate def:split-level/raw
+P def:split-level/raw#0/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/child candidate def:split-level/raw
+P def:split-level/raw#0/first candidate def:split-level/raw
+P def:split-level/raw#0/first#0 candidate def:split-level/raw
+P def:split-level/raw#0/first#0#else candidate def:split-level/raw
+P def:split-level/raw#0/first#0#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/first#0#test candidate def:split-level/raw
+P def:split-level/raw#0/first#0#then candidate def:split-level/raw
+P def:split-level/raw#0/first#0#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1 candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#else candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#test candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#then candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/horizontal candidate def:split-level/raw
+P def:split-level/raw#0/orientation candidate def:split-level/raw
+P def:split-level/raw#0/p candidate def:split-level/raw
+P def:split-level/raw#0/parent candidate def:split-level/raw
+P def:split-level/raw#0/part candidate def:split-level/raw
+P def:split-level/raw#0/ratio candidate def:split-level/raw
+P def:split-level/raw#0/s candidate def:split-level/raw
+P def:split-level/raw#0/split-x candidate def:split-level/raw
+P def:split-level/raw#0/split-y candidate def:split-level/raw
+P model/@result/@result candidate model/@result/@result#1#test
+P model/@result/@result#1 candidate model/@result/@result#1#test
+P model/@result/@result#1#test refused 1
+P model/@result/@result#1#test/@result candidate model/@result/@result#1#test
+P picture/boxes refused 1
+P picture/boxes/@result candidate def:split-level/@result,picture/boxes
+P picture/colors candidate picture/colors
+P picture/colors#0 candidate picture/colors
+P picture/colors#0/:i candidate picture/boxes
+P picture/colors#0/@result candidate picture/boxes,picture/colors
+P picture/colors#0/p candidate picture/boxes,picture/colors
+P picture/indices candidate picture/boxes
+P picture/indices#0 candidate picture/boxes
+P picture/indices#0#0 candidate picture/boxes
+P picture/positions candidate picture/positions
+P picture/positions#0 candidate picture/positions
+P picture/positions#0/:i candidate picture/boxes
+P picture/positions#0/@result candidate picture/boxes,picture/positions
+P picture/positions#0/p candidate picture/boxes,picture/positions
+P picture/sizes candidate picture/sizes
+P picture/sizes#0 candidate picture/sizes
+P picture/sizes#0/:i candidate picture/boxes
+P picture/sizes#0/@result candidate picture/boxes,picture/sizes
+P picture/sizes#0/s candidate picture/boxes,picture/sizes
+PLAN instances=5 nodes=7
+N 0 draw/background picture/@result#0
+N 1 draw/rects picture/@result#1#1#1#1
+N 2 draw/translate picture/@result#1#1#1
+N 3 draw/rotate picture/@result#1#1
+N 4 draw/translate picture/@result#1
+N 5 draw/merge picture/@result
+N 6 host/quit actions/@result
+R model {:scheme 0 :control 0.5}
+R picture drawing
+R actions effect
+R editor editor
+R window settings
+FILE recursive_signals.rays
+W recursive_signals graphs=5 defs=5 macros=0 nodes=0
+G model host rec{scheme:int,control:float,zoom:float,x:float,y:float}
+G picture draw drawing
+G actions host effect
+G editor editor editor
+G window settings settings
+L actions/@result
+L actions/@result#0
+L actions/@result#1
+L def:field/@result
+L def:field/blend
+L def:field/ease
+L def:field/from
+L def:field/local
+L def:field/speed
+L def:field/step
+L def:field-slot/@result
+L def:palette-color/@result
+L def:palette-color/@result#else
+L def:palette-color/@result#else/@result
+L def:palette-color/@result#else/@result#test0
+L def:palette-color/@result#else/@result#test1
+L def:palette-color/@result#else/@result#test2
+L def:palette-color/@result#else/@result#test3
+L def:palette-color/@result#test0
+L def:palette-color/@result#test1
+L def:palette-color/@result#test2
+L def:palette-color/@result#test3
+L def:palette-color/@result#test4
+L def:palette-color/@result#test5
+L def:palette-color/@result#test6
+L def:palette-color/@result#then
+L def:palette-color/@result#then/@result
+L def:palette-color/@result#then/@result#test0
+L def:palette-color/@result#then/@result#test1
+L def:palette-color/@result#then/@result#test2
+L def:palette-color/@result#then/@result#test3
+L def:palette-color/@result#then~2
+L def:palette-color/@result#then~2/@result
+L def:palette-color/@result#then~2/@result#test0
+L def:palette-color/@result#then~2/@result#test1
+L def:palette-color/@result#then~2/@result#test2
+L def:palette-color/@result#then~2/@result#test3
+L def:palette-color/@result#then~3
+L def:palette-color/@result#then~3/@result
+L def:palette-color/@result#then~3/@result#test0
+L def:palette-color/@result#then~3/@result#test1
+L def:palette-color/@result#then~3/@result#test2
+L def:palette-color/@result#then~3/@result#test3
+L def:palette-color/@result#then~4
+L def:palette-color/@result#then~4/@result
+L def:palette-color/@result#then~4/@result#test0
+L def:palette-color/@result#then~4/@result#test1
+L def:palette-color/@result#then~4/@result#test2
+L def:palette-color/@result#then~4/@result#test3
+L def:palette-color/@result#then~5
+L def:palette-color/@result#then~5/@result
+L def:palette-color/@result#then~5/@result#test0
+L def:palette-color/@result#then~5/@result#test1
+L def:palette-color/@result#then~5/@result#test2
+L def:palette-color/@result#then~5/@result#test3
+L def:palette-color/@result#then~6
+L def:palette-color/@result#then~6/@result
+L def:palette-color/@result#then~6/@result#test0
+L def:palette-color/@result#then~6/@result#test1
+L def:palette-color/@result#then~6/@result#test2
+L def:palette-color/@result#then~6/@result#test3
+L def:palette-color/@result#then~7
+L def:palette-color/@result#then~7/@result
+L def:palette-color/@result#then~7/@result#test0
+L def:palette-color/@result#then~7/@result#test1
+L def:palette-color/@result#then~7/@result#test2
+L def:palette-color/@result#then~7/@result#test3
+L def:palette-color/slot
+L def:palette-color/slot#0
+L def:palette-color/theme
+L def:scheme-hash/@result
+L def:scheme-hash/@result#0
+L def:split-level/@result
+L def:split-level/@result#0
+L def:split-level/@result#0/:i
+L def:split-level/@result#0/@result
+L def:split-level/@result#0/@result#0
+L def:split-level/@result#0/@result#0#1
+L def:split-level/@result#1
+L def:split-level/@result#1#0
+L def:split-level/kept
+L def:split-level/kept#0
+L def:split-level/kept#0/:i
+L def:split-level/kept#0/@result
+L def:split-level/kept#0/s
+L def:split-level/kept#1
+L def:split-level/kept#1#0
+L def:split-level/kept#1#0#0
+L def:split-level/raw
+L def:split-level/raw#0
+L def:split-level/raw#0/:i
+L def:split-level/raw#0/@result
+L def:split-level/raw#0/@result#else
+L def:split-level/raw#0/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else
+L def:split-level/raw#0/@result#else/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#else
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#else
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#test
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#then
+L def:split-level/raw#0/@result#else/@result#else/@result#else/@result#then/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#test
+L def:split-level/raw#0/@result#else/@result#else/@result#then
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#else
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#test
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#then
+L def:split-level/raw#0/@result#else/@result#else/@result#then/@result#then/@result
+L def:split-level/raw#0/@result#else/@result#test
+L def:split-level/raw#0/@result#else/@result#then
+L def:split-level/raw#0/@result#else/@result#then/@result
+L def:split-level/raw#0/@result#else/@result#then/@result#else
+L def:split-level/raw#0/@result#else/@result#then/@result#else/@result
+L def:split-level/raw#0/@result#else/@result#then/@result#test
+L def:split-level/raw#0/@result#else/@result#then/@result#then
+L def:split-level/raw#0/@result#else/@result#then/@result#then/@result
+L def:split-level/raw#0/@result#test
+L def:split-level/raw#0/@result#test#1
+L def:split-level/raw#0/@result#test#1#else
+L def:split-level/raw#0/@result#test#1#else/@result
+L def:split-level/raw#0/@result#test#1#test
+L def:split-level/raw#0/@result#test#1#then
+L def:split-level/raw#0/@result#test#1#then/@result
+L def:split-level/raw#0/@result#then
+L def:split-level/raw#0/@result#then/@result
+L def:split-level/raw#0/@result#then/@result#else
+L def:split-level/raw#0/@result#then/@result#else/@result
+L def:split-level/raw#0/@result#then/@result#else/@result#test
+L def:split-level/raw#0/@result#then/@result#else/@result#then
+L def:split-level/raw#0/@result#then/@result#else/@result#then/@result
+L def:split-level/raw#0/@result#then/@result#test
+L def:split-level/raw#0/@result#then/@result#then
+L def:split-level/raw#0/@result#then/@result#then/@result
+L def:split-level/raw#0/@result#then/@result#then/@result#else
+L def:split-level/raw#0/@result#then/@result#then/@result#else/@result
+L def:split-level/raw#0/@result#then/@result#then/@result#test
+L def:split-level/raw#0/@result#then/@result#then/@result#then
+L def:split-level/raw#0/@result#then/@result#then/@result#then/@result
+L def:split-level/raw#0/chance
+L def:split-level/raw#0/child
+L def:split-level/raw#0/child#0
+L def:split-level/raw#0/first
+L def:split-level/raw#0/first#0
+L def:split-level/raw#0/first#0#else
+L def:split-level/raw#0/first#0#else/@result
+L def:split-level/raw#0/first#0#test
+L def:split-level/raw#0/first#0#then
+L def:split-level/raw#0/first#0#then/@result
+L def:split-level/raw#0/first#0~1
+L def:split-level/raw#0/first#0~1#else
+L def:split-level/raw#0/first#0~1#else/@result
+L def:split-level/raw#0/first#0~1#test
+L def:split-level/raw#0/first#0~1#then
+L def:split-level/raw#0/first#0~1#then/@result
+L def:split-level/raw#0/hash
+L def:split-level/raw#0/hash#0
+L def:split-level/raw#0/hash#0#0
+L def:split-level/raw#0/hash#0#1
+L def:split-level/raw#0/hash#0#1#0
+L def:split-level/raw#0/horizontal
+L def:split-level/raw#0/orientation
+L def:split-level/raw#0/orientation#0
+L def:split-level/raw#0/p
+L def:split-level/raw#0/parent
+L def:split-level/raw#0/part
+L def:split-level/raw#0/ratio
+L def:split-level/raw#0/s
+L def:split-level/raw#0/split-x
+L def:split-level/raw#0/split-y
+L def:split-level/raw#0/splitting
+L def:split-level/raw#0/tile
+L def:split-level/raw#1
+L def:split-level/raw#1#0
+L editor/@result
+L editor/@result#0
+L model/@result
+L model/@result/:previous
+L model/@result/@result
+L model/@result/@result#1
+L model/@result/@result#1#test
+L model/@result/@result#1#test/:event
+L model/@result/@result#1#test/:pressed
+L model/@result/@result#1#test/@result
+L model/@result/events
+L model/@result/h
+L model/@result/px
+L model/@result/py
+L model/@result/view
+L model/@result/view/:event
+L model/@result/view/:view
+L model/@result/view/@result
+L model/@result/view/@result#else
+L model/@result/view/@result#else/@result
+L model/@result/view/@result#test0
+L model/@result/view/@result#test1
+L model/@result/view/@result#then
+L model/@result/view/@result#then/@result
+L model/@result/view/@result#then/f
+L model/@result/view/@result#then/zoom
+L model/@result/view/@result#then~2
+L model/@result/view/@result#then~2/@result
+L model/@result/w
+L picture/@result
+L picture/@result#1
+L picture/@result#1#1
+L picture/@result#1#1#1
+L picture/boxes
+L picture/boxes/:boxes
+L picture/boxes/:depth
+L picture/boxes/@result
+L picture/boxes#1
+L picture/colors
+L picture/colors#0
+L picture/colors#0/:color
+L picture/colors#0/:window
+L picture/colors#0/@result
+L picture/colors#0/@result#else
+L picture/colors#0/@result#else/@result
+L picture/colors#0/@result#test
+L picture/cutoff
+L picture/density
+L picture/density#0
+L picture/density#1
+L picture/density#1~1
+L picture/indices
+L picture/indices#0
+L picture/indices#0#0
+L picture/iterations
+L picture/model
+L picture/palette
+L picture/palette#0
+L picture/palette#0/:i
+L picture/palette#0/@result
+L picture/palette#0/p
+L picture/phase
+L picture/positions
+L picture/positions#0
+L picture/positions#0/:i
+L picture/positions#0/@result
+L picture/positions#0/p
+L picture/second
+L picture/sizes
+L picture/sizes#0
+L picture/sizes#0/:i
+L picture/sizes#0/@result
+L picture/sizes#0/s
+L picture/windows
+L picture/windows#0
+L picture/windows#0/:i
+L picture/windows#0/@result
+L picture/windows#0/@result#0
+L picture/windows#0/hash
+L picture/windows#0/hash#0
+L picture/windows#0/hash#0#0
+L picture/windows#0/hash#0#0#0
+L picture/windows#0/hash#0#0#1
+L picture/windows#0/p
+P def:field/@result candidate def:split-level/raw
+P def:field/blend candidate def:split-level/raw
+P def:field/ease candidate def:split-level/raw
+P def:field/from candidate def:split-level/raw
+P def:field/local candidate def:split-level/raw
+P def:field/speed candidate def:split-level/raw
+P def:field/step candidate def:split-level/raw
+P def:field-slot/@result candidate def:split-level/raw
+P def:palette-color/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#else candidate picture/boxes,picture/palette
+P def:palette-color/@result#else/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#else/@result#else candidate picture/palette
+P def:palette-color/@result#else/@result#else/@result candidate picture/palette
+P def:palette-color/@result#else/@result#test0 candidate picture/boxes,picture/palette
+P def:palette-color/@result#else/@result#test1 candidate picture/boxes,picture/palette
+P def:palette-color/@result#else/@result#test2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#else/@result#test3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#else/@result#then candidate picture/palette
+P def:palette-color/@result#else/@result#then/@result candidate picture/palette
+P def:palette-color/@result#else/@result#then~2 candidate picture/palette
+P def:palette-color/@result#else/@result#then~2/@result candidate picture/palette
+P def:palette-color/@result#else/@result#then~3 candidate picture/palette
+P def:palette-color/@result#else/@result#then~3/@result candidate picture/palette
+P def:palette-color/@result#else/@result#then~4 candidate picture/palette
+P def:palette-color/@result#else/@result#then~4/@result candidate picture/palette
+P def:palette-color/@result#test0 candidate picture/palette
+P def:palette-color/@result#test1 candidate picture/palette
+P def:palette-color/@result#test2 candidate picture/palette
+P def:palette-color/@result#test3 candidate picture/palette
+P def:palette-color/@result#test4 candidate picture/palette
+P def:palette-color/@result#test5 candidate picture/palette
+P def:palette-color/@result#test6 candidate picture/palette
+P def:palette-color/@result#then candidate picture/boxes,picture/palette
+P def:palette-color/@result#then/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#then/@result#else candidate picture/palette
+P def:palette-color/@result#then/@result#else/@result candidate picture/palette
+P def:palette-color/@result#then/@result#test0 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then/@result#test1 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then/@result#test2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then/@result#test3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then/@result#then candidate picture/palette
+P def:palette-color/@result#then/@result#then/@result candidate picture/palette
+P def:palette-color/@result#then/@result#then~2 candidate picture/palette
+P def:palette-color/@result#then/@result#then~2/@result candidate picture/palette
+P def:palette-color/@result#then/@result#then~3 candidate picture/palette
+P def:palette-color/@result#then/@result#then~3/@result candidate picture/palette
+P def:palette-color/@result#then/@result#then~4 candidate picture/palette
+P def:palette-color/@result#then/@result#then~4/@result candidate picture/palette
+P def:palette-color/@result#then~2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~2/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~2/@result#else candidate picture/palette
+P def:palette-color/@result#then~2/@result#else/@result candidate picture/palette
+P def:palette-color/@result#then~2/@result#test0 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~2/@result#test1 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~2/@result#test2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~2/@result#test3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~2/@result#then candidate picture/palette
+P def:palette-color/@result#then~2/@result#then/@result candidate picture/palette
+P def:palette-color/@result#then~2/@result#then~2 candidate picture/palette
+P def:palette-color/@result#then~2/@result#then~2/@result candidate picture/palette
+P def:palette-color/@result#then~2/@result#then~3 candidate picture/palette
+P def:palette-color/@result#then~2/@result#then~3/@result candidate picture/palette
+P def:palette-color/@result#then~2/@result#then~4 candidate picture/palette
+P def:palette-color/@result#then~2/@result#then~4/@result candidate picture/palette
+P def:palette-color/@result#then~3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~3/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~3/@result#else candidate picture/palette
+P def:palette-color/@result#then~3/@result#else/@result candidate picture/palette
+P def:palette-color/@result#then~3/@result#test0 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~3/@result#test1 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~3/@result#test2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~3/@result#test3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~3/@result#then candidate picture/palette
+P def:palette-color/@result#then~3/@result#then/@result candidate picture/palette
+P def:palette-color/@result#then~3/@result#then~2 candidate picture/palette
+P def:palette-color/@result#then~3/@result#then~2/@result candidate picture/palette
+P def:palette-color/@result#then~3/@result#then~3 candidate picture/palette
+P def:palette-color/@result#then~3/@result#then~3/@result candidate picture/palette
+P def:palette-color/@result#then~3/@result#then~4 candidate picture/palette
+P def:palette-color/@result#then~3/@result#then~4/@result candidate picture/palette
+P def:palette-color/@result#then~4 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~4/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~4/@result#else candidate picture/palette
+P def:palette-color/@result#then~4/@result#else/@result candidate picture/palette
+P def:palette-color/@result#then~4/@result#test0 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~4/@result#test1 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~4/@result#test2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~4/@result#test3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~4/@result#then candidate picture/palette
+P def:palette-color/@result#then~4/@result#then/@result candidate picture/palette
+P def:palette-color/@result#then~4/@result#then~2 candidate picture/palette
+P def:palette-color/@result#then~4/@result#then~2/@result candidate picture/palette
+P def:palette-color/@result#then~4/@result#then~3 candidate picture/palette
+P def:palette-color/@result#then~4/@result#then~3/@result candidate picture/palette
+P def:palette-color/@result#then~4/@result#then~4 candidate picture/palette
+P def:palette-color/@result#then~4/@result#then~4/@result candidate picture/palette
+P def:palette-color/@result#then~5 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~5/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~5/@result#else candidate picture/palette
+P def:palette-color/@result#then~5/@result#else/@result candidate picture/palette
+P def:palette-color/@result#then~5/@result#test0 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~5/@result#test1 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~5/@result#test2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~5/@result#test3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~5/@result#then candidate picture/palette
+P def:palette-color/@result#then~5/@result#then/@result candidate picture/palette
+P def:palette-color/@result#then~5/@result#then~2 candidate picture/palette
+P def:palette-color/@result#then~5/@result#then~2/@result candidate picture/palette
+P def:palette-color/@result#then~5/@result#then~3 candidate picture/palette
+P def:palette-color/@result#then~5/@result#then~3/@result candidate picture/palette
+P def:palette-color/@result#then~5/@result#then~4 candidate picture/palette
+P def:palette-color/@result#then~5/@result#then~4/@result candidate picture/palette
+P def:palette-color/@result#then~6 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~6/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~6/@result#else candidate picture/palette
+P def:palette-color/@result#then~6/@result#else/@result candidate picture/palette
+P def:palette-color/@result#then~6/@result#test0 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~6/@result#test1 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~6/@result#test2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~6/@result#test3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~6/@result#then candidate picture/palette
+P def:palette-color/@result#then~6/@result#then/@result candidate picture/palette
+P def:palette-color/@result#then~6/@result#then~2 candidate picture/palette
+P def:palette-color/@result#then~6/@result#then~2/@result candidate picture/palette
+P def:palette-color/@result#then~6/@result#then~3 candidate picture/palette
+P def:palette-color/@result#then~6/@result#then~3/@result candidate picture/palette
+P def:palette-color/@result#then~6/@result#then~4 candidate picture/palette
+P def:palette-color/@result#then~6/@result#then~4/@result candidate picture/palette
+P def:palette-color/@result#then~7 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~7/@result candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~7/@result#else candidate picture/palette
+P def:palette-color/@result#then~7/@result#else/@result candidate picture/palette
+P def:palette-color/@result#then~7/@result#test0 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~7/@result#test1 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~7/@result#test2 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~7/@result#test3 candidate picture/boxes,picture/palette
+P def:palette-color/@result#then~7/@result#then candidate picture/palette
+P def:palette-color/@result#then~7/@result#then/@result candidate picture/palette
+P def:palette-color/@result#then~7/@result#then~2 candidate picture/palette
+P def:palette-color/@result#then~7/@result#then~2/@result candidate picture/palette
+P def:palette-color/@result#then~7/@result#then~3 candidate picture/palette
+P def:palette-color/@result#then~7/@result#then~3/@result candidate picture/palette
+P def:palette-color/@result#then~7/@result#then~4 candidate picture/palette
+P def:palette-color/@result#then~7/@result#then~4/@result candidate picture/palette
+P def:palette-color/slot candidate picture/boxes,picture/palette
+P def:palette-color/slot#0 candidate picture/boxes
+P def:palette-color/theme candidate picture/palette
+P def:scheme-hash/@result candidate picture/boxes,picture/palette,picture/windows
+P def:scheme-hash/@result#0 candidate picture/boxes
+P def:split-level/@result candidate def:split-level/@result
+P def:split-level/@result#0 candidate def:split-level/@result
+P def:split-level/@result#0/:i candidate def:split-level/kept
+P def:split-level/@result#0/@result candidate def:split-level/@result,def:split-level/kept,def:split-level/raw
+P def:split-level/@result#0/@result#0 candidate def:split-level/kept
+P def:split-level/@result#0/@result#0#1 candidate def:split-level/kept
+P def:split-level/@result#1 candidate def:split-level/kept
+P def:split-level/@result#1#0 candidate def:split-level/kept
+P def:split-level/kept refused 1
+P def:split-level/kept#0 candidate def:split-level/kept
+P def:split-level/kept#0/:i candidate def:split-level/raw
+P def:split-level/kept#0/@result candidate def:split-level/kept,def:split-level/raw
+P def:split-level/kept#0/s candidate def:split-level/kept,def:split-level/raw
+P def:split-level/kept#1 candidate def:split-level/raw
+P def:split-level/kept#1#0 candidate def:split-level/raw
+P def:split-level/kept#1#0#0 candidate def:split-level/raw
+P def:split-level/raw candidate def:split-level/raw
+P def:split-level/raw#0 candidate def:split-level/raw
+P def:split-level/raw#0/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#else/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#else/@result#then/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#else/@result#then/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#test#1 candidate def:split-level/raw
+P def:split-level/raw#0/@result#test#1#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#test#1#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#test#1#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#test#1#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#test#1#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#else/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#else candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#test candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#then candidate def:split-level/raw
+P def:split-level/raw#0/@result#then/@result#then/@result#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/chance candidate def:split-level/raw
+P def:split-level/raw#0/child candidate def:split-level/raw
+P def:split-level/raw#0/first candidate def:split-level/raw
+P def:split-level/raw#0/first#0 candidate def:split-level/raw
+P def:split-level/raw#0/first#0#else candidate def:split-level/raw
+P def:split-level/raw#0/first#0#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/first#0#test candidate def:split-level/raw
+P def:split-level/raw#0/first#0#then candidate def:split-level/raw
+P def:split-level/raw#0/first#0#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1 candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#else candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#else/@result candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#test candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#then candidate def:split-level/raw
+P def:split-level/raw#0/first#0~1#then/@result candidate def:split-level/raw
+P def:split-level/raw#0/hash candidate def:split-level/raw
+P def:split-level/raw#0/horizontal candidate def:split-level/raw
+P def:split-level/raw#0/orientation candidate def:split-level/raw
+P def:split-level/raw#0/p candidate def:split-level/raw
+P def:split-level/raw#0/parent candidate def:split-level/raw
+P def:split-level/raw#0/part candidate def:split-level/raw
+P def:split-level/raw#0/ratio candidate def:split-level/raw
+P def:split-level/raw#0/s candidate def:split-level/raw
+P def:split-level/raw#0/split-x candidate def:split-level/raw
+P def:split-level/raw#0/split-y candidate def:split-level/raw
+P def:split-level/raw#0/splitting candidate def:split-level/raw
+P def:split-level/raw#0/tile candidate def:split-level/raw
+P model/@result/@result candidate model/@result/@result#1#test,model/@result/view
+P model/@result/@result#1 candidate model/@result/@result#1#test
+P model/@result/@result#1#test refused 1
+P model/@result/@result#1#test/@result candidate model/@result/@result#1#test
+P model/@result/view refused 1
+P model/@result/view/@result candidate model/@result/view
+P model/@result/view/@result#else candidate model/@result/view
+P model/@result/view/@result#else/@result candidate model/@result/view
+P model/@result/view/@result#test0 candidate model/@result/view
+P model/@result/view/@result#test1 candidate model/@result/view
+P model/@result/view/@result#then candidate model/@result/view
+P model/@result/view/@result#then/@result candidate model/@result/view
+P model/@result/view/@result#then/f candidate model/@result/view
+P model/@result/view/@result#then/zoom candidate model/@result/view
+P model/@result/view/@result#then~2 candidate model/@result/view
+P model/@result/view/@result#then~2/@result candidate model/@result/view
+P picture/boxes refused 1
+P picture/boxes/@result candidate def:split-level/@result,picture/boxes
+P picture/colors candidate picture/colors
+P picture/colors#0 candidate picture/colors
+P picture/colors#0/:color candidate picture/palette
+P picture/colors#0/:window candidate picture/windows
+P picture/colors#0/@result candidate picture/colors,picture/palette,picture/windows
+P picture/colors#0/@result#else candidate picture/colors,picture/palette
+P picture/colors#0/@result#else/@result candidate picture/colors,picture/palette
+P picture/colors#0/@result#test candidate picture/colors,picture/windows
+P picture/colors#0/@result#then candidate picture/colors
+P picture/colors#0/@result#then/@result candidate picture/colors
+P picture/indices candidate picture/boxes
+P picture/indices#0 candidate picture/boxes
+P picture/indices#0#0 candidate picture/boxes
+P picture/palette candidate picture/palette
+P picture/palette#0 candidate picture/palette
+P picture/palette#0/:i candidate picture/boxes
+P picture/palette#0/@result candidate picture/boxes,picture/palette
+P picture/palette#0/p candidate picture/boxes,picture/palette
+P picture/positions candidate picture/positions
+P picture/positions#0 candidate picture/positions
+P picture/positions#0/:i candidate picture/boxes
+P picture/positions#0/@result candidate picture/boxes,picture/positions
+P picture/positions#0/p candidate picture/boxes,picture/positions
+P picture/sizes candidate picture/sizes
+P picture/sizes#0 candidate picture/sizes
+P picture/sizes#0/:i candidate picture/boxes
+P picture/sizes#0/@result candidate picture/boxes,picture/sizes
+P picture/sizes#0/s candidate picture/boxes,picture/sizes
+P picture/windows candidate picture/windows
+P picture/windows#0 candidate picture/windows
+P picture/windows#0/:i candidate picture/boxes
+P picture/windows#0/@result candidate picture/boxes,picture/windows
+P picture/windows#0/@result#0 candidate picture/boxes
+P picture/windows#0/hash candidate picture/boxes,picture/windows
+P picture/windows#0/hash#0 candidate picture/boxes
+P picture/windows#0/hash#0#0 candidate picture/boxes
+P picture/windows#0/hash#0#0#0 candidate picture/boxes
+P picture/windows#0/p candidate picture/boxes,picture/windows
+PLAN instances=5 nodes=6
+N 0 draw/background picture/@result#0
+N 1 draw/rects picture/@result#1#1#1
+N 2 draw/scale picture/@result#1#1
+N 3 draw/translate picture/@result#1
+N 4 draw/merge picture/@result
+N 5 host/quit actions/@result
+R model {:scheme 0 :control 0 :zoom 1 :x 40 :y 40}
+R picture drawing
+R actions effect
+R editor editor
+R window settings
+FILE shattered_cube.rays
+W shattered_cube graphs=2 defs=0 macros=0 nodes=0
+G shattered sop geometry
+G scene scene scene
+PLAN instances=2 nodes=13
+N 0 sop/box shattered/cube
+N 1 sop/platonic shattered/dodecahedron
+N 2 sop/switch shattered/source-switch
+N 3 sop/grid shattered/cutter-grid/in0/in0
+N 4 sop/mountain shattered/cutter-grid/in0
+N 5 sop/normals shattered/cutter-grid
+N 6 sop/points shattered/cutter-points/in0/in0
+N 7 sop/attribute_noise_quaternion shattered/cutter-points/in0
+N 8 sop/point_jitter shattered/cutter-points
+N 9 sop/copy_to_points shattered/cutters
+N 10 sop/boolean_fracture shattered/fracture
+N 11 sop/normals shattered/shaded
+N 12 sop/exploded_view shattered/@result
+R shattered geometry
+R scene scene
+FILE shattered_studio.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE sop_gallery.rays
+D W_SOFT_RANGE: :columns 100 is outside the slider range 1–64. Allowed, but check it
+D W_SOFT_RANGE: :rows 100 is outside the slider range 1–64. Allowed, but check it
+W sop_gallery graphs=20 defs=0 macros=0 nodes=0
+G attribute_laplacian sop geometry
+G boolean sop geometry
+G boolean_detect sop geometry
+G circle_from_edges sop geometry
+G convex_hull sop geometry
+G extract_centroid sop geometry
+G extract_point_curve sop geometry
+G graph_color sop geometry
+G intersection_analysis sop geometry
+G measure_curvature sop geometry
+G remesh sop geometry
+G triangulate_2d sop geometry
+G procedural_terrain sop geometry
+G geom_csg sop geometry
+G geom_curves sop geometry
+G geom_meshes sop geometry
+G geom_subdivision sop geometry
+G geom_isosurface sop geometry
+G geom_voronoi sop geometry
+G scene scene scene
+L scene/@result
+L scene/light
+P convex_hull/@result#0#0/~for refused 1
+P convex_hull/@result#0#0/~for/@result candidate convex_hull/@result#0#0/~for
+P convex_hull/@result#0#0/~for/a candidate convex_hull/@result#0#0/~for
+P convex_hull/@result#0#0/~for/h candidate convex_hull/@result#0#0/~for
+P convex_hull/@result#0#0/~for/r candidate convex_hull/@result#0#0/~for
+P geom_curves/@result#0/~for refused 1
+P geom_curves/@result#0/~for/@result candidate geom_curves/@result#0/~for
+P geom_curves/@result#0/~for/a candidate geom_curves/@result#0/~for
+P geom_curves/@result#0/~for/r candidate geom_curves/@result#0/~for
+P geom_curves/@result#0~1/~for refused 1
+P geom_curves/@result#0~1/~for/@result candidate geom_curves/@result#0~1/~for
+P geom_curves/@result#0~1/~for/a candidate geom_curves/@result#0~1/~for
+P geom_curves/@result#0~1/~for/ca candidate geom_curves/@result#0~1/~for
+P geom_curves/@result#0~1/~for/r candidate geom_curves/@result#0~1/~for
+P geom_curves/@result#0~1/~for/sa candidate geom_curves/@result#0~1/~for
+P geom_meshes/star/~for refused 1
+P geom_meshes/star/~for/@result candidate geom_meshes/star/~for
+P geom_meshes/star/~for/a candidate geom_meshes/star/~for
+P geom_meshes/star/~for/r candidate geom_meshes/star/~for
+P geom_meshes/swept#0#0/~for refused 1
+P geom_meshes/swept#0#0/~for/@result candidate geom_meshes/swept#0#0/~for
+P geom_meshes/swept#0#0/~for/a candidate geom_meshes/swept#0#0/~for
+P geom_meshes/swept#0#0/~for/u candidate geom_meshes/swept#0#0/~for
+P triangulate_2d/@result#0/~for refused 1
+P triangulate_2d/@result#0/~for/@result candidate triangulate_2d/@result#0/~for
+P triangulate_2d/@result#0/~for/a candidate triangulate_2d/@result#0/~for
+P triangulate_2d/@result#0/~for/r candidate triangulate_2d/@result#0/~for
+PLAN instances=20 nodes=115
+N 0 sop/torus attribute_laplacian/@result/in0
+N 1 sop/attribute_laplacian attribute_laplacian/@result
+N 2 sop/box boolean/box
+N 3 sop/transform boolean/cutter
+N 4 sop/boolean boolean/@result/in0
+N 5 sop/normals boolean/@result
+N 6 sop/grid boolean_detect/source
+N 7 sop/transform boolean_detect/collision
+N 8 sop/boolean_detect boolean_detect/@result
+N 9 sop/circle circle_from_edges/@result/in0/in0
+N 10 sop/circle_from_edges circle_from_edges/@result/in0
+N 11 sop/polywire circle_from_edges/@result
+N 12 sop/curve convex_hull/@result/in0/in0
+N 13 sop/convex_hull convex_hull/@result/in0
+N 14 sop/normals convex_hull/@result
+N 15 sop/box extract_centroid/targets/in0
+N 16 sop/extract_centroid extract_centroid/targets
+N 17 sop/uv_sphere extract_centroid/@result/source
+N 18 sop/copy_to_points extract_centroid/@result
+N 19 sop/curve extract_point_curve/signal/in0
+N 20 sop/attribute_randomize extract_point_curve/signal
+N 21 sop/extract_point_from_curve extract_point_curve/targets
+N 22 sop/uv_sphere extract_point_curve/@result/source
+N 23 sop/copy_to_points extract_point_curve/@result
+N 24 sop/grid graph_color/@result/in0
+N 25 sop/graph_color graph_color/@result
+N 26 sop/grid intersection_analysis/source
+N 27 sop/transform intersection_analysis/collision
+N 28 sop/intersection_analysis intersection_analysis/targets
+N 29 sop/uv_sphere intersection_analysis/@result/source
+N 30 sop/copy_to_points intersection_analysis/@result
+N 31 sop/torus measure_curvature/@result/in0
+N 32 sop/measure_curvature measure_curvature/@result
+N 33 sop/uv_sphere remesh/sphere
+N 34 sop/mountain remesh/rough
+N 35 sop/remesh remesh/@result
+N 36 sop/curve triangulate_2d/@result/in0
+N 37 sop/triangulate_2d triangulate_2d/@result
+N 38 sop/grid procedural_terrain/grid
+N 39 sop/noise_displace procedural_terrain/bumpy
+N 40 sop/color_by_height procedural_terrain/@result
+N 41 sop/uv_sphere geom_csg/left
+N 42 sop/box geom_csg/right/in0
+N 43 sop/transform geom_csg/right
+N 44 sop/boolean geom_csg/piece/@result/in0
+N 45 sop/transform geom_csg/piece/@result
+N 46 sop/boolean geom_csg/piece/@result/in0
+N 47 sop/transform geom_csg/piece/@result
+N 48 sop/boolean geom_csg/piece/@result/in0
+N 49 sop/transform geom_csg/piece/@result
+N 50 sop/merge geom_csg/@result
+N 51 sop/curve geom_curves/@result/input/a0
+N 52 sop/polywire geom_curves/wire/@result/in0
+N 53 sop/transform geom_curves/wire/@result
+N 54 sop/curve geom_curves/@result/input#1/a0
+N 55 sop/polywire geom_curves/wire/@result/in0
+N 56 sop/transform geom_curves/wire/@result
+N 57 sop/curve geom_curves/@result/input#2/a0
+N 58 sop/polywire geom_curves/wire/@result/in0
+N 59 sop/transform geom_curves/wire/@result
+N 60 sop/merge geom_curves/@result
+N 61 sop/curve geom_meshes/star
+N 62 sop/poly_extrude geom_meshes/extruded
+N 63 sop/curve geom_meshes/lathe/in0
+N 64 sop/revolve geom_meshes/lathe
+N 65 sop/curve geom_meshes/swept/in0/in0
+N 66 sop/resample geom_meshes/swept/in0
+N 67 sop/polywire geom_meshes/swept
+N 68 sop/uv_sphere geom_meshes/smooth/a0/in0
+N 69 sop/triangulate geom_meshes/smooth/a0
+N 70 sop/subdivide geom_meshes/subdivide/@result
+N 71 sop/transform geom_meshes/plain/@result/input
+N 72 sop/delete_attributes geom_meshes/plain/@result
+N 73 sop/transform geom_meshes/plain/@result/input
+N 74 sop/delete_attributes geom_meshes/plain/@result
+N 75 sop/transform geom_meshes/plain/@result/input
+N 76 sop/delete_attributes geom_meshes/plain/@result
+N 77 sop/transform geom_meshes/plain/@result/input
+N 78 sop/delete_attributes geom_meshes/plain/@result
+N 79 sop/merge geom_meshes/@result
+N 80 sop/platonic geom_subdivision/source
+N 81 sop/subdivide geom_subdivision/subdivide/@result
+N 82 sop/transform geom_subdivision/plain/@result/input
+N 83 sop/delete_attributes geom_subdivision/plain/@result
+N 84 sop/subdivide geom_subdivision/subdivide/@result
+N 85 sop/transform geom_subdivision/plain/@result/input
+N 86 sop/delete_attributes geom_subdivision/plain/@result
+N 87 sop/merge geom_subdivision/@result
+N 88 sop/iso_surface geom_isosurface/@result
+N 89 sop/curve geom_voronoi/@result/in0/input
+N 90 sop/curve geom_voronoi/@result/in0/input#1
+N 91 sop/curve geom_voronoi/@result/in0/input#2
+N 92 sop/curve geom_voronoi/@result/in0/input#3
+N 93 sop/curve geom_voronoi/@result/in0/input#4
+N 94 sop/curve geom_voronoi/@result/in0/input#5
+N 95 sop/curve geom_voronoi/@result/in0/input#6
+N 96 sop/curve geom_voronoi/@result/in0/input#7
+N 97 sop/curve geom_voronoi/@result/in0/input#8
+N 98 sop/curve geom_voronoi/@result/in0/input#9
+N 99 sop/curve geom_voronoi/@result/in0/input#10
+N 100 sop/curve geom_voronoi/@result/in0/input#11
+N 101 sop/curve geom_voronoi/@result/in0/input#12
+N 102 sop/curve geom_voronoi/@result/in0/input#13
+N 103 sop/curve geom_voronoi/@result/in0/input#14
+N 104 sop/curve geom_voronoi/@result/in0/input#15
+N 105 sop/curve geom_voronoi/@result/in0/input#16
+N 106 sop/curve geom_voronoi/@result/in0/input#17
+N 107 sop/curve geom_voronoi/@result/in0/input#18
+N 108 sop/curve geom_voronoi/@result/in0/input#19
+N 109 sop/curve geom_voronoi/@result/in0/input#20
+N 110 sop/curve geom_voronoi/@result/in0/input#21
+N 111 sop/curve geom_voronoi/@result/in0/input#22
+N 112 sop/curve geom_voronoi/@result/in0/input#23
+N 113 sop/merge geom_voronoi/@result/in0
+N 114 sop/polywire geom_voronoi/@result
+R attribute_laplacian geometry
+R boolean geometry
+R boolean_detect geometry
+R circle_from_edges geometry
+R convex_hull geometry
+R extract_centroid geometry
+R extract_point_curve geometry
+R graph_color geometry
+R intersection_analysis geometry
+R measure_curvature geometry
+R remesh geometry
+R triangulate_2d geometry
+R procedural_terrain geometry
+R geom_csg geometry
+R geom_curves geometry
+R geom_meshes geometry
+R geom_subdivision geometry
+R geom_isosurface geometry
+R geom_voronoi geometry
+R scene scene
+FILE swarm.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE swarm_crawling.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE swarm_floating.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE swarm_lib.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE voxel_wall.rays
+D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
+D W_SOFT_RANGE: :width 35 is outside the slider range 0.01–10. Allowed, but check it
+D W_SOFT_RANGE: :height 59 is outside the slider range 0.01–10. Allowed, but check it
+D W_SOFT_RANGE: :size 35 is outside the slider range 0.01–10. Allowed, but check it
+D W_SOFT_RANGE: :translate -34 is outside the slider range -20–20. Allowed, but check it
+D W_SOFT_RANGE: :translate 40 is outside the slider range -20–20. Allowed, but check it
+D W_SOFT_RANGE: :translate 30 is outside the slider range -20–20. Allowed, but check it
+D W_SOFT_RANGE: :width 24 is outside the slider range 0.01–20. Allowed, but check it
+D W_SOFT_RANGE: :height 24 is outside the slider range 0.01–20. Allowed, but check it
+D W_SOFT_RANGE: :translate 30 is outside the slider range -20–20. Allowed, but check it
+D W_SOFT_RANGE: :translate 26 is outside the slider range -20–20. Allowed, but check it
+D W_SOFT_RANGE: :width 30 is outside the slider range 0.01–20. Allowed, but check it
+D W_SOFT_RANGE: :height 30 is outside the slider range 0.01–20. Allowed, but check it
+NONE
+FILE ws_bloom.rays
+W bloom_studio graphs=5 defs=2 macros=1 nodes=0
+G flower sop geometry
+G scene scene scene
+G world world world
+G settings settings settings
+G editor editor editor
+P def:petal/@result candidate flower/ring
+P flower/ring refused 1
+P flower/ring/@result candidate flower/ring
+P flower/ring/leaf candidate flower/ring
+P flower/ring/tint candidate flower/ring
+P flower/ring/u candidate flower/ring
+P flower/ring/wobble candidate flower/ring
+PLAN instances=6 nodes=84
+N 0 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 1 sop/transform flower/ring/leaf/def:petal/@result
+N 2 sop/set_color flower/ring/tint
+N 3 sop/transform flower/ring/@result
+N 4 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 5 sop/transform flower/ring/leaf/def:petal/@result
+N 6 sop/set_color flower/ring/tint
+N 7 sop/transform flower/ring/@result
+N 8 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 9 sop/transform flower/ring/leaf/def:petal/@result
+N 10 sop/set_color flower/ring/tint
+N 11 sop/transform flower/ring/@result
+N 12 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 13 sop/transform flower/ring/leaf/def:petal/@result
+N 14 sop/set_color flower/ring/tint
+N 15 sop/transform flower/ring/@result
+N 16 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 17 sop/transform flower/ring/leaf/def:petal/@result
+N 18 sop/set_color flower/ring/tint
+N 19 sop/transform flower/ring/@result
+N 20 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 21 sop/transform flower/ring/leaf/def:petal/@result
+N 22 sop/set_color flower/ring/tint
+N 23 sop/transform flower/ring/@result
+N 24 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 25 sop/transform flower/ring/leaf/def:petal/@result
+N 26 sop/set_color flower/ring/tint
+N 27 sop/transform flower/ring/@result
+N 28 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 29 sop/transform flower/ring/leaf/def:petal/@result
+N 30 sop/set_color flower/ring/tint
+N 31 sop/transform flower/ring/@result
+N 32 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 33 sop/transform flower/ring/leaf/def:petal/@result
+N 34 sop/set_color flower/ring/tint
+N 35 sop/transform flower/ring/@result
+N 36 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 37 sop/transform flower/ring/leaf/def:petal/@result
+N 38 sop/set_color flower/ring/tint
+N 39 sop/transform flower/ring/@result
+N 40 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 41 sop/transform flower/ring/leaf/def:petal/@result
+N 42 sop/set_color flower/ring/tint
+N 43 sop/transform flower/ring/@result
+N 44 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 45 sop/transform flower/ring/leaf/def:petal/@result
+N 46 sop/set_color flower/ring/tint
+N 47 sop/transform flower/ring/@result
+N 48 sop/merge flower/bloom
+N 49 sop/uv_sphere flower/heart
+N 50 sop/set_color flower/result/input#1
+N 51 sop/merge flower/result
+N 52 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 53 sop/transform flower/ring/leaf/def:petal/@result
+N 54 sop/set_color flower/ring/tint
+N 55 sop/transform flower/ring/@result
+N 56 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 57 sop/transform flower/ring/leaf/def:petal/@result
+N 58 sop/set_color flower/ring/tint
+N 59 sop/transform flower/ring/@result
+N 60 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 61 sop/transform flower/ring/leaf/def:petal/@result
+N 62 sop/set_color flower/ring/tint
+N 63 sop/transform flower/ring/@result
+N 64 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 65 sop/transform flower/ring/leaf/def:petal/@result
+N 66 sop/set_color flower/ring/tint
+N 67 sop/transform flower/ring/@result
+N 68 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 69 sop/transform flower/ring/leaf/def:petal/@result
+N 70 sop/set_color flower/ring/tint
+N 71 sop/transform flower/ring/@result
+N 72 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 73 sop/transform flower/ring/leaf/def:petal/@result
+N 74 sop/set_color flower/ring/tint
+N 75 sop/transform flower/ring/@result
+N 76 sop/uv_sphere flower/ring/leaf/def:petal/@result/in0
+N 77 sop/transform flower/ring/leaf/def:petal/@result
+N 78 sop/set_color flower/ring/tint
+N 79 sop/transform flower/ring/@result
+N 80 sop/merge flower/bloom
+N 81 sop/uv_sphere flower/heart
+N 82 sop/set_color flower/result/input#1
+N 83 sop/merge flower/result
+R flower geometry
+R scene scene
+R world world
+R settings settings
+R editor editor
+FILE ws_facade.rays
+W facade graphs=1 defs=0 macros=0 nodes=0
+G facade sop geometry
+P facade/windows refused 1
+P facade/windows/@result candidate facade/windows
+PLAN instances=1 nodes=69
+N 0 sop/box facade/wall/in0
+N 1 sop/set_color facade/wall
+N 2 sop/box facade/windows/@result/in0
+N 3 sop/group_bounds facade/windows/@result
+N 4 sop/box facade/windows/@result/in0
+N 5 sop/group_bounds facade/windows/@result
+N 6 sop/box facade/windows/@result/in0
+N 7 sop/group_bounds facade/windows/@result
+N 8 sop/box facade/windows/@result/in0
+N 9 sop/group_bounds facade/windows/@result
+N 10 sop/box facade/windows/@result/in0
+N 11 sop/group_bounds facade/windows/@result
+N 12 sop/box facade/windows/@result/in0
+N 13 sop/group_bounds facade/windows/@result
+N 14 sop/box facade/windows/@result/in0
+N 15 sop/group_bounds facade/windows/@result
+N 16 sop/box facade/windows/@result/in0
+N 17 sop/group_bounds facade/windows/@result
+N 18 sop/box facade/windows/@result/in0
+N 19 sop/group_bounds facade/windows/@result
+N 20 sop/box facade/windows/@result/in0
+N 21 sop/group_bounds facade/windows/@result
+N 22 sop/box facade/windows/@result/in0
+N 23 sop/group_bounds facade/windows/@result
+N 24 sop/box facade/windows/@result/in0
+N 25 sop/group_bounds facade/windows/@result
+N 26 sop/box facade/windows/@result/in0
+N 27 sop/group_bounds facade/windows/@result
+N 28 sop/box facade/windows/@result/in0
+N 29 sop/group_bounds facade/windows/@result
+N 30 sop/box facade/windows/@result/in0
+N 31 sop/group_bounds facade/windows/@result
+N 32 sop/box facade/windows/@result/in0
+N 33 sop/group_bounds facade/windows/@result
+N 34 sop/box facade/windows/@result/in0
+N 35 sop/group_bounds facade/windows/@result
+N 36 sop/box facade/windows/@result/in0
+N 37 sop/group_bounds facade/windows/@result
+N 38 sop/box facade/windows/@result/in0
+N 39 sop/group_bounds facade/windows/@result
+N 40 sop/box facade/windows/@result/in0
+N 41 sop/group_bounds facade/windows/@result
+N 42 sop/box facade/windows/@result/in0
+N 43 sop/group_bounds facade/windows/@result
+N 44 sop/box facade/windows/@result/in0
+N 45 sop/group_bounds facade/windows/@result
+N 46 sop/box facade/windows/@result/in0
+N 47 sop/group_bounds facade/windows/@result
+N 48 sop/box facade/windows/@result/in0
+N 49 sop/group_bounds facade/windows/@result
+N 50 sop/box facade/windows/@result/in0
+N 51 sop/group_bounds facade/windows/@result
+N 52 sop/box facade/windows/@result/in0
+N 53 sop/group_bounds facade/windows/@result
+N 54 sop/box facade/windows/@result/in0
+N 55 sop/group_bounds facade/windows/@result
+N 56 sop/box facade/windows/@result/in0
+N 57 sop/group_bounds facade/windows/@result
+N 58 sop/box facade/windows/@result/in0
+N 59 sop/group_bounds facade/windows/@result
+N 60 sop/box facade/windows/@result/in0
+N 61 sop/group_bounds facade/windows/@result
+N 62 sop/merge facade/glass
+N 63 sop/group_bounds facade/marked/top
+N 64 sop/group_random facade/marked/odd
+N 65 sop/set_color facade/lit
+N 66 sop/blast facade/open
+N 67 sop/blast facade/closed
+N 68 sop/merge facade/result
+R facade geometry
+FILE ws_garland.rays
+W garland graphs=1 defs=1 macros=0 nodes=0
+G garland sop geometry
+P def:ring/@result#0 refused 1
+P def:ring/@result#0#0 candidate def:ring/@result#0
+P def:ring/@result#0#0/@result candidate def:ring/@result#0
+P def:ring/@result#0#0/a candidate def:ring/@result#0
+P garland/bead candidate garland/beads
+P garland/bead/:k candidate garland/ordered
+P garland/bead/:r candidate garland/ordered
+P garland/bead/@result candidate garland/beads
+P garland/beads refused 2
+P garland/big refused 1
+P garland/big#0 candidate garland/big
+P garland/big#0/:s candidate garland/sizes
+P garland/big#0/@result candidate garland/big,garland/sizes
+P garland/ordered refused 1
+P garland/ordered#0 candidate garland/ordered
+P garland/ordered#0/:s candidate garland/big
+P garland/ordered#0/@result candidate garland/big,garland/ordered
+P garland/size candidate garland/sizes
+P garland/size/@result candidate garland/sizes
+P garland/sizes refused 1
+P garland/total refused 1
+PLAN instances=1 nodes=40
+N 0 sop/uv_sphere garland/bead/@result
+N 1 sop/uv_sphere garland/bead/@result
+N 2 sop/uv_sphere garland/bead/@result
+N 3 sop/uv_sphere garland/bead/@result
+N 4 sop/uv_sphere garland/bead/@result
+N 5 sop/uv_sphere garland/bead/@result
+N 6 sop/uv_sphere garland/bead/@result
+N 7 sop/uv_sphere garland/bead/@result
+N 8 sop/uv_sphere garland/leaf/@result
+N 9 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 10 sop/uv_sphere garland/leaf/@result
+N 11 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 12 sop/uv_sphere garland/leaf/@result
+N 13 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 14 sop/uv_sphere garland/leaf/@result
+N 15 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 16 sop/uv_sphere garland/leaf/@result
+N 17 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 18 sop/uv_sphere garland/leaf/@result
+N 19 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 20 sop/uv_sphere garland/leaf/@result
+N 21 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 22 sop/uv_sphere garland/leaf/@result
+N 23 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 24 sop/uv_sphere garland/leaf/@result
+N 25 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 26 sop/uv_sphere garland/leaf/@result
+N 27 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 28 sop/uv_sphere garland/leaf/@result
+N 29 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 30 sop/uv_sphere garland/leaf/@result
+N 31 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 32 sop/uv_sphere garland/leaf/@result
+N 33 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 34 sop/uv_sphere garland/leaf/@result
+N 35 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 36 sop/merge garland/wreath/def:ring/@result
+N 37 sop/uv_sphere garland/heart
+N 38 sop/merge garland/result/input#1
+N 39 sop/merge garland/result
+R garland geometry
+FILE ws_kit.rays
+W kit graphs=1 defs=1 macros=0 nodes=0
+G kit sop geometry
+P kit/tower refused 1
+P kit/tower/@result candidate kit/tower
+P kit/tower/part candidate kit/tower
+P kit/tower/part#else candidate kit/tower
+P kit/tower/part#else/@result candidate kit/tower
+P kit/tower/part#test0 candidate kit/tower
+P kit/tower/part#test1 candidate kit/tower
+P kit/tower/part#then candidate kit/tower
+P kit/tower/part#then/@result candidate kit/tower
+P kit/tower/part#then~2 candidate kit/tower
+P kit/tower/part#then~2/@result candidate kit/tower
+P kit/tower/placed candidate kit/tower
+P kit/tower/unit candidate kit/tower
+P kit/tower/{:keys [shape y]} candidate kit/tower
+PLAN instances=1 nodes=24
+N 0 sop/box kit/big/def:window/frame
+N 1 sop/box kit/big/def:window/pane
+N 2 sop/box kit/small/def:window/frame
+N 3 sop/box kit/small/def:window/pane
+N 4 sop/box kit/tower/init/shape/in0
+N 5 sop/set_color kit/tower/init/shape
+N 6 sop/set_color kit/tower/unit
+N 7 sop/transform kit/tower/placed
+N 8 sop/merge kit/tower/@result/shape
+N 9 sop/set_color kit/tower/unit
+N 10 sop/transform kit/tower/placed
+N 11 sop/merge kit/tower/@result/shape
+N 12 sop/set_color kit/tower/unit
+N 13 sop/transform kit/tower/placed
+N 14 sop/merge kit/tower/@result/shape
+N 15 sop/set_color kit/tower/unit
+N 16 sop/transform kit/tower/placed
+N 17 sop/merge kit/tower/@result/shape
+N 18 sop/set_color kit/tower/unit
+N 19 sop/transform kit/tower/placed
+N 20 sop/merge kit/tower/@result/shape
+N 21 sop/transform kit/panes/in0
+N 22 sop/set_color kit/panes
+N 23 sop/merge kit/@result
+R kit geometry
+FILE ws_layout.rays
+D E_ONE_WORKSPACE: A file holds one workspace form.
+NONE
+FILE ws_morph.rays
+W ws_morph graphs=5 defs=0 macros=0 nodes=0
+G sheet sop geometry
+G tinted sop geometry
+G vase sop geometry
+G scene scene scene
+G editor editor editor
+P vase/stack/~for refused 1
+P vase/stack/~for/@result candidate vase/stack/~for
+P vase/stack/~for/r candidate vase/stack/~for
+P vase/stack/~for/u candidate vase/stack/~for
+PLAN instances=5 nodes=25
+N 0 sop/grid sheet/flat
+N 1 sop/mountain sheet/rough
+N 2 sop/bend sheet/bent
+N 3 sop/blend_shapes sheet/morph
+N 4 sop/set_color tinted/cool
+N 5 sop/set_color tinted/warm
+N 6 sop/attribute_composite tinted/mixed
+N 7 sop/normals tinted/@result
+N 8 sop/circle vase/stack/~for/@result/in0
+N 9 sop/transform vase/stack/~for/@result
+N 10 sop/circle vase/stack/~for/@result/in0
+N 11 sop/transform vase/stack/~for/@result
+N 12 sop/circle vase/stack/~for/@result/in0
+N 13 sop/transform vase/stack/~for/@result
+N 14 sop/circle vase/stack/~for/@result/in0
+N 15 sop/transform vase/stack/~for/@result
+N 16 sop/circle vase/stack/~for/@result/in0
+N 17 sop/transform vase/stack/~for/@result
+N 18 sop/circle vase/stack/~for/@result/in0
+N 19 sop/transform vase/stack/~for/@result
+N 20 sop/merge vase/stack
+N 21 sop/skin vase/wall
+N 22 sop/ordered_group vase/marked
+N 23 sop/normals vase/@result/in0
+N 24 sop/set_color vase/@result
+R sheet geometry
+R tinted geometry
+R vase geometry
+R scene scene
+R editor editor
+FILE ws_orrery.rays
+W orrery graphs=1 defs=0 macros=0 nodes=0
+G orrery sop geometry
+L orrery/@result
+L orrery/glow
+L orrery/glow#:color
+L orrery/moons_each
+L orrery/moons_each/@result
+L orrery/moons_each/@result#:color
+L orrery/moons_each/@result#:color#test
+L orrery/moons_each/a
+L orrery/moons_each/a#1
+L orrery/moons_each/bob
+L orrery/moons_each/moon
+L orrery/moons_each/moon#:center
+L orrery/orbit
+L orrery/pulse
+L orrery/spin
+L orrery/sun
+L orrery/system
+P orrery/moons_each refused 1
+P orrery/moons_each/@result candidate orrery/moons_each
+P orrery/moons_each/a candidate orrery/moons_each
+P orrery/moons_each/bob candidate orrery/moons_each
+P orrery/moons_each/moon candidate orrery/moons_each
+P orrery/moons_each/radius candidate orrery/moons_each
+P orrery/moons_each/size candidate orrery/moons_each
+PLAN instances=1 nodes=56
+N 0 sop/tube orrery/base/in0
+N 1 sop/noise_displace orrery/base
+N 2 sop/normals orrery/plinth/in0
+N 3 sop/set_color orrery/plinth
+N 4 sop/uv_sphere orrery/sun
+N 5 sop/set_color orrery/glow
+N 6 sop/uv_sphere orrery/moons_each/moon
+N 7 sop/set_color orrery/moons_each/@result
+N 8 sop/uv_sphere orrery/moons_each/moon
+N 9 sop/set_color orrery/moons_each/@result
+N 10 sop/uv_sphere orrery/moons_each/moon
+N 11 sop/set_color orrery/moons_each/@result
+N 12 sop/uv_sphere orrery/moons_each/moon
+N 13 sop/set_color orrery/moons_each/@result
+N 14 sop/uv_sphere orrery/moons_each/moon
+N 15 sop/set_color orrery/moons_each/@result
+N 16 sop/uv_sphere orrery/moons_each/moon
+N 17 sop/set_color orrery/moons_each/@result
+N 18 sop/uv_sphere orrery/moons_each/moon
+N 19 sop/set_color orrery/moons_each/@result
+N 20 sop/uv_sphere orrery/moons_each/moon
+N 21 sop/set_color orrery/moons_each/@result
+N 22 sop/uv_sphere orrery/moons_each/moon
+N 23 sop/set_color orrery/moons_each/@result
+N 24 sop/uv_sphere orrery/moons_each/moon
+N 25 sop/set_color orrery/moons_each/@result
+N 26 sop/uv_sphere orrery/moons_each/moon
+N 27 sop/set_color orrery/moons_each/@result
+N 28 sop/uv_sphere orrery/moons_each/moon
+N 29 sop/set_color orrery/moons_each/@result
+N 30 sop/uv_sphere orrery/moons_each/moon
+N 31 sop/set_color orrery/moons_each/@result
+N 32 sop/uv_sphere orrery/moons_each/moon
+N 33 sop/set_color orrery/moons_each/@result
+N 34 sop/uv_sphere orrery/moons_each/moon
+N 35 sop/set_color orrery/moons_each/@result
+N 36 sop/uv_sphere orrery/moons_each/moon
+N 37 sop/set_color orrery/moons_each/@result
+N 38 sop/uv_sphere orrery/moons_each/moon
+N 39 sop/set_color orrery/moons_each/@result
+N 40 sop/uv_sphere orrery/moons_each/moon
+N 41 sop/set_color orrery/moons_each/@result
+N 42 sop/uv_sphere orrery/moons_each/moon
+N 43 sop/set_color orrery/moons_each/@result
+N 44 sop/uv_sphere orrery/moons_each/moon
+N 45 sop/set_color orrery/moons_each/@result
+N 46 sop/uv_sphere orrery/moons_each/moon
+N 47 sop/set_color orrery/moons_each/@result
+N 48 sop/uv_sphere orrery/moons_each/moon
+N 49 sop/set_color orrery/moons_each/@result
+N 50 sop/uv_sphere orrery/moons_each/moon
+N 51 sop/set_color orrery/moons_each/@result
+N 52 sop/uv_sphere orrery/moons_each/moon
+N 53 sop/set_color orrery/moons_each/@result
+N 54 sop/merge orrery/orbit
+N 55 sop/merge orrery/system
+R orrery geometry
+FILE ws_rosette.rays
+W rosette graphs=1 defs=0 macros=2 nodes=0
+G rosette sop geometry
+P rosette/inner/~for refused 1
+P rosette/inner/~for/@result candidate rosette/inner/~for
+P rosette/outer/~for refused 1
+P rosette/outer/~for/@result candidate rosette/outer/~for
+PLAN instances=1 nodes=39
+N 0 sop/uv_sphere rosette/outer/~for/@result/in0
+N 1 sop/transform rosette/outer/~for/@result
+N 2 sop/uv_sphere rosette/outer/~for/@result/in0
+N 3 sop/transform rosette/outer/~for/@result
+N 4 sop/uv_sphere rosette/outer/~for/@result/in0
+N 5 sop/transform rosette/outer/~for/@result
+N 6 sop/uv_sphere rosette/outer/~for/@result/in0
+N 7 sop/transform rosette/outer/~for/@result
+N 8 sop/uv_sphere rosette/outer/~for/@result/in0
+N 9 sop/transform rosette/outer/~for/@result
+N 10 sop/uv_sphere rosette/outer/~for/@result/in0
+N 11 sop/transform rosette/outer/~for/@result
+N 12 sop/uv_sphere rosette/outer/~for/@result/in0
+N 13 sop/transform rosette/outer/~for/@result
+N 14 sop/uv_sphere rosette/outer/~for/@result/in0
+N 15 sop/transform rosette/outer/~for/@result
+N 16 sop/uv_sphere rosette/outer/~for/@result/in0
+N 17 sop/transform rosette/outer/~for/@result
+N 18 sop/uv_sphere rosette/outer/~for/@result/in0
+N 19 sop/transform rosette/outer/~for/@result
+N 20 sop/uv_sphere rosette/outer/~for/@result/in0
+N 21 sop/transform rosette/outer/~for/@result
+N 22 sop/uv_sphere rosette/outer/~for/@result/in0
+N 23 sop/transform rosette/outer/~for/@result
+N 24 sop/merge rosette/outer
+N 25 sop/uv_sphere rosette/inner/~for/@result/in0
+N 26 sop/transform rosette/inner/~for/@result
+N 27 sop/uv_sphere rosette/inner/~for/@result/in0
+N 28 sop/transform rosette/inner/~for/@result
+N 29 sop/uv_sphere rosette/inner/~for/@result/in0
+N 30 sop/transform rosette/inner/~for/@result
+N 31 sop/uv_sphere rosette/inner/~for/@result/in0
+N 32 sop/transform rosette/inner/~for/@result
+N 33 sop/uv_sphere rosette/inner/~for/@result/in0
+N 34 sop/transform rosette/inner/~for/@result
+N 35 sop/uv_sphere rosette/inner/~for/@result/in0
+N 36 sop/transform rosette/inner/~for/@result
+N 37 sop/merge rosette/inner
+N 38 sop/merge rosette/rose
+R rosette geometry
+FILE ws_spreadsheet.rays
+W ws_spreadsheet graphs=4 defs=0 macros=0 nodes=0
+G geometry sop geometry
+G scene scene scene
+G settings settings settings
+G editor editor editor
+PLAN instances=4 nodes=2
+N 0 sop/grid geometry/grid
+N 1 sop/set_color geometry/color
+R geometry geometry
+R scene scene
+R settings settings
+R editor editor
+FILE ws_sunflower.rays
+W sunflower graphs=1 defs=0 macros=0 nodes=0
+G sunflower sop geometry
+I sunflower/seeds_each/turn
+P sunflower/seeds_each refused 1
+P sunflower/seeds_each/@result candidate sunflower/seeds_each
+P sunflower/seeds_each/a candidate sunflower/seeds_each
+P sunflower/seeds_each/lift candidate sunflower/seeds_each
+P sunflower/seeds_each/r candidate sunflower/seeds_each
+P sunflower/seeds_each/size candidate sunflower/seeds_each
+P sunflower/seeds_each/turn candidate sunflower/seeds_each
+PLAN instances=1 nodes=241
+N 0 sop/uv_sphere sunflower/seeds_each/@result
+N 1 sop/uv_sphere sunflower/seeds_each/@result
+N 2 sop/uv_sphere sunflower/seeds_each/@result
+N 3 sop/uv_sphere sunflower/seeds_each/@result
+N 4 sop/uv_sphere sunflower/seeds_each/@result
+N 5 sop/uv_sphere sunflower/seeds_each/@result
+N 6 sop/uv_sphere sunflower/seeds_each/@result
+N 7 sop/uv_sphere sunflower/seeds_each/@result
+N 8 sop/uv_sphere sunflower/seeds_each/@result
+N 9 sop/uv_sphere sunflower/seeds_each/@result
+N 10 sop/uv_sphere sunflower/seeds_each/@result
+N 11 sop/uv_sphere sunflower/seeds_each/@result
+N 12 sop/uv_sphere sunflower/seeds_each/@result
+N 13 sop/uv_sphere sunflower/seeds_each/@result
+N 14 sop/uv_sphere sunflower/seeds_each/@result
+N 15 sop/uv_sphere sunflower/seeds_each/@result
+N 16 sop/uv_sphere sunflower/seeds_each/@result
+N 17 sop/uv_sphere sunflower/seeds_each/@result
+N 18 sop/uv_sphere sunflower/seeds_each/@result
+N 19 sop/uv_sphere sunflower/seeds_each/@result
+N 20 sop/uv_sphere sunflower/seeds_each/@result
+N 21 sop/uv_sphere sunflower/seeds_each/@result
+N 22 sop/uv_sphere sunflower/seeds_each/@result
+N 23 sop/uv_sphere sunflower/seeds_each/@result
+N 24 sop/uv_sphere sunflower/seeds_each/@result
+N 25 sop/uv_sphere sunflower/seeds_each/@result
+N 26 sop/uv_sphere sunflower/seeds_each/@result
+N 27 sop/uv_sphere sunflower/seeds_each/@result
+N 28 sop/uv_sphere sunflower/seeds_each/@result
+N 29 sop/uv_sphere sunflower/seeds_each/@result
+N 30 sop/uv_sphere sunflower/seeds_each/@result
+N 31 sop/uv_sphere sunflower/seeds_each/@result
+N 32 sop/uv_sphere sunflower/seeds_each/@result
+N 33 sop/uv_sphere sunflower/seeds_each/@result
+N 34 sop/uv_sphere sunflower/seeds_each/@result
+N 35 sop/uv_sphere sunflower/seeds_each/@result
+N 36 sop/uv_sphere sunflower/seeds_each/@result
+N 37 sop/uv_sphere sunflower/seeds_each/@result
+N 38 sop/uv_sphere sunflower/seeds_each/@result
+N 39 sop/uv_sphere sunflower/seeds_each/@result
+N 40 sop/uv_sphere sunflower/seeds_each/@result
+N 41 sop/uv_sphere sunflower/seeds_each/@result
+N 42 sop/uv_sphere sunflower/seeds_each/@result
+N 43 sop/uv_sphere sunflower/seeds_each/@result
+N 44 sop/uv_sphere sunflower/seeds_each/@result
+N 45 sop/uv_sphere sunflower/seeds_each/@result
+N 46 sop/uv_sphere sunflower/seeds_each/@result
+N 47 sop/uv_sphere sunflower/seeds_each/@result
+N 48 sop/uv_sphere sunflower/seeds_each/@result
+N 49 sop/uv_sphere sunflower/seeds_each/@result
+N 50 sop/uv_sphere sunflower/seeds_each/@result
+N 51 sop/uv_sphere sunflower/seeds_each/@result
+N 52 sop/uv_sphere sunflower/seeds_each/@result
+N 53 sop/uv_sphere sunflower/seeds_each/@result
+N 54 sop/uv_sphere sunflower/seeds_each/@result
+N 55 sop/uv_sphere sunflower/seeds_each/@result
+N 56 sop/uv_sphere sunflower/seeds_each/@result
+N 57 sop/uv_sphere sunflower/seeds_each/@result
+N 58 sop/uv_sphere sunflower/seeds_each/@result
+N 59 sop/uv_sphere sunflower/seeds_each/@result
+N 60 sop/uv_sphere sunflower/seeds_each/@result
+N 61 sop/uv_sphere sunflower/seeds_each/@result
+N 62 sop/uv_sphere sunflower/seeds_each/@result
+N 63 sop/uv_sphere sunflower/seeds_each/@result
+N 64 sop/uv_sphere sunflower/seeds_each/@result
+N 65 sop/uv_sphere sunflower/seeds_each/@result
+N 66 sop/uv_sphere sunflower/seeds_each/@result
+N 67 sop/uv_sphere sunflower/seeds_each/@result
+N 68 sop/uv_sphere sunflower/seeds_each/@result
+N 69 sop/uv_sphere sunflower/seeds_each/@result
+N 70 sop/uv_sphere sunflower/seeds_each/@result
+N 71 sop/uv_sphere sunflower/seeds_each/@result
+N 72 sop/uv_sphere sunflower/seeds_each/@result
+N 73 sop/uv_sphere sunflower/seeds_each/@result
+N 74 sop/uv_sphere sunflower/seeds_each/@result
+N 75 sop/uv_sphere sunflower/seeds_each/@result
+N 76 sop/uv_sphere sunflower/seeds_each/@result
+N 77 sop/uv_sphere sunflower/seeds_each/@result
+N 78 sop/uv_sphere sunflower/seeds_each/@result
+N 79 sop/uv_sphere sunflower/seeds_each/@result
+N 80 sop/uv_sphere sunflower/seeds_each/@result
+N 81 sop/uv_sphere sunflower/seeds_each/@result
+N 82 sop/uv_sphere sunflower/seeds_each/@result
+N 83 sop/uv_sphere sunflower/seeds_each/@result
+N 84 sop/uv_sphere sunflower/seeds_each/@result
+N 85 sop/uv_sphere sunflower/seeds_each/@result
+N 86 sop/uv_sphere sunflower/seeds_each/@result
+N 87 sop/uv_sphere sunflower/seeds_each/@result
+N 88 sop/uv_sphere sunflower/seeds_each/@result
+N 89 sop/uv_sphere sunflower/seeds_each/@result
+N 90 sop/uv_sphere sunflower/seeds_each/@result
+N 91 sop/uv_sphere sunflower/seeds_each/@result
+N 92 sop/uv_sphere sunflower/seeds_each/@result
+N 93 sop/uv_sphere sunflower/seeds_each/@result
+N 94 sop/uv_sphere sunflower/seeds_each/@result
+N 95 sop/uv_sphere sunflower/seeds_each/@result
+N 96 sop/uv_sphere sunflower/seeds_each/@result
+N 97 sop/uv_sphere sunflower/seeds_each/@result
+N 98 sop/uv_sphere sunflower/seeds_each/@result
+N 99 sop/uv_sphere sunflower/seeds_each/@result
+N 100 sop/uv_sphere sunflower/seeds_each/@result
+N 101 sop/uv_sphere sunflower/seeds_each/@result
+N 102 sop/uv_sphere sunflower/seeds_each/@result
+N 103 sop/uv_sphere sunflower/seeds_each/@result
+N 104 sop/uv_sphere sunflower/seeds_each/@result
+N 105 sop/uv_sphere sunflower/seeds_each/@result
+N 106 sop/uv_sphere sunflower/seeds_each/@result
+N 107 sop/uv_sphere sunflower/seeds_each/@result
+N 108 sop/uv_sphere sunflower/seeds_each/@result
+N 109 sop/uv_sphere sunflower/seeds_each/@result
+N 110 sop/uv_sphere sunflower/seeds_each/@result
+N 111 sop/uv_sphere sunflower/seeds_each/@result
+N 112 sop/uv_sphere sunflower/seeds_each/@result
+N 113 sop/uv_sphere sunflower/seeds_each/@result
+N 114 sop/uv_sphere sunflower/seeds_each/@result
+N 115 sop/uv_sphere sunflower/seeds_each/@result
+N 116 sop/uv_sphere sunflower/seeds_each/@result
+N 117 sop/uv_sphere sunflower/seeds_each/@result
+N 118 sop/uv_sphere sunflower/seeds_each/@result
+N 119 sop/uv_sphere sunflower/seeds_each/@result
+N 120 sop/uv_sphere sunflower/seeds_each/@result
+N 121 sop/uv_sphere sunflower/seeds_each/@result
+N 122 sop/uv_sphere sunflower/seeds_each/@result
+N 123 sop/uv_sphere sunflower/seeds_each/@result
+N 124 sop/uv_sphere sunflower/seeds_each/@result
+N 125 sop/uv_sphere sunflower/seeds_each/@result
+N 126 sop/uv_sphere sunflower/seeds_each/@result
+N 127 sop/uv_sphere sunflower/seeds_each/@result
+N 128 sop/uv_sphere sunflower/seeds_each/@result
+N 129 sop/uv_sphere sunflower/seeds_each/@result
+N 130 sop/uv_sphere sunflower/seeds_each/@result
+N 131 sop/uv_sphere sunflower/seeds_each/@result
+N 132 sop/uv_sphere sunflower/seeds_each/@result
+N 133 sop/uv_sphere sunflower/seeds_each/@result
+N 134 sop/uv_sphere sunflower/seeds_each/@result
+N 135 sop/uv_sphere sunflower/seeds_each/@result
+N 136 sop/uv_sphere sunflower/seeds_each/@result
+N 137 sop/uv_sphere sunflower/seeds_each/@result
+N 138 sop/uv_sphere sunflower/seeds_each/@result
+N 139 sop/uv_sphere sunflower/seeds_each/@result
+N 140 sop/uv_sphere sunflower/seeds_each/@result
+N 141 sop/uv_sphere sunflower/seeds_each/@result
+N 142 sop/uv_sphere sunflower/seeds_each/@result
+N 143 sop/uv_sphere sunflower/seeds_each/@result
+N 144 sop/uv_sphere sunflower/seeds_each/@result
+N 145 sop/uv_sphere sunflower/seeds_each/@result
+N 146 sop/uv_sphere sunflower/seeds_each/@result
+N 147 sop/uv_sphere sunflower/seeds_each/@result
+N 148 sop/uv_sphere sunflower/seeds_each/@result
+N 149 sop/uv_sphere sunflower/seeds_each/@result
+N 150 sop/uv_sphere sunflower/seeds_each/@result
+N 151 sop/uv_sphere sunflower/seeds_each/@result
+N 152 sop/uv_sphere sunflower/seeds_each/@result
+N 153 sop/uv_sphere sunflower/seeds_each/@result
+N 154 sop/uv_sphere sunflower/seeds_each/@result
+N 155 sop/uv_sphere sunflower/seeds_each/@result
+N 156 sop/uv_sphere sunflower/seeds_each/@result
+N 157 sop/uv_sphere sunflower/seeds_each/@result
+N 158 sop/uv_sphere sunflower/seeds_each/@result
+N 159 sop/uv_sphere sunflower/seeds_each/@result
+N 160 sop/uv_sphere sunflower/seeds_each/@result
+N 161 sop/uv_sphere sunflower/seeds_each/@result
+N 162 sop/uv_sphere sunflower/seeds_each/@result
+N 163 sop/uv_sphere sunflower/seeds_each/@result
+N 164 sop/uv_sphere sunflower/seeds_each/@result
+N 165 sop/uv_sphere sunflower/seeds_each/@result
+N 166 sop/uv_sphere sunflower/seeds_each/@result
+N 167 sop/uv_sphere sunflower/seeds_each/@result
+N 168 sop/uv_sphere sunflower/seeds_each/@result
+N 169 sop/uv_sphere sunflower/seeds_each/@result
+N 170 sop/uv_sphere sunflower/seeds_each/@result
+N 171 sop/uv_sphere sunflower/seeds_each/@result
+N 172 sop/uv_sphere sunflower/seeds_each/@result
+N 173 sop/uv_sphere sunflower/seeds_each/@result
+N 174 sop/uv_sphere sunflower/seeds_each/@result
+N 175 sop/uv_sphere sunflower/seeds_each/@result
+N 176 sop/uv_sphere sunflower/seeds_each/@result
+N 177 sop/uv_sphere sunflower/seeds_each/@result
+N 178 sop/uv_sphere sunflower/seeds_each/@result
+N 179 sop/uv_sphere sunflower/seeds_each/@result
+N 180 sop/uv_sphere sunflower/seeds_each/@result
+N 181 sop/uv_sphere sunflower/seeds_each/@result
+N 182 sop/uv_sphere sunflower/seeds_each/@result
+N 183 sop/uv_sphere sunflower/seeds_each/@result
+N 184 sop/uv_sphere sunflower/seeds_each/@result
+N 185 sop/uv_sphere sunflower/seeds_each/@result
+N 186 sop/uv_sphere sunflower/seeds_each/@result
+N 187 sop/uv_sphere sunflower/seeds_each/@result
+N 188 sop/uv_sphere sunflower/seeds_each/@result
+N 189 sop/uv_sphere sunflower/seeds_each/@result
+N 190 sop/uv_sphere sunflower/seeds_each/@result
+N 191 sop/uv_sphere sunflower/seeds_each/@result
+N 192 sop/uv_sphere sunflower/seeds_each/@result
+N 193 sop/uv_sphere sunflower/seeds_each/@result
+N 194 sop/uv_sphere sunflower/seeds_each/@result
+N 195 sop/uv_sphere sunflower/seeds_each/@result
+N 196 sop/uv_sphere sunflower/seeds_each/@result
+N 197 sop/uv_sphere sunflower/seeds_each/@result
+N 198 sop/uv_sphere sunflower/seeds_each/@result
+N 199 sop/uv_sphere sunflower/seeds_each/@result
+N 200 sop/uv_sphere sunflower/seeds_each/@result
+N 201 sop/uv_sphere sunflower/seeds_each/@result
+N 202 sop/uv_sphere sunflower/seeds_each/@result
+N 203 sop/uv_sphere sunflower/seeds_each/@result
+N 204 sop/uv_sphere sunflower/seeds_each/@result
+N 205 sop/uv_sphere sunflower/seeds_each/@result
+N 206 sop/uv_sphere sunflower/seeds_each/@result
+N 207 sop/uv_sphere sunflower/seeds_each/@result
+N 208 sop/uv_sphere sunflower/seeds_each/@result
+N 209 sop/uv_sphere sunflower/seeds_each/@result
+N 210 sop/uv_sphere sunflower/seeds_each/@result
+N 211 sop/uv_sphere sunflower/seeds_each/@result
+N 212 sop/uv_sphere sunflower/seeds_each/@result
+N 213 sop/uv_sphere sunflower/seeds_each/@result
+N 214 sop/uv_sphere sunflower/seeds_each/@result
+N 215 sop/uv_sphere sunflower/seeds_each/@result
+N 216 sop/uv_sphere sunflower/seeds_each/@result
+N 217 sop/uv_sphere sunflower/seeds_each/@result
+N 218 sop/uv_sphere sunflower/seeds_each/@result
+N 219 sop/uv_sphere sunflower/seeds_each/@result
+N 220 sop/uv_sphere sunflower/seeds_each/@result
+N 221 sop/uv_sphere sunflower/seeds_each/@result
+N 222 sop/uv_sphere sunflower/seeds_each/@result
+N 223 sop/uv_sphere sunflower/seeds_each/@result
+N 224 sop/uv_sphere sunflower/seeds_each/@result
+N 225 sop/uv_sphere sunflower/seeds_each/@result
+N 226 sop/uv_sphere sunflower/seeds_each/@result
+N 227 sop/uv_sphere sunflower/seeds_each/@result
+N 228 sop/uv_sphere sunflower/seeds_each/@result
+N 229 sop/uv_sphere sunflower/seeds_each/@result
+N 230 sop/uv_sphere sunflower/seeds_each/@result
+N 231 sop/uv_sphere sunflower/seeds_each/@result
+N 232 sop/uv_sphere sunflower/seeds_each/@result
+N 233 sop/uv_sphere sunflower/seeds_each/@result
+N 234 sop/uv_sphere sunflower/seeds_each/@result
+N 235 sop/uv_sphere sunflower/seeds_each/@result
+N 236 sop/uv_sphere sunflower/seeds_each/@result
+N 237 sop/uv_sphere sunflower/seeds_each/@result
+N 238 sop/uv_sphere sunflower/seeds_each/@result
+N 239 sop/uv_sphere sunflower/seeds_each/@result
+N 240 sop/merge sunflower/head
+R sunflower geometry
+FILE ws_tiles.rays
+W tiles graphs=1 defs=0 macros=0 nodes=0
+G tiles sop geometry
+P tiles/cells_each refused 1
+P tiles/cells_each/@result candidate tiles/cells_each
+P tiles/cells_each/angle candidate tiles/cells_each
+P tiles/cells_each/angle#else candidate tiles/cells_each
+P tiles/cells_each/angle#else/@result candidate tiles/cells_each
+P tiles/cells_each/angle#test candidate tiles/cells_each
+P tiles/cells_each/angle#then candidate tiles/cells_each
+P tiles/cells_each/angle#then/@result candidate tiles/cells_each
+P tiles/cells_each/coin candidate tiles/cells_each
+P tiles/cells_each/ink candidate tiles/cells_each
+P tiles/cells_each/wall candidate tiles/cells_each
+PLAN instances=1 nodes=193
+N 0 sop/box tiles/cells_each/wall
+N 1 sop/set_color tiles/cells_each/ink
+N 2 sop/transform tiles/cells_each/@result
+N 3 sop/box tiles/cells_each/wall
+N 4 sop/set_color tiles/cells_each/ink
+N 5 sop/transform tiles/cells_each/@result
+N 6 sop/box tiles/cells_each/wall
+N 7 sop/set_color tiles/cells_each/ink
+N 8 sop/transform tiles/cells_each/@result
+N 9 sop/box tiles/cells_each/wall
+N 10 sop/set_color tiles/cells_each/ink
+N 11 sop/transform tiles/cells_each/@result
+N 12 sop/box tiles/cells_each/wall
+N 13 sop/set_color tiles/cells_each/ink
+N 14 sop/transform tiles/cells_each/@result
+N 15 sop/box tiles/cells_each/wall
+N 16 sop/set_color tiles/cells_each/ink
+N 17 sop/transform tiles/cells_each/@result
+N 18 sop/box tiles/cells_each/wall
+N 19 sop/set_color tiles/cells_each/ink
+N 20 sop/transform tiles/cells_each/@result
+N 21 sop/box tiles/cells_each/wall
+N 22 sop/set_color tiles/cells_each/ink
+N 23 sop/transform tiles/cells_each/@result
+N 24 sop/box tiles/cells_each/wall
+N 25 sop/set_color tiles/cells_each/ink
+N 26 sop/transform tiles/cells_each/@result
+N 27 sop/box tiles/cells_each/wall
+N 28 sop/set_color tiles/cells_each/ink
+N 29 sop/transform tiles/cells_each/@result
+N 30 sop/box tiles/cells_each/wall
+N 31 sop/set_color tiles/cells_each/ink
+N 32 sop/transform tiles/cells_each/@result
+N 33 sop/box tiles/cells_each/wall
+N 34 sop/set_color tiles/cells_each/ink
+N 35 sop/transform tiles/cells_each/@result
+N 36 sop/box tiles/cells_each/wall
+N 37 sop/set_color tiles/cells_each/ink
+N 38 sop/transform tiles/cells_each/@result
+N 39 sop/box tiles/cells_each/wall
+N 40 sop/set_color tiles/cells_each/ink
+N 41 sop/transform tiles/cells_each/@result
+N 42 sop/box tiles/cells_each/wall
+N 43 sop/set_color tiles/cells_each/ink
+N 44 sop/transform tiles/cells_each/@result
+N 45 sop/box tiles/cells_each/wall
+N 46 sop/set_color tiles/cells_each/ink
+N 47 sop/transform tiles/cells_each/@result
+N 48 sop/box tiles/cells_each/wall
+N 49 sop/set_color tiles/cells_each/ink
+N 50 sop/transform tiles/cells_each/@result
+N 51 sop/box tiles/cells_each/wall
+N 52 sop/set_color tiles/cells_each/ink
+N 53 sop/transform tiles/cells_each/@result
+N 54 sop/box tiles/cells_each/wall
+N 55 sop/set_color tiles/cells_each/ink
+N 56 sop/transform tiles/cells_each/@result
+N 57 sop/box tiles/cells_each/wall
+N 58 sop/set_color tiles/cells_each/ink
+N 59 sop/transform tiles/cells_each/@result
+N 60 sop/box tiles/cells_each/wall
+N 61 sop/set_color tiles/cells_each/ink
+N 62 sop/transform tiles/cells_each/@result
+N 63 sop/box tiles/cells_each/wall
+N 64 sop/set_color tiles/cells_each/ink
+N 65 sop/transform tiles/cells_each/@result
+N 66 sop/box tiles/cells_each/wall
+N 67 sop/set_color tiles/cells_each/ink
+N 68 sop/transform tiles/cells_each/@result
+N 69 sop/box tiles/cells_each/wall
+N 70 sop/set_color tiles/cells_each/ink
+N 71 sop/transform tiles/cells_each/@result
+N 72 sop/box tiles/cells_each/wall
+N 73 sop/set_color tiles/cells_each/ink
+N 74 sop/transform tiles/cells_each/@result
+N 75 sop/box tiles/cells_each/wall
+N 76 sop/set_color tiles/cells_each/ink
+N 77 sop/transform tiles/cells_each/@result
+N 78 sop/box tiles/cells_each/wall
+N 79 sop/set_color tiles/cells_each/ink
+N 80 sop/transform tiles/cells_each/@result
+N 81 sop/box tiles/cells_each/wall
+N 82 sop/set_color tiles/cells_each/ink
+N 83 sop/transform tiles/cells_each/@result
+N 84 sop/box tiles/cells_each/wall
+N 85 sop/set_color tiles/cells_each/ink
+N 86 sop/transform tiles/cells_each/@result
+N 87 sop/box tiles/cells_each/wall
+N 88 sop/set_color tiles/cells_each/ink
+N 89 sop/transform tiles/cells_each/@result
+N 90 sop/box tiles/cells_each/wall
+N 91 sop/set_color tiles/cells_each/ink
+N 92 sop/transform tiles/cells_each/@result
+N 93 sop/box tiles/cells_each/wall
+N 94 sop/set_color tiles/cells_each/ink
+N 95 sop/transform tiles/cells_each/@result
+N 96 sop/box tiles/cells_each/wall
+N 97 sop/set_color tiles/cells_each/ink
+N 98 sop/transform tiles/cells_each/@result
+N 99 sop/box tiles/cells_each/wall
+N 100 sop/set_color tiles/cells_each/ink
+N 101 sop/transform tiles/cells_each/@result
+N 102 sop/box tiles/cells_each/wall
+N 103 sop/set_color tiles/cells_each/ink
+N 104 sop/transform tiles/cells_each/@result
+N 105 sop/box tiles/cells_each/wall
+N 106 sop/set_color tiles/cells_each/ink
+N 107 sop/transform tiles/cells_each/@result
+N 108 sop/box tiles/cells_each/wall
+N 109 sop/set_color tiles/cells_each/ink
+N 110 sop/transform tiles/cells_each/@result
+N 111 sop/box tiles/cells_each/wall
+N 112 sop/set_color tiles/cells_each/ink
+N 113 sop/transform tiles/cells_each/@result
+N 114 sop/box tiles/cells_each/wall
+N 115 sop/set_color tiles/cells_each/ink
+N 116 sop/transform tiles/cells_each/@result
+N 117 sop/box tiles/cells_each/wall
+N 118 sop/set_color tiles/cells_each/ink
+N 119 sop/transform tiles/cells_each/@result
+N 120 sop/box tiles/cells_each/wall
+N 121 sop/set_color tiles/cells_each/ink
+N 122 sop/transform tiles/cells_each/@result
+N 123 sop/box tiles/cells_each/wall
+N 124 sop/set_color tiles/cells_each/ink
+N 125 sop/transform tiles/cells_each/@result
+N 126 sop/box tiles/cells_each/wall
+N 127 sop/set_color tiles/cells_each/ink
+N 128 sop/transform tiles/cells_each/@result
+N 129 sop/box tiles/cells_each/wall
+N 130 sop/set_color tiles/cells_each/ink
+N 131 sop/transform tiles/cells_each/@result
+N 132 sop/box tiles/cells_each/wall
+N 133 sop/set_color tiles/cells_each/ink
+N 134 sop/transform tiles/cells_each/@result
+N 135 sop/box tiles/cells_each/wall
+N 136 sop/set_color tiles/cells_each/ink
+N 137 sop/transform tiles/cells_each/@result
+N 138 sop/box tiles/cells_each/wall
+N 139 sop/set_color tiles/cells_each/ink
+N 140 sop/transform tiles/cells_each/@result
+N 141 sop/box tiles/cells_each/wall
+N 142 sop/set_color tiles/cells_each/ink
+N 143 sop/transform tiles/cells_each/@result
+N 144 sop/box tiles/cells_each/wall
+N 145 sop/set_color tiles/cells_each/ink
+N 146 sop/transform tiles/cells_each/@result
+N 147 sop/box tiles/cells_each/wall
+N 148 sop/set_color tiles/cells_each/ink
+N 149 sop/transform tiles/cells_each/@result
+N 150 sop/box tiles/cells_each/wall
+N 151 sop/set_color tiles/cells_each/ink
+N 152 sop/transform tiles/cells_each/@result
+N 153 sop/box tiles/cells_each/wall
+N 154 sop/set_color tiles/cells_each/ink
+N 155 sop/transform tiles/cells_each/@result
+N 156 sop/box tiles/cells_each/wall
+N 157 sop/set_color tiles/cells_each/ink
+N 158 sop/transform tiles/cells_each/@result
+N 159 sop/box tiles/cells_each/wall
+N 160 sop/set_color tiles/cells_each/ink
+N 161 sop/transform tiles/cells_each/@result
+N 162 sop/box tiles/cells_each/wall
+N 163 sop/set_color tiles/cells_each/ink
+N 164 sop/transform tiles/cells_each/@result
+N 165 sop/box tiles/cells_each/wall
+N 166 sop/set_color tiles/cells_each/ink
+N 167 sop/transform tiles/cells_each/@result
+N 168 sop/box tiles/cells_each/wall
+N 169 sop/set_color tiles/cells_each/ink
+N 170 sop/transform tiles/cells_each/@result
+N 171 sop/box tiles/cells_each/wall
+N 172 sop/set_color tiles/cells_each/ink
+N 173 sop/transform tiles/cells_each/@result
+N 174 sop/box tiles/cells_each/wall
+N 175 sop/set_color tiles/cells_each/ink
+N 176 sop/transform tiles/cells_each/@result
+N 177 sop/box tiles/cells_each/wall
+N 178 sop/set_color tiles/cells_each/ink
+N 179 sop/transform tiles/cells_each/@result
+N 180 sop/box tiles/cells_each/wall
+N 181 sop/set_color tiles/cells_each/ink
+N 182 sop/transform tiles/cells_each/@result
+N 183 sop/box tiles/cells_each/wall
+N 184 sop/set_color tiles/cells_each/ink
+N 185 sop/transform tiles/cells_each/@result
+N 186 sop/box tiles/cells_each/wall
+N 187 sop/set_color tiles/cells_each/ink
+N 188 sop/transform tiles/cells_each/@result
+N 189 sop/box tiles/cells_each/wall
+N 190 sop/set_color tiles/cells_each/ink
+N 191 sop/transform tiles/cells_each/@result
+N 192 sop/merge tiles/maze
+R tiles geometry
+FILE ws_tree.rays
+W tree graphs=1 defs=0 macros=0 nodes=0
+G tree sop geometry
+I tree/crown/up
+P tree/@result candidate tree/crown
+P tree/crown refused 1
+P tree/crown/@result candidate tree/crown
+P tree/crown/a candidate tree/crown
+P tree/crown/b candidate tree/crown
+P tree/crown/c candidate tree/crown
+P tree/crown/tilted candidate tree/crown
+P tree/crown/up candidate tree/crown
+PLAN instances=1 nodes=27
+N 0 sop/line tree/trunk/in0
+N 1 sop/polywire tree/trunk
+N 2 sop/transform tree/crown/tilted
+N 3 sop/transform tree/crown/a
+N 4 sop/transform tree/crown/b
+N 5 sop/transform tree/crown/c
+N 6 sop/merge tree/crown/@result
+N 7 sop/transform tree/crown/tilted
+N 8 sop/transform tree/crown/a
+N 9 sop/transform tree/crown/b
+N 10 sop/transform tree/crown/c
+N 11 sop/merge tree/crown/@result
+N 12 sop/transform tree/crown/tilted
+N 13 sop/transform tree/crown/a
+N 14 sop/transform tree/crown/b
+N 15 sop/transform tree/crown/c
+N 16 sop/merge tree/crown/@result
+N 17 sop/transform tree/crown/tilted
+N 18 sop/transform tree/crown/a
+N 19 sop/transform tree/crown/b
+N 20 sop/transform tree/crown/c
+N 21 sop/merge tree/crown/@result
+N 22 sop/transform tree/crown/tilted
+N 23 sop/transform tree/crown/a
+N 24 sop/transform tree/crown/b
+N 25 sop/transform tree/crown/c
+N 26 sop/merge tree/crown/@result
+R tree geometry
+FILE ws_tunnel.rays
+W rings graphs=1 defs=0 macros=0 nodes=0
+G rings sop geometry
+P rings/@result candidate rings/nested
+P rings/nested refused 1
+P rings/nested/@result candidate rings/nested
+PLAN instances=1 nodes=37
+N 0 sop/torus rings/frame
+N 1 sop/transform rings/nested/@result/input#1
+N 2 sop/merge rings/nested/@result
+N 3 sop/transform rings/nested/@result/input#1
+N 4 sop/merge rings/nested/@result
+N 5 sop/transform rings/nested/@result/input#1
+N 6 sop/merge rings/nested/@result
+N 7 sop/transform rings/nested/@result/input#1
+N 8 sop/merge rings/nested/@result
+N 9 sop/transform rings/nested/@result/input#1
+N 10 sop/merge rings/nested/@result
+N 11 sop/transform rings/nested/@result/input#1
+N 12 sop/merge rings/nested/@result
+N 13 sop/transform rings/nested/@result/input#1
+N 14 sop/merge rings/nested/@result
+N 15 sop/transform rings/nested/@result/input#1
+N 16 sop/merge rings/nested/@result
+N 17 sop/transform rings/nested/@result/input#1
+N 18 sop/merge rings/nested/@result
+N 19 sop/transform rings/nested/@result/input#1
+N 20 sop/merge rings/nested/@result
+N 21 sop/transform rings/nested/@result/input#1
+N 22 sop/merge rings/nested/@result
+N 23 sop/transform rings/nested/@result/input#1
+N 24 sop/merge rings/nested/@result
+N 25 sop/transform rings/nested/@result/input#1
+N 26 sop/merge rings/nested/@result
+N 27 sop/transform rings/nested/@result/input#1
+N 28 sop/merge rings/nested/@result
+N 29 sop/transform rings/nested/@result/input#1
+N 30 sop/merge rings/nested/@result
+N 31 sop/transform rings/nested/@result/input#1
+N 32 sop/merge rings/nested/@result
+N 33 sop/transform rings/nested/@result/input#1
+N 34 sop/merge rings/nested/@result
+N 35 sop/transform rings/nested/@result/input#1
+N 36 sop/merge rings/nested/@result
+R rings geometry
+FILE ws_variations.rays
+W variations graphs=3 defs=0 macros=0 nodes=0
+G garden sop geometry
+G scene scene scene
+G editor editor editor
+P editor/sheet/~for refused 1
+P editor/sheet/~for/@result candidate editor/sheet/~for
+PLAN instances=11 nodes=30
+N 0 sop/tube garden/bed
+N 1 sop/scatter garden/spots
+N 2 sop/uv_sphere garden/dot
+N 3 sop/copy_to_points garden/dots
+N 4 sop/merge garden/result/in0
+N 5 sop/set_color garden/result
+N 6 sop/tube garden/bed
+N 7 sop/scatter garden/spots
+N 8 sop/uv_sphere garden/dot
+N 9 sop/copy_to_points garden/dots
+N 10 sop/merge garden/result/in0
+N 11 sop/set_color garden/result
+N 12 sop/tube garden/bed
+N 13 sop/scatter garden/spots
+N 14 sop/uv_sphere garden/dot
+N 15 sop/copy_to_points garden/dots
+N 16 sop/merge garden/result/in0
+N 17 sop/set_color garden/result
+N 18 sop/tube garden/bed
+N 19 sop/scatter garden/spots
+N 20 sop/uv_sphere garden/dot
+N 21 sop/copy_to_points garden/dots
+N 22 sop/merge garden/result/in0
+N 23 sop/set_color garden/result
+N 24 sop/tube garden/bed
+N 25 sop/scatter garden/spots
+N 26 sop/uv_sphere garden/dot
+N 27 sop/copy_to_points garden/dots
+N 28 sop/merge garden/result/in0
+N 29 sop/set_color garden/result
+R garden geometry
+R scene scene
+R editor editor
+FILE ws_wave.rays
+W wave graphs=1 defs=0 macros=0 nodes=0
+G wave sop geometry
+L wave/@result
+L wave/sheet
+L wave/strands
+L wave/strands/@result
+L wave/strands/@result#0
+L wave/strands/pts
+L wave/strands/pts/@result
+L wave/strands/pts/y
+L wave/strands/pts/y/~sum/@result
+P wave/strands refused 1
+P wave/strands/@result candidate wave/strands
+P wave/strands/pts refused 1
+P wave/strands/pts/@result candidate wave/strands/pts,wave/strands/pts/y/~sum
+P wave/strands/pts/x candidate wave/strands/pts
+P wave/strands/pts/y candidate wave/strands/pts,wave/strands/pts/y/~sum
+P wave/strands/pts/y/~sum refused 1
+P wave/strands/pts/y/~sum/@result candidate wave/strands/pts/y/~sum
+PLAN instances=1 nodes=13
+N 0 sop/curve wave/strands/@result/in0
+N 1 sop/polywire wave/strands/@result
+N 2 sop/curve wave/strands/@result/in0
+N 3 sop/polywire wave/strands/@result
+N 4 sop/curve wave/strands/@result/in0
+N 5 sop/polywire wave/strands/@result
+N 6 sop/curve wave/strands/@result/in0
+N 7 sop/polywire wave/strands/@result
+N 8 sop/curve wave/strands/@result/in0
+N 9 sop/polywire wave/strands/@result
+N 10 sop/curve wave/strands/@result/in0
+N 11 sop/polywire wave/strands/@result
+N 12 sop/merge wave/sheet
+R wave geometry

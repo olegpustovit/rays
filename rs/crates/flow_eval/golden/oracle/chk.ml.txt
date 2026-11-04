@@ -1,0 +1,51 @@
+open Flow
+
+let read path = In_channel.with_open_bin path In_channel.input_all
+let path_s p = String.concat "/" p
+
+let () =
+  let catalog =
+    match Catalog.catalog_of_manifest (read Sys.argv.(1)) with
+    | Ok (c, _) -> c
+    | Error d -> failwith (Diagnostic.to_string d)
+  in
+  for i = 2 to Array.length Sys.argv - 1 do
+    let file = Sys.argv.(i) in
+    Printf.printf "FILE %s\n" (Filename.basename file);
+    (match Syntax.parse (read file) with
+    | Error d -> Printf.printf "PARSE %s\n" (Diagnostic.to_string d)
+    | Ok forms -> (
+        let ws, ds = Workspace.check catalog forms in
+        List.iter (fun d -> Printf.printf "D %s\n" (Diagnostic.to_string d)) ds;
+        match ws with
+        | None -> print_endline "NONE"
+        | Some w ->
+            Printf.printf "W %s graphs=%d defs=%d macros=%d nodes=%d\n" w.name (List.length w.graphs)
+              (List.length w.defs) (List.length w.macros) (List.length w.nodes);
+            List.iter
+              (fun (g : Workspace.graph) ->
+                Printf.printf "G %s %s %s\n" g.name (Context.name g.context) (Ty.to_string g.body.ty))
+              w.graphs;
+            Workspace.Paths.iter (fun p -> Printf.printf "L %s\n" (path_s p)) w.live;
+            Workspace.Paths.iter (fun p -> Printf.printf "I %s\n" (path_s p)) w.invariant;
+            Workspace.Paths.iter (fun p -> Printf.printf "A %s\n" (path_s p)) w.approx;
+            List.iter
+              (fun (p, f) ->
+                match f with
+                | Workspace.Candidate ps ->
+                    Printf.printf "P %s candidate %s\n" (path_s p)
+                      (String.concat "," (List.map path_s (Workspace.Paths.elements ps)))
+                | Workspace.Refused rs ->
+                    Printf.printf "P %s refused %d\n" (path_s p) (List.length rs))
+              (List.sort compare w.packed);
+            (match if Filename.basename file = "million_marks.rays" then Error (Diagnostic.error ~code:"SKIPPED" "heavy") else Eval.run ~time:0.5 w with
+            | Error d -> Printf.printf "EVAL_ERROR %s
+" (Diagnostic.to_string d)
+            | Ok e ->
+                Printf.printf "PLAN instances=%d nodes=%d
+" (Array.length e.plan.instances) (Array.length e.plan.nodes);
+                Array.iteri (fun i (n : Eval.node) -> if i < 400 then Printf.printf "N %d %s %s
+" i n.kind (String.concat "/" n.site)) e.plan.nodes;
+                List.iter (fun (n, v) -> let s = Eval.show v in Printf.printf "R %s %s
+" n (if String.length s > 600 then String.sub s 0 600 else s)) e.results)))
+  done

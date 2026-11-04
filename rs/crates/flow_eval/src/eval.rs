@@ -1,0 +1,2476 @@
+#![forbid(unsafe_code)]
+
+use flow_check::{op, workspace::{self as W, Graph, Node as TermNode, Path, Term, Workspace}};
+use flow_syntax::{context::Context, ty, value};
+pub use flow_syntax::ty::{Ty, FnSignature};
+pub use flow_syntax::value::{FnId, ResidualId, Value};
+use input::Frame;
+use rays_diagnostic::{Diagnostic, Severity};
+use std::{cell::RefCell, collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, LazyLock, Mutex, RwLock, Weak, atomic::{AtomicI64, Ordering}}};
+
+pub use flow_syntax::value::{FnId as FunctionId, ResidualId as LiveId};
+pub type Live = Frame;
+pub type ValuePayload = Value;
+pub type InlineParameterCanonicalizer = Arc<dyn Fn(&[(String, Value)]) -> Result<Option<Vec<(String, Value)>>, Diagnostic> + Send + Sync>;
+#[derive(Clone)]
+pub struct InlineParameterPolicy {
+    pub definition: W::NodeDefinition,
+    pub key: String,
+    pub canonicalize: InlineParameterCanonicalizer,
+}
+pub type InlineParametersHook = Arc<dyn Fn(&Workspace, &W::NodeDefinition) -> InlineParameterPolicy + Send + Sync>;
+static INLINE_PARAMETERS_HOOK: LazyLock<RwLock<InlineParametersHook>> = LazyLock::new(|| RwLock::new(Arc::new(|workspace, definition| InlineParameterPolicy {
+    definition: definition.clone(),
+    key: authored_key(workspace),
+    canonicalize: Arc::new(|arguments| Ok(Some(arguments.to_vec()))),
+})));
+pub fn set_inline_parameters(hook: InlineParametersHook) { *INLINE_PARAMETERS_HOOK.write().unwrap() = hook; }
+pub fn inline_parameters() -> InlineParametersHook { INLINE_PARAMETERS_HOOK.read().unwrap().clone() }
+pub type StaticMapFinish = Arc<dyn Fn(usize, usize, bool) + Send + Sync>;
+pub type StaticMapRequest = Arc<dyn Fn(&Path, &Term, usize) -> StaticMapFinish + Send + Sync>;
+#[derive(Clone, Default)]
+pub struct ResidualHandlers {
+    pub observe: Option<Arc<dyn Fn(ResidualId) + Send + Sync>>,
+    pub kernel: Option<Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>>,
+    pub bulk: Option<Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>>,
+    pub bulk_needed: Option<Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>>,
+    pub defer: Option<Arc<dyn Fn(ResidualId) -> bool + Send + Sync>>,
+    pub bulk_approx: Option<Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>>,
+    pub trusted: bool,
+    pub replay: bool,
+    pub map: Option<StaticMapRequest>,
+}
+thread_local! { static ACTIVE_RESIDUAL_HANDLERS: RefCell<Vec<ResidualHandlers>> = const { RefCell::new(Vec::new()) }; }
+fn current_residual_handlers() -> Option<ResidualHandlers> {
+    ACTIVE_RESIDUAL_HANDLERS.with(|handlers| handlers.borrow().last().cloned())
+}
+thread_local! { static ACTIVE_OBSERVED_RESIDUALS: RefCell<Vec<Vec<ResidualId>>> = const { RefCell::new(Vec::new()) }; }
+thread_local! { static ACTIVE_RESIDUAL_SNAPSHOTS: RefCell<Vec<HashMap<ResidualId, Arc<Mutex<Arena>>>>> = const { RefCell::new(Vec::new()) }; }
+fn active_residual_snapshot(id: &ResidualId) -> Option<Arc<Mutex<Arena>>> {
+    ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| snapshots.borrow().iter().rev().find_map(|snapshot| snapshot.get(id).cloned()))
+}
+struct ResidualSnapshotScope { id: ResidualId }
+impl Drop for ResidualSnapshotScope {
+    fn drop(&mut self) {
+        ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| { if let Some(snapshot) = snapshots.borrow_mut().last_mut() { snapshot.remove(&self.id); } });
+    }
+}
+fn call_with_snapshot(a: &Arena, id: ResidualId, callback: &dyn Fn(ResidualId) -> Option<Value>) -> Option<Value> {
+    let snapshot = Arc::new(Mutex::new(a.clone()));
+    ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| {
+        if let Some(scope) = snapshots.borrow_mut().last_mut() { scope.insert(id, snapshot); }
+    });
+    let scope = ResidualSnapshotScope { id };
+    let value = callback(id);
+    drop(scope);
+    value
+}
+struct ResidualHandlerScope;
+impl Drop for ResidualHandlerScope {
+    fn drop(&mut self) {
+        ACTIVE_RESIDUAL_HANDLERS.with(|handlers| { handlers.borrow_mut().pop(); });
+        ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| { snapshots.borrow_mut().pop(); });
+        ACTIVE_OBSERVED_RESIDUALS.with(|observed| { observed.borrow_mut().pop(); });
+    }
+}
+
+const MAX_STEPS: usize = 600_000;
+const MAX_ITERATIONS: usize = 4096;
+const MAX_DEPTH: usize = 64;
+const PACKED_BLOCK: usize = 1024;
+pub const CONTEXT_LABEL: &str = "$label";
+pub const CARD_KIND: &str = "$card";
+pub fn context_label() -> &'static str { CONTEXT_LABEL }
+pub fn card_kind() -> &'static str { CARD_KIND }
+pub fn max_iterations() -> usize { MAX_ITERATIONS }
+
+fn diagnostic(code: &str, message: &str) -> Diagnostic {
+    Diagnostic { code: code.into(), severity: Severity::ErrorSeverity, position: None, message: message.into(), span: None, cause: None, hints: Vec::new(), trace: Vec::new() }
+}
+fn error(code: &str, message: &str) -> Diagnostic { diagnostic(code, message) }
+fn errorf(code: &str, message: String) -> Diagnostic { diagnostic(code, &message) }
+fn add_span(mut d: Diagnostic, term: &Term) -> Diagnostic {
+    if d.span.is_none() && (term.form.span.start != 0 || term.form.span.finish != 0) { d.span = Some(term.form.span.clone()); }
+    d
+}
+fn fail_frame(frame: &Frame) -> Result<(), Diagnostic> { input::validate(frame).map_err(|message| error("E_FRAME", &message)) }
+fn text(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
+fn path_text(path: &[String]) -> String { path.join("/") }
+fn int_value(v: &Value) -> Result<i64, Diagnostic> { value::int_of(v) }
+fn num(v: &Value) -> Result<f64, Diagnostic> { value::num(v) }
+fn truth(v: &Value) -> Result<bool, Diagnostic> { value::truthy(v) }
+fn coerce(ty: &Ty, v: &Value) -> Result<Value, Diagnostic> { value::coerce_to(ty, v) }
+fn array_len(v: &Value) -> Result<usize, Diagnostic> { value::array_length(v) }
+fn array_get(v: &Value, index: usize) -> Result<Value, Diagnostic> {
+    let i = i64::try_from(index).map_err(|_| error("E_LIST_RANGE", "Index is outside native storage bounds."))?;
+    value::array_get(v, i)
+}
+fn names(pat: &W::Pattern, out: &mut BTreeSet<String>) {
+    match pat { W::Pattern::Name(n) => { out.insert(n.clone()); }, W::Pattern::Seq(ps) => for p in ps { names(p, out); }, W::Pattern::Keys(ns) => out.extend(ns.iter().cloned()) }
+}
+fn pattern_name(pat: &W::Pattern) -> String {
+    match pat { W::Pattern::Name(n) => n.clone(), W::Pattern::Seq(ps) => format!("[{}]", ps.iter().map(pattern_name).collect::<Vec<_>>().join(" ")), W::Pattern::Keys(ns) => format!("{{:keys [{}]}}", ns.join(" ")) }
+}
+fn children(term: &Term) -> Vec<&Term> {
+    match &term.node {
+        TermNode::Vec(ts) | TermNode::Hof(_, ts) | TermNode::ListLit(ts) | TermNode::Str(ts) | TermNode::ListOp(_, ts) => ts.iter().collect(),
+        TermNode::Call { args, .. } | TermNode::Op { args, .. } | TermNode::Record(args) | TermNode::GraphRef { inputs: args, .. } => args.iter().map(|(_, t)| t).collect(),
+        TermNode::CallFn { args, body, .. } => args.iter().chain(body.iter().map(Box::as_ref)).collect(),
+        TermNode::Let(bindings, body) => bindings.iter().map(|(_, t)| t).chain(std::iter::once(body.as_ref())).collect(),
+        TermNode::Loop { accs, clauses, body, .. } => accs.iter().chain(clauses).map(|(_, t)| t).chain(std::iter::once(body.as_ref())).collect(),
+        TermNode::State { init, step, .. } => vec![init.as_ref(), step.as_ref()],
+        TermNode::WithError(a, b) => vec![a.as_ref(), b.as_ref()],
+        TermNode::ErrorRows { rows, mapper, .. } => vec![rows.as_ref(), mapper.as_ref()],
+        TermNode::If(a, b, c) => vec![a.as_ref(), b.as_ref(), c.as_ref()],
+        TermNode::Cond(arms, d) => arms.iter().flat_map(|(a, b)| [a, b]).chain(std::iter::once(d.as_ref())).collect(),
+        TermNode::Case(s, arms, d) => std::iter::once(s.as_ref()).chain(arms.iter().map(|(_, t)| t)).chain(std::iter::once(d.as_ref())).collect(),
+        TermNode::Fn { body, capture, .. } => std::iter::once(body.as_ref()).chain(capture.iter().map(Box::as_ref)).collect(),
+        TermNode::Get(v, _) | TermNode::Expanded { body: v, .. } => vec![v.as_ref()],
+        TermNode::Bypass(call) => W::bypass_input_ref(call).into_iter().collect(),
+        TermNode::Assoc(r, updates) => std::iter::once(r.as_ref()).chain(updates.iter().map(|(_, t)| t)).collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Node {
+    pub id: i64,
+    pub inst: i64,
+    pub site: Path,
+    pub iter: Vec<i64>,
+    pub kind: String,
+    pub ty: Ty,
+    pub args: Vec<(String, Value)>,
+    pub error: Option<Diagnostic>,
+}
+#[derive(Clone, Debug)]
+pub struct Instance { pub graph: String, pub default: bool, pub inputs: Vec<(String, Value)>, pub result: Value }
+#[derive(Clone, Debug)]
+pub struct Plan { pub instances: Vec<Instance>, pub nodes: Vec<Node> }
+pub type Record = (Path, Vec<(Vec<i64>, Value)>);
+pub type Records = Vec<Record>;
+#[derive(Clone)]
+pub struct Eval {
+    pub plan: Plan,
+    pub authored: Vec<i64>,
+    pub results: Vec<(String, Value)>,
+    pub states: Vec<Value>,
+    pub records: Records,
+    owner: Arc<Mutex<Arena>>,
+}
+pub type T = Eval;
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct StateKey { instance: i64, path: Path, iter: Vec<i64> }
+#[derive(Clone, Debug, Default)]
+struct StatePlane { source: String, frame: Option<i64>, before: BTreeMap<StateKey, Value>, next: BTreeMap<StateKey, Value>, epoch: i64 }
+#[derive(Clone, Debug, Default)]
+pub struct State { inner: Arc<Mutex<StateData>> }
+#[derive(Clone, Debug, Default)]
+struct StateData { source: String, frame: Option<i64>, before: BTreeMap<StateKey, Value>, next: BTreeMap<StateKey, Value>, host: Option<StatePlane>, epoch: i64 }
+static STATE_EPOCH: AtomicI64 = AtomicI64::new(1);
+static NEXT_ARENA: AtomicI64 = AtomicI64::new(1);
+static NEXT_FID: AtomicI64 = AtomicI64::new(1);
+static NEXT_RID: AtomicI64 = AtomicI64::new(1);
+static NEXT_BULK: AtomicI64 = AtomicI64::new(-1);
+static FREE_WALKS: AtomicI64 = AtomicI64::new(0);
+static FREE_NAMES_CACHE: LazyLock<Mutex<HashMap<String, BTreeSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+type Interrupt = Arc<dyn Fn() -> bool + Send + Sync>;
+static INTERRUPTS: LazyLock<Mutex<HashMap<std::thread::ThreadId, Interrupt>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static ARENAS: LazyLock<Mutex<HashMap<i64, Weak<Mutex<Arena>>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+// ponytail: OCaml keeps an arena alive through any value that points into it; ids here do not, so the 64 newest arenas stay alive so a value outliving its Eval still resolves. Raise or key by owner if an editor drops that many.
+static RECENT_ARENAS: LazyLock<Mutex<std::collections::VecDeque<Arc<Mutex<Arena>>>>> = LazyLock::new(|| Mutex::new(std::collections::VecDeque::new()));
+static SOURCE_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, &Value)->Option<Value> + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_,_|None)));
+static FACTS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, i64)->String + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_,_|String::new())));
+static LIVE_KERNELS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&[Node])->bool + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_|true)));
+
+#[derive(Clone)]
+struct ClosureData { params: Vec<(W::Pattern, Option<Ty>)>, replayable: bool, body: Term, env: BTreeMap<String, Value>, zone: Path, calls: i64, at: ExecCtx }
+#[derive(Clone)]
+struct NamedData { name: String, calls: i64 }
+#[derive(Clone)]
+enum Function { Closure(ClosureData), Named(NamedData) }
+#[derive(Clone)]
+struct ResidualData { term: Term, env: BTreeMap<String, Value>, ctx: ExecCtx, previous: bool, live: Option<Frame> }
+#[derive(Clone)]
+struct GraphCell { instance: i64, graph: String, default: bool, inputs: Vec<(String,Value)>, result: Value }
+#[derive(Clone)]
+struct Arena {
+    id: i64, workspace: Workspace, functions: HashMap<FnId,Function>, residuals: HashMap<ResidualId,ResidualData>,
+    nodes: Vec<Node>, authored: Vec<i64>, cells: Vec<GraphCell>, cache: HashMap<String,usize>, states: Vec<Value>, records: BTreeMap<Path, Vec<(Vec<i64>,Value)>>,
+    observed: Vec<ResidualId>,
+    record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
+    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: HashMap<FnId,i64>, memo: HashMap<ResidualId,Value>, interrupt: Option<Interrupt>,
+}
+impl Arena {
+    fn new(workspace: &Workspace, record: bool, budget: usize) -> Arc<Mutex<Arena>> {
+        let id = NEXT_ARENA.fetch_add(1, Ordering::Relaxed);
+        let interrupt = INTERRUPTS.lock().unwrap().get(&std::thread::current().id()).cloned();
+        let arena = Arc::new(Mutex::new(Arena {
+            id, workspace: workspace.clone(), functions: HashMap::new(), residuals: HashMap::new(),
+            nodes: Vec::new(), authored: Vec::new(), cells: Vec::new(), cache: HashMap::new(),
+            states: Vec::new(), records: BTreeMap::new(), observed: Vec::new(), record,
+            time: None, resolve: None, state: None, elems: BTreeMap::new(), step_count: 0,
+            budget, fn_calls: HashMap::new(), memo: HashMap::new(), interrupt,
+        }));
+        ARENAS.lock().unwrap().insert(id, Arc::downgrade(&arena));
+        { let mut recent = RECENT_ARENAS.lock().unwrap(); recent.push_back(arena.clone()); if recent.len() > 64 { recent.pop_front(); } }
+        arena
+    }
+}
+#[derive(Clone)]
+struct ExecCtx { arena: i64, inst: i64, prefix: Path, base: Path, route: Vec<String>, iter: Vec<i64>, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<String> }
+#[derive(Clone)]
+struct Env { values: BTreeMap<String,Value> }
+impl Env {
+    fn empty() -> Self { Self { values:BTreeMap::new() } }
+    fn get(&self, name:&str)->Option<Value>{self.values.get(name).cloned()}
+    fn bind(&mut self,name:String,value:Value){self.values.insert(name,value);}
+}
+
+fn new_fid()->FnId{FnId(NEXT_FID.fetch_add(1,Ordering::Relaxed))}
+fn new_rid()->ResidualId{ResidualId(NEXT_RID.fetch_add(1,Ordering::Relaxed))}
+fn get_fn(a:&Arena,id:FnId)->Result<Function,Diagnostic>{a.functions.get(&id).cloned().ok_or_else(||error("E_FUNCTION_ID","Function belongs to an expired evaluation."))}
+fn get_res(a:&Arena,id:ResidualId)->Result<ResidualData,Diagnostic>{a.residuals.get(&id).cloned().ok_or_else(||error("E_RESIDUAL_ID","Residual belongs to an expired evaluation."))}
+fn closure_id(a:&mut Arena, f:Function)->FnId{let id=new_fid();a.functions.insert(id,f);id}
+fn residual_id(a: &mut Arena, residual: ResidualData) -> ResidualId {
+    let id = new_rid();
+    a.residuals.insert(id, residual);
+    id
+}
+fn root_ctx(a:&Arena)->ExecCtx{ExecCtx{arena:a.id,inst:-1,prefix:Vec::new(),base:Vec::new(),route:Vec::new(),iter:Vec::new(),depth:0,record:true,data:false,geometry:false,host:false,context:flow_syntax::context::host(),card:None}}
+fn site(c:&ExecCtx)->Path{let mut p=c.prefix.clone();p.extend(c.base.clone());p.extend(c.route.iter().cloned());p}
+fn sub(c:&ExecCtx,seg:String)->ExecCtx{let mut c=c.clone();c.route.push(seg);c}
+fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record{let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push((c.iter.clone(),v));}}}
+fn named_args(a: &mut Arena, c: &ExecCtx, env: &Env, args: &[(String, Term)]) -> Result<Vec<(String, Value)>, Diagnostic> {
+    let mut counts = HashMap::<String, usize>::new();
+    let mut routes = Vec::with_capacity(args.len());
+    for (name, term) in args {
+        let count = counts.entry(name.clone()).or_default();
+        let route = if *count == 0 { name.clone() } else { format!("{}#{}", name, *count) };
+        *count += 1;
+        routes.push(route);
+    }
+    let mut values = args.iter().map(|(name, _)| (name.clone(), Value::No_geo)).collect::<Vec<_>>();
+    for index in 0..args.len() {
+        values[index].1 = eval_at(a, &sub(c, routes[index].clone()), env, &args[index].1)?;
+    }
+    Ok(values)
+}
+fn mk_node(a:&mut Arena,c:&ExecCtx,authored:i64,ty:Ty,kind:String,args:Vec<(String,Value)>)->Result<Value,Diagnostic>{
+    if c.data{return eval_error("E_ARRAY_TYPE","Packed-array functions produce data, not graph nodes.")}
+    if a.time.is_some(){return Err(errorf("E_LIVE_GEOMETRY",format!("{} makes geometry; geometry cannot be created while evaluating a live value.",kind)))}
+    let i=a.nodes.len() as i64;let node=Node{id:i,inst:c.inst,site:site(c),iter:c.iter.clone(),kind,ty:ty.clone(),args,error:None};
+    a.nodes.push(node);a.authored.push(authored);Ok(Value::Deferred(ty,i))
+}
+fn context_result(ctx:Context)->Ty{flow_syntax::context::result(ctx)}
+fn catalog_call(a:&mut Arena,c:&ExecCtx,authored:i64,kind:String,ctx:Context,args:Vec<(String,Value)>)->Result<Value,Diagnostic>{
+    if !flow_syntax::context::supports_values(ctx)||ctx==flow_syntax::context::material(){return Ok(Value::Struct(kind,context_result(ctx),args))}
+    mk_node(a,c,authored,context_result(ctx),kind,args)
+}
+fn literal_case(x:&flow_syntax::syntax::Syntax)->Result<Value,Diagnostic>{use flow_syntax::syntax::Node as S;match &x.node{S::Num(s)=>{if !s.contains('.')&& !s.contains('e')&&!s.contains('E'){if let Ok(n)=s.parse::<i64>(){return Ok(Value::Int(n));}}s.parse::<f64>().map(Value::Float).map_err(|_|error("E_CASE","Invalid numeric case literal."))},S::Str(s)=>Ok(Value::Text(s.clone())),S::Sym(s)=>Ok(Value::Bool(s=="true")),_=>eval_error("E_CASE","case matches literal numbers, text or booleans.")}}
+fn field(v:Value,name:&str,form:&str)->Result<Value,Diagnostic>{match v{
+    Value::Vec2(x,_) if name=="x"=>Ok(Value::Float(x)),Value::Vec2(_,y) if name=="y"=>Ok(Value::Float(y)),
+    Value::Vec3(x,_,_) if name=="x"=>Ok(Value::Float(x)),Value::Vec3(_,y,_) if name=="y"=>Ok(Value::Float(y)),Value::Vec3(_,_,z) if name=="z"=>Ok(Value::Float(z)),
+    Value::Vec4(x,_,_,_) if name=="x"=>Ok(Value::Float(x)),Value::Vec4(_,y,_,_) if name=="y"=>Ok(Value::Float(y)),Value::Vec4(_,_,z,_) if name=="z"=>Ok(Value::Float(z)),Value::Vec4(_,_,_,w) if name=="w"=>Ok(Value::Float(w)),
+    Value::Record(fs)=>fs.iter().find(|(n,_)|n==name).map(|(_,v)|v.clone()).ok_or_else(||errorf("E_FIELD",format!("{} has no field {}.",form,name))),
+    _=>Err(errorf("E_FIELD",format!("{} has no output {}. A vec3 has .x .y .z; a record has its fields.",form,name)))}}
+fn elem_type(vs:&[Value])->Ty{value::elem_ty(vs)}
+fn join_list(vs:Vec<Value>)->Value{let ty=elem_type(&vs);Value::List(vs.iter().map(|v|coerce(&ty,v).unwrap_or_else(|_|v.clone())).collect())}
+fn live_in(v:&Value,a:&Arena)->bool{match v{Value::Residual(_)|Value::Source(..)=>true,Value::Struct(_,Ty::Array(_),_)=>true,Value::List(v)=>v.iter().any(|x|live_in(x,a)),Value::Record(fs)|Value::Struct(_,_,fs)=>fs.iter().any(|(_,v)|live_in(v,a)),_=>false}}
+fn bind_pattern(a:&mut Arena,c:&ExecCtx,env:&mut Env,pat:&W::Pattern,v:Value,mk:Option<&dyn Fn(&str)->Path>)->Result<(),Diagnostic>{match pat{
+    W::Pattern::Name(n)=>{if let Some(mk)=mk{note(a,c,mk(n),v.clone());}env.bind(n.clone(),v);Ok(())},
+    W::Pattern::Seq(ps)=>{let v=concrete(a,v)?;let xs=match v{Value::List(xs)=>xs,Value::Vec2(x,y)=>vec![Value::Float(x),Value::Float(y)],Value::Vec3(x,y,z)=>vec![Value::Float(x),Value::Float(y),Value::Float(z)],Value::Vec4(x,y,z,w)=>vec![Value::Float(x),Value::Float(y),Value::Float(z),Value::Float(w)],_=>return Err(errorf("E_PATTERN",format!("{} destructures a list or vec3.",pattern_name(pat))))};if xs.len()<ps.len(){return Err(errorf("E_PATTERN",format!("{} needs {} elements; the list has {}.",pattern_name(pat),ps.len(),xs.len())))}for (p,x) in ps.iter().zip(xs){bind_pattern(a,c,env,p,x,mk)?;}Ok(())},
+    W::Pattern::Keys(ks)=>{let v=concrete(a,v)?;for k in ks{let x=field(v.clone(),k,&pattern_name(pat))?;bind_pattern(a,c,env,&W::Pattern::Name(k.clone()),x,mk)?;}Ok(())}}}
+fn record_pattern(a: &mut Arena, c: &ExecCtx, zone: &Path, pattern: &W::Pattern, value: &Value) -> Result<(), Diagnostic> {
+    if !a.record || !c.record { return Ok(()); }
+    if !matches!(pattern, W::Pattern::Name(_)) {
+        let mut path = zone.clone();
+        path.push(format!(":{}", pattern_name(pattern)));
+        note(a, c, path, value.clone());
+    }
+    match pattern {
+        W::Pattern::Name(name) => {
+            let mut path = zone.clone();
+            path.push(format!(":{}", name));
+            note(a, c, path, value.clone());
+        }
+        W::Pattern::Seq(patterns) => {
+            let values = match value {
+                Value::List(values) => values.clone(),
+                Value::Vec2(x, y) => vec![Value::Float(*x), Value::Float(*y)],
+                Value::Vec3(x, y, z) => vec![Value::Float(*x), Value::Float(*y), Value::Float(*z)],
+                Value::Vec4(x, y, z, w) => vec![Value::Float(*x), Value::Float(*y), Value::Float(*z), Value::Float(*w)],
+                _ => return Err(errorf("E_PATTERN", format!("{} destructures a list or vec3.", pattern_name(pattern)))),
+            };
+            if values.len() < patterns.len() { return Err(errorf("E_PATTERN", format!("{} needs {} elements; the list has {}.", pattern_name(pattern), patterns.len(), values.len()))); }
+            for (pattern, value) in patterns.iter().zip(&values) { record_pattern(a, c, zone, pattern, value)?; }
+        }
+        W::Pattern::Keys(keys) => for key in keys {
+            let value = field(value.clone(), key, &pattern_name(pattern))?;
+            let mut path = zone.clone();
+            path.push(format!(":{}", key));
+            note(a, c, path, value);
+        },
+    }
+    Ok(())
+}
+fn free_names(term: &Term) -> BTreeSet<String> {
+    let key = format!("{}:{:?}:{:p}", term.form.id, term.path, term);
+    if let Some(names) = FREE_NAMES_CACHE.lock().unwrap().get(&key).cloned() { return names; }
+    FREE_WALKS.fetch_add(1, Ordering::Relaxed);
+    fn walk(t: &Term, bound: &mut BTreeSet<String>, free: &mut BTreeSet<String>) {
+        match &t.node {
+            TermNode::RefBinding(name, _) | TermNode::FnRef(name) => {
+                if !bound.contains(name) { free.insert(name.clone()); }
+            }
+            TermNode::CallFn { fn_name, args, body } => {
+                if !bound.contains(fn_name) { free.insert(fn_name.clone()); }
+                for term in args { walk(term, bound, free); }
+                if let Some(term) = body { walk(term, bound, free); }
+            }
+            TermNode::Let(bindings, body) => {
+                let prior = bound.clone();
+                for (pattern, term) in bindings { walk(term, bound, free); names(pattern, bound); }
+                walk(body, bound, free);
+                *bound = prior;
+            }
+            TermNode::Fn { params, body, capture, .. } => {
+                if let Some(term) = capture { walk(term, bound, free); }
+                let prior = bound.clone();
+                for (pattern, _) in params { names(pattern, bound); }
+                walk(body, bound, free);
+                *bound = prior;
+            }
+            TermNode::Loop { accs, clauses, body, .. } => {
+                let prior = bound.clone();
+                for (pattern, term) in accs.iter().chain(clauses) { walk(term, bound, free); names(pattern, bound); }
+                walk(body, bound, free);
+                *bound = prior;
+            }
+            TermNode::State { binder, init, step, .. } => {
+                walk(init, bound, free);
+                let prior = bound.clone();
+                names(binder, bound);
+                walk(step, bound, free);
+                *bound = prior;
+            }
+            _ => for child in children(t) { walk(child, bound, free); },
+        }
+    }
+    let mut free = BTreeSet::new();
+    walk(term, &mut BTreeSet::new(), &mut free);
+    let mut cache = FREE_NAMES_CACHE.lock().unwrap();
+    if cache.len() >= 16_384 { cache.clear(); }
+    cache.insert(key, free.clone());
+    free
+}
+fn capture_env(term: &Term, env: &Env) -> BTreeMap<String, Value> {
+    free_names(term).into_iter().filter_map(|name| env.get(&name).map(|value| (name, value))).collect()
+}
+
+fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let c=match &t.path{Some(p)=>{let mut c=c.clone();c.base=p.clone();c.route.clear();c},None=>c.clone()};let r=eval_raw(a,&c,env,t).map_err(|e|add_span(e,t));match r{
+    Ok(v)=>{if a.record&&c.record{if let Some(p)=&t.path{note(a,&c,p.clone(),v.clone());}}Ok(v)},
+    Err(d) if d.code == "$NEEDS_TIME" => {
+        if a.time.is_some() { Err(error("E_EVAL", "A live value was needed while evaluating dynamically.")) }
+        else {
+            let residual = ResidualData { term: t.clone(), env: capture_env(t, env), ctx: c.clone(), previous: false, live: None };
+            let value = Value::Residual(residual_id(a, residual));
+            if matches!(&t.node, TermNode::State { .. }) { a.states.push(value.clone()); }
+            if a.record && c.record { if let Some(path) = &t.path { note(a, &c, path.clone(), value.clone()); } }
+            Ok(value)
+        }
+    },
+    Err(d)=>Err(d)} }
+fn eval_error(code: &str, message: &str) -> Result<Value, Diagnostic> {
+    Err(error(code, message))
+}
+fn need_time() -> Result<Value, Diagnostic> { Err(error("$NEEDS_TIME", "")) }
+fn execute_residual(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
+    let residual = get_res(a, id)?;
+    let env = Env { values: residual.env };
+    if residual.previous {
+        if let TermNode::State { init, zone, .. } = &residual.term.node {
+            return state_previous(a, &residual.ctx, &env, zone, init);
+        }
+        return eval_error("E_STATE", "A previous-state residual is not a state term.");
+    }
+    if a.time.is_some() && kernel_eligible(&residual.term) && current_residual_handlers().is_some_and(|handler| handler.kernel.is_some()) {
+        if let Some(value) = kernel_value(a, id, &residual.term.ty) { return Ok(value); }
+    }
+    eval_at(a, &residual.ctx, &env, &residual.term)
+}
+fn kernel_eligible(term: &Term) -> bool {
+    match &term.node {
+        TermNode::Hof(W::HofKind::Map | W::HofKind::Reduce, _) | TermNode::Loop { .. } => true,
+        TermNode::Op { op, .. } => op == "array/sum" || op == "image/map",
+        _ => false,
+    }
+}
+fn kernel_value(a: &Arena, id: ResidualId, ty: &Ty) -> Option<Value> {
+    let handler = current_residual_handlers()?;
+    let kernel = handler.kernel?;
+    let value = call_with_snapshot(a, id, &*kernel)?;
+    if value::ty_of(&value) != *ty || value::validate(&value).is_err() { return None; }
+    Some(value)
+}
+fn concrete(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
+    match value {
+        Value::Residual(id) => if a.time.is_none() { need_time() } else { execute_residual(a, id) },
+        Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
+            if a.time.is_none() { return need_time(); }
+            resolve_source(a, &value)
+        }
+        value => Ok(value),
+    }
+}
+fn eval_concrete(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term) -> Result<Value, Diagnostic> {
+    let value = eval_at(a, c, env, term)?;
+    concrete(a, value)
+}
+fn geometry_ids(value: &Value, out: &mut Vec<i64>) {
+    match value {
+        Value::Deferred(ty, id) if flow_syntax::ty::is_geometry(ty) => out.push(*id),
+        Value::List(values) => for value in values { geometry_ids(value, out); },
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => for (_, value) in fields { geometry_ids(value, out); },
+        _ => (),
+    }
+}
+fn function_value(value: &Value) -> bool {
+    match value {
+        Value::Fn(_) => true,
+        Value::List(values) => values.iter().any(function_value),
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| function_value(value)),
+        _ => false,
+    }
+}
+fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDefinition, args: &[(String, Value)], call: &Term) -> Result<Value, Diagnostic> {
+    if c.depth > MAX_DEPTH { return eval_error("E_DEPTH", "Call depth exceeds 64."); }
+    let policy = INLINE_PARAMETERS_HOOK.read().unwrap()( &a.workspace, original);
+    let authored = call.form.id;
+    let definition = policy.definition;
+    let _inline_key = policy.key;
+    let Some(parameters) = (policy.canonicalize)(args)? else {
+        return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
+    };
+    let live = args.iter().any(|(_, value)| live_in(value, a));
+    let mut context = c.clone();
+    context.prefix = site(c);
+    context.base = vec![format!("node:{}", definition.kind.qualified)];
+    context.route.clear();
+    context.depth += 1;
+    context.record = false;
+    context.card = definition.kind.qualified.split_once('/').map(|(_, label)| label.to_owned()).or_else(|| Some(definition.kind.qualified.clone()));
+    let mut env = Env::empty();
+    for (name, ty, default) in &definition.body.inputs {
+        let mut value = if definition.slots.iter().any(|slot| slot.rest && slot.name == *name) {
+            let mut flattened = Vec::new();
+            for (_, value) in args.iter().filter(|(arg_name, _)| arg_name == name) {
+                match value {
+                    Value::List(items) => flattened.extend(items.iter().filter(|item| !matches!(item, Value::No_geo)).cloned()),
+                    Value::No_geo => (),
+                    value => flattened.push(value.clone()),
+                }
+            }
+            Value::List(flattened)
+        } else if let Some(value) = parameters.iter().find(|(arg_name, _)| arg_name == name).or_else(|| args.iter().find(|(arg_name, _)| arg_name == name)).map(|(_, value)| value.clone()) {
+            value
+        } else if let Some(default) = default {
+            eval_at(a, &sub(&context, name.clone()), &env, default)?
+        } else {
+            Value::No_geo
+        };
+        value = coerce(ty, &value)?;
+        env.bind(name.clone(), value);
+    }
+    for (predicate, code, message) in &definition.validations {
+        match eval_concrete(a, &sub(&context, "validate".into()), &env, predicate)? {
+            Value::Bool(true) => (),
+            Value::Bool(false) => return Err(error("E_LOWER", &format!("{}: {}", code, message))),
+            _ => return Err(error("E_TYPE", "A node validation must return bool.")),
+        }
+    }
+    
+    let body_nodes = a.nodes.len();
+    let body_authored = a.authored.len();
+    let outer_steps = a.step_count;
+    a.step_count = 0;
+    let evaluated = eval_at(a, &context, &env, &definition.body.body);
+    a.step_count = outer_steps;
+    let result = match evaluated {
+        Ok(value) => value,
+        Err(diagnostic) if !is_cancelled(&diagnostic) => {
+            a.nodes.truncate(body_nodes);
+            a.authored.truncate(body_authored);
+            let slots = definition.slots.iter().map(|slot| {
+                let mut ids = Vec::new();
+                for (_, value) in args.iter().filter(|(name, _)| name == &slot.name) { geometry_ids(value, &mut ids); }
+                (slot.name.clone(), Value::List(ids.into_iter().map(Value::Int).collect()))
+            }).collect::<Vec<_>>();
+            let mut marker_args = vec![
+                ("value".into(), Value::No_geo),
+                ("kind".into(), text(&definition.kind.qualified)),
+                ("parameters".into(), Value::Record(parameters.clone())),
+                ("slots".into(), Value::Record(slots)),
+            ];
+            marker_args.extend(args.iter().filter(|(_, value)| function_value(value)).cloned());
+            let Value::Deferred(_, id) = mk_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)? else {
+                return eval_error("E_TYPE", "A failed node definition must produce a geometry marker.");
+            };
+            if let Some(node) = a.nodes.iter_mut().find(|node| node.id == id) { node.error = Some(diagnostic); }
+            return Ok(Value::Deferred(flow_syntax::ty::geometry(), id))
+        }
+        Err(diagnostic) => return Err(diagnostic),
+    };
+    let body_nodes_values = a.nodes[body_nodes..].to_vec();
+    let takes_nodes = (LIVE_KERNELS_HOOK.read().unwrap().clone())(&body_nodes_values);
+    if live && (matches!(&result, Value::Residual(_)) || !takes_nodes) {
+        a.nodes.truncate(body_nodes);
+        a.authored.truncate(body_authored);
+        return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
+    }
+    let geometry = match &result {
+        Value::Deferred(ty, _) if flow_syntax::ty::is_geometry(ty) => true,
+        Value::Residual(id) => get_res(a, *id).is_ok_and(|residual| flow_syntax::ty::is_geometry(&residual.term.ty)),
+        _ => false,
+    };
+    if a.time.is_some() || c.data || !geometry { return Ok(result); }
+    let mut slot_values = Vec::new();
+    for slot in &definition.slots {
+        let mut ids = Vec::new();
+        for (_, value) in args.iter().filter(|(name, _)| name == &slot.name) { geometry_ids(value, &mut ids); }
+        slot_values.push((slot.name.clone(), Value::List(ids.into_iter().map(Value::Int).collect())));
+    }
+    let mut marker_args = vec![
+        ("value".into(), result),
+        ("kind".into(), text(&definition.kind.qualified)),
+        ("parameters".into(), Value::Record(parameters)),
+        ("slots".into(), Value::Record(slot_values)),
+    ];
+    marker_args.extend(args.iter().filter(|(_, value)| function_value(value)).cloned());
+    mk_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)
+}
+fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
+    a.step_count += 1;
+    if a.step_count % PACKED_BLOCK == 0 {
+        if a.interrupt.as_ref().is_some_and(|stop| stop()) { return Err(error("cancelled", "Evaluation interrupted.")); }
+    }
+    if a.step_count > a.budget { return Err(errorf("E_EVAL_BUDGET", format!("Evaluation budget exceeded ({} steps). Reduce iteration counts.", a.budget))); }
+    if c.depth > MAX_DEPTH { return eval_error("E_DEPTH", "Call depth exceeds 64."); }
+    if a.time.is_some() && kernel_eligible(t) && current_residual_handlers().is_some_and(|handler| handler.kernel.is_some()) {
+        let residual = residual_id(a, ResidualData { term: t.clone(), env: capture_env(t, env), ctx: c.clone(), previous: false, live: a.time.clone() });
+        if let Some(value) = kernel_value(a, residual, &t.ty) { return Ok(value); }
+    }
+    let observe = match &t.node {
+        TermNode::Hof(W::HofKind::Map | W::HofKind::Reduce, _) | TermNode::Loop { .. } => true,
+        TermNode::Op { op, .. } => op == "array/sum" || op == "image/map",
+        _ => false,
+    };
+    if a.time.is_none() && observe && current_residual_handlers().is_some() {
+        let id = residual_id(a, ResidualData { term: t.clone(), env: capture_env(t, env), ctx: c.clone(), previous: false, live: None });
+        a.observed.push(id);
+        ACTIVE_OBSERVED_RESIDUALS.with(|observed| { if let Some(queue) = observed.borrow_mut().last_mut() { queue.push(id); } });
+    }
+    match &t.node {
+        TermNode::Lit(param::Value::Int(n)) => Ok(Value::Int(*n)),
+        TermNode::Lit(param::Value::Float(n)) => Ok(Value::Float(*n)),
+        TermNode::Lit(param::Value::Bool(v)) => Ok(Value::Bool(*v)),
+        TermNode::Lit(_) => eval_error("E_TYPE", "Unexpected literal."),
+        TermNode::Text(bytes) => Ok(Value::Text(bytes.clone())),
+        TermNode::Nil => Ok(Value::No_geo),
+        TermNode::Time => if let Some(frame) = &a.time { Ok(Value::Float(frame.t)) } else { need_time() },
+        TermNode::Vec(terms) => {
+            let mut values = Vec::with_capacity(terms.len());
+            for (i, term) in terms.iter().enumerate() {
+                let context = sub(c, i.to_string());
+                values.push(num(&eval_concrete(a, &context, env, term)?)?);
+            }
+            match values.as_slice() {
+                [x, y] => Ok(Value::Vec2(*x, *y)),
+                [x, y, z] => Ok(Value::Vec3(*x, *y, *z)),
+                [x, y, z, w] => Ok(Value::Vec4(*x, *y, *z, *w)),
+                _ => Err(errorf("E_VECTOR", format!("A vector has 2, 3 or 4 components; this one has {}.", values.len()))),
+            }
+        }
+        TermNode::RefBinding(name, fields) => {
+            if fields.is_empty() && name.starts_with("$elem:") { return a.elems.get(name).cloned().ok_or_else(|| error("E_ELEMENT", "A geometry element is not bound.")); }
+            let mut value = env.get(name).ok_or_else(|| errorf("E_UNBOUND", format!("{} is not bound.", name)))?;
+            let mut path = name.clone();
+            for field_name in fields { value = field(concrete(a, value)?, field_name, &path)?; path = format!("{}.{}", path, field_name); }
+            Ok(value)
+        }
+        TermNode::Call { kind, ctx, args } => {
+            let mut args = named_args(a, c, env, args)?;
+            if kind == "sop/merge" {
+                let mut flattened = Vec::new();
+                for (name, value) in args {
+                    match concrete(a, value)? {
+                        Value::List(values) => flattened.extend(values.into_iter().filter(|v| !matches!(v, Value::No_geo)).map(|v| (name.clone(), v))),
+                        Value::No_geo => (),
+                        value => flattened.push((name, value)),
+                    }
+                }
+                args = flattened;
+            }
+            match a.workspace.nodes.iter().find(|definition| definition.kind.qualified == *kind).cloned() {
+                Some(definition) => inline_node(a, c, t.form.id, &definition, &args, t),
+                None => catalog_call(a, c, t.form.id, kind.clone(), ctx.clone(), args),
+            }
+        }
+        TermNode::Op { op: name, args, .. } if (name == "and" || name == "or") && args.len() == 2 => {
+            let (first_name, first_term) = &args[0];
+            let first = eval_at(a, &sub(c, first_name.clone()), env, first_term)?;
+            if let Value::Bool(value) = &first {
+                if *value == (name == "or") { return Ok(Value::Bool(*value)); }
+            }
+            let (second_name, second_term) = &args[1];
+            let second = eval_at(a, &sub(c, second_name.clone()), env, second_term)?;
+            apply_op(a, c, t.form.id, name, &[(args[0].0.clone(), first), (second_name.clone(), second)])
+        }
+        TermNode::Op { op: name, args, skip } if name == "live?" && args.len() == 1 => {
+            Ok(Value::Bool(is_live_value(&eval_at(a, &sub(c, args[0].0.clone()), env, &args[0].1)?)))
+        }
+        TermNode::Op { op: name, args, skip } => {
+            let values = if name == "scene/merge" && !skip.is_empty() {
+                let mut counts = HashMap::<String, usize>::new();
+                let mut kept = Vec::new();
+                for (index, (arg_name, term)) in args.iter().enumerate() {
+                    let mut tuple = c.iter.iter().map(|index| usize::try_from(*index).unwrap_or(usize::MAX)).collect::<Vec<_>>();
+                    tuple.push(index);
+                    if skip.iter().any(|indices| indices == &tuple) { continue; }
+                    let count = counts.entry(arg_name.clone()).or_default();
+                    let route = if *count == 0 { arg_name.clone() } else { format!("{}#{}", arg_name, *count) };
+                    *count += 1;
+                    kept.push((arg_name.clone(), route, term));
+                }
+                let mut values = kept.iter().map(|(name, _, _)| (name.clone(), Value::No_geo)).collect::<Vec<_>>();
+                for index in 0..kept.len() { values[index].1 = eval_at(a, &sub(c, kept[index].1.clone()), env, kept[index].2)?; }
+                values
+            } else {
+                named_args(a, c, env, args)?
+            };
+            apply_op(a, c, t.form.id, name, &values)
+        }
+        TermNode::CallFn { fn_name, args, body } => {
+            let mut values = vec![Value::No_geo; args.len()];
+            for index in 0..args.len() { values[index] = eval_at(a, &sub(c, format!("a{}", index)), env, &args[index])?; }
+            match env.get(fn_name) {
+                Some(Value::Fn(id)) => call_fn(a, c, id, &values, body.as_deref()),
+                _ => apply_def(a, c, fn_name, &values, body.as_deref()),
+            }
+        }
+        TermNode::FnRef(name) => Ok(Value::Fn(closure_id(a, Function::Named(NamedData { name: name.clone(), calls: 0 })))),
+        TermNode::GraphRef { graph, inputs } => {
+            let values = named_args(a, c, env, inputs)?;
+            graph_value(a, c, graph, &values, values.is_empty())
+        }
+        TermNode::Let(bindings, body) => {
+            let mut local = env.clone();
+            for (pattern, term) in bindings {
+                let mut value = eval_at(a, c, &local, term)?;
+                if matches!(value, Value::Residual(_)) && diagnostic_effect(term) { value = concrete(a, value)?; }
+                if matches!(pattern, W::Pattern::Name(_)) { bind_pattern(a, c, &mut local, pattern, value, None)?; }
+                else {
+                    // a destructuring pattern records its parts beside the binding (the path without its last segment)
+                    let prefix: Path = term.path.as_ref().map(|p| p[..p.len().saturating_sub(1)].to_vec()).unwrap_or_default();
+                    let mk = move |n: &str| { let mut q = prefix.clone(); q.push(n.to_owned()); q };
+                    bind_pattern(a, c, &mut local, pattern, value, Some(&mk))?;
+                }
+            }
+            eval_at(a, c, &local, body)
+        }
+        TermNode::Loop { kind, accs, clauses, skip, body, zone } => eval_loop(a, c, env, t, kind, accs, clauses, skip, body, zone),
+        TermNode::State { binder, init, step, zone } => {
+            if c.geometry { return eval_error("E_STATE_ELEMENT", "Frame state belongs to the workspace value lane; bind it outside a loop over cooked geometry."); }
+            let previous = if a.time.is_none() {
+                Value::Residual(residual_id(a, ResidualData { term: t.clone(), env: capture_env(t, env), ctx: c.clone(), previous: true, live: None }))
+            } else { state_previous(a, c, env, zone, init)? };
+            let mut local = env.clone();
+            record_pattern(a, c, zone, binder, &previous)?;
+            bind_pattern(a, c, &mut local, binder, previous, None)?;
+            if a.time.is_none() { let _ = eval_at(a, c, &local, step)?; need_time() }
+            else {
+                let (state, _) = state_plane(a, c)?;
+                let key = state_key(c, zone);
+                let existing = { let data = state.inner.lock().unwrap(); if c.host { data.host.as_ref().and_then(|p| p.next.get(&key).cloned()) } else { data.next.get(&key).cloned() } };
+                if let Some(v) = existing { return Ok(Device::thaw(&v)); }
+                let value = coerce(&t.ty, &eval_at(a, c, &local, step)?)?;
+                state_write(a, c, zone, value)
+            }
+        }
+        TermNode::If(test, yes, no) => {
+            let test = eval_at(a, &sub(c, "if".into()), env, test)?;
+            if truth(&concrete(a, test)?)? { eval_at(a, &sub(c, "then".into()), env, yes) } else { eval_at(a, &sub(c, "else".into()), env, no) }
+        }
+        TermNode::Cond(arms, default) => {
+            for (i, (test, body)) in arms.iter().enumerate() {
+                let context = sub(c, format!("test{}", i));
+                if truth(&eval_concrete(a, &context, env, test)?)? { return eval_at(a, &sub(c, format!("arm{}", i)), env, body); }
+            }
+            eval_at(a, &sub(c, "else".into()), env, default)
+        }
+        TermNode::Case(subject, arms, default) => {
+            let value = eval_concrete(a, &sub(c, "case".into()), env, subject)?;
+            for (i, (literal, body)) in arms.iter().enumerate() {
+                let literal = literal_case(literal)?;
+                let matches = if matches!(&value, Value::Bool(_)) || matches!(&literal, Value::Bool(_)) {
+                    let truthy = |value: &Value| match value { Value::Bool(value) => Ok(*value), value => num(value).map(|number| number != 0.0) };
+                    truthy(&value)? == truthy(&literal)?
+                } else {
+                    match (&value, &literal) {
+                        (Value::Text(a), Value::Text(b)) => a == b,
+                        (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => num(&value)? == num(&literal)?,
+                        _ => false,
+                    }
+                };
+                if matches { return eval_at(a, &sub(c, format!("arm{}", i)), env, body); }
+            }
+            eval_at(a, &sub(c, "else".into()), env, default)
+        }
+        TermNode::Fn { params, body, zone, capture } => {
+            if let Some(original) = capture {
+                let Value::Fn(id) = eval_at(a, c, env, original)? else { return eval_error("E_TYPE", "A function port requires a function."); };
+                match get_fn(a, id)? {
+                    Function::Closure(mut closure) => { closure.params = params.clone(); closure.body = body.as_ref().clone(); a.functions.insert(id, Function::Closure(closure)); Ok(Value::Fn(id)) }
+                    Function::Named(named) => Ok(Value::Fn(closure_id(a, Function::Closure(ClosureData { params: params.clone(), replayable: false, body: body.as_ref().clone(), env: BTreeMap::new(), zone: zone.clone(), calls: named.calls, at: c.clone() })))),
+                }
+            } else {
+                Ok(Value::Fn(closure_id(a, Function::Closure(ClosureData { params: params.clone(), replayable: true, body: body.as_ref().clone(), env: capture_env(body, env), zone: zone.clone(), calls: 0, at: c.clone() }))))
+            }
+        }
+        TermNode::Hof(kind, terms) => {
+            if terms.is_empty() { return eval_error("E_ARITY", "A higher-order form takes a function."); }
+            eval_hof(a, c, env, t, kind, &terms[0], &terms[1..])
+        }
+        TermNode::ListLit(terms) => {
+            let mut values = Vec::with_capacity(terms.len());
+            for (i, term) in terms.iter().enumerate() { values.push(eval_at(a, &sub(c, i.to_string()), env, term)?); }
+            Ok(join_list(values))
+        }
+        TermNode::Record(fields) => {
+            let mut values = Vec::with_capacity(fields.len());
+            for (name, term) in fields { values.push((name.clone(), eval_at(a, &sub(c, name.clone()), env, term)?)); }
+            Ok(Value::Record(values))
+        }
+        TermNode::Get(record, name) => field(eval_concrete(a, c, env, record)?, name, "value"),
+        TermNode::Assoc(record, updates) => {
+            let Value::Record(mut fields) = eval_concrete(a, c, env, record)? else { return eval_error("E_TYPE", "assoc updates a record."); };
+            for (name, term) in updates {
+                let value = eval_at(a, &sub(c, name.clone()), env, term)?;
+                if let Some((_, old)) = fields.iter().find(|(key, _)| key == name) {
+                    let value = coerce_like(a, old, &value)?;
+                    if let Some(slot) = fields.iter_mut().find(|(key, _)| key == name) { slot.1 = value; }
+                } else { fields.push((name.clone(), value)); }
+            }
+            Ok(Value::Record(fields))
+        }
+        TermNode::Str(terms) => {
+            let mut bytes = Vec::new();
+            for (i, term) in terms.iter().enumerate() {
+                let context = sub(c, i.to_string());
+                let value = eval_concrete(a, &context, env, term)?;
+                bytes.extend(value::show_with(&|value| value.clone(), &value));
+            }
+            Ok(Value::Text(bytes))
+        }
+        TermNode::ListOp(_, terms) => {
+            let mut values = Vec::new();
+            for (i, term) in terms.iter().enumerate() {
+                let context = sub(c, i.to_string());
+                match eval_concrete(a, &context, env, term)? {
+                    Value::List(list) => values.extend(list),
+                    _ => return eval_error("E_TYPE", "Expected a list."),
+                }
+            }
+            if values.len() > MAX_ITERATIONS { return eval_error("E_ITER_BOUND", "concat exceeds 4,096 elements."); }
+            Ok(join_list(values))
+        }
+        TermNode::Bypass(call) => match W::bypass_input(call) { Some(input) => coerce(&t.ty, &eval_at(a, &sub(c, "bypass".into()), env, &input)?), None => Err(error("E_BYPASS", "Nothing to pass through.")) },
+        TermNode::Expanded { body, .. } => eval_at(a, c, env, body),
+        TermNode::WithError(protected, mapper) => eval_with_error(a, c, env, protected, mapper),
+        TermNode::ErrorRows { rows, policy, mapper } => eval_error_rows(a, c, env, rows, *policy, mapper),
+    }
+}
+fn pattern_names_vec(p:&W::Pattern)->Vec<String>{let mut s=BTreeSet::new();names(p,&mut s);s.into_iter().collect()}
+fn diagnostic_effect(term: &Term) -> bool {
+    matches!(&term.node, TermNode::WithError(..) | TermNode::ErrorRows { .. }) || children(term).into_iter().any(diagnostic_effect)
+}
+fn diagnostic_payload(diagnostic: &Diagnostic) -> Value {
+    Value::Record(vec![
+        ("code".into(), Value::Text(diagnostic.code.as_bytes().to_vec())),
+        ("message".into(), Value::Text(diagnostic.message.as_bytes().to_vec())),
+        ("cause".into(), Value::List(diagnostic.cause.iter().map(|cause| Value::Text(cause.as_bytes().to_vec())).collect())),
+    ])
+}
+fn is_cancelled(diagnostic: &Diagnostic) -> bool { diagnostic.code == "cancelled" || diagnostic.code == "E_CANCELLED" }
+fn resolve_source(a: &Arena, source: &Value) -> Result<Value, Diagnostic> {
+    let resolve = a.resolve.as_ref().ok_or_else(|| error("E_DATA_SOURCE", "This data source needs its host's cooked data."))?;
+    let value = resolve(source)?;
+    if matches!(value, Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
+    if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
+    value::validate(&value)?;
+    Ok(value)
+}
+fn concrete_data(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
+    match value {
+        Value::List(values) => Ok(Value::List(values.into_iter().map(|value| concrete_data(a, value)).collect::<Result<Vec<_>, _>>()?)),
+        Value::Record(fields) => Ok(Value::Record(fields.into_iter().map(|(name, value)| Ok((name, concrete_data(a, value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        Value::Struct(name, ty, fields) => Ok(Value::Struct(name, ty, fields.into_iter().map(|(name, value)| Ok((name, concrete_data(a, value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        value => concrete(a, value),
+    }
+}
+fn eval_with_error(a: &mut Arena, c: &ExecCtx, env: &Env, protected: &Term, mapper: &Term) -> Result<Value, Diagnostic> {
+    if a.time.is_none() { return need_time(); }
+    let protected = eval_at(a, &sub(c, "0".into()), env, protected)?;
+    let diagnostic = match concrete_data(a, protected) {
+        Ok(Value::Deferred(ty, id)) if flow_syntax::ty::is_cooked(&ty) => {
+            let source = Value::Source("$core/complete".into(), ty.clone(), vec![("value".into(), Value::Deferred(ty, id))]);
+            return resolve_source(a, &source);
+        }
+        Ok(value) => return Ok(value),
+        Err(diagnostic) if is_cancelled(&diagnostic) => return Err(diagnostic),
+        Err(diagnostic) => diagnostic,
+    };
+    let payload = diagnostic_payload(&diagnostic);
+    let mapped = match eval_concrete(a, &sub(c, "1".into()), env, mapper)? {
+        Value::Fn(function) => {
+            let mapped = call_fn(a, c, function, &[payload], None)?;
+            concrete_data(a, mapped)?
+        }
+        _ => return eval_error("E_DIAGNOSTIC_MAP", "An error mapper is a function."),
+    };
+    value::with_error(&|| Err(diagnostic.clone()), &|_| Ok(mapped.clone()))
+}
+fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W::DiagnosticPolicy, mapper: &Term) -> Result<Value, Diagnostic> {
+    let policy_name = match policy { W::DiagnosticPolicy::First => "first", W::DiagnosticPolicy::RangeLast => "range-last" };
+    let rows = if a.time.is_none() {
+        if c.card.is_none() || policy != W::DiagnosticPolicy::First { return need_time(); }
+        match eval_at(a, &sub(c, "0".into()), env, rows)? {
+            Value::Int_array(values) => Value::Int_array(values),
+            Value::Residual(id) => {
+                let residual = get_res(a, id)?;
+                let term = match &residual.term.node {
+                    TermNode::Op { op, args, .. } if op == "exact" && args.len() == 1 => args[0].1.clone(),
+                    _ => residual.term,
+                };
+                let bindings = Env { values: residual.env };
+                let needed = residual_id(a, ResidualData { env: capture_env(&term, &bindings), term, ctx: residual.ctx, previous: false, live: None });
+                match current_residual_handlers().and_then(|handlers| handlers.bulk_needed).and_then(|bulk| call_with_snapshot(a, needed, &|id| bulk(id))) {
+                    Some(Value::Int_array(values)) => Value::Int_array(values),
+                    _ => return need_time(),
+                }
+            }
+            _ => return need_time(),
+        }
+    } else {
+        let value = eval_at(a, &sub(c, "0".into()), env, rows)?;
+        concrete_data(a, value)?
+    };
+    let Some(first) = value::error_row_index(&rows, None, None)? else { return Ok(Value::No_geo); };
+    let index = if let Some(resolve) = &a.resolve {
+        match resolve_source(a, &Value::Source("$core/diagnostic_index".into(), Ty::Int, vec![("rows".into(), rows.clone()), ("policy".into(), text(policy_name))]))? {
+            Value::Int(index) => index,
+            _ => return eval_error("E_DIAGNOSTIC_CONTEXT", "Host diagnosis returns one integer row."),
+        }
+    } else if policy == W::DiagnosticPolicy::First {
+        first
+    } else {
+        return eval_error("E_DIAGNOSTIC_CONTEXT", "Range-last diagnosis needs its native host.");
+    };
+    match &rows {
+        Value::Int_array(values) if index >= 0 && (index as u128) < values.len() as u128 && values[index as usize] == 1 => (),
+        _ => return eval_error("E_DIAGNOSTIC_CONTEXT", "Host diagnosis returned a non-failing row."),
+    }
+    let mapped = match eval_concrete(a, &sub(c, "1".into()), env, mapper)? {
+        Value::Fn(function) => {
+            let mapped = call_fn(a, c, function, &[Value::Int(index)], None)?;
+            concrete_data(a, mapped)?
+        }
+        _ => return eval_error("E_DIAGNOSTIC_MAP", "A row mapper is a function."),
+    };
+    value::with_error(&|| Err(error("E_DIAGNOSTIC_ROW", "A diagnostic row failed.")), &|_| Ok(mapped.clone()))
+}
+
+fn data_type(ty: &Ty) -> bool {
+    match ty {
+        Ty::Float | Ty::Int | Ty::Bool | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Text | Ty::Color => true,
+        Ty::List(element) | Ty::Array(element) => data_type(element),
+        Ty::Record(fields) => !fields.is_empty() && fields.iter().all(|(_, ty)| data_type(ty)),
+        Ty::Any | Ty::Named(_) | Ty::Fn(_) => false,
+    }
+}
+fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(String, Value)]) -> Result<Value, Diagnostic> {
+    let op = op::find(&a.workspace.ops, name, &c.context).ok_or_else(|| errorf("E_UNKNOWN", format!("Unknown operator {}.", name)))?;
+    let mut values = values.to_vec();
+    if let Some(label) = &c.card {
+        if W::BODY_CONTEXT_OPS.contains(&name) && !values.iter().any(|(key, _)| key == CONTEXT_LABEL) { values.push((CONTEXT_LABEL.into(), text(label))); }
+    }
+    if let op::Shape::Struct { splice: true } = &op.shape {
+        let mut spliced = Vec::new();
+        for (name, value) in values {
+            match concrete(a, value)? {
+                Value::List(items) => spliced.extend(items.into_iter().map(|value| (name.clone(), value))),
+                value => spliced.push((name, value)),
+            }
+        }
+        values = spliced;
+    }
+    if matches!(&op.shape, op::Shape::Scalar) && op.ctx == flow_syntax::context::value() {
+        let declared = |name: &str| op.signature.pos.iter().chain(&op.signature.opt).chain(&op.signature.kw).find(|(arg, _)| arg == name).map(|(_, ty)| ty)
+            .or_else(|| op.signature.rest.as_ref().filter(|(arg, _)| arg == name).map(|(_, ty)| ty));
+        let mut concrete_values = Vec::with_capacity(values.len());
+        for (name, value) in values {
+            let deep = op.name == "equal?" || declared(&name).is_some_and(|ty| matches!(ty, Ty::List(_) | Ty::Record(_)) && data_type(ty));
+            let value = if deep { concrete_data(a, value)? } else { concrete(a, value)? };
+            concrete_values.push((name, value));
+        }
+        values = concrete_values;
+    }
+    (op.check)(&values)?;
+    if a.time.is_none() && op.live { return need_time(); }
+    let frame = a.time.clone().unwrap_or_else(|| input::at_time(0.0));
+    let mut typed = Vec::with_capacity(values.len());
+    let args = values.iter().map(|(name, value)| {
+        let ty = value::ty_of(value);
+        let literal = match value {
+            Value::Int(n) => Some(param::Value::Int(*n)),
+            Value::Float(n) => Some(param::Value::Float(*n)),
+            Value::Bool(b) => Some(param::Value::Bool(*b)),
+            Value::Text(bytes) => Some(param::Value::Text(bytes.clone())),
+            _ => None,
+        };
+        typed.push((name.clone(), ty.clone(), literal));
+        (name.clone(), value.clone())
+    }).collect::<Vec<_>>();
+    let ty = op::result_type(&op, &typed)?;
+    let result = {
+        let cell = RefCell::new(&mut *a);
+        let node = |kind: &str, args: &[(String, Value)]| mk_node(&mut cell.borrow_mut(), c, authored, ty.clone(), kind.to_owned(), args.to_vec());
+        (op.body)(&frame, &node, &args)?
+    };
+    if a.time.is_none() {
+        if matches!(&result, Value::Source(..)) {
+            let hook = SOURCE_HOOK.read().unwrap().clone();
+            let node = |id| a.nodes.iter().find(|node| node.id == id).cloned();
+            return Ok(hook(&node, &result).unwrap_or(result));
+        }
+    }
+    Ok(result)
+}
+fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let graph=a.workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?.clone();if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=site(c);cx.base=vec![format!("def:{}",name)];cx.route.clear();cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};let mut p=cx.base.clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());env.bind(n.clone(),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
+fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Result<Value, Diagnostic> {
+    match get_fn(a, id)? {
+        Function::Closure(closure) => {
+            if closure.params.len() != values.len() {
+                return Err(errorf("E_ARITY", format!("{} takes {} arguments; got {}.", path_text(&closure.zone), closure.params.len(), values.len())));
+            }
+            let index = *a.fn_calls.get(&id).unwrap_or(&closure.calls);
+            a.fn_calls.insert(id, index + 1);
+            let mut context = c.clone();
+            context.inst = closure.at.inst;
+            context.prefix = closure.at.prefix.clone();
+            context.base = closure.zone.clone();
+            context.route.clear();
+            context.iter.push(index);
+            context.depth += 1;
+            let mut env = Env { values: closure.env.clone() };
+            for ((pattern, ty), value) in closure.params.iter().zip(values) {
+                let value = if let Some(ty) = ty { coerce(ty, value)? } else { value.clone() };
+                record_pattern(a, &context, &closure.zone, pattern, &value)?;
+                bind_pattern(a, &context, &mut env, pattern, value, None)?;
+            }
+            eval_at(a, &context, &env, body.unwrap_or(&closure.body))
+        }
+        Function::Named(mut named) => {
+            let index = *a.fn_calls.get(&id).unwrap_or(&named.calls);
+            named.calls = index + 1;
+            a.fn_calls.insert(id, index + 1);
+            a.functions.insert(id, Function::Named(named.clone()));
+            if a.workspace.defs.iter().any(|graph| graph.name == named.name) {
+                let mut context = c.clone();
+                context.iter.push(index);
+                return apply_def(a, &context, &named.name, values, body);
+            }
+            if let Some(operation) = op::find(&a.workspace.ops, &named.name, &c.context) {
+                let names = operation.signature.pos.iter().chain(&operation.signature.opt).map(|(name, _)| name.clone()).collect::<Vec<_>>();
+                let args = values.iter().enumerate().map(|(index, value)| {
+                    let name = names.get(index).cloned().or_else(|| operation.signature.rest.as_ref().map(|(name, _)| name.clone())).unwrap_or_else(|| format!("${}", index));
+                    (name, value.clone())
+                }).collect::<Vec<_>>();
+                return apply_op(a, c, 0, &named.name, &args);
+            }
+            let (kind, context, slots) = a.workspace.kind_fns.iter().find(|(name, _)| name == &named.name).map(|(_, kind)| kind.clone()).ok_or_else(|| errorf("E_UNKNOWN", format!("Unknown function {}.", named.name)))?;
+            let mut args = Vec::with_capacity(values.len());
+            for (index, value) in values.iter().enumerate() {
+                let name = slots.get(index).map(|slot| slot.name.clone()).or_else(|| slots.last().filter(|slot| slot.rest).map(|slot| slot.name.clone())).ok_or_else(|| errorf("E_ARITY", format!("{} takes at most {} inputs.", kind, slots.len())))?;
+                args.push((name, value.clone()));
+            }
+            catalog_call(a, c, 0, kind, context, args)
+        }
+    }
+}
+fn graph_input_fits(arena: &Arena, expected: &Ty, value: &Value) -> bool {
+    match (expected, value) {
+        (Ty::Fn(Some(signature)), Value::Fn(id)) => match arena.functions.get(id) {
+            Some(Function::Closure(closure)) => signature.params.len() == closure.params.len()
+                && signature.params.iter().zip(&closure.params).all(|(expected, (_, actual))| actual.as_ref().is_some_and(|actual| ty::fits(expected, actual)))
+                && ty::fits(&closure.body.ty, &signature.result),
+            _ => false,
+        },
+        (Ty::List(element), Value::List(values)) => values.iter().all(|value| graph_input_fits(arena, element, value)),
+        _ => ty::fits(&value::ty_of(value), expected),
+    }
+}
+fn value_key(value: &Value) -> String {
+    stable_digest(&value::key_of(&|id| id.0, value))
+}
+fn graph_value(a: &mut Arena, c: &ExecCtx, name: &str, over: &[(String, Value)], record: bool) -> Result<Value, Diagnostic> {
+    let graph = a.workspace.graphs.iter().find(|graph| graph.name == name).cloned().ok_or_else(|| errorf("E_UNKNOWN_GRAPH", format!("Unknown graph reference: {}.", name)))?;
+    let mut seen = BTreeSet::new();
+    let mut coerced: Vec<(String, Value)> = Vec::with_capacity(over.len());
+    for (input, value) in over {
+        let (_, ty, _) = graph.inputs.iter().find(|(key, _, _)| key == input).ok_or_else(|| errorf("E_INPUT_UNKNOWN", format!("Graph {} has no input {}.", name, input)))?;
+        if !graph_input_fits(a, ty, value) {
+            return Err(errorf("E_INPUT_TYPE", format!("Graph input {} of {} needs {}; got {}.", input, name, ty::to_string(ty), ty::to_string(&value::ty_of(value)))));
+        }
+        coerced.push((input.clone(), coerce(ty, value)?));
+        if !seen.insert(input) { return Err(errorf("E_INPUT_DUPLICATE", format!("Graph {} has duplicate input overrides.", name))); }
+    }
+    let over = coerced.as_slice();
+    let mut keys = over.iter().map(|(name, value)| (name.clone(), value_key(value))).collect::<Vec<_>>();
+    keys.sort_by(|left, right| left.0.cmp(&right.0));
+    let key = format!("{}|{}", name, keys.iter().map(|(name, value)| format!("{}={}", name, value)).collect::<Vec<_>>().join(","));
+    if let Some(index) = a.cache.get(&key) { return Ok(a.cells[*index].result.clone()); }
+    if a.time.is_some() { return eval_graph_body(a, c, &graph, over, record, -1).map(|(value, _)| value); }
+    let instance = a.cells.len() as i64;
+    a.cells.push(GraphCell { instance, graph: name.to_owned(), default: over.is_empty(), inputs: Vec::new(), result: Value::No_geo });
+    a.cache.insert(key, instance as usize);
+    let (value, inputs) = eval_graph_body(a, c, &graph, over, record, instance)?;
+    a.cells[instance as usize].inputs = inputs;
+    a.cells[instance as usize].result = value.clone();
+    Ok(value)
+}
+fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix.clear();cx.base=vec![g.name.clone()];cx.route.clear();cx.iter.clear();cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at(a,&sub(&cx,n.clone()),&env,t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(n.clone(),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
+fn state_plane(a: &Arena, c: &ExecCtx) -> Result<(State, i64), Diagnostic> {
+    let state = a.state.clone().ok_or_else(|| error("E_STATE", "State is not available."))?;
+    let frame = a.time.as_ref().map_or(0, |frame| if c.host { frame.tick } else { frame.frame });
+    if c.host { state.inner.lock().unwrap().host.get_or_insert_with(StatePlane::default); }
+    Ok((state, frame))
+}
+fn state_key(c: &ExecCtx, zone: &[String]) -> StateKey {
+    let mut path = c.prefix.clone();
+    path.extend(zone.to_vec());
+    StateKey { instance: c.inst, path, iter: c.iter.clone() }
+}
+fn begin_frame(state: &mut StateData, source: &str, frame: i64) {
+    if state.source != source || state.frame.is_some_and(|old| frame < old) {
+        state.source = source.into();
+        state.frame = None;
+        state.before.clear();
+        state.next.clear();
+        state.epoch = STATE_EPOCH.fetch_add(1, Ordering::Relaxed);
+    }
+    if state.frame != Some(frame) {
+        let newer = std::mem::take(&mut state.next);
+        state.before.extend(newer);
+        state.frame = Some(frame);
+    }
+}
+fn begin_host_frame(state: &mut StatePlane, source: &str, frame: i64) {
+    if state.source != source || state.frame.is_some_and(|old| frame < old) {
+        state.source = source.into();
+        state.frame = None;
+        state.before.clear();
+        state.next.clear();
+        state.epoch = STATE_EPOCH.fetch_add(1, Ordering::Relaxed);
+    }
+    if state.frame != Some(frame) {
+        let newer = std::mem::take(&mut state.next);
+        state.before.extend(newer);
+        state.frame = Some(frame);
+    }
+}
+fn state_data(value: Value) -> Result<Value, Diagnostic> {
+    match value {
+        Value::Deferred(..) | Value::No_geo => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),
+        Value::Struct(_, ty, _) if flow_syntax::ty::shape(&ty) => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),
+        Value::Fn(_) => eval_error("E_FN_ESCAPES", "A function value cannot be stored in state."),
+        Value::List(values) => Ok(Value::List(values.into_iter().map(state_data).collect::<Result<Vec<_>, _>>()?)),
+        Value::Record(fields) => Ok(Value::Record(fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        Value::Struct(name, ty, fields) => Ok(Value::Struct(name, ty, fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        value => Ok(Device::thaw(&value)),
+    }
+}
+fn state_previous(a: &mut Arena, c: &ExecCtx, env: &Env, zone: &Path, init: &Term) -> Result<Value, Diagnostic> {
+    let (state, frame) = state_plane(a, c)?;
+    let source = workspace_source_key(&a.workspace);
+    let key = state_key(c, zone);
+    let previous = {
+        let mut state_data = state.inner.lock().unwrap();
+        if c.host {
+            let plane = state_data.host.get_or_insert_with(StatePlane::default);
+            begin_host_frame(plane, &source, frame);
+            plane.before.get(&key).cloned()
+        } else {
+            begin_frame(&mut state_data, &source, frame);
+            state_data.before.get(&key).cloned()
+        }
+    };
+    match previous { Some(value) => state_data(value), None => state_data(eval_at(a, c, env, init)?) }
+}
+fn state_write(a: &mut Arena, c: &ExecCtx, zone: &Path, value: Value) -> Result<Value, Diagnostic> {
+    let value = state_data(concrete(a, value)?)?;
+    let (state, frame) = state_plane(a, c)?;
+    let source = workspace_source_key(&a.workspace);
+    let key = state_key(c, zone);
+    let mut data = state.inner.lock().unwrap();
+    if c.host {
+        let plane = data.host.get_or_insert_with(StatePlane::default);
+        begin_host_frame(plane, &source, frame);
+        plane.next.insert(key, value.clone());
+        plane.epoch = STATE_EPOCH.fetch_add(1, Ordering::Relaxed);
+    } else {
+        begin_frame(&mut data, &source, frame);
+        data.next.insert(key, value.clone());
+        data.epoch = STATE_EPOCH.fetch_add(1, Ordering::Relaxed);
+    }
+    Ok(value)
+}
+
+fn eval_sequence(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, route: String) -> Result<(Value, usize), Diagnostic> {
+    let value = eval_concrete(a, &sub(c, route), env, term)?;
+    let count = match &value { Value::List(values) => values.len(), _ => array_len(&value)? };
+    Ok((value, count))
+}
+fn sequence_item(value: &Value, index: usize) -> Result<Value, Diagnostic> {
+    match value { Value::List(values) => Ok(values[index].clone()), _ => array_get(value, index) }
+}
+fn eval_hof(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::HofKind, function_term: &Term, rest: &[Term]) -> Result<Value, Diagnostic> {
+    let function = eval_concrete(a, &sub(c, "f".into()), env, function_term)?;
+    let Value::Fn(function) = function else { return eval_error("E_TYPE", "Expected a function."); };
+    // A function that reads the frame is live whichever elements read it: walking until one does could spend the static budget on a branch that leaves it unread.
+    if a.time.is_none() && read_value(a, &Value::Fn(function), true, &mut BTreeSet::new(), &mut HashSet::new(), &mut HashSet::new()) { return need_time(); }
+    let packed = matches!(&term.ty, Ty::Array(_)) || rest.iter().any(|term| matches!(&term.ty, Ty::Array(_)));
+    let saved_steps = a.step_count;
+    let result = eval_hof_work(a, c, env, term, kind, function, rest, packed, saved_steps);
+    if packed { a.step_count = saved_steps; }
+    result
+}
+fn check_packed_block(a: &mut Arena, iter: &mut usize, packed: bool, saved_steps: usize) -> Result<(), Diagnostic> {
+    if packed && *iter % PACKED_BLOCK == 0 {
+        if a.interrupt.as_ref().is_some_and(|stop| stop()) { return Err(error("cancelled", "Evaluation interrupted.")); }
+        a.step_count = saved_steps;
+    }
+    *iter += 1;
+    Ok(())
+}
+struct MapProgress { finish: Option<StaticMapFinish>, head: usize, tail: usize, completed: bool }
+impl Drop for MapProgress {
+    fn drop(&mut self) { if let Some(finish) = &self.finish { finish(self.head, self.tail, self.completed); } }
+}
+fn map_residual(a: &mut Arena, c: &ExecCtx, term: &Term, env: &Env) -> ResidualId {
+    a.observed.iter().rev().find(|id| get_res(a, **id).is_ok_and(|residual| residual.term.form.id == term.form.id && residual.ctx.iter == c.iter && site(&residual.ctx) == site(c))).copied()
+        .unwrap_or_else(|| residual_id(a, ResidualData { term: term.clone(), env: capture_env(term, env), ctx: c.clone(), previous: false, live: None }))
+}
+fn function_call_offset(a: &Arena, function: FnId) -> i64 {
+    a.fn_calls.get(&function).copied().unwrap_or_else(|| match a.functions.get(&function) { Some(Function::Closure(closure)) => closure.calls, Some(Function::Named(named)) => named.calls, None => 0 })
+}
+fn reserve_function_calls(a: &mut Arena, function: FnId, count: usize) {
+    let next = function_call_offset(a, function).saturating_add(count as i64);
+    a.fn_calls.insert(function, next);
+}
+fn function_replayable(a: &Arena, function: FnId) -> bool {
+    matches!(a.functions.get(&function), Some(Function::Closure(closure)) if closure.replayable)
+}
+fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, sources: &[Term], packed: bool, saved_steps: usize, iter: &mut usize) -> Result<Value, Diagnostic> {
+    let mut lists = Vec::with_capacity(sources.len());
+    for (index, source) in sources.iter().enumerate() { lists.push(eval_sequence(a, c, env, source, format!("l{}", index))?); }
+    let count = if lists.is_empty() { 0 } else { lists.iter().map(|(_, count)| *count).min().unwrap_or(0) };
+    if !packed && count > MAX_ITERATIONS { return eval_error("E_ITER_BOUND", "A map exceeds 4,096 elements."); }
+    let numeric = !matches!(&term.ty, Ty::Array(element) if **element == Ty::Text) && !sources.iter().any(|source| matches!(&source.ty, Ty::Array(element) if **element == Ty::Text));
+    let static_map = a.time.is_none() && packed && numeric;
+    let id = if static_map || (a.record && c.record && matches!(&term.ty, Ty::Array(_))) { Some(map_residual(a, c, term, env)) } else { None };
+    let finish = if static_map {
+        current_residual_handlers().and_then(|handlers| handlers.map).map(|map| map(&site(c), term, count))
+    } else { None };
+    let mut progress = MapProgress { finish, head: 0, tail: 0, completed: false };
+    if let (Some(id), Some(Function::Closure(closure))) = (id, a.functions.get(&function).cloned()) {
+        if a.record && c.record && matches!(&term.ty, Ty::Array(_)) {
+            let offset = function_call_offset(a, function);
+            let mut path = closure.zone;
+            path.push("~calls".into());
+            note(a, c, path, Value::Record(vec![("offset".into(), Value::Int(offset)), ("call".into(), Value::Residual(id))]));
+        }
+    }
+    let large = static_map && count > MAX_ITERATIONS && matches!(&term.ty, Ty::Array(_));
+    if large {
+        let id = id.unwrap();
+        let can_defer = matches!(a.functions.get(&function), Some(Function::Closure(_)));
+        if can_defer && current_residual_handlers().and_then(|handlers| handlers.defer).is_some_and(|defer| call_with_snapshot(a, id, &|id| defer(id).then_some(Value::Bool(true))).is_some()) {
+            reserve_function_calls(a, function, count);
+            progress.completed = false;
+            return Ok(Value::Residual(id));
+        }
+        let trusted = current_residual_handlers().is_some_and(|handlers| handlers.trusted && (!a.record || !c.record || (handlers.replay && function_replayable(a, function))));
+        if trusted {
+            if let Some(candidate) = current_residual_handlers().and_then(|handlers| handlers.kernel).and_then(|kernel| call_with_snapshot(a, id, &|id| kernel(id))) {
+                if value::ty_of(&candidate) == term.ty && array_len(&candidate).ok() == Some(count) {
+                    reserve_function_calls(a, function, count);
+                    progress.completed = true;
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+    let walked = if large { MAX_ITERATIONS } else { count };
+    let mut output = Vec::with_capacity(walked);
+    for index in 0..walked {
+        check_packed_block(a, iter, packed, saved_steps)?;
+        let args = lists.iter().map(|(values, _)| sequence_item(values, index)).collect::<Result<Vec<_>, _>>()?;
+        let value = call_fn(a, c, function, &args, None)?;
+        output.push(concrete(a, value)?);
+        if index < MAX_ITERATIONS { progress.head += 1; } else { progress.tail += 1; }
+    }
+    if large {
+        let id = id.unwrap();
+        let head_value = pack(&term.ty, output.clone())?;
+        let approximate = current_residual_handlers().and_then(|handlers| handlers.bulk_approx).and_then(|bulk| call_with_snapshot(a, id, &|id| bulk(id)))
+            .filter(|candidate| bulk_matches(&head_value, candidate, count, walked, true));
+        if let Some(candidate) = approximate {
+            reserve_function_calls(a, function, count - walked);
+            progress.completed = true;
+            return Ok(candidate);
+        }
+        let exact = current_residual_handlers().and_then(|handlers| handlers.bulk).and_then(|bulk| call_with_snapshot(a, id, &|id| bulk(id)))
+            .filter(|candidate| bulk_matches(&head_value, candidate, count, walked, false));
+        if let Some(candidate) = exact {
+            reserve_function_calls(a, function, count - walked);
+            progress.completed = true;
+            return Ok(candidate);
+        }
+        for index in walked..count {
+            check_packed_block(a, iter, packed, saved_steps)?;
+            let args = lists.iter().map(|(values, _)| sequence_item(values, index)).collect::<Result<Vec<_>, _>>()?;
+            let value = call_fn(a, c, function, &args, None)?;
+            output.push(concrete(a, value)?);
+            progress.tail += 1;
+        }
+    }
+    let result = if matches!(&term.ty, Ty::Array(_)) { pack(&term.ty, output)? } else { join_list(output) };
+    progress.completed = true;
+    Ok(result)
+}
+fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::HofKind, function: FnId, rest: &[Term], packed: bool, saved_steps: usize) -> Result<Value, Diagnostic> {
+    let mut iter = 0usize;
+    match kind {
+        W::HofKind::Map => eval_map(a, c, env, term, function, rest, packed, saved_steps, &mut iter),
+        W::HofKind::Filter => {
+            if rest.len() != 1 { return eval_error("E_ARITY", "filter takes one list."); }
+            let (values, count) = eval_sequence(a, c, env, &rest[0], "l0".into())?;
+            let mut output = Vec::new();
+            for index in 0..count {
+                check_packed_block(a, &mut iter, packed, saved_steps)?;
+                let value = sequence_item(&values, index)?;
+                let selected = call_fn(a, c, function, &[value.clone()], None)?;
+                if truth(&concrete(a, selected)?)? { output.push(value); }
+            }
+            if matches!(&term.ty, Ty::Array(_)) { pack(&term.ty, output) } else { Ok(join_list(output)) }
+        }
+        W::HofKind::SortBy => {
+            if rest.len() != 1 { return eval_error("E_ARITY", "sort-by takes one list."); }
+            let (values, count) = eval_sequence(a, c, env, &rest[0], "l0".into())?;
+            let mut keyed = Vec::with_capacity(count);
+            for index in 0..count {
+                check_packed_block(a, &mut iter, packed, saved_steps)?;
+                let value = sequence_item(&values, index)?;
+                let result = call_fn(a, c, function, &[value.clone()], None)?;
+                keyed.push((num(&concrete(a, result)?)?, index, value));
+            }
+            keyed.sort_by(|left, right| left.0.total_cmp(&right.0).then(left.1.cmp(&right.1)));
+            let output = keyed.into_iter().map(|(_, _, value)| value).collect();
+            if matches!(&term.ty, Ty::Array(_)) { pack(&term.ty, output) } else { Ok(join_list(output)) }
+        }
+        W::HofKind::Reduce => {
+            if rest.len() != 2 { return eval_error("E_ARITY", "reduce takes an initial value and list."); }
+            let mut accumulator = eval_at(a, &sub(c, "init".into()), env, &rest[0])?;
+            let (values, count) = eval_sequence(a, c, env, &rest[1], "l0".into())?;
+            for index in 0..count {
+                check_packed_block(a, &mut iter, packed, saved_steps)?;
+                let value = sequence_item(&values, index)?;
+                let next = call_fn(a, c, function, &[accumulator.clone(), value], None)?;
+                accumulator = widen_like(a, &accumulator, &next)?;
+            }
+            Ok(accumulator)
+        }
+        W::HofKind::Iterate => {
+            if rest.len() < 2 || rest.len() > 3 { return eval_error("E_ARITY", "iterate takes an initial value, count and optional stop function."); }
+            let mut accumulator = eval_at(a, &sub(c, "init".into()), env, &rest[0])?;
+            let count_term = eval_at(a, &sub(c, "n".into()), env, &rest[1])?;
+            let count = int_value(&concrete(a, count_term)?)?;
+            if !(0..=MAX_ITERATIONS as i64).contains(&count) { return eval_error("E_ITER_BOUND", "iterate exceeds 4,096 iterations."); }
+            let stop = if let Some(term) = rest.get(2) {
+                match eval_concrete(a, &sub(c, "until".into()), env, term)? { Value::Fn(function) => Some(function), _ => return eval_error("E_TYPE", "Expected a function.") }
+            } else { None };
+            for _ in 0..count {
+                check_packed_block(a, &mut iter, packed, saved_steps)?;
+                let next = call_fn(a, c, function, &[accumulator.clone()], None)?;
+                if let Some(stop) = stop {
+                    let finished = call_fn(a, c, stop, &[accumulator.clone(), next.clone()], None)?;
+                    if truth(&concrete(a, finished)?)? { accumulator = next; break; }
+                }
+                accumulator = next;
+            }
+            Ok(accumulator)
+        }
+    }
+}
+fn v_len(value: &Value) -> usize { match value { Value::List(items) => items.len(), _ => array_len(value).unwrap_or(0) } }
+fn pack(ty: &Ty, values: Vec<Value>) -> Result<Value, Diagnostic> {
+    let Ty::Array(element) = ty else { return Ok(join_list(values)); };
+    match element.as_ref() {
+        Ty::Int => Ok(Value::Int_array(Arc::new(values.iter().map(int_value).collect::<Result<Vec<_>, _>>()?))),
+        Ty::Text => Ok(Value::Text_array(Arc::new(values.iter().map(|value| match value { Value::Text(bytes) => Ok(bytes.clone()), _ => Err(error("E_ARRAY_TYPE", "Text arrays contain text values.")) }).collect::<Result<Vec<_>, _>>()?))),
+        Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 => {
+            let width = match element.as_ref() { Ty::Float => 1, Ty::Vec2 => 2, Ty::Vec3 => 3, _ => 4 };
+            let mut data = Vec::with_capacity(values.len() * width);
+            for value in values {
+                match (width, value) {
+                    (1, number @ (Value::Int(_) | Value::Float(_) | Value::Bool(_))) => data.push(value::fin("array loop", num(&number)?)?),
+                    (2, Value::Vec2(x, y)) => data.extend([value::fin("array loop", x)?, value::fin("array loop", y)?]),
+                    (3, Value::Vec3(x, y, z)) => data.extend([value::fin("array loop", x)?, value::fin("array loop", y)?, value::fin("array loop", z)?]),
+                    (4, Value::Vec4(x, y, z, w)) => data.extend([value::fin("array loop", x)?, value::fin("array loop", y)?, value::fin("array loop", z)?, value::fin("array loop", w)?]),
+                    (_, number @ (Value::Int(_) | Value::Float(_) | Value::Bool(_))) => {
+                        let number = value::fin("array loop", num(&number)?)?;
+                        data.extend(std::iter::repeat_n(number, width));
+                    }
+                    _ => return eval_error("E_ARRAY_TYPE", "Packed loop element has the wrong vector width."),
+                }
+            }
+            let data = Arc::new(data);
+            Ok(match width { 1 => Value::Float_array(data), 2 => Value::Vec2_array(data), 3 => Value::Vec3_array(data), _ => Value::Vec4_array(data) })
+        }
+        _ => Ok(join_list(values)),
+    }
+}
+fn loop_values(source: Value) -> Result<Vec<Value>, Diagnostic> {
+    match source {
+        Value::List(values) => Ok(values),
+        Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_) => {
+            let count = array_len(&source)?;
+            (0..count).map(|index| array_get(&source, index)).collect()
+        }
+        Value::Struct(op, Ty::List(_), _) => Err(errorf("E_ZONE", format!("{op}: only a for with one clause and no :skip can iterate the elements of geometry."))),
+        _ => Err(error("E_TYPE", "Expected a list or packed array.")),
+    }
+}
+// A record update keeps the existing field's tag (the current one, if it is still a residual); an Int seed widens to a Float body.
+fn coerce_like(a: &mut Arena, w: &Value, v: &Value) -> Result<Value, Diagnostic> {
+    let w = concrete(a, w.clone())?;
+    let v = concrete(a, v.clone())?;
+    match (&w, &v) {
+        (Value::List(wa), Value::List(_)) if wa.is_empty() => Ok(v),
+        (Value::List(wa), Value::List(vb)) => Ok(Value::List(vb.iter().map(|x| coerce_like(a, &wa[0], x)).collect::<Result<Vec<_>, _>>()?)),
+        (Value::Record(wf), Value::Record(fs)) => Ok(Value::Record(fs.iter().map(|(n, x)| Ok((n.clone(), match wf.iter().find(|(k, _)| k == n) { Some((_, old)) => coerce_like(a, old, x)?, None => x.clone() }))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        _ => coerce(&value::ty_of(&w), &v),
+    }
+}
+fn widen_like(a: &mut Arena, w: &Value, v: &Value) -> Result<Value, Diagnostic> {
+    let w = concrete(a, w.clone())?;
+    let v = concrete(a, v.clone())?;
+    match (&w, &v) { (Value::Int(_), Value::Float(_)) => Ok(v), _ => coerce_like(a, &w, &v) }
+}
+fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::LoopKind, accs: &[(W::Pattern, Term)], clauses: &[(W::Pattern, Term)], skip: &[Vec<usize>], body: &Term, zone: &Path) -> Result<Value, Diagnostic> {
+    let packed = clauses.iter().any(|(_, term)| matches!(&term.ty, Ty::Array(_)));
+    let saved_steps = a.step_count;
+    let mut accumulators = Vec::with_capacity(accs.len());
+    for (_, init) in accs {
+        let mut context = c.clone();
+        context.base = zone.clone();
+        context.route.clear();
+        accumulators.push(eval_at(a, &sub(&context, "init".into()), env, init)?);
+    }
+    let first = {
+        let (pattern, source) = &clauses[0];
+        let source = eval_concrete(a, &sub(c, "in0".into()), env, source)?;
+        match source {
+            Value::Struct(_, Ty::List(_), _) if kind == &W::LoopKind::For && clauses.len() == 1 && skip.is_empty() => {
+                return eval_geometry_loop(a, c, env, pattern, body, zone, source);
+            }
+            source => loop_values(source)?,
+        }
+    };
+    let lists = [first];
+    let mut output = Vec::new();
+    let mut sum = None;
+    let mut count = 0usize;
+    let mut selected = Vec::with_capacity(clauses.len());
+    let mut tuple = Vec::with_capacity(clauses.len());
+    fn walk(
+        a: &mut Arena, c: &ExecCtx, env: &Env, kind: &W::LoopKind, accs: &[(W::Pattern, Term)],
+        clauses: &[(W::Pattern, Term)], lists: &[Vec<Value>], skip: &[Vec<usize>], body: &Term,
+        zone: &Path, depth: usize, selected: &mut Vec<Value>, tuple: &mut Vec<i64>,
+        accumulators: &mut Vec<Value>, output: &mut Vec<Value>, sum: &mut Option<Value>,
+        count: &mut usize, packed: bool, saved_steps: usize,
+    ) -> Result<(), Diagnostic> {
+        if depth < clauses.len() {
+            let (pattern, source_term) = &clauses[depth];
+            // A later source is evaluated where the earlier names are bound, when its turn comes.
+            let fresh = if depth == 0 { None } else { Some(loop_values(eval_concrete(a, &sub(c, format!("in{}", depth)), env, source_term)?)?) };
+            let items: &[Value] = match &fresh { Some(v) => v, None => &lists[0] };
+            for (index, item) in items.iter().enumerate() {
+                selected.push(item.clone());
+                tuple.push(index as i64);
+                let mut inner = env.clone();
+                bind_pattern(a, c, &mut inner, pattern, item.clone(), None)?;
+                walk(a, c, &inner, kind, accs, clauses, lists, skip, body, zone, depth + 1, selected, tuple, accumulators, output, sum, count, packed, saved_steps)?;
+                tuple.pop();
+                selected.pop();
+            }
+            return Ok(());
+        }
+        if !packed && *count >= MAX_ITERATIONS { return Err(errorf("E_ITER_BOUND", format!("{} runs more than 4,096 iterations.", path_text(zone)))); }
+        if packed && *count % PACKED_BLOCK == 0 {
+            if a.interrupt.as_ref().is_some_and(|stop| stop()) { return Err(error("cancelled", "Evaluation interrupted.")); }
+            a.step_count = saved_steps;
+        }
+        let ordinal = *count;
+        let mut cx = c.clone();
+        cx.base = zone.clone();
+        cx.route.clear();
+        cx.iter.push(ordinal as i64);
+        // OCaml matches the skip tuples against the iteration path: the outer iteration plus this flat ordinal.
+        let skipped = skip.iter().any(|indices| indices.iter().copied().map(|index| index as i64).eq(cx.iter.iter().copied()));
+        let mut local = env.clone();
+        for ((pattern, _), value) in clauses.iter().zip(selected.iter()) {
+            record_pattern(a, &cx, zone, pattern, value)?;
+            bind_pattern(a, &cx, &mut local, pattern, value.clone(), None)?;
+        }
+        for ((pattern, _), value) in accs.iter().zip(accumulators.iter()) {
+            record_pattern(a, &cx, zone, pattern, value)?;
+            bind_pattern(a, &cx, &mut local, pattern, value.clone(), None)?;
+        }
+        if !skipped {
+            let mut value = eval_at(a, &cx, &local, body)?;
+            if packed { value = concrete(a, value)?; }
+            match kind {
+                W::LoopKind::Fold | W::LoopKind::Scan => {
+                    let Some(accumulator) = accumulators.first_mut() else { return Err(error("E_ARITY", "fold needs an accumulator.")); };
+                    let next = value;
+                    *accumulator = widen_like(a, accumulator, &next)?;
+                    if kind == &W::LoopKind::Scan { output.push(accumulator.clone()); }
+                }
+                W::LoopKind::Sum => *sum = Some(match sum.take() {
+                    Some(previous) => { let (p, v) = (concrete(a, previous)?, concrete(a, value)?); value::arith("sum", &|left, right| left + right, &p, &v)? }
+                    None => value,
+                }),
+                W::LoopKind::For => output.push(value),
+            }
+        }
+        *count += 1;
+        Ok(())
+    }
+    walk(a, c, env, kind, accs, clauses, &lists, skip, body, zone, 0, &mut selected, &mut tuple, &mut accumulators, &mut output, &mut sum, &mut count, packed, saved_steps)?;
+    if packed { a.step_count = saved_steps; }
+    match kind {
+        W::LoopKind::Fold => accumulators.into_iter().next().ok_or_else(|| error("E_ARITY", "fold needs an accumulator.")),
+        W::LoopKind::Sum => match sum { None => Ok(Value::Int(0)), Some(total) => concrete(a, total) },
+        W::LoopKind::For | W::LoopKind::Scan => if matches!(&term.ty, Ty::Array(_)) { pack(&term.ty, output) } else { Ok(join_list(output)) },
+    }
+}
+fn eval_geometry_loop(a: &mut Arena, c: &ExecCtx, env: &Env, pattern: &W::Pattern, body: &Term, zone: &Path, source: Value) -> Result<Value, Diagnostic> {
+    let (operation, fields) = match source { Value::Struct(operation, Ty::List(_), fields) => (operation, fields), _ => return eval_error("E_ZONE", "Geometry loop source is malformed.") };
+    let source_id = match fields.iter().find(|(name, _)| name == "geometry").map(|(_, value)| value) {
+        Some(Value::Deferred(ty, id)) if flow_syntax::ty::is_geometry(ty) => *id,
+        _ => return Err(errorf("E_TYPE", format!("{}: {} needs geometry.", path_text(zone), operation))),
+    };
+    let points = operation == "sop/point_list";
+    let key = fields.iter().find(|(name, _)| name == "key").map(|(_, value)| value.clone());
+    let mut context = c.clone();
+    context.iter.push(0);
+    context.geometry = true;
+    let element_name = element_key(zone);
+    let lo = a.nodes.len() as i64;
+    let (element, element_arg) = if points {
+        let term = Term { path: None, ty: Ty::Vec3, node: TermNode::RefBinding(element_name.clone(), Vec::new()), form: body.form.clone() };
+        let residual = residual_id(a, ResidualData { term, env: BTreeMap::new(), ctx: context.clone(), previous: false, live: None });
+        (Value::Residual(residual), text(&element_name))
+    } else {
+        let value = mk_node(a, &sub(&context, "element".into()), 0, flow_syntax::ty::geometry(), "zone/element".into(), Vec::new())?;
+        let Value::Deferred(_, id) = value.clone() else { return eval_error("E_TYPE", "A geometry element must be a plan node."); };
+        (value, Value::Int(id))
+    };
+    let mut local = env.clone();
+    bind_pattern(a, &context, &mut local, pattern, element, None)?;
+    let value = eval_at(a, &context, &local, body)?;
+    let root = match value {
+        Value::Deferred(ty, id) if ty::is_geometry(&ty) => id,
+        Value::Residual(_) => return Err(errorf("E_ZONE", format!("{}: what a loop over geometry builds cannot depend on the element; only arguments can.", path_text(zone)))),
+        _ => return Err(errorf("E_TYPE", format!("{}: the body of a loop over geometry returns geometry.", path_text(zone)))),
+    };
+    let hi = a.nodes.len() as i64;
+    let mut args = vec![("geometry".into(), Value::Deferred(flow_syntax::ty::geometry(), source_id))];
+    if let Some(key) = key { args.push(("key".into(), key)); }
+    args.extend([("body".into(), Value::Int(root)), ("lo".into(), Value::Int(lo)), ("hi".into(), Value::Int(hi)), ("element".into(), element_arg)]);
+    mk_node(a, c, 0, flow_syntax::ty::geometry(), if points { "zone/points" } else { "zone/pieces" }.into(), args)
+}
+
+fn result_from(owner: &Arc<Mutex<Arena>>, results: Vec<(String, Value)>, authored: Vec<i64>) -> Eval {
+    let arena = owner.lock().unwrap();
+    let records = arena.records.iter().map(|(path, values)| (path.clone(), values.clone())).collect();
+    let instances = arena.cells.iter().map(|cell| Instance { graph: cell.graph.clone(), default: cell.default, inputs: cell.inputs.clone(), result: cell.result.clone() }).collect();
+    Eval { plan: Plan { instances, nodes: arena.nodes.clone() }, authored, results, states: arena.states.clone(), records, owner: owner.clone() }
+}
+ 
+pub fn static_eval(workspace: &Workspace) -> Result<Eval, Diagnostic> { static_with(workspace, false, None, None) }
+pub fn r#static(workspace: &Workspace, record: bool, inputs: Option<&[(String, Vec<(String, Value)>)]>) -> Result<Eval, Diagnostic> { static_with(workspace, record, inputs, None) }
+pub fn static_with(workspace: &Workspace, record: bool, inputs: Option<&[(String, Vec<(String, Value)>)]>, budget: Option<usize>) -> Result<Eval, Diagnostic> {
+    let _timer = flow_syntax::phase_timer::measure("evaluate");
+    if let Some(overrides) = inputs {
+        let mut names = BTreeSet::new();
+        for (name, inputs) in overrides {
+            if !names.insert(name.clone()) { return Err(error("E_INPUT_DUPLICATE", "A graph receives more than one input override set.")); }
+            if !workspace.graphs.iter().any(|graph| graph.name == *name) { return Err(errorf("E_UNKNOWN_GRAPH", format!("Unknown graph input target: {}.", name))); }
+            for (_, value) in inputs { value::validate(value)?; }
+        }
+    }
+    FREE_NAMES_CACHE.lock().unwrap().clear();
+    let arena = Arena::new(workspace, record, budget.unwrap_or(MAX_STEPS));
+    let (graphs, root) = { let arena = arena.lock().unwrap(); (arena.workspace.graphs.clone(), root_ctx(&arena)) };
+    let mut results = Vec::with_capacity(graphs.len());
+    for graph in &graphs {
+        let overrides = inputs.and_then(|inputs| inputs.iter().find(|(name, _)| name == &graph.name)).map_or(&[][..], |(_, values)| values.as_slice());
+        let mut arena = arena.lock().unwrap();
+        let value = graph_value(&mut arena, &root, &graph.name, overrides, true)?;
+        results.push((graph.name.clone(), value));
+    }
+    let authored = arena.lock().unwrap().authored.clone();
+    Ok(result_from(&arena, results, authored))
+}
+pub fn static_with_requests(budget: Option<usize>, record: bool, inputs: Option<&[(String, Vec<(String, Value)>)]>, workspace: &Workspace) -> Result<Eval, Diagnostic> {
+    static_with(workspace, record, inputs, budget)
+}
+
+pub fn create_state()->State{State::default()}
+pub fn reset_state(state:&State,host_state:bool){let mut s=state.inner.lock().unwrap();s.source.clear();s.frame=None;s.before.clear();s.next.clear();s.epoch=STATE_EPOCH.fetch_add(1,Ordering::Relaxed);if host_state{s.host=None}}
+pub fn fork_state(state:&State)->State{let s=state.inner.lock().unwrap().clone();State{inner:Arc::new(Mutex::new(s))}}
+pub fn state_stamp(state:&State)->String{let s=state.inner.lock().unwrap();format!("{}{}",s.epoch,s.host.as_ref().map_or(String::new(),|x|format!(":{}",x.epoch)))}
+fn restore_state(state:&State,saved:&State){*state.inner.lock().unwrap()=saved.inner.lock().unwrap().clone()}
+pub fn state_values(state:&State)->Vec<Value>{let state=state.inner.lock().unwrap();let mut values=state.before.values().chain(state.next.values()).cloned().collect::<Vec<_>>();if let Some(host)=&state.host{values.extend(host.before.values().chain(host.next.values()).cloned());}values}
+pub fn transaction(state:&State,f:&mut dyn FnMut()->Result<(),Diagnostic>)->Result<(),Diagnostic>{let saved=fork_state(state);let result=f();if result.is_err(){*state.inner.lock().unwrap()=saved.inner.lock().unwrap().clone()}result}
+
+pub fn force(value:&Value,live:&Frame,state:Option<&State>)->Result<Value,Diagnostic>{force_with(value,live,state,None,None)}
+type ResolveFn = Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>;
+fn static_source_fields(value: &Value) -> bool {
+    match value {
+        Value::Source(_, _, f) | Value::Struct(_, _, f) | Value::Record(f) => f.iter().all(|(_, v)| static_source_fields(v)),
+        Value::List(vs) => vs.iter().all(static_source_fields),
+        v => !is_live_value(v),
+    }
+}
+// OCaml with_live: a fresh state unless one is supplied, restored when the walk fails.
+pub fn force_with(value: &Value, live: &Frame, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<ResolveFn>) -> Result<Value, Diagnostic> {
+    if !is_live_value(value) { return Ok(value.clone()); }
+    if let (Value::Source(_, _, fields) | Value::Struct(_, Ty::Array(_), fields), None, None, Some(resolve)) = (value, state, elems, &resolve) {
+        if fields.iter().all(|(_, v)| static_source_fields(v)) {
+            fail_frame(live)?;
+            let resolved = resolve_source_with(resolve, value)?;
+            return if is_live_value(&resolved) { force_with(&resolved, live, None, None, Some(resolve.clone())) } else { Ok(resolved) };
+        }
+    }
+    let owned = state.cloned().unwrap_or_default();
+    let saved = fork_state(&owned);
+    fail_frame(live)?;
+    let result = force_general(value, live, Some(&owned), elems, resolve);
+    if result.is_err() { restore_state(&owned, &saved); }
+    result
+}
+fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<ResolveFn>) -> Result<Value, Diagnostic> {
+    match value {
+        Value::Residual(id) => {
+            let arena = arena_for_residual(id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+            let mut arena = arena.lock().unwrap();
+            arena.time = Some(live.clone());
+            arena.state = state.cloned().or(arena.state.clone());
+            arena.resolve = resolve;
+            arena.elems = elems.unwrap_or(&[]).iter().cloned().collect();
+            arena.step_count = 0;
+            arena.fn_calls.clear();
+            arena.memo.clear();
+            execute_residual(&mut arena, *id)
+        }
+        Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
+            let arena = arena_for_value(value);
+            if let Some(arena) = arena {
+                let mut arena = arena.lock().unwrap();
+                arena.time = Some(live.clone());
+                arena.state = state.cloned().or(arena.state.clone());
+                arena.resolve = resolve;
+                arena.elems = elems.unwrap_or(&[]).iter().cloned().collect();
+                let resolver = arena.resolve.clone();
+                drop(arena);
+                let resolved = match &resolver { Some(r) => resolve_source_with(r, value)?, None => return Err(error("E_DATA_SOURCE", "This data source needs its host's cooked data.")) };
+                force_with(&resolved, live, state, elems, resolver)
+            } else if let Some(resolve) = resolve {
+                let result = resolve_source_with(&resolve, value)?;
+                force_with(&result, live, state, elems, Some(resolve))
+            } else {
+                eval_error("E_DATA_SOURCE", "This data source needs its host's cooked data.")
+            }
+        }
+        Value::List(values) => Ok(Value::List(values.iter().map(|value| force_general(value, live, state, elems, resolve.clone())).collect::<Result<Vec<_>, _>>()?)),
+        Value::Record(fields) => Ok(Value::Record(fields.iter().map(|(name, value)| Ok((name.clone(), force_general(value, live, state, elems, resolve.clone())?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        Value::Struct(name, ty, fields) => Ok(Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| Ok((name.clone(), force_general(value, live, state, elems, resolve.clone())?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        _ => Ok(value.clone()),
+    }
+}
+fn resolve_source_with(resolve: &Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>, source: &Value) -> Result<Value, Diagnostic> {
+    let value = resolve(source)?;
+    if matches!(value, Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
+    if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
+    value::validate(&value)?;
+    Ok(value)
+}
+fn arena_for_residual(id: &ResidualId) -> Option<Arc<Mutex<Arena>>> {
+    if let Some(arena) = active_residual_snapshot(id) { return Some(arena); }
+    let arenas = ARENAS.lock().ok()?;
+    arenas.values().find_map(|weak| {
+        let arena = weak.upgrade()?;
+        let found = arena.lock().ok().is_some_and(|arena| arena.residuals.contains_key(id));
+        found.then_some(arena)
+    })
+}
+pub fn residual_eval(id: ResidualId, live: &Frame, state: Option<&State>) -> Result<Value, Diagnostic> {
+    let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+    let mut arena = arena.lock().unwrap();
+    fail_frame(live)?;
+    arena.time = Some(live.clone());
+    arena.state = state.cloned().or(arena.state.clone());
+    arena.step_count = 0;
+    arena.fn_calls.clear();
+    arena.memo.clear();
+    execute_residual(&mut arena, id)
+}
+pub fn run(workspace: &Workspace, record: bool, inputs: Option<&[(String, Vec<(String, Value)>)]>, state: Option<&State>, live: Option<&Frame>, time: f64) -> Result<Eval, Diagnostic> {
+    let mut result = static_with(workspace, record, inputs, None)?;
+    let frame = live.cloned().unwrap_or_else(|| input::at_time(time));
+    let state = state.cloned().unwrap_or_default();
+    let saved = fork_state(&state);
+    let evaluated: Result<Eval, Diagnostic> = (|| {
+        for (_, value) in &mut result.results { *value = force(value, &frame, Some(&state))?; }
+        for node in &mut result.plan.nodes { for (_, value) in &mut node.args { *value = force(value, &frame, Some(&state))?; } }
+        for instance in &mut result.plan.instances {
+            for (_, value) in &mut instance.inputs { *value = force(value, &frame, Some(&state))?; }
+            instance.result = force(&instance.result, &frame, Some(&state))?;
+        }
+        for (_, values) in &mut result.records { for (_, value) in values { *value = force(value, &frame, Some(&state))?; } }
+        for value in &mut result.states { *value = force(value, &frame, Some(&state))?; }
+        Ok(result)
+    })();
+    if evaluated.is_err() { *state.inner.lock().unwrap() = saved.inner.lock().unwrap().clone(); }
+    evaluated
+}
+
+pub fn hash(values:&[f64])->f64{value::hash(values)}
+pub fn show(v: &Value) -> Vec<u8> { value::show_with(&|v| v.clone(), v) }
+pub fn is_live(value: &Value) -> bool { is_live_value(value) }
+pub fn is_live_value(value: &Value) -> bool {
+    match value {
+        Value::Residual(_) | Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => true,
+        Value::List(values) => values.iter().any(is_live_value),
+        Value::Record(fields) | Value::Struct(_, _, fields) => fields.iter().any(|(_, value)| is_live_value(value)),
+        _ => false,
+    }
+}
+fn read_value(arena: &Arena, value: &Value, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<ResidualId>, functions: &mut HashSet<FnId>) -> bool {
+    match value {
+        Value::Residual(id) => {
+            if !residuals.insert(*id) { return false; }
+            if let Some(residual) = arena.residuals.get(id) { read_term(arena, &residual.term, &residual.env, &residual.ctx.context, frame, reads, residuals, functions) } else { false }
+        }
+        Value::Fn(id) => {
+            if !functions.insert(*id) { return false; }
+            match arena.functions.get(id) {
+                Some(Function::Closure(closure)) => read_term(arena, &closure.body, &closure.env, &closure.at.context, frame, reads, residuals, functions),
+                Some(Function::Named(function)) => read_named(arena, &function.name, frame, reads, residuals, functions),
+                None => false,
+            }
+        }
+        Value::List(values) => values.iter().fold(false, |found, value| read_value(arena, value, frame, reads, residuals, functions) || found),
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().fold(false, |found, (_, value)| read_value(arena, value, frame, reads, residuals, functions) || found),
+        _ => false,
+    }
+}
+fn read_named(arena: &Arena, name: &str, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<ResidualId>, functions: &mut HashSet<FnId>) -> bool {
+    if let Some(graph) = arena.workspace.defs.iter().find(|graph| graph.name == name) {
+        return read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions);
+    }
+    if frame && op::find(&arena.workspace.ops, name, &flow_syntax::context::value()).is_some_and(|operation| operation.live) {
+        reads.insert(name.to_owned());
+        return true;
+    }
+    false
+}
+fn read_term(arena: &Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<ResidualId>, functions: &mut HashSet<FnId>) -> bool {
+    let mut found = false;
+    match &term.node {
+        TermNode::Time if frame => { reads.insert("time".into()); found = true; }
+        TermNode::State { .. } => { reads.insert("state".into()); found = true; }
+        TermNode::RefBinding(name, _) => if let Some(value) = env.get(name) { found |= read_value(arena, value, frame, reads, residuals, functions); },
+        TermNode::FnRef(name) => found |= read_named(arena, name, frame, reads, residuals, functions),
+        TermNode::CallFn { fn_name, .. } => {
+            if let Some(Value::Fn(function)) = env.get(fn_name) { found |= read_value(arena, &Value::Fn(*function), frame, reads, residuals, functions); }
+            else { found |= read_named(arena, fn_name, frame, reads, residuals, functions); }
+        }
+        TermNode::Op { op: name, .. } if frame && op::find(&arena.workspace.ops, name, context).is_some_and(|operation| operation.live) => {
+            reads.insert(name.clone());
+            found = true;
+        }
+        TermNode::GraphRef { graph, .. } => if let Some(graph) = arena.workspace.graphs.iter().find(|definition| definition.name == *graph) {
+            found |= read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions);
+            for (_, _, default) in &graph.inputs { if let Some(term) = default { found |= read_term(arena, term, env, context, frame, reads, residuals, functions); } }
+        },
+        _ => (),
+    }
+    for child in children(term) { found |= read_term(arena, child, env, context, frame, reads, residuals, functions); }
+    found
+}
+fn dependent(value: &Value, frame: bool, reads: &mut BTreeSet<String>) -> bool {
+    let Some(arena) = arena_for_value(value) else { return false; };
+    let arena = arena.lock().unwrap();
+    read_value(&arena, value, frame, reads, &mut HashSet::new(), &mut HashSet::new())
+}
+pub fn frame_dependent(value: &Value) -> bool { dependent(value, true, &mut BTreeSet::new()) }
+pub fn state_dependent(value: &Value) -> bool { dependent(value, false, &mut BTreeSet::new()) }
+pub fn frame_reads(value: &Value) -> Vec<String> {
+    let mut reads = BTreeSet::new();
+    let _ = dependent(value, true, &mut reads);
+    reads.into_iter().collect()
+}
+fn stable_digest(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes { hash ^= u64::from(*byte); hash = hash.wrapping_mul(0x100000001b3); }
+    format!("{hash:016x}")
+}
+fn structure_bytes(out: &mut String, bytes: &[u8]) {
+    out.push_str(&format!("{}:", bytes.len()));
+    for byte in bytes { out.push_str(&format!("{:02x}", byte)); }
+}
+fn structure_path(out: &mut String, path: &[String]) {
+    out.push('P');
+    for segment in path { structure_bytes(out, segment.as_bytes()); }
+    out.push(';');
+}
+fn structure_context(out: &mut String, context: &ExecCtx) {
+    out.push_str(&format!("{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        context.inst, context.depth, context.iter.iter().map(i64::to_string).collect::<Vec<_>>().join(","),
+        context.record as u8, context.data as u8, context.geometry as u8, context.host as u8,
+        context.card.as_deref().unwrap_or(""), context.context.as_str(), context.arena));
+    structure_path(out, &context.prefix);
+    structure_path(out, &context.base);
+    structure_path(out, &context.route);
+}
+fn structure_term(out: &mut String, term: &Term) {
+    out.push('T');
+    out.push_str(&format!("{}:{}:{:?}", term.form.id, ty::to_string(&term.ty), term.path));
+    structure_bytes(out, format!("{:?}", term.node).as_bytes());
+    if term.form.id < flow_syntax::syntax::LIBRARY_BASE || term.form.id == 0 {
+        structure_bytes(out, flow_syntax::lisp::flat(&term.form).as_bytes());
+    }
+}
+fn structure_value(
+    out: &mut String, value: &Value, arena: Option<&Arena>, seen_residuals: &mut HashMap<ResidualId, usize>,
+    seen_functions: &mut HashMap<FnId, usize>, next: &mut usize,
+) {
+    match value {
+        Value::Residual(id) => {
+            if let Some(index) = seen_residuals.get(id) { out.push_str(&format!("#{index}")); return; }
+            let Some(residual) = arena.and_then(|arena| arena.residuals.get(id)) else { out.push_str("R?"); return; };
+            let index = *next; *next += 1; seen_residuals.insert(*id, index);
+            out.push_str(&format!("R{}:{}", index, residual.previous as u8));
+            structure_term(out, &residual.term);
+            structure_context(out, &residual.ctx);
+            for (name, value) in &residual.env {
+                structure_bytes(out, name.as_bytes());
+                structure_value(out, value, arena, seen_residuals, seen_functions, next);
+            }
+        }
+        Value::Fn(id) => {
+            let Some(function) = arena.and_then(|arena| arena.functions.get(id)) else { out.push_str("F?"); return; };
+            match function {
+                Function::Named(function) => { out.push('N'); structure_bytes(out, function.name.as_bytes()); }
+                Function::Closure(closure) => {
+                    if let Some(index) = seen_functions.get(id) { out.push_str(&format!("#{index}")); return; }
+                    let index = *next; *next += 1; seen_functions.insert(*id, index);
+                    out.push_str(&format!("C{}:{}", index, closure.replayable as u8));
+                    structure_bytes(out, format!("{:?}", closure.params).as_bytes());
+                    structure_term(out, &closure.body);
+                    structure_path(out, &closure.zone);
+                    structure_context(out, &closure.at);
+                    for (name, value) in &closure.env {
+                        structure_bytes(out, name.as_bytes());
+                        structure_value(out, value, arena, seen_residuals, seen_functions, next);
+                    }
+                }
+            }
+        }
+        Value::List(values) => {
+            out.push('[');
+            for value in values { structure_value(out, value, arena, seen_residuals, seen_functions, next); }
+            out.push(']');
+        }
+        Value::Record(fields) => {
+            out.push('{');
+            for (name, value) in fields { structure_bytes(out, name.as_bytes()); structure_value(out, value, arena, seen_residuals, seen_functions, next); }
+            out.push('}');
+        }
+        Value::Struct(name, ty, fields) | Value::Source(name, ty, fields) => {
+            out.push(if matches!(value, Value::Struct(..)) { 'S' } else { 'Q' });
+            structure_bytes(out, name.as_bytes());
+            structure_bytes(out, ty::to_string(ty).as_bytes());
+            for (name, value) in fields { structure_bytes(out, name.as_bytes()); structure_value(out, value, arena, seen_residuals, seen_functions, next); }
+            out.push('}');
+        }
+        Value::Text(bytes) => { out.push('s'); structure_bytes(out, bytes); }
+        value => structure_bytes(out, &value::key_of(&|_| 0, value)),
+    }
+}
+pub fn structure(value: &Value) -> String {
+    let mut output = String::new();
+    let mut seen_residuals = HashMap::new();
+    let mut seen_functions = HashMap::new();
+    let mut next = 0;
+    if let Some(arena) = arena_for_value(value) {
+        let arena = arena.lock().unwrap();
+        structure_value(&mut output, value, Some(&arena), &mut seen_residuals, &mut seen_functions, &mut next);
+    } else {
+        structure_value(&mut output, value, None, &mut seen_residuals, &mut seen_functions, &mut next);
+    }
+    stable_digest(output.as_bytes())
+}
+pub fn authored_key(workspace: &Workspace) -> String {
+    let forms = workspace.defs.iter().map(|graph| &graph.form)
+        .chain(workspace.macros.iter())
+        .chain(workspace.nodes.iter().map(|node| &node.body.form))
+        .filter(|form| form.id < flow_syntax::syntax::LIBRARY_BASE)
+        .map(flow_syntax::lisp::flat)
+        .collect::<Vec<_>>().join("\0");
+    stable_digest(forms.as_bytes())
+}
+fn workspace_source_key(workspace: &Workspace) -> String {
+    let (source, _) = flow_syntax::lisp::print(&workspace.source);
+    stable_digest(source.as_bytes())
+}
+pub fn element_key(zone:&Path)->String{format!("$elem:{}",zone.join("/"))}
+fn arena_for_function(id: FnId) -> Option<Arc<Mutex<Arena>>> {
+    if let Some(arena) = ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| snapshots.borrow().iter().rev().find_map(|scope| scope.values().find(|arena| arena.lock().ok().is_some_and(|arena| arena.functions.contains_key(&id))).cloned())) { return Some(arena); }
+    let arenas = ARENAS.lock().ok()?;
+    arenas.values().find_map(|weak| {
+        let arena = weak.upgrade()?;
+        let found = arena.lock().ok().is_some_and(|arena| arena.functions.contains_key(&id));
+        found.then_some(arena)
+    })
+}
+fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signature: &FnSignature, function: FnId, arrays: &[Value]) -> Result<Value, Diagnostic> {
+    let arena = arena_for_function(function).ok_or_else(|| error("E_FUNCTION_ID", "Function belongs to an expired evaluation."))?;
+    let mut arena = arena.lock().unwrap();
+    let Function::Closure(closure) = get_fn(&arena, function)? else { return eval_error("E_KERNEL_FORM", "A bulk function needs an instantiated local body."); };
+    if arrays.len() != closure.params.len() { return eval_error("E_ARITY", "Bulk function inputs differ from its parameter count."); }
+    if signature.params.len() != arrays.len() || !signature.params.iter().zip(arrays).all(|(ty, value)| value::ty_of(value) == Ty::Array(Box::new(ty.clone()))) {
+        return eval_error("E_ARRAY_TYPE", "Bulk function columns must match their declared parameter types.");
+    }
+    if arrays.iter().any(|value| !matches!(value, Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_))) {
+        return eval_error("E_ARRAY_TYPE", "Bulk function inputs must be packed arrays.");
+    }
+    for array in arrays { value::validate(array)?; }
+    let counts = arrays.iter().map(array_len).collect::<Result<Vec<_>, _>>()?;
+    if counts.first().is_some_and(|first| counts.iter().any(|count| count != first)) { return eval_error("E_ARRAY_RANGE", "Bulk function inputs must have equal counts."); }
+    if !ty::fits(&closure.body.ty, &signature.result) { return eval_error("E_KERNEL_FORM", "Bulk function body differs from its declared result type."); }
+    let result = match &signature.result {
+        Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Text => signature.result.clone(),
+        Ty::Record(_) if ty::numeric_record(&signature.result) => signature.result.clone(),
+        _ => return eval_error("E_KERNEL_FORM", "Bulk functions must return int, float, vec2, vec3, vec4, text or a record of numbers."),
+    };
+    let form = closure.body.form.clone();
+    let function_name = "$kernel-function".to_owned();
+    let mut terms = vec![Term { path: None, ty: Ty::Fn(None), node: TermNode::RefBinding(function_name.clone(), Vec::new()), form: form.clone() }];
+    let mut env = BTreeMap::from([(function_name, Value::Fn(function))]);
+    for (index, value) in arrays.iter().enumerate() {
+        let name = format!("$kernel-input:{}", index);
+        terms.push(Term { path: None, ty: value::ty_of(value), node: TermNode::RefBinding(name.clone(), Vec::new()), form: form.clone() });
+        env.insert(name, value.clone());
+    }
+    let mut context = closure.at.clone();
+    if let Some((instance, prefix, iter)) = site { context.inst = instance; context.prefix = prefix; context.base.clear(); context.route.clear(); context.iter = iter; }
+    context.data = true;
+    context.record = false;
+    let term = Term { path, ty: Ty::Array(Box::new(result)), node: TermNode::Hof(W::HofKind::Map, terms), form };
+    Ok(Value::Residual(residual_id(&mut arena, ResidualData { term, env, ctx: context, previous: false, live: None })))
+}
+pub fn map_kernel(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signature: &FnSignature, function: FnId, values: &[Value]) -> Result<Value, Diagnostic> {
+    Host::map_function(site, path, signature, function, values)
+}
+pub fn bind_captures(function: FnId, replace: &dyn Fn(&Value) -> Value) -> FnId {
+    Host::map_function_bindings(function, replace)
+}
+struct InterruptScope { id: std::thread::ThreadId, previous: Option<Interrupt>, current: Interrupt }
+impl Drop for InterruptScope {
+    fn drop(&mut self) {
+        let mut interrupts = INTERRUPTS.lock().unwrap();
+        match self.previous.take() { Some(previous) => { interrupts.insert(self.id, previous); }, None => { interrupts.remove(&self.id); } }
+    }
+}
+pub fn with_interrupt(expired: Arc<dyn Fn() -> bool + Send + Sync>, f: &mut dyn FnMut()) -> bool {
+    let id = std::thread::current().id();
+    let previous = INTERRUPTS.lock().unwrap().insert(id, expired.clone());
+    let scope = InterruptScope { id, previous, current: expired };
+    f();
+    let completed = !(scope.current)();
+    drop(scope);
+    completed
+}
+pub fn interruptible(f: &mut dyn FnMut()) {
+    if INTERRUPTS.lock().unwrap().get(&std::thread::current().id()).is_some_and(|expired| expired()) { return; }
+    f()
+}
+
+struct HeldArray {
+    data: Weak<Vec<f64>>,
+    read: Arc<dyn Fn() -> Value + Send + Sync>,
+}
+static HELD_ARRAYS: LazyLock<Mutex<HashMap<usize, HeldArray>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+pub mod Device {
+    use super::*;
+    pub fn add(placeholder: &Value, read: Arc<dyn Fn() -> Value + Send + Sync>) {
+        let data = match placeholder {
+            Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => data,
+            _ => panic!("Eval.Device.add expects a packed float array"),
+        };
+        let key = Arc::as_ptr(data) as usize;
+        let mut held = HELD_ARRAYS.lock().unwrap();
+        held.retain(|_, entry| entry.data.strong_count() != 0);
+        held.insert(key, HeldArray { data: Arc::downgrade(data), read });
+    }
+    fn reader(data: &Arc<Vec<f64>>) -> Option<Arc<dyn Fn() -> Value + Send + Sync>> {
+        if data.len() > 4 { return None; }
+        let key = Arc::as_ptr(data) as usize;
+        let mut held = HELD_ARRAYS.lock().unwrap();
+        let entry = held.get(&key)?;
+        if entry.data.upgrade().is_some_and(|owner| Arc::ptr_eq(&owner, data)) { return Some(entry.read.clone()); }
+        held.remove(&key);
+        None
+    }
+    pub fn thaw(value: &Value) -> Value {
+        match value {
+            Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => reader(data).map_or_else(|| value.clone(), |read| read()),
+            Value::List(values) => Value::List(values.iter().map(thaw).collect()),
+            Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
+            Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
+            _ => value.clone(),
+        }
+    }
+    pub fn held_by_device(value: &Value) -> bool {
+        matches!(value, Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) if reader(data).is_some())
+    }
+}
+
+fn same_array_storage(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Int_array(left), Value::Int_array(right)) => Arc::ptr_eq(left, right),
+        (Value::Text_array(left), Value::Text_array(right)) => Arc::ptr_eq(left, right),
+        (Value::Float_array(left), Value::Float_array(right)) => Arc::ptr_eq(left, right),
+        (Value::Vec2_array(left), Value::Vec2_array(right)) => Arc::ptr_eq(left, right),
+        (Value::Vec3_array(left), Value::Vec3_array(right)) => Arc::ptr_eq(left, right),
+        (Value::Vec4_array(left), Value::Vec4_array(right)) => Arc::ptr_eq(left, right),
+        _ => false,
+    }
+}
+fn numeric_components(value: &Value) -> Option<Vec<f64>> {
+    match value {
+        Value::Float(value) => Some(vec![*value]),
+        Value::Vec2(x, y) => Some(vec![*x, *y]),
+        Value::Vec3(x, y, z) => Some(vec![*x, *y, *z]),
+        Value::Vec4(x, y, z, w) => Some(vec![*x, *y, *z, *w]),
+        _ => None,
+    }
+}
+fn bulk_matches(expected: &Value, candidate: &Value, count: usize, head: usize, approximate: bool) -> bool {
+    if value::ty_of(expected) != value::ty_of(candidate) || array_len(candidate).ok() != Some(count) { return false; }
+    (0..head.min(count)).all(|index| {
+        let (Ok(expected), Ok(candidate)) = (array_get(expected, index), array_get(candidate, index)) else { return false; };
+        if !approximate { return value::key_of(&|_| 0, &expected) == value::key_of(&|_| 0, &candidate); }
+        let (Some(expected), Some(candidate)) = (numeric_components(&expected), numeric_components(&candidate)) else { return false; };
+        expected.iter().zip(candidate).all(|(expected, candidate)| (expected - candidate).abs() <= 1e-4 * (1.0 + expected.abs()))
+    })
+}
+fn replace_array(value: &mut Value, original: &Value, replacement: &Value) {
+    if same_array_storage(value, original) { *value = replacement.clone(); return; }
+    match value {
+        Value::List(values) => for value in values { replace_array(value, original, replacement); },
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => {
+            for (_, value) in fields { replace_array(value, original, replacement); }
+        }
+        _ => (),
+    }
+}
+fn replace_eval_value(evaluated: &mut Eval, original: &Value, replacement: &Value) {
+    for (_, value) in &mut evaluated.results { replace_array(value, original, replacement); }
+    for node in &mut evaluated.plan.nodes { for (_, value) in &mut node.args { replace_array(value, original, replacement); } }
+    for instance in &mut evaluated.plan.instances {
+        for (_, value) in &mut instance.inputs { replace_array(value, original, replacement); }
+        replace_array(&mut instance.result, original, replacement);
+    }
+    for (_, values) in &mut evaluated.records { for (_, value) in values { replace_array(value, original, replacement); } }
+    for value in &mut evaluated.states { replace_array(value, original, replacement); }
+    let mut arena = evaluated.owner.lock().unwrap();
+    for node in &mut arena.nodes { for (_, value) in &mut node.args { replace_array(value, original, replacement); } }
+    for cell in &mut arena.cells {
+        for (_, value) in &mut cell.inputs { replace_array(value, original, replacement); }
+        replace_array(&mut cell.result, original, replacement);
+    }
+    for values in arena.records.values_mut() { for (_, value) in values { replace_array(value, original, replacement); } }
+    for value in &mut arena.states { replace_array(value, original, replacement); }
+}
+pub mod Residual {
+    use super::*;
+    #[derive(Clone, Debug)]
+    pub struct View {
+        pub term: Term, pub bindings: Vec<(String, Value)>, pub site: Path, pub owner: Path,
+        pub iter: Vec<i64>, pub instance: i64, pub prefix: Path, pub previous: bool,
+        pub host: bool, pub geometry: bool, pub context: Context,
+    }
+    pub type ResidualView = View;
+    pub fn handle(handlers: ResidualHandlers, run: &mut dyn FnMut() -> Result<Eval, Diagnostic>) -> Result<Eval, Diagnostic> {
+        ACTIVE_RESIDUAL_HANDLERS.with(|active| active.borrow_mut().push(handlers.clone()));
+        ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| snapshots.borrow_mut().push(HashMap::new()));
+        ACTIVE_OBSERVED_RESIDUALS.with(|observed| observed.borrow_mut().push(Vec::new()));
+        let scope = ResidualHandlerScope;
+        let result = run();
+        let observed = ACTIVE_OBSERVED_RESIDUALS.with(|queues| queues.borrow_mut().last_mut().map(std::mem::take).unwrap_or_default());
+        if let Some(observe) = &handlers.observe { for residual in observed { observe(residual); } }
+        drop(scope);
+        result
+    }
+    pub fn free_names(term: &Term) -> Vec<String> { super::free_names(term).into_iter().collect() }
+    pub fn residual_id(id: ResidualId) -> i64 { id.0 }
+    pub fn residual_view(id: ResidualId) -> Result<View, Diagnostic> {
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let arena = arena.lock().unwrap();
+        let residual = get_res(&arena, id)?;
+        Ok(View {
+            term: residual.term, bindings: residual.env.into_iter().collect(), site: site(&residual.ctx),
+            owner: residual.ctx.base, iter: residual.ctx.iter, instance: residual.ctx.inst,
+            prefix: residual.ctx.prefix, previous: residual.previous, host: residual.ctx.host,
+            geometry: residual.ctx.geometry, context: residual.ctx.context,
+        })
+    }
+    pub fn bind_live(id: ResidualId, live: &Frame, state: Option<&State>) -> Result<(), Diagnostic> {
+        fail_frame(live)?;
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let mut arena = arena.lock().unwrap();
+        arena.time = Some(live.clone());
+        arena.state = state.cloned().or(arena.state.clone());
+        if let Some(residual) = arena.residuals.get_mut(&id) { residual.live = Some(live.clone()); }
+        Ok(())
+    }
+    pub fn function_bindings(id: FnId) -> Vec<(String, Value)> {
+        arena_for_function(id).and_then(|arena| {
+            let arena = arena.lock().ok()?;
+            match arena.functions.get(&id)? { Function::Closure(closure) => Some(closure.env.clone().into_iter().collect()), Function::Named(_) => Some(Vec::new()) }
+        }).unwrap_or_default()
+    }
+    pub fn function_id(id: FnId) -> i64 { id.0 }
+    pub fn function_body(id: FnId) -> Option<(Vec<(W::Pattern, Option<Ty>)>, Term)> {
+        let arena = arena_for_function(id)?;
+        let arena = arena.lock().ok()?;
+        match arena.functions.get(&id)? { Function::Closure(closure) => Some((closure.params.clone(), closure.body.clone())), Function::Named(_) => None }
+    }
+    pub fn function_origin(id: FnId) -> Option<(i64, Path, Path)> {
+        let arena = arena_for_function(id)?;
+        let arena = arena.lock().ok()?;
+        match arena.functions.get(&id)? { Function::Closure(closure) => Some((closure.at.inst, closure.at.prefix.clone(), closure.zone.clone())), Function::Named(_) => None }
+    }
+    pub fn function_name(id: FnId) -> Option<String> {
+        let arena = arena_for_function(id)?;
+        let arena = arena.lock().ok()?;
+        match arena.functions.get(&id)? { Function::Named(function) => Some(function.name.clone()), Function::Closure(_) => None }
+    }
+    pub fn residual_definition(id: ResidualId, name: &str) -> Option<Graph> {
+        let arena = arena_for_residual(&id)?;
+        let arena = arena.lock().ok()?;
+        arena.workspace.defs.iter().find(|graph| graph.name == name).cloned()
+    }
+    pub fn residual_graph(id: ResidualId, name: &str) -> Option<Graph> {
+        let arena = arena_for_residual(&id)?;
+        let arena = arena.lock().ok()?;
+        arena.workspace.graphs.iter().find(|graph| graph.name == name).cloned()
+    }
+    pub fn graph_instance(id: ResidualId, name: &str) -> Option<i64> {
+        let arena = arena_for_residual(&id)?;
+        let arena = arena.lock().ok()?;
+        arena.cache.get(&format!("{}|", name)).map(|index| arena.cells[*index].instance)
+    }
+    pub fn checkpoint(id: ResidualId) -> Result<Box<dyn Fn()>, Diagnostic> {
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let state = arena.lock().unwrap().state.clone().ok_or_else(|| error("E_STATE", "State is not available."))?;
+        let saved = fork_state(&state);
+        Ok(Box::new(move || { *state.inner.lock().unwrap() = saved.inner.lock().unwrap().clone(); }))
+    }
+    pub fn rerun(id: ResidualId, on_walk: Option<&dyn Fn()>) -> Result<Value, Diagnostic> {
+        if let Some(on_walk) = on_walk { on_walk(); }
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let mut arena = arena.lock().unwrap();
+        let residual = get_res(&arena, id)?;
+        if arena.time.is_none() {
+            if let Some(live) = &residual.live { arena.time = Some(live.clone()); }
+            else { return eval_error("E_FRAME", "Bind a live frame before rerunning this residual."); }
+        }
+        execute_residual(&mut arena, id)
+    }
+    fn state_location(residual: &ResidualData, instance: i64, path: Path, iter: Vec<i64>, host: bool) -> ExecCtx {
+        let mut context = residual.ctx.clone();
+        context.inst = instance; context.prefix = path; context.iter = iter; context.host = host;
+        context
+    }
+    pub fn state_read(id: ResidualId, instance: i64, path: Path, iter: Vec<i64>, host: bool, init: &dyn Fn() -> Value) -> Result<Value, Diagnostic> {
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let mut arena = arena.lock().unwrap();
+        let residual = get_res(&arena, id)?;
+        let context = state_location(&residual, instance, path, iter, host);
+        let (state, frame) = state_plane(&arena, &context)?;
+        let source = workspace_source_key(&arena.workspace);
+        let key = state_key(&context, &[]);
+        let previous = {
+            let mut state = state.inner.lock().unwrap();
+            if host {
+                let plane = state.host.get_or_insert_with(StatePlane::default);
+                begin_host_frame(plane, &source, frame);
+                plane.before.get(&key).cloned()
+            } else {
+                begin_frame(&mut state, &source, frame);
+                state.before.get(&key).cloned()
+            }
+        };
+        state_data(previous.unwrap_or_else(init))
+    }
+    pub fn state_peek(id: ResidualId, instance: i64, path: Path, iter: Vec<i64>, host: bool) -> Option<Value> {
+        let arena = arena_for_residual(&id)?;
+        let arena = arena.lock().ok()?;
+        let residual = get_res(&arena, id).ok()?;
+        let context = state_location(&residual, instance, path, iter, host);
+        let state = arena.state.as_ref()?.inner.lock().ok()?;
+        let value = if host { state.host.as_ref()?.next.get(&state_key(&context, &[])).cloned() } else { state.next.get(&state_key(&context, &[])).cloned() }?;
+        Some(Device::thaw(&value))
+    }
+    pub fn state_write(id: ResidualId, instance: i64, path: Path, iter: Vec<i64>, host: bool, value: Value) -> Result<Value, Diagnostic> {
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let mut arena = arena.lock().unwrap();
+        let residual = get_res(&arena, id)?;
+        let context = state_location(&residual, instance, path, iter, host);
+        super::state_write(&mut arena, &context, &Vec::new(), value)
+    }
+    pub fn residual_ops(id: ResidualId) -> Vec<op::Op> {
+        arena_for_residual(&id).and_then(|arena| arena.lock().ok().map(|arena| arena.workspace.ops.clone())).unwrap_or_default()
+    }
+    pub fn residual_authored_key(id: ResidualId) -> Option<String> {
+        arena_for_residual(&id).map(|arena| authored_key(&arena.lock().unwrap().workspace))
+    }
+    pub fn residual_eval(id: ResidualId, live: &Frame, state: Option<&State>) -> Result<Value, Diagnostic> { super::residual_eval(id, live, state) }
+    pub fn eval_term(id: ResidualId, term: &Term, live: &Frame, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>>) -> Result<Value, Diagnostic> {
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let mut arena = arena.lock().unwrap();
+        fail_frame(live)?;
+        arena.time = Some(live.clone());
+        arena.state = state.cloned().or(arena.state.clone());
+        arena.elems = elems.unwrap_or(&[]).iter().cloned().collect();
+        arena.resolve = resolve;
+        let residual = get_res(&arena, id)?;
+        eval_concrete(&mut arena, &residual.ctx, &Env { values: residual.env }, term)
+    }
+    pub fn with_bindings(id: ResidualId, term: &Term, bindings: &[(String, Value)]) -> Result<ResidualId, Diagnostic> {
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let mut arena = arena.lock().unwrap();
+        let mut residual = get_res(&arena, id)?;
+        for (name, value) in bindings { residual.env.insert(name.clone(), value.clone()); }
+        residual.term = term.clone();
+        let free = free_names(term);
+        residual.env.retain(|name, _| free.contains(name));
+        residual.live = None;
+        Ok(super::residual_id(&mut arena, residual))
+    }
+    pub fn compiled_function(id: ResidualId, instance: i64, prefix: Path, zone: Path, params: Vec<(W::Pattern, Option<Ty>)>, body: Term, bindings: Vec<(String, Value)>) -> Result<FnId, Diagnostic> {
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        let mut arena = arena.lock().unwrap();
+        let residual = get_res(&arena, id)?;
+        let mut context = residual.ctx;
+        context.inst = instance;
+        context.prefix = prefix;
+        let closure = ClosureData { params, replayable: true, body, env: bindings.into_iter().collect(), zone, calls: 0, at: context };
+        Ok(closure_id(&mut arena, Function::Closure(closure)))
+    }
+}
+
+pub type RetargetResidual = dyn Fn(&Term, &[(String, Value)]) -> Option<(Term, Vec<(String, Value)>)>;
+fn arena_for_value(value: &Value) -> Option<Arc<Mutex<Arena>>> {
+    match value {
+        Value::Residual(id) => arena_for_residual(id),
+        Value::Fn(id) => arena_for_function(*id),
+        Value::List(values) => values.iter().find_map(arena_for_value),
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().find_map(|(_, value)| arena_for_value(value)),
+        _ => None,
+    }
+}
+fn rewrite_value(
+    arena: &mut Arena, value: &Value, replace: &dyn Fn(&Value) -> Option<Value>, fresh: &dyn Fn() -> i64,
+    retarget: &RetargetResidual, residuals: &mut HashMap<ResidualId, ResidualId>, functions: &mut HashMap<FnId, FnId>,
+) -> Value {
+    if let Some(value) = replace(value) { return value; }
+    match value {
+        Value::Residual(id) => {
+            if let Some(copy) = residuals.get(id) { return Value::Residual(*copy); }
+            let Some(mut residual) = arena.residuals.get(id).cloned() else { return value.clone(); };
+            let original_bindings = residual.env.iter().map(|(name, value)| (name.clone(), value.clone())).collect::<Vec<_>>();
+            let (term, overrides) = retarget(&residual.term, &original_bindings).unwrap_or_else(|| (residual.term.clone(), Vec::new()));
+            let copy = ResidualId(fresh());
+            residuals.insert(*id, copy);
+            residual.term = term;
+            let names = overrides.iter().map(|(name, _)| name.clone()).collect::<BTreeSet<_>>();
+            let mut env = BTreeMap::new();
+            for (name, value) in residual.env {
+                if names.contains(&name) { env.insert(name, value); }
+                else { env.insert(name, rewrite_value(arena, &value, replace, fresh, retarget, residuals, functions)); }
+            }
+            env.extend(overrides);
+            residual.env = env;
+            arena.residuals.insert(copy, residual);
+            Value::Residual(copy)
+        }
+        Value::Fn(id) => {
+            if let Some(copy) = functions.get(id) { return Value::Fn(*copy); }
+            let Some(Function::Closure(mut closure)) = arena.functions.get(id).cloned() else { return value.clone(); };
+            let copy = FnId(fresh());
+            functions.insert(*id, copy);
+            arena.functions.insert(copy, Function::Closure(closure.clone()));
+            closure.env = closure.env.into_iter().map(|(name, value)| (name, rewrite_value(arena, &value, replace, fresh, retarget, residuals, functions))).collect();
+            arena.functions.insert(copy, Function::Closure(closure));
+            Value::Fn(copy)
+        }
+        Value::List(values) => Value::List(values.iter().map(|value| rewrite_value(arena, value, replace, fresh, retarget, residuals, functions)).collect()),
+        Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), rewrite_value(arena, value, replace, fresh, retarget, residuals, functions))).collect()),
+        Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(arena, value, replace, fresh, retarget, residuals, functions))).collect()),
+        Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(arena, value, replace, fresh, retarget, residuals, functions))).collect()),
+        _ => value.clone(),
+    }
+}
+fn rewrite_plain(value: &Value, replace: &dyn Fn(&Value) -> Option<Value>) -> Value {
+    if let Some(value) = replace(value) { return value; }
+    match value {
+        Value::List(values) => Value::List(values.iter().map(|value| rewrite_plain(value, replace)).collect()),
+        Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), rewrite_plain(value, replace))).collect()),
+        Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_plain(value, replace))).collect()),
+        Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_plain(value, replace))).collect()),
+        _ => value.clone(),
+    }
+}
+fn remap_value(arena: &mut Arena, value: &Value, sources: &[(i64, i64)], residuals: &mut HashSet<ResidualId>, functions: &mut HashSet<FnId>) -> Value {
+    match value {
+        Value::Deferred(ty, id) if flow_syntax::ty::is_geometry(ty) => Value::Deferred(ty.clone(), sources.iter().find(|(source, _)| source == id).map_or(*id, |(_, target)| *target)),
+        Value::Residual(id) => {
+            if !residuals.insert(*id) { return value.clone(); }
+            if let Some(mut residual) = arena.residuals.get(id).cloned() {
+                residual.env = residual.env.into_iter().map(|(name, value)| (name, remap_value(arena, &value, sources, residuals, functions))).collect();
+                arena.residuals.insert(*id, residual);
+            }
+            value.clone()
+        }
+        Value::Fn(id) => {
+            if !functions.insert(*id) { return value.clone(); }
+            if let Some(Function::Closure(mut closure)) = arena.functions.get(id).cloned() {
+                closure.env = closure.env.into_iter().map(|(name, value)| (name, remap_value(arena, &value, sources, residuals, functions))).collect();
+                arena.functions.insert(*id, Function::Closure(closure));
+            }
+            value.clone()
+        }
+        Value::List(values) => Value::List(values.iter().map(|value| remap_value(arena, value, sources, residuals, functions)).collect()),
+        Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
+        Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
+        Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
+        _ => value.clone(),
+    }
+}
+pub mod Host {
+    use super::*;
+    pub fn free_name_walks() -> usize { FREE_WALKS.load(Ordering::Relaxed) as usize }
+    pub fn static_with_requests(budget: Option<usize>, record: bool, inputs: Option<&[(String, Vec<(String, Value)>)]>, workspace: &Workspace) -> Result<Eval, Diagnostic> {
+        static_with(workspace, record, inputs, budget)
+    }
+    pub fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signature: &FnSignature, function: FnId, arrays: &[Value]) -> Result<Value, Diagnostic> {
+        super::map_function(site, path, signature, function, arrays)
+    }
+    pub fn map_function_bindings(function: FnId, replace: &dyn Fn(&Value) -> Value) -> FnId {
+        let Some(arena) = arena_for_function(function) else { return function; };
+        let mut arena = arena.lock().unwrap();
+        if let Some(Function::Closure(mut closure)) = arena.functions.get(&function).cloned() {
+            closure.env = closure.env.into_iter().map(|(name, value)| (name, replace(&value))).collect();
+            arena.functions.insert(function, Function::Closure(closure));
+        }
+        function
+    }
+    pub fn rewrite(value: &Value, replace: &dyn Fn(&Value) -> Option<Value>) -> Value {
+        rewrite_with(value, replace, &|| NEXT_BULK.fetch_add(-1, Ordering::Relaxed), &|_, _| None)
+    }
+    pub fn rewrite_with(value: &Value, replace: &dyn Fn(&Value) -> Option<Value>, fresh: &dyn Fn() -> i64, retarget: &RetargetResidual) -> Value {
+        let Some(arena) = arena_for_value(value) else { return rewrite_plain(value, replace); };
+        let mut arena = arena.lock().unwrap();
+        rewrite_value(&mut arena, value, replace, fresh, retarget, &mut HashMap::new(), &mut HashMap::new())
+    }
+    pub fn remap_function_geometry(sources: &[(i64, i64)], function: FnId) -> FnId {
+        let Some(arena) = arena_for_function(function) else { return function; };
+        let mut arena = arena.lock().unwrap();
+        remap_value(&mut arena, &Value::Fn(function), sources, &mut HashSet::new(), &mut HashSet::new());
+        function
+    }
+    pub fn state_values(state: &State) -> Vec<Value> { super::state_values(state) }
+    pub fn function_scope(function: FnId) -> Option<(Path, Vec<i64>)> {
+        let arena = arena_for_function(function)?;
+        let arena = arena.lock().ok()?;
+        match arena.functions.get(&function)? {
+            Function::Closure(closure) => {
+                let mut path = closure.at.prefix.clone();
+                path.extend(closure.zone.clone());
+                Some((path, closure.at.iter.clone()))
+            }
+            Function::Named(_) => None,
+        }
+    }
+    pub fn force_reference(value: &Value, live: &Frame, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>>) -> Result<Value, Diagnostic> {
+        force_with(value, live, state, elems, resolve)
+    }
+    pub fn force_reference_observed(value: &Value, live: &Frame, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>>, on_walk: &dyn Fn()) -> Result<Value, Diagnostic> {
+        if is_live_value(value) { on_walk(); }
+        force_with(value, live, state, elems, resolve)
+    }
+    pub fn map_probe(
+        id: ResidualId, live: &Frame, state: Option<&State>,
+        resolve: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>>,
+        execute: Option<Arc<dyn Fn(ResidualId) -> Result<Value, Diagnostic> + Send + Sync>>,
+        offset: usize,
+    ) -> Result<(usize, Box<dyn Fn(usize) -> Result<Records, Diagnostic>>), Diagnostic> {
+        let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
+        fail_frame(live)?;
+        if let Some(execute) = execute { let _ = execute(id)?; }
+        let (context, function, lists, count) = {
+            let mut data = arena.lock().unwrap();
+            data.time = Some(live.clone());
+            data.state = state.cloned().or(data.state.clone());
+            data.resolve = resolve;
+            let residual = get_res(&data, id)?;
+            let TermNode::Hof(W::HofKind::Map, terms) = &residual.term.node else { return Err(error("E_TYPE", "A map probe needs a checked map.")); };
+            let Some(function_term) = terms.first() else { return Err(error("E_TYPE", "A map probe needs a checked map.")); };
+            let Value::Fn(function) = eval_concrete(&mut data, &residual.ctx, &Env { values: residual.env.clone() }, function_term)? else { return Err(error("E_TYPE", "Expected a function.")); };
+            let env = Env { values: residual.env };
+            let mut lists = Vec::with_capacity(terms.len().saturating_sub(1));
+            for (index, term) in terms.iter().skip(1).enumerate() { lists.push(eval_sequence(&mut data, &residual.ctx, &env, term, format!("l{}", index))?.0); }
+            let count = if lists.is_empty() { 0 } else { lists.iter().map(v_len).min().unwrap_or(0) };
+            (residual.ctx, function, lists, count)
+        };
+        let arena = arena.clone();
+        let at = move |index: usize| -> Result<Records, Diagnostic> {
+            if index >= count { return Err(error("E_LIST_RANGE", "Probe index is outside this map.")); }
+            let mut worker = arena.lock().unwrap().clone();
+            worker.record = true;
+            worker.records.clear();
+            worker.fn_calls.clear();
+            worker.memo.clear();
+            worker.step_count = 0;
+            worker.fn_calls.insert(function, (offset + index) as i64);
+            let mut context = context.clone();
+            context.record = true;
+            let args = lists.iter().map(|value| sequence_item(value, index)).collect::<Result<Vec<_>, _>>()?;
+            let value = call_fn(&mut worker, &context, function, &args, None)?;
+            let _ = concrete(&mut worker, value)?;
+            let mut records = worker.records.into_iter().collect::<Records>();
+            records.sort_by(|left, right| left.0.cmp(&right.0));
+            Ok(records)
+        };
+        Ok((count, Box::new(at)))
+    }
+}
+pub fn static_source_get()->Arc<dyn Fn(&dyn Fn(i64)->Option<Node>,&Value)->Option<Value>+Send+Sync>{SOURCE_HOOK.read().unwrap().clone()}
+pub fn set_static_source(f:Arc<dyn Fn(&dyn Fn(i64)->Option<Node>,&Value)->Option<Value>+Send+Sync>){*SOURCE_HOOK.write().unwrap()=f}
+pub fn set_static_facts(f:Arc<dyn Fn(&dyn Fn(i64)->Option<Node>,i64)->String+Send+Sync>){*FACTS_HOOK.write().unwrap()=f}
+pub fn set_live_kernels(f:Arc<dyn Fn(&[Node])->bool+Send+Sync>){*LIVE_KERNELS_HOOK.write().unwrap()=f}
+pub fn static_facts_get() -> Arc<dyn Fn(&dyn Fn(i64) -> Option<Node>, i64) -> String + Send + Sync> { FACTS_HOOK.read().unwrap().clone() }
+pub fn live_kernels_get() -> Arc<dyn Fn(&[Node]) -> bool + Send + Sync> { LIVE_KERNELS_HOOK.read().unwrap().clone() }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn form() -> flow_syntax::syntax::Syntax {
+        flow_syntax::syntax::make(flow_syntax::syntax::Node::Sym("test".into()))
+    }
+    fn literal(value: param::Value, ty: Ty) -> Term {
+        Term { path: None, ty, node: W::Node::Lit(value), form: form() }
+    }
+    fn workspace(body: Term) -> Workspace {
+        let graph_form = form();
+        Workspace {
+            name: "test".into(),
+            graphs: vec![Graph { name: "g".into(), context: flow_syntax::context::value(), inputs: Vec::new(), body, form: graph_form.clone() }],
+            defs: Vec::new(), nodes: Vec::new(), macros: Vec::new(), source: vec![graph_form],
+            live: BTreeSet::new(), invariant: BTreeSet::new(), approx: BTreeSet::new(),
+            packed: Vec::new(), packed_roots: Vec::new(), approx_reasons: Vec::new(),
+            kind_fns: Vec::new(), ops: Vec::new(),
+        }
+    }
+    #[test]
+    fn hash_is_stable_and_in_unit_interval() {
+        let result = hash(&[1.0, 2.0]);
+        assert_eq!(result, hash(&[1.0, 2.0]));
+        assert!((0.0..1.0).contains(&result));
+    }
+    #[test]
+    fn formatting_preserves_shared_byte_value_output() {
+        assert_eq!(show(&Value::Int(7)), b"7");
+        assert_eq!(show(&Value::Bool(true)), b"true");
+        assert_eq!(show(&Value::Text(vec![0xff])), vec![0xff]);
+    }
+    #[test]
+    fn checked_workspace_if_runs_only_its_selected_branch() {
+        let mut body = Term {
+            path: Some(vec!["g".into(), "@result".into()]), ty: Ty::Int,
+            node: W::Node::If(
+                Box::new(literal(param::Value::Bool(true), Ty::Bool)),
+                Box::new(literal(param::Value::Int(42), Ty::Int)),
+                Box::new(literal(param::Value::Int(7), Ty::Int)),
+            ),
+            form: form(),
+        };
+        body.form.id = 12;
+        assert_eq!(static_eval(&workspace(body)).unwrap().results, vec![("g".into(), Value::Int(42))]);
+    }
+    #[test]
+    fn checked_workspace_loop_binds_each_item_in_order() {
+        let source = Term {
+            path: None, ty: Ty::List(Box::new(Ty::Int)),
+            node: W::Node::ListLit(vec![literal(param::Value::Int(1), Ty::Int), literal(param::Value::Int(2), Ty::Int)]),
+            form: form(),
+        };
+        let body = Term {
+            path: Some(vec!["g".into(), "values".into(), "@result".into()]),
+            ty: Ty::Int, node: W::Node::RefBinding("i".into(), Vec::new()), form: form(),
+        };
+        let term = Term {
+            path: Some(vec!["g".into(), "values".into()]),
+            ty: Ty::List(Box::new(Ty::Int)),
+            node: W::Node::Loop {
+                kind: W::LoopKind::For, accs: Vec::new(),
+                clauses: vec![(W::Pattern::Name("i".into()), source)],
+                skip: Vec::new(), body: Box::new(body),
+                zone: vec!["g".into(), "values".into()],
+            },
+            form: form(),
+        };
+        assert_eq!(static_eval(&workspace(term)).unwrap().results, vec![("g".into(), Value::List(vec![Value::Int(1), Value::Int(2)]))]);
+    }
+}

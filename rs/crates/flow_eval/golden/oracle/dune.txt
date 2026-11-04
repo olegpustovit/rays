@@ -1,0 +1,3 @@
+(executables
+ (names dump chk)
+ (libraries flow param))

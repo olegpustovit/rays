@@ -1,0 +1,16 @@
+open Flow
+
+let sg l = String.concat "," (List.map (fun (n, t) -> n ^ ":" ^ Ty.to_string t) l)
+
+let () =
+  List.iter
+    (fun (o : Op.t) ->
+      Printf.printf "%s|%s|%s|%s|pos=%s|opt=%s|rest=%s|kw=%s|choices=%s|any=%b|live=%b|ar=%b|pk=%b\n"
+        o.name (Context.name o.ctx) o.category
+        (match o.shape with Op.Scalar -> "scalar" | Op.Struct { splice } -> "struct" ^ string_of_bool splice)
+        (sg o.signature.pos) (sg o.signature.opt)
+        (match o.signature.rest with None -> "-" | Some (n, t) -> n ^ ":" ^ Ty.to_string t)
+        (sg o.signature.kw)
+        (String.concat ";" (List.map (fun (n, c) -> n ^ "=" ^ String.concat "/" c) o.choices))
+        o.any_num o.live (o.arithmetic <> None) (Op.packed_kind o <> None))
+    Op.all

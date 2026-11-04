@@ -1,0 +1,12 @@
+[package]
+name = "flow_check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+flow_syntax = { path = "../flow_syntax" }
+input = { path = "../input" }
+param = { path = "../param" }
+rays_diagnostic = { path = "../rays_diagnostic" }
+rays_math = { path = "../rays_math" }
