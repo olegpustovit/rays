@@ -788,7 +788,8 @@ fn crate_name(package_name: &str, lib_name: Option<&str>) -> String {
 const HELPER_LEAVES: [&str; 4] = ["cfmt", "ocaml_int", "rays_hash", "rays_collections"];
 /// OCaml leaves a crate may name directly when its allowed dependencies reach them (flow reaches
 /// rays_diagnostic and input; lru reaches mem).
-const OCAML_LEAVES: [&str; 3] = ["rays_diagnostic", "input", "mem"];
+// param: OCaml flow depends on it, so anything reaching flow reaches param.
+const OCAML_LEAVES: [&str; 4] = ["rays_diagnostic", "input", "mem", "param"];
 
 /// Direct edges each crate may name, mirroring the OCaml dune library lists (and `only` in
 /// test/dependency_gate.ml). The Rust flow library is three crates; each takes the OCaml flow edges.
