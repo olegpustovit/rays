@@ -3087,8 +3087,8 @@ pub fn check(
     packed_roots.sort_by(|(a, p),(b, q)| p.cmp(q).then(a.id.cmp(&b.id)));
     let workspace = Workspace {
         name: name.clone(),
-        graphs: graph_names.iter().filter_map(|name| checker.graph_terms.get(name).cloned()).collect::<Vec<_>>().into(),
-        defs: def_names.iter().filter_map(|name| checker.def_terms.get(name).cloned()).collect::<Vec<_>>().into(),
+        graphs: graph_names.iter().filter_map(|name| checker.graph_terms.remove(name)).collect::<Vec<_>>().into(),
+        defs: def_names.iter().filter_map(|name| checker.def_terms.remove(name)).collect::<Vec<_>>().into(),
         nodes: checker.nodes.into(),
         macros: checker.macro_forms.into(),
         source: forms.to_vec().into(),
