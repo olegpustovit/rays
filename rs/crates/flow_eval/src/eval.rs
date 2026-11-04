@@ -3228,8 +3228,8 @@ enum Kind {
     Lit(Value),
     Local(usize, Vec<String>),
     Outer(String, Vec<String>),
-    Op { op: OpRef, args: Vec<Code>, names: Vec<(String, Value)>, named: Vec<bool> },
-    AndOr { or: bool, op: OpRef, first: Box<Code>, second: Box<Code>, names: Vec<(String, Value)>, named: Vec<bool> },
+    Op { op: OpRef, args: Vec<Code>, names: Vec<(String, Value)>, named: Vec<bool>, fast: Option<Fast> },
+    AndOr { or: bool, op: OpRef, first: Box<Code>, second: Box<Code>, names: Vec<(String, Value)>, named: Vec<bool>, fast: bool },
     If(Box<Code>, Box<Code>, Box<Code>),
     Cond(Vec<(Code, Code)>, Box<Code>),
     Case(Box<Code>, Vec<(Value, Code)>, Box<Code>),
@@ -3258,6 +3258,28 @@ enum CodePlan { Walk(Stamp), Run(Box<Compiled>) }
 const COMPILE_MIN_NODES: usize = 4;
 
 fn op_at(workspace: &Workspace, op: OpRef) -> &op::Op { match op { OpRef::Extra(i) => &workspace.ops[i], OpRef::Builtin(i) => &op::all()[i] } }
+// A built-in scalar operator with arguments `a` (and `b`), run without the operator call: these have no check, a result type that
+// cannot fail, and a body that is exactly the arm below (flow_check op.rs: value_op integer and comparison operators, binary_op through
+// its `arithmetic`, `not`, and the float comparisons).
+#[derive(Clone, Copy)]
+enum Fast { Int(flow_syntax::packed_ops::Integer), Cmp(flow_syntax::packed_ops::Comparison), Arith, FloatCmp(fn(f64, f64) -> bool), Not }
+fn op_fast(workspace: &Workspace, op: OpRef, args: &[(String, Term)]) -> Option<Fast> {
+    let OpRef::Builtin(_) = op else { return None; };
+    let found = op_at(workspace, op);
+    let names: Vec<&str> = args.iter().map(|(name, _)| name.as_str()).collect();
+    let binary = names == ["a", "b"];
+    match found.name.as_str() {
+        "not" if names == ["a"] => Some(Fast::Not),
+        "<" if binary => Some(Fast::FloatCmp(|x, y| x < y)),
+        ">" if binary => Some(Fast::FloatCmp(|x, y| x > y)),
+        "<=" if binary => Some(Fast::FloatCmp(|x, y| x <= y)),
+        ">=" if binary => Some(Fast::FloatCmp(|x, y| x >= y)),
+        "=" if binary => Some(Fast::FloatCmp(|x, y| x == y)),
+        "+" | "-" | "*" | "/" | "mod" | "pow" | "min" | "max" if binary && found.arithmetic.is_some() => Some(Fast::Arith),
+        name if binary => flow_syntax::packed_ops::integer(name).map(Fast::Int).or_else(|| flow_syntax::packed_ops::comparison(name).map(Fast::Cmp)),
+        _ => None,
+    }
+}
 // Which arguments `op::result_type` reads (the positional and optional ones), found once per compiled call site.
 fn op_named(workspace: &Workspace, op: OpRef, args: &[(String, Term)]) -> Vec<bool> {
     let found = op_at(workspace, op);
@@ -3300,7 +3322,7 @@ impl Compiler {
                 let op = self.op(a, name)?;
                 let seg = Seg::Owned(intern(a, &args[0].0)); let first = Box::new(self.term(a, &args[0].1, Some(seg))?);
                 let seg = Seg::Owned(intern(a, &args[1].0)); let second = Box::new(self.term(a, &args[1].1, Some(seg))?);
-                { let named = op_named(&self.workspace, op, &args[..2]); Kind::AndOr { or: name == "or", op, first, second, names: vec![(args[0].0.clone(), Value::No_geo), (args[1].0.clone(), Value::No_geo)], named } }
+                { let named = op_named(&self.workspace, op, &args[..2]); let fast = matches!(op, OpRef::Builtin(_)) && args[0].0 == "a" && args[1].0 == "b"; Kind::AndOr { or: name == "or", op, first, second, names: vec![(args[0].0.clone(), Value::No_geo), (args[1].0.clone(), Value::No_geo)], named, fast } }
             }
             TermNode::Op { op: name, args, skip } if skip.is_empty() && name != "live?" => {
                 let op = self.op(a, name)?;
@@ -3310,7 +3332,7 @@ impl Compiler {
                     let seg = if count == 0 { Seg::Owned(intern(a, arg)) } else { format!("{}#{}", arg, count).into() };
                     code.push(self.term(a, term, Some(seg))?);
                 }
-                Kind::Op { op, args: code, names: args.iter().map(|(name, _)| (name.clone(), Value::No_geo)).collect(), named: op_named(&self.workspace, op, args) }
+                Kind::Op { op, args: code, names: args.iter().map(|(name, _)| (name.clone(), Value::No_geo)).collect(), named: op_named(&self.workspace, op, args), fast: op_fast(&self.workspace, op, args) }
             }
             TermNode::If(test, yes, no) => {
                 let test = self.term(a, test, Some("if".into()))?;
@@ -3442,6 +3464,32 @@ impl Run {
                 context
             }
         }
+    }
+    // A `Fast` operator: its arguments, then its arm; arguments of other kinds take the operator call.
+    fn fast(&mut self, a: &mut Arena, op: OpRef, fast: Fast, args: &mut [Code], names: &mut Vec<(String, Value)>, named: &[bool]) -> Result<Value, Abandon> {
+        let first = self.eval(a, &mut args[0])?;
+        let second = if args.len() > 1 { Some(self.eval(a, &mut args[1])?) } else { None };
+        let value = match (fast, &first, &second) {
+            (Fast::Int(operation), Value::Int(x), Some(Value::Int(y))) => Some(Value::Int(flow_syntax::packed_ops::integer_apply(operation, *x, *y).map_err(|_| Abandon)?)),
+            (Fast::Cmp(operation), Value::Int(x), Some(Value::Int(y))) => Some(Value::Bool(flow_syntax::packed_ops::comparison_apply(operation, *x, *y))),
+            (Fast::FloatCmp(predicate), x, Some(y)) => Some(Value::Bool(predicate(num(x).map_err(|_| Abandon)?, num(y).map_err(|_| Abandon)?))),
+            (Fast::Arith, x, Some(y)) => {
+                let apply = &op_at(&self.workspace, op).arithmetic.as_ref().expect("an arithmetic operator").apply;
+                let result = apply(x, y).map_err(|_| Abandon)?;
+                if is_live_value(&result) { return Err(Abandon); }
+                Some(result)
+            }
+            (Fast::Not, x, None) => Some(Value::Bool(!truth(x).map_err(|_| Abandon)?)),
+            _ => None,
+        };
+        if let Some(value) = value { return Ok(value); }
+        let mut values = std::mem::take(names);
+        values[0].1 = first;
+        if let Some(second) = second { values[1].1 = second; }
+        let result = self.apply(a, op, &values, named);
+        for entry in values.iter_mut() { entry.1 = Value::No_geo; }
+        *names = values;
+        result
     }
     fn apply(&mut self, a: &Arena, op: OpRef, values: &[(String, Value)], named: &[bool]) -> Result<Value, Abandon> {
         let found = op_at(&self.workspace, op);
@@ -3579,7 +3627,8 @@ impl Run {
                 let env = &self.frames.last().expect("a frame").env;
                 if fields.is_empty() { env.get(name).ok_or(Abandon)? } else { Self::fields(env.get_ref(name).ok_or(Abandon)?, fields)? }
             }
-            Kind::Op { op, args, names, named } => {
+            Kind::Op { op, args, names, named, fast } => {
+                if let Some(fast) = *fast { let value = self.fast(a, *op, fast, args, names, named)?; return self.done(path, value, false); }
                 let mut values = std::mem::take(names);
                 for (index, arg) in args.iter_mut().enumerate() {
                     match self.eval(a, arg) { Ok(value) => values[index].1 = value, Err(abandon) => { *names = values; return Err(abandon); } }
@@ -3589,10 +3638,16 @@ impl Run {
                 *names = values;
                 result?
             }
-            Kind::AndOr { or, op, first, second, names, named } => {
+            Kind::AndOr { or, op, first, second, names, named, fast } => {
                 let left = self.eval(a, first)?;
                 if let Value::Bool(value) = &left { if *value == *or { return self.done(path, Value::Bool(*value), false); } }
                 let right = self.eval(a, second)?;
+                // `and` / `or`: truthy(a) and/or truthy(b)
+                if *fast {
+                    let x = truth(&left).map_err(|_| Abandon)?;
+                    let value = if *or { x || truth(&right).map_err(|_| Abandon)? } else { x && truth(&right).map_err(|_| Abandon)? };
+                    return self.done(path, Value::Bool(value), false);
+                }
                 let mut values = std::mem::take(names);
                 values[0].1 = left;
                 values[1].1 = right;
