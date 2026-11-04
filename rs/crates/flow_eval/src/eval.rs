@@ -166,6 +166,9 @@ impl Drop for ResidualHandlerScope {
 const MAX_STEPS: usize = 600_000;
 const MAX_ITERATIONS: usize = 4096;
 const MAX_DEPTH: usize = 64;
+// Measured on uv_sphere (debug): a trusted bulk kernel costs ~1.5 ms to offer and wins over walking from a few hundred elements
+// (25-48 elements: walk 0.4 ms vs kernel 1.5-2.4 ms; 1,106: walk 56-135 ms vs 13-22 ms; 2,209: 10 ms vs 6.5 ms).
+const BULK_MIN_ELEMENTS: usize = 256;
 const PACKED_BLOCK: usize = 1024;
 pub const CONTEXT_LABEL: &str = "$label";
 pub const CARD_KIND: &str = "$card";
@@ -1806,6 +1809,21 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
     let id = if static_map || (a.record && c.record && matches!(&term.ty, Ty::Array(_))) { Some(calls.unwrap_or_else(|| map_residual(a, c, term, env))) } else { None };
     if static_map {
         if let Some(map) = current_residual_handlers().and_then(|handlers| handlers.map) { let at = site(c); progress.finish = Some(lend(a, || outside_handler(|| map(&at, term, count)))); }
+    }
+    // A packed map of at least BULK_MIN_ELEMENTS (and at most 4,096, where OCaml walks it) is offered to a trusted bulk handler before
+    // it is walked: the handler's whole array is the walker's (trusted), the call counts are reserved as for a large map, and packed
+    // walks restore their step count, so nothing observable differs; it only asks the host where OCaml would not (post_parity_backlog).
+    if static_map && count >= BULK_MIN_ELEMENTS && count <= MAX_ITERATIONS && matches!(&term.ty, Ty::Array(_))
+        && current_residual_handlers().is_some_and(|handlers| handlers.trusted && (!a.record || !c.record || (handlers.replay && function_replayable(a, function))))
+    {
+        let id = id.expect("a static map has its residual");
+        if let Some(candidate) = current_residual_handlers().and_then(|handlers| handlers.bulk).and_then(|bulk| call_lent(a, id, &|id| bulk(id))) {
+            if value::ty_of(&candidate) == term.ty && array_len(&candidate).ok() == Some(count) {
+                reserve_function_calls(a, function, count);
+                progress.completed = true;
+                return Ok(candidate);
+            }
+        }
     }
     let mut large = static_map && count > MAX_ITERATIONS && matches!(&term.ty, Ty::Array(_));
     if large {

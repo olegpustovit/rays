@@ -22,3 +22,4 @@ dropping it.
 
 Not here: anything that changes a documented Lisp contract (names, defaults, ranges, errors). Those
 stay; this list only frees implementation details that today are pinned by goldens.
+| 9 | `flow_eval` `eval_map_walk` (protocol, not output) | Offer trusted, non-recording packed maps of 256..4,096 elements to the bulk kernel before walking them (done, `BULK_MIN_ELEMENTS`); OCaml offers only above 4,096. Results, call counts and step counts are the walker's; what differs is that the host is asked, and a walked body's own observations (nested maps' `observe` callbacks), closures and residual ids are not made | Taken (no output difference in goldens); listed because the host sees a different offer sequence than OCaml's | uv_sphere debug lowering 281 -> 243 ms | uv_sphere map timings (debug): 25-48 elements walk 0.4 ms vs kernel 1.5-2.4 ms; 1,106: 56-135 ms vs 13-22 ms; 2,209: 10 ms vs 6.5 ms |
