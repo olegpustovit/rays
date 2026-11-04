@@ -113,7 +113,7 @@ pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::Gpu::Config>, ops: Vec<FlowOp
     let text = editor_core::store::read_text(path)?;
     let factories_v = factories.map(|f| f.to_vec()).unwrap_or_else(sop::nodes::factories);
     let catalog = kinds::catalog(1, &factories_v).map_err(|d| rays_diagnostic::to_string(&d))?;
-    let options = TextOptions { ops: Some(ops), settings: Some(settings::defaults(settings_value)), ..Default::default() };
+    let options = TextOptions { ops: Some(std::sync::Arc::new(ops)), settings: Some(settings::defaults(settings_value)), ..Default::default() };
     let mut workspace = workspace_doc::of_text(&options, &catalog, &text)
         .map_err(|ds| ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n"))?;
     // the view is the preset's own form, not the document's

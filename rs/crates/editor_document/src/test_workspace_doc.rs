@@ -442,3 +442,13 @@ fn part_literals() {
     // not ported: the Editor.create half (editor literal phases), see rays_editor
 }
 
+
+#[test]
+fn text_edit_keeps_the_ops_arc_so_an_unchanged_graph_is_not_reprojected() {
+    let d = doc::of_text(&TextOptions::default(), &catalog(), STILL).unwrap();
+    let text = format!("; edited
+{STILL}");
+    let edited = doc::of_text(&TextOptions { ops: Some(d.checked.ops.clone()), ..Default::default() }, &catalog(), &text).unwrap();
+    assert!(Arc::ptr_eq(&d.checked.ops, &edited.checked.ops));
+    assert!(flow_graph::projection::same_graph(&d.checked, &edited.checked, "g"));
+}

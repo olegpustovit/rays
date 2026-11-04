@@ -447,7 +447,7 @@ pub mod Workspace {
     pub fn load(ops: Option<Vec<flow_check::op::Op>>, imports: Vec<(String, String)>, factories: Option<&[Factory]>, text: &str) -> Result<workspace_doc::T, Vec<Diagnostic>> {
         match workspace_catalog(factories) {
             Err(d) => Err(vec![d]),
-            Ok(catalog) => workspace_doc::of_text(&workspace_doc::TextOptions { ops, imports, ..Default::default() }, &catalog, text),
+            Ok(catalog) => workspace_doc::of_text(&workspace_doc::TextOptions { ops: ops.map(std::sync::Arc::new), imports, ..Default::default() }, &catalog, text),
         }
     }
 

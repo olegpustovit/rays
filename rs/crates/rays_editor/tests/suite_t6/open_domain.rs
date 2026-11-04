@@ -44,7 +44,7 @@ fn op_with(name: &str, signature: Signature, body_name: &'static str) -> Op {
 }
 
 fn of_text(ops: &[Op], catalog: &Catalog, text: &str) -> Result<wd::T, Vec<rays_diagnostic::Diagnostic>> {
-    wd::of_text(&wd::TextOptions { ops: Some(ops.to_vec()), ..Default::default() }, catalog, text)
+    wd::of_text(&wd::TextOptions { ops: Some(std::sync::Arc::new(ops.to_vec())), ..Default::default() }, catalog, text)
 }
 
 fn doc(r: Result<wd::T, Vec<rays_diagnostic::Diagnostic>>) -> wd::T {

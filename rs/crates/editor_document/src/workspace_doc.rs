@@ -335,7 +335,7 @@ fn prune_keys(checked: &Workspace, layout: &lbp::T) -> lbp::T {
 #[derive(Clone, Default)]
 pub struct TextOptions {
     /// Defaults to `flow_sop::operators::all`; an explicit list replaces those extensions.
-    pub ops: Option<Vec<FlowOp>>,
+    pub ops: Option<Arc<Vec<FlowOp>>>,
     pub imports: Vec<(String, String)>,
     pub inputs: Inputs,
     pub settings: Option<settings::T>,
@@ -401,9 +401,11 @@ pub fn check_text(options: &TextOptions, catalog: &Catalog, text: &str) -> Resul
     };
     // Imported parses have independent ids; the composed workspace owns one id space.
     let ws = s::renumber(0, &ws).0;
-    let ops: Vec<FlowOp> = options.ops.clone().unwrap_or_else(|| flow_sop::operators::all().to_vec());
+    let ops: Arc<Vec<FlowOp>> = options.ops.clone().unwrap_or_else(|| Arc::new(flow_sop::operators::all().to_vec()));
     let (checked, warnings) = fsc::check_workspace(&ops, fragment, None, catalog, std::slice::from_ref(&ws));
-    let Some(checked) = checked else { return Err(warnings) };
+    let Some(mut checked) = checked else { return Err(warnings) };
+    // the ops stay one shared list across text edits (`same_graph` compares them by identity)
+    checked.ops = ops.clone();
     let layout = match forms.iter().find(|f| head(f) == Some("layout")) {
         None => options.layout.clone().unwrap_or_default(),
         Some(f) => lbp::of_syntax(f).map_err(|m| vec![diag(Some(f.span.clone()), "E_LAYOUT", &m)])?,
