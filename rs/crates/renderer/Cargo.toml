@@ -1,0 +1,87 @@
+[package]
+name = "renderer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "renderer"
+path = "src/lib.rs"
+
+[dependencies]
+ogpu_core = { path = "../ogpu_core" }
+ogpu = { path = "../ogpu" }
+scene_command = { path = "../scene_command" }
+runtime = { path = "../runtime" }
+runtime_resources = { path = "../runtime_resources" }
+lru = { path = "../lru" }
+rays_math = { path = "../rays_math" }
+mem = { path = "../mem" }
+cfmt = { path = "../cfmt" }
+sdl3 = { path = "../sdl3" }
+
+[dev-dependencies]
+ogpu_mock = { path = "../ogpu_mock" }
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+
+# Resource operations (and so Renderer.destroy) need the SDL main thread, which libtest never gives a
+# test: these targets' own main runs them (tests/common/window.rs). GPU tests are gpu_*, tests that
+# open a window are window_*.
+
+[[test]]
+name = "gpu_probe"
+harness = false
+
+[[test]]
+name = "gpu_draw"
+harness = false
+
+[[test]]
+name = "gpu_offscreen"
+harness = false
+
+[[test]]
+name = "gpu_scene2_coordinates"
+harness = false
+
+[[test]]
+name = "gpu_dense_scene2"
+harness = false
+
+[[test]]
+name = "gpu_ui_pipeline"
+harness = false
+
+[[test]]
+name = "gpu_marks_native"
+harness = false
+
+[[test]]
+name = "gpu_batch_merge"
+harness = false
+
+[[test]]
+name = "gpu_shapes_lowering"
+harness = false
+
+[[test]]
+name = "gpu_scene2_argument"
+harness = false
+
+[[test]]
+name = "gpu_scene3_instances"
+harness = false
+
+
+[[test]]
+name = "window_runtime_render"
+harness = false
+
+[[test]]
+name = "window_scene3_lighting"
+harness = false
+
+[[test]]
+name = "window_scene2_argument"
+harness = false
+
