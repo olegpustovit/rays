@@ -237,3 +237,17 @@ fn a_live_validation_keeps_the_plain_node() {
     let kinds: Vec<&str> = l.plan.nodes.iter().map(|n| n.kind.as_str()).collect();
     assert!(kinds.contains(&"sop/transform"), "a live validation residualized the call: {kinds:?}");
 }
+
+/// OCaml `test_lisp_inline.ml` ("a driven transform"): a card whose `:validate` or `if` reads a live
+/// argument stays inlined, its check deferred as a guard of the card (`Eval.guards`, `card ~guards`).
+/// The Rust evaluator has no guards, so such a call falls back to the plain catalog node: on gpu_sea
+/// that left `sop/attribute_noise` a cooked-selection node whose kernels were rebuilt every frame
+/// (a new device site and slot set per frame) and could not bind their `Source("sop/attr")`.
+#[test]
+#[ignore = "needs the evaluator's deferred guards (flow_eval): a live validation inlines the card"]
+fn a_live_validation_inlines_the_card_as_a_guard() {
+    let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse("(workspace x (graph g :context sop (sop/transform (sop/grid :rows 5 :columns 7) :recompute_normals true :shear_xy (* t 2.0))))"))
+        .unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let kinds: Vec<&str> = l.plan.nodes.iter().map(|n| n.kind.as_str()).collect();
+    assert!(!kinds.contains(&"sop/transform"), "the driven transform stayed a catalog node: {kinds:?}");
+}
