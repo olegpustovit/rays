@@ -390,7 +390,8 @@ pub fn attribute_args(head: &str, args: &[Syntax]) -> Vec<Syntax> {
     let mut normalized = Vec::with_capacity(args.len());
     let mut i = 0;
     let mut position = 0;
-    while i < args.len() {
+    if !positional { normalized = args.to_vec(); }
+    while positional && i < args.len() {
         if i + 1 < args.len() && matches!(&args[i].node, Node::Kw(key) if is_one_of(key, &["owner", "type", "selection", "default"])) {
             normalized.push(args[i].clone());
             normalized.push(args[i + 1].clone());

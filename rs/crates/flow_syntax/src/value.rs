@@ -468,19 +468,20 @@ pub fn int_array_put(data: &mut [i64], index: usize, value: &Value) -> Result<()
     }
     Ok(())
 }
-fn allocation_count_ok(count: i64, item_size: usize) -> Result<usize, Diagnostic> {
-    if count < 0 || (count as u128) > (isize::MAX as u128 / item_size as u128) { Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds.")) }
+const MAX_ARRAY_LENGTH: u128 = (1u128 << 54) - 1; // OCaml 5: Sys.max_array_length = Sys.max_floatarray_length
+fn allocation_count_ok(count: i64, width: usize) -> Result<usize, Diagnostic> {
+    if count < 0 || (count as u128) > MAX_ARRAY_LENGTH / width as u128 { Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds.")) }
     else { Ok(count as usize) }
 }
 pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Result<Value, Diagnostic> {
     if *element == Ty::Text {
-        let count = allocation_count_ok(count, std::mem::size_of::<Vec<u8>>())?;
+        let count = allocation_count_ok(count, 1)?;
         let mut values = Vec::with_capacity(count);
         for index in 0..count { match f(index) { Value::Text(text) => values.push(text), _ => return Err(fail("E_ARRAY_TYPE", "Text arrays contain text values.")) } }
         return Ok(Value::Text_array(Arc::new(values)));
     }
     if *element == Ty::Int {
-        let count = allocation_count_ok(count, std::mem::size_of::<i64>())?;
+        let count = allocation_count_ok(count, 1)?;
         let mut values = vec![0; count];
         for (index, slot) in values.iter_mut().enumerate() { *slot = match coerce_to(&Ty::Int, &f(index))? { Value::Int(value) => value, _ => return Err(fail("E_ARRAY_TYPE", "Packed integer arrays contain integer values.")) }; }
         return Ok(Value::Int_array(Arc::new(values)));
@@ -493,7 +494,7 @@ pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Resul
         },
         _ => return Err(fail("E_ARRAY_TYPE", "Packed arrays contain float, vec2, vec3 or vec4 values.")),
     };
-    let count = allocation_count_ok(count, std::mem::size_of::<f64>() * width)?;
+    let count = allocation_count_ok(count, width)?;
     let mut values = vec![0.0; count * width];
     for index in 0..count { array_put(&mut values, width, index, &f(index))?; }
     let values = Arc::new(values);

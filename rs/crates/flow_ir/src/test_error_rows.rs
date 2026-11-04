@@ -164,7 +164,7 @@ fn ill_typed_error_rows_forms_are_rejected_by_the_checker() {
 }
 
 // The checked graph edits (flow_graph), compiled out: see the header.
-#[cfg(any())]
+// checked-edit tests (flow_graph dev-dependency)
 mod graph_edits {
     use super::*;
     use flow_graph::flow_edit::{apply_checked, ArgKey, Op};

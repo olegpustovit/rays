@@ -103,7 +103,5 @@ fn test_js_programs_match_the_ocaml_printers() {
         diffs.region(&name, &program);
         diffs.same("wgsl", &name, &wgsl_text(wgsl::kernel(false, &program)), &expected("wgsl", &name, ".wgsl"));
     }
-    // OCaml evaluates the branches of `if` right to left, so its text constants are numbered the
-    // other way round (js::region itself prints the register program it is given identically).
-    diffs.finish(&["js_region carried record", "js_region_fast carried record"]);
+    diffs.finish(&[]);
 }

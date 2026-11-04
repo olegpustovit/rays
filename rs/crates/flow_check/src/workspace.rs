@@ -27,7 +27,7 @@ pub enum Pattern { Name(String), Seq(Vec<Pattern>), Keys(Vec<String>) }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagnosticPolicy { First, RangeLast }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Term { pub path: Option<Path>, pub ty: Ty, pub node: Node, pub form: Syntax }
+pub struct Term { pub path: Option<Path>, pub ty: Ty, pub node: Node, pub form: std::sync::Arc<Syntax> }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
     Lit(param::Value), Text(Vec<u8>), Nil, Time, Vec(Vec<Term>), RefBinding(String, Vec<String>),
@@ -194,7 +194,7 @@ fn cooked(ty: &Ty) -> bool {
 }
 
 fn make_term(form: &Syntax, ty: Ty, node: Node) -> Term {
-    Term { path: None, ty, node, form: form.clone() }
+    Term { path: None, ty, node, form: std::sync::Arc::new(form.clone()) }
 }
 
 fn set_path(mut term: Term, path: Path) -> Term {
@@ -395,11 +395,11 @@ impl Info {
 #[derive(Clone)]
 enum Callable{Local(Rc<Closure>),Def(String),Op(String),Kind(catalog::Kind)}
 #[derive(Clone)]
-struct Closure{params:Vec<(Syntax,Option<Ty>)>,body:Syntax,env:BTreeMap<String,Info>,ctx:Context,path:Path,name:String}
+struct Closure{params:Vec<(Syntax,Option<Ty>)>,body:Syntax,env:Rc<BTreeMap<String,Info>>,ctx:Context,path:Path,name:String}
 #[derive(Clone)]
 struct Sig{name:String,ctx:Context,params:Vec<(String,Ty,Option<Syntax>)>,body:Syntax,form:Syntax}
 #[derive(Clone)]
-struct Cx{env:BTreeMap<String,Info>,ctx:Context,path:Path,scope:String,in_def:bool,stack:Vec<String>,depth:usize,zone:Option<usize>,zbody:bool}
+struct Cx{env:Rc<BTreeMap<String,Info>>,ctx:Context,path:Path,scope:String,in_def:bool,stack:Vec<String>,depth:usize,zone:Option<usize>,zbody:bool}
 #[derive(Clone)]
 struct Arg{key:Option<String>,form:Syntax,term:Term,info:Info}
 
@@ -432,6 +432,8 @@ struct Checker {
     node_order: Vec<String>,
     declared_names: BTreeSet<String>,
     steps: usize,
+    count: usize,
+    children: usize,
     zone_id: usize,
     graph_stack: Vec<String>,
 }
@@ -466,6 +468,8 @@ impl Checker {
             node_order: Vec::new(),
             declared_names: BTreeSet::new(),
             steps: 0,
+            count: 0,
+            children: 0,
             zone_id: 0,
             graph_stack: Vec::new(),
         }
@@ -535,7 +539,7 @@ impl Checker {
 
  fn infer(&mut self, cx: &Cx, form: &Syntax) -> (Term, Info) {
      self.steps += 1;
-     if self.steps > 400_000 {
+     if self.steps > 400_000 * (self.count + self.children).max(1) {
          return self.fail_term(form, "E_BUDGET", "The workspace is too large to check: call-site typing exceeded its budget. Reduce nested function calls.");
      }
      let mut result = if !form.meta.is_empty() {
@@ -587,7 +591,7 @@ impl Checker {
          let (_, checked) = self.infer_plain(cx, &plain);
          let (mut branch, mut value) = self.branch(cx, "then", &items[2]);
          branch.ty = checked.ty.clone();
-         branch.form = form.clone();
+         branch.form = std::sync::Arc::new(form.clone());
          value.ty = checked.ty;
          return (branch, value);
      }
@@ -911,7 +915,7 @@ impl Checker {
    "quote"|"quasiquote"|"unquote"|"unquote-splicing"=>self.fail_term(f,"E_QUOTE",&format!("{name} belongs in a defmacro template (`…).")),"workspace"|"graph"|"defn"|"defnode"|"defmacro"=>self.fail_term(f,"E_FORM",&format!("{name} is a top-level form of a workspace.")),
    _=>self.call_named(cx,f,name,args)
  }}
- fn let_scope(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax],base:Path)->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let SNode::Vec(bs)=&args[0].node else{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")};if bs.len()%2!=0{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let mut env=cx.env.clone();let mut out=Vec::new();let mut seen=BTreeSet::new();for pair in bs.chunks_exact(2){let p=&pair[0];if !self.check_pattern(cx,p,&mut seen,&env,"let*" ){continue}let mut path=base.clone();path.push(Self::pattern_key(p));let mut inner=cx.clone();inner.env=env.clone();inner.path=path.clone();inner.zbody=false;let(t,v)=if pair[1].meta.is_empty()&&matches!((&p.node,&pair[1].node),(SNode::Sym(_),SNode::List(xs)) if xs.first().is_some_and(|h|matches!(&h.node,SNode::Sym(s) if s=="fn"))){self.make_fn(&inner,&pair[1],&pair[1].node_as_args(),Self::pattern_key(p).as_str(),Some(path.clone()))}else{self.binding(&inner,&pair[1],path.clone())};let mut t=t;t.path=Some(path.clone());self.mark(path.clone(),&v);if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}{let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",&mut env);}out.push((Self::pattern(p),t));}let mut inner=cx.clone();inner.env=env;inner.zbody=false;let(t,v)=self.result_in(&inner,&args[1],&base);(make_term(f,v.ty.clone(),Node::Let(out,Box::new(t))),v)}
+ fn let_scope(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax],base:Path)->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let SNode::Vec(bs)=&args[0].node else{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")};if bs.len()%2!=0{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let mut env=(*cx.env).clone();let mut out=Vec::new();let mut seen=BTreeSet::new();for pair in bs.chunks_exact(2){let p=&pair[0];if !self.check_pattern(cx,p,&mut seen,&env,"let*" ){continue}let mut path=base.clone();path.push(Self::pattern_key(p));let mut inner=cx.clone();inner.env=Rc::new(env.clone());inner.path=path.clone();inner.zbody=false;let(t,v)=if pair[1].meta.is_empty()&&matches!((&p.node,&pair[1].node),(SNode::Sym(_),SNode::List(xs)) if xs.first().is_some_and(|h|matches!(&h.node,SNode::Sym(s) if s=="fn"))){self.make_fn(&inner,&pair[1],&pair[1].node_as_args(),Self::pattern_key(p).as_str(),Some(path.clone()))}else{self.binding(&inner,&pair[1],path.clone())};let mut t=t;t.path=Some(path.clone());self.mark(path.clone(),&v);if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}{let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",&mut env);}out.push((Self::pattern(p),t));}let mut inner=cx.clone();inner.env=Rc::new(env);inner.zbody=false;let(t,v)=self.result_in(&inner,&args[1],&base);(make_term(f,v.ty.clone(),Node::Let(out,Box::new(t))),v)}
  fn pattern_key(p:&Syntax)->String{if let SNode::Sym(s)=&p.node{s.clone()}else{lisp::flat(p)}}
  fn list(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax])->(Term,Info){let mut ts=Vec::new();let mut vs=Vec::new();let mut elem=Ty::Any;for a in args{let(t,v)=self.infer(cx,a);self.no_fn(a,&v.ty,"A list element");elem=ty::join(&elem,&v.ty).unwrap_or_else(||{self.error(a,"E_TYPE",&format!("List elements share one type; got {} and {}.",show(&elem),show(&v.ty)));elem.clone()});ts.push(t);vs.push(v)}let mut v=Info::derive(Ty::List(Box::new(elem.clone())),&vs);v.len=Some(args.len());(make_term(f,Ty::List(Box::new(elem)),Node::ListLit(ts)),v)}
  fn concat(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax])->(Term,Info){let mut ts=Vec::new();let mut vs=Vec::new();let mut el=Ty::Any;let mut len=Some(0usize);for a in args{let(t,v)=self.infer(cx,a);if let Some(e)=ty::elem(&v.ty){el=ty::join(&el,&e).unwrap_or_else(||{self.error(a,"E_TYPE","concat joins lists of one type.");el.clone()});}else{self.error(a,"E_TYPE",&format!("concat joins lists; got {}.",show(&v.ty)));}len=match(len,v.len){(Some(x),Some(y))=>x.checked_add(y),_=>None};ts.push(t);vs.push(v)}let ty=Ty::List(Box::new(el));let mut v=Info::derive(ty.clone(),&vs);v.len=len;(make_term(f,ty,Node::ListOp("concat".into(),ts)),v)}
@@ -1132,10 +1136,10 @@ impl Checker {
      init_value.state_dep = true;
      init_value.list_fields = seed_list_fields.clone();
      init_value.live_len = seed_list_fields.iter().any(Vec::is_empty);
-     let mut env = cx.env.clone();
+     let mut env = (*cx.env).clone();
      self.bind(cx, pattern, init_value.clone(), ":", &mut env);
      let mut inner = cx.clone();
-     inner.env = env;
+     inner.env = Rc::new(env);
      inner.path = zone.clone();
      let (step, step_value) = self.body(&inner, &args[1]);
      self.no_fn(form, &step_value.ty, "A state step");
@@ -1215,7 +1219,7 @@ impl Checker {
      let acc_live0 = init.as_ref().is_some_and(|(_, _, v)| v.live);
      let mut run_live = acc_live0;
      let (clauses, lens, outer, bt, bv) = loop {
-         let mut env = cx.env.clone();
+         let mut env = (*cx.env).clone();
          if let Some((p, _, iv)) = &init {
              let mut seed = iv.clone();
              seed.live = run_live;
@@ -1229,7 +1233,7 @@ impl Checker {
          for pair in iters.chunks_exact(2) {
              let (p, e) = (&pair[0], &pair[1]);
              let mut ecx = cx.clone();
-             ecx.env = env.clone();
+             ecx.env = Rc::new(env.clone());
              let (ct, cv) = self.infer(&ecx, e);
              let et = match ty::elem(&cv.ty) {
                  Some(t) => t,
@@ -1256,7 +1260,7 @@ impl Checker {
              outer.push(cv);
          }
          let mut inner = cx.clone();
-         inner.env = env;
+         inner.env = Rc::new(env);
          inner.path = id.clone();
          inner.scope = format!("{} › {}", cx.scope, last);
          inner.zone = Some(zid);
@@ -1361,7 +1365,7 @@ impl Checker {
          self.link_body(child, producer);
      }
  }
- fn make_fn(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax],name:&str,at:Option<Path>)->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_FN","fn is (fn [params] body).")}let SNode::Vec(ps)=&args[0].node else{return self.fail_term(f,"E_FN","fn is (fn [params] body).")};let path=match at{Some(p)=>p,None=>self.inline_path(cx,"~fn")};let mut bcx=cx.clone();bcx.path=path.clone();let mut params=Vec::new();let mut env=cx.env.clone();let mut seen=BTreeSet::new();for p in ps{let(mut pat,mut annot)=(p.clone(),None);if let SNode::List(parts)=&p.node{if parts.len()==3&&matches!(&parts[1].node,SNode::Sym(s) if s==":"){pat=parts[0].clone();annot=ty::of_syntax(&parts[2]);if annot.is_none(){self.error(p,"E_PARAM","Invalid fn parameter annotation.")}}}if !self.check_pattern(cx,&pat,&mut seen,&env,"fn"){continue}params.push((pat.clone(),annot.clone()));self.bind(&bcx,&pat,Info::leaf(annot.unwrap_or(Ty::Any)),":",&mut env)}let mut inner=cx.clone();inner.env=env.clone();inner.path=path.clone();inner.scope=format!("{} › {name}",cx.scope);let(bt,bv)=self.body(&inner,&args[1]);let callable=Rc::new(Callable::Local(Rc::new(Closure{params:params.iter().map(|(p,t)|(p.clone(),t.clone())).collect(),body:args[1].clone(),env:cx.env.clone(),ctx:cx.ctx.clone(),path:path.clone(),name:name.into()})));let ir_params=params.iter().map(|(p,t)|(Self::pattern(p),t.clone())).collect();let mut v=Info::leaf(Ty::Fn(None));v.live=bv.live;v.state_dep=bv.state_dep;v.callable=Some(callable);(make_term(f,Ty::Fn(None),Node::Fn{params:ir_params,body:Box::new(bt),zone:path,capture:None}),v)}
+ fn make_fn(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax],name:&str,at:Option<Path>)->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_FN","fn is (fn [params] body).")}let SNode::Vec(ps)=&args[0].node else{return self.fail_term(f,"E_FN","fn is (fn [params] body).")};let path=match at{Some(p)=>p,None=>self.inline_path(cx,"~fn")};let mut bcx=cx.clone();bcx.path=path.clone();let mut params=Vec::new();let mut env=(*cx.env).clone();let mut seen=BTreeSet::new();for p in ps{let(mut pat,mut annot)=(p.clone(),None);if let SNode::List(parts)=&p.node{if parts.len()==3&&matches!(&parts[1].node,SNode::Sym(s) if s==":"){pat=parts[0].clone();annot=ty::of_syntax(&parts[2]);if annot.is_none(){self.error(p,"E_PARAM","Invalid fn parameter annotation.")}}}if !self.check_pattern(cx,&pat,&mut seen,&env,"fn"){continue}params.push((pat.clone(),annot.clone()));self.bind(&bcx,&pat,Info::leaf(annot.unwrap_or(Ty::Any)),":",&mut env)}let mut inner=cx.clone();inner.env=Rc::new(env.clone());inner.path=path.clone();inner.scope=format!("{} › {name}",cx.scope);let(bt,bv)=self.body(&inner,&args[1]);let callable=Rc::new(Callable::Local(Rc::new(Closure{params:params.iter().map(|(p,t)|(p.clone(),t.clone())).collect(),body:args[1].clone(),env:cx.env.clone(),ctx:cx.ctx.clone(),path:path.clone(),name:name.into()})));let ir_params=params.iter().map(|(p,t)|(Self::pattern(p),t.clone())).collect();let mut v=Info::leaf(Ty::Fn(None));v.live=bv.live;v.state_dep=bv.state_dep;v.callable=Some(callable);(make_term(f,Ty::Fn(None),Node::Fn{params:ir_params,body:Box::new(bt),zone:path,capture:None}),v)}
  fn fn_value(&mut self, cx: &Cx, form: &Syntax, what: &str) -> (Term, Info) {
      if let SNode::Sym(name) = &form.node {
          if !cx.env.contains_key(name) && !name.contains('.') && !SPECIAL.contains(&name.as_str()) {
@@ -1399,7 +1403,7 @@ impl Checker {
  fn call_closure(&mut self,cx:&Cx,f:&Syntax,c:&Closure,args:&[Arg])->(Term,Info){
      if args.len()!=c.params.len(){return self.fail_term(f,"E_ARITY",&format!("{} takes {} argument{}; got {}.",c.name,c.params.len(),if c.params.len()==1{""}else{"s"},args.len()))}
      if cx.depth>64{return self.fail_term(f,"E_DEPTH","Call depth exceeds 64.")}
-     let mut env=c.env.clone();
+     let mut env=(*c.env).clone();
      let mut pcx=cx.clone();pcx.path=c.path.clone();
      for ((pattern,annotation),arg) in c.params.iter().zip(args){
          let mut value=arg.info.clone();
@@ -1410,7 +1414,7 @@ impl Checker {
          self.bind(&pcx,pattern,value,":",&mut env);
      }
      let mut inner=cx.clone();
-     inner.env=env;
+     inner.env=Rc::new(env);
      inner.ctx=c.ctx.clone();
      inner.path=c.path.clone();
      inner.scope=format!("{} › {}",cx.scope,c.name);
@@ -1597,7 +1601,7 @@ impl Checker {
      }
  }
  fn apply_def(&mut self,cx:&Cx,f:&Syntax,name:&str,args:&[Arg])->(Term,Info){let Some(d)=self.defs.get(name).cloned()else{return self.fail_term(f,"E_UNKNOWN_KIND","Unknown definition.")};self.apply_sig(cx,f,&d,args)}
- fn apply_sig(&mut self,cx:&Cx,f:&Syntax,d:&Sig,args:&[Arg])->(Term,Info){if d.ctx!=cx.ctx&&d.ctx!=context::value(){return self.fail_term(f,"E_WRONG_CONTEXT",&format!("{} belongs to {}; it cannot run in {}.",d.name,context_name(&d.ctx),context_name(&cx.ctx)))}if cx.stack.contains(&d.name){let mut stack=cx.stack.clone();stack.push(d.name.clone());return self.fail_term(f,"E_RECURSION",&format!("Recursive call: {}. Use fold for repetition.",stack.join(" → ")))}let pos=args.iter().filter(|a|a.key.is_none()).collect::<Vec<_>>();if pos.len()>d.params.len(){self.error(f,"E_ARITY",&format!("{} takes {} inputs; got {} positional.",d.name,d.params.len(),pos.len()))}let mut env=BTreeMap::new();let mut terms=Vec::new();for(i,(n,want,default))in d.params.iter().enumerate(){let named=args.iter().find(|a|a.key.as_deref()==Some(n));let bypos=pos.get(i).copied();if bypos.is_some()&&named.is_some(){self.error(&named.unwrap().form,"E_DUPLICATE_PARAM",&format!("{} input {n} is given twice.",d.name))}let(t,v)=if let Some(a)=bypos.or(named){if !ty::fits(&a.info.ty,want){self.error(&a.form,"E_TYPE",&format!("{} :{n} expects {}; got {}.",d.name,show(want),show(&a.info.ty)))}let mut v=a.info.clone();v.ty=ty::coerce(&v.ty,want);(a.term.clone(),v)}else if let Some(default)=default{let dcx=Cx{env:BTreeMap::new(),ctx:d.ctx.clone(),path:vec![format!("def:{}",d.name),format!(":{n}")],scope:format!("ƒ {}",d.name),in_def:true,stack:vec![d.name.clone()],depth:0,zone:None,zbody:false};let(t,v)=self.infer(&dcx,default);if !ty::fits(&v.ty,want){self.error(default,"E_TYPE","Definition default differs from its declared input type.")}(t,v)}else{self.error(f,"E_ARGS",&format!("{} needs :{n} ({}).",d.name,show(want)));(make_term(f,want.clone(),Node::Nil),Info::leaf(want.clone()))};env.insert(n.clone(),v);terms.push(t)}for a in args{if let Some(k)=&a.key{if !d.params.iter().any(|(n,_,_)|n==k){self.error(&a.form,"E_UNKNOWN_PARAM",&format!("{} has no input :{k}.",d.name))}}}let mut inner=Cx{env,ctx:d.ctx.clone(),path:vec![format!("def:{}",d.name)],scope:format!("ƒ {}",d.name),in_def:true,stack:cx.stack.clone(),depth:cx.depth+1,zone:None,zbody:false};inner.stack.push(d.name.clone());let(body,v)=self.body(&inner,&d.body);(make_term(f,v.ty.clone(),Node::CallFn{fn_name:d.name.clone(),args:terms,body:Some(Box::new(body))}),v)}
+ fn apply_sig(&mut self,cx:&Cx,f:&Syntax,d:&Sig,args:&[Arg])->(Term,Info){if d.ctx!=cx.ctx&&d.ctx!=context::value(){return self.fail_term(f,"E_WRONG_CONTEXT",&format!("{} belongs to {}; it cannot run in {}.",d.name,context_name(&d.ctx),context_name(&cx.ctx)))}if cx.stack.contains(&d.name){let mut stack=cx.stack.clone();stack.push(d.name.clone());return self.fail_term(f,"E_RECURSION",&format!("Recursive call: {}. Use fold for repetition.",stack.join(" → ")))}let pos=args.iter().filter(|a|a.key.is_none()).collect::<Vec<_>>();if pos.len()>d.params.len(){self.error(f,"E_ARITY",&format!("{} takes {} inputs; got {} positional.",d.name,d.params.len(),pos.len()))}let mut env=BTreeMap::new();let mut terms=Vec::new();for(i,(n,want,default))in d.params.iter().enumerate(){let named=args.iter().find(|a|a.key.as_deref()==Some(n));let bypos=pos.get(i).copied();if bypos.is_some()&&named.is_some(){self.error(&named.unwrap().form,"E_DUPLICATE_PARAM",&format!("{} input {n} is given twice.",d.name))}let(t,v)=if let Some(a)=bypos.or(named){if !ty::fits(&a.info.ty,want){self.error(&a.form,"E_TYPE",&format!("{} :{n} expects {}; got {}.",d.name,show(want),show(&a.info.ty)))}let mut v=a.info.clone();v.ty=ty::coerce(&v.ty,want);(a.term.clone(),v)}else if let Some(default)=default{let dcx=Cx{env:Rc::new(BTreeMap::new()),ctx:d.ctx.clone(),path:vec![format!("def:{}",d.name),format!(":{n}")],scope:format!("ƒ {}",d.name),in_def:true,stack:vec![d.name.clone()],depth:0,zone:None,zbody:false};let(t,v)=self.infer(&dcx,default);if !ty::fits(&v.ty,want){self.error(default,"E_TYPE","Definition default differs from its declared input type.")}(t,v)}else{self.error(f,"E_ARGS",&format!("{} needs :{n} ({}).",d.name,show(want)));(make_term(f,want.clone(),Node::Nil),Info::leaf(want.clone()))};env.insert(n.clone(),v);terms.push(t)}for a in args{if let Some(k)=&a.key{if !d.params.iter().any(|(n,_,_)|n==k){self.error(&a.form,"E_UNKNOWN_PARAM",&format!("{} has no input :{k}.",d.name))}}}let mut inner=Cx{env:Rc::new(env),ctx:d.ctx.clone(),path:vec![format!("def:{}",d.name)],scope:format!("ƒ {}",d.name),in_def:true,stack:cx.stack.clone(),depth:cx.depth+1,zone:None,zbody:false};inner.stack.push(d.name.clone());let(body,v)=self.body(&inner,&d.body);(make_term(f,v.ty.clone(),Node::CallFn{fn_name:d.name.clone(),args:terms,body:Some(Box::new(body))}),v)}
  fn apply_op(&mut self, cx: &Cx, form: &Syntax, operator: &op::Op, arguments: &[Arg], skip: Vec<Vec<usize>>) -> (Term, Info) {
      if BODY_CONTEXT_OPS.contains(&operator.name.as_str()) && !cx.in_def {
          self.error(form, "E_NODE_CONTEXT", "Context seed, frame and provenance base are available inside a defnode body.");
@@ -1674,21 +1678,18 @@ impl Checker {
                  Ty::Vec2 | Ty::Vec4 => operator.arithmetic.is_some(),
                  _ => false,
              };
-             if !ty::fits(&argument.info.ty, want) && !compatible_number {
-                 self.error(&argument.form, "E_TYPE", &format!("{} {} expects {}; got {}.", operator.name, name, show(want), show(&argument.info.ty)));
+             if !compatible_number {
+                 self.need(argument, &format!("{} {}", operator.name, name), want);
              }
              named.push((name.clone(), argument.term.clone()));
          } else if let Some((name, want)) = &operator.signature.rest {
-             let element = ty::elem(&argument.info.ty);
-             if let Some(element) = element {
-                 if !ty::fits(&element, want) {
-                     self.error(&argument.form, "E_TYPE", &format!("{} {} expects {}; got {}.", operator.name, name, show(want), show(&argument.info.ty)));
-                 }
+             let element = ty::elem(&argument.info.ty).filter(|element| ty::fits(element, want));
+             if let Some(_element) = element {
                  if argument.info.live_len && shape_ty(want) {
                      self.error(&argument.form, "E_TIME_COUNT", &format!("The list passed to {} changes length with t. The network keeps its shape while playing; animate parameters instead, for example scale a piece to 0.", operator.name));
                  }
-             } else if !ty::fits(&argument.info.ty, want) {
-                 self.error(&argument.form, "E_TYPE", &format!("{} {} expects {}; got {}.", operator.name, name, show(want), show(&argument.info.ty)));
+             } else {
+                 self.need(argument, &format!("{} {}", operator.name, name), want);
              }
              named.push((name.clone(), argument.term.clone()));
          }
@@ -1705,9 +1706,7 @@ impl Checker {
                  self.error(&argument.form, "E_DUPLICATE_PARAM", &format!(":{key} is given twice"));
              }
              Some((_, want)) => {
-                 if !ty::fits(&argument.info.ty, want) {
-                     self.error(&argument.form, "E_TYPE", &format!("{} :{key} expects {}; got {}.", operator.name, show(want), show(&argument.info.ty)));
-                 }
+                self.need(argument, &format!("{} :{key}", operator.name), want);
                  named.push((key.to_owned(), argument.term.clone()));
              }
          }
@@ -1885,7 +1884,7 @@ impl Checker {
          let mut values = Vec::with_capacity(entries.len());
          for entry in entries {
              let (term, value) = self.fn_value(cx, &entry.form, "function port");
-             let nested = Arg { key: None, form: entry.form.clone(), term, info: value };
+             let nested = Arg { key: None, form: (*entry.form).clone(), term, info: value };
              let nested = self.instantiate_fn(cx, &nested, signature, coerce_params);
              terms.push(nested.term);
              values.push(nested.info);
@@ -1910,7 +1909,7 @@ impl Checker {
                  (syntax::make(SNode::Sym(name.clone())), Some(ty.clone()))
              }).collect(),
              body: definition.body.clone(),
-             env: BTreeMap::new(),
+             env: Rc::new(BTreeMap::new()),
              ctx: definition.ctx.clone(),
              path: vec![format!("def:{name}")],
              name: name.clone(),
@@ -2393,18 +2392,37 @@ impl Checker {
  fn with_error(&mut self,cx:&Cx,f:&Syntax,forms:&[Syntax])->(Term,Info){
      if forms.len()!=2{return self.fail_term(f,"E_ARITY","with_error takes a protected value and a pure error mapper.")}
      let(protected,protected_info)=self.input(cx,&forms[0],"0");
-     let(mapper_form,mapper_info)=self.fn_value(cx,&forms[1],"with_error");
+     let(mapper_term,mapper_info)=self.fn_value(cx,&forms[1],"with_error");
      let payload=Ty::Record(vec![("code".into(),Ty::Text),("message".into(),Ty::Text),("cause".into(),Ty::List(Box::new(Ty::Text)))]);
-     let argument=Arg{key:None,form:forms[1].clone(),term:make_term(&forms[1],payload.clone(),Node::RefBinding("_".into(),Vec::new())),info:Info::leaf(payload.clone())};
-     let(mapper,mapper_result)=self.apply_callable(cx,f,&mapper_info,std::slice::from_ref(&argument));
-     if !ty::fits(&mapper_result.ty,&payload){self.error(&forms[1],"E_DIAGNOSTIC_MAP","An error mapper takes and returns a diagnostic record.")}
+     let argument=self.instantiate_fn(cx,&Arg{key:None,form:forms[1].clone(),term:mapper_term,info:mapper_info},&FnSignature{params:vec![payload.clone()],result:payload.clone()},false);
+     let(mapper,mapper_info)=(argument.term,argument.info);
+     match &mapper_info.ty{Ty::Fn(Some(s)) if s.params==[payload.clone()]&&ty::fits(&s.result,&payload)=>(),_=>self.error(&mapper.form,"E_DIAGNOSTIC_MAP","An error mapper takes and returns a diagnostic record.")}
      self.no_fn(&forms[0],&protected_info.ty,"A protected value");
-     if cooked(&protected_info.ty)&&protected_info.ty!=ty::geometry()&&protected_info.ty!=ty::image(){self.error(&forms[0],"E_ERROR_SCOPE","An error boundary completes a direct cooked result, not a cooked container.")}
-     if mapper_result.live||mapper_result.state_dep{self.error(&forms[1],"E_DIAGNOSTIC_MAP","An error mapper is pure and independent of frame/state.")}
-     let result=Info::derive(protected_info.ty.clone(),&[protected_info,mapper_result]);
+     fn cooked_container(t:&Ty)->bool{cooked(t)||match t{Ty::List(e)=>cooked_container(e),Ty::Record(fs)=>fs.iter().any(|(_,t)|cooked_container(t)),_=>false}}
+     if cooked_container(&protected_info.ty)&&protected_info.ty!=ty::geometry()&&protected_info.ty!=ty::image(){self.error(&protected.form,"E_ERROR_SCOPE","An error boundary completes a direct cooked result, not a cooked container.")}
+     self.pure_boundary(cx,false,"E_ERROR_SCOPE","An error boundary has no state, graph, drawing or UI effects.",&protected);
+     if mapper_info.live||mapper_info.state_dep{self.error(&mapper.form,"E_DIAGNOSTIC_MAP","An error mapper is pure and independent of frame/state.")}
+     self.pure_boundary(cx,true,"E_DIAGNOSTIC_MAP","An error mapper is pure: no frame, state, context or cooked values.",&mapper);
+     let result=Info::derive(protected_info.ty.clone(),&[protected_info,mapper_info]);
      (make_term(f,result.ty.clone(),Node::WithError(Box::new(protected),Box::new(mapper))),result)
  }
- fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[Syntax])->(Term,Info){let(rows_form,policy,mf)=if forms.len()==2{(&forms[0],DiagnosticPolicy::First,&forms[1])}else if forms.len()==4&&matches!(&forms[1].node,SNode::Kw(k) if k=="policy"){let p=match &forms[2].node{SNode::Str(s) if s==b"range-last"=>DiagnosticPolicy::RangeLast,SNode::Str(s) if s==b"first"=>DiagnosticPolicy::First,_=>{self.error(&forms[2],"E_DIAGNOSTIC_POLICY","Diagnostic policy is literal first or range-last.");DiagnosticPolicy::First}};(&forms[0],p,&forms[3])}else{return self.fail_term(f,"E_ARGS","error_rows takes rows, a pure diagnostic mapper, and optional :policy text.")};let(rows,rv)=self.input(cx,rows_form,"0");if rv.ty!=Ty::Array(Box::new(Ty::Int)){self.error(rows_form,"E_DIAGNOSTIC_ROWS","Diagnostic rows require an integer 0/1 array.")}let(mt,mv)=self.fn_value(cx,mf,"error_rows");let arg=Arg{key:None,form:mf.clone(),term:mt.clone(),info:Info::leaf(Ty::Int)};let(mapper,mapped)=self.apply_callable(cx,f,&mv,&[arg]);let out=ty::geometry();(make_term(f,out.clone(),Node::ErrorRows{rows:Box::new(rows),policy,mapper:Box::new(mapper)}),Info::derive(out,&[rv,mapped]))}
+ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[Syntax])->(Term,Info){
+     let is_policy=|k:&Syntax|matches!(&k.node,SNode::Kw(k) if k=="policy");
+     let parse=|this:&mut Self,rows:&Syntax,mapper:&Syntax,policy:&Syntax|->Option<(Syntax,Syntax,DiagnosticPolicy)>{match &policy.node{SNode::Str(s) if s==b"first"=>Some((rows.clone(),mapper.clone(),DiagnosticPolicy::First)),SNode::Str(s) if s==b"range-last"=>Some((rows.clone(),mapper.clone(),DiagnosticPolicy::RangeLast)),_=>{this.error(policy,"E_DIAGNOSTIC_POLICY","Diagnostic policy is literal first or range-last.");None}}};
+     let parsed=if forms.len()==2{Some((forms[0].clone(),forms[1].clone(),DiagnosticPolicy::First))}else if forms.len()==4&&is_policy(&forms[1]){parse(self,&forms[0],&forms[3],&forms[2])}else if forms.len()==4&&is_policy(&forms[2]){parse(self,&forms[0],&forms[1],&forms[3])}else{None};
+     let Some((rows_form,mapper_form,policy))=parsed else{return self.fail_term(f,"E_ARGS","error_rows takes rows, a pure diagnostic mapper, and optional :policy text.")};
+     let(rows,rv)=self.input(cx,&rows_form,"0");
+     if rv.ty!=Ty::Array(Box::new(Ty::Int)){self.error(&rows.form,"E_DIAGNOSTIC_ROWS","Diagnostic rows require an integer 0/1 array.")}
+     let(mapper_term,mapper_info)=self.fn_value(cx,&mapper_form,"error_rows");
+     let payload=Ty::Record(vec![("code".into(),Ty::Text),("message".into(),Ty::Text),("cause".into(),Ty::List(Box::new(Ty::Text)))]);
+     let argument=self.instantiate_fn(cx,&Arg{key:None,form:mapper_form.clone(),term:mapper_term,info:mapper_info},&FnSignature{params:vec![Ty::Int],result:payload.clone()},false);
+     let(mapper,mv)=(argument.term,argument.info);
+     match &mv.ty{Ty::Fn(Some(s)) if s.params==[Ty::Int]&&ty::fits(&s.result,&payload)=>(),_=>self.error(&mapper.form,"E_DIAGNOSTIC_MAP","A row mapper takes an int and returns a diagnostic record.")}
+     if mv.live||mv.state_dep{self.error(&mapper.form,"E_DIAGNOSTIC_MAP","A row mapper is pure and independent of frame/state.")}
+     self.pure_boundary(cx,true,"E_DIAGNOSTIC_MAP","A row mapper is pure: no frame, state, context or cooked values.",&mapper);
+     let out=ty::geometry();
+     (make_term(f,out.clone(),Node::ErrorRows{rows:Box::new(rows),policy,mapper:Box::new(mapper)}),Info::derive(out,&[rv,mv]))
+ }
  fn graph_info(&mut self, x: &Syntax, name: &str) -> Info {
      if let Some(v) = self.ginfo.get(name) { return v.clone(); }
      let Some(sg) = self.graphs.get(name).cloned() else { return Info::leaf(Ty::Any) };
@@ -2415,12 +2433,12 @@ impl Checker {
          return Info::leaf(context::result(sg.ctx));
      }
      self.graph_stack.push(name.to_owned());
-     let cx0 = Cx { env: BTreeMap::new(), ctx: sg.ctx, path: vec![name.to_owned()], scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
+     let cx0 = Cx { env: Rc::new(BTreeMap::new()), ctx: sg.ctx, path: vec![name.to_owned()], scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
      let mut env: BTreeMap<String, Info> = BTreeMap::new();
      let mut inputs = Vec::new();
      for (n, t, df) in &sg.params {
          let mut cx = cx0.clone();
-         cx.env = env.clone();
+         cx.env = Rc::new(env.clone());
          let (dt, dv) = match df {
              Some(d) => {
                  let (term, v) = self.infer(&cx, d);
@@ -2441,7 +2459,7 @@ impl Checker {
          inputs.push((n.clone(), t.clone(), dt));
      }
      let mut cx = cx0.clone();
-     cx.env = env;
+     cx.env = Rc::new(env);
      let (bt, bv) = self.body(&cx, &sg.body);
      let want = context::result(sg.ctx);
      if !ty::fits(&bv.ty, &want) {
@@ -2570,7 +2588,7 @@ impl Checker {
         for (input, want, default) in &definition.params {
             let value = if let Some(default) = default {
                 let cx = Cx {
-                    env: BTreeMap::new(),
+                    env: Rc::new(BTreeMap::new()),
                     ctx: definition.ctx.clone(),
                     path: vec![format!("def:{name}"), format!(":{input}")],
                     scope: format!("ƒ {name}"),
@@ -2592,7 +2610,7 @@ impl Checker {
             inputs.push((input.clone(), want.clone(), value));
         }
         let cx = Cx {
-            env,
+            env: Rc::new(env),
             ctx: definition.ctx.clone(),
             path: vec![format!("def:{name}")],
             scope: format!("ƒ {name}"),
@@ -2814,7 +2832,7 @@ impl Checker {
 
         for name in node_names {
             let Some(definition) = self.node_defs.get(&name).cloned() else { continue };
-            let env = definition.inputs.iter().map(|(input, ty, _)| (input.clone(), Info::leaf(ty.clone()))).collect();
+            let env = definition.inputs.iter().map(|(input, ty, _)| (input.clone(), Info::leaf(ty.clone()))).collect::<BTreeMap<_, _>>().into();
             let base = Cx {
                 env,
                 ctx: context::sop(),
@@ -2830,7 +2848,7 @@ impl Checker {
             for (input, input_ty, default) in &definition.inputs {
                 let term = default.as_ref().map(|form| {
                     let mut cx = base.clone();
-                    cx.env.clear();
+                    Rc::make_mut(&mut cx.env).clear();
                     cx.path.push(format!(":{input}"));
                     let (term, value) = self.infer(&cx, form);
                     if !ty::fits(&value.ty, input_ty) {
@@ -2859,7 +2877,7 @@ impl Checker {
             for (input, form) in &definition.normalizers {
                 let mut cx = base.clone();
                 cx.ctx = context::value();
-                cx.env.clear();
+                Rc::make_mut(&mut cx.env).clear();
                 let (term, value) = self.fn_value(&cx, form, "normalizer");
                 let signature = FnSignature { params: vec![Ty::Text], result: Ty::Text };
                 let argument = Arg { key: None, form: form.clone(), term, info: value };
@@ -2968,7 +2986,9 @@ pub fn prelude(
     forms: &[Syntax],
 ) -> Prelude {
     let mut checker = Checker::new(catalog.clone(), ops, library, call_sites);
+    checker.children = forms.len();
     checker.phase(forms);
+    checker.count += forms.len();
     Prelude { checker }
 }
 
@@ -3001,6 +3021,7 @@ pub fn check(
     let SNode::List(items) = &workspace_form.node else {
         return (None, vec![err("E_WORKSPACE", "Expected (workspace name …).".into(), Some(workspace_form.span.clone()))]);
     };
+    checker.children = items.len().saturating_sub(2);
     if items.first().and_then(|form| match &form.node { SNode::Sym(name) => Some(name.as_str()), _ => None }) != Some("workspace") {
         checker.error(workspace_form, "E_WORKSPACE", "Expected (workspace name …).");
         return (None, checker.diags);

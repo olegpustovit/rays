@@ -1620,7 +1620,7 @@ impl Lower {
                         SNode::Sym(s) if s == "true" || s == "false" => (param::Value::Bool(s == "true"), Ty::Bool),
                         _ => return Err(refusal(t, "E_PACKED_FORM", "Packed case arms require numeric or boolean literals.")),
                     };
-                    let right = Term { path: None, ty: ty.clone(), node: Node::Lit(value), form: literal.clone() };
+                    let right = Term { path: None, ty: ty.clone(), node: Node::Lit(value), form: std::sync::Arc::new(literal.clone()) };
                     let (left, right) = if scrutinee.ty == Ty::Bool || ty == Ty::Bool { (boolean(scrutinee), boolean(&right)) } else { ((**scrutinee).clone(), right) };
                     let condition = Term { ty: Ty::Bool, node: Node::Op { op: "=".to_owned(), args: vec![("a".to_owned(), left), ("b".to_owned(), right)], skip: Vec::new() }, ..t.clone() };
                     folded = Term { node: Node::If(Box::new(condition), Box::new(yes.clone()), Box::new(folded)), ..t.clone() };

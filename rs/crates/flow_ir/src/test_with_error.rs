@@ -52,7 +52,7 @@ fn compare(body: &str) -> Result<Value, Diagnostic> {
     let b = E::Host::force_reference(&Value::Residual(r), &live, None, None, None);
     match (&a, &b) {
         (Ok(a), Ok(b)) => assert!(a == b),
-        (Err(a), Err(b)) => assert!(a.code == b.code && a.message == b.message && a.cause == b.cause && a.hints == b.hints && a.trace == b.trace),
+        (Err(a), Err(b)) => assert!(a.code == b.code && a.message == b.message && a.cause == b.cause && a.hints == b.hints && a.trace == b.trace, "{a:?} / {b:?}"),
         _ => panic!("core and reference outcomes differ: {a:?} / {b:?}"),
     }
     a
@@ -205,7 +205,7 @@ fn diagnostic_envelopes_are_lossless() {
 }
 
 // The checked graph edit (flow_graph), compiled out: see the header.
-#[cfg(any())]
+// checked-edit tests (flow_graph dev-dependency)
 mod graph_edits {
     use super::*;
     use flow_graph::flow_edit::{apply_checked, ArgKey, Op};

@@ -619,7 +619,7 @@ impl Walker {
     fn callable(&mut self, owner: &Path, body: &Term) {
         let entries = self.t.callable_owners.entry(body.form.id).or_default();
         if !entries.iter().any(|(form, path)| form_same(form, &body.form) && path == owner) {
-            entries.insert(0, (body.form.clone(), owner.clone()));
+            entries.insert(0, ((*body.form).clone(), owner.clone()));
         }
     }
 
@@ -638,7 +638,7 @@ impl Walker {
         let old = entries.iter().find(|x| same(x)).map(|x| x.2.clone()).unwrap_or_default();
         let merged: Paths = old.union(&producers).cloned().collect();
         entries.retain(|x| !same(x));
-        entries.insert(0, (term.form.clone(), owner.clone(), merged));
+        entries.insert(0, ((*term.form).clone(), owner.clone(), merged));
     }
 
     fn walk(&mut self, owner: &Path, term: &Term) {
@@ -2963,7 +2963,7 @@ mod tests {
             let expected = e::Host::force_reference(value, &live, Some(&reference), None, None);
             let actual = e::Residual::bind_live(*r, &live, Some(&state))
                 .and_then(|_| core_exec::execute(&prepared, &live, &core_exec::Options { root: Some(*r), ..Default::default() }));
-            assert!(same(&actual, &expected), "prepared kernel vs reference at frame {frame}");
+            assert!(same(&actual, &expected), "prepared kernel vs reference at frame {frame}: {:?} / {:?}", actual.as_ref().map(|v| format!("{v:?}").chars().take(300).collect::<String>()), expected.as_ref().map(|v| format!("{v:?}").chars().take(300).collect::<String>()));
         }
     }
 

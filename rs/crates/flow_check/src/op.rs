@@ -122,7 +122,7 @@ pub fn result_type(op:&Op,args:&[(String,Ty,Option<param::Value>)])->Result<Ty,D
     let ts=args.iter().filter(|(n,_,_)|named(n)).map(|(_,t,_)|t.clone()).collect::<Vec<_>>(); (op.out)(&ts)
 }
 pub fn find(extra:&[Op],name:&str,context:&Context)->Option<Op>{
-    let lookup=|key:&str|extra.iter().find(|op|op.name==key).cloned().or_else(||all().iter().find(|op|op.name==key).cloned());
+    let lookup=|key:&str|extra.iter().find(|op|op.name==key).cloned().or_else(||builtin_index().get(key).map(|i|all()[*i].clone()));
     lookup(name).or_else(||lookup(&format!("value/{name}"))).or_else(||lookup(&format!("{}/{name}",context::name(*context))))
 }
 pub fn finder(extra:&[Op])->Box<dyn Fn(&str,&Context)->Option<Op>+Send+Sync>{
@@ -227,7 +227,7 @@ pub fn reduce_array(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+
         if operation!=Reduction::Sum&&first==finish{return Err(fail("E_ARRAY_EMPTY","An extremum needs at least one array value."))}
         let mut result=if operation==Reduction::Sum{0.}else{fin(op_name,data[first*width+component])?};
         let start=if operation==Reduction::Sum{first}else{first+1};
-        for i in start..finish{let x=fin(op_name,data[i*width+component])?;result=match operation{Reduction::Sum=>fin(op_name,result+x)?,Reduction::Minimum=>if x<result{x}else if result<x{result}else{x.min(result)},Reduction::Maximum=>if x>result{x}else if result>x{result}else{x.max(result)}}}
+        for i in start..finish{let x=fin(op_name,data[i*width+component])?;result=match operation{Reduction::Sum=>fin(op_name,result+x)?,Reduction::Minimum=>if x<result{x}else if result<x{result}else if x.is_sign_negative(){x}else{result},Reduction::Maximum=>if x>result{x}else if result>x{result}else if result.is_sign_negative(){x}else{result}}}
         Ok(result)
     };
     if let Some(offsets)=offsets{
@@ -441,7 +441,7 @@ fn scatter_type(ts:&[Ty])->Result<Ty,Diagnostic>{
 fn array_ops()->Vec<Op>{
     let mut ops=Vec::new();
     let max=op_with("array/max_length",context::value(),vec![],vec![],None,vec![("type",Ty::Text)],Ty::Int,"Array",Arc::new(|_,_,args|{
-        let kind=match args.opt_arg("type"){None=>"float",Some(v)=>text_string(v)?};let cap=array_limit(kind).ok_or_else(||fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))?;Ok(Value::Int(cap as i64))
+        let kind=match args.opt_arg("type"){None=>"float",Some(Value::Text(t))=>std::str::from_utf8(t).map_err(|_|fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))?,Some(_)=>return Err(fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))};let cap=array_limit(kind).ok_or_else(||fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))?;Ok(Value::Int(cap as i64))
     }));
     let mut max=max;max.choices=vec![("type".into(),["float","int","text","vec2","vec3","vec4"].iter().map(|s|(*s).into()).collect())];
     max.out_args=Some(Arc::new(|args|{if args.iter().any(|(n,_,_)|n=="type"){match args.literal_arg("type"){Some(param::Value::Text(k)) if std::str::from_utf8(k).ok().and_then(array_limit).is_some()=>(),_=>return Err(fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))}}Ok(Ty::Int)}));ops.push(max);
@@ -464,7 +464,7 @@ fn array_ops()->Vec<Op>{
     ops.push(with_defaults(mk("array/nth",context::value(),signature(vec![("array",arr(Ty::Any)),("index",Ty::Int)],vec![],None,vec![]),nth,Arc::new(|_,_,a|{let i=checked_count("array/nth",a.get_arg("index")?,MAX_WOSIZE)?;value::array_get(a.get_arg("array")?,i as i64)})),"Array"));
     let slice_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
     ops.push(with_defaults(mk("array/slice",context::value(),signature(vec![("array",arr(Ty::Any)),("first",Ty::Int),("count",Ty::Int)],vec![],None,vec![]),slice_out,Arc::new(|_,_,a|{
-        let source=a.get_arg("array")?;let first=checked_count("array/slice",a.get_arg("first")?,isize::MAX as usize)?;let count=checked_count("array/slice",a.get_arg("count")?,isize::MAX as usize)?;let n=value::array_length(source)?;if first>n||count>n-first{return Err(fail("E_ARRAY_RANGE","An array slice must be within its source."))}
+        let source=a.get_arg("array")?;let first=checked_count("array/slice",a.get_arg("first")?,MAX_WOSIZE)?;let count=checked_count("array/slice",a.get_arg("count")?,MAX_WOSIZE)?;let n=value::array_length(source)?;if first>n||count>n-first{return Err(fail("E_ARRAY_RANGE","An array slice must be within its source."))}
         match source{Value::Int_array(x)=>Ok(Value::Int_array(Arc::new(x[first..first+count].to_vec()))),Value::Text_array(x)=>Ok(Value::Text_array(Arc::new(x[first..first+count].to_vec()))),Value::Float_array(x)=>Ok(Value::Float_array(Arc::new(x[first..first+count].to_vec()))),Value::Vec2_array(x)=>Ok(Value::Vec2_array(Arc::new(x[first*2..(first+count)*2].to_vec()))),Value::Vec3_array(x)=>Ok(Value::Vec3_array(Arc::new(x[first*3..(first+count)*3].to_vec()))),Value::Vec4_array(x)=>Ok(Value::Vec4_array(Arc::new(x[first*4..(first+count)*4].to_vec()))),_=>Err(fail("E_TYPE","Expected a packed array."))}
     })),"Array"));
     let concat_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
@@ -668,7 +668,7 @@ fn special_value_ops()->Vec<Op>{
     ops.push(value_op("rand/at",vec![("seed",Ty::Int),("index",Ty::Int)],vec![],None,vec![],Ty::Float,"Random",Arc::new(|_,_,a|Ok(Value::Float(packed_ops::rand_at(int_of(a.get_arg("seed")?)?,int_of(a.get_arg("index")?)?))))));
     ops.push(value_op("dot",vec![("a",Ty::Vec3),("b",Ty::Vec3)],vec![],None,vec![],Ty::Float,"Vector",Arc::new(|_,_,a|{let x=vec3(a.get_arg("a")?)?;let y=vec3(a.get_arg("b")?)?;Ok(Value::Float(fin("dot",x.0*y.0+x.1*y.1+x.2*y.2)?))})));
     ops.push(value_op("cross",vec![("a",Ty::Vec3),("b",Ty::Vec3)],vec![],None,vec![],Ty::Vec3,"Vector",Arc::new(|_,_,a|{let(x,y,z)=vec3(a.get_arg("a")?)?;let(u,v,w)=vec3(a.get_arg("b")?)?;Ok(Value::Vec3(fin("cross",rays_math::fma::fma(-z,v,y*w))?,fin("cross",rays_math::fma::fma(-x,w,z*u))?,fin("cross",rays_math::fma::fma(-y,u,x*v))?))})));
-    ops.push(value_op("normalize",vec![("vector",Ty::Vec3)],vec![],None,vec![],Ty::Vec3,"Vector",Arc::new(|_,_,a|{let(x,y,z)=vec3(a.get_arg("vector")?)?;let l=fin("normalize",(x*x+y*y+z*z).sqrt())?;if l==0.{Ok(Value::Vec3(0.,0.,0.))}else{Ok(Value::Vec3(fin("normalize",x/l)?,fin("normalize",y/l)?,fin("normalize",z/l)?))}})));
+    ops.push(value_op("normalize",vec![("vector",Ty::Vec3)],vec![],None,vec![],Ty::Vec3,"Vector",Arc::new(|_,_,a|{let(x,y,z)=vec3(a.get_arg("vector")?)?;let l=fin("normalize",(x*x+y*y+z*z).sqrt())?;if l==0.{Ok(Value::Vec3(0.,0.,0.))}else{let r=1./l;Ok(Value::Vec3(fin("normalize",x*r)?,fin("normalize",y*r)?,fin("normalize",z*r)?))}})));
     ops.push(value_op("length",vec![("vector",Ty::Vec3)],vec![],None,vec![],Ty::Float,"Vector",Arc::new(|_,_,a|{let(x,y,z)=match a.get_arg("vector")?{Value::Vec3(x,y,z)=>(*x,*y,*z),_=>return Err(fail("E_TYPE","length needs a vec3."))};Ok(Value::Float(fin("length",(x*x+y*y+z*z).sqrt())?))})));
     ops.push(value_op("value/hsv",vec![("h",Ty::Float),("s",Ty::Float),("v",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Math",Arc::new(|_,_,a|{let(r,g,b)=rays_math::color::hsv(num(a.get_arg("h")?)?,num(a.get_arg("s")?)?,num(a.get_arg("v")?)?);Ok(Value::Vec3(fin("value/hsv",r)?,fin("value/hsv",g)?,fin("value/hsv",b)?))})));
     let mut lerp=value_op("value/lerp",vec![("a",Ty::Float),("b",Ty::Float),("u",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,args|{let a=args.get_arg("a")?;let b=args.get_arg("b")?;let u=num(args.get_arg("u")?)?;if value::is_vec(a)||value::is_vec(b){let(ax,ay,az)=vec3(a)?;let(bx,by,bz)=vec3(b)?;let mix=|a:f64,b:f64|a*(1.-u)+b*u;Ok(Value::Vec3(fin("value/lerp",mix(ax,bx))?,fin("value/lerp",mix(ay,by))?,fin("value/lerp",mix(az,bz))?))}else{Ok(Value::Float(fin("value/lerp",num(a)?*(1.-u)+num(b)?*u)?))}}));
@@ -828,7 +828,11 @@ fn builtins()->Vec<Op>{
 }
 static ALL:LazyLock<Vec<Op>>=LazyLock::new(builtins);
 pub fn all()->&'static [Op]{ALL.as_slice()}
-pub fn arith(name:&str)->Option<Arithmetic>{all().iter().find(|op|op.name==name).and_then(|op|op.arithmetic.clone())}
+fn builtin_index()->&'static std::collections::HashMap<&'static str,usize>{
+    static INDEX:LazyLock<std::collections::HashMap<&'static str,usize>>=LazyLock::new(||{let mut m=std::collections::HashMap::new();for (i,op) in all().iter().enumerate(){m.entry(op.name.as_str()).or_insert(i);}m});
+    &INDEX
+}
+pub fn arith(name:&str)->Option<Arithmetic>{builtin_index().get(name).and_then(|i|all()[*i].arithmetic.clone())}
 
 #[cfg(test)]
 mod tests{

@@ -82,22 +82,38 @@ fn closure_free(v: &Value) -> bool {
 
 fn geometry_collection(ty: &Ty) -> bool { *ty == Ty::List(Box::new(ty::geometry())) }
 
-fn state_step_candidate(parent: ResidualId, candidate: &Term) -> bool {
-    let Ok(view) = E::Residual::residual_view(parent) else { return false };
-    match &view.term.node {
-        Node::State { step, .. } => {
-            fn direct(term: &Term, candidate: &Term) -> bool {
-                // OCaml's physical equality: the same node, compared by address
-                if std::ptr::eq(term, candidate) { return true; }
-                match &term.node {
-                    Node::If(..) | Node::Cond(..) | Node::Case(..) => false,
-                    _ => W::children(term).iter().any(|c| direct(c, candidate)),
-                }
-            }
-            direct(step, candidate)
-        }
-        _ => false,
+fn term_refs(term: &Term) -> Vec<&Term> {
+    match &term.node {
+        Node::Vec(ts) | Node::Hof(_, ts) | Node::ListLit(ts) | Node::Str(ts) | Node::ListOp(_, ts) => ts.iter().collect(),
+        Node::Call { args, .. } | Node::Op { args, .. } | Node::Record(args) | Node::GraphRef { inputs: args, .. } => args.iter().map(|(_, t)| t).collect(),
+        Node::CallFn { args, body, .. } => args.iter().chain(body.iter().map(Box::as_ref)).collect(),
+        Node::Let(bindings, body) => bindings.iter().map(|(_, t)| t).chain(std::iter::once(body.as_ref())).collect(),
+        Node::Loop { accs, clauses, body, .. } => accs.iter().chain(clauses).map(|(_, t)| t).chain(std::iter::once(body.as_ref())).collect(),
+        Node::State { init, step, .. } => vec![init.as_ref(), step.as_ref()],
+        Node::WithError(a, b) => vec![a.as_ref(), b.as_ref()],
+        Node::ErrorRows { rows, mapper, .. } => vec![rows.as_ref(), mapper.as_ref()],
+        Node::If(a, b, c) => vec![a.as_ref(), b.as_ref(), c.as_ref()],
+        Node::Cond(arms, d) => arms.iter().flat_map(|(a, b)| [a, b]).chain(std::iter::once(d.as_ref())).collect(),
+        Node::Case(s, arms, d) => std::iter::once(s.as_ref()).chain(arms.iter().map(|(_, t)| t)).chain(std::iter::once(d.as_ref())).collect(),
+        Node::Fn { body, capture, .. } => std::iter::once(body.as_ref()).chain(capture.iter().map(Box::as_ref)).collect(),
+        Node::Get(v, _) | Node::Expanded { body: v, .. } => vec![v.as_ref()],
+        Node::Bypass(call) => W::bypass_input_ref(call).into_iter().collect(),
+        Node::Assoc(r, updates) => std::iter::once(r.as_ref()).chain(updates.iter().map(|(_, t)| t)).collect(),
+        _ => Vec::new(),
     }
+}
+// OCaml compares the step's direct nodes physically: collect their addresses in the one view the lowering walks
+fn state_step_nodes(term: &Term) -> HashSet<usize> {
+    fn direct(term: &Term, out: &mut HashSet<usize>) {
+        out.insert(term as *const Term as usize);
+        match &term.node {
+            Node::If(..) | Node::Cond(..) | Node::Case(..) => (),
+            _ => for c in term_refs(term) { direct(c, out); },
+        }
+    }
+    let mut out = HashSet::new();
+    if let Node::State { step, .. } = &term.node { direct(step, &mut out); }
+    out
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -319,6 +335,7 @@ pub struct Lowerer {
     next_function: i64,
     mixed: HashSet<i64>,
     current: Option<ResidualId>,
+    step_nodes: HashSet<usize>,
     regions: Vec<Arc<C::RegionT>>,
     slots: Vec<C::StateSlot>,
     next_slot: i64,
@@ -1072,6 +1089,7 @@ impl Lowerer {
         self.active.insert(id);
         let saved = (self.plane, self.geometry);
         let saved_current = self.current;
+        let saved_nodes = std::mem::replace(&mut self.step_nodes, state_step_nodes(&view.term));
         self.current = Some(r);
         self.plane = if view.host { C::Plane::Host } else { C::Plane::Frame };
         self.geometry = view.geometry;
@@ -1079,6 +1097,7 @@ impl Lowerer {
         self.active.remove(&id);
         self.plane = saved.0;
         self.geometry = saved.1;
+        self.step_nodes = saved_nodes;
         self.current = saved_current;
         result
     }
@@ -1216,7 +1235,7 @@ impl Lowerer {
         let candidate = numeric_candidate || text_candidate;
         // A State step's maps are deferred past the static pass. Compile those nested kernels
         // under their state residual; other nested candidates keep the existing strict/draw gate.
-        let state_parent = self.current.map(|parent| state_step_candidate(parent, x)).unwrap_or(false);
+        let state_parent = self.current.is_some() && self.step_nodes.contains(&(x as *const Term as usize));
         // a kernel reading a state value takes it as an argument, lowered once before the region
         let reads_state = candidate
             && E::Residual::free_names(x).iter().any(|name| matches!(env.get(name), Some(Known(Value::Residual(r))) if E::state_dependent(&Value::Residual(*r))));
@@ -2843,7 +2862,7 @@ fn new_lowerer(value: Option<Value>, trace: Option<Trace>, budget: Option<i64>, 
         constants: Vec::new(), locals: Vec::new(), next_statement: 0,
         budget: budget.unwrap_or(if has_draw { 32768 } else { 2048 }),
         active: HashSet::new(), calls: HashMap::new(), next_call: 0, next_function: -1,
-        mixed: HashSet::new(), current: None, regions: Vec::new(), slots: Vec::new(), next_slot: 0,
+        mixed: HashSet::new(), current: None, step_nodes: HashSet::new(), regions: Vec::new(), slots: Vec::new(), next_slot: 0,
         plane: C::Plane::Frame, geometry: false,
     }
 }

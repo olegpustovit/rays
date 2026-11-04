@@ -17,3 +17,6 @@ mem = { path = "../mem" }
 cfmt = { path = "../cfmt" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 input = { path = "../input" }
+
+[dev-dependencies]
+flow_graph = { path = "../flow_graph" }

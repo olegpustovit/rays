@@ -140,7 +140,6 @@ fn statically_folded_float_conversion_has_no_int_bank() {
 // Vec::with_capacity, so limit+1 aborts the process with "memory allocation of ... bytes failed".
 // OCaml raises E_ARRAY_RANGE (Flow.Value.array_init ty (limit + 1)).
 #[test]
-#[ignore = "product bug: array_init(limit+1) aborts on allocation instead of E_ARRAY_RANGE"]
 fn array_init_past_the_native_bound_is_a_range_error() {
     for (kind, limit) in limits() {
         let element = ty::of_string(kind).unwrap();
@@ -151,7 +150,6 @@ fn array_init_past_the_native_bound_is_a_range_error() {
 // Product defect: array/max_length's body (flow_check op.rs array_ops) reads :type with text_string,
 // so a non-text argument fails E_TYPE; OCaml reports E_ARRAY_TYPE for Int, Bool and Text_array.
 #[test]
-#[ignore = "product bug: non-text :type to array/max_length gives E_TYPE, OCaml E_ARRAY_TYPE"]
 fn direct_non_text_type_is_array_type() {
     let op = op::find(&[], "array/max_length", &context::value()).unwrap();
     for arg in [Value::Int(1), Value::Bool(true), Value::Text_array(std::sync::Arc::new(vec![b"float".to_vec()]))] {

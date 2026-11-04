@@ -305,7 +305,7 @@ fn info_of(t: &w::Term) -> Info {
         },
         _ => Slim::Other,
     };
-    Info { ty: t.ty.clone(), form_id: t.form.id, point_form: if is_point_list(&t.form) { Some(t.form.clone()) } else { None }, node }
+    Info { ty: t.ty.clone(), form_id: t.form.id, point_form: if is_point_list(&t.form) { Some((*t.form).clone()) } else { None }, node }
 }
 
 fn collect(c: &mut Cx, t: &w::Term) {
@@ -1285,7 +1285,7 @@ pub fn find_graph<'a>(workspace: &'a w::Workspace, name: &str) -> Option<&'a w::
 }
 
 fn graph_info(g: &w::Graph) -> GraphInfo {
-    GraphInfo { name: g.name.clone(), inputs: g.inputs.iter().map(|(n, t, d)| (n.clone(), t.clone(), d.as_ref().map(|x| x.form.clone()))).collect() }
+    GraphInfo { name: g.name.clone(), inputs: g.inputs.iter().map(|(n, t, d)| (n.clone(), t.clone(), d.as_ref().map(|x| (*x.form).clone()))).collect() }
 }
 
 /// The root scope of a graph or, for `"def:name"` or a `defn` name, of a definition. An operator call
@@ -1326,7 +1326,7 @@ pub fn of_graph_with(folded: &dyn Fn(&[String]) -> bool, catalog: &Catalog, work
         .map(|(n, ty, d)| {
             let mut path = root.clone();
             path.push(format!(":{}", n));
-            Input { path, name: n.clone(), ty: ty.clone(), default: d.as_ref().map(|t| t.form.clone()) }
+            Input { path, name: n.clone(), ty: ty.clone(), default: d.as_ref().map(|t| (*t.form).clone()) }
         })
         .collect();
     let visible: Vec<String> = inputs.iter().map(|i| i.name.clone()).collect();

@@ -382,7 +382,6 @@ fn diagnose_span(statements: &[C::Statement]) -> Option<rays_diagnostic::Span> {
 }
 
 #[test]
-#[ignore = "Rust core_lower refuses this error_rows mapper (refused binding); OCaml lowers it. flow_ir gap, see report"]
 fn range_last_diagnosis_is_refused_with_its_span() {
     let (_, program) = wrapped(
         "range-last-boundary",

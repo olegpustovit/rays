@@ -209,7 +209,6 @@ fn source_column_and_unsupported_producer() {
 // Product defect: Maximum over a Float_array [-0., 0.] returns -0. (flow_check op.rs reduce_array, the
 // width-1 path uses f64::max, whose zero sign is unspecified); OCaml returns +0.
 #[test]
-#[ignore = "product bug: array/max of [-0. 0.] returns -0., OCaml +0."]
 fn maximum_of_signed_zeros_is_positive_zero() {
     let v2 = Value::Vec2_array(Arc::new(vec![3., -0., 1., 0.]));
     assert!(same(&reduce_array(None, Reduction::Maximum, None, &v2).unwrap(), &Value::Vec2(3., 0.)));
