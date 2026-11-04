@@ -88,7 +88,7 @@ fn window_sketch_retained_view() {
             vec![
                 scene::clear(color::black()),
                 scene::view3d(None, camera, scene3.clone()),
-                scene::rect((0, 0), 6, 6, Some(color::rgb(((f.input.frame * 20) % 256) as i64, 0, 0)), None),
+                scene::rect((0, 0), 6, 6, Some(color::rgb(((f.input.frame * 20) % 256) as i64, 0, 0)), None).expect("rect"),
             ]
         }),
         after_present: Some(Box::new(move |_, f: &frame::t| {

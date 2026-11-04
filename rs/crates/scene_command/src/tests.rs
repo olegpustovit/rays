@@ -38,6 +38,21 @@ fn path_and_shape_primitives_preserve_subpixels_and_contours() {
 }
 
 #[test]
+fn path_commands_accessor_exposes_close() {
+    let commands = [
+        path::Command::MoveTo(path::Point { x: 0.0, y: 0.0 }),
+        path::Command::LineTo(path::Point { x: 4.0, y: 0.0 }),
+    ];
+    let open = path::of_commands(&commands);
+    assert_eq!(open.commands(), &commands[..], "open path commands");
+    assert!(!open.commands().iter().any(|c| matches!(c, path::Command::Close)), "open path has no Close");
+    let closed_commands = [commands[0], commands[1], path::Command::Close];
+    let closed = path::of_commands(&closed_commands);
+    assert_eq!(closed.commands(), &closed_commands[..], "closed path commands");
+    assert!(closed.commands().iter().any(|c| matches!(c, path::Command::Close)), "closed path has Close");
+}
+
+#[test]
 fn shape_float_edges_match_ocaml_nan_rules() {
     assert_eq!(
         shape2::line((0.0, 0.0), (2.0, 2.0), f64::NAN, 1),

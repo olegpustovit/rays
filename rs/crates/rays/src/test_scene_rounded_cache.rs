@@ -63,22 +63,22 @@ fn rounded_and_path_caches_are_deterministic_and_bounded() {
         same_picture();
         same_view3d();
         let make = |x: i64, y: i64| {
-            vec![scene::rounded_rect((x, y), 84, 31, 7, Some(color::rgba(12, 34, 56, 220)), Some(color::rgb(90, 80, 70)))]
+            vec![scene::rounded_rect((x, y), 84, 31, 7, Some(color::rgba(12, 34, 56, 220)), Some(color::rgb(90, 80, 70))).expect("rounded_rect")]
         };
         let baseline = serialize(&make(17, 23));
         require(baseline == serialize(&make(17, 23)), "cached rounded geometry changed IR");
         require(baseline != serialize(&make(18, 23)), "translation was omitted from cache key lowering");
         for index in 0..300 {
-            serialize(&[scene::rounded_rect((index & 7, index & 3), 20 + index, 31, 7, Some(color::red()), None)]);
+            serialize(&[scene::rounded_rect((index & 7, index & 3), 20 + index, 31, 7, Some(color::red()), None).expect("rounded_rect")]);
         }
         require(baseline == serialize(&make(17, 23)), "bounded eviction changed rounded geometry");
-        let primitive = || scene::circle((44, 37), 19, Some(color::rgba(11, 22, 33, 210)), None);
+        let primitive = || scene::circle((44, 37), 19, Some(color::rgba(11, 22, 33, 210)), None).expect("circle");
         let first = first_geometry(&primitive());
         let second = first_geometry(&primitive());
         require(Rc::ptr_eq(&first, &second), "structurally identical primitive rebuilt geometry arrays");
         let primitive_baseline = serialize(&[primitive()]);
         for index in 0..300 {
-            serialize(&[scene::rect((index, 0), index + 1, 3, Some(color::rgba(index & 255, 20, 30, 255)), None)]);
+            serialize(&[scene::rect((index, 0), index + 1, 3, Some(color::rgba(index & 255, 20, 30, 255)), None).expect("rect")]);
         }
         require(primitive_baseline == serialize(&[primitive()]), "bounded primitive cache eviction changed geometry");
         let ellipse_first = primitive();
@@ -89,37 +89,37 @@ fn rounded_and_path_caches_are_deterministic_and_bounded() {
         };
         require(same_group, "stable ellipse did not reuse its immutable scene node");
         for index in 0..300 {
-            let _ = scene::circle((index, index & 15), index + 2, Some(color::rgb(0, 0, 255)), None);
+            let _ = scene::circle((index, index & 15), index + 2, Some(color::rgb(0, 0, 255)), None).expect("circle");
         }
         require(primitive_baseline == serialize(&[primitive()]), "bounded ellipse cache eviction changed geometry");
         require_geometry_reuse("polygon", &|| {
-            scene::polygon(&[(11, 7), (83, 13), (72, 61), (19, 55)], Some(color::rgba(17, 41, 89, 213)), Some(color::rgb(220, 170, 90)))
+            scene::polygon(&[(11, 7), (83, 13), (72, 61), (19, 55)], Some(color::rgba(17, 41, 89, 213)), Some(color::rgb(220, 170, 90))).expect("polygon")
         });
-        require_geometry_reuse("rect", &|| scene::rect((13, 17), 71, 29, Some(color::rgba(27, 51, 93, 207)), Some(color::rgb(201, 151, 71))));
-        require_geometry_reuse("line", &|| scene::line((7, 9), (93, 67), Some(color::rgba(61, 103, 149, 219)), Some(5)));
+        require_geometry_reuse("rect", &|| scene::rect((13, 17), 71, 29, Some(color::rgba(27, 51, 93, 207)), Some(color::rgb(201, 151, 71))).expect("rect"));
+        require_geometry_reuse("line", &|| scene::line((7, 9), (93, 67), Some(color::rgba(61, 103, 149, 219)), Some(5)).expect("line"));
         let native_paths = || {
             vec![
-                scene::rect((8, 12), 63, 37, Some(color::rgba(19, 47, 83, 229)), Some(color::rgb(191, 157, 113))),
-                scene::polygon(&[(17, 71), (41, 19), (89, 27), (101, 78), (53, 91)], Some(color::rgba(13, 79, 127, 197)), None),
-                scene::line((3, 97), (117, 43), Some(color::rgba(149, 83, 31, 221)), Some(7)),
+                scene::rect((8, 12), 63, 37, Some(color::rgba(19, 47, 83, 229)), Some(color::rgb(191, 157, 113))).expect("rect"),
+                scene::polygon(&[(17, 71), (41, 19), (89, 27), (101, 78), (53, 91)], Some(color::rgba(13, 79, 127, 197)), None).expect("polygon"),
+                scene::line((3, 97), (117, 43), Some(color::rgba(149, 83, 31, 221)), Some(7)).expect("line"),
             ]
         };
         let native_baseline = serialize(&native_paths());
         require(native_baseline == serialize(&native_paths()), "cached native path geometry changed exact serialized IR");
         require(
-            serialize(&[scene::line((3, 97), (117, 43), Some(color::rgba(149, 83, 31, 221)), Some(6))])
-                != serialize(&[scene::line((3, 97), (117, 43), Some(color::rgba(149, 83, 31, 221)), Some(7))]),
+            serialize(&[scene::line((3, 97), (117, 43), Some(color::rgba(149, 83, 31, 221)), Some(6)).expect("line")])
+                != serialize(&[scene::line((3, 97), (117, 43), Some(color::rgba(149, 83, 31, 221)), Some(7)).expect("line")]),
             "native path cache omitted stroke width from its semantic key",
         );
         require(
-            serialize(&[scene::polygon(&[(4, 5), (31, 7), (29, 37)], Some(color::rgb(20, 40, 60)), None)])
-                != serialize(&[scene::polygon(&[(4, 5), (31, 7), (29, 37)], Some(color::rgb(21, 40, 60)), None)]),
+            serialize(&[scene::polygon(&[(4, 5), (31, 7), (29, 37)], Some(color::rgb(20, 40, 60)), None).expect("polygon")])
+                != serialize(&[scene::polygon(&[(4, 5), (31, 7), (29, 37)], Some(color::rgb(21, 40, 60)), None).expect("polygon")]),
             "native path cache omitted packed fill from its semantic key",
         );
-        let evicting = || scene::polygon(&[(-71, -53), (-19, -47), (-23, -11)], Some(color::rgba(23, 59, 101, 227)), None);
+        let evicting = || scene::polygon(&[(-71, -53), (-19, -47), (-23, -11)], Some(color::rgba(23, 59, 101, 227)), None).expect("polygon");
         let evicted_before = first_geometry(&evicting());
         for index in 0..300 {
-            let _ = scene::polygon(&[(index, 0), (index + 17, 3), (index + 11, 29)], Some(color::rgba(index & 255, 37, 73, 211)), None);
+            let _ = scene::polygon(&[(index, 0), (index + 17, 3), (index + 11, 29)], Some(color::rgba(index & 255, 37, 73, 211)), None).expect("polygon");
         }
         let evicted_after = first_geometry(&evicting());
         require(!Rc::ptr_eq(&evicted_before, &evicted_after), "native path cache did not deterministically evict its oldest geometry");

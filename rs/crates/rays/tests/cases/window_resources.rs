@@ -43,7 +43,7 @@ fn window_resources_scene_parity() {
                 24,
                 vec![scene::text((2, 3), None, Some(12), "staged text"), scene::view3d(Some((8, 4, 16, 12)), &cam, scene3)],
             ),
-            scene::rect((1, 1), 3, 2, Some(color::red()), None),
+            scene::rect((1, 1), 3, 2, Some(color::red()), None).expect("rect"),
         ];
         let first = Layer::stage_native(32, 24, &s).expect("stage");
         let (first_ir, first_resources) = (first.scene2.clone(), first.resources.clone());
@@ -245,14 +245,14 @@ fn window_resources_display_list_images() {
             }
             _ => fail(&format!("transformed display list bypassed retained transform lowering")),
         }
-        let equivalent = || vec![scene::clear(color::black()), scene::rect((3, 4), 12, 9, Some(color::white()), None)];
+        let equivalent = || vec![scene::clear(color::black()), scene::rect((3, 4), 12, 9, Some(color::white()), None).expect("rect")];
         let first_equivalent = Layer::stage_native_render(32, 32, &equivalent()).expect("stage");
         let second_equivalent = Layer::stage_native_render(32, 32, &equivalent()).expect("stage");
         require(std::rc::Rc::ptr_eq(&first_equivalent, &second_equivalent), "equivalent shallow scene composition missed native stage reuse");
-        let changed = Layer::stage_native_render(32, 32, &[scene::clear(color::black()), scene::rect((3, 4), 13, 9, Some(color::white()), None)]).expect("stage");
+        let changed = Layer::stage_native_render(32, 32, &[scene::clear(color::black()), scene::rect((3, 4), 13, 9, Some(color::white()), None).expect("rect")]).expect("stage");
         require(!std::rc::Rc::ptr_eq(&changed, &first_equivalent), "changed shallow scene composition reused stale native stage");
         let layered = |width: i64| {
-            vec![scene::rect((1, 1), 8, 8, Some(color::white()), None), Layer::layer_break(), scene::rect((16, 1), width, 8, Some(color::red()), None)]
+            vec![scene::rect((1, 1), 8, 8, Some(color::white()), None).expect("rect"), Layer::layer_break(), scene::rect((16, 1), width, 8, Some(color::red()), None).expect("rect")]
         };
         let first_layered = Layer::stage_native_render(32, 32, &layered(8)).expect("stage");
         let changed_layered = Layer::stage_native_render(32, 32, &layered(9)).expect("stage");

@@ -61,6 +61,13 @@ pub fn of_commands(commands: &[Command]) -> Path {
     Path(commands.to_vec())
 }
 
+impl Path {
+    /// The commands in order (OCaml `(path :> command array)`).
+    pub fn commands(&self) -> &[Command] {
+        &self.0
+    }
+}
+
 fn finite(p: Point) -> bool {
     p.x.is_finite() && p.y.is_finite()
 }

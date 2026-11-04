@@ -128,7 +128,7 @@ fn frame_facts_scene_lowering_path_texture() {
     );
     let s = vec![
         scene::clear(color::black()),
-        scene::rect((0, 0), 4, 3, Some(color::red()), None),
+        scene::rect((0, 0), 4, 3, Some(color::red()), None).expect("rect"),
         scene::text_input_region((1, 1), 2, 1, Some(true), Some(1)).expect("region"),
     ];
     let ir = Layer::to_ir(&s).expect("to_ir");
@@ -171,8 +171,8 @@ fn scene_staging_order_and_layer_breaks() {
     Layer::with_cache_context(&context, &mut || {
         let scene2_only = vec![
             scene::clear(color::black()),
-            scene::rect((1, 2), 8, 6, Some(color::red()), None),
-            scene::rect((2, 3), 1, 1, Some(color::white()), None),
+            scene::rect((1, 2), 8, 6, Some(color::red()), None).expect("rect"),
+            scene::rect((2, 3), 1, 1, Some(color::white()), None).expect("rect"),
         ];
         let staged = Layer::stage_native(16, 12, &scene2_only).expect("stage");
         match staged.layers.as_slice() {
@@ -180,9 +180,9 @@ fn scene_staging_order_and_layer_breaks() {
             _ => panic!("Scene2-only native staging split one ordered layer"),
         }
         let split = vec![
-            scene::rect((1, 2), 8, 6, Some(color::red()), None),
+            scene::rect((1, 2), 8, 6, Some(color::red()), None).expect("rect"),
             Layer::layer_break(),
-            scene::rect((2, 3), 1, 1, Some(color::white()), None),
+            scene::rect((2, 3), 1, 1, Some(color::white()), None).expect("rect"),
         ];
         let staged_split = Layer::stage_native(16, 12, &split).expect("stage");
         match staged_split.layers.as_slice() {
@@ -193,7 +193,7 @@ fn scene_staging_order_and_layer_breaks() {
             _ => panic!("Scene2 layer break did not isolate dynamic commands"),
         }
         check(render_ir::commands_readonly(&staged_split.scene2).len() == 2, "Scene2 layer break leaked into compatibility IR");
-        let styled = vec![scene::polygon(&[(0, 0), (8, 0), (8, 8)], Some(color::red()), Some(color::white()))];
+        let styled = vec![scene::polygon(&[(0, 0), (8, 0), (8, 8)], Some(color::red()), Some(color::white())).expect("polygon")];
         let (styled_ir, _) = Layer::stage(16, 16, &styled).expect("stage");
         let c = render_ir::commands_readonly(&styled_ir);
         check(c.len() == 2 && c.iter().all(|x| matches!(x, render_ir::Command::Geometry(_))), "polygon fill/stroke did not stage two meshes");

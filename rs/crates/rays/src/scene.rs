@@ -159,86 +159,81 @@ fn path_geometry_key(points: &[(i64, i64)], closed: bool, width: f64, fill: Opti
     TableKey::Str(format!("pg|{points:?}|{closed}|{}|{:?}|{:?}", width.to_bits(), fill.map(rgba), stroke.map(rgba)))
 }
 
-fn path_geometry_cached(key: TableKey, make: &dyn Fn() -> node) -> node {
+fn path_geometry_cached(key: TableKey, make: &dyn Fn() -> Result<node, String>) -> Result<node, String> {
     let context = CURRENT_SHAPES.with(|c| c.borrow().clone());
     let Some(context) = context else {
         return make();
     };
     if let Some(item) = table::find(&mut context.path_geometry.borrow_mut(), &key) {
         if let Ok(n) = item.downcast::<node>() {
-            return (*n).clone();
+            return Ok((*n).clone());
         }
     }
-    let value = make();
+    let value = make()?;
     table::add(&mut context.path_geometry.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()), false);
-    value
+    Ok(value)
 }
 
-fn geometry_nodes(geometries: Result<Vec<Geometry>, String>) -> Vec<node> {
-    // ponytail: OCaml raised from the constructor; every int-coordinate input tessellates, so a
-    // failure (non-finite stroke) draws nothing here.
-    geometries.unwrap_or_default().into_iter().map(|g| node::Geometry(Rc::new(g))).collect()
+fn geometry_nodes(geometries: Result<Vec<Geometry>, String>) -> Result<Vec<node>, String> {
+    Ok(geometries?.into_iter().map(|g| node::Geometry(Rc::new(g))).collect())
 }
 
-pub fn line(from_: (i64, i64), to_: (i64, i64), color_: Option<color::T>, width: Option<i64>) -> node {
+pub fn line(from_: (i64, i64), to_: (i64, i64), color_: Option<color::T>, width: Option<i64>) -> Result<node, String> {
     let color_ = color_.unwrap_or_else(default_color);
     let width = std::cmp::max(1, width.unwrap_or(1)) as f64;
     let points = [from_, to_];
     let key = path_geometry_key(&points, false, width, None, Some(color_));
     let as_float = |(x, y): (i64, i64)| (x as f64, y as f64);
-    path_geometry_cached(key, &|| match shape2::line(as_float(from_), as_float(to_), width, rgba(color_)) {
-        Ok(g) => node::Geometry(Rc::new(g)),
-        Err(_) => node::Group(Rc::new(Vec::new())),
+    path_geometry_cached(key, &|| {
+        let g = shape2::line(as_float(from_), as_float(to_), width, rgba(color_))?;
+        Ok(node::Geometry(Rc::new(g)))
     })
 }
 
-pub fn polygon(points: &[(i64, i64)], fill: Option<color::T>, stroke: Option<color::T>) -> node {
+pub fn polygon(points: &[(i64, i64)], fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
     let fill = if fill.is_none() && stroke.is_none() { Some(default_color()) } else { fill };
     let key = path_geometry_key(points, true, 1., fill, stroke);
     path_geometry_cached(key, &|| {
         let floats: Vec<(f64, f64)> = points.iter().map(|&(x, y)| (x as f64, y as f64)).collect();
-        node::Group(Rc::new(geometry_nodes(shape2::polygon(&floats, fill.map(rgba), stroke.map(rgba)))))
+        Ok(node::Group(Rc::new(geometry_nodes(shape2::polygon(&floats, fill.map(rgba), stroke.map(rgba)))?)))
     })
 }
 
-pub fn polyline(points: &[(i64, i64)], color_: Option<color::T>) -> node {
+pub fn polyline(points: &[(i64, i64)], color_: Option<color::T>) -> Result<node, String> {
     let color_ = color_.unwrap_or_else(default_color);
     let key = path_geometry_key(points, false, 1., None, Some(color_));
     path_geometry_cached(key, &|| {
         let floats: Vec<(f64, f64)> = points.iter().map(|&(x, y)| (x as f64, y as f64)).collect();
-        match shape2::polyline(&floats, rgba(color_)) {
-            Ok(g) => node::Geometry(Rc::new(g)),
-            Err(_) => node::Group(Rc::new(Vec::new())),
-        }
+        Ok(node::Geometry(Rc::new(shape2::polyline(&floats, rgba(color_))?)))
     })
 }
 
-pub fn point(at: (i64, i64), color_: Option<color::T>) -> node {
+pub fn point(at: (i64, i64), color_: Option<color::T>) -> Result<node, String> {
     let (x, y) = at;
     polygon(&[(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)], Some(color_.unwrap_or_else(default_color)), None)
 }
 
-pub fn rect(at: (i64, i64), w: i64, h: i64, fill: Option<color::T>, stroke: Option<color::T>) -> node {
+pub fn rect(at: (i64, i64), w: i64, h: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
     let (x, y) = at;
     polygon(&[(x, y), (x + w, y), (x + w, y + h), (x, y + h)], fill, stroke)
 }
 
-pub fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> node {
+pub fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
     let (x, y) = at;
     let radius = std::cmp::max(0, std::cmp::min(radius, std::cmp::min(w.abs(), h.abs()) / 2));
     let key = TableKey::Str(format!("rr|{w}|{h}|{radius}|{:?}|{:?}", fill.map(rgba), stroke.map(rgba)));
-    let make = || -> Rc<Vec<node>> {
-        Rc::new(geometry_nodes(shape2::rounded_rect(w as f64, h as f64, radius as f64, fill.map(rgba), stroke.map(rgba))))
+    let make = || -> Result<Rc<Vec<node>>, String> {
+        Ok(Rc::new(geometry_nodes(shape2::rounded_rect(w as f64, h as f64, radius as f64, fill.map(rgba), stroke.map(rgba)))?))
     };
     let context = CURRENT_SHAPES.with(|c| c.borrow().clone());
     let geometry = match context {
-        None => make(),
+        None => make()?,
         Some(context) => {
             let found = table::find(&mut context.rounded.borrow_mut(), &key).and_then(|i| i.downcast::<Vec<node>>().ok());
             match found {
                 Some(found) => found,
                 None => {
-                    let value = make();
+                    let value = make()?;
                     let bytes = value.iter().map(node_bytes).sum();
                     table::add(&mut context.rounded.borrow_mut(), bytes, key, value.clone(), false);
                     value
@@ -246,47 +241,44 @@ pub fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Option<co
             }
         }
     };
-    node::Translate(x, y, geometry)
+    Ok(node::Translate(x, y, geometry))
 }
 
-fn ellipse(at: (i64, i64), rx: i64, ry: i64, fill: Option<color::T>, stroke: Option<color::T>) -> node {
+fn ellipse(at: (i64, i64), rx: i64, ry: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
     let (cx, cy) = at;
     let key = TableKey::Str(format!("el|{cx}|{cy}|{rx}|{ry}|{:?}|{:?}", fill.map(rgba), stroke.map(rgba)));
-    let make = || node::Group(Rc::new(geometry_nodes(shape2::ellipse((cx as f64, cy as f64), rx as f64, ry as f64, fill.map(rgba), stroke.map(rgba)))));
+    let make = || -> Result<node, String> {
+        Ok(node::Group(Rc::new(geometry_nodes(shape2::ellipse((cx as f64, cy as f64), rx as f64, ry as f64, fill.map(rgba), stroke.map(rgba)))?)))
+    };
     let context = CURRENT_SHAPES.with(|c| c.borrow().clone());
     match context {
         None => make(),
         Some(context) => {
             let found = table::find(&mut context.ellipse.borrow_mut(), &key).and_then(|i| i.downcast::<node>().ok());
             match found {
-                Some(found) => (*found).clone(),
+                Some(found) => Ok((*found).clone()),
                 None => {
-                    let value = make();
+                    let value = make()?;
                     table::add(&mut context.ellipse.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()), false);
-                    value
+                    Ok(value)
                 }
             }
         }
     }
 }
 
-pub fn circle(at: (i64, i64), radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> node {
+pub fn circle(at: (i64, i64), radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
     ellipse(at, radius, radius, fill, stroke)
 }
 
-pub fn path(fill: Option<color::T>, value: &path_mod::t) -> node {
-    let closed = value_commands_closed(value);
+pub fn path(fill: Option<color::T>, value: &path_mod::t) -> Result<node, String> {
+    let closed = value.commands().iter().any(|c| matches!(c, path_mod::Command::Close));
     let geometries = if closed {
         shape2::path(Some(rgba(fill.unwrap_or_else(default_color))), None, value)
     } else {
         shape2::path(None, Some(rgba(default_color())), value)
     };
-    node::Group(Rc::new(geometry_nodes(geometries)))
-}
-
-fn value_commands_closed(value: &path_mod::t) -> bool {
-    // ponytail: `scene_command::path::Path` has no commands accessor; a `Close` shows in its Debug form
-    format!("{value:?}").contains("Close")
+    Ok(node::Group(Rc::new(geometry_nodes(geometries)?)))
 }
 
 pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: &str) -> node {

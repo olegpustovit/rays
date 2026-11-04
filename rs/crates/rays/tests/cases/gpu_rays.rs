@@ -199,7 +199,7 @@ fn gpu_rays_world_furnace() {
     render(
         &canvas_,
         None,
-        &[scene::line((4, 4), (4, 4), Some(color::white()), Some(1)), scene::circle((8, 8), 0, Some(color::white()), None)],
+        &[scene::line((4, 4), (4, 4), Some(color::white()), Some(1)).expect("line"), scene::circle((8, 8), 0, Some(color::white()), None).expect("circle")],
     );
     let _ = canvas::destroy(&canvas_);
     require(live_handles() == baseline, "World raster native handle delta");
@@ -368,7 +368,7 @@ fn gpu_rays_primitives() {
     let mut b = ui_batch::Builder::create();
     b.circle(32., 32., 12., Some(rgba(cyan)), None, 0.).expect("circle");
     let packed = scene::shapes(b.publish().expect("publish"));
-    render(&canvas_, None, &[scene::clear(color::black()), scene::circle((32, 32), 12, Some(cyan), None)]);
+    render(&canvas_, None, &[scene::clear(color::black()), scene::circle((32, 32), 12, Some(cyan), None).expect("circle")]);
     let polygon = px(&canvas_);
     render(&canvas_, None, &[scene::clear(color::black()), packed]);
     let sdf = px(&canvas_);
@@ -427,7 +427,7 @@ fn gpu_rays_primitives() {
         for i in 0..count {
             let (x, y) = (8 + (2 * (i % 19)), 8 + (2 * (i % 13)));
             builder.shape_rect(x as f64, y as f64, 2., 2., rgba(cyan), 0).expect("rect");
-            reference.push(scene::rect((x, y), 2, 2, Some(cyan), None));
+            reference.push(scene::rect((x, y), 2, 2, Some(cyan), None).expect("rect"));
         }
         render(&canvas_, None, &reference);
         let expected = px(&canvas_);

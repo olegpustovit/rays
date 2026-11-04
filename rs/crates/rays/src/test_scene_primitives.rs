@@ -1,5 +1,6 @@
 //! Packed shapes through `Scene.shapes`: layout, finite bounds and owned commands. (The native
 //! circle/alpha/transform parity is `gpu_rays_primitives` in tests/cases/gpu_rays.rs.)
+use crate::path as path_mod;
 use crate::scene::{self, Layer};
 use rays_math::color;
 use scene_command::render_ir::{self, Command};
@@ -42,4 +43,27 @@ fn shapes_layout_finite_bounds_owned_commands() {
     let mut builder = ui_batch::Builder::create();
     assert!(builder.circle(0., 0., -1., None, None, 0.).is_err(), "negative radius");
     assert!(builder.line(1e100, 0., 1., 1., 0, 1.).is_err(), "float32 overflow");
+}
+
+#[test]
+fn failing_tessellation_is_an_error_with_ocaml_message() {
+    // A non-finite point fails tessellation; OCaml's Shape2 raised Invalid_argument with these texts.
+    let bad = path_mod::Point { x: f64::NAN, y: 0.0 };
+    let ok = path_mod::Point { x: 1.0, y: 1.0 };
+    let open = path_mod::of_commands(&[path_mod::Command::MoveTo(bad), path_mod::Command::LineTo(ok)]);
+    assert_eq!(scene::path(None, &open).err().as_deref(), Some("Shape2 stroke"), "open path stroke");
+    let closed = path_mod::of_commands(&[
+        path_mod::Command::MoveTo(bad),
+        path_mod::Command::LineTo(ok),
+        path_mod::Command::LineTo(path_mod::Point { x: 0.0, y: 1.0 }),
+        path_mod::Command::Close,
+    ]);
+    assert_eq!(scene::path(Some(color::red()), &closed).err().as_deref(), Some("Shape2 fill"), "closed path fill");
+    let good = path_mod::of_commands(&[
+        path_mod::Command::MoveTo(ok),
+        path_mod::Command::LineTo(path_mod::Point { x: 2.0, y: 1.0 }),
+        path_mod::Command::LineTo(path_mod::Point { x: 2.0, y: 2.0 }),
+        path_mod::Command::Close,
+    ]);
+    assert!(scene::path(Some(color::red()), &good).is_ok(), "valid closed path");
 }
