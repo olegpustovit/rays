@@ -1,0 +1,42 @@
+[package]
+name = "rays_editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "rays_editor"
+path = "src/lib.rs"
+
+[dependencies]
+editor_document = { path = "../editor_document" }
+flow_native = { path = "../flow_native" }
+rays = { path = "../rays" }
+rays_math = { path = "../rays_math" }
+input = { path = "../input" }
+runtime_input = { path = "../runtime_input" }
+sdl3 = { path = "../sdl3" }
+rdk_rays = { path = "../rdk_rays" }
+rays_pathtracer = { path = "../rays_pathtracer" }
+sop = { path = "../sop" }
+flow_syntax = { path = "../flow_syntax" }
+flow_check = { path = "../flow_check" }
+flow_eval = { path = "../flow_eval" }
+flow_sop = { path = "../flow_sop" }
+flow_graph = { path = "../flow_graph" }
+editor_core = { path = "../editor_core" }
+pxui = { path = "../pxui" }
+pxui_shell = { path = "../pxui_shell" }
+pxui_graph = { path = "../pxui_graph" }
+lru = { path = "../lru" }
+cfmt = { path = "../cfmt" }
+ocaml_int = { path = "../ocaml_int" }
+
+[dev-dependencies]
+ogpu = { path = "../ogpu" }
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+renderer = { path = "../renderer" }
+
+# Window/GPU suites (see rs/port/rays_editor_plan.md) are added per bundle, each
+#   [[test]] name = "window_editor_<x>" / "gpu_editor_<x>"  harness = false
+# like crates/pxui (own main, rays/tests/common/window.rs runner).
