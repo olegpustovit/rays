@@ -1,0 +1,1957 @@
+## case 0 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+1
+  r2 = Binary Mul 0 1
+  r3 = Frame "t"
+  r4 = Binary Add 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 0 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+1
+  r2 = Binary Mul 0 1
+  r3 = Frame "t"
+  r4 = Binary Add 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 1 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Lt 0 1
+  r3 = Guarded 2:true (Const 0x1p+0)
+  r4 = Guarded 2:true (Binary Add 0 3)
+  r5 = Guarded 2:false (Const 0x1p+0)
+  r6 = Guarded 2:false (Binary Sub 0 5)
+  r7 = Select 2 4 6
+  widths [1]
+  output [7]
+  uniform_widths []
+  collecting true
+## case 1 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Lt 0 1
+  r3 = Guarded 2:true (Const 0x1p+0)
+  r4 = Guarded 2:true (Binary Add 0 3)
+  r5 = Guarded 2:false (Const 0x1p+0)
+  r6 = Guarded 2:false (Binary Sub 0 5)
+  r7 = Select 2 4 6
+  widths [1]
+  output [7]
+  uniform_widths []
+  collecting true
+## case 2 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1.47ae147ae147bp-6
+  r2 = Binary Mul 0 1
+  r3 = Frame "t"
+  r4 = Const 0x1p-2
+  r5 = Noise3 2 3 4 seed=31 octaves=3
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 2 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1.47ae147ae147bp-6
+  r2 = Binary Mul 0 1
+  r3 = Frame "t"
+  r4 = Const 0x1p-2
+  r5 = Noise3 2 3 4 seed=31 octaves=3
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 3 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  widths [1]
+  output [0;2]
+  uniform_widths []
+  collecting true
+## case 3 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  widths [1]
+  output [0;2]
+  uniform_widths []
+  collecting true
+## case 4 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Binary Add 0 1
+  r3 = Frame "t"
+  widths [1]
+  output [2;0;3;1]
+  uniform_widths []
+  collecting true
+## case 4 fusion=false
+program
+  r0 = Input 0 2 0
+  r1 = Input 0 2 1
+  r2 = Frame "t"
+  r3 = Const 0x1p+0
+  widths [2]
+  output [1;0;2;3]
+  uniform_widths []
+  collecting true
+## case 5 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Const 0x1p+1
+  r3 = Const 0x1.8p+1
+  r4 = Uniform 0 0
+  r5 = Uniform 0 1
+  r6 = Uniform 0 2
+  r7 = Uniform 0 3
+  r8 = Binary Add 0 4
+  r9 = Binary Add 1 5
+  r10 = Binary Add 2 6
+  r11 = Binary Add 3 7
+  widths [1]
+  output [8;9;10;11]
+  uniform_widths [4]
+  collecting true
+## case 5 fusion=false
+program
+  r0 = Input 0 4 0
+  r1 = Input 0 4 1
+  r2 = Input 0 4 2
+  r3 = Input 0 4 3
+  r4 = Uniform 0 0
+  r5 = Uniform 0 1
+  r6 = Uniform 0 2
+  r7 = Uniform 0 3
+  r8 = Binary Add 0 4
+  r9 = Binary Add 1 5
+  r10 = Binary Add 2 6
+  r11 = Binary Add 3 7
+  widths [4]
+  output [8;9;10;11]
+  uniform_widths [4]
+  collecting true
+## case 6 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1.ep+4
+  r2 = Binary Mul 0 1
+  r3 = Const 0x1.6666666666666p-1
+  r4 = Const 0x1.999999999999ap-2
+  r5 = Frame "t"
+  r6 = Const 0x0p+0
+  r7 = Binary Mul 5 6
+  r8 = Binary Add 4 7
+  r9 = Const 0x1.ep+5
+  r10 = Const 0x1.68p+8
+  r11 = Binary Mod 2 10
+  r12 = Binary Div 11 9
+  r13 = Const 0x1p+0
+  r14 = Binary Min 13 3
+  r15 = Binary Max 6 14
+  r16 = Binary Min 13 8
+  r17 = Binary Max 6 16
+  r18 = Const 0x1p+1
+  r19 = Binary Mul 18 17
+  r20 = Binary Sub 19 13
+  r21 = Unary Abs 20
+  r22 = Binary Sub 13 21
+  r23 = Binary Mul 22 15
+  r24 = Binary Mod 12 18
+  r25 = Binary Sub 24 13
+  r26 = Unary Abs 25
+  r27 = Binary Sub 13 26
+  r28 = Binary Mul 23 27
+  r29 = Binary Div 23 18
+  r30 = Binary Sub 17 29
+  r31 = Const 0x1.4p+2
+  r32 = Binary Lt 12 31
+  r33 = Select 32 23 28
+  r34 = Const 0x1p+2
+  r35 = Binary Lt 12 34
+  r36 = Select 35 23 33
+  r37 = Const 0x1.8p+1
+  r38 = Binary Lt 12 37
+  r39 = Select 38 28 36
+  r40 = Binary Lt 12 18
+  r41 = Select 40 6 39
+  r42 = Binary Lt 12 13
+  r43 = Select 42 6 41
+  r44 = Const 0x1.fep+7
+  r45 = Const 0x1p-1
+  r46 = Binary Add 43 30
+  r47 = Binary Min 13 46
+  r48 = Binary Max 6 47
+  r49 = Binary Mul 48 44
+  r50 = Binary Add 49 45
+  r51 = Convert int 50
+  r52 = Convert float 51
+  r53 = Binary Div 52 44
+  r54 = Select 32 6 6
+  r55 = Select 35 28 54
+  r56 = Select 38 23 55
+  r57 = Select 40 23 56
+  r58 = Select 42 28 57
+  r59 = Binary Add 58 30
+  r60 = Binary Min 13 59
+  r61 = Binary Max 6 60
+  r62 = Binary Mul 61 44
+  r63 = Binary Add 62 45
+  r64 = Convert int 63
+  r65 = Convert float 64
+  r66 = Binary Div 65 44
+  r67 = Select 32 28 23
+  r68 = Select 35 6 67
+  r69 = Select 38 6 68
+  r70 = Select 40 28 69
+  r71 = Select 42 23 70
+  r72 = Binary Add 71 30
+  r73 = Binary Min 13 72
+  r74 = Binary Max 6 73
+  r75 = Binary Mul 74 44
+  r76 = Binary Add 75 45
+  r77 = Convert int 76
+  r78 = Convert float 77
+  r79 = Binary Div 78 44
+  widths [1]
+  output [79;66;53]
+  uniform_widths []
+  collecting true
+## case 6 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1.ep+4
+  r2 = Binary Mul 0 1
+  r3 = Const 0x1.6666666666666p-1
+  r4 = Const 0x1.999999999999ap-2
+  r5 = Frame "t"
+  r6 = Const 0x0p+0
+  r7 = Binary Mul 5 6
+  r8 = Binary Add 4 7
+  r9 = Const 0x1.ep+5
+  r10 = Const 0x1.68p+8
+  r11 = Binary Mod 2 10
+  r12 = Binary Div 11 9
+  r13 = Const 0x1p+0
+  r14 = Binary Min 13 3
+  r15 = Binary Max 6 14
+  r16 = Binary Min 13 8
+  r17 = Binary Max 6 16
+  r18 = Const 0x1p+1
+  r19 = Binary Mul 18 17
+  r20 = Binary Sub 19 13
+  r21 = Unary Abs 20
+  r22 = Binary Sub 13 21
+  r23 = Binary Mul 22 15
+  r24 = Binary Mod 12 18
+  r25 = Binary Sub 24 13
+  r26 = Unary Abs 25
+  r27 = Binary Sub 13 26
+  r28 = Binary Mul 23 27
+  r29 = Binary Div 23 18
+  r30 = Binary Sub 17 29
+  r31 = Const 0x1.4p+2
+  r32 = Binary Lt 12 31
+  r33 = Select 32 23 28
+  r34 = Const 0x1p+2
+  r35 = Binary Lt 12 34
+  r36 = Select 35 23 33
+  r37 = Const 0x1.8p+1
+  r38 = Binary Lt 12 37
+  r39 = Select 38 28 36
+  r40 = Binary Lt 12 18
+  r41 = Select 40 6 39
+  r42 = Binary Lt 12 13
+  r43 = Select 42 6 41
+  r44 = Const 0x1.fep+7
+  r45 = Const 0x1p-1
+  r46 = Binary Add 43 30
+  r47 = Binary Min 13 46
+  r48 = Binary Max 6 47
+  r49 = Binary Mul 48 44
+  r50 = Binary Add 49 45
+  r51 = Convert int 50
+  r52 = Convert float 51
+  r53 = Binary Div 52 44
+  r54 = Select 32 6 6
+  r55 = Select 35 28 54
+  r56 = Select 38 23 55
+  r57 = Select 40 23 56
+  r58 = Select 42 28 57
+  r59 = Binary Add 58 30
+  r60 = Binary Min 13 59
+  r61 = Binary Max 6 60
+  r62 = Binary Mul 61 44
+  r63 = Binary Add 62 45
+  r64 = Convert int 63
+  r65 = Convert float 64
+  r66 = Binary Div 65 44
+  r67 = Select 32 28 23
+  r68 = Select 35 6 67
+  r69 = Select 38 6 68
+  r70 = Select 40 28 69
+  r71 = Select 42 23 70
+  r72 = Binary Add 71 30
+  r73 = Binary Min 13 72
+  r74 = Binary Max 6 73
+  r75 = Binary Mul 74 44
+  r76 = Binary Add 75 45
+  r77 = Convert int 76
+  r78 = Convert float 77
+  r79 = Binary Div 78 44
+  widths [1]
+  output [79;66;53]
+  uniform_widths []
+  collecting true
+## case 7 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Frame "t"
+  r3 = Const 0x0p+0
+  r4 = Const -0x1p+0
+  r5 = Binary Mul 0 1
+  r6 = Binary Mul 4 1
+  r7 = Fma 6 3 5
+  r8 = Binary Mul 2 3
+  r9 = Binary Mul 4 0
+  r10 = Fma 9 0 8
+  r11 = Binary Mul 1 0
+  r12 = Binary Mul 4 2
+  r13 = Fma 12 1 11
+  widths [1]
+  output [13;10;7]
+  uniform_widths []
+  collecting true
+## case 7 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Frame "t"
+  r3 = Const 0x0p+0
+  r4 = Const -0x1p+0
+  r5 = Binary Mul 0 1
+  r6 = Binary Mul 4 1
+  r7 = Fma 6 3 5
+  r8 = Binary Mul 2 3
+  r9 = Binary Mul 4 0
+  r10 = Fma 9 0 8
+  r11 = Binary Mul 1 0
+  r12 = Binary Mul 4 2
+  r13 = Fma 12 1 11
+  widths [1]
+  output [13;10;7]
+  uniform_widths []
+  collecting true
+## case 8 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Frame "t"
+  r3 = Const 0x0p+0
+  r4 = Binary Mul 0 3
+  r5 = Binary Mul 1 1
+  r6 = Binary Mul 2 0
+  r7 = Binary Add 4 5
+  r8 = Binary Add 7 6
+  widths [1]
+  output [8]
+  uniform_widths []
+  collecting true
+## case 8 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Frame "t"
+  r3 = Const 0x0p+0
+  r4 = Binary Mul 0 3
+  r5 = Binary Mul 1 1
+  r6 = Binary Mul 2 0
+  r7 = Binary Add 4 5
+  r8 = Binary Add 7 6
+  widths [1]
+  output [8]
+  uniform_widths []
+  collecting true
+## case 9 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Frame "t"
+  r3 = Binary Mul 0 0
+  r4 = Binary Mul 1 1
+  r5 = Binary Mul 2 2
+  r6 = Binary Add 3 4
+  r7 = Binary Add 6 5
+  r8 = Unary Sqrt 7
+  r9 = Const 0x0p+0
+  r10 = Binary Eq 8 9
+  r11 = Guarded 10:false (Const 0x1p+0)
+  r12 = Guarded 10:false (Binary Div 11 8)
+  r13 = Guarded 10:false (Binary Mul 0 12)
+  r14 = Guarded 10:false (Binary Mul 1 12)
+  r15 = Guarded 10:false (Binary Mul 2 12)
+  r16 = Select 10 9 13
+  r17 = Select 10 9 14
+  r18 = Select 10 9 15
+  widths [1]
+  output [16;17;18]
+  uniform_widths []
+  collecting true
+## case 9 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Frame "t"
+  r3 = Binary Mul 0 0
+  r4 = Binary Mul 1 1
+  r5 = Binary Mul 2 2
+  r6 = Binary Add 3 4
+  r7 = Binary Add 6 5
+  r8 = Unary Sqrt 7
+  r9 = Const 0x0p+0
+  r10 = Binary Eq 8 9
+  r11 = Guarded 10:false (Const 0x1p+0)
+  r12 = Guarded 10:false (Binary Div 11 8)
+  r13 = Guarded 10:false (Binary Mul 0 12)
+  r14 = Guarded 10:false (Binary Mul 1 12)
+  r15 = Guarded 10:false (Binary Mul 2 12)
+  r16 = Select 10 9 13
+  r17 = Select 10 9 14
+  r18 = Select 10 9 15
+  widths [1]
+  output [16;17;18]
+  uniform_widths []
+  collecting true
+## case 10 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Frame "t"
+  r3 = Binary Mul 0 0
+  r4 = Binary Mul 1 1
+  r5 = Binary Mul 2 2
+  r6 = Binary Add 3 4
+  r7 = Binary Add 6 5
+  r8 = Unary Sqrt 7
+  widths [1]
+  output [8]
+  uniform_widths []
+  collecting true
+## case 10 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Frame "t"
+  r3 = Binary Mul 0 0
+  r4 = Binary Mul 1 1
+  r5 = Binary Mul 2 2
+  r6 = Binary Add 3 4
+  r7 = Binary Add 6 5
+  r8 = Unary Sqrt 7
+  widths [1]
+  output [8]
+  uniform_widths []
+  collecting true
+## case 11 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Array_prepare 0 array:float
+  r3 = Convert int 0
+  r4 = Int_const 0
+  r5 = Int_compare int/ge 3 4
+  r6 = Int_const 3
+  r7 = Int_compare int/lt 3 6
+  r8 = Binary And 5 7
+  r9 = Guarded 8:false (Raise int "E_LIST_RANGE" "nth index is out of range or is not a whole number.")
+  r10 = Int_select 8 3 9
+  r11 = Guarded 8:true (Gather 2 10 1 0)
+  r12 = Binary Add 1 11
+  widths [1]
+  output [12]
+  uniform_widths [1]
+  collecting true
+## case 11 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Array_prepare 0 array:float
+  r3 = Convert int 0
+  r4 = Int_const 0
+  r5 = Int_compare int/ge 3 4
+  r6 = Int_const 3
+  r7 = Int_compare int/lt 3 6
+  r8 = Binary And 5 7
+  r9 = Guarded 8:false (Raise int "E_LIST_RANGE" "nth index is out of range or is not a whole number.")
+  r10 = Int_select 8 3 9
+  r11 = Guarded 8:true (Gather 2 10 1 0)
+  r12 = Binary Add 1 11
+  widths [1]
+  output [12]
+  uniform_widths [1]
+  collecting true
+## case 12 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Array_prepare 0 array:float
+  r3 = Const 0x0p+0
+  r4 = Binary Ge 0 3
+  r5 = Const 0x1.8p+1
+  r6 = Binary Lt 0 5
+  r7 = Const 0x1p+0
+  r8 = Binary Mod 0 7
+  r9 = Binary Eq 8 3
+  r10 = Binary And 4 6
+  r11 = Binary And 10 9
+  r12 = Guarded 11:true (Convert int 0)
+  r13 = Guarded 11:false (Raise int "E_LIST_RANGE" "nth index is out of range or is not a whole number.")
+  r14 = Int_select 11 12 13
+  r15 = Guarded 11:true (Gather 2 14 1 0)
+  r16 = Binary Add 1 15
+  widths [1]
+  output [16]
+  uniform_widths [1]
+  collecting true
+## case 12 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Array_prepare 0 array:float
+  r3 = Const 0x0p+0
+  r4 = Binary Ge 0 3
+  r5 = Const 0x1.8p+1
+  r6 = Binary Lt 0 5
+  r7 = Const 0x1p+0
+  r8 = Binary Mod 0 7
+  r9 = Binary Eq 8 3
+  r10 = Binary And 4 6
+  r11 = Binary And 10 9
+  r12 = Guarded 11:true (Convert int 0)
+  r13 = Guarded 11:false (Raise int "E_LIST_RANGE" "nth index is out of range or is not a whole number.")
+  r14 = Int_select 11 12 13
+  r15 = Guarded 11:true (Gather 2 14 1 0)
+  r16 = Binary Add 1 15
+  widths [1]
+  output [16]
+  uniform_widths [1]
+  collecting true
+## case 13 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Array_prepare 0 array:float
+  r2 = Int_const 3
+  r3 = Int_binary int/mod 0 2
+  r4 = Gather 1 3 1 0
+  widths [1]
+  output [4]
+  uniform_widths [1]
+  collecting true
+## case 13 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Array_prepare 0 array:float
+  r2 = Int_const 3
+  r3 = Int_binary int/mod 0 2
+  r4 = Gather 1 3 1 0
+  widths [1]
+  output [4]
+  uniform_widths [1]
+  collecting true
+## case 14 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Lt 0 1
+  r3 = Guarded 2:true (Raise any "E_Y" "bad")
+  r4 = Select 2 3 0
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 14 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Lt 0 1
+  r3 = Guarded 2:true (Raise any "E_Y" "bad")
+  r4 = Select 2 3 0
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 15 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Lt 0 1
+  r3 = Guarded 2:true (Const 0x1p+0)
+  r4 = Guarded 2:false (Const 0x1p+1)
+  r5 = Guarded 2:false (Binary Lt 0 4)
+  r6 = Guarded 2:false;5:true (Const 0x1p+1)
+  r7 = Guarded 2:false;5:false (Const 0x1.8p+1)
+  r8 = Guarded 2:false (Select 5 6 7)
+  r9 = Select 2 3 8
+  widths [1]
+  output [9]
+  uniform_widths []
+  collecting true
+## case 15 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Lt 0 1
+  r3 = Guarded 2:true (Const 0x1p+0)
+  r4 = Guarded 2:false (Const 0x1p+1)
+  r5 = Guarded 2:false (Binary Lt 0 4)
+  r6 = Guarded 2:false;5:true (Const 0x1p+1)
+  r7 = Guarded 2:false;5:false (Const 0x1.8p+1)
+  r8 = Guarded 2:false (Select 5 6 7)
+  r9 = Select 2 3 8
+  widths [1]
+  output [9]
+  uniform_widths []
+  collecting true
+## case 18 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Accumulator 0
+  r2 = Const 0x1.fae147ae147aep-1
+  r3 = Binary Mul 1 2
+  r4 = Frame "t"
+  r5 = Binary Mul 0 4
+  r6 = Binary Add 3 5
+  widths [1]
+  output [6]
+  uniform_widths []
+  collecting false
+## case 18 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Accumulator 0
+  r2 = Const 0x1.fae147ae147aep-1
+  r3 = Binary Mul 1 2
+  r4 = Frame "t"
+  r5 = Binary Mul 0 4
+  r6 = Binary Add 3 5
+  widths [1]
+  output [6]
+  uniform_widths []
+  collecting false
+## case 20 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Unary Sin 2
+  widths [1]
+  output [3]
+  uniform_widths []
+  collecting false
+## case 20 fusion=false
+program
+  r0 = Input 0 1 0
+  widths [1]
+  output [0]
+  uniform_widths []
+  collecting false
+## case 21 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Input 1 1 0
+  r2 = Const 0x1p-2
+  r3 = Binary Mul 0 2
+  r4 = Frame "t"
+  r5 = Binary Add 1 4
+  r6 = Binary Add 3 5
+  widths [1;1]
+  output [6]
+  uniform_widths []
+  collecting true
+## case 21 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Input 1 1 0
+  r2 = Const 0x1p-2
+  r3 = Binary Mul 0 2
+  r4 = Frame "t"
+  r5 = Binary Add 1 4
+  r6 = Binary Add 3 5
+  widths [1;1]
+  output [6]
+  uniform_widths []
+  collecting true
+## case 22 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Unary Sin 2
+  widths [1]
+  output [3]
+  uniform_widths []
+  collecting true
+## case 22 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Unary Sin 2
+  widths [1]
+  output [3]
+  uniform_widths []
+  collecting true
+## case 23 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Int_frame "frame/index"
+  r2 = Int_binary int/xor 0 1
+  r3 = Int_const 9007199254740993
+  r4 = Int_binary int/add 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 23 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Int_frame "frame/index"
+  r2 = Int_binary int/xor 0 1
+  r3 = Int_const 9007199254740993
+  r4 = Int_binary int/add 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 24 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Int_const 0
+  r2 = Int_compare int/lt 0 1
+  r3 = Guarded 2:true (Int_const 0)
+  r4 = Guarded 2:true (Int_binary int/div 0 3)
+  r5 = Guarded 2:false (Int_frame "frame/index")
+  r6 = Guarded 2:false (Int_binary int/add 0 5)
+  r7 = Int_select 2 4 6
+  widths [1]
+  output [7]
+  uniform_widths []
+  collecting true
+## case 24 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Int_const 0
+  r2 = Int_compare int/lt 0 1
+  r3 = Guarded 2:true (Int_const 0)
+  r4 = Guarded 2:true (Int_binary int/div 0 3)
+  r5 = Guarded 2:false (Int_frame "frame/index")
+  r6 = Guarded 2:false (Int_binary int/add 0 5)
+  r7 = Int_select 2 4 6
+  widths [1]
+  output [7]
+  uniform_widths []
+  collecting true
+## case 25 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Convert float 0
+  r2 = Frame "t"
+  r3 = Binary Sub 1 2
+  r4 = Int_const 10
+  r5 = Int_binary int/shr 0 4
+  r6 = Convert float 5
+  widths [1]
+  output [3;6]
+  uniform_widths []
+  collecting true
+## case 25 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Convert float 0
+  r2 = Frame "t"
+  r3 = Binary Sub 1 2
+  r4 = Int_const 10
+  r5 = Int_binary int/shr 0 4
+  r6 = Convert float 5
+  widths [1]
+  output [3;6]
+  uniform_widths []
+  collecting true
+## case 26 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Int_accumulator
+  r2 = Int_const 2177342782468422677
+  r3 = Int_binary int/mul 1 2
+  r4 = Int_binary int/xor 3 0
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting false
+## case 26 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Int_accumulator
+  r2 = Int_const 2177342782468422677
+  r3 = Int_binary int/mul 1 2
+  r4 = Int_binary int/xor 3 0
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting false
+## case 27 fusion=true
+program
+  r0 = Input 0 3 0
+  r1 = Input 0 3 1
+  r2 = Input 0 3 2
+  r3 = Frame "t"
+  r4 = Binary Mul 0 3
+  r5 = Binary Mul 1 3
+  r6 = Binary Mul 2 3
+  r7 = Input 1 3 0
+  r8 = Input 1 3 1
+  r9 = Input 1 3 2
+  r10 = Binary Add 4 7
+  r11 = Binary Add 5 8
+  r12 = Binary Add 6 9
+  widths [3;3]
+  output [10;11;12]
+  uniform_widths []
+  collecting true
+## case 27 fusion=false
+program
+  r0 = Input 0 3 0
+  r1 = Input 0 3 1
+  r2 = Input 0 3 2
+  r3 = Input 1 3 0
+  r4 = Input 1 3 1
+  r5 = Input 1 3 2
+  r6 = Binary Add 0 3
+  r7 = Binary Add 1 4
+  r8 = Binary Add 2 5
+  widths [3;3]
+  output [6;7;8]
+  uniform_widths []
+  collecting true
+## case 28 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Binary Mul 2 1
+  widths [1]
+  output [3]
+  uniform_widths []
+  collecting true
+## case 28 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Mul 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 29 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Unary Sin 2
+  r4 = Binary Mul 3 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 29 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Binary Mul 0 0
+  widths [1]
+  output [1]
+  uniform_widths []
+  collecting true
+## case 30 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x0p+0
+  r2 = Frame "t"
+  r3 = Binary Add 0 2
+  r4 = Binary Mul 1 3
+  r5 = Const 0x1p+0
+  r6 = Binary Mul 5 3
+  r7 = Const 0x1p+1
+  r8 = Binary Mul 7 3
+  r9 = Binary Add 1 4
+  r10 = Binary Add 9 6
+  r11 = Binary Add 10 8
+  widths [1]
+  output [11]
+  uniform_widths []
+  collecting true
+## case 30 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x0p+0
+  r2 = Frame "t"
+  r3 = Binary Add 0 2
+  r4 = Binary Mul 1 3
+  r5 = Const 0x1p+0
+  r6 = Binary Mul 5 3
+  r7 = Const 0x1p+1
+  r8 = Binary Mul 7 3
+  r9 = Binary Add 1 4
+  r10 = Binary Add 9 6
+  r11 = Binary Add 10 8
+  widths [1]
+  output [11]
+  uniform_widths []
+  collecting true
+## case 31 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Const 0x0p+0
+  r2 = Array_prepare 0 array:float
+  r3 = Int_uniform 1
+  r4 = Int_const 18014398509481983
+  r5 = Int_compare int/le 0 4
+  r6 = Int_const 0
+  r7 = Int_compare int/ge 0 6
+  r8 = Binary And 7 5
+  r9 = Guarded 8:false (Raise int "E_ARRAY_RANGE" "array/slice needs a non-negative whole length.")
+  r10 = Int_select 8 0 9
+  r11 = Int_binary int/sub 3 10
+  r12 = Int_const 3
+  r13 = Int_compare int/le 12 11
+  r14 = Int_compare int/le 10 3
+  r15 = Binary And 14 13
+  r16 = Guarded 15:false (Raise int "E_ARRAY_RANGE" "An array slice must be within its source.")
+  r17 = Int_select 15 6 16
+  r18 = Convert float 17
+  r19 = Int_binary int/add 10 6
+  r20 = Guarded 15:true (Gather 2 19 1 0)
+  r21 = Int_const 1
+  r22 = Int_binary int/add 10 21
+  r23 = Guarded 15:true (Gather 2 22 1 0)
+  r24 = Int_const 2
+  r25 = Int_binary int/add 10 24
+  r26 = Guarded 15:true (Gather 2 25 1 0)
+  r27 = Binary Add 18 20
+  r28 = Binary Add 27 23
+  r29 = Binary Add 28 26
+  widths [1]
+  output [29]
+  uniform_widths [1;1]
+  collecting true
+## case 31 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Const 0x0p+0
+  r2 = Array_prepare 0 array:float
+  r3 = Int_uniform 1
+  r4 = Int_const 18014398509481983
+  r5 = Int_compare int/le 0 4
+  r6 = Int_const 0
+  r7 = Int_compare int/ge 0 6
+  r8 = Binary And 7 5
+  r9 = Guarded 8:false (Raise int "E_ARRAY_RANGE" "array/slice needs a non-negative whole length.")
+  r10 = Int_select 8 0 9
+  r11 = Int_binary int/sub 3 10
+  r12 = Int_const 3
+  r13 = Int_compare int/le 12 11
+  r14 = Int_compare int/le 10 3
+  r15 = Binary And 14 13
+  r16 = Guarded 15:false (Raise int "E_ARRAY_RANGE" "An array slice must be within its source.")
+  r17 = Int_select 15 6 16
+  r18 = Convert float 17
+  r19 = Int_binary int/add 10 6
+  r20 = Guarded 15:true (Gather 2 19 1 0)
+  r21 = Int_const 1
+  r22 = Int_binary int/add 10 21
+  r23 = Guarded 15:true (Gather 2 22 1 0)
+  r24 = Int_const 2
+  r25 = Int_binary int/add 10 24
+  r26 = Guarded 15:true (Gather 2 25 1 0)
+  r27 = Binary Add 18 20
+  r28 = Binary Add 27 23
+  r29 = Binary Add 28 26
+  widths [1]
+  output [29]
+  uniform_widths [1;1]
+  collecting true
+## case 32 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x0p+0
+  r2 = Int_const 0
+  r3 = Int_const 4
+  r4 = Loop_begin 2 3 end=11
+  r5 = Loop_carry 4 0 float
+  r6 = Frame "t"
+  r7 = Binary Add 0 6
+  r8 = Convert float 4
+  r9 = Binary Mul 8 7
+  r10 = Binary Add 5 9
+  r11 = Loop_end 4
+  r12 = Loop_result 4 0 float
+  widths [1]
+  output [12]
+  uniform_widths []
+  collecting true
+## case 32 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x0p+0
+  r2 = Int_const 0
+  r3 = Int_const 4
+  r4 = Loop_begin 2 3 end=11
+  r5 = Loop_carry 4 0 float
+  r6 = Frame "t"
+  r7 = Binary Add 0 6
+  r8 = Convert float 4
+  r9 = Binary Mul 8 7
+  r10 = Binary Add 5 9
+  r11 = Loop_end 4
+  r12 = Loop_result 4 0 float
+  widths [1]
+  output [12]
+  uniform_widths []
+  collecting true
+## case 33 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Int_const 4
+  r2 = Int_const 0
+  r3 = Loop_begin 2 1 end=11
+  r4 = Loop_carry 3 0 float
+  r5 = Const 0x1p-1
+  r6 = Frame "t"
+  r7 = Const 0x0p+0
+  r8 = Binary Mul 6 7
+  r9 = Binary Add 5 8
+  r10 = Binary Mul 4 9
+  r11 = Loop_end 3
+  r12 = Loop_result 3 0 float
+  widths [1]
+  output [12]
+  uniform_widths []
+  collecting true
+## case 33 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Int_const 4
+  r2 = Int_const 0
+  r3 = Loop_begin 2 1 end=11
+  r4 = Loop_carry 3 0 float
+  r5 = Const 0x1p-1
+  r6 = Frame "t"
+  r7 = Const 0x0p+0
+  r8 = Binary Mul 6 7
+  r9 = Binary Add 5 8
+  r10 = Binary Mul 4 9
+  r11 = Loop_end 3
+  r12 = Loop_result 3 0 float
+  widths [1]
+  output [12]
+  uniform_widths []
+  collecting true
+## case 34 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Int_const 4
+  r3 = Int_const 0
+  r4 = Loop_begin 3 2 end=11
+  r5 = Loop_carry 4 0 float
+  r6 = Loop_carry 4 1 float
+  r7 = Const 0x1p-1
+  r8 = Binary Mul 5 7
+  r9 = Frame "t"
+  r10 = Binary Add 6 9
+  r11 = Loop_end 4
+  r12 = Loop_result 4 0 float
+  r13 = Loop_result 4 1 float
+  widths [1]
+  output [12;13]
+  uniform_widths []
+  collecting true
+## case 34 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Int_const 4
+  r3 = Int_const 0
+  r4 = Loop_begin 3 2 end=11
+  r5 = Loop_carry 4 0 float
+  r6 = Loop_carry 4 1 float
+  r7 = Const 0x1p-1
+  r8 = Binary Mul 5 7
+  r9 = Frame "t"
+  r10 = Binary Add 6 9
+  r11 = Loop_end 4
+  r12 = Loop_result 4 0 float
+  r13 = Loop_result 4 1 float
+  widths [1]
+  output [12;13]
+  uniform_widths []
+  collecting true
+## case 36 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1.8p+1
+  r2 = Binary Mul 0 1
+  r3 = Frame "t"
+  r4 = Binary Add 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 36 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1.8p+1
+  r2 = Binary Mul 0 1
+  r3 = Frame "t"
+  r4 = Binary Add 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 37 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Binary Add 0 1
+  r3 = Frame "t"
+  r4 = Binary Mul 2 3
+  r5 = Binary Sub 4 2
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 37 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Binary Add 0 1
+  r3 = Frame "t"
+  r4 = Binary Mul 2 3
+  r5 = Binary Sub 4 2
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 38 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Convert float 0
+  r2 = Frame "t"
+  r3 = Binary Sub 1 2
+  r4 = Unary Abs 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 38 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Convert float 0
+  r2 = Frame "t"
+  r3 = Binary Sub 1 2
+  r4 = Unary Abs 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 39 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x1p+0
+  r3 = Fma 0 1 2
+  widths [1]
+  output [3]
+  uniform_widths []
+  collecting true
+## case 39 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x1p+0
+  r3 = Fma 0 1 2
+  widths [1]
+  output [3]
+  uniform_widths []
+  collecting true
+## case 40 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Hypot 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 40 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Hypot 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 41 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Convert int 2
+  r4 = Int_const 5
+  r5 = Rand_at 4 3
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 41 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Convert int 2
+  r4 = Int_const 5
+  r5 = Rand_at 4 3
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 42 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Frame "t"
+  r2 = Convert int 1
+  r3 = Int_binary int/add 0 2
+  r4 = Int_const 5
+  r5 = Rand_at 4 3
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 42 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Frame "t"
+  r2 = Convert int 1
+  r3 = Int_binary int/add 0 2
+  r4 = Int_const 5
+  r5 = Rand_at 4 3
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 43 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x1p-1
+  r3 = Const 0x1p+0
+  r4 = Binary Add 3 1
+  r5 = Convert int 4
+  r6 = Noise3 0 1 2 seed=3 octaves=r5
+  widths [1]
+  output [6]
+  uniform_widths []
+  collecting true
+## case 43 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x1p-1
+  r3 = Const 0x1p+0
+  r4 = Binary Add 3 1
+  r5 = Convert int 4
+  r6 = Noise3 0 1 2 seed=3 octaves=r5
+  widths [1]
+  output [6]
+  uniform_widths []
+  collecting true
+## case 44 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x1p-1
+  r3 = Const 0x1p+1
+  r4 = Binary Add 3 1
+  r5 = Const 0x1p+0
+  r6 = Binary Add 5 1
+  r7 = Binary Mul 2 6
+  r8 = Noise3 0 1 2 seed=3 octaves=2 lacunarity=r4 gain=r7
+  widths [1]
+  output [8]
+  uniform_widths []
+  collecting true
+## case 44 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x1p-1
+  r3 = Const 0x1p+1
+  r4 = Binary Add 3 1
+  r5 = Const 0x1p+0
+  r6 = Binary Add 5 1
+  r7 = Binary Mul 2 6
+  r8 = Noise3 0 1 2 seed=3 octaves=2 lacunarity=r4 gain=r7
+  widths [1]
+  output [8]
+  uniform_widths []
+  collecting true
+## case 46 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Const 0x1.8p+1
+  r4 = Binary Min 2 3
+  r5 = Unary Exp 4
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 46 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Const 0x1.8p+1
+  r4 = Binary Min 2 3
+  r5 = Unary Exp 4
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 47 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  widths [1]
+  output [2;2]
+  uniform_widths []
+  collecting true
+## case 47 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  widths [1]
+  output [2;2]
+  uniform_widths []
+  collecting true
+## case 48 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Const 0x1p+1
+  r4 = Binary Mod 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 48 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Const 0x1p+1
+  r4 = Binary Mod 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 49 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Const 0x1p+1
+  r4 = Binary Pow 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 49 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Const 0x1p+1
+  r4 = Binary Pow 2 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 50 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Gt 0 1
+  r3 = Guarded 2:true (Const 0x1p+1)
+  r4 = Guarded 2:true (Binary Gt 0 3)
+  r5 = Guarded 2:true;4:true (Const 0x1p+0)
+  r6 = Guarded 2:true;4:false (Const 0x1p+1)
+  r7 = Guarded 2:true (Select 4 5 6)
+  r8 = Guarded 2:false (Const 0x1p-1)
+  r9 = Guarded 2:false (Binary Lt 0 8)
+  r10 = Guarded 2:false;9:true (Const 0x1.8p+1)
+  r11 = Guarded 2:false;9:false (Const 0x1p+2)
+  r12 = Guarded 2:false (Select 9 10 11)
+  r13 = Select 2 7 12
+  widths [1]
+  output [13]
+  uniform_widths []
+  collecting true
+## case 50 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Gt 0 1
+  r3 = Guarded 2:true (Const 0x1p+1)
+  r4 = Guarded 2:true (Binary Gt 0 3)
+  r5 = Guarded 2:true;4:true (Const 0x1p+0)
+  r6 = Guarded 2:true;4:false (Const 0x1p+1)
+  r7 = Guarded 2:true (Select 4 5 6)
+  r8 = Guarded 2:false (Const 0x1p-1)
+  r9 = Guarded 2:false (Binary Lt 0 8)
+  r10 = Guarded 2:false;9:true (Const 0x1.8p+1)
+  r11 = Guarded 2:false;9:false (Const 0x1p+2)
+  r12 = Guarded 2:false (Select 9 10 11)
+  r13 = Select 2 7 12
+  widths [1]
+  output [13]
+  uniform_widths []
+  collecting true
+## case 51 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Binary Gt 0 1
+  r3 = Frame "t"
+  r4 = Binary Lt 0 3
+  r5 = Binary And 2 4
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 51 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+0
+  r2 = Binary Gt 0 1
+  r3 = Frame "t"
+  r4 = Binary Lt 0 3
+  r5 = Binary And 2 4
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 52 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x0p+0
+  r3 = Binary Gt 1 2
+  r4 = Guarded 3:true (Const 0x1p+0)
+  r5 = Guarded 3:true (Array_prepare 0 array:float)
+  r6 = Guarded 3:true (Int_const 0)
+  r7 = Guarded 3:true (Gather 5 6 1 0)
+  r8 = Guarded 3:false (Const 0x1p+1)
+  r9 = Select 3 7 8
+  widths [1]
+  output [9]
+  uniform_widths [1]
+  collecting true
+## case 52 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x0p+0
+  r3 = Binary Gt 1 2
+  r4 = Guarded 3:true (Const 0x1p+0)
+  r5 = Guarded 3:true (Array_prepare 0 array:float)
+  r6 = Guarded 3:true (Int_const 0)
+  r7 = Guarded 3:true (Gather 5 6 1 0)
+  r8 = Guarded 3:false (Const 0x1p+1)
+  r9 = Select 3 7 8
+  widths [1]
+  output [9]
+  uniform_widths [1]
+  collecting true
+## case 53 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 53 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 54 fusion=true
+program
+  r0 = Input 0 3 0
+  r1 = Input 0 3 1
+  r2 = Input 0 3 2
+  r3 = Frame "t"
+  r4 = Binary Mul 1 3
+  r5 = Binary Add 0 4
+  widths [3]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 54 fusion=false
+program
+  r0 = Input 0 3 0
+  r1 = Input 0 3 1
+  r2 = Input 0 3 2
+  r3 = Frame "t"
+  r4 = Binary Mul 1 3
+  r5 = Binary Add 0 4
+  widths [3]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 55 fusion=true
+program
+  r0 = Input 0 3 0
+  r1 = Input 0 3 1
+  r2 = Input 0 3 2
+  r3 = Const 0x1p+0
+  r4 = Frame "t"
+  r5 = Binary Sub 0 3
+  r6 = Binary Sub 1 3
+  r7 = Binary Sub 2 4
+  widths [3]
+  output [5;6;7]
+  uniform_widths []
+  collecting true
+## case 55 fusion=false
+program
+  r0 = Input 0 3 0
+  r1 = Input 0 3 1
+  r2 = Input 0 3 2
+  r3 = Const 0x1p+0
+  r4 = Frame "t"
+  r5 = Binary Sub 0 3
+  r6 = Binary Sub 1 3
+  r7 = Binary Sub 2 4
+  widths [3]
+  output [5;6;7]
+  uniform_widths []
+  collecting true
+## case 57 fusion=true
+program
+  r0 = Int_input 0
+  r1 = Int_const 1
+  r2 = Int_binary int/add 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 57 fusion=false
+program
+  r0 = Int_input 0
+  r1 = Int_const 1
+  r2 = Int_binary int/add 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 58 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Mul 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 58 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Mul 0 1
+  widths [1]
+  output [2]
+  uniform_widths []
+  collecting true
+## case 59 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+1
+  r2 = Frame "t"
+  r3 = Binary Mul 0 2
+  r4 = Binary Add 3 1
+  r5 = Binary Add 3 4
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 59 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x1p+1
+  r2 = Frame "t"
+  r3 = Binary Mul 0 2
+  r4 = Binary Add 3 1
+  r5 = Binary Add 3 4
+  widths [1]
+  output [5]
+  uniform_widths []
+  collecting true
+## case 60 fusion=true
+check-error "E_PATTERN: Invalid binding name {a b}. Bind a name, [a b] or {:keys [a b]}.\nE_UNBOUND: a is not bound in g \226\128\186 fn. Bound here: x. Did you mean x?\nE_UNBOUND: b is not bound in g \226\128\186 fn. Bound here: x. Did you mean x?"
+## case 60 fusion=false
+check-error "E_PATTERN: Invalid binding name {a b}. Bind a name, [a b] or {:keys [a b]}.\nE_UNBOUND: a is not bound in g \226\128\186 fn. Bound here: x. Did you mean x?\nE_UNBOUND: b is not bound in g \226\128\186 fn. Bound here: x. Did you mean x?"
+## case 61 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x1p+0
+  r3 = Binary Mul 1 2
+  r4 = Binary Add 0 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 61 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Const 0x1p+0
+  r3 = Binary Mul 1 2
+  r4 = Binary Add 0 3
+  widths [1]
+  output [4]
+  uniform_widths []
+  collecting true
+## case 62 fusion=true
+refused E_PACKED_FORM 82..96 "Unsupported packed body form list."
+check-error "E_PACKED_FORM: Unsupported packed body form list."
+## case 62 fusion=false
+refused E_PACKED_FORM 82..96 "Unsupported packed body form list."
+check-error "E_PACKED_FORM: Unsupported packed body form list."
+## case 63 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Int_const 3
+  r3 = Int_const 0
+  r4 = Loop_begin 3 2 end=11
+  r5 = Loop_carry 4 0 float
+  r6 = Loop_carry 4 1 float
+  r7 = Const 0x1p-1
+  r8 = Binary Mul 6 7
+  r9 = Const 0x1p+0
+  r10 = Binary Add 5 9
+  r11 = Loop_end 4
+  r12 = Loop_result 4 0 float
+  r13 = Loop_result 4 1 float
+  widths [1]
+  output [12;13]
+  uniform_widths []
+  collecting true
+## case 63 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Int_const 3
+  r3 = Int_const 0
+  r4 = Loop_begin 3 2 end=11
+  r5 = Loop_carry 4 0 float
+  r6 = Loop_carry 4 1 float
+  r7 = Const 0x1p-1
+  r8 = Binary Mul 6 7
+  r9 = Const 0x1p+0
+  r10 = Binary Add 5 9
+  r11 = Loop_end 4
+  r12 = Loop_result 4 0 float
+  r13 = Loop_result 4 1 float
+  widths [1]
+  output [12;13]
+  uniform_widths []
+  collecting true
+## case 64 fusion=true
+check-error "E_ARITY: iterate is (iterate n init (fn [x] body)) with an optional :until (fn [prev next] bool)."
+## case 64 fusion=false
+check-error "E_ARITY: iterate is (iterate n init (fn [x] body)) with an optional :until (fn [prev next] bool)."
+## case 65 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x0p+0
+  r2 = Int_const 1
+  r3 = Int_const 5
+  r4 = Loop_begin 2 3 end=11
+  r5 = Loop_carry 4 0 float
+  r6 = Frame "t"
+  r7 = Binary Add 0 6
+  r8 = Convert float 4
+  r9 = Binary Mul 8 7
+  r10 = Binary Add 5 9
+  r11 = Loop_end 4
+  r12 = Loop_result 4 0 float
+  widths [1]
+  output [12]
+  uniform_widths []
+  collecting true
+## case 65 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x0p+0
+  r2 = Int_const 1
+  r3 = Int_const 5
+  r4 = Loop_begin 2 3 end=11
+  r5 = Loop_carry 4 0 float
+  r6 = Frame "t"
+  r7 = Binary Add 0 6
+  r8 = Convert float 4
+  r9 = Binary Mul 8 7
+  r10 = Binary Add 5 9
+  r11 = Loop_end 4
+  r12 = Loop_result 4 0 float
+  widths [1]
+  output [12]
+  uniform_widths []
+  collecting true
+## case 66 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x0p+0
+  r2 = Int_const 0
+  r3 = Int_const 3
+  r4 = Loop_begin 2 3 end=10
+  r5 = Loop_carry 4 0 float
+  r6 = Loop_carry 4 1 float
+  r7 = Frame "t"
+  r8 = Binary Add 5 7
+  r9 = Binary Add 6 0
+  r10 = Loop_end 4
+  r11 = Loop_result 4 0 float
+  r12 = Loop_result 4 1 float
+  widths [1]
+  output [11;12]
+  uniform_widths []
+  collecting true
+## case 66 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Const 0x0p+0
+  r2 = Int_const 0
+  r3 = Int_const 3
+  r4 = Loop_begin 2 3 end=10
+  r5 = Loop_carry 4 0 float
+  r6 = Loop_carry 4 1 float
+  r7 = Frame "t"
+  r8 = Binary Add 5 7
+  r9 = Binary Add 6 0
+  r10 = Loop_end 4
+  r11 = Loop_result 4 0 float
+  r12 = Loop_result 4 1 float
+  widths [1]
+  output [11;12]
+  uniform_widths []
+  collecting true
+## case 67 fusion=true
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Const 0x1p+1
+  r4 = Const -0x1p+0
+  r5 = Const 0x1.ep+5
+  r6 = Const 0x1.68p+8
+  r7 = Binary Mod 2 6
+  r8 = Binary Div 7 5
+  r9 = Const 0x1p+0
+  r10 = Binary Min 9 3
+  r11 = Const 0x0p+0
+  r12 = Binary Max 11 10
+  r13 = Binary Min 9 4
+  r14 = Binary Max 11 13
+  r15 = Binary Mul 3 14
+  r16 = Binary Sub 15 9
+  r17 = Unary Abs 16
+  r18 = Binary Sub 9 17
+  r19 = Binary Mul 18 12
+  r20 = Binary Mod 8 3
+  r21 = Binary Sub 20 9
+  r22 = Unary Abs 21
+  r23 = Binary Sub 9 22
+  r24 = Binary Mul 19 23
+  r25 = Binary Div 19 3
+  r26 = Binary Sub 14 25
+  r27 = Const 0x1.4p+2
+  r28 = Binary Lt 8 27
+  r29 = Select 28 19 24
+  r30 = Const 0x1p+2
+  r31 = Binary Lt 8 30
+  r32 = Select 31 19 29
+  r33 = Const 0x1.8p+1
+  r34 = Binary Lt 8 33
+  r35 = Select 34 24 32
+  r36 = Binary Lt 8 3
+  r37 = Select 36 11 35
+  r38 = Binary Lt 8 9
+  r39 = Select 38 11 37
+  r40 = Const 0x1.fep+7
+  r41 = Const 0x1p-1
+  r42 = Binary Add 39 26
+  r43 = Binary Min 9 42
+  r44 = Binary Max 11 43
+  r45 = Binary Mul 44 40
+  r46 = Binary Add 45 41
+  r47 = Convert int 46
+  r48 = Convert float 47
+  r49 = Binary Div 48 40
+  r50 = Select 28 11 11
+  r51 = Select 31 24 50
+  r52 = Select 34 19 51
+  r53 = Select 36 19 52
+  r54 = Select 38 24 53
+  r55 = Binary Add 54 26
+  r56 = Binary Min 9 55
+  r57 = Binary Max 11 56
+  r58 = Binary Mul 57 40
+  r59 = Binary Add 58 41
+  r60 = Convert int 59
+  r61 = Convert float 60
+  r62 = Binary Div 61 40
+  r63 = Select 28 24 19
+  r64 = Select 31 11 63
+  r65 = Select 34 11 64
+  r66 = Select 36 24 65
+  r67 = Select 38 19 66
+  r68 = Binary Add 67 26
+  r69 = Binary Min 9 68
+  r70 = Binary Max 11 69
+  r71 = Binary Mul 70 40
+  r72 = Binary Add 71 41
+  r73 = Convert int 72
+  r74 = Convert float 73
+  r75 = Binary Div 74 40
+  widths [1]
+  output [75;62;49]
+  uniform_widths []
+  collecting true
+## case 67 fusion=false
+program
+  r0 = Input 0 1 0
+  r1 = Frame "t"
+  r2 = Binary Add 0 1
+  r3 = Const 0x1p+1
+  r4 = Const -0x1p+0
+  r5 = Const 0x1.ep+5
+  r6 = Const 0x1.68p+8
+  r7 = Binary Mod 2 6
+  r8 = Binary Div 7 5
+  r9 = Const 0x1p+0
+  r10 = Binary Min 9 3
+  r11 = Const 0x0p+0
+  r12 = Binary Max 11 10
+  r13 = Binary Min 9 4
+  r14 = Binary Max 11 13
+  r15 = Binary Mul 3 14
+  r16 = Binary Sub 15 9
+  r17 = Unary Abs 16
+  r18 = Binary Sub 9 17
+  r19 = Binary Mul 18 12
+  r20 = Binary Mod 8 3
+  r21 = Binary Sub 20 9
+  r22 = Unary Abs 21
+  r23 = Binary Sub 9 22
+  r24 = Binary Mul 19 23
+  r25 = Binary Div 19 3
+  r26 = Binary Sub 14 25
+  r27 = Const 0x1.4p+2
+  r28 = Binary Lt 8 27
+  r29 = Select 28 19 24
+  r30 = Const 0x1p+2
+  r31 = Binary Lt 8 30
+  r32 = Select 31 19 29
+  r33 = Const 0x1.8p+1
+  r34 = Binary Lt 8 33
+  r35 = Select 34 24 32
+  r36 = Binary Lt 8 3
+  r37 = Select 36 11 35
+  r38 = Binary Lt 8 9
+  r39 = Select 38 11 37
+  r40 = Const 0x1.fep+7
+  r41 = Const 0x1p-1
+  r42 = Binary Add 39 26
+  r43 = Binary Min 9 42
+  r44 = Binary Max 11 43
+  r45 = Binary Mul 44 40
+  r46 = Binary Add 45 41
+  r47 = Convert int 46
+  r48 = Convert float 47
+  r49 = Binary Div 48 40
+  r50 = Select 28 11 11
+  r51 = Select 31 24 50
+  r52 = Select 34 19 51
+  r53 = Select 36 19 52
+  r54 = Select 38 24 53
+  r55 = Binary Add 54 26
+  r56 = Binary Min 9 55
+  r57 = Binary Max 11 56
+  r58 = Binary Mul 57 40
+  r59 = Binary Add 58 41
+  r60 = Convert int 59
+  r61 = Convert float 60
+  r62 = Binary Div 61 40
+  r63 = Select 28 24 19
+  r64 = Select 31 11 63
+  r65 = Select 34 11 64
+  r66 = Select 36 24 65
+  r67 = Select 38 19 66
+  r68 = Binary Add 67 26
+  r69 = Binary Min 9 68
+  r70 = Binary Max 11 69
+  r71 = Binary Mul 70 40
+  r72 = Binary Add 71 41
+  r73 = Convert int 72
+  r74 = Convert float 73
+  r75 = Binary Div 74 40
+  widths [1]
+  output [75;62;49]
+  uniform_widths []
+  collecting true
+## case 68 fusion=true
+refused E_PACKED_OPERATOR 98..115 "Dynamic operator array/float has no packed instruction for 2 arguments at width 1."
+check-error "E_PACKED_OPERATOR: Dynamic operator array/float has no packed instruction for 2 arguments at width 1."
+## case 68 fusion=false
+refused E_PACKED_OPERATOR 98..115 "Dynamic operator array/float has no packed instruction for 2 arguments at width 1."
+check-error "E_PACKED_OPERATOR: Dynamic operator array/float has no packed instruction for 2 arguments at width 1."

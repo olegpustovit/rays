@@ -1,4 +1,3 @@
-12889c56 updates
 #include <metal_stdlib>
 using namespace metal;
 struct present_vertex_out {

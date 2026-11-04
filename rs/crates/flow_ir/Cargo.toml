@@ -1,0 +1,19 @@
+[package]
+name = "flow_ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+flow_syntax = { path = "../flow_syntax" }
+flow_check = { path = "../flow_check" }
+flow_eval = { path = "../flow_eval" }
+param = { path = "../param" }
+rays_math = { path = "../rays_math" }
+scene_command = { path = "../scene_command" }
+lru = { path = "../lru" }
+parallel = { path = "../parallel" }
+mem = { path = "../mem" }
+cfmt = { path = "../cfmt" }
+rays_diagnostic = { path = "../rays_diagnostic" }
+input = { path = "../input" }
