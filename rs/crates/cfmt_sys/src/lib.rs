@@ -44,6 +44,11 @@ pub fn parse(text: &str) -> Option<f64> {
         return parse_hex(number, negative);
     }
 
+    // Rust's decimal parse is correctly rounded (as glibc strtod, OCaml's on Unix); the Windows CRT's
+    // strtod rounds some subnormals one ulp low. The C path stays for forms Rust rejects.
+    if let Ok(value) = input.parse::<f64>() {
+        return Some(value);
+    }
     let text = CString::new(text).ok()?;
     let mut value = 0.0;
     let parsed = unsafe { cfmt_parse(*C_LOCALE as *mut c_void, text.as_ptr(), &mut value) };

@@ -66,7 +66,6 @@ fn float_text_round_trips_and_is_shortest() {
 
 // Fewer significant digits than the text uses must not read back to the same value.
 #[test]
-#[ignore = "PARITY: cfmt_sys::parse reads subnormal 1.881089136541482e-308 one ulp low (bits ...992, correct ...993), so float_text emits 17 digits where 16 are shortest"]
 fn float_text_is_shortest() {
     for i in 0..=2047u64 {
         let bits = pattern_bits(i);
