@@ -332,7 +332,7 @@ struct Arena {
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
     observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
-    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<AddrMap<Arc<Path>>>, ops_seen: Shared<AddrMap<(String, &'static str, OpRef)>>, names: Shared<AddrMap<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<String>>)>>,
+    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<AddrMap<Arc<Path>>>, ops_seen: Shared<AddrMap<(String, &'static str, OpRef)>>, names: Shared<AddrMap<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, pure: Shared<AddrMap<(usize, &'static str, Option<usize>)>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<String>>)>>,
 }
 static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::new(Workspace {
     name: String::new(), graphs: Vec::new().into(), defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: Vec::new().into(),
@@ -346,7 +346,7 @@ impl Arena {
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
             states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, policies: Shared::default(), record,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
-            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), names: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), terms: Shared::default(), frees: Shared::default(),
+            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), names: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), frees: Shared::default(),
         }
     }
     /// What stands in for an arena while it is lent (never read: `owns_index` false marks it).
@@ -401,6 +401,11 @@ struct Env { values: Arc<BTreeMap<String,Value>>, top: Option<Arc<EnvNode>> }
 impl Env {
     fn empty() -> Self { static EMPTY: LazyLock<Arc<BTreeMap<String, Value>>> = LazyLock::new(|| Arc::new(BTreeMap::new())); Self { values: EMPTY.clone(), top: None } }
     fn of(values: Arc<BTreeMap<String, Value>>) -> Self { Self { values, top: None } }
+    fn get_ref(&self, name: &str) -> Option<&Value> {
+        let mut at = &self.top;
+        while let Some(node) = at { if &*node.name == name { return Some(&node.value); } at = &node.next; }
+        self.values.get(name)
+    }
     fn get(&self, name: &str) -> Option<Value> {
         let mut at = &self.top;
         while let Some(node) = at { if &*node.name == name { return Some(node.value.clone()); } at = &node.next; }
@@ -3363,7 +3368,7 @@ struct Abandon;
 enum Undo { Calls(FnId, Option<i64>), Closure(FnId), Replace(FnId, Function) }
 enum Root { Ctx(ExecCtx), Call { closure: Arc<ClosureData>, index: i64 }, Def { name: String, caller: usize, steps: Arc<Vec<Step>> } }
 struct CallFrame { slots: Vec<Value>, env: Env, root: Root }
-struct Run { workspace: Arc<Workspace>, frames: Vec<CallFrame>, steps: usize, base: usize, depth: usize, notes: Vec<(Path, Value)>, record: bool, undo: Vec<Undo>, context: Context }
+struct Run { workspace: Arc<Workspace>, frames: Vec<CallFrame>, spare: Vec<Vec<Value>>, steps: usize, base: usize, depth: usize, notes: Vec<(Path, Value)>, record: bool, undo: Vec<Undo>, context: Context }
 impl Run {
     fn step(&mut self, a: &Arena) -> Result<(), Abandon> {
         self.steps += 1;
@@ -3377,15 +3382,18 @@ impl Run {
         if self.record { if let Some(path) = path { self.notes.push((path.clone(), value.clone())); } }
         Ok(value)
     }
-    fn fields(value: Value, name: &str, fields: &[String]) -> Result<Value, Abandon> {
-        let mut value = value;
-        let mut path = name.to_owned();
+    // `name.f.g` read through references: only the field itself is copied (an error gives way, so no message is spelled).
+    fn fields(value: &Value, fields: &[String]) -> Result<Value, Abandon> {
+        let mut at = value;
+        let mut owned;
         for field_name in fields {
-            if is_live_value(&value) { return Err(Abandon); }
-            value = field(value, field_name, &path).map_err(|_| Abandon)?;
-            path = format!("{}.{}", path, field_name);
+            if matches!(at, Value::Residual(_) | Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) { return Err(Abandon); }
+            match at {
+                Value::Record(entries) => at = &entries.iter().find(|(name, _)| name == field_name).ok_or(Abandon)?.1,
+                other => { owned = field(other.clone(), field_name, "").map_err(|_| Abandon)?; at = &owned; }
+            }
         }
-        Ok(value)
+        Ok(at.clone())
     }
     // The context of frame `k`, as the walker's would be: the entry context, or a call's (`call_fn`) over its caller's.
     fn root_ctx(&self, a: &mut Arena, k: usize) -> ExecCtx {
@@ -3431,7 +3439,7 @@ impl Run {
         if matches!(result, Value::Source(..)) || is_live_value(&result) { return Err(Abandon); }
         Ok(result)
     }
-    fn call(&mut self, a: &mut Arena, function: Value, values: Vec<Value>, body: Option<&Arc<Term>>) -> Result<Value, Abandon> {
+    fn call(&mut self, a: &mut Arena, function: Value, mut values: Vec<Value>, body: Option<&Arc<Term>>) -> Result<Value, Abandon> {
         if self.record { return Err(Abandon); }
         let Value::Fn(id) = function else { return Err(Abandon); };
         if id.1 != a.id { return Err(Abandon); }
@@ -3459,20 +3467,22 @@ impl Run {
         let index = previous.unwrap_or(closure.calls);
         self.undo.push(Undo::Calls(id, previous));
         a.fn_calls.insert(id, index + 1);
-        let mut slots = vec![Value::No_geo; compiled.slots];
-        for (slot, ((_, ty), value)) in closure.params.iter().zip(values).enumerate() {
+        let mut slots = self.spare.pop().unwrap_or_default();
+        slots.resize(compiled.slots, Value::No_geo);
+        for (slot, ((_, ty), value)) in closure.params.iter().zip(values.drain(..)).enumerate() {
             slots[slot] = match ty { Some(ty) => match coerce(ty, &value) { Ok(value) => value, Err(_) => { a.fn_plans.insert(key, CodePlan::Run(compiled)); return Err(Abandon); } }, None => value };
         }
+        self.recycle(values);
         self.frames.push(CallFrame { slots, env: Env::of(closure.env.clone()), root: Root::Call { closure: closure.clone(), index } });
         self.depth += 1;
         let result = self.eval(a, &mut compiled.code);
         self.depth -= 1;
-        self.frames.pop();
+        if let Some(frame) = self.frames.pop() { self.recycle(frame.slots); }
         a.fn_plans.insert(key, CodePlan::Run(compiled));
         result
     }
     // `apply_def` for a definition with all its inputs given: a frame of its inputs, under `def:<name>` at the call's site.
-    fn call_def(&mut self, a: &mut Arena, def: &DefCall, values: Vec<Value>) -> Result<Value, Abandon> {
+    fn call_def(&mut self, a: &mut Arena, def: &DefCall, mut values: Vec<Value>) -> Result<Value, Abandon> {
         if self.record || self.depth >= MAX_DEPTH { return Err(Abandon); }
         let key = Arc::as_ptr(&def.body) as usize;
         let same = |compiled: &Compiled| compiled.stamp.is(&def.body) && compiled.params.len() == def.inputs.len()
@@ -3490,16 +3500,18 @@ impl Run {
             }
         };
         if compiled.context != self.context.as_str() { a.fn_plans.insert(key, CodePlan::Run(compiled)); return Err(Abandon); }
-        let mut slots = vec![Value::No_geo; compiled.slots];
-        for (slot, ((_, ty), value)) in def.inputs.iter().zip(values).enumerate() {
+        let mut slots = self.spare.pop().unwrap_or_default();
+        slots.resize(compiled.slots, Value::No_geo);
+        for (slot, ((_, ty), value)) in def.inputs.iter().zip(values.drain(..)).enumerate() {
             match coerce(ty, &value) { Ok(value) => slots[slot] = value, Err(_) => { a.fn_plans.insert(key, CodePlan::Run(compiled)); return Err(Abandon); } }
         }
+        self.recycle(values);
         let caller = self.frames.len() - 1;
         self.frames.push(CallFrame { slots, env: Env::empty(), root: Root::Def { name: def.name.clone(), caller, steps: def.steps.clone() } });
         self.depth += 1;
         let result = self.eval(a, &mut compiled.code);
         self.depth -= 1;
-        self.frames.pop();
+        if let Some(frame) = self.frames.pop() { self.recycle(frame.slots); }
         a.fn_plans.insert(key, CodePlan::Run(compiled));
         result
     }
@@ -3526,6 +3538,8 @@ impl Run {
             }
         }
     }
+    // A slot or argument vector, emptied and kept for the next call (calls in a loop allocate none).
+    fn recycle(&mut self, mut values: Vec<Value>) { values.clear(); if self.spare.len() < 16 { self.spare.push(values); } }
     fn local(&self, slot: usize) -> Value { self.frames.last().expect("a frame").slots[slot].clone() }
     fn eval(&mut self, a: &mut Arena, code: &mut Code) -> Result<Value, Abandon> {
         self.step(a)?;
@@ -3533,12 +3547,11 @@ impl Run {
         let value = match kind {
             Kind::Lit(value) => value.clone(),
             Kind::Local(slot, fields) => {
-                let value = self.local(*slot);
-                if fields.is_empty() { value } else { Self::fields(value, "", fields)? }
+                if fields.is_empty() { self.local(*slot) } else { Self::fields(&self.frames.last().expect("a frame").slots[*slot], fields)? }
             }
             Kind::Outer(name, fields) => {
-                let value = self.frames.last().expect("a frame").env.get(name).ok_or(Abandon)?;
-                if fields.is_empty() { value } else { Self::fields(value, name, fields)? }
+                let env = &self.frames.last().expect("a frame").env;
+                if fields.is_empty() { env.get(name).ok_or(Abandon)? } else { Self::fields(env.get_ref(name).ok_or(Abandon)?, fields)? }
             }
             Kind::Op { op, args, names } => {
                 let mut values = std::mem::take(names);
@@ -3597,8 +3610,8 @@ impl Run {
                 match terms.len() { 2 => Value::Vec2(values[0], values[1]), 3 => Value::Vec3(values[0], values[1], values[2]), _ => Value::Vec4(values[0], values[1], values[2], values[3]) }
             }
             Kind::Call { callee, args, def, body } => {
-                let mut values = Vec::with_capacity(args.len());
-                for arg in args.iter_mut() { values.push(self.eval(a, arg)?); }
+                let mut values = self.spare.pop().unwrap_or_default();
+                for arg in args.iter_mut() { match self.eval(a, arg) { Ok(value) => values.push(value), Err(abandon) => { self.recycle(values); return Err(abandon); } } }
                 let function = match callee {
                     Callee::Local(slot) => Some(self.local(*slot)),
                     Callee::Outer(name) => self.frames.last().expect("a frame").env.get(name),
@@ -3649,7 +3662,7 @@ impl Caller {
         if a.record && c.record { return Caller { run: None }; }
         Caller { run: Some(Run {
             workspace: a.workspace.0.clone(), frames: vec![CallFrame { slots: Vec::new(), env: Env::empty(), root: Root::Ctx(c.clone()) }],
-            steps: 0, base: a.step_count, depth: c.depth, notes: Vec::new(), record: false, undo: Vec::new(), context: c.context.clone(),
+            steps: 0, base: a.step_count, depth: c.depth, notes: Vec::new(), record: false, undo: Vec::new(), context: c.context.clone(), spare: Vec::new(),
         }) }
     }
     fn call(&mut self, a: &mut Arena, id: FnId, values: &[Value], body: Option<&Term>) -> Option<Result<Value, Diagnostic>> {
@@ -3657,7 +3670,9 @@ impl Caller {
         let body = body.map(|body| shared_term(a, body));
         run.base = a.step_count;
         run.steps = 0;
-        match run.call(a, Value::Fn(id), values.to_vec(), body.as_ref()) {
+        let mut arguments = run.spare.pop().unwrap_or_default();
+        arguments.extend_from_slice(values);
+        match run.call(a, Value::Fn(id), arguments, body.as_ref()) {
             Ok(value) => {
                 a.step_count += run.steps;
                 EVAL_STEPS.fetch_add(run.steps as u64, Ordering::Relaxed);
@@ -3672,6 +3687,39 @@ impl Caller {
 fn call_in(caller: &mut Caller, a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value]) -> Result<Value, Diagnostic> {
     match caller.call(a, id, values, None) { Some(result) => result, None => call_fn_walked(a, c, id, values, None) }
 }
+// Whether a term could compile at all, and how many nodes it has, found once per term: a walked subtree is not compiled again and again
+// down to its first refusal (a cold lowering asks every term once). A term judged compilable may still be refused by the compiler.
+fn pure_size(a: &mut Arena, t: &Term, context: &Context) -> Option<usize> {
+    let key = t as *const Term as usize;
+    let form = Arc::as_ptr(&t.form) as usize;
+    if let Some((at, within, size)) = a.pure.get(&key) { if *at == form && *within == context.as_str() { return *size; } }
+    let own = match &t.node {
+        TermNode::Lit(param::Value::Int(_) | param::Value::Float(_) | param::Value::Bool(_)) | TermNode::Text(_) | TermNode::Nil => true,
+        TermNode::RefBinding(name, _) => !name.starts_with("$elem:"),
+        TermNode::Op { op: name, skip, .. } => skip.is_empty() && name != "live?" && {
+            let workspace = a.workspace.0.clone();
+            find_op(a, &workspace, name, context).is_some_and(|found| matches!(&found.shape, op::Shape::Scalar) && found.ctx == flow_syntax::context::value() && !found.live && found.out_args.is_none() && !W::BODY_CONTEXT_OPS.contains(&found.name.as_str()))
+        },
+        TermNode::If(..) | TermNode::Cond(..) => true,
+        TermNode::Case(_, arms, _) => arms.iter().all(|(literal, _)| literal_case(literal).is_ok()),
+        TermNode::Let(bindings, _) => bindings.iter().all(|(pattern, _)| matches!(pattern, W::Pattern::Name(_))),
+        TermNode::Vec(terms) => (2..=4).contains(&terms.len()),
+        TermNode::CallFn { .. } | TermNode::Fn { .. } => true,
+        _ => false,
+    };
+    let size = if !own { None } else {
+        let parts: Vec<&Term> = match &t.node {
+            TermNode::CallFn { args, .. } => args.iter().collect(),
+            TermNode::Fn { capture, .. } => capture.iter().map(Box::as_ref).collect(),
+            _ => children(t),
+        };
+        let mut size = Some(1usize);
+        for part in parts { size = match (size, pure_size(a, part, context)) { (Some(total), Some(more)) => Some(total + more), _ => None }; if size.is_none() { break; } }
+        size
+    };
+    a.pure.insert(key, (form, context.as_str(), size));
+    size
+}
 // The walker's evaluation of `t`, run compiled when `t` is a pure subtree (None: walk it).
 fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Result<Value, Diagnostic>> {
     if c.depth > MAX_DEPTH { return None; }
@@ -3680,6 +3728,7 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
         Some(CodePlan::Walk(at)) if at.is(t) => { a.plans.insert(key, CodePlan::Walk(at)); return None; }
         Some(CodePlan::Run(compiled)) if compiled.stamp.is(t) && compiled.context == c.context.as_str() => compiled,
         _ => {
+            if pure_size(a, t, &c.context).is_none_or(|size| size < COMPILE_MIN_NODES) { a.plans.insert(key, CodePlan::Walk(Stamp::of(t))); return None; }
             let mut compiler = Compiler { workspace: a.workspace.0.clone(), context: c.context.clone(), scope: Vec::new(), slots: 0, nodes: 0, steps: Vec::new() };
             match compiler.term(a, t, None) {
                 Some(code) if compiler.nodes >= COMPILE_MIN_NODES => Box::new(Compiled { code, context: c.context.as_str(), slots: compiler.slots, stamp: Stamp::of(t), params: Vec::new(), runs: 0, abandons: 0 }),
@@ -3689,7 +3738,7 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
     };
     let mut run = Run {
         workspace: a.workspace.0.clone(), frames: vec![CallFrame { slots: vec![Value::No_geo; compiled.slots], env: env.clone(), root: Root::Ctx(c.clone()) }],
-        steps: 0, base: a.step_count, depth: c.depth, notes: Vec::new(), record: a.record && c.record, undo: Vec::new(), context: c.context.clone(),
+        steps: 0, base: a.step_count, depth: c.depth, notes: Vec::new(), record: a.record && c.record, undo: Vec::new(), context: c.context.clone(), spare: Vec::new(),
     };
     let outcome = run.eval(a, &mut compiled.code);
     compiled.runs += 1;
