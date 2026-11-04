@@ -67,3 +67,7 @@ harness = false
 [[test]]
 name = "window_suite_t4"
 harness = false
+
+[[test]]
+name = "window_suite_t5"
+harness = false
