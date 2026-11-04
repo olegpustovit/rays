@@ -79,3 +79,7 @@ Three re-entrant deadlocks so far (registry_find lock, live-kernels hook under l
 - furnace_mis: with >1 spp per frame MIS-vs-BSDF variance check barely holds (1.06 vs 1.14 at 8 spp; OCaml 1 spp gives 0.95 vs 3.25) — cause not found.
 - Metal: destroy doesn't release buffers until the last Rust clone drops; release_film byte check only on Vulkan; 2 window handles tolerated on Metal.
 - gpu_parity runs only under RAYS_SLOW=1 (256 spp instead of 1024); exact_m1 digests, bench_scene, bench_world not ported.
+## From flow_native
+- flow_sop attribute_kernel::resident_vec3/resident_color return a copied Vec, so flow_gpu::run::pin can't find the placeholder: workspace_gpu::display never succeeds (host copy drawn instead). Return the placeholder's own Arc.
+- flow_native frame-alloc budget measures live-byte growth (mem_sys tracks live bytes), not cumulative allocation like OCaml.
+- RECHECK after lowerperf2: flow_gpu run.rs materialise panicked (settle diagnostic / read after free) in a run during the Value::List refactor.
