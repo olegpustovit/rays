@@ -8,15 +8,8 @@ unsafe extern "C" {
     fn cfmt_parse(locale: *mut c_void, text: *const c_char, value: *mut f64) -> i32;
 }
 
-#[cfg(windows)]
-#[link(name = "msvcrt")]
-unsafe extern "C" {
-    #[link_name = "ldexp"]
-    fn cfmt_ldexp(value: f64, exponent: i32) -> f64;
-}
-
-#[cfg(not(windows))]
-#[link(name = "m")]
+// ldexp comes from the C runtime std already links (ucrt/msvcrt on Windows, libm elsewhere);
+// naming a library here pulled msvcrt next to ucrt and broke links (duplicate __imp_ldexp).
 unsafe extern "C" {
     #[link_name = "ldexp"]
     fn cfmt_ldexp(value: f64, exponent: i32) -> f64;
