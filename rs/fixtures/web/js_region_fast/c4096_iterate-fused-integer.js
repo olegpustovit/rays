@@ -1,0 +1,83 @@
+function region(inputs, uniforms, outputs, start, stop) {
+  const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
+  let RH = 0;
+  const P32 = 4294967296;
+  const split = x => { const h = Math.floor(x / P32); RH = h | 0; return x - h * P32; };
+  const unbig = v => { v = BigInt.asIntN(64, v); RH = Number(v >> 32n); return Number(BigInt.asUintN(32, v)); };
+  const big = (h, l) => (BigInt(h) << 32n) + BigInt(l);
+  const add64 = (ah, al, bh, bl) => { const s = al + bl; RH = (ah + bh + (s >= P32 ? 1 : 0)) | 0; return s >= P32 ? s - P32 : s; };
+  const sub64 = (ah, al, bh, bl) => { const d = al - bl; RH = (ah - bh - (d < 0 ? 1 : 0)) | 0; return d < 0 ? d + P32 : d; };
+  const mulhi = (a, b) => { const a0 = a & 0xffff, a1 = a >>> 16, b0 = b & 0xffff, b1 = b >>> 16;
+    const m1 = a1 * b0 + Math.floor(a0 * b0 / 65536), m2 = a0 * b1 + (m1 & 0xffff);
+    return (a1 * b1 + Math.floor(m1 / 65536) + Math.floor(m2 / 65536)) >>> 0; };
+  const mul64 = (ah, al, bh, bl) => { RH = (mulhi(al, bl) + Math.imul(ah, bl) + Math.imul(al, bh)) | 0; return Math.imul(al, bl) >>> 0; };
+  const div64 = (ah, al, bh, bl, mod) => {
+    if (bh === 0 && bl === 0) fail('E_RANGE', 'Integer division by zero.');
+    const a = ah * P32 + al, b = bh * P32 + bl;
+    if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
+    return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
+  const shift64 = (ah, al, b, right) => {
+    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b === 0) { RH = ah; return al; }
+    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
+    RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
+  const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? Math.trunc(x) : fail('E_NONFINITE', name + ' produced a nonfinite value.');
+  const in0 = inputs[0];
+  const out0 = outputs[0];
+  for (let i = start; i < stop; i++) {
+    const o = i;
+    const j0 = i;
+    let r0;
+    r0 = Number(in0[j0 * 1 + 0]);
+    if (!Number.isFinite(r0)) return 1;
+    let r1h = 0, r1l = 0;
+    r1l = split(convert("int", Math.trunc(r0))); r1h = RH;
+    let r2h = 0, r2l = 0;
+    r2l = (typeof (uniforms[0][2]) === 'bigint' ? unbig(uniforms[0][2]) : split(uniforms[0][2])); r2h = RH;
+    let r3h = 0, r3l = 0;
+    r3l = add64(r1h, r1l, r2h, r2l); r3h = RH; r3h = (r3h << 1) >> 1;
+    let r4h = 0, r4l = 0;
+    r4h = 0; r4l = 2;
+    let r5h = 0, r5l = 0;
+    r5h = 0; r5l = 0;
+    let r6h = 0, r6l = 0;
+    let r7h = 0, r7l = 0;
+    r6h = r5h; r6l = r5l;
+    r7h = r3h; r7l = r3l;
+    for (; (r6h < r4h || (r6h === r4h && r6l < r4l));) {
+    let r8h = 0, r8l = 0;
+    r8h = 1073741823; r8l = 4294967295;
+    let r9h = 0, r9l = 0;
+    r9l = add64(r7h, r7l, r8h, r8l); r9h = RH; r9h = (r9h << 1) >> 1;
+    const next6h0 = r9h, next6l0 = r9l;
+    r7h = next6h0; r7l = next6l0;
+    r6l = add64(r6h, r6l, 0, 1); r6h = RH;
+    }
+    let r11h = 0, r11l = 0;
+    r11h = r7h; r11l = r7l;
+    let r12h = 0, r12l = 0;
+    r12h = 0; r12l = 3;
+    let r13h = 0, r13l = 0;
+    let r14h = 0, r14l = 0;
+    r13h = r5h; r13l = r5l;
+    r14h = r11h; r14l = r11l;
+    for (; (r13h < r12h || (r13h === r12h && r13l < r12l));) {
+    let r15h = 0, r15l = 0;
+    r15l = (typeof (uniforms[0][15]) === 'bigint' ? unbig(uniforms[0][15]) : split(uniforms[0][15])); r15h = RH;
+    let r16h = 0, r16l = 0;
+    r16h = r14h ^ r15h; r16l = (r14l ^ r15l) >>> 0; r16h = (r16h << 1) >> 1;
+    const next13h0 = r16h, next13l0 = r16l;
+    r14h = next13h0; r14l = next13l0;
+    r13l = add64(r13h, r13l, 0, 1); r13h = RH;
+    }
+    let r18h = 0, r18l = 0;
+    r18h = r14h; r18l = r14l;
+    let r19;
+    r19 = (r18h * 4294967296 + r18l);
+    if (!Number.isFinite(r19)) return 1;
+    if (!Number.isFinite(r19)) return 1;
+    out0[o * 1 + 0] = r19;
+  }
+  return 0;
+}

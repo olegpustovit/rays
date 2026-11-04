@@ -1,0 +1,3 @@
+(executable
+ (name dump)
+ (libraries flow_web flow flow_ir flow_ir_test_support input))

@@ -1,0 +1,1 @@
+ERROR E_GPU_FORM Integer sources, uniforms and instructions stay on the CPU.

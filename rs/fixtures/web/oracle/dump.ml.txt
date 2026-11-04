@@ -1,0 +1,202 @@
+let ok = Test_program.ok
+let programs =
+  let range = "(array/range 1024)" in
+  let map body = "(map (fn [x] " ^ body ^ ") " ^ range ^ ")" in
+  Test_program.fixtures 1024
+  @ [ ("two_outputs", Test_program.two_outputs ()) ]
+  @ List.map
+      (fun (name, source) ->
+        (name, try Test_program.compile source with Failure m -> failwith (name ^ ": " ^ m)))
+      (List.map
+         (fun name -> ("op " ^ name, map ("(" ^ name ^ " x t)")))
+         [ "/"; "mod"; "pow"; "min"; "max" ]
+      @ List.map
+          (fun name -> ("op " ^ name, map ("(" ^ name ^ " (+ x t))")))
+          [ "sin"; "cos"; "sqrt"; "abs" ]
+      @ [
+          ("logic", map "(if (and (> x t) (or (< x 8) (not (>= x 500)))) x (- 0 x))");
+          ("cond", map "(cond (< x t) (+ x 1) (> x 5) (- x 1) :else (* x t))");
+          ("vec3", map "[x t (/ x 3)]");
+          ("noise octaves", map "(noise3 [(* x 0.37) (* t 1.3) (- 0.0 4.2)] :seed 5 :octaves 4)");
+          ("noise neg", map "(noise3 [(* x (- 0.0 0.37)) (- t 3.0) (- 0.0 40.5)] :seed 7)");
+          ("sum", "(sum [x " ^ range ^ "] (sin (+ x t)))");
+          ("sum vec", "(sum [x " ^ range ^ "] [x t])");
+          ("fold", "(fold [a 0.0] [x " ^ range ^ "] (- (* a 0.99) (* (+ x t) 0.0001)))");
+          ("scan", "(scan [a 0.0] [x " ^ range ^ "] (- (* a 0.99) (* (+ x t) 0.0001)))");
+          ("scan vec", "(scan [a [0.0 0.0]] [x " ^ range ^ "] (+ (* a 0.99) [x t]))");
+          ("skip", "(for [x " ^ range ^ "] :skip [0 5 1023] (sin (+ x t)))");
+          ("skip two", "(for [x " ^ range ^ "] :skip [0 700] (* x t))");
+          ("product", "(for [x (array/range 32) y (array/range 32)] (+ (* x y) t))");
+        ])
+
+let carried =
+  List.map
+    (fun (name, body) ->
+      (name, Test_program.compile ("(map (fn [x] " ^ body ^ ") (array/range 65))")))
+    [
+      ("carried dynamic", "(fold [a t] [i (range -2 (int/mod (int x) 5))] (+ a (* i 0.5)))");
+      ("carried empty", "(fold [a t] [i (range 0)] (error \"E_UNTAKEN\" \"empty loop\"))");
+      ("carried nested", "(fold [a t] [i (range 3)] (fold [b a] [j (range i)] (+ b (+ x j))))");
+      ( "carried record",
+        "(let* [s (fold [s {:a 1 :b 2 :v [t 1.] :flag false :text \"start\"}]\n\
+        \    [i (range (int/mod (int x) 5))] {:a s.b :b s.a :v [s.v.y (+ s.v.x 1.)]\n\
+        \      :flag (not s.flag) :text (if s.flag \"a\" \"b\")})]\n\
+        \    [(float s.a) (float s.b) s.v.x (if s.flag 1. 0.)])" );
+      ("carried guarded", "(if (> x t) (fold [a t] [i (range 2)] (+ a x)) x)");
+      (* a live octave count, an Int register *)
+      ( "noise live octaves",
+        "(noise3 [(* x 0.37) t 0.5] :seed 5 :octaves (int/add 3 (frame/index)))" );
+      ("carried scope", "(let* [a (fold [s t] [i (range 2)] (+ s (+ x 1.)))] (+ a (+ x 1.)))");
+      ( "iterate-empty-error",
+        "(iterate -1 t (fn [a] (error \"E_EMPTY\" \"untaken body\"))\n\
+        \    :until (fn [prev next] (error \"E_EMPTY\" \"untaken predicate\")))" );
+    ]
+  @ List.filter
+      (fun (name, _) -> String.starts_with ~prefix:"iterate-" name)
+      (Test_program.carried_fixtures 65)
+
+let fast_cases =
+  [
+    ( "hash",
+      "(map (fn [x] (int/mod (int/and (int/xor (int/mul (int x) 73856093) (int/mul (int/mul (int \
+       x) (int x)) 19349663)) 4611686018427387903) 8)) (array/range (int/add 70000 \
+       (frame/index))))" );
+    ( "hash_div",
+      "(map (fn [x] (int/div (int/and (int/xor (int/mul (int x) 73856093) (int/mul (int/mul (int \
+       x) (int x)) 19349663)) 4611686018427387903) 360000000000)) (array/range (int/add 70000 \
+       (frame/index))))" );
+    ( "mod_negative",
+      "(map (fn [x] (int/mod (int/sub 0 (int/mul (int x) 2654435761)) 1000)) (array/range \
+       (int/add 4097 (frame/index))))" );
+    ( "div_negative",
+      "(map (fn [x] (int/div (int/sub 0 (int/mul (int x) 2654435761)) 1000)) (array/range \
+       (int/add 4097 (frame/index))))" );
+    ( "shifts",
+      "(map (fn [x] (int/add (int/shr (int/mul (int x) 2654435761) 37) (int/shr (int/shl (int x) \
+       40) 38))) (array/range (int/add 4097 (frame/index))))" );
+    ( "compare",
+      "(map (fn [x] (if (int/lt (int/mul (int x) 2654435761) 5000000000000) (int/mul (int x) 3) \
+       (int/sub 0 (int x)))) (array/range (int/add 4097 (frame/index))))" );
+    ( "gather",
+      "(let* [table (map (fn [i] [i (* i 2.) (- 0. i)]) (array/range (int/add 64 \
+       (frame/index))))] (map (fn [x] (let* [p (array/nth table (int/mod (int x) 64))] (+ (+ p.x \
+       (* p.y 0.5)) (+ p.z t)))) (array/range (int/add 4097 (frame/index)))))" );
+    ( "seed_mod",
+      "(map (fn [x] (/ (mod (int/and (+ (int/mul (+ (int x) 1) 1103515245) 12345) \
+       4611686018427387903) 360000) 1000)) (array/range (int/add 4097 (frame/index))))" );
+    ( "list_gather",
+      "(let* [table (list [1 0 0] [0 1 0] [0 0 1])] (map (fn [x] (+ (nth table (int/mod (int x) \
+       3)) [t 0. 0.])) (array/range 4097)))" );
+    ( "list_float_index",
+      "(let* [table (list 0.25 0.5 0.75)] (map (fn [x] (+ (nth table (float (int/mod (int x) \
+       3))) t)) (array/range 4097)))" );
+    ( "inner_map_sum",
+      "(map (fn [(x : int)] (+ (array/sum (map (fn [(j : int)] (+ x j)) (array/range 3 :type \
+       int))) (frame/index))) (array/range 4097 :type int))" );
+    ( "inner_slice_sum",
+      "(let* [table (array/range 64 :type int)] (map (fn [(x : int)] (+ (array/sum (array/slice \
+       table (int/mod x 61) 3)) (frame/index))) (array/range 4097 :type int)))" );
+    ( "noise_hash",
+      "(map (fn [x] (+ (noise3 [(* x 0.37) t 0.0] :seed 451) (float (int/and (int/add (int/mul \
+       (int x) 1103515245) 12345) 65535)))) (array/range (int/add 4097 (frame/index))))" );
+    (* a live octave count: an Int uniform bounding wfbm_live's fold *)
+    ( "noise_octaves",
+      "(map (fn [x] (noise3 [(* x 0.37) t 0.0] :seed 451 :octaves (int/add 2 (frame/index)) \
+       :lacunarity 1.9)) (array/range 4097))" );
+  ]
+let error_cases =
+  List.map
+    (fun (name, source) -> (name, Test_program.compile source))
+    [
+      ( "error_slice_selected",
+        "(let* [table (array/range 16 :type int)] (map (fn [(x : int)] (if (> t 0.) (float \
+         (array/sum (array/slice table (+ x 17) 0))) (float x))) (array/range 16 :type int)))" );
+      ( "error_slice_untaken",
+        "(let* [table (array/range 16 :type int)] (map (fn [(x : int)] (if (< t 0.) (float \
+         (array/sum (array/slice table (+ x 17) 0))) (float x))) (array/range 16 :type int)))" );
+      ( "error_slice_length_selected",
+        "(let* [table (array/range 16 :type int)] (map (fn [(x : int)] (if (> t 0.) (float \
+         (array/sum (array/slice table (- -1 x) 1))) (float x))) (array/range 16 :type int)))" );
+      ( "error_slice_length_untaken",
+        "(let* [table (array/range 16 :type int)] (map (fn [(x : int)] (if (< t 0.) (float \
+         (array/sum (array/slice table (- -1 x) 1))) (float x))) (array/range 16 :type int)))" );
+      ( "error_list_selected",
+        "(let* [table (list 1 2 3)] (map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (nth \
+         table (int/add 3 (int/mod x 1)))) (float x))) (array/range 16 :type int)))" );
+      ( "error_list_untaken",
+        "(let* [table (list 1 2 3)] (map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (nth \
+         table (int/add 3 (int/mod x 1)))) (float x))) (array/range 16 :type int)))" );
+      ( "error_list_fraction_selected",
+        "(let* [table (list 1 2 3)] (map (fn [(x : int)] (float (nth table (+ (+ 0.5 (float \
+         (int/mod x 1))) (* t 0.))))) (array/range 16 :type int)))" );
+      ( "error_shift_selected",
+        "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod \
+         (frame/index) 1)))) (float x))) (array/range 16 :type int))" );
+      ( "error_shift_untaken",
+        "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod \
+         (frame/index) 1)))) (float x))) (array/range 16 :type int))" );
+      ( "error_negative_shift_selected",
+        "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/sub \
+         (frame/index) (int/add (frame/index) 1)))) (float x))) (array/range 16 :type int))" );
+      ( "error_negative_shift_untaken",
+        "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/sub \
+         (frame/index) (int/add (frame/index) 1)))) (float x))) (array/range 16 :type int))" );
+      ( "error_div_selected",
+        "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/div x (int/sub \
+         (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))" );
+      ( "error_div_untaken",
+        "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/div x (int/sub \
+         (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))" );
+      ( "error_mod_selected",
+        "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/mod x (int/sub \
+         (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))" );
+      ( "error_mod_untaken",
+        "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/mod x (int/sub \
+         (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))" );
+    ]
+
+let sanitize s = String.map (fun c -> match c with 'a'..'z' | 'A'..'Z' | '0'..'9' | '-' -> c | _ -> '_') s
+
+let write dir name ext text =
+  let path = Filename.concat dir (sanitize name ^ ext) in
+  Out_channel.with_open_bin path (fun c -> output_string c text)
+
+let () =
+  let dir = Sys.argv.(1) in
+  List.iter (fun sub -> try Sys.mkdir (Filename.concat dir sub) 0o755 with _ -> ()) [ "wgsl"; "wgsl_fast"; "js_region"; "js_region_fast"; "wgsl_error" ];
+  let all_compiled =
+    List.map (fun (n, s) -> ("f_" ^ n, Test_program.compile s)) fast_cases
+    @ List.map (fun (n, p) -> ("c4096_" ^ n, p)) (Test_program.carried_fixtures 4096)
+  in
+  List.iter
+    (fun (name, program) ->
+      (match Flow_web.Wgsl.kernel_fast program with
+       | Ok w -> write (Filename.concat dir "wgsl_fast") name ".wgsl" (w.entry ^ "\n" ^ w.source)
+       | Error d -> write (Filename.concat dir "wgsl_fast") name ".wgsl" ("ERROR " ^ d.code ^ " " ^ d.message));
+      write (Filename.concat dir "js_region_fast") name ".js" ((try Flow_web.Js.region ~fast:true program with Invalid_argument m -> "EXN Invalid_argument " ^ m));
+      write (Filename.concat dir "js_region") name ".js" ((try Flow_web.Js.region program with Invalid_argument m -> "EXN Invalid_argument " ^ m)))
+    all_compiled;
+  List.iter
+    (fun (name, source) ->
+      let program = Test_program.compile source in
+      (match Flow_web.Wgsl.kernel program with
+       | Ok w -> write (Filename.concat dir "wgsl") name ".wgsl" (w.entry ^ "\n" ^ w.source)
+       | Error d -> write (Filename.concat dir "wgsl") name ".wgsl" ("ERROR " ^ d.code ^ " " ^ d.message));
+      write (Filename.concat dir "js_region") name ".js" ((try Flow_web.Js.region program with Invalid_argument m -> "EXN Invalid_argument " ^ m));
+      write (Filename.concat dir "js_region_fast") name ".js" ((try Flow_web.Js.region ~fast:true program with Invalid_argument m -> "EXN Invalid_argument " ^ m)))
+    (List.map (fun (n, s) -> (n, s)) [])
+  ;
+  List.iter
+    (fun (name, program) ->
+      write (Filename.concat dir "js_region") name ".js" ((try Flow_web.Js.region program with Invalid_argument m -> "EXN Invalid_argument " ^ m));
+      write (Filename.concat dir "js_region_fast") name ".js" ((try Flow_web.Js.region ~fast:true program with Invalid_argument m -> "EXN Invalid_argument " ^ m));
+      match Flow_web.Wgsl.kernel program with
+      | Ok w -> write (Filename.concat dir "wgsl") name ".wgsl" (w.entry ^ "\n" ^ w.source)
+      | Error d -> write (Filename.concat dir "wgsl") name ".wgsl" ("ERROR " ^ d.code ^ " " ^ d.message))
+    (programs @ carried);
+  List.iter
+    (fun (name, program) ->
+      match Flow_web.Wgsl.kernel_fast program with
+      | Ok w -> write (Filename.concat dir "wgsl_error") name ".wgsl" (w.entry ^ "\n" ^ w.source)
+      | Error d -> write (Filename.concat dir "wgsl_error") name ".wgsl" ("ERROR " ^ d.code ^ " " ^ d.message))
+    error_cases

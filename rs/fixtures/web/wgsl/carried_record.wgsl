@@ -1,0 +1,1 @@
+ERROR E_GPU_FORM Text kernels stay on the CPU.
