@@ -2,6 +2,7 @@
 use crate::command;
 use crate::history::{self as hist, Merge};
 use crate::keymap::{label, Trigger};
+use crate::panels::Panel;
 use crate::router::{self, State};
 use input::{Event, Key, Platform};
 use rays::frame;
@@ -177,10 +178,13 @@ fn history_merge_seal_undo_redo_capacity_labels() {
     println!("editor history: merge, seal, undo/redo, capacity, labels ok");
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Scope {
-    View,
-    Graph,
+/// The scopes the tests use, as the panels they are.
+struct Scope;
+
+#[allow(non_upper_case_globals)]
+impl Scope {
+    const View: Panel = Panel::View(String::new());
+    const Graph: Panel = Panel::Graph;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,10 +200,21 @@ enum Act {
     Add,
 }
 
-type Cmd = command::t<Scope, Act>;
+type Cmd = command::t;
 
-fn cmd(id: &str, label: &str, trigger: Option<Trigger>, scope: Option<Scope>, action: Act) -> Cmd {
-    command::make(trigger, scope, Vec::new(), id, label, action)
+const ACTS: [Act; 9] = [Act::Toggle, Act::Layout, Act::Undo, Act::Redo, Act::Delete, Act::Frame, Act::Palette, Act::AddLight, Act::Add];
+
+/// The command's action code is the act's index in `ACTS`.
+fn unact(code: usize) -> Act {
+    ACTS[code]
+}
+
+fn make(trigger: Option<Trigger>, scope: Option<Panel>, guide: Vec<crate::guide_context::t>, id: &str, label: &str, action: Act) -> Cmd {
+    command::make(trigger, scope, guide, id, label, action as usize)
+}
+
+fn cmd(id: &str, label: &str, trigger: Option<Trigger>, scope: Option<Panel>, action: Act) -> Cmd {
+    make(trigger, scope, Vec::new(), id, label, action)
 }
 
 fn leader(sequence: &str) -> Option<Trigger> {
@@ -256,25 +271,25 @@ fn refs(commands: &[Cmd]) -> Vec<&Cmd> {
 fn route(
     platform: Platform,
     commands: &[Cmd],
-    focus: Scope,
+    focus: Panel,
     text_focus: bool,
     frame: frame::t,
     state: State,
 ) -> (State, Vec<Act>, Vec<Event>) {
     let (state, matched, frame) =
         router::step(&[], platform, &refs(commands), &focus, text_focus, frame, state);
-    (state, matched.iter().map(|c| c.action).collect(), frame.input.events)
+    (state, matched.iter().map(|c| unact(c.action)).collect(), frame.input.events)
 }
 
 fn actions_of(matched: &[&Cmd]) -> Vec<Act> {
-    matched.iter().map(|c| c.action).collect()
+    matched.iter().map(|c| unact(c.action)).collect()
 }
 
 #[test]
 fn router_leader_chord_scope_text_focus_and_event_consumption() {
     let b = bindings();
-    let alias = |scope: Option<Scope>, trigger: Option<Trigger>, label: &str| {
-        command::make(trigger, scope, Vec::new(), "alias", label, Act::Frame)
+    let alias = |scope: Option<Panel>, trigger: Option<Trigger>, label: &str| {
+        make(trigger, scope, Vec::new(), "alias", label, Act::Frame)
     };
     let meta = Some(Trigger::Chord(Key::KeyChar('c'), vec![Key::Meta]));
     let view = alias(Some(Scope::View), meta.clone(), "view alias");
@@ -331,7 +346,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
             && activated.is_empty()
             && remaining.input.events == vec![pressed(Key::Tab), pressed(Key::KeyChar('/'))]
     );
-    let add = command::make(
+    let add = make(
         chord(Key::Tab, vec![]),
         Some(Scope::View),
         Vec::new(),
@@ -373,7 +388,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
             && remaining.input.events.contains(&pressed(Key::Tab))
             && remaining.input.events.contains(&pressed(Key::KeyChar('/')))
     );
-    let step = |focus: Scope, text_focus: bool, state: State, keys: Vec<Key>| {
+    let step = |focus: Panel, text_focus: bool, state: State, keys: Vec<Key>| {
         route(
             Platform::Apple,
             &bindings(),
@@ -434,7 +449,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
     assert!(
         state == State::Idle && actions.is_empty() && passed == vec![pressed(Key::KeyChar('g'))]
     );
-    let chord_route = |focus: Scope, text_focus: bool, keys: Vec<Key>, events: Vec<Event>| {
+    let chord_route = |focus: Panel, text_focus: bool, keys: Vec<Key>, events: Vec<Event>| {
         router::step(
             &[],
             Platform::Apple,
@@ -571,7 +586,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
     assert!(ended && passed.input.events == vec![Event::Focus_lost]);
     // E10: a focused text field keeps its own Command chords (undo, above) and lets the others
     // run, but only commands of every pane
-    let save = command::make(
+    let save = make(
         chord(Key::KeyChar('s'), vec![Key::Meta]),
         None,
         Vec::new(),
@@ -579,7 +594,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         "save",
         Act::Palette,
     );
-    let scoped = command::make(
+    let scoped = make(
         chord(Key::KeyChar('d'), vec![Key::Meta]),
         Some(Scope::View),
         Vec::new(),
@@ -605,8 +620,8 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
     let (_, matched, passed) = typing(vec![pressed(Key::KeyChar('d'))]);
     assert!(matched.is_empty() && passed.input.events == vec![pressed(Key::KeyChar('d'))]);
     // the leader is /: Space plays and pauses, Shift P resets, a bare / waits for the sequence
-    let play = command::make(chord(Key::Space, vec![]), None, Vec::new(), "play", "play", Act::Frame);
-    let reset = command::make(
+    let play = make(chord(Key::Space, vec![]), None, Vec::new(), "play", "play", Act::Frame);
+    let reset = make(
         chord(Key::KeyChar('p'), vec![Key::Shift]),
         None,
         Vec::new(),
@@ -635,10 +650,10 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
     assert!(run(vec![pressed(Key::KeyChar('/'))]) == (State::Pending(String::new()), vec![]));
     // E17: Shift and a symbol key is the symbol it types: / ? is not / /, and a chord bound to +
     // is reached by Shift =
-    let keys = command::make(leader("?"), None, Vec::new(), "?", "?", Act::Layout);
-    let palette = command::make(leader("/"), None, Vec::new(), "/", "/", Act::Palette);
+    let keys = make(leader("?"), None, Vec::new(), "?", "?", Act::Layout);
+    let palette = make(leader("/"), None, Vec::new(), "/", "/", Act::Palette);
     let symbols = vec![palette.clone(), keys.clone()];
-    let plus = command::make(
+    let plus = make(
         chord(Key::KeyChar('+'), vec![Key::Meta]),
         None,
         Vec::new(),
@@ -687,7 +702,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
 // The platform is an argument: Command is Meta on Apple and Ctrl elsewhere, in triggers and labels.
 #[test]
 fn router_platform_modifier_and_labels() {
-    let undo = command::make(
+    let undo = make(
         chord(Key::KeyChar('z'), vec![Key::Meta]),
         None,
         Vec::new(),
@@ -695,7 +710,7 @@ fn router_platform_modifier_and_labels() {
         "undo",
         Act::Undo,
     );
-    let redo = command::make(
+    let redo = make(
         chord(Key::KeyChar('z'), vec![Key::Meta, Key::Shift]),
         None,
         Vec::new(),

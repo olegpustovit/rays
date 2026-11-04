@@ -744,10 +744,11 @@ pub fn run_command(t: Pane, command: Command) -> (Pane, Vec<Change>) {
     }
 }
 
-pub type Cmd = command::t<String, Command>;
+/// A binding and the scope command it runs (`command::t.action` is the host's code, unused here).
+pub type Cmd = (command::t, Command);
 
 fn make(guide: &[Ctx], id: &str, label: &str, action: Command, key: Key, modifiers: &[Key]) -> Cmd {
-    command::make(Some(Trigger::Chord(key, modifiers.to_vec())), None, guide.to_vec(), &format!("scope.{}", id), label, action)
+    (command::make(Some(Trigger::Chord(key, modifiers.to_vec())), None, guide.to_vec(), &format!("scope.{}", id), label, 0), action)
 }
 
 /// The scope's key bindings; the guide strip lists a key where it does something: on the empty canvas,

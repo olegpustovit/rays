@@ -217,7 +217,7 @@ fn scope_levels_c() {
     let rs = Rc::new(p::of_graph(&scope_catalog(), &reloaded, "g").unwrap());
     check(!scope::editing(&scope::with_scope(ScopeOpts::default(), "g", rs, hint_view)), "a new scope kept the letter hints");
     // f frames the selection (all with none); the hints are on w
-    let key_of = |action: Command| scope_commands::bindings().into_iter().find(|c| c.action == action).and_then(|c| c.trigger);
+    let key_of = |action: Command| scope_commands::bindings().into_iter().find(|c| c.1 == action).and_then(|c| c.0.trigger);
     check(matches!(key_of(Command::Frame_selection), Some(Trigger::Chord(Key::KeyChar('f'), k)) if k.is_empty()), "f does not frame the selection");
     check(matches!(key_of(Command::Show_hints), Some(Trigger::Chord(Key::KeyChar('w'), k)) if k.is_empty()), "w does not start the hints");
     // a node named as the graph it refers to is not wired to itself

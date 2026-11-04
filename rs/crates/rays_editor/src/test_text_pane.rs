@@ -400,7 +400,6 @@ fn indent_len(text: &str) -> usize {
 }
 
 #[test]
-#[ignore = "lisp_text::complete returns no keyword candidates (first(sop/box :si) is empty, want :size): bundle A"]
 fn lisp_text_completions() {
     use crate::lisp_text as l;
     let indent = indent_len;

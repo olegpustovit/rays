@@ -406,7 +406,7 @@ fn scope_gestures_2() {
         let mods = if id == "scope.display" { vec![] } else { vec![modifier] };
         let ch = if id == "scope.display" { 'v' } else { 'd' };
         check(
-            scope::bindings().iter().any(|c| c.id == id && c.trigger == Some(editor_core::editor_core::keymap::Trigger::Chord(Key::KeyChar(ch), mods.clone()))),
+            scope::bindings().iter().any(|(c, _)| c.id == id && c.trigger == Some(editor_core::editor_core::keymap::Trigger::Chord(Key::KeyChar(ch), mods.clone()))),
             &format!("{id} is not bound"),
         );
     }

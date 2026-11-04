@@ -1,9 +1,10 @@
 //! Port of lib/pxui_shell/which_key.ml: the leader sheet and the key table.
-//! The command type is the host's `Command.t<S, A>`, as in `editor_core::command`.
+//! Commands are `editor_core::command::t`; their scope is a kind of panel, `Panel`.
 use crate::kit;
 use crate::layout;
 use editor_core::command;
 use editor_core::keymap::{self, Trigger};
+use editor_core::panels::Panel;
 use input::{Key, Platform};
 use pxui::theme;
 use pxui::ui::*;
@@ -22,7 +23,7 @@ fn byte_at(sequence: &str, i: usize) -> String {
 
 /// One page per typed prefix: a key that continues into longer sequences shows as a "+group" row
 /// named by the first word of its first command.
-fn page<S: PartialEq, A>(platform: Platform, keymap: &[command::t<S, A>], prefix: &str, scope: Option<&S>) -> Rows {
+fn page(platform: Platform, keymap: &[command::t], prefix: &str, scope: Option<&Panel>) -> Rows {
     let mut rows: Rows = Vec::new();
     for command in keymap {
         match &command.trigger {
@@ -61,11 +62,11 @@ fn ordered_titles(titles: &[String]) -> Vec<String> {
 /// The leader's page by category: one-letter continuations only, no chords. A key that continues
 /// into longer sequences is "+" and a name from `describe`, else the first word of its first
 /// command.
-fn by_category<S: PartialEq, A>(
-    keymap: &[command::t<S, A>],
+fn by_category(
+    keymap: &[command::t],
     prefix: &str,
-    focus: &S,
-    category: &dyn Fn(&command::t<S, A>) -> String,
+    focus: &Panel,
+    category: &dyn Fn(&command::t) -> String,
     describe: &dyn Fn(&str) -> Option<String>,
     order: &dyn Fn(&str) -> Vec<String>,
 ) -> Sections {
@@ -162,14 +163,14 @@ fn no_order(_: &str) -> Vec<String> {
 /// The leader: a sheet over the status strip, the `/` key and its name over six columns. Hosts
 /// that give a `category` get the sections of the sheet (the keys of the leader only); without it
 /// the sections are the commands everywhere and those of the focused pane, with the key chords.
-pub fn panel<S: PartialEq, A>(
+pub fn panel(
     ui: &mut Ui,
-    category: Option<&dyn Fn(&command::t<S, A>) -> String>,
+    category: Option<&dyn Fn(&command::t) -> String>,
     describe: Option<&dyn Fn(&str) -> Option<String>>,
     order: Option<&dyn Fn(&str) -> Vec<String>>,
-    keymap: &[command::t<S, A>],
+    keymap: &[command::t],
     prefix: &str,
-    focus: &S,
+    focus: &Panel,
     focus_name: &str,
 ) {
     let theme = ui.theme();
@@ -219,15 +220,15 @@ pub fn panel<S: PartialEq, A>(
 /// The key sheet's sections: every command a key reaches, once per id with all its keys (the Ctrl
 /// twins of the Command chords left out), under the section `category` gives it, the leader
 /// sheet's sections first.
-pub fn sheet_sections<S, A>(
+pub fn sheet_sections(
     platform: Platform,
-    category: Option<&dyn Fn(&command::t<S, A>) -> String>,
+    category: Option<&dyn Fn(&command::t) -> String>,
     text_keys: &[(String, Trigger)],
-    keymap: &[command::t<S, A>],
+    keymap: &[command::t],
 ) -> Sections {
-    let keys_category = |_: &command::t<S, A>| "Keys".to_string();
-    let category: &dyn Fn(&command::t<S, A>) -> String = category.unwrap_or(&keys_category);
-    let mut commands: Vec<&command::t<S, A>> = Vec::new();
+    let keys_category = |_: &command::t| "Keys".to_string();
+    let category: &dyn Fn(&command::t) -> String = category.unwrap_or(&keys_category);
+    let mut commands: Vec<&command::t> = Vec::new();
     for command in keymap {
         if command.trigger.is_none() || commands.iter().any(|previous| previous.id == command.id) {
             continue;
@@ -279,12 +280,12 @@ pub fn sheet_sections<S, A>(
 /// The Flow key table, the sheet's `05`: a title row with `context` (what has the focus) and a
 /// close button, the filter (at rest until typed in), and the sections of `sheet_sections` in
 /// three columns. False on dismissal or the close button.
-pub fn sheet<S, A>(
+pub fn sheet(
     ui: &mut Ui,
     context: &str,
-    category: Option<&dyn Fn(&command::t<S, A>) -> String>,
+    category: Option<&dyn Fn(&command::t) -> String>,
     text_keys: &[(String, Trigger)],
-    keymap: &[command::t<S, A>],
+    keymap: &[command::t],
 ) -> bool {
     let sections = sheet_sections(ui.platform(), category, text_keys, keymap);
     let mut result: Option<bool> = None;

@@ -47,3 +47,17 @@ pub mod world_map;
 mod test_navigator;
 #[cfg(test)]
 mod test_text_pane;
+
+// tests: A
+#[cfg(test)]
+mod test_timeline;
+#[cfg(test)]
+mod test_schedule;
+#[cfg(test)]
+mod test_selection;
+#[cfg(test)]
+mod test_bars;
+#[cfg(test)]
+mod test_editor_commands;
+#[cfg(test)]
+mod test_source_file;

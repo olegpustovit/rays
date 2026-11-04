@@ -282,16 +282,16 @@ pub fn window_shell_drop_targets() {
 }
 
 pub fn window_shell_status_and_guide_draw() {
-    let bindings: Vec<editor_core::command::t<&'static str, &'static str>> = vec![
-        editor_core::command::make(Some(editor_core::keymap::Trigger::Leader("s".into())), None, vec![], "save", "Save", "save"),
-        editor_core::command::make(Some(editor_core::keymap::Trigger::Leader("v".into())), Some("view"), vec![], "view", "View", "view"),
+    let bindings: Vec<editor_core::command::t> = vec![
+        editor_core::command::make(Some(editor_core::keymap::Trigger::Leader("s".into())), None, vec![], "save", "Save", 0),
+        editor_core::command::make(Some(editor_core::keymap::Trigger::Leader("v".into())), Some(editor_core::panels::Panel::View(String::new())), vec![], "view", "View", 0),
     ];
-    let leader = |focus: &'static str| -> i64 {
+    let leader = |focus: editor_core::panels::Panel| -> i64 {
         instances(&mut |ui| {
             which_key::panel(ui, None, None, None, &bindings, "", &focus, "View");
         })
     };
-    assert!(leader("view") > leader("other"), "focused leader bindings were not drawn");
+    assert!(leader(editor_core::panels::Panel::View(String::new())) > leader(editor_core::panels::Panel::Graph), "focused leader bindings were not drawn");
     let status = |height: i64| -> i64 {
         instances(&mut |ui| {
             let o = status_bar::Opts { text: "Cook complete".into(), fps: Some(60), ..status_bar::Opts::default() };

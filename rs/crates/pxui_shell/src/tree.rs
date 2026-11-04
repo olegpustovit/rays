@@ -127,9 +127,9 @@ pub fn summary(t: &Tree) -> String {
 
 /// Arrows, Home/End, Tab/Shift-Tab, Alt-arrows, F2, `/`, `h`, Enter; the host scopes them to its
 /// list pane.
-pub fn bindings<S>() -> Vec<command::t<S, Command>> {
-    let key = |id: &str, label: &str, key: Key, action: Command, modifiers: Vec<Key>| -> command::t<S, Command> {
-        command::make(Some(Trigger::Chord(key, modifiers)), None, Vec::new(), &format!("list.{id}"), label, action)
+pub fn bindings() -> Vec<(command::t, Command)> {
+    let key = |id: &str, label: &str, key: Key, action: Command, modifiers: Vec<Key>| -> (command::t, Command) {
+        (command::make(Some(Trigger::Chord(key, modifiers)), None, Vec::new(), &format!("list.{id}"), label, 0), action)
     };
     vec![
         key("up", "previous row", Key::ArrowUp, Command::Up, vec![]),

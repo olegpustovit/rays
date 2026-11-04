@@ -474,10 +474,13 @@ pub mod guide_context {
 pub mod command {
     use crate::editor_core::guide_context;
     use crate::editor_core::keymap::Trigger;
+    use crate::panels::Panel;
 
-    /// `S` is the scope (pane) type and `A` the action type; both are the host's.
+    /// The scope is a kind of panel. `action` is the host's own code for what the command does (an
+    /// index into its action table; editor_core cannot name the host's action type, so the table
+    /// stays with the host).
     #[derive(Clone, Debug, PartialEq)]
-    pub struct t<S, A> {
+    pub struct t {
         /// Stable, e.g. "edit.undo"; entries sharing an id are one command.
         pub id: String,
         /// Shown in which-key and the palette.
@@ -485,30 +488,26 @@ pub mod command {
         /// `None`: palette only.
         pub trigger: Option<Trigger>,
         /// `None`: global; else only while that pane has focus.
-        pub scope: Option<S>,
+        pub scope: Option<Panel>,
         /// Contexts where the guide strip lists this command.
         pub guide: Vec<guide_context::t>,
-        pub action: A,
+        pub action: usize,
     }
 
     /// The OCaml optional arguments `?trigger ?scope ?guide` are positional here.
-    pub fn make<S, A>(
+    pub fn make(
         trigger: Option<Trigger>,
-        scope: Option<S>,
+        scope: Option<Panel>,
         guide: Vec<guide_context::t>,
         id: &str,
         label: &str,
-        action: A,
-    ) -> t<S, A> {
+        action: usize,
+    ) -> t {
         t { id: id.into(), label: label.into(), trigger, scope, guide, action }
     }
 
     /// Applicable commands in their original table order.
-    pub fn for_guide<'k, S: PartialEq, A>(
-        commands: &'k [t<S, A>],
-        focus: &S,
-        context: guide_context::t,
-    ) -> Vec<&'k t<S, A>> {
+    pub fn for_guide<'k>(commands: &'k [t], focus: &Panel, context: guide_context::t) -> Vec<&'k t> {
         commands
             .iter()
             .filter(|command| {
@@ -523,6 +522,7 @@ pub mod command {
 
 pub mod router {
     use super::command::t as Command;
+    use crate::panels::Panel;
     use super::keymap::{resolve, shifted, Trigger};
     use input::{Event, Key, Platform};
     use rays::frame;
@@ -537,7 +537,7 @@ pub mod router {
     }
 
     /// The commands a pane with this focus may run, in table order.
-    fn visible<'k, S: PartialEq, A>(commands: &[&'k Command<S, A>], focus: &S) -> Vec<&'k Command<S, A>> {
+    fn visible<'k>(commands: &[&'k Command], focus: &Panel) -> Vec<&'k Command> {
         commands
             .iter()
             .copied()
@@ -553,14 +553,8 @@ pub mod router {
     }
 
     /// The matching chord with the most modifiers; on a tie the earlier command wins.
-    fn chord<'k, S: PartialEq, A>(
-        platform: Platform,
-        commands: &[&'k Command<S, A>],
-        focus: &S,
-        keys: &[Key],
-        key: Key,
-    ) -> Option<&'k Command<S, A>> {
-        let mut best: Option<(usize, &'k Command<S, A>)> = None;
+    fn chord<'k>(platform: Platform, commands: &[&'k Command], focus: &Panel, keys: &[Key], key: Key) -> Option<&'k Command> {
+        let mut best: Option<(usize, &'k Command)> = None;
         for command in visible(commands, focus) {
             let Some(Trigger::Chord(bound, modifiers)) = &command.trigger else { continue };
             let modifiers: Vec<Key> = modifiers.iter().map(|m| resolve(platform, *m)).collect();
@@ -605,14 +599,14 @@ pub mod router {
 
     /// A text field owns the keyboard except the Command/Ctrl chords it has no use for (its own
     /// are select all, copy, cut, paste, undo and redo). Only commands of every pane run.
-    fn text_chords<'k, S: PartialEq, A>(
+    fn text_chords<'k>(
         platform: Platform,
-        keymap: &[&'k Command<S, A>],
-        focus: &S,
+        keymap: &[&'k Command],
+        focus: &Panel,
         previous_keys: &[Key],
         mut frame: frame::t,
-    ) -> (Vec<&'k Command<S, A>>, frame::t) {
-        let global: Vec<&'k Command<S, A>> =
+    ) -> (Vec<&'k Command>, frame::t) {
+        let global: Vec<&'k Command> =
             keymap.iter().copied().filter(|command| command.scope.is_none()).collect();
         let owned = |key: Key| match key {
             Key::KeyChar(c) => ['a', 'c', 'v', 'x', 'z', 'y'].contains(&c.to_ascii_lowercase()),
@@ -645,15 +639,15 @@ pub mod router {
     ///
     /// `previous_keys` supplies the previous frame's keys for changed modifiers and focus
     /// cancellation; pass `&[]` when none were held.
-    pub fn step<'k, S: PartialEq, A>(
+    pub fn step<'k>(
         previous_keys: &[Key],
         platform: Platform,
-        keymap: &[&'k Command<S, A>],
-        focus: &S,
+        keymap: &[&'k Command],
+        focus: &Panel,
         text_focus: bool,
         mut frame: frame::t,
         state: State,
-    ) -> (State, Vec<&'k Command<S, A>>, frame::t) {
+    ) -> (State, Vec<&'k Command>, frame::t) {
         if text_focus {
             let (actions, frame) = text_chords(platform, keymap, focus, previous_keys, frame);
             return (State::Idle, actions, frame);
@@ -661,7 +655,7 @@ pub mod router {
         let mut modifiers = input::keys_before(previous_keys, &frame.input.keys, &frame.input.events);
         let mut traversing = false;
         let mut state = state;
-        let mut actions: Vec<&'k Command<S, A>> = Vec::new();
+        let mut actions: Vec<&'k Command> = Vec::new();
         let mut passed: Vec<Event> = Vec::new();
         for event in frame.input.events.iter() {
             modifiers = input::keys_after(&modifiers, event);

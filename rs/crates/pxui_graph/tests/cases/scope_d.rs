@@ -252,7 +252,7 @@ fn wire_and_delete() {
     // keys and menu: every key command maps to a request
     let bindings = scope::bindings();
     for name in ["delete", "fold", "unfold", "hoist", "bypass", "repeat", "iterate", "function", "collapse", "probe-prev", "probe-next", "frame-all", "walk.left"] {
-        check(bindings.iter().any(|c| c.id == format!("scope.{}", name)), &format!("no key for {}", name));
+        check(bindings.iter().any(|(c, _)| c.id == format!("scope.{}", name)), &format!("no key for {}", name));
     }
     let (_, changes) = scope::run_command(scope::select(vec![heart.clone()], view), Command::Bypass);
     check(changes == vec![Change::Syntax_edit(Op::ToggleBypass { node: heart })], "Bypass");
