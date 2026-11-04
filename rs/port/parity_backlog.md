@@ -37,3 +37,12 @@
 - Host::force_reference evaluates index arg before resolving the table (E_RANGE vs OCaml E_DATA_SOURCE).
 - text_error_cause_raw_bytes: Diagnostic.cause is String (raw bytes lost).
 - flow_ir lacks flow_graph dev-dep: replay probes (test_static_map), checked-edit blocks (#[cfg(any())] in test_with_error/test_error_rows).
+## From flow_sop lower port (fsopD)
+- LEAK: lowering closures hold Arc<Lowerer>; lowering and its nodes form a reference cycle (leaks every lowering; the editor re-lowers per edit). Use Weak or restructure.
+- operators::parity::rand_at_primitive_agrees_with_native fails.
+- 8 flow_sop tests hang in flow_ir::qualify_workspace (static-map deadlock) — flowrt.
+- library nodes transform/mountain/normals/curve fail check: "sop/group takes 1 positional inputs; got 3" — likely flow_syntax attribute_args positional bug (sent to flowck).
+- test_settle needs device write placement (settle/release/bounds) in attribute_kernel.
+- $card marker: Rust flow_eval emits a marker with an attached error where OCaml evaluator makes a catalog call; lower.rs rewrites it (failed_card_as_call) — fix flow_eval to match OCaml and drop the rewrite.
+- Unported flow_sop tests: most of test_lisp_node, test_lisp_fusion, test_graph, test_node_sources, test_workspace_cook/edit/zone, test_projection, test_lisp_projection, test_mesh_resident, test_gpu_bulk, test_node_facts, test_metadata_kernel, kernel half of test_trace, test_group_kernel, test_remap.
+- flow_sop depends directly on rdk/rdk_core (OCaml reaches rdk only via sop) — gate.

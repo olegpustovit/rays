@@ -22,6 +22,16 @@ opt-level = 1
 opt-level = 1
 [profile.dev.package.rdk_boolean]
 opt-level = 1
+[profile.dev.package.flow_ir]
+opt-level = 1
+[profile.dev.package.flow_sop]
+opt-level = 1
+[profile.dev.package.flow_check]
+opt-level = 1
+[profile.dev.package.flow_syntax]
+opt-level = 1
+[profile.dev.package.flow_eval]
+opt-level = 1
 
 [profile.release]
 codegen-units = 16
