@@ -13,44 +13,37 @@ const MAX_INT: i64 = (1 << 62) - 1;
 const MIN_INT: i64 = -(1 << 62);
 const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
 
-type R<V> = Result<V, String>;
 
 pub struct T {
     triangle_points: Arc<[i64]>,
     constraint_points: Arc<[i64]>,
 }
 
-type Cb<'a> = (
-    &'a dyn Fn(i64, i64, i64) -> Sign,
-    &'a dyn Fn(i64, i64, i64, i64) -> Sign,
-    &'a dyn Fn(i64, i64, i64, i64) -> bool,
-);
-
-fn orient(cb: &Cb, a: i64, b: i64, c: i64) -> Sign {
+fn orient(cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), a: i64, b: i64, c: i64) -> Sign {
     (cb.0)(a, b, c)
 }
 
-fn incircle(cb: &Cb, a: i64, b: i64, c: i64, d: i64) -> Sign {
+fn incircle(cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), a: i64, b: i64, c: i64, d: i64) -> Sign {
     (cb.1)(a, b, c, d)
 }
 
-fn bounds_overlap(cb: &Cb, a: i64, b: i64, c: i64, d: i64) -> bool {
+fn bounds_overlap(cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), a: i64, b: i64, c: i64, d: i64) -> bool {
     (cb.2)(a, b, c, d)
 }
 
-fn err<V>(message: &str) -> R<V> {
-    Err(message.to_owned())
+fn err_message(message: &str) -> String {
+    message.to_owned()
 }
 
 fn cancelled() -> String {
     "Planar CDT was cancelled".to_owned()
 }
 
-fn check(cancel_value: Option<&cancel::T>) -> R<()> {
+fn check(cancel_value: Option<&cancel::T>) -> Result<(), String> {
     cancel::check_opt(cancel_value).map_err(|_| cancelled())
 }
 
-fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> R<()> {
+fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> Result<(), String> {
     cancel::poll(cancel_value, index, mask).map_err(|_| cancelled())
 }
 
@@ -58,17 +51,17 @@ fn u(value: i64) -> usize {
     value as usize
 }
 
-fn edge_key(point_count: i64, key_stride: i64, first: i64, second: i64) -> R<i64> {
+fn edge_key(point_count: i64, key_stride: i64, first: i64, second: i64) -> Result<i64, String> {
     let (first, second) = if first < second {
         (first, second)
     } else {
         (second, first)
     };
     if first < 0 || second < 0 || second >= point_count {
-        return err("Planar CDT edge endpoint is out of range");
+        return Err(err_message("Planar CDT edge endpoint is out of range"));
     }
     if first > (MAX_INT - second) / key_stride {
-        return err("Planar CDT edge key exceeds integer range");
+        return Err(err_message("Planar CDT edge key exceeds integer range"));
     }
     Ok(first * key_stride + second)
 }
@@ -87,15 +80,15 @@ struct Table {
     tombstone_count: i64,
 }
 
-fn table_capacity_for(expected: i64) -> R<usize> {
+fn table_capacity_for(expected: i64) -> Result<usize, String> {
     if expected < 0 || expected > MAX_ARRAY_LENGTH / 2 {
-        return err("Planar CDT edge cardinality exceeds array limits");
+        return Err(err_message("Planar CDT edge cardinality exceeds array limits"));
     }
     let needed = std::cmp::max(16, expected * 2);
     let mut capacity: i64 = 16;
     while capacity < needed {
         if capacity > MAX_ARRAY_LENGTH / 2 {
-            return err("Planar CDT edge table exceeds array limits");
+            return Err(err_message("Planar CDT edge table exceeds array limits"));
         }
         capacity *= 2;
     }
@@ -115,7 +108,7 @@ fn table_with_capacity(capacity: usize) -> Table {
     }
 }
 
-fn table_create(expected: i64) -> R<Table> {
+fn table_create(expected: i64) -> Result<Table, String> {
     Ok(table_with_capacity(table_capacity_for(expected)?))
 }
 
@@ -173,7 +166,7 @@ fn table_add_raw(
     triangle: i64,
     opposite: i64,
     is_constrained: bool,
-) -> R<()> {
+) -> Result<(), String> {
     let slot = find_slot(table, key);
     if table.keys[slot] != key {
         if table.keys[slot] == TOMBSTONE {
@@ -193,9 +186,9 @@ fn table_add_raw(
         let first = table.first_triangles[slot];
         let second = table.second_triangles[slot];
         if triangle == first || triangle == second {
-            return err("Planar CDT duplicated one triangle edge incidence");
+            return Err(err_message("Planar CDT duplicated one triangle edge incidence"));
         } else if second >= 0 {
-            return err("Planar CDT input contains a non-manifold edge");
+            return Err(err_message("Planar CDT input contains a non-manifold edge"));
         } else if triangle < first {
             table.second_triangles[slot] = first;
             table.second_opposites[slot] = table.first_opposites[slot];
@@ -209,7 +202,7 @@ fn table_add_raw(
     Ok(())
 }
 
-fn table_rehash(table: &mut Table, capacity: usize) -> R<()> {
+fn table_rehash(table: &mut Table, capacity: usize) -> Result<(), String> {
     let old = std::mem::replace(table, table_with_capacity(capacity));
     for slot in 0..old.keys.len() {
         if old.keys[slot] >= 0 {
@@ -235,12 +228,12 @@ fn table_rehash(table: &mut Table, capacity: usize) -> R<()> {
     Ok(())
 }
 
-fn table_prepare_insert(table: &mut Table) -> R<()> {
+fn table_prepare_insert(table: &mut Table) -> Result<(), String> {
     let capacity = table.keys.len() as i64;
     let used = table.edge_count + table.tombstone_count + 1;
     if used >= capacity - capacity / 3 {
         if capacity > MAX_ARRAY_LENGTH / 2 {
-            return err("Planar CDT edge table exceeds array limits");
+            return Err(err_message("Planar CDT edge table exceeds array limits"));
         }
         table_rehash(table, (capacity * 2) as usize)?;
     } else if table.tombstone_count > table.edge_count && table.tombstone_count > 64 {
@@ -249,15 +242,15 @@ fn table_prepare_insert(table: &mut Table) -> R<()> {
     Ok(())
 }
 
-fn table_add(table: &mut Table, key: i64, triangle: i64, opposite: i64) -> R<()> {
+fn table_add(table: &mut Table, key: i64, triangle: i64, opposite: i64) -> Result<(), String> {
     table_prepare_insert(table)?;
     table_add_raw(table, key, triangle, opposite, false)
 }
 
-fn table_remove(table: &mut Table, key: i64, triangle: i64) -> R<()> {
+fn table_remove(table: &mut Table, key: i64, triangle: i64) -> Result<(), String> {
     let slot = table_find(table, key);
     if slot < 0 {
-        return err("Planar CDT lost an indexed edge");
+        return Err(err_message("Planar CDT lost an indexed edge"));
     }
     let slot = u(slot);
     if table.first_triangles[slot] == triangle {
@@ -278,15 +271,15 @@ fn table_remove(table: &mut Table, key: i64, triangle: i64) -> R<()> {
         table.second_triangles[slot] = -1;
         table.second_opposites[slot] = -1;
     } else {
-        return err("Planar CDT lost one edge incidence");
+        return Err(err_message("Planar CDT lost one edge incidence"));
     }
     Ok(())
 }
 
-fn table_constrain(table: &mut Table, key: i64) -> R<()> {
+fn table_constrain(table: &mut Table, key: i64) -> Result<(), String> {
     let slot = table_find(table, key);
     if slot < 0 {
-        return err("Planar CDT cannot mark a missing edge");
+        return Err(err_message("Planar CDT cannot mark a missing edge"));
     }
     table.constrained[u(slot)] = 1;
     Ok(())
@@ -315,20 +308,20 @@ pub struct Workspace {
     edge_table: Table,
 }
 
-fn checked_edge_capacity(triangle_capacity: i64) -> R<i64> {
+fn checked_edge_capacity(triangle_capacity: i64) -> Result<i64, String> {
     if triangle_capacity < 0 || triangle_capacity > (MAX_INT - 3) / 2 {
-        return err("Planar CDT triangle cardinality exceeds edge-table limits");
+        return Err(err_message("Planar CDT triangle cardinality exceeds edge-table limits"));
     }
     Ok(std::cmp::max(1, triangle_capacity * 2 + 3))
 }
 
-pub fn create_workspace(point_capacity: Option<i64>, triangle_capacity: i64) -> R<Workspace> {
+pub fn create_workspace(point_capacity: Option<i64>, triangle_capacity: i64) -> Result<Workspace, String> {
     if triangle_capacity < 0 || triangle_capacity > MAX_ARRAY_LENGTH {
-        return err("Planar CDT workspace triangle capacity exceeds array limits");
+        return Err(err_message("Planar CDT workspace triangle capacity exceeds array limits"));
     }
     let point_capacity = point_capacity.unwrap_or(std::cmp::max(1, triangle_capacity + 2));
     if point_capacity <= 0 || point_capacity > MAX_ARRAY_LENGTH {
-        return err("Planar CDT workspace point capacity exceeds array limits");
+        return Err(err_message("Planar CDT workspace point capacity exceeds array limits"));
     }
     let capacity = std::cmp::max(1, triangle_capacity);
     Ok(Workspace {
@@ -510,16 +503,16 @@ fn canonical_constraints(
     key_stride: i64,
     constraints: &[i64],
     winding: Option<&[i64]>,
-) -> R<(Vec<i64>, Vec<i64>)> {
+) -> Result<(Vec<i64>, Vec<i64>), String> {
     if constraints.len() % 2 != 0 {
-        return err("Planar CDT constraint endpoint array must contain pairs");
+        return Err(err_message("Planar CDT constraint endpoint array must contain pairs"));
     }
     let count = constraints.len() / 2;
     let winding: Vec<i64> = match winding {
         None => vec![0; count],
         Some(values) if values.len() == count => values.to_vec(),
         Some(_) => {
-            return err("Planar CDT constraint winding cardinality must match constraint count")
+            return Err(err_message("Planar CDT constraint winding cardinality must match constraint count"))
         }
     };
     let mut pairs = vec![0i64; count];
@@ -528,14 +521,14 @@ fn canonical_constraints(
         let first = constraints[constraint_index * 2];
         let second = constraints[constraint_index * 2 + 1];
         if first == second {
-            return err("Planar CDT constraint has equal endpoints");
+            return Err(err_message("Planar CDT constraint has equal endpoints"));
         }
         pairs[constraint_index] = edge_key(point_count, key_stride, first, second)?;
         let weight = winding[constraint_index];
         weights[constraint_index] = if first < second {
             weight
         } else if weight == MIN_INT {
-            return err("Planar CDT constraint winding exceeds integer range");
+            return Err(err_message("Planar CDT constraint winding exceeds integer range"));
         } else {
             -weight
         };
@@ -558,7 +551,7 @@ fn canonical_constraints(
             if (value > 0 && previous > MAX_INT - value)
                 || (value < 0 && previous < MIN_INT - value)
             {
-                return err("Planar CDT constraint winding exceeds integer range");
+                return Err(err_message("Planar CDT constraint winding exceeds integer range"));
             }
             unique_weights[last] = previous + value;
         }
@@ -630,11 +623,11 @@ struct St {
     boundary_generation: i64,
 }
 
-fn ek(st: &St, first: i64, second: i64) -> R<i64> {
+fn ek(st: &St, first: i64, second: i64) -> Result<i64, String> {
     edge_key(st.point_count, st.key_stride, first, second)
 }
 
-fn constraint_index(st: &St, key: i64) -> R<i64> {
+fn constraint_index(st: &St, key: i64) -> Result<i64, String> {
     let mut first: i64 = 0;
     let mut last = (st.constraints.len() / 2) as i64;
     while first < last {
@@ -663,11 +656,11 @@ fn constraint_index(st: &St, key: i64) -> R<i64> {
     }
 }
 
-fn constraint_key(st: &St, key: i64) -> R<bool> {
+fn constraint_key(st: &St, key: i64) -> Result<bool, String> {
     Ok(constraint_index(st, key)? >= 0)
 }
 
-fn constraint_weight(st: &St, key: i64) -> R<i64> {
+fn constraint_weight(st: &St, key: i64) -> Result<i64, String> {
     let index = constraint_index(st, key)?;
     Ok(if index < 0 {
         0
@@ -676,7 +669,7 @@ fn constraint_weight(st: &St, key: i64) -> R<i64> {
     })
 }
 
-fn add_edge(st: &mut St, key: i64, triangle: i64, opposite: i64) -> R<()> {
+fn add_edge(st: &mut St, key: i64, triangle: i64, opposite: i64) -> Result<(), String> {
     table_add(&mut st.table, key, triangle, opposite)?;
     if st.incremental && st.has_constraints && constraint_key(st, key)? {
         table_constrain(&mut st.table, key)?;
@@ -689,7 +682,7 @@ fn tri(st: &St, triangle: i64) -> (i64, i64, i64) {
     (st.triangle_a[t], st.triangle_b[t], st.triangle_c[t])
 }
 
-fn add_triangle(st: &mut St, triangle: i64) -> R<()> {
+fn add_triangle(st: &mut St, triangle: i64) -> Result<(), String> {
     let (a, b, c) = tri(st, triangle);
     let k = ek(st, a, b)?;
     add_edge(st, k, triangle, c)?;
@@ -699,7 +692,7 @@ fn add_triangle(st: &mut St, triangle: i64) -> R<()> {
     add_edge(st, k, triangle, b)
 }
 
-fn remove_triangle(st: &mut St, triangle: i64) -> R<()> {
+fn remove_triangle(st: &mut St, triangle: i64) -> Result<(), String> {
     let (a, b, c) = tri(st, triangle);
     let k = ek(st, a, b)?;
     table_remove(&mut st.table, k, triangle)?;
@@ -716,7 +709,7 @@ fn seed_triangle(st: &mut St, triangle: i64) {
     st.point_triangle[u(c)] = triangle;
 }
 
-fn set_triangle(st: &mut St, cb: &Cb, triangle: i64, a: i64, b: i64, c: i64) -> R<()> {
+fn set_triangle(st: &mut St, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), triangle: i64, a: i64, b: i64, c: i64) -> Result<(), String> {
     let t = u(triangle);
     match orient(cb, a, b, c) {
         Sign::Positive => {
@@ -729,21 +722,21 @@ fn set_triangle(st: &mut St, cb: &Cb, triangle: i64, a: i64, b: i64, c: i64) -> 
             st.triangle_b[t] = c;
             st.triangle_c[t] = b;
         }
-        Sign::Zero => return err("Planar CDT flip produced a degenerate triangle"),
+        Sign::Zero => return Err(err_message("Planar CDT flip produced a degenerate triangle")),
     }
     Ok(())
 }
 
 fn flip(
     st: &mut St,
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     left: i64,
     right: i64,
     left_opposite: i64,
     right_opposite: i64,
     edge_a: i64,
     edge_b: i64,
-) -> R<()> {
+) -> Result<(), String> {
     remove_triangle(st, left)?;
     remove_triangle(st, right)?;
     set_triangle(st, cb, left, left_opposite, right_opposite, edge_a)?;
@@ -755,9 +748,9 @@ fn flip(
     Ok(())
 }
 
-fn append_triangle(st: &mut St, cb: &Cb, a: i64, b: i64, c: i64) -> R<i64> {
+fn append_triangle(st: &mut St, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), a: i64, b: i64, c: i64) -> Result<i64, String> {
     if st.triangle_count >= st.triangle_capacity {
-        return err("Planar CDT inserted-point triangle bound was exceeded");
+        return Err(err_message("Planar CDT inserted-point triangle bound was exceeded"));
     }
     let triangle = st.triangle_count;
     st.triangle_count += 1;
@@ -765,7 +758,7 @@ fn append_triangle(st: &mut St, cb: &Cb, a: i64, b: i64, c: i64) -> R<i64> {
     Ok(triangle)
 }
 
-fn adjacent_across(st: &St, triangle: i64, first: i64, second: i64) -> R<i64> {
+fn adjacent_across(st: &St, triangle: i64, first: i64, second: i64) -> Result<i64, String> {
     let slot = table_find(&st.table, ek(st, first, second)?);
     if slot < 0 {
         return Ok(-1);
@@ -783,7 +776,7 @@ fn adjacent_across(st: &St, triangle: i64, first: i64, second: i64) -> R<i64> {
 
 type Edge = Option<(i64, i64, i64, i64)>;
 
-fn choose(st: &St, edge: &mut Edge, first: i64, second: i64, opposite: i64, sign: Sign) -> R<()> {
+fn choose(st: &St, edge: &mut Edge, first: i64, second: i64, opposite: i64, sign: Sign) -> Result<(), String> {
     if sign == Sign::Zero {
         let key = ek(st, first, second)?;
         match *edge {
@@ -797,9 +790,9 @@ fn choose(st: &St, edge: &mut Edge, first: i64, second: i64, opposite: i64, sign
     Ok(())
 }
 
-fn locate(st: &St, cb: &Cb, point: i64) -> R<(i64, Edge)> {
+fn locate(st: &St, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), point: i64) -> Result<(i64, Edge), String> {
     if st.triangle_count == 0 {
-        return err("Planar CDT cannot insert a point into empty topology");
+        return Err(err_message("Planar CDT cannot insert a point into empty topology"));
     }
     let mut current = std::cmp::min(st.walk_start, st.triangle_count - 1);
     let mut steps: i64 = 0;
@@ -852,10 +845,10 @@ fn locate(st: &St, cb: &Cb, point: i64) -> R<(i64, Edge)> {
         }
         triangle += 1;
     }
-    err("Planar CDT inserted point lies outside seed triangulation")
+    Err(err_message("Planar CDT inserted point lies outside seed triangulation"))
 }
 
-fn enqueue_opposite(st: &mut St, point: i64, triangle: i64) -> R<()> {
+fn enqueue_opposite(st: &mut St, point: i64, triangle: i64) -> Result<(), String> {
     let (a, b, c) = tri(st, triangle);
     if a == point {
         let k = ek(st, b, c)?;
@@ -878,7 +871,7 @@ fn is_illegal(orientation: Sign, circle: Sign, a_key: i64, key: i64) -> bool {
     }
 }
 
-fn legalize_inserted(st: &mut St, cb: &Cb, point: i64, triangles: &[i64]) -> R<()> {
+fn legalize_inserted(st: &mut St, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), point: i64, triangles: &[i64]) -> Result<(), String> {
     st.insertion_queue.values.clear();
     for &triangle in triangles {
         enqueue_opposite(st, point, triangle)?;
@@ -911,7 +904,7 @@ fn legalize_inserted(st: &mut St, cb: &Cb, point: i64, triangles: &[i64]) -> R<(
                 {
                     flips += 1;
                     if flips > squared_limit(st.triangle_count) {
-                        return err("Planar CDT inserted-point legalization did not converge");
+                        return Err(err_message("Planar CDT inserted-point legalization did not converge"));
                     }
                     flip(st, cb, left, right, inserted, opposite, edge_a, edge_b)?;
                     enqueue_opposite(st, point, left)?;
@@ -923,7 +916,7 @@ fn legalize_inserted(st: &mut St, cb: &Cb, point: i64, triangles: &[i64]) -> R<(
     Ok(())
 }
 
-fn properly_crosses(cb: &Cb, a: i64, b: i64, u_: i64, v: i64) -> bool {
+fn properly_crosses(cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), a: i64, b: i64, u_: i64, v: i64) -> bool {
     u_ != a
         && u_ != b
         && v != a
@@ -938,7 +931,7 @@ fn triangle_has(st: &St, triangle: i64, point: i64) -> bool {
     a == point || b == point || c == point
 }
 
-fn crossing_key(st: &St, cb: &Cb, a: i64, b: i64, triangle: i64, entry: i64) -> R<i64> {
+fn crossing_key(st: &St, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), a: i64, b: i64, triangle: i64, entry: i64) -> Result<i64, String> {
     let mut found: i64 = -1;
     let (ta, tb, tc) = tri(st, triangle);
     for (p, q) in [(ta, tb), (tb, tc), (tc, ta)] {
@@ -950,7 +943,7 @@ fn crossing_key(st: &St, cb: &Cb, a: i64, b: i64, triangle: i64, entry: i64) -> 
     Ok(found)
 }
 
-fn adjacent(st: &St, triangle: i64, p: i64, q: i64) -> R<i64> {
+fn adjacent(st: &St, triangle: i64, p: i64, q: i64) -> Result<i64, String> {
     let slot = table_find(&st.table, ek(st, p, q)?);
     if slot < 0 {
         return Ok(-1);
@@ -977,7 +970,7 @@ fn other(st: &St, triangle: i64, p: i64, q: i64) -> i64 {
     }
 }
 
-fn search_fan(st: &St, cb: &Cb, a: i64, b: i64, seed: i64, entry_vertex: i64) -> R<i64> {
+fn search_fan(st: &St, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), a: i64, b: i64, seed: i64, entry_vertex: i64) -> Result<i64, String> {
     let mut current = adjacent(st, seed, a, entry_vertex)?;
     let mut entry = entry_vertex;
     let mut steps: i64 = 0;
@@ -996,7 +989,7 @@ fn search_fan(st: &St, cb: &Cb, a: i64, b: i64, seed: i64, entry_vertex: i64) ->
     Ok(found)
 }
 
-fn incident_start(st: &St, cb: &Cb, a: i64, b: i64) -> R<i64> {
+fn incident_start(st: &St, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), a: i64, b: i64) -> Result<i64, String> {
     let seed = st.point_triangle[u(a)];
     if seed < 0 || !triangle_has(st, seed, a) {
         return Ok(-1);
@@ -1023,14 +1016,14 @@ fn incident_start(st: &St, cb: &Cb, a: i64, b: i64) -> R<i64> {
 /// Planar CDT's exact-predicate ear clip: the lowest-point ear, not the first.
 fn ear_clip(
     cancel_value: Option<&cancel::T>,
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     a: i64,
     b: i64,
     path: &[i64],
     emitted: &mut Vec<i64>,
     emitted_count: &mut i64,
     strip_count: i64,
-) -> R<()> {
+) -> Result<(), String> {
     let size = path.len();
     if size >= 3 {
         let mut remaining: Vec<usize> = (0..size).collect();
@@ -1104,7 +1097,7 @@ fn ear_clip(
     Ok(())
 }
 
-fn write_emitted(cb: &Cb, emitted: &mut [i64], triangle: i64, a: i64, b: i64, c: i64) -> R<()> {
+fn write_emitted(cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), emitted: &mut [i64], triangle: i64, a: i64, b: i64, c: i64) -> Result<(), String> {
     let at = u(triangle) * 3;
     match orient(cb, a, b, c) {
         Sign::Positive => {
@@ -1118,23 +1111,23 @@ fn write_emitted(cb: &Cb, emitted: &mut [i64], triangle: i64, a: i64, b: i64, c:
             emitted[at + 2] = b;
         }
         Sign::Zero => {
-            return err("Planar CDT constraint cavity emitted a degenerate triangle");
+            return Err(err_message("Planar CDT constraint cavity emitted a degenerate triangle"));
         }
     }
     Ok(())
 }
 
 fn emit(
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     emitted: &mut Vec<i64>,
     emitted_count: &mut i64,
     strip_count: i64,
     a: i64,
     b: i64,
     c: i64,
-) -> R<()> {
+) -> Result<(), String> {
     if *emitted_count >= strip_count {
-        return err("Planar CDT constraint cavity exceeded its triangle budget");
+        return Err(err_message("Planar CDT constraint cavity exceeded its triangle budget"));
     }
     write_emitted(cb, emitted, *emitted_count, a, b, c)?;
     *emitted_count += 1;
@@ -1152,13 +1145,13 @@ fn point_index(point: i64, cycle: &[i64]) -> i64 {
 
 fn bridge_cycle(
     st: &mut St,
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     a: i64,
     b: i64,
     strip: &[i64],
     outer: &[i64],
     hole: &[i64],
-) -> R<Vec<i64>> {
+) -> Result<Vec<i64>, String> {
     let point_count = u(st.point_count);
     let mut target = vec![0u8; point_count];
     for &point in hole {
@@ -1207,7 +1200,7 @@ fn bridge_cycle(
         }
     }
     if reached < 0 {
-        return err("Planar CDT could not bridge a constraint-strip hole");
+        return Err(err_message("Planar CDT could not bridge a constraint-strip hole"));
     }
     let mut reverse_path: Vec<i64> = Vec::new();
     let mut point = reached;
@@ -1222,7 +1215,7 @@ fn bridge_cycle(
     let outer_index = point_index(path[0], outer);
     let hole_index = point_index(path[path.len() - 1], hole);
     if outer_index < 0 || hole_index < 0 {
-        return err("Planar CDT hole bridge endpoints are not on their cycles");
+        return Err(err_message("Planar CDT hole bridge endpoints are not on their cycles"));
     }
     let (outer_index, hole_index) = (u(outer_index), u(hole_index));
     let outer_count = outer.len();
@@ -1245,7 +1238,7 @@ fn bridge_cycle(
         output.push(outer[(outer_index + offset) % outer_count]);
     }
     if output.len() != output_count {
-        return err("Planar CDT hole bridge cardinality is inconsistent");
+        return Err(err_message("Planar CDT hole bridge cardinality is inconsistent"));
     }
     Ok(output)
 }
@@ -1263,7 +1256,7 @@ fn triangle_has_edge(emitted: &[i64], triangle: usize, p: i64, q: i64) -> bool {
 }
 
 fn split_triangle_edge(
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     emitted: &mut Vec<i64>,
     emitted_count: &mut i64,
     strip_count: i64,
@@ -1271,7 +1264,7 @@ fn split_triangle_edge(
     p: i64,
     q: i64,
     point: i64,
-) -> R<()> {
+) -> Result<(), String> {
     let at = u(triangle) * 3;
     let (a, b, c) = (emitted[at], emitted[at + 1], emitted[at + 2]);
     let opposite = if a != p && a != q {
@@ -1288,10 +1281,10 @@ fn split_triangle_edge(
 fn recover_constraint(
     st: &mut St,
     cancel_value: Option<&cancel::T>,
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     a: i64,
     b: i64,
-) -> R<()> {
+) -> Result<(), String> {
     let mut strip: Vec<i64> = Vec::new();
     let mut current = incident_start(st, cb, a, b)?;
     let mut entry_key: i64 = -1;
@@ -1299,7 +1292,7 @@ fn recover_constraint(
     let mut complete = false;
     while !complete && current >= 0 && steps <= st.triangle_count {
         if st.strip_marks[u(current)] != 0 {
-            return err("Planar CDT constraint trace entered a cycle");
+            return Err(err_message("Planar CDT constraint trace entered a cycle"));
         }
         st.strip_marks[u(current)] = 1;
         strip.push(current);
@@ -1311,7 +1304,7 @@ fn recover_constraint(
             if slot < 0 || st.table.second_triangles[u(slot)] < 0 {
                 current = -1;
             } else if constraint_key(st, key)? {
-                return err("Planar CDT constraints cross; crossing splitting is required");
+                return Err(err_message("Planar CDT constraints cross; crossing splitting is required"));
             } else {
                 let left = st.table.first_triangles[u(slot)];
                 let right = st.table.second_triangles[u(slot)];
@@ -1329,9 +1322,7 @@ fn recover_constraint(
         steps += 1;
     }
     if !complete {
-        return err(
-            "Planar CDT constraint trace failed; an open constraint segment contains an unsplit point",
-        );
+        return Err(err_message("Planar CDT constraint trace failed; an open constraint segment contains an unsplit point"));
     }
     let strip_count = strip.len() as i64;
     let mut boundary_u: Vec<i64> = Vec::new();
@@ -1343,7 +1334,7 @@ fn recover_constraint(
         for (first, second) in [(ta, tb), (tb, tc), (tc, ta)] {
             let slot = table_find(&st.table, ek(st, first, second)?);
             if slot < 0 {
-                return err("Planar CDT strip lost a boundary edge");
+                return Err(err_message("Planar CDT strip lost a boundary edge"));
             }
             let left = st.table.first_triangles[u(slot)];
             let right = st.table.second_triangles[u(slot)];
@@ -1352,7 +1343,7 @@ fn recover_constraint(
             } else if right == triangle {
                 left
             } else {
-                return err("Planar CDT strip edge incidence is inconsistent");
+                return Err(err_message("Planar CDT strip edge incidence is inconsistent"));
             };
             if outside < 0 || st.strip_marks[u(outside)] == 0 {
                 boundary_u.push(first);
@@ -1374,7 +1365,7 @@ fn recover_constraint(
     if st.boundary_stamps[u(a)] != st.boundary_generation
         || st.boundary_stamps[u(b)] != st.boundary_generation
     {
-        return err("Planar CDT constraint endpoints are absent from the strip boundary");
+        return Err(err_message("Planar CDT constraint endpoints are absent from the strip boundary"));
     }
     let point_count = st.point_count;
     let directed_key = |first: i64, second: i64| first * point_count + second;
@@ -1383,7 +1374,7 @@ fn recover_constraint(
         st.boundary_edges
             .insert(directed_key(boundary_u[edge], boundary_v[edge]), edge as i64);
     }
-    let next_boundary = |st: &St, edge: usize| -> R<usize> {
+    let next_boundary = |st: &St, edge: usize| -> Result<usize, String> {
         let mut current_triangle = boundary_triangle[edge];
         let mut first = boundary_u[edge];
         let second = boundary_v[edge];
@@ -1398,11 +1389,11 @@ fn recover_constraint(
             } else if tc == first && ta == second {
                 tb
             } else {
-                return err("Planar CDT boundary walk lost its directed triangle edge");
+                return Err(err_message("Planar CDT boundary walk lost its directed triangle edge"));
             };
             let slot = table_find(&st.table, ek(st, second, third)?);
             if slot < 0 {
-                return err("Planar CDT boundary walk lost an edge");
+                return Err(err_message("Planar CDT boundary walk lost an edge"));
             }
             let left = st.table.first_triangles[u(slot)];
             let right = st.table.second_triangles[u(slot)];
@@ -1411,12 +1402,12 @@ fn recover_constraint(
             } else if right == current_triangle {
                 left
             } else {
-                return err("Planar CDT boundary walk found inconsistent incidence");
+                return Err(err_message("Planar CDT boundary walk found inconsistent incidence"));
             };
             if adjacent < 0 || st.strip_marks[u(adjacent)] == 0 {
                 next = match st.boundary_edges.get(&directed_key(second, third)) {
                     Some(&value) => value,
-                    None => return err("Planar CDT boundary walk did not find its next edge"),
+                    None => return Err(err_message("Planar CDT boundary walk did not find its next edge")),
                 };
             } else {
                 current_triangle = adjacent;
@@ -1425,7 +1416,7 @@ fn recover_constraint(
             steps += 1;
         }
         if next < 0 {
-            return err("Planar CDT boundary walk did not terminate");
+            return Err(err_message("Planar CDT boundary walk did not terminate"));
         }
         Ok(next as usize)
     };
@@ -1441,7 +1432,7 @@ fn recover_constraint(
                 current = next_boundary(st, current)?;
             }
             if current != start {
-                return err("Planar CDT strip boundary cycles merge");
+                return Err(err_message("Planar CDT strip boundary cycles merge"));
             }
             cycles.push(values);
         }
@@ -1452,9 +1443,9 @@ fn recover_constraint(
     let initial_main = if main_cycles.len() == 1 {
         main_cycles[0]
     } else if main_cycles.is_empty() {
-        return err("Planar CDT constraint strip did not reach its endpoint");
+        return Err(err_message("Planar CDT constraint strip did not reach its endpoint"));
     } else {
-        return err("Planar CDT constraint belongs to multiple strip cycles");
+        return Err(err_message("Planar CDT constraint belongs to multiple strip cycles"));
     };
     let mut main_cycle = cycles[initial_main].clone();
     for index in 0..cycles.len() {
@@ -1468,7 +1459,7 @@ fn recover_constraint(
         let a_index = point_index(a, &main_cycle);
         let b_index = point_index(b, &main_cycle);
         if a_index < 0 || b_index < 0 {
-            return err("Planar CDT constraint endpoints are absent from main strip cycle");
+            return Err(err_message("Planar CDT constraint endpoints are absent from main strip cycle"));
         }
         let (a_index, b_index) = (u(a_index), u(b_index));
         let path = cyclic_path(&main_cycle, a_index, b_index);
@@ -1537,7 +1528,7 @@ fn recover_constraint(
             triangle += 1;
         }
         if containing < 0 {
-            return err("Planar CDT could not reinsert a constraint-cavity point");
+            return Err(err_message("Planar CDT could not reinsert a constraint-cavity point"));
         }
         if edge_u < 0 {
             let at = u(containing) * 3;
@@ -1554,7 +1545,7 @@ fn recover_constraint(
                 }
             }
             if adjacent_triangle < 0 {
-                return err("Planar CDT cavity point lies on its unsplit boundary");
+                return Err(err_message("Planar CDT cavity point lies on its unsplit boundary"));
             }
             let first = containing;
             let second = adjacent_triangle;
@@ -1611,9 +1602,9 @@ fn recover_constraint(
 fn recover_constraints(
     st: &mut St,
     cancel_value: Option<&cancel::T>,
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     values: &[i64],
-) -> R<()> {
+) -> Result<(), String> {
     for constraint_index in 0..values.len() / 2 {
         poll(cancel_value, constraint_index as i64, 255)?;
         let a = values[constraint_index * 2];
@@ -1623,23 +1614,23 @@ fn recover_constraints(
             recover_constraint(st, cancel_value, cb, a, b)?;
         }
         if table_find(&st.table, key) < 0 {
-            return err("Planar CDT cavity retriangulation did not recover its constraint");
+            return Err(err_message("Planar CDT cavity retriangulation did not recover its constraint"));
         }
         table_constrain(&mut st.table, key)?;
     }
     Ok(())
 }
 
-fn checked_add(left: i64, right: i64) -> R<i64> {
+fn checked_add(left: i64, right: i64) -> Result<i64, String> {
     if (right > 0 && left > MAX_INT - right) || (right < 0 && left < MIN_INT - right) {
-        return err("Planar CDT polygon winding exceeds integer range");
+        return Err(err_message("Planar CDT polygon winding exceeds integer range"));
     }
     Ok(left + right)
 }
 
-fn checked_negate(value: i64) -> R<i64> {
+fn checked_negate(value: i64) -> Result<i64, String> {
     if value == MIN_INT {
-        return err("Planar CDT polygon winding exceeds integer range");
+        return Err(err_message("Planar CDT polygon winding exceeds integer range"));
     }
     Ok(-value)
 }
@@ -1655,10 +1646,10 @@ struct Outcome {
 fn filter_outside(
     st: &St,
     cancel_value: Option<&cancel::T>,
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     flood_from_hull_boundary: bool,
     remove_outside_constraint_polygons: bool,
-) -> R<Outcome> {
+) -> Result<Outcome, String> {
     let triangle_count = st.triangle_count;
     let n = u(triangle_count);
     let table = &st.table;
@@ -1687,7 +1678,7 @@ fn filter_outside(
             for (p, q) in [(a, b), (b, c), (c, a)] {
                 let slot = table_find(table, ek(st, p, q)?);
                 if slot < 0 {
-                    return err("Planar CDT outside flood lost an edge");
+                    return Err(err_message("Planar CDT outside flood lost an edge"));
                 }
                 if table.constrained[u(slot)] == 0 {
                     let first = table.first_triangles[u(slot)];
@@ -1709,14 +1700,14 @@ fn filter_outside(
                       known: &mut Vec<u8>,
                       queue: &mut Vec<i64>,
                       write: &mut usize|
-         -> R<()> {
+         -> Result<(), String> {
             if known[u(triangle)] == 0 {
                 known[u(triangle)] = 1;
                 winding[u(triangle)] = value;
                 queue[*write] = triangle;
                 *write += 1;
             } else if winding[u(triangle)] != value {
-                return err("Planar CDT polygon constraints have inconsistent winding");
+                return Err(err_message("Planar CDT polygon constraints have inconsistent winding"));
             }
             Ok(())
         };
@@ -1733,7 +1724,7 @@ fn filter_outside(
                     match orient(cb, pu, pv, opposite) {
                         Sign::Positive => weight,
                         Sign::Negative => checked_negate(weight)?,
-                        Sign::Zero => return err("Planar CDT hull contains a degenerate edge"),
+                        Sign::Zero => return Err(err_message("Planar CDT hull contains a degenerate edge")),
                     }
                 };
                 assign(
@@ -1755,7 +1746,7 @@ fn filter_outside(
                 let key = ek(st, pu, pv)?;
                 let slot = table_find(table, key);
                 if slot < 0 {
-                    return err("Planar CDT winding propagation lost an edge");
+                    return Err(err_message("Planar CDT winding propagation lost an edge"));
                 }
                 let first = table.first_triangles[u(slot)];
                 let second = table.second_triangles[u(slot)];
@@ -1771,7 +1762,7 @@ fn filter_outside(
                             Sign::Positive => checked_negate(weight)?,
                             Sign::Negative => weight,
                             Sign::Zero => {
-                                return err("Planar CDT triangle contains a degenerate edge")
+                                return Err(err_message("Planar CDT triangle contains a degenerate edge"))
                             }
                         }
                     };
@@ -1789,7 +1780,7 @@ fn filter_outside(
         }
         for triangle in 0..n {
             if winding_known[triangle] == 0 {
-                return err("Planar CDT could not classify polygon winding");
+                return Err(err_message("Planar CDT could not classify polygon winding"));
             }
         }
     }
@@ -1820,7 +1811,7 @@ fn filter_outside(
         let b = st.constraints[constraint_index * 2 + 1];
         let slot = table_find(table, ek(st, a, b)?);
         if slot < 0 {
-            return err("Planar CDT outside flood lost a constrained edge");
+            return Err(err_message("Planar CDT outside flood lost a constrained edge"));
         }
         let first = table.first_triangles[u(slot)];
         let second = table.second_triangles[u(slot)];
@@ -1838,7 +1829,7 @@ fn filter_outside(
     })
 }
 
-fn delaunay_repair(st: &mut St, cancel_value: Option<&cancel::T>, cb: &Cb) -> R<()> {
+fn delaunay_repair(st: &mut St, cancel_value: Option<&cancel::T>, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool)) -> Result<(), String> {
     let mut queue = KeyHeap { values: Vec::new() };
     for slot in 0..st.table.keys.len() {
         if st.table.keys[slot] >= 0
@@ -1869,7 +1860,7 @@ fn delaunay_repair(st: &mut St, cancel_value: Option<&cancel::T>, cb: &Cb) -> R<
             if illegal && opposite_sign(orient(cb, lo, ro, ea), orient(cb, lo, ro, eb)) {
                 flips += 1;
                 if flips > squared_limit(st.triangle_count) {
-                    return err("Planar CDT Delaunay repair did not converge");
+                    return Err(err_message("Planar CDT Delaunay repair did not converge"));
                 }
                 flip(st, cb, left, right, lo, ro, ea, eb)?;
                 for triangle in [left, right] {
@@ -1898,11 +1889,11 @@ struct Request {
 
 fn run(
     st: &mut St,
-    cb: &Cb,
+    cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     cancel_value: Option<&cancel::T>,
     req: &Request,
     previous_constraints: &[i64],
-) -> R<T> {
+) -> Result<T, String> {
     let point_count = req.point_count;
     let initial_triangle_count = req.initial_triangle_count;
     let insert_points = &req.insert_points[..];
@@ -1915,7 +1906,7 @@ fn run(
             let b = triangle_points[triangle * 3 + 1];
             let c = triangle_points[triangle * 3 + 2];
             if a < 0 || a >= point_count || b < 0 || b >= point_count || c < 0 || c >= point_count {
-                return err("Planar CDT triangle point is out of range");
+                return Err(err_message("Planar CDT triangle point is out of range"));
             }
             match orient(cb, a, b, c) {
                 Sign::Positive => {
@@ -1928,7 +1919,7 @@ fn run(
                     st.triangle_b[triangle] = c;
                     st.triangle_c[triangle] = b;
                 }
-                Sign::Zero => return err("Planar CDT input contains a degenerate triangle"),
+                Sign::Zero => return Err(err_message("Planar CDT input contains a degenerate triangle")),
             }
             referenced[u(a)] = 1;
             referenced[u(b)] = 1;
@@ -1936,10 +1927,10 @@ fn run(
         }
         for &point in insert_points {
             if point < 0 || point >= point_count {
-                return err("Planar CDT inserted point is out of range");
+                return Err(err_message("Planar CDT inserted point is out of range"));
             }
             if referenced[u(point)] != 0 {
-                return err("Planar CDT inserted point is duplicated or already referenced");
+                return Err(err_message("Planar CDT inserted point is duplicated or already referenced"));
             }
             referenced[u(point)] = 1;
         }
@@ -1956,7 +1947,7 @@ fn run(
                     st.triangle_b[triangle] = c;
                     st.triangle_c[triangle] = b;
                 }
-                Sign::Zero => return err("Planar CDT input contains a degenerate triangle"),
+                Sign::Zero => return Err(err_message("Planar CDT input contains a degenerate triangle")),
             }
         }
     }
@@ -2013,7 +2004,7 @@ fn run(
             Some((_, pu, pv, opposite)) => {
                 let slot = table_find(&st.table, ek(st, pu, pv)?);
                 if slot < 0 {
-                    return err("Planar CDT lost an inserted-point split edge");
+                    return Err(err_message("Planar CDT lost an inserted-point split edge"));
                 }
                 let left = st.table.first_triangles[u(slot)];
                 let right = st.table.second_triangles[u(slot)];
@@ -2097,22 +2088,22 @@ pub fn build(
 ) -> Result<T, String> {
     check(cancel_value)?;
     if point_count <= 0 {
-        return err("Planar CDT point count must be positive");
+        return Err(err_message("Planar CDT point count must be positive"));
     }
     if triangle_points.len() % 3 != 0 {
-        return err("Planar CDT triangle array must contain triples");
+        return Err(err_message("Planar CDT triangle array must contain triples"));
     }
     let insert_points = insert_points.unwrap_or(&[]);
     let initial_triangle_count = triangle_points.len() / 3;
     if insert_points.len() as i64 > (MAX_ARRAY_LENGTH - initial_triangle_count as i64) / 2 {
-        return err("Planar CDT inserted-point cardinality exceeds array limits");
+        return Err(err_message("Planar CDT inserted-point cardinality exceeds array limits"));
     }
     let all_true = |_: i64, _: i64, _: i64, _: i64| true;
     let overlap: &dyn Fn(i64, i64, i64, i64) -> bool = match bounds_overlap_fn {
         Some(f) => f,
         None => &all_true,
     };
-    let cb: Cb = (orient_fn, incircle_fn, overlap);
+    let cb = (orient_fn, incircle_fn, overlap);
     let mut incremental = false;
     if let Some(w) = workspace.as_deref() {
         if w.valid

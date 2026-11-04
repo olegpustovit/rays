@@ -3,7 +3,7 @@
 //! with none prints "skipped" and returns, as the OCaml suite skips without a display or GPU.
 #![allow(dead_code)]
 
-use ogpu::error::{self, Error, ErrorKind};
+use ogpu::error::{self, ErrorKind};
 
 thread_local! {
     static KEEP: std::cell::RefCell<Option<::renderer::renderer::gpu>> = const { std::cell::RefCell::new(None) };
@@ -44,10 +44,6 @@ pub fn gpu() -> bool {
 pub fn gpu() -> bool {
     println!("skipped: the Vulkan implementation is Windows only");
     false
-}
-
-pub fn get<A>(result: Result<A, Error>) -> A {
-    result.unwrap_or_else(|e| panic!("{}", error::to_string(&e)))
 }
 
 pub fn words(values: &[i32]) -> Vec<u8> {

@@ -27,11 +27,8 @@ use std::{path::Path, rc::Rc};
 
 type Hit = (i64, i64, i64, f64, f64, f64);
 
-fn get<T>(result: Result<T, Error>) -> T {
-    match result {
-        Ok(value) => value,
-        Err(failure) => panic!("{}", error::to_string(&failure)),
-    }
+fn die(failure: Error) -> ! {
+    panic!("{}", error::to_string(&failure))
 }
 
 fn require(condition: bool, message: &str) {
@@ -39,11 +36,11 @@ fn require(condition: bool, message: &str) {
 }
 
 /// The result must be an error of this kind.
-fn refused<T>(result: Result<T, Error>, kind: ErrorKind, message: &str) {
+fn refused(result: Option<Error>, kind: ErrorKind, message: &str) {
     match result {
-        Err(failure) if failure.kind == kind => (),
-        Err(failure) => panic!("{message}: got {}", error::to_string(&failure)),
-        Ok(_) => panic!("{message}"),
+        Some(failure) if failure.kind == kind => (),
+        Some(failure) => panic!("{message}: got {}", error::to_string(&failure)),
+        None => panic!("{message}"),
     }
 }
 
@@ -107,11 +104,11 @@ fn buf(label: &str, size: i64, usage: &[BufferUsage]) -> BufferDescriptor {
 }
 
 fn make_buffer(device: &Device, label: &str, size: i64, usage: &[BufferUsage]) -> Buffer {
-    get(be::create_buffer(device, buf(label, size, usage), None))
+    be::create_buffer(device, buf(label, size, usage), None).unwrap_or_else(|failure| die(failure))
 }
 
 fn local_buffer(device: &Device, label: &str, size: i64, usage: &[BufferUsage]) -> Buffer {
-    get(be::create_buffer(device, buf(label, size, usage), Some(Memory::DeviceLocal)))
+    be::create_buffer(device, buf(label, size, usage), Some(Memory::DeviceLocal)).unwrap_or_else(|failure| die(failure))
 }
 
 fn float_buffer(device: &Device, label: &str, values: &[f64]) -> Buffer {
@@ -120,7 +117,7 @@ fn float_buffer(device: &Device, label: &str, values: &[f64]) -> Buffer {
         put_f32(&mut bytes, i * 4, *v);
     }
     let buffer = make_buffer(device, label, bytes.len() as i64, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&buffer, 0, &bytes));
+    be::write_buffer(&buffer, 0, &bytes).unwrap_or_else(|failure| die(failure));
     buffer
 }
 
@@ -142,19 +139,19 @@ fn compute_binding(binding: i64, kind: BindingKind) -> Binding {
 }
 
 fn make_shader(label: &str, bytes: Vec<u8>, entries: &[(&str, Stage)], bindings: Vec<Binding>) -> Shader {
-    get(shader::create(shader::Descriptor {
+    shader::create(shader::Descriptor {
         backend: "vulkan".to_owned(),
         label: Some(label.to_owned()),
         bytes,
         entry_points: entries.iter().map(|(name, stage)| EntryPoint { name: (*name).to_owned(), stage: *stage }).collect(),
         bindings,
-    }))
+    }).unwrap_or_else(|failure| die(failure))
 }
 
 /// Waits for a submitted epoch by polling it, bounded and without a sleep.
 fn poll_epoch(queue: &Queue, receipt: Receipt) {
     for _ in 0..2_000_000 {
-        if get(be::status(queue, receipt)) == Status::Completed {
+        if be::status(queue, receipt).unwrap_or_else(|failure| die(failure)) == Status::Completed {
             return;
         }
         std::thread::yield_now();
@@ -178,13 +175,13 @@ fn open() -> Option<Device> {
             return None;
         }
         Err(failure) => panic!("{}", error::to_string(&failure)),
-        Ok(raw) => get((raw.destroy_device)()),
+        Ok(raw) => (raw.destroy_device)().unwrap_or_else(|failure| die(failure)),
     }
-    Some(get(be::create_device(driver)))
+    Some(be::create_device(driver).unwrap_or_else(|failure| die(failure)))
 }
 
 fn finish(device: &Device) {
-    get(be::destroy_device(device));
+    be::destroy_device(device).unwrap_or_else(|failure| die(failure));
     assert_eq!(impl_::live_handles(), 0, "Vulkan backend leaked handles");
     assert_eq!(vulkan::Device::validation_messages(), 0, "validation messages");
 }
@@ -225,48 +222,48 @@ fn gpu_implementation_tag_and_handles() {
 fn gpu_conformance_transfer_and_compute() {
     let Some(device) = open() else { return };
     let capabilities = be::capabilities(&device);
-    get(caps::validate(&capabilities));
+    caps::validate(&capabilities).unwrap_or_else(|failure| die(failure));
     let profile = capabilities;
     require(caps::has(&profile, &Feature::RayTracing) == capabilities.ray_tracing, "ray-tracing capability mismatch");
     refused(
-        caps::require(None, &profile, &Feature::Unknown("future".to_owned())),
+        caps::require(None, &profile, &Feature::Unknown("future".to_owned())).err(),
         ErrorKind::Unsupported,
         "unknown feature was not typed Unsupported",
     );
     let source = make_buffer(&device, "conformance", 16, &[BufferUsage::CopySrc, BufferUsage::CopyDst]);
-    let queue = get(be::create_queue(&device));
+    let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
     require(be::completed_epoch(&queue) == 0, "new queue completed an epoch");
-    refused(be::poll_through(&queue, 0), ErrorKind::InvalidArgument, "zero completion epoch was accepted");
+    refused(be::poll_through(&queue, 0).err(), ErrorKind::InvalidArgument, "zero completion epoch was accepted");
     let bytes: Vec<u8> = (0..16).map(|i| ((i * 13) & 255) as u8).collect();
-    get(be::write_buffer(&source, 0, &bytes));
-    require(get(be::read_buffer(&source, 0, 16)) == bytes, "buffer round trip differs");
+    be::write_buffer(&source, 0, &bytes).unwrap_or_else(|failure| die(failure));
+    require(be::read_buffer(&source, 0, 16).unwrap_or_else(|failure| die(failure)) == bytes, "buffer round trip differs");
 
     // a mapped buffer: host view and device copy meet only at flush and invalidate; a view outlives
     // the buffer
-    let mapped = get(be::create_mapped_buffer(
+    let mapped = be::create_mapped_buffer(
         &device,
         buf("mapped", 16, &[BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst]),
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     let floats = be::mapped_view(&mapped).unwrap();
     require(floats.borrow().len() == 4 && floats.borrow()[3] == 0., "mapped view is not 4 zeroed floats");
     require(Rc::ptr_eq(&be::mapped_view(&mapped).unwrap(), &floats), "mapped view accessor copied storage");
     require(be::mapped_view(&source).is_none(), "unmapped buffer exposed a mapped view");
     floats.borrow_mut()[1] = 1.5;
-    get(be::flush_mapped(&mapped, 16));
-    require(i32_at(&get(be::read_buffer(&mapped, 4, 4)), 0) == 1.5f32.to_bits() as i32, "a flushed view write is not in the buffer");
+    be::flush_mapped(&mapped, 16).unwrap_or_else(|failure| die(failure));
+    require(i32_at(&be::read_buffer(&mapped, 4, 4).unwrap_or_else(|failure| die(failure)), 0) == 1.5f32.to_bits() as i32, "a flushed view write is not in the buffer");
     let mut three = [0u8; 4];
     put_f32(&mut three, 0, 3.);
-    get(be::write_buffer(&mapped, 8, &three));
-    get(be::invalidate_mapped(&mapped, 16));
+    be::write_buffer(&mapped, 8, &three).unwrap_or_else(|failure| die(failure));
+    be::invalidate_mapped(&mapped, 16).unwrap_or_else(|failure| die(failure));
     require(floats.borrow()[2] == 3. && floats.borrow()[1] == 1.5, "an invalidated view lacks the buffer's contents");
     // released, the host copy of a discrete device goes: a flush has nothing to write, and the next
     // view is new and holds the device copy once invalidated; unified memory keeps its one view
-    get(be::release_mapped_view(&mapped));
+    be::release_mapped_view(&mapped).unwrap_or_else(|failure| die(failure));
     if capabilities.unified_memory {
         require(Rc::ptr_eq(&be::mapped_view(&mapped).unwrap(), &floats), "a unified view changed on release");
     } else {
-        refused(be::flush_mapped(&mapped, 16), ErrorKind::InvalidArgument, "a released view was flushed");
-        get(be::invalidate_mapped(&mapped, 16));
+        refused(be::flush_mapped(&mapped, 16).err(), ErrorKind::InvalidArgument, "a released view was flushed");
+        be::invalidate_mapped(&mapped, 16).unwrap_or_else(|failure| die(failure));
         let fresh = be::mapped_view(&mapped).unwrap();
         require(
             !Rc::ptr_eq(&fresh, &floats) && fresh.borrow()[2] == 3. && fresh.borrow()[1] == 1.5,
@@ -274,66 +271,66 @@ fn gpu_conformance_transfer_and_compute() {
         );
     }
     let floats = be::mapped_view(&mapped).unwrap();
-    refused(be::release_mapped_view(&source), ErrorKind::InvalidArgument, "an unmapped buffer's view was released");
+    refused(be::release_mapped_view(&source).err(), ErrorKind::InvalidArgument, "an unmapped buffer's view was released");
     // a buffer only the device touches: no view until the host asks, then the device copy once invalidated
-    let device_only = get(be::create_mapped_buffer(
+    let device_only = be::create_mapped_buffer(
         &device,
         buf("device only", 16, &[BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst]),
-    ));
-    get(be::write_buffer(&device_only, 8, &three));
+    ).unwrap_or_else(|failure| die(failure));
+    be::write_buffer(&device_only, 8, &three).unwrap_or_else(|failure| die(failure));
     if !capabilities.unified_memory {
-        refused(be::flush_mapped(&device_only, 16), ErrorKind::InvalidArgument, "a view nobody asked for was flushed");
+        refused(be::flush_mapped(&device_only, 16).err(), ErrorKind::InvalidArgument, "a view nobody asked for was flushed");
     }
-    get(be::invalidate_mapped(&device_only, 16));
+    be::invalidate_mapped(&device_only, 16).unwrap_or_else(|failure| die(failure));
     require(be::mapped_view(&device_only).unwrap().borrow()[2] == 3., "a device-only buffer's first view");
-    get(be::destroy_buffer(&device_only));
-    refused(be::flush_mapped(&mapped, 20), ErrorKind::InvalidArgument, "a flush past the buffer was accepted");
-    refused(be::flush_mapped(&source, 4), ErrorKind::InvalidArgument, "an unmapped buffer was flushed");
-    get(be::destroy_buffer(&mapped));
+    be::destroy_buffer(&device_only).unwrap_or_else(|failure| die(failure));
+    refused(be::flush_mapped(&mapped, 20).err(), ErrorKind::InvalidArgument, "a flush past the buffer was accepted");
+    refused(be::flush_mapped(&source, 4).err(), ErrorKind::InvalidArgument, "an unmapped buffer was flushed");
+    be::destroy_buffer(&mapped).unwrap_or_else(|failure| die(failure));
     require(be::mapped_view(&mapped).is_none(), "destroyed buffer exposed a mapped view");
     require(floats.borrow()[1] == 1.5, "mapped view changed after destroy");
-    refused(be::invalidate_mapped(&mapped, 4), ErrorKind::StaleHandle, "a destroyed mapped buffer was invalidated");
+    refused(be::invalidate_mapped(&mapped, 4).err(), ErrorKind::StaleHandle, "a destroyed mapped buffer was invalidated");
     refused(
-        be::create_mapped_buffer(&device, buf("", 6, &[BufferUsage::Storage])),
+        be::create_mapped_buffer(&device, buf("", 6, &[BufferUsage::Storage])).err(),
         ErrorKind::InvalidArgument,
         "a mapped buffer of 6 bytes was accepted",
     );
 
     // Blit encoder: texture upload with padded rows, read back by the host, and the same at an inset origin.
     let blit = |encode: &dyn Fn(&be::BlitEncoder)| -> Receipt {
-        let commands = get(be::begin_commands(&queue));
-        let encoder = get(be::blit_encoder(&commands));
+        let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+        let encoder = be::blit_encoder(&commands).unwrap_or_else(|failure| die(failure));
         encode(&encoder);
-        get(be::end_blit(&encoder));
-        let receipt = get(be::commit(&commands));
+        be::end_blit(&encoder).unwrap_or_else(|failure| die(failure));
+        let receipt = be::commit(&commands).unwrap_or_else(|failure| die(failure));
         poll_epoch(&queue, receipt);
         receipt
     };
     let upload = make_buffer(&device, "texture-transfer", 512, &[BufferUsage::CopySrc, BufferUsage::CopyDst]);
     let round_trip = texture_descriptor("texture-round-trip", 2, &[TextureUsage::TextureCopySrc, TextureUsage::TextureCopyDst]);
-    let first = get(be::create_texture(&device, round_trip.clone()));
+    let first = be::create_texture(&device, round_trip.clone()).unwrap_or_else(|failure| die(failure));
     let mut padded = vec![0u8; 512];
     for i in 0..8usize {
         padded[i] = (i * 17 + 3) as u8;
         padded[256 + i] = (i * 19 + 5) as u8;
     }
-    get(be::write_buffer(&upload, 0, &padded));
+    be::write_buffer(&upload, 0, &padded).unwrap_or_else(|failure| die(failure));
     let extent = Extent { width: 2, height: 2, depth: 1 };
-    let receipt = blit(&|encoder| get(be::buffer_to_texture(encoder, &upload, None, 256, 512, &first, None, None, extent)));
+    let receipt = blit(&|encoder| be::buffer_to_texture(encoder, &upload, None, 256, 512, &first, None, None, extent).unwrap_or_else(|failure| die(failure)));
     require(be::completed_epoch(&queue) == receipt.epoch, "queue completed epoch differs from receipt");
-    require(get(be::poll_through(&queue, receipt.epoch)), "completed epoch did not remain complete");
+    require(be::poll_through(&queue, receipt.epoch).unwrap_or_else(|failure| die(failure)), "completed epoch did not remain complete");
     let mut compact = vec![0u8; 16];
     compact[..8].copy_from_slice(&padded[..8]);
     compact[8..].copy_from_slice(&padded[256..264]);
-    require(get(be::read_texture(&first, 8)) == compact, "uploaded texture differs from its padded rows");
-    let inset = get(be::create_texture(&device, TextureDescriptor { width: 4, height: 4, ..round_trip }));
+    require(be::read_texture(&first, 8).unwrap_or_else(|failure| die(failure)) == compact, "uploaded texture differs from its padded rows");
+    let inset = be::create_texture(&device, TextureDescriptor { width: 4, height: 4, ..round_trip }).unwrap_or_else(|failure| die(failure));
     blit(&|encoder| {
-        get(be::buffer_to_texture(encoder, &upload, None, 256, 512, &inset, None, Some(Origin { x: 1, y: 1, z: 0 }), extent))
+        be::buffer_to_texture(encoder, &upload, None, 256, 512, &inset, None, Some(Origin { x: 1, y: 1, z: 0 }), extent).unwrap_or_else(|failure| die(failure))
     });
     let mut expected_image = vec![0u8; 64];
     expected_image[20..28].copy_from_slice(&padded[..8]);
     expected_image[36..44].copy_from_slice(&padded[256..264]);
-    require(get(be::read_texture(&inset, 16)) == expected_image, "texture subregion upload changed other pixels");
+    require(be::read_texture(&inset, 16).unwrap_or_else(|failure| die(failure)) == expected_image, "texture subregion upload changed other pixels");
 
     // Pixel formats: a 4x4 three-mip texture per format, known texels per level (negative and above one
     // for floats) uploaded with 256-byte rows; level 0 is read back exactly through the host read path.
@@ -355,7 +352,7 @@ fn gpu_conformance_transfer_and_compute() {
     };
     let sampled = [TextureUsage::TextureBinding, TextureUsage::TextureCopySrc, TextureUsage::TextureCopyDst];
     for format in [TextureFormat::Rgba8Unorm, TextureFormat::Rgba16Float, TextureFormat::Rgba32Float] {
-        let texture = get(format_texture(4, 3, &sampled, format));
+        let texture = format_texture(4, 3, &sampled, format).unwrap_or_else(|failure| die(failure));
         for mip in 0..3usize {
             let width = 4usize >> mip;
             let rows = encode_rows(format, width, &|x, y, c| {
@@ -365,10 +362,10 @@ fn gpu_conformance_transfer_and_compute() {
                     (x as f64 - (2 * y) as f64 + (3 * c) as f64) * 1.5 + mip as f64 * 100. - 7.
                 }
             });
-            get(be::write_buffer(&format_rows, 0, &rows));
+            be::write_buffer(&format_rows, 0, &rows).unwrap_or_else(|failure| die(failure));
             let extent = Extent { width: width as i64, height: width as i64, depth: 1 };
             blit(&|encoder| {
-                get(be::buffer_to_texture(encoder, &format_rows, None, 256, 1024, &texture, Some(mip as i64), None, extent))
+                be::buffer_to_texture(encoder, &format_rows, None, 256, 1024, &texture, Some(mip as i64), None, extent).unwrap_or_else(|failure| die(failure))
             });
             if mip == 0 {
                 let row = 4 * types::texel_bytes(format) as usize;
@@ -376,52 +373,52 @@ fn gpu_conformance_transfer_and_compute() {
                 for y in 0..4 {
                     compact[y * row..(y + 1) * row].copy_from_slice(&rows[y * 256..y * 256 + row]);
                 }
-                require(get(be::read_texture(&texture, row as i64)) == compact, "format host read differs");
+                require(be::read_texture(&texture, row as i64).unwrap_or_else(|failure| die(failure)) == compact, "format host read differs");
             }
         }
-        get(be::destroy_texture(&texture));
+        be::destroy_texture(&texture).unwrap_or_else(|failure| die(failure));
     }
     refused(
-        format_texture(4, 1, &[TextureUsage::TextureBinding, TextureUsage::RenderAttachment], TextureFormat::Rgba16Float),
+        format_texture(4, 1, &[TextureUsage::TextureBinding, TextureUsage::RenderAttachment], TextureFormat::Rgba16Float).err(),
         ErrorKind::Unsupported,
         "float render attachment was accepted",
     );
-    let half = get(format_texture(4, 3, &sampled, TextureFormat::Rgba16Float));
-    let wide = get(format_texture(32, 1, &sampled, TextureFormat::Rgba32Float));
-    let commands = get(be::begin_commands(&queue));
-    let encoder = get(be::blit_encoder(&commands));
+    let half = format_texture(4, 3, &sampled, TextureFormat::Rgba16Float).unwrap_or_else(|failure| die(failure));
+    let wide = format_texture(32, 1, &sampled, TextureFormat::Rgba32Float).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::blit_encoder(&commands).unwrap_or_else(|failure| die(failure));
     refused(
-        be::buffer_to_texture(&encoder, &format_rows, None, 256, 256, &wide, None, None, Extent { width: 32, height: 1, depth: 1 }),
+        be::buffer_to_texture(&encoder, &format_rows, None, 256, 256, &wide, None, None, Extent { width: 32, height: 1, depth: 1 }).err(),
         ErrorKind::InvalidArgument,
         "row pitch below the float texel width was accepted",
     );
-    get(be::end_blit(&encoder));
-    get(be::abandon(&commands));
+    be::end_blit(&encoder).unwrap_or_else(|failure| die(failure));
+    be::abandon(&commands).unwrap_or_else(|failure| die(failure));
 
     // Linear mip sampling of Rgba16_float at LOD 0, 0.5 and 1 from uniform levels: the exact levels and their average.
     let levels: [[f64; 4]; 3] = [[2., -1., 0.5, 4.], [4., -3., 1.5, 8.], [100., 100., 100., 100.]];
     for mip in 0..3usize {
         let width = 4usize >> mip;
-        get(be::write_buffer(&format_rows, 0, &encode_rows(TextureFormat::Rgba16Float, width, &|_, _, c| levels[mip][c])));
+        be::write_buffer(&format_rows, 0, &encode_rows(TextureFormat::Rgba16Float, width, &|_, _, c| levels[mip][c])).unwrap_or_else(|failure| die(failure));
         let extent = Extent { width: width as i64, height: width as i64, depth: 1 };
         blit(&|encoder| {
-            get(be::buffer_to_texture(encoder, &format_rows, None, 256, 1024, &half, Some(mip as i64), None, extent))
+            be::buffer_to_texture(encoder, &format_rows, None, 256, 1024, &half, Some(mip as i64), None, extent).unwrap_or_else(|failure| die(failure))
         });
     }
     let interface = vec![compute_binding(0, BindingKind::SampledTexture), compute_binding(1, BindingKind::StorageBuffer)];
     let lod_shader = make_shader("sample-lod", shader_bytes("sample_lod"), &[("sample_lod", Stage::Compute)], interface.clone());
-    let library = get(be::create_library(&device, &lod_shader));
-    let pipeline = get(be::create_compute_pipeline_from(&library, "sample_lod", None, &interface));
+    let library = be::create_library(&device, &lod_shader).unwrap_or_else(|failure| die(failure));
+    let pipeline = be::create_compute_pipeline_from(&library, "sample_lod", None, &interface).unwrap_or_else(|failure| die(failure));
     let out = make_buffer(&device, "sample-lod", 48, &[BufferUsage::Storage, BufferUsage::CopySrc]);
-    let commands = get(be::begin_commands(&queue));
-    let encoder = get(be::compute_encoder(&commands));
-    get(be::set_pipeline(&encoder, &pipeline));
-    get(be::set_texture(&encoder, 0, &half));
-    get(be::set_buffer(&encoder, 1, &out));
-    get(be::dispatch_threads(&encoder, (3, 1, 1), (3, 1, 1)));
-    get(be::end_compute(&encoder));
-    poll_epoch(&queue, get(be::commit(&commands)));
-    let values = get(be::read_buffer(&out, 0, 48));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::compute_encoder(&commands).unwrap_or_else(|failure| die(failure));
+    be::set_pipeline(&encoder, &pipeline).unwrap_or_else(|failure| die(failure));
+    be::set_texture(&encoder, 0, &half).unwrap_or_else(|failure| die(failure));
+    be::set_buffer(&encoder, 1, &out).unwrap_or_else(|failure| die(failure));
+    be::dispatch_threads(&encoder, (3, 1, 1), (3, 1, 1)).unwrap_or_else(|failure| die(failure));
+    be::end_compute(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+    let values = be::read_buffer(&out, 0, 48).unwrap_or_else(|failure| die(failure));
     let average: Vec<f64> = (0..4).map(|c| (levels[0][c] + levels[1][c]) * 0.5).collect();
     for (i, expected) in [levels[0].to_vec(), average, levels[1].to_vec()].iter().enumerate() {
         for (c, expected) in expected.iter().enumerate() {
@@ -432,13 +429,13 @@ fn gpu_conformance_transfer_and_compute() {
             );
         }
     }
-    get(be::destroy_buffer(&out));
-    get(be::destroy_pipeline(&pipeline));
-    get(be::destroy_library(&library));
+    be::destroy_buffer(&out).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&pipeline).unwrap_or_else(|failure| die(failure));
+    be::destroy_library(&library).unwrap_or_else(|failure| die(failure));
     for texture in [&half, &wide] {
-        get(be::destroy_texture(texture));
+        be::destroy_texture(texture).unwrap_or_else(|failure| die(failure));
     }
-    get(be::destroy_buffer(&format_rows));
+    be::destroy_buffer(&format_rows).unwrap_or_else(|failure| die(failure));
 
     // Reusable libraries and immediate-mode encoders: one library, two pipelines (SPIR-V has no named
     // function constants: the two variants are two entries), exact output, and status polling.
@@ -449,47 +446,47 @@ fn gpu_conformance_transfer_and_compute() {
         &[("fill", Stage::Compute), ("scale2", Stage::Compute), ("scale3", Stage::Compute)],
         vec![],
     );
-    let library = get(be::create_library(&device, &library_shader));
+    let library = be::create_library(&device, &library_shader).unwrap_or_else(|failure| die(failure));
     let scale_interface = vec![compute_binding(0, BindingKind::StorageBuffer), compute_binding(1, BindingKind::UniformBuffer)];
     let words = make_buffer(&device, "encoded-words", 16, &[BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst]);
     let local = local_buffer(&device, "device-local", 16, &[BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst]);
-    refused(be::read_buffer(&local, 0, 16), ErrorKind::Unsupported, "device-local buffer was host readable");
-    refused(be::write_buffer(&local, 0, &[0u8; 16]), ErrorKind::Unsupported, "device-local buffer was host writable");
+    refused(be::read_buffer(&local, 0, 16).err(), ErrorKind::Unsupported, "device-local buffer was host readable");
+    refused(be::write_buffer(&local, 0, &[0u8; 16]).err(), ErrorKind::Unsupported, "device-local buffer was host writable");
     let mut bias = [0u8; 4];
     put_i32(&mut bias, 0, 5);
-    let triple = get(be::create_compute_pipeline_from(&library, &scale(true), None, &scale_interface));
-    let double = get(be::create_compute_pipeline_from(&library, &scale(false), None, &scale_interface));
+    let triple = be::create_compute_pipeline_from(&library, &scale(true), None, &scale_interface).unwrap_or_else(|failure| die(failure));
+    let double = be::create_compute_pipeline_from(&library, &scale(false), None, &scale_interface).unwrap_or_else(|failure| die(failure));
     assert!(be::max_total_threads(&double) >= 32);
     refused(
-        be::create_compute_pipeline_from(&library, &scale(true), None, &scale_interface[..1]),
+        be::create_compute_pipeline_from(&library, &scale(true), None, &scale_interface[..1]).err(),
         ErrorKind::InvalidArgument,
         "mismatched library interface was accepted",
     );
     require(be::create_compute_pipeline_from(&library, "missing", None, &[]).is_err(), "missing library entry was accepted");
-    refused(be::destroy_library(&library), ErrorKind::InvalidState, "library with live pipelines was destroyed");
+    refused(be::destroy_library(&library).err(), ErrorKind::InvalidState, "library with live pipelines was destroyed");
     let run = |pipeline: &Pipeline, factor: i32| {
         let mut input = [0u8; 16];
         for i in 0..4 {
             put_i32(&mut input, i * 4, i as i32);
         }
-        get(be::write_buffer(&words, 0, &input));
-        let commands = get(be::begin_commands(&queue));
-        let compute = get(be::compute_encoder(&commands));
+        be::write_buffer(&words, 0, &input).unwrap_or_else(|failure| die(failure));
+        let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+        let compute = be::compute_encoder(&commands).unwrap_or_else(|failure| die(failure));
         refused(
-            be::dispatch_threads(&compute, (4, 1, 1), (4, 1, 1)),
+            be::dispatch_threads(&compute, (4, 1, 1), (4, 1, 1)).err(),
             ErrorKind::InvalidState,
             "dispatch without a pipeline was accepted",
         );
-        get(be::set_pipeline(&compute, pipeline));
-        get(be::set_buffer(&compute, 0, &words));
-        get(be::set_bytes(&compute, 1, &bias));
-        refused(be::blit_encoder(&commands), ErrorKind::InvalidState, "second encoder opened while one was recording");
-        get(be::dispatch_threads(&compute, (4, 1, 1), (4, 1, 1)));
-        get(be::end_compute(&compute));
-        let receipt = get(be::commit(&commands));
-        refused(be::commit(&commands), ErrorKind::InvalidState, "commands were committed twice");
+        be::set_pipeline(&compute, pipeline).unwrap_or_else(|failure| die(failure));
+        be::set_buffer(&compute, 0, &words).unwrap_or_else(|failure| die(failure));
+        be::set_bytes(&compute, 1, &bias).unwrap_or_else(|failure| die(failure));
+        refused(be::blit_encoder(&commands).err(), ErrorKind::InvalidState, "second encoder opened while one was recording");
+        be::dispatch_threads(&compute, (4, 1, 1), (4, 1, 1)).unwrap_or_else(|failure| die(failure));
+        be::end_compute(&compute).unwrap_or_else(|failure| die(failure));
+        let receipt = be::commit(&commands).unwrap_or_else(|failure| die(failure));
+        refused(be::commit(&commands).err(), ErrorKind::InvalidState, "commands were committed twice");
         poll_epoch(&queue, receipt);
-        let output = get(be::read_buffer(&words, 0, 16));
+        let output = be::read_buffer(&words, 0, 16).unwrap_or_else(|failure| die(failure));
         for i in 0..4 {
             require(i32_at(&output, i * 4) == i as i32 * factor + 5, "encoded compute output differs");
         }
@@ -504,60 +501,60 @@ fn gpu_conformance_transfer_and_compute() {
     for (k, v) in [1, 1, 1].iter().enumerate() {
         put_i32(&mut args, k * 4, *v);
     }
-    get(be::write_buffer(&groups, 0, &args));
-    get(be::write_buffer(&words, 0, &[0u8; 16]));
-    let commands = get(be::begin_commands(&queue));
-    let compute = get(be::compute_encoder(&commands));
-    get(be::set_pipeline(&compute, &double));
-    get(be::set_buffer(&compute, 0, &words));
-    get(be::set_bytes(&compute, 1, &bias));
+    be::write_buffer(&groups, 0, &args).unwrap_or_else(|failure| die(failure));
+    be::write_buffer(&words, 0, &[0u8; 16]).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let compute = be::compute_encoder(&commands).unwrap_or_else(|failure| die(failure));
+    be::set_pipeline(&compute, &double).unwrap_or_else(|failure| die(failure));
+    be::set_buffer(&compute, 0, &words).unwrap_or_else(|failure| die(failure));
+    be::set_bytes(&compute, 1, &bias).unwrap_or_else(|failure| die(failure));
     for offset in [8, 2, -4] {
         refused(
-            be::dispatch_threadgroups_indirect(&compute, &groups, offset, (2, 1, 1)),
+            be::dispatch_threadgroups_indirect(&compute, &groups, offset, (2, 1, 1)).err(),
             ErrorKind::InvalidArgument,
             "invalid indirect arguments range was accepted",
         );
     }
-    get(be::dispatch_threadgroups_indirect(&compute, &groups, 0, (2, 1, 1)));
-    get(be::end_compute(&compute));
-    poll_epoch(&queue, get(be::commit(&commands)));
-    let output = get(be::read_buffer(&words, 0, 16));
+    be::dispatch_threadgroups_indirect(&compute, &groups, 0, (2, 1, 1)).unwrap_or_else(|failure| die(failure));
+    be::end_compute(&compute).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+    let output = be::read_buffer(&words, 0, 16).unwrap_or_else(|failure| die(failure));
     for (i, expected) in [5, 5, 0, 0].iter().enumerate() {
         require(i32_at(&output, i * 4) == *expected, "indirect dispatch ran a group count other than its buffer's");
     }
-    get(be::destroy_buffer(&groups));
-    get(be::destroy_pipeline(&triple));
-    get(be::destroy_pipeline(&double));
+    be::destroy_buffer(&groups).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&triple).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&double).unwrap_or_else(|failure| die(failure));
 
     // Abandoned commands never execute and cannot be committed.
-    get(be::write_buffer(&upload, 0, &[255u8; 512]));
-    let abandoned = get(be::begin_commands(&queue));
-    let blit_encoder = get(be::blit_encoder(&abandoned));
-    get(be::buffer_to_texture(&blit_encoder, &upload, None, 256, 512, &first, None, None, extent));
-    get(be::abandon(&abandoned));
-    refused(be::commit(&abandoned), ErrorKind::InvalidState, "abandoned commands were committed");
-    require(get(be::read_texture(&first, 8)) == compact, "abandoned commands executed");
-    get(be::destroy_library(&library));
-    get(be::destroy_buffer(&words));
-    get(be::destroy_buffer(&local));
+    be::write_buffer(&upload, 0, &[255u8; 512]).unwrap_or_else(|failure| die(failure));
+    let abandoned = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let blit_encoder = be::blit_encoder(&abandoned).unwrap_or_else(|failure| die(failure));
+    be::buffer_to_texture(&blit_encoder, &upload, None, 256, 512, &first, None, None, extent).unwrap_or_else(|failure| die(failure));
+    be::abandon(&abandoned).unwrap_or_else(|failure| die(failure));
+    refused(be::commit(&abandoned).err(), ErrorKind::InvalidState, "abandoned commands were committed");
+    require(be::read_texture(&first, 8).unwrap_or_else(|failure| die(failure)) == compact, "abandoned commands executed");
+    be::destroy_library(&library).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&words).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&local).unwrap_or_else(|failure| die(failure));
 
     // A second queue's epochs are its own.
-    let other_queue = get(be::create_queue(&device));
+    let other_queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
     require(be::completed_epoch(&other_queue) == 0, "new queue inherited another queue's completion");
-    let other_commands = get(be::begin_commands(&other_queue));
-    let other_blit = get(be::blit_encoder(&other_commands));
-    get(be::buffer_to_texture(&other_blit, &upload, None, 256, 512, &first, None, None, extent));
-    get(be::end_blit(&other_blit));
-    let other = get(be::commit(&other_commands));
+    let other_commands = be::begin_commands(&other_queue).unwrap_or_else(|failure| die(failure));
+    let other_blit = be::blit_encoder(&other_commands).unwrap_or_else(|failure| die(failure));
+    be::buffer_to_texture(&other_blit, &upload, None, 256, 512, &first, None, None, extent).unwrap_or_else(|failure| die(failure));
+    be::end_blit(&other_blit).unwrap_or_else(|failure| die(failure));
+    let other = be::commit(&other_commands).unwrap_or_else(|failure| die(failure));
     require(other.epoch == 1, "queue epochs are not independent");
     poll_epoch(&other_queue, other);
-    get(be::destroy_buffer(&source));
-    refused(be::read_buffer(&source, 0, 1), ErrorKind::StaleHandle, "destroyed buffer remained readable");
-    get(be::destroy_buffer(&upload));
-    get(be::destroy_texture(&first));
-    get(be::destroy_texture(&inset));
-    get(be::destroy_queue(&other_queue));
-    get(be::destroy_queue(&queue));
+    be::destroy_buffer(&source).unwrap_or_else(|failure| die(failure));
+    refused(be::read_buffer(&source, 0, 1).err(), ErrorKind::StaleHandle, "destroyed buffer remained readable");
+    be::destroy_buffer(&upload).unwrap_or_else(|failure| die(failure));
+    be::destroy_texture(&first).unwrap_or_else(|failure| die(failure));
+    be::destroy_texture(&inset).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&other_queue).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
     finish(&device);
 }
 
@@ -598,7 +595,7 @@ struct Extras {
 
 impl Rays {
     fn read_hits(&self) -> Vec<Hit> {
-        let bytes = get(be::read_buffer(&self.hits, 0, 96));
+        let bytes = be::read_buffer(&self.hits, 0, 96).unwrap_or_else(|failure| die(failure));
         (0..4)
             .map(|i| {
                 (
@@ -614,35 +611,35 @@ impl Rays {
     }
 
     fn query(&self, pipeline: &Pipeline, structure: &Accel, extras: &Extras) -> Vec<Hit> {
-        let commands = get(be::begin_commands(&self.queue));
-        let compute = get(be::compute_encoder(&commands));
-        get(be::set_pipeline(&compute, pipeline));
-        get(be::set_accel(&compute, 0, structure));
-        get(be::set_buffer(&compute, 1, &self.rays));
-        get(be::set_buffer(&compute, 2, &self.hits));
+        let commands = be::begin_commands(&self.queue).unwrap_or_else(|failure| die(failure));
+        let compute = be::compute_encoder(&commands).unwrap_or_else(|failure| die(failure));
+        be::set_pipeline(&compute, pipeline).unwrap_or_else(|failure| die(failure));
+        be::set_accel(&compute, 0, structure).unwrap_or_else(|failure| die(failure));
+        be::set_buffer(&compute, 1, &self.rays).unwrap_or_else(|failure| die(failure));
+        be::set_buffer(&compute, 2, &self.hits).unwrap_or_else(|failure| die(failure));
         if let Some(bytes) = &extras.bytes {
-            get(be::set_bytes(&compute, 3, bytes));
+            be::set_bytes(&compute, 3, bytes).unwrap_or_else(|failure| die(failure));
         }
         for (index, buffer) in [(3, &extras.buffer3), (4, &extras.buffer4), (5, &extras.buffer5)] {
             if let Some(buffer) = buffer {
-                get(be::set_buffer(&compute, index, buffer));
+                be::set_buffer(&compute, index, buffer).unwrap_or_else(|failure| die(failure));
             }
         }
         if let Some(accel) = &extras.accel6 {
-            get(be::set_accel(&compute, 6, accel));
+            be::set_accel(&compute, 6, accel).unwrap_or_else(|failure| die(failure));
         }
-        get(be::dispatch_threads(&compute, (4, 1, 1), (4, 1, 1)));
-        get(be::end_compute(&compute));
-        poll_epoch(&self.queue, get(be::commit(&commands)));
+        be::dispatch_threads(&compute, (4, 1, 1), (4, 1, 1)).unwrap_or_else(|failure| die(failure));
+        be::end_compute(&compute).unwrap_or_else(|failure| die(failure));
+        poll_epoch(&self.queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
         self.read_hits()
     }
 
     fn build_one(&self, structure: &Accel, scratch: &Buffer) {
-        let commands = get(be::begin_commands(&self.queue));
-        let encoder = get(be::accel_encoder(&commands));
-        get(be::build_accel(&encoder, structure, scratch, None));
-        get(be::end_accel(&encoder));
-        poll_epoch(&self.queue, get(be::commit(&commands)));
+        let commands = be::begin_commands(&self.queue).unwrap_or_else(|failure| die(failure));
+        let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
+        be::build_accel(&encoder, structure, scratch, None).unwrap_or_else(|failure| die(failure));
+        be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
+        poll_epoch(&self.queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     }
 }
 
@@ -659,7 +656,7 @@ fn gpu_conformance_ray_tracing() {
     let capabilities = be::capabilities(&device);
     let profile = capabilities;
     require(profile.ray_tracing && profile.ray_tracing_motion && profile.ray_tracing_refit, "this device lacks ray queries");
-    let queue = get(be::create_queue(&device));
+    let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
     let ray_interface = vec![
         compute_binding(0, BindingKind::AccelerationStructure),
         compute_binding(1, BindingKind::StorageBuffer),
@@ -673,7 +670,7 @@ fn gpu_conformance_ray_tracing() {
     );
     // Two triangles in z=0 (primitive 0 around x=0, primitive 1 around x=4).
     let vertices = make_buffer(&device, "ray-vertices", 72, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&vertices, 0, &vertex_bytes(0.)));
+    be::write_buffer(&vertices, 0, &vertex_bytes(0.)).unwrap_or_else(|failure| die(failure));
     // Rays from z=2 toward -z at x=0, x=4, x=8 (miss), x=12 (miss).
     let mut ray_bytes = vec![0u8; 128];
     for (i, x) in [0., 4., 8., 12.].iter().enumerate() {
@@ -682,22 +679,22 @@ fn gpu_conformance_ray_tracing() {
         }
     }
     let rays = make_buffer(&device, "rays", 128, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&rays, 0, &ray_bytes));
+    be::write_buffer(&rays, 0, &ray_bytes).unwrap_or_else(|failure| die(failure));
     let hits = make_buffer(&device, "hits", 96, &[BufferUsage::Storage, BufferUsage::CopySrc]);
-    let rt = Rays { queue: get(be::create_queue(&device)), rays, hits };
+    let rt = Rays { queue: be::create_queue(&device).unwrap_or_else(|failure| die(failure)), rays, hits };
     let blas_descriptor = triangles(&vertices, 72, 6);
 
-    let ray_library = get(be::create_library(&device, &ray_shader));
-    let trace = get(be::create_compute_pipeline_from(&ray_library, "trace", None, &ray_interface));
-    let trace_instances = get(be::create_compute_pipeline_from(&ray_library, "trace_instances", None, &ray_interface));
-    let blas = get(be::create_accel(&device, blas_descriptor.clone(), false));
+    let ray_library = be::create_library(&device, &ray_shader).unwrap_or_else(|failure| die(failure));
+    let trace = be::create_compute_pipeline_from(&ray_library, "trace", None, &ray_interface).unwrap_or_else(|failure| die(failure));
+    let trace_instances = be::create_compute_pipeline_from(&ray_library, "trace_instances", None, &ray_interface).unwrap_or_else(|failure| die(failure));
+    let blas = be::create_accel(&device, blas_descriptor.clone(), false).unwrap_or_else(|failure| die(failure));
     let sizes = be::accel_sizes(&blas);
     require(sizes.structure_size > 0 && sizes.build_scratch_size >= 0, "BLAS sizes are empty");
     let scratch = local_buffer(&device, "scratch", 256.max(2 * sizes.build_scratch_size), &[BufferUsage::Storage]);
-    let instances = get(be::pack_instance_records(&device, &[instance(&IDENTITY, 0xFFFF_FFFF, 0, 0), instance(&SHIFTED, 0xFFFF_FFFF, 0, 1)]));
+    let instances = be::pack_instance_records(&device, &[instance(&IDENTITY, 0xFFFF_FFFF, 0, 0), instance(&SHIFTED, 0xFFFF_FFFF, 0, 1)]).unwrap_or_else(|failure| die(failure));
     let stride = instances.len() / 2;
     let instance_buffer = make_buffer(&device, "instances", 2 * stride as i64, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&instance_buffer, 0, &instances));
+    be::write_buffer(&instance_buffer, 0, &instances).unwrap_or_else(|failure| die(failure));
     let tlas_of = |buffer: &Buffer, count: i64, structures: Vec<Accel>| AccelDescriptor::TlasOf {
         instances: buffer.clone(),
         offset: 0,
@@ -706,46 +703,46 @@ fn gpu_conformance_ray_tracing() {
         structures,
         motion_transforms: None,
     };
-    let tlas = get(be::create_accel(&device, tlas_of(&instance_buffer, 2, vec![blas.clone()]), false));
+    let tlas = be::create_accel(&device, tlas_of(&instance_buffer, 2, vec![blas.clone()]), false).unwrap_or_else(|failure| die(failure));
     refused(
-        be::create_accel(&device, tlas_of(&instance_buffer, 3, vec![blas.clone()]), false),
+        be::create_accel(&device, tlas_of(&instance_buffer, 3, vec![blas.clone()]), false).err(),
         ErrorKind::InvalidArgument,
         "oversized TLAS instance count was accepted",
     );
     let tlas_scratch = local_buffer(&device, "tlas-scratch", 256.max(be::accel_sizes(&tlas).build_scratch_size), &[BufferUsage::Storage]);
-    let commands = get(be::begin_commands(&queue));
-    let compute = get(be::compute_encoder(&commands));
-    get(be::set_pipeline(&compute, &trace));
-    refused(be::set_accel(&compute, 0, &blas), ErrorKind::InvalidState, "unbuilt structure was bound");
-    refused(be::compute_use_accels(&compute, &[blas.clone()]), ErrorKind::InvalidState, "unbuilt structure was declared used");
-    get(be::compute_use_accels(&compute, &[]));
-    get(be::end_compute(&compute));
-    let build = get(be::accel_encoder(&commands));
-    refused(be::build_accel(&build, &tlas, &tlas_scratch, None), ErrorKind::InvalidState, "TLAS built before its BLAS");
-    get(be::build_accel(&build, &blas, &scratch, None));
-    refused(be::build_accel(&build, &blas, &scratch, None), ErrorKind::InvalidState, "double build was accepted");
-    get(be::build_accel(&build, &tlas, &tlas_scratch, None));
-    get(be::end_accel(&build));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let compute = be::compute_encoder(&commands).unwrap_or_else(|failure| die(failure));
+    be::set_pipeline(&compute, &trace).unwrap_or_else(|failure| die(failure));
+    refused(be::set_accel(&compute, 0, &blas).err(), ErrorKind::InvalidState, "unbuilt structure was bound");
+    refused(be::compute_use_accels(&compute, &[blas.clone()]).err(), ErrorKind::InvalidState, "unbuilt structure was declared used");
+    be::compute_use_accels(&compute, &[]).unwrap_or_else(|failure| die(failure));
+    be::end_compute(&compute).unwrap_or_else(|failure| die(failure));
+    let build = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
+    refused(be::build_accel(&build, &tlas, &tlas_scratch, None).err(), ErrorKind::InvalidState, "TLAS built before its BLAS");
+    be::build_accel(&build, &blas, &scratch, None).unwrap_or_else(|failure| die(failure));
+    refused(be::build_accel(&build, &blas, &scratch, None).err(), ErrorKind::InvalidState, "double build was accepted");
+    be::build_accel(&build, &tlas, &tlas_scratch, None).unwrap_or_else(|failure| die(failure));
+    be::end_accel(&build).unwrap_or_else(|failure| die(failure));
     let query_in = |commands: &be::Commands, pipeline: &Pipeline, structure: &Accel| {
-        let compute = get(be::compute_encoder(commands));
-        get(be::set_pipeline(&compute, pipeline));
-        get(be::set_accel(&compute, 0, structure));
-        get(be::compute_use_accels(&compute, &[blas.clone()]));
-        get(be::set_buffer(&compute, 1, &rt.rays));
-        get(be::set_buffer(&compute, 2, &rt.hits));
-        get(be::dispatch_threads(&compute, (4, 1, 1), (4, 1, 1)));
-        get(be::end_compute(&compute));
+        let compute = be::compute_encoder(commands).unwrap_or_else(|failure| die(failure));
+        be::set_pipeline(&compute, pipeline).unwrap_or_else(|failure| die(failure));
+        be::set_accel(&compute, 0, structure).unwrap_or_else(|failure| die(failure));
+        be::compute_use_accels(&compute, &[blas.clone()]).unwrap_or_else(|failure| die(failure));
+        be::set_buffer(&compute, 1, &rt.rays).unwrap_or_else(|failure| die(failure));
+        be::set_buffer(&compute, 2, &rt.hits).unwrap_or_else(|failure| die(failure));
+        be::dispatch_threads(&compute, (4, 1, 1), (4, 1, 1)).unwrap_or_else(|failure| die(failure));
+        be::end_compute(&compute).unwrap_or_else(|failure| die(failure));
     };
     query_in(&commands, &trace, &blas);
-    poll_epoch(&queue, get(be::commit(&commands)));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     check_hits(
         "primitive triangle",
         &rt.read_hits(),
         &[triangle_hit(0, 0, 2.), triangle_hit(1, 0, 2.), NO_HIT, NO_HIT],
     );
-    let commands = get(be::begin_commands(&queue));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     query_in(&commands, &trace_instances, &tlas);
-    poll_epoch(&queue, get(be::commit(&commands)));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     check_hits(
         "triangle instances",
         &rt.read_hits(),
@@ -754,9 +751,9 @@ fn gpu_conformance_ray_tracing() {
 
     // Refit: a refittable structure updated in place from new vertex data of the same shape (the
     // triangles moved to z = 1, so the rays from z = 2 hit at t = 1).
-    let refittable = get(be::create_accel(&device, blas_descriptor.clone(), true));
+    let refittable = be::create_accel(&device, blas_descriptor.clone(), true).unwrap_or_else(|failure| die(failure));
     let moved = make_buffer(&device, "ray-vertices-moved", 72, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&moved, 0, &vertex_bytes(1.)));
+    be::write_buffer(&moved, 0, &vertex_bytes(1.)).unwrap_or_else(|failure| die(failure));
     let moved_descriptor = triangles(&moved, 72, 6);
     let refit_scratch = local_buffer(
         &device,
@@ -764,32 +761,32 @@ fn gpu_conformance_ray_tracing() {
         256.max(be::accel_sizes(&refittable).build_scratch_size.max(be::accel_sizes(&refittable).refit_scratch_size)),
         &[BufferUsage::Storage],
     );
-    let commands = get(be::begin_commands(&queue));
-    let encoder = get(be::accel_encoder(&commands));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
     refused(
-        be::refit_accel(&encoder, &refittable, moved_descriptor.clone(), &refit_scratch, None),
+        be::refit_accel(&encoder, &refittable, moved_descriptor.clone(), &refit_scratch, None).err(),
         ErrorKind::InvalidState,
         "an unbuilt structure was refit",
     );
-    get(be::build_accel(&encoder, &refittable, &refit_scratch, None));
+    be::build_accel(&encoder, &refittable, &refit_scratch, None).unwrap_or_else(|failure| die(failure));
     refused(
-        be::refit_accel(&encoder, &blas, moved_descriptor.clone(), &refit_scratch, None),
+        be::refit_accel(&encoder, &blas, moved_descriptor.clone(), &refit_scratch, None).err(),
         ErrorKind::InvalidState,
         "a structure built without refit was refit",
     );
     refused(
-        be::refit_accel(&encoder, &refittable, triangles(&moved, 36, 3), &refit_scratch, None),
+        be::refit_accel(&encoder, &refittable, triangles(&moved, 36, 3), &refit_scratch, None).err(),
         ErrorKind::InvalidArgument,
         "a refit of another shape was accepted",
     );
-    get(be::refit_accel(&encoder, &refittable, moved_descriptor, &refit_scratch, None));
-    get(be::end_accel(&encoder));
+    be::refit_accel(&encoder, &refittable, moved_descriptor, &refit_scratch, None).unwrap_or_else(|failure| die(failure));
+    be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
     query_in(&commands, &trace, &refittable);
-    poll_epoch(&queue, get(be::commit(&commands)));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     check_hits("refit triangles", &rt.read_hits(), &[triangle_hit(0, 0, 1.), triangle_hit(1, 0, 1.), NO_HIT, NO_HIT]);
-    get(be::destroy_accel(&refittable));
-    get(be::destroy_buffer(&refit_scratch));
-    get(be::destroy_buffer(&moved));
+    be::destroy_accel(&refittable).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&refit_scratch).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&moved).unwrap_or_else(|failure| die(failure));
 
     // Procedural box/capsule candidates, motion keyframes, user-id instances with masks, and compaction.
     let extra_shader = make_shader(
@@ -804,14 +801,14 @@ fn gpu_conformance_ray_tracing() {
         ],
         vec![],
     );
-    let extra = get(be::create_library(&device, &extra_shader));
+    let extra = be::create_library(&device, &extra_shader).unwrap_or_else(|failure| die(failure));
     let with = |extra_bindings: &[Binding]| -> Vec<Binding> {
         let mut all = ray_interface.clone();
         all.extend_from_slice(extra_bindings);
         all
     };
-    let boxes_pipeline = get(be::create_compute_pipeline_from(&extra, "trace_boxes", None, &with(&[compute_binding(3, BindingKind::StorageBuffer)])));
-    let capsules_pipeline = get(be::create_compute_pipeline_from(&extra, "trace_capsules", None, &with(&[compute_binding(3, BindingKind::StorageBuffer)])));
+    let boxes_pipeline = be::create_compute_pipeline_from(&extra, "trace_boxes", None, &with(&[compute_binding(3, BindingKind::StorageBuffer)])).unwrap_or_else(|failure| die(failure));
+    let capsules_pipeline = be::create_compute_pipeline_from(&extra, "trace_capsules", None, &with(&[compute_binding(3, BindingKind::StorageBuffer)])).unwrap_or_else(|failure| die(failure));
     let spheres = float_buffer(&device, "spheres", &[0., 0., 0., 0.5, 4., 0., 0., 0.5]);
     let boxes = float_buffer(&device, "boxes", &[-0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 3.5, -0.5, -0.5, 4.5, 0.5, 0.5]);
     let box_geometry = |buffer: &Buffer, count: i64| AccelDescriptor::Blas {
@@ -822,10 +819,10 @@ fn gpu_conformance_ray_tracing() {
             options: DEFAULT_GEOMETRY_OPTIONS,
         }],
     };
-    let box_blas = get(be::create_accel(&device, box_geometry(&boxes, 2), false));
+    let box_blas = be::create_accel(&device, box_geometry(&boxes, 2), false).unwrap_or_else(|failure| die(failure));
     let capsule_boxes = float_buffer(&device, "capsule-boxes", &[7.5, -1.5, -0.5, 8.5, 1.5, 0.5]);
     let capsule_data = float_buffer(&device, "capsules", &[8., -1., 0., 0.5, 8., 1., 0., 0.5]);
-    let capsule_blas = get(be::create_accel(&device, box_geometry(&capsule_boxes, 1), false));
+    let capsule_blas = be::create_accel(&device, box_geometry(&capsule_boxes, 1), false).unwrap_or_else(|failure| die(failure));
     let big_scratch = local_buffer(&device, "scratch-extra", 1_048_576, &[BufferUsage::Storage]);
     rt.build_one(&box_blas, &big_scratch);
     rt.build_one(&capsule_blas, &big_scratch);
@@ -842,7 +839,7 @@ fn gpu_conformance_ray_tracing() {
     let control = float_buffer(&device, "curve-points", &[8., -1., 0., 8., 1., 0.]);
     let radii = float_buffer(&device, "curve-radii", &[0.5, 0.5]);
     let indices = make_buffer(&device, "curve-indices", 4, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&indices, 0, &[0u8; 4]));
+    be::write_buffer(&indices, 0, &[0u8; 4]).unwrap_or_else(|failure| die(failure));
     let curve_descriptor = AccelDescriptor::Blas {
         geometries: vec![Geometry::Curves {
             control_points: vec![Keyframe { buffer: control.clone(), offset: 0 }],
@@ -861,7 +858,7 @@ fn gpu_conformance_ray_tracing() {
     };
     require(!caps::has(&profile, &Feature::RayTracingCurves), "Vulkan reports native curves");
     refused(
-        be::create_accel(&device, curve_descriptor, false),
+        be::create_accel(&device, curve_descriptor, false).err(),
         ErrorKind::Unsupported,
         "curve geometry without curve support was accepted",
     );
@@ -875,30 +872,30 @@ fn gpu_conformance_ray_tracing() {
     let motion_bindings = [compute_binding(4, BindingKind::StorageBuffer), compute_binding(5, BindingKind::StorageBuffer)];
     let vertices0 = make_buffer(&device, "motion-0", 72, &[BufferUsage::Storage, BufferUsage::CopyDst]);
     let vertices1 = make_buffer(&device, "motion-1", 72, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&vertices0, 0, &vertex_bytes(0.)));
-    get(be::write_buffer(&vertices1, 0, &vertex_bytes(1.5)));
+    be::write_buffer(&vertices0, 0, &vertex_bytes(0.)).unwrap_or_else(|failure| die(failure));
+    be::write_buffer(&vertices1, 0, &vertex_bytes(1.5)).unwrap_or_else(|failure| die(failure));
     let motion = Motion { keyframes: 2, start_time: 0., end_time: 1., start_border: Border::Clamp, end_border: Border::Clamp };
     let motion_triangles = |keyframes: Vec<Keyframe>| AccelDescriptor::MotionBlas {
         geometries: vec![Geometry::MotionTriangles { keyframes, vertex_stride: 12, vertex_count: 6 }],
         motion,
     };
     refused(
-        be::create_accel(&device, motion_triangles(vec![Keyframe { buffer: vertices0.clone(), offset: 0 }]), false),
+        be::create_accel(&device, motion_triangles(vec![Keyframe { buffer: vertices0.clone(), offset: 0 }]), false).err(),
         ErrorKind::InvalidArgument,
         "keyframe count mismatch was accepted",
     );
-    let motion_blas = get(be::create_accel(
+    let motion_blas = be::create_accel(
         &device,
         motion_triangles(vec![Keyframe { buffer: vertices0.clone(), offset: 0 }, Keyframe { buffer: vertices1.clone(), offset: 0 }]),
         false,
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     rt.build_one(&motion_blas, &big_scratch);
-    let motion_pipeline = get(be::create_compute_pipeline_from(
+    let motion_pipeline = be::create_compute_pipeline_from(
         &extra,
         "trace_motion",
         None,
         &with(&[compute_binding(3, BindingKind::UniformBuffer), motion_bindings[0].clone(), motion_bindings[1].clone()]),
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     for (time, expected_t) in [(0., 2.), (1., 0.5), (0.5, 1.25)] {
         let motion_hits = rt.query(
             &motion_pipeline,
@@ -913,18 +910,18 @@ fn gpu_conformance_ray_tracing() {
     }
 
     // User-id instances with masks over the triangle BLAS.
-    let records = get(be::pack_instance_records(&device, &[instance(&IDENTITY, 1, 0, 7), instance(&SHIFTED, 2, 0, 9)]));
+    let records = be::pack_instance_records(&device, &[instance(&IDENTITY, 1, 0, 7), instance(&SHIFTED, 2, 0, 9)]).unwrap_or_else(|failure| die(failure));
     require(records.len() == 2 * 68, "user-id record stride differs");
     let record_buffer = make_buffer(&device, "user-id-instances", records.len() as i64, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&record_buffer, 0, &records));
-    let masked_tlas = get(be::create_accel(&device, tlas_of(&record_buffer, 2, vec![blas.clone()]), false));
+    be::write_buffer(&record_buffer, 0, &records).unwrap_or_else(|failure| die(failure));
+    let masked_tlas = be::create_accel(&device, tlas_of(&record_buffer, 2, vec![blas.clone()]), false).unwrap_or_else(|failure| die(failure));
     rt.build_one(&masked_tlas, &big_scratch);
-    let masked_pipeline = get(be::create_compute_pipeline_from(
+    let masked_pipeline = be::create_compute_pipeline_from(
         &extra,
         "trace_masked",
         None,
         &with(&[compute_binding(3, BindingKind::UniformBuffer)]),
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     let mask_bytes = |mask: i32| mask.to_le_bytes().to_vec();
     let masked = rt.query(&masked_pipeline, &masked_tlas, &Extras { bytes: Some(mask_bytes(1)), ..Extras::default() });
     check_hits("mask 1 instances", &masked, &[triangle_hit(0, 7, 2.), triangle_hit(1, 7, 2.), NO_HIT, NO_HIT]);
@@ -933,18 +930,18 @@ fn gpu_conformance_ray_tracing() {
 
     // The off-ray record 0 and tested record 1 distinguish InstanceId=1, user_id=5, and prototype
     // structure_index=0. Record 1 moves from x=0 to x=8.
-    let keyframes = get(be::pack_transforms(&[FAR.to_vec(), FAR.to_vec(), IDENTITY.to_vec(), SHIFTED.to_vec()]));
+    let keyframes = be::pack_transforms(&[FAR.to_vec(), FAR.to_vec(), IDENTITY.to_vec(), SHIFTED.to_vec()]).unwrap_or_else(|failure| die(failure));
     let keyframe_buffer = make_buffer(&device, "instance-keyframes", keyframes.len() as i64, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&keyframe_buffer, 0, &keyframes));
+    be::write_buffer(&keyframe_buffer, 0, &keyframes).unwrap_or_else(|failure| die(failure));
     let prototype_vertices = make_buffer(&device, "motion-instance-prototype", 72, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&prototype_vertices, 0, &vertex_bytes(1.5)));
-    let prototype_blas = get(be::create_accel(&device, triangles(&prototype_vertices, 72, 6), false));
+    be::write_buffer(&prototype_vertices, 0, &vertex_bytes(1.5)).unwrap_or_else(|failure| die(failure));
+    let prototype_blas = be::create_accel(&device, triangles(&prototype_vertices, 72, 6), false).unwrap_or_else(|failure| die(failure));
     rt.build_one(&prototype_blas, &big_scratch);
-    let prototype_records = get(be::pack_instance_records(&device, &[instance(&IDENTITY, 1, 0, 0), instance(&IDENTITY, 1, 1, 1)]));
+    let prototype_records = be::pack_instance_records(&device, &[instance(&IDENTITY, 1, 0, 0), instance(&IDENTITY, 1, 1, 1)]).unwrap_or_else(|failure| die(failure));
     let prototype_record_buffer =
         make_buffer(&device, "motion-prototypes", prototype_records.len() as i64, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&prototype_record_buffer, 0, &prototype_records));
-    let prototype_tlas = get(be::create_accel(&device, tlas_of(&prototype_record_buffer, 2, vec![blas.clone(), prototype_blas.clone()]), false));
+    be::write_buffer(&prototype_record_buffer, 0, &prototype_records).unwrap_or_else(|failure| die(failure));
+    let prototype_tlas = be::create_accel(&device, tlas_of(&prototype_record_buffer, 2, vec![blas.clone(), prototype_blas.clone()]), false).unwrap_or_else(|failure| die(failure));
     rt.build_one(&prototype_tlas, &big_scratch);
     let motion_instance = |transform: &[f64; 12], structure_index: i64, user_id: i64, start: i64| MotionInstance {
         record: instance(transform, 1, structure_index, user_id),
@@ -955,11 +952,11 @@ fn gpu_conformance_ray_tracing() {
         start_border: Border::Clamp,
         end_border: Border::Clamp,
     };
-    let motion_records = get(be::pack_motion_instances(&device, &[motion_instance(&FAR, 0, 3, 0), motion_instance(&IDENTITY, 1, 5, 2)]));
+    let motion_records = be::pack_motion_instances(&device, &[motion_instance(&FAR, 0, 3, 0), motion_instance(&IDENTITY, 1, 5, 2)]).unwrap_or_else(|failure| die(failure));
     require(motion_records.len() == 2 * 44, "motion instance record stride differs");
     let motion_record_buffer =
         make_buffer(&device, "motion-instances", motion_records.len() as i64, &[BufferUsage::Storage, BufferUsage::CopyDst]);
-    get(be::write_buffer(&motion_record_buffer, 0, &motion_records));
+    be::write_buffer(&motion_record_buffer, 0, &motion_records).unwrap_or_else(|failure| die(failure));
     let motion_tlas_of = |transforms: Option<(Buffer, i64, i64)>| AccelDescriptor::TlasOf {
         instances: motion_record_buffer.clone(),
         offset: 0,
@@ -969,13 +966,13 @@ fn gpu_conformance_ray_tracing() {
         motion_transforms: transforms,
     };
     refused(
-        be::create_accel(&device, motion_tlas_of(None), false),
+        be::create_accel(&device, motion_tlas_of(None), false).err(),
         ErrorKind::InvalidArgument,
         "motion instances without keyframe transforms were accepted",
     );
-    let motion_tlas = get(be::create_accel(&device, motion_tlas_of(Some((keyframe_buffer.clone(), 0, 4))), false));
+    let motion_tlas = be::create_accel(&device, motion_tlas_of(Some((keyframe_buffer.clone(), 0, 4))), false).unwrap_or_else(|failure| die(failure));
     rt.build_one(&motion_tlas, &big_scratch);
-    let motion_instances_pipeline = get(be::create_compute_pipeline_from(
+    let motion_instances_pipeline = be::create_compute_pipeline_from(
         &extra,
         "trace_motion_instances",
         None,
@@ -985,7 +982,7 @@ fn gpu_conformance_ray_tracing() {
             motion_bindings[1].clone(),
             compute_binding(6, BindingKind::AccelerationStructure),
         ]),
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     let query_motion_instances = |time: f64| {
         rt.query(
             &motion_instances_pipeline,
@@ -1004,30 +1001,30 @@ fn gpu_conformance_ray_tracing() {
 
     // Compaction of the triangle BLAS reproduces its hits.
     let size_buffer = make_buffer(&device, "compacted-size", 8, &[BufferUsage::Storage, BufferUsage::CopySrc]);
-    let commands = get(be::begin_commands(&queue));
-    let encoder = get(be::accel_encoder(&commands));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
     refused(
-        be::write_compacted_size(&encoder, &blas, &size_buffer, Some(4)),
+        be::write_compacted_size(&encoder, &blas, &size_buffer, Some(4)).err(),
         ErrorKind::InvalidArgument,
         "unaligned compacted size offset was accepted",
     );
-    get(be::write_compacted_size(&encoder, &blas, &size_buffer, None));
-    get(be::end_accel(&encoder));
-    poll_epoch(&queue, get(be::commit(&commands)));
-    let size_bytes = get(be::read_buffer(&size_buffer, 0, 8));
+    be::write_compacted_size(&encoder, &blas, &size_buffer, None).unwrap_or_else(|failure| die(failure));
+    be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+    let size_bytes = be::read_buffer(&size_buffer, 0, 8).unwrap_or_else(|failure| die(failure));
     let compact_size = i64::from_le_bytes(size_bytes[..8].try_into().unwrap());
     require(compact_size > 0 && compact_size <= sizes.structure_size, "compacted size is out of range");
-    let compacted = get(be::create_accel(&device, AccelDescriptor::Sized { size: compact_size, template: blas.clone() }, false));
-    let commands = get(be::begin_commands(&queue));
-    let encoder = get(be::accel_encoder(&commands));
+    let compacted = be::create_accel(&device, AccelDescriptor::Sized { size: compact_size, template: blas.clone() }, false).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
     refused(
-        be::build_accel(&encoder, &compacted, &big_scratch, None),
+        be::build_accel(&encoder, &compacted, &big_scratch, None).err(),
         ErrorKind::InvalidState,
         "sized structure accepted a build",
     );
-    get(be::compact_accel(&encoder, &blas, &compacted));
-    get(be::end_accel(&encoder));
-    poll_epoch(&queue, get(be::commit(&commands)));
+    be::compact_accel(&encoder, &blas, &compacted).unwrap_or_else(|failure| die(failure));
+    be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     check_hits(
         "compacted triangles",
         &rt.query(&trace, &compacted, &Extras::default()),
@@ -1035,31 +1032,31 @@ fn gpu_conformance_ray_tracing() {
     );
 
     for pipeline in [&motion_instances_pipeline, &motion_pipeline, &boxes_pipeline, &capsules_pipeline, &masked_pipeline] {
-        get(be::destroy_pipeline(pipeline));
+        be::destroy_pipeline(pipeline).unwrap_or_else(|failure| die(failure));
     }
     for accel in [&motion_tlas, &prototype_tlas, &prototype_blas, &motion_blas, &compacted, &masked_tlas, &capsule_blas, &box_blas] {
-        get(be::destroy_accel(accel));
+        be::destroy_accel(accel).unwrap_or_else(|failure| die(failure));
     }
     for buffer in [
         &motion_record_buffer, &keyframe_buffer, &prototype_record_buffer, &prototype_vertices, &vertices1, &vertices0, &size_buffer,
         &record_buffer, &indices, &radii, &control, &capsule_data, &capsule_boxes, &big_scratch, &boxes, &spheres,
     ] {
-        get(be::destroy_buffer(buffer));
+        be::destroy_buffer(buffer).unwrap_or_else(|failure| die(failure));
     }
-    get(be::destroy_library(&extra));
-    get(be::destroy_accel(&blas));
-    get(be::destroy_accel(&tlas));
-    get(be::destroy_buffer(&instance_buffer));
-    get(be::destroy_buffer(&tlas_scratch));
-    get(be::destroy_buffer(&scratch));
-    get(be::destroy_pipeline(&trace));
-    get(be::destroy_pipeline(&trace_instances));
-    get(be::destroy_library(&ray_library));
-    get(be::destroy_buffer(&vertices));
-    get(be::destroy_buffer(&rt.rays));
-    get(be::destroy_buffer(&rt.hits));
-    get(be::destroy_queue(&rt.queue));
-    get(be::destroy_queue(&queue));
+    be::destroy_library(&extra).unwrap_or_else(|failure| die(failure));
+    be::destroy_accel(&blas).unwrap_or_else(|failure| die(failure));
+    be::destroy_accel(&tlas).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&instance_buffer).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&tlas_scratch).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&scratch).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&trace).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&trace_instances).unwrap_or_else(|failure| die(failure));
+    be::destroy_library(&ray_library).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&vertices).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&rt.rays).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&rt.hits).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&rt.queue).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
     finish(&device);
 }
 
@@ -1079,8 +1076,8 @@ fn gpu_conformance_render() {
     let Some(device) = open() else { return };
     let capabilities = be::capabilities(&device);
     let profile = capabilities;
-    let queue = get(be::create_queue(&device));
-    let sampler = get(be::create_sampler(
+    let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
+    let sampler = be::create_sampler(
         &device,
         SamplerDescriptor {
             label: Some("conformance-sampler".to_owned()),
@@ -1093,7 +1090,7 @@ fn gpu_conformance_render() {
             lod_max: 0.,
             max_anisotropy: 1,
         },
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     let render_shader = |entry: &str, stage: Stage, bindings: Vec<Binding>| {
         make_shader("conformance-render", shader_bytes(entry), &[(entry, stage)], bindings)
     };
@@ -1108,8 +1105,8 @@ fn gpu_conformance_render() {
         vec![stage_binding(1, BindingKind::SampledTexture, Stage::Fragment), stage_binding(2, BindingKind::Sampler, Stage::Fragment)],
     );
     let render_layout = |entries: &[LayoutEntry]| {
-        let group = get(binding::create_layout(entries));
-        get(binding::create_pipeline_layout(be::device_handle(&device), &capabilities, &[(0, group)]))
+        let group = binding::create_layout(entries).unwrap_or_else(|failure| die(failure));
+        binding::create_pipeline_layout(be::device_handle(&device), &capabilities, &[(0, group)]).unwrap_or_else(|failure| die(failure))
     };
     let vertex_entry = LayoutEntry { binding: 0, kind: LayoutKind::Buffer, visibility: vec![LayoutStage::Vertex] };
     let flat_layout = render_layout(&[
@@ -1135,23 +1132,23 @@ fn gpu_conformance_render() {
     };
     let target_usage = [TextureUsage::TextureBinding, TextureUsage::RenderAttachment, TextureUsage::TextureCopySrc];
     let target_descriptor = texture_descriptor("render-target", 4, &target_usage);
-    let target = get(be::create_texture(&device, target_descriptor.clone()));
+    let target = be::create_texture(&device, target_descriptor.clone()).unwrap_or_else(|failure| die(failure));
     let transient = TextureDescriptor { label: Some("pass".to_owned()), usage: vec![TextureUsage::RenderAttachment], ..target_descriptor.clone() };
     require(!profile.memoryless_attachments, "Vulkan reports memoryless attachments");
     refused(
-        be::create_memoryless_texture(&device, true, transient),
+        be::create_memoryless_texture(&device, true, transient).err(),
         ErrorKind::Unsupported,
         "unavailable memoryless attachments were not typed Unsupported",
     );
     refused(
-        be::create_buffer(&device, buf("pass", 16, &[BufferUsage::Storage]), Some(Memory::Memoryless)),
+        be::create_buffer(&device, buf("pass", 16, &[BufferUsage::Storage]), Some(Memory::Memoryless)).err(),
         ErrorKind::InvalidArgument,
         "a memoryless buffer was accepted",
     );
     let offsets = make_buffer(&device, "offsets", 8, &[BufferUsage::Storage]);
-    get(be::write_buffer(&offsets, 0, &[0u8; 8]));
+    be::write_buffer(&offsets, 0, &[0u8; 8]).unwrap_or_else(|failure| die(failure));
     let expect_pixels = |expected: [u8; 4], message: &str| {
-        let pixels = get(be::read_texture(&target, 16));
+        let pixels = be::read_texture(&target, 16).unwrap_or_else(|failure| die(failure));
         let pixel = |x: usize, y: usize| pixels[(y * 4 + x) * 4..(y * 4 + x) * 4 + 4].to_vec();
         require(
             pixel(0, 0) == expected && pixel(3, 3) == expected,
@@ -1159,49 +1156,49 @@ fn gpu_conformance_render() {
         );
     };
     let clear_target = |r: f64, g: f64, b: f64, a: f64| {
-        let commands = get(be::begin_commands(&queue));
-        let encoder = get(be::render_encoder(&commands, &render_target(&target, Load::Clear, Store::Store, (r, g, b, a))));
-        get(be::end_render(&encoder));
-        poll_epoch(&queue, get(be::commit(&commands)));
+        let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+        let encoder = be::render_encoder(&commands, &render_target(&target, Load::Clear, Store::Store, (r, g, b, a))).unwrap_or_else(|failure| die(failure));
+        be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+        poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     };
     let load_pass = |commands: &be::Commands| {
-        get(be::render_encoder(commands, &render_target(&target, Load::Load, Store::Store, (0., 0., 0., 0.))))
+        be::render_encoder(commands, &render_target(&target, Load::Load, Store::Store, (0., 0., 0., 0.))).unwrap_or_else(|failure| die(failure))
     };
     let full = Rect { x: 0, y: 0, width: 4, height: 4 };
     require(caps::has(&profile, &Feature::RenderPipeline), "this device cannot render");
 
-    let flat = get(be::create_render_pipeline(&device, &render_descriptor(&flat_layout, &fragment_flat, "flat_fragment"), None, None, None));
+    let flat = be::create_render_pipeline(&device, &render_descriptor(&flat_layout, &fragment_flat, "flat_fragment"), None, None, None).unwrap_or_else(|failure| die(failure));
     clear_target(0.125, 0.25, 0.5, 1.);
     expect_pixels([0x20, 0x40, 0x80, 0xff], "clear-only render pass pixels differ");
     // One full-screen triangle through the immediate encoder with a fragment uniform buffer.
     let color = make_buffer(&device, "color", 16, &[BufferUsage::Uniform]);
     let set_color = |encoder: &be::RenderEncoder, r: f64, g: f64, b: f64, a: f64| {
-        get(be::write_buffer(&color, 0, &color_bytes(r, g, b, a)));
-        get(be::set_stage_buffer(encoder, ShaderStage::Fragment, 1, None, &color));
+        be::write_buffer(&color, 0, &color_bytes(r, g, b, a)).unwrap_or_else(|failure| die(failure));
+        be::set_stage_buffer(encoder, ShaderStage::Fragment, 1, None, &color).unwrap_or_else(|failure| die(failure));
     };
-    let commands = get(be::begin_commands(&queue));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = load_pass(&commands);
     refused(
-        be::draw(&encoder, Primitive::TriangleList, 0, 3, None),
+        be::draw(&encoder, Primitive::TriangleList, 0, 3, None).err(),
         ErrorKind::InvalidState,
         "draw without a render pipeline was accepted",
     );
-    get(be::set_render_pipeline(&encoder, &flat));
-    get(be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets));
+    be::set_render_pipeline(&encoder, &flat).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets).unwrap_or_else(|failure| die(failure));
     set_color(&encoder, 1., 0., 0.5, 1.);
     // A viewport may hang over the target; an empty one is refused.
     refused(
-        be::set_viewport(&encoder, Rect { x: 0, y: 0, width: 0, height: 4 }),
+        be::set_viewport(&encoder, Rect { x: 0, y: 0, width: 0, height: 4 }).err(),
         ErrorKind::InvalidArgument,
         "empty viewport was accepted",
     );
-    get(be::set_viewport(&encoder, Rect { x: -2, y: -2, width: 8, height: 8 }));
-    get(be::set_viewport(&encoder, full));
-    get(be::set_scissor(&encoder, full));
-    get(be::set_cull(&encoder, Cull::CullNone));
-    get(be::draw(&encoder, Primitive::TriangleList, 0, 3, None));
-    get(be::end_render(&encoder));
-    poll_epoch(&queue, get(be::commit(&commands)));
+    be::set_viewport(&encoder, Rect { x: -2, y: -2, width: 8, height: 8 }).unwrap_or_else(|failure| die(failure));
+    be::set_viewport(&encoder, full).unwrap_or_else(|failure| die(failure));
+    be::set_scissor(&encoder, full).unwrap_or_else(|failure| die(failure));
+    be::set_cull(&encoder, Cull::CullNone).unwrap_or_else(|failure| die(failure));
+    be::draw(&encoder, Primitive::TriangleList, 0, 3, None).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     expect_pixels([0xff, 0x00, 0x80, 0xff], "immediate triangle pixels differ");
 
     // The same triangle as one indexed batch draw.
@@ -1210,13 +1207,13 @@ fn gpu_conformance_render() {
     for (i, v) in [0, 1, 2].iter().enumerate() {
         put_i32(&mut index_bytes, i * 4, *v);
     }
-    get(be::write_buffer(&indices, 0, &index_bytes));
-    get(be::write_buffer(&color, 0, &color_bytes(0., 1., 0., 1.)));
+    be::write_buffer(&indices, 0, &index_bytes).unwrap_or_else(|failure| die(failure));
+    be::write_buffer(&color, 0, &color_bytes(0., 1., 0., 1.)).unwrap_or_else(|failure| die(failure));
     clear_target(0., 0., 0., 1.);
-    let commands = get(be::begin_commands(&queue));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = load_pass(&commands);
-    get(be::set_viewport(&encoder, full));
-    get(be::draw_batch(
+    be::set_viewport(&encoder, full).unwrap_or_else(|failure| die(failure));
+    be::draw_batch(
         &encoder,
         &[BatchDraw {
             pipeline: flat.clone(),
@@ -1227,9 +1224,9 @@ fn gpu_conformance_render() {
             vertex_count: 3,
             instances: 1,
         }],
-    ));
-    get(be::end_render(&encoder));
-    poll_epoch(&queue, get(be::commit(&commands)));
+    ).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     expect_pixels([0x00, 0xff, 0x00, 0xff], "batched indexed triangle pixels differ");
 
     // The same indexed triangle, its counts read from a buffer when the draw runs (index count 3, one
@@ -1239,72 +1236,72 @@ fn gpu_conformance_render() {
     for (i, v) in [0, 3, 1, 0, 0, 0].iter().enumerate() {
         put_i32(&mut argument_bytes, i * 4, *v);
     }
-    get(be::write_buffer(&arguments, 0, &argument_bytes));
-    get(be::write_buffer(&color, 0, &color_bytes(1., 1., 0., 1.)));
+    be::write_buffer(&arguments, 0, &argument_bytes).unwrap_or_else(|failure| die(failure));
+    be::write_buffer(&color, 0, &color_bytes(1., 1., 0., 1.)).unwrap_or_else(|failure| die(failure));
     clear_target(0., 0., 0., 1.);
-    let commands = get(be::begin_commands(&queue));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = load_pass(&commands);
-    get(be::set_viewport(&encoder, full));
-    get(be::set_render_pipeline(&encoder, &flat));
-    get(be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets));
-    get(be::set_stage_buffer(&encoder, ShaderStage::Fragment, 1, None, &color));
+    be::set_viewport(&encoder, full).unwrap_or_else(|failure| die(failure));
+    be::set_render_pipeline(&encoder, &flat).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Fragment, 1, None, &color).unwrap_or_else(|failure| die(failure));
     refused(
-        be::draw_indexed_indirect(&encoder, Primitive::TriangleList, IndexType::Uint32, &indices, 0, &arguments, 6),
+        be::draw_indexed_indirect(&encoder, Primitive::TriangleList, IndexType::Uint32, &indices, 0, &arguments, 6).err(),
         ErrorKind::InvalidArgument,
         "misaligned indirect arguments were accepted",
     );
-    get(be::draw_indexed_indirect(&encoder, Primitive::TriangleList, IndexType::Uint32, &indices, 0, &arguments, 4));
-    get(be::end_render(&encoder));
-    poll_epoch(&queue, get(be::commit(&commands)));
+    be::draw_indexed_indirect(&encoder, Primitive::TriangleList, IndexType::Uint32, &indices, 0, &arguments, 4).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     expect_pixels([0xff, 0xff, 0x00, 0xff], "indirect indexed triangle pixels differ");
 
     // Indirect command buffer: one recorded draw, executed twice.
     let indirect =
-        get(be::create_render_pipeline(&device, &render_descriptor(&flat_layout, &fragment_flat, "flat_fragment"), None, None, Some(true)));
-    let icb = get(be::create_icb(&device, 2));
+        be::create_render_pipeline(&device, &render_descriptor(&flat_layout, &fragment_flat, "flat_fragment"), None, None, Some(true)).unwrap_or_else(|failure| die(failure));
+    let icb = be::create_icb(&device, 2).unwrap_or_else(|failure| die(failure));
     refused(
-        be::icb_set_pipeline(&icb, 2, &indirect),
+        be::icb_set_pipeline(&icb, 2, &indirect).err(),
         ErrorKind::InvalidArgument,
         "out-of-range indirect command index was accepted",
     );
-    get(be::write_buffer(&color, 0, &color_bytes(0., 0., 1., 1.)));
-    get(be::icb_set_pipeline(&icb, 0, &indirect));
-    get(be::icb_set_buffer(&icb, 0, ShaderStage::Vertex, 0, None, &offsets));
-    get(be::icb_set_buffer(&icb, 0, ShaderStage::Fragment, 1, None, &color));
-    get(be::icb_draw_indexed(&icb, 0, Primitive::TriangleList, IndexType::Uint32, &indices, 0, 3, None));
+    be::write_buffer(&color, 0, &color_bytes(0., 0., 1., 1.)).unwrap_or_else(|failure| die(failure));
+    be::icb_set_pipeline(&icb, 0, &indirect).unwrap_or_else(|failure| die(failure));
+    be::icb_set_buffer(&icb, 0, ShaderStage::Vertex, 0, None, &offsets).unwrap_or_else(|failure| die(failure));
+    be::icb_set_buffer(&icb, 0, ShaderStage::Fragment, 1, None, &color).unwrap_or_else(|failure| die(failure));
+    be::icb_draw_indexed(&icb, 0, Primitive::TriangleList, IndexType::Uint32, &indices, 0, 3, None).unwrap_or_else(|failure| die(failure));
     clear_target(0., 0., 0., 1.);
     for _ in 0..2 {
-        let commands = get(be::begin_commands(&queue));
+        let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
         let encoder = load_pass(&commands);
-        get(be::set_viewport(&encoder, full));
+        be::set_viewport(&encoder, full).unwrap_or_else(|failure| die(failure));
         refused(
-            be::execute_icb(&encoder, &icb, 0, 1),
+            be::execute_icb(&encoder, &icb, 0, 1).err(),
             ErrorKind::InvalidState,
             "indirect execution without a pipeline was accepted",
         );
-        get(be::set_render_pipeline(&encoder, &indirect));
-        get(be::use_resources(
+        be::set_render_pipeline(&encoder, &indirect).unwrap_or_else(|failure| die(failure));
+        be::use_resources(
             &encoder,
             &[ResourceUse::Buffer(offsets.clone()), ResourceUse::Buffer(color.clone()), ResourceUse::Buffer(indices.clone())],
-        ));
-        get(be::execute_icb(&encoder, &icb, 0, 1));
-        get(be::end_render(&encoder));
-        poll_epoch(&queue, get(be::commit(&commands)));
+        ).unwrap_or_else(|failure| die(failure));
+        be::execute_icb(&encoder, &icb, 0, 1).unwrap_or_else(|failure| die(failure));
+        be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+        poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     }
     expect_pixels([0x00, 0x00, 0xff, 0xff], "indirect command pixels differ");
 
     // Argument buffer: a 1x1 texture and sampler bound through one buffer.
-    let argument_pipeline = get(be::create_render_pipeline(
+    let argument_pipeline = be::create_render_pipeline(
         &device,
         &render_descriptor(&flat_layout, &fragment_argument, "argument_fragment"),
         None,
         None,
         Some(true),
-    ));
-    let argument = get(be::create_argument(&argument_pipeline, ShaderStage::Fragment, 1));
+    ).unwrap_or_else(|failure| die(failure));
+    let argument = be::create_argument(&argument_pipeline, ShaderStage::Fragment, 1).unwrap_or_else(|failure| die(failure));
     require(be::argument_length(&argument) > 0, "argument length is empty");
     let argument_buffer = make_buffer(&device, "arguments", 256.max(be::argument_length(&argument)), &[BufferUsage::Storage]);
-    let texel = get(be::create_texture(
+    let texel = be::create_texture(
         &device,
         TextureDescriptor {
             label: Some("texel".to_owned()),
@@ -1312,60 +1309,60 @@ fn gpu_conformance_render() {
             height: 1,
             ..texture_descriptor("texel", 1, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst])
         },
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     let texel_upload = make_buffer(&device, "texel-upload", 256, &[BufferUsage::CopySrc]);
     let mut upload_bytes = vec![0u8; 256];
     upload_bytes[..4].copy_from_slice(&[0x40, 0x80, 0xc0, 0xff]);
-    get(be::write_buffer(&texel_upload, 0, &upload_bytes));
-    let commands = get(be::begin_commands(&queue));
-    let blit = get(be::blit_encoder(&commands));
-    get(be::buffer_to_texture(&blit, &texel_upload, None, 256, 256, &texel, None, None, Extent { width: 1, height: 1, depth: 1 }));
-    get(be::end_blit(&blit));
-    poll_epoch(&queue, get(be::commit(&commands)));
-    get(be::argument_texture(&argument, &argument_buffer, 0, 0, &texel));
-    get(be::argument_sampler(&argument, &argument_buffer, 0, 1, &sampler));
+    be::write_buffer(&texel_upload, 0, &upload_bytes).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let blit = be::blit_encoder(&commands).unwrap_or_else(|failure| die(failure));
+    be::buffer_to_texture(&blit, &texel_upload, None, 256, 256, &texel, None, None, Extent { width: 1, height: 1, depth: 1 }).unwrap_or_else(|failure| die(failure));
+    be::end_blit(&blit).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+    be::argument_texture(&argument, &argument_buffer, 0, 0, &texel).unwrap_or_else(|failure| die(failure));
+    be::argument_sampler(&argument, &argument_buffer, 0, 1, &sampler).unwrap_or_else(|failure| die(failure));
     clear_target(0., 0., 0., 1.);
-    let commands = get(be::begin_commands(&queue));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = load_pass(&commands);
-    get(be::set_viewport(&encoder, full));
-    get(be::set_render_pipeline(&encoder, &argument_pipeline));
-    get(be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets));
-    get(be::set_stage_buffer(&encoder, ShaderStage::Fragment, 1, None, &argument_buffer));
-    get(be::use_resources(&encoder, &[ResourceUse::Texture(texel.clone())]));
-    get(be::draw(&encoder, Primitive::TriangleList, 0, 3, None));
-    get(be::end_render(&encoder));
-    poll_epoch(&queue, get(be::commit(&commands)));
+    be::set_viewport(&encoder, full).unwrap_or_else(|failure| die(failure));
+    be::set_render_pipeline(&encoder, &argument_pipeline).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Fragment, 1, None, &argument_buffer).unwrap_or_else(|failure| die(failure));
+    be::use_resources(&encoder, &[ResourceUse::Texture(texel.clone())]).unwrap_or_else(|failure| die(failure));
+    be::draw(&encoder, Primitive::TriangleList, 0, 3, None).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     expect_pixels([0x40, 0x80, 0xc0, 0xff], "argument-buffer sampled pixels differ");
 
     // Direct texture and sampler binding.
-    let textured = get(be::create_render_pipeline(
+    let textured = be::create_render_pipeline(
         &device,
         &render_descriptor(&textured_layout, &fragment_textured, "textured_fragment"),
         None,
         None,
         None,
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     clear_target(0., 0., 0., 1.);
-    let commands = get(be::begin_commands(&queue));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = load_pass(&commands);
-    get(be::set_viewport(&encoder, full));
-    get(be::set_render_pipeline(&encoder, &textured));
-    get(be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets));
-    get(be::set_stage_texture(&encoder, ShaderStage::Fragment, 1, &texel));
-    get(be::set_stage_sampler(&encoder, ShaderStage::Fragment, 2, &sampler));
-    get(be::draw(&encoder, Primitive::TriangleList, 0, 3, None));
-    get(be::end_render(&encoder));
-    poll_epoch(&queue, get(be::commit(&commands)));
+    be::set_viewport(&encoder, full).unwrap_or_else(|failure| die(failure));
+    be::set_render_pipeline(&encoder, &textured).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets).unwrap_or_else(|failure| die(failure));
+    be::set_stage_texture(&encoder, ShaderStage::Fragment, 1, &texel).unwrap_or_else(|failure| die(failure));
+    be::set_stage_sampler(&encoder, ShaderStage::Fragment, 2, &sampler).unwrap_or_else(|failure| die(failure));
+    be::draw(&encoder, Primitive::TriangleList, 0, 3, None).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     expect_pixels([0x40, 0x80, 0xc0, 0xff], "directly sampled pixels differ");
 
     // Depth: a cleared depth attachment at 0.25 with Less rejects a triangle at z=0.5 when loaded, and
     // admits it after a clear to 1.
-    let depth = get(be::create_depth_texture(
+    let depth = be::create_depth_texture(
         &device,
         texture_descriptor("depth", 4, &[TextureUsage::RenderAttachment]),
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     let depth_shader = render_shader("flat_vertex", Stage::Vertex, vec![stage_binding(0, BindingKind::StorageBuffer, Stage::Vertex)]);
-    let depth_pipeline = get(be::create_render_pipeline(
+    let depth_pipeline = be::create_render_pipeline(
         &device,
         &RenderDescriptor {
             vertex: depth_shader,
@@ -1375,21 +1372,21 @@ fn gpu_conformance_render() {
         None,
         None,
         None,
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     let render_depth = |load: Load, clear: f64, expected: [u8; 4], message: &str| {
         clear_target(0., 0., 0., 1.);
-        let commands = get(be::begin_commands(&queue));
+        let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
         let mut pass = render_target(&target, Load::Load, Store::Store, (0., 0., 0., 0.));
         pass.depth = Some(DepthAttachment { depth_texture: depth.clone(), depth_load: load, depth_store: Store::Store, depth_clear: clear });
-        let encoder = get(be::render_encoder(&commands, &pass));
-        get(be::set_viewport(&encoder, full));
-        get(be::set_render_pipeline(&encoder, &depth_pipeline));
-        get(be::set_depth_state(&encoder, Some(DepthState { depth_compare: Comparison::Less, depth_write: true })));
-        get(be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets));
+        let encoder = be::render_encoder(&commands, &pass).unwrap_or_else(|failure| die(failure));
+        be::set_viewport(&encoder, full).unwrap_or_else(|failure| die(failure));
+        be::set_render_pipeline(&encoder, &depth_pipeline).unwrap_or_else(|failure| die(failure));
+        be::set_depth_state(&encoder, Some(DepthState { depth_compare: Comparison::Less, depth_write: true })).unwrap_or_else(|failure| die(failure));
+        be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets).unwrap_or_else(|failure| die(failure));
         set_color(&encoder, 1., 1., 0., 1.);
-        get(be::draw(&encoder, Primitive::TriangleList, 0, 3, None));
-        get(be::end_render(&encoder));
-        poll_epoch(&queue, get(be::commit(&commands)));
+        be::draw(&encoder, Primitive::TriangleList, 0, 3, None).unwrap_or_else(|failure| die(failure));
+        be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+        poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
         expect_pixels(expected, message);
     };
     render_depth(Load::Clear, 1., [0xff, 0xff, 0x00, 0xff], "depth clear-to-far rejected the triangle");
@@ -1398,7 +1395,7 @@ fn gpu_conformance_render() {
 
     // Multisampling: Store with a resolve texture resolves and keeps the samples, so a following Load
     // pass resolves the same colour; Discard cannot resolve.
-    let msaa = get(be::create_texture(
+    let msaa = be::create_texture(
         &device,
         TextureDescriptor {
             label: Some("msaa".to_owned()),
@@ -1406,23 +1403,23 @@ fn gpu_conformance_render() {
             usage: vec![TextureUsage::RenderAttachment],
             ..target_descriptor.clone()
         },
-    ));
+    ).unwrap_or_else(|failure| die(failure));
     let msaa_pass = |load: Load, store: Store, clear: (f64, f64, f64, f64)| {
-        let commands = get(be::begin_commands(&queue));
+        let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
         let pass = RenderTarget {
             colors: vec![ColorAttachment { texture: msaa.clone(), resolve: Some(target.clone()), load, store, clear }],
             depth: None,
         };
-        let encoder = get(be::render_encoder(&commands, &pass));
-        get(be::end_render(&encoder));
-        poll_epoch(&queue, get(be::commit(&commands)));
+        let encoder = be::render_encoder(&commands, &pass).unwrap_or_else(|failure| die(failure));
+        be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+        poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
     };
     msaa_pass(Load::Clear, Store::Store, (0.125, 0.25, 0.5, 1.));
     expect_pixels([0x20, 0x40, 0x80, 0xff], "stored multisample pass did not resolve");
     clear_target(0., 0., 0., 1.);
     msaa_pass(Load::Load, Store::Resolve, (0., 0., 0., 0.));
     expect_pixels([0x20, 0x40, 0x80, 0xff], "Store with a resolve texture did not keep the samples");
-    let commands = get(be::begin_commands(&queue));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     refused(
         be::render_encoder(
             &commands,
@@ -1436,30 +1433,30 @@ fn gpu_conformance_render() {
                 }],
                 depth: None,
             },
-        ),
+        ).err(),
         ErrorKind::InvalidArgument,
         "a discarded attachment was allowed to resolve",
     );
-    get(be::abandon(&commands));
-    get(be::destroy_texture(&msaa));
-    get(be::destroy_texture(&depth));
-    get(be::destroy_pipeline(&depth_pipeline));
-    get(be::destroy_pipeline(&textured));
-    get(be::destroy_argument(&argument));
-    get(be::destroy_buffer(&argument_buffer));
-    get(be::destroy_buffer(&texel_upload));
-    get(be::destroy_texture(&texel));
-    get(be::destroy_pipeline(&argument_pipeline));
-    get(be::destroy_icb(&icb));
-    get(be::destroy_pipeline(&indirect));
-    get(be::destroy_buffer(&color));
-    get(be::destroy_buffer(&indices));
-    get(be::destroy_buffer(&arguments));
-    get(be::destroy_pipeline(&flat));
-    get(be::destroy_buffer(&offsets));
-    get(be::destroy_texture(&target));
-    get(be::destroy_sampler(&sampler));
-    get(be::destroy_queue(&queue));
+    be::abandon(&commands).unwrap_or_else(|failure| die(failure));
+    be::destroy_texture(&msaa).unwrap_or_else(|failure| die(failure));
+    be::destroy_texture(&depth).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&depth_pipeline).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&textured).unwrap_or_else(|failure| die(failure));
+    be::destroy_argument(&argument).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&argument_buffer).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&texel_upload).unwrap_or_else(|failure| die(failure));
+    be::destroy_texture(&texel).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&argument_pipeline).unwrap_or_else(|failure| die(failure));
+    be::destroy_icb(&icb).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&indirect).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&color).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&indices).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&arguments).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&flat).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&offsets).unwrap_or_else(|failure| die(failure));
+    be::destroy_texture(&target).unwrap_or_else(|failure| die(failure));
+    be::destroy_sampler(&sampler).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
     finish(&device);
 }
 
@@ -1482,7 +1479,7 @@ fn gpu_out_of_device_memory_is_capacity() {
             panic!("a buffer of twice the working set was created");
         }
     }
-    get((raw.destroy_device)());
+    (raw.destroy_device)().unwrap_or_else(|failure| die(failure));
     assert_eq!(impl_::live_handles(), 0, "out-of-memory test leaked handles");
     assert_eq!(vulkan::Device::validation_messages(), 0, "out-of-memory test: validation messages");
 }

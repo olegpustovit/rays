@@ -36,10 +36,9 @@ fn blen(value: &bytes) -> usize {
 /// OCaml `Sys.max_string_length` on 64-bit.
 const MAX_STRING_LENGTH: i64 = 144115188075855863;
 
-type R<A> = Result<A, Error>;
 
-fn failure<A>(operation: &str, kind: ErrorKind, text: &str) -> R<A> {
-    Err(error::make(operation, kind, text))
+fn failure_error(operation: &str, kind: ErrorKind, text: &str) -> Error {
+    error::make(operation, kind, text)
 }
 
 fn thread_id() -> std::thread::ThreadId {
@@ -108,7 +107,7 @@ pub fn register_gpu_vertices(
     buffer: &Buffer,
     vertex_count: i64,
     valid: Box<dyn Fn() -> bool>,
-) -> R<gpu_vertices> {
+) -> Result<gpu_vertices, Error> {
     let operation = "Scene_execution.register_gpu_vertices";
     let extra = extra.unwrap_or_default();
     let stride = stride.unwrap_or(16);
@@ -137,10 +136,10 @@ pub fn register_gpu_vertices(
         }
         || registry_has;
     if invalid {
-        return failure(operation, ErrorKind::InvalidArgument, "invalid or duplicate borrowed vertex registration");
+        return Err(failure_error(operation, ErrorKind::InvalidArgument, "invalid or duplicate borrowed vertex registration"));
     }
     if owner.borrow().gpu_vertex_registry.len() >= gpu_vertex_capacity {
-        return failure(operation, ErrorKind::Capacity, "borrowed vertex registration capacity reached");
+        return Err(failure_error(operation, ErrorKind::Capacity, "borrowed vertex registration capacity reached"));
     }
     let value: gpu_vertices = Rc::new(gpu_vertices_data {
         gpu_owner: owner.clone(),
@@ -162,7 +161,7 @@ pub fn register_gpu_vertices(
 
 pub fn unregister_gpu_vertices(value: &gpu_vertices) {
     if value.gpu_domain != thread_id() {
-        panic!("GPU vertices closed on another domain");
+        unreachable!("GPU vertices closed on another domain");
     }
     if value.gpu_active.get() {
         value.gpu_active.set(false);
@@ -536,19 +535,19 @@ fn auxiliary_table(retired: &Rc<RefCell<retired>>) -> side_lru::Table {
 }
 
 fn cached_of(item: &Item) -> cached_ref {
-    item.clone().downcast::<RefCell<cached>>().unwrap_or_else(|_| panic!("mesh table item"))
+    item.clone().downcast::<RefCell<cached>>().unwrap_or_else(|_| unreachable!("mesh table item"))
 }
 
 fn cached_texture_of(item: &Item) -> cached_texture_ref {
-    item.clone().downcast::<RefCell<cached_texture>>().unwrap_or_else(|_| panic!("texture table item"))
+    item.clone().downcast::<RefCell<cached_texture>>().unwrap_or_else(|_| unreachable!("texture table item"))
 }
 
 fn cached_auxiliary_of(item: &Item) -> cached_auxiliary_ref {
-    item.clone().downcast::<RefCell<cached_auxiliary>>().unwrap_or_else(|_| panic!("auxiliary table item"))
+    item.clone().downcast::<RefCell<cached_auxiliary>>().unwrap_or_else(|_| unreachable!("auxiliary table item"))
 }
 
 fn prepared_run_of(item: &Item) -> Rc<prepared_run> {
-    item.clone().downcast::<prepared_run>().unwrap_or_else(|_| panic!("prepared table item"))
+    item.clone().downcast::<prepared_run>().unwrap_or_else(|_| unreachable!("prepared table item"))
 }
 
 fn skey(key: &str) -> TableKey {
@@ -578,7 +577,7 @@ struct sun_map {
     sun_key: String,
 }
 
-pub type sun_factory = Rc<dyn Fn(&Device) -> R<Pipeline>>;
+pub type sun_factory = Rc<dyn Fn(&Device) -> Result<Pipeline, Error>>;
 
 pub struct t {
     device: Device,
@@ -667,7 +666,7 @@ fn is_scene3_family(family: pipeline_family) -> bool {
     matches!(family, Scene3 | Scene3_points | Scene3_world)
 }
 
-fn resolve_gpu_vertices(value: &t, entry: &sampled_draw) -> R<Option<gpu_vertices>> {
+fn resolve_gpu_vertices(value: &t, entry: &sampled_draw) -> Result<Option<gpu_vertices>, Error> {
     let mesh = &entry.draw.mesh;
     let name = match &mesh.key {
         mesh_key::Host(_) => return Ok(None),
@@ -687,7 +686,7 @@ fn resolve_gpu_vertices(value: &t, entry: &sampled_draw) -> R<Option<gpu_vertice
             let indices_len = blen(&mesh.indices) as i64;
             let vertices_len = blen(&mesh.vertices) as i64;
             if !same_device(&source.gpu_device, &value.device) {
-                return failure("Renderer.submit", ErrorKind::CrossDevice, "GPU vertices belong to another device");
+                return Err(failure_error("Renderer.submit", ErrorKind::CrossDevice, "GPU vertices belong to another device"));
             }
             let colors_bad = (source.gpu_colors.is_some() && !is_scene3_family(family))
                 || (is_scene3_family(family)
@@ -715,12 +714,12 @@ fn resolve_gpu_vertices(value: &t, entry: &sampled_draw) -> R<Option<gpu_vertice
                 _ => true,
             };
             if colors_bad || indices_bad || layout_bad {
-                failure("Renderer.submit", ErrorKind::InvalidArgument, "GPU shape layout is malformed")
+                Err(failure_error("Renderer.submit", ErrorKind::InvalidArgument, "GPU shape layout is malformed"))
             } else {
                 Ok(Some(source))
             }
         }
-        _ => failure("Renderer.submit", ErrorKind::StaleHandle, "GPU vertices are stale or closed"),
+        _ => Err(failure_error("Renderer.submit", ErrorKind::StaleHandle, "GPU vertices are stale or closed")),
     }
 }
 
@@ -759,7 +758,7 @@ fn valid_index_length(mesh: &mesh) -> bool {
 
 /// Validates and copies a native Scene3 submission description. Nested byte resources remain
 /// borrowed and must be retained by the staging owner.
-pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[draw]) -> R<prepared_scene3> {
+pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[draw]) -> Result<prepared_scene3, Error> {
     let (r, g, b, a) = clear;
     let valid_extent = |(_, _, width, height): (i64, i64, i64, i64)| width > 0 && height > 0;
     let valid_family = |entry: &sampled_draw| match (entry.family, &entry.texture, &entry.auxiliary) {
@@ -790,9 +789,9 @@ pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[
     };
     let operation = "Scene_execution.prepare_scene3";
     if ![r, g, b, a, clear_depth].iter().all(|v| v.is_finite()) || clear_depth < 0.0 || clear_depth > 1.0 {
-        failure(operation, ErrorKind::InvalidArgument, "clear state is malformed")
+        Err(failure_error(operation, ErrorKind::InvalidArgument, "clear state is malformed"))
     } else if !entries.iter().all(|entry| valid_entry(entry)) {
-        failure(operation, ErrorKind::InvalidArgument, "draw family, resources, samples, mesh, or extent is malformed")
+        Err(failure_error(operation, ErrorKind::InvalidArgument, "draw family, resources, samples, mesh, or extent is malformed"))
     } else {
         Ok(prepared_scene3 { entries: entries.to_vec() })
     }
@@ -861,7 +860,7 @@ fn sample_counts(device: &Device) -> Vec<i64> {
     [1, 4, 9, 16].into_iter().filter(|samples| *samples <= max).collect()
 }
 
-fn allocate_target(device: &Device, configuration: &Configuration) -> R<Texture> {
+fn allocate_target(device: &Device, configuration: &Configuration) -> Result<Texture, Error> {
     backend::create_texture(device, texture_descriptor(configuration))
 }
 
@@ -881,8 +880,8 @@ pub fn create(
     offscreen: bool,
     driver: backend::Driver,
     configuration: &Configuration,
-    make: &dyn Fn(&Device, pipeline_family, Blend, i64) -> R<Pipeline>,
-) -> R<t> {
+    make: &dyn Fn(&Device, pipeline_family, Blend, i64) -> Result<Pipeline, Error>,
+) -> Result<t, Error> {
     let owns_device = device.is_none();
     let device = match device {
         Some(device) => device,
@@ -1077,7 +1076,7 @@ fn scratch_mem_mesh(scratch: &prepared_scratch, item: &cached_ref) -> bool {
 /// One entry per key. A hit needs no hashing: vertex-stable keys carry their identity, other draws
 /// keep the exact source bytes they were uploaded from and compare them physically. Content hashing
 /// happens once per upload and only decides a same-key miss for fresh but equal bytes.
-fn prepare(value: &mut t, uniforms: Option<&bytes>, vertex_stable: bool, mesh: &mesh) -> R<cached_ref> {
+fn prepare(value: &mut t, uniforms: Option<&bytes>, vertex_stable: bool, mesh: &mesh) -> Result<cached_ref, Error> {
     let uniform_bytes: Vec<u8> = uniforms.map(|b| b.borrow().clone()).unwrap_or_default();
     let valid_uniforms = uniforms.is_none_or(|bytes_| valid_uniform_bytes(&bytes_.borrow()));
     let key = mesh_key_string(&mesh.key);
@@ -1151,7 +1150,7 @@ fn prepare_upload(
     mesh: &mesh,
     key: &str,
     existing: Option<cached_ref>,
-) -> R<cached_ref> {
+) -> Result<cached_ref, Error> {
     let vertices = mesh.vertices.borrow();
     let indices = mesh.indices.borrow();
     let (vertex_count, index_count) = (mesh.vertex_count, mesh.index_count);
@@ -1162,7 +1161,7 @@ fn prepare_upload(
         || (total == 0 && matches!(mesh.key, mesh_key::Host(_)))
         || !valid_uniforms
     {
-        return failure("Scene_execution.prepare", ErrorKind::InvalidArgument, "mesh payload or transform uniforms are malformed");
+        return Err(failure_error("Scene_execution.prepare", ErrorKind::InvalidArgument, "mesh payload or transform uniforms are malformed"));
     }
     let payload_hash = if vertex_stable { String::new() } else { content_hash(mesh, uniform_bytes) };
     let uniform_offset = uniforms.map(|_| (vertices.len() + indices.len()) as i64);
@@ -1224,7 +1223,7 @@ fn prepare_upload(
             let buffer = backend::create_buffer(&value.device, descriptor, None)?;
             let offset = vertices.len() as i64;
             // Indices and uniforms are written apart: joining them first copied every index.
-            let write = |offset: i64, data: &[u8]| -> R<()> {
+            let write = |offset: i64, data: &[u8]| -> Result<(), Error> {
                 backend::write_buffer(&buffer, offset, data).inspect_err(|_| {
                     let _ = backend::destroy_buffer(&buffer);
                 })
@@ -1303,7 +1302,7 @@ enum deferred {
     Texture(Texture),
 }
 
-fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<bytes>]) -> R<Vec<Option<uniform_slice>>> {
+fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<bytes>]) -> Result<Vec<Option<uniform_slice>>, Error> {
     let operation = "Scene_execution.prepare_uniforms";
     // one page per plan S6: a frame's needs far under it for long enough bring it back down, also
     // when the uniforms stop changing
@@ -1343,7 +1342,7 @@ fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<
         return Ok(value.previous_uniforms.clone());
     }
     if malformed_scene3() {
-        return failure(operation, ErrorKind::InvalidArgument, "Scene3 transform uniforms are malformed");
+        return Err(failure_error(operation, ErrorKind::InvalidArgument, "Scene3 transform uniforms are malformed"));
     }
     drop_plans(value);
     value.previous_uniforms = Vec::new();
@@ -1363,7 +1362,7 @@ fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<
         }
     }
     if !valid {
-        return failure(operation, ErrorKind::Capacity, "one submission exceeds the bounded transform-uniform bytes");
+        return Err(failure_error(operation, ErrorKind::Capacity, "one submission exceeds the bounded transform-uniform bytes"));
     }
     if needed == 0 {
         return Ok(vec![None; sources.len()]);
@@ -1463,7 +1462,7 @@ fn valid_texture(source: &sampled_texture) -> bool {
         }
 }
 
-fn texture_upload_scratch_for(value: &mut t, total: i64) -> R<()> {
+fn texture_upload_scratch_for(value: &mut t, total: i64) -> Result<(), Error> {
     if value.staged_frame != value.frame {
         value.staged_stream = value.staged_frame == value.frame - 1;
         value.staged_frame = value.frame;
@@ -1515,14 +1514,14 @@ fn levels_hash(source: &sampled_texture) -> String {
     digest_hex(parts.join("|").as_bytes())
 }
 
-fn prepare_texture(value: &mut t, defer: &mut Vec<deferred>, source: &sampled_texture) -> R<cached_texture_ref> {
+fn prepare_texture(value: &mut t, defer: &mut Vec<deferred>, source: &sampled_texture) -> Result<cached_texture_ref, Error> {
     if let Some(texture) = &source.gpu {
         let (device_id, _) = backend::texture_driver_token(texture);
         if !valid_texture(source) {
-            return failure("Scene_execution.prepare_texture", ErrorKind::InvalidArgument, "GPU image is malformed or destroyed");
+            return Err(failure_error("Scene_execution.prepare_texture", ErrorKind::InvalidArgument, "GPU image is malformed or destroyed"));
         }
         if device_id != ogpu::handle::device_id(backend::device_handle(&value.device)) {
-            return failure("Scene_execution.prepare_texture", ErrorKind::CrossDevice, "GPU image belongs to another renderer");
+            return Err(failure_error("Scene_execution.prepare_texture", ErrorKind::CrossDevice, "GPU image belongs to another renderer"));
         }
         return Ok(Rc::new(RefCell::new(cached_texture {
             texture_key: source.key.clone(),
@@ -1576,9 +1575,9 @@ fn upload_texture(
     source: &sampled_texture,
     hash: String,
     reusable: Option<cached_texture_ref>,
-) -> R<cached_texture_ref> {
+) -> Result<cached_texture_ref, Error> {
     if !valid_texture(source) {
-        return failure("Scene_execution.prepare_texture", ErrorKind::InvalidArgument, "texture or sampler is malformed");
+        return Err(failure_error("Scene_execution.prepare_texture", ErrorKind::InvalidArgument, "texture or sampler is malformed"));
     }
     let texel = texel_bytes(source);
     let shape = format!(
@@ -1657,9 +1656,9 @@ fn upload_texture(
         destroy_created(&texture);
         return Err(e);
     }
-    let uploaded = (|| -> R<()> {
+    let uploaded = (|| -> Result<(), Error> {
         let commands = backend::begin_commands(&value.queue)?;
-        let encoded = (|| -> R<backend::Receipt> {
+        let encoded = (|| -> Result<backend::Receipt, Error> {
             let blit = backend::blit_encoder(&commands)?;
             for (index, level) in source.levels.iter().enumerate() {
                 backend::buffer_to_texture(
@@ -1728,7 +1727,7 @@ fn upload_texture(
     }
 }
 
-fn prepare_storage(value: &mut t, key: &str, bytes_: &bytes) -> R<cached_auxiliary_ref> {
+fn prepare_storage(value: &mut t, key: &str, bytes_: &bytes) -> Result<cached_auxiliary_ref, Error> {
     let found = side_lru::find(&mut value.auxiliary_cache, &skey(key)).map(|item| cached_auxiliary_of(&item));
     if let Some(item) = found {
         if Rc::ptr_eq(&item.borrow().auxiliary_source, bytes_) {
@@ -1761,7 +1760,7 @@ fn prepare_storage(value: &mut t, key: &str, bytes_: &bytes) -> R<cached_auxilia
     Ok(item)
 }
 
-fn prepare_auxiliary(value: &mut t, source: &auxiliary_resource) -> R<cached_auxiliary_ref> {
+fn prepare_auxiliary(value: &mut t, source: &auxiliary_resource) -> Result<cached_auxiliary_ref, Error> {
     prepare_storage(value, &source.key, &source.buffer)
 }
 
@@ -1788,7 +1787,7 @@ fn mesh_identity(mesh: &mesh) -> String {
     )
 }
 
-fn combine_meshes(meshes: &[&mesh]) -> R<mesh> {
+fn combine_meshes(meshes: &[&mesh]) -> Result<mesh, Error> {
     let operation = "Scene_execution.combine_meshes";
     let valid_indices = |mesh: &mesh| {
         let indices = mesh.indices.borrow();
@@ -1807,13 +1806,13 @@ fn combine_meshes(meshes: &[&mesh]) -> R<mesh> {
             || blen(&mesh.indices) as i64 != mesh.index_count * 4
             || !valid_indices(mesh)
         {
-            return failure(operation, ErrorKind::InvalidArgument, "packed mesh cardinality is inconsistent");
+            return Err(failure_error(operation, ErrorKind::InvalidArgument, "packed mesh cardinality is inconsistent"));
         }
         if vertex_bytes > MAX_STRING_LENGTH - vlen
             || vertex_count > i32::MAX as i64 - mesh.vertex_count
             || index_count > MAX_STRING_LENGTH / 4 - mesh.index_count
         {
-            return failure(operation, ErrorKind::Capacity, "combined mesh exceeds packed representation limits");
+            return Err(failure_error(operation, ErrorKind::Capacity, "combined mesh exceeds packed representation limits"));
         }
         vertex_bytes += vlen;
         vertex_count += mesh.vertex_count;
@@ -1846,7 +1845,15 @@ fn combine_meshes(meshes: &[&mesh]) -> R<mesh> {
     })
 }
 
-fn same_optional_rc<A>(a: &Option<Rc<A>>, b: &Option<Rc<A>>) -> bool {
+fn same_optional_texture(a: &Option<Rc<sampled_texture>>, b: &Option<Rc<sampled_texture>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+        _ => false,
+    }
+}
+
+fn same_optional_auxiliary(a: &Option<Rc<auxiliary_resource>>, b: &Option<Rc<auxiliary_resource>>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => Rc::ptr_eq(a, b),
@@ -1862,7 +1869,7 @@ fn draw_bytes(entry: &sampled_draw) -> i64 {
     (blen(&entry.draw.mesh.vertices) + blen(&entry.draw.mesh.indices)) as i64 + attribute_bytes(entry)
 }
 
-fn coalesce_draws(draws: &[draw]) -> R<Vec<draw>> {
+fn coalesce_draws(draws: &[draw]) -> Result<Vec<draw>, Error> {
     let stride = |mesh: &mesh| if mesh.vertex_count == 0 { 0 } else { blen(&mesh.vertices) as i64 / mesh.vertex_count };
     let compatible = |first: &sampled_draw, next: &sampled_draw| {
         matches!((&first.draw.mesh.key, &next.draw.mesh.key), (mesh_key::Host(_), mesh_key::Host(_)))
@@ -1872,8 +1879,8 @@ fn coalesce_draws(draws: &[draw]) -> R<Vec<draw>> {
             && first.draw.state == next.draw.state
             && first.draw.mesh.primitive == next.draw.mesh.primitive
             && stride(&first.draw.mesh) == stride(&next.draw.mesh)
-            && same_optional_rc(&first.texture, &next.texture)
-            && same_optional_rc(&first.auxiliary, &next.auxiliary)
+            && same_optional_texture(&first.texture, &next.texture)
+            && same_optional_auxiliary(&first.auxiliary, &next.auxiliary)
             && first.vertex_attributes.is_some() == next.vertex_attributes.is_some()
     };
     let mut result: Vec<draw> = Vec::new();
@@ -1882,7 +1889,7 @@ fn coalesce_draws(draws: &[draw]) -> R<Vec<draw>> {
         let first = &draws[position];
         let first_bytes = draw_bytes(first);
         if first_bytes > cache_byte_capacity {
-            return failure("Scene_execution.coalesce", ErrorKind::Capacity, "one mesh exceeds the batch byte capacity");
+            return Err(failure_error("Scene_execution.coalesce", ErrorKind::Capacity, "one mesh exceeds the batch byte capacity"));
         }
         let mut packed_bytes = first_bytes;
         let mut end = position + 1;
@@ -1930,10 +1937,10 @@ fn prepared_bytes_of(draws: &[draw]) -> i64 {
     draws.iter().map(|entry| draw_bytes(entry)).sum()
 }
 
-fn resolve_prepared(value: &mut t, prepared: &Option<(String, i64)>, draws: &[draw]) -> R<Vec<draw>> {
+fn resolve_prepared(value: &mut t, prepared: &Option<(String, i64)>, draws: &[draw]) -> Result<Vec<draw>, Error> {
     match prepared {
         Some((identity, _)) if identity.is_empty() => {
-            failure("Scene_execution.prepare_run", ErrorKind::InvalidArgument, "prepared identity is empty")
+            Err(failure_error("Scene_execution.prepare_run", ErrorKind::InvalidArgument, "prepared identity is empty"))
         }
         Some((identity, version)) => {
             if let Some(item) = side_lru::find(&mut value.prepared_cache, &skey(identity)) {
@@ -2022,9 +2029,9 @@ fn make_prepared_slot() -> prepared_slot {
     }
 }
 
-fn ensure_prepared_scratch(scratch: &mut prepared_scratch, needed: usize) -> R<()> {
+fn ensure_prepared_scratch(scratch: &mut prepared_scratch, needed: usize) -> Result<(), Error> {
     if needed > prepared_scratch_capacity {
-        return failure("Renderer.submit", ErrorKind::Capacity, "one submission exceeds the bounded prepared-draw capacity");
+        return Err(failure_error("Renderer.submit", ErrorKind::Capacity, "one submission exceeds the bounded prepared-draw capacity"));
     }
     if needed <= scratch.scratch_slots.len() {
         return Ok(());
@@ -2206,7 +2213,7 @@ fn render_target(
     clear: (f64, f64, f64, f64),
     later_color: bool,
     later_depth: bool,
-) -> R<RenderTarget> {
+) -> Result<RenderTarget, Error> {
     // an attachment no other pass reads needs no memory: it clears here and only its resolve stays
     let color_passes = load == Load::Clear && !later_color;
     let depth_passes = state.depth_load == Load::Clear && !later_depth;
@@ -2247,7 +2254,7 @@ fn sampler_key(descriptor: &SamplerDescriptor) -> String {
     format!("{:?}", descriptor)
 }
 
-fn sampler_for(value: &mut t, descriptor: &SamplerDescriptor) -> R<Sampler> {
+fn sampler_for(value: &mut t, descriptor: &SamplerDescriptor) -> Result<Sampler, Error> {
     let key = sampler_key(descriptor);
     if let Some(sampler) = value.samplers.get(&key) {
         return Ok(sampler.clone());
@@ -2268,7 +2275,7 @@ fn sampler_for(value: &mut t, descriptor: &SamplerDescriptor) -> R<Sampler> {
 
 const argument_page_bytes: i64 = 256 * 1024;
 
-fn argument_encoder(value: &mut t, variant: usize) -> R<Argument> {
+fn argument_encoder(value: &mut t, variant: usize) -> Result<Argument, Error> {
     if let Some(argument) = &value.pipelines[variant].argument {
         return Ok(argument.clone());
     }
@@ -2279,7 +2286,7 @@ fn argument_encoder(value: &mut t, variant: usize) -> R<Argument> {
 
 /// Canonical Scene2 binds its texture and sampler through one argument slice per (texture, sampler)
 /// pair inside a shared page, so indirect commands can reference textures.
-fn argument_slice(value: &mut t, variant: usize, texture: &Texture, sampler_descriptor: &SamplerDescriptor) -> R<(Buffer, i64)> {
+fn argument_slice(value: &mut t, variant: usize, texture: &Texture, sampler_descriptor: &SamplerDescriptor) -> Result<(Buffer, i64), Error> {
     let argument = argument_encoder(value, variant)?;
     if value.arguments.is_none() {
         let length = backend::argument_length(&argument);
@@ -2304,7 +2311,7 @@ fn argument_slice(value: &mut t, variant: usize, texture: &Texture, sampler_desc
         (pool.argument_stride, pool.argument_buffer.clone())
     };
     if backend::argument_length(&argument) > stride {
-        return failure("Scene_execution.argument_slice", ErrorKind::Capacity, "argument layout exceeds the shared slice stride");
+        return Err(failure_error("Scene_execution.argument_slice", ErrorKind::Capacity, "argument layout exceeds the shared slice stride"));
     }
     let key = (backend::texture_id(texture), sampler_key(sampler_descriptor));
     if let Some(offset) = value.arguments.as_ref().expect("argument pool").slices.get(&key) {
@@ -2342,7 +2349,7 @@ fn discard(frame: &acquired) {
 /// One presented frame stays in flight: the CPU builds the next frame while the GPU draws this one.
 /// Waiting here, before any preparation, keeps every resource the previous frame used alive until it
 /// completes, so retiring and destroying after the next submission stays safe.
-fn settle(value: &mut t) -> R<()> {
+fn settle(value: &mut t) -> Result<(), Error> {
     match value.in_flight.take() {
         None => Ok(()),
         Some(epoch) => backend::complete_through(&value.queue, epoch),
@@ -2354,13 +2361,13 @@ enum acquisition {
     Skipped,
 }
 
-fn acquire(value: &mut t) -> R<acquisition> {
+fn acquire(value: &mut t) -> Result<acquisition, Error> {
     settle(value)?;
     match &value.surface {
         None => Ok(acquisition::Acquired(acquired::Offscreen)),
         Some(surface) => match backend::acquire_sync(surface)? {
             backend::AcquireResult::Timeout | backend::AcquireResult::Occluded => Ok(acquisition::Skipped),
-            backend::AcquireResult::DeviceLost => failure("Renderer.submit", ErrorKind::DeviceLost, "device lost"),
+            backend::AcquireResult::DeviceLost => Err(failure_error("Renderer.submit", ErrorKind::DeviceLost, "device lost")),
             backend::AcquireResult::Acquired(frame) => Ok(acquisition::Acquired(acquired::Presented(frame))),
         },
     }
@@ -2376,7 +2383,7 @@ fn encode_batch(
     clear: (f64, f64, f64, f64),
     later: &[Rc<batch_plan>],
     batch: &batch_plan,
-) -> R<()> {
+) -> Result<(), Error> {
     let same_samples = |next: &Rc<batch_plan>| next.batch_samples == batch.batch_samples;
     let target = render_target(
         value,
@@ -2464,7 +2471,7 @@ fn encode_batch(
     backend::end_render(&encoder)
 }
 
-fn build_icb(value: &mut t, batch: &batch_plan) -> R<()> {
+fn build_icb(value: &mut t, batch: &batch_plan) -> Result<(), Error> {
     let draws = &batch.batch_draws;
     if draws.is_empty()
         || !plain_draws(draws)
@@ -2474,7 +2481,7 @@ fn build_icb(value: &mut t, batch: &batch_plan) -> R<()> {
         return Ok(());
     }
     let icb = backend::create_icb(&value.device, draws.len() as i64)?;
-    let encoded = (|| -> R<()> {
+    let encoded = (|| -> Result<(), Error> {
         for (index, draw) in draws.iter().enumerate() {
             let index = index as i64;
             let bd = &draw.plan_draw;
@@ -2504,7 +2511,7 @@ fn build_icb(value: &mut t, batch: &batch_plan) -> R<()> {
     }
 }
 
-fn submit_frame(value: &mut t, frame: &acquired, commands: &backend::Commands) -> R<()> {
+fn submit_frame(value: &mut t, frame: &acquired, commands: &backend::Commands) -> Result<(), Error> {
     let committed = match frame {
         acquired::Offscreen => backend::commit(commands),
         acquired::Presented(surface_frame) => backend::commit_present(commands, &value.target, surface_frame),
@@ -2526,7 +2533,7 @@ fn submit_frame(value: &mut t, frame: &acquired, commands: &backend::Commands) -
 }
 
 /// Encodes `batches` into one command buffer and completes it.
-fn encode_frame(value: &mut t, frame: &acquired, clear: (f64, f64, f64, f64), batches: &[Rc<batch_plan>]) -> R<()> {
+fn encode_frame(value: &mut t, frame: &acquired, clear: (f64, f64, f64, f64), batches: &[Rc<batch_plan>]) -> Result<(), Error> {
     let commands = match backend::begin_commands(&value.queue) {
         Ok(commands) => commands,
         Err(e) => {
@@ -2534,7 +2541,7 @@ fn encode_frame(value: &mut t, frame: &acquired, clear: (f64, f64, f64, f64), ba
             return Err(e);
         }
     };
-    let encoded = (|| -> R<()> {
+    let encoded = (|| -> Result<(), Error> {
         for (index, batch) in batches.iter().enumerate() {
             encode_batch(value, &commands, clear, &batches[index + 1..], batch)?;
         }
@@ -2578,7 +2585,7 @@ fn sun_descriptor(label: &str, usage: Vec<TextureUsage>) -> TextureDescriptor {
     }
 }
 
-fn render_sun(value: &mut t) -> R<()> {
+fn render_sun(value: &mut t) -> Result<(), Error> {
     let mut request: Option<String> = None;
     for index in (0..value.prepared_scratch.scratch_length).rev() {
         if let Some(key) = sun_key_of(&value.prepared_scratch.scratch_slots[index]) {
@@ -2591,7 +2598,7 @@ fn render_sun(value: &mut t) -> R<()> {
     }
     if value.sun.is_none() {
         let Some(factory) = value.sun_factory.clone() else {
-            return failure("Renderer.submit", ErrorKind::Unsupported, "renderer has no sun shadow pipeline");
+            return Err(failure_error("Renderer.submit", ErrorKind::Unsupported, "renderer has no sun shadow pipeline"));
         };
         let pipeline = factory(&value.device)?;
         let color = match backend::create_texture(
@@ -2622,7 +2629,7 @@ fn render_sun(value: &mut t) -> R<()> {
         (sun.sun_pipeline.clone(), sun.sun_color.clone(), sun.sun_depth.clone())
     };
     let commands = backend::begin_commands(&value.queue)?;
-    let encoded = (|| -> R<()> {
+    let encoded = (|| -> Result<(), Error> {
         let encoder = backend::render_encoder(
             &commands,
             &RenderTarget {
@@ -2721,9 +2728,9 @@ pub fn sun_shadow_passes(value: &t) -> i64 {
     value.sun_passes
 }
 
-fn replay_plan(value: &mut t, plan: &Rc<replay_plan>) -> R<bool> {
+fn replay_plan(value: &mut t, plan: &Rc<replay_plan>) -> Result<bool, Error> {
     if !plan.replay_gpu_vertices.iter().all(gpu_vertices_valid) {
-        return failure("Scene_execution.replay", ErrorKind::StaleHandle, "GPU vertices are stale or closed");
+        return Err(failure_error("Scene_execution.replay", ErrorKind::StaleHandle, "GPU vertices are stale or closed"));
     }
     match acquire(value)? {
         acquisition::Skipped => Ok(false),
@@ -2764,7 +2771,7 @@ fn assoc(table: &[(i64, i64)], slot: i64) -> i64 {
 type plan_entry_result = (plan_draw, automatic_signature);
 
 /// One draw's plan: the bindings its pipeline's Lisp declaration order expects.
-fn plan_entry(value: &mut t, index: usize) -> R<plan_entry_result> {
+fn plan_entry(value: &mut t, index: usize) -> Result<plan_entry_result, Error> {
     let slot = &value.prepared_scratch.scratch_slots[index];
     let family = slot.slot_family;
     let blend = slot.slot_blend;
@@ -2782,7 +2789,7 @@ fn plan_entry(value: &mut t, index: usize) -> R<plan_entry_result> {
     let item = item_ref.borrow();
     if let Some(source) = &slot_gpu_vertices {
         if !gpu_vertices_valid(source) {
-            return failure("Renderer.submit", ErrorKind::StaleHandle, "GPU vertices are stale or closed");
+            return Err(failure_error("Renderer.submit", ErrorKind::StaleHandle, "GPU vertices are stale or closed"));
         }
     }
     let scene2 = family == Scene2 || family == Scene2_textured;
@@ -3019,7 +3026,7 @@ fn batch_resources_of(value: &t, draws: &[plan_draw]) -> Vec<ResourceUse> {
     resources
 }
 
-fn plan_batches(value: &mut t) -> R<Vec<(Rc<batch_plan>, Vec<automatic_signature>)>> {
+fn plan_batches(value: &mut t) -> Result<Vec<(Rc<batch_plan>, Vec<automatic_signature>)>, Error> {
     let length = value.prepared_scratch.scratch_length;
     let mut planned: Vec<(Rc<batch_plan>, Vec<automatic_signature>)> = Vec::new();
     let mut first = true;
@@ -3099,7 +3106,7 @@ fn finish_prepared_frame(
     draw_count: i64,
     uniform_slices: Vec<Option<uniform_slice>>,
     after_prepare: &mut dyn FnMut(),
-) -> R<bool> {
+) -> Result<bool, Error> {
     let candidate_fingerprint = automatic_candidate_fingerprint(&value.prepared_scratch);
     after_prepare();
     let hit = match &value.automatic_submission {
@@ -3198,7 +3205,7 @@ fn finish_prepared_frame(
 /// Evicted and oversize resources are valid through this synchronous submission, but not through
 /// another replay. Retained plans borrow cache resources; drop both replay paths before releasing
 /// any of them, including on preparation/submission failure.
-fn finish_submit(value: &mut t, deferred_items: Vec<deferred>, result: R<bool>) -> R<bool> {
+fn finish_submit(value: &mut t, deferred_items: Vec<deferred>, result: Result<bool, Error>) -> Result<bool, Error> {
     let retired_pending = {
         let r = value.retired.borrow();
         !r.retired_buffers.is_empty() || !r.retired_textures.is_empty()
@@ -3229,15 +3236,15 @@ pub fn submit(
     clear: Option<(f64, f64, f64, f64)>,
     value: &mut t,
     draws: &[draw],
-) -> R<bool> {
+) -> Result<bool, Error> {
     let clear = clear.unwrap_or((0.0, 0.0, 0.0, 0.0));
     if value.dead {
         after_prepare();
-        return failure("Renderer.submit", ErrorKind::StaleHandle, "renderer is destroyed");
+        return Err(failure_error("Renderer.submit", ErrorKind::StaleHandle, "renderer is destroyed"));
     }
     if draws.len() > prepared_scratch_capacity {
         after_prepare();
-        return failure("Renderer.submit", ErrorKind::Capacity, "one submission exceeds the bounded prepared-draw capacity");
+        return Err(failure_error("Renderer.submit", ErrorKind::Capacity, "one submission exceeds the bounded prepared-draw capacity"));
     }
     if let (Some((identity, version)), Some(cached)) = (&prepared, &value.prepared_submission) {
         if cached.submission_identity == *identity && cached.submission_version == *version && cached.submission_plan.replay_clear == clear {
@@ -3285,11 +3292,11 @@ pub fn submit(
     });
     if !supported {
         after_prepare();
-        return failure("Renderer.submit", ErrorKind::Unsupported, "pipeline family/blend variant is unavailable");
+        return Err(failure_error("Renderer.submit", ErrorKind::Unsupported, "pipeline family/blend variant is unavailable"));
     }
     if !valid {
         after_prepare();
-        return failure("Renderer.submit", ErrorKind::InvalidArgument, "draw resource preflight failed");
+        return Err(failure_error("Renderer.submit", ErrorKind::InvalidArgument, "draw resource preflight failed"));
     }
     let mut deferred_items: Vec<deferred> = Vec::new();
     clear_prepared_scratch(&mut value.prepared_scratch);
@@ -3317,7 +3324,7 @@ fn submit_prepared(
     clear: (f64, f64, f64, f64),
     draws: &[draw],
     after_prepare: &mut dyn FnMut(),
-) -> R<bool> {
+) -> Result<bool, Error> {
     let modes: Vec<draw_mode> = draws
         .iter()
         .map(|entry| {
@@ -3380,7 +3387,7 @@ fn prepare_all(
     draws: &[draw],
     modes: &[draw_mode],
     uniform_slices: &[Option<uniform_slice>],
-) -> R<()> {
+) -> Result<(), Error> {
     for entry in draws {
         let position = value.prepared_scratch.scratch_length;
         let mode = &modes[position];
@@ -3450,10 +3457,10 @@ pub fn replay_prepared_sampled_resources(
     identity: &str,
     version: i64,
     value: &mut t,
-) -> R<Option<(bool, i64)>> {
+) -> Result<Option<(bool, i64)>, Error> {
     let clear = clear.unwrap_or((0.0, 0.0, 0.0, 0.0));
     if value.dead {
-        return failure("Scene_execution.replay_prepared_sampled_resources", ErrorKind::StaleHandle, "renderer is destroyed");
+        return Err(failure_error("Scene_execution.replay_prepared_sampled_resources", ErrorKind::StaleHandle, "renderer is destroyed"));
     }
     let cached = match &value.prepared_submission {
         Some(cached) if cached.submission_identity == identity && cached.submission_version == version && cached.submission_plan.replay_clear == clear => {
@@ -3467,7 +3474,7 @@ pub fn replay_prepared_sampled_resources(
     }
 }
 
-pub fn resize(value: &mut t, configuration: &Configuration) -> R<()> {
+pub fn resize(value: &mut t, configuration: &Configuration) -> Result<(), Error> {
     let _ = settle(value);
     drop_plans(value);
     let mut samples: Vec<i64> = value.pipelines.iter().map(|variant| variant.samples).collect();
@@ -3576,28 +3583,34 @@ pub fn pipeline_count(value: &t) -> i64 {
     value.pipelines.len() as i64
 }
 
-pub fn read_pixels(value: &mut t, bytes_per_row: i64) -> R<Vec<u8>> {
+pub fn read_pixels(value: &mut t, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
     settle(value)?;
     backend::read_texture(&value.target, bytes_per_row)
 }
 
+fn sorted_samplers(samplers: HashMap<String, Sampler>) -> Vec<(String, Sampler)> {
+    let mut entries: Vec<(String, Sampler)> = samplers.into_iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
+}
+
 /// Every owned handle is released; the first failure is reported after the remaining releases and
 /// device teardown have run.
-pub fn destroy(value: &mut t) -> R<()> {
+pub fn destroy(value: &mut t) -> Result<(), Error> {
     if value.dead {
         return Ok(());
     }
     let _ = settle(value);
     value.dead = true;
     let mut first: Option<Error> = None;
-    let record = |result: R<()>, first: &mut Option<Error>| {
+    let record = |result: Result<(), Error>, first: &mut Option<Error>| {
         if let Err(e) = result {
             if first.is_none() {
                 *first = Some(e);
             }
         }
     };
-    let named = |name: &str, result: R<()>, first: &mut Option<Error>| {
+    let named = |name: &str, result: Result<(), Error>, first: &mut Option<Error>| {
         if let Err(mut e) = result {
             e.message = format!("{} ({})", e.message, name);
             if first.is_none() {
@@ -3625,8 +3638,8 @@ pub fn destroy(value: &mut t) -> R<()> {
     side_lru::clear(&mut value.auxiliary_cache);
     side_lru::clear(&mut value.texture_cache);
     {
-        let mut buffer_results: Vec<R<()>> = Vec::new();
-        let mut texture_results: Vec<R<()>> = Vec::new();
+        let mut buffer_results: Vec<Result<(), Error>> = Vec::new();
+        let mut texture_results: Vec<Result<(), Error>> = Vec::new();
         drain_retired(
             &value.retired,
             &mut |b| buffer_results.push(backend::destroy_buffer(b)),
@@ -3645,10 +3658,9 @@ pub fn destroy(value: &mut t) -> R<()> {
     if let Some(pool) = value.arguments.take() {
         named("argument page", backend::destroy_buffer(&pool.argument_buffer), &mut first);
     }
-    for sampler in value.samplers.values() {
-        record(backend::destroy_sampler(sampler), &mut first);
+    for (_, sampler) in sorted_samplers(std::mem::take(&mut value.samplers)) {
+        record(backend::destroy_sampler(&sampler), &mut first);
     }
-    value.samplers.clear();
     if let Some(sun) = value.sun.take() {
         record(backend::destroy_texture(&sun.sun_color), &mut first);
         record(backend::destroy_texture(&sun.sun_depth), &mut first);

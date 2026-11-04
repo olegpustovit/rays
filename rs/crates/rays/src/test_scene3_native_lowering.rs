@@ -173,9 +173,9 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
 fn device_host_copy_made_once() {
     let made = Rc::new(Cell::new(0));
     let host_count = made.clone();
-    let host: Rc<dyn Fn() -> mesh::t> = Rc::new(move || {
+    let host: Rc<dyn Fn() -> Result<mesh::t, String>> = Rc::new(move || {
         host_count.set(host_count.get() + 1);
-        test_meshes::box_(1., 1., 1.)
+        Ok(test_meshes::box_(1., 1., 1.))
     });
     let box_ = Some((vec3::create(-1., 0., 0.), vec3::create(1., 2., 3.)));
     let bounds: Rc<dyn Fn() -> Option<(vec3::T, vec3::T)>> = Rc::new(move || box_);
@@ -193,8 +193,8 @@ fn device_host_copy_made_once() {
     .expect("device mesh");
     let unread = mesh::View::unread(&m);
     assert!(made.get() == 0 && unread.vertices.x.is_empty() && *unread.indices == vec![0, 1, 2], "a device mesh's own arrays made its host copy");
-    assert!(mesh::bounds(&m) == box_ && made.get() == 0, "a device mesh's bounds made its host copy");
-    assert!(mesh::View::view(&m).vertices.len() == 24 && made.get() == 1, "a device mesh's view is not its host copy");
+    assert!(mesh::bounds(&m) == Ok(box_) && made.get() == 0, "a device mesh's bounds made its host copy");
+    assert!(mesh::View::view(&m).unwrap().vertices.len() == 24 && made.get() == 1, "a device mesh's view is not its host copy");
     let _ = mesh::View::packed_view(&m);
     let _ = mesh::centroid(&m);
     assert_eq!(made.get(), 1, "a device mesh made its host copy twice");
@@ -206,9 +206,9 @@ fn resident_streams() {
     Layer::with_cache_context(&context, &mut || {
         let made = Rc::new(Cell::new(0));
         let host_count = made.clone();
-        let host: Rc<dyn Fn() -> mesh::t> = Rc::new(move || {
+        let host: Rc<dyn Fn() -> Result<mesh::t, String>> = Rc::new(move || {
             host_count.set(host_count.get() + 1);
-            test_meshes::box_(1., 1., 1.)
+            Ok(test_meshes::box_(1., 1., 1.))
         });
         let create = |indices: Option<Vec<i64>>, colors: Option<Vec<color::T>>, tex_coords: Option<Vec<vec2::T>>, mode: mesh::mode, index_count: i64, color_width: i64| {
             mesh::View::create_device(
@@ -265,7 +265,7 @@ fn resident_streams() {
         let _ = stage(d3::render_mode::Vertices);
         let _ = mesh::View::packed_view(&m);
         assert_eq!(made.get(), 1);
-        let indices = (*mesh::View::packed_view(&m).indices).clone();
+        let indices = (*mesh::View::packed_view(&m).unwrap().indices).clone();
         let legacy = mesh::View::create_device(
             mesh::View::device_args {
                 indices: Some(indices),

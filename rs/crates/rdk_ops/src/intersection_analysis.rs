@@ -13,7 +13,6 @@ use rdk_geom::triangle_intersection::{self, EVENT_STRIDE, MAX_EVENTS};
 
 const OPERATION: &str = "intersection_analysis";
 
-type R<V> = Result<V, error::T>;
 
 pub struct Params {
     pub cancel: Option<Arc<cancel::T>>,
@@ -96,7 +95,7 @@ fn narrow(
     collision_index: &linear_piece_index::T,
     source_piece: i64,
     collision_piece: i64,
-) -> R<usize> {
+) -> Result<usize, error::T> {
     use linear_piece_index::View as V;
     let source_positions = V::positions(source_index);
     let collision_positions = V::positions(collision_index);
@@ -185,7 +184,7 @@ fn event_pass(
     include_coplanar: bool,
     source_index: &linear_piece_index::T,
     collision_index: &linear_piece_index::T,
-) -> R<Raw> {
+) -> Result<Raw, error::T> {
     let (source_pieces, collision_pieces) = if is_self {
         linear_piece_index::View::overlapping_self_pairs(cancel_value, grain, tolerance, source_index)?
     } else {
@@ -284,7 +283,7 @@ fn numerical_weld_tolerance(requested: f64, raw: &Raw) -> f64 {
     float_max(requested, float_max(8.0 * magnitude_ulp, 256.0 * f64::EPSILON * float_max(1.0, extent)))
 }
 
-fn cluster_events(cancel_value: Option<&cancel::T>, tolerance: f64, raw: &Raw) -> R<point_clusters::T> {
+fn cluster_events(cancel_value: Option<&cancel::T>, tolerance: f64, raw: &Raw) -> Result<point_clusters::T, error::T> {
     let x: Arc<[f64]> = Arc::from(raw.x.clone());
     let y: Arc<[f64]> = Arc::from(raw.y.clone());
     let z: Arc<[f64]> = Arc::from(raw.z.clone());
@@ -315,7 +314,7 @@ fn representative_data(clusters: &point_clusters::T, raw: &Raw) -> (i64, Vec<i64
     }
 }
 
-fn point_of_piece_vertex(index: &linear_piece_index::T, piece: i64, u: f64, v: f64, w: f64) -> R<i64> {
+fn point_of_piece_vertex(index: &linear_piece_index::T, piece: i64, u: f64, v: f64, w: f64) -> Result<i64, error::T> {
     use linear_piece_index::View as V;
     let epsilon = 512.0 * f64::EPSILON;
     match V::kind(index, piece) {
@@ -345,7 +344,7 @@ fn point_of_piece_vertex(index: &linear_piece_index::T, piece: i64, u: f64, v: f
     }
 }
 
-fn provenance_piece(index: &linear_piece_index::T, piece: i64, u: f64) -> R<i64> {
+fn provenance_piece(index: &linear_piece_index::T, piece: i64, u: f64) -> Result<i64, error::T> {
     use linear_piece_index::View as V;
     match V::kind(index, piece) {
         Kind::Triangle => Ok(piece),
@@ -375,7 +374,7 @@ fn build_provenance(
     collision_index: &linear_piece_index::T,
     clusters: &point_clusters::T,
     raw: &Raw,
-) -> R<Provenance> {
+) -> Result<Provenance, error::T> {
     use linear_piece_index::View as V;
     let (point_count, of_event, representatives) = representative_data(clusters, raw);
     let source_count = linear_piece_index::piece_count(source_index);
@@ -440,11 +439,11 @@ fn build_provenance(
     Ok(Provenance { x, y, z, offsets, inputs, primitives, uvw, point_numbers })
 }
 
-fn create_output(params: &Params, data: Provenance) -> R<geometry::T> {
+fn create_output(params: &Params, data: Provenance) -> Result<geometry::T, error::T> {
     let point_count = data.x.len() as i64;
     let mut attributes = Vec::new();
     let offsets = &data.offsets;
-    let int_array = |name: &String, values: &Vec<i64>| -> R<attribute::T> {
+    let int_array = |name: &String, values: &Vec<i64>| -> Result<attribute::T, error::T> {
         let rows = packed::IntArray::create_owned(offsets.clone(), values.clone()).map_err(lift)?;
         attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::IntArray(rows)).map_err(lift)
     };
@@ -479,7 +478,7 @@ fn validate_name(name: &Option<String>) -> bool {
 
 /// Emit one welded point per triangle/triangle intersection location. One input performs AxA
 /// analysis; two inputs perform AxB analysis.
-pub fn run(params: &Params, geometry_value: &geometry::T) -> R<geometry::T> {
+pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run_inner(params, geometry_value).map_err(|value| {
         if error::code(&value) == "cancelled" {
             make("cancelled", "Intersection Analysis was cancelled".to_owned())
@@ -489,7 +488,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> R<geometry::T> {
     })
 }
 
-fn run_inner(params: &Params, geometry_value: &geometry::T) -> R<geometry::T> {
+fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
     let tolerance = params.tolerance;
@@ -550,19 +549,12 @@ mod tests {
 
     type P3 = (f64, f64, f64);
 
-    fn get<V>(value: R<V>) -> V {
-        match value {
-            Ok(value) => value,
-            Err(failure) => panic!("{}", error::to_string(&failure)),
-        }
-    }
-
     fn with_topology(points: &[P3], vertex_points: Vec<i64>, offsets: Vec<i64>, kinds: Vec<PrimitiveKind>) -> geometry::T {
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
-        let topology_value = get(topology::create_owned(points.len() as i64, vertex_points, offsets, kinds));
-        get(geometry::create(get(packed::Float3::View::of_owned_exn(x, y, z)), topology_value, None, None, None))
+        let topology_value = topology::create_owned(points.len() as i64, vertex_points, offsets, kinds).unwrap();
+        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
     }
 
     fn mesh(points: &[P3], triangles: &[i64]) -> geometry::T {
@@ -647,7 +639,7 @@ mod tests {
     }
 
     fn run_with(params: Params, value: &geometry::T) -> geometry::T {
-        get(run(&params, value))
+        run(&params, value).unwrap()
     }
 
     fn count(value: &geometry::T) -> i64 {

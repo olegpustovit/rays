@@ -1,7 +1,8 @@
 //! Ogpu_metal.Render_encoder: the driver's render encoder record over a Metal render encoder.
+use ogpu_core::error::Error;
 use crate::{
     command_control::{CommandContext, Resource},
-    device::{fail, R},
+    device::{fail, of_metal_error},
     pipeline::Native,
 };
 use metal::{
@@ -54,12 +55,12 @@ fn depth_store(value: Store) -> StoreAction {
     }
 }
 
-fn render_pipeline(context: &CommandContext, token: i64) -> R<metal::RenderPipeline> {
+fn render_pipeline(context: &CommandContext, token: i64) -> Result<metal::RenderPipeline, Error> {
     let Some(pipeline) = context.pipeline(token) else {
-        return fail(context.operation, ErrorKind::InvalidArgument, "pipeline graph is incomplete");
+        return Err(fail(context.operation, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
     };
     match pipeline.native() {
-        Native::Compute(_) => fail(context.operation, ErrorKind::InvalidArgument, "compute pipeline cannot draw"),
+        Native::Compute(_) => Err(fail(context.operation, ErrorKind::InvalidArgument, "compute pipeline cannot draw")),
         Native::Render(native) => {
             let p = pipeline.clone();
             context.keep(pipeline.retain_submission(), Box::new(move || p.release_submission()))?;
@@ -77,7 +78,7 @@ struct ResolvedDraw {
 
 // ponytail: the OCaml all-indexed fast path (Metal prepared indexed draws, one native call for the
 // batch) is not in the Rust `metal` crate; every batch takes the per-draw path, whose output is the same.
-fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[DriverBatchDraw]) -> R<()> {
+fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[DriverBatchDraw]) -> Result<(), Error> {
     let mut resolved: Vec<ResolvedDraw> = Vec::with_capacity(draws.len());
     for d in draws {
         let native = render_pipeline(context, d.batch_pipeline)?;
@@ -100,15 +101,15 @@ fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[Driver
     let mut previous: Option<i64> = None;
     for (d, r) in draws.iter().zip(resolved.iter()) {
         if previous != Some(r.token) {
-            context.native_of(encoder.set_pipeline(&r.native))?;
+            encoder.set_pipeline(&r.native).map_err(|value| of_metal_error(context.operation, &value))?;
         }
         for (stage, slot, buffer, offset) in &r.buffers {
-            context.native_of(match stage {
+            match stage {
                 ShaderStage::Vertex => encoder.set_vertex_buffer(*slot as usize, *offset as u64, buffer.metal()),
                 ShaderStage::Fragment => encoder.set_fragment_buffer(*slot as usize, *offset as u64, buffer.metal()),
-            })?;
+            }.map_err(|value| of_metal_error(context.operation, &value))?;
         }
-        context.native_of(match &r.index {
+        match &r.index {
             None => encoder.draw_primitives(metal_primitive(d.batch_primitive), d.batch_vertex_start as usize, d.batch_vertex_count as usize, d.batch_instances as usize),
             Some((kind, index_buffer, offset, count)) => encoder.draw_indexed(
                 metal_primitive(d.batch_primitive),
@@ -118,13 +119,13 @@ fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[Driver
                 *count as u64,
                 Some(d.batch_instances as u64),
             ),
-        })?;
+        }.map_err(|value| of_metal_error(context.operation, &value))?;
         previous = Some(r.token);
     }
     Ok(())
 }
 
-fn use_resources(context: &CommandContext, encoder: &RenderEncoder, tokens: &[i64]) -> R<()> {
+fn use_resources(context: &CommandContext, encoder: &RenderEncoder, tokens: &[i64]) -> Result<(), Error> {
     let mut buffers: Vec<metal::Buffer> = Vec::new();
     let mut textures: Vec<metal::Texture> = Vec::new();
     let mut seen: Vec<i64> = Vec::new();
@@ -142,21 +143,21 @@ fn use_resources(context: &CommandContext, encoder: &RenderEncoder, tokens: &[i6
                 context.keep_texture(&texture)?;
                 textures.push(texture.metal().clone());
             }
-            None => return fail(context.operation, ErrorKind::InvalidArgument, "resource graph is incomplete"),
+            None => return Err(fail(context.operation, ErrorKind::InvalidArgument, "resource graph is incomplete")),
         }
     }
     if !buffers.is_empty() {
-        let resources: Vec<RenderResource> = buffers.iter().map(RenderResource::Buffer).collect();
-        context.native_of(encoder.use_resources(&resources, &[ResourceUsage::Read], &[RenderStage::Vertex, RenderStage::Fragment]))?;
+        let resources: Vec<RenderResource> = buffers.iter().map(|buffer| RenderResource::Buffer(buffer.clone())).collect();
+        encoder.use_resources(&resources, &[ResourceUsage::Read], &[RenderStage::Vertex, RenderStage::Fragment]).map_err(|value| of_metal_error(context.operation, &value))?;
     }
     if !textures.is_empty() {
-        let resources: Vec<RenderResource> = textures.iter().map(RenderResource::Texture).collect();
-        context.native_of(encoder.use_resources(&resources, &[ResourceUsage::Sample], &[RenderStage::Fragment]))?;
+        let resources: Vec<RenderResource> = textures.iter().map(|texture| RenderResource::Texture(texture.clone())).collect();
+        encoder.use_resources(&resources, &[ResourceUsage::Sample], &[RenderStage::Fragment]).map_err(|value| of_metal_error(context.operation, &value))?;
     }
     Ok(())
 }
 
-pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> R<DriverRenderEncoder> {
+pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Result<DriverRenderEncoder, Error> {
     let operation = context.operation;
     context.recording()?;
     let color = &target.target_colors[0];
@@ -173,10 +174,10 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> R<Dr
     for texture in resolve.iter().chain(depth.iter()) {
         context.keep_texture(texture)?;
     }
-    let pass = context.native_of(RenderPassDescriptor::create(context.device.metal(), target.target_width as u64, target.target_height as u64, target.target_samples as u64))?;
+    let pass = RenderPassDescriptor::create(context.device.metal(), target.target_width as u64, target.target_height as u64, target.target_samples as u64).map_err(|value| of_metal_error(context.operation, &value))?;
     let fail_pass = |e: metal::Error| {
         let _ = pass.destroy();
-        crate::device::of_metal_error(operation, &e)
+        of_metal_error(operation, &e)
     };
     let (r, g, b, a) = color.color_clear;
     pass.set_attachments(color_texture.metal(), depth.as_ref().map(|d| d.metal()), None, [r, g, b, a]).map_err(&fail_pass)?;
@@ -196,13 +197,13 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> R<Dr
     };
     pass.set_actions(load_action(color.color_load), color_store, depth_load, depth_store_action, depth_clear, LoadAction::Clear, StoreAction::Store, 0).map_err(&fail_pass)?;
     let encoder = RenderEncoder::create(&context.native, &pass).map_err(&fail_pass)?;
-    let finish: Rc<dyn Fn() -> R<()>> = {
+    let finish: Rc<dyn Fn() -> Result<(), Error>> = {
         let (context, encoder, pass) = (context.clone(), encoder.clone(), pass);
         Rc::new(move || {
             *context.open_encoder.borrow_mut() = None;
             let ended = encoder.end_encoding();
             let _ = pass.destroy();
-            context.native_of(ended)
+            ended.map_err(|value| of_metal_error(context.operation, &value))
         })
     };
     {
@@ -240,89 +241,89 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> R<Dr
     Ok(DriverRenderEncoder {
         render_set_pipeline: Box::new(move |token| {
             let native = render_pipeline(&c1, token)?;
-            c1.native_of(e1.set_pipeline(&native))
+            e1.set_pipeline(&native).map_err(|value| of_metal_error(c1.operation, &value))
         }),
         set_stage_buffer: Box::new(move |stage, index, offset, token| {
             let buffer = c2.find_buffer(token)?;
             c2.keep_buffer(&buffer)?;
-            c2.native_of(match stage {
+            match stage {
                 ShaderStage::Vertex => e2.set_vertex_buffer(index as usize, offset as u64, buffer.metal()),
                 ShaderStage::Fragment => e2.set_fragment_buffer(index as usize, offset as u64, buffer.metal()),
-            })
+            }.map_err(|value| of_metal_error(c2.operation, &value))
         }),
         set_stage_texture: Box::new(move |stage, index, token| {
             let texture = c3.find_texture(token)?;
             c3.keep_texture(&texture)?;
-            c3.native_of(match stage {
+            match stage {
                 ShaderStage::Vertex => e3.set_vertex_texture(index as usize, texture.metal()),
                 ShaderStage::Fragment => e3.set_fragment_texture(index as usize, texture.metal()),
-            })
+            }.map_err(|value| of_metal_error(c3.operation, &value))
         }),
         set_stage_sampler: Box::new(move |stage, index, token| {
             let Some(sampler) = c4.sampler(token) else {
-                return fail(operation, ErrorKind::InvalidArgument, "sampler graph is incomplete");
+                return Err(fail(operation, ErrorKind::InvalidArgument, "sampler graph is incomplete"));
             };
             let s = sampler.clone();
             c4.keep(sampler.retain_submission(), Box::new(move || s.release_submission()))?;
-            c4.native_of(match stage {
+            match stage {
                 ShaderStage::Vertex => e4.set_vertex_sampler(index as usize, sampler.metal()),
                 ShaderStage::Fragment => e4.set_fragment_sampler(index as usize, sampler.metal()),
-            })
+            }.map_err(|value| of_metal_error(c4.operation, &value))
         }),
         set_viewport: Box::new(move |rect: Rect| {
-            c5.native_of(e5.set_viewport(Viewport { x: rect.x as f64, y: rect.y as f64, width: rect.width as f64, height: rect.height as f64, znear: 0., zfar: 1. }))
+            e5.set_viewport(Viewport { x: rect.x as f64, y: rect.y as f64, width: rect.width as f64, height: rect.height as f64, znear: 0., zfar: 1. }).map_err(|value| of_metal_error(c5.operation, &value))
         }),
         set_scissor: Box::new(move |rect: Rect| {
-            c6.native_of(e6.set_scissor(Scissor { x: rect.x as usize, y: rect.y as usize, width: rect.width as usize, height: rect.height as usize }))
+            e6.set_scissor(Scissor { x: rect.x as usize, y: rect.y as usize, width: rect.width as usize, height: rect.height as usize }).map_err(|value| of_metal_error(c6.operation, &value))
         }),
-        set_cull: Box::new(move |cull| c7.native_of(e7.set_cull_mode(metal_cull(cull)))),
+        set_cull: Box::new(move |cull| e7.set_cull_mode(metal_cull(cull)).map_err(|value| of_metal_error(c7.operation, &value))),
         set_winding: Box::new(move |winding| {
-            c8.native_of(e8.set_winding(match winding {
+            e8.set_winding(match winding {
                 OgpuWinding::Clockwise => Winding::Clockwise,
                 OgpuWinding::CounterClockwise => Winding::CounterClockwise,
-            }))
+            }).map_err(|value| of_metal_error(c8.operation, &value))
         }),
         set_depth_state: Box::new(move |state| match state {
-            None => c9.native_of(e9.set_depth_stencil_state(None)),
+            None => e9.set_depth_stencil_state(None).map_err(|value| of_metal_error(c9.operation, &value)),
             Some(state) => {
                 let native = c9.depth_state(state)?;
-                c9.native_of(e9.set_depth_stencil_state(Some(&native)))
+                e9.set_depth_stencil_state(Some(&native)).map_err(|value| of_metal_error(c9.operation, &value))
             }
         }),
         draw: Box::new(move |primitive, first, count, instances| {
-            c10.native_of(e10.draw_primitives(metal_primitive(primitive), first as usize, count as usize, instances as usize))
+            e10.draw_primitives(metal_primitive(primitive), first as usize, count as usize, instances as usize).map_err(|value| of_metal_error(c10.operation, &value))
         }),
         draw_indexed: Box::new(move |primitive, index_type, token, offset, count, instances| {
             let buffer = c11.find_buffer(token)?;
             c11.keep_buffer(&buffer)?;
-            c11.native_of(e11.draw_indexed(
+            e11.draw_indexed(
                 metal_primitive(primitive),
                 metal_index(index_type),
                 buffer.metal(),
                 offset as u64,
                 count as u64,
                 if instances == 1 { None } else { Some(instances as u64) },
-            ))
+            ).map_err(|value| of_metal_error(c11.operation, &value))
         }),
         draw_indexed_indirect: Box::new(move |primitive, index_type, token, offset, arguments_token, arguments_offset| {
             let buffer = c12.find_buffer(token)?;
             let arguments = c12.find_buffer(arguments_token)?;
             c12.keep_buffer(&buffer)?;
             c12.keep_buffer(&arguments)?;
-            c12.native_of(e12.draw_indexed_indirect(
+            e12.draw_indexed_indirect(
                 metal_primitive(primitive),
                 metal_index(index_type),
                 buffer.metal(),
                 offset as u64,
                 arguments.metal(),
                 arguments_offset as u64,
-            ))
+            ).map_err(|value| of_metal_error(c12.operation, &value))
         }),
         draw_batch: Box::new(move |draws| draw_batch(&c13, &e13, draws)),
         use_resources: Box::new(move |tokens| use_resources(&c14, &e14, tokens)),
         execute_icb: Box::new(move |token, location, length| match c15.icb(token) {
-            None => fail(operation, ErrorKind::InvalidArgument, "indirect command buffer graph is incomplete"),
-            Some(entry) => c15.native_of(e15.execute_indirect_commands(&entry, location as usize, length as usize)),
+            None => Err(fail(operation, ErrorKind::InvalidArgument, "indirect command buffer graph is incomplete")),
+            Some(entry) => e15.execute_indirect_commands(&entry, location as usize, length as usize).map_err(|value| of_metal_error(c15.operation, &value)),
         }),
         end_render: Box::new(move || finish()),
     })

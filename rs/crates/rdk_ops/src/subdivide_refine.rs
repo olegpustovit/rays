@@ -8,7 +8,6 @@ use rdk_core::{
     topology_index,
 };
 
-pub type Res<T> = Result<T, error::T>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scheme {
@@ -93,14 +92,14 @@ pub fn invalid_arg(message: String) -> error::T {
 /// OCaml `max_int` is 2^62 - 1.
 pub const OCAML_MAX_INT: i64 = (1_i64 << 62) - 1;
 
-pub fn checked_add(name: &str, a: i64, b: i64) -> Res<i64> {
+pub fn checked_add(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
     if b < 0 || a > OCAML_MAX_INT - b {
         return Err(fail(format!("{name} exceeds integer limits")));
     }
     Ok(a + b)
 }
 
-pub fn checked_mul(name: &str, a: i64, b: i64) -> Res<i64> {
+pub fn checked_mul(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
     if a < 0 || b < 0 || (a != 0 && b > OCAML_MAX_INT / a) {
         return Err(fail(format!("{name} exceeds integer limits")));
     }
@@ -198,8 +197,8 @@ pub fn run(
     grain: Option<i64>,
     cancel_token: Option<&cancel::T>,
     count: i64,
-    operation: &(dyn Fn(i64) -> Res<()> + Sync),
-) -> Res<()> {
+    operation: &(dyn Fn(i64) -> Result<(), error::T> + Sync),
+) -> Result<(), error::T> {
     let grain = grain.unwrap_or(16_384);
     if grain <= 0 {
         return Err(invalid_arg(
@@ -276,7 +275,7 @@ pub fn float_attribute(
     owner: Owner,
     name: &str,
     geometry_value: &geometry::T,
-) -> Res<Option<Vec<f64>>> {
+) -> Result<Option<Vec<f64>>, error::T> {
     match geometry::find_attribute(owner, name, geometry_value) {
         None => Ok(None),
         Some(found) => match attribute::View::storage(&found)? {
@@ -286,7 +285,7 @@ pub fn float_attribute(
     }
 }
 
-fn validate_sharpness(name: &str, values: &[f64]) -> Res<()> {
+fn validate_sharpness(name: &str, values: &[f64]) -> Result<(), error::T> {
     for &value in values {
         if !value.is_finite() || value < 0.0 {
             return Err(fail(format!("{name} values must be finite and non-negative")));
@@ -303,7 +302,7 @@ pub fn crease_data(
     geometry_value: &geometry::T,
     topology_view: &topology::View::View,
     index: &topology_index::View::View,
-) -> Res<Option<CreaseData>> {
+) -> Result<Option<CreaseData>, error::T> {
     let edge_count = index.edge_a.len();
     let vertex_weights = float_attribute(Owner::Vertex, "creaseweight", geometry_value)?;
     let primitive_weights = float_attribute(Owner::Primitive, "creaseweight", geometry_value)?;
@@ -378,7 +377,7 @@ fn same_topology(left: &topology::View::View, right: &topology::View::View) -> b
         && left.primitive_kinds == right.primitive_kinds
 }
 
-fn validate_crease_selection(selection: &group::T, creases: &geometry::T) -> Res<()> {
+fn validate_crease_selection(selection: &group::T, creases: &geometry::T) -> Result<(), error::T> {
     if group::owner(selection) != group::Owner::Primitive {
         return Err(failm("crease selection must be a primitive group"));
     }
@@ -393,7 +392,7 @@ fn validate_crease_selection(selection: &group::T, creases: &geometry::T) -> Res
     Ok(())
 }
 
-pub fn validate_hole_group(holes: &group::T, geometry_value: &geometry::T) -> Res<()> {
+pub fn validate_hole_group(holes: &group::T, geometry_value: &geometry::T) -> Result<(), error::T> {
     if group::owner(holes) != group::Owner::Primitive {
         return Err(failm("subdivision holes must be a primitive group"));
     }
@@ -415,7 +414,7 @@ pub fn apply_crease_input(
     override_value: Option<f64>,
     source: &geometry::T,
     creases: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     if let Some(value) = override_value {
         if !value.is_finite() || value < 0.0 {
             return Err(failm("crease override must be finite and non-negative"));
@@ -589,7 +588,7 @@ pub fn build_child_edge_sharpness(
     index: &topology_index::View::View,
     point_count: i64,
     edge_sharpness: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let child = AFloats::new(edge_sharpness.len() as i64 * 2, 0.0);
     run(grain, cancel_token, point_count, &|point| {
         let first = gi(&index.point_edge_offsets, point);
@@ -637,7 +636,7 @@ pub fn build_vertex_sharp_plan(
     edge_sharpness: &[f64],
     child_edge_sharpness: &[f64],
     corner_sharpness: &[f64],
-) -> Res<VertexMaskPlan> {
+) -> Result<VertexMaskPlan, error::T> {
     let point_count = corner_sharpness.len() as i64;
     let parent_kind = ABytes::new(point_count, 0);
     let child_kind = ABytes::new(point_count, 0);
@@ -755,7 +754,7 @@ pub fn validate(
     geometry_value: &geometry::T,
     topology_view: &topology::View::View,
     index: &topology_index::View::View,
-) -> Res<()> {
+) -> Result<(), error::T> {
     if topology_view.point_count == 0 || topology_view.primitive_kinds.is_empty() {
         return Err(failm("input must contain polygon geometry"));
     }
@@ -916,7 +915,7 @@ pub fn point_term_count(
     source_points: i64,
     edge_count: i64,
     output: i64,
-) -> Res<i64> {
+) -> Result<i64, error::T> {
     if output < source_points {
         let point = output;
         match scheme {
@@ -1001,7 +1000,7 @@ pub fn fill_point_stencil(
     weights: &AFloats,
     representatives: &AInts,
     output: i64,
-) -> Res<()> {
+) -> Result<(), error::T> {
     let mut cursor = gi(offsets, output);
     let mut add = |source: i64, weight: f64| {
         sources.set(cursor, source);
@@ -1187,7 +1186,7 @@ pub fn make_topology(
     source_points: i64,
     edge_count: i64,
     face_offset: i64,
-) -> Res<Built> {
+) -> Result<Built, error::T> {
     let visible = |primitive: i64| match holes {
         None => true,
         Some(holes) => !group::mem(primitive, holes),
@@ -1391,7 +1390,7 @@ pub fn make_plan(
     creasing_method: CreasingMethod,
     scheme: Scheme,
     source: &geometry::T,
-) -> Res<Plan> {
+) -> Result<Plan, error::T> {
     let topology_view = topology::View::view(geometry::topology(source))?;
     let topology_index_value = topology_index::create(cancel_token, geometry::topology(source))?;
     let index = topology_index::View::view(&topology_index_value);
@@ -1551,7 +1550,7 @@ pub fn point_float(
     grain: Option<i64>,
     plan: &Plan,
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let output = AFloats::new(plan.output_points, 0.0);
     run(grain, cancel_token, plan.output_points, &|point| {
         let mut sum = 0.0;
@@ -1671,7 +1670,7 @@ pub fn fvar_refinement(
     mode: FaceVaryingInterpolation,
     plan: &Plan,
     equal: &dyn Fn(i64, i64) -> bool,
-) -> Res<FvarRefinement> {
+) -> Result<FvarRefinement, error::T> {
     let topology_view = &plan.source_topology;
     let index = &plan.index;
     let vertex_count = plan.source_vertices;
@@ -1723,7 +1722,7 @@ pub fn fvar_refinement(
     }
     let mut parents: Vec<i64> = (0..vertex_count).collect();
     let mut ranks = vec![0_i64; vertex_count as usize];
-    let corner_at_point = |directed: i64, point: i64| -> Res<i64> {
+    let corner_at_point = |directed: i64, point: i64| -> Result<i64, error::T> {
         if gi(&topology_view.vertex_points, directed) == point {
             Ok(directed)
         } else {
@@ -2103,7 +2102,7 @@ pub fn fvar_point_float(
     grain: Option<i64>,
     plan: &FvarPointPlan,
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let output = AFloats::new(plan.fvar_output_points, 0.0);
     run(grain, cancel_token, plan.fvar_output_points, &|point| {
         let mut sum = 0.0;
@@ -2151,7 +2150,7 @@ pub fn linear_vertex_float(
     grain: Option<i64>,
     plan: &Plan,
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let count = plan.vertex_kind.len() as i64;
     let output = AFloats::new(count, 0.0);
     run(grain, cancel_token, count, &|vertex| {
@@ -2184,7 +2183,7 @@ pub fn isolated_vertex_float(
     plan: &Plan,
     corner_sharpness: &[f64],
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let count = plan.vertex_kind.len() as i64;
     let output = AFloats::new(count, 0.0);
     run(grain, cancel_token, count, &|output_vertex| {
@@ -2226,7 +2225,7 @@ pub fn fvar_float(
     grain: Option<i64>,
     fvar: &FvarRefinement,
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     match fvar {
         FvarRefinement::LinearFvar(plan) => linear_vertex_float(cancel_token, grain, plan, source),
         FvarRefinement::IsolatedFvar { geometry_refinement, corner_sharpness } => {
@@ -2264,7 +2263,7 @@ pub fn vertex_float(
     grain: Option<i64>,
     plan: &Plan,
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     linear_vertex_float(cancel_token, grain, plan, source)
 }
 
@@ -2273,7 +2272,7 @@ pub fn primitive_float(
     grain: Option<i64>,
     plan: &Plan,
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let count = plan.primitive_source.len() as i64;
     let output = AFloats::new(count, 0.0);
     run(grain, cancel_token, count, &|primitive| {
@@ -2289,7 +2288,7 @@ pub fn discrete_mapping(
     grain: Option<i64>,
     plan: &Plan,
     owner: Owner,
-) -> Res<Vec<i64>> {
+) -> Result<Vec<i64>, error::T> {
     let count = match owner {
         Owner::Point => plan.output_points,
         Owner::Vertex => plan.vertex_kind.len() as i64,
@@ -2319,14 +2318,14 @@ pub fn discrete_mapping(
     Ok(output.into_vec())
 }
 
-fn discrete_map_ints(mapping: &[i64], source: &[i64]) -> Res<Vec<i64>> {
+fn discrete_map_ints(mapping: &[i64], source: &[i64]) -> Result<Vec<i64>, error::T> {
     if source.is_empty() {
         return Err(invalid_arg("index out of bounds".to_owned()));
     }
     Ok(mapping.iter().map(|&at| gi(source, at)).collect())
 }
 
-fn discrete_map_text(mapping: &[i64], source: &[String]) -> Res<Vec<String>> {
+fn discrete_map_text(mapping: &[i64], source: &[String]) -> Result<Vec<String>, error::T> {
     if source.is_empty() {
         return Err(invalid_arg("index out of bounds".to_owned()));
     }
@@ -2339,7 +2338,7 @@ pub fn vertex_edge_discrete_map(
     plan: &Plan,
     source: &[i64],
     default: i64,
-) -> Res<Vec<i64>> {
+) -> Result<Vec<i64>, error::T> {
     let count = plan.vertex_kind.len() as i64;
     let output = AInts::new(count, default);
     run(grain, cancel_token, count, &|vertex| {
@@ -2359,7 +2358,7 @@ pub fn numeric_map(
     plan: &Plan,
     owner: Owner,
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     match owner {
         Owner::Point => point_float(cancel_token, grain, plan, source),
         Owner::Vertex => vertex_float(cancel_token, grain, plan, source),
@@ -2386,7 +2385,7 @@ fn map_planes(
     owner: Owner,
     fvar: &Option<FvarRefinement>,
     planes: &[&[f64]],
-) -> Res<Vec<Vec<f64>>> {
+) -> Result<Vec<Vec<f64>>, error::T> {
     let mut out = Vec::with_capacity(planes.len());
     for values in planes {
         out.push(match fvar {
@@ -2404,7 +2403,7 @@ pub fn remap_attribute(
     face_varying_interpolation: FaceVaryingInterpolation,
     plan: &Plan,
     attribute_value: &attribute::T,
-) -> Res<Option<attribute::T>> {
+) -> Result<Option<attribute::T>, error::T> {
     let owner = attribute::owner(attribute_value);
     let name = attribute::name(attribute_value);
     if owner == Owner::Vertex && plan.edge_ancestry_attribute.as_deref() == Some(name) {
@@ -2568,7 +2567,7 @@ pub fn child_crease_sharpness(plan: &Plan) -> Option<Vec<f64>> {
     }
 }
 
-pub fn output_child_slot(plan: &Plan, vertex: i64, source_edge: i64) -> Res<i64> {
+pub fn output_child_slot(plan: &Plan, vertex: i64, source_edge: i64) -> Result<i64, error::T> {
     let topology_view = topology::View::view(&plan.topology)?;
     output_child_slot_in(plan, &topology_view, vertex, source_edge)
 }
@@ -2578,7 +2577,7 @@ pub fn resulting_crease_attribute(
     grain: Option<i64>,
     plan: &Plan,
     child_sharpness: Option<&[f64]>,
-) -> Res<Option<attribute::T>> {
+) -> Result<Option<attribute::T>, error::T> {
     let Some(child_sharpness) = child_sharpness else {
         return Ok(None);
     };
@@ -2606,7 +2605,7 @@ fn output_child_slot_in(
     topology_view: &topology::View::View,
     vertex: i64,
     source_edge: i64,
-) -> Res<i64> {
+) -> Result<i64, error::T> {
     let primitive = match plan.scheme {
         Scheme::CatmullClark | Scheme::Bilinear => vertex / 4,
         Scheme::Loop => vertex / 3,
@@ -2640,7 +2639,7 @@ pub struct OutputEdgePlan {
     pub output_edge_count: i64,
 }
 
-pub fn output_edge_plan(cancel_token: Option<&cancel::T>, plan: &Plan) -> Res<OutputEdgePlan> {
+pub fn output_edge_plan(cancel_token: Option<&cancel::T>, plan: &Plan) -> Result<OutputEdgePlan, error::T> {
     let internal_count = match plan.scheme {
         Scheme::CatmullClark | Scheme::Bilinear => plan.source_vertices,
         Scheme::Loop => checked_mul("subdivision internal edge count", plan.source_primitives, 3)?,
@@ -2703,7 +2702,7 @@ pub fn edge_group_from_source(
     edge_plan: &OutputEdgePlan,
     name: &str,
     selected: &dyn Fn(i64) -> bool,
-) -> Res<edge_group::T> {
+) -> Result<edge_group::T, error::T> {
     let mut bits = vec![0u8; ((edge_plan.output_edge_count + 7) / 8) as usize];
     for edge in 0..plan.edge_count {
         cancel::poll(cancel_token, edge, 16_383)?;
@@ -2727,7 +2726,7 @@ pub fn resulting_crease_group(
     plan: &Plan,
     edge_plan: &OutputEdgePlan,
     child_sharpness: Option<&[f64]>,
-) -> Res<edge_group::T> {
+) -> Result<edge_group::T, error::T> {
     let mut bits = vec![0u8; ((edge_plan.output_edge_count + 7) / 8) as usize];
     if let Some(sharpness) = child_sharpness {
         for child in 0..sharpness.len() as i64 {
@@ -2748,7 +2747,7 @@ pub fn remap_group(
     grain: Option<i64>,
     plan: &Plan,
     group_value: &group::T,
-) -> Res<group::T> {
+) -> Result<group::T, error::T> {
     let owner = group::owner(group_value);
     let count = match owner {
         group::Owner::Point => plan.output_points,
@@ -2841,7 +2840,7 @@ pub fn find_attribute_like(
         .find(|candidate| same_attribute_slot(template, candidate))
 }
 
-pub fn checked_total(name: &str, values: &[i64]) -> Res<i64> {
+pub fn checked_total(name: &str, values: &[i64]) -> Result<i64, error::T> {
     let mut total = 0;
     for &value in values {
         total = checked_add(name, total, value)?;
@@ -2853,7 +2852,7 @@ pub fn checked_total(name: &str, values: &[i64]) -> Res<i64> {
 fn part_attributes(
     template: &attribute::T,
     parts: &[geometry::T],
-) -> Res<Vec<Option<attribute::T>>> {
+) -> Result<Vec<Option<attribute::T>>, error::T> {
     let mut out = Vec::with_capacity(parts.len());
     for part in parts {
         out.push(match find_attribute_like(template, part) {
@@ -2879,7 +2878,7 @@ pub fn concatenate_part_attribute(
     extra_sources: &[i64],
     template: &attribute::T,
     parts: &[geometry::T],
-) -> Res<Option<attribute::T>> {
+) -> Result<Option<attribute::T>, error::T> {
     let owner = attribute::owner(template);
     if owner == Owner::Detail {
         return Ok(Some(template.clone()));
@@ -2893,7 +2892,7 @@ pub fn concatenate_part_attribute(
     )?;
     let attributes = part_attributes(template, parts)?;
     let kind = attribute::kind_name(template);
-    let check_source = |source: i64, label: &str| -> Res<()> {
+    let check_source = |source: i64, label: &str| -> Result<(), error::T> {
         if source < 0 || source >= base_total {
             return Err(fail(format!("combined {label} ancestry is out of range")));
         }
@@ -2991,7 +2990,7 @@ pub fn concatenate_part_attribute(
                     },
                 });
             }
-            let row_length = |source: i64| -> Res<i64> {
+            let row_length = |source: i64| -> Result<i64, error::T> {
                 let mut offset = 0_i64;
                 for (count, view) in counts.iter().zip(views.iter()) {
                     if source < offset + count {
@@ -3070,7 +3069,7 @@ pub fn concatenate_part_attribute(
                     },
                 });
             }
-            let row_length = |source: i64| -> Res<i64> {
+            let row_length = |source: i64| -> Result<i64, error::T> {
                 let mut offset = 0_i64;
                 for (count, view) in counts.iter().zip(views.iter()) {
                     if source < offset + count {
@@ -3158,7 +3157,7 @@ pub struct PointWeld {
     pub bias: f64,
 }
 
-pub fn locate_part(offsets: &[i64], source: i64) -> Res<(usize, i64)> {
+pub fn locate_part(offsets: &[i64], source: i64) -> Result<(usize, i64), error::T> {
     let mut part = 0_usize;
     while part + 1 < offsets.len() && source >= offsets[part + 1] {
         part += 1;
@@ -3175,9 +3174,9 @@ pub fn welded_float_plane(
     weld: &PointWeld,
     point_offsets: &[i64],
     sources: &[Option<&[f64]>],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let count = weld.output_source.len() as i64;
-    let value = |source: i64| -> Res<f64> {
+    let value = |source: i64| -> Result<f64, error::T> {
         let (part, local) = locate_part(point_offsets, source)?;
         Ok(match sources[part] {
             None => 0.0,
@@ -3226,10 +3225,10 @@ pub fn concatenate_welded_point_attribute(
     parts: &[geometry::T],
     point_offsets: &[i64],
     weld: &PointWeld,
-) -> Res<attribute::T> {
+) -> Result<attribute::T, error::T> {
     let attributes = part_attributes(template, parts)?;
     // For each welded point, the part attribute and local row of its representative source.
-    let representative_rows = || -> Res<Vec<Option<(i64, usize)>>> {
+    let representative_rows = || -> Result<Vec<Option<(i64, usize)>>, error::T> {
         let mapping = welded_representatives(weld);
         let mut rows = Vec::with_capacity(mapping.len());
         for source in mapping {
@@ -3409,7 +3408,7 @@ pub fn combine_parts(
     weld: Option<&PointWeld>,
     source: &geometry::T,
     parts: &[geometry::T],
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let point_counts: Vec<i64> = parts.iter().map(geometry::point_count).collect();
     let vertex_counts: Vec<i64> = parts.iter().map(geometry::vertex_count).collect();
     let primitive_counts: Vec<i64> = parts.iter().map(geometry::primitive_count).collect();
@@ -3725,7 +3724,7 @@ pub fn select_floats(
     grain: Option<i64>,
     mapping: &[i64],
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let count = mapping.len() as i64;
     if count == 0 {
         return Ok(Vec::new());
@@ -3743,7 +3742,7 @@ pub fn select_ints(
     grain: Option<i64>,
     mapping: &[i64],
     source: &[i64],
-) -> Res<Vec<i64>> {
+) -> Result<Vec<i64>, error::T> {
     let count = mapping.len() as i64;
     if count == 0 {
         return Ok(Vec::new());
@@ -3760,7 +3759,7 @@ pub fn select_texts(
     cancel_token: Option<&cancel::T>,
     mapping: &[i64],
     source: &[String],
-) -> Res<Vec<String>> {
+) -> Result<Vec<String>, error::T> {
     let mut output = Vec::with_capacity(mapping.len());
     for (point, &at) in mapping.iter().enumerate() {
         cancel::poll(cancel_token, point as i64, 4095)?;
@@ -3775,7 +3774,7 @@ pub fn select_storage(
     grain: Option<i64>,
     mapping: &[i64],
     storage: &Storage,
-) -> Res<Storage> {
+) -> Result<Storage, error::T> {
     Ok(match storage {
         Storage::Float(values) => Storage::Float(select_floats(cancel_token, grain, mapping, values)?),
         Storage::Int(values) => Storage::Int(select_ints(cancel_token, grain, mapping, values)?),
@@ -3818,7 +3817,7 @@ pub fn duplicate_point_attribute(
     grain: Option<i64>,
     point_source: &[i64],
     attribute_value: &attribute::T,
-) -> Res<attribute::T> {
+) -> Result<attribute::T, error::T> {
     if attribute::owner(attribute_value) != Owner::Point {
         return Ok(attribute_value.clone());
     }
@@ -3831,7 +3830,7 @@ pub fn split_disconnected_point_fans(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let topology_value = geometry::topology(geometry_value);
     let topology_view = topology::View::view(topology_value)?;
     let vertex_count = topology_view.vertex_points.len() as i64;
@@ -4011,7 +4010,7 @@ pub fn annotate_pull_interfaces(
     cancel_token: Option<&cancel::T>,
     primitives: &group::T,
     geometry_value: &geometry::T,
-) -> Res<(geometry::T, Option<PullPlan>)> {
+) -> Result<(geometry::T, Option<PullPlan>), error::T> {
     let topology_value = geometry::topology(geometry_value);
     let topology_view = topology::View::view(topology_value)?;
     let topology_index_value = topology_index::create(cancel_token, topology_value)?;
@@ -4126,7 +4125,7 @@ pub fn interface_chains(
     cancel_token: Option<&cancel::T>,
     plan: &PullPlan,
     refined: &geometry::T,
-) -> Res<InterfaceChains> {
+) -> Result<InterfaceChains, error::T> {
     let ancestry = match geometry::find_attribute(Owner::Vertex, &plan.ancestry_attribute, refined) {
         Some(found) => match attribute::View::storage(&found)? {
             Storage::Int(values) => values.clone(),
@@ -4258,7 +4257,7 @@ pub fn interpolate_array(
     right: &[i64],
     weight: &[f64],
     source: &[f64],
-) -> Res<Vec<f64>> {
+) -> Result<Vec<f64>, error::T> {
     let count = left.len() as i64;
     let output = AFloats::new(count, 0.0);
     run(grain, cancel_token, count, &|target| {
@@ -4294,7 +4293,7 @@ pub fn interpolate_owned_attribute(
     vertex_weight: &[f64],
     primitive_source: &[i64],
     attribute_value: &attribute::T,
-) -> Res<attribute::T> {
+) -> Result<attribute::T, error::T> {
     let owner = attribute::owner(attribute_value);
     if owner == Owner::Detail {
         return Ok(attribute_value.clone());
@@ -4358,7 +4357,7 @@ pub fn divide_unselected_edges(
     plan: &PullPlan,
     chains: &InterfaceChains,
     source: &geometry::T,
-) -> Res<DividedBoundary> {
+) -> Result<DividedBoundary, error::T> {
     let topology_view = topology::View::view(&plan.source_topology)?;
     let source_index = topology_index::View::view(&plan.source_index);
     let source_edges = source_index.edge_a.len() as i64;
@@ -4629,7 +4628,7 @@ pub fn remap_divided_attribute(
     vertex_map: &[i64],
     primitive_map: &[i64],
     attribute_value: &attribute::T,
-) -> Res<attribute::T> {
+) -> Result<attribute::T, error::T> {
     let mapping = match attribute::owner(attribute_value) {
         Owner::Point | Owner::Detail => return Ok(attribute_value.clone()),
         Owner::Vertex => vertex_map,
@@ -4649,7 +4648,7 @@ pub fn remap_divided_group(
     vertex_map: &[i64],
     primitive_map: &[i64],
     group_value: &group::T,
-) -> Res<group::T> {
+) -> Result<group::T, error::T> {
     let mapping = match group::owner(group_value) {
         group::Owner::Point => return Ok(group_value.clone()),
         group::Owner::Vertex => vertex_map,
@@ -4723,7 +4722,7 @@ pub fn triangulate_divided_boundary(
     chains: &InterfaceChains,
     divided: &DividedBoundary,
     refined: &geometry::T,
-) -> Res<DividedBoundary> {
+) -> Result<DividedBoundary, error::T> {
     let geometry_value = &divided.geometry;
     let topology_value = geometry::topology(geometry_value);
     let topology_view = topology::View::view(topology_value)?;
@@ -4918,7 +4917,7 @@ pub fn triangulate_divided_boundary(
     })
 }
 
-pub fn validate_primitive_selection(primitives: &group::T, geometry_value: &geometry::T) -> Res<()> {
+pub fn validate_primitive_selection(primitives: &group::T, geometry_value: &geometry::T) -> Result<(), error::T> {
     if group::owner(primitives) != group::Owner::Primitive {
         return Err(failm("selection must be a primitive group"));
     }
@@ -4970,7 +4969,7 @@ pub fn once(
     options: &OnceOptions,
     scheme: Scheme,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let grain = options.grain;
     let holes = if !options.remove_holes {
         None

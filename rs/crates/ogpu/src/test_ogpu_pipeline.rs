@@ -6,11 +6,8 @@ use crate::{
     shader::{self, Descriptor, EntryPoint, Shader, Stage},
 };
 
-fn ok<T>(result: Result<T, Error>) -> T {
-    match result {
-        Ok(value) => value,
-        Err(error) => panic!("{}", crate::error::to_string(&error)),
-    }
+fn die(error: Error) -> ! {
+    panic!("{}", crate::error::to_string(&error))
 }
 
 fn reject(result: Result<(), Error>) {
@@ -21,13 +18,13 @@ fn reject(result: Result<(), Error>) {
 }
 
 fn make_shader(backend: &str, entries: Vec<EntryPoint>) -> Shader {
-    ok(shader::create(Descriptor {
+    shader::create(Descriptor {
         backend: backend.into(),
         label: None,
         bytes: b"artifact".to_vec(),
         entry_points: entries,
         bindings: Vec::new(),
-    }))
+    }).unwrap_or_else(|failure| die(failure))
 }
 
 fn entry(name: &str, stage: Stage) -> EntryPoint {
@@ -40,7 +37,7 @@ fn deterministic_pipeline_descriptions() {
     let device = handle::create_device();
     let vertex = make_shader("mock", vec![entry("vs", Stage::Vertex)]);
     let fragment = make_shader("mock", vec![entry("fs", Stage::Fragment)]);
-    let empty = ok(binding::create_pipeline_layout(&device, &capabilities, &[]));
+    let empty = binding::create_pipeline_layout(&device, &capabilities, &[]).unwrap_or_else(|failure| die(failure));
     let render = |sample_count: i64, fragment: Option<&Shader>, fragment_entry: Option<&str>| {
         pipeline::create_render(
             &capabilities,
@@ -58,7 +55,7 @@ fn deterministic_pipeline_descriptions() {
             },
         )
     };
-    ok(render(4, Some(&fragment), Some("fs")));
+    render(4, Some(&fragment), Some("fs")).unwrap_or_else(|failure| die(failure));
     reject(render(3, Some(&fragment), Some("fs")));
     reject(render(i64::MAX, Some(&fragment), Some("fs")));
     reject(render(1, Some(&fragment), None));

@@ -34,14 +34,14 @@ fn scene(reference: bool, count: i64, phase: f64) -> Rc<RenderIr> {
 }
 
 fn capture(execution: &renderer::t, lower: &dyn Fn(&renderer::submission) -> Result<renderer::batch, ogpu::error::Error>) -> Vec<u8> {
-    let submission = common::get(Native::begin_submission(execution));
+    let submission = Native::begin_submission(execution).unwrap();
     let result = (|| {
         let batch = lower(&submission)?;
         Native::step(Some((0.0, 0.0, 0.0, 1.0)), None, None, &submission, &[batch])?;
         renderer::capture(execution)
     })();
     Native::cancel(&submission);
-    common::get(result)
+    result.unwrap()
 }
 
 fn run(scale: i64) {
@@ -50,7 +50,7 @@ fn run(scale: i64) {
     }
     let baseline = ogpu::impl_::live_handles().unwrap();
     let cfg = renderer::configuration { logical_width: 64, logical_height: 48, drawable_width: 64 * scale, drawable_height: 48 * scale, title: "dense-scene2".into(), vsync: false, high_density: true };
-    let execution = common::get(renderer::create_offscreen(&cfg));
+    let execution = renderer::create_offscreen(&cfg).unwrap();
     let render = |ir: &Rc<RenderIr>| -> Vec<u8> {
         let pixels = capture(&execution, &|s| Native::lower_scene2(s, scale, &|_| None, ir));
         assert_eq!(pixels.len() as i64, 64 * 48 * scale * scale * 4, "dense scene2 readback length");
@@ -68,7 +68,7 @@ fn run(scale: i64) {
             }
         }
     }
-    let lower = |ir: Rc<RenderIr>| common::get(renderer::lower_scene2(&execution, scale, &|_| None, &ir));
+    let lower = |ir: Rc<RenderIr>| renderer::lower_scene2(&execution, scale, &|_| None, &ir).unwrap();
     let colored = |barrier: bool, color: i32| {
         let mut commands: Vec<Command> = render_ir::commands_readonly(&scene(false, 63, 0.0))
             .iter()
@@ -85,14 +85,14 @@ fn run(scale: i64) {
     let white = colored(false, 0xffffffffu32 as i32);
     let dark = colored(false, 0x101010ffu32 as i32);
     let retained = |identity: &str, draws: &Vec<renderer::draw_>| -> Vec<u8> {
-        let submission = common::get(Native::begin_submission(&execution));
+        let submission = Native::begin_submission(&execution).unwrap();
         let result = (|| {
             let batch = Native::adopt_draws(&submission, draws.clone())?;
             Native::step(Some((0.0, 0.0, 0.0, 1.0)), Some(identity), Some(1), &submission, &[batch])?;
             renderer::capture(&execution)
         })();
         Native::cancel(&submission);
-        common::get(result)
+        result.unwrap()
     };
     let expected = retained("retained-white", &white);
     for _ in 0..12 {
@@ -124,7 +124,7 @@ fn run(scale: i64) {
     let moved = shifted(30.0);
     assert!(render_draws(&moved) != expected, "shifted geometry did not move");
     assert!(render_draws(&first) == expected, "geometry cache hit rewrote an earlier lowering's transform");
-    common::get(renderer::destroy(&execution));
+    renderer::destroy(&execution).unwrap();
     assert_eq!(ogpu::impl_::live_handles().unwrap(), baseline, "dense scene2 handle delta");
     println!("dense scene2: exact {scale}x pixels, alpha/add, fractional transforms, alternating retained payloads, zero handles");
 }

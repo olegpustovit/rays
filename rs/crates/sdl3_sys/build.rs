@@ -28,12 +28,12 @@ fn run_pkg_config(argument: &str) -> String {
         .find(|dir| std::path::Path::new(dir).join("include/SDL3/SDL.h").exists());
     match msys {
         Some(dir) => prefix(dir),
-        None => panic!("SDL3 not found: set SDL3_DIR, or install pkg-config with the SDL3 development package"),
+        None => build_failure(format!("SDL3 not found: set SDL3_DIR, or install pkg-config with the SDL3 development package")),
     }
 }
 
-fn words(value: &str) -> impl Iterator<Item = &str> {
-    value.split_whitespace()
+fn words(value: &str) -> Vec<&str> {
+    value.split_whitespace().collect()
 }
 
 fn main() {
@@ -54,7 +54,7 @@ fn main() {
         .map(str::trim)
         .find(|line| line.starts_with("((sdl3 "))
         .expect("sdl3 entry in packaging/sdl3.lock");
-    let lock_words: Vec<_> = words(entry).collect();
+    let lock_words: Vec<_> = words(entry);
     let floor = lock_words
         .windows(2)
         .find(|pair| pair[0] == "(floor")
@@ -125,7 +125,7 @@ fn main() {
     c.compile("rays_sdl3_sys");
 
     let libs = run_pkg_config("--libs");
-    let library_flags: Vec<_> = words(&libs).collect();
+    let library_flags: Vec<_> = words(&libs);
     let mut index = 0;
     while index < library_flags.len() {
         let flag = library_flags[index];
@@ -152,4 +152,9 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=CoreFoundation");
         println!("cargo:rustc-link-lib=framework=ApplicationServices");
     }
+}
+
+fn build_failure(message: String) -> ! {
+    eprintln!("{message}");
+    std::process::exit(1)
 }

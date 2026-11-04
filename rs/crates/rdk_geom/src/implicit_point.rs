@@ -140,7 +140,7 @@ fn valid_index(source: &Source, index: i64) -> bool {
 
 pub fn source_coordinate(source: &Source, point: i64) -> (f64, f64, f64) {
     if !valid_index(source, point) {
-        panic!("implicit source point is out of bounds");
+        unreachable!("implicit source point is out of bounds");
     }
     let p = point as usize;
     (source.data.x[p], source.data.y[p], source.data.z[p])
@@ -1035,7 +1035,7 @@ pub fn bounds(point: &T) -> ((f64, f64), (f64, f64), (f64, f64)) {
 
 fn ensure_same_source(left: &T, right: &T) {
     if !same_source_ref(&left.node.source, &right.node.source) {
-        panic!("Rdk implicit points belong to different coordinate sources");
+        unreachable!("Rdk implicit points belong to different coordinate sources");
     }
 }
 
@@ -1121,7 +1121,7 @@ pub fn equal(left: &T, right: &T) -> bool {
 
 pub fn source_triangle_projection(source: &Source, a: i64, b: i64, c: i64) -> Projection {
     if !(valid_index(source, a) && valid_index(source, b) && valid_index(source, c)) {
-        panic!("implicit source triangle index is out of bounds");
+        unreachable!("implicit source triangle index is out of bounds");
     }
     let d = &source.data;
     let (a, b, c) = (a as usize, b as usize, c as usize);
@@ -1132,7 +1132,7 @@ pub fn source_triangle_projection(source: &Source, a: i64, b: i64, c: i64) -> Pr
     } else if predicates::orient2d(d.z[a], d.x[a], d.z[b], d.x[b], d.z[c], d.x[c]) != Sign::Zero {
         Projection::ZX
     } else {
-        panic!("implicit source triangle is exactly degenerate")
+        unreachable!("implicit source triangle is exactly degenerate")
     }
 }
 
@@ -1179,10 +1179,10 @@ pub fn source_segment_contains(
     point: &T,
 ) -> bool {
     if !(valid_index(source, first) && valid_index(source, second)) {
-        panic!("implicit source segment index is out of bounds");
+        unreachable!("implicit source segment index is out of bounds");
     }
     if !same_source_ref(&point.node.source, source) {
-        panic!("Rdk implicit point and source segment belong to different sources");
+        unreachable!("Rdk implicit point and source segment belong to different sources");
     }
     let homogeneous = exact_homogeneous(point);
     let d = &source.data;
@@ -1214,10 +1214,10 @@ pub fn source_segment_contains(
 /// Exact-construction barycentric weights against three explicit source points.
 pub fn barycentric_source_triangle(source: &Source, a: i64, b: i64, c: i64, point: &T) -> (f64, f64, f64) {
     if !(valid_index(source, a) && valid_index(source, b) && valid_index(source, c)) {
-        panic!("implicit source triangle index is out of bounds");
+        unreachable!("implicit source triangle index is out of bounds");
     }
     if !same_source_ref(&point.node.source, source) {
-        panic!("Rdk implicit point and source triangle belong to different sources");
+        unreachable!("Rdk implicit point and source triangle belong to different sources");
     }
     let homogeneous = exact_homogeneous(point);
     let d = &source.data;
@@ -1357,10 +1357,10 @@ pub fn symbolic_ray_source_triangle(
     query: &T,
 ) -> SymbolicRayTriangle {
     if !(valid_index(source, a) && valid_index(source, b) && valid_index(source, c)) {
-        panic!("implicit symbolic source triangle index is out of bounds");
+        unreachable!("implicit symbolic source triangle index is out of bounds");
     }
     if !same_source_ref(&query.node.source, source) {
-        panic!("Rdk implicit point and symbolic source triangle belong to different sources");
+        unreachable!("Rdk implicit point and symbolic source triangle belong to different sources");
     }
     let q = exact_homogeneous(query);
     let d = &source.data;
@@ -1549,13 +1549,13 @@ pub fn axis_ray_source_triangle(
     query: &T,
 ) -> AxisRayTriangle {
     if !(valid_index(source, a) && valid_index(source, b) && valid_index(source, c)) {
-        panic!("implicit axis-ray source triangle index is out of bounds");
+        unreachable!("implicit axis-ray source triangle index is out of bounds");
     }
     if !same_source_ref(&query.node.source, source) {
-        panic!("Rdk implicit point and axis-ray source triangle belong to different sources");
+        unreachable!("Rdk implicit point and axis-ray source triangle belong to different sources");
     }
     if !(0..=2).contains(&axis) {
-        panic!("Rdk exact ray axis is out of bounds");
+        unreachable!("Rdk exact ray axis is out of bounds");
     }
     let d = &source.data;
     let (first_plane, second_plane) = if axis == 0 {

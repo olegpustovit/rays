@@ -9,7 +9,6 @@ use ogpu::shader::{self, BindingKind, EntryPoint, Stage};
 use ogpu::surface::Configuration;
 use std::rc::Rc;
 
-type R<A> = Result<A, Error>;
 
 #[derive(Clone, Copy, PartialEq)]
 enum kind {
@@ -41,7 +40,7 @@ fn layout_stages(visibility_: visibility) -> Vec<LayoutStage> {
     }
 }
 
-fn sun_artifact(backend_name: &str, stage: Stage, bindings: Vec<shader::Binding>) -> R<shader::Shader> {
+fn sun_artifact(backend_name: &str, stage: Stage, bindings: Vec<shader::Binding>) -> Result<shader::Shader, Error> {
     let bytes: &[u8] = if backend_name != "vulkan" {
         shaders::scene3_sun_depth.as_bytes()
     } else if stage == Stage::Vertex {
@@ -61,7 +60,7 @@ fn sun_artifact(backend_name: &str, stage: Stage, bindings: Vec<shader::Binding>
     })
 }
 
-fn make_sun_depth_pipeline(backend_name: &str, backend_device: &Device) -> R<Pipeline> {
+fn make_sun_depth_pipeline(backend_name: &str, backend_device: &Device) -> Result<Pipeline, Error> {
     let buffer = |binding: i64| shader::Binding { group: 0, binding, kind: BindingKind::StorageBuffer, visibility: vec![Stage::Vertex] };
     let slots = [0i64, 2, 3, 4];
     let vertex = sun_artifact(backend_name, Stage::Vertex, slots.iter().map(|b| buffer(*b)).collect())?;
@@ -190,7 +189,7 @@ fn spirv_of(family: pipeline_family) -> (&'static [u8], &'static [u8]) {
     }
 }
 
-fn make_pipeline(backend_name: &str, backend_device: &Device, family: pipeline_family, blend: Blend, samples: i64) -> R<Pipeline> {
+fn make_pipeline(backend_name: &str, backend_device: &Device, family: pipeline_family, blend: Blend, samples: i64) -> Result<Pipeline, Error> {
     // Every pipeline is generated (shaders/*.rays) and binds in its Lisp declaration order: buffer 0
     // and the vertex buffers, the one buffer both stages read, then the fragment's resources.
     let shape = shape_of(family);
@@ -204,7 +203,7 @@ fn make_pipeline(backend_name: &str, backend_device: &Device, family: pipeline_f
     for (binding, kind_) in &shape.fragment_resources {
         resources.push((*binding, *kind_, visibility::Fragment));
     }
-    let artifact = |stage: Stage| -> R<shader::Shader> {
+    let artifact = |stage: Stage| -> Result<shader::Shader, Error> {
         let bytes: Vec<u8> = if backend_name != "vulkan" {
             shape.source.as_bytes().to_vec()
         } else {
@@ -282,7 +281,7 @@ pub fn create_renderer(
     offscreen: bool,
     driver: backend::Driver,
     configuration: &Configuration,
-) -> R<scene_execution::t> {
+) -> Result<scene_execution::t, Error> {
     if backend_name != "metal" && backend_name != "vulkan" {
         return Err(error::make("Renderer.create", ErrorKind::Unsupported, &format!("no renderer shaders for backend {}", backend_name)));
     }

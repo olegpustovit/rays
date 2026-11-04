@@ -24,7 +24,6 @@ impl Error {
     pub fn message(&self) -> &str { &self.message }
 }
 
-pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -34,8 +33,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-fn error(operation: &'static str, kind: ErrorKind, message: impl Into<String>) -> Error {
-    Error { operation, kind, message: message.into() }
+fn error(operation: &'static str, kind: ErrorKind, message: &str) -> Error {
+    Error { operation, kind, message: message.to_string() }
 }
 
 fn version(number: i32) -> Version {
@@ -51,7 +50,7 @@ pub fn compiled_version() -> Version {
     version(sys::compiled_version())
 }
 
-pub fn check_version(release: bool) -> Result<()> {
+pub fn check_version(release: bool) -> std::result::Result<(), Error> {
     sdl3::validate_version_for("SDL3_image", compiled_version(), release, linked_version())
         .map_err(|source| error("SDL3_image.check_version", ErrorKind::IncompatibleVersion, source.message()))
 }
@@ -201,15 +200,15 @@ fn orient(decoded: Rgba, orientation: i64) -> Rgba {
     Rgba { width: width as i32, height: height as i32, pixels }
 }
 
-fn decode(operation: &'static str, kind: Option<&str>, bytes: &[u8]) -> Result<Rgba> {
+fn decode(operation: &'static str, kind: Option<&str>, bytes: &[u8]) -> std::result::Result<Rgba, Error> {
     match sys::decode(bytes, kind) {
-        Err(message) => Err(error(operation, ErrorKind::DecoderError, message)),
+        Err(message) => Err(error(operation, ErrorKind::DecoderError, &message)),
         Ok((width, height, pixels)) => Ok(orient(Rgba { width, height, pixels }, jpeg_orientation(bytes))),
     }
 }
 
-fn read_file(operation: &'static str, path: &str) -> Result<Vec<u8>> {
-    std::fs::read(path).map_err(|failure| error(operation, ErrorKind::DecoderError, format!("{path}: {failure}")))
+fn read_file(operation: &'static str, path: &str) -> std::result::Result<Vec<u8>, Error> {
+    std::fs::read(path).map_err(|failure| error(operation, ErrorKind::DecoderError, &format!("{path}: {failure}")))
 }
 
 fn kind_of_path(path: &str) -> Option<&'static str> {
@@ -243,7 +242,7 @@ fn kind_of_path(path: &str) -> Option<&'static str> {
     })
 }
 
-fn on_main<T>(operation: &'static str, callback: impl FnOnce() -> Result<T>) -> Result<T> {
+fn enter_main(operation: &'static str) -> std::result::Result<(), Error> {
     if !main_thread() {
         return Err(error(
             operation,
@@ -252,18 +251,17 @@ fn on_main<T>(operation: &'static str, callback: impl FnOnce() -> Result<T>) -> 
         ));
     }
     check_version(true)?;
-    callback()
+    Ok(())
 }
 
-pub fn load_file(path: &str) -> Result<Rgba> {
+pub fn load_file(path: &str) -> std::result::Result<Rgba, Error> {
     let operation = "SDL3_image.load_file";
     if path.contains('\0') {
         return Err(error(operation, ErrorKind::InvalidArgument, "image path contains a NUL byte"));
     }
-    on_main(operation, || {
-        let bytes = read_file(operation, path)?;
-        decode(operation, kind_of_path(path), &bytes)
-    })
+    enter_main(operation)?;
+    let bytes = read_file(operation, path)?;
+    decode(operation, kind_of_path(path), &bytes)
 }
 
 #[cfg(test)]

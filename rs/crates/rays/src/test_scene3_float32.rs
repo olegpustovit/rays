@@ -56,7 +56,7 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
         let packed = first.draw.mesh.vertices.clone();
         let attrs = attributes(&first);
         assert!(packed.borrow().len() == 72 && attrs.len() == 36);
-        let original = mesh::View::view(&source);
+        let original = mesh::View::view(&source).unwrap();
         for (i, position) in original.vertices.iter().enumerate() {
             let normal = original.normals.as_ref().expect("normals")[i];
             for (word, expected) in [position.x, position.y, position.z, normal.x, normal.y, normal.z].iter().enumerate() {

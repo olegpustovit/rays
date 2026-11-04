@@ -27,8 +27,6 @@ use std::{
 };
 use vulkan as vk;
 
-type R<T> = Result<T, Error>;
-
 thread_local! {
     static LIVE: Cell<i64> = const { Cell::new(0) };
 }
@@ -41,8 +39,8 @@ pub fn live_handles() -> i64 {
     LIVE.with(Cell::get)
 }
 
-fn fail<T>(op: &str, kind: ErrorKind, text: &str) -> R<T> {
-    Err(error::make(op, kind, text))
+fn fail(op: &str, kind: ErrorKind, text: &str) -> Error {
+    error::make(op, kind, text)
 }
 
 /// Every Vulkan failure becomes an Ogpu error here, and nowhere else.
@@ -58,10 +56,6 @@ fn of_vk(op: &str, failure: vk::Error) -> Error {
         vk::ErrorKind::WrongDevice => error::make(op, ErrorKind::CrossDevice, "resource belongs to another device"),
         vk::ErrorKind::Vulkan(code) => error::make(op, ErrorKind::Io, &format!("VkResult {code}")),
     }
-}
-
-fn vk_result<T>(op: &str, result: Result<T, vk::Error>) -> R<T> {
-    result.map_err(|failure| of_vk(op, failure))
 }
 
 struct BufferEntry {
@@ -217,40 +211,40 @@ impl Dev {
         self.next.set(x + 1);
         x
     }
-    fn device(&self, op: &str) -> R<Rc<vk::Device>> {
+    fn device(&self, op: &str) -> Result<Rc<vk::Device>, Error> {
         match self.device.borrow().as_ref() {
             Some(device) => Ok(device.clone()),
-            None => fail(op, ErrorKind::StaleHandle, "device is destroyed"),
+            None => Err(fail(op, ErrorKind::StaleHandle, "device is destroyed")),
         }
     }
-    fn find_buffer(&self, op: &str, id: Token) -> R<Rc<BufferEntry>> {
+    fn find_buffer(&self, op: &str, id: Token) -> Result<Rc<BufferEntry>, Error> {
         match self.buffers.borrow().get(&id) {
             Some(buffer) => Ok(buffer.clone()),
-            None => fail(op, ErrorKind::InvalidArgument, "buffer graph is incomplete"),
+            None => Err(fail(op, ErrorKind::InvalidArgument, "buffer graph is incomplete")),
         }
     }
-    fn find_texture(&self, op: &str, id: Token) -> R<Rc<TextureEntry>> {
+    fn find_texture(&self, op: &str, id: Token) -> Result<Rc<TextureEntry>, Error> {
         match self.textures.borrow().get(&id) {
             Some(texture) => Ok(texture.clone()),
-            None => fail(op, ErrorKind::InvalidArgument, "texture graph is incomplete"),
+            None => Err(fail(op, ErrorKind::InvalidArgument, "texture graph is incomplete")),
         }
     }
-    fn find_pipeline(&self, op: &str, id: Token) -> R<Rc<PipelineEntry>> {
+    fn find_pipeline(&self, op: &str, id: Token) -> Result<Rc<PipelineEntry>, Error> {
         match self.pipelines.borrow().get(&id) {
             Some(pipeline) => Ok(pipeline.clone()),
-            None => fail(op, ErrorKind::InvalidArgument, "pipeline graph is incomplete"),
+            None => Err(fail(op, ErrorKind::InvalidArgument, "pipeline graph is incomplete")),
         }
     }
-    fn find_sampler(&self, op: &str, id: Token) -> R<Rc<vk::Sampler>> {
+    fn find_sampler(&self, op: &str, id: Token) -> Result<Rc<vk::Sampler>, Error> {
         match self.samplers.borrow().get(&id) {
             Some(sampler) => Ok(sampler.clone()),
-            None => fail(op, ErrorKind::InvalidArgument, "sampler graph is incomplete"),
+            None => Err(fail(op, ErrorKind::InvalidArgument, "sampler graph is incomplete")),
         }
     }
-    fn find_accel(&self, op: &str, id: Token) -> R<Rc<vk::AccelerationStructure>> {
+    fn find_accel(&self, op: &str, id: Token) -> Result<Rc<vk::AccelerationStructure>, Error> {
         match self.accels.borrow().get(&id) {
             Some(accel) => Ok(accel.clone()),
-            None => fail(op, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete"),
+            None => Err(fail(op, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete")),
         }
     }
 }
@@ -259,15 +253,15 @@ fn in_range(size: i64, offset: i64, length: usize) -> bool {
     offset >= 0 && i64::try_from(length).is_ok_and(|length| offset.checked_add(length).is_some_and(|end| end <= size))
 }
 
-fn buffer_read_into(op: &str, entry: &BufferEntry, offset: i64, destination: &mut [u8], at: usize, length: usize) -> R<()> {
+fn buffer_read_into(op: &str, entry: &BufferEntry, offset: i64, destination: &mut [u8], at: usize, length: usize) -> Result<(), Error> {
     if at > destination.len() || length > destination.len() - at || !in_range(entry.size, offset, length) {
-        return fail(op, ErrorKind::InvalidArgument, "read range is invalid");
+        return Err(fail(op, ErrorKind::InvalidArgument, "read range is invalid"));
     }
-    vk_result(op, entry.buffer.borrow().read(offset as u64, &mut destination[at..at + length]))
+    entry.buffer.borrow().read(offset as u64, &mut destination[at..at + length]).map_err(|failure| of_vk(op, failure))
 }
 
-fn register_buffer(dev: &Rc<Dev>, op: &'static str, created: Result<vk::Buffer, vk::Error>, size: i64) -> R<DriverResource> {
-    let native = vk_result(op, created)?;
+fn register_buffer(dev: &Rc<Dev>, op: &'static str, created: Result<vk::Buffer, vk::Error>, size: i64) -> Result<DriverResource, Error> {
+    let native = created.map_err(|failure| of_vk(op, failure))?;
     live_add(1);
     let id = dev.token();
     dev.buffers.borrow_mut().insert(id, Rc::new(BufferEntry { buffer: RefCell::new(native), size }));
@@ -277,9 +271,9 @@ fn register_buffer(dev: &Rc<Dev>, op: &'static str, created: Result<vk::Buffer, 
         write: Box::new(move |offset, bytes| {
             let entry = write_dev.find_buffer(op, id)?;
             if !in_range(entry.size, offset, bytes.len()) {
-                return fail(op, ErrorKind::InvalidArgument, "write range is invalid");
+                return Err(fail(op, ErrorKind::InvalidArgument, "write range is invalid"));
             }
-            vk_result(op, entry.buffer.borrow_mut().write(offset as u64, bytes))
+            entry.buffer.borrow_mut().write(offset as u64, bytes).map_err(|failure| of_vk(op, failure))
         }),
         read: Box::new(move |offset, length| {
             let entry = read_dev.find_buffer(op, id)?;
@@ -304,12 +298,12 @@ fn register_buffer(dev: &Rc<Dev>, op: &'static str, created: Result<vk::Buffer, 
 /// submit and reads go through the transfer queue; Shared reads as zeros, so it is filled like a mapped
 /// buffer is. ponytail: a host-visible tier for a buffer the host rewrites every frame and the GPU reads
 /// once, if a measurement ever shows the staging copy.
-fn create_buffer(dev: &Rc<Dev>, memory: Memory, descriptor: &BufferDescriptor) -> R<DriverResource> {
+fn create_buffer(dev: &Rc<Dev>, memory: Memory, descriptor: &BufferDescriptor) -> Result<DriverResource, Error> {
     const OP: &str = "Ogpu_vulkan.create_buffer";
     let device = dev.device(OP)?;
     let resource = register_buffer(dev, OP, device.buffer(descriptor.size as u64, vk::BufferKind::DeviceLocal), descriptor.size)?;
     if memory == Memory::Shared {
-        let zeroed = dev.find_buffer(OP, resource.token).and_then(|entry| vk_result(OP, entry.buffer.borrow().zero()));
+        let zeroed = dev.find_buffer(OP, resource.token).and_then(|entry| entry.buffer.borrow().zero().map_err(|failure| of_vk(OP, failure)));
         if let Err(failure) = zeroed {
             let _ = (resource.destroy)();
             return Err(failure);
@@ -324,13 +318,13 @@ fn floats_to_bytes(floats: &[f32], length: usize) -> Vec<u8> {
     bytes
 }
 
-fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> R<DriverMapped> {
+fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<DriverMapped, Error> {
     const OP: &str = "Ogpu_vulkan.create_mapped_buffer";
     let device = dev.device(OP)?;
     let size = descriptor.size;
     let resource = register_buffer(dev, OP, device.buffer(size as u64, vk::BufferKind::DeviceLocal), size)?;
     let id = resource.token;
-    if let Err(failure) = dev.find_buffer(OP, id).and_then(|entry| vk_result(OP, entry.buffer.borrow().zero())) {
+    if let Err(failure) = dev.find_buffer(OP, id).and_then(|entry| entry.buffer.borrow().zero().map_err(|failure| of_vk(OP, failure))) {
         let _ = (resource.destroy)();
         return Err(failure);
     }
@@ -366,11 +360,11 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> R<Drive
         release_view: Box::new(move || *release_cell.borrow_mut() = None),
         flush: Box::new(move |length| {
             let Some(floats) = flush_cell.borrow().clone() else {
-                return fail(OP, ErrorKind::InvalidArgument, "no host view was written");
+                return Err(fail(OP, ErrorKind::InvalidArgument, "no host view was written"));
             };
             let entry = flush_dev.find_buffer(OP, id)?;
             let bytes = floats_to_bytes(&floats.borrow(), length);
-            vk_result(OP, entry.buffer.borrow().flush(&bytes))
+            entry.buffer.borrow().flush(&bytes).map_err(|failure| of_vk(OP, failure))
         }),
         invalidate: Box::new(move |length| {
             let floats = invalidate_view();
@@ -378,9 +372,9 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> R<Drive
             let all = floats.borrow().len() * 4;
             let mut bytes = floats_to_bytes(&floats.borrow(), all);
             if length > bytes.len() {
-                return fail(OP, ErrorKind::InvalidArgument, "range exceeds the buffer");
+                return Err(fail(OP, ErrorKind::InvalidArgument, "range exceeds the buffer"));
             }
-            vk_result(OP, entry.buffer.borrow().invalidate(&mut bytes[..length]))?;
+            entry.buffer.borrow().invalidate(&mut bytes[..length]).map_err(|failure| of_vk(OP, failure))?;
             for (value, chunk) in floats.borrow_mut().iter_mut().zip(bytes.chunks_exact(4)) {
                 *value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
             }
@@ -389,7 +383,7 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> R<Drive
     })
 }
 
-fn register_texture(dev: &Rc<Dev>, format: TextureFormat, descriptor: &TextureDescriptor) -> R<DriverResource> {
+fn register_texture(dev: &Rc<Dev>, format: TextureFormat, descriptor: &TextureDescriptor) -> Result<DriverResource, Error> {
     const OP: &str = "Ogpu_vulkan.create_texture";
     let device = dev.device(OP)?;
     let created = device.texture(vk::TextureDescriptor {
@@ -402,30 +396,30 @@ fn register_texture(dev: &Rc<Dev>, format: TextureFormat, descriptor: &TextureDe
         storage: descriptor.usage.contains(&TextureUsage::StorageBinding),
         attachment: descriptor.usage.contains(&TextureUsage::RenderAttachment),
     });
-    let native = vk_result(OP, created)?;
+    let native = created.map_err(|failure| of_vk(OP, failure))?;
     live_add(1);
     let id = dev.token();
     let stored = TextureDescriptor { format, ..descriptor.clone() };
     dev.textures.borrow_mut().insert(id, Rc::new(TextureEntry { texture: native, descriptor: stored }));
     let (width, height) = (descriptor.width, descriptor.height);
     let (into_dev, read_dev) = (dev.clone(), dev.clone());
-    let read_into = move |dev: &Rc<Dev>, offset: i64, destination: &mut [u8], at: usize, length: usize| -> R<()> {
+    let read_into = move |dev: &Rc<Dev>, offset: i64, destination: &mut [u8], at: usize, length: usize| -> Result<(), Error> {
         if offset != 0 || at != 0 || length != destination.len() || height <= 0 || length as i64 % height != 0 {
-            return fail(OP, ErrorKind::InvalidArgument, "destination must match the texture read range");
+            return Err(fail(OP, ErrorKind::InvalidArgument, "destination must match the texture read range"));
         }
         let row = length as i64 / height;
         let texel = types::texel_bytes(format);
         if row < width * texel || row % texel != 0 {
-            return fail(OP, ErrorKind::InvalidArgument, "row pitch is invalid");
+            return Err(fail(OP, ErrorKind::InvalidArgument, "row pitch is invalid"));
         }
         let entry = dev.find_texture(OP, id)?;
-        vk_result(OP, entry.texture.read(destination, row as u64, texel as u32))
+        entry.texture.read(destination, row as u64, texel as u32).map_err(|failure| of_vk(OP, failure))
     };
     let read_again = read_into.clone();
     let destroy_dev = dev.clone();
     Ok(DriverResource {
         token: id,
-        write: Box::new(|_, _| fail(OP, ErrorKind::Unsupported, "use a transfer pass for textures")),
+        write: Box::new(|_, _| Err(fail(OP, ErrorKind::Unsupported, "use a transfer pass for textures"))),
         read: Box::new(move |offset, length| {
             let mut bytes = vec![0u8; length];
             read_again(&read_dev, offset, &mut bytes, 0, length)?;
@@ -474,38 +468,38 @@ fn reflected_space(kind: u32) -> u32 {
     }
 }
 
-fn create_library(dev: &Rc<Dev>, shader: &Shader) -> R<DriverLibrary> {
+fn create_library(dev: &Rc<Dev>, shader: &Shader) -> Result<DriverLibrary, Error> {
     const OP: &str = "Ogpu_vulkan.create_library";
     let bytes = shader::bytes(shader).to_vec();
     let device = dev.device(OP)?;
-    let module = vk_result(OP, device.shader(&bytes))?;
+    let module = device.shader(&bytes).map_err(|failure| of_vk(OP, failure))?;
     live_add(1);
     let module: Rc<RefCell<Option<vk::ShaderModule>>> = Rc::new(RefCell::new(Some(module)));
     let (pipeline_dev, pipeline_module) = (dev.clone(), module.clone());
     Ok(DriverLibrary {
         create_compute_pipeline_in: Box::new(move |entry: &str, constants: &[(String, ConstantValue)], declared: &[ShaderBinding]| {
             if !constants.is_empty() {
-                return fail(OP, ErrorKind::Unsupported, "SPIR-V kernels take no named function constants");
+                return Err(fail(OP, ErrorKind::Unsupported, "SPIR-V kernels take no named function constants"));
             }
             let reflected = match vk::reflect::reflect_entry(&bytes, entry) {
                 Ok(Some(reflected)) => reflected,
-                Ok(None) | Err(_) => return fail(OP, ErrorKind::InvalidArgument, "the module has no such entry point"),
+                Ok(None) | Err(_) => return Err(fail(OP, ErrorKind::InvalidArgument, "the module has no such entry point")),
             };
             let mut want: Vec<(u32, u32)> = declared.iter().map(|b| (b.binding as u32, kernel_space(b.kind))).collect();
             let mut have: Vec<(u32, u32)> = reflected.bindings.iter().map(|&(b, k)| (b, reflected_space(k))).collect();
             want.sort_unstable();
             have.sort_unstable();
             if want != have {
-                return fail(OP, ErrorKind::InvalidArgument, "SPIR-V reflection does not match the interface");
+                return Err(fail(OP, ErrorKind::InvalidArgument, "SPIR-V reflection does not match the interface"));
             }
             let device = pipeline_dev.device(OP)?;
             let natives: Vec<vk::Binding> =
                 reflected.bindings.iter().map(|&(binding, kind)| vk::Binding { binding, kind: kind as i32 }).collect();
             let module = pipeline_module.borrow();
             let Some(module) = module.as_ref() else {
-                return fail(OP, ErrorKind::StaleHandle, "library is destroyed");
+                return Err(fail(OP, ErrorKind::StaleHandle, "library is destroyed"));
             };
-            let pipeline = vk_result(OP, vk::Pipeline::compute(&device, module, entry, &natives))?;
+            let pipeline = vk::Pipeline::compute(&device, module, entry, &natives).map_err(|failure| of_vk(OP, failure))?;
             let local = (reflected.local_size.0 as i64, reflected.local_size.1 as i64, reflected.local_size.2 as i64);
             Ok(own_pipeline(&pipeline_dev, pipeline, local, pipeline_dev.max_invocations))
         }),
@@ -517,17 +511,17 @@ fn create_library(dev: &Rc<Dev>, shader: &Shader) -> R<DriverLibrary> {
     })
 }
 
-fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descriptor: &RenderDescriptor) -> R<DriverPipeline> {
+fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descriptor: &RenderDescriptor) -> Result<DriverPipeline, Error> {
     const OP: &str = "Ogpu_vulkan.create_render_pipeline";
     let device = dev.device(OP)?;
     let vertex_bytes = shader::bytes(&descriptor.vertex);
-    let vertex = vk_result(OP, device.shader(vertex_bytes))?;
+    let vertex = device.shader(vertex_bytes).map_err(|failure| of_vk(OP, failure))?;
     let fragment = match &descriptor.fragment {
         None => None,
-        Some(shader) => Some(vk_result(OP, device.shader(shader::bytes(shader)))?),
+        Some(shader) => Some(device.shader(shader::bytes(shader)).map_err(|failure| of_vk(OP, failure))?),
     };
-    let reflect = |bytes: &[u8]| -> R<Vec<(u32, u32)>> {
-        vk::reflect::reflect(bytes).or_else(|_| fail(OP, ErrorKind::InvalidArgument, "invalid SPIR-V module"))
+    let reflect = |bytes: &[u8]| -> Result<Vec<(u32, u32)>, Error> {
+        vk::reflect::reflect(bytes).or_else(|_| Err(fail(OP, ErrorKind::InvalidArgument, "invalid SPIR-V module")))
     };
     let mut interface = reflect(vertex_bytes)?;
     if let Some(shader) = &descriptor.fragment {
@@ -546,9 +540,7 @@ fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descrip
         ColorFormat::Bgra8Unorm => 2,
     };
     let has_depth = descriptor.depth_format != DepthFormat::NoDepth;
-    let pipeline = vk_result(
-        OP,
-        vk::Pipeline::render(
+    let pipeline = vk::Pipeline::render(
             &device,
             &vertex,
             fragment.as_ref(),
@@ -560,12 +552,12 @@ fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descrip
                 has_depth,
                 samples: descriptor.sample_count.max(1) as i32,
             },
-        ),
-    )?;
+        )
+    .map_err(|failure| of_vk(OP, failure))?;
     Ok(own_pipeline(dev, pipeline, (1, 1, 1), 0))
 }
 
-fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> R<DriverSampler> {
+fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> Result<DriverSampler, Error> {
     const OP: &str = "Ogpu_vulkan.create_sampler";
     let filter = |filter: SamplerFilter| match filter {
         SamplerFilter::Nearest => 0,
@@ -582,9 +574,7 @@ fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> R<DriverSamp
         MipFilter::LinearMip => 2,
     };
     let device = dev.device(OP)?;
-    let native = vk_result(
-        OP,
-        device.sampler(vk::SamplerDescriptor {
+    let native = device.sampler(vk::SamplerDescriptor {
             min_filter: filter(descriptor.min_filter),
             mag_filter: filter(descriptor.mag_filter),
             mip_filter: mip,
@@ -593,8 +583,8 @@ fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> R<DriverSamp
             anisotropy: descriptor.max_anisotropy as i32,
             lod_min: descriptor.lod_min,
             lod_max: descriptor.lod_max,
-        }),
-    )?;
+        })
+    .map_err(|failure| of_vk(OP, failure))?;
     live_add(1);
     let id = dev.token();
     dev.samplers.borrow_mut().insert(id, Rc::new(native));
@@ -609,20 +599,20 @@ fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> R<DriverSamp
     })
 }
 
-fn create_icb(dev: &Rc<Dev>, max_commands: i64) -> R<DriverIcb> {
+fn create_icb(dev: &Rc<Dev>, max_commands: i64) -> Result<DriverIcb, Error> {
     const OP: &str = "Ogpu_vulkan.icb";
     let id = dev.token();
     live_add(1);
     let commands = Rc::new(RefCell::new(vec![IcbCommand::default(); max_commands.max(0) as usize]));
     dev.icbs.borrow_mut().insert(id, commands.clone());
-    let at = move |index: i64, edit: &mut dyn FnMut(&mut IcbCommand)| -> R<()> {
+    let at = move |index: i64, edit: &mut dyn FnMut(&mut IcbCommand)| -> Result<(), Error> {
         let mut commands = commands.borrow_mut();
         match usize::try_from(index).ok().and_then(|index| commands.get_mut(index)) {
             Some(command) => {
                 edit(command);
                 Ok(())
             }
-            None => fail(OP, ErrorKind::InvalidArgument, "indirect command index is out of range"),
+            None => Err(fail(OP, ErrorKind::InvalidArgument, "indirect command index is out of range")),
         }
     };
     let (a1, a2, a3, a4) = (at.clone(), at.clone(), at.clone(), at);
@@ -647,7 +637,7 @@ fn create_icb(dev: &Rc<Dev>, max_commands: i64) -> R<DriverIcb> {
     })
 }
 
-fn create_argument(dev: &Rc<Dev>) -> R<DriverArgument> {
+fn create_argument(dev: &Rc<Dev>) -> Result<DriverArgument, Error> {
     const OP: &str = "Ogpu_vulkan.argument";
     let (texture_dev, sampler_dev) = (dev.clone(), dev.clone());
     Ok(DriverArgument {
@@ -667,17 +657,17 @@ fn create_argument(dev: &Rc<Dev>) -> R<DriverArgument> {
     })
 }
 
-fn read_bytes(dev: &Dev, op: &str, token: Token, offset: i64, length: i64) -> R<Vec<u8>> {
+fn read_bytes(dev: &Dev, op: &str, token: Token, offset: i64, length: i64) -> Result<Vec<u8>, Error> {
     let buffer = dev.find_buffer(op, token)?;
     if offset < 0 || length < 0 || offset > buffer.size || length > buffer.size - offset {
-        return fail(op, ErrorKind::InvalidArgument, "read range is invalid");
+        return Err(fail(op, ErrorKind::InvalidArgument, "read range is invalid"));
     }
     let mut bytes = vec![0u8; length as usize];
     buffer_read_into(op, &buffer, offset, &mut bytes, 0, length as usize)?;
     Ok(bytes)
 }
 
-fn generated_buffer(dev: &Rc<Dev>, generated: &mut Vec<DriverResource>, bytes: &[u8]) -> R<Token> {
+fn generated_buffer(dev: &Rc<Dev>, generated: &mut Vec<DriverResource>, bytes: &[u8]) -> Result<Token, Error> {
     let resource = create_buffer(
         dev,
         Memory::DeviceLocal,
@@ -742,7 +732,7 @@ fn motion_triangle_boxes(
     keyframes: &[(Token, i64)],
     stride: i64,
     vertices: i64,
-) -> R<GeomRecord> {
+) -> Result<GeomRecord, Error> {
     let length = (vertices - 1) * stride + 12;
     let mut frames = Vec::new();
     for &(token, offset) in keyframes {
@@ -774,7 +764,7 @@ fn motion_triangle_boxes(
     Ok(box_geometry(entry, vertices / 3))
 }
 
-fn geometry_records(dev: &Rc<Dev>, generated: &mut Vec<DriverResource>, geometries: &[DriverGeometry]) -> R<Vec<GeomRecord>> {
+fn geometry_records(dev: &Rc<Dev>, generated: &mut Vec<DriverResource>, geometries: &[DriverGeometry]) -> Result<Vec<GeomRecord>, Error> {
     const OP: &str = "Ogpu_vulkan.accel";
     let mut records = Vec::new();
     for geometry in geometries {
@@ -801,42 +791,39 @@ fn geometry_records(dev: &Rc<Dev>, generated: &mut Vec<DriverResource>, geometri
                 duplicate: *duplicate,
             },
             DriverGeometry::Boxes { .. } | DriverGeometry::Curves { .. } => {
-                return fail(OP, ErrorKind::Unsupported, "Vulkan ray queries do not expose native curves or multi-keyframe boxes");
+                return Err(fail(OP, ErrorKind::Unsupported, "Vulkan ray queries do not expose native curves or multi-keyframe boxes"));
             }
         });
     }
     Ok(records)
 }
 
-/// The bridge's geometries over records, borrowing each buffer for the call.
-fn with_native<T>(records: &[GeomRecord], call: impl FnOnce(&[vk::Geometry]) -> T) -> T {
-    let buffers: Vec<Ref<vk::Buffer>> = records.iter().map(|record| record.buffer.buffer.borrow()).collect();
-    let geometries: Vec<vk::Geometry> = records
+/// The bridge's geometries over records (each buffer handle is a cheap shared clone).
+fn native_geometries(records: &[GeomRecord]) -> Vec<vk::Geometry> {
+    records
         .iter()
-        .zip(&buffers)
-        .map(|(record, buffer)| vk::Geometry {
+        .map(|record| vk::Geometry {
             kind: record.kind,
-            buffer,
+            buffer: record.buffer.buffer.borrow().clone(),
             offset: record.offset,
             stride: record.stride,
             count: record.count,
             opaque: record.opaque,
             duplicate_any_hit: record.duplicate,
         })
-        .collect();
-    call(&geometries)
+        .collect()
 }
 
-fn local_bounds(op: &str, geometry: &GeomRecord) -> R<([f64; 3], [f64; 3])> {
+fn local_bounds(op: &str, geometry: &GeomRecord) -> Result<([f64; 3], [f64; 3]), Error> {
     if geometry.kind != vk::GeometryKind::Triangles {
-        return fail(op, ErrorKind::Unsupported, "motion instances require triangle prototypes");
+        return Err(fail(op, ErrorKind::Unsupported, "motion instances require triangle prototypes"));
     }
     if geometry.count == 0 {
-        return fail(op, ErrorKind::InvalidArgument, "motion instance prototype has no vertices");
+        return Err(fail(op, ErrorKind::InvalidArgument, "motion instance prototype has no vertices"));
     }
     let (stride, vertices) = (geometry.stride as usize, geometry.count as usize);
     let mut bytes = vec![0u8; (vertices - 1) * stride + 12];
-    vk_result(op, geometry.buffer.buffer.borrow().read(geometry.offset, &mut bytes))?;
+    geometry.buffer.buffer.borrow().read(geometry.offset, &mut bytes).map_err(|failure| of_vk(op, failure))?;
     let mut minimum = [f64::INFINITY; 3];
     let mut maximum = [f64::NEG_INFINITY; 3];
     for vertex in 0..vertices {
@@ -870,7 +857,7 @@ fn motion_instance_geometries(
     count: i64,
     structures: &[Token],
     transforms: (Token, i64, i64),
-) -> R<(Vec<GeomRecord>, Vec<u8>)> {
+) -> Result<(Vec<GeomRecord>, Vec<u8>), Error> {
     let records = read_bytes(dev, op, instances, offset, count * 44)?;
     let (transform_token, transform_offset, transform_count) = transforms;
     let transform_data = read_bytes(dev, op, transform_token, transform_offset, transform_count * 48)?;
@@ -883,16 +870,16 @@ fn motion_instance_geometries(
         let start = read_u32(&records, base + 12);
         let keys = read_u32(&records, base + 16);
         if structure < 0 || structure as usize >= structures.len() {
-            return fail(op, ErrorKind::InvalidArgument, "motion instance structure index is out of range");
+            return Err(fail(op, ErrorKind::InvalidArgument, "motion instance structure index is out of range"));
         }
         if keys < 2 || start < 0 || keys > transform_count || start > transform_count - keys {
-            return fail(op, ErrorKind::InvalidArgument, "motion instance transform range is invalid");
+            return Err(fail(op, ErrorKind::InvalidArgument, "motion instance transform range is invalid"));
         }
         let prototype = dev.accel_geometries.borrow().get(&structures[structure as usize]).cloned();
         let triangle = match prototype {
-            None => return fail(op, ErrorKind::InvalidArgument, "motion instance prototype is not a triangle BLAS"),
+            None => return Err(fail(op, ErrorKind::InvalidArgument, "motion instance prototype is not a triangle BLAS")),
             Some(geometries) if geometries.len() == 1 => geometries[0].clone(),
-            Some(_) => return fail(op, ErrorKind::Unsupported, "motion instances require one triangle geometry per prototype"),
+            Some(_) => return Err(fail(op, ErrorKind::Unsupported, "motion instances require one triangle geometry per prototype")),
         };
         let (minimum, maximum) = local_bounds(op, &triangle)?;
         let mut bytes = vec![0u8; (keys as usize - 1) * 24];
@@ -947,14 +934,14 @@ fn build_accel(
     descriptor: &DriverAccelDescriptor,
     generated: &mut Vec<DriverResource>,
     stored: &mut Option<Vec<GeomRecord>>,
-) -> R<vk::AccelerationStructure> {
+) -> Result<vk::AccelerationStructure, Error> {
     let device = dev.device(op)?;
     match descriptor {
         DriverAccelDescriptor::Blas { geometries, refit, .. } => {
             let records = geometry_records(dev, generated, geometries)?;
-            let created = with_native(&records, |native| device.acceleration_blas(native, *refit));
+            let created = device.acceleration_blas(&native_geometries(&records), *refit);
             *stored = Some(records);
-            vk_result(op, created)
+            created.map_err(|failure| of_vk(op, failure))
         }
         DriverAccelDescriptor::Tlas {
             instances,
@@ -970,15 +957,15 @@ fn build_accel(
             let instance_buffer = dev.find_buffer(op, instance_token)?;
             let mut children = Vec::new();
             for proxy in &proxies {
-                let created = with_native(std::slice::from_ref(proxy), |native| device.acceleration_blas(native, false));
-                children.push(vk_result(op, created)?);
+                let created = device.acceleration_blas(&native_geometries(std::slice::from_ref(proxy)), false);
+                children.push(created.map_err(|failure| of_vk(op, failure))?);
             }
             let refs = children;
             let buffer = instance_buffer.buffer.borrow();
-            vk_result(op, device.acceleration_tlas(&buffer, 0, *instance_count as u32, &refs, true))
+            device.acceleration_tlas(&buffer, 0, *instance_count as u32, &refs, true).map_err(|failure| of_vk(op, failure))
         }
         DriverAccelDescriptor::Tlas { kind: InstanceKind::MotionInstances, .. } => {
-            fail(op, ErrorKind::InvalidArgument, "motion instances require transform keyframes")
+            Err(fail(op, ErrorKind::InvalidArgument, "motion instances require transform keyframes"))
         }
         DriverAccelDescriptor::Tlas { instances, offset, instance_count, structures, .. } => {
             let buffer = dev.find_buffer(op, *instances)?;
@@ -988,16 +975,16 @@ fn build_accel(
             }
             let refs: Vec<vk::AccelerationStructure> = handles.iter().map(|handle| (**handle).clone()).collect();
             let buffer = buffer.buffer.borrow();
-            vk_result(op, device.acceleration_tlas(&buffer, *offset as u64, *instance_count as u32, &refs, false))
+            device.acceleration_tlas(&buffer, *offset as u64, *instance_count as u32, &refs, false).map_err(|failure| of_vk(op, failure))
         }
         DriverAccelDescriptor::Sized { size, template } => {
             let template = dev.find_accel(op, *template)?;
-            vk_result(op, device.acceleration_sized(*size as u64, &template))
+            device.acceleration_sized(*size as u64, &template).map_err(|failure| of_vk(op, failure))
         }
     }
 }
 
-fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> R<DriverAccel> {
+fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> Result<DriverAccel, Error> {
     const OP: &str = "Ogpu_vulkan.create_accel";
     let mut generated = Vec::new();
     let mut stored = None;
@@ -1046,13 +1033,13 @@ impl QueueState {
     fn active(&self) -> i64 {
         self.next_epoch.get() - 1 - self.completed.get()
     }
-    fn native(&self, op: &str) -> R<Ref<'_, vk::Queue>> {
+    fn native(&self, op: &str) -> Result<Ref<'_, vk::Queue>, Error> {
         Ref::filter_map(self.queue.borrow(), Option::as_ref)
-            .or_else(|_| fail(op, ErrorKind::StaleHandle, "queue is destroyed"))
+            .or_else(|_| Err(fail(op, ErrorKind::StaleHandle, "queue is destroyed")))
     }
-    fn bound_epoch(&self, op: &str, epoch: i64) -> R<i64> {
+    fn bound_epoch(&self, op: &str, epoch: i64) -> Result<i64, Error> {
         if epoch <= 0 || epoch >= self.next_epoch.get() {
-            fail(op, ErrorKind::InvalidArgument, "epoch was not submitted")
+            Err(fail(op, ErrorKind::InvalidArgument, "epoch was not submitted"))
         } else {
             Ok(epoch)
         }
@@ -1068,20 +1055,20 @@ struct Cmds {
 }
 
 impl Cmds {
-    fn run(&self, op: &str, call: &mut dyn FnMut(&mut vk::Commands) -> Result<(), vk::Error>) -> R<()> {
+    fn run(&self, op: &str, call: &mut dyn FnMut(&mut vk::Commands) -> Result<(), vk::Error>) -> Result<(), Error> {
         match self.commands.borrow_mut().as_mut() {
-            Some(commands) => vk_result(op, call(commands)),
-            None => fail(op, ErrorKind::InvalidState, "commands are finished"),
+            Some(commands) => call(commands).map_err(|failure| of_vk(op, failure)),
+            None => Err(fail(op, ErrorKind::InvalidState, "commands are finished")),
         }
     }
 
-    fn commit_with(&self, op: &str, submit: &mut dyn FnMut(&mut Option<vk::Commands>) -> Result<u64, vk::Error>) -> R<Receipt> {
+    fn commit_with(&self, op: &str, submit: &mut dyn FnMut(&mut Option<vk::Commands>) -> Result<u64, vk::Error>) -> Result<Receipt, Error> {
         if self.finished.get() {
-            fail(op, ErrorKind::InvalidState, "commands are finished")
+            Err(fail(op, ErrorKind::InvalidState, "commands are finished"))
         } else if self.queue.active() >= 3 {
-            fail(op, ErrorKind::Capacity, "frames-in-flight capacity reached")
+            Err(fail(op, ErrorKind::Capacity, "frames-in-flight capacity reached"))
         } else {
-            let epoch = vk_result(op, submit(&mut self.commands.borrow_mut()))? as i64;
+            let epoch = submit(&mut self.commands.borrow_mut()).map_err(|failure| of_vk(op, failure))? as i64;
             self.finished.set(true);
             self.queue.next_epoch.set(epoch + 1);
             Ok(Receipt { epoch })
@@ -1089,7 +1076,7 @@ impl Cmds {
     }
 }
 
-fn compute_encoder(cmds: &Rc<Cmds>) -> R<DriverComputeEncoder> {
+fn compute_encoder(cmds: &Rc<Cmds>) -> Result<DriverComputeEncoder, Error> {
     const OP: &str = "Ogpu_vulkan.queue";
     cmds.run(OP, &mut |c| {
         c.compute_begin();
@@ -1142,7 +1129,7 @@ fn compute_encoder(cmds: &Rc<Cmds>) -> R<DriverComputeEncoder> {
     })
 }
 
-fn accel_encoder(cmds: &Rc<Cmds>) -> R<DriverAccelEncoder> {
+fn accel_encoder(cmds: &Rc<Cmds>) -> Result<DriverAccelEncoder, Error> {
     const OP: &str = "Ogpu_vulkan.queue";
     let (c1, c2, c3, c4, c5) = (cmds.clone(), cmds.clone(), cmds.clone(), cmds.clone(), cmds.clone());
     Ok(DriverAccelEncoder {
@@ -1165,7 +1152,7 @@ fn accel_encoder(cmds: &Rc<Cmds>) -> R<DriverAccelEncoder> {
             let accel = c4.dev.find_accel(OP, id)?;
             let scratch = c4.dev.find_buffer(OP, scratch)?;
             let DriverAccelDescriptor::Blas { geometries, .. } = descriptor else {
-                return fail(OP, ErrorKind::InvalidArgument, "Vulkan refit requires a BLAS descriptor");
+                return Err(fail(OP, ErrorKind::InvalidArgument, "Vulkan refit requires a BLAS descriptor"));
             };
             let mut generated = Vec::new();
             let records = match geometry_records(&c4.dev, &mut generated, geometries) {
@@ -1176,7 +1163,7 @@ fn accel_encoder(cmds: &Rc<Cmds>) -> R<DriverAccelEncoder> {
                 }
             };
             let refit = c4.run(OP, &mut |c| {
-                with_native(&records, |native| c.refit_acceleration(&accel, native, &scratch.buffer.borrow(), scratch_offset as u64))
+                c.refit_acceleration(&accel, &native_geometries(&records), &scratch.buffer.borrow(), scratch_offset as u64)
             });
             if let Err(failure) = refit {
                 destroy_all(generated);
@@ -1196,7 +1183,7 @@ fn accel_encoder(cmds: &Rc<Cmds>) -> R<DriverAccelEncoder> {
     })
 }
 
-fn blit_encoder(cmds: &Rc<Cmds>) -> R<DriverBlitEncoder> {
+fn blit_encoder(cmds: &Rc<Cmds>) -> Result<DriverBlitEncoder, Error> {
     const OP: &str = "Ogpu_vulkan.queue";
     let (c1, c2) = (cmds.clone(), cmds.clone());
     Ok(DriverBlitEncoder {
@@ -1235,17 +1222,17 @@ struct Render {
 impl Render {
     const OP: &'static str = "Ogpu_vulkan.queue";
 
-    fn set_pipeline(&self, id: Token) -> R<()> {
+    fn set_pipeline(&self, id: Token) -> Result<(), Error> {
         let entry = self.cmds.dev.find_pipeline(Self::OP, id)?;
         self.cmds.run(Self::OP, &mut |c| c.set_pipeline(&entry.pipeline))
     }
 
-    fn set_stage_buffer(&self, index: i64, offset: i64, id: Token) -> R<()> {
+    fn set_stage_buffer(&self, index: i64, offset: i64, id: Token) -> Result<(), Error> {
         let argument = self.cmds.dev.arguments.borrow().get(&(id, offset)).cloned();
         match argument {
             Some((texture, sampler)) => {
                 let (Some(texture), Some(sampler)) = (texture, sampler) else {
-                    return fail(Self::OP, ErrorKind::InvalidArgument, "argument slice is incomplete");
+                    return Err(fail(Self::OP, ErrorKind::InvalidArgument, "argument slice is incomplete"));
                 };
                 self.cmds.run(Self::OP, &mut |c| c.set_texture(index as u32, &texture.texture))?;
                 self.cmds.run(Self::OP, &mut |c| c.set_sampler(index as u32 + 1, &sampler))
@@ -1257,11 +1244,11 @@ impl Render {
         }
     }
 
-    fn draw(&self, primitive: Primitive, first: i64, count: i64, instances: i64) -> R<()> {
+    fn draw(&self, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.cmds.run(Self::OP, &mut |c| c.draw(primitive_index(primitive), first as u32, count as u32, instances as u32))
     }
 
-    fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, id: Token, offset: i64, count: i64, instances: i64) -> R<()> {
+    fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, id: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
         let entry = self.cmds.dev.find_buffer(Self::OP, id)?;
         self.cmds.run(Self::OP, &mut |c| {
             c.draw_indexed(
@@ -1276,7 +1263,7 @@ impl Render {
     }
 }
 
-fn render_encoder(cmds: &Rc<Cmds>, target: &DriverRenderTarget) -> R<DriverRenderEncoder> {
+fn render_encoder(cmds: &Rc<Cmds>, target: &DriverRenderTarget) -> Result<DriverRenderEncoder, Error> {
     const OP: &str = "Ogpu_vulkan.queue";
     let dev = &cmds.dev;
     let mut colors = Vec::new();
@@ -1295,15 +1282,15 @@ fn render_encoder(cmds: &Rc<Cmds>, target: &DriverRenderTarget) -> R<DriverRende
     let attachments: Vec<vk::ColorAttachment> = colors
         .iter()
         .map(|(texture, resolve, load, store, (r, g, b, a))| vk::ColorAttachment {
-            texture: &texture.texture,
-            resolve: resolve.as_ref().map(|t| &t.texture),
+            texture: texture.texture.clone(),
+            resolve: resolve.as_ref().map(|t| t.texture.clone()),
             load: load_index(*load),
             store: store_index(*store),
             clear: [*r, *g, *b, *a],
         })
         .collect();
     let depth_attachment = depth.as_ref().map(|(texture, load, store, clear)| vk::DepthAttachment {
-        texture: &texture.texture,
+        texture: texture.texture.clone(),
         load: load_index(*load),
         store: store_index(*store),
         clear: *clear,
@@ -1396,12 +1383,12 @@ fn render_encoder(cmds: &Rc<Cmds>, target: &DriverRenderTarget) -> R<DriverRende
         execute_icb: Box::new(move |id, location, length| {
             let recorded = r14.cmds.dev.icbs.borrow().get(&id).cloned();
             let Some(recorded) = recorded else {
-                return fail(OP, ErrorKind::InvalidArgument, "indirect commands are unknown");
+                return Err(fail(OP, ErrorKind::InvalidArgument, "indirect commands are unknown"));
             };
             for i in location..location + length {
                 let command = usize::try_from(i).ok().and_then(|i| recorded.borrow().get(i).cloned());
                 let Some(command) = command else {
-                    return fail(OP, ErrorKind::InvalidArgument, "indirect command index is out of range");
+                    return Err(fail(OP, ErrorKind::InvalidArgument, "indirect command index is out of range"));
                 };
                 if let Some(pipeline) = command.pipeline {
                     r14.set_pipeline(pipeline)?;
@@ -1428,9 +1415,9 @@ fn render_encoder(cmds: &Rc<Cmds>, target: &DriverRenderTarget) -> R<DriverRende
     })
 }
 
-fn begin_commands(dev: &Rc<Dev>, queue: &Rc<QueueState>) -> R<DriverCommands> {
+fn begin_commands(dev: &Rc<Dev>, queue: &Rc<QueueState>) -> Result<DriverCommands, Error> {
     const OP: &str = "Ogpu_vulkan.queue";
-    let native = vk_result(OP, queue.native(OP)?.begin())?;
+    let native = queue.native(OP)?.begin().map_err(|failure| of_vk(OP, failure))?;
     let cmds = Rc::new(Cmds { dev: dev.clone(), queue: queue.clone(), commands: RefCell::new(Some(native)), finished: Cell::new(false) });
     let (c1, c2, c3, c4, c5, c6, c7) =
         (cmds.clone(), cmds.clone(), cmds.clone(), cmds.clone(), cmds.clone(), cmds.clone(), cmds.clone());
@@ -1449,7 +1436,7 @@ fn begin_commands(dev: &Rc<Dev>, queue: &Rc<QueueState>) -> R<DriverCommands> {
             let source = c6.dev.find_texture(OP, source)?;
             let surface = c6.dev.frames.borrow().get(&frame.frame_token).cloned();
             let Some(surface) = surface else {
-                return fail(OP, ErrorKind::InvalidState, "frame token is stale");
+                return Err(fail(OP, ErrorKind::InvalidState, "frame token is stale"));
             };
             let result = c6.commit_with(OP, &mut |slot| {
                 let handle_error = || vk::Error { operation: "commit_present", kind: vk::ErrorKind::InvalidHandle };
@@ -1466,7 +1453,7 @@ fn begin_commands(dev: &Rc<Dev>, queue: &Rc<QueueState>) -> R<DriverCommands> {
         }),
         abandon: Box::new(move || {
             if c7.finished.get() {
-                fail(OP, ErrorKind::InvalidState, "commands are finished")
+                Err(fail(OP, ErrorKind::InvalidState, "commands are finished"))
             } else {
                 c7.finished.set(true);
                 *c7.commands.borrow_mut() = None;
@@ -1476,10 +1463,10 @@ fn begin_commands(dev: &Rc<Dev>, queue: &Rc<QueueState>) -> R<DriverCommands> {
     })
 }
 
-fn create_queue(dev: &Rc<Dev>) -> R<DriverQueue> {
+fn create_queue(dev: &Rc<Dev>) -> Result<DriverQueue, Error> {
     const OP: &str = "Ogpu_vulkan.queue";
     let device = dev.device(OP)?;
-    let native = vk_result(OP, device.queue())?;
+    let native = device.queue().map_err(|failure| of_vk(OP, failure))?;
     live_add(1);
     dev.queues.set(dev.queues.get() + 1);
     let state = Rc::new(QueueState { queue: RefCell::new(Some(native)), next_epoch: Cell::new(1), completed: Cell::new(0) });
@@ -1492,7 +1479,7 @@ fn create_queue(dev: &Rc<Dev>) -> R<DriverQueue> {
             if epoch <= s1.completed.get() {
                 return Ok(());
             }
-            vk_result(OP, s1.native(OP)?.wait(epoch as u64))?;
+            s1.native(OP)?.wait(epoch as u64).map_err(|failure| of_vk(OP, failure))?;
             s1.completed.set(epoch);
             Ok(())
         }),
@@ -1502,7 +1489,7 @@ fn create_queue(dev: &Rc<Dev>) -> R<DriverQueue> {
                 return Ok(true);
             }
             let queue = s2.native(OP)?;
-            let done = vk_result(OP, queue.completed())? as i64;
+            let done = queue.completed().map_err(|failure| of_vk(OP, failure))? as i64;
             if done >= epoch {
                 queue.poll();
                 s2.completed.set(epoch);
@@ -1518,7 +1505,7 @@ fn create_queue(dev: &Rc<Dev>) -> R<DriverQueue> {
         destroy_queue: Box::new(move || {
             let completed = s7.native(OP)?.completed().map_or(-1, |done| done as i64);
             if s7.active() > 0 && completed < s7.next_epoch.get() - 1 {
-                fail(OP, ErrorKind::InvalidState, "queue has commands in flight")
+                Err(fail(OP, ErrorKind::InvalidState, "queue has commands in flight"))
             } else {
                 destroy_dev.queues.set(destroy_dev.queues.get() - 1);
                 live_add(-1);
@@ -1529,14 +1516,14 @@ fn create_queue(dev: &Rc<Dev>) -> R<DriverQueue> {
     })
 }
 
-fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> R<DriverSurface> {
+fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> Result<DriverSurface, Error> {
     const OP: &str = "Ogpu_vulkan.surface";
     let immediate = |configuration: &Configuration| configuration.present_mode == PresentMode::Immediate;
     let Some(layer) = &configuration.layer else {
-        return fail(OP, ErrorKind::Unsupported, "surface needs a native layer token");
+        return Err(fail(OP, ErrorKind::Unsupported, "surface needs a native layer token"));
     };
     let device = dev.device(OP)?;
-    let native = vk_result(OP, device.surface(layer, layer.owner_id(), layer.generation(), immediate(configuration)))?;
+    let native = device.surface(layer, layer.owner_id(), layer.generation(), immediate(configuration)).map_err(|failure| of_vk(OP, failure))?;
     live_add(1);
     let cell = Rc::new(RefCell::new(Some(native)));
     let (configure_cell, acquire_cell, discard_cell, destroy_cell) = (cell.clone(), cell.clone(), cell.clone(), cell);
@@ -1544,7 +1531,7 @@ fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> R<DriverSurfa
     let stale = || error::make(OP, ErrorKind::StaleHandle, "surface is destroyed");
     Ok(DriverSurface {
         configure: Box::new(move |configuration| match configure_cell.borrow_mut().as_mut() {
-            Some(surface) => vk_result(OP, surface.configure(immediate(configuration))),
+            Some(surface) => surface.configure(immediate(configuration)).map_err(|failure| of_vk(OP, failure)),
             None => Err(stale()),
         }),
         acquire_sync: Box::new(move || {
@@ -1571,7 +1558,7 @@ fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> R<DriverSurfa
                 }
                 Ok(())
             } else {
-                fail(OP, ErrorKind::InvalidState, "frame token is stale")
+                Err(fail(OP, ErrorKind::InvalidState, "frame token is stale"))
             }
         }),
         destroy_surface: Box::new(move || {
@@ -1583,14 +1570,14 @@ fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> R<DriverSurfa
     })
 }
 
-fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> R<DriverDevice> {
+fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Result<DriverDevice, Error> {
     const OP: &str = "Ogpu_vulkan.create_device";
     if device_live.get() {
-        return fail(OP, ErrorKind::InvalidState, "adapter already owns a live device");
+        return Err(fail(OP, ErrorKind::InvalidState, "adapter already owns a live device"));
     }
-    let device = vk_result(OP, vk::Device::create(validation.0, validation.1))?;
+    let device = vk::Device::create(validation.0, validation.1).map_err(|failure| of_vk(OP, failure))?;
     device_live.set(true);
-    let facts = match vk_result(OP, device.facts()) {
+    let facts = match device.facts().map_err(|failure| of_vk(OP, failure)) {
         Ok(facts) => facts,
         Err(failure) => {
             device_live.set(false);
@@ -1650,7 +1637,7 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> R<Dr
         create_texture: Box::new(move |descriptor| register_texture(&d_texture, descriptor.format, descriptor)),
         create_depth_texture: Box::new(move |descriptor| register_texture(&d_depth, TextureFormat::Depth32Float, descriptor)),
         create_memoryless_texture: Box::new(|_depth, _descriptor| {
-            fail("Ogpu_vulkan.create_memoryless_texture", ErrorKind::Unsupported, "this device has no tile memory")
+            Err(fail("Ogpu_vulkan.create_memoryless_texture", ErrorKind::Unsupported, "this device has no tile memory"))
         }),
         create_library: Box::new(move |shader| create_library(&d_library, shader)),
         create_accel: Box::new(move |descriptor| create_accel(&d_accel, descriptor)),
@@ -1668,7 +1655,7 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> R<Dr
         create_surface: Box::new(move |configuration| create_surface(&d_surface, configuration)),
         destroy_device: Box::new(move || {
             if d_destroy.queues.get() != 0 {
-                return fail("Ogpu_vulkan.destroy_device", ErrorKind::InvalidState, "device has active queues");
+                return Err(fail("Ogpu_vulkan.destroy_device", ErrorKind::InvalidState, "device has active queues"));
             }
             device_live.set(false);
             // Natives leaked past their owners go with the device.

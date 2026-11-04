@@ -51,7 +51,7 @@ fn magnitude_of_int64(value: i64) -> Vec<i64> {
 
 pub fn of_float(value: f64) -> T {
     if !value.is_finite() {
-        panic!("Rdk exact arithmetic: values must be finite");
+        unreachable!("Rdk exact arithmetic: values must be finite");
     }
     let bits = value.to_bits();
     let negative = (bits as i64) < 0;
@@ -938,7 +938,7 @@ pub mod scratch {
         let c3 = ar.times_det2(apz, bpx, cpy, bpy, cpx);
         let coplanar = ar.sum3(c1, c2, c3);
         if ar.compare_zero(coplanar) != 0 {
-            panic!("Rdk barycentric point is not coplanar with its source triangle");
+            unreachable!("Rdk barycentric point is not coplanar with its source triangle");
         }
         let result = match barycentric_weights(&mut ar, [ax, ay, bx, by, cx, cy, px, py], pw) {
             Some(result) => result,
@@ -946,7 +946,7 @@ pub mod scratch {
                 Some(result) => result,
                 None => match barycentric_weights(&mut ar, [az, ax, bz, bx, cz, cx, pz, px], pw) {
                     Some(result) => result,
-                    None => panic!("Rdk barycentric source triangle is degenerate"),
+                    None => unreachable!("Rdk barycentric source triangle is degenerate"),
                 },
             },
         };
@@ -1190,7 +1190,7 @@ pub mod scratch {
         } else if axis == 2 {
             z
         } else {
-            panic!("Rdk exact ray axis is out of bounds")
+            unreachable!("Rdk exact ray axis is out of bounds")
         });
         if positive { sign } else { -sign }
     }

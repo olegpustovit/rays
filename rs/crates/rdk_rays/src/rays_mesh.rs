@@ -15,9 +15,15 @@ use rdk_core::topology::{self, PrimitiveKind};
 use rdk_core::{error, geometry, normal_ops, packed, topology_remap};
 use rdk_ops::triangulate;
 
-enum Source<A> {
-    Point(A),
-    Vertex(A),
+enum Planes {
+    F2(packed::Float2::T),
+    F3(packed::Float3::T),
+    F4(packed::Float4::T),
+}
+
+enum Source {
+    Point(Planes),
+    Vertex(Planes),
 }
 
 fn text(e: error::T) -> String {
@@ -37,13 +43,13 @@ fn owner_name(owner: Owner) -> &'static str {
     }
 }
 
-fn standard<A>(
+fn standard(
     g: &geometry::T,
     name: &str,
-    point_kind: fn(&Storage) -> Option<A>,
-    vertex_kind: fn(&Storage) -> Option<A>,
-) -> Result<Option<Source<A>>, String> {
-    let read = |owner: Owner, expected: fn(&Storage) -> Option<A>| -> Result<Option<A>, String> {
+    point_kind: fn(&Storage) -> Option<Planes>,
+    vertex_kind: fn(&Storage) -> Option<Planes>,
+) -> Result<Option<Source>, String> {
+    let read = |owner: Owner, expected: fn(&Storage) -> Option<Planes>| -> Result<Option<Planes>, String> {
         let found = if owner == Owner::Vertex && geometry::vertex_count(g) == 0 {
             None
         } else {
@@ -67,37 +73,37 @@ fn standard<A>(
     Ok(read(Owner::Point, point_kind)?.map(Source::Point))
 }
 
-fn float2(s: &Storage) -> Option<packed::Float2::T> {
+fn float2(s: &Storage) -> Option<Planes> {
     match s {
-        Storage::Float2(v) => Some(v.clone()),
+        Storage::Float2(v) => Some(Planes::F2(v.clone())),
         _ => None,
     }
 }
 
-fn float3(s: &Storage) -> Option<packed::Float3::T> {
+fn float3(s: &Storage) -> Option<Planes> {
     match s {
-        Storage::Float3(v) => Some(v.clone()),
+        Storage::Float3(v) => Some(Planes::F3(v.clone())),
         _ => None,
     }
 }
 
-fn float4(s: &Storage) -> Option<packed::Float4::T> {
+fn float4(s: &Storage) -> Option<Planes> {
     match s {
-        Storage::Float4(v) => Some(v.clone()),
+        Storage::Float4(v) => Some(Planes::F4(v.clone())),
         Storage::Float3(v) => {
             let view = packed::Float3::View::view(v).ok()?;
-            packed::Float4::of_owned(view.x.to_vec(), view.y.to_vec(), view.z.to_vec(), vec![1.0; view.x.len()]).ok()
+            packed::Float4::of_owned(view.x.to_vec(), view.y.to_vec(), view.z.to_vec(), vec![1.0; view.x.len()]).ok().map(Planes::F4)
         }
         _ => None,
     }
 }
 
-fn source_has_vertex<A>(s: &Option<Source<A>>) -> bool {
+fn source_has_vertex(s: &Option<Source>) -> bool {
     matches!(s, Some(Source::Vertex(_)))
 }
 
 /// Index `i` of an expanded array: a point source reads through the corner's point.
-fn source_index<A>(source: &Source<A>, vertex_points: &[i64], vertex: usize) -> usize {
+fn source_index(source: &Source, vertex_points: &[i64], vertex: usize) -> usize {
     match source {
         Source::Point(_) => vertex_points[vertex] as usize,
         Source::Vertex(_) => vertex,
@@ -108,9 +114,10 @@ fn vertex_points_of(topo: &topology::T) -> Result<Arc<[i64]>, String> {
     Ok(topology::View::view(topo).map_err(text)?.vertex_points)
 }
 
-fn expanded_vec3(vertex_points: &[i64], count: usize, source: &Source<packed::Float3::T>) -> Result<Vec3_buffer, String> {
+fn expanded_vec3(vertex_points: &[i64], count: usize, source: &Source) -> Result<Vec3_buffer, String> {
     let values = match source {
-        Source::Point(v) | Source::Vertex(v) => v,
+        Source::Point(Planes::F3(v)) | Source::Vertex(Planes::F3(v)) => v,
+        _ => unreachable!("position and normal sources are Float3"),
     };
     let input = packed::Float3::View::view(values).map_err(text)?;
     let (mut x, mut y, mut z) = (vec![0.0; count], vec![0.0; count], vec![0.0; count]);
@@ -123,9 +130,10 @@ fn expanded_vec3(vertex_points: &[i64], count: usize, source: &Source<packed::Fl
     Ok(Vec3_buffer::of_planes(x, y, z))
 }
 
-fn color_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Source<packed::Float4::T>) -> Vec<color::T> {
+fn color_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Source) -> Vec<color::T> {
     let values = match source {
-        Source::Point(v) | Source::Vertex(v) => v,
+        Source::Point(Planes::F4(v)) | Source::Vertex(Planes::F4(v)) => v,
+        _ => unreachable!("color sources are Float4"),
     };
     let input = packed::Float4::View::view(values);
     (0..count)
@@ -139,9 +147,10 @@ fn color_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Sou
         .collect()
 }
 
-fn tex_coord_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Source<packed::Float2::T>) -> Vec<vec2::T> {
+fn tex_coord_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Source) -> Vec<vec2::T> {
     let values = match source {
-        Source::Point(v) | Source::Vertex(v) => v,
+        Source::Point(Planes::F2(v)) | Source::Vertex(Planes::F2(v)) => v,
+        _ => unreachable!("tex-coord sources are Float2"),
     };
     let input = packed::Float2::View::view(values);
     (0..count)
@@ -187,9 +196,9 @@ fn curve_indices(topo: &topology::T, kinds: &[PrimitiveKind], expanded: bool) ->
 }
 
 type Standard = (
-    Option<Source<packed::Float3::T>>,
-    Option<Source<packed::Float4::T>>,
-    Option<Source<packed::Float2::T>>,
+    Option<Source>,
+    Option<Source>,
+    Option<Source>,
 );
 
 fn standards(g: &geometry::T) -> Result<Standard, String> {
@@ -201,18 +210,19 @@ fn standards(g: &geometry::T) -> Result<Standard, String> {
     Ok((n?, cd?, uv?))
 }
 
-fn shared_normals(normals: Option<Source<packed::Float3::T>>) -> Result<Option<Vec3_buffer>, String> {
+fn shared_normals(normals: Option<Source>) -> Result<Option<Vec3_buffer>, String> {
     match normals {
         None => Ok(None),
-        Some(Source::Point(values)) => Ok(Some(mesh_vec3(&packed::Float3::View::view(&values).map_err(text)?))),
+        Some(Source::Point(Planes::F3(values))) => Ok(Some(mesh_vec3(&packed::Float3::View::view(&values).map_err(text)?))),
         Some(Source::Vertex(_)) => unreachable!("vertex normals take the expanded path"),
+        Some(Source::Point(_)) => unreachable!("normal sources are Float3"),
     }
 }
 
 fn expanded_normals(
     vertex_points: &[i64],
     count: usize,
-    normals: &Option<Source<packed::Float3::T>>,
+    normals: &Option<Source>,
 ) -> Result<Option<Vec3_buffer>, String> {
     match normals {
         None => Ok(None),
@@ -230,7 +240,7 @@ fn curve_mesh(g: &geometry::T, kinds: &[PrimitiveKind]) -> Result<mesh::t, Strin
     let colors_out = colors.as_ref().map(|s| color_array(expand, &vertex_points, count, s));
     let tex_out = tex_coords.as_ref().map(|s| tex_coord_array(expand, &vertex_points, count, s));
     if expand {
-        let positions = expanded_vec3(&vertex_points, count, &Source::Point(geometry::positions(g).clone()))?;
+        let positions = expanded_vec3(&vertex_points, count, &Source::Point(Planes::F3(geometry::positions(g).clone())))?;
         let normals = expanded_normals(&vertex_points, count, &normals)?;
         mesh::View::create_packed_owned(Some(mesh::mode::Lines), Some(indices), normals, colors_out, tex_out, positions)
     } else {
@@ -266,7 +276,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::t, String> {
     let vertex_points = vertex_points_of(topo)?;
     if expand {
         let count = topology::vertex_count(topo) as usize;
-        let positions = expanded_vec3(&vertex_points, count, &Source::Point(geometry::positions(g).clone()))?;
+        let positions = expanded_vec3(&vertex_points, count, &Source::Point(Planes::F3(geometry::positions(g).clone())))?;
         let normals = expanded_normals(&vertex_points, count, &normals)?;
         let colors = colors.as_ref().map(|s| color_array(true, &vertex_points, count, s));
         let tex_coords = tex_coords.as_ref().map(|s| tex_coord_array(true, &vertex_points, count, s));
@@ -293,7 +303,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::t, String> {
     }
 }
 
-fn protected(operation: &str, work: impl FnOnce() -> Result<mesh::t, String>) -> Result<mesh::t, error::T> {
+fn protected(operation: &str, work: &dyn Fn() -> Result<mesh::t, String>) -> Result<mesh::t, error::T> {
     work().map_err(|message| {
         error::make(operation.to_owned(), "mesh_conversion".to_owned(), message, None).unwrap_or_else(|e| e)
     })
@@ -302,7 +312,7 @@ fn protected(operation: &str, work: impl FnOnce() -> Result<mesh::t, String>) ->
 /// Triangulate a geometry, compute the path tracer's smoothed vertex normals, and return the packed
 /// triangle mesh it consumes.
 pub fn to_trace_mesh(g: &geometry::T) -> Result<mesh::t, error::T> {
-    protected("to_trace_mesh", || {
+    protected("to_trace_mesh", &|| {
         let triangles = triangulate::run(&triangulate::Params { cancel: None, grain: None, primitives: None }, g).map_err(text)?;
         let triangles = normal_ops::run(
             &normal_ops::Params {
@@ -344,7 +354,7 @@ fn tex_coord_attribute(tex_coords: &[vec2::T]) -> Result<attribute::T, String> {
 }
 
 fn of_mesh_raw_impl(m: &mesh::t) -> Result<geometry::T, String> {
-    let view = mesh::View::packed_view(m);
+    let view = mesh::View::packed_view(m)?;
     match view.mode {
         mesh::mode::Points | mesh::mode::Triangles => {
             let positions = rdk_float3(&view.vertices)?;
@@ -400,7 +410,7 @@ fn to_geometry_mesh(g: &geometry::T) -> Result<mesh::t, String> {
 }
 
 pub fn to_mesh(g: &geometry::T) -> Result<mesh::t, error::T> {
-    protected("to_mesh", || to_geometry_mesh(g))
+    protected("to_mesh", &|| to_geometry_mesh(g))
 }
 
 pub fn of_mesh(m: &mesh::t) -> Result<geometry::T, error::T> {

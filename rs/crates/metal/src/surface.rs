@@ -1,4 +1,4 @@
-use crate::metal::{CommandBuffer, Device, Error, ErrorKind, Lifetime, PresentTime, Texture};
+use crate::metal::{error, sys_error, CommandBuffer, Device, Error, ErrorKind, Lifetime, PresentTime, Texture};
 use crate::metal_format::Format;
 use native_layer_token::Token;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -73,14 +73,14 @@ impl Surface {
         configuration: Configuration,
     ) -> Result<Self, Error> {
         let operation = "Metal.Surface.adopt_borrowed";
-        on_main(operation)?;
+        enter_main(operation)?;
         device.ensure_live(operation)?;
         configuration.validate(operation)?;
         let layer = token.borrow_raw(owner_id, generation).ok_or_else(|| {
             error(operation, ErrorKind::Destroyed, "native layer token is stale or belongs to another owner")
         })?;
-        let raw = native(operation, metal_sys::native::surface::adopt_borrowed_layer(device.raw(), layer))?;
-        if let Err(failure) = native(operation, configure_raw(&raw, configuration)) {
+        let raw = metal_sys::native::surface::adopt_borrowed_layer(device.raw(), layer).map_err(|failure| sys_error(operation, failure))?;
+        if let Err(failure) = configure_raw(&raw, configuration).map_err(|failure| sys_error(operation, failure)) {
             drop(raw);
             return Err(failure);
         }
@@ -99,17 +99,17 @@ impl Surface {
 
     pub fn configure(&self, configuration: Configuration) -> Result<(), Error> {
         let operation = "Metal.Surface.configure";
-        on_main(operation)?;
+        enter_main(operation)?;
         self.ensure_live(operation)?;
         configuration.validate(operation)?;
-        native(operation, configure_raw(&self.0.raw, configuration))
+        configure_raw(&self.0.raw, configuration).map_err(|failure| sys_error(operation, failure))
     }
 
     pub fn acquire(&self) -> Result<Result<Drawable, Loss>, Error> {
         let operation = "Metal.Surface.acquire";
-        on_main(operation)?;
+        enter_main(operation)?;
         self.ensure_live(operation)?;
-        let Some(raw) = native(operation, metal_sys::native::surface::next_drawable(&self.0.raw))? else {
+        let Some(raw) = metal_sys::native::surface::next_drawable(&self.0.raw).map_err(|failure| sys_error(operation, failure))? else {
             return Ok(Err(Loss::TimeoutOrUnavailable));
         };
         self.0.lifetime.attach();
@@ -124,7 +124,7 @@ impl Surface {
 
     pub fn destroy(&self) -> Result<(), Error> {
         let operation = "Metal.Surface.destroy";
-        on_main(operation)?;
+        enter_main(operation)?;
         self.0.lifetime.destroy_parent(operation)?;
         if self.0.device_attached.swap(false, Ordering::AcqRel) {
             self.0.device.detach_child();
@@ -159,12 +159,9 @@ pub struct Drawable(Arc<DrawableInner>);
 impl Drawable {
     pub fn texture(&self) -> Result<Texture, Error> {
         let operation = "Metal.Drawable.texture";
-        on_main(operation)?;
+        enter_main(operation)?;
         self.ensure_live(operation)?;
-        let (raw, width, height, code) = native(
-            operation,
-            metal_sys::native::surface::drawable_texture(&self.0.raw),
-        )?;
+        let (raw, width, height, code) = metal_sys::native::surface::drawable_texture(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
         let format = match code {
             80 => Format::Bgra8Unorm,
             81 => Format::Bgra8UnormSrgb,
@@ -189,7 +186,7 @@ impl Drawable {
 
     pub fn destroy(&self) -> Result<(), Error> {
         let operation = "Metal.Drawable.destroy";
-        on_main(operation)?;
+        enter_main(operation)?;
         self.0.lifetime.destroy_parent(operation)?;
         if self.0.surface_attached.swap(false, Ordering::AcqRel) {
             self.0.surface.lifetime.detach();
@@ -241,7 +238,7 @@ fn configure_raw(layer: &metal_sys::Handle, configuration: Configuration) -> Res
     )
 }
 
-fn on_main(operation: &str) -> Result<(), Error> {
+fn enter_main(operation: &str) -> Result<(), Error> {
     if !metal_sys::native::is_main_thread() {
         return Err(error(operation, ErrorKind::WrongDomain, "Metal calls must run on the platform main thread"));
     }
@@ -249,17 +246,4 @@ fn on_main(operation: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn native<T>(operation: &str, result: Result<T, metal_sys::Error>) -> Result<T, Error> {
-    result.map_err(|failure| match failure {
-        metal_sys::Error::Unavailable => error(operation, ErrorKind::Unsupported, "Metal is unavailable on this platform or OS version"),
-        metal_sys::Error::WrongThread => error(operation, ErrorKind::WrongDomain, "Metal handles must be released on the platform main thread"),
-        metal_sys::Error::InvalidArgument(message) => error(operation, ErrorKind::InvalidArgument, message),
-        metal_sys::Error::InvalidHandle => error(operation, ErrorKind::InvalidState, "invalid native Metal handle"),
-        metal_sys::Error::Native(message) => error(operation, ErrorKind::NativeError, message),
-    })
-}
-
-fn error(operation: &str, kind: ErrorKind, message: impl Into<String>) -> Error {
-    Error { operation: operation.to_owned(), kind, message: message.into() }
-}
 

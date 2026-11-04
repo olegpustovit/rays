@@ -718,8 +718,8 @@ fn canonicalize_points(points: &[implicit_point::T], count: usize) -> (Vec<impli
     (output, old_to_new)
 }
 
-struct State<'a> {
-    constraints: &'a constraints_mod::T,
+struct State {
+    constraints: Arc<constraints_mod::T>,
     side: Side,
     triangle: i64,
     source: implicit_point::Source,
@@ -743,7 +743,7 @@ struct State<'a> {
     segment_split_count: Vec<i64>,
 }
 
-impl State<'_> {
+impl State {
     fn append_point(&mut self, point: implicit_point::T, handle: i64) -> i64 {
         self.points.push(point);
         self.point_handles.push(handle);
@@ -851,11 +851,11 @@ impl State<'_> {
     }
 
     fn opponent_plane(&self, constraint_index: i64) -> [i64; 3] {
-        let (opponent_side, opponent_triangle) = opponent(self.constraints, self.side, self.triangle, constraint_index);
+        let (opponent_side, opponent_triangle) = opponent(&self.constraints, self.side, self.triangle, constraint_index);
         [
-            face_triangle_point(self.constraints, opponent_side, opponent_triangle, 0),
-            face_triangle_point(self.constraints, opponent_side, opponent_triangle, 1),
-            face_triangle_point(self.constraints, opponent_side, opponent_triangle, 2),
+            face_triangle_point(&self.constraints, opponent_side, opponent_triangle, 0),
+            face_triangle_point(&self.constraints, opponent_side, opponent_triangle, 1),
+            face_triangle_point(&self.constraints, opponent_side, opponent_triangle, 2),
         ]
     }
 
@@ -901,7 +901,7 @@ impl State<'_> {
                     (false, false) => {
                         let left_plane = self.opponent_plane(self.segment_constraint[l]);
                         let right_plane = self.opponent_plane(self.segment_constraint[r]);
-                        let face = |local| face_triangle_point(self.constraints, self.side, self.triangle, local);
+                        let face = |local| face_triangle_point(&self.constraints, self.side, self.triangle, local);
                         implicit_point::triple_plane(
                             &self.source,
                             face(0),
@@ -1095,7 +1095,7 @@ pub fn build(
     point_index.build(&points, points.len());
     let split_capacity = (raw_segment_count * 2).max(4);
     let mut state = State {
-        constraints: constraints_ref,
+        constraints: constraints.clone(),
         side,
         triangle,
         source,

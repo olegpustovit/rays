@@ -16,7 +16,6 @@ const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
 const MASK63: u64 = (1u64 << 63) - 1;
 const MAX_INT: i64 = (1 << 62) - 1;
 
-type R<V> = Result<V, String>;
 
 pub struct T {
     initial_point_count: i64,
@@ -129,7 +128,7 @@ fn to_ordering(value: i64) -> Ordering {
     value.cmp(&0)
 }
 
-fn finite_positive(label: &str, value: Option<f64>) -> R<()> {
+fn finite_positive(label: &str, value: Option<f64>) -> Result<(), String> {
     match value {
         None => Ok(()),
         Some(value) if value.is_finite() && value > 0. => Ok(()),
@@ -290,11 +289,11 @@ fn barycentric(x: &[f64], y: &[f64], a: i64, b: i64, c: i64, px: f64, py: f64) -
 }
 
 /// OCaml `Result.get_ok`.
-fn get_ok(value: Result<implicit_point::T, PointError>) -> R<implicit_point::T> {
+fn get_ok(value: Result<implicit_point::T, PointError>) -> Result<implicit_point::T, String> {
     value.map_err(|_| "result is Error _".to_owned())
 }
 
-fn rounded_centroid(points: &[implicit_point::T], x: &[f64], y: &[f64], a: i64, b: i64, c: i64) -> R<implicit_point::T> {
+fn rounded_centroid(points: &[implicit_point::T], x: &[f64], y: &[f64], a: i64, b: i64, c: i64) -> Result<implicit_point::T, String> {
     let coordinate = |values: &[f64]| -> f64 {
         let first = values[a as usize];
         let second = values[b as usize];
@@ -372,7 +371,7 @@ struct Buckets {
     count: i64,
 }
 
-fn buckets_capacity(expected: i64) -> R<usize> {
+fn buckets_capacity(expected: i64) -> Result<usize, String> {
     if expected < 0 || expected > MAX_ARRAY_LENGTH / 2 {
         return Err("Planar refinement coordinate table exceeds array limits".to_owned());
     }
@@ -386,7 +385,7 @@ fn buckets_capacity(expected: i64) -> R<usize> {
     Ok(capacity as usize)
 }
 
-fn buckets_create(expected: i64) -> R<Buckets> {
+fn buckets_create(expected: i64) -> Result<Buckets, String> {
     let size = buckets_capacity(expected)?;
     Ok(Buckets {
         keys: vec![-1; size],
@@ -415,7 +414,7 @@ fn buckets_slot(keys: &[i64], key: i64) -> usize {
     result as usize
 }
 
-fn buckets_grow(table: &mut Buckets) -> R<()> {
+fn buckets_grow(table: &mut Buckets) -> Result<(), String> {
     if table.keys.len() as i64 > MAX_ARRAY_LENGTH / 2 {
         return Err("Planar refinement coordinate table exceeds array limits".to_owned());
     }
@@ -435,7 +434,7 @@ fn buckets_grow(table: &mut Buckets) -> R<()> {
     Ok(())
 }
 
-fn buckets_ensure_next(table: &mut Buckets, index: i64) -> R<()> {
+fn buckets_ensure_next(table: &mut Buckets, index: i64) -> Result<(), String> {
     if index >= table.next.len() as i64 {
         let mut size = table.next.len() as i64;
         while size <= index {
@@ -454,7 +453,7 @@ fn buckets_find(table: &Buckets, key: i64) -> i64 {
     if table.keys[index] == key { table.heads[index] } else { -1 }
 }
 
-fn buckets_add(table: &mut Buckets, key: i64, value: i64) -> R<()> {
+fn buckets_add(table: &mut Buckets, key: i64, value: i64) -> Result<(), String> {
     if table.count >= (table.keys.len() / 2) as i64 {
         buckets_grow(table)?;
     }
@@ -523,11 +522,11 @@ fn conv(value: error::T) -> String {
     }
 }
 
-fn check(cancel_value: Option<&cancel::T>) -> R<()> {
+fn check(cancel_value: Option<&cancel::T>) -> Result<(), String> {
     cancel::check_opt(cancel_value).map_err(|_| cancelled())
 }
 
-fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> R<()> {
+fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> Result<(), String> {
     cancel::poll(cancel_value, index, mask).map_err(|_| cancelled())
 }
 
@@ -535,7 +534,7 @@ fn constraint_index(
     cancel_value: Option<&cancel::T>,
     points: &[implicit_point::T],
     constraints: &[i64],
-) -> R<bounds2_index::T> {
+) -> Result<bounds2_index::T, String> {
     let count = constraints.len() / 2;
     let mut min_x = vec![0.; count];
     let mut min_y = vec![0.; count];
@@ -597,7 +596,7 @@ fn mesh_index(
     point_count: i64,
     triangles: &[i64],
     constraints: &[i64],
-) -> R<MeshIndex> {
+) -> Result<MeshIndex, String> {
     let triangle_count = triangles.len() / 3;
     if triangle_count as i64 > MAX_ARRAY_LENGTH / 3 {
         return Err("Planar refinement edge cardinality exceeds array limits".to_owned());
@@ -746,7 +745,7 @@ fn run_cdt(
     constraints: &[i64],
     winding: &[i64],
     prefix: &str,
-) -> R<Arc<[i64]>> {
+) -> Result<Arc<[i64]>, String> {
     let orient = |a: i64, b: i64, c: i64| {
         implicit_point::orient2d_xy(&points[a as usize], &points[b as usize], &points[c as usize])
     };
@@ -793,7 +792,7 @@ fn run(
     allow_constraint_splitting: bool,
     regularization_steps: i64,
     allow_movement_of_interior_input_points: bool,
-) -> R<T> {
+) -> Result<T, String> {
     if grain <= 0 {
         return Err("Planar refinement grain must be positive".to_owned());
     }
@@ -871,7 +870,7 @@ fn run(
         std::cmp::max(1, initial_triangle_points.len() as i64 / 3),
     )?;
     let mut buckets = buckets_create(initial_len)?;
-    let add_bucket = |buckets: &mut Buckets, x: &[f64], y: &[f64], point: i64| -> R<()> {
+    let add_bucket = |buckets: &mut Buckets, x: &[f64], y: &[f64], point: i64| -> Result<(), String> {
         let key = buckets_key(canonical_bits(x[point as usize]), canonical_bits(y[point as usize]));
         buckets_add(buckets, key, point)
     };

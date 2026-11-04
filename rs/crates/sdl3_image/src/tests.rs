@@ -9,7 +9,7 @@ fn fixture(name: &str) -> String {
     format!("{}/{}", root(), name)
 }
 
-fn get_image(result: crate::Result<Rgba>) -> Rgba {
+fn get_image(result: std::result::Result<Rgba, crate::Error>) -> Rgba {
     result.unwrap_or_else(|error| panic!("{error}"))
 }
 

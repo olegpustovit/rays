@@ -49,7 +49,7 @@ pub struct t {
 }
 
 fn plan_of(item: &Item) -> plan_ref {
-    item.clone().downcast::<RefCell<plan>>().unwrap_or_else(|_| panic!("plan table item"))
+    item.clone().downcast::<RefCell<plan>>().unwrap_or_else(|_| unreachable!("plan table item"))
 }
 
 pub fn create() -> t {
@@ -114,7 +114,7 @@ pub fn rebind(value: &t, plan_: &plan_ref, ir_id: i64, ir: &Rc<RenderIr>) {
 }
 
 pub fn find_segment(value: &mut t, identity: i64) -> Option<Rc<segment>> {
-    side_lru::find(&mut value.segments, &TableKey::Int(identity)).map(|item| item.downcast::<segment>().unwrap_or_else(|_| panic!("segment table item")))
+    side_lru::find(&mut value.segments, &TableKey::Int(identity)).map(|item| item.downcast::<segment>().unwrap_or_else(|_| unreachable!("segment table item")))
 }
 
 pub fn add_segment(value: &mut t, identity: i64, bytes: i64, segment_: segment) {

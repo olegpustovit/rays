@@ -19,17 +19,17 @@ fn run(density: i64) {
     let live = || ogpu::impl_::live_handles().unwrap();
     let baseline = live();
     let cfg = renderer::configuration { logical_width: 32, logical_height: 24, drawable_width: 32 * density, drawable_height: 24 * density, title: "GPU drawing parity".into(), vsync: false, high_density: true };
-    let execution = common::get(renderer::create_offscreen(&cfg));
-    let gpu = common::get(renderer::acquire_gpu());
-    let sink = common::get(renderer::create_gpu_marks(&gpu));
-    let positions = common::get(b::create_buffer(
+    let execution = renderer::create_offscreen(&cfg).unwrap();
+    let gpu = renderer::acquire_gpu().unwrap();
+    let sink = renderer::create_gpu_marks(&gpu).unwrap();
+    let positions = b::create_buffer(
         &renderer::gpu_device(&gpu),
         BufferDescriptor { label: Some("GPU parity points".into()), size: 24, usage: vec![BufferUsage::Vertex, BufferUsage::Storage, BufferUsage::CopyDst] },
         None,
-    ));
+    ).unwrap();
     let points: [f64; 6] = [8.0, 8.0, 0.0, 20.0, 14.0, 0.0];
     let point32: Vec<f32> = points.iter().map(|v| *v as f32).collect();
-    common::get(b::write_buffer(&positions, 0, &common::floats(&point32)));
+    b::write_buffer(&positions, 0, &common::floats(&point32)).unwrap();
     let generation = Rc::new(Cell::new(1));
     // A device source is current only while its producer's output is.
     let source = |stamp: i32| -> marks_source {
@@ -54,9 +54,9 @@ fn run(density: i64) {
         bld.publish().unwrap()
     };
     let expected_shapes = expected(0x12345678);
-    let first = common::get(marks_(generation.get(), 0x12345678));
+    let first = marks_(generation.get(), 0x12345678).unwrap();
     // Nothing changed: the same token, not a new registration.
-    assert!(common::get(marks_(generation.get(), 0x12345678)) == first);
+    assert!(marks_(generation.get(), 0x12345678).unwrap() == first);
     let ir = |blend: Blend, shapes: &Table| -> Rc<RenderIr> {
         Rc::new(
             render_ir::create(vec![
@@ -72,14 +72,14 @@ fn run(density: i64) {
     };
     let clear = (0.125, 0.25, 0.375, 1.0);
     let capture = |identity: Option<&str>, version: Option<i64>, ir: &Rc<RenderIr>| -> Vec<u8> {
-        let submission = common::get(Native::begin_submission(&execution));
+        let submission = Native::begin_submission(&execution).unwrap();
         let result = (|| {
             let batch = Native::lower_scene2(&submission, density, &|_| None, ir)?;
             Native::step(Some(clear), identity, version, &submission, &[batch])?;
             renderer::capture(&execution)
         })();
         Native::cancel(&submission);
-        let pixels = common::get(result);
+        let pixels = result.unwrap();
         assert_eq!(pixels.len() as i64, 32 * 24 * density * density * 4);
         pixels
     };
@@ -96,13 +96,13 @@ fn run(density: i64) {
     }
     let retained = |token: marks::GpuToken| capture(Some("gpu-marks"), Some(marks::gpu_stamp(token)), &ir(Blend::Replace, &ui_batch::of_marks(token)));
     retained(first);
-    assert!(common::get(Native::replay(Some(clear), "gpu-marks", marks::gpu_stamp(first), &execution)) == Some(()));
+    assert!(Native::replay(Some(clear), "gpu-marks", marks::gpu_stamp(first), &execution).unwrap() == Some(()));
     let refuse_replay = |token: marks::GpuToken| match Native::replay(Some(clear), "gpu-marks", marks::gpu_stamp(token), &execution) {
         Err(e) if e.kind == ErrorKind::StaleHandle && e.operation == "Scene_execution.replay" && e.message == "GPU vertices are stale or closed" => {}
         _ => panic!("retained GPU mark replay accepted a stale source"),
     };
     let refuse_lower = |token: marks::GpuToken| {
-        let submission = common::get(Native::begin_submission(&execution));
+        let submission = Native::begin_submission(&execution).unwrap();
         let result = Native::lower_scene2(&submission, density, &|_| None, &ir(Blend::Replace, &ui_batch::of_marks(token)));
         Native::cancel(&submission);
         match result {
@@ -119,12 +119,12 @@ fn run(density: i64) {
         Err(e) if e.kind == ErrorKind::StaleHandle => {}
         _ => panic!("a stale device source was registered"),
     }
-    let second = common::get(marks_(generation.get(), 0x12345678));
+    let second = marks_(generation.get(), 0x12345678).unwrap();
     assert!(marks::gpu_stamp(first) < marks::gpu_stamp(second));
     let reference = capture(None, None, &ir(Blend::Replace, &expected_shapes));
     assert!(retained(second) == reference);
     // A host attribute that changes supersedes the previous token.
-    let third = common::get(marks_(generation.get(), 0x87654321));
+    let third = marks_(generation.get(), 0x87654321).unwrap();
     assert!(marks::gpu_stamp(second) < marks::gpu_stamp(third));
     refuse_replay(second);
     refuse_lower(second);
@@ -149,7 +149,7 @@ fn run(density: i64) {
     renderer::close_gpu_marks(&sink);
     let _ = b::destroy_buffer(&positions);
     renderer::release_gpu(&gpu);
-    common::get(renderer::destroy(&execution));
+    renderer::destroy(&execution).unwrap();
     assert_eq!(live(), baseline);
     println!("GPU marks: exact native parity at {density}x under transform, clip, six blends and stale guards");
 }

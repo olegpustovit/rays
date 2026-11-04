@@ -1,8 +1,8 @@
 //! Prepared SOP surfaces. Material batches share one converted mesh, and explosion moves complete
 //! pieces before any material split.
 //!
-//! Gaps against OCaml: `ConversionError` is a panic payload (`std::panic::panic_any`) only where a
-//! callback type forces it (a device mesh's host-copy request); `scene3` returns it as a value.
+//! Gaps against OCaml: a device mesh's host-copy request returns its conversion failure as a `Result`;
+//! `scene3` returns it as a [`ConversionError`] value.
 //! `last_topology` keys on the topology's `data_id` where OCaml compared physically.
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -303,7 +303,7 @@ pub fn scene3_result(
                                     device_index_count,
                                     device_color_width,
                                     host: Some(Rc::new(move || {
-                                        host(&host_geometry).unwrap_or_else(|message| std::panic::panic_any(ConversionError(message)))
+                                        host(&host_geometry)
                                     })),
                                     bounds: Some(Rc::new(move || geometry_view::bounds(&bounds_geometry))),
                                     derived: mode == mesh::mode::Triangles && geometry::find_attribute(Owner::Point, "N", g).is_none(),
@@ -345,7 +345,7 @@ pub fn scene3_result(
     let drawings = if surface.batches.is_empty() {
         vec![draw(material::default(), m)]
     } else {
-        let view = mesh::View::packed_view(&m);
+        let view = mesh::View::packed_view(&m)?;
         let mut drawings = Vec::with_capacity(surface.batches.len());
         for (material, offsets) in &surface.batches {
             let indices: Vec<i64> = offsets.iter().map(|&o| view.indices[o as usize]).collect();

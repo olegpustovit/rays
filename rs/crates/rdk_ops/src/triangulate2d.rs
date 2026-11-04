@@ -23,7 +23,6 @@ const GUARD_OPERATION: &str = "triangulate_2d";
 const MAX_INT: i64 = (1 << 62) - 1;
 const MIN_INT: i64 = -(1 << 62);
 
-type R<V> = Result<V, error::T>;
 
 pub enum Projection {
     BestFit,
@@ -162,7 +161,7 @@ fn finite3(x: f64, y: f64, z: f64) -> bool {
     x.is_finite() && y.is_finite() && z.is_finite()
 }
 
-fn normalize3(x: f64, y: f64, z: f64) -> R<(f64, f64, f64)> {
+fn normalize3(x: f64, y: f64, z: f64) -> Result<(f64, f64, f64), error::T> {
     let scale = x.abs().max(y.abs().max(z.abs()));
     if scale == 0.0 || !scale.is_finite() {
         return Err(invalid("plane normal must be finite and nonzero"));
@@ -174,7 +173,7 @@ fn normalize3(x: f64, y: f64, z: f64) -> R<(f64, f64, f64)> {
 
 type Triple = (f64, f64, f64);
 
-fn frame_of_normal(normal: vec3::T) -> R<(Triple, Triple)> {
+fn frame_of_normal(normal: vec3::T) -> Result<(Triple, Triple), error::T> {
     let (nx, ny, nz) = vec3::to_triple(normal);
     let (nx, ny, nz) = normalize3(nx, ny, nz)?;
     let (ax, ay, az) = if nx.abs() <= ny.abs() && nx.abs() <= nz.abs() {
@@ -264,7 +263,7 @@ fn selected_points(
     grain: i64,
     selection: Option<&element_selection::T>,
     geometry_value: &geometry::T,
-) -> R<Vec<i64>> {
+) -> Result<Vec<i64>, error::T> {
     let topology_value = geometry::topology(geometry_value);
     element_selection::validate(OPERATION, topology_value, selection).map_err(lift)?;
     match selection {
@@ -284,7 +283,7 @@ fn constraint_endpoint_selection(
     constraint_edges: Option<&edge_group::T>,
     constraint_primitives: Option<&group::T>,
     geometry_value: &geometry::T,
-) -> R<Vec<i64>> {
+) -> Result<Vec<i64>, error::T> {
     let point_count = geometry::point_count(geometry_value) as usize;
     let topology_value = geometry::topology(geometry_value);
     let view = topology::View::view(topology_value).map_err(pass)?;
@@ -294,7 +293,7 @@ fn constraint_endpoint_selection(
     }
     let mut retained = vec![false; point_count];
     let mut retained_count = 0_usize;
-    let mut retain = |point: i64| -> R<()> {
+    let mut retain = |point: i64| -> Result<(), error::T> {
         if !selected[point as usize] {
             return Err(invalid("every constraint endpoint must belong to the point selection"));
         }
@@ -344,8 +343,8 @@ fn par_i64(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     count: i64,
-    value: &(dyn Fn(i64) -> R<i64> + Sync),
-) -> R<Vec<i64>> {
+    value: &(dyn Fn(i64) -> Result<i64, error::T> + Sync),
+) -> Result<Vec<i64>, error::T> {
     let ranges = if count <= 0 { 0 } else { (count - 1) / grain + 1 };
     let slots: Vec<Mutex<Vec<i64>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
     support::run_indexed_ranges(grain, count, &|range, first, last| {
@@ -370,8 +369,8 @@ fn par_xy(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     count: i64,
-    value: &(dyn Fn(i64) -> R<(f64, f64)> + Sync),
-) -> R<(Vec<f64>, Vec<f64>)> {
+    value: &(dyn Fn(i64) -> Result<(f64, f64), error::T> + Sync),
+) -> Result<(Vec<f64>, Vec<f64>), error::T> {
     let ranges = if count <= 0 { 0 } else { (count - 1) / grain + 1 };
     let slots: Vec<Mutex<(Vec<f64>, Vec<f64>)>> = (0..ranges).map(|_| Mutex::new((Vec::new(), Vec::new()))).collect();
     support::run_indexed_ranges(grain, count, &|range, first, last| {
@@ -417,12 +416,12 @@ fn constraint_segments(
     geometry_value: &geometry::T,
     local_of_point: &[i64],
     triangulation: &delaunay2::T,
-) -> R<(Vec<i64>, Vec<i64>)> {
+) -> Result<(Vec<i64>, Vec<i64>), error::T> {
     let topology_value = geometry::topology(geometry_value);
     let view = topology::View::view(topology_value).map_err(pass)?;
     let mut source: Vec<i64> = Vec::new();
     let mut winding: Vec<i64> = Vec::new();
-    let add_local = |source: &mut Vec<i64>, winding: &mut Vec<i64>, weight: i64, a: i64, b: i64| -> R<()> {
+    let add_local = |source: &mut Vec<i64>, winding: &mut Vec<i64>, weight: i64, a: i64, b: i64| -> Result<(), error::T> {
         if a == b {
             return Err(invalid("a constraint collapses after projected-coordinate deduplication"));
         }
@@ -431,11 +430,11 @@ fn constraint_segments(
         winding.push(weight);
         Ok(())
     };
-    let unique_of = |local: i64| -> R<i64> {
+    let unique_of = |local: i64| -> Result<i64, error::T> {
         let unique = delaunay2::source_unique(triangulation, local).map_err(pass)?;
         delaunay2::unique_source(triangulation, unique).map_err(pass)
     };
-    let add = |source: &mut Vec<i64>, winding: &mut Vec<i64>, weight: i64, source_a: i64, source_b: i64| -> R<()> {
+    let add = |source: &mut Vec<i64>, winding: &mut Vec<i64>, weight: i64, source_a: i64, source_b: i64| -> Result<(), error::T> {
         let local_a = local_of_point[source_a as usize];
         let local_b = local_of_point[source_b as usize];
         if local_a < 0 || local_b < 0 {
@@ -594,7 +593,7 @@ fn planes_from_positions(
     grain: i64,
     positions: &packed::Float3::T,
     points: &[i64],
-) -> R<ProjectedPoints> {
+) -> Result<ProjectedPoints, error::T> {
     let source = packed::Float3::View::view(positions).map_err(pass)?;
     let count = points.len();
     if count == 0 {
@@ -657,7 +656,7 @@ fn project(
     projection: &Projection,
     geometry_value: &geometry::T,
     points: &[i64],
-) -> R<ProjectedPoints> {
+) -> Result<ProjectedPoints, error::T> {
     let positions = packed::Float3::View::view(geometry::positions(geometry_value)).map_err(pass)?;
     let count = points.len() as i64;
     let fill = |coordinate_x: &(dyn Fn(usize) -> f64 + Sync), coordinate_y: &(dyn Fn(usize) -> f64 + Sync)| {
@@ -815,7 +814,7 @@ fn materialization(
     arrangement: Option<&planar_constraints::T>,
     refinement: Option<&planar_refinement::T>,
     geometry_value: &geometry::T,
-) -> R<PointMaterialization> {
+) -> Result<PointMaterialization, error::T> {
     let source_point_count = geometry::point_count(geometry_value);
     let selected_count = points.len() as i64;
     let split_count = arrangement.map_or(0, planar_constraints::split_point_count);
@@ -1003,7 +1002,7 @@ fn finish_unrestored(
     local: (&[f64], &[f64]),
     embed: &(dyn Fn(f64, f64) -> (f64, f64, f64) + Send + Sync),
     local_count: i64,
-) -> R<PointMaterialization> {
+) -> Result<PointMaterialization, error::T> {
     let (mut x, mut y, mut z) = planes;
     let (local_x, local_y) = local;
     if local_x.len() as i64 != local_count || local_y.len() as i64 != local_count {
@@ -1051,10 +1050,10 @@ fn interpolate_point_attribute(
     grain: i64,
     plan: &PointMaterialization,
     item: &attribute::T,
-) -> R<attribute::T> {
+) -> Result<attribute::T, error::T> {
     use attribute::Storage;
     let count = plan.representative.len() as i64;
-    let numeric = |source: &[f64]| -> R<Vec<f64>> {
+    let numeric = |source: &[f64]| -> Result<Vec<f64>, error::T> {
         let mut values = vec![0.0_f64; plan.value_count as usize];
         values[..plan.source_point_count as usize].copy_from_slice(&source[..plan.source_point_count as usize]);
         let blend = |values: &mut Vec<f64>, point: i64| {
@@ -1132,7 +1131,7 @@ fn interpolate_point_attribute(
     attribute::create_owned(attribute::name(item), attribute::Owner::Point, storage).map_err(pass)
 }
 
-fn checked_add(label: &str, first: i64, second: i64) -> R<i64> {
+fn checked_add(label: &str, first: i64, second: i64) -> Result<i64, error::T> {
     if first < 0 || second < 0 || first > MAX_INT - second {
         return Err(invalid(&format!("{label} exceeds integer range")));
     }
@@ -1148,7 +1147,7 @@ fn defaulted_attribute(
     grain: i64,
     mapping: &[i64],
     item: &attribute::T,
-) -> R<attribute::T> {
+) -> Result<attribute::T, error::T> {
     use attribute::Storage;
     for (target, _) in mapping.iter().enumerate() {
         cancel::poll(cancel_value, target as i64, 4095).map_err(pass)?;
@@ -1200,7 +1199,7 @@ fn defaulted_attribute(
     attribute::create_owned(attribute::name(item), attribute::owner(item), storage).map_err(pass)
 }
 
-fn defaulted_group(cancel_value: Option<&cancel::T>, grain: i64, mapping: &[i64], source: &group::T) -> R<group::T> {
+fn defaulted_group(cancel_value: Option<&cancel::T>, grain: i64, mapping: &[i64], source: &group::T) -> Result<group::T, error::T> {
     let cancelled = AtomicBool::new(false);
     let output = group::init(Some(grain), group::owner(source), group::name(source), mapping.len() as i64, &|target| {
         if cancel::poll(cancel_value, target, 4095).is_err() {
@@ -1233,7 +1232,7 @@ fn output_topology(
     plan: &PointMaterialization,
     triangle_points: &[i64],
     geometry_value: &geometry::T,
-) -> R<OutputTopologyPlan> {
+) -> Result<OutputTopologyPlan, error::T> {
     let triangle_count = (triangle_points.len() / 3) as i64;
     if !keep_primitives {
         let mut vertex_points = Vec::with_capacity(triangle_points.len());
@@ -1343,7 +1342,7 @@ fn remap_source_edge_groups(
     target_topology: &topology::T,
     target_index: &topology_index::T,
     geometry_value: &geometry::T,
-) -> R<Vec<edge_group::T>> {
+) -> Result<Vec<edge_group::T>, error::T> {
     let groups = geometry::edge_groups(geometry_value);
     if groups.is_empty() {
         return Ok(Vec::new());
@@ -1376,7 +1375,7 @@ fn constraint_only_seed(
     y: &[f64],
     constraints: &[i64],
     constraint_winding: Vec<i64>,
-) -> R<Seed> {
+) -> Result<Seed, error::T> {
     let count = points.len();
     if constraints.is_empty() {
         return Err(invalid("Ignore Non-Constraint Points requires at least one constraint"));
@@ -1418,7 +1417,7 @@ fn constraint_only_seed(
     Ok((output_points, output_x, output_y, triangulation, output_constraints, constraint_winding))
 }
 
-fn exact_points(x: &[f64], y: &[f64], arrangement: Option<&planar_constraints::T>) -> R<Vec<implicit_point::T>> {
+fn exact_points(x: &[f64], y: &[f64], arrangement: Option<&planar_constraints::T>) -> Result<Vec<implicit_point::T>, error::T> {
     match arrangement {
         Some(arrangement) => (0..planar_constraints::point_count(arrangement))
             .map(|point| planar_constraints::View::point(arrangement, point).map_err(pass))
@@ -1433,7 +1432,7 @@ fn exact_points(x: &[f64], y: &[f64], arrangement: Option<&planar_constraints::T
     }
 }
 
-fn blank(name: &Option<String>, message: &str) -> R<()> {
+fn blank(name: &Option<String>, message: &str) -> Result<(), error::T> {
     match name {
         Some(name) if name.trim().is_empty() => Err(invalid(message)),
         _ => Ok(()),
@@ -1441,7 +1440,7 @@ fn blank(name: &Option<String>, message: &str) -> R<()> {
 }
 
 /// Triangulate the selected points of `geometry_value`.
-pub fn run(cancel_value: Option<&cancel::T>, params: &Params, geometry_value: &geometry::T) -> R<geometry::T> {
+pub fn run(cancel_value: Option<&cancel::T>, params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let output = triangulate(cancel_value, params, geometry_value)?;
     finish(cancel_value, params, geometry_value, output)
 }
@@ -1451,7 +1450,7 @@ fn finish(
     params: &Params,
     geometry_value: &geometry::T,
     output: geometry::T,
-) -> R<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let output = if params.remove_unused_points {
         compact_points::run(cancel_value, Some(params.grain), &output).map_err(get_core)?
     } else {
@@ -1482,7 +1481,7 @@ fn finish(
     }
 }
 
-fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value: &geometry::T) -> R<geometry::T> {
+fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain;
     if grain <= 0 {
         return Err(invalid("grain must be positive"));
@@ -1839,33 +1838,22 @@ mod tests {
 
     type P3 = (f64, f64, f64);
 
-    fn get<V>(value: R<V>) -> V {
-        match value {
-            Ok(value) => value,
-            Err(failure) => panic!("{}", error::to_string(&failure)),
-        }
-    }
-
-    fn ok<V>(value: Result<V, error::T>) -> V {
-        get(value)
-    }
-
     fn check(condition: bool, message: &str) {
         assert!(condition, "{message}");
     }
 
     fn f3(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>) -> packed::Float3::T {
-        ok(packed::Float3::View::of_owned_exn(x, y, z))
+        packed::Float3::View::of_owned_exn(x, y, z).unwrap()
     }
 
     fn points(values: &[P3]) -> geometry::T {
-        ok(geometry::create(
+        geometry::create(
             f3(values.iter().map(|p| p.0).collect(), values.iter().map(|p| p.1).collect(), values.iter().map(|p| p.2).collect()),
-            ok(topology::empty(values.len() as i64)),
+            topology::empty(values.len() as i64).unwrap(),
             None,
             None,
             None,
-        ))
+        ).unwrap()
     }
 
     fn build(
@@ -1875,7 +1863,7 @@ mod tests {
         groups: Vec<group::T>,
         edge_groups: Vec<edge_group::T>,
     ) -> geometry::T {
-        ok(geometry::create(positions, topology_value, Some(attributes), Some(groups), Some(edge_groups)))
+        geometry::create(positions, topology_value, Some(attributes), Some(groups), Some(edge_groups)).unwrap()
     }
 
     fn plain(positions: packed::Float3::T, topology_value: topology::T) -> geometry::T {
@@ -1883,27 +1871,27 @@ mod tests {
     }
 
     fn polylines(point_count: i64, vertex_points: Vec<i64>, offsets: Vec<i64>, kinds: Vec<PrimitiveKind>) -> topology::T {
-        ok(topology::create_owned(point_count, vertex_points, offsets, kinds))
+        topology::create_owned(point_count, vertex_points, offsets, kinds).unwrap()
     }
 
     fn polygons(point_count: i64, vertex_points: Vec<i64>, offsets: Vec<i64>) -> topology::T {
-        ok(topology::polygons_owned(point_count, vertex_points, offsets))
+        topology::polygons_owned(point_count, vertex_points, offsets).unwrap()
     }
 
     fn attr(name: &str, owner: attribute::Owner, storage: attribute::Storage) -> attribute::T {
-        ok(attribute::create_owned(name, owner, storage))
+        attribute::create_owned(name, owner, storage).unwrap()
     }
 
     fn pgroup(owner: group::Owner, name: &str, length: i64, member: &(dyn Fn(i64) -> bool + Send + Sync)) -> group::T {
-        ok(group::init(None, owner, name, length, member))
+        group::init(None, owner, name, length, member).unwrap()
     }
 
-    fn run_with(params: Params, input: &geometry::T) -> R<geometry::T> {
+    fn run_with(params: Params, input: &geometry::T) -> Result<geometry::T, error::T> {
         run(None, &params, input)
     }
 
     fn tri(params: Params, input: &geometry::T) -> geometry::T {
-        get(run_with(params, input))
+        run_with(params, input).unwrap()
     }
 
     fn xy() -> Params {
@@ -1964,11 +1952,11 @@ mod tests {
     }
 
     fn edge_index(value: &geometry::T, a: i64, b: i64) -> i64 {
-        let index = ok(topology_index::create(None, geometry::topology(value)));
+        let index = topology_index::create(None, geometry::topology(value)).unwrap();
         topology_index::find_edge_index(&index, a, b)
     }
 
-    fn expect_error(value: R<geometry::T>) {
+    fn expect_error(value: Result<geometry::T, error::T>) {
         assert!(value.is_err(), "invalid input succeeded");
     }
 
@@ -1977,7 +1965,7 @@ mod tests {
         let input = points(&[(0., 0., 3.), (1., 0., 4.), (1., 1., 5.), (0., 1., 6.)]);
         let id = attr("id", attribute::Owner::Point, attribute::Storage::Int(vec![10, 11, 12, 13]));
         let selected = pgroup(group::Owner::Point, "selected", 4, &|_| true);
-        let input = ok(geometry::with_group(selected, &ok(geometry::with_attribute(id, &input))));
+        let input = geometry::with_group(selected, &geometry::with_attribute(id, &input).unwrap()).unwrap();
         let output = tri(Params { triangle_group: Some("triangles".to_owned()), ..xy() }, &input);
         check(
             geometry::point_count(&output) == 4 && geometry::primitive_count(&output) == 2 && geometry::vertex_count(&output) == 6,
@@ -2013,11 +2001,11 @@ mod tests {
 
     #[test]
     fn projected_output_positions() {
-        let selected = ok(group::ordered(group::Owner::Point, "selected", 5, &[0, 1, 2, 3]));
-        let source = ok(geometry::with_group(
+        let selected = group::ordered(group::Owner::Point, "selected", 5, &[0, 1, 2, 3]).unwrap();
+        let source = geometry::with_group(
             selected.clone(),
             &points(&[(0., 0., 10.), (2., 0., 20.), (2., 2., 30.), (0., 2., 40.), (9., 9., 9.)]),
-        ));
+        ).unwrap();
         let output = tri(
             Params {
                 selection: Some(element_selection::T::SelectedPoints(selected)),
@@ -2068,7 +2056,7 @@ mod tests {
             attribute::Owner::Point,
             attribute::Storage::Float3(f3(vec![0., 2., 2., 0.], vec![0., 0., 2., 2.], vec![f64::NAN, 100., -200., f64::INFINITY])),
         );
-        let attribute_source = ok(geometry::with_attribute(coordinates, &attribute_source));
+        let attribute_source = geometry::with_attribute(coordinates, &attribute_source).unwrap();
         let attribute_output = tri(unrestored(Projection::PointAttribute("planar3".to_owned())), &attribute_source);
         let (x, y, z) = position_signature(&attribute_output);
         check(
@@ -2103,10 +2091,10 @@ mod tests {
     #[test]
     fn attribute_and_selection() {
         let input = points(&[(0., 0., 0.), (1., 0., 0.), (2., 0., 0.), (3., 0., 0.), (4., 0., 0.)]);
-        let uv = ok(packed::Float2::of_owned(vec![0., 1., 1., 0., 5.], vec![0., 0., 1., 1., 5.]));
+        let uv = packed::Float2::of_owned(vec![0., 1., 1., 0., 5.], vec![0., 0., 1., 1., 5.]).unwrap();
         let uv = attr("planar", attribute::Owner::Point, attribute::Storage::Float2(uv));
-        let input = ok(geometry::with_attribute(uv, &input));
-        let selected = ok(group::ordered(group::Owner::Point, "four", 5, &[0, 1, 2, 3]));
+        let input = geometry::with_attribute(uv, &input).unwrap();
+        let selected = group::ordered(group::Owner::Point, "four", 5, &[0, 1, 2, 3]).unwrap();
         let output = tri(
             Params {
                 selection: Some(element_selection::T::SelectedPoints(selected)),
@@ -2121,7 +2109,7 @@ mod tests {
     }
 
     fn rows_int(offsets: Vec<i64>, values: Vec<i64>) -> attribute::Storage {
-        attribute::Storage::IntArray(ok(packed::IntArray::create_owned(offsets, values)))
+        attribute::Storage::IntArray(packed::IntArray::create_owned(offsets, values).unwrap())
     }
 
     #[test]
@@ -2146,17 +2134,17 @@ mod tests {
             attr(
                 "vertex_float_rows",
                 v,
-                attribute::Storage::FloatArray(ok(packed::FloatArray::create_owned(
+                attribute::Storage::FloatArray(packed::FloatArray::create_owned(
                     vec![0, 1, 3, 3, 4, 5, 7, 8, 10],
                     vec![0., 10., 11., 30., 40., 50., 51., 60., 70., 71.],
-                ))),
+                ).unwrap()),
             ),
-            attr("vertex_uv", v, attribute::Storage::Float2(ok(packed::Float2::of_owned(range(0.), range(10.))))),
+            attr("vertex_uv", v, attribute::Storage::Float2(packed::Float2::of_owned(range(0.), range(10.)).unwrap())),
             attr("vertex_vector", v, attribute::Storage::Float3(f3(range(0.), range(10.), range(20.)))),
             attr(
                 "vertex_color",
                 v,
-                attribute::Storage::Float4(ok(packed::Float4::of_owned(range(0.), range(10.), range(20.), range(30.)))),
+                attribute::Storage::Float4(packed::Float4::of_owned(range(0.), range(10.), range(20.), range(30.)).unwrap()),
             ),
             attr(
                 "primitive_label",
@@ -2166,13 +2154,13 @@ mod tests {
             attr("detail_id", attribute::Owner::Detail, attribute::Storage::Int(vec![73])),
         ];
         let constraints = pgroup(group::Owner::Primitive, "constraints", 3, &|p| p == 1);
-        let vertex_order = ok(group::ordered(group::Owner::Vertex, "vertex_order", 8, &[7, 4, 2, 0]));
-        let primitive_order = ok(group::ordered(group::Owner::Primitive, "primitive_order", 3, &[2, 1, 0]));
+        let vertex_order = group::ordered(group::Owner::Vertex, "vertex_order", 8, &[7, 4, 2, 0]).unwrap();
+        let primitive_order = group::ordered(group::Owner::Primitive, "primitive_order", 3, &[2, 1, 0]).unwrap();
         let old_triangles = pgroup(group::Owner::Primitive, "triangles", 3, &|p| p == 0);
-        let source_index = ok(topology_index::create(None, &topology_value));
+        let source_index = topology_index::create(None, &topology_value).unwrap();
         let retained_edge = topology_index::find_edge_index(&source_index, 0, 1);
-        let boundary = ok(edge_group::init(None, &topology_value, &source_index, "boundary", &|e| e == retained_edge));
-        let old_recovered = ok(edge_group::init(None, &topology_value, &source_index, "recovered", &|e| e == retained_edge));
+        let boundary = edge_group::init(None, &topology_value, &source_index, "boundary", &|e| e == retained_edge).unwrap();
+        let old_recovered = edge_group::init(None, &topology_value, &source_index, "recovered", &|e| e == retained_edge).unwrap();
         let input = build(
             positions,
             topology_value,
@@ -2339,9 +2327,9 @@ mod tests {
             &input,
         );
         check_constraint_edge(&output);
-        let source_index = ok(topology_index::create(None, geometry::topology(&input)));
+        let source_index = topology_index::create(None, geometry::topology(&input)).unwrap();
         let edge = topology_index::find_edge_index(&source_index, 1, 3);
-        let edges = ok(edge_group::init(None, geometry::topology(&input), &source_index, "edge_constraint", &|c| c == edge));
+        let edges = edge_group::init(None, geometry::topology(&input), &source_index, "edge_constraint", &|c| c == edge).unwrap();
         let output = tri(
             Params { constraint_edges: Some(edges), constraint_group: Some("constraints".to_owned()), ..xy() },
             &input,
@@ -2511,8 +2499,8 @@ mod tests {
             &points(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.)]),
         );
         check(geometry::primitive_count(&empty) == 0, "unblocked adapter hull flood did not remove all triangles");
-        let index = ok(topology_index::create(None, &topology_value));
-        let all_edges = ok(edge_group::init(None, &topology_value, &index, "edge_only", &|_| true));
+        let index = topology_index::create(None, &topology_value).unwrap();
+        let all_edges = edge_group::init(None, &topology_value, &index, "edge_only", &|_| true).unwrap();
         let edge_only = tri(
             Params { constraint_edges: Some(all_edges), remove_outside_constraint_polygons: true, ..xy() },
             &input,
@@ -2585,12 +2573,12 @@ mod tests {
     fn remove_duplicate_points() {
         let input = points(&[(0., 0., 0.), (1., 0., 0.), (1., 1., 0.), (0., 1., 0.), (0., 0., 7.), (9., 9., 9.)]);
         let id = attr("id", attribute::Owner::Point, attribute::Storage::Int(vec![10, 11, 12, 13, 14, 15]));
-        let selected = ok(group::ordered(group::Owner::Point, "selected", 6, &[0, 1, 2, 3, 4]));
+        let selected = group::ordered(group::Owner::Point, "selected", 6, &[0, 1, 2, 3, 4]).unwrap();
         let markers = pgroup(group::Owner::Point, "markers", 6, &|p| p == 4 || p == 5);
-        let input = ok(geometry::with_group(
+        let input = geometry::with_group(
             markers,
-            &ok(geometry::with_group(selected.clone(), &ok(geometry::with_attribute(id, &input)))),
-        ));
+            &geometry::with_group(selected.clone(), &geometry::with_attribute(id, &input).unwrap()).unwrap(),
+        ).unwrap();
         let selection = || Some(element_selection::T::SelectedPoints(selected.clone()));
         let ordinary = tri(Params { selection: selection(), ..xy() }, &input);
         check(geometry::point_count(&ordinary) == 6, "projected duplicate was removed without the output policy");
@@ -2629,7 +2617,7 @@ mod tests {
     fn quality_refinement() {
         let input = points(&[(0., 0., 0.), (2., 0., 2.), (2., 2., 6.), (0., 2., 4.)]);
         let value = attr("value", attribute::Owner::Point, attribute::Storage::Float(vec![0., 2., 6., 4.]));
-        let input = ok(geometry::with_attribute(value, &input));
+        let input = geometry::with_attribute(value, &input).unwrap();
         let (output, parallel) = one_four(&|| {
             tri(
                 Params {
@@ -2775,7 +2763,7 @@ mod tests {
             &input,
         );
         let (tx, ty, _) = position_signature(&targeted);
-        let targeted_index = ok(topology_index::create(None, geometry::topology(&targeted)));
+        let targeted_index = topology_index::create(None, geometry::topology(&targeted)).unwrap();
         let targeted_view = topology_index::View::view(&targeted_index);
         for edge in 0..targeted_view.edge_a.len() {
             let a = targeted_view.edge_a[edge] as usize;
@@ -2946,9 +2934,9 @@ mod tests {
         let bad_coordinates = attr(
             "bad_coordinates",
             attribute::Owner::Point,
-            attribute::Storage::Float2(ok(packed::Float2::of_owned(vec![0., f64::NAN, 0.], vec![0., 0., 1.]))),
+            attribute::Storage::Float2(packed::Float2::of_owned(vec![0., f64::NAN, 0.], vec![0., 0., 1.]).unwrap()),
         );
-        let nonfinite = ok(geometry::with_attribute(bad_coordinates, &input));
+        let nonfinite = geometry::with_attribute(bad_coordinates, &input).unwrap();
         expect_error(run_with(
             Params { projection: Projection::PointAttribute("bad_coordinates".to_owned()), ..Params::default() },
             &nonfinite,

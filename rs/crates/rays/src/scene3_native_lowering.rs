@@ -401,14 +401,14 @@ fn same_caster(a: &caster, b: &caster) -> bool {
 /// depth-writing Replace or Alpha triangle drawings (the renderer's casters), keyed by their
 /// meshes, transforms and instances plus the sun direction, so a scene rebuilt each frame from
 /// the same parts re-renders nothing.
-fn sun_fit(scene: &scene3::t, sun: &world::sun) -> Option<(mat4::T, String)> {
+fn sun_fit(scene: &scene3::t, sun: &world::sun) -> Result<Option<(mat4::T, String)>, error> {
     let list = casters(scene);
     let cache = current();
     let key: Item = Rc::new((caster_list_key(list), sun.direction));
     if let Some(context) = &cache {
         if let Some(found) = idlist::peek(&context.0.sun_fits.borrow(), &key) {
             if let Ok(fit) = found.downcast::<Option<(mat4::T, String)>>() {
-                return (*fit).clone();
+                return Ok((*fit).clone());
             }
         }
     }
@@ -427,7 +427,7 @@ fn sun_fit(scene: &scene3::t, sun: &world::sun) -> Option<(mat4::T, String)> {
     };
     for c in list {
         // a device mesh's box is reduced where its positions are, its host copy never made
-        if let Some((a, b)) = mesh::bounds(&c.caster_mesh) {
+        if let Some((a, b)) = mesh::bounds(&c.caster_mesh).map_err(|_| error::Invalid_mesh)? {
             let mut corners = |m: &mat4::T| {
                 for k in 0..8 {
                     add(mat4::transform_point(
@@ -465,7 +465,7 @@ fn sun_fit(scene: &scene3::t, sun: &world::sun) -> Option<(mat4::T, String)> {
     if let Some(context) = &cache {
         idlist::add(&mut context.0.sun_fits.borrow_mut(), 0, key.clone(), Rc::new(fit.clone()));
     }
-    fit
+    Ok(fit)
 }
 
 fn ocaml_float_compare(a: f64, b: f64) -> std::cmp::Ordering {
@@ -1096,7 +1096,7 @@ fn packed_of_mesh(mode: scene3::render_mode, m: &mesh::t) -> Result<Rc<packed_me
 }
 
 fn packed_of_host(mode: scene3::render_mode, m: &mesh::t) -> Result<Rc<packed_mesh>, error> {
-    let source = mesh::View::packed_view(m);
+    let source = mesh::View::packed_view(m).map_err(|_| error::Invalid_mesh)?;
     let cache = current();
     let exact = cache
         .as_ref()
@@ -1131,7 +1131,7 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::t) -> Result<Rc<packed_me
         && view.normals.is_none()
         && reused.is_none()
     {
-        view = mesh::View::packed_view(&mesh::recalculate_normals(m));
+        view = mesh::View::packed_view(&mesh::recalculate_normals(m)).map_err(|_| error::Invalid_mesh)?;
     }
     let native: Option<(Primitive, Vec<i64>)> = match mode {
         scene3::render_mode::Vertices => Some((Primitive::PointList, (0..view.vertices.x.len() as i64).collect())),
@@ -1210,7 +1210,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
         None => None,
         Some(baked) => {
             let fit = match &baked.sun {
-                Some(s) => sun_fit(scene, s),
+                Some(s) => sun_fit(scene, s)?,
                 None => None,
             };
             Some(world_of(&baked, fit))

@@ -107,8 +107,13 @@ fn fields(tokens: &[Token]) -> Vec<(String, Vec<Token>)> {
         Some((word(field.first()?)?.to_owned(), field[eq+1..].to_vec()))
     }).collect()
 }
-fn get<'a>(fields: &'a [(String, Vec<Token>)], key: &str) -> &'a [Token] {
-    fields.iter().find(|(field, _)| field == key).map(|(_, value)| value.as_slice()).unwrap_or(&[])
+fn get(fields: &[(String, Vec<Token>)], key: &str) -> Vec<Token> {
+    fields.iter().find(|(field, _)| field == key).map(|(_, value)| value.clone()).unwrap_or_default()
+}
+/// A malformed registry stops the build with the message on stderr.
+fn build_failure(message: String) -> ! {
+    eprintln!("{message}");
+    std::process::exit(1)
 }
 fn parse_ty(tokens: &[Token]) -> Ty {
     match name(tokens).as_str() {
@@ -116,7 +121,7 @@ fn parse_ty(tokens: &[Token]) -> Ty {
         "Enum_of" => Ty::Enum(string(tokens)), "Str" => Ty::Text,
         "Obj" => Ty::Object(string(tokens)), "Opt_obj" => Ty::OptionalObject(string(tokens)),
         "Rec" => Ty::Record(string(tokens)), "Tuple" => Ty::Tuple(string(tokens)),
-        other => panic!("unhandled Metal registry type {other}: {tokens:?}"),
+        other => build_failure(format!("unhandled Metal registry type {other}: {tokens:?}")),
     }
 }
 fn parse_ty_list(tokens: &[Token]) -> Vec<Ty> { list(tokens).into_iter().filter(|part| !part.is_empty()).map(parse_ty).collect() }
@@ -144,7 +149,7 @@ fn parse_record_fields(tokens: &[Token]) -> Vec<(String, String)> {
         (string(values[0]), name(values[1]))
     }).collect()
 }
-fn feature(fields: &[(String, Vec<Token>)]) -> String { name(get(fields, "feature")) }
+fn feature(fields: &[(String, Vec<Token>)]) -> String { name(&get(fields, "feature")) }
 
 fn parse_registry(source: &str) -> (Vec<Call>, Vec<EnumDef>, Vec<RecordDef>, Vec<NativeDef>) {
     let tokens = lex(source);
@@ -173,28 +178,28 @@ fn parse_registry(source: &str) -> (Vec<Call>, Vec<EnumDef>, Vec<RecordDef>, Vec
             "Method" | "Class_method" => {
                 let class = kind == "Class_method";
                 calls.push(Call {
-                    name: string(get(&entry, "ocaml")),
-                    receiver: if class { "Class".to_owned() } else { string(get(&entry, "recv")) },
-                    objc: string(get(&entry, "objc")), selector: string(get(&entry, "sel")),
-                    args: parse_ty_list(get(&entry, "args")), result: parse_result(get(&entry, "ret")),
-                    error: name(get(&entry, "error")) == "true", pool: class || name(get(&entry, "pool")) == "true",
-                    since: parse_since(get(&entry, "since")), feature: cap, body: Body::Send,
+                    name: string(&get(&entry, "ocaml")),
+                    receiver: if class { "Class".to_owned() } else { string(&get(&entry, "recv")) },
+                    objc: string(&get(&entry, "objc")), selector: string(&get(&entry, "sel")),
+                    args: parse_ty_list(&get(&entry, "args")), result: parse_result(&get(&entry, "ret")),
+                    error: name(&get(&entry, "error")) == "true", pool: class || name(&get(&entry, "pool")) == "true",
+                    since: parse_since(&get(&entry, "since")), feature: cap, body: Body::Send,
                 });
             }
             "Property" => {
-                let receiver = string(get(&entry, "recv"));
-                let objc = string(get(&entry, "objc"));
-                let property = string(get(&entry, "name"));
-                let binding = string(get(&entry, "ocaml"));
-                let ty = parse_ty(get(&entry, "ty"));
-                let access = name(get(&entry, "access"));
-                let since = parse_since(get(&entry, "since"));
+                let receiver = string(&get(&entry, "recv"));
+                let objc = string(&get(&entry, "objc"));
+                let property = string(&get(&entry, "name"));
+                let binding = string(&get(&entry, "ocaml"));
+                let ty = parse_ty(&get(&entry, "ty"));
+                let access = name(&get(&entry, "access"));
+                let since = parse_since(&get(&entry, "since"));
                 if access != "Set" { calls.push(Call { name: binding.clone(), receiver: receiver.clone(), objc: objc.clone(), selector: property.clone(), args: vec![], result: Some(ty.clone()), error: false, pool: true, since, feature: cap.clone(), body: Body::Read(property.clone()) }); }
                 if access != "Get" { calls.push(Call { name: format!("set_{binding}"), receiver, objc, selector: format!("{property}="), args: vec![ty], result: None, error: false, pool: true, since, feature: cap, body: Body::Write(property) }); }
             }
-            "Enum" => enums.push(EnumDef { name: string(get(&entry, "ocaml")), feature: cap, cases: parse_enum_cases(get(&entry, "cases")) }),
-            "Record" => records.push(RecordDef { name: string(get(&entry, "ocaml")), sdk: string(get(&entry, "sdk")), feature: cap, fields: parse_record_fields(get(&entry, "fields")) }),
-            "Native" => natives.push(NativeDef { name: string(get(&entry, "ocaml")), signature: string(get(&entry, "signature")), primitives: list(get(&entry, "primitives")).into_iter().map(string).collect(), reason: string(get(&entry, "reason")) }),
+            "Enum" => enums.push(EnumDef { name: string(&get(&entry, "ocaml")), feature: cap, cases: parse_enum_cases(&get(&entry, "cases")) }),
+            "Record" => records.push(RecordDef { name: string(&get(&entry, "ocaml")), sdk: string(&get(&entry, "sdk")), feature: cap, fields: parse_record_fields(&get(&entry, "fields")) }),
+            "Native" => natives.push(NativeDef { name: string(&get(&entry, "ocaml")), signature: string(&get(&entry, "signature")), primitives: list(&get(&entry, "primitives")).into_iter().map(string).collect(), reason: string(&get(&entry, "reason")) }),
             _ => unreachable!(),
         }
     }
@@ -206,7 +211,7 @@ fn feature_name(name: &str) -> &'static str {
         "Buffer" => "Buffer", "Texture" => "Texture", "Sampler" => "Sampler", "Compute_pipeline" => "ComputePipeline",
         "Render_pipeline" => "RenderPipeline", "Queue" => "Queue", "Surface" => "Surface", "Ray_tracing" => "RayTracing",
         "Ray_tracing_curves" => "RayTracingCurves", "Ray_tracing_motion" => "RayTracingMotion", "Ray_tracing_refit" => "RayTracingRefit",
-        "Memoryless_attachments" => "MemorylessAttachments", other => panic!("unmapped Metal capability {other}"),
+        "Memoryless_attachments" => "MemorylessAttachments", other => build_failure(format!("unmapped Metal capability {other}")),
     }
 }
 fn ident(value: &str) -> String { value.replace('-', "_") }
@@ -320,7 +325,7 @@ fn cpp_call(call: &Call, records: &[RecordDef]) -> String {
 fn emit_record(record: &RecordDef) -> String {
     let mut out = format!("#[repr(C)]\n#[derive(Clone, Copy, Debug, Default, PartialEq)]\npub struct {} {{\n", ident(&record.name));
     for (field, ty) in &record.fields {
-        let ty = match ty.as_str() { "Bool" => "u8", "Int" => "i32", "Nsuint" => "u64", "Nsuint_int" => "usize", "Nsint" => "isize", "Float" => "f32", "Double" => "f64", _ => panic!("unknown Metal record scalar {ty}") };
+        let ty = match ty.as_str() { "Bool" => "u8", "Int" => "i32", "Nsuint" => "u64", "Nsuint_int" => "usize", "Nsint" => "isize", "Float" => "f32", "Double" => "f64", _ => build_failure(format!("unknown Metal record scalar {ty}")) };
         out.push_str(&format!("    pub {field}: {ty},\n"));
     }
     out.push_str("}\n"); out

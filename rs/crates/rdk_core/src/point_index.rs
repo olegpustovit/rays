@@ -94,7 +94,7 @@ static CACHE: LazyLock<Arc<support::IdentityCache>> = LazyLock::new(|| {
         Some(index_bytes),
         64,
     )
-    .unwrap_or_else(|failure| panic!("{}", error::to_string(&failure)))
+    .unwrap_or_else(|failure| unreachable!("{}", error::to_string(&failure)))
 });
 
 fn cache() -> &'static Arc<support::IdentityCache> {

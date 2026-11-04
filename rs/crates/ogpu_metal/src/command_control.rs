@@ -1,9 +1,10 @@
 //! Ogpu_metal.Command_control: what the encoders share while one command buffer records, and the
 //! token tables of the device behind them.
+use ogpu_core::error::Error;
 use crate::{
     acceleration::Acceleration,
     buffer::Buffer,
-    device::{fail, of_metal_error, Device, R},
+    device::{fail, of_metal_error, Device},
     pipeline::Pipeline,
     queue::Cleanup,
     sampler::Sampler,
@@ -71,7 +72,7 @@ impl Tables {
         self.resources.borrow().get(&token).cloned()
     }
 
-    pub fn depth_state_for(&self, device: &Device, state: DepthState) -> R<DepthStencil> {
+    pub fn depth_state_for(&self, device: &Device, state: DepthState) -> Result<DepthStencil, Error> {
         let operation = "Ogpu_metal.Backend.depth_state";
         let mut states = self.depth_states.borrow_mut();
         if let Some(index) = states.iter().position(|(s, _)| *s == state) {
@@ -130,27 +131,23 @@ pub struct CommandContext {
 }
 
 impl CommandContext {
-    pub fn native_of<T>(&self, result: Result<T, metal::Error>) -> R<T> {
-        result.map_err(|e| of_metal_error(self.operation, &e))
-    }
-
-    pub fn recording(&self) -> R<()> {
+        pub fn recording(&self) -> Result<(), Error> {
         if self.finished.get() {
-            fail(self.operation, ErrorKind::InvalidState, "commands are finished")
+            Err(fail(self.operation, ErrorKind::InvalidState, "commands are finished"))
         } else {
             Ok(())
         }
     }
 
     /// Records `release` when `retained` succeeded.
-    pub fn keep(&self, retained: R<()>, release: Cleanup) -> R<()> {
+    pub fn keep(&self, retained: Result<(), Error>, release: Cleanup) -> Result<(), Error> {
         retained?;
         self.retained.borrow_mut().push(release);
         Ok(())
     }
 
     /// One retain per buffer per command buffer, however many bindings reference it.
-    pub fn keep_buffer(&self, buffer: &Buffer) -> R<()> {
+    pub fn keep_buffer(&self, buffer: &Buffer) -> Result<(), Error> {
         if buffer.retain_for(self.commands_token)? {
             let b = buffer.clone();
             self.retained.borrow_mut().push(Box::new(move || b.release_submission()));
@@ -158,34 +155,34 @@ impl CommandContext {
         Ok(())
     }
 
-    pub fn find_buffer(&self, token: i64) -> R<Buffer> {
+    pub fn find_buffer(&self, token: i64) -> Result<Buffer, Error> {
         match self.tables.resource(token) {
             Some(Resource::Buffer(buffer)) => Ok(buffer),
-            _ => fail(self.operation, ErrorKind::InvalidArgument, "buffer graph is incomplete"),
+            _ => Err(fail(self.operation, ErrorKind::InvalidArgument, "buffer graph is incomplete")),
         }
     }
 
-    pub fn find_accel(&self, token: i64) -> R<Acceleration> {
+    pub fn find_accel(&self, token: i64) -> Result<Acceleration, Error> {
         match self.tables.accels.borrow().get(&token) {
             Some(structure) => Ok(structure.clone()),
-            None => fail(self.operation, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete"),
+            None => Err(fail(self.operation, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete")),
         }
     }
 
-    pub fn keep_accel(&self, structure: &Acceleration) -> R<()> {
+    pub fn keep_accel(&self, structure: &Acceleration) -> Result<(), Error> {
         let release = structure.retain_submission()?;
         self.retained.borrow_mut().push(release);
         Ok(())
     }
 
-    pub fn find_texture(&self, token: i64) -> R<Texture> {
+    pub fn find_texture(&self, token: i64) -> Result<Texture, Error> {
         match self.tables.resource(token) {
             Some(Resource::Texture(texture)) => Ok(texture),
-            _ => fail(self.operation, ErrorKind::InvalidArgument, "texture graph is incomplete"),
+            _ => Err(fail(self.operation, ErrorKind::InvalidArgument, "texture graph is incomplete")),
         }
     }
 
-    pub fn keep_texture(&self, texture: &Texture) -> R<()> {
+    pub fn keep_texture(&self, texture: &Texture) -> Result<(), Error> {
         let t = texture.clone();
         self.keep(texture.retain_submission(), Box::new(move || t.release_submission()))
     }
@@ -206,7 +203,7 @@ impl CommandContext {
         self.tables.icbs.borrow().get(&token).map(|entry| entry.icb.clone())
     }
 
-    pub fn depth_state(&self, state: DepthState) -> R<DepthStencil> {
+    pub fn depth_state(&self, state: DepthState) -> Result<DepthStencil, Error> {
         self.tables.depth_state_for(&self.device, state)
     }
 }

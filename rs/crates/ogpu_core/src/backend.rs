@@ -384,30 +384,25 @@ pub struct BatchDraw {
 }
 
 fn make_error(operation: &str, kind: ErrorKind, message: &str) -> Error { error::make(operation, kind, message) }
-macro_rules! fail {
-    ($operation:expr, $kind:expr, $message:expr) => {
-        Err(make_error($operation, $kind, $message))
-    };
-}
 fn live(operation: &str, device: &Device) -> Result<(), Error> {
-    if device.0.dead.get() { fail!(operation, ErrorKind::StaleHandle, "device is destroyed") } else { Ok(()) }
+    if device.0.dead.get() { Err(make_error(operation, ErrorKind::StaleHandle, "device is destroyed")) } else { Ok(()) }
 }
 fn make_resource(device: &Device, raw: DriverResource) -> Resource {
     Resource(Rc::new(ResourceInner { raw, handle: handle::create(&device.0.handle), device: device.clone(), dead: Cell::new(false) }))
 }
 fn resource_check(operation: &str, device: &Device, resource: &Resource) -> Result<(), Error> {
-    if resource.0.dead.get() { fail!(operation, ErrorKind::StaleHandle, "resource is destroyed") }
-    else if !Rc::ptr_eq(&resource.0.device.0, &device.0) { fail!(operation, ErrorKind::CrossDevice, "resource belongs to another device") }
+    if resource.0.dead.get() { Err(make_error(operation, ErrorKind::StaleHandle, "resource is destroyed")) }
+    else if !Rc::ptr_eq(&resource.0.device.0, &device.0) { Err(make_error(operation, ErrorKind::CrossDevice, "resource belongs to another device")) }
     else { Ok(()) }
 }
 fn accel_check(operation: &str, device: &Device, value: &Accel) -> Result<(), Error> {
-    if value.0.dead.get() { fail!(operation, ErrorKind::StaleHandle, "acceleration structure is destroyed") }
-    else if !Rc::ptr_eq(&value.0.device.0, &device.0) { fail!(operation, ErrorKind::CrossDevice, "acceleration structure belongs to another device") }
+    if value.0.dead.get() { Err(make_error(operation, ErrorKind::StaleHandle, "acceleration structure is destroyed")) }
+    else if !Rc::ptr_eq(&value.0.device.0, &device.0) { Err(make_error(operation, ErrorKind::CrossDevice, "acceleration structure belongs to another device")) }
     else { Ok(()) }
 }
 fn require(operation: &str, device: &Device, feature: Feature) -> Result<(), Error> { caps::require(Some(operation), &device.0.raw.capabilities, &feature) }
 fn check_slot(operation: &str, index: i64) -> Result<(), Error> {
-    if !(0..=31).contains(&index) { fail!(operation, ErrorKind::InvalidArgument, "binding slot is out of range") } else { Ok(()) }
+    if !(0..=31).contains(&index) { Err(make_error(operation, ErrorKind::InvalidArgument, "binding slot is out of range")) } else { Ok(()) }
 }
 fn finite(value: f64) -> bool { value.is_finite() && value.abs() <= f32::MAX as f64 }
 fn border_code(border: Border) -> i64 { match border { Border::Clamp => 0, Border::Vanish => 1 } }
@@ -432,7 +427,7 @@ pub fn create_buffer(device: &Device, descriptor: BufferDescriptor, memory: Opti
     crate::validation::validate_buffer(&device.0.raw.capabilities, &descriptor)?;
     let memory = memory.unwrap_or(Memory::Shared);
     if memory == Memory::Memoryless {
-        return fail!(OP, ErrorKind::InvalidArgument, "a buffer cannot be memoryless");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "a buffer cannot be memoryless"));
     }
     let raw = (device.0.raw.create_buffer)(memory, &descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
@@ -444,7 +439,7 @@ pub fn create_mapped_buffer(device: &Device, descriptor: BufferDescriptor) -> Re
     live(OP, device)?;
     crate::validation::validate_buffer(&device.0.raw.capabilities, &descriptor)?;
     if descriptor.size % 4 != 0 {
-        return fail!(OP, ErrorKind::InvalidArgument, "mapped buffer size must be a multiple of 4");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "mapped buffer size must be a multiple of 4"));
     }
     let mapped = (device.0.raw.create_mapped_buffer)(&descriptor)?;
     let DriverMapped { mapped_resource, view, release_view, flush, invalidate } = mapped;
@@ -455,12 +450,12 @@ pub fn create_mapped_buffer(device: &Device, descriptor: BufferDescriptor) -> Re
 }
 
 fn sync_mapped(buffer: &Buffer, operation: &str, length: i64, invalidate: bool) -> Result<(), Error> {
-    if buffer.resource.0.dead.get() { return fail!(operation, ErrorKind::StaleHandle, "buffer is destroyed"); }
-    let Some(mapped) = &buffer.mapping else { return fail!(operation, ErrorKind::InvalidArgument, "buffer is not mapped"); };
+    if buffer.resource.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "buffer is destroyed")); }
+    let Some(mapped) = &buffer.mapping else { return Err(make_error(operation, ErrorKind::InvalidArgument, "buffer is not mapped")); };
     if length < 0 || length > buffer.buffer_descriptor.size {
-        return fail!(operation, ErrorKind::InvalidArgument, "range exceeds the buffer");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer"));
     }
-    let Ok(length) = usize::try_from(length) else { return fail!(operation, ErrorKind::InvalidArgument, "range exceeds the buffer"); };
+    let Ok(length) = usize::try_from(length) else { return Err(make_error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer")); };
     if invalidate { (mapped.invalidate)(length) } else { (mapped.flush)(length) }
 }
 
@@ -475,9 +470,9 @@ pub fn mapped_view(buffer: &Buffer) -> Option<Floats> {
 }
 pub fn release_mapped_view(buffer: &Buffer) -> Result<(), Error> {
     const OP: &str = "Backend.release_mapped_view";
-    if buffer.resource.0.dead.get() { fail!(OP, ErrorKind::StaleHandle, "buffer is destroyed") }
+    if buffer.resource.0.dead.get() { Err(make_error(OP, ErrorKind::StaleHandle, "buffer is destroyed")) }
     else if let Some(mapping) = &buffer.mapping { (mapping.release_view)(); Ok(()) }
-    else { fail!(OP, ErrorKind::InvalidArgument, "buffer is not mapped") }
+    else { Err(make_error(OP, ErrorKind::InvalidArgument, "buffer is not mapped")) }
 }
 pub fn buffer_size(buffer: &Buffer) -> i64 { buffer.buffer_descriptor.size }
 
@@ -496,7 +491,7 @@ pub fn create_depth_texture(device: &Device, descriptor: TextureDescriptor) -> R
     if !descriptor.usage.contains(&TextureUsage::RenderAttachment)
         || descriptor.usage.iter().any(|usage| *usage != TextureUsage::RenderAttachment)
     {
-        return fail!(OP, ErrorKind::InvalidArgument, "depth textures are render-attachment only");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "depth textures are render-attachment only"));
     }
     let raw = (device.0.raw.create_depth_texture)(&descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
@@ -508,7 +503,7 @@ pub fn create_memoryless_texture(device: &Device, depth: bool, descriptor: Textu
     require(OP, device, Feature::MemorylessAttachments)?;
     crate::validation::validate_texture(&device.0.raw.capabilities, &descriptor)?;
     if descriptor.usage.as_slice() != &[TextureUsage::RenderAttachment] {
-        return fail!(OP, ErrorKind::InvalidArgument, "memoryless textures are render-attachment only");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "memoryless textures are render-attachment only"));
     }
     let raw = (device.0.raw.create_memoryless_texture)(depth, &descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
@@ -539,46 +534,46 @@ pub fn create_surface(device: &Device, configuration: Configuration) -> Result<S
 pub fn buffer_id(buffer: &Buffer) -> i64 { handle::id(&buffer.resource.0.handle) }
 pub fn texture_id(texture: &Texture) -> i64 { handle::id(&texture.resource.0.handle) }
 pub fn write_buffer(buffer: &Buffer, offset: i64, bytes: &[u8]) -> Result<(), Error> {
-    if buffer.resource.0.dead.get() { fail!("Backend.write_buffer", ErrorKind::StaleHandle, "buffer is destroyed") }
-    else if buffer.memory == Memory::DeviceLocal { fail!("Backend.write_buffer", ErrorKind::Unsupported, "device-local buffers are not host writable") }
+    if buffer.resource.0.dead.get() { Err(make_error("Backend.write_buffer", ErrorKind::StaleHandle, "buffer is destroyed")) }
+    else if buffer.memory == Memory::DeviceLocal { Err(make_error("Backend.write_buffer", ErrorKind::Unsupported, "device-local buffers are not host writable")) }
     else { (buffer.resource.0.raw.write)(offset, bytes) }
 }
 pub fn read_buffer(buffer: &Buffer, offset: i64, length: i64) -> Result<Vec<u8>, Error> {
-    if buffer.resource.0.dead.get() { return fail!("Backend.read_buffer", ErrorKind::StaleHandle, "buffer is destroyed"); }
-    if buffer.memory == Memory::DeviceLocal { return fail!("Backend.read_buffer", ErrorKind::Unsupported, "device-local buffers are not host readable"); }
-    if length < 0 { return fail!("Backend.read_buffer", ErrorKind::InvalidArgument, "read length is negative"); }
-    let Ok(length) = usize::try_from(length) else { return fail!("Backend.read_buffer", ErrorKind::InvalidArgument, "read length is invalid"); };
+    if buffer.resource.0.dead.get() { return Err(make_error("Backend.read_buffer", ErrorKind::StaleHandle, "buffer is destroyed")); }
+    if buffer.memory == Memory::DeviceLocal { return Err(make_error("Backend.read_buffer", ErrorKind::Unsupported, "device-local buffers are not host readable")); }
+    if length < 0 { return Err(make_error("Backend.read_buffer", ErrorKind::InvalidArgument, "read length is negative")); }
+    let Ok(length) = usize::try_from(length) else { return Err(make_error("Backend.read_buffer", ErrorKind::InvalidArgument, "read length is invalid")); };
     (buffer.resource.0.raw.read)(offset, length)
 }
 pub fn read_texture(texture: &Texture, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
     const OP: &str = "Backend.read_texture";
     let d = &texture.texture_descriptor;
-    if texture.resource.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "texture is destroyed"); }
+    if texture.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "texture is destroyed")); }
     if bytes_per_row <= 0 || d.height < 0 || d.height > i64::MAX / bytes_per_row {
-        return fail!(OP, ErrorKind::InvalidArgument, "row pitch is invalid");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "row pitch is invalid"));
     }
-    let Ok(length) = usize::try_from(bytes_per_row * d.height) else { return fail!(OP, ErrorKind::InvalidArgument, "row pitch is invalid"); };
+    let Ok(length) = usize::try_from(bytes_per_row * d.height) else { return Err(make_error(OP, ErrorKind::InvalidArgument, "row pitch is invalid")); };
     (texture.resource.0.raw.read)(0, length)
 }
 pub fn read_texture_into(texture: &Texture, bytes_per_row: i64, destination: &mut [u8]) -> Result<(), Error> {
     const OP: &str = "Backend.read_texture_into";
     let d = &texture.texture_descriptor;
-    if texture.resource.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "texture is destroyed"); }
+    if texture.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "texture is destroyed")); }
     if bytes_per_row <= 0 || d.height < 0 || d.height > i64::MAX / bytes_per_row {
-        return fail!(OP, ErrorKind::InvalidArgument, "row pitch is invalid");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "row pitch is invalid"));
     }
-    let Ok(length) = usize::try_from(bytes_per_row * d.height) else { return fail!(OP, ErrorKind::InvalidArgument, "row pitch is invalid"); };
-    if destination.len() != length { return fail!(OP, ErrorKind::InvalidArgument, "destination length does not match texture extent"); }
+    let Ok(length) = usize::try_from(bytes_per_row * d.height) else { return Err(make_error(OP, ErrorKind::InvalidArgument, "row pitch is invalid")); };
+    if destination.len() != length { return Err(make_error(OP, ErrorKind::InvalidArgument, "destination length does not match texture extent")); }
     (texture.resource.0.raw.read_into)(0, destination, 0, length)
 }
 pub fn complete_through(queue: &Queue, epoch: i64) -> Result<(), Error> {
     let q = queue.0.borrow();
-    if q.dead { fail!("Backend.complete_through", ErrorKind::StaleHandle, "queue is destroyed") }
+    if q.dead { Err(make_error("Backend.complete_through", ErrorKind::StaleHandle, "queue is destroyed")) }
     else { (q.raw.complete_through)(epoch) }
 }
 pub fn poll_through(queue: &Queue, epoch: i64) -> Result<bool, Error> {
     let q = queue.0.borrow();
-    if q.dead { fail!("Backend.poll_through", ErrorKind::StaleHandle, "queue is destroyed") }
+    if q.dead { Err(make_error("Backend.poll_through", ErrorKind::StaleHandle, "queue is destroyed")) }
     else { (q.raw.poll_through)(epoch) }
 }
 pub fn completed_epoch(queue: &Queue) -> i64 { (queue.0.borrow().raw.completed_epoch)() }
@@ -587,15 +582,15 @@ pub fn status(queue: &Queue, receipt: Receipt) -> Result<Status, Error> {
 }
 pub fn configure(surface: &Surface, configuration: Configuration) -> Result<(), Error> {
     const OP: &str = "Backend.configure";
-    if surface.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "surface is destroyed"); }
-    if surface.0.frames.get() != 0 { return fail!(OP, ErrorKind::InvalidState, "surface has acquired frames"); }
+    if surface.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "surface is destroyed")); }
+    if surface.0.frames.get() != 0 { return Err(make_error(OP, ErrorKind::InvalidState, "surface has acquired frames")); }
     (surface.0.raw.configure)(&configuration)?;
     *surface.0.configuration.borrow_mut() = configuration;
     Ok(())
 }
 pub fn acquire_sync(surface: &Surface) -> Result<AcquireResult, Error> {
     const OP: &str = "Backend.acquire_sync";
-    if surface.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "surface is destroyed"); }
+    if surface.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "surface is destroyed")); }
     match (surface.0.raw.acquire_sync)()? {
         DriverAcquire::Acquired(raw) => {
             surface.0.frames.set(surface.0.frames.get() + 1);
@@ -612,11 +607,11 @@ pub enum AcquireResult { Acquired(Frame), Timeout, Occluded, DeviceLost }
 pub fn discard(frame: &Frame) -> Result<(), Error> {
     const OP: &str = "Backend.discard";
     if frame.0.consumed.get() {
-        return fail!(OP, ErrorKind::InvalidState, "frame is already consumed");
+        return Err(make_error(OP, ErrorKind::InvalidState, "frame is already consumed"));
     }
     let surface = &frame.0.surface;
     if surface.0.dead.get() {
-        return fail!(OP, ErrorKind::StaleHandle, "surface is destroyed");
+        return Err(make_error(OP, ErrorKind::StaleHandle, "surface is destroyed"));
     }
     (surface.0.raw.discard)(frame.0.raw.clone())?;
     frame.0.consumed.set(true);
@@ -655,7 +650,7 @@ pub fn destroy_queue(queue: &Queue) -> Result<(), Error> {
 }
 pub fn destroy_surface(surface: &Surface) -> Result<(), Error> {
     if surface.0.dead.get() { return Ok(()); }
-    if surface.0.frames.get() != 0 { return fail!("Backend.destroy_surface", ErrorKind::InvalidState, "surface has acquired frames"); }
+    if surface.0.frames.get() != 0 { return Err(make_error("Backend.destroy_surface", ErrorKind::InvalidState, "surface has acquired frames")); }
     (surface.0.raw.destroy_surface)()?;
     surface.0.dead.set(true);
     surface.0.device.0.children.set(surface.0.device.0.children.get() - 1);
@@ -663,7 +658,7 @@ pub fn destroy_surface(surface: &Surface) -> Result<(), Error> {
 }
 pub fn destroy_device(device: &Device) -> Result<(), Error> {
     if device.0.dead.get() { return Ok(()); }
-    if device.0.children.get() != 0 { return fail!("Backend.destroy_device", ErrorKind::InvalidState, "device has live children"); }
+    if device.0.children.get() != 0 { return Err(make_error("Backend.destroy_device", ErrorKind::InvalidState, "device has live children")); }
     (device.0.raw.destroy_device)()?;
     device.0.dead.set(true);
     handle::destroy_device(&device.0.handle);
@@ -689,11 +684,11 @@ pub fn create_compute_pipeline_from(
     interface: &[Binding],
 ) -> Result<Pipeline, Error> {
     const OP: &str = "Backend.create_compute_pipeline_from";
-    if library.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "library is destroyed"); }
+    if library.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "library is destroyed")); }
     live(OP, &library.0.device)?;
     require(OP, &library.0.device, Feature::ComputePipeline)?;
     if entry.is_empty() || entry.as_bytes().contains(&0) {
-        return fail!(OP, ErrorKind::InvalidArgument, "entry name is empty or contains NUL");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "entry name is empty or contains NUL"));
     }
     crate::shader::validate_bindings(interface)?;
     let constants = constants.unwrap_or_default();
@@ -709,7 +704,7 @@ pub fn create_compute_pipeline_from(
 pub fn destroy_library(library: &Library) -> Result<(), Error> {
     const OP: &str = "Backend.destroy_library";
     if library.0.dead.get() { return Ok(()); }
-    if library.0.pipelines.get() > 0 { return fail!(OP, ErrorKind::InvalidState, "library has live pipelines"); }
+    if library.0.pipelines.get() > 0 { return Err(make_error(OP, ErrorKind::InvalidState, "library has live pipelines")); }
     (library.0.raw.destroy_library)()?;
     library.0.dead.set(true);
     library.0.device.0.children.set(library.0.device.0.children.get() - 1);
@@ -726,9 +721,9 @@ fn valid_record(record: &InstanceRecord) -> bool {
 }
 pub fn pack_instance_records(device: &Device, records: &[InstanceRecord]) -> Result<Vec<u8>, Error> {
     const OP: &str = "Backend.pack_instance_records";
-    if records.is_empty() { return fail!(OP, ErrorKind::InvalidArgument, "instance array is empty"); }
+    if records.is_empty() { return Err(make_error(OP, ErrorKind::InvalidArgument, "instance array is empty")); }
     if !records.iter().all(valid_record) {
-        return fail!(OP, ErrorKind::InvalidArgument, "instance transform, mask, index, or user id is invalid");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "instance transform, mask, index, or user id is invalid"));
     }
     let layout = (device.0.raw.instance_layout)(InstanceKind::UserIdInstances);
     let (mut bytes, size) = acceleration::record_bytes(&layout, records.len());
@@ -748,12 +743,12 @@ pub fn pack_instance_records(device: &Device, records: &[InstanceRecord]) -> Res
 }
 pub fn pack_motion_instances(device: &Device, instances: &[MotionInstance]) -> Result<Vec<u8>, Error> {
     const OP: &str = "Backend.pack_motion_instances";
-    if instances.is_empty() { return fail!(OP, ErrorKind::InvalidArgument, "instance array is empty"); }
+    if instances.is_empty() { return Err(make_error(OP, ErrorKind::InvalidArgument, "instance array is empty")); }
     if !instances.iter().all(|m| {
         valid_record(&m.record) && m.transforms_start >= 0 && m.transforms_count >= 2
             && m.start_time.is_finite() && m.end_time.is_finite() && m.start_time < m.end_time
     }) {
-        return fail!(OP, ErrorKind::InvalidArgument, "motion instance record, transform range, or time range is invalid");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "motion instance record, transform range, or time range is invalid"));
     }
     let layout = (device.0.raw.instance_layout)(InstanceKind::MotionInstances);
     let (mut bytes, size) = acceleration::record_bytes(&layout, instances.len());
@@ -778,9 +773,9 @@ pub fn pack_motion_instances(device: &Device, instances: &[MotionInstance]) -> R
 }
 pub fn pack_transforms(transforms: &[Vec<f64>]) -> Result<Vec<u8>, Error> {
     const OP: &str = "Backend.pack_transforms";
-    if transforms.is_empty() { return fail!(OP, ErrorKind::InvalidArgument, "transform array is empty"); }
+    if transforms.is_empty() { return Err(make_error(OP, ErrorKind::InvalidArgument, "transform array is empty")); }
     if !transforms.iter().all(|transform| transform.len() == 12 && transform.iter().all(|v| finite(*v))) {
-        return fail!(OP, ErrorKind::InvalidArgument, "transforms must be finite 3x4 rows");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "transforms must be finite 3x4 rows"));
     }
     Ok(acceleration::pack_transforms(transforms))
 }
@@ -929,7 +924,7 @@ pub fn create_accel(device: &Device, descriptor: AccelDescriptor, refit: bool) -
         if matches!(&descriptor, AccelDescriptor::TlasOf { .. })
             && matches!(acceleration::descriptor(&structure.0.portable.borrow()), PortableDescriptor::Tlas { .. })
         {
-            return fail!(OP, ErrorKind::InvalidArgument, "TLAS instances must reference bottom-level structures");
+            return Err(make_error(OP, ErrorKind::InvalidArgument, "TLAS instances must reference bottom-level structures"));
         }
     }
     let motion_valid = match &descriptor {
@@ -939,7 +934,7 @@ pub fn create_accel(device: &Device, descriptor: AccelDescriptor, refit: bool) -
         AccelDescriptor::TlasOf { motion_transforms: Some((_, offset, count)), .. } => *offset >= 0 && *count > 0,
         _ => true,
     };
-    if !motion_valid { return fail!(OP, ErrorKind::InvalidArgument, "motion keyframes, time range, or transform range is invalid"); }
+    if !motion_valid { return Err(make_error(OP, ErrorKind::InvalidArgument, "motion keyframes, time range, or transform range is invalid")); }
     let portable_descriptor = portable_of(device, &descriptor);
     let portable = acceleration::create(&device.0.handle, true, refit, portable_descriptor)?;
     let raw = match (device.0.raw.create_accel)(&driver_of(refit, &descriptor)) {
@@ -961,17 +956,17 @@ pub fn destroy_accel(value: &Accel) -> Result<(), Error> {
 fn recording(operation: &str, commands: &Commands) -> Result<(), Error> {
     match commands.0.state.get() {
         CommandsState::Recording => Ok(()),
-        CommandsState::Encoding => fail!(operation, ErrorKind::InvalidState, "an encoder is still open"),
-        CommandsState::Committed => fail!(operation, ErrorKind::InvalidState, "commands are already committed"),
-        CommandsState::Abandoned => fail!(operation, ErrorKind::InvalidState, "commands were abandoned"),
+        CommandsState::Encoding => Err(make_error(operation, ErrorKind::InvalidState, "an encoder is still open")),
+        CommandsState::Committed => Err(make_error(operation, ErrorKind::InvalidState, "commands are already committed")),
+        CommandsState::Abandoned => Err(make_error(operation, ErrorKind::InvalidState, "commands were abandoned")),
     }
 }
 fn commands_device(commands: &Commands) -> Device { commands.0.queue.0.borrow().device.clone() }
 pub fn begin_commands(queue: &Queue) -> Result<Commands, Error> {
     const OP: &str = "Backend.begin_commands";
     let q = queue.0.borrow();
-    if q.device.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "device is destroyed"); }
-    if q.dead { return fail!(OP, ErrorKind::StaleHandle, "queue is destroyed"); }
+    if q.device.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "device is destroyed")); }
+    if q.dead { return Err(make_error(OP, ErrorKind::StaleHandle, "queue is destroyed")); }
     let raw = (q.raw.begin_commands)()?;
     Ok(Commands(Rc::new(CommandsInner { raw, queue: queue.clone(), state: Cell::new(CommandsState::Recording) })))
 }
@@ -985,14 +980,14 @@ pub fn compute_encoder(commands: &Commands) -> Result<ComputeEncoder, Error> {
     Ok(ComputeEncoder(Rc::new(ComputeInner { raw, commands: commands.clone(), open: Cell::new(true), pipeline_set: Cell::new(false) })))
 }
 fn open_compute(operation: &str, encoder: &ComputeEncoder) -> Result<(), Error> {
-    if encoder.0.open.get() { Ok(()) } else { fail!(operation, ErrorKind::InvalidState, "compute encoder is ended") }
+    if encoder.0.open.get() { Ok(()) } else { Err(make_error(operation, ErrorKind::InvalidState, "compute encoder is ended")) }
 }
 pub fn set_pipeline(encoder: &ComputeEncoder, pipeline: &Pipeline) -> Result<(), Error> {
     const OP: &str = "Backend.set_pipeline";
     open_compute(OP, encoder)?;
-    if pipeline.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "pipeline is destroyed"); }
+    if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
     let device = commands_device(&encoder.0.commands);
-    if !Rc::ptr_eq(&pipeline.0.device.0, &device.0) { return fail!(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"); }
+    if !Rc::ptr_eq(&pipeline.0.device.0, &device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device")); }
     (encoder.0.raw.set_pipeline)(pipeline.0.driver.pipeline_token)?;
     encoder.0.pipeline_set.set(true);
     Ok(())
@@ -1003,14 +998,14 @@ pub fn set_buffer(encoder: &ComputeEncoder, index: i64, buffer: &Buffer) -> Resu
     check_slot(OP, index)?;
     let device = commands_device(&encoder.0.commands);
     resource_check(OP, &device, &buffer.resource)?;
-    if buffer.buffer_descriptor.size <= 0 { return fail!(OP, ErrorKind::InvalidArgument, "buffer is empty"); }
+    if buffer.buffer_descriptor.size <= 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer is empty")); }
     (encoder.0.raw.set_buffer)(index, 0, buffer.resource.0.raw.token)
 }
 pub fn set_bytes(encoder: &ComputeEncoder, index: i64, bytes: &[u8]) -> Result<(), Error> {
     const OP: &str = "Backend.set_bytes";
     open_compute(OP, encoder)?;
     check_slot(OP, index)?;
-    if bytes.is_empty() || bytes.len() > 4096 { return fail!(OP, ErrorKind::InvalidArgument, "inline bytes must be 1..4096 bytes"); }
+    if bytes.is_empty() || bytes.len() > 4096 { return Err(make_error(OP, ErrorKind::InvalidArgument, "inline bytes must be 1..4096 bytes")); }
     (encoder.0.raw.set_bytes)(index, bytes)
 }
 pub fn set_texture(encoder: &ComputeEncoder, index: i64, texture: &Texture) -> Result<(), Error> {
@@ -1019,7 +1014,7 @@ pub fn set_texture(encoder: &ComputeEncoder, index: i64, texture: &Texture) -> R
     check_slot(OP, index)?;
     resource_check(OP, &commands_device(&encoder.0.commands), &texture.resource)?;
     if !texture.texture_descriptor.usage.iter().any(|usage| matches!(usage, TextureUsage::TextureBinding | TextureUsage::StorageBinding)) {
-        return fail!(OP, ErrorKind::InvalidArgument, "texture lacks shader binding usage");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "texture lacks shader binding usage"));
     }
     (encoder.0.raw.set_texture)(index, texture.resource.0.raw.token)
 }
@@ -1028,15 +1023,15 @@ pub fn set_accel(encoder: &ComputeEncoder, index: i64, accel: &Accel) -> Result<
     open_compute(OP, encoder)?;
     check_slot(OP, index)?;
     accel_check(OP, &commands_device(&encoder.0.commands), accel)?;
-    if !is_built(accel) { return fail!(OP, ErrorKind::InvalidState, "acceleration structure has no encoded build"); }
+    if !is_built(accel) { return Err(make_error(OP, ErrorKind::InvalidState, "acceleration structure has no encoded build")); }
     (encoder.0.raw.set_accel)(index, accel.0.raw.accel_token)
 }
 fn positive3(value: (i64, i64, i64)) -> bool { value.0 > 0 && value.1 > 0 && value.2 > 0 }
 pub fn dispatch_threads(encoder: &ComputeEncoder, threads: (i64, i64, i64), threadgroup: (i64, i64, i64)) -> Result<(), Error> {
     const OP: &str = "Backend.dispatch_threads";
     open_compute(OP, encoder)?;
-    if !encoder.0.pipeline_set.get() { return fail!(OP, ErrorKind::InvalidState, "no compute pipeline is set"); }
-    if !positive3(threads) || !positive3(threadgroup) { return fail!(OP, ErrorKind::InvalidArgument, "dispatch dimensions must be positive"); }
+    if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no compute pipeline is set")); }
+    if !positive3(threads) || !positive3(threadgroup) { return Err(make_error(OP, ErrorKind::InvalidArgument, "dispatch dimensions must be positive")); }
     (encoder.0.raw.dispatch_threads)(threads, threadgroup)
 }
 pub fn dispatch_threadgroups_indirect(
@@ -1044,11 +1039,11 @@ pub fn dispatch_threadgroups_indirect(
 ) -> Result<(), Error> {
     const OP: &str = "Backend.dispatch_threadgroups_indirect";
     open_compute(OP, encoder)?;
-    if !encoder.0.pipeline_set.get() { return fail!(OP, ErrorKind::InvalidState, "no compute pipeline is set"); }
-    if !positive3(threadgroup) { return fail!(OP, ErrorKind::InvalidArgument, "dispatch dimensions must be positive"); }
+    if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no compute pipeline is set")); }
+    if !positive3(threadgroup) { return Err(make_error(OP, ErrorKind::InvalidArgument, "dispatch dimensions must be positive")); }
     resource_check(OP, &commands_device(&encoder.0.commands), &arguments.resource)?;
     if offset < 0 || offset % 4 != 0 || offset > arguments.buffer_descriptor.size - 12 {
-        return fail!(OP, ErrorKind::InvalidArgument, "indirect arguments range is invalid");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect arguments range is invalid"));
     }
     (encoder.0.raw.dispatch_indirect)(arguments.resource.0.raw.token, offset, threadgroup)
 }
@@ -1070,14 +1065,14 @@ pub fn accel_encoder(commands: &Commands) -> Result<AccelEncoder, Error> {
     Ok(AccelEncoder(Rc::new(AccelEncoderInner { raw, commands: commands.clone(), open: Cell::new(true) })))
 }
 fn open_accel(operation: &str, encoder: &AccelEncoder) -> Result<(), Error> {
-    if encoder.0.open.get() { Ok(()) } else { fail!(operation, ErrorKind::InvalidState, "acceleration encoder is ended") }
+    if encoder.0.open.get() { Ok(()) } else { Err(make_error(operation, ErrorKind::InvalidState, "acceleration encoder is ended")) }
 }
 fn check_scratch(operation: &str, device: &Device, scratch: &Buffer, offset: i64, required: i64) -> Result<(), Error> {
     resource_check(operation, device, &scratch.resource)?;
     if offset < 0 || offset % 256 != 0 || required < 0 || required > scratch.buffer_descriptor.size
         || offset > scratch.buffer_descriptor.size - required
     {
-        fail!(operation, ErrorKind::InvalidArgument, "scratch range is invalid, unaligned, or insufficient")
+        Err(make_error(operation, ErrorKind::InvalidArgument, "scratch range is invalid, unaligned, or insufficient"))
     } else { Ok(()) }
 }
 pub fn build_accel(encoder: &AccelEncoder, accel: &Accel, scratch: &Buffer, scratch_offset: Option<i64>) -> Result<(), Error> {
@@ -1085,7 +1080,7 @@ pub fn build_accel(encoder: &AccelEncoder, accel: &Accel, scratch: &Buffer, scra
     open_accel(OP, encoder)?;
     let device = commands_device(&encoder.0.commands);
     if accel.0.structures.iter().any(|structure| structure.0.dead.get() || !is_built(structure)) {
-        return fail!(OP, ErrorKind::InvalidState, "TLAS references a destroyed or unbuilt structure");
+        return Err(make_error(OP, ErrorKind::InvalidState, "TLAS references a destroyed or unbuilt structure"));
     }
     accel_check(OP, &device, accel)?;
     let offset = scratch_offset.unwrap_or(0);
@@ -1100,7 +1095,7 @@ pub fn refit_accel(
     let device = commands_device(&encoder.0.commands);
     require(OP, &device, Feature::RayTracingRefit)?;
     if matches!(&descriptor, AccelDescriptor::TlasOf { .. } | AccelDescriptor::Sized { .. }) {
-        return fail!(OP, ErrorKind::InvalidArgument, "only a primitive structure refits");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "only a primitive structure refits"));
     }
     for buffer in descriptor_buffers(&descriptor) { resource_check(OP, &device, &buffer.resource)?; }
     open_accel(OP, encoder)?;
@@ -1116,9 +1111,9 @@ pub fn compact_accel(encoder: &AccelEncoder, src: &Accel, dst: &Accel) -> Result
     let device = commands_device(&encoder.0.commands);
     accel_check(OP, &device, src)?;
     accel_check(OP, &device, dst)?;
-    if accel_sizes(dst).structure_size <= 0 { return fail!(OP, ErrorKind::InvalidArgument, "destination structure is empty"); }
+    if accel_sizes(dst).structure_size <= 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "destination structure is empty")); }
     if Rc::ptr_eq(&src.0, &dst.0) {
-        return fail!(OP, ErrorKind::InvalidState, "compaction source and destination are the same structure");
+        return Err(make_error(OP, ErrorKind::InvalidState, "compaction source and destination are the same structure"));
     }
     acceleration::compact_into(
         &device.0.handle, &mut src.0.portable.borrow_mut(), &mut dst.0.portable.borrow_mut(),
@@ -1133,7 +1128,7 @@ pub fn write_compacted_size(encoder: &AccelEncoder, accel: &Accel, dst: &Buffer,
     resource_check(OP, &device, &dst.resource)?;
     let offset = offset.unwrap_or(0);
     if offset < 0 || offset % 8 != 0 || offset > dst.buffer_descriptor.size - 8 {
-        return fail!(OP, ErrorKind::InvalidArgument, "compacted size destination needs eight aligned bytes");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "compacted size destination needs eight aligned bytes"));
     }
     acceleration::compacted_size(&device.0.handle, &accel.0.portable.borrow())?;
     (encoder.0.raw.write_compacted_size)(accel.0.raw.accel_token, dst.resource.0.raw.token, offset)
@@ -1155,7 +1150,7 @@ pub fn blit_encoder(commands: &Commands) -> Result<BlitEncoder, Error> {
     Ok(BlitEncoder(Rc::new(BlitInner { raw, commands: commands.clone(), open: Cell::new(true) })))
 }
 fn open_blit(operation: &str, encoder: &BlitEncoder) -> Result<(), Error> {
-    if encoder.0.open.get() { Ok(()) } else { fail!(operation, ErrorKind::InvalidState, "blit encoder is ended") }
+    if encoder.0.open.get() { Ok(()) } else { Err(make_error(operation, ErrorKind::InvalidState, "blit encoder is ended")) }
 }
 pub fn end_blit(encoder: &BlitEncoder) -> Result<(), Error> {
     const OP: &str = "Backend.end_blit";
@@ -1173,7 +1168,7 @@ pub fn commit(commands: &Commands) -> Result<Receipt, Error> {
 }
 pub fn abandon(commands: &Commands) -> Result<(), Error> {
     match commands.0.state.get() {
-        CommandsState::Committed => fail!("Backend.abandon", ErrorKind::InvalidState, "commands are already committed"),
+        CommandsState::Committed => Err(make_error("Backend.abandon", ErrorKind::InvalidState, "commands are already committed")),
         CommandsState::Abandoned => Ok(()),
         CommandsState::Recording | CommandsState::Encoding => {
             (commands.0.raw.abandon)()?;
@@ -1194,7 +1189,7 @@ pub fn compute_use_accels(encoder: &ComputeEncoder, accels: &[Accel]) -> Result<
     let mut tokens = Vec::with_capacity(accels.len());
     for accel in accels {
         accel_check(OP, &device, accel)?;
-        if !is_built(accel) { return fail!(OP, ErrorKind::InvalidState, "acceleration structure has no encoded build"); }
+        if !is_built(accel) { return Err(make_error(OP, ErrorKind::InvalidState, "acceleration structure has no encoded build")); }
         tokens.push(accel.0.raw.accel_token);
     }
     if tokens.is_empty() { Ok(()) } else { (encoder.0.raw.compute_use_accels)(&tokens) }
@@ -1228,7 +1223,7 @@ pub fn create_render_pipeline(
     pipeline::create_render(&device.0.raw.capabilities, descriptor)?;
     let topology = topology.unwrap_or(Primitive::TriangleList);
     if topology != Primitive::TriangleList && topology != Primitive::PointList {
-        return fail!(OP, ErrorKind::InvalidArgument, "pipeline topology class must be triangles or points");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "pipeline topology class must be triangles or points"));
     }
     let indirect = indirect.unwrap_or(false);
     let options = RenderPipelineOptions { blend: blend.unwrap_or(Blend::Replace), topology, indirect };
@@ -1243,22 +1238,22 @@ pub fn create_icb(device: &Device, max_commands: i64) -> Result<Icb, Error> {
     const OP: &str = "Backend.create_icb";
     live(OP, device)?;
     if max_commands <= 0 || max_commands > 65_536 {
-        return fail!(OP, ErrorKind::InvalidArgument, "indirect command capacity must be in 1..65536");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect command capacity must be in 1..65536"));
     }
     let raw = (device.0.raw.create_icb)(max_commands)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Icb(Rc::new(IcbInner { raw, device: device.clone(), capacity: max_commands, dead: Cell::new(false) })))
 }
 fn check_icb(operation: &str, icb: &Icb, index: i64) -> Result<(), Error> {
-    if icb.0.dead.get() { fail!(operation, ErrorKind::StaleHandle, "indirect command buffer is destroyed") }
-    else if index < 0 || index >= icb.0.capacity { fail!(operation, ErrorKind::InvalidArgument, "indirect command index is out of range") }
+    if icb.0.dead.get() { Err(make_error(operation, ErrorKind::StaleHandle, "indirect command buffer is destroyed")) }
+    else if index < 0 || index >= icb.0.capacity { Err(make_error(operation, ErrorKind::InvalidArgument, "indirect command index is out of range")) }
     else { Ok(()) }
 }
 pub fn icb_set_pipeline(icb: &Icb, index: i64, pipeline: &Pipeline) -> Result<(), Error> {
     const OP: &str = "Backend.icb_set_pipeline";
     check_icb(OP, icb, index)?;
-    if pipeline.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "pipeline is destroyed"); }
-    if !Rc::ptr_eq(&pipeline.0.device.0, &icb.0.device.0) { return fail!(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"); }
+    if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
+    if !Rc::ptr_eq(&pipeline.0.device.0, &icb.0.device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device")); }
     (icb.0.raw.icb_set_pipeline)(index, pipeline.0.driver.pipeline_token)
 }
 pub fn icb_set_buffer(
@@ -1269,19 +1264,19 @@ pub fn icb_set_buffer(
     check_slot(OP, slot)?;
     resource_check(OP, &icb.0.device, &buffer.resource)?;
     let offset = offset.unwrap_or(0);
-    if offset < 0 || offset >= buffer.buffer_descriptor.size { return fail!(OP, ErrorKind::InvalidArgument, "buffer offset is out of range"); }
+    if offset < 0 || offset >= buffer.buffer_descriptor.size { return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer offset is out of range")); }
     (icb.0.raw.icb_set_buffer)(index, stage, slot, offset, buffer.resource.0.raw.token)
 }
 fn valid_draw(operation: &str, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
-    if first < 0 || count <= 0 || instances <= 0 { return fail!(operation, ErrorKind::InvalidArgument, "draw range is invalid"); }
+    if first < 0 || count <= 0 || instances <= 0 { return Err(make_error(operation, ErrorKind::InvalidArgument, "draw range is invalid")); }
     if primitive == Primitive::TriangleList && count % 3 != 0 {
-        return fail!(operation, ErrorKind::InvalidArgument, "triangle-list vertex count is not divisible by three");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "triangle-list vertex count is not divisible by three"));
     }
     if primitive == Primitive::LineList && count % 2 != 0 {
-        return fail!(operation, ErrorKind::InvalidArgument, "line-list vertex count is not divisible by two");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "line-list vertex count is not divisible by two"));
     }
     if primitive == Primitive::TriangleStrip && count < 3 {
-        return fail!(operation, ErrorKind::InvalidArgument, "triangle strip requires at least three vertices");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "triangle strip requires at least three vertices"));
     }
     Ok(())
 }
@@ -1294,13 +1289,13 @@ fn valid_indexed(
     if count <= 0 || offset < 0 || offset % stride != 0 || offset > buffer.buffer_descriptor.size
         || count > (buffer.buffer_descriptor.size - offset) / stride || instances <= 0
     {
-        return fail!(operation, ErrorKind::InvalidArgument, "index range is invalid");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "index range is invalid"));
     }
     if primitive == Primitive::TriangleList && count % 3 != 0 {
-        return fail!(operation, ErrorKind::InvalidArgument, "triangle-list index count is not divisible by three");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "triangle-list index count is not divisible by three"));
     }
     if primitive == Primitive::LineList && count % 2 != 0 {
-        return fail!(operation, ErrorKind::InvalidArgument, "line-list index count is not divisible by two");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "line-list index count is not divisible by two"));
     }
     Ok(())
 }
@@ -1332,7 +1327,7 @@ pub fn destroy_icb(icb: &Icb) -> Result<(), Error> {
 }
 pub fn create_argument(pipeline: &Pipeline, stage: ShaderStage, index: i64) -> Result<Argument, Error> {
     const OP: &str = "Backend.create_argument";
-    if pipeline.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "pipeline is destroyed"); }
+    if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
     live(OP, &pipeline.0.device)?;
     check_slot(OP, index)?;
     let raw = (pipeline.0.device.0.raw.create_argument)(pipeline.0.driver.pipeline_token, stage, index)?;
@@ -1342,14 +1337,14 @@ pub fn create_argument(pipeline: &Pipeline, stage: ShaderStage, index: i64) -> R
 pub fn argument_length(argument: &Argument) -> i64 { argument.0.raw.argument_length }
 pub fn argument_alignment(argument: &Argument) -> i64 { argument.0.raw.argument_alignment }
 fn argument_target(operation: &str, argument: &Argument, buffer: &Buffer, offset: i64) -> Result<(), Error> {
-    if argument.0.dead.get() { return fail!(operation, ErrorKind::StaleHandle, "argument encoder is destroyed"); }
+    if argument.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "argument encoder is destroyed")); }
     resource_check(operation, &argument.0.device, &buffer.resource)?;
     let alignment = argument.0.raw.argument_alignment.max(1);
     if offset < 0 || offset % alignment != 0 || argument.0.raw.argument_length < 0
         || argument.0.raw.argument_length > buffer.buffer_descriptor.size
         || offset > buffer.buffer_descriptor.size - argument.0.raw.argument_length
     {
-        return fail!(operation, ErrorKind::InvalidArgument, "argument buffer range is invalid or unaligned");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "argument buffer range is invalid or unaligned"));
     }
     Ok(())
 }
@@ -1362,8 +1357,8 @@ pub fn argument_texture(argument: &Argument, buffer: &Buffer, offset: i64, slot:
 pub fn argument_sampler(argument: &Argument, buffer: &Buffer, offset: i64, slot: i64, sampler: &Sampler) -> Result<(), Error> {
     const OP: &str = "Backend.argument_sampler";
     argument_target(OP, argument, buffer, offset)?;
-    if sampler.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "sampler is destroyed"); }
-    if !Rc::ptr_eq(&sampler.0.device.0, &argument.0.device.0) { return fail!(OP, ErrorKind::CrossDevice, "sampler belongs to another device"); }
+    if sampler.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "sampler is destroyed")); }
+    if !Rc::ptr_eq(&sampler.0.device.0, &argument.0.device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "sampler belongs to another device")); }
     (argument.0.raw.argument_sampler)(buffer.resource.0.raw.token, offset, slot, sampler.0.raw.sampler_token)
 }
 pub fn destroy_argument(argument: &Argument) -> Result<(), Error> {
@@ -1379,7 +1374,7 @@ pub enum ResourceUse { Buffer(Buffer), Texture(Texture) }
 fn attachment_check(operation: &str, device: &Device, texture: &Texture) -> Result<(), Error> {
     resource_check(operation, device, &texture.resource)?;
     if !texture.texture_descriptor.usage.contains(&TextureUsage::RenderAttachment) {
-        fail!(operation, ErrorKind::InvalidArgument, "attachment texture lacks Render_attachment usage")
+        Err(make_error(operation, ErrorKind::InvalidArgument, "attachment texture lacks Render_attachment usage"))
     } else { Ok(()) }
 }
 pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<RenderEncoder, Error> {
@@ -1387,8 +1382,8 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
     recording(OP, commands)?;
     let device = commands_device(commands);
     require(OP, &device, Feature::RenderPipeline)?;
-    if target.colors.is_empty() { return fail!(OP, ErrorKind::InvalidArgument, "render target needs one color attachment"); }
-    if target.colors.len() > 1 { return fail!(OP, ErrorKind::Unsupported, "multiple color attachments are not exposed"); }
+    if target.colors.is_empty() { return Err(make_error(OP, ErrorKind::InvalidArgument, "render target needs one color attachment")); }
+    if target.colors.len() > 1 { return Err(make_error(OP, ErrorKind::Unsupported, "multiple color attachments are not exposed")); }
     let color = &target.colors[0];
     attachment_check(OP, &device, &color.texture)?;
     let width = color.texture.texture_descriptor.width;
@@ -1397,15 +1392,15 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
     let same_extent = |texture: &Texture| texture.texture_descriptor.width == width && texture.texture_descriptor.height == height;
     match &color.resolve {
         None if color.store == Store::Resolve =>
-            return fail!(OP, ErrorKind::InvalidArgument, "resolve store needs a resolve texture"),
+            return Err(make_error(OP, ErrorKind::InvalidArgument, "resolve store needs a resolve texture")),
         Some(_) if samples == 1 =>
-            return fail!(OP, ErrorKind::InvalidArgument, "single-sample attachment cannot resolve"),
+            return Err(make_error(OP, ErrorKind::InvalidArgument, "single-sample attachment cannot resolve")),
         Some(_) if color.store == Store::Discard =>
-            return fail!(OP, ErrorKind::InvalidArgument, "a resolve texture needs a Store or Resolve store action"),
+            return Err(make_error(OP, ErrorKind::InvalidArgument, "a resolve texture needs a Store or Resolve store action")),
         Some(resolve) => {
             attachment_check(OP, &device, resolve)?;
             if !same_extent(resolve) || resolve.texture_descriptor.sample_count != 1 {
-                return fail!(OP, ErrorKind::InvalidArgument, "resolve texture extent or sample count differs");
+                return Err(make_error(OP, ErrorKind::InvalidArgument, "resolve texture extent or sample count differs"));
             }
         }
         _ => {}
@@ -1413,15 +1408,15 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
     if let Some(depth) = &target.depth {
         attachment_check(OP, &device, &depth.depth_texture)?;
         if !same_extent(&depth.depth_texture) || depth.depth_texture.texture_descriptor.sample_count != samples {
-            return fail!(OP, ErrorKind::InvalidArgument, "depth attachment extent or sample count differs");
+            return Err(make_error(OP, ErrorKind::InvalidArgument, "depth attachment extent or sample count differs"));
         }
-        if depth.depth_store == Store::Resolve { return fail!(OP, ErrorKind::InvalidArgument, "depth attachments cannot resolve"); }
+        if depth.depth_store == Store::Resolve { return Err(make_error(OP, ErrorKind::InvalidArgument, "depth attachments cannot resolve")); }
         if !depth.depth_clear.is_finite() || depth.depth_clear < 0.0 || depth.depth_clear > 1.0 {
-            return fail!(OP, ErrorKind::InvalidArgument, "depth clear is outside [0,1]");
+            return Err(make_error(OP, ErrorKind::InvalidArgument, "depth clear is outside [0,1]"));
         }
     }
     if ![color.clear.0, color.clear.1, color.clear.2, color.clear.3].iter().all(|value| value.is_finite()) {
-        return fail!(OP, ErrorKind::InvalidArgument, "clear color is not finite");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "clear color is not finite"));
     }
     let driver_target = DriverRenderTarget {
         target_colors: vec![DriverColorAttachment {
@@ -1443,18 +1438,18 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
 }
 
 fn open_render(operation: &str, encoder: &RenderEncoder) -> Result<(), Error> {
-    if encoder.0.open.get() { Ok(()) } else { fail!(operation, ErrorKind::InvalidState, "render encoder is ended") }
+    if encoder.0.open.get() { Ok(()) } else { Err(make_error(operation, ErrorKind::InvalidState, "render encoder is ended")) }
 }
 fn render_device(encoder: &RenderEncoder) -> Device { commands_device(&encoder.0.commands) }
 pub fn set_render_pipeline(encoder: &RenderEncoder, pipeline: &Pipeline) -> Result<(), Error> {
     const OP: &str = "Backend.set_render_pipeline";
     open_render(OP, encoder)?;
-    if pipeline.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "pipeline is destroyed"); }
+    if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
     if !Rc::ptr_eq(&pipeline.0.device.0, &render_device(encoder).0) {
-        return fail!(OP, ErrorKind::CrossDevice, "pipeline belongs to another device");
+        return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"));
     }
     if pipeline.0.shape == PipelineShape::Compute {
-        return fail!(OP, ErrorKind::InvalidArgument, "compute pipelines cannot be set on a render encoder");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "compute pipelines cannot be set on a render encoder"));
     }
     (encoder.0.raw.render_set_pipeline)(pipeline.0.driver.pipeline_token)?;
     encoder.0.pipeline_set.set(true);
@@ -1469,7 +1464,7 @@ pub fn set_stage_buffer(
     check_slot(OP, index)?;
     resource_check(OP, &render_device(encoder), &buffer.resource)?;
     let offset = offset.unwrap_or(0);
-    if offset < 0 || offset >= buffer.buffer_descriptor.size { return fail!(OP, ErrorKind::InvalidArgument, "buffer offset is out of range"); }
+    if offset < 0 || offset >= buffer.buffer_descriptor.size { return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer offset is out of range")); }
     (encoder.0.raw.set_stage_buffer)(stage, index, offset, buffer.resource.0.raw.token)
 }
 pub fn set_stage_texture(encoder: &RenderEncoder, stage: ShaderStage, index: i64, texture: &Texture) -> Result<(), Error> {
@@ -1478,7 +1473,7 @@ pub fn set_stage_texture(encoder: &RenderEncoder, stage: ShaderStage, index: i64
     check_slot(OP, index)?;
     resource_check(OP, &render_device(encoder), &texture.resource)?;
     if !texture.texture_descriptor.usage.contains(&TextureUsage::TextureBinding) {
-        return fail!(OP, ErrorKind::InvalidArgument, "texture lacks Texture_binding usage");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "texture lacks Texture_binding usage"));
     }
     (encoder.0.raw.set_stage_texture)(stage, index, texture.resource.0.raw.token)
 }
@@ -1486,21 +1481,21 @@ pub fn set_stage_sampler(encoder: &RenderEncoder, stage: ShaderStage, index: i64
     const OP: &str = "Backend.set_stage_sampler";
     open_render(OP, encoder)?;
     check_slot(OP, index)?;
-    if sampler.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "sampler is destroyed"); }
+    if sampler.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "sampler is destroyed")); }
     if !Rc::ptr_eq(&sampler.0.device.0, &render_device(encoder).0) {
-        return fail!(OP, ErrorKind::CrossDevice, "sampler belongs to another device");
+        return Err(make_error(OP, ErrorKind::CrossDevice, "sampler belongs to another device"));
     }
     (encoder.0.raw.set_stage_sampler)(stage, index, sampler.0.raw.sampler_token)
 }
 pub fn set_viewport(encoder: &RenderEncoder, rect: Rect) -> Result<(), Error> {
     const OP: &str = "Backend.set_viewport";
     open_render(OP, encoder)?;
-    if rect.width <= 0 || rect.height <= 0 { return fail!(OP, ErrorKind::InvalidArgument, "viewport is empty"); }
+    if rect.width <= 0 || rect.height <= 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "viewport is empty")); }
     (encoder.0.raw.set_viewport)(rect)
 }
 fn valid_rect(operation: &str, rect: Rect) -> Result<(), Error> {
     if rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0 {
-        fail!(operation, ErrorKind::InvalidArgument, "rectangle is empty or negative")
+        Err(make_error(operation, ErrorKind::InvalidArgument, "rectangle is empty or negative"))
     } else { Ok(()) }
 }
 pub fn set_scissor(encoder: &RenderEncoder, rect: Rect) -> Result<(), Error> {
@@ -1522,9 +1517,9 @@ pub fn set_depth_state(encoder: &RenderEncoder, state: Option<DepthState>) -> Re
     (encoder.0.raw.set_depth_state)(state)
 }
 fn vertex_pipeline(operation: &str, encoder: &RenderEncoder) -> Result<(), Error> {
-    if !encoder.0.pipeline_set.get() { return fail!(operation, ErrorKind::InvalidState, "no render pipeline is set"); }
+    if !encoder.0.pipeline_set.get() { return Err(make_error(operation, ErrorKind::InvalidState, "no render pipeline is set")); }
     if encoder.0.shape.get() != PipelineShape::Vertex {
-        return fail!(operation, ErrorKind::InvalidState, "vertex draws need a vertex/fragment pipeline");
+        return Err(make_error(operation, ErrorKind::InvalidState, "vertex draws need a vertex/fragment pipeline"));
     }
     Ok(())
 }
@@ -1544,7 +1539,7 @@ pub fn draw_indexed(
 ) -> Result<(), Error> {
     const OP: &str = "Backend.draw_indexed";
     open_render(OP, encoder)?;
-    if !encoder.0.pipeline_set.get() { return fail!(OP, ErrorKind::InvalidState, "no render pipeline is set"); }
+    if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no render pipeline is set")); }
     let instances = instances.unwrap_or(1);
     valid_indexed(OP, &render_device(encoder), primitive, index_type, buffer, offset, count, instances)?;
     (encoder.0.raw.draw_indexed)(primitive, index_type, buffer.resource.0.raw.token, offset, count, instances)
@@ -1555,16 +1550,16 @@ pub fn draw_indexed_indirect(
 ) -> Result<(), Error> {
     const OP: &str = "Backend.draw_indexed_indirect";
     open_render(OP, encoder)?;
-    if !encoder.0.pipeline_set.get() { return fail!(OP, ErrorKind::InvalidState, "no render pipeline is set"); }
+    if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no render pipeline is set")); }
     let device = render_device(encoder);
     resource_check(OP, &device, &buffer.resource)?;
     resource_check(OP, &device, &arguments.resource)?;
     let stride = match index_type { IndexType::Uint16 => 2, IndexType::Uint32 => 4 };
     if offset < 0 || offset % stride != 0 || offset >= buffer.buffer_descriptor.size {
-        return fail!(OP, ErrorKind::InvalidArgument, "index offset is invalid");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "index offset is invalid"));
     }
     if arguments_offset < 0 || arguments_offset % 4 != 0 || arguments_offset > arguments.buffer_descriptor.size - 20 {
-        return fail!(OP, ErrorKind::InvalidArgument, "indirect arguments range is invalid");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect arguments range is invalid"));
     }
     (encoder.0.raw.draw_indexed_indirect)(
         primitive, index_type, buffer.resource.0.raw.token, offset,
@@ -1574,20 +1569,20 @@ pub fn draw_indexed_indirect(
 pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Error> {
     const OP: &str = "Backend.draw_batch";
     open_render(OP, encoder)?;
-    if draws.is_empty() { return fail!(OP, ErrorKind::InvalidArgument, "draw batch is empty"); }
+    if draws.is_empty() { return Err(make_error(OP, ErrorKind::InvalidArgument, "draw batch is empty")); }
     let device = render_device(encoder);
     let mut lowered = Vec::with_capacity(draws.len());
     for draw in draws {
-        if draw.pipeline.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "pipeline is destroyed"); }
+        if draw.pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
         if !Rc::ptr_eq(&draw.pipeline.0.device.0, &device.0) {
-            return fail!(OP, ErrorKind::CrossDevice, "pipeline belongs to another device");
+            return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"));
         }
         let mut buffers = Vec::with_capacity(draw.buffers.len());
         for (stage, index, buffer, offset) in &draw.buffers {
             check_slot(OP, *index)?;
             resource_check(OP, &device, &buffer.resource)?;
             if *offset < 0 || *offset >= buffer.buffer_descriptor.size {
-                return fail!(OP, ErrorKind::InvalidArgument, "buffer offset is out of range");
+                return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer offset is out of range"));
             }
             buffers.push((*stage, *index, buffer.resource.0.raw.token, *offset));
         }
@@ -1628,13 +1623,13 @@ pub fn use_resources(encoder: &RenderEncoder, resources: &[ResourceUse]) -> Resu
 pub fn execute_icb(encoder: &RenderEncoder, icb: &Icb, location: i64, length: i64) -> Result<(), Error> {
     const OP: &str = "Backend.execute_icb";
     open_render(OP, encoder)?;
-    if !encoder.0.pipeline_set.get() { return fail!(OP, ErrorKind::InvalidState, "no render pipeline is set"); }
-    if icb.0.dead.get() { return fail!(OP, ErrorKind::StaleHandle, "indirect command buffer is destroyed"); }
+    if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no render pipeline is set")); }
+    if icb.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "indirect command buffer is destroyed")); }
     if !Rc::ptr_eq(&icb.0.device.0, &render_device(encoder).0) {
-        return fail!(OP, ErrorKind::CrossDevice, "indirect command buffer belongs to another device");
+        return Err(make_error(OP, ErrorKind::CrossDevice, "indirect command buffer belongs to another device"));
     }
     if location < 0 || length <= 0 || location > icb.0.capacity - length {
-        return fail!(OP, ErrorKind::InvalidArgument, "indirect command range is out of range");
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect command range is out of range"));
     }
     (encoder.0.raw.execute_icb)(icb.0.raw.icb_token, location, length)
 }
@@ -1673,17 +1668,17 @@ fn buffer_texture_region(
     offset: i64, row: i64, image: i64, texture: &Texture, mip: i64, origin: Origin, extent: Extent,
 ) -> Result<(), Error> {
     if !buffer.buffer_descriptor.usage.contains(&buffer_usage) || !texture.texture_descriptor.usage.contains(&texture_usage) {
-        return fail!(operation, ErrorKind::InvalidArgument, "buffer or texture usage does not permit the copy");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "buffer or texture usage does not permit the copy"));
     }
     if !texture_range(&texture.texture_descriptor, mip, origin, extent)
         || !valid_pitches(types::texel_bytes(texture.texture_descriptor.format), extent, row, image)
     {
-        return fail!(operation, ErrorKind::InvalidArgument, "texture region or row pitch is invalid");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "texture region or row pitch is invalid"));
     }
     if image_footprint(image, extent.depth).is_some_and(|length| blit_range(buffer.buffer_descriptor.size, offset, length)) {
         Ok(())
     } else {
-        fail!(operation, ErrorKind::InvalidArgument, "buffer range does not cover the texture region")
+        Err(make_error(operation, ErrorKind::InvalidArgument, "buffer range does not cover the texture region"))
     }
 }
 pub fn buffer_to_texture(
@@ -1705,26 +1700,26 @@ pub fn buffer_to_texture(
 }
 
 fn validate_present(operation: &str, queue: &Queue, source: &Texture, frame: &Frame) -> Result<(), Error> {
-    if frame.0.consumed.get() { return fail!(operation, ErrorKind::InvalidState, "frame is already consumed"); }
-    if frame.0.surface.0.dead.get() { return fail!(operation, ErrorKind::StaleHandle, "surface is destroyed"); }
+    if frame.0.consumed.get() { return Err(make_error(operation, ErrorKind::InvalidState, "frame is already consumed")); }
+    if frame.0.surface.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "surface is destroyed")); }
     let q = queue.0.borrow();
-    if q.dead { return fail!(operation, ErrorKind::StaleHandle, "queue is destroyed"); }
-    if source.resource.0.dead.get() { return fail!(operation, ErrorKind::StaleHandle, "source texture is destroyed"); }
+    if q.dead { return Err(make_error(operation, ErrorKind::StaleHandle, "queue is destroyed")); }
+    if source.resource.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "source texture is destroyed")); }
     if !Rc::ptr_eq(&q.device.0, &frame.0.surface.0.device.0) {
-        return fail!(operation, ErrorKind::CrossDevice, "queue belongs to a different device");
+        return Err(make_error(operation, ErrorKind::CrossDevice, "queue belongs to a different device"));
     }
     if !Rc::ptr_eq(&source.resource.0.device.0, &frame.0.surface.0.device.0) {
-        return fail!(operation, ErrorKind::CrossDevice, "source texture belongs to a different device");
+        return Err(make_error(operation, ErrorKind::CrossDevice, "source texture belongs to a different device"));
     }
     let descriptor = &source.texture_descriptor;
     let configuration = frame.0.surface.0.configuration.borrow();
     if descriptor.width != configuration.physical_width || descriptor.height != configuration.physical_height {
-        return fail!(operation, ErrorKind::InvalidArgument, "source texture extent does not match the configured physical surface extent");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "source texture extent does not match the configured physical surface extent"));
     }
-    if descriptor.sample_count != 1 { return fail!(operation, ErrorKind::InvalidArgument, "source texture must have sample_count=1"); }
-    if descriptor.format != TextureFormat::Rgba8Unorm { return fail!(operation, ErrorKind::InvalidArgument, "source texture must be Rgba8_unorm"); }
+    if descriptor.sample_count != 1 { return Err(make_error(operation, ErrorKind::InvalidArgument, "source texture must have sample_count=1")); }
+    if descriptor.format != TextureFormat::Rgba8Unorm { return Err(make_error(operation, ErrorKind::InvalidArgument, "source texture must be Rgba8_unorm")); }
     if !descriptor.usage.contains(&TextureUsage::TextureBinding) {
-        return fail!(operation, ErrorKind::InvalidArgument, "source texture must have Texture_binding usage");
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "source texture must have Texture_binding usage"));
     }
     Ok(())
 }

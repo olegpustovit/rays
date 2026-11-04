@@ -2,14 +2,6 @@ use crate::font::{Alignment, Font, Hinting, system_path};
 use crate::{ErrorKind, check_version, compiled_version, init, linked_version};
 use sdl3::Rgba;
 
-fn get<T>(result: crate::Result<T>) -> T {
-    result.unwrap_or_else(|error| panic!("{error}"))
-}
-
-fn kind<T>(result: crate::Result<T>) -> Option<ErrorKind> {
-    result.err().map(|error| error.kind())
-}
-
 fn has_visible_alpha(pixels: &[u8]) -> bool {
     pixels.len() >= 4 && pixels.iter().skip(3).step_by(4).any(|&alpha| alpha != 0)
 }
@@ -28,25 +20,25 @@ fn lock_floor(key: &str) -> (i32, i32, i32) {
     (parts[0], parts[1], parts[2])
 }
 
-fn some(result: crate::Result<Option<Rgba>>, what: &str) -> Rgba {
-    get(result).unwrap_or_else(|| panic!("{what}"))
+fn some(result: std::result::Result<Option<Rgba>, crate::Error>, what: &str) -> Rgba {
+    result.unwrap().unwrap_or_else(|| panic!("{what}"))
 }
 
 #[test]
 fn cpu_font_conformance() {
     claim_main();
-    let font_path = get(system_path(None));
+    let font_path = system_path(None).unwrap();
     assert!(std::path::Path::new(&font_path).exists(), "installed system font discovery returned a missing path");
     let triple = |v: sdl3::Version| (v.major, v.minor, v.patch);
     let floor = lock_floor("sdl3_ttf");
     assert!(triple(compiled_version()) >= floor && triple(linked_version()) >= floor, "installed SDL3_ttf is below the lock floor");
-    get(check_version(true));
-    assert_eq!(kind(Font::open_file(&font_path, 18.0)), Some(ErrorKind::NotInitialized), "pre-init font open");
-    get(init::init());
-    assert!(get(init::initialized()), "TTF initialization was not retained");
-    assert_eq!(kind(std::thread::spawn(init::initialized).join().unwrap()), Some(ErrorKind::WrongDomain));
-    assert_eq!(kind(Font::open_file(&font_path, f64::NAN)), Some(ErrorKind::InvalidArgument), "NaN font size");
-    assert_eq!(kind(Font::open_file("", 18.0)), Some(ErrorKind::InvalidArgument), "empty font path");
+    check_version(true).unwrap();
+    assert_eq!(Font::open_file(&font_path, 18.0).err().map(|failure| failure.kind()), Some(ErrorKind::NotInitialized), "pre-init font open");
+    init::init().unwrap();
+    assert!(init::initialized().unwrap(), "TTF initialization was not retained");
+    assert_eq!(std::thread::spawn(init::initialized).join().unwrap().err().map(|failure| failure.kind()), Some(ErrorKind::WrongDomain));
+    assert_eq!(Font::open_file(&font_path, f64::NAN).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "NaN font size");
+    assert_eq!(Font::open_file("", 18.0).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "empty font path");
     match Font::open_file("/definitely/missing/font.ttf", 18.0) {
         Err(captured) if captured.kind() == ErrorKind::TtfError && !captured.message().is_empty() => {
             let original = captured.message().to_owned();
@@ -56,12 +48,12 @@ fn cpu_font_conformance() {
         _ => panic!("missing font returned the wrong result"),
     }
 
-    let font = get(Font::open_file(&font_path, 18.0));
-    let metrics = get(font.metrics());
+    let font = Font::open_file(&font_path, 18.0).unwrap();
+    let metrics = font.metrics().unwrap();
     assert!(metrics.height > 0 && metrics.ascent > 0 && metrics.line_skip > 0, "font metrics are not positive");
-    assert_eq!(kind(font.render_blended((256, 0, 0, 255), "bad")), Some(ErrorKind::InvalidArgument));
-    assert_eq!(kind(font.render_blended((0, 0, 0, 255), "bad\0text")), Some(ErrorKind::InvalidArgument));
-    assert!(get(font.render_blended((12, 34, 56, 200), "")).is_none(), "empty text allocated a raster");
+    assert_eq!(font.render_blended((256, 0, 0, 255), "bad").err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument));
+    assert_eq!(font.render_blended((0, 0, 0, 255), "bad\0text").err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument));
+    assert!(font.render_blended((12, 34, 56, 200), "").unwrap().is_none(), "empty text allocated a raster");
     let rgba = some(font.render_blended((12, 34, 56, 200), "Rays ž"), "non-empty text did not rasterize");
     assert!(
         rgba.width > 0
@@ -75,14 +67,14 @@ fn cpu_font_conformance() {
     assert_eq!(again.pixels, rgba.pixels, "two renders of one text differ");
 
     // Setters used by the runtime and glyph metrics.
-    get(font.set_hinting(Hinting::Mono));
-    get(font.set_hinting(Hinting::Normal));
-    let glyph = get(font.glyph_metrics('A' as i64));
+    font.set_hinting(Hinting::Mono).unwrap();
+    font.set_hinting(Hinting::Normal).unwrap();
+    let glyph = font.glyph_metrics('A' as i64).unwrap();
     assert!(glyph.advance > 0 && glyph.max_x >= glyph.min_x && glyph.max_y >= glyph.min_y, "ASCII glyph metrics are invalid");
     for codepoint in [-1, 0xd800, 0x110000] {
-        assert_eq!(kind(font.glyph_metrics(codepoint)), Some(ErrorKind::InvalidArgument), "invalid Unicode scalar was accepted");
+        assert_eq!(font.glyph_metrics(codepoint).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "invalid Unicode scalar was accepted");
     }
-    get(font.set_wrap_alignment(Alignment::Center));
+    font.set_wrap_alignment(Alignment::Center).unwrap();
     let wrapped = some(
         font.render_blended_wrapped((200, 180, 160, 255), 80, "a deterministic wrapped line with several words"),
         "wrapped non-empty text did not rasterize",
@@ -98,9 +90,9 @@ fn cpu_font_conformance() {
     // ponytail: the malformed-UTF-8 case (bad\xed\xa0\x80) cannot be written as a Rust &str.
 
     // density: the same text at 144 DPI is about twice the size of 72 DPI
-    get(font.set_size_dpi(18.0, 72, 72));
+    font.set_size_dpi(18.0, 72, 72).unwrap();
     let one_x = some(font.render_blended((12, 34, 56, 200), "Density"), "72-DPI density raster was empty");
-    get(font.set_size_dpi(18.0, 144, 144));
+    font.set_size_dpi(18.0, 144, 144).unwrap();
     let two_x = some(font.render_blended((12, 34, 56, 200), "Density"), "144-DPI density raster was empty");
     let width_scale = two_x.width as f64 / one_x.width as f64;
     let height_scale = two_x.height as f64 / one_x.height as f64;
@@ -109,21 +101,21 @@ fn cpu_font_conformance() {
         "144-DPI raster metrics are not approximately twice 72-DPI metrics: {}x{} -> {}x{}",
         one_x.width, one_x.height, two_x.width, two_x.height
     );
-    assert_eq!(kind(font.set_size_dpi(18.0, 0, 144)), Some(ErrorKind::InvalidArgument), "non-positive font DPI");
+    assert_eq!(font.set_size_dpi(18.0, 0, 144).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "non-positive font DPI");
 
     let wrong_domain = std::thread::scope(|scope| scope.spawn(|| font.metrics()).join().unwrap());
-    assert_eq!(kind(wrong_domain), Some(ErrorKind::WrongDomain), "wrong-domain font access");
-    assert_eq!(kind(init::quit()), Some(ErrorKind::FontsStillOpen), "TTF quit ignored a live font");
+    assert_eq!(wrong_domain.err().map(|failure| failure.kind()), Some(ErrorKind::WrongDomain), "wrong-domain font access");
+    assert_eq!(init::quit().err().map(|failure| failure.kind()), Some(ErrorKind::FontsStillOpen), "TTF quit ignored a live font");
 
-    get(font.destroy());
-    get(font.destroy());
-    assert_eq!(kind(font.metrics()), Some(ErrorKind::Destroyed), "stale font access");
+    font.destroy().unwrap();
+    font.destroy().unwrap();
+    assert_eq!(font.metrics().err().map(|failure| failure.kind()), Some(ErrorKind::Destroyed), "stale font access");
     for _ in 0..1_000 {
-        let transient = get(Font::open_file(&font_path, 8.0));
-        get(transient.destroy());
+        let transient = Font::open_file(&font_path, 8.0).unwrap();
+        transient.destroy().unwrap();
     }
-    get(init::quit());
-    get(init::quit());
+    init::quit().unwrap();
+    init::quit().unwrap();
 }
 
 #[test]

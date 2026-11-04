@@ -69,16 +69,16 @@ impl From<error::T> for Fail {
     }
 }
 
-fn invalid<V>(message: &str) -> Result<V, Fail> {
-    Err(Fail::Invalid(message.to_owned()))
+fn invalid_fail(message: &str) -> Fail {
+    Fail::Invalid(message.to_owned())
 }
 
-fn finish<V>(result: Result<V, Fail>, cancelled: &str) -> Result<V, error::T> {
-    result.map_err(|failure| match failure {
+fn finish_fail(cancelled: &str, failure: Fail) -> error::T {
+    match failure {
         Fail::Cancelled => make("cancelled", cancelled.to_owned()),
         Fail::Invalid(message) => make("invalid_output", message),
         Fail::Rdk(failure) => failure,
-    })
+    }
 }
 
 #[derive(Clone)]
@@ -260,7 +260,7 @@ fn evaluate(expression: &Expression, left: bool, right: bool) -> bool {
 fn edge_key(point_count: i64, first: i64, second: i64) -> Result<i64, Fail> {
     let (first, second) = if first < second { (first, second) } else { (second, first) };
     if first > (i64::MAX - second) / point_count {
-        return invalid("Boolean output edge key exceeds integer range");
+        return Err(invalid_fail("Boolean output edge key exceeds integer range"));
     }
     Ok(first * point_count + second)
 }
@@ -371,7 +371,7 @@ pub fn validate_materialized(
 }
 
 pub fn validate_closed_topology(topology_value: &topology::T) -> Result<(), error::T> {
-    finish(validate_closed_inner(topology_value), "Boolean closed-topology validation was cancelled")
+    validate_closed_inner(topology_value).map_err(|f| finish_fail("Boolean closed-topology validation was cancelled", f))
 }
 
 fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
@@ -526,11 +526,9 @@ pub fn options() -> Options {
     Options { require_closed: true, defer_rounded_slivers: false, corner_payload: true }
 }
 
-struct Internal<'a> {
-    cancel_value: Option<&'a cancel::T>,
+struct Internal {
     require_closed: bool,
     defer_rounded_slivers: bool,
-    facet_selection: Option<&'a [u8]>,
     preferred_side: Option<Side>,
     with_corner_payload: bool,
 }
@@ -550,6 +548,8 @@ fn side_surface(c: &constraints::T, side: Side) -> &surface_index::T {
 }
 
 fn build_internal(
+    cancel_value: Option<&cancel::T>,
+    facet_selection: Option<&[u8]>,
     internal: &Internal,
     expression: &Expression,
     c: &Arc<complex::T>,
@@ -557,16 +557,15 @@ fn build_internal(
     cells_value: &cells::T,
     shared_barycentrics: Option<&mut BarycentricCache>,
 ) -> Result<Ancestry, Fail> {
-    let cancel_value = internal.cancel_value;
     cancel::check_opt(cancel_value)?;
     if !Arc::ptr_eq(weiler::View::complex(weiler_value), c) {
-        return invalid("Weiler graph belongs to a different Boolean complex");
+        return Err(invalid_fail("Weiler graph belongs to a different Boolean complex"));
     }
     if !Arc::ptr_eq(cells::View::weiler(cells_value), weiler_value) {
-        return invalid("cell labels belong to a different Weiler graph");
+        return Err(invalid_fail("cell labels belong to a different Weiler graph"));
     }
     if cells::shell_count(cells_value) != weiler::shell_count(weiler_value) {
-        return invalid("cell labels do not match the Weiler shell cardinality");
+        return Err(invalid_fail("cell labels do not match the Weiler shell cardinality"));
     }
     let mut table = [false; 4];
     for state in 0..4_usize {
@@ -578,13 +577,13 @@ fn build_internal(
         table[state]
     };
     let facets = complex::facet_count(c);
-    if let Some(values) = internal.facet_selection {
+    if let Some(values) = facet_selection {
         if values.len() as i64 != facets {
-            return invalid("Boolean facet selection cardinality mismatch");
+            return Err(invalid_fail("Boolean facet selection cardinality mismatch"));
         }
         for &value in values {
             if value != 0 && value != 1 && value != 2 {
-                return invalid("Boolean facet selection contains an invalid orientation");
+                return Err(invalid_fail("Boolean facet selection contains an invalid orientation"));
             }
         }
     }
@@ -593,7 +592,7 @@ fn build_internal(
     let mut selected_count = 0_i64;
     for facet in 0..facets {
         cancel::poll(cancel_value, facet, 4095)?;
-        match internal.facet_selection {
+        match facet_selection {
             Some(values) => {
                 let choice = values[facet as usize];
                 if choice != 0 {
@@ -761,7 +760,7 @@ fn build_internal(
         primitive_complex_facets[output] = facet;
         let (first_member, last_member) = complex::facet_member_range(c, facet);
         if first_member == last_member {
-            return invalid("Boolean output facet has no source member");
+            return Err(invalid_fail("Boolean output facet has no source member"));
         }
         let desired: i64 = if !is_reversed { 1 } else { -1 };
         let side_matches = |member: i64| -> bool {
@@ -788,7 +787,7 @@ fn build_internal(
             }
         }
         if preferred < 0 {
-            return invalid("selected Boolean facet has no member on its requested side");
+            return Err(invalid_fail("selected Boolean facet has no member on its requested side"));
         }
         let member = preferred;
         let member_side = complex::member_side(c, member);
@@ -930,7 +929,7 @@ fn build_internal(
                     let edge = edge_source_scratch[member_index * 3 + local];
                     if edge >= 0 {
                         if edge_source_count >= edge_source_capacity {
-                            return invalid("Boolean edge ancestry exceeded its proven capacity");
+                            return Err(invalid_fail("Boolean edge ancestry exceeded its proven capacity"));
                         }
                         edge_source_sides[edge_source_count] = edge_side_scratch[member_index];
                         edge_source_edges[edge_source_count] = edge;
@@ -1009,17 +1008,12 @@ pub fn build_with_ancestry(
     cells_value: &cells::T,
 ) -> Result<Ancestry, error::T> {
     let internal = Internal {
-        cancel_value,
         require_closed: options.require_closed,
         defer_rounded_slivers: options.defer_rounded_slivers,
-        facet_selection: None,
         preferred_side: None,
         with_corner_payload: options.corner_payload,
     };
-    finish(
-        build_internal(&internal, expression, c, weiler_value, cells_value, None),
-        "Boolean extraction was cancelled",
-    )
+    build_internal(cancel_value, None, &internal, expression, c, weiler_value, cells_value, None).map_err(|f| finish_fail("Boolean extraction was cancelled", f))
 }
 
 /// Materialize the exact facets selected by packed orientation bytes: zero omits, one keeps
@@ -1037,17 +1031,12 @@ pub fn build_selected_with_ancestry(
     cells_value: &cells::T,
 ) -> Result<Ancestry, error::T> {
     let internal = Internal {
-        cancel_value,
         require_closed: false,
         defer_rounded_slivers,
-        facet_selection: Some(selection),
         preferred_side: Some(side),
         with_corner_payload: corner_payload,
     };
-    finish(
-        build_internal(&internal, &Expression::Left, c, weiler_value, cells_value, barycentric_cache),
-        "Boolean extraction was cancelled",
-    )
+    build_internal(cancel_value, Some(selection), &internal, &Expression::Left, c, weiler_value, cells_value, barycentric_cache).map_err(|f| finish_fail("Boolean extraction was cancelled", f))
 }
 
 #[allow(non_snake_case)]
@@ -1157,7 +1146,7 @@ pub mod View {
 }
 
 fn reverse_ancestry(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<Ancestry, error::T> {
-    finish(reverse_inner(cancel_value, value), "Boolean ancestry reversal was cancelled")
+    reverse_inner(cancel_value, value).map_err(|f| finish_fail("Boolean ancestry reversal was cancelled", f))
 }
 
 fn reverse_inner(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<Ancestry, Fail> {
@@ -1166,7 +1155,7 @@ fn reverse_inner(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<A
     let corners = primitives * 3;
     let source_topology = topology::View::view(geometry::topology(&value.geometry))?;
     if source_topology.vertex_points.len() != corners {
-        return invalid("Boolean ancestry reversal requires triangular topology");
+        return Err(invalid_fail("Boolean ancestry reversal requires triangular topology"));
     }
     let mut vertex_points = vec![0_i64; corners];
     let mut corner_complex_vertices = vec![0_i64; corners];
@@ -1221,7 +1210,7 @@ fn reverse_inner(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<A
     }
     edge_source_offsets[corners] = next_edge_source as i64;
     if next_edge_source != edge_source_count {
-        return invalid("Boolean reversed edge ancestry changed cardinality");
+        return Err(invalid_fail("Boolean reversed edge ancestry changed cardinality"));
     }
     let primitive_offsets: Vec<i64> = (0..=primitives as i64).map(|primitive| primitive * 3).collect();
     let topology_value = topology::polygons_owned(
@@ -1252,13 +1241,13 @@ fn concatenate_ancestries(
     cancel_value: Option<&cancel::T>,
     values: &[Ancestry],
 ) -> Result<Ancestry, error::T> {
-    finish(concatenate_inner(cancel_value, values), "Boolean product concatenation was cancelled")
+    concatenate_inner(cancel_value, values).map_err(|f| finish_fail("Boolean product concatenation was cancelled", f))
 }
 
 fn concatenate_inner(cancel_value: Option<&cancel::T>, values: &[Ancestry]) -> Result<Ancestry, Fail> {
     cancel::check_opt(cancel_value)?;
     if values.is_empty() {
-        return invalid("Boolean ancestry concatenation requires at least one product");
+        return Err(invalid_fail("Boolean ancestry concatenation requires at least one product"));
     }
     let first = &values[0];
     let c = &first.complex;
@@ -1266,7 +1255,7 @@ fn concatenate_inner(cancel_value: Option<&cancel::T>, values: &[Ancestry]) -> R
     let mut total_edge_sources = 0_usize;
     for (index, value) in values.iter().enumerate() {
         if !Arc::ptr_eq(&value.complex, c) {
-            return invalid("Boolean products belong to different exact complexes");
+            return Err(invalid_fail("Boolean products belong to different exact complexes"));
         }
         total_primitives += geometry::primitive_count(&value.geometry) as usize;
         total_edge_sources += value.edge_source_offsets[value.edge_source_offsets.len() - 1] as usize;

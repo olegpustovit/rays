@@ -73,7 +73,7 @@ pub struct device {
     pub derived: bool,
     /// Held by the mesh: its producer watches it to release its buffers.
     pub keep: Rc<dyn Fn()>,
-    host: Option<Rc<dyn Fn() -> t>>,
+    host: Option<Rc<dyn Fn() -> Result<t, String>>>,
     host_made: RefCell<Option<t>>,
     device_bounds: Option<Rc<dyn Fn() -> Option<(vec3::T, vec3::T)>>>,
 }
@@ -133,18 +133,18 @@ pub fn same(a: &t, b: &t) -> bool {
 }
 
 /// A device mesh's host copy where a reader needs vertices; any other mesh itself.
-fn readable(mesh: &t) -> t {
+fn readable(mesh: &t) -> Result<t, String> {
     if let Some(d) = &mesh.device {
         if let Some(host) = &d.host {
             if let Some(made) = d.host_made.borrow().as_ref() {
-                return made.clone();
+                return Ok(made.clone());
             }
-            let made = host();
+            let made = host()?;
             *d.host_made.borrow_mut() = Some(made.clone());
-            return made;
+            return Ok(made);
         }
     }
-    mesh.clone()
+    Ok(mesh.clone())
 }
 
 fn count_error(name: &str, vertex_count: i64, len: usize) -> String {
@@ -271,8 +271,8 @@ pub fn mode(mesh: &t) -> mode {
     mesh.mode
 }
 
-pub fn vertices(mesh: &t) -> Vec<vec3::T> {
-    readable(mesh).vertices.to_array()
+pub fn vertices(mesh: &t) -> Result<Vec<vec3::T>, String> {
+    Ok(readable(mesh)?.vertices.to_array())
 }
 
 pub fn vertex_count(mesh: &t) -> i64 {
@@ -289,11 +289,11 @@ pub fn index_count(mesh: &t) -> i64 {
     }
 }
 
-pub fn centroid(mesh: &t) -> Option<vec3::T> {
-    let mesh = readable(mesh);
+pub fn centroid(mesh: &t) -> Result<Option<vec3::T>, String> {
+    let mesh = readable(mesh)?;
     let count = mesh.vertices.length();
     if count == 0 {
-        return None;
+        return Ok(None);
     }
     let (mut x, mut y, mut z) = (0., 0., 0.);
     for index in 0..count as usize {
@@ -302,21 +302,21 @@ pub fn centroid(mesh: &t) -> Option<vec3::T> {
         z += mesh.vertices.z[index];
     }
     let inverse = 1. / count as f64;
-    Some(vec3::create(x * inverse, y * inverse, z * inverse))
+    Ok(Some(vec3::create(x * inverse, y * inverse, z * inverse)))
 }
 
 /// The vertices' box: a device mesh's `bounds` where it has them (its host copy is not made),
 /// otherwise a scan of the vertices.
-pub fn bounds(mesh: &t) -> Option<(vec3::T, vec3::T)> {
+pub fn bounds(mesh: &t) -> Result<Option<(vec3::T, vec3::T)>, String> {
     if let Some(d) = &mesh.device {
         if let Some(bounds) = &d.device_bounds {
-            return bounds();
+            return Ok(bounds());
         }
     }
-    let readable = readable(mesh);
+    let readable = readable(mesh)?;
     let v = &readable.vertices;
     if v.x.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut lo = [f64::INFINITY; 3];
     let mut hi = [f64::NEG_INFINITY; 3];
@@ -328,12 +328,12 @@ pub fn bounds(mesh: &t) -> Option<(vec3::T, vec3::T)> {
         hi[1] = fmax(hi[1], v.y[i]);
         hi[2] = fmax(hi[2], v.z[i]);
     }
-    Some((vec3::create(lo[0], lo[1], lo[2]), vec3::create(hi[0], hi[1], hi[2])))
+    Ok(Some((vec3::create(lo[0], lo[1], lo[2]), vec3::create(hi[0], hi[1], hi[2]))))
 }
 
-pub fn vertex(index: i64, mesh: &t) -> Option<vec3::T> {
-    let mesh = readable(mesh);
-    if index < 0 || index >= mesh.vertices.length() { None } else { Some(mesh.vertices.get(index as usize)) }
+pub fn vertex(index: i64, mesh: &t) -> Result<Option<vec3::T>, String> {
+    let mesh = readable(mesh)?;
+    Ok(if index < 0 || index >= mesh.vertices.length() { None } else { Some(mesh.vertices.get(index as usize)) })
 }
 
 pub fn with_mode(mode_: mode, mesh: &t) -> t {
@@ -441,15 +441,15 @@ pub mod View {
         pub tex_coords: Option<Arc<Vec<vec2::T>>>,
     }
 
-    pub fn view(mesh: &t) -> view {
-        let mesh = readable(mesh);
-        view {
+    pub fn view(mesh: &t) -> Result<view, String> {
+        let mesh = readable(mesh)?;
+        Ok(view {
             mode: mesh.mode,
             vertices: mesh.vertices.to_array(),
             normals: mesh.normals.as_ref().map(|n| n.to_array()),
             colors: mesh.colors.clone(),
             tex_coords: mesh.tex_coords.clone(),
-        }
+        })
     }
 
     #[derive(Clone)]
@@ -475,8 +475,8 @@ pub mod View {
         }
     }
 
-    pub fn packed_view(mesh: &t) -> packed_view {
-        unread(&readable(mesh))
+    pub fn packed_view(mesh: &t) -> Result<packed_view, String> {
+        Ok(unread(&readable(mesh)?))
     }
 
     /// Ownership-transfer construction for sibling-library generators.
@@ -515,7 +515,7 @@ pub mod View {
         pub indices: Option<Vec<i64>>,
         pub colors: Option<Vec<color::T>>,
         pub tex_coords: Option<Vec<vec2::T>>,
-        pub host: Option<Rc<dyn Fn() -> t>>,
+        pub host: Option<Rc<dyn Fn() -> Result<t, String>>>,
         pub bounds: Option<Rc<dyn Fn() -> Option<(vec3::T, vec3::T)>>>,
         pub derived: bool,
         pub device_index_count: Option<i64>,

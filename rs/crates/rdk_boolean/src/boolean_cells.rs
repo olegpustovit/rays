@@ -60,8 +60,8 @@ impl From<error::T> for Fail {
     }
 }
 
-fn invalid<V>(message: &str) -> Result<V, Fail> {
-    Err(Fail::Invalid(message.to_owned()))
+fn invalid_fail(message: &str) -> Fail {
+    Fail::Invalid(message.to_owned())
 }
 
 fn make(code: &str, message: String) -> error::T {
@@ -108,7 +108,7 @@ fn axis_index(axis: Axis) -> i64 {
 fn checked_add(left: i64, right: i64) -> Result<i64, Fail> {
     match left.checked_add(right) {
         Some(value) => Ok(value),
-        None => invalid("Boolean winding integer overflow"),
+        None => Err(invalid_fail("Boolean winding integer overflow")),
     }
 }
 
@@ -295,7 +295,7 @@ fn build_components(
         for local in 0..3 {
             let point = triangle_point(c, side, triangle, local);
             if point < 0 || point >= source_points {
-                return invalid("Boolean component source point is out of range");
+                return Err(invalid_fail("Boolean component source point is out of range"));
             }
             let other = first_triangle[point as usize];
             if other < 0 {
@@ -528,8 +528,8 @@ fn classify_operand_symbolic(
     })
 }
 
-fn finish<V>(result: Result<V, Fail>) -> Result<V, error::T> {
-    result.map_err(|failure| match failure {
+fn finish_fail(failure: Fail) -> error::T {
+    match failure {
         Fail::Cancelled => make("cancelled", "Boolean cell classification was cancelled".to_owned()),
         Fail::Ambiguous(facet, reason) => make(
             "ambiguous_classification",
@@ -537,7 +537,7 @@ fn finish<V>(result: Result<V, Fail>) -> Result<V, error::T> {
         ),
         Fail::Invalid(message) => make("invalid_complex", message),
         Fail::Rdk(failure) => failure,
-    })
+    }
 }
 
 /// OCaml's `?track_left ?track_right`.
@@ -567,7 +567,7 @@ fn assign(state: &mut State, shell: i64, left_value: i64, right_value: i64) -> R
         state.queue.push(shell);
         Ok(())
     } else if state.left[s] != left_value || state.right[s] != right_value {
-        invalid("inconsistent winding propagation across Weiler cells")
+        Err(invalid_fail("inconsistent winding propagation across Weiler cells"))
     } else {
         Ok(())
     }
@@ -586,13 +586,10 @@ pub fn build(
     c: &Arc<complex::T>,
     weiler_value: &Arc<weiler::T>,
 ) -> Result<T, error::T> {
-    finish(build_inner(cancel_value, options, c, weiler_value))
+    build_inner(cancel_value, options, c, weiler_value).map_err(|f| finish_fail(f))
 }
 
-struct Context<'a> {
-    cancel_value: Option<&'a cancel::T>,
-    complex: &'a complex::T,
-    weiler: &'a weiler::T,
+struct Context {
     track_left: bool,
     track_right: bool,
     left_components: Option<Components>,
@@ -601,7 +598,7 @@ struct Context<'a> {
     incidences: Vec<i64>,
 }
 
-fn propagate(context: &Context, state: &mut State) -> Result<(), Fail> {
+fn propagate(weiler: &weiler::T, context: &Context, state: &mut State) -> Result<(), Fail> {
     let mut queue_first = 0;
     while queue_first < state.queue.len() {
         let shell = state.queue[queue_first];
@@ -611,11 +608,11 @@ fn propagate(context: &Context, state: &mut State) -> Result<(), Fail> {
             let incidence = context.incidences[slot as usize];
             let facet = incidence >> 1;
             let current_positive = incidence & 1 == 1;
-            let (negative, positive) = shells_of(context.weiler, facet);
+            let (negative, positive) = shells_of(weiler, facet);
             let delta_left =
-                if context.track_left { weiler::facet_left_winding(context.weiler, facet) } else { 0 };
+                if context.track_left { weiler::facet_left_winding(weiler, facet) } else { 0 };
             let delta_right = if context.track_right {
-                weiler::facet_right_winding(context.weiler, facet)
+                weiler::facet_right_winding(weiler, facet)
             } else {
                 0
             };
@@ -633,8 +630,8 @@ fn propagate(context: &Context, state: &mut State) -> Result<(), Fail> {
     Ok(())
 }
 
-fn seed_component(context: &Context, state: &mut State, shell: i64) -> Result<(), Fail> {
-    let c = context.complex;
+fn seed_component(cancel_value: Option<&cancel::T>, complex: &complex::T, weiler: &weiler::T, context: &Context, state: &mut State, shell: i64) -> Result<(), Fail> {
+    let c = complex;
     let constraints_value = complex::View::constraints(c);
     let incidence = context.incidences[context.offsets[shell as usize] as usize];
     let facet = incidence >> 1;
@@ -643,7 +640,7 @@ fn seed_component(context: &Context, state: &mut State, shell: i64) -> Result<()
     let cc = complex::View::vertex(c, complex::facet_vertex(c, facet, 2));
     let query = match implicit_point::centroid3(&a, &b, &cc) {
         Ok(point) => point,
-        Err(_) => return invalid("could not construct exact facet centroid"),
+        Err(_) => return Err(invalid_fail("could not construct exact facet centroid")),
     };
     let (first_member, last_member) = complex::facet_member_range(c, facet);
     let skip = |side: Side, face: i64| -> bool {
@@ -673,7 +670,7 @@ fn seed_component(context: &Context, state: &mut State, shell: i64) -> Result<()
         }
         let left_value = if context.track_left {
             classify_operand(
-                context.cancel_value,
+                cancel_value,
                 constraints_value,
                 context.left_components.as_ref().expect("left components"),
                 Side::Left,
@@ -687,7 +684,7 @@ fn seed_component(context: &Context, state: &mut State, shell: i64) -> Result<()
         };
         let right_value = if context.track_right {
             classify_operand(
-                context.cancel_value,
+                cancel_value,
                 constraints_value,
                 context.right_components.as_ref().expect("right components"),
                 Side::Right,
@@ -706,13 +703,13 @@ fn seed_component(context: &Context, state: &mut State, shell: i64) -> Result<()
                 weiler::Side::Negative
             };
             let seed_shell =
-                weiler::half_facet_shell(context.weiler, weiler::half_facet(facet, side));
+                weiler::half_facet_shell(weiler, weiler::half_facet(facet, side));
             return assign(state, seed_shell, left_value, right_value);
         }
     }
     let left_value = if context.track_left {
         classify_operand_symbolic(
-            context.cancel_value,
+            cancel_value,
             constraints_value,
             context.left_components.as_ref().expect("left components"),
             Side::Left,
@@ -724,7 +721,7 @@ fn seed_component(context: &Context, state: &mut State, shell: i64) -> Result<()
     };
     let right_value = if context.track_right {
         classify_operand_symbolic(
-            context.cancel_value,
+            cancel_value,
             constraints_value,
             context.right_components.as_ref().expect("right components"),
             Side::Right,
@@ -746,7 +743,7 @@ fn seed_component(context: &Context, state: &mut State, shell: i64) -> Result<()
                     weiler::Side::Negative
                 };
                 let seed_shell =
-                    weiler::half_facet_shell(context.weiler, weiler::half_facet(facet, side));
+                    weiler::half_facet_shell(weiler, weiler::half_facet(facet, side));
                 assign(state, seed_shell, left_value, right_value)
             }
         }
@@ -777,7 +774,7 @@ fn build_inner(
 ) -> Result<T, Fail> {
     cancel::check_opt(cancel_value)?;
     if !Arc::ptr_eq(weiler::View::complex(weiler_value), c) {
-        return invalid("Weiler graph belongs to a different Boolean complex");
+        return Err(invalid_fail("Weiler graph belongs to a different Boolean complex"));
     }
     let constraints_value = complex::View::constraints(c);
     let shells = weiler::shell_count(weiler_value);
@@ -819,9 +816,6 @@ fn build_inner(
         cursor[positive as usize] += 1;
     }
     let context = Context {
-        cancel_value,
-        complex: c,
-        weiler: weiler_value,
         track_left: options.track_left,
         track_right: options.track_right,
         left_components,
@@ -837,8 +831,8 @@ fn build_inner(
     for shell in 0..shells {
         if state.left[shell as usize] == UNKNOWN {
             state.queue.clear();
-            seed_component(&context, &mut state, shell)?;
-            propagate(&context, &mut state)?;
+            seed_component(cancel_value, c, weiler_value, &context, &mut state, shell)?;
+            propagate(weiler_value, &context, &mut state)?;
         }
     }
     Ok(T { weiler: Arc::clone(weiler_value), left: state.left, right: state.right })

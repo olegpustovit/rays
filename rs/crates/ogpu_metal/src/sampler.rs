@@ -1,6 +1,7 @@
 //! Ogpu_metal.Sampler
-use crate::device::{fail, native_of, Device, R};
+use crate::device::{fail, of_metal_error, Device};
 use ogpu_core::{
+    error::Error,
     error::ErrorKind,
     handle::{self, ResourceHandle},
     types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter},
@@ -40,10 +41,10 @@ fn address(value: AddressMode) -> metal::AddressMode {
     }
 }
 
-pub fn create(device: &Device, descriptor: &SamplerDescriptor) -> R<Sampler> {
+pub fn create(device: &Device, descriptor: &SamplerDescriptor) -> Result<Sampler, Error> {
     let operation = "Ogpu_metal.Sampler.create";
     if device.destroyed() {
-        return fail(operation, ErrorKind::StaleHandle, "device is destroyed");
+        return Err(fail(operation, ErrorKind::StaleHandle, "device is destroyed"));
     }
     if descriptor.max_anisotropy < 1
         || descriptor.max_anisotropy > 16
@@ -52,7 +53,7 @@ pub fn create(device: &Device, descriptor: &SamplerDescriptor) -> R<Sampler> {
         || descriptor.lod_min < 0.
         || descriptor.lod_max < descriptor.lod_min
     {
-        return fail(operation, ErrorKind::InvalidArgument, "sampler limits are invalid");
+        return Err(fail(operation, ErrorKind::InvalidArgument, "sampler limits are invalid"));
     }
     let native = metal::SamplerDescriptor {
         min_filter: filter(descriptor.min_filter),
@@ -68,7 +69,7 @@ pub fn create(device: &Device, descriptor: &SamplerDescriptor) -> R<Sampler> {
         label: descriptor.label.clone(),
         ..metal::SamplerDescriptor::default()
     };
-    let metal = native_of(operation, metal::Sampler::create(device.metal(), native))?;
+    let metal = metal::Sampler::create(device.metal(), native).map_err(|value| of_metal_error(operation, &value))?;
     device.attach_resource();
     Ok(Sampler(Rc::new(SamplerInner {
         metal,
@@ -83,14 +84,14 @@ impl Sampler {
         handle::destroyed(&self.0.handle)
     }
 
-    pub fn destroy(&self) -> R<()> {
+    pub fn destroy(&self) -> Result<(), Error> {
         let operation = "Ogpu_metal.Sampler.destroy";
         if self.destroyed() {
             Ok(())
         } else if self.0.submissions.get() > 0 {
-            fail(operation, ErrorKind::InvalidState, "sampler is retained by submitted work")
+            Err(fail(operation, ErrorKind::InvalidState, "sampler is retained by submitted work"))
         } else {
-            native_of(operation, self.0.metal.destroy())?;
+            self.0.metal.destroy().map_err(|value| of_metal_error(operation, &value))?;
             handle::destroy(&self.0.handle);
             self.0.device.detach_resource();
             Ok(())
@@ -101,9 +102,9 @@ impl Sampler {
         &self.0.metal
     }
 
-    pub fn retain_submission(&self) -> R<()> {
+    pub fn retain_submission(&self) -> Result<(), Error> {
         if self.destroyed() {
-            return fail("Ogpu_metal.Sampler.retain", ErrorKind::StaleHandle, "sampler is destroyed");
+            return Err(fail("Ogpu_metal.Sampler.retain", ErrorKind::StaleHandle, "sampler is destroyed"));
         }
         self.0.submissions.set(self.0.submissions.get() + 1);
         Ok(())

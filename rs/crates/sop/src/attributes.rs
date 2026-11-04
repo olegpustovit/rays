@@ -17,7 +17,7 @@ use crate::support::{self, DistanceRadiusMode, KernelMode, MirrorMethod, MirrorT
 fn bytes(value: &Value) -> &[u8] {
     match value {
         Value::Text(text) => text,
-        _ => panic!("attribute node: parameter record has the wrong shape"),
+        _ => unreachable!("attribute node: parameter record has the wrong shape"),
     }
 }
 
@@ -32,21 +32,21 @@ fn text_value(value: &str) -> Value {
 fn int(value: &Value) -> i64 {
     match value {
         Value::Int(int) => *int,
-        _ => panic!("attribute node: parameter record has the wrong shape"),
+        _ => unreachable!("attribute node: parameter record has the wrong shape"),
     }
 }
 
 fn float(value: &Value) -> f64 {
     match value {
         Value::Float(float) => *float,
-        _ => panic!("attribute node: parameter record has the wrong shape"),
+        _ => unreachable!("attribute node: parameter record has the wrong shape"),
     }
 }
 
 fn boolean(value: &Value) -> bool {
     match value {
         Value::Bool(flag) => *flag,
-        _ => panic!("attribute node: parameter record has the wrong shape"),
+        _ => unreachable!("attribute node: parameter record has the wrong shape"),
     }
 }
 

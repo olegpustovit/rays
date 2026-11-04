@@ -1,18 +1,12 @@
 #![allow(non_camel_case_types)]
 use crate::common;
-use crate::common::get;
 use ogpu::backend::{self, Buffer};
-use ogpu::error;
 use ogpu::pipeline::Blend;
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
 use ogpu::types::{BufferDescriptor, BufferUsage};
 use ::renderer::renderer::{self, family, t};
 use ::renderer::scene_execution::{self, geometry_draw, mesh, mesh_key, new_bytes, sampled_draw, state};
 use std::rc::Rc;
-
-fn native<A>(result: Result<A, error::Error>) -> A {
-    result.unwrap_or_else(|e| panic!("{}", error::to_string(&e)))
-}
 
 fn config() -> renderer::configuration {
     renderer::configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, ..renderer::default_configuration() }
@@ -102,15 +96,15 @@ fn entry(f: &fixture, scissor: (i64, i64, i64, i64), uniforms: Vec<u8>) -> sampl
 
 fn render(runtime: &t, entries: Vec<sampled_draw>) -> Vec<u8> {
     let draws: Vec<Rc<sampled_draw>> = entries.into_iter().map(Rc::new).collect();
-    get(renderer::draw(None, runtime, &draws));
-    get(renderer::read_pixels(runtime, 256))
+    renderer::draw(None, runtime, &draws).unwrap();
+    renderer::read_pixels(runtime, 256).unwrap()
 }
 
 fn gpu_scene3_shared_mesh_and_instances() {
     if !common::gpu() {
         return;
     }
-    let runtime = get(renderer::create_offscreen(&config()));
+    let runtime = renderer::create_offscreen(&config()).unwrap();
     let f = fixture();
     let left = entry(&f, (0, 0, 4, 4), uniform(true));
     let right = entry(&f, (0, 0, 4, 4), uniform(false));
@@ -176,7 +170,7 @@ fn gpu_scene3_shared_mesh_and_instances() {
         }
         assert!(lit, "Scene3 native draw produced no pixels: {}", name);
     }
-    get(renderer::destroy(&runtime));
+    renderer::destroy(&runtime).unwrap();
     println!("Scene3 shared-mesh and instances passed");
 }
 
@@ -193,40 +187,40 @@ struct resident {
 
 fn resident() -> resident {
     let f = fixture();
-    let host = get(renderer::create_offscreen(&config()));
-    let gpu = get(renderer::acquire_gpu());
-    let runtime = get(renderer::Native::create_offscreen_with_gpu(&gpu, &config()));
+    let host = renderer::create_offscreen(&config()).unwrap();
+    let gpu = renderer::acquire_gpu().unwrap();
+    let runtime = renderer::Native::create_offscreen_with_gpu(&gpu, &config()).unwrap();
     let device = renderer::gpu_device(&gpu);
-    let positions = native(backend::create_buffer(
+    let positions = backend::create_buffer(
         &device,
         BufferDescriptor { label: Some("indexed-test-P".to_owned()), size: 36, usage: vec![BufferUsage::Vertex, BufferUsage::Storage, BufferUsage::CopyDst] },
         None,
-    ));
-    let device_indices = native(backend::create_buffer(
+    ).unwrap();
+    let device_indices = backend::create_buffer(
         &device,
         BufferDescriptor { label: Some("indexed-test-indices".to_owned()), size: 12, usage: vec![BufferUsage::Index, BufferUsage::Storage, BufferUsage::CopyDst] },
         None,
-    ));
+    ).unwrap();
     let mut position_bytes = vec![0u8; 36];
     for i in 0..3 {
         position_bytes[i * 12..i * 12 + 12].copy_from_slice(&f.vertices[i * 24..i * 24 + 12]);
     }
-    native(backend::write_buffer(&positions, 0, &position_bytes));
-    native(backend::write_buffer(&device_indices, 0, &f.indices));
-    let (key, unregister) = get(renderer::register_gpu_positions(&gpu, &positions, None, Some((device_indices.clone(), 3)), None, 3, Rc::new(|| true)));
+    backend::write_buffer(&positions, 0, &position_bytes).unwrap();
+    backend::write_buffer(&device_indices, 0, &f.indices).unwrap();
+    let (key, unregister) = renderer::register_gpu_positions(&gpu, &positions, None, Some((device_indices.clone(), 3)), None, 3, Rc::new(|| true)).unwrap();
     resident { runtime, host, gpu, positions, device_indices, key, unregister, f }
 }
 
 fn finish(r: resident, color_buffers: Vec<Buffer>) {
     (r.unregister)();
-    get(renderer::destroy(&r.runtime));
+    renderer::destroy(&r.runtime).unwrap();
     for buffer in color_buffers.iter() {
-        native(backend::destroy_buffer(buffer));
+        backend::destroy_buffer(buffer).unwrap();
     }
-    native(backend::destroy_buffer(&r.device_indices));
-    native(backend::destroy_buffer(&r.positions));
+    backend::destroy_buffer(&r.device_indices).unwrap();
+    backend::destroy_buffer(&r.positions).unwrap();
     renderer::release_gpu(&r.gpu);
-    get(renderer::destroy(&r.host));
+    renderer::destroy(&r.host).unwrap();
 }
 
 fn device_entry(r: &resident, key: String, uniforms: Vec<u8>, attributes: &str, host_bytes: Vec<u8>) -> sampled_draw {
@@ -274,13 +268,13 @@ fn resident_colors(width: usize) {
         let packed = ((color.r as u32) << 24) | ((color.g as u32) << 16) | ((color.b as u32) << 8) | (color.a as u32);
         set_u32(&mut host_attributes, i * 3, packed);
     }
-    let color_buffer = native(backend::create_buffer(
+    let color_buffer = backend::create_buffer(
         &device,
         BufferDescriptor { label: Some("indexed-test-Cd".to_owned()), size: color_bytes.len() as i64, usage: vec![BufferUsage::Vertex, BufferUsage::Storage, BufferUsage::CopyDst] },
         None,
-    ));
-    native(backend::write_buffer(&color_buffer, 0, &color_bytes));
-    let (color_key, unregister_color) = get(renderer::register_gpu_positions(
+    ).unwrap();
+    backend::write_buffer(&color_buffer, 0, &color_bytes).unwrap();
+    let (color_key, unregister_color) = renderer::register_gpu_positions(
         &r.gpu,
         &r.positions,
         None,
@@ -288,7 +282,7 @@ fn resident_colors(width: usize) {
         Some((color_buffer.clone(), width as i64)),
         3,
         Rc::new(|| true),
-    ));
+    ).unwrap();
     let mut white = uniform(true);
     set(&mut white, 53, 1.0);
     set(&mut white, 54, 1.0);

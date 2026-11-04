@@ -141,17 +141,13 @@ fn interpolate_float(left: &[i64], right: &[i64], weights: &[f64], source: &[f64
         .collect()
 }
 
-struct VertexMap<'a> {
-    left: &'a [i64],
-    right: &'a [i64],
-    weight: &'a [f64],
-}
-
 fn interpolate_attribute(
     cancel_ref: Option<&cancel::T>,
     grain: i64,
     point_map: &[i64],
-    vertex: &VertexMap,
+    vertex_left: &[i64],
+    vertex_right: &[i64],
+    vertex_weight: &[f64],
     primitive_map: &[i64],
     source: &attribute::T,
 ) -> Result<Option<attribute::T>, error::T> {
@@ -166,8 +162,8 @@ fn interpolate_attribute(
             Ok(Some(topology_remap::attribute(cancel_ref, grain, None, mapping, source)?))
         }
         attribute::Owner::Vertex => {
-            let nearest = nearest_mapping(vertex.left, vertex.right, vertex.weight);
-            let plane = |values: &[f64]| interpolate_float(vertex.left, vertex.right, vertex.weight, values);
+            let nearest = nearest_mapping(vertex_left, vertex_right, vertex_weight);
+            let plane = |values: &[f64]| interpolate_float(vertex_left, vertex_right, vertex_weight, values);
             let storage = match attribute::View::storage(source)? {
                 attribute::Storage::Float(values) => attribute::Storage::Float(plane(values)),
                 attribute::Storage::Int(values) => {
@@ -1117,10 +1113,9 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         primitive_offsets,
         primitive_kinds,
     );
-    let vertex_map = VertexMap { left: &vertex_left, right: &vertex_right, weight: &vertex_weight };
     let mut attributes = Vec::new();
     for source in geometry::attributes(geometry_value) {
-        if let Some(mapped) = interpolate_attribute(cancel_ref, grain, &point_map, &vertex_map, &primitive_map, &source)? {
+        if let Some(mapped) = interpolate_attribute(cancel_ref, grain, &point_map, &vertex_left, &vertex_right, &vertex_weight, &primitive_map, &source)? {
             attributes.push(mapped);
         }
     }

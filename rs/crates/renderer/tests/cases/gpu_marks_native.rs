@@ -4,7 +4,6 @@
 //! such as x + width are exact; see specification/marks.md. Every channel is compared.
 //! The OCaml loop over (density, kind) is split into one test fn per pair so each stays under 5 s.
 use crate::common;
-use crate::common::get;
 use ogpu::backend::{self, Buffer, Device};
 use ogpu::pipeline::Blend;
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
@@ -194,7 +193,7 @@ fn quad_indices(n: i64) -> Vec<u8> {
 static COUNTER: AtomicI64 = AtomicI64::new(0);
 
 fn upload(device: &Device, label: &str, bytes: &[u8]) -> Buffer {
-    let buffer = get(backend::create_buffer(
+    let buffer = backend::create_buffer(
         device,
         BufferDescriptor {
             label: Some(label.to_owned()),
@@ -202,8 +201,8 @@ fn upload(device: &Device, label: &str, bytes: &[u8]) -> Buffer {
             usage: vec![BufferUsage::Vertex, BufferUsage::Storage, BufferUsage::CopyDst],
         },
         None,
-    ));
-    get(backend::write_buffer(&buffer, 0, bytes));
+    ).unwrap();
+    backend::write_buffer(&buffer, 0, bytes).unwrap();
     buffer
 }
 
@@ -233,7 +232,7 @@ fn marks_draw(
     if let Some(r) = &record {
         buffers.push(r.clone());
     }
-    let source = get(scene_execution::Private::register_gpu_vertices(
+    let source = scene_execution::Private::register_gpu_vertices(
         owner,
         Some(buffers[1..6].to_vec()),
         None,
@@ -245,7 +244,7 @@ fn marks_draw(
         &buffers[0],
         4 * n,
         Box::new(|| true),
-    ));
+    ).unwrap();
     let affine = floats(&[2.0 / WIDTH as f64, 0.0, -1.0, 0.0, -2.0 / HEIGHT as f64, 1.0]);
     let st = state {
         viewport: (0, 0, WIDTH, HEIGHT),
@@ -281,20 +280,20 @@ const CLEAR: (f64, f64, f64, f64) = (0.125, 0.25, 0.375, 1.0);
 
 fn capture_ui(execution: &renderer::t, density: i64, table: Table) -> Vec<u8> {
     let ir = Rc::new(render_ir::create(vec![Command::SetBlend(render_ir::Blend::Alpha), Command::Shapes(table)]).unwrap());
-    let submission = get(renderer::begin_submission(execution));
+    let submission = renderer::begin_submission(execution).unwrap();
     let lowered = Native::lower_scene2(&submission, density, &|_| None, &ir);
     let result = lowered.and_then(|b| Native::step(Some(CLEAR), None, None, &submission, &[b]));
     Native::cancel(&submission);
-    get(result);
-    get(renderer::capture(execution))
+    result.unwrap();
+    renderer::capture(execution).unwrap()
 }
 
 fn capture_marks(execution: &renderer::t, draw: scene_execution::draw) -> Vec<u8> {
-    let submission = get(renderer::begin_submission(execution));
+    let submission = renderer::begin_submission(execution).unwrap();
     let result = Native::adopt_draws(&submission, vec![draw]).and_then(|b| Native::step(Some(CLEAR), None, None, &submission, &[b]));
     Native::cancel(&submission);
-    get(result);
-    get(renderer::capture(execution))
+    result.unwrap();
+    renderer::capture(execution).unwrap()
 }
 
 fn painted(pixels: &[u8]) -> usize {
@@ -302,8 +301,8 @@ fn painted(pixels: &[u8]) -> usize {
 }
 
 fn with_renderer(density: i64, body: &dyn Fn(&renderer::t, &renderer::gpu)) {
-    let baseline = get(ogpu::impl_::live_handles());
-    let execution = get(renderer::create_offscreen(&renderer::configuration {
+    let baseline = ogpu::impl_::live_handles().unwrap();
+    let execution = renderer::create_offscreen(&renderer::configuration {
         logical_width: WIDTH,
         logical_height: HEIGHT,
         drawable_width: WIDTH * density,
@@ -311,12 +310,12 @@ fn with_renderer(density: i64, body: &dyn Fn(&renderer::t, &renderer::gpu)) {
         title: "marks-native".into(),
         vsync: false,
         high_density: true,
-    }));
-    let gpu = get(renderer::acquire_gpu());
+    }).unwrap();
+    let gpu = renderer::acquire_gpu().unwrap();
     body(&execution, &gpu);
     renderer::release_gpu(&gpu);
-    get(renderer::destroy(&execution));
-    assert_eq!(get(ogpu::impl_::live_handles()), baseline, "marks native handle delta");
+    renderer::destroy(&execution).unwrap();
+    assert_eq!(ogpu::impl_::live_handles().unwrap(), baseline, "marks native handle delta");
 }
 
 fn parity(density: i64, kind: Kind) {

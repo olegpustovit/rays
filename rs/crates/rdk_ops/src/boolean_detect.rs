@@ -10,7 +10,6 @@ use rdk_geom::triangle_intersection::{self, EVENT_STRIDE, MAX_EVENTS};
 
 const OPERATION: &str = "boolean_detect";
 
-type R<V> = Result<V, error::T>;
 
 pub struct Params {
     pub cancel: Option<Arc<cancel::T>>,
@@ -71,7 +70,7 @@ fn unique_rows(
     primitive_count: i64,
     raw_counts: &[i64],
     raw_values: &[i64],
-) -> R<Outputs> {
+) -> Result<Outputs, error::T> {
     let mut raw_offsets = vec![0_i64; primitive_count as usize + 1];
     for primitive in 0..primitive_count as usize {
         cancel::poll(cancel_value, primitive as i64, 4095)?;
@@ -116,7 +115,7 @@ fn install_outputs(
     raw_counts: &[i64],
     raw_values: &[i64],
     geometry_value: &geometry::T,
-) -> R<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let primitive_count = geometry::primitive_count(geometry_value);
     let outputs = unique_rows(cancel_value, grain, primitive_count, raw_counts, raw_values)?;
     let mut output = geometry_value.clone();
@@ -161,7 +160,7 @@ fn detect_pairs(
     source_geometry: &geometry::T,
     collision_surface: &Arc<surface_index::T>,
     collision_geometry: &geometry::T,
-) -> R<(Vec<i64>, Vec<i64>)> {
+) -> Result<(Vec<i64>, Vec<i64>), error::T> {
     let (source_triangles, collision_triangles) = if is_self {
         surface_index::View::overlapping_self_triangle_pairs(cancel_value, grain, tolerance, source_surface)?
     } else {
@@ -265,7 +264,7 @@ fn invalid(message: &str) -> error::T {
     make("invalid_parameter", message.to_owned())
 }
 
-fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -> R<geometry::T> {
+fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
     let grain = params.grain;
     let tolerance = params.tolerance;
@@ -373,7 +372,7 @@ fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -
 
 /// Detect source/collision polygon intersections without changing source topology or payload.
 /// `params.intersecting_group` defaults to `boolean_intersections`; `None` omits it.
-pub fn run_checked(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -> R<geometry::T> {
+pub fn run_checked(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run(params, collision, geometry_value).map_err(|value| {
         if error::code(&value) == "cancelled" { cancelled() } else { value }
     })
@@ -384,20 +383,13 @@ mod tests {
     use super::*;
     use rdk_core::topology;
 
-    fn get<V>(value: R<V>) -> V {
-        match value {
-            Ok(value) => value,
-            Err(failure) => panic!("{}", error::to_string(&failure)),
-        }
-    }
-
     fn mesh(points: &[(f64, f64, f64)], triangles: &[i64]) -> geometry::T {
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
         let offsets = (0..=triangles.len() as i64 / 3).map(|p| p * 3).collect();
-        let topology_value = get(topology::polygons_owned(points.len() as i64, triangles.to_vec(), offsets));
-        get(geometry::create(get(packed::Float3::View::of_owned_exn(x, y, z)), topology_value, None, None, None))
+        let topology_value = topology::polygons_owned(points.len() as i64, triangles.to_vec(), offsets).unwrap();
+        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
     }
 
     fn source() -> geometry::T {
@@ -461,7 +453,7 @@ mod tests {
         )
     }
 
-    fn expect(code: &str, value: R<geometry::T>) {
+    fn expect(code: &str, value: Result<geometry::T, error::T>) {
         match value {
             Err(failure) => assert_eq!(error::code(&failure), code, "{}", error::to_string(&failure)),
             Ok(_) => panic!("expected {code}"),
@@ -474,23 +466,23 @@ mod tests {
 
     #[test]
     fn cross_and_coplanar() {
-        let temperature = get(attribute::create_owned(
+        let temperature = attribute::create_owned(
             "temperature",
             attribute::Owner::Point,
             attribute::Storage::Float(vec![0., 1., 2., 3., 4., 5.]),
-        ));
-        let preserved = get(group::init(None, group::Owner::Primitive, "preserved", 2, &|p| p == 1));
-        let stale_hits = get(attribute::create_owned(
+        ).unwrap();
+        let preserved = group::init(None, group::Owner::Primitive, "preserved", 2, &|p| p == 1).unwrap();
+        let stale_hits = attribute::create_owned(
             "hits",
             attribute::Owner::Primitive,
             attribute::Storage::Int(vec![9, 9]),
-        ));
-        let stale_intersections = get(group::init(None, group::Owner::Primitive, "intersections", 2, &|_| true));
+        ).unwrap();
+        let stale_intersections = group::init(None, group::Owner::Primitive, "intersections", 2, &|_| true).unwrap();
         let mut source = source();
-        source = get(geometry::with_attribute(temperature.clone(), &source));
-        source = get(geometry::with_attribute(stale_hits, &source));
-        source = get(geometry::with_group(preserved.clone(), &source));
-        source = get(geometry::with_group(stale_intersections, &source));
+        source = geometry::with_attribute(temperature.clone(), &source).unwrap();
+        source = geometry::with_attribute(stale_hits, &source).unwrap();
+        source = geometry::with_group(preserved.clone(), &source).unwrap();
+        source = geometry::with_group(stale_intersections, &source).unwrap();
         let collision = collision();
         let params = Params {
             grain: 1,
@@ -499,7 +491,7 @@ mod tests {
             count_attribute: Some("hit_count".to_owned()),
             ..Params::default()
         };
-        let output = get(run_checked(&params, &collision, &source));
+        let output = run_checked(&params, &collision, &source).unwrap();
         assert!(
             topology::data_id(geometry::topology(&output)) == topology::data_id(geometry::topology(&source))
                 && packed::Float3::data_id(geometry::positions(&output))
@@ -523,7 +515,7 @@ mod tests {
                 && group::mem(0, &selected),
             "cross/coplanar primitive aggregation"
         );
-        let crossing_only = get(run_checked(
+        let crossing_only = run_checked(
             &Params {
                 include_coplanar: false,
                 intersecting_group: None,
@@ -532,7 +524,7 @@ mod tests {
             },
             &collision,
             &source,
-        ));
+        ).unwrap();
         let (crossing_offsets, crossing_values) = int_array("hits", &crossing_only);
         assert!(crossing_offsets == [0, 1, 1] && crossing_values == [0], "include_coplanar=false");
         assert!(topology_equal(&output, &source), "changed topology values");
@@ -546,7 +538,7 @@ mod tests {
             p.z.iter().map(|v| v + dz).collect(),
         )
         .unwrap();
-        get(geometry::create(moved, geometry::topology(value).clone(), None, None, None))
+        geometry::create(moved, geometry::topology(value).clone(), None, None, None).unwrap()
     }
 
     #[test]
@@ -556,11 +548,11 @@ mod tests {
         let hits = |tolerance: f64| {
             int_array(
                 "hits",
-                &get(run_checked(
+                &run_checked(
                     &Params { tolerance, intersections_attribute: Some("hits".to_owned()), ..Params::default() },
                     &separated,
                     &single_source,
-                )),
+                ).unwrap(),
             )
             .1
         };
@@ -571,12 +563,12 @@ mod tests {
             count_attribute: Some("hit_count".to_owned()),
             ..Params::default()
         };
-        let origin_output = get(run_checked(&params, &collision(), &source()));
-        let moved_output = get(run_checked(
+        let origin_output = run_checked(&params, &collision(), &source()).unwrap();
+        let moved_output = run_checked(
             &params,
             &translated(&collision(), 1e12, -1e12, 1e12),
             &translated(&source(), 1e12, -1e12, 1e12),
-        ));
+        ).unwrap();
         assert!(
             output_signature(&origin_output) == output_signature(&moved_output),
             "changed under a large common translation"
@@ -584,7 +576,7 @@ mod tests {
     }
 
     fn self_detect(value: &geometry::T) -> geometry::T {
-        get(run_checked(
+        run_checked(
             &Params {
                 intersecting_group: None,
                 self_intersecting_group: Some("self_intersections".to_owned()),
@@ -594,7 +586,7 @@ mod tests {
             },
             &no_collision(),
             value,
-        ))
+        ).unwrap()
     }
 
     #[test]
@@ -612,7 +604,7 @@ mod tests {
                 && group::cardinality(&named_group("self_intersections", &crossing)) == 2,
             "AxA symmetric crossing output"
         );
-        let both = get(run_checked(
+        let both = run_checked(
             &Params {
                 intersecting_group: Some("cross".to_owned()),
                 intersections_attribute: Some("cross_hits".to_owned()),
@@ -622,7 +614,7 @@ mod tests {
             },
             &collision(),
             &crossing_source,
-        ));
+        ).unwrap();
         assert!(
             geometry::find_group(group::Owner::Primitive, "cross", &both).is_some()
                 && geometry::find_group(group::Owner::Primitive, "self", &both).is_some()
@@ -646,7 +638,7 @@ mod tests {
         let tri = [(0., 0., 0.), (2., 0., 0.), (0., 2., 0.)];
         let duplicate = self_detect(&mesh(&tri, &[0, 1, 2, 2, 1, 0]));
         assert!(int_array("self_hits", &duplicate).1 == [1, 0], "duplicate overlapping primitives");
-        let duplicate_without_coplanar = get(run_checked(
+        let duplicate_without_coplanar = run_checked(
             &Params {
                 intersecting_group: None,
                 include_coplanar: false,
@@ -655,16 +647,16 @@ mod tests {
             },
             &no_collision(),
             &mesh(&tri, &[0, 1, 2, 2, 1, 0]),
-        ));
+        ).unwrap();
         assert!(int_array("self_hits", &duplicate_without_coplanar).1.is_empty(), "AxA include_coplanar=false");
-        let quad_topology = get(topology::create_owned(
+        let quad_topology = topology::create_owned(
             4,
             vec![0, 1, 2, 3],
             vec![0, 4],
             vec![topology::PrimitiveKind::Polygon],
-        ));
+        ).unwrap();
         let quad_source = mesh(&square, &[0, 1, 2, 0, 2, 3]);
-        let quad = get(geometry::create(geometry::positions(&quad_source).clone(), quad_topology, None, None, None));
+        let quad = geometry::create(geometry::positions(&quad_source).clone(), quad_topology, None, None, None).unwrap();
         assert!(
             int_array("self_hits", &self_detect(&quad)).1.is_empty(),
             "exposed one polygon's triangulation diagonal as AxA"
@@ -728,7 +720,7 @@ mod tests {
             count_attribute: Some("hit_count".to_owned()),
             ..Params::default()
         };
-        let run_cross = |domains: i64| at_domains(domains, &|| get(run_checked(&params, &collision, &source)));
+        let run_cross = |domains: i64| at_domains(domains, &|| run_checked(&params, &collision, &source).unwrap());
         let one = run_cross(1);
         let four = run_cross(4);
         assert!(output_signature(&one) == output_signature(&four), "one/four-domain output drift");
@@ -748,7 +740,7 @@ mod tests {
             ..Params::default()
         };
         let run_self = |domains: i64| {
-            at_domains(domains, &|| get(run_checked(&self_params, &no_collision(), &combined)))
+            at_domains(domains, &|| run_checked(&self_params, &no_collision(), &combined).unwrap())
         };
         let signature = |value: &geometry::T| {
             let (offsets, values) = int_array("self_hits", value);

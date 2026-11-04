@@ -394,17 +394,9 @@ pub struct Params {
 type FloatTriple = (Vec<f64>, Vec<f64>, Vec<f64>);
 type PickRange = (Vec<bool>, Vec<bool>, Vec<i64>);
 
-fn unlock<T>(slot: Mutex<Option<T>>) -> Option<T> {
-    slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn store<T>(slot: &Mutex<Option<T>>, value: T) {
-    *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(value);
-}
-
-fn range_slots<T>(count: i64, grain: i64) -> Vec<Mutex<Option<T>>> {
+fn range_count(count: i64, grain: i64) -> usize {
     let ranges = if count <= 0 { 0 } else { ((count - 1) / grain + 1) as usize };
-    (0..ranges).map(|_| Mutex::new(None)).collect()
+    ranges
 }
 
 /// Welds the selected open polyline curves of `geometry` into chains.
@@ -577,7 +569,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
             };
             chain_count = fixed_chain_count;
             let chunk = grain.unwrap_or(16_384);
-            let slots: Vec<Mutex<Option<PickRange>>> = range_slots(selected_count, chunk);
+            let slots: Vec<Mutex<Option<PickRange>>> = (0..range_count(selected_count, chunk)).map(|_| Mutex::new(None)).collect();
             let selected_ref = &selected_primitives;
             support::run_indexed_ranges(chunk, selected_count, &|range, first, last| {
                 cancel::check_opt(cancel_value)?;
@@ -604,12 +596,12 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                     }
                     local_welded.push(weld);
                 }
-                store(&slots[range as usize], (local_reversed, local_welded, local_chain));
+                *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((local_reversed, local_welded, local_chain));
                 Ok(())
             })?;
             let mut at = 0;
             for slot in slots {
-                let (r, w, c) = unlock(slot).unwrap_or_default();
+                let (r, w, c) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).unwrap_or_default();
                 for k in 0..r.len() {
                     reversed[at] = r[k];
                     welded[at] = w[k];
@@ -625,7 +617,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
         let input_primitives = selected_primitives.clone();
         let endpoint_count = selected_count * 2;
         let chunk = grain.unwrap_or(16_384);
-        let slots: Vec<Mutex<Option<FloatTriple>>> = range_slots(endpoint_count, chunk);
+        let slots: Vec<Mutex<Option<FloatTriple>>> = (0..range_count(endpoint_count, chunk)).map(|_| Mutex::new(None)).collect();
         support::run_indexed_ranges(chunk, endpoint_count, &|range, first, last| {
             let mut xs = Vec::new();
             let mut ys = Vec::new();
@@ -644,14 +636,14 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                 ys.push(y);
                 zs.push(z);
             }
-            store(&slots[range as usize], (xs, ys, zs));
+            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((xs, ys, zs));
             Ok(())
         })?;
         let mut endpoint_x = Vec::with_capacity(endpoint_count as usize);
         let mut endpoint_y = Vec::with_capacity(endpoint_count as usize);
         let mut endpoint_z = Vec::with_capacity(endpoint_count as usize);
         for slot in slots {
-            let (xs, ys, zs) = unlock(slot).unwrap_or_default();
+            let (xs, ys, zs) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).unwrap_or_default();
             endpoint_x.extend(xs);
             endpoint_y.extend(ys);
             endpoint_z.extend(zs);
@@ -877,7 +869,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
     let mut edge_source_corner = Vec::with_capacity(output_vertex_count as usize);
     {
         let chunk = grain.unwrap_or(16_384);
-        let slots: Vec<Mutex<Option<FillBuf>>> = range_slots(output_primitive_count, chunk);
+        let slots: Vec<Mutex<Option<FillBuf>>> = (0..range_count(output_primitive_count, chunk)).map(|_| Mutex::new(None)).collect();
         let offsets = &primitive_offsets;
         let (descriptor_primitive, descriptor_chain) = (&descriptor_primitive, &descriptor_chain);
         let (selected_primitives, reversed, welded) = (&selected_primitives, &reversed, &welded);
@@ -927,11 +919,11 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                     buf.corner[previous as usize] = -1;
                 }
             }
-            store(&slots[range as usize], buf);
+            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(buf);
             Ok(())
         })?;
         for slot in slots {
-            if let Some(buf) = unlock(slot) {
+            if let Some(buf) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
                 vertex_map.extend(buf.map);
                 vertex_points.extend(buf.points);
                 edge_source_corner.extend(buf.corner);

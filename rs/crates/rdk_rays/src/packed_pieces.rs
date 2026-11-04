@@ -41,8 +41,20 @@ fn vertex_count(value: &T) -> usize {
     value.piece_of_vertex.len()
 }
 
-fn dense<K: std::hash::Hash + Eq + Clone>(values: &[K]) -> (Vec<usize>, usize) {
-    let mut table: HashMap<K, usize> = HashMap::with_capacity((values.len() / 4).max(16));
+fn dense_int(values: &[i64]) -> (Vec<usize>, usize) {
+    let mut table: HashMap<i64, usize> = HashMap::with_capacity((values.len() / 4).max(16));
+    let dense = values
+        .iter()
+        .map(|value| {
+            let next = table.len();
+            *table.entry(value.clone()).or_insert(next)
+        })
+        .collect();
+    (dense, table.len())
+}
+
+fn dense_text(values: &[String]) -> (Vec<usize>, usize) {
+    let mut table: HashMap<String, usize> = HashMap::with_capacity((values.len() / 4).max(16));
     let dense = values
         .iter()
         .map(|value| {
@@ -57,15 +69,15 @@ fn primitive_pieces(piece_attribute: &str, g: &geometry::T) -> Result<(Vec<usize
     match geometry::find_attribute(Owner::Primitive, piece_attribute, g) {
         None => Err(format!("Packed_pieces: missing primitive piece attribute {piece_attribute:?}")),
         Some(a) => match attribute::View::storage(&a) {
-            Ok(Storage::Int(values)) => Ok(dense(values)),
-            Ok(Storage::Text(values)) => Ok(dense(values)),
+            Ok(Storage::Int(values)) => Ok(dense_int(values)),
+            Ok(Storage::Text(values)) => Ok(dense_text(values)),
             _ => Err(format!("Packed_pieces: primitive piece attribute {piece_attribute:?} must be int or text")),
         },
     }
 }
 
 fn expand_triangles_preserving_attributes(m: &mesh::t) -> Result<mesh::t, String> {
-    let source = mesh::View::packed_view(m);
+    let source = mesh::View::packed_view(m)?;
     if source.mode != mesh::mode::Triangles {
         return Err("Packed_pieces: expected a triangulated render mesh".to_owned());
     }
@@ -98,7 +110,7 @@ pub fn of_geometry(piece_attribute: &str, g: &geometry::T) -> Result<T, String> 
     }
     let m = rays_mesh::to_mesh(&g).map_err(text)?;
     let expanded = expand_triangles_preserving_attributes(&m)?;
-    let base = mesh::View::packed_view(&expanded);
+    let base = mesh::View::packed_view(&expanded)?;
     let expected = (geometry::primitive_count(&g) * 3) as usize;
     if base.mode != mesh::mode::Triangles || base.vertices.x.len() != expected {
         return Err("Packed_pieces: triangle render ancestry is inconsistent".to_owned());

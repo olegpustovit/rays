@@ -42,7 +42,7 @@ pub fn orient2d(ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64) -> Sign {
         && cx.is_finite()
         && cy.is_finite())
     {
-        panic!("Rdk.Predicates.orient2d: coordinates must be finite");
+        unreachable!("Rdk.Predicates.orient2d: coordinates must be finite");
     }
     orient2d_filtered(ax, ay, bx, by, cx, cy)
 }
@@ -74,7 +74,7 @@ pub fn orient2d_packed(x: &[f64], y: &[f64], a: i64, b: i64, c: i64) -> Sign {
         && cx.is_finite()
         && cy.is_finite())
     {
-        panic!("Rdk.Predicates.orient2d_packed: coordinates must be finite");
+        unreachable!("Rdk.Predicates.orient2d_packed: coordinates must be finite");
     }
     orient2d_filtered(ax, ay, bx, by, cx, cy)
 }
@@ -161,7 +161,7 @@ pub fn orient3d(
     dz: f64,
 ) -> Sign {
     if !all_finite(&[ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz]) {
-        panic!("Rdk.Predicates.orient3d: coordinates must be finite");
+        unreachable!("Rdk.Predicates.orient3d: coordinates must be finite");
     }
     orient3d_filtered(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz)
 }
@@ -173,7 +173,7 @@ pub fn orient3d_packed(x: &[f64], y: &[f64], z: &[f64], a: i64, b: i64, c: i64, 
     let (cx, cy, cz) = (x[c], y[c], z[c]);
     let (dx, dy, dz) = (x[d], y[d], z[d]);
     if !all_finite(&[ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz]) {
-        panic!("Rdk.Predicates.orient3d_packed: coordinates must be finite");
+        unreachable!("Rdk.Predicates.orient3d_packed: coordinates must be finite");
     }
     orient3d_filtered(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz)
 }
@@ -185,7 +185,7 @@ fn exact_incircle(ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64, dx: f64,
 #[allow(clippy::too_many_arguments)]
 fn incircle_values(ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64, dx: f64, dy: f64) -> Sign {
     if !all_finite(&[ax, ay, bx, by, cx, cy, dx, dy]) {
-        panic!("Rdk.Predicates.incircle: coordinates must be finite");
+        unreachable!("Rdk.Predicates.incircle: coordinates must be finite");
     }
     let adx = ax - dx;
     let ady = ay - dy;
@@ -223,7 +223,7 @@ pub fn incircle_packed(x: &[f64], y: &[f64], a: i64, b: i64, c: i64, d: i64) -> 
 /// Exact sign of twice the signed shoelace area of one packed polygon range.
 pub fn polygon_area_sign_packed(x: &[f64], y: &[f64], points: &[i64], first: i64, count: i64) -> Sign {
     if count < 3 || first < 0 || first > points.len() as i64 - count {
-        panic!("Rdk.Predicates.polygon_area_sign_packed: invalid polygon range");
+        unreachable!("Rdk.Predicates.polygon_area_sign_packed: invalid polygon range");
     }
     let mut sum = 0.;
     let mut correction = 0.;
@@ -233,12 +233,12 @@ pub fn polygon_area_sign_packed(x: &[f64], y: &[f64], points: &[i64], first: i64
         let a = points[(first + local) as usize];
         let b = points[(first + next) as usize];
         if a < 0 || a >= x.len() as i64 || b < 0 || b >= x.len() as i64 || y.len() != x.len() {
-            panic!("Rdk.Predicates.polygon_area_sign_packed: invalid packed planes");
+            unreachable!("Rdk.Predicates.polygon_area_sign_packed: invalid packed planes");
         }
         let (a, b) = (a as usize, b as usize);
         let (ax, ay, bx, by) = (x[a], y[a], x[b], y[b]);
         if !all_finite(&[ax, ay, bx, by]) {
-            panic!("Rdk.Predicates.polygon_area_sign_packed: coordinates must be finite");
+            unreachable!("Rdk.Predicates.polygon_area_sign_packed: coordinates must be finite");
         }
         let left = ax * by;
         let right = bx * ay;
@@ -372,7 +372,7 @@ pub fn segment_segment_packed(
     let point = |i: i64| [x[i as usize], y[i as usize], z[i as usize]];
     let (la, lb, ra, rb) = (point(left_a), point(left_b), point(right_a), point(right_b));
     if !la.iter().chain(&lb).chain(&ra).chain(&rb).all(|v| v.is_finite()) {
-        panic!("Rdk.Predicates.segment_segment_packed: coordinates must be finite");
+        unreachable!("Rdk.Predicates.segment_segment_packed: coordinates must be finite");
     }
     if la == lb || ra == rb {
         return SegmentSegment::Degenerate;
@@ -555,7 +555,7 @@ fn feature_of_triangle_location(location: i64) -> i64 {
         4 => 0,
         5 => 1,
         6 => 2,
-        _ => panic!("Rdk.Predicates: invalid encoded triangle location"),
+        _ => unreachable!("Rdk.Predicates: invalid encoded triangle location"),
     }
 }
 
@@ -569,7 +569,7 @@ fn add_feature_pair(output: &mut [i64], count: i64, left: i64, right: i64) -> i6
     if duplicate {
         count
     } else if count == 2 {
-        panic!("Rdk.Predicates: non-coplanar triangles produced more than two intersection points")
+        unreachable!("Rdk.Predicates: non-coplanar triangles produced more than two intersection points")
     } else {
         output[(count * 2) as usize] = left;
         output[(count * 2 + 1) as usize] = right;
@@ -599,7 +599,7 @@ fn triangle_triangle_features_into(
     output: &mut [i64],
 ) -> i64 {
     if output.len() < 4 {
-        panic!("Rdk.Predicates.triangle_triangle_features_into: output is too small");
+        unreachable!("Rdk.Predicates.triangle_triangle_features_into: output is too small");
     }
     if triangle_degenerate_packed(x, y, z, left_a, left_b, left_c)
         || triangle_degenerate_packed(x, y, z, right_a, right_b, right_c)

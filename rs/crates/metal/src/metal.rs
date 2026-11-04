@@ -15,23 +15,22 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-pub(crate) fn error(operation: &str, kind: ErrorKind, message: impl Into<String>) -> Error {
-    Error { operation: operation.to_owned(), kind, message: message.into() }
+pub(crate) fn error(operation: &str, kind: ErrorKind, message: &str) -> Error {
+    Error { operation: operation.to_owned(), kind, message: message.to_owned() }
 }
-fn sys_error(operation: &str, value: metal_sys::Error) -> Error {
+pub(crate) fn sys_error(operation: &str, value: metal_sys::Error) -> Error {
     match value {
         metal_sys::Error::Unavailable => error(operation, ErrorKind::Unsupported, "Metal is unavailable on this platform or OS version"),
         metal_sys::Error::WrongThread => error(operation, ErrorKind::WrongDomain, "Metal handles must be released on the platform main thread"),
-        metal_sys::Error::InvalidArgument(message) => error(operation, ErrorKind::InvalidArgument, message),
+        metal_sys::Error::InvalidArgument(message) => error(operation, ErrorKind::InvalidArgument, &message),
         metal_sys::Error::InvalidHandle => error(operation, ErrorKind::InvalidState, "invalid native Metal handle"),
-        metal_sys::Error::Native(message) => error(operation, ErrorKind::NativeError, message),
+        metal_sys::Error::Native(message) => error(operation, ErrorKind::NativeError, &message),
     }
 }
-pub(crate) fn native<T>(operation: &str, result: Result<T, metal_sys::Error>) -> Result<T, Error> { result.map_err(|failure| sys_error(operation, failure)) }
-pub(crate) fn on_main<T>(operation: &str, action: impl FnOnce() -> Result<T, Error>) -> Result<T, Error> {
+pub(crate) fn enter_main(operation: &str) -> Result<(), Error> {
     if !metal_raw::is_main_thread() { return Err(error(operation, ErrorKind::WrongDomain, "Metal calls must run on the platform main thread")); }
-    native(operation, metal_raw::drain_releases())?;
-    action()
+    metal_raw::drain_releases().map_err(|failure| sys_error(operation, failure))?;
+    Ok(())
 }
 pub(crate) fn validate_text(operation: &str, value: &str) -> Result<(), Error> {
     if value.as_bytes().contains(&0) { Err(error(operation, ErrorKind::InvalidArgument, "string contains a NUL byte")) } else { Ok(()) }
@@ -48,7 +47,7 @@ impl Lifetime {
     pub(crate) fn destroy_parent(&self, operation: &str) -> Result<(), Error> {
         if self.destroyed.load(Ordering::Acquire) { return Ok(()); }
         let dependents = self.dependents.load(Ordering::Acquire);
-        if dependents != 0 { return Err(error(operation, ErrorKind::ParentHasDependents, format!("{dependents} Metal objects still depend on this handle"))); }
+        if dependents != 0 { return Err(error(operation, ErrorKind::ParentHasDependents, &format!("{dependents} Metal objects still depend on this handle"))); }
         self.destroyed.store(true, Ordering::Release);
         Ok(())
     }
@@ -74,60 +73,60 @@ pub struct DeviceInfo {
 
 impl Device {
     pub fn system_default() -> Result<Self, Error> {
-        on_main("Metal.Device.system_default", || {
-            let raw = native("Metal.Device.system_default", metal_raw::default_device())?;
-            let registry_id = native("Metal.Device.registry_id", metal_raw::device_registry_id(&raw))?;
+        (|| -> Result<_, Error> { enter_main("Metal.Device.system_default")?;
+            let raw = metal_raw::default_device().map_err(|failure| sys_error("Metal.Device.system_default", failure))?;
+            let registry_id = metal_raw::device_registry_id(&raw).map_err(|failure| sys_error("Metal.Device.registry_id", failure))?;
             Ok(Self(Arc::new(DeviceInner { raw, lifetime: Lifetime::new(), registry_id })))
-        })
+        })()
     }
     pub fn same(&self, other: &Self) -> bool { self.0.registry_id == other.0.registry_id }
     pub fn info(&self) -> Result<DeviceInfo, Error> {
         let operation = "Metal.Device.info";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             let raw = &self.0.raw;
-            let name = native(operation, metal_raw::device_name(raw))?;
+            let name = metal_raw::device_name(raw).map_err(|failure| sys_error(operation, failure))?;
             Ok(DeviceInfo {
                 name: if name.is_empty() { "Unnamed Metal device".to_owned() } else { name },
                 registry_id: self.0.registry_id,
-                low_power: native(operation, metal_sys::registry::device_is_low_power(raw))?,
-                removable: native(operation, metal_sys::registry::device_is_removable(raw))?,
-                headless: native(operation, metal_sys::registry::device_is_headless(raw))?,
-                unified_memory: native(operation, metal_sys::registry::device_has_unified_memory(raw))?,
-                recommended_max_working_set_size: native(operation, metal_sys::registry::device_recommended_max_working_set_size(raw))?,
-                current_allocated_size: native(operation, metal_sys::registry::device_current_allocated_size(raw))?,
-                max_buffer_length: native(operation, metal_sys::registry::device_max_buffer_length(raw))?,
-                max_threadgroup_memory_length: native(operation, metal_sys::registry::device_max_threadgroup_memory_length(raw))?,
-                raytracing: native(operation, metal_sys::registry::device_supports_raytracing(raw))?,
-                raytracing_from_render: native(operation, metal_sys::registry::device_supports_raytracing_from_render(raw))?,
-                dynamic_libraries: native(operation, metal_sys::registry::device_supports_dynamic_libraries(raw))?,
+                low_power: metal_sys::registry::device_is_low_power(raw).map_err(|failure| sys_error(operation, failure))?,
+                removable: metal_sys::registry::device_is_removable(raw).map_err(|failure| sys_error(operation, failure))?,
+                headless: metal_sys::registry::device_is_headless(raw).map_err(|failure| sys_error(operation, failure))?,
+                unified_memory: metal_sys::registry::device_has_unified_memory(raw).map_err(|failure| sys_error(operation, failure))?,
+                recommended_max_working_set_size: metal_sys::registry::device_recommended_max_working_set_size(raw).map_err(|failure| sys_error(operation, failure))?,
+                current_allocated_size: metal_sys::registry::device_current_allocated_size(raw).map_err(|failure| sys_error(operation, failure))?,
+                max_buffer_length: metal_sys::registry::device_max_buffer_length(raw).map_err(|failure| sys_error(operation, failure))?,
+                max_threadgroup_memory_length: metal_sys::registry::device_max_threadgroup_memory_length(raw).map_err(|failure| sys_error(operation, failure))?,
+                raytracing: metal_sys::registry::device_supports_raytracing(raw).map_err(|failure| sys_error(operation, failure))?,
+                raytracing_from_render: metal_sys::registry::device_supports_raytracing_from_render(raw).map_err(|failure| sys_error(operation, failure))?,
+                dynamic_libraries: metal_sys::registry::device_supports_dynamic_libraries(raw).map_err(|failure| sys_error(operation, failure))?,
             })
-        })
+        })()
     }
     pub fn supports_family(&self, family: DeviceFamily) -> Result<bool, Error> {
         let operation = "Metal.Device.supports_family";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             let code = match family { DeviceFamily::Apple1 => 1001, DeviceFamily::Apple2 => 1002, DeviceFamily::Apple3 => 1003, DeviceFamily::Apple4 => 1004, DeviceFamily::Apple5 => 1005, DeviceFamily::Apple6 => 1006, DeviceFamily::Apple7 => 1007, DeviceFamily::Apple8 => 1008, DeviceFamily::Apple9 => 1009, DeviceFamily::Apple10 => 1010, DeviceFamily::Mac2 => 2002, DeviceFamily::Common1 => 3001, DeviceFamily::Common2 => 3002, DeviceFamily::Common3 => 3003, DeviceFamily::Metal3 => 5001, DeviceFamily::Metal4 => 5002 };
-            native(operation, metal_raw::device_supports_family(&self.0.raw, code))
-        })
+            metal_raw::device_supports_family(&self.0.raw, code).map_err(|failure| sys_error(operation, failure))
+        })()
     }
     pub fn supports_texture_sample_count(&self, sample_count: usize) -> Result<bool, Error> {
         let operation = "Metal.Device.supports_texture_sample_count";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             if sample_count == 0 { return Err(error(operation, ErrorKind::InvalidArgument, "texture sample count must be positive")); }
-            native(operation, metal_raw::device_supports_sample_count(&self.0.raw, sample_count as u64))
-        })
+            metal_raw::device_supports_sample_count(&self.0.raw, sample_count as u64).map_err(|failure| sys_error(operation, failure))
+        })()
     }
     pub(crate) fn supports_sampler_reduction(&self) -> Result<bool, Error> {
         let operation = "Metal.Device.supports_sampler_reduction";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
-            native(operation, metal_sys::native::supports_sampler_reduction(&self.0.raw))
-        })
+            metal_sys::native::supports_sampler_reduction(&self.0.raw).map_err(|failure| sys_error(operation, failure))
+        })()
     }
-    pub fn destroy(&self) -> Result<(), Error> { on_main("Metal.Device.destroy", || self.0.lifetime.destroy_parent("Metal.Device.destroy")) }
+    pub fn destroy(&self) -> Result<(), Error> { enter_main("Metal.Device.destroy")?; self.0.lifetime.destroy_parent("Metal.Device.destroy") }
     pub fn is_destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
@@ -168,10 +167,10 @@ fn storage_code(storage: StorageMode) -> i64 { match storage { StorageMode::Shar
 fn cache_code(cache: CpuCacheMode) -> i64 { match cache { CpuCacheMode::DefaultCache => 0, CpuCacheMode::WriteCombined => 1 } }
 fn verify_buffer(operation: &str, raw: &metal_sys::Handle, length: u64, storage: StorageMode, cache: CpuCacheMode) -> Result<(), Error> {
     let actual = (
-        native(operation, metal_raw::buffer_length(raw))?,
-        native(operation, metal_raw::buffer_storage_mode(raw))?,
-        native(operation, metal_raw::buffer_cache_mode(raw))?,
-        native(operation, metal_raw::buffer_hazard_tracking(raw))?,
+        metal_raw::buffer_length(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_raw::buffer_storage_mode(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_raw::buffer_cache_mode(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_raw::buffer_hazard_tracking(raw).map_err(|failure| sys_error(operation, failure))?,
     );
     if actual != (length, storage_code(storage), cache_code(cache), 2) {
         Err(error(operation, ErrorKind::NativeError, "Metal changed checked buffer properties during creation"))
@@ -184,61 +183,61 @@ fn options(storage: StorageMode, cache: CpuCacheMode, hazard: HazardTrackingMode
 impl Buffer {
     pub fn create(device: &Device, length: u64, storage: StorageMode, cache: CpuCacheMode, label: Option<&str>) -> Result<Self, Error> {
         let operation = "Metal.Buffer.create";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             device.0.lifetime.ensure_live(operation)?;
             if length == 0 { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length must be positive")); }
             if storage == StorageMode::Memoryless { return Err(error(operation, ErrorKind::InvalidArgument, "a buffer cannot be memoryless")); }
             if let Some(label) = label { validate_text(operation, label)?; }
-            if length > native(operation, metal_sys::registry::device_max_buffer_length(device.raw()))? { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length exceeds the device limit")); }
-            let raw = native(operation, metal_raw::buffer_create(device.raw(), length, options(storage, cache, HazardTrackingMode::Default)))?;
+            if length > metal_sys::registry::device_max_buffer_length(device.raw()).map_err(|failure| sys_error(operation, failure))? { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length exceeds the device limit")); }
+            let raw = metal_raw::buffer_create(device.raw(), length, options(storage, cache, HazardTrackingMode::Default)).map_err(|failure| sys_error(operation, failure))?;
             verify_buffer(operation, &raw, length, storage, cache)?;
-            if let Some(label) = label { native(operation, metal_sys::registry::set_buffer_label(&raw, label))?; }
+            if let Some(label) = label { metal_sys::registry::set_buffer_label(&raw, label).map_err(|failure| sys_error(operation, failure))?; }
             device.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
             Ok(Self(Arc::new(BufferInner { raw, lifetime: Lifetime::new(), device: device.clone(), length, storage, device_attached: AtomicBool::new(true) })))
-        })
+        })()
     }
     pub fn create_mapped(device: &Device, length: u64, label: Option<&str>) -> Result<(Self, MappedBuffer), Error> {
         let operation = "Metal.Buffer.create_mapped";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             device.0.lifetime.ensure_live(operation)?;
             if length == 0 || length % 4 != 0 { return Err(error(operation, ErrorKind::InvalidArgument, "mapped buffer length must be a positive multiple of four")); }
             if let Some(label) = label { validate_text(operation, label)?; }
-            if length > native(operation, metal_sys::registry::device_max_buffer_length(device.raw()))? { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length exceeds the device limit")); }
-            let (raw, mapping) = native(operation, metal_sys::native::create_mapped_buffer(device.raw(), length, options(StorageMode::Shared, CpuCacheMode::DefaultCache, HazardTrackingMode::Default)))?;
-            let actual_length = native(operation, metal_raw::buffer_length(&raw))?;
+            if length > metal_sys::registry::device_max_buffer_length(device.raw()).map_err(|failure| sys_error(operation, failure))? { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length exceeds the device limit")); }
+            let (raw, mapping) = metal_sys::native::create_mapped_buffer(device.raw(), length, options(StorageMode::Shared, CpuCacheMode::DefaultCache, HazardTrackingMode::Default)).map_err(|failure| sys_error(operation, failure))?;
+            let actual_length = metal_raw::buffer_length(&raw).map_err(|failure| sys_error(operation, failure))?;
             if actual_length < length { return Err(error(operation, ErrorKind::NativeError, "mapped buffer is shorter than its requested view")); }
             verify_buffer(operation, &raw, actual_length, StorageMode::Shared, CpuCacheMode::DefaultCache)?;
-            if let Some(label) = label { native(operation, metal_sys::registry::set_buffer_label(&raw, label))?; }
+            if let Some(label) = label { metal_sys::registry::set_buffer_label(&raw, label).map_err(|failure| sys_error(operation, failure))?; }
             device.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
             Ok((Self(Arc::new(BufferInner { raw, lifetime: Lifetime::new(), device: device.clone(), length: actual_length, storage: StorageMode::Shared, device_attached: AtomicBool::new(true) })), MappedBuffer(mapping)))
-        })
+        })()
     }
     pub fn length(&self) -> u64 { self.0.length }
     pub fn storage_mode(&self) -> StorageMode { self.0.storage }
     pub fn write_bytes(&self, offset: u64, bytes: &[u8]) -> Result<(), Error> {
         let operation = "Metal.Buffer.write_bytes";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             if self.0.storage == StorageMode::Private { return Err(error(operation, ErrorKind::Unsupported, "private buffers have no CPU mapping")); }
             validate_range(operation, self.0.length, offset, bytes.len())?;
-            native(operation, metal_sys::native::write_buffer(&self.0.raw, offset, bytes))
-        })
+            metal_sys::native::write_buffer(&self.0.raw, offset, bytes).map_err(|failure| sys_error(operation, failure))
+        })()
     }
     pub fn read_bytes(&self, offset: u64, length: usize) -> Result<Vec<u8>, Error> {
         let operation = "Metal.Buffer.read_bytes";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             if self.0.storage == StorageMode::Private { return Err(error(operation, ErrorKind::Unsupported, "private buffers have no CPU mapping")); }
             validate_range(operation, self.0.length, offset, length)?;
-            native(operation, metal_sys::native::read_buffer(&self.0.raw, offset, length))
-        })
+            metal_sys::native::read_buffer(&self.0.raw, offset, length).map_err(|failure| sys_error(operation, failure))
+        })()
     }
     pub fn destroy(&self) -> Result<(), Error> {
-        on_main("Metal.Buffer.destroy", || {
+        (|| -> Result<_, Error> { enter_main("Metal.Buffer.destroy")?;
             self.0.lifetime.destroy_parent("Metal.Buffer.destroy")?;
             if self.0.device_attached.swap(false, Ordering::AcqRel) { self.0.device.0.lifetime.dependents.fetch_sub(1, Ordering::AcqRel); }
             Ok(())
-        })
+        })()
     }
     pub fn is_destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
@@ -251,15 +250,15 @@ fn validate_range(operation: &str, total: u64, offset: u64, length: usize) -> Re
 }
 
 pub mod ReleaseQueue {
-    use super::{metal_raw, native, on_main, Error};
+    use super::{metal_raw, sys_error, enter_main, Error};
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     pub struct Stats { pub pending: usize, pub live_handles: usize, pub total_created: u64, pub total_released: u64, pub external_deallocations: u64, pub external_deallocation_mismatches: u64, pub resident_bytes: u64 }
-    pub fn drain() -> Result<usize, Error> { on_main("Metal.Release_queue.drain", || native("Metal.Release_queue.drain", metal_raw::drain_releases())) }
+    pub fn drain() -> Result<usize, Error> { enter_main("Metal.Release_queue.drain")?; metal_raw::drain_releases().map_err(|failure| sys_error("Metal.Release_queue.drain", failure)) }
     pub fn stats() -> Result<Stats, Error> {
-        on_main("Metal.Release_queue.stats", || {
+        (|| -> Result<_, Error> { enter_main("Metal.Release_queue.stats")?;
             let stats = metal_raw::handle_stats();
             Ok(Stats { pending: stats.pending, live_handles: stats.live_handles, total_created: stats.total_created, total_released: stats.total_released, external_deallocations: 0, external_deallocation_mismatches: 0, resident_bytes: 0 })
-        })
+        })()
     }
 }
 
@@ -387,7 +386,7 @@ impl Texture {
     }
     pub fn create(device: &Device, descriptor: TextureDescriptor) -> Result<Self, Error> {
         let operation = "Metal.Texture.create";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             device.0.lifetime.ensure_live(operation)?;
             validate_texture_descriptor(device, &descriptor)?;
             if descriptor.kind == TextureKind::TextureBuffer { return Err(error(operation, ErrorKind::InvalidArgument, "texture-buffer resources must be created from a buffer")); }
@@ -405,8 +404,8 @@ impl Texture {
                 swizzle_blue: texture_swizzle_code(descriptor.swizzle.blue), swizzle_alpha: texture_swizzle_code(descriptor.swizzle.alpha),
             };
             if let Some(label) = descriptor.label.as_deref() { validate_text(operation, label)?; }
-            let raw = native(operation, metal_sys::native::create_texture(device.raw(), &raw_descriptor, descriptor.label.as_deref()))?;
-            let actual = native(operation, metal_raw::texture_info(&raw))?;
+            let raw = metal_sys::native::create_texture(device.raw(), &raw_descriptor, descriptor.label.as_deref()).map_err(|failure| sys_error(operation, failure))?;
+            let actual = metal_raw::texture_info(&raw).map_err(|failure| sys_error(operation, failure))?;
             let expected = [
                 i64::from(texture_kind_code(descriptor.kind)),
                 i64::from(descriptor.format.code()),
@@ -431,9 +430,9 @@ impl Texture {
                 const FIELDS: [&str; 18] = ["kind", "format", "width", "height", "depth", "mip_levels", "sample_count", "array_length", "usage", "storage", "cpu_cache", "hazard_tracking", "allow_gpu_optimized_contents", "compression", "swizzle_red", "swizzle_green", "swizzle_blue", "swizzle_alpha"];
                 let differing = (0..FIELDS.len()).filter(|&index| actual[index] != expected[index])
                     .map(|index| format!("{} expected {} got {}", FIELDS[index], expected[index], actual[index])).collect::<Vec<_>>().join("; ");
-                return Err(error(operation, ErrorKind::NativeError, format!("Metal changed checked texture properties during creation: {differing}")));
+                return Err(error(operation, ErrorKind::NativeError, &format!("Metal changed checked texture properties during creation: {differing}")));
             }
-            if native(operation, metal_sys::registry::texture_is_shareable(&raw))? {
+            if metal_sys::registry::texture_is_shareable(&raw).map_err(|failure| sys_error(operation, failure))? {
                 return Err(error(operation, ErrorKind::NativeError, "Metal changed the checked texture sharing mode during creation"));
             }
             device.attach_child(operation)?;
@@ -450,7 +449,7 @@ impl Texture {
                 drawable_attached: AtomicBool::new(false),
                 parent_keepalive: None,
             })))
-        })
+        })()
     }
 
     pub(crate) fn from_drawable(
@@ -486,21 +485,21 @@ impl Texture {
     pub fn is_destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
     pub fn read_bytes(&self, region: TextureRegion, mip_level: usize, slice: usize, bytes_per_row: usize, bytes_per_image: usize) -> Result<Vec<u8>, Error> {
         let operation = "Metal.Texture.read_bytes";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             let total = self.validate_transfer(operation, region, mip_level, slice, bytes_per_row, bytes_per_image)?;
-            let destination = native(operation, metal_sys::native::read_texture_bytes(&self.0.raw, total, bytes_per_row, bytes_per_image, (region.x as u64, region.y as u64, region.z as u64, region.width as u64, region.height as u64, region.depth as u64), mip_level as u64, slice as u64))?;
+            let destination = metal_sys::native::read_texture_bytes(&self.0.raw, total, bytes_per_row, bytes_per_image, (region.x as u64, region.y as u64, region.z as u64, region.width as u64, region.height as u64, region.depth as u64), mip_level as u64, slice as u64).map_err(|failure| sys_error(operation, failure))?;
             Ok(destination)
-        })
+        })()
     }
     pub fn read_bytes_into(&self, region: TextureRegion, mip_level: usize, slice: usize, bytes_per_row: usize, bytes_per_image: usize, destination: &mut [u8]) -> Result<(), Error> {
         let operation = "Metal.Texture.read_bytes_into";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             let total = self.validate_transfer(operation, region, mip_level, slice, bytes_per_row, bytes_per_image)?;
             if destination.len() != total { return Err(error(operation, ErrorKind::InvalidArgument, "destination length does not match the complete pitched region")); }
-            native(operation, metal_sys::native::read_texture(&self.0.raw, destination, bytes_per_row, bytes_per_image, (region.x as u64, region.y as u64, region.z as u64, region.width as u64, region.height as u64, region.depth as u64), mip_level as u64, slice as u64))
-        })
+            metal_sys::native::read_texture(&self.0.raw, destination, bytes_per_row, bytes_per_image, (region.x as u64, region.y as u64, region.z as u64, region.width as u64, region.height as u64, region.depth as u64), mip_level as u64, slice as u64).map_err(|failure| sys_error(operation, failure))
+        })()
     }
     fn validate_transfer(&self, operation: &str, region: TextureRegion, mip_level: usize, slice: usize, bytes_per_row: usize, bytes_per_image: usize) -> Result<usize, Error> {
         let descriptor = &self.0.descriptor;
@@ -525,14 +524,14 @@ impl Texture {
         bytes_per_image.checked_mul(region.depth).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture transfer size overflow"))
     }
     pub fn destroy(&self) -> Result<(), Error> {
-        on_main("Metal.Texture.destroy", || {
+        (|| -> Result<_, Error> { enter_main("Metal.Texture.destroy")?;
             self.0.lifetime.destroy_parent("Metal.Texture.destroy")?;
             if self.0.device_attached.swap(false, Ordering::AcqRel) { self.0.device.lifetime().detach(); }
             if self.0.drawable_attached.swap(false, Ordering::AcqRel) {
                 if let Some(dependents) = &self.0.drawable_dependents { dependents.fetch_sub(1, Ordering::AcqRel); }
             }
             Ok(())
-        })
+        })()
     }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
@@ -551,19 +550,19 @@ pub struct CommandQueue(Arc<CommandQueueInner>);
 impl CommandQueue {
     pub fn create(device: &Device) -> Result<Self, Error> {
         let operation = "Metal.Command_queue.create";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             device.0.lifetime.ensure_live(operation)?;
-            let raw = native(operation, metal_sys::registry::command_queue_create(device.raw()))?;
+            let raw = metal_sys::registry::command_queue_create(device.raw()).map_err(|failure| sys_error(operation, failure))?;
             device.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
             Ok(Self(Arc::new(CommandQueueInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true) })))
-        })
+        })()
     }
     pub fn destroy(&self) -> Result<(), Error> {
-        on_main("Metal.Command_queue.destroy", || {
+        (|| -> Result<_, Error> { enter_main("Metal.Command_queue.destroy")?;
             self.0.lifetime.destroy_parent("Metal.Command_queue.destroy")?;
             if self.0.device_attached.swap(false, Ordering::AcqRel) { self.0.device.0.lifetime.dependents.fetch_sub(1, Ordering::AcqRel); }
             Ok(())
-        })
+        })()
     }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn device(&self) -> &Device { &self.0.device }
@@ -647,12 +646,12 @@ pub struct CommandBuffer(Arc<CommandBufferInner>);
 impl CommandBuffer {
     pub fn create(queue: &CommandQueue) -> Result<Self, Error> {
         let operation = "Metal.Command_buffer.create";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             queue.0.lifetime.ensure_live(operation)?;
-            let raw = native(operation, metal_sys::registry::command_buffer_create(queue.raw()))?;
+            let raw = metal_sys::registry::command_buffer_create(queue.raw()).map_err(|failure| sys_error(operation, failure))?;
             queue.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
             Ok(Self(Arc::new(CommandBufferInner { raw, lifetime: Lifetime::new(), queue: queue.clone(), queue_attached: AtomicBool::new(true), phase: Cell::new(CommandPhase::Recording), resources: RefCell::new(Vec::new()) })))
-        })
+        })()
     }
     pub fn device(&self) -> &Device { self.0.queue.device() }
     pub(crate) fn ensure_recording(&self, operation: &str) -> Result<(), Error> {
@@ -668,9 +667,9 @@ impl CommandBuffer {
 
     pub fn status(&self) -> Result<CommandBufferStatus, Error> {
         let operation = "Metal.Command_buffer.status";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
-            let status = native(operation, metal_sys::registry::command_buffer_status(&self.0.raw))?;
+            let status = metal_sys::registry::command_buffer_status(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
             let status = match status { 0 => CommandBufferStatus::NotEnqueued, 1 => CommandBufferStatus::Enqueued, 2 => CommandBufferStatus::Committed, 3 => CommandBufferStatus::Scheduled, 4 => CommandBufferStatus::Completed, 5 => CommandBufferStatus::Error, other => CommandBufferStatus::Unknown(other) };
             match status {
                 CommandBufferStatus::Completed => { self.0.phase.set(CommandPhase::Completed); self.0.resources.borrow_mut().clear(); }
@@ -678,69 +677,69 @@ impl CommandBuffer {
                 _ => {}
             }
             Ok(status)
-        })
+        })()
     }
     pub fn diagnostics(&self) -> Result<CommandBufferDiagnostics, Error> {
         let operation = "Metal.Command_buffer.diagnostics";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
-            let value = native(operation, metal_sys::native::presentation_command_snapshot(&self.0.raw))?;
+            let value = metal_sys::native::presentation_command_snapshot(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
             Ok(CommandBufferDiagnostics { error_options: value.error_options, gpu_start_time: value.gpu_start_time, gpu_end_time: value.gpu_end_time, kernel_start_time: value.kernel_start_time, kernel_end_time: value.kernel_end_time, retained_references: value.retained_references != 0 })
-        })
+        })()
     }
     pub fn commit(&self) -> Result<(), Error> {
         let operation = "Metal.Command_buffer.commit";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             self.ensure_recording(operation)?;
-            native(operation, metal_sys::registry::command_buffer_commit(&self.0.raw))?;
+            metal_sys::registry::command_buffer_commit(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
             self.0.phase.set(CommandPhase::Submitted);
             Ok(())
-        })
+        })()
     }
     pub fn wait_until_completed(&self) -> Result<(), Error> {
         let operation = "Metal.Command_buffer.wait_until_completed";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             let state = self.status()?;
             if matches!(state, CommandBufferStatus::NotEnqueued | CommandBufferStatus::Enqueued) { return Err(error(operation, ErrorKind::InvalidState, "command buffer has not been committed")); }
-            native(operation, metal_sys::native::wait_command_buffer(&self.0.raw))?;
+            metal_sys::native::wait_command_buffer(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
             self.0.resources.borrow_mut().clear();
             self.0.phase.set(CommandPhase::Completed);
-            if let Some(message) = native(operation, metal_sys::native::command_buffer_error(&self.0.raw))? {
+            if let Some(message) = metal_sys::native::command_buffer_error(&self.0.raw).map_err(|failure| sys_error(operation, failure))? {
                 self.0.phase.set(CommandPhase::Failed);
-                return Err(error(operation, ErrorKind::NativeError, message));
+                return Err(error(operation, ErrorKind::NativeError, &message));
             }
             Ok(())
-        })
+        })()
     }
     pub fn destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
     pub fn present(&self, drawable: &crate::surface::Drawable, time: PresentTime) -> Result<(), Error> {
         let operation = "Metal.Command_buffer.present";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.ensure_recording(operation)?;
             drawable.ensure_live(operation)?;
             if drawable.is_presentation_scheduled() { return Err(error(operation, ErrorKind::InvalidState, "drawable is already scheduled for presentation")); }
             if !self.device().same(drawable.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "drawable belongs to another Metal device")); }
             match time {
-                PresentTime::Immediate => native(operation, metal_sys::registry::command_buffer_present(&self.0.raw, drawable.raw())),
-                PresentTime::AtTime(time) if time.is_finite() && time >= 0.0 => native(operation, metal_sys::registry::command_buffer_present_at_time(&self.0.raw, drawable.raw(), time)),
-                PresentTime::AfterMinimumDuration(duration) if duration.is_finite() && duration >= 0.0 => native(operation, metal_sys::registry::command_buffer_present_after_duration(&self.0.raw, drawable.raw(), duration)),
+                PresentTime::Immediate => metal_sys::registry::command_buffer_present(&self.0.raw, drawable.raw()).map_err(|failure| sys_error(operation, failure)),
+                PresentTime::AtTime(time) if time.is_finite() && time >= 0.0 => metal_sys::registry::command_buffer_present_at_time(&self.0.raw, drawable.raw(), time).map_err(|failure| sys_error(operation, failure)),
+                PresentTime::AfterMinimumDuration(duration) if duration.is_finite() && duration >= 0.0 => metal_sys::registry::command_buffer_present_after_duration(&self.0.raw, drawable.raw(), duration).map_err(|failure| sys_error(operation, failure)),
                 _ => Err(error(operation, ErrorKind::InvalidArgument, "presentation time must be finite and nonnegative")),
             }?;
             drawable.mark_presentation_scheduled();
             self.retain(RetainedResource::Drawable(drawable.clone()));
             Ok(())
-        })
+        })()
     }
     pub(crate) fn present_drawable(&self, drawable: &crate::surface::Drawable) -> Result<(), Error> { self.present(drawable, PresentTime::Immediate) }
     pub fn destroy(&self) -> Result<(), Error> {
-        on_main("Metal.Command_buffer.destroy", || {
+        (|| -> Result<_, Error> { enter_main("Metal.Command_buffer.destroy")?;
             self.0.lifetime.destroy_parent("Metal.Command_buffer.destroy")?;
             self.0.resources.borrow_mut().clear(); // a destroyed command buffer retains nothing (ogpu_metal abandons uncommitted work this way)
             if self.0.queue_attached.swap(false, Ordering::AcqRel) { self.0.queue.0.lifetime.dependents.fetch_sub(1, Ordering::AcqRel); }
             Ok(())
-        })
+        })()
     }
     fn retain(&self, resource: RetainedResource) {
         resource.dependents().fetch_add(1, Ordering::AcqRel);
@@ -780,26 +779,26 @@ pub struct ComputePipeline(Arc<ComputePipelineInner>);
 impl ComputePipeline {
     pub fn create(function: &crate::library::Function, label: Option<&str>, reflection: bool) -> Result<Self, Error> {
         let operation = "Metal.Compute_pipeline.create";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             function.lifetime().ensure_live(operation)?;
             if let Some(label) = label { validate_text(operation, label)?; }
             let device = function.device();
             device.ensure_live(operation)?;
-            let (raw, reflected) = native(operation, metal_sys::native::pipeline::create_compute_pipeline(device.raw(), function.raw(), label, reflection))?;
-            let max_total_threads = usize::try_from(native(operation, metal_sys::registry::compute_pipeline_max_total_threads(&raw))?).map_err(|_| error(operation, ErrorKind::InvalidState, "Metal returned an out-of-range thread limit"))?;
+            let (raw, reflected) = metal_sys::native::pipeline::create_compute_pipeline(device.raw(), function.raw(), label, reflection).map_err(|failure| sys_error(operation, failure))?;
+            let max_total_threads = usize::try_from(metal_sys::registry::compute_pipeline_max_total_threads(&raw).map_err(|failure| sys_error(operation, failure))?).map_err(|_| error(operation, ErrorKind::InvalidState, "Metal returned an out-of-range thread limit"))?;
             let bindings = reflection.then(|| reflected.into_iter().map(crate::pipeline::map_binding).collect());
             device.attach_child(operation)?;
             Ok(Self(Arc::new(ComputePipelineInner { raw, lifetime: Lifetime::new(), device: device.clone(), max_total_threads, bindings, device_attached: AtomicBool::new(true) })))
-        })
+        })()
     }
     pub fn bindings(&self) -> Option<&[crate::pipeline::ShaderBinding]> { self.0.bindings.as_deref() }
     pub fn max_total_threads(&self) -> usize { self.0.max_total_threads }
     pub fn destroy(&self) -> Result<(), Error> {
-        on_main("Metal.Compute_pipeline.destroy", || {
+        (|| -> Result<_, Error> { enter_main("Metal.Compute_pipeline.destroy")?;
             self.0.lifetime.destroy_parent("Metal.Compute_pipeline.destroy")?;
             if self.0.device_attached.swap(false, Ordering::AcqRel) { self.0.device.lifetime().detach(); }
             Ok(())
-        })
+        })()
     }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
@@ -820,61 +819,61 @@ pub struct ComputeEncoder(Arc<ComputeEncoderInner>);
 impl ComputeEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         let operation = "Metal.Compute_encoder.create";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             command_buffer.ensure_recording(operation)?;
-            let raw = native(operation, metal_sys::registry::command_buffer_compute_encoder(command_buffer.raw()))?;
+            let raw = metal_sys::registry::command_buffer_compute_encoder(command_buffer.raw()).map_err(|failure| sys_error(operation, failure))?;
             command_buffer.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
             Ok(Self(Arc::new(ComputeEncoderInner { raw, lifetime: Lifetime::new(), command_buffer: command_buffer.clone(), pipeline: RefCell::new(None), ended: AtomicBool::new(false) })))
-        })
+        })()
     }
     pub fn set_pipeline(&self, pipeline: &ComputePipeline) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.set_pipeline";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             pipeline.0.lifetime.ensure_live(operation)?;
             if !self.0.command_buffer.device().same(&pipeline.0.device) { return Err(error(operation, ErrorKind::DeviceMismatch, "resources belong to different Metal devices")); }
-            native(operation, metal_sys::registry::compute_encoder_set_pipeline(&self.0.raw, pipeline.raw()))?;
+            metal_sys::registry::compute_encoder_set_pipeline(&self.0.raw, pipeline.raw()).map_err(|failure| sys_error(operation, failure))?;
             *self.0.pipeline.borrow_mut() = Some(pipeline.clone());
             self.0.command_buffer.retain_pipeline(pipeline);
             Ok(())
-        })
+        })()
     }
     pub fn set_buffer(&self, index: usize, offset: u64, buffer: &Buffer) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.set_buffer";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             buffer.0.lifetime.ensure_live(operation)?;
             if index >= 31 { return Err(error(operation, ErrorKind::InvalidArgument, "buffer index must be in [0, 31)")); }
             if offset > buffer.0.length { return Err(error(operation, ErrorKind::InvalidArgument, "buffer offset is outside the resource")); }
             if !self.0.command_buffer.device().same(buffer.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "resources belong to different Metal devices")); }
-            native(operation, metal_sys::registry::compute_encoder_set_buffer(&self.0.raw, buffer.raw(), offset, index))?;
+            metal_sys::registry::compute_encoder_set_buffer(&self.0.raw, buffer.raw(), offset, index).map_err(|failure| sys_error(operation, failure))?;
             self.0.command_buffer.retain_buffer(buffer);
             Ok(())
-        })
+        })()
     }
     pub fn set_texture(&self, index: usize, texture: &Texture) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.set_texture";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             texture.0.lifetime.ensure_live(operation)?;
             if index >= 31 { return Err(error(operation, ErrorKind::InvalidArgument, "texture index must be in [0, 31)")); }
             if !self.0.command_buffer.device().same(texture.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "resources belong to different Metal devices")); }
-            native(operation, metal_sys::registry::compute_encoder_set_texture(&self.0.raw, texture.raw(), index))?;
+            metal_sys::registry::compute_encoder_set_texture(&self.0.raw, texture.raw(), index).map_err(|failure| sys_error(operation, failure))?;
             self.0.command_buffer.retain_texture(texture);
             Ok(())
-        })
+        })()
     }
     pub fn set_bytes(&self, index: usize, bytes: &[u8]) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.set_bytes";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             if index >= 31 || bytes.is_empty() { return Err(error(operation, ErrorKind::InvalidArgument, "byte binding index or length is invalid")); }
-            native(operation, metal_sys::native::set_compute_bytes(&self.0.raw, bytes, index as u64))
-        })
+            metal_sys::native::set_compute_bytes(&self.0.raw, bytes, index as u64).map_err(|failure| sys_error(operation, failure))
+        })()
     }
     pub fn dispatch_threads(&self, threads: (usize, usize, usize), threadgroup: (usize, usize, usize)) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.dispatch_threads";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             let pipeline = self.0.pipeline.borrow().clone().ok_or_else(|| error(operation, ErrorKind::InvalidState, "no compute pipeline is bound"))?;
             if threads.0 == 0 || threads.1 == 0 || threads.2 == 0 || threadgroup.0 == 0 || threadgroup.1 == 0 || threadgroup.2 == 0 {
@@ -883,12 +882,12 @@ impl ComputeEncoder {
             let count = threadgroup.0.checked_mul(threadgroup.1).and_then(|value| value.checked_mul(threadgroup.2)).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "threadgroup cardinality overflows"))?;
             if count > pipeline.max_total_threads() { return Err(error(operation, ErrorKind::InvalidArgument, "threadgroup exceeds the pipeline's maximum total thread count")); }
             let make_size = |(width, height, depth)| metal_sys::registry::Record::Mtl_size_int { width, height, depth };
-            native(operation, metal_sys::registry::compute_encoder_dispatch(&self.0.raw, make_size(threads), make_size(threadgroup)))
-        })
+            metal_sys::registry::compute_encoder_dispatch(&self.0.raw, make_size(threads), make_size(threadgroup)).map_err(|failure| sys_error(operation, failure))
+        })()
     }
     pub fn dispatch_threadgroups_indirect(&self, arguments: &Buffer, offset: u64, threadgroup: (usize, usize, usize)) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.dispatch_threadgroups_indirect";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             arguments.0.lifetime.ensure_live(operation)?;
             let pipeline = self.0.pipeline.borrow().clone().ok_or_else(|| error(operation, ErrorKind::InvalidState, "no compute pipeline is bound"))?;
@@ -898,22 +897,22 @@ impl ComputeEncoder {
             let count = threadgroup.0.checked_mul(threadgroup.1).and_then(|value| value.checked_mul(threadgroup.2)).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "threadgroup cardinality overflows"))?;
             if count > pipeline.max_total_threads() { return Err(error(operation, ErrorKind::InvalidArgument, "threadgroup exceeds the pipeline's maximum total thread count")); }
             let size = metal_sys::registry::Record::Mtl_size_int { width: threadgroup.0, height: threadgroup.1, depth: threadgroup.2 };
-            native(operation, metal_sys::registry::compute_encoder_dispatch_indirect(&self.0.raw, arguments.raw(), offset, size))?;
+            metal_sys::registry::compute_encoder_dispatch_indirect(&self.0.raw, arguments.raw(), offset, size).map_err(|failure| sys_error(operation, failure))?;
             self.0.command_buffer.retain_buffer(arguments);
             Ok(())
-        })
+        })()
     }
     pub fn end_encoding(&self) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.end_encoding";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
-            native(operation, metal_sys::registry::compute_encoder_end(&self.0.raw))?;
+            metal_sys::registry::compute_encoder_end(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
             if !self.0.ended.swap(true, Ordering::AcqRel) {
                 self.0.lifetime.destroyed.store(true, Ordering::Release);
                 self.0.command_buffer.0.lifetime.dependents.fetch_sub(1, Ordering::AcqRel);
             }
             Ok(())
-        })
+        })()
     }
 }
 
@@ -921,21 +920,21 @@ impl ComputeEncoder {
 impl ComputeEncoder {
     pub fn set_acceleration_structure(&self, index: usize, structure: Option<&crate::acceleration::AccelerationStructure>) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.set_acceleration_structure";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             if index >= 31 { return Err(error(operation, ErrorKind::InvalidArgument, "buffer index is outside [0, 31)")); }
             if let Some(a) = structure {
                 a.lifetime().ensure_live(operation)?;
                 if !self.0.command_buffer.device().same(a.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "resources belong to different Metal devices")); }
             }
-            native(operation, metal_sys::registry::compute35_acceleration(&self.0.raw, structure.map(|a| a.raw()), index as u64))?;
+            metal_sys::registry::compute35_acceleration(&self.0.raw, structure.map(|a| a.raw()), index as u64).map_err(|failure| sys_error(operation, failure))?;
             if let Some(a) = structure { self.0.command_buffer.retain_acceleration(a); }
             Ok(())
-        })
+        })()
     }
     pub fn use_acceleration_structures(&self, structures: &[crate::acceleration::AccelerationStructure]) -> Result<(), Error> {
         let operation = "Metal.Compute_encoder.use_acceleration_structures";
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             if structures.is_empty() { return Err(error(operation, ErrorKind::InvalidArgument, "structures must not be empty")); }
             for a in structures {
@@ -943,9 +942,9 @@ impl ComputeEncoder {
                 if !self.0.command_buffer.device().same(a.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "resources belong to different Metal devices")); }
             }
             let raws: Vec<metal_sys::Handle> = structures.iter().map(|a| a.raw().clone()).collect();
-            native(operation, metal_sys::native::use_accelerations(&self.0.raw, &raws))?;
+            metal_sys::native::use_accelerations(&self.0.raw, &raws).map_err(|failure| sys_error(operation, failure))?;
             for a in structures { self.0.command_buffer.retain_acceleration(a); }
             Ok(())
-        })
+        })()
     }
 }

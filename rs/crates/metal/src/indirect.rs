@@ -2,12 +2,12 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::metal::{error, native, on_main, Buffer, Device, Error, ErrorKind, Lifetime};
+use crate::metal::{error, sys_error, enter_main, Buffer, Device, Error, ErrorKind, Lifetime};
 use crate::pipeline::RenderPipeline;
 use metal_sys;
 
 const PRIVATE_TRACKED_RESOURCE_OPTIONS: i64 = (2 << 4) | (2 << 8);
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommandType { IndirectDraw, IndirectDrawIndexed, IndirectConcurrentDispatch, IndirectConcurrentDispatchThreads }
 impl CommandType {
     fn bit(self) -> i64 {
@@ -95,12 +95,12 @@ impl IndirectCommandBuffer {
     pub fn descriptor(command_types: Vec<CommandType>) -> Descriptor { Descriptor::new(command_types) }
     pub fn create(device: &Device, max_command_count: usize, descriptor: &Descriptor) -> Result<Self, Error> {
         const OP: &str = "Metal.Indirect_command_buffer.create";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             device.ensure_live(OP)?;
             if descriptor.command_types.is_empty() {
                 return Err(error(OP, ErrorKind::InvalidArgument, "at least one indirect command type is required"));
             }
-            if descriptor.command_types.windows(2).any(|pair| pair[0] >= pair[1]) {
+            if descriptor.command_types.windows(2).any(|pair| pair[0] as u8 >= pair[1] as u8) {
                 return Err(error(OP, ErrorKind::InvalidArgument, "indirect command types must be unique and ordered"));
             }
             if max_command_count == 0 { return Err(error(OP, ErrorKind::InvalidArgument, "maximum command count must be positive")); }
@@ -139,23 +139,23 @@ impl IndirectCommandBuffer {
                 support_color_attachment_mapping: u8::from(descriptor.support_color_attachment_mapping),
             };
             let max = u64::try_from(max_command_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "maximum command count exceeds native bounds"))?;
-            let raw = native(OP, metal_sys::native::create_indirect_command_buffer(device.raw(), &raw_descriptor, max, PRIVATE_TRACKED_RESOURCE_OPTIONS))?;
+            let raw = metal_sys::native::create_indirect_command_buffer(device.raw(), &raw_descriptor, max, PRIVATE_TRACKED_RESOURCE_OPTIONS).map_err(|failure| sys_error(OP, failure))?;
             device.attach_child(OP)?;
             Ok(Self(Arc::new(IndirectCommandBufferInner {
                 raw, lifetime: Lifetime::new(), device: device.clone(), max_command_count,
                 command_types: descriptor.command_types.clone(), retained: RefCell::new(Vec::new()),
                 device_attached: AtomicBool::new(true),
             })))
-        })
+        })()
     }
 
     pub fn destroy(&self) -> Result<(), Error> {
-        on_main("Metal.Indirect_command_buffer.destroy", || {
+        (|| -> Result<_, Error> { enter_main("Metal.Indirect_command_buffer.destroy")?;
             self.0.lifetime.destroy_parent("Metal.Indirect_command_buffer.destroy")?;
             self.0.retained.borrow_mut().clear();
             if self.0.device_attached.swap(false, Ordering::AcqRel) { self.0.device.detach_child(); }
             Ok(())
-        })
+        })()
     }
 
     fn retain(&self, resource: RetainedResource) {
@@ -201,47 +201,47 @@ pub struct RenderCommand(Arc<RenderCommandInner>);
 impl RenderCommand {
     pub fn at(buffer: &IndirectCommandBuffer, index: usize) -> Result<Self, Error> {
         const OP: &str = "Metal.Indirect_command_buffer.Render_command.at";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             buffer.0.lifetime.ensure_live(OP)?;
             if !buffer.0.command_types.contains(&CommandType::IndirectDraw) && !buffer.0.command_types.contains(&CommandType::IndirectDrawIndexed) {
                 return Err(error(OP, ErrorKind::InvalidState, "descriptor does not enable render commands"));
             }
             buffer.validate_range(OP, index, 1)?;
-            let raw = native(OP, metal_sys::registry::indirect_render_command(&buffer.0.raw, index as u64))?;
+            let raw = metal_sys::registry::indirect_render_command(&buffer.0.raw, index as u64).map_err(|failure| sys_error(OP, failure))?;
             buffer.0.lifetime.attach();
             Ok(Self(Arc::new(RenderCommandInner { raw, lifetime: Lifetime::new(), parent: buffer.clone(), parent_attached: AtomicBool::new(true) })))
-        })
+        })()
     }
     pub fn set_pipeline(&self, pipeline: &RenderPipeline) -> Result<(), Error> {
         const OP: &str = "Metal.Indirect_command_buffer.Render_command.set_pipeline";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.0.lifetime.ensure_live(OP)?;
             pipeline.lifetime().ensure_live(OP)?;
             if !self.0.parent.device().same(pipeline.device()) { return Err(error(OP, ErrorKind::DeviceMismatch, "pipeline belongs to another device")); }
-            if !native(OP, metal_sys::registry::render_pipeline_state_support_indirect_command_buffers(pipeline.raw()))? {
+            if !metal_sys::registry::render_pipeline_state_support_indirect_command_buffers(pipeline.raw()).map_err(|failure| sys_error(OP, failure))? {
                 return Err(error(OP, ErrorKind::Unsupported, "pipeline was not compiled for indirect command buffers"));
             }
-            native(OP, metal_sys::registry::indirect_render_command_set_pipeline(&self.0.raw, pipeline.raw()))?;
+            metal_sys::registry::indirect_render_command_set_pipeline(&self.0.raw, pipeline.raw()).map_err(|failure| sys_error(OP, failure))?;
             self.0.parent.retain_pipeline(pipeline);
             Ok(())
-        })
+        })()
     }
 
     fn set_buffer(&self, operation: &'static str, vertex: bool, index: usize, offset: u64, buffer: &Buffer) -> Result<(), Error> {
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             buffer.lifetime().ensure_live(operation)?;
             if index >= 31 { return Err(error(operation, ErrorKind::InvalidArgument, "buffer index must be in [0, 31)")); }
             if offset > buffer.length() { return Err(error(operation, ErrorKind::InvalidArgument, "buffer offset is outside the resource")); }
             if !self.0.parent.device().same(buffer.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "buffer belongs to another device")); }
             if vertex {
-                native(operation, metal_sys::registry::indirect_render_command_set_vertex_buffer(&self.0.raw, buffer.raw(), offset, index))?;
+                metal_sys::registry::indirect_render_command_set_vertex_buffer(&self.0.raw, buffer.raw(), offset, index).map_err(|failure| sys_error(operation, failure))?;
             } else {
-                native(operation, metal_sys::registry::indirect_render_command_set_fragment_buffer(&self.0.raw, buffer.raw(), offset, index))?;
+                metal_sys::registry::indirect_render_command_set_fragment_buffer(&self.0.raw, buffer.raw(), offset, index).map_err(|failure| sys_error(operation, failure))?;
             }
             self.0.parent.retain_buffer(buffer);
             Ok(())
-        })
+        })()
     }
 
     pub fn set_vertex_buffer(&self, index: usize, offset: u64, buffer: &Buffer) -> Result<(), Error> {
@@ -254,7 +254,7 @@ impl RenderCommand {
     pub fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, index_buffer: &Buffer, index_offset: u64, index_count: u64, instance_count: Option<u64>) -> Result<(), Error> {
         const OP: &str = "Metal.Indirect_command_buffer.Render_command.draw_indexed";
         let instance_count = instance_count.unwrap_or(1);
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.0.lifetime.ensure_live(OP)?;
             index_buffer.lifetime().ensure_live(OP)?;
             let element = match index_type { IndexType::Uint16 => 2, IndexType::Uint32 => 4 };
@@ -264,34 +264,34 @@ impl RenderCommand {
             }
             if !self.0.parent.device().same(index_buffer.device()) { return Err(error(OP, ErrorKind::DeviceMismatch, "index buffer belongs to another device")); }
             let type_code = match index_type { IndexType::Uint16 => 0, IndexType::Uint32 => 1 };
-            native(OP, metal_sys::native::draw_indexed(
+            metal_sys::native::draw_indexed(
                 &self.0.raw, primitive.code() as i32, index_count, type_code, index_buffer.raw(), index_offset,
                 instance_count, 0, 0, self.0.parent.device().registry_id(),
-            ))?;
+            ).map_err(|failure| sys_error(OP, failure))?;
             self.0.parent.retain_buffer(index_buffer);
             Ok(())
-        })
+        })()
     }
 
     pub fn draw_primitives(&self, primitive: Primitive, vertex_start: usize, vertex_count: usize, instance_count: Option<usize>) -> Result<(), Error> {
         const OP: &str = "Metal.Indirect_command_buffer.Render_command.draw_primitives";
         let instance_count = instance_count.unwrap_or(1);
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.0.lifetime.ensure_live(OP)?;
             if vertex_count == 0 || instance_count == 0 { return Err(error(OP, ErrorKind::InvalidArgument, "draw ranges must be nonnegative and counts positive")); }
             let start = u64::try_from(vertex_start).map_err(|_| error(OP, ErrorKind::InvalidArgument, "vertex start exceeds native bounds"))?;
             let count = u64::try_from(vertex_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "vertex count exceeds native bounds"))?;
             let instances = u64::try_from(instance_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "instance count exceeds native bounds"))?;
-            native(OP, metal_sys::registry::indirect_render_command_draw_primitives(&self.0.raw, primitive.code(), start, count, instances, 0))
-        })
+            metal_sys::registry::indirect_render_command_draw_primitives(&self.0.raw, primitive.code(), start, count, instances, 0).map_err(|failure| sys_error(OP, failure))
+        })()
     }
 
     pub fn destroy(&self) -> Result<(), Error> {
-        on_main("Metal.Indirect_command_buffer.Render_command.destroy", || {
+        (|| -> Result<_, Error> { enter_main("Metal.Indirect_command_buffer.Render_command.destroy")?;
             self.0.lifetime.destroy_parent("Metal.Indirect_command_buffer.Render_command.destroy")?;
             if self.0.parent_attached.swap(false, Ordering::AcqRel) { self.0.parent.lifetime().detach(); }
             Ok(())
-        })
+        })()
     }
 }
 

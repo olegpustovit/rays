@@ -1,5 +1,5 @@
 //! Ogpu_metal.Queue: one command queue, its frames-in-flight epochs and GPU timings.
-use crate::device::{fail, native_of, of_metal_error, Device, R};
+use crate::device::{fail, of_metal_error, Device};
 use ogpu_core::error::{Error, ErrorKind};
 use std::{
     cell::{Cell, RefCell},
@@ -75,12 +75,12 @@ fn record_gpu_duration(device: &Device, duration: f64) {
 /// The last few completed epochs' GPU durations, for profiling callers.
 const DURATION_CAPACITY: usize = 16;
 
-pub fn create(device: &Device) -> R<Queue> {
+pub fn create(device: &Device) -> Result<Queue, Error> {
     let op = "Ogpu_metal.Queue.create";
     if device.destroyed() {
-        return fail(op, ErrorKind::StaleHandle, "device is destroyed");
+        return Err(fail(op, ErrorKind::StaleHandle, "device is destroyed"));
     }
-    let metal = native_of(op, metal::CommandQueue::create(device.metal()))?;
+    let metal = metal::CommandQueue::create(device.metal()).map_err(|value| of_metal_error(op, &value))?;
     GPU_TIMINGS.with(|table| {
         table
             .borrow_mut()
@@ -115,13 +115,13 @@ impl Queue {
         self.0.durations.borrow().iter().find(|(e, _)| *e == epoch).map(|(_, d)| *d)
     }
 
-    fn admit(&self) -> R<i64> {
+    fn admit(&self) -> Result<i64, Error> {
         let operation = "Ogpu_metal.Queue.submit_native";
         let value = &self.0;
         if value.device.destroyed() {
-            fail(operation, ErrorKind::DeviceLost, "queue device is lost")
+            Err(fail(operation, ErrorKind::DeviceLost, "queue device is lost"))
         } else if value.active.get() >= value.max_frames {
-            fail(operation, ErrorKind::Capacity, "frames-in-flight capacity reached")
+            Err(fail(operation, ErrorKind::Capacity, "frames-in-flight capacity reached"))
         } else {
             let epoch = value.next_epoch.get();
             value.next_epoch.set(epoch + 1);
@@ -130,11 +130,11 @@ impl Queue {
         }
     }
 
-    fn complete_epoch(&self, epoch: i64) -> R<()> {
+    fn complete_epoch(&self, epoch: i64) -> Result<(), Error> {
         let operation = "Ogpu_metal.Queue.complete_through";
         let value = &self.0;
         if epoch < value.completed.get() || epoch >= value.next_epoch.get() {
-            fail(operation, ErrorKind::InvalidArgument, "completion epoch is invalid")
+            Err(fail(operation, ErrorKind::InvalidArgument, "completion epoch is invalid"))
         } else {
             value.active.set((value.active.get() - (epoch - value.completed.get())).max(0));
             value.completed.set(epoch);
@@ -144,11 +144,11 @@ impl Queue {
 
     /// Admits an externally encoded, uncommitted native command buffer. On any failure the caller
     /// still owns `native` and `retained`; on success `retained` is emptied into the queue.
-    pub fn submit_native(&self, native: &metal::CommandBuffer, retained: &mut Vec<Cleanup>) -> R<Receipt> {
+    pub fn submit_native(&self, native: &metal::CommandBuffer, retained: &mut Vec<Cleanup>) -> Result<Receipt, Error> {
         let op = "Ogpu_metal.Queue.submit_native";
         let value = &self.0;
         if value.dead.get() {
-            return fail(op, ErrorKind::StaleHandle, "queue is destroyed");
+            return Err(fail(op, ErrorKind::StaleHandle, "queue is destroyed"));
         }
         let epoch = self.admit()?;
         match native.commit() {
@@ -164,16 +164,16 @@ impl Queue {
         }
     }
 
-    pub fn wait_through(&self, epoch: i64) -> R<()> {
+    pub fn wait_through(&self, epoch: i64) -> Result<(), Error> {
         let op = "Ogpu_metal.Queue.wait_through";
         let value = &self.0;
         if epoch <= self.completed_epoch() || epoch > (1i64 << 62) - 1 {
-            return fail(op, ErrorKind::InvalidArgument, "completion epoch is invalid");
+            return Err(fail(op, ErrorKind::InvalidArgument, "completion epoch is invalid"));
         }
         let (ready, later): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut *value.pending.borrow_mut()).into_iter().partition(|p| p.epoch <= epoch);
         if ready.is_empty() {
             *value.pending.borrow_mut() = later;
-            return fail(op, ErrorKind::InvalidArgument, "epoch was not submitted");
+            return Err(fail(op, ErrorKind::InvalidArgument, "epoch was not submitted"));
         }
         let mut first_error: Option<Error> = None;
         for pending in ready {
@@ -210,23 +210,23 @@ impl Queue {
         }
     }
 
-    pub fn poll_through(&self, epoch: i64) -> R<bool> {
+    pub fn poll_through(&self, epoch: i64) -> Result<bool, Error> {
         let op = "Ogpu_metal.Queue.poll_through";
         let value = &self.0;
         if epoch <= 0 {
-            return fail(op, ErrorKind::InvalidArgument, "completion epoch is invalid");
+            return Err(fail(op, ErrorKind::InvalidArgument, "completion epoch is invalid"));
         }
         if epoch <= value.completed.get() {
             return Ok(true);
         }
         if epoch >= value.next_epoch.get() {
-            return fail(op, ErrorKind::InvalidArgument, "epoch was not submitted");
+            return Err(fail(op, ErrorKind::InvalidArgument, "epoch was not submitted"));
         }
         for pending in value.pending.borrow().iter() {
             if pending.epoch > epoch {
                 break;
             }
-            match native_of(op, pending.command.status())? {
+            match pending.command.status().map_err(|value| of_metal_error(op, &value))? {
                 metal::CommandBufferStatus::Completed | metal::CommandBufferStatus::Error => {}
                 _ => return Ok(false),
             }
@@ -235,15 +235,15 @@ impl Queue {
         Ok(true)
     }
 
-    pub fn destroy(&self) -> R<()> {
+    pub fn destroy(&self) -> Result<(), Error> {
         let op = "Ogpu_metal.Queue.destroy";
         let value = &self.0;
         if value.dead.get() {
             Ok(())
         } else if !value.pending.borrow().is_empty() {
-            fail(op, ErrorKind::InvalidState, "queue has commands in flight")
+            Err(fail(op, ErrorKind::InvalidState, "queue has commands in flight"))
         } else {
-            native_of(op, value.metal.destroy())?;
+            value.metal.destroy().map_err(|value| of_metal_error(op, &value))?;
             value.dead.set(true);
             GPU_TIMINGS.with(|table| {
                 let mut table = table.borrow_mut();

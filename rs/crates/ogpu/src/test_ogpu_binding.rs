@@ -5,18 +5,15 @@ use crate::{
     handle,
 };
 
-fn ok<T>(result: Result<T, Error>) -> T {
-    match result {
-        Ok(value) => value,
-        Err(error) => panic!("{}", crate::error::to_string(&error)),
-    }
+fn die(error: Error) -> ! {
+    panic!("{}", crate::error::to_string(&error))
 }
 
-fn expect<T>(kind: ErrorKind, result: Result<T, Error>) {
+fn expect(kind: ErrorKind, result: Option<Error>) {
     match result {
-        Err(error) if error.kind == kind => {}
-        Err(error) => panic!("unexpected error: {}", crate::error::to_string(&error)),
-        Ok(_) => panic!("expected rejection"),
+        Some(error) if error.kind == kind => {}
+        Some(error) => panic!("unexpected error: {}", crate::error::to_string(&error)),
+        None => panic!("expected rejection"),
     }
 }
 
@@ -35,29 +32,29 @@ fn immutable_binding_tables() {
     let _foreign_buffer = handle::create(&foreign);
     expect(
         ErrorKind::InvalidArgument,
-        binding::create_layout(&[entry(0, Kind::Buffer, &[Stage::Vertex]), entry(0, Kind::Texture, &[Stage::Fragment])]),
+        binding::create_layout(&[entry(0, Kind::Buffer, &[Stage::Vertex]), entry(0, Kind::Texture, &[Stage::Fragment])]).err(),
     );
-    expect(ErrorKind::InvalidArgument, binding::create_layout(&[entry(0, Kind::Buffer, &[])]));
+    expect(ErrorKind::InvalidArgument, binding::create_layout(&[entry(0, Kind::Buffer, &[])]).err());
     expect(
         ErrorKind::InvalidArgument,
-        binding::create_layout(&[entry(0, Kind::Buffer, &[Stage::Vertex, Stage::Vertex])]),
+        binding::create_layout(&[entry(0, Kind::Buffer, &[Stage::Vertex, Stage::Vertex])]).err(),
     );
     handle::destroy(&texture);
     let too_many: Vec<_> = (0..capabilities.limits.max_bind_groups + 1)
-        .map(|group| (group, ok(binding::create_layout(&[]))))
+        .map(|group| (group, binding::create_layout(&[]).unwrap_or_else(|failure| die(failure))))
         .collect();
-    expect(ErrorKind::Capacity, binding::create_pipeline_layout(&device, &capabilities, &too_many));
+    expect(ErrorKind::Capacity, binding::create_pipeline_layout(&device, &capabilities, &too_many).err());
     expect(
         ErrorKind::InvalidArgument,
-        binding::create_pipeline_layout(&device, &capabilities, &[(1, ok(binding::create_layout(&[])))]),
+        binding::create_pipeline_layout(&device, &capabilities, &[(1, binding::create_layout(&[]).unwrap_or_else(|failure| die(failure)))]).err(),
     );
     expect(
         ErrorKind::InvalidArgument,
         binding::create_pipeline_layout(
             &device,
             &capabilities,
-            &[(0, ok(binding::create_layout(&[]))), (0, ok(binding::create_layout(&[])))],
-        ),
+            &[(0, binding::create_layout(&[]).unwrap_or_else(|failure| die(failure))), (0, binding::create_layout(&[]).unwrap_or_else(|failure| die(failure)))],
+        ).err(),
     );
     handle::destroy_device(&device);
     handle::destroy_device(&foreign);

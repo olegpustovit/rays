@@ -553,7 +553,7 @@ mod tests {
             .iter()
             .map(|pattern| AttributeRule { pattern: (*pattern).to_owned(), method: AttributeMethod::LeastPoint, weight_attribute: None })
             .collect();
-        let signature = same_at_one_and_four(&|| {
+        let signature = same_at_one_and_four_strings(&|| {
             let out = apply(None, 512, &rules, &[], &destinations, &source, &target).unwrap();
             geometry::attributes(&out).iter().map(attribute_signature).collect::<Vec<_>>()
         });

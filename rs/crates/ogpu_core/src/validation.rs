@@ -104,7 +104,7 @@ pub fn validate_texture_profile(capabilities: &Caps, profile: &TextureProfile) -
         profile.sample_count,
         profile.usage.len() as i64,
     )?;
-    if profile.usage.windows(2).any(|pair| pair[0] >= pair[1]) {
+    if profile.usage.windows(2).any(|pair| pair[0] as u8 >= pair[1] as u8) {
         return Err(invalid(operation, "texture usage must be sorted and unique"));
     }
     if profile.sample_count > 1

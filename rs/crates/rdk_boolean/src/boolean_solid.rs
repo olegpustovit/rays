@@ -15,9 +15,8 @@ use crate::boolean_weiler::{self, Side as WeilerSide};
 
 const OPERATION: &str = "boolean_solid";
 
-type Cancel<'a> = Option<&'a Arc<cancel::T>>;
 
-fn cx(cancel: Cancel<'_>) -> Option<&cancel::T> {
+fn cx(cancel: Option<&Arc<cancel::T>>) -> Option<&cancel::T> {
     cancel.map(|value| value.as_ref())
 }
 
@@ -73,7 +72,7 @@ fn shatter_error() -> error::T {
 /// remain exact arrangement constraints and seam contributors but add zero to volumetric winding.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     resolve_left_self_intersections: Option<bool>,
     resolve_right_self_intersections: Option<bool>,
     left_treatment: Option<Treatment>,
@@ -117,7 +116,7 @@ pub fn prepare(
 }
 
 fn extract_with_ancestry(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     options: &boolean_extract::Options,
     expression: &boolean_extract::Expression,
     value: &T,
@@ -189,7 +188,7 @@ fn relative_location(cells: &boolean_cells::T, weiler: &boolean_weiler::T, facet
 
 #[allow(clippy::too_many_arguments)]
 fn extract_selection(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     defer_rounded_slivers: bool,
     barycentric_cache: Option<&mut boolean_extract::BarycentricCache>,
     corner_payload: bool,
@@ -215,7 +214,7 @@ fn selected_count(selection: &[u8]) -> i64 {
 }
 
 fn extract_mixed_with_ancestry(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     defer_rounded_slivers: bool,
     corner_payload: bool,
     operation: Operation,
@@ -280,7 +279,7 @@ fn extract_mixed_with_ancestry(
 }
 
 fn extract_surface_pair_with_ancestry(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     defer_rounded_slivers: bool,
     corner_payload: bool,
     operation: Operation,
@@ -320,7 +319,7 @@ fn extract_surface_pair_with_ancestry(
 /// constraints and are emitted explicitly, including paired opposite-facing walls for a
 /// solid-minus-surface cut.
 pub fn extract_product_with_ancestry(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     require_closed: Option<bool>,
     defer_rounded_slivers: Option<bool>,
     corner_payload: Option<bool>,
@@ -364,7 +363,7 @@ pub fn extract_product_with_ancestry(
 /// Materialize deterministic self/intersection curves and coincident facets from the already
 /// prepared exact complex without repeating arrangement.
 pub fn seams(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: Option<i64>,
     materialize: Option<bool>,
     value: &T,
@@ -382,7 +381,7 @@ pub fn seams(
 /// Extract stable A-only, overlap, and B-only closed region boundaries from one prepared
 /// arrangement. Shared walls are intentionally duplicated between products.
 pub fn shatter_with_ancestry(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     require_closed: Option<bool>,
     defer_rounded_slivers: Option<bool>,
     corner_payload: Option<bool>,

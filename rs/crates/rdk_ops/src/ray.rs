@@ -336,29 +336,6 @@ fn combine_samples(
     }
 }
 
-struct RangeOutputs<'a> {
-    primitives: &'a mut [i64],
-    triangles: &'a mut [i64],
-    barycentric_a: &'a mut [f64],
-    barycentric_b: &'a mut [f64],
-    barycentric_c: &'a mut [f64],
-    distances: &'a mut [f64],
-    direction_signs: &'a mut [i64],
-    hit_counts: &'a mut [i64],
-    normals: Option<(&'a mut [f64], &'a mut [f64], &'a mut [f64])>,
-}
-
-struct SampleOutputs<'a> {
-    primitives: &'a mut [i64],
-    triangles: &'a mut [i64],
-    barycentric_a: &'a mut [f64],
-    barycentric_b: &'a mut [f64],
-    barycentric_c: &'a mut [f64],
-    distances: &'a mut [f64],
-    direction_signs: &'a mut [i64],
-    hit_counts: &'a mut [i64],
-}
-
 #[allow(clippy::too_many_arguments)]
 fn raycast_samples_into(
     cancel_ref: Option<&cancel::T>,
@@ -376,7 +353,14 @@ fn raycast_samples_into(
     jitter_scale: f64,
     seed: i64,
     combine: Combine,
-    out: &mut SampleOutputs,
+    out_primitives: &mut [i64],
+    out_triangles: &mut [i64],
+    out_barycentric_a: &mut [f64],
+    out_barycentric_b: &mut [f64],
+    out_barycentric_c: &mut [f64],
+    out_distances: &mut [f64],
+    out_direction_signs: &mut [i64],
+    out_hit_counts: &mut [i64],
     normals: Option<(&mut [f64], &mut [f64], &mut [f64])>,
 ) -> Result<(), error::T> {
     let invalid = |m: &str| fail("invalid_parameter", m);
@@ -390,14 +374,14 @@ fn raycast_samples_into(
         return Err(invalid("Surface_index: ray jitter scale must be finite and non-negative"));
     }
     let query_count = packed::Float3::length(queries) as usize;
-    if out.primitives.len() < query_count
-        || out.triangles.len() < query_count
-        || out.barycentric_a.len() < query_count
-        || out.barycentric_b.len() < query_count
-        || out.barycentric_c.len() < query_count
-        || out.distances.len() < query_count
-        || out.direction_signs.len() < query_count
-        || out.hit_counts.len() < query_count
+    if out_primitives.len() < query_count
+        || out_triangles.len() < query_count
+        || out_barycentric_a.len() < query_count
+        || out_barycentric_b.len() < query_count
+        || out_barycentric_c.len() < query_count
+        || out_distances.len() < query_count
+        || out_direction_signs.len() < query_count
+        || out_hit_counts.len() < query_count
     {
         return Err(invalid("Surface_index: sampled ray output arrays are too short"));
     }
@@ -420,35 +404,35 @@ fn raycast_samples_into(
     let samples_u = samples as usize;
     let range_count = query_count.div_ceil(grain as usize);
     let chunk = grain as usize;
-    let mut primitives = out.primitives[..query_count].chunks_mut(chunk);
-    let mut triangles = out.triangles[..query_count].chunks_mut(chunk);
-    let mut barycentric_a = out.barycentric_a[..query_count].chunks_mut(chunk);
-    let mut barycentric_b = out.barycentric_b[..query_count].chunks_mut(chunk);
-    let mut barycentric_c = out.barycentric_c[..query_count].chunks_mut(chunk);
-    let mut distances = out.distances[..query_count].chunks_mut(chunk);
-    let mut direction_signs = out.direction_signs[..query_count].chunks_mut(chunk);
-    let mut hit_counts = out.hit_counts[..query_count].chunks_mut(chunk);
+    let mut primitives = out_primitives[..query_count].chunks_mut(chunk);
+    let mut triangles = out_triangles[..query_count].chunks_mut(chunk);
+    let mut barycentric_a = out_barycentric_a[..query_count].chunks_mut(chunk);
+    let mut barycentric_b = out_barycentric_b[..query_count].chunks_mut(chunk);
+    let mut barycentric_c = out_barycentric_c[..query_count].chunks_mut(chunk);
+    let mut distances = out_distances[..query_count].chunks_mut(chunk);
+    let mut direction_signs = out_direction_signs[..query_count].chunks_mut(chunk);
+    let mut hit_counts = out_hit_counts[..query_count].chunks_mut(chunk);
     let mut normal_chunks = normals.map(|(x, y, z)| {
         (x[..query_count].chunks_mut(chunk), y[..query_count].chunks_mut(chunk), z[..query_count].chunks_mut(chunk))
     });
-    let mut parts: Vec<Mutex<RangeOutputs>> = Vec::with_capacity(range_count);
+    let mut parts = Vec::with_capacity(range_count);
     for _ in 0..range_count {
-        parts.push(Mutex::new(RangeOutputs {
-            primitives: primitives.next().unwrap(),
-            triangles: triangles.next().unwrap(),
-            barycentric_a: barycentric_a.next().unwrap(),
-            barycentric_b: barycentric_b.next().unwrap(),
-            barycentric_c: barycentric_c.next().unwrap(),
-            distances: distances.next().unwrap(),
-            direction_signs: direction_signs.next().unwrap(),
-            hit_counts: hit_counts.next().unwrap(),
-            normals: normal_chunks.as_mut().map(|(x, y, z)| (x.next().unwrap(), y.next().unwrap(), z.next().unwrap())),
-        }));
+        parts.push(Mutex::new((
+            primitives.next().unwrap(),
+            triangles.next().unwrap(),
+            barycentric_a.next().unwrap(),
+            barycentric_b.next().unwrap(),
+            barycentric_c.next().unwrap(),
+            distances.next().unwrap(),
+            direction_signs.next().unwrap(),
+            hit_counts.next().unwrap(),
+            normal_chunks.as_mut().map(|(x, y, z)| (x.next().unwrap(), y.next().unwrap(), z.next().unwrap())),
+        )));
     }
     support::run_indexed_ranges(grain, query_count as i64, &|range, first, last| {
         let (first, last) = (first as usize, last as usize);
         let mut guard = parts[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let part = &mut *guard;
+        let (p_primitives, p_triangles, p_barycentric_a, p_barycentric_b, p_barycentric_c, p_distances, p_direction_signs, p_hit_counts, p_normals) = &mut *guard;
         // Scratch is per range, as in the OCaml worker: its `combined` slots carry over between
         // queries of one range.
         let result_count = samples_u * 2;
@@ -462,14 +446,14 @@ fn raycast_samples_into(
         let mut combined = Combined { counts: [0; 2], distances: [f64::INFINITY; 2], selected: [-1; 2] };
         for query in first..last {
             cancel::poll(cancel_ref, query as i64, 4095)?;
-            part.primitives[query - first] = -1;
-            part.triangles[query - first] = -1;
-            part.barycentric_a[query - first] = 0.0;
-            part.barycentric_b[query - first] = 0.0;
-            part.barycentric_c[query - first] = 0.0;
-            part.distances[query - first] = f64::INFINITY;
-            part.direction_signs[query - first] = 0;
-            part.hit_counts[query - first] = 0;
+            p_primitives[query - first] = -1;
+            p_triangles[query - first] = -1;
+            p_barycentric_a[query - first] = 0.0;
+            p_barycentric_b[query - first] = 0.0;
+            p_barycentric_c[query - first] = 0.0;
+            p_distances[query - first] = f64::INFINITY;
+            p_direction_signs[query - first] = 0;
+            p_hit_counts[query - first] = 0;
             let selected_query = match selection {
                 None => true,
                 Some(item) => group::mem(query as i64, item),
@@ -543,21 +527,21 @@ fn raycast_samples_into(
             if selected >= 0 {
                 let integer = selected as usize * 2;
                 let floating = selected as usize * 4;
-                part.primitives[query - first] = integer_results[integer];
-                part.triangles[query - first] = integer_results[integer + 1];
-                part.barycentric_a[query - first] = float_results[floating + 1];
-                part.barycentric_b[query - first] = float_results[floating + 2];
-                part.barycentric_c[query - first] = float_results[floating + 3];
-                part.distances[query - first] = combined.distances[chosen];
-                part.hit_counts[query - first] = combined.counts[chosen];
-                part.direction_signs[query - first] = match direction_mode {
+                p_primitives[query - first] = integer_results[integer];
+                p_triangles[query - first] = integer_results[integer + 1];
+                p_barycentric_a[query - first] = float_results[floating + 1];
+                p_barycentric_b[query - first] = float_results[floating + 2];
+                p_barycentric_c[query - first] = float_results[floating + 3];
+                p_distances[query - first] = combined.distances[chosen];
+                p_hit_counts[query - first] = combined.counts[chosen];
+                p_direction_signs[query - first] = match direction_mode {
                     RayDirectionMode::RayReverse => -1,
                     RayDirectionMode::RayForward => 1,
                     RayDirectionMode::RayBidirectionalClosest | RayDirectionMode::RayBidirectionalFarthest => {
                         if chosen == 0 { 1 } else { -1 }
                     }
                 };
-                if let Some((nx_out, ny_out, nz_out)) = part.normals.as_mut() {
+                if let Some((nx_out, ny_out, nz_out)) = p_normals.as_mut() {
                     let (mut nx, mut ny, mut nz) = (0.0f64, 0.0f64, 0.0f64);
                     if combine == Combine::RayAverage {
                         let base = chosen * samples_u;
@@ -579,7 +563,7 @@ fn raycast_samples_into(
                         ny *= inverse;
                         nz *= inverse;
                     } else {
-                        surface_index::View::triangle_normal_into(value, part.triangles[query - first], &mut normal);
+                        surface_index::View::triangle_normal_into(value, p_triangles[query - first], &mut normal);
                         nx = normal[0];
                         ny = normal[1];
                         nz = normal[2];
@@ -905,16 +889,6 @@ fn run_inner(
                 let normals = normal_planes
                     .as_mut()
                     .map(|(x, y, z)| (x.as_mut_slice(), y.as_mut_slice(), z.as_mut_slice()));
-                let mut outputs = SampleOutputs {
-                    primitives: &mut primitives,
-                    triangles: &mut triangles,
-                    barycentric_a: &mut barycentric_a,
-                    barycentric_b: &mut barycentric_b,
-                    barycentric_c: &mut barycentric_c,
-                    distances: &mut distances,
-                    direction_signs: &mut direction_signs,
-                    hit_counts: &mut hit_counts,
-                };
                 raycast_samples_into(
                     cancel_ref,
                     selection.as_ref(),
@@ -931,7 +905,14 @@ fn run_inner(
                     params.jitter_scale,
                     params.seed,
                     combine,
-                    &mut outputs,
+                    &mut primitives,
+                    &mut triangles,
+                    &mut barycentric_a,
+                    &mut barycentric_b,
+                    &mut barycentric_c,
+                    &mut distances,
+                    &mut direction_signs,
+                    &mut hit_counts,
                     normals,
                 )?;
             }

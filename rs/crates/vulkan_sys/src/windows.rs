@@ -114,9 +114,9 @@ pub struct AccelerationSizes { pub structure_bytes: u64, pub build_scratch_bytes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeometryKind { Triangles, Boxes }
 
-pub struct Geometry<'a> {
+pub struct Geometry {
     pub kind: GeometryKind,
-    pub buffer: &'a Buffer,
+    pub buffer: Buffer,
     pub offset: u64,
     pub stride: u64,
     pub count: u32,
@@ -275,7 +275,7 @@ impl Device {
             ![1,2,4,8,16,32,64].contains(&descriptor.samples)||!(0..=6).contains(&descriptor.format){return Err(Error::InvalidInput("invalid texture dimensions, mips, samples, or format"));}
         let d=NativeTextureDescriptor{width:descriptor.width,height:descriptor.height,depth:descriptor.depth,mips:descriptor.mip_levels,samples:descriptor.samples,format:descriptor.format,storage:descriptor.storage as u8,attachment:descriptor.attachment as u8};
         let mut raw=std::ptr::null_mut();Error::status(unsafe{rv_texture_create(self.raw(),&d,&mut raw)})?;
-        Ok(Texture{raw:nonnull(raw)?,device:self.inner.clone(),descriptor})
+        let raw=nonnull(raw)?;Ok(Texture{raw,device:self.inner.clone(),descriptor,_owner:Arc::new(TextureOwner{raw})})
     }
     pub fn sampler(&self,descriptor:SamplerDescriptor)->Result<Sampler,Error>{
         if !(0..=1).contains(&descriptor.min_filter)||!(0..=1).contains(&descriptor.mag_filter)||!(0..=2).contains(&descriptor.mip_filter)||
@@ -289,7 +289,7 @@ impl Device {
         let mut raw=std::ptr::null_mut();Error::status(unsafe{rv_surface_create(self.raw(),hwnd.as_ptr(),immediate,&mut raw)})?;
         Ok(Surface{raw:nonnull(raw)?,device:self.inner.clone(),acquired:false,_not_send:PhantomData})
     }
-    pub fn acceleration_blas(&self,geometries:&[Geometry<'_>],allow_refit:bool)->Result<AccelerationStructure,Error>{
+    pub fn acceleration_blas(&self,geometries:&[Geometry],allow_refit:bool)->Result<AccelerationStructure,Error>{
         let native=geometries.iter().map(|g|NativeGeometry{kind:if g.kind==GeometryKind::Triangles{0}else{1},buffer:g.buffer.raw(),offset:g.offset,stride:g.stride,count:g.count,opaque:g.opaque as u8,duplicate:g.duplicate_any_hit as u8}).collect::<Vec<_>>();
         validate_geometries(&self.inner,geometries)?;
         let mut raw=std::ptr::null_mut();Error::status(unsafe{rv_accel_create_blas(self.raw(),native.as_ptr(),native.len() as u32,allow_refit,&mut raw)})?;
@@ -360,11 +360,11 @@ impl Commands{
         let d=NativeBlit{offset:args.buffer_offset,bytes_per_row:args.bytes_per_row,texel:args.texel_bytes,mip:args.mip_level,x:args.x,y:args.y,z:args.z,width:args.width,height:args.height,depth:args.depth};
         unsafe{rv_blit_buffer_to_texture(self.raw.as_ptr(),buffer.raw.as_ptr(),texture.raw.as_ptr(),&d)};Ok(())
     }
-    pub fn render_begin(&mut self,colors:&[ColorAttachment<'_>],depth:Option<DepthAttachment<'_>>,size:Size)->Result<(),Error>{
+    pub fn render_begin(&mut self,colors:&[ColorAttachment],depth:Option<DepthAttachment>,size:Size)->Result<(),Error>{
         if colors.len()>8{return Err(Error::InvalidInput("at most eight color attachments are supported"));}
         let mut native=[NativeAttachment{texture:std::ptr::null_mut(),resolve:std::ptr::null_mut(),load:0,store:0,clear:[0.;4]};8];
-        for (dst,src) in native.iter_mut().zip(colors){same(&self.queue.device,&src.texture.device)?;if let Some(resolve)=src.resolve{same(&self.queue.device,&resolve.device)?;}
-            *dst=NativeAttachment{texture:src.texture.raw.as_ptr(),resolve:src.resolve.map_or(std::ptr::null_mut(),|t|t.raw.as_ptr()),load:src.load,store:src.store,clear:src.clear};}
+        for (dst,src) in native.iter_mut().zip(colors){same(&self.queue.device,&src.texture.device)?;if let Some(resolve)=src.resolve.as_ref(){same(&self.queue.device,&resolve.device)?;}
+            *dst=NativeAttachment{texture:src.texture.raw.as_ptr(),resolve:src.resolve.as_ref().map_or(std::ptr::null_mut(),|t|t.raw.as_ptr()),load:src.load,store:src.store,clear:src.clear};}
         let d=if let Some(d)=depth{same(&self.queue.device,&d.texture.device)?;Some(NativeDepthAttachment{texture:d.texture.raw.as_ptr(),load:d.load,store:d.store,clear:d.clear})}else{None};
         let native_size=NativeSize{width:size.width,height:size.height};Error::status(unsafe{rv_render_begin(self.raw.as_ptr(),native.as_ptr(),colors.len() as u32,d.as_ref().map_or(std::ptr::null(),|x|x),&native_size)})
     }
@@ -390,7 +390,7 @@ impl Commands{
         if offset.checked_add(required).is_none_or(|end|end>scratch.size){return Err(Error::InvalidInput("acceleration build scratch exceeds buffer"));}
         Error::status(unsafe{rv_accel_build(self.raw.as_ptr(),accel.raw.as_ptr(),scratch.raw.as_ptr(),offset)})
     }
-    pub fn refit_acceleration(&mut self,accel:&AccelerationStructure,geometries:&[Geometry<'_>],scratch:&Buffer,offset:u64)->Result<(),Error>{
+    pub fn refit_acceleration(&mut self,accel:&AccelerationStructure,geometries:&[Geometry],scratch:&Buffer,offset:u64)->Result<(),Error>{
         same(&self.queue.device,&accel.device)?;same(&self.queue.device,&scratch.device)?;validate_geometries(&self.queue.device,geometries)?;
         let required=accel.sizes().update_scratch_bytes;
         if offset.checked_add(required).is_none_or(|end|end>scratch.size){return Err(Error::InvalidInput("acceleration update scratch exceeds buffer"));}
@@ -412,7 +412,7 @@ fn validate_bindings(bindings:&[Binding])->Result<(),Error>{
     }
     Ok(())
 }
-fn validate_geometries(device:&Arc<DeviceInner>,geometries:&[Geometry<'_>])->Result<(),Error>{
+fn validate_geometries(device:&Arc<DeviceInner>,geometries:&[Geometry])->Result<(),Error>{
     for g in geometries{
         same(device,&g.buffer.device)?;
         let (element,alignment)=if g.kind==GeometryKind::Triangles{(12,4)}else{(24,8)};
@@ -425,9 +425,10 @@ fn validate_geometries(device:&Arc<DeviceInner>,geometries:&[Geometry<'_>])->Res
     Ok(())
 }
 
-pub struct ColorAttachment<'a>{pub texture:&'a Texture,pub resolve:Option<&'a Texture>,pub load:i32,pub store:i32,pub clear:[f64;4]}
-pub struct DepthAttachment<'a>{pub texture:&'a Texture,pub load:i32,pub store:i32,pub clear:f64}
+pub struct ColorAttachment{pub texture:Texture,pub resolve:Option<Texture>,pub load:i32,pub store:i32,pub clear:[f64;4]}
+pub struct DepthAttachment{pub texture:Texture,pub load:i32,pub store:i32,pub clear:f64}
 
+#[derive(Clone)]
 pub struct Buffer { raw: NonNull<c_void>, device: Arc<DeviceInner>, size: u64, inner: Arc<BufferInner> }
 struct BufferInner { raw: NonNull<c_void>, device: Arc<DeviceInner>, size: u64 }
 unsafe impl Send for BufferInner {}
@@ -509,7 +510,9 @@ impl Pipeline{
 }
 impl Drop for Pipeline{fn drop(&mut self){unsafe{rv_pipeline_destroy(self.raw.as_ptr())}}}
 
-pub struct Texture{raw:NonNull<c_void>,device:Arc<DeviceInner>,descriptor:TextureDescriptor}
+#[derive(Clone)]
+pub struct Texture{raw:NonNull<c_void>,device:Arc<DeviceInner>,descriptor:TextureDescriptor,_owner:Arc<TextureOwner>}
+struct TextureOwner{raw:NonNull<c_void>}
 impl Texture{
     pub fn descriptor(&self)->TextureDescriptor{self.descriptor}
     pub fn read(&self,bytes:&mut[u8],bytes_per_row:u64,texel_bytes:u32)->Result<(),Error>{
@@ -518,7 +521,7 @@ impl Texture{
         Error::status(unsafe{rv_texture_read(self.raw.as_ptr(),bytes.as_mut_ptr().cast(),bytes_per_row,texel_bytes)})
     }
 }
-impl Drop for Texture{fn drop(&mut self){unsafe{rv_texture_destroy(self.raw.as_ptr())}}}
+impl Drop for TextureOwner{fn drop(&mut self){unsafe{rv_texture_destroy(self.raw.as_ptr())}}}
 
 pub struct Sampler{raw:NonNull<c_void>,device:Arc<DeviceInner>}
 impl Drop for Sampler{fn drop(&mut self){unsafe{rv_sampler_destroy(self.device.raw.as_ptr(),self.raw.as_ptr())}}}

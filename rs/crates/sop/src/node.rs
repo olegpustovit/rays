@@ -482,7 +482,7 @@ pub mod build {
                     data.id = value.0.id;
                     T(Arc::new(data))
                 }
-                Err(message) => panic!("{message}"),
+                Err(message) => unreachable!("{message}"),
             },
         }
     }

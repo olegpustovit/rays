@@ -280,8 +280,8 @@ pub mod fixtures {
     }
 
     /// Runs `work` under `domains` worker domains and returns its value.
-    pub fn at_domains_any<T: Send>(domains: i64, work: &(dyn Fn() -> T + Sync)) -> T {
-        let slot: std::sync::Mutex<Option<T>> = std::sync::Mutex::new(None);
+    pub fn at_domains_strings(domains: i64, work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {
+        let slot: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
         parallel::run_unit(Some(domains), &|| {
             *slot.lock().unwrap() = Some(work());
             Ok(())
@@ -291,9 +291,9 @@ pub mod fixtures {
     }
 
     /// The one-domain value of `work`, after asserting four domains give an equal value.
-    pub fn same_at_one_and_four<T: Send + PartialEq>(work: &(dyn Fn() -> T + Sync)) -> T {
-        let one = at_domains_any(1, work);
-        let four = at_domains_any(4, work);
+    pub fn same_at_one_and_four_strings(work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {
+        let one = at_domains_strings(1, work);
+        let four = at_domains_strings(4, work);
         assert!(one == four, "one/four-domain output drift");
         one
     }

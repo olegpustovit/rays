@@ -49,6 +49,6 @@ pub fn rollback(policy_: &policy, checkpoint_: Option<checkpoint>) {
                 }
             }
         }
-        (policy::Retain_image_snapshots(_), None) => panic!("Renderer_leases.rollback: no checkpoint"),
+        (policy::Retain_image_snapshots(_), None) => unreachable!("Renderer_leases.rollback: no checkpoint"),
     }
 }

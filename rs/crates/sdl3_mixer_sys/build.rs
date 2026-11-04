@@ -28,7 +28,7 @@ fn flags(argument: &str) -> String {
         .find(|dir| std::path::Path::new(dir).join("include/SDL3/SDL.h").exists());
     match msys {
         Some(dir) => prefix(dir),
-        None => panic!("{PKG} not found: set SDL3_DIR, or install pkg-config with its development package"),
+        None => build_failure(format!("{PKG} not found: set SDL3_DIR, or install pkg-config with its development package")),
     }
 }
 
@@ -45,7 +45,7 @@ fn main() {
         .lines()
         .map(|line| line.trim().trim_start_matches('('))
         .find(|line| line.starts_with(&format!("{KEY} ")))
-        .unwrap_or_else(|| panic!("{KEY} entry in packaging/sdl3.lock"));
+        .unwrap_or_else(|| build_failure(format!("{KEY} entry in packaging/sdl3.lock")));
     let floor = entry
         .split("(floor ")
         .nth(1)
@@ -86,4 +86,9 @@ fn main() {
             println!("cargo:rustc-link-arg={flag}");
         }
     }
+}
+
+fn build_failure(message: String) -> ! {
+    eprintln!("{message}");
+    std::process::exit(1)
 }

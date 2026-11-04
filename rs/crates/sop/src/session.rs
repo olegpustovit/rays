@@ -242,7 +242,7 @@ fn key_of(bytes: &[u8]) -> Key {
 }
 
 fn entry_of(value: &lru::Value) -> Arc<Entry> {
-    value.clone().downcast::<Entry>().unwrap_or_else(|_| panic!("session cache holds only entries"))
+    value.clone().downcast::<Entry>().unwrap_or_else(|_| unreachable!("session cache holds only entries"))
 }
 
 pub fn create(max_entries: i64, max_payload_bytes: i64) -> Result<T, String> {
@@ -1153,8 +1153,8 @@ fn replay_event(session: &mut T, event: &CacheEvent) -> bool {
     }
 }
 
-fn results_find<'a>(results: &'a Results, n: &node::T) -> Option<&'a Result<Output, Diagnostic>> {
-    results.get(&node::id(n))?.iter().find(|(seen, _)| node::ptr_eq(seen, n)).map(|(_, r)| r)
+fn results_has(results: &Results, n: &node::T) -> bool {
+    results.get(&node::id(n)).is_some_and(|entries| entries.iter().any(|(seen, _)| node::ptr_eq(seen, n)))
 }
 
 /// A node list keyed by id with the physical check, for visited sets.
@@ -1192,7 +1192,7 @@ fn costly(predictions: &mut Predictions, results: &Results, session: &T, context
             ) {
                 if enough(b)
                     || seen_has(&b.visited, n)
-                    || results_find(results, n).is_some()
+                    || results_has(results, n)
                     || !matches!(cached_output(predictions, results, session, context, n), Prediction::Missing)
                 {
                     return;
@@ -1238,7 +1238,7 @@ fn shared_prefix(memo: &mut Memo, session: &mut T, context: &context::T, roots: 
             counts: &mut HashMap<i64, Vec<(node::T, usize)>>,
             opaque: &mut bool,
         ) {
-            if results_find(&memo.results, n).is_some() || seen_has(visited, n) {
+            if results_has(&memo.results, n) || seen_has(visited, n) {
                 return;
             }
             seen_add(visited, n);
@@ -1264,7 +1264,7 @@ fn shared_prefix(memo: &mut Memo, session: &mut T, context: &context::T, roots: 
     // ponytail: shared-node membership scans this coarse DAG frontier; use a physical-node set if
     // large shared frontiers dominate cook measurements.
     fn contains(n: &node::T, memo: &Memo, pending: &[node::T]) -> bool {
-        results_find(&memo.results, n).is_none()
+        !results_has(&memo.results, n)
             && (pending.iter().any(|p| node::ptr_eq(p, n)) || selected_inputs(n).iter().any(|c| contains(c, memo, pending)))
     }
     fn prefix(
@@ -1274,12 +1274,12 @@ fn shared_prefix(memo: &mut Memo, session: &mut T, context: &context::T, roots: 
         context: &context::T,
         pending: &mut Vec<node::T>,
     ) -> Result<(), Diagnostic> {
-        if pending.is_empty() || results_find(&memo.results, n).is_some() {
+        if pending.is_empty() || results_has(&memo.results, n) {
             return Ok(());
         }
         if pending.iter().any(|p| node::ptr_eq(p, n)) || !contains(n, memo, pending) {
             evaluate(memo, session, context, n)?;
-            pending.retain(|shared| results_find(&memo.results, shared).is_none());
+            pending.retain(|shared| !results_has(&memo.results, shared));
             return Ok(());
         }
         for child in selected_inputs(n) {
@@ -1333,7 +1333,7 @@ fn evaluate_many(memo: &mut Memo, session: &mut T, context: &context::T, roots: 
         (0..count)
             .filter(|i| {
                 let n = &roots[*i];
-                results_find(&memo.results, n).is_none()
+                !results_has(&memo.results, n)
                     && costly(&mut predictions, &memo.results, session, context, n)
                     && matches!(cached_output(&mut predictions, &memo.results, session, context, n), Prediction::Missing)
             })
@@ -1398,7 +1398,7 @@ fn evaluate_many(memo: &mut Memo, session: &mut T, context: &context::T, roots: 
             Some((local, local_memo, result)) => {
                 let events = local.journal.as_ref().expect("worker journal");
                 let compatible = local_memo.results.values().flatten().all(|(n, worker_result)| {
-                    results_find(&memo.results, n).is_none_or(|parent_result| same_result(worker_result, parent_result))
+                    memo.results.get(&node::id(n)).and_then(|entries| entries.iter().find(|(seen, _)| node::ptr_eq(seen, n))).map(|(_, r)| r).is_none_or(|parent_result| same_result(worker_result, parent_result))
                 });
                 let mut probe = snapshot(session);
                 if compatible && events.iter().all(|event| replay_event(&mut probe, event)) {
@@ -1430,7 +1430,7 @@ fn evaluate_many(memo: &mut Memo, session: &mut T, context: &context::T, roots: 
                                 None => true,
                                 Some(serial) => memo.left[serial] > 0,
                             };
-                            if wanted && results_find(&memo.results, n).is_none() {
+                            if wanted && !results_has(&memo.results, n) {
                                 memo.results.entry(*id).or_default().push((n.clone(), value.clone()));
                             }
                         }

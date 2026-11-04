@@ -117,7 +117,7 @@ fn mesh_round_trip_and_trace_mesh() {
     let back = rays_mesh::of_mesh(&mesh).unwrap();
     assert_eq!((geometry::point_count(&back), geometry::primitive_count(&back)), (4, 2));
     let trace = rays_mesh::to_trace_mesh(&g).unwrap();
-    let view = rays::mesh::View::packed_view(&trace);
+    let view = rays::mesh::View::packed_view(&trace).unwrap();
     assert!(view.normals.is_some(), "trace mesh has smoothed normals");
     assert_eq!(view.indices.len(), 6);
     let lines = rays_mesh::of_mesh(&geometry_view::wire_mesh(&g).unwrap());
@@ -173,7 +173,7 @@ fn explosion_of(amount: f64, scale_x: f64, noise: Option<(f64, f64, i64)>) -> Op
 }
 
 fn xs(mesh: &rays::mesh::t) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-    let v = rays::mesh::View::packed_view(mesh).vertices;
+    let v = rays::mesh::View::packed_view(mesh).unwrap().vertices;
     (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
 }
 
@@ -186,7 +186,7 @@ fn packed_pieces_explosion() {
     let base = xs(&exploded(explosion_of(0.0, 1.0, None)));
     let moved = xs(&exploded(explosion_of(1.0, 1.0, None)));
     assert_eq!(xs(&packed_pieces::mesh_for_explosion(None, &pieces).unwrap()), base, "a zero explosion moved the pieces");
-    let normals = rays::mesh::View::packed_view(&exploded(explosion_of(0.0, 1.0, None))).normals.unwrap();
+    let normals = rays::mesh::View::packed_view(&exploded(explosion_of(0.0, 1.0, None))).unwrap().normals.unwrap();
     assert!(
         normals.x.iter().all(|v| *v == 0.0) && normals.y.iter().all(|v| *v == 1.0) && normals.z.iter().all(|v| *v == 0.0),
         "replaced authored vertex normals with flat faces"

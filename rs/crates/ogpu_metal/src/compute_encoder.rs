@@ -1,7 +1,8 @@
 //! Ogpu_metal.Compute_encoder: the driver's compute encoder record over a Metal compute encoder.
+use ogpu_core::error::Error;
 use crate::{
     command_control::{CommandContext, Resource},
-    device::{fail, R},
+    device::{fail, of_metal_error},
     pipeline::Native,
 };
 use ogpu_core::{backend::DriverComputeEncoder, error::ErrorKind};
@@ -11,9 +12,9 @@ fn size(t: (i64, i64, i64)) -> (usize, usize, usize) {
     (t.0 as usize, t.1 as usize, t.2 as usize)
 }
 
-pub fn create(context: &Rc<CommandContext>) -> R<DriverComputeEncoder> {
+pub fn create(context: &Rc<CommandContext>) -> Result<DriverComputeEncoder, Error> {
     context.recording()?;
-    let encoder = context.native_of(metal::ComputeEncoder::create(&context.native))?;
+    let encoder = metal::ComputeEncoder::create(&context.native).map_err(|value| of_metal_error(context.operation, &value))?;
     let closing = encoder.clone();
     *context.open_encoder.borrow_mut() = Some(Box::new(move || {
         let _ = closing.end_encoding();
@@ -32,40 +33,40 @@ pub fn create(context: &Rc<CommandContext>) -> R<DriverComputeEncoder> {
     Ok(DriverComputeEncoder {
         set_pipeline: Box::new(move |token| {
             let Some(pipeline) = c_pipeline.pipeline(token) else {
-                return fail(operation, ErrorKind::InvalidArgument, "pipeline graph is incomplete");
+                return Err(fail(operation, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
             };
             match pipeline.native() {
-                Native::Render(_) => fail(operation, ErrorKind::InvalidArgument, "render pipeline cannot execute compute"),
+                Native::Render(_) => Err(fail(operation, ErrorKind::InvalidArgument, "render pipeline cannot execute compute")),
                 Native::Compute(compute) => {
                     let p = pipeline.clone();
                     c_pipeline.keep(pipeline.retain_submission(), Box::new(move || p.release_submission()))?;
-                    c_pipeline.native_of(e_pipeline.set_pipeline(compute))
+                    e_pipeline.set_pipeline(compute).map_err(|value| of_metal_error(c_pipeline.operation, &value))
                 }
             }
         }),
         set_buffer: Box::new(move |index, offset, token| {
             let buffer = c_buffer.find_buffer(token)?;
             c_buffer.keep_buffer(&buffer)?;
-            c_buffer.native_of(e_buffer.set_buffer(index as usize, offset as u64, buffer.metal()))
+            e_buffer.set_buffer(index as usize, offset as u64, buffer.metal()).map_err(|value| of_metal_error(c_buffer.operation, &value))
         }),
-        set_bytes: Box::new(move |index, bytes| c_bytes.native_of(e_bytes.set_bytes(index as usize, bytes))),
+        set_bytes: Box::new(move |index, bytes| e_bytes.set_bytes(index as usize, bytes).map_err(|value| of_metal_error(c_bytes.operation, &value))),
         set_texture: Box::new(move |index, token| match c_texture.resource(token) {
             Some(Resource::Texture(texture)) => {
                 c_texture.keep_texture(&texture)?;
-                c_texture.native_of(e_texture.set_texture(index as usize, texture.metal()))
+                e_texture.set_texture(index as usize, texture.metal()).map_err(|value| of_metal_error(c_texture.operation, &value))
             }
-            _ => fail(operation, ErrorKind::InvalidArgument, "texture graph is incomplete"),
+            _ => Err(fail(operation, ErrorKind::InvalidArgument, "texture graph is incomplete")),
         }),
         set_accel: Box::new(move |index, token| {
             let structure = c_accel.find_accel(token)?;
             c_accel.keep_accel(&structure)?;
-            c_accel.native_of(e_accel.set_acceleration_structure(index as usize, Some(structure.metal())))
+            e_accel.set_acceleration_structure(index as usize, Some(structure.metal())).map_err(|value| of_metal_error(c_accel.operation, &value))
         }),
-        dispatch_threads: Box::new(move |threads, threadgroup| c_dispatch.native_of(e_dispatch.dispatch_threads(size(threads), size(threadgroup)))),
+        dispatch_threads: Box::new(move |threads, threadgroup| e_dispatch.dispatch_threads(size(threads), size(threadgroup)).map_err(|value| of_metal_error(c_dispatch.operation, &value))),
         dispatch_indirect: Box::new(move |token, offset, threadgroup| {
             let buffer = c_indirect.find_buffer(token)?;
             c_indirect.keep_buffer(&buffer)?;
-            c_indirect.native_of(e_indirect.dispatch_threadgroups_indirect(buffer.metal(), offset as u64, size(threadgroup)))
+            e_indirect.dispatch_threadgroups_indirect(buffer.metal(), offset as u64, size(threadgroup)).map_err(|value| of_metal_error(c_indirect.operation, &value))
         }),
         compute_use_accels: Box::new(move |tokens| {
             let mut structures = Vec::new();
@@ -77,12 +78,12 @@ pub fn create(context: &Rc<CommandContext>) -> R<DriverComputeEncoder> {
             if structures.is_empty() {
                 Ok(())
             } else {
-                c_use.native_of(e_use.use_acceleration_structures(&structures))
+                e_use.use_acceleration_structures(&structures).map_err(|value| of_metal_error(c_use.operation, &value))
             }
         }),
         end_compute: Box::new(move || {
             *c_end.open_encoder.borrow_mut() = None;
-            c_end.native_of(e_end.end_encoding())
+            e_end.end_encoding().map_err(|value| of_metal_error(c_end.operation, &value))
         }),
     })
 }

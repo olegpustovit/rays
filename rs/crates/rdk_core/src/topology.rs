@@ -23,7 +23,7 @@ fn kind_from_code(code: u8) -> PrimitiveKind {
         0 => PrimitiveKind::Polygon,
         1 => PrimitiveKind::OpenPolyline,
         2 => PrimitiveKind::ClosedPolyline,
-        _ => panic!("Topology: invalid primitive kind code"),
+        _ => unreachable!("Topology: invalid primitive kind code"),
     }
 }
 
@@ -145,7 +145,7 @@ fn validate(
             0 => PrimitiveKind::Polygon,
             1 => PrimitiveKind::OpenPolyline,
             2 => PrimitiveKind::ClosedPolyline,
-            _ => panic!("Topology: invalid primitive kind code"),
+            _ => unreachable!("Topology: invalid primitive kind code"),
         };
         let size = primitive_offsets[primitive + 1] - primitive_offsets[primitive];
         let minimum = match kind {

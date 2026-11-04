@@ -8,14 +8,10 @@ fn select_mock() {
     ogpu::impl_::select(ogpu_mock::impl_::implementation());
 }
 
-fn ok<A>(result: Result<A, ogpu::error::Error>) -> A {
-    result.unwrap_or_else(|e| panic!("{}", error::to_string(&e)))
-}
-
 #[test]
 fn mock_renderer_returns_typed_unsupported() {
     select_mock();
-    assert_eq!(ok(ogpu::impl_::backend()), "mock", "mock renderer selected the wrong OGPU implementation");
+    assert_eq!(ogpu::impl_::backend().unwrap(), "mock", "mock renderer selected the wrong OGPU implementation");
     match renderer::create_offscreen(&renderer::default_configuration()) {
         Err(e) if e.kind == ErrorKind::Unsupported => {}
         Err(e) => panic!("{}", error::to_string(&e)),
@@ -30,9 +26,9 @@ fn mock_renderer_returns_typed_unsupported() {
 #[test]
 fn mock_caps_live_allocations() {
     select_mock();
-    let device = ok(b::create_device(ok(ogpu::impl_::create_driver())));
+    let device = b::create_device(ogpu::impl_::create_driver().unwrap()).unwrap();
     let descriptor = BufferDescriptor { label: None, size: 16, usage: vec![BufferUsage::Storage] };
-    let held: Vec<b::Buffer> = (0..4096).map(|_| ok(b::create_buffer(&device, descriptor.clone(), None))).collect();
+    let held: Vec<b::Buffer> = (0..4096).map(|_| b::create_buffer(&device, descriptor.clone(), None).unwrap()).collect();
     match b::create_buffer(&device, descriptor.clone(), None) {
         Err(e) if e.kind == ErrorKind::Capacity => {}
         _ => panic!("the 4,097th live allocation was accepted"),
@@ -40,6 +36,6 @@ fn mock_caps_live_allocations() {
     for buffer in &held {
         let _ = b::destroy_buffer(buffer);
     }
-    let _ = b::destroy_buffer(&ok(b::create_buffer(&device, descriptor, None)));
+    let _ = b::destroy_buffer(&b::create_buffer(&device, descriptor, None).unwrap());
     let _ = b::destroy_device(&device);
 }

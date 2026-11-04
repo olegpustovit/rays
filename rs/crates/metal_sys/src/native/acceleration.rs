@@ -90,9 +90,9 @@ pub struct InstancesDescriptor {
     pub refit: bool,
 }
 
-pub enum Descriptor<'a> {
-    Primitive(&'a PrimitiveDescriptor),
-    Instances(&'a InstancesDescriptor),
+pub enum Descriptor {
+    Primitive(PrimitiveDescriptor),
+    Instances(InstancesDescriptor),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -223,7 +223,7 @@ fn raw_keyframes(values: &[Keyframe]) -> Result<Vec<RawKeyframe>, Error> {
         .collect()
 }
 
-fn prepare_descriptor(descriptor: &Descriptor<'_>) -> Result<PreparedDescriptor, Error> {
+fn prepare_descriptor(descriptor: &Descriptor) -> Result<PreparedDescriptor, Error> {
     match descriptor {
         Descriptor::Primitive(value) => {
             if value.geometries.is_empty() {
@@ -505,7 +505,7 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-pub fn descriptor_sizes(device: &Handle, descriptor: &Descriptor<'_>) -> Result<Sizes, Error> {
+pub fn descriptor_sizes(device: &Handle, descriptor: &Descriptor) -> Result<Sizes, Error> {
     let prepared = prepare_descriptor(descriptor)?;
     let raw = prepared.raw();
     #[cfg(target_vendor = "apple")]
@@ -539,7 +539,7 @@ pub fn descriptor_sizes(device: &Handle, descriptor: &Descriptor<'_>) -> Result<
 pub fn encoder_build(
     encoder: &Handle,
     destination: &Handle,
-    descriptor: &Descriptor<'_>,
+    descriptor: &Descriptor,
     scratch: &Handle,
     scratch_offset: u64,
     refit: bool,

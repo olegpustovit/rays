@@ -83,28 +83,28 @@ fn first_input(inputs: &[Option<node::T>]) -> node::T {
 fn vb(values: &[Value], index: usize) -> bool {
     match &values[index] {
         Value::Bool(value) => *value,
-        _ => panic!("parameter {index} is not a toggle"),
+        _ => unreachable!("parameter {index} is not a toggle"),
     }
 }
 
 fn vf(values: &[Value], index: usize) -> f64 {
     match &values[index] {
         Value::Float(value) => *value,
-        _ => panic!("parameter {index} is not a float"),
+        _ => unreachable!("parameter {index} is not a float"),
     }
 }
 
 fn vi(values: &[Value], index: usize) -> i64 {
     match &values[index] {
         Value::Int(value) => *value,
-        _ => panic!("parameter {index} is not an int"),
+        _ => unreachable!("parameter {index} is not an int"),
     }
 }
 
 fn vs(values: &[Value], index: usize) -> String {
     match &values[index] {
         Value::Text(value) => String::from_utf8_lossy(value).into_owned(),
-        _ => panic!("parameter {index} is not text"),
+        _ => unreachable!("parameter {index} is not text"),
     }
 }
 
@@ -123,11 +123,6 @@ fn has_duplicates(names: &[String]) -> bool {
 
 fn refuse(node: &str, message: &str) -> Result<(), String> {
     Err(format!("sop/{node}: {message}"))
-}
-
-/// A `Param.choice` table: the value at the label's position.
-fn pick<T: Clone>(labels: &[&str], table: &[T], value: &Value) -> T {
-    table[support::choice_index(labels, value)].clone()
 }
 
 // ---- field constructors (one `Spec` each; descriptions and vec3 by struct update)
@@ -164,19 +159,6 @@ fn int(
 
 fn choice(name: &'static str, label: &'static str, folder: &'static str, kind: Kind, default: Value) -> Spec {
     Spec { label, folder, ..decl::spec(name, kind, default) }
-}
-
-/// `decl` and `factory` of a node module (`parameters_factory build`).
-macro_rules! declare {
-    () => {
-        pub fn decl() -> Decl {
-            Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-        }
-
-        pub fn factory() -> Factory {
-            decl::factory(&decl())
-        }
-    };
 }
 
 // ---------------------------------------------------------------- choice tables
@@ -224,7 +206,7 @@ fn position_kind() -> Kind {
 }
 
 fn position_of_value(value: &Value) -> Position {
-    pick(&POSITION_LABELS, &POSITION, value)
+    POSITION[support::choice_index(&POSITION_LABELS, value)].clone()
 }
 
 // ---------------------------------------------------------------- Edge_collapse
@@ -298,7 +280,13 @@ pub mod edge_collapse {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Dissolve
@@ -328,8 +316,8 @@ pub mod dissolve {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             group: vs(values, 0),
-            operation: pick(&OPERATION_LABELS, &OPERATION, &values[1]),
-            bridge_policy: pick(&BRIDGE_LABELS, &BRIDGE, &values[2]),
+            operation: OPERATION[support::choice_index(&OPERATION_LABELS, &values[1])].clone(),
+            bridge_policy: BRIDGE[support::choice_index(&BRIDGE_LABELS, &values[2])].clone(),
             remove_inline_points: vb(values, 3),
             collinearity_tolerance: vf(values, 4),
             remove_unused_points: vb(values, 5),
@@ -383,7 +371,13 @@ pub mod dissolve {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Triangulate
@@ -416,7 +410,13 @@ pub mod triangulate {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Poly_extrude
@@ -450,7 +450,7 @@ pub mod poly_extrude {
             group: vs(values, 0),
             split_edges: vs(values, 1),
             distance: vf(values, 2),
-            divide: pick(&DIVIDE_LABELS, &DIVIDE, &values[3]),
+            divide: DIVIDE[support::choice_index(&DIVIDE_LABELS, &values[3])].clone(),
             divisions: vi(values, 4),
             output_front: vb(values, 5),
             output_back: vb(values, 6),
@@ -535,7 +535,13 @@ pub mod poly_extrude {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Poly_fill
@@ -560,7 +566,7 @@ pub mod poly_fill {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             boundary_group: vs(values, 0),
-            mode: pick(&MODE_LABELS, &MODE, &values[1]),
+            mode: MODE[support::choice_index(&MODE_LABELS, &values[1])].clone(),
             reverse_patches: vb(values, 2),
             unique_points: vb(values, 3),
             update_point_normals: vb(values, 4),
@@ -617,7 +623,13 @@ pub mod poly_fill {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Remesh
@@ -747,7 +759,13 @@ pub mod remesh {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Convex_hull
@@ -829,7 +847,13 @@ pub mod convex_hull {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 /// OCaml `String.trim`: ASCII whitespace only.
@@ -875,7 +899,7 @@ pub mod clean {
             remove_degenerate: vb(values, 2),
             consolidate_mode: support::kernel_mode_of_value(&values[3]),
             consolidate_distance: vf(values, 4),
-            overlaps: pick(&OVERLAPS_LABELS, &OVERLAPS, &values[5]),
+            overlaps: OVERLAPS[support::choice_index(&OVERLAPS_LABELS, &values[5])].clone(),
             reverse_winding: vb(values, 6),
             remove_nan_points: vb(values, 7),
             remove_unused_points: vb(values, 8),
@@ -1001,7 +1025,13 @@ pub mod clean {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Join_curves
@@ -1125,7 +1155,13 @@ pub mod join_curves {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Facet
@@ -1274,7 +1310,13 @@ pub mod facet {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Poly_cut
@@ -1308,9 +1350,9 @@ pub mod poly_cut {
         Parameters {
             group: vs(values, 0),
             cut_group: vs(values, 1),
-            element: pick(&ELEMENT_LABELS, &ELEMENT, &values[2]),
-            strategy: pick(&STRATEGY_LABELS, &STRATEGY, &values[3]),
-            detection: pick(&DETECTION_LABELS, &DETECTION, &values[4]),
+            element: ELEMENT[support::choice_index(&ELEMENT_LABELS, &values[2])].clone(),
+            strategy: STRATEGY[support::choice_index(&STRATEGY_LABELS, &values[3])].clone(),
+            detection: DETECTION[support::choice_index(&DETECTION_LABELS, &values[4])].clone(),
             attribute: vs(values, 5),
             value: vf(values, 6),
             threshold: vf(values, 7),
@@ -1405,7 +1447,13 @@ pub mod poly_cut {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Poly_reduce
@@ -1440,7 +1488,7 @@ pub mod poly_reduce {
             group: vs(values, 0),
             hard_point_group: vs(values, 1),
             hard_edge_group: vs(values, 2),
-            target_mode: pick(&TARGET_LABELS, &TARGET, &values[3]),
+            target_mode: TARGET[support::choice_index(&TARGET_LABELS, &values[3])].clone(),
             ratio: vf(values, 4),
             primitive_count: vi(values, 5),
             preserve_boundary: vb(values, 6),
@@ -1550,7 +1598,13 @@ pub mod poly_reduce {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- shared Boolean tables
@@ -1603,9 +1657,9 @@ pub mod boolean_seam {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            output: pick(&OUTPUT_LABELS, &OUTPUT, &values[0]),
-            left_treatment: pick(&TREATMENT_LABELS, &TREATMENT, &values[1]),
-            right_treatment: pick(&TREATMENT_LABELS, &TREATMENT, &values[2]),
+            output: OUTPUT[support::choice_index(&OUTPUT_LABELS, &values[0])].clone(),
+            left_treatment: TREATMENT[support::choice_index(&TREATMENT_LABELS, &values[1])].clone(),
+            right_treatment: TREATMENT[support::choice_index(&TREATMENT_LABELS, &values[2])].clone(),
             resolve_left_self_intersections: vb(values, 3),
             resolve_right_self_intersections: vb(values, 4),
             left_self_group: vs(values, 5),
@@ -1688,7 +1742,13 @@ pub mod boolean_seam {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Poly_bevel
@@ -1720,7 +1780,7 @@ pub mod poly_bevel {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             group: vs(values, 0),
-            shape: pick(&SHAPE_LABELS, &SHAPE, &values[1]),
+            shape: SHAPE[support::choice_index(&SHAPE_LABELS, &values[1])].clone(),
             convexity: vf(values, 2),
             distance: vf(values, 3),
             divisions: vi(values, 4),
@@ -1825,7 +1885,13 @@ pub mod poly_bevel {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Boolean_fracture
@@ -1850,10 +1916,10 @@ pub mod boolean_fracture {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            point_conflict: pick(&CONFLICT_LABELS, &CONFLICT, &values[0]),
+            point_conflict: CONFLICT[support::choice_index(&CONFLICT_LABELS, &values[0])].clone(),
             assume_flat: vb(values, 1),
             resolve_cutter_self_intersections: vb(values, 2),
-            detriangulation: pick(&DETRIANGULATION_LABELS, &DETRIANGULATION, &values[3]),
+            detriangulation: DETRIANGULATION[support::choice_index(&DETRIANGULATION_LABELS, &values[3])].clone(),
             require_closed: vb(values, 4),
             piece_attribute: vs(values, 5),
             point_tolerance: vf(values, 6),
@@ -1944,7 +2010,13 @@ pub mod boolean_fracture {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Intersection_analysis
@@ -2068,7 +2140,13 @@ pub mod intersection_analysis {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Fuse
@@ -2124,7 +2202,7 @@ pub mod fuse {
     fn bytes(values: &[Value], index: usize) -> Vec<u8> {
         match &values[index] {
             Value::Text(value) => value.clone(),
-            _ => panic!("parameter {index} is not text"),
+            _ => unreachable!("parameter {index} is not text"),
         }
     }
 
@@ -2132,21 +2210,21 @@ pub mod fuse {
         Parameters {
             group: vs(values, 0),
             target_group: vs(values, 1),
-            targeting: pick(&TARGETING_LABELS, &TARGETING, &values[2]),
+            targeting: TARGETING[support::choice_index(&TARGETING_LABELS, &values[2])].clone(),
             target_attribute: vs(values, 3),
-            using: pick(&USING_LABELS, &USING, &values[4]),
+            using: USING[support::choice_index(&USING_LABELS, &values[4])].clone(),
             tolerance: vf(values, 5),
             position: position_of_value(&values[6]),
             weight_attribute: vs(values, 7),
-            attributes: pick(&ATTRIBUTES_LABELS, &ATTRIBUTES, &values[8]),
+            attributes: ATTRIBUTES[support::choice_index(&ATTRIBUTES_LABELS, &values[8])].clone(),
             attribute_rules: bytes(values, 9),
             group_rules: bytes(values, 10),
-            metric: pick(&METRIC_LABELS, &METRIC, &values[11]),
+            metric: METRIC[support::choice_index(&METRIC_LABELS, &values[11])].clone(),
             inclusive: vb(values, 12),
             match_attributes: vb(values, 13),
             radius_attribute: vs(values, 14),
             match_attribute: vs(values, 15),
-            match_condition: pick(&CONDITION_LABELS, &CONDITION, &values[16]),
+            match_condition: CONDITION[support::choice_index(&CONDITION_LABELS, &values[16])].clone(),
             match_tolerance: vf(values, 17),
             modify_target: vb(values, 18),
             fuse_points: vb(values, 19),
@@ -2307,7 +2385,13 @@ pub mod fuse {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Subdivide_cracks
@@ -2386,9 +2470,9 @@ pub mod subdivide_cracks {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             group: vs(values, 0),
-            scheme: pick(&SCHEME_LABELS, &SCHEME, &values[1]),
+            scheme: SCHEME[support::choice_index(&SCHEME_LABELS, &values[1])].clone(),
             iterations: vi(values, 2),
-            cracks: pick(&CRACKS_LABELS, &CRACKS, &values[3]),
+            cracks: CRACKS[support::choice_index(&CRACKS_LABELS, &values[3])].clone(),
             crack_bias: vf(values, 4),
             consistent_topology: vb(values, 5),
             crease_group: vs(values, 6),
@@ -2398,10 +2482,10 @@ pub mod subdivide_cracks {
             resulting_crease_group: vs(values, 10),
             hole_group: vs(values, 11),
             remove_holes: vb(values, 12),
-            boundary_interpolation: pick(&BOUNDARY_LABELS, &BOUNDARY, &values[13]),
-            face_varying_interpolation: pick(&FVAR_LABELS, &FVAR, &values[14]),
-            triangle_policy: pick(&TRIANGLE_LABELS, &TRIANGLE, &values[15]),
-            creasing_method: pick(&CREASING_LABELS, &CREASING, &values[16]),
+            boundary_interpolation: BOUNDARY[support::choice_index(&BOUNDARY_LABELS, &values[13])].clone(),
+            face_varying_interpolation: FVAR[support::choice_index(&FVAR_LABELS, &values[14])].clone(),
+            triangle_policy: TRIANGLE[support::choice_index(&TRIANGLE_LABELS, &values[15])].clone(),
+            creasing_method: CREASING[support::choice_index(&CREASING_LABELS, &values[16])].clone(),
             treat_curves_as_independent: vb(values, 17),
             recompute_point_normals: vb(values, 18),
         }
@@ -2536,7 +2620,13 @@ pub mod subdivide_cracks {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Boolean
@@ -2587,20 +2677,20 @@ pub mod boolean {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            operation: pick(&OPERATION_LABELS, &OPERATION, &values[0]),
-            left_treatment: pick(&TREATMENT_LABELS, &TREATMENT, &values[1]),
-            right_treatment: pick(&TREATMENT_LABELS, &TREATMENT, &values[2]),
+            operation: OPERATION[support::choice_index(&OPERATION_LABELS, &values[0])].clone(),
+            left_treatment: TREATMENT[support::choice_index(&TREATMENT_LABELS, &values[1])].clone(),
+            right_treatment: TREATMENT[support::choice_index(&TREATMENT_LABELS, &values[2])].clone(),
             resolve_left_self_intersections: vb(values, 3),
             resolve_right_self_intersections: vb(values, 4),
-            point_conflict: pick(&CONFLICT_LABELS, &CONFLICT, &values[5]),
+            point_conflict: CONFLICT[support::choice_index(&CONFLICT_LABELS, &values[5])].clone(),
             point_tolerance: vf(values, 6),
             tiny_seam_threshold: vf(values, 7),
             cleanup_max_batches: vi(values, 8),
             strict_cleanup: vb(values, 9),
-            seam_points: pick(&SEAM_POINTS_LABELS, &SEAM_POINTS, &values[10]),
-            detriangulation: pick(&DETRIANGULATION_LABELS, &DETRIANGULATION, &values[11]),
+            seam_points: SEAM_POINTS[support::choice_index(&SEAM_POINTS_LABELS, &values[10])].clone(),
+            detriangulation: DETRIANGULATION[support::choice_index(&DETRIANGULATION_LABELS, &values[11])].clone(),
             assume_flat: vb(values, 12),
-            require_closed: pick(&CLOSED_LABELS, &CLOSED, &values[13]),
+            require_closed: CLOSED[support::choice_index(&CLOSED_LABELS, &values[13])].clone(),
             piece_attribute: vs(values, 14),
             left_piece_group: vs(values, 15),
             overlap_piece_group: vs(values, 16),
@@ -2715,7 +2805,13 @@ pub mod boolean {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Boolean_detect
@@ -2858,7 +2954,13 @@ pub mod boolean_detect {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- Triangulate_2d
@@ -2928,7 +3030,7 @@ pub mod triangulate_2d {
             point_group: vs(values, 0),
             constraint_edge_group: vs(values, 1),
             constraint_primitive_group: vs(values, 2),
-            projection: pick(&PROJECTION_LABELS, &PROJECTION, &values[3]),
+            projection: PROJECTION[support::choice_index(&PROJECTION_LABELS, &values[3])].clone(),
             plane_origin_x: vf(values, 4),
             plane_origin_y: vf(values, 5),
             plane_origin_z: vf(values, 6),
@@ -3172,7 +3274,13 @@ pub mod triangulate_2d {
         ))
     }
 
-    declare!();
+    pub fn decl() -> Decl {
+        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
+    }
+
+    pub fn factory() -> Factory {
+        decl::factory(&decl())
+    }
 }
 
 // ---------------------------------------------------------------- tests

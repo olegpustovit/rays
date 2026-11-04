@@ -21,14 +21,13 @@ pub struct Error {
     pub message: String,
 }
 
-pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-fn invalid(message: impl Into<String>) -> Error {
-    Error { kind: ErrorKind::InvalidArgument, message: message.into() }
+fn invalid(message: &str) -> Error {
+    Error { kind: ErrorKind::InvalidArgument, message: message.to_string() }
 }
 
-fn input(value: &str, what: &str) -> Result<CString> {
-    CString::new(value).map_err(|_| invalid(format!("{what} contains a NUL byte")))
+fn input(value: &str, what: &str) -> std::result::Result<CString, Error> {
+    CString::new(value).map_err(|_| invalid(&format!("{what} contains a NUL byte")))
 }
 
 unsafe fn string(pointer: *const c_char) -> String {
@@ -84,7 +83,7 @@ pub fn platform_name() -> String {
     unsafe { string(ffi::rays_sdl3_platform_name()) }
 }
 
-pub fn pref_path(org: &str, app: &str) -> Result<Option<String>> {
+pub fn pref_path(org: &str, app: &str) -> std::result::Result<Option<String>, Error> {
     let org = input(org, "organization")?;
     let app = input(app, "application")?;
     // SAFETY: both CString arguments stay alive for the call; SDL returns an SDL_free allocation.
@@ -101,7 +100,7 @@ pub fn clear_error() {
     unsafe { ffi::rays_sdl3_clear_error() }
 }
 
-pub fn init_subsystems(bits: u32) -> Result<()> {
+pub fn init_subsystems(bits: u32) -> std::result::Result<(), Error> {
     // SAFETY: subsystem bits are translated to SDL flags in the C bridge.
     if unsafe { ffi::rays_sdl3_init_subsystem(bits) } {
         Ok(())
@@ -115,7 +114,7 @@ pub fn quit_subsystems(bits: u32) {
     unsafe { ffi::rays_sdl3_quit_subsystem(bits) }
 }
 
-pub fn set_control_click_right_click(enabled: bool) -> Result<()> {
+pub fn set_control_click_right_click(enabled: bool) -> std::result::Result<(), Error> {
     // SAFETY: passes a boolean to SDL's named hint.
     if unsafe { ffi::rays_sdl3_set_control_click_right_click(enabled) } {
         Ok(())
@@ -124,7 +123,7 @@ pub fn set_control_click_right_click(enabled: bool) -> Result<()> {
     }
 }
 
-pub fn set_mouse_relative_system_scale(enabled: bool) -> Result<()> {
+pub fn set_mouse_relative_system_scale(enabled: bool) -> std::result::Result<(), Error> {
     // SAFETY: passes a boolean to SDL's named hint.
     if unsafe { ffi::rays_sdl3_set_mouse_relative_system_scale(enabled) } {
         Ok(())
@@ -133,7 +132,7 @@ pub fn set_mouse_relative_system_scale(enabled: bool) -> Result<()> {
     }
 }
 
-pub fn clipboard_set_text(text: &str) -> Result<()> {
+pub fn clipboard_set_text(text: &str) -> std::result::Result<(), Error> {
     let text = input(text, "clipboard text")?;
     // SAFETY: the CString lives through SDL's copying call.
     if unsafe { ffi::rays_sdl3_clipboard_set_text(text.as_ptr()) } {
@@ -143,7 +142,7 @@ pub fn clipboard_set_text(text: &str) -> Result<()> {
     }
 }
 
-pub fn clipboard_get_text() -> Result<String> {
+pub fn clipboard_get_text() -> std::result::Result<String, Error> {
     // SAFETY: SDL returns an SDL_free allocation, copied and freed immediately.
     unsafe { owned_string(ffi::rays_sdl3_clipboard_get_text()) }
         .ok_or_else(|| sdl_error(ErrorKind::Sdl, "SDL clipboard read failed"))
@@ -169,7 +168,7 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn create(shape: CursorShape) -> Result<Self> {
+    pub fn create(shape: CursorShape) -> std::result::Result<Self, Error> {
         clear_error();
         // SAFETY: shape is mapped to a checked native cursor enum in the bridge.
         let raw = unsafe { ffi::rays_sdl3_create_cursor(shape.code()) };
@@ -178,7 +177,7 @@ impl Cursor {
         Ok(Self { raw: Some(raw), _main_thread_only: PhantomData })
     }
 
-    pub fn set(&self) -> Result<()> {
+    pub fn set(&self) -> std::result::Result<(), Error> {
         let raw = self.raw.ok_or_else(|| destroyed("cursor is destroyed"))?;
         clear_error();
         // SAFETY: this owned cursor remains live through the call.
@@ -229,7 +228,7 @@ struct WindowHandle {
 }
 
 impl WindowHandle {
-    fn raw(&self) -> Result<NonNull<ffi::SDL_Window>> {
+    fn raw(&self) -> std::result::Result<NonNull<ffi::SDL_Window>, Error> {
         self.raw.get().ok_or_else(|| destroyed("window is destroyed"))
     }
 
@@ -251,12 +250,12 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn create(title: &str, width: i32, height: i32, flags: impl IntoIterator<Item = WindowFlag>) -> Result<Self> {
+    pub fn create(title: &str, width: i32, height: i32, flags: &[WindowFlag]) -> std::result::Result<Self, Error> {
         if width <= 0 || height <= 0 {
             return Err(invalid("window dimensions must be positive"));
         }
         let title = input(title, "window title")?;
-        let bits = flags.into_iter().fold(0, |bits, flag| bits | match flag {
+        let bits = flags.iter().fold(0, |bits, flag| bits | match flag {
             WindowFlag::Hidden => 1,
             WindowFlag::HighPixelDensity => 2,
             WindowFlag::Metal => 4,
@@ -272,13 +271,13 @@ impl Window {
         })
     }
 
-    fn raw(&self) -> Result<NonNull<ffi::SDL_Window>> { self.handle.raw() }
+    fn raw(&self) -> std::result::Result<NonNull<ffi::SDL_Window>, Error> { self.handle.raw() }
 
     fn clone_handle(&self) -> Self {
         Self { handle: Rc::clone(&self.handle), _main_thread_only: PhantomData }
     }
 
-    pub fn destroy(&mut self) -> Result<()> {
+    pub fn destroy(&mut self) -> std::result::Result<(), Error> {
         if Rc::strong_count(&self.handle) != 1 {
             return Err(Error {
                 kind: ErrorKind::ParentHasDependents,
@@ -289,7 +288,7 @@ impl Window {
         Ok(())
     }
 
-    pub fn size(&self) -> Result<(i32, i32)> {
+    pub fn size(&self) -> std::result::Result<(i32, i32), Error> {
         let raw = self.raw()?;
         let (mut width, mut height) = (0, 0);
         clear_error();
@@ -301,7 +300,7 @@ impl Window {
         }
     }
 
-    pub fn size_in_pixels(&self) -> Result<(i32, i32)> {
+    pub fn size_in_pixels(&self) -> std::result::Result<(i32, i32), Error> {
         let raw = self.raw()?;
         let (mut width, mut height) = (0, 0);
         clear_error();
@@ -313,7 +312,7 @@ impl Window {
         }
     }
 
-    pub fn state(&self) -> Result<WindowState> {
+    pub fn state(&self) -> std::result::Result<WindowState, Error> {
         let raw = self.raw()?;
         // SAFETY: the window handle is live.
         let bits = unsafe { ffi::rays_sdl3_window_state(raw.as_ptr()) };
@@ -321,21 +320,21 @@ impl Window {
     }
 
 
-    pub fn pixel_density(&self) -> Result<f32> {
+    pub fn pixel_density(&self) -> std::result::Result<f32, Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: the window handle is live.
         Ok(unsafe { ffi::rays_sdl3_window_pixel_density(raw.as_ptr()) })
     }
 
-    pub fn display_scale(&self) -> Result<f32> {
+    pub fn display_scale(&self) -> std::result::Result<f32, Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: the window handle is live.
         Ok(unsafe { ffi::rays_sdl3_window_display_scale(raw.as_ptr()) })
     }
 
-    pub fn position(&self) -> Result<(i32, i32)> {
+    pub fn position(&self) -> std::result::Result<(i32, i32), Error> {
         let raw = self.raw()?;
         let (mut x, mut y) = (0, 0);
         clear_error();
@@ -347,45 +346,45 @@ impl Window {
         }
     }
 
-    pub fn title(&self) -> Result<String> {
+    pub fn title(&self) -> std::result::Result<String, Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: SDL returns a borrowed, NUL-terminated title for a live window.
         Ok(unsafe { string(ffi::rays_sdl3_window_title(raw.as_ptr())) })
     }
 
-    fn boolean(&self, operation: unsafe extern "C" fn(*mut ffi::SDL_Window) -> bool, fallback: &str) -> Result<()> {
+    fn boolean(&self, operation: unsafe extern "C" fn(*mut ffi::SDL_Window) -> bool, fallback: &str) -> std::result::Result<(), Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: the window handle remains live for this call.
         if unsafe { operation(raw.as_ptr()) } { Ok(()) } else { Err(sdl_error(ErrorKind::Sdl, fallback)) }
     }
 
-    pub fn center(&self) -> Result<()> {
+    pub fn center(&self) -> std::result::Result<(), Error> {
         self.boolean(ffi::rays_sdl3_center_window, "SDL could not center the window")
     }
 
-    pub fn show(&self) -> Result<()> {
+    pub fn show(&self) -> std::result::Result<(), Error> {
         self.boolean(ffi::rays_sdl3_show_window, "SDL could not show the window")
     }
 
-    pub fn raise(&self) -> Result<()> {
+    pub fn raise(&self) -> std::result::Result<(), Error> {
         self.boolean(ffi::rays_sdl3_raise_window, "SDL could not raise the window")
     }
 
-    pub fn hide(&self) -> Result<()> {
+    pub fn hide(&self) -> std::result::Result<(), Error> {
         self.boolean(ffi::rays_sdl3_hide_window, "SDL could not hide the window")
     }
 
-    pub fn restore(&self) -> Result<()> {
+    pub fn restore(&self) -> std::result::Result<(), Error> {
         self.boolean(ffi::rays_sdl3_restore_window, "SDL could not restore the window")
     }
 
-    pub fn sync(&self) -> Result<()> {
+    pub fn sync(&self) -> std::result::Result<(), Error> {
         self.boolean(ffi::rays_sdl3_sync_window, "SDL could not synchronize the window")
     }
 
-    pub fn set_size(&self, width: i32, height: i32) -> Result<()> {
+    pub fn set_size(&self, width: i32, height: i32) -> std::result::Result<(), Error> {
         if width <= 0 || height <= 0 { return Err(invalid("window dimensions must be positive")); }
         let raw = self.raw()?;
         clear_error();
@@ -397,7 +396,7 @@ impl Window {
         }
     }
 
-    pub fn set_resizable(&self, enabled: bool) -> Result<()> {
+    pub fn set_resizable(&self, enabled: bool) -> std::result::Result<(), Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: the window handle is live.
@@ -408,7 +407,7 @@ impl Window {
         }
     }
 
-    pub fn set_relative_mouse(&self, enabled: bool) -> Result<()> {
+    pub fn set_relative_mouse(&self, enabled: bool) -> std::result::Result<(), Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: the window handle is live.
@@ -419,14 +418,14 @@ impl Window {
         }
     }
 
-    pub fn set_background(&self, red: f32, green: f32, blue: f32) -> Result<()> {
+    pub fn set_background(&self, red: f32, green: f32, blue: f32) -> std::result::Result<(), Error> {
         let raw = self.raw()?;
         // SAFETY: the window handle is live; this platform operation is a no-op off Cocoa.
         unsafe { ffi::rays_sdl3_set_window_background(raw.as_ptr(), red.into(), green.into(), blue.into()) };
         Ok(())
     }
 
-    pub fn start_text_input(&self) -> Result<()> {
+    pub fn start_text_input(&self) -> std::result::Result<(), Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: the window handle is live.
@@ -434,7 +433,7 @@ impl Window {
         else { Err(sdl_error(ErrorKind::Sdl, "SDL could not start text input")) }
     }
 
-    pub fn stop_text_input(&self) -> Result<()> {
+    pub fn stop_text_input(&self) -> std::result::Result<(), Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: the window handle is live.
@@ -442,7 +441,7 @@ impl Window {
         else { Err(sdl_error(ErrorKind::Sdl, "SDL could not stop text input")) }
     }
 
-    pub fn set_text_input_area(&self, area: Rect, cursor: i32) -> Result<()> {
+    pub fn set_text_input_area(&self, area: Rect, cursor: i32) -> std::result::Result<(), Error> {
         if cursor < 0 { return Err(invalid("text-input cursor offset must be non-negative")); }
         if area.width <= 0 || area.height <= 0 { return Err(invalid("text-input area dimensions must be positive")); }
         let raw = self.raw()?;
@@ -455,7 +454,7 @@ impl Window {
         }
     }
 
-    pub fn show_dialog(&self, kind: DialogKind, filters: &[DialogFilter], default_location: Option<&str>) -> Result<i32> {
+    pub fn show_dialog(&self, kind: DialogKind, filters: &[DialogFilter], default_location: Option<&str>) -> std::result::Result<i32, Error> {
         if filters.len() > 32 { return Err(invalid("too many dialog filters")); }
         if filters.iter().any(|filter| filter.name.is_empty() || filter.pattern.is_empty()) {
             return Err(invalid("a dialog filter needs a name and a pattern"));
@@ -513,7 +512,7 @@ pub struct MetalView {
 }
 
 impl MetalView {
-    pub fn create(window: &Window) -> Result<Self> {
+    pub fn create(window: &Window) -> std::result::Result<Self, Error> {
         let parent = window.clone_handle();
         let window = parent.raw()?;
         clear_error();
@@ -524,7 +523,7 @@ impl MetalView {
         Ok(Self { raw: Some(raw), parent: Some(parent), tokens: Vec::new(), _main_thread_only: PhantomData })
     }
 
-    pub fn layer_token(&mut self, generation: i64) -> Result<LayerToken> {
+    pub fn layer_token(&mut self, generation: i64) -> std::result::Result<LayerToken, Error> {
         let view = self.raw.ok_or_else(|| destroyed("Metal view is destroyed"))?;
         let parent = self.parent.as_ref().ok_or_else(|| destroyed("Metal view is destroyed"))?;
         let window = parent.raw()?;

@@ -25,8 +25,8 @@ fn make(operation: &str, code: &str, message: String) -> error::T {
     error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
 }
 
-fn fail<T>(code: &str, message: &str) -> Result<T, error::T> {
-    Err(make("boolean", code, message.to_owned()))
+fn fail_with(code: &str, message: &str) -> error::T {
+    make("boolean", code, message.to_owned())
 }
 
 fn invalid_output(operation: &str, failure: &error::T) -> error::T {
@@ -84,20 +84,20 @@ pub struct Params {
 /// emits A-only, overlap, and B-only boundaries in that stable order.
 pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T> {
     if params.grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
     if !params.point_tolerance.is_finite() || params.point_tolerance < 0. {
-        return fail("invalid_parameter", "point_tolerance must be finite and non-negative");
+        return Err(fail_with("invalid_parameter", "point_tolerance must be finite and non-negative"));
     }
     if !params.tiny_seam_threshold.is_finite() || params.tiny_seam_threshold < 0. {
-        return fail("invalid_parameter", "tiny_seam_threshold must be finite and non-negative");
+        return Err(fail_with("invalid_parameter", "tiny_seam_threshold must be finite and non-negative"));
     }
     if params.cleanup_max_batches <= 0 {
-        return fail("invalid_parameter", "cleanup_max_batches must be positive");
+        return Err(fail_with("invalid_parameter", "cleanup_max_batches must be positive"));
     }
     if let Some(name) = &params.piece_attribute {
         if trimmed_empty(name) {
-            return fail("invalid_parameter", "piece attribute name must not be empty");
+            return Err(fail_with("invalid_parameter", "piece attribute name must not be empty"));
         }
     }
     let group_names: Vec<String> = [&params.left_piece_group, &params.overlap_piece_group, &params.right_piece_group]
@@ -107,10 +107,10 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
         .collect();
     let shatter = params.operation == Operation::Shatter;
     if shatter && group_names.iter().any(|name| trimmed_empty(name)) {
-        return fail("invalid_parameter", "shatter group names must not be empty");
+        return Err(fail_with("invalid_parameter", "shatter group names must not be empty"));
     }
     if shatter && has_duplicate(&group_names) {
-        return fail("invalid_parameter", "shatter group names must be distinct");
+        return Err(fail_with("invalid_parameter", "shatter group names must be distinct"));
     }
     let left_kind = params.left_treatment;
     let right_kind = params.right_treatment;
@@ -128,7 +128,7 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
         || (operation == Operation::Xor && left_kind != right_kind)
         || operation == Operation::Shatter;
     if shatter && (left_kind != Treatment::Solid || right_kind != Treatment::Solid) {
-        return fail("invalid_parameter", "shatter currently requires two solid operands");
+        return Err(fail_with("invalid_parameter", "shatter currently requires two solid operands"));
     }
     let cancel_arc = params.cancel.as_ref();
     let cancel_ref = params.cancel.as_deref();
@@ -333,7 +333,7 @@ pub fn default_seam_params(right: geometry::T) -> SeamParams {
 /// can receive one complete primitive group. No approximate proximity edge is introduced.
 pub fn seam(params: &SeamParams, left: &geometry::T) -> Result<geometry::T, error::T> {
     if params.grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
     let names: Vec<String> = match params.output {
         SeamOutput::SeamCurves => {
@@ -346,10 +346,10 @@ pub fn seam(params: &SeamParams, left: &geometry::T) -> Result<geometry::T, erro
         SeamOutput::CoincidentPatches => params.coincident_group.iter().cloned().collect(),
     };
     if names.iter().any(|name| trimmed_empty(name)) {
-        return fail("invalid_parameter", "Boolean seam group names must not be empty");
+        return Err(fail_with("invalid_parameter", "Boolean seam group names must not be empty"));
     }
     if has_duplicate(&names) {
-        return fail("invalid_parameter", "Boolean seam group names must be distinct");
+        return Err(fail_with("invalid_parameter", "Boolean seam group names must be distinct"));
     }
     let cancel_arc = params.cancel.as_ref();
     let grain = params.grain;
@@ -601,14 +601,13 @@ mod tests {
     }
 
     /// `Parallel.run ~domains`.
-    fn with_domains<R: Send>(domains: i64, work: &(dyn Fn() -> R + Sync)) -> R {
-        let slot: Mutex<Option<R>> = Mutex::new(None);
+    fn with_domains(domains: i64, work: &mut (dyn FnMut() + Send)) {
+        let cell = Mutex::new(work);
         parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
+            (cell.lock().unwrap())();
             Ok(())
         })
         .unwrap();
-        slot.into_inner().unwrap().unwrap()
     }
 
     fn group_flags(name: &str, geometry_value: &geometry::T) -> Vec<bool> {
@@ -630,7 +629,7 @@ mod tests {
         let left = tetra((0., 0., 0.), 2.);
         let right = tetra((0.5, 0.2, 0.2), 2.);
         let run_with = |domains: i64| {
-            with_domains(domains, &|| {
+            { let mut out = None; with_domains(domains, &mut || { out = Some({
                 [Operation::Union, Operation::Intersection, Operation::Difference, Operation::ReverseDifference, Operation::Xor]
                     .iter()
                     .map(|operation| {
@@ -639,7 +638,7 @@ mod tests {
                         signature(&run(&params, &left).unwrap())
                     })
                     .collect::<Vec<_>>()
-            })
+            }); }); out.unwrap() }
         };
         let products = run_with(1);
         assert!(products.iter().all(|product| !product.3.is_empty()), "public Boolean lost a non-empty solid product");
@@ -681,12 +680,12 @@ mod tests {
             &triangles(&[(-1., 1., -1.), (3., 1., -1.), (-1., 1., 3.), (3., 1., 3.)], vec![0, 1, 2, 1, 3, 2]),
         );
         let run_with = |domains: i64| {
-            with_domains(domains, &|| {
+            { let mut out = None; with_domains(domains, &mut || { out = Some({
                 let mut params = front(right.clone());
                 params.operation = Operation::Difference;
                 params.right_treatment = Treatment::Surface;
                 run(&params, &left).unwrap()
-            })
+            }); }); out.unwrap() }
         };
         let output = run_with(1);
         let parallel_output = run_with(4);
@@ -748,14 +747,14 @@ mod tests {
         let right =
             triangles(&[(-1., 1., -1.), (3., 1., -1.), (-1., 1., 3.), (3., 1., 3.)], vec![0, 1, 2, 1, 3, 2]);
         let run_with = |domains: i64| {
-            with_domains(domains, &|| {
+            { let mut out = None; with_domains(domains, &mut || { out = Some({
                 let mut params = front(right.clone());
                 params.operation = Operation::Difference;
                 params.right_treatment = Treatment::Surface;
                 params.piece_attribute = Some("piece".to_owned());
                 params.require_closed = Some(true);
                 run(&params, &left).unwrap()
-            })
+            }); }); out.unwrap() }
         };
         let output = run_with(1);
         let values_for = |geometry_value: &geometry::T| {
@@ -802,7 +801,7 @@ mod tests {
         let left = tetra((0., 0., 0.), 2.);
         let right = tetra((0.5, 0.2, 0.2), 2.);
         let run_with = |domains: i64| {
-            with_domains(domains, &|| {
+            { let mut out = None; with_domains(domains, &mut || { out = Some({
                 let mut params = front(right.clone());
                 params.operation = Operation::Shatter;
                 let output = run(&params, &left).unwrap();
@@ -819,7 +818,7 @@ mod tests {
                     "public Boolean shatter lost a non-empty product"
                 );
                 (signature(&output), groups)
-            })
+            }); }); out.unwrap() }
         };
         assert!(run_with(1) == run_with(4), "public Boolean shatter differs between one and four domains");
         let mut params = front(right.clone());
@@ -839,7 +838,7 @@ mod tests {
         let left = tetra_batch(16, 0.);
         let right = tetra_batch(16, 0.5);
         let run_with = |domains: i64| {
-            with_domains(domains, &|| {
+            { let mut out = None; with_domains(domains, &mut || { out = Some({
                 let mut params = front(right.clone());
                 params.operation = Operation::Shatter;
                 let output = run(&params, &left).unwrap();
@@ -850,7 +849,7 @@ mod tests {
                     })
                     .collect();
                 (signature(&output), counts)
-            })
+            }); }); out.unwrap() }
         };
         let one = run_with(1);
         assert!(one.1.iter().all(|count| *count > 0), "multi-pair shatter lost a region product");
@@ -874,8 +873,8 @@ mod tests {
         let mut params = front(overlap);
         params.seam_points = SeamPoints::SplitSeamPoints;
         let split = run(&params, &left).unwrap();
-        let split_one = with_domains(1, &|| signature(&run(&params, &left).unwrap()));
-        let split_four = with_domains(4, &|| signature(&run(&params, &left).unwrap()));
+        let split_one = { let mut out = None; with_domains(1, &mut || { out = Some(signature(&run(&params, &left).unwrap())); }); out.unwrap() };
+        let split_four = { let mut out = None; with_domains(4, &mut || { out = Some(signature(&run(&params, &left).unwrap())); }); out.unwrap() };
         assert!(split_one == split_four, "split seam points differ between domain counts");
         assert!(
             geometry::point_count(&split) > geometry::point_count(&shared)
@@ -916,13 +915,13 @@ mod tests {
         let right = cube_quads(((0.6f64).next_up(), 0.60000000000000009, 0.60000000000000009), 2.);
         let threshold = 0.60000000000000009;
         let run_with = |domains: i64| {
-            with_domains(domains, &|| {
+            { let mut out = None; with_domains(domains, &mut || { out = Some({
                 let mut params = front(right.clone());
                 params.tiny_seam_threshold = threshold;
                 params.cleanup_max_batches = 8;
                 params.strict_cleanup = false;
                 signature(&run(&params, &left).unwrap())
-            })
+            }); }); out.unwrap() }
         };
         assert!(run_with(1) == run_with(4), "public bounded Boolean cleanup differs between one and four domains");
     }
@@ -933,7 +932,7 @@ mod tests {
         let left = tetra((0., 0., 0.), 2.);
         let right = tetra((0.5, 0.2, 0.2), 2.);
         let run_with = |domains: i64| {
-            with_domains(domains, &|| {
+            { let mut out = None; with_domains(domains, &mut || { out = Some({
                 let mut params = default_seam_params(right.clone());
                 params.grain = 1;
                 let output = seam(&params, &left).unwrap();
@@ -946,7 +945,7 @@ mod tests {
                     signature(&output),
                     (0..group::length(&between)).map(|primitive| group::mem(primitive, &between)).collect::<Vec<_>>(),
                 )
-            })
+            }); }); out.unwrap() }
         };
         assert!(run_with(1) == run_with(4), "public Boolean seam curves differ between one and four domains");
         let mut params = default_seam_params(left.clone());

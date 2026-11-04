@@ -25,18 +25,15 @@ use ogpu_metal::{
 };
 use std::{cell::RefCell, collections::HashMap};
 
-fn get<T>(result: Result<T, Error>) -> T {
-    match result {
-        Ok(value) => value,
-        Err(failure) => panic!("{}", error::to_string(&failure)),
-    }
+fn die(failure: Error) -> ! {
+    panic!("{}", error::to_string(&failure))
 }
 
-fn expect<T>(kind: ErrorKind, result: Result<T, Error>) {
+fn expect(kind: ErrorKind, result: Option<Error>) {
     match result {
-        Err(failure) if failure.kind == kind => (),
-        Err(failure) => panic!("wrong rejection: {}", error::to_string(&failure)),
-        Ok(_) => panic!("wrong rejection: accepted"),
+        Some(failure) if failure.kind == kind => (),
+        Some(failure) => panic!("wrong rejection: {}", error::to_string(&failure)),
+        None => panic!("wrong rejection: accepted"),
     }
 }
 
@@ -55,18 +52,18 @@ fn put_f32(bytes: &mut [u8], offset: usize, value: f64) {
 }
 
 fn make_shader(label: &str, source: &str, entries: &[(&str, Stage)], bindings: Vec<Binding>) -> Shader {
-    get(shader::create(shader::Descriptor {
+    shader::create(shader::Descriptor {
         backend: "metal".to_owned(),
         label: Some(label.to_owned()),
         bytes: source.as_bytes().to_vec(),
         entry_points: entries.iter().map(|(name, stage)| EntryPoint { name: (*name).to_owned(), stage: *stage }).collect(),
         bindings,
-    }))
+    }).unwrap_or_else(|failure| die(failure))
 }
 
 fn empty_layout(device: &Device) -> binding::PipelineLayout {
-    let group = get(binding::create_layout(&[]));
-    get(binding::create_pipeline_layout(device.handle(), &device.capabilities(), &[(0, group)]))
+    let group = binding::create_layout(&[]).unwrap_or_else(|failure| die(failure));
+    binding::create_pipeline_layout(device.handle(), &device.capabilities(), &[(0, group)]).unwrap_or_else(|failure| die(failure))
 }
 
 fn gpu_device_error() {
@@ -93,14 +90,14 @@ fn gpu_foundation() {
     assert_eq!(impl_::BACKEND, "metal");
     let mut unsupported = caps::minimum_m1();
     unsupported.limits.max_buffer_size = 0;
-    expect(ErrorKind::InvalidArgument, caps::validate(&unsupported));
+    expect(ErrorKind::InvalidArgument, caps::validate(&unsupported).err());
     let Ok(device) = Device::system_default() else {
         println!("ogpu_metal foundation: skipped (no Metal device)");
         return;
     };
-    let other = get(Device::system_default());
+    let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
-    expect(ErrorKind::InvalidArgument, buffer::create(&device, buffer::Memory::Shared, &buffer_descriptor(0, &[BufferUsage::CopySrc])));
+    expect(ErrorKind::InvalidArgument, buffer::create(&device, buffer::Memory::Shared, &buffer_descriptor(0, &[BufferUsage::CopySrc])).err());
     let values: Vec<Buffer> = [
         (buffer::Memory::DeviceLocal, BufferUsage::Storage),
         (buffer::Memory::Shared, BufferUsage::Uniform),
@@ -108,22 +105,22 @@ fn gpu_foundation() {
         (buffer::Memory::Readback, BufferUsage::CopyDst),
     ]
     .into_iter()
-    .map(|(memory, usage)| get(buffer::create(&device, memory, &buffer_descriptor(64, &[usage]))))
+    .map(|(memory, usage)| buffer::create(&device, memory, &buffer_descriptor(64, &[usage])).unwrap_or_else(|failure| die(failure)))
     .collect();
-    expect(ErrorKind::InvalidArgument, buffer::create(&device, buffer::Memory::Readback, &buffer_descriptor(64, &[BufferUsage::Uniform])));
+    expect(ErrorKind::InvalidArgument, buffer::create(&device, buffer::Memory::Readback, &buffer_descriptor(64, &[BufferUsage::Uniform])).err());
     for value in &values {
-        get(value.descriptor(&device));
+        value.descriptor(&device).unwrap_or_else(|failure| die(failure));
     }
-    expect(ErrorKind::CrossDevice, values[0].descriptor(&other));
-    expect(ErrorKind::InvalidState, device.destroy());
+    expect(ErrorKind::CrossDevice, values[0].descriptor(&other).err());
+    expect(ErrorKind::InvalidState, device.destroy().err());
     for value in &values {
-        get(value.destroy());
+        value.destroy().unwrap_or_else(|failure| die(failure));
     }
     for value in &values {
-        expect(ErrorKind::StaleHandle, value.descriptor(&device));
+        expect(ErrorKind::StaleHandle, value.descriptor(&device).err());
     }
-    get(device.destroy());
-    get(other.destroy());
+    device.destroy().unwrap_or_else(|failure| die(failure));
+    other.destroy().unwrap_or_else(|failure| die(failure));
     drop((values, device, other));
     let after = live();
     assert_eq!(after + 2, before, "Metal live-handle delta");
@@ -135,7 +132,7 @@ fn gpu_texture() {
         println!("ogpu_metal texture: skipped (no device)");
         return;
     };
-    let other = get(Device::system_default());
+    let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
     let descriptor = TextureDescriptor {
         label: Some("ogpu-metal-texture".to_owned()),
@@ -148,19 +145,19 @@ fn gpu_texture() {
         usage: vec![TextureUsage::TextureBinding, TextureUsage::TextureCopySrc, TextureUsage::TextureCopyDst],
     };
     let invalid = TextureDescriptor { mip_levels: 8, ..descriptor.clone() };
-    expect(ErrorKind::InvalidArgument, texture::create(&device, Memory::Shared, TextureFormat::Rgba8Unorm, &invalid));
-    let value = get(texture::create(&device, Memory::Shared, TextureFormat::Rgba8Unorm, &descriptor));
-    let bytes = get(value.read_bytes(&device, 0, 16));
+    expect(ErrorKind::InvalidArgument, texture::create(&device, Memory::Shared, TextureFormat::Rgba8Unorm, &invalid).err());
+    let value = texture::create(&device, Memory::Shared, TextureFormat::Rgba8Unorm, &descriptor).unwrap_or_else(|failure| die(failure));
+    let bytes = value.read_bytes(&device, 0, 16).unwrap_or_else(|failure| die(failure));
     assert_eq!(bytes.len(), 64, "texture readback length");
     let mut direct = vec![0xffu8; 64];
-    get(value.read_bytes_into(&device, 0, 16, &mut direct));
+    value.read_bytes_into(&device, 0, 16, &mut direct).unwrap_or_else(|failure| die(failure));
     assert_eq!(direct, bytes, "texture direct read-into mismatch");
-    expect(ErrorKind::InvalidArgument, value.read_bytes_into(&device, 0, 16, &mut [0u8; 63]));
-    expect(ErrorKind::CrossDevice, value.descriptor(&other));
-    expect(ErrorKind::InvalidState, device.destroy());
-    get(value.destroy());
-    get(device.destroy());
-    get(other.destroy());
+    expect(ErrorKind::InvalidArgument, value.read_bytes_into(&device, 0, 16, &mut [0u8; 63]).err());
+    expect(ErrorKind::CrossDevice, value.descriptor(&other).err());
+    expect(ErrorKind::InvalidState, device.destroy().err());
+    value.destroy().unwrap_or_else(|failure| die(failure));
+    device.destroy().unwrap_or_else(|failure| die(failure));
+    other.destroy().unwrap_or_else(|failure| die(failure));
     drop((value, device, other));
     assert_eq!(live() + 2, before, "texture live-handle delta");
     println!("ogpu_metal texture: both host read paths agree, typed rejections, zero live-handle delta");
@@ -184,7 +181,7 @@ fn gpu_capabilities() {
         }
     }
     assert_eq!(reported.limits.max_sample_count, maximum.min(4), "sample limit differs from qualified Metal probes");
-    get(device.destroy());
+    device.destroy().unwrap_or_else(|failure| die(failure));
 }
 
 const COMPUTE_SOURCE: &str = "#include <metal_stdlib>\nusing namespace metal;\nkernel void mapped_compute(device uint *values [[buffer(0)]], uint i [[thread_position_in_grid]]) { values[i] = values[i] * 2 + 3; }\n";
@@ -196,15 +193,13 @@ fn gpu_pipeline() {
         println!("ogpu_metal pipeline: skipped (no device)");
         return;
     };
-    let other = get(Device::system_default());
+    let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
     let compute_binding = Binding { group: 0, binding: 0, kind: BindingKind::StorageBuffer, visibility: vec![Stage::Compute] };
     let compute_shader = make_shader("mapped-compute", COMPUTE_SOURCE, &[("mapped_compute", Stage::Compute)], vec![compute_binding.clone()]);
-    let library_value = get(library::create(&device, &compute_shader));
-    let compute = get(pipeline::create_compute_from_library(&device, &library_value, "mapped_compute", &[], &[compute_binding.clone()]));
-    expect(
-        ErrorKind::InvalidArgument,
-        pipeline::create_compute_from_library(&device, &library_value, "mapped_compute", &[], &[Binding { kind: BindingKind::SampledTexture, ..compute_binding.clone() }]),
+    let library_value = library::create(&device, &compute_shader).unwrap_or_else(|failure| die(failure));
+    let compute = pipeline::create_compute_from_library(&device, &library_value, "mapped_compute", &[], &[compute_binding.clone()]).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidArgument, pipeline::create_compute_from_library(&device, &library_value, "mapped_compute", &[], &[Binding { kind: BindingKind::SampledTexture, ..compute_binding.clone() }]).err(),
     );
     assert!(pipeline::create_compute_from_library(&device, &library_value, "absent", &[], &[]).is_err(), "absent entry accepted");
     let invalid_shader = make_shader("invalid-msl", "this is not Metal", &[("bad", Stage::Compute)], vec![]);
@@ -223,13 +218,13 @@ fn gpu_pipeline() {
         sample_count: 1,
     };
     for blend in [Blend::Replace, Blend::Alpha, Blend::Add, Blend::Multiply, Blend::Screen, Blend::Subtract] {
-        let value = get(pipeline::create_render_owned(false, metal::pipeline::PrimitiveTopology::Triangle, blend, &device, &descriptor));
-        get(value.destroy());
+        let value = pipeline::create_render_owned(false, metal::pipeline::PrimitiveTopology::Triangle, blend, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+        value.destroy().unwrap_or_else(|failure| die(failure));
     }
-    get(compute.destroy());
-    get(library_value.destroy());
-    get(device.destroy());
-    get(other.destroy());
+    compute.destroy().unwrap_or_else(|failure| die(failure));
+    library_value.destroy().unwrap_or_else(|failure| die(failure));
+    device.destroy().unwrap_or_else(|failure| die(failure));
+    other.destroy().unwrap_or_else(|failure| die(failure));
     drop((compute, library_value, descriptor, device, other));
     assert_eq!(live() + 2, before, "pipeline live-handle delta");
     println!("ogpu_metal pipeline: reflected compute from library, six owned render blends, typed rejections, zero live-handle delta");
@@ -250,8 +245,8 @@ fn gpu_pipeline_argument_buffer() {
         &[("scene_fragment_argument", Stage::Fragment)],
         vec![Binding { group: 0, binding: 1, kind: BindingKind::StorageBuffer, visibility: vec![Stage::Fragment] }],
     );
-    let group = get(binding::create_layout(&[LayoutEntry { binding: 1, kind: LayoutKind::Buffer, visibility: vec![LayoutStage::Fragment] }]));
-    let layout = get(binding::create_pipeline_layout(device.handle(), &device.capabilities(), &[(0, group)]));
+    let group = binding::create_layout(&[LayoutEntry { binding: 1, kind: LayoutKind::Buffer, visibility: vec![LayoutStage::Fragment] }]).unwrap_or_else(|failure| die(failure));
+    let layout = binding::create_pipeline_layout(device.handle(), &device.capabilities(), &[(0, group)]).unwrap_or_else(|failure| die(failure));
     let descriptor = RenderDescriptor {
         backend: "metal".to_owned(),
         label: Some("argument".to_owned()),
@@ -265,16 +260,16 @@ fn gpu_pipeline_argument_buffer() {
         sample_count: 1,
     };
     // Without `indirect` no fragment function is retained for encoders.
-    let direct = get(pipeline::create_render_owned(false, metal::pipeline::PrimitiveTopology::Triangle, Blend::Replace, &device, &descriptor));
-    expect(ErrorKind::InvalidState, direct.argument_encoder(1));
-    let indirect = get(pipeline::create_render_owned(true, metal::pipeline::PrimitiveTopology::Triangle, Blend::Replace, &device, &descriptor));
-    let mut encoder = get(indirect.argument_encoder(1));
+    let direct = pipeline::create_render_owned(false, metal::pipeline::PrimitiveTopology::Triangle, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, direct.argument_encoder(1).err());
+    let indirect = pipeline::create_render_owned(true, metal::pipeline::PrimitiveTopology::Triangle, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+    let mut encoder = indirect.argument_encoder(1).unwrap_or_else(|failure| die(failure));
     assert!(encoder.encoded_length() > 0, "argument encoder length");
-    expect(ErrorKind::InvalidArgument, indirect.argument_encoder(u64::MAX));
+    expect(ErrorKind::InvalidArgument, indirect.argument_encoder(u64::MAX).err());
     encoder.destroy().expect("encoder destroy");
-    get(indirect.destroy());
-    get(direct.destroy());
-    get(device.destroy());
+    indirect.destroy().unwrap_or_else(|failure| die(failure));
+    direct.destroy().unwrap_or_else(|failure| die(failure));
+    device.destroy().unwrap_or_else(|failure| die(failure));
     drop((encoder, indirect, direct, descriptor, device));
     assert_eq!(live() + 1, before, "argument pipeline live-handle delta");
     println!("pipeline argument buffer: owned indirect pipeline retains its fragment encoder, zero delta");
@@ -285,14 +280,14 @@ fn gpu_acceleration() {
         println!("ogpu_metal acceleration: skipped (no device)");
         return;
     };
-    let other = get(Device::system_default());
+    let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
-    let vertices = get(buffer::create(&device, buffer::Memory::Shared, &BufferDescriptor { label: Some("triangle".to_owned()), size: 36, usage: vec![BufferUsage::Storage, BufferUsage::Vertex] }));
+    let vertices = buffer::create(&device, buffer::Memory::Shared, &BufferDescriptor { label: Some("triangle".to_owned()), size: 36, usage: vec![BufferUsage::Storage, BufferUsage::Vertex] }).unwrap_or_else(|failure| die(failure));
     let mut triangle = vec![0u8; 36];
     for (i, v) in [-1., -1., 0., 1., -1., 0., 0., 1., 0.].iter().enumerate() {
         put_f32(&mut triangle, i * 4, *v);
     }
-    get(vertices.write_bytes(&device, 0, &triangle));
+    vertices.write_bytes(&device, 0, &triangle).unwrap_or_else(|failure| die(failure));
     let buffers: RefCell<HashMap<Token, Buffer>> = RefCell::new(HashMap::new());
     let structures: RefCell<HashMap<Token, Acceleration>> = RefCell::new(HashMap::new());
     buffers.borrow_mut().insert(1, vertices.clone());
@@ -302,29 +297,29 @@ fn gpu_acceleration() {
     let triangles = |vertex_count: i64| DriverGeometry::Triangles { vertices: 1, offset: 0, length: 36, vertex_stride: 12, vertex_count };
     let blas = |vertex_count: i64, refit: bool| DriverAccelDescriptor::Blas { geometries: vec![triangles(vertex_count)], motion: None, refit };
     if device.capabilities().ray_tracing {
-        let structure = get(create(&blas(3, false)));
+        let structure = create(&blas(3, false)).unwrap_or_else(|failure| die(failure));
         structures.borrow_mut().insert(10, structure.clone());
-        expect(ErrorKind::InvalidArgument, create(&blas(6, false)));
-        let scratch = get(buffer::create(&device, buffer::Memory::DeviceLocal, &BufferDescriptor { label: Some("scratch".to_owned()), size: 1_048_576, usage: vec![BufferUsage::Storage] }));
-        let q = get(queue::create(&device));
+        expect(ErrorKind::InvalidArgument, create(&blas(6, false)).err());
+        let scratch = buffer::create(&device, buffer::Memory::DeviceLocal, &BufferDescriptor { label: Some("scratch".to_owned()), size: 1_048_576, usage: vec![BufferUsage::Storage] }).unwrap_or_else(|failure| die(failure));
+        let q = queue::create(&device).unwrap_or_else(|failure| die(failure));
         let commands = metal::CommandBuffer::create(q.metal()).expect("command buffer");
         let encoder = metal::AccelerationEncoder::create(&commands).expect("acceleration encoder");
-        expect(ErrorKind::CrossDevice, structure.encode_build(&encoder, &other, &scratch, 0));
-        get(structure.encode_build(&encoder, &device, &scratch, 0));
-        let refittable = get(create(&blas(3, true)));
-        get(refittable.encode_build(&encoder, &device, &scratch, 0));
-        expect(ErrorKind::InvalidArgument, refittable.encode_refit(&encoder, &device, &blas(3, true), &resolve_buffer, &scratch, 1_048_832));
-        get(refittable.encode_refit(&encoder, &device, &blas(3, true), &resolve_buffer, &scratch, 0));
-        let instances = get(buffer::create(&device, buffer::Memory::Shared, &BufferDescriptor { label: Some("instances".to_owned()), size: 68, usage: vec![BufferUsage::Storage] }));
+        expect(ErrorKind::CrossDevice, structure.encode_build(&encoder, &other, &scratch, 0).err());
+        structure.encode_build(&encoder, &device, &scratch, 0).unwrap_or_else(|failure| die(failure));
+        let refittable = create(&blas(3, true)).unwrap_or_else(|failure| die(failure));
+        refittable.encode_build(&encoder, &device, &scratch, 0).unwrap_or_else(|failure| die(failure));
+        expect(ErrorKind::InvalidArgument, refittable.encode_refit(&encoder, &device, &blas(3, true), &resolve_buffer, &scratch, 1_048_832).err());
+        refittable.encode_refit(&encoder, &device, &blas(3, true), &resolve_buffer, &scratch, 0).unwrap_or_else(|failure| die(failure));
+        let instances = buffer::create(&device, buffer::Memory::Shared, &BufferDescriptor { label: Some("instances".to_owned()), size: 68, usage: vec![BufferUsage::Storage] }).unwrap_or_else(|failure| die(failure));
         buffers.borrow_mut().insert(2, instances.clone());
-        get(instances.write_bytes(
+        instances.write_bytes(
             &device,
             0,
             &ogpu_core::acceleration::pack_instances(
                 &vec![68, 0, 48, 52, 60, 64, -1, -1, -1, -1, -1, -1],
                 &[(vec![1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0.], 0xFFFF_FFFF, 0, 7)],
             ),
-        ));
+        ).unwrap_or_else(|failure| die(failure));
         let tlas = |structure: Token| DriverAccelDescriptor::Tlas {
             instances: 2,
             offset: 0,
@@ -333,31 +328,31 @@ fn gpu_acceleration() {
             structures: vec![structure],
             motion_transforms: None,
         };
-        let top = get(create(&tlas(10)));
+        let top = create(&tlas(10)).unwrap_or_else(|failure| die(failure));
         structures.borrow_mut().insert(11, top.clone());
-        expect(ErrorKind::InvalidArgument, create(&tlas(11)));
-        get(top.encode_build(&encoder, &device, &scratch, 0));
-        let sized = get(create(&DriverAccelDescriptor::Sized { size: structure.sizes().acceleration_structure_size as i64, template: 10 }));
-        expect(ErrorKind::InvalidState, sized.encode_build(&encoder, &device, &scratch, 0));
+        expect(ErrorKind::InvalidArgument, create(&tlas(11)).err());
+        top.encode_build(&encoder, &device, &scratch, 0).unwrap_or_else(|failure| die(failure));
+        let sized = create(&DriverAccelDescriptor::Sized { size: structure.sizes().acceleration_structure_size as i64, template: 10 }).unwrap_or_else(|failure| die(failure));
+        expect(ErrorKind::InvalidState, sized.encode_build(&encoder, &device, &scratch, 0).err());
         encoder.end_encoding().expect("end encoding");
-        let release_top = get(top.retain_submission());
-        let release_sized = get(sized.retain_submission());
-        let receipt = get(q.submit_native(&commands, &mut vec![release_top, release_sized]));
-        get(q.wait_through(receipt.epoch));
-        get(sized.destroy());
-        get(top.destroy());
-        get(structure.destroy());
-        get(refittable.destroy());
-        get(instances.destroy());
-        get(scratch.destroy());
-        get(q.destroy());
+        let release_top = top.retain_submission().unwrap_or_else(|failure| die(failure));
+        let release_sized = sized.retain_submission().unwrap_or_else(|failure| die(failure));
+        let receipt = q.submit_native(&commands, &mut vec![release_top, release_sized]).unwrap_or_else(|failure| die(failure));
+        q.wait_through(receipt.epoch).unwrap_or_else(|failure| die(failure));
+        sized.destroy().unwrap_or_else(|failure| die(failure));
+        top.destroy().unwrap_or_else(|failure| die(failure));
+        structure.destroy().unwrap_or_else(|failure| die(failure));
+        refittable.destroy().unwrap_or_else(|failure| die(failure));
+        instances.destroy().unwrap_or_else(|failure| die(failure));
+        scratch.destroy().unwrap_or_else(|failure| die(failure));
+        q.destroy().unwrap_or_else(|failure| die(failure));
         drop((sized, top, structure, refittable, instances, scratch, q, commands, encoder));
     } else {
-        expect(ErrorKind::Unsupported, create(&blas(3, false)));
+        expect(ErrorKind::Unsupported, create(&blas(3, false)).err());
     }
-    get(vertices.destroy());
-    get(device.destroy());
-    get(other.destroy());
+    vertices.destroy().unwrap_or_else(|failure| die(failure));
+    device.destroy().unwrap_or_else(|failure| die(failure));
+    other.destroy().unwrap_or_else(|failure| die(failure));
     drop((structures, buffers, vertices, device, other));
     assert_eq!(live() + 2, before, "acceleration live-handle delta");
     println!("ogpu_metal acceleration: generic build for primitives and user-id instances, in-place refit, typed rejections, zero delta ok");
@@ -389,8 +384,8 @@ fn gpu_sampler_pixels() {
         }
         Err(failure) => panic!("{}", error::to_string(&failure)),
         Ok(raw) => {
-            get((raw.destroy_device)());
-            get(be::create_device(driver))
+            (raw.destroy_device)().unwrap_or_else(|failure| die(failure));
+            be::create_device(driver).unwrap_or_else(|failure| die(failure))
         }
     };
     {
@@ -404,11 +399,11 @@ fn gpu_sampler_pixels() {
                 vec![sampler_binding(0, BindingKind::SampledTexture), sampler_binding(1, BindingKind::Sampler)],
             )
         };
-        let texture_layout = get(binding::create_layout(&[
+        let texture_layout = binding::create_layout(&[
             LayoutEntry { binding: 0, kind: LayoutKind::Texture, visibility: vec![LayoutStage::Fragment] },
             LayoutEntry { binding: 1, kind: LayoutKind::Sampler, visibility: vec![LayoutStage::Fragment] },
-        ]));
-        let layout = get(binding::create_pipeline_layout(be::device_handle(&device), &be::capabilities(&device), &[(0, texture_layout)]));
+        ]).unwrap_or_else(|failure| die(failure));
+        let layout = binding::create_pipeline_layout(be::device_handle(&device), &be::capabilities(&device), &[(0, texture_layout)]).unwrap_or_else(|failure| die(failure));
         let pipelines: Vec<(&str, be::Pipeline)> = ["sample_clamp", "sample_repeat", "sample_mirror", "sample_linear", "sample_mip"]
             .into_iter()
             .map(|entry| {
@@ -424,31 +419,31 @@ fn gpu_sampler_pixels() {
                     depth_format: DepthFormat::NoDepth,
                     sample_count: 1,
                 };
-                (entry, get(be::create_render_pipeline(&device, &descriptor, None, None, None)))
+                (entry, be::create_render_pipeline(&device, &descriptor, None, None, None).unwrap_or_else(|failure| die(failure)))
             })
             .collect();
         let texture_of = |label: &str, width: i64, mip_levels: i64, usage: &[TextureUsage]| {
-            get(be::create_texture(
+            be::create_texture(
                 &device,
                 TextureDescriptor { label: Some(label.to_owned()), width, height: width, depth: 1, mip_levels, sample_count: 1, format: TextureFormat::Rgba8Unorm, usage: usage.to_vec() },
-            ))
+            ).unwrap_or_else(|failure| die(failure))
         };
         let sampled = texture_of("sampled", 2, 2, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst]);
         let target = texture_of("target", 1, 1, &[TextureUsage::TextureBinding, TextureUsage::RenderAttachment, TextureUsage::TextureCopySrc]);
-        let upload = get(be::create_buffer(&device, BufferDescriptor { label: None, size: 768, usage: vec![BufferUsage::CopySrc, BufferUsage::CopyDst] }, None));
-        let queue_value = get(be::create_queue(&device));
+        let upload = be::create_buffer(&device, BufferDescriptor { label: None, size: 768, usage: vec![BufferUsage::CopySrc, BufferUsage::CopyDst] }, None).unwrap_or_else(|failure| die(failure));
+        let queue_value = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
         let mut bytes = vec![0u8; 768];
         bytes[..8].copy_from_slice(&[0xff, 0x00, 0x00, 0xff, 0x00, 0xff, 0x00, 0xff]);
         bytes[256..264].copy_from_slice(&[0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
         bytes[512..516].copy_from_slice(&[0xff, 0xff, 0x00, 0xff]);
-        get(be::write_buffer(&upload, 0, &bytes));
-        let wait = |receipt: be::Receipt| get(be::complete_through(&queue_value, receipt.epoch));
-        let commands = get(be::begin_commands(&queue_value));
-        let blit = get(be::blit_encoder(&commands));
-        get(be::buffer_to_texture(&blit, &upload, None, 256, 512, &sampled, None, None, Extent { width: 2, height: 2, depth: 1 }));
-        get(be::buffer_to_texture(&blit, &upload, Some(512), 256, 256, &sampled, Some(1), None, Extent { width: 1, height: 1, depth: 1 }));
-        get(be::end_blit(&blit));
-        wait(get(be::commit(&commands)));
+        be::write_buffer(&upload, 0, &bytes).unwrap_or_else(|failure| die(failure));
+        let wait = |receipt: be::Receipt| be::complete_through(&queue_value, receipt.epoch).unwrap_or_else(|failure| die(failure));
+        let commands = be::begin_commands(&queue_value).unwrap_or_else(|failure| die(failure));
+        let blit = be::blit_encoder(&commands).unwrap_or_else(|failure| die(failure));
+        be::buffer_to_texture(&blit, &upload, None, 256, 512, &sampled, None, None, Extent { width: 2, height: 2, depth: 1 }).unwrap_or_else(|failure| die(failure));
+        be::buffer_to_texture(&blit, &upload, Some(512), 256, 256, &sampled, Some(1), None, Extent { width: 1, height: 1, depth: 1 }).unwrap_or_else(|failure| die(failure));
+        be::end_blit(&blit).unwrap_or_else(|failure| die(failure));
+        wait(be::commit(&commands).unwrap_or_else(|failure| die(failure)));
         let base = SamplerDescriptor {
             label: None,
             min_filter: SamplerFilter::Nearest,
@@ -469,37 +464,37 @@ fn gpu_sampler_pixels() {
         ];
         for (entry, expected, descriptor) in cases {
             let pipeline_value = &pipelines.iter().find(|(name, _)| *name == entry).expect("pipeline").1;
-            let sampler = get(be::create_sampler(&device, descriptor));
-            let commands = get(be::begin_commands(&queue_value));
-            let encoder = get(be::render_encoder(
+            let sampler = be::create_sampler(&device, descriptor).unwrap_or_else(|failure| die(failure));
+            let commands = be::begin_commands(&queue_value).unwrap_or_else(|failure| die(failure));
+            let encoder = be::render_encoder(
                 &commands,
                 &be::RenderTarget {
                     colors: vec![be::ColorAttachment { texture: target.clone(), resolve: None, load: Load::Clear, store: Store::Store, clear: (0., 0., 0., 0.) }],
                     depth: None,
                 },
-            ));
-            get(be::set_render_pipeline(&encoder, pipeline_value));
-            get(be::set_stage_texture(&encoder, be::ShaderStage::Fragment, 0, &sampled));
-            get(be::set_stage_sampler(&encoder, be::ShaderStage::Fragment, 1, &sampler));
-            get(be::draw(&encoder, Primitive::TriangleList, 0, 3, None));
-            get(be::end_render(&encoder));
-            wait(get(be::commit(&commands)));
-            let actual = get(be::read_texture(&target, 4));
+            ).unwrap_or_else(|failure| die(failure));
+            be::set_render_pipeline(&encoder, pipeline_value).unwrap_or_else(|failure| die(failure));
+            be::set_stage_texture(&encoder, be::ShaderStage::Fragment, 0, &sampled).unwrap_or_else(|failure| die(failure));
+            be::set_stage_sampler(&encoder, be::ShaderStage::Fragment, 1, &sampler).unwrap_or_else(|failure| die(failure));
+            be::draw(&encoder, Primitive::TriangleList, 0, 3, None).unwrap_or_else(|failure| die(failure));
+            be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+            wait(be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+            let actual = be::read_texture(&target, 4).unwrap_or_else(|failure| die(failure));
             assert!(
                 expected.iter().zip(actual.iter()).all(|(a, b)| (*a as i32 - *b as i32).abs() <= 1),
                 "{entry} sampled {actual:?}, expected {expected:?}"
             );
-            get(be::destroy_sampler(&sampler));
+            be::destroy_sampler(&sampler).unwrap_or_else(|failure| die(failure));
         }
-        get(be::destroy_queue(&queue_value));
-        get(be::destroy_buffer(&upload));
-        get(be::destroy_texture(&sampled));
-        get(be::destroy_texture(&target));
+        be::destroy_queue(&queue_value).unwrap_or_else(|failure| die(failure));
+        be::destroy_buffer(&upload).unwrap_or_else(|failure| die(failure));
+        be::destroy_texture(&sampled).unwrap_or_else(|failure| die(failure));
+        be::destroy_texture(&target).unwrap_or_else(|failure| die(failure));
         for (_, value) in &pipelines {
-            get(be::destroy_pipeline(value));
+            be::destroy_pipeline(value).unwrap_or_else(|failure| die(failure));
         }
     }
-    get(be::destroy_device(&device));
+    be::destroy_device(&device).unwrap_or_else(|failure| die(failure));
     drop(device);
     assert_eq!(impl_::live_handles(), before, "sampler pixels live-handle delta");
     println!("ogpu_metal sampler pixels: nearest/linear clamp/repeat/mirror/mip exact, zero delta");

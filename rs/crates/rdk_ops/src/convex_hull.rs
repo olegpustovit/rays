@@ -16,7 +16,6 @@ use rdk_geom::predicates::{self, Sign};
 const OPERATION: &str = "Rdk_mesh.Convex_hull.convex_hull";
 const GUARD_OPERATION: &str = "convex_hull";
 
-type R<V> = Result<V, error::T>;
 
 #[derive(Default)]
 pub struct Params {
@@ -71,7 +70,7 @@ struct Positions {
     z: Arc<[f64]>,
 }
 
-fn positions_of(geometry_value: &geometry::T) -> R<Positions> {
+fn positions_of(geometry_value: &geometry::T) -> Result<Positions, error::T> {
     let view = packed::Float3::View::view(geometry::positions(geometry_value))?;
     Ok(Positions { x: view.x, y: view.y, z: view.z })
 }
@@ -104,7 +103,7 @@ fn hash_position(positions: &Positions, point: usize, mask: i64) -> i64 {
     mix(hash) & mask
 }
 
-fn next_table_size(count: usize) -> R<usize> {
+fn next_table_size(count: usize) -> Result<usize, error::T> {
     if count > (i64::MAX as usize) / 2 {
         return Err(fail(format!("{OPERATION}: selected point set exceeds hash-table limits")));
     }
@@ -121,7 +120,7 @@ fn selected_unique_points(
     grain: i64,
     selection: Option<&group::T>,
     geometry_value: &geometry::T,
-) -> R<Vec<i64>> {
+) -> Result<Vec<i64>, error::T> {
     let point_count = geometry::point_count(geometry_value);
     let positions = positions_of(geometry_value)?;
     let selected = |point: i64| match selection {
@@ -139,7 +138,7 @@ fn selected_unique_points(
         return Err(fail(format!("{OPERATION}: selection contains no points")));
     }
     let first_invalid = AtomicI64::new(i64::MAX);
-    let validate = |point: i64| -> R<()> {
+    let validate = |point: i64| -> Result<(), error::T> {
         let index = point as usize;
         if selected(point)
             && !(positions.x[index].is_finite()
@@ -339,7 +338,7 @@ impl Faces {
         }
     }
 
-    fn neighbor_slot(&self, face: usize, neighbor: i64) -> R<usize> {
+    fn neighbor_slot(&self, face: usize, neighbor: i64) -> Result<usize, error::T> {
         for slot in 0..3 {
             if self.neighbor[slot][face] == neighbor {
                 return Ok(slot);
@@ -386,7 +385,7 @@ fn face_measure(p: &Positions, faces: &Faces, face: usize, point: i64) -> f64 {
         .abs()
 }
 
-fn connect_initial(faces: &mut Faces) -> R<()> {
+fn connect_initial(faces: &mut Faces) -> Result<(), error::T> {
     for left in 0..4 {
         for left_edge in 0..3 {
             if faces.neighbor[left_edge][left] < 0 {
@@ -419,12 +418,12 @@ fn assign_points(
     face_ids: &[usize],
     points: &[i64],
     queue: &mut VecDeque<usize>,
-) -> R<()> {
+) -> Result<(), error::T> {
     let point_count = points.len();
     let assignments: Vec<AtomicI64> = (0..point_count).map(|_| AtomicI64::new(-1)).collect();
     {
         let faces_ref: &Faces = faces;
-        let assign = |index: i64| -> R<()> {
+        let assign = |index: i64| -> Result<(), error::T> {
             let point = points[index as usize];
             for &face in face_ids {
                 if visible(p, faces_ref, face, point) {
@@ -450,7 +449,7 @@ fn assign_points(
     Ok(())
 }
 
-fn oriented_face(p: &Positions, faces: &mut Faces, a: i64, b: i64, c: i64, opposite: i64) -> R<usize> {
+fn oriented_face(p: &Positions, faces: &mut Faces, a: i64, b: i64, c: i64, opposite: i64) -> Result<usize, error::T> {
     match predicates::orient3d_packed(&p.x, &p.y, &p.z, a, b, c, opposite) {
         Sign::Positive => Ok(faces.add(a, b, c)),
         Sign::Negative => Ok(faces.add(b, a, c)),
@@ -458,7 +457,7 @@ fn oriented_face(p: &Positions, faces: &mut Faces, a: i64, b: i64, c: i64, oppos
     }
 }
 
-fn farthest_outside(p: &Positions, faces: &Faces, face: usize) -> R<i64> {
+fn farthest_outside(p: &Positions, faces: &Faces, face: usize) -> Result<i64, error::T> {
     let outside = &faces.outside[face];
     if outside.is_empty() {
         return Err(fail(format!("{OPERATION}: empty outside set")));
@@ -486,7 +485,7 @@ fn expand_hull(
     generation: i64,
     seed_face: usize,
     eye: i64,
-) -> R<()> {
+) -> Result<(), error::T> {
     let mut visible_faces: Vec<usize> = Vec::new();
     let mut stack: Vec<usize> = vec![seed_face];
     faces.mark[seed_face] = generation;
@@ -563,7 +562,7 @@ fn three_dimensional_hull(
     b: i64,
     c: i64,
     d: i64,
-) -> R<(Faces, Vec<usize>)> {
+) -> Result<(Faces, Vec<usize>), error::T> {
     let mut faces = Faces::new();
     oriented_face(p, &mut faces, a, b, c, d)?;
     oriented_face(p, &mut faces, a, d, b, c)?;
@@ -601,7 +600,7 @@ enum Hull {
     Solid(Faces, Vec<usize>),
 }
 
-fn gather(cancel_value: Option<&cancel::T>, grain: i64, point_map: &[i64], source: &[f64]) -> R<Vec<f64>> {
+fn gather(cancel_value: Option<&cancel::T>, grain: i64, point_map: &[i64], source: &[f64]) -> Result<Vec<f64>, error::T> {
     let count = point_map.len() as i64;
     let slots: Vec<Mutex<Vec<f64>>> =
         (0..((count + grain - 1) / grain).max(0)).map(|_| Mutex::new(Vec::new())).collect();
@@ -628,7 +627,7 @@ fn remap_output(
     geometry_value: &geometry::T,
     point_map: &[i64],
     topology_value: topology::T,
-) -> R<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let source = positions_of(geometry_value)?;
     let positions = packed::Float3::View::of_owned_exn(
         gather(cancel_value, grain, point_map, &source.x)?,
@@ -672,7 +671,7 @@ fn materialize(
     params: &Params,
     geometry_value: &geometry::T,
     hull: Hull,
-) -> R<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let preserve = params.preserve_point_payload;
     let source_attr = params.source_point_attribute.as_deref();
     let hull_group = params.hull_group.as_deref();
@@ -752,11 +751,11 @@ fn materialize(
 /// produces a free point, collinear inputs produce one open endpoint segment, coplanar inputs
 /// produce one closed convex polygon, and a full-dimensional input produces an outward closed
 /// triangle surface.
-pub fn run(params: &Params, geometry_value: &geometry::T) -> R<geometry::T> {
+pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run_inner(params, geometry_value).map_err(norm)
 }
 
-fn run_inner(params: &Params, geometry_value: &geometry::T) -> R<geometry::T> {
+fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
     if grain <= 0 {
@@ -827,27 +826,20 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> R<geometry::T> {
 mod tests {
     use super::*;
 
-    fn get<V>(value: R<V>) -> V {
-        match value {
-            Ok(value) => value,
-            Err(failure) => panic!("{}", error::to_string(&failure)),
-        }
-    }
-
     fn point_cloud(values: &[(f64, f64, f64)]) -> geometry::T {
         let x = values.iter().map(|v| v.0).collect();
         let y = values.iter().map(|v| v.1).collect();
         let z = values.iter().map(|v| v.2).collect();
-        get(geometry::create(
-            get(packed::Float3::View::of_owned_exn(x, y, z)),
-            get(topology::empty(values.len() as i64)),
+        geometry::create(
+            packed::Float3::View::of_owned_exn(x, y, z).unwrap(),
+            topology::empty(values.len() as i64).unwrap(),
             None,
             None,
             None,
-        ))
+        ).unwrap()
     }
 
-    fn expect_error(value: R<geometry::T>, code: &str) {
+    fn expect_error(value: Result<geometry::T, error::T>, code: &str) {
         match value {
             Err(failure) => assert_eq!(error::code(&failure), code, "{}", error::to_string(&failure)),
             Ok(_) => panic!("expected {code} error"),
@@ -941,26 +933,26 @@ mod tests {
         }
     }
 
-    fn run_with(params: Params, source: &geometry::T) -> R<geometry::T> {
+    fn run_with(params: Params, source: &geometry::T) -> Result<geometry::T, error::T> {
         run(&params, source)
     }
 
     #[test]
     fn affine_dimensions() {
-        let point = get(run_with(
+        let point = run_with(
             Params { source_point_attribute: Some("source".to_owned()), ..Params::default() },
             &point_cloud(&[(2., 3., 4.), (2., 3., 4.), (2., 3., 4.)]),
-        ));
+        ).unwrap();
         assert!(
             geometry::point_count(&point) == 1
                 && geometry::vertex_count(&point) == 0
                 && geometry::primitive_count(&point) == 0,
             "singleton hull"
         );
-        let line = get(run_with(
+        let line = run_with(
             Params::default(),
             &point_cloud(&[(2., 0., 0.), (-1., 0., 0.), (5., 0., 0.), (0., 0., 0.), (5., 0., 0.)]),
-        ));
+        ).unwrap();
         let line_positions = positions_of(&line).unwrap();
         assert!(
             geometry::point_count(&line) == 2
@@ -971,7 +963,7 @@ mod tests {
                 && line_positions.x[..] == [-1., 5.],
             "collinear endpoint hull"
         );
-        let plane = get(run_with(
+        let plane = run_with(
             Params::default(),
             &point_cloud(&[
                 (0., 0., 0.),
@@ -982,7 +974,7 @@ mod tests {
                 (0.5, 0., 0.),
                 (1., 1., 0.),
             ]),
-        ));
+        ).unwrap();
         assert!(
             geometry::point_count(&plane) == 4
                 && geometry::vertex_count(&plane) == 4
@@ -1011,33 +1003,33 @@ mod tests {
         ];
         let geometry_value = point_cloud(&values);
         let points = values.len();
-        let id = get(attribute::create_owned(
+        let id = attribute::create_owned(
             "id",
             attribute::Owner::Point,
             attribute::Storage::Int((0..points as i64).map(|point| 100 + point).collect()),
-        ));
-        let normal = get(attribute::create_owned(
+        ).unwrap();
+        let normal = attribute::create_owned(
             "N",
             attribute::Owner::Point,
-            attribute::Storage::Float3(get(packed::Float3::View::of_owned_exn(
+            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
                 vec![1.; points],
                 vec![0.; points],
                 vec![0.; points],
-            ))),
-        ));
-        let detail = get(attribute::create_owned(
+            ).unwrap()),
+        ).unwrap();
+        let detail = attribute::create_owned(
             "tag",
             attribute::Owner::Detail,
             attribute::Storage::Text(vec!["cube".to_owned()]),
-        ));
-        let corners = get(group::ordered(group::Owner::Point, "corners", points as i64, &[7, 0, 3, 4]));
-        get(geometry::create(
+        ).unwrap();
+        let corners = group::ordered(group::Owner::Point, "corners", points as i64, &[7, 0, 3, 4]).unwrap();
+        geometry::create(
             geometry::positions(&geometry_value).clone(),
             geometry::topology(&geometry_value).clone(),
             Some(vec![id, normal, detail]),
             Some(vec![corners]),
             None,
-        ))
+        ).unwrap()
     }
 
     fn int_storage(value: Option<attribute::T>) -> Vec<i64> {
@@ -1050,7 +1042,7 @@ mod tests {
     #[test]
     fn solid_payload_and_selection() {
         let source = decorated_cube();
-        let hull = get(run_with(
+        let hull = run_with(
             Params {
                 grain: Some(1),
                 source_point_attribute: Some("source_point".to_owned()),
@@ -1059,7 +1051,7 @@ mod tests {
                 ..Params::default()
             },
             &source,
-        ));
+        ).unwrap();
         assert!(
             geometry::point_count(&hull) == 8
                 && geometry::vertex_count(&hull) == 36
@@ -1093,13 +1085,13 @@ mod tests {
             Some(vec![7, 0, 3, 4]),
             "ordered point-group ancestry"
         );
-        let selected = get(group::init(Some(1), group::Owner::Point, "bottom", 11, &|point| point < 4));
-        let plane = get(run_with(
+        let selected = group::init(Some(1), group::Owner::Point, "bottom", 11, &|point| point < 4).unwrap();
+        let plane = run_with(
             Params { selection: Some(element_selection::T::SelectedPoints(selected)), ..Params::default() },
             &source,
-        ));
+        ).unwrap();
         assert!(geometry::point_count(&plane) == 4 && geometry::primitive_count(&plane) == 1, "typed selected hull");
-        let stripped = get(run_with(Params::default(), &source));
+        let stripped = run_with(Params::default(), &source).unwrap();
         assert!(
             geometry::find_attribute(attribute::Owner::Point, "id", &stripped).is_none()
                 && geometry::find_attribute(attribute::Owner::Detail, "tag", &stripped).is_some()
@@ -1115,10 +1107,10 @@ mod tests {
     #[test]
     fn exact_and_errors() {
         let tiny = f64::from_bits(1);
-        let exact = get(run_with(
+        let exact = run_with(
             Params::default(),
             &point_cloud(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.), (0., 0., tiny)]),
-        ));
+        ).unwrap();
         assert!(geometry::point_count(&exact) == 4 && geometry::primitive_count(&exact) == 4, "subnormal hull");
         check_closed(&exact, "subnormal hull incidence");
         let exact_source = point_cloud(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.), (0., 0., tiny)]);
@@ -1130,7 +1122,7 @@ mod tests {
         );
         let bad = point_cloud(&[(0., 0., 0.), (f64::NAN, 0., 0.)]);
         expect_error(run_with(Params::default(), &bad), "invalid_geometry");
-        let wrong = get(group::init(Some(1), group::Owner::Point, "wrong", 3, &|_| true));
+        let wrong = group::init(Some(1), group::Owner::Point, "wrong", 3, &|_| true).unwrap();
         expect_error(
             run_with(
                 Params { selection: Some(element_selection::T::SelectedPoints(wrong)), ..Params::default() },
@@ -1156,7 +1148,7 @@ mod tests {
                 })
                 .collect();
             let source = point_cloud(&points);
-            let hull = get(run_with(Params { grain: Some(7), ..Params::default() }, &source));
+            let hull = run_with(Params { grain: Some(7), ..Params::default() }, &source).unwrap();
             check_closed(&hull, &format!("random hull {case} incidence"));
             check_contains(&source, &hull, &format!("random hull {case} containment"));
             let (_, _, edges) = edge_stats(&hull);
@@ -1202,7 +1194,7 @@ mod tests {
                     preserve_point_payload: true,
                     ..Params::default()
                 };
-                *slot.lock().unwrap() = Some(get(run(&params, &source)));
+                *slot.lock().unwrap() = Some(run(&params, &source).unwrap());
                 Ok(())
             })
             .unwrap();

@@ -28,14 +28,13 @@ const MAX_ARRAY_LENGTH: i64 = 18_014_398_509_481_983;
 type Positions = packed::Float3::View::View;
 type TopologyView = topology::View::View;
 type IndexView = topology_index::View::View;
-type Cancel<'a> = Option<&'a Arc<cancel::T>>;
 
 fn make(code: &str, message: String) -> error::T {
     error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
 }
 
-fn fail<T>(code: &str, message: &str) -> Result<T, error::T> {
-    Err(make(code, message.to_owned()))
+fn fail_with(code: &str, message: &str) -> error::T {
+    make(code, message.to_owned())
 }
 
 /// OCaml `invalid_arg`.
@@ -53,15 +52,15 @@ fn raised(failure: error::T) -> error::T {
 }
 
 /// The OCaml `try ... with Cancelled -> ... | Invalid_argument m -> error invalid_code m`.
-fn guard<T>(cancelled: &str, invalid_code: &str, result: Result<T, error::T>) -> Result<T, error::T> {
-    result.map_err(|failure| match error::code(&failure) {
+fn guard_fail(cancelled: &str, invalid_code: &str, failure: error::T) -> error::T {
+    match error::code(&failure) {
         "cancelled" => make("cancelled", cancelled.to_owned()),
         "invalid_argument" => make(invalid_code, error::message(&failure).to_owned()),
         _ => failure,
-    })
+    }
 }
 
-fn cx(cancel: Cancel<'_>) -> Option<&cancel::T> {
+fn cx(cancel: Option<&Arc<cancel::T>>) -> Option<&cancel::T> {
     cancel.map(|value| value.as_ref())
 }
 
@@ -234,20 +233,17 @@ fn reserve_primitives(index: &IndexView, used_primitives: &mut [u8], point: i64)
 }
 
 pub fn safe_independent_edges(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     keep_greatest: Option<bool>,
     candidates: &edge_group::T,
     geometry_value: &geometry::T,
 ) -> Result<edge_group::T, error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
     let keep_greatest = keep_greatest.unwrap_or(false);
-    guard(
-        "Boolean contraction planning was cancelled",
-        "invalid_input",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
             let index_value = topology_index::create(cx(cancel), topology_value)?;
@@ -319,23 +315,19 @@ pub fn safe_independent_edges(
             }
             edge_group::View::of_owned_bits(topology_value, edge_count, "__rdk_boolean_safe_tiny_seam", chosen)
                 .map_err(raised)
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean contraction planning was cancelled", "invalid_input", f))
 }
 
 pub fn speculative_independent_edges(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     candidates: &edge_group::T,
     geometry_value: &geometry::T,
 ) -> Result<edge_group::T, error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
-    guard(
-        "Boolean speculative contraction planning was cancelled",
-        "invalid_input",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
             let index_value = topology_index::create(cx(cancel), topology_value)?;
@@ -376,23 +368,19 @@ pub fn speculative_independent_edges(
                 chosen,
             )
             .map_err(raised)
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean speculative contraction planning was cancelled", "invalid_input", f))
 }
 
 pub fn surface_seam_edges(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     ancestry: &boolean_extract::Ancestry,
     seam: &boolean_seam::T,
 ) -> Result<edge_group::T, error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
-    guard(
-        "Boolean seam-edge mapping was cancelled",
-        "invalid_input",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let complex = boolean_extract::View::complex(ancestry);
             if !Arc::ptr_eq(boolean_seam::View::complex(seam), complex) {
@@ -423,8 +411,7 @@ pub fn surface_seam_edges(
                 }
             }
             edge_group::Builder::freeze(&mut builder).map_err(raised)
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean seam-edge mapping was cancelled", "invalid_input", f))
 }
 
 fn empty_geometry() -> Result<geometry::T, error::T> {
@@ -543,15 +530,12 @@ fn verify_duplicate_triangles(allow_opposite_duplicates: bool, topology: &Topolo
     }
     match failure {
         None => Ok(()),
-        Some((first, second)) => fail(
-            "surface_self_intersection",
-            &format!("rounded Boolean triangles {first} and {second} duplicate a surface facet"),
-        ),
+        Some((first, second)) => Err(fail_with("surface_self_intersection", &format!("rounded Boolean triangles {first} and {second} duplicate a surface facet"))),
     }
 }
 
 fn verify_extracted_contacts(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     positions: &Positions,
     topology: &TopologyView,
@@ -616,28 +600,22 @@ fn verify_extracted_contacts(
     let first = surface_index::View::triangle_primitive(&surface, first_triangle);
     let second = surface_index::View::triangle_primitive(&surface, second_triangle);
     match failure_kinds[u(failure_range)].load(AtomicOrdering::Relaxed) {
-        1 => fail("rounding_degenerate", "rounded Boolean surface contains a degenerate triangle pair"),
+        1 => Err(fail_with("rounding_degenerate", "rounded Boolean surface contains a degenerate triangle pair")),
         2 => {
             let first_min = primitive_min_edge_length(positions, topology, first);
             let second_min = primitive_min_edge_length(positions, topology, second);
-            fail(
-                "surface_self_intersection",
-                &format!(
+            Err(fail_with("surface_self_intersection", &format!(
                     "rounded Boolean triangles {first} and {second} intersect away from ordinary shared topology (minimum edge lengths {} and {})",
                     cfmt::g(first_min, 17),
                     cfmt::g(second_min, 17)
-                ),
-            )
+                )))
         }
-        _ => fail(
-            "surface_self_intersection",
-            &format!("rounded Boolean triangles {first} and {second} have non-adjacent coplanar contact"),
-        ),
+        _ => Err(fail_with("surface_self_intersection", &format!("rounded Boolean triangles {first} and {second} have non-adjacent coplanar contact"))),
     }
 }
 
 fn verify_constraint_contacts(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     allow_opposite_duplicates: bool,
     positions: &Positions,
@@ -645,21 +623,18 @@ fn verify_constraint_contacts(
     constraints: &Arc<boolean_constraints::T>,
 ) -> Result<(), error::T> {
     if boolean_constraints::degenerate_pair_count(constraints) > 0 {
-        return fail("rounding_degenerate", "rounded Boolean surface contains a degenerate triangle pair");
+        return Err(fail_with("rounding_degenerate", "rounded Boolean surface contains a degenerate triangle pair"));
     }
     if boolean_constraints::constraint_count(constraints) > 0 {
         let first = boolean_constraints::constraint_first_triangle(constraints, 0);
         let second = boolean_constraints::constraint_second_triangle(constraints, 0);
         let first_min = primitive_min_edge_length(positions, topology, first);
         let second_min = primitive_min_edge_length(positions, topology, second);
-        return fail(
-            "surface_self_intersection",
-            &format!(
+        return Err(fail_with("surface_self_intersection", &format!(
                 "rounded Boolean triangles {first} and {second} intersect away from ordinary shared topology (minimum edge lengths {} and {})",
                 cfmt::g(first_min, 17),
                 cfmt::g(second_min, 17)
-            ),
-        );
+            )));
     }
     if boolean_constraints::coplanar_pair_count(constraints) == 0 {
         return Ok(());
@@ -682,14 +657,11 @@ fn verify_constraint_contacts(
     }
     let first = boolean_coplanar::first_triangle(&coplanar, contact);
     let second = boolean_coplanar::second_triangle(&coplanar, contact);
-    fail(
-        "surface_self_intersection",
-        &format!("rounded Boolean triangles {first} and {second} have non-adjacent coplanar contact"),
-    )
+    Err(fail_with("surface_self_intersection", &format!("rounded Boolean triangles {first} and {second} have non-adjacent coplanar contact")))
 }
 
 fn verify_extracted_orientations(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     ancestry: &boolean_extract::Ancestry,
     geometry_value: &geometry::T,
@@ -703,7 +675,7 @@ fn verify_extracted_orientations(
         || view.primitive_sides.len() as i64 != primitives
         || view.primitive_triangles.len() as i64 != primitives
     {
-        return fail("geometry_mismatch", "Boolean extraction corner ancestry has the wrong cardinality");
+        return Err(fail_with("geometry_mismatch", "Boolean extraction corner ancestry has the wrong cardinality"));
     }
     let constraints = crate::boolean_complex::View::constraints(&complex);
     let source = boolean_constraints::View::source(&constraints);
@@ -758,10 +730,7 @@ fn verify_extracted_orientations(
     if failure < 0 {
         Ok(())
     } else {
-        fail(
-            "rounding_orientation",
-            &format!("rounded Boolean triangle {failure} changed its exact extraction orientation"),
-        )
+        Err(fail_with("rounding_orientation", &format!("rounded Boolean triangle {failure} changed its exact extraction orientation")))
     }
 }
 
@@ -782,7 +751,7 @@ fn validate_materialized(positions: &Positions, topology: &TopologyView) -> Resu
 }
 
 fn verify_extracted_surface(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     require_closed: bool,
     allow_opposite_duplicates: bool,
@@ -794,12 +763,9 @@ fn verify_extracted_surface(
         != packed::Float3::data_id(geometry::positions(&extracted))
         || topology::data_id(geometry::topology(geometry_value)) != topology::data_id(geometry::topology(&extracted))
     {
-        return fail("geometry_mismatch", "fast Boolean verification requires unchanged extraction geometry");
+        return Err(fail_with("geometry_mismatch", "fast Boolean verification requires unchanged extraction geometry"));
     }
-    guard(
-        "Boolean materialization verification was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let positions = positions_view(geometry_value)?;
             let topology_value = geometry::topology(geometry_value);
@@ -811,24 +777,20 @@ fn verify_extracted_surface(
             verify_extracted_orientations(cancel, grain, ancestry, geometry_value)?;
             verify_duplicate_triangles(allow_opposite_duplicates, &topology)?;
             verify_extracted_contacts(cancel, grain, &positions, &topology, geometry_value)
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean materialization verification was cancelled", "invalid_output", f))
 }
 
 fn verify_surface(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     require_closed: bool,
     allow_opposite_duplicates: bool,
     geometry_value: &geometry::T,
 ) -> Result<(), error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
-    guard(
-        "Boolean materialization verification was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let positions = positions_view(geometry_value)?;
             let topology_value = geometry::topology(geometry_value);
@@ -843,8 +805,7 @@ fn verify_surface(
             constraint_params.skip_opposite_self_pairs = allow_opposite_duplicates;
             let constraints = Arc::new(boolean_constraints::build(&constraint_params, geometry_value, &empty_geometry()?)?);
             verify_constraint_contacts(cancel, grain, allow_opposite_duplicates, &positions, &view, &constraints)
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean materialization verification was cancelled", "invalid_output", f))
 }
 
 #[derive(Clone)]
@@ -870,7 +831,7 @@ pub fn cleanup_primitive_source(value: &Cleanup, primitive: i64) -> i64 {
     value.cleanup_primitive_sources[u(primitive)]
 }
 
-fn verify_materialized_seam_curves(cancel: Cancel<'_>, grain: i64, seam: &boolean_seam::T) -> Result<(), error::T> {
+fn verify_materialized_seam_curves(cancel: Option<&Arc<cancel::T>>, grain: i64, seam: &boolean_seam::T) -> Result<(), error::T> {
     if boolean_seam::View::curves_materialized(seam) {
         boolean_seam::View::verify_curves(cx(cancel), grain, &boolean_seam::curves(seam))
     } else {
@@ -1008,17 +969,14 @@ fn rounded_triangle_degenerate(positions: &Positions, topology: &TopologyView, p
 }
 
 fn rounded_sliver_edges(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<(i64, edge_group::T), error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
-    guard(
-        "Boolean rounded-sliver scan was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
             let topology = topology_view(topology_value)?;
@@ -1044,15 +1002,14 @@ fn rounded_sliver_edges(
             let group = edge_group::View::of_owned_bits(topology_value, edge_count, "__rdk_boolean_rounded_sliver", bits)
                 .map_err(raised)?;
             Ok((degenerate_count, group))
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean rounded-sliver scan was cancelled", "invalid_output", f))
 }
 
 /// Fast exact verification for geometry that still physically shares its extraction positions and
 /// topology. `false` requests the ordinary bounded rounding-repair path; no weakened result is
 /// published.
 pub fn verify_unchanged_extraction(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     require_closed: bool,
     allow_opposite_duplicates: bool,
@@ -1060,7 +1017,7 @@ pub fn verify_unchanged_extraction(
     geometry_value: &geometry::T,
 ) -> Result<bool, error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
     match verify_extracted_surface(cancel, grain, require_closed, allow_opposite_duplicates, ancestry, geometry_value) {
         Ok(()) => Ok(true),
@@ -1094,21 +1051,18 @@ fn primitive_ulp_scale(positions: &Positions, topology: &TopologyView, primitive
 }
 
 fn rounded_self_contact_edges(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<(i64, i64, edge_group::T), error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
     let mut constraint_params = boolean_constraints::params(grain);
     constraint_params.cancel = cancel.cloned();
     constraint_params.resolve_left_self_intersections = true;
     let constraints = boolean_constraints::build(&constraint_params, geometry_value, &empty_geometry()?)?;
-    guard(
-        "Boolean rounded self-contact scan was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             let contact_count = boolean_constraints::constraint_count(&constraints);
             let topology_value = geometry::topology(geometry_value);
             let topology = topology_view(topology_value)?;
@@ -1150,8 +1104,7 @@ fn rounded_self_contact_edges(
             )
             .map_err(raised)?;
             Ok((contact_count, repairable, group))
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean rounded self-contact scan was cancelled", "invalid_output", f))
 }
 
 /// OCaml's `Array.sort` (ternary heap sort) specialised to `((i64, i64, i64), i64)` keyed by the
@@ -1247,17 +1200,14 @@ fn ocaml_sort_keyed(a: &mut [((i64, i64, i64), i64)]) {
 }
 
 fn paired_rounded_slivers(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<(i64, group::T), error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
-    guard(
-        "Boolean paired rounded-sliver scan was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let topology = topology_view(geometry::topology(geometry_value))?;
             let positions = positions_view(geometry_value)?;
@@ -1293,22 +1243,18 @@ fn paired_rounded_slivers(
             )
             .map_err(raised)?;
             Ok((removed, selected))
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean paired rounded-sliver scan was cancelled", "invalid_output", f))
 }
 
 fn closed_rounded_slivers(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<(bool, i64, group::T), error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
-    guard(
-        "Boolean closed rounded-sliver scan was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
             let topology = topology_view(topology_value)?;
@@ -1351,12 +1297,11 @@ fn closed_rounded_slivers(
             )
             .map_err(raised)?;
             Ok((valid, selected_count, selection))
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean closed rounded-sliver scan was cancelled", "invalid_output", f))
 }
 
 fn delete_rounding_pairs(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     selected: &group::T,
     cleanup: &Cleanup,
@@ -1364,10 +1309,7 @@ fn delete_rounding_pairs(
     if group::cardinality(selected) == 0 {
         return Ok(cleanup.clone());
     }
-    guard(
-        "Boolean rounding-pair deletion was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             let tagged = tag(cleanup)?;
             let output = deletion::delete_primitives(
                 deletion::DeletePrimitivesParams {
@@ -1394,12 +1336,11 @@ fn delete_rounding_pairs(
                 cleanup_seam_edges: composed.seams,
                 ..cleanup.clone()
             })
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean rounding-pair deletion was cancelled", "invalid_output", f))
 }
 
 fn run_edge_collapse(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     selected: &edge_group::T,
     position: fuse_reduce::Position,
@@ -1420,7 +1361,7 @@ fn run_edge_collapse(
 }
 
 fn collapse_rounding_batch(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     keep_greatest: bool,
     selected: &edge_group::T,
@@ -1429,10 +1370,7 @@ fn collapse_rounding_batch(
     if edge_group::cardinality(selected) == 0 {
         return Ok(cleanup.clone());
     }
-    guard(
-        "Boolean rounding repair was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             let tagged = tag(cleanup)?;
             let position = if keep_greatest {
                 fuse_reduce::Position::GreatestPoint
@@ -1457,8 +1395,7 @@ fn collapse_rounding_batch(
                 cleanup_seam_edges: composed.seams,
                 ..cleanup.clone()
             })
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean rounding repair was cancelled", "invalid_output", f))
 }
 
 enum Step {
@@ -1472,7 +1409,7 @@ fn next_attempt(slot: i64, keep_greatest: bool) -> (i64, bool) {
 
 /// The speculative one-edge-at-a-time contraction search of the self-contact branch.
 fn attempt_contacts(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     contacts: i64,
     repairable: i64,
@@ -1502,12 +1439,9 @@ fn attempt_contacts(
         if slot >= limit {
             return match last_error {
                 Some(failure) => Err(failure),
-                None => fail(
-                    "unresolved_rounding_contacts",
-                    &format!(
+                None => Err(fail_with("unresolved_rounding_contacts", &format!(
                         "{contacts} rounded self-contact(s), {repairable} ULP-scale incident triangle(s), and no certified contraction"
-                    ),
-                ),
+                    ))),
             };
         }
         let edge = ordered[u(slot)];
@@ -1558,7 +1492,7 @@ fn attempt_contacts(
 
 /// One certified batch: least-point contraction, then greatest-point.
 fn certified_batch(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     candidates: &edge_group::T,
     cleanup: &Cleanup,
@@ -1576,7 +1510,7 @@ fn certified_batch(
 
 #[allow(clippy::too_many_arguments)]
 fn repair_step(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     require_closed: bool,
     allow_opposite_duplicates: bool,
@@ -1608,10 +1542,7 @@ fn repair_step(
                 let (contacts, repairable, candidates) =
                     rounded_self_contact_edges(cancel, grain, &cleanup.cleanup_geometry)?;
                 if contacts > 0 && batch >= max_batches {
-                    return fail(
-                        "unresolved_rounding_contacts",
-                        &format!("{contacts} rounded self-contact(s) remain after {max_batches} certified batch(es)"),
-                    );
+                    return Err(fail_with("unresolved_rounding_contacts", &format!("{contacts} rounded self-contact(s) remain after {max_batches} certified batch(es)")));
                 }
                 if contacts <= 0 {
                     return Err(initial);
@@ -1629,10 +1560,7 @@ fn repair_step(
         };
     }
     if batch >= max_batches {
-        return fail(
-            "unresolved_rounding_slivers",
-            &format!("{remaining} rounded degenerate triangle(s) remain after {max_batches} certified batch(es)"),
-        );
+        return Err(fail_with("unresolved_rounding_slivers", &format!("{remaining} rounded degenerate triangle(s) remain after {max_batches} certified batch(es)")));
     }
     let (closed_valid, _, closed) = closed_rounded_slivers(cancel, grain, &cleanup.cleanup_geometry)?;
     if closed_valid {
@@ -1656,16 +1584,13 @@ fn repair_step(
             other += 1;
         }
     }
-    fail(
-        "unresolved_rounding_slivers",
-        &format!(
+    Err(fail_with("unresolved_rounding_slivers", &format!(
             "{remaining} rounded degenerate triangle(s) have no certified edge contraction ({two_sided} two-sided and {other} other candidate edges)"
-        ),
-    )
+        )))
 }
 
 fn repair_rounded_slivers(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     require_closed: bool,
     allow_opposite_duplicates: bool,
@@ -1709,7 +1634,7 @@ fn repair_rounded_slivers(
 }
 
 fn tiny_cleanup_edges(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     threshold: f64,
     ancestry: &boolean_extract::Ancestry,
@@ -1717,15 +1642,12 @@ fn tiny_cleanup_edges(
     cleanup: &Cleanup,
 ) -> Result<edge_group::T, error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
     if !threshold.is_finite() || threshold < 0. {
-        return fail("invalid_parameter", "threshold must be finite and non-negative");
+        return Err(fail_with("invalid_parameter", "threshold must be finite and non-negative"));
     }
-    guard(
-        "Boolean cleanup continuation was cancelled",
-        "invalid_input",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let complex = boolean_extract::View::complex(ancestry);
             if !Arc::ptr_eq(boolean_seam::View::complex(seam), complex) {
@@ -1790,12 +1712,11 @@ fn tiny_cleanup_edges(
                 return Err(problem);
             }
             Ok(group)
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean cleanup continuation was cancelled", "invalid_input", f))
 }
 
 fn collapse_cleanup_batch(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     require_closed: bool,
     allow_opposite_duplicates: bool,
@@ -1806,10 +1727,7 @@ fn collapse_cleanup_batch(
     if edge_group::cardinality(selected) == 0 {
         return Ok(cleanup.clone());
     }
-    guard(
-        "Boolean cleanup continuation was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             let tagged = tag(cleanup)?;
             let output = run_edge_collapse(cancel, grain, selected, fuse_reduce::Position::First, &tagged)?;
             let composed = compose_output(
@@ -1832,8 +1750,7 @@ fn collapse_cleanup_batch(
                 cleanup_primitive_sources: composed.primitives,
                 cleanup_seam_edges: composed.seams,
             })
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean cleanup continuation was cancelled", "invalid_output", f))
 }
 
 /// Continue deterministic independent contraction batches until no tiny seam-adjacent candidate
@@ -1843,7 +1760,7 @@ fn collapse_cleanup_batch(
 /// closed/pair-canceling zero-area subcomplexes and contracts only ULP-scale edges.
 #[allow(clippy::too_many_arguments)]
 pub fn collapse_tiny_seams(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     threshold: f64,
     require_closed: bool,
@@ -1858,7 +1775,7 @@ pub fn collapse_tiny_seams(
     let max_batches = max_batches.unwrap_or(8);
     let strict = strict.unwrap_or(true);
     if max_batches <= 0 {
-        return fail("invalid_parameter", "max_batches must be positive");
+        return Err(fail_with("invalid_parameter", "max_batches must be positive"));
     }
     let mut cleanup = repair_rounded_slivers(
         cancel,
@@ -1881,12 +1798,9 @@ pub fn collapse_tiny_seams(
         }
         if cleanup.cleanup_batch_count >= max_batches {
             return if strict {
-                fail(
-                    "unresolved_cleanup",
-                    &format!(
+                Err(fail_with("unresolved_cleanup", &format!(
                         "{remaining} tiny seam-adjacent edge candidate(s) remain after {max_batches} batch(es)"
-                    ),
-                )
+                    )))
             } else {
                 Ok(cleanup)
             };
@@ -1894,10 +1808,7 @@ pub fn collapse_tiny_seams(
         let selected = safe_independent_edges(cancel, grain, None, &candidates, &cleanup.cleanup_geometry)?;
         if edge_group::cardinality(&selected) == 0 {
             return if strict {
-                fail(
-                    "unresolved_cleanup",
-                    &format!("{remaining} tiny seam-adjacent edge candidate(s) have no certified contraction"),
-                )
+                Err(fail_with("unresolved_cleanup", &format!("{remaining} tiny seam-adjacent edge candidate(s) have no certified contraction")))
             } else {
                 Ok(cleanup)
             };
@@ -1931,17 +1842,14 @@ fn find_root(parent: &mut [usize], primitive: usize) -> usize {
 /// Duplicate each seam point once per primitive component obtained after removing exact seam
 /// edges. Corner/primitive order is unchanged; point payload and native edge groups follow exact
 /// packed ancestry.
-pub fn split_seam_points(cancel: Cancel<'_>, grain: i64, cleanup: &Cleanup) -> Result<Cleanup, error::T> {
+pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &Cleanup) -> Result<Cleanup, error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
     if edge_group::cardinality(&cleanup.cleanup_seam_edges) == 0 {
         return Ok(cleanup.clone());
     }
-    guard(
-        "Boolean seam point splitting was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let geometry_value = &cleanup.cleanup_geometry;
             let topology_value = geometry::topology(geometry_value);
@@ -2117,8 +2025,7 @@ pub fn split_seam_points(cancel: Cancel<'_>, grain: i64, cleanup: &Cleanup) -> R
                 cleanup_seam_edges: seam_edges,
                 ..cleanup.clone()
             })
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean seam point splitting was cancelled", "invalid_output", f))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2131,7 +2038,7 @@ pub enum Detriangulation {
 /// Merge adjacent triangles only when their exact extraction ancestry names the same source
 /// polygon and the edge is not a Boolean seam.
 pub fn detriangulate(
-    cancel: Cancel<'_>,
+    cancel: Option<&Arc<cancel::T>>,
     grain: i64,
     assume_flat: bool,
     mode: Detriangulation,
@@ -2139,15 +2046,12 @@ pub fn detriangulate(
     cleanup: &Cleanup,
 ) -> Result<Cleanup, error::T> {
     if grain <= 0 {
-        return fail("invalid_parameter", "grain must be positive");
+        return Err(fail_with("invalid_parameter", "grain must be positive"));
     }
     if mode == Detriangulation::Triangles {
         return Ok(cleanup.clone());
     }
-    guard(
-        "Boolean detriangulation was cancelled",
-        "invalid_output",
-        (|| {
+    (|| {
             cancel::check_opt(cx(cancel))?;
             let geometry_value = &cleanup.cleanup_geometry;
             let topology_value = geometry::topology(geometry_value);
@@ -2406,8 +2310,7 @@ pub fn detriangulate(
                 cleanup_seam_edges: composed.seams,
                 ..cleanup.clone()
             })
-        })(),
-    )
+        })().map_err(|f| guard_fail("Boolean detriangulation was cancelled", "invalid_output", f))
 }
 
 #[cfg(test)]

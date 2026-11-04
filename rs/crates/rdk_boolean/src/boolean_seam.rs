@@ -51,8 +51,8 @@ impl From<error::T> for Fail {
     }
 }
 
-fn invalid<V>(message: &str) -> Result<V, Fail> {
-    Err(Fail::Invalid(message.to_owned()))
+fn invalid_fail(message: &str) -> Fail {
+    Fail::Invalid(message.to_owned())
 }
 
 pub fn curves(value: &T) -> &geometry::T {
@@ -76,7 +76,7 @@ pub fn curve_kind(value: &T, curve: i64) -> Kind {
         0 => Kind::LeftSelf,
         1 => Kind::Between,
         2 => Kind::RightSelf,
-        _ => panic!("Boolean seam kind is invalid"),
+        _ => unreachable!("Boolean seam kind is invalid"),
     }
 }
 
@@ -359,7 +359,7 @@ fn validate_curve_ancestry(
         || curve_edge_offsets[0] != 0
         || curve_edge_offsets[curve_count as usize] != selected
     {
-        return invalid("Boolean seam curve ancestry has inconsistent cardinality");
+        return Err(invalid_fail("Boolean seam curve ancestry has inconsistent cardinality"));
     }
     let mut seen = vec![0_u8; complex_edge_count as usize];
     for curve in 0..curve_count {
@@ -367,24 +367,24 @@ fn validate_curve_ancestry(
         let first = curve_edge_offsets[curve as usize];
         let last = curve_edge_offsets[curve as usize + 1];
         if first > last {
-            return invalid("Boolean seam curve ancestry offsets decrease");
+            return Err(invalid_fail("Boolean seam curve ancestry offsets decrease"));
         }
         let size = topology::primitive_size(topology_value, curve)?;
         let expected = match topology::primitive_kind(topology_value, curve)? {
             PrimitiveKind::OpenPolyline => size - 1,
             PrimitiveKind::ClosedPolyline => size,
-            PrimitiveKind::Polygon => return invalid("Boolean seam ancestry references a polygon"),
+            PrimitiveKind::Polygon => return Err(invalid_fail("Boolean seam ancestry references a polygon")),
         };
         if last - first != expected {
-            return invalid("Boolean seam curve incidence differs from edge ancestry");
+            return Err(invalid_fail("Boolean seam curve incidence differs from edge ancestry"));
         }
         for slot in first..last {
             let edge = curve_edges[slot as usize];
             if edge < 0 || edge >= complex_edge_count {
-                return invalid("Boolean seam ancestry edge is out of bounds");
+                return Err(invalid_fail("Boolean seam ancestry edge is out of bounds"));
             }
             if seen[edge as usize] != 0 {
-                return invalid("Boolean seam ancestry repeats a complex edge");
+                return Err(invalid_fail("Boolean seam ancestry repeats a complex edge"));
             }
             seen[edge as usize] = 1;
         }
@@ -517,7 +517,7 @@ fn materialize_curves(
         } else if second == vertex {
             Ok(first)
         } else {
-            invalid("Boolean seam adjacency is inconsistent")
+            Err(invalid_fail("Boolean seam adjacency is inconsistent"))
         }
     };
     let next_edge = |state: &Chaining, vertex: i64, code: u8| -> i64 {
@@ -544,7 +544,7 @@ fn materialize_curves(
             if state.edge_output >= materialized_selected
                 || state.vertex_output >= materialized_selected * 2
             {
-                return invalid("Boolean seam chaining exceeded proven cardinality");
+                return Err(invalid_fail("Boolean seam chaining exceeded proven cardinality"));
             }
             state.visited[current_edge as usize] = 1;
             state.curve_edges[state.edge_output] = current_edge;
@@ -595,7 +595,7 @@ fn materialize_curves(
     state.primitive_offsets[state.curve_output] = state.vertex_output as i64;
     state.curve_edge_offsets[state.curve_output] = state.edge_output as i64;
     if state.edge_output != materialized_selected {
-        return invalid("Boolean seam chaining did not consume every selected edge");
+        return Err(invalid_fail("Boolean seam chaining did not consume every selected edge"));
     }
     let curve_output = state.curve_output;
     state.vertices.truncate(state.vertex_output);
@@ -758,7 +758,7 @@ pub mod View {
 
     pub fn is_seam_edge(value: &T, edge: i64) -> bool {
         if edge < 0 || edge >= value.edge_kinds.len() as i64 {
-            panic!("Boolean seam edge is out of bounds");
+            unreachable!("Boolean seam edge is out of bounds");
         }
         value.edge_kinds[edge as usize] < 3
     }
@@ -956,11 +956,22 @@ mod tests {
                 "disjoint source boundary was retained as a Boolean seam edge"
             );
         }
-        let rejected = |edge: i64| std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| View::is_seam_edge(&value, edge))).is_err();
-        assert!(
-            rejected(-1) && rejected(complex::edge_count(&complex_value)),
-            "Boolean seam edge classification accepted an invalid edge index"
-        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Boolean seam edge is out of bounds")]
+    fn edge_classification_rejects_negative() {
+        let complex_value = disjoint_complex();
+        let value = build(None, &params(), &complex_value).unwrap();
+        View::is_seam_edge(&value, -1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Boolean seam edge is out of bounds")]
+    fn edge_classification_rejects_past_end() {
+        let complex_value = disjoint_complex();
+        let value = build(None, &params(), &complex_value).unwrap();
+        View::is_seam_edge(&value, complex::edge_count(&complex_value));
     }
 
     #[test]

@@ -56,20 +56,20 @@ fn make(code: &str, message: String) -> error::T {
     error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
 }
 
-fn payload_error<V>(code: &str, message: String) -> Result<V, Fail> {
-    Err(Fail::Rdk(make(code, message)))
+fn payload_fail(code: &str, message: String) -> Fail {
+    Fail::Rdk(make(code, message))
 }
 
-fn invalid<V>(message: &str) -> Result<V, Fail> {
-    Err(Fail::Invalid(message.to_owned()))
+fn invalid_fail(message: &str) -> Fail {
+    Fail::Invalid(message.to_owned())
 }
 
-fn finish<V>(result: Result<V, Fail>, cancelled: &str) -> Result<V, error::T> {
-    result.map_err(|failure| match failure {
+fn finish_fail(cancelled: &str, failure: Fail) -> error::T {
+    match failure {
         Fail::Cancelled => make("cancelled", cancelled.to_owned()),
         Fail::Invalid(message) => make("invalid_payload", message),
         Fail::Rdk(failure) => failure,
-    })
+    }
 }
 
 fn storage_kind(storage: &Storage) -> i64 {
@@ -122,14 +122,11 @@ fn collect_attributes(
                 Some(&slot) => {
                     let pair = &mut pairs[slot];
                     if pair.kind != kind {
-                        return payload_error(
-                            "attribute_storage_mismatch",
-                            format!(
+                        return Err(payload_fail("attribute_storage_mismatch", format!(
                                 "{} attribute {:?} has different storage on the Boolean operands",
                                 owner_name(owner),
                                 name
-                            ),
-                        );
+                            )));
                     }
                     if side == 0 {
                         pair.left = Some(item.clone());
@@ -262,7 +259,7 @@ fn sorted_offsets(lengths: &[i64], what: &str) -> Result<Vec<i64>, Fail> {
     for index in 0..lengths.len() {
         match offsets[index].checked_add(lengths[index]) {
             Some(value) => offsets[index + 1] = value,
-            None => return invalid(what),
+            None => return Err(invalid_fail(what)),
         }
     }
     Ok(offsets)
@@ -352,14 +349,11 @@ fn interpolate_fixed(
         }
         return Ok(Storage::Text(output));
     }
-    payload_error(
-        "unsupported_storage",
-        format!(
+    Err(payload_fail("unsupported_storage", format!(
             "{} attribute {:?} uses CSR storage not yet handled by the fixed-width interpolator",
             if pair.source_owner == AttributeOwner::Point { "point" } else { "vertex" },
             pair.name
-        ),
-    )
+        )))
 }
 
 fn interpolate_csr(
@@ -485,8 +479,8 @@ fn first_corners(vertex_points: &[i64], point_count: usize) -> Vec<i64> {
     representatives
 }
 
-fn conflict<V>(name: &str, point: usize) -> Result<V, Fail> {
-    payload_error(
+fn conflict_fail(name: &str, point: usize) -> Fail {
+    payload_fail(
         "point_payload_conflict",
         format!(
             "point payload {name:?} disagrees across incident Boolean corners at output point {point}; use Promote_to_vertex or split the schema"
@@ -508,7 +502,7 @@ fn consolidate_to_points(
             let point = point as usize;
             for (plane, output) in planes.iter().zip(outputs) {
                 if !float_equal(tolerance, output[point], plane[corner]) {
-                    return conflict(name, point);
+                    return Err(conflict_fail(name, point));
                 }
             }
         }
@@ -525,7 +519,7 @@ fn consolidate_to_points(
             let output: Vec<i64> = (0..point_count).map(|point| source[rep(point)]).collect();
             for (corner, &point) in vertex_points.iter().enumerate() {
                 if output[point as usize] != source[corner] {
-                    return conflict(name, point as usize);
+                    return Err(conflict_fail(name, point as usize));
                 }
             }
             Ok(Storage::Int(output))
@@ -534,7 +528,7 @@ fn consolidate_to_points(
             let output: Vec<String> = (0..point_count).map(|point| source[rep(point)].clone()).collect();
             for (corner, &point) in vertex_points.iter().enumerate() {
                 if output[point as usize] != source[corner] {
-                    return conflict(name, point as usize);
+                    return Err(conflict_fail(name, point as usize));
                 }
             }
             Ok(Storage::Text(output))
@@ -575,11 +569,11 @@ fn consolidate_to_points(
                 let (other_first, other_last) =
                     (source.offsets[representative] as usize, source.offsets[representative + 1] as usize);
                 if last - first != other_last - other_first {
-                    return conflict(name, point as usize);
+                    return Err(conflict_fail(name, point as usize));
                 }
                 for slot in 0..last - first {
                     if source.values[first + slot] != source.values[other_first + slot] {
-                        return conflict(name, point as usize);
+                        return Err(conflict_fail(name, point as usize));
                     }
                 }
             }
@@ -607,11 +601,11 @@ fn consolidate_to_points(
                 let (other_first, other_last) =
                     (source.offsets[representative] as usize, source.offsets[representative + 1] as usize);
                 if last - first != other_last - other_first {
-                    return conflict(name, point as usize);
+                    return Err(conflict_fail(name, point as usize));
                 }
                 for slot in 0..last - first {
                     if !float_equal(tolerance, source.values[first + slot], source.values[other_first + slot]) {
-                        return conflict(name, point as usize);
+                        return Err(conflict_fail(name, point as usize));
                     }
                 }
             }
@@ -715,13 +709,10 @@ fn copy_group(
             if corner as i64 == representative {
                 points[point as usize] = value;
             } else if value != points[point as usize] {
-                return payload_error(
-                    "point_group_conflict",
-                    format!(
+                return Err(payload_fail("point_group_conflict", format!(
                         "point group {:?} disagrees across incident Boolean corners at output point {}; use Promote_to_vertex or split the group",
                         pair.group_name, point
-                    ),
-                );
+                    )));
             }
         }
         (group::Owner::Point, point_count as i64, points)
@@ -828,10 +819,7 @@ pub fn copy_points_and_vertices(
             "point_tolerance must be finite and non-negative".to_owned(),
         ));
     }
-    finish(
-        copy_points_inner(cancel_value, grain, point_conflict, point_tolerance, ancestry, base),
-        "Boolean corner payload transfer was cancelled",
-    )
+    copy_points_inner(cancel_value, grain, point_conflict, point_tolerance, ancestry, base).map_err(|f| finish_fail("Boolean corner payload transfer was cancelled", f))
 }
 
 fn copy_points_inner(
@@ -859,13 +847,13 @@ fn copy_points_inner(
     let point_count = geometry::point_count(base) as usize;
     let corner_count = geometry::vertex_count(base);
     if corner_count != primitive_count * 3 || topology_view.vertex_points.len() as i64 != corner_count {
-        return invalid("Boolean corner payload requires triangular extraction topology");
+        return Err(invalid_fail("Boolean corner payload requires triangular extraction topology"));
     }
     let vertex_points: &[i64] = &topology_view.vertex_points;
     let corner_count = corner_count as usize;
     let representatives = first_corners(vertex_points, point_count);
     if representatives.iter().any(|&corner| corner < 0) {
-        return invalid("Boolean corner payload found an unreferenced output point");
+        return Err(invalid_fail("Boolean corner payload found an unreferenced output point"));
     }
     let left = extract_view::left_geometry(ancestry);
     let right = extract_view::right_geometry(ancestry);
@@ -878,24 +866,18 @@ fn copy_points_inner(
     if point_conflict == PointConflict::PromoteToVertex {
         for pair in &point_attributes {
             if vertex_attributes.iter().any(|other| other.name == pair.name) {
-                return payload_error(
-                    "promotion_collision",
-                    format!(
+                return Err(payload_fail("promotion_collision", format!(
                         "point attribute {:?} cannot be promoted because a vertex attribute has the same name",
                         pair.name
-                    ),
-                );
+                    )));
             }
         }
         for pair in &point_groups {
             if vertex_groups.iter().any(|other| other.group_name == pair.group_name) {
-                return payload_error(
-                    "promotion_collision",
-                    format!(
+                return Err(payload_fail("promotion_collision", format!(
                         "point group {:?} cannot be promoted because a vertex group has the same name",
                         pair.group_name
-                    ),
-                );
+                    )));
             }
         }
     }
@@ -1118,10 +1100,7 @@ pub fn copy_primitives(
     if grain <= 0 {
         return Err(make("invalid_parameter", "grain must be positive".to_owned()));
     }
-    finish(
-        copy_primitives_inner(cancel_value, grain, ancestry),
-        "Boolean primitive payload transfer was cancelled",
-    )
+    copy_primitives_inner(cancel_value, grain, ancestry).map_err(|f| finish_fail("Boolean primitive payload transfer was cancelled", f))
 }
 
 fn copy_primitives_inner(
@@ -1200,21 +1179,21 @@ fn copy_primitives_inner(
     .map_err(|failure| Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())))
 }
 
-fn planes_of_storage<'a>(storage: Option<&'a Storage>) -> Result<Option<Vec<&'a [f64]>>, Fail> {
+fn planes_of_storage(storage: Option<&Storage>) -> Result<Option<Vec<&[f64]>>, Fail> {
     match storage {
         None => Ok(None),
         Some(storage) => Ok(attribute::float_planes(storage)?),
     }
 }
 
-fn int_of_storage<'a>(storage: Option<&'a Storage>) -> Option<&'a Vec<i64>> {
+fn int_of_storage(storage: Option<&Storage>) -> Option<&Vec<i64>> {
     match storage {
         Some(Storage::Int(values)) => Some(values),
         _ => None,
     }
 }
 
-fn text_of_storage<'a>(storage: Option<&'a Storage>) -> Option<&'a Vec<String>> {
+fn text_of_storage(storage: Option<&Storage>) -> Option<&Vec<String>> {
     match storage {
         Some(Storage::Text(values)) => Some(values),
         _ => None,

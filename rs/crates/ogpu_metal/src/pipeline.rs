@@ -1,6 +1,7 @@
 //! Ogpu_metal.Pipeline: compute pipelines from a shared library and owned render pipelines.
+use ogpu_core::error::Error;
 use crate::{
-    device::{fail, native_of, of_metal_error, Device, R},
+    device::{fail, of_metal_error, Device},
     library::{self, Library},
 };
 use metal::{BlendFactor, BlendOperation, BlendState, ColorAttachment, PrimitiveTopology};
@@ -36,15 +37,12 @@ struct PipelineInner {
 #[derive(Clone)]
 pub struct Pipeline(Rc<PipelineInner>);
 
-fn finish_destroy(value: &PipelineInner) -> R<()> {
+fn finish_destroy(value: &PipelineInner) -> Result<(), Error> {
     let operation = "Ogpu_metal.Pipeline.destroy";
-    native_of(
-        operation,
-        match &value.native {
+    match &value.native {
             Native::Compute(x) => x.destroy(),
             Native::Render(x) => x.destroy(),
-        },
-    )?;
+        }.map_err(|value| of_metal_error(operation, &value))?;
     let mut first: Option<metal::Error> = None;
     for function in value.functions.borrow().iter() {
         if let Err(e) = function.destroy() {
@@ -109,16 +107,16 @@ fn show(items: &[(i64, u8)]) -> String {
         .join(",")
 }
 
-fn validate_reflection(op: &str, expected: &[Binding], bindings: &[metal::ShaderBinding]) -> R<()> {
+fn validate_reflection(op: &str, expected: &[Binding], bindings: &[metal::ShaderBinding]) -> Result<(), Error> {
     if expected.iter().any(|b| b.group != 0) {
-        return fail(op, ErrorKind::InvalidArgument, "Metal foundation maps only bind group zero");
+        return Err(fail(op, ErrorKind::InvalidArgument, "Metal foundation maps only bind group zero"));
     }
     let mut expected: Vec<(i64, u8)> = expected.iter().map(|b| (b.binding, expected_class(b.kind))).collect();
     let mut actual: Vec<(i64, u8)> = bindings.iter().filter(|b| b.used).map(|b| (b.index as i64, reflected_class(b))).collect();
     expected.sort();
     actual.sort();
     if expected != actual {
-        return fail(
+        return Err(fail(
             op,
             ErrorKind::InvalidArgument,
             &format!(
@@ -126,7 +124,7 @@ fn validate_reflection(op: &str, expected: &[Binding], bindings: &[metal::Shader
                 show(&expected),
                 show(&actual)
             ),
-        );
+        ));
     }
     Ok(())
 }
@@ -148,7 +146,7 @@ fn metal_constants(constants: &[(String, ConstantValue)]) -> Vec<(String, metal:
         .collect()
 }
 
-pub fn create_compute_from_library(device: &Device, library_value: &Library, entry: &str, constants: &[(String, ConstantValue)], interface: &[Binding]) -> R<Pipeline> {
+pub fn create_compute_from_library(device: &Device, library_value: &Library, entry: &str, constants: &[(String, ConstantValue)], interface: &[Binding]) -> Result<Pipeline, Error> {
     let op = "Ogpu_metal.Pipeline.create_compute_from_library";
     library_value.validate(device)?;
     let native = library_value.metal();
@@ -157,7 +155,7 @@ pub fn create_compute_from_library(device: &Device, library_value: &Library, ent
     } else {
         metal::Function::specialize(native, &metal_constants(constants), entry)
     };
-    let function = native_of(op, found)?;
+    let function = found.map_err(|value| of_metal_error(op, &value))?;
     let pipeline_value = match metal::ComputePipeline::create(&function, Some(entry), true) {
         Ok(p) => p,
         Err(e) => {
@@ -216,7 +214,7 @@ fn attachment(blend: Blend, format: metal::metal_format::Format) -> ColorAttachm
     a
 }
 
-fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blend, op: &str, device: &Device, descriptor: &RenderDescriptor) -> R<Pipeline> {
+fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blend, op: &str, device: &Device, descriptor: &RenderDescriptor) -> Result<Pipeline, Error> {
     let library_value = library::compile_native(op, device, &descriptor.vertex)?;
     let color = match descriptor.color_format {
         ColorFormat::Rgba8Unorm => metal::metal_format::Format::Rgba8Unorm,
@@ -270,10 +268,10 @@ fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blen
 
 /// An owned, uncached render pipeline for the portable driver. With `indirect`, the fragment
 /// function is retained for argument encoders and indirect command buffers.
-pub fn create_render_owned(indirect: bool, topology: PrimitiveTopology, blend: Blend, device: &Device, descriptor: &RenderDescriptor) -> R<Pipeline> {
+pub fn create_render_owned(indirect: bool, topology: PrimitiveTopology, blend: Blend, device: &Device, descriptor: &RenderDescriptor) -> Result<Pipeline, Error> {
     let op = "Ogpu_metal.Pipeline.create_render_owned";
     if device.destroyed() {
-        return fail(op, ErrorKind::StaleHandle, "device is destroyed");
+        return Err(fail(op, ErrorKind::StaleHandle, "device is destroyed"));
     }
     pipeline::create_render(&device.capabilities(), descriptor)?;
     let value = build_render(indirect, topology, blend, op, device, descriptor)?;
@@ -288,7 +286,7 @@ pub fn create_render_owned(indirect: bool, topology: PrimitiveTopology, blend: B
             }
             Ok(false) => {
                 let _ = value.destroy();
-                fail(op, ErrorKind::Unsupported, "native pipeline does not support indirect commands")
+                Err(fail(op, ErrorKind::Unsupported, "native pipeline does not support indirect commands"))
             }
             Ok(true) => match metal::Function::find(&value.0.library, entry) {
                 Err(e) => {
@@ -306,7 +304,7 @@ pub fn create_render_owned(indirect: bool, topology: PrimitiveTopology, blend: B
 }
 
 impl Pipeline {
-    pub fn destroy(&self) -> R<()> {
+    pub fn destroy(&self) -> Result<(), Error> {
         let value = &self.0;
         if value.dead.get() {
             Ok(())
@@ -327,22 +325,22 @@ impl Pipeline {
         &self.0.native
     }
 
-    pub fn argument_encoder(&self, buffer_index: u64) -> R<metal::ShaderArgumentEncoder> {
+    pub fn argument_encoder(&self, buffer_index: u64) -> Result<metal::ShaderArgumentEncoder, Error> {
         let operation = "Ogpu_metal.Pipeline.argument_encoder";
         // Metal asserts (and aborts) on an index that is no buffer slot; the Rust binding does not range-check it.
         if buffer_index >= 31 {
-            return fail(operation, ErrorKind::InvalidArgument, "argument buffer index is outside [0, 31)");
+            return Err(fail(operation, ErrorKind::InvalidArgument, "argument buffer index is outside [0, 31)"));
         }
         let function = match (&self.0.native, self.0.functions.borrow().first()) {
             (Native::Render(_), Some(function)) => function.clone(),
-            _ => return fail(operation, ErrorKind::InvalidState, "fragment function was not retained"),
+            _ => return Err(fail(operation, ErrorKind::InvalidState, "fragment function was not retained")),
         };
-        native_of(operation, function.argument_encoder(buffer_index))
+        function.argument_encoder(buffer_index).map_err(|value| of_metal_error(operation, &value))
     }
 
-    pub fn retain_submission(&self) -> R<()> {
+    pub fn retain_submission(&self) -> Result<(), Error> {
         if self.0.dead.get() {
-            return fail("Ogpu_metal.Pipeline.retain_submission", ErrorKind::StaleHandle, "pipeline is destroyed");
+            return Err(fail("Ogpu_metal.Pipeline.retain_submission", ErrorKind::StaleHandle, "pipeline is destroyed"));
         }
         self.0.submission_uses.set(self.0.submission_uses.get() + 1);
         Ok(())

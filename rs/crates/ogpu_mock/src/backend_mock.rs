@@ -50,8 +50,8 @@ pub struct Control(Rc<RefCell<State>>);
 
 type Shared = Rc<RefCell<State>>;
 
-fn fail<T>(op: &str, kind: ErrorKind, text: &str) -> Result<T, Error> {
-    Err(error::make(op, kind, text))
+fn fail(op: &str, kind: ErrorKind, text: &str) -> Error {
+    error::make(op, kind, text)
 }
 
 fn add(c: &Shared, text: String) {
@@ -158,19 +158,19 @@ fn execute_transfer(c: &Shared, t: &BufferToTexture) -> Result<(), Error> {
     let (source, target) = {
         let state = c.borrow();
         let Some(source) = state.memory.get(&t.src).cloned() else {
-            return fail(op, ErrorKind::StaleHandle, "command resource is destroyed");
+            return Err(fail(op, ErrorKind::StaleHandle, "command resource is destroyed"));
         };
         if !state.memory.contains_key(&t.dst) {
-            return fail(op, ErrorKind::StaleHandle, "command resource is destroyed");
+            return Err(fail(op, ErrorKind::StaleHandle, "command resource is destroyed"));
         }
         let Some(storage) = state.texture_storage.get(&t.dst) else {
-            return fail(op, ErrorKind::InvalidArgument, "resource is not a color texture");
+            return Err(fail(op, ErrorKind::InvalidArgument, "resource is not a color texture"));
         };
         let texel = types::texel_bytes(storage.descriptor.format);
         let ok = valid_region(storage, t.mip, &t.origin, &t.extent)
             && buffer_region(texel, source.borrow().len(), t.offset, t.row, t.image, &t.extent);
         if !ok {
-            return fail(op, ErrorKind::InvalidArgument, "texture upload range is invalid");
+            return Err(fail(op, ErrorKind::InvalidArgument, "texture upload range is invalid"));
         }
         let width = mip_extent(storage.descriptor.width, t.mip);
         let height = mip_extent(storage.descriptor.height, t.mip);
@@ -209,10 +209,10 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource,
         matches!(state.max_allocations, Some(limit) if state.buffers + state.textures >= limit)
     };
     if over {
-        return fail("Backend_mock.allocate", ErrorKind::Capacity, "allocation count limit");
+        return Err(fail("Backend_mock.allocate", ErrorKind::Capacity, "allocation count limit"));
     }
     let Some(initial) = zeroed(size) else {
-        return fail("Backend_mock.allocate", ErrorKind::Capacity, "allocation exceeds mock byte capacity");
+        return Err(fail("Backend_mock.allocate", ErrorKind::Capacity, "allocation exceeds mock byte capacity"));
     };
     let id = token(c);
     let bytes: Bytes = Rc::new(RefCell::new(initial));
@@ -231,7 +231,7 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource,
         write: Box::new(move |offset, source| {
             let mut data = b_write.borrow_mut();
             if !in_range(data.len(), offset, source.len() as i64) {
-                return fail("Backend_mock.write", ErrorKind::InvalidArgument, "range");
+                return Err(fail("Backend_mock.write", ErrorKind::InvalidArgument, "range"));
             }
             data[offset as usize..offset as usize + source.len()].copy_from_slice(source);
             Ok(())
@@ -239,7 +239,7 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource,
         read: Box::new(move |offset, length| {
             let data = b_read.borrow();
             if !in_range(data.len(), offset, length as i64) {
-                return fail("Backend_mock.read", ErrorKind::InvalidArgument, "range");
+                return Err(fail("Backend_mock.read", ErrorKind::InvalidArgument, "range"));
             }
             Ok(data[offset as usize..offset as usize + length].to_vec())
         }),
@@ -249,7 +249,7 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource,
                 || destination_offset > destination.len()
                 || length > destination.len() - destination_offset
             {
-                return fail("Backend_mock.read_into", ErrorKind::InvalidArgument, "range");
+                return Err(fail("Backend_mock.read_into", ErrorKind::InvalidArgument, "range"));
             }
             destination[destination_offset..destination_offset + length]
                 .copy_from_slice(&data[offset as usize..offset as usize + length]);
@@ -300,7 +300,7 @@ fn create_mapped_buffer(c: &Shared, d: &BufferDescriptor) -> Result<DriverMapped
             }
         }),
         flush: Box::new(move |n| match flush_cell.borrow().as_ref() {
-            None => fail("Backend_mock.flush", ErrorKind::InvalidArgument, "no host view was written"),
+            None => Err(fail("Backend_mock.flush", ErrorKind::InvalidArgument, "no host view was written")),
             Some(floats) => {
                 let floats = floats.borrow();
                 let mut device = device.borrow_mut();
@@ -328,12 +328,12 @@ fn create_texture(c: &Shared, d: &TextureDescriptor) -> Result<DriverResource, E
         let mut state = c.borrow_mut();
         if should_fail(state.fail_texture_after) {
             state.fail_texture_after = None;
-            return fail(operation, ErrorKind::Capacity, "injected texture allocation failure");
+            return Err(fail(operation, ErrorKind::Capacity, "injected texture allocation failure"));
         }
         state.fail_texture_after = advance(state.fail_texture_after);
     }
     let Some(size) = texture_level_size(d, 0) else {
-        return fail(operation, ErrorKind::Capacity, "texture exceeds mock byte capacity");
+        return Err(fail(operation, ErrorKind::Capacity, "texture exceeds mock byte capacity"));
     };
     let raw = resource(c, "texture", size)?;
     let mut levels: Vec<Bytes> = Vec::new();
@@ -345,7 +345,7 @@ fn create_texture(c: &Shared, d: &TextureDescriptor) -> Result<DriverResource, E
                 Some(bytes) => levels.push(Rc::new(RefCell::new(bytes))),
                 None => {
                     let _ = (raw.destroy)();
-                    return fail(operation, ErrorKind::Capacity, "texture exceeds mock byte capacity");
+                    return Err(fail(operation, ErrorKind::Capacity, "texture exceeds mock byte capacity"));
                 }
             }
         }
@@ -359,7 +359,7 @@ fn create_depth_texture(c: &Shared) -> Result<DriverResource, Error> {
         let mut state = c.borrow_mut();
         if should_fail(state.fail_depth_after) {
             state.fail_depth_after = None;
-            return fail("Backend_mock.create_depth_texture", ErrorKind::Capacity, "injected depth allocation failure");
+            return Err(fail("Backend_mock.create_depth_texture", ErrorKind::Capacity, "injected depth allocation failure"));
         }
         state.fail_depth_after = advance(state.fail_depth_after);
     }
@@ -373,13 +373,13 @@ fn create_depth_texture(c: &Shared) -> Result<DriverResource, Error> {
     Ok(DriverResource {
         token: id,
         write: Box::new(|_, _| {
-            fail("Backend_mock.depth.write", ErrorKind::Unsupported, "depth textures are not host writable")
+            Err(fail("Backend_mock.depth.write", ErrorKind::Unsupported, "depth textures are not host writable"))
         }),
         read: Box::new(|_, _| {
-            fail("Backend_mock.depth.read", ErrorKind::Unsupported, "depth textures are not host readable")
+            Err(fail("Backend_mock.depth.read", ErrorKind::Unsupported, "depth textures are not host readable"))
         }),
         read_into: Box::new(|_, _, _, _| {
-            fail("Backend_mock.depth.read_into", ErrorKind::Unsupported, "depth textures are not host readable")
+            Err(fail("Backend_mock.depth.read_into", ErrorKind::Unsupported, "depth textures are not host readable"))
         }),
         destroy: Box::new(move || {
             let mut state = c.borrow_mut();
@@ -399,13 +399,13 @@ fn create_queue(c: &Shared) -> Result<DriverQueue, Error> {
         let (c, epoch, completed) = (c.clone(), epoch.clone(), completed.clone());
         Rc::new(move |e: i64| -> Result<(), Error> {
             if e <= completed.get() || e > epoch.get() {
-                return fail("Backend_mock.complete", ErrorKind::InvalidArgument, "epoch is invalid");
+                return Err(fail("Backend_mock.complete", ErrorKind::InvalidArgument, "epoch is invalid"));
             }
             completed.set(e);
             add(&c, format!("complete:{e}"));
             let injected = std::mem::replace(&mut c.borrow_mut().fail_completion, false);
             if injected {
-                fail("Backend_mock.complete", ErrorKind::DeviceLost, "injected terminal completion failure")
+                Err(fail("Backend_mock.complete", ErrorKind::DeviceLost, "injected terminal completion failure"))
             } else {
                 Ok(())
             }
@@ -415,7 +415,7 @@ fn create_queue(c: &Shared) -> Result<DriverQueue, Error> {
         let (completed, complete_through) = (completed.clone(), complete_through.clone());
         move |e: i64| -> Result<bool, Error> {
             if e <= 0 {
-                fail("Backend_mock.poll", ErrorKind::InvalidArgument, "epoch is invalid")
+                Err(fail("Backend_mock.poll", ErrorKind::InvalidArgument, "epoch is invalid"))
             } else if e <= completed.get() {
                 Ok(true)
             } else {
@@ -458,9 +458,9 @@ fn create_commands(c: &Shared, epoch: &Rc<Cell<i64>>) -> DriverCommands {
         move |operation: &str| -> Result<(), Error> {
             let injected = std::mem::replace(&mut c.borrow_mut().fail_submission, false);
             if injected {
-                fail(operation, ErrorKind::InvalidState, "injected submission failure")
+                Err(fail(operation, ErrorKind::InvalidState, "injected submission failure"))
             } else if c.borrow().lost {
-                fail(operation, ErrorKind::DeviceLost, "injected device loss")
+                Err(fail(operation, ErrorKind::DeviceLost, "injected device loss"))
             } else {
                 Ok(())
             }
@@ -501,14 +501,14 @@ fn create_commands(c: &Shared, epoch: &Rc<Cell<i64>>) -> DriverCommands {
     };
     DriverCommands {
         compute_encoder: Box::new(|| {
-            fail("Backend_mock.compute_encoder", ErrorKind::Unsupported, "mock backend does not execute compute shaders")
+            Err(fail("Backend_mock.compute_encoder", ErrorKind::Unsupported, "mock backend does not execute compute shaders"))
         }),
         accel_encoder: Box::new(|| {
-            fail("Backend_mock.accel_encoder", ErrorKind::Unsupported, "mock backend has no ray tracing")
+            Err(fail("Backend_mock.accel_encoder", ErrorKind::Unsupported, "mock backend has no ray tracing"))
         }),
         blit_encoder: Box::new(blit_encoder),
         render_encoder: Box::new(|_| {
-            fail("Backend_mock.render_encoder", ErrorKind::Unsupported, "mock backend does not rasterize")
+            Err(fail("Backend_mock.render_encoder", ErrorKind::Unsupported, "mock backend does not rasterize"))
         }),
         commit: Box::new(commit),
         commit_present: Box::new(commit_present),
@@ -528,7 +528,7 @@ fn create_surface(c: &Shared) -> Result<DriverSurface, Error> {
         configure: Box::new(move |_| {
             let injected = std::mem::replace(&mut c_configure.borrow_mut().fail_configure, false);
             if injected {
-                fail("Backend_mock.configure", ErrorKind::InvalidState, "injected configure failure")
+                Err(fail("Backend_mock.configure", ErrorKind::InvalidState, "injected configure failure"))
             } else {
                 Ok(())
             }
@@ -559,11 +559,11 @@ fn create_library(c: &Shared) -> Result<DriverLibrary, Error> {
     let c = c.clone();
     Ok(DriverLibrary {
         create_compute_pipeline_in: Box::new(|_, _, _| {
-            fail(
+            Err(fail(
                 "Backend_mock.create_compute_pipeline_in",
                 ErrorKind::Unsupported,
                 "mock backend does not execute compute shaders",
-            )
+            ))
         }),
         destroy_library: Box::new(move || {
             c.borrow_mut().pipelines -= 1;
@@ -614,15 +614,15 @@ fn create_device(c: &Shared, capabilities: caps::Caps) -> Result<DriverDevice, E
         create_texture: Box::new(move |d| create_texture(&c_texture, d)),
         create_depth_texture: Box::new(move |_| create_depth_texture(&c_depth)),
         create_memoryless_texture: Box::new(|_, _| {
-            fail(
+            Err(fail(
                 "Backend_mock.create_memoryless_texture",
                 ErrorKind::Unsupported,
                 "the mock has no memoryless attachments",
-            )
+            ))
         }),
         create_library: Box::new(move |_| create_library(&c_library)),
         create_accel: Box::new(|_| {
-            fail("Backend_mock.create_accel", ErrorKind::Unsupported, "mock backend has no ray tracing")
+            Err(fail("Backend_mock.create_accel", ErrorKind::Unsupported, "mock backend has no ray tracing"))
         }),
         // The mock mirrors Metal's documented instance record layouts.
         instance_layout: Box::new(|kind| match kind {
@@ -631,13 +631,13 @@ fn create_device(c: &Shared, capabilities: caps::Caps) -> Result<DriverDevice, E
         }),
         create_sampler: Box::new(move |_| create_sampler(&c_sampler)),
         create_render_pipeline: Box::new(|_, _| {
-            fail("Backend_mock.create_render_pipeline", ErrorKind::Unsupported, "mock backend does not rasterize")
+            Err(fail("Backend_mock.create_render_pipeline", ErrorKind::Unsupported, "mock backend does not rasterize"))
         }),
         create_icb: Box::new(|_| {
-            fail("Backend_mock.create_icb", ErrorKind::Unsupported, "mock backend does not rasterize")
+            Err(fail("Backend_mock.create_icb", ErrorKind::Unsupported, "mock backend does not rasterize"))
         }),
         create_argument: Box::new(|_, _, _| {
-            fail("Backend_mock.create_argument", ErrorKind::Unsupported, "mock backend does not rasterize")
+            Err(fail("Backend_mock.create_argument", ErrorKind::Unsupported, "mock backend does not rasterize"))
         }),
         create_queue: Box::new(move || create_queue(&c_queue)),
         create_surface: Box::new(move |_| create_surface(&c_surface)),

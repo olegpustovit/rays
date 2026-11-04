@@ -75,11 +75,11 @@ pub fn boundary_first(value: &T, pair: i64, boundary: i64) -> i64 {
         OverlapKind::Segment if boundary == 0 => 0,
         OverlapKind::Polygon => {
             if boundary < 0 || boundary >= point_count(value, pair) {
-                panic!("Coplanar Boolean boundary index is out of bounds");
+                unreachable!("Coplanar Boolean boundary index is out of bounds");
             }
             boundary
         }
-        _ => panic!("Coplanar Boolean overlap has no requested boundary"),
+        _ => unreachable!("Coplanar Boolean overlap has no requested boundary"),
     }
 }
 
@@ -89,11 +89,11 @@ pub fn boundary_second(value: &T, pair: i64, boundary: i64) -> i64 {
         OverlapKind::Polygon => {
             let count = point_count(value, pair);
             if boundary < 0 || boundary >= count {
-                panic!("Coplanar Boolean boundary index is out of bounds");
+                unreachable!("Coplanar Boolean boundary index is out of bounds");
             }
             (boundary + 1) % count
         }
-        _ => panic!("Coplanar Boolean overlap has no requested boundary"),
+        _ => unreachable!("Coplanar Boolean overlap has no requested boundary"),
     }
 }
 

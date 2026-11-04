@@ -1610,7 +1610,7 @@ mod tests {
                 .iter()
                 .map(|pattern| AttributeRule { pattern: (*pattern).to_owned(), method, weight_attribute: Some("w".to_owned()) })
                 .collect();
-            let signature = same_at_one_and_four(&|| {
+            let signature = same_at_one_and_four_strings(&|| {
                 match apply(None, 256, DefaultAttributes::KeepFirst, &rules, &[], true, true, &big, &g) {
                     Ok((attributes, _)) => attributes.iter().map(attribute_signature).collect::<Vec<_>>(),
                     Err(failure) => panic!("{method:?}: {}", error::message(&failure)),

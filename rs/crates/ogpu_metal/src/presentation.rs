@@ -1,6 +1,6 @@
 //! Ogpu_metal.Presentation: the blit from an RGBA8 source texture into a BGRA8 drawable.
 use crate::{
-    device::{fail, of_metal_error, Device, R},
+    device::{fail, of_metal_error, Device},
     present_source,
 };
 use metal::{LoadAction, RenderPassDescriptor, RenderEncoder, StoreAction};
@@ -20,10 +20,10 @@ fn metal_failure(value: &metal::Error) -> Error {
     of_metal_error(OPERATION, value)
 }
 
-pub fn create(device: &Device) -> R<Presentation> {
+pub fn create(device: &Device) -> Result<Presentation, Error> {
     let native = device.metal();
     if device.destroyed() {
-        return fail(OPERATION, ErrorKind::StaleHandle, "device is destroyed");
+        return Err(fail(OPERATION, ErrorKind::StaleHandle, "device is destroyed"));
     }
     let library = metal::Library::compile_source(native, present_source::SOURCE, Some("Rays presentation")).map_err(|e| metal_failure(&e))?;
     let compiler = match metal::Compiler::create(native) {
@@ -52,18 +52,18 @@ pub fn create(device: &Device) -> R<Presentation> {
 }
 
 impl Presentation {
-    fn validate_resources(&self, device: &metal::Device, source: &metal::Texture, target: &metal::Texture) -> R<()> {
+    fn validate_resources(&self, device: &metal::Device, source: &metal::Texture, target: &metal::Texture) -> Result<(), Error> {
         if self.dead.get() {
-            return fail(OPERATION, ErrorKind::StaleHandle, "presentation helper is destroyed");
+            return Err(fail(OPERATION, ErrorKind::StaleHandle, "presentation helper is destroyed"));
         }
         if !self.device.same(device) {
-            return fail(OPERATION, ErrorKind::CrossDevice, "presentation command belongs to another device");
+            return Err(fail(OPERATION, ErrorKind::CrossDevice, "presentation command belongs to another device"));
         }
         if source.is_destroyed() || target.is_destroyed() {
-            return fail(OPERATION, ErrorKind::StaleHandle, "presentation texture is destroyed");
+            return Err(fail(OPERATION, ErrorKind::StaleHandle, "presentation texture is destroyed"));
         }
         if !self.device.same(source.device()) || !self.device.same(target.device()) {
-            return fail(OPERATION, ErrorKind::CrossDevice, "presentation texture belongs to another device");
+            return Err(fail(OPERATION, ErrorKind::CrossDevice, "presentation texture belongs to another device"));
         }
         let (s, t) = (source.descriptor(), target.descriptor());
         if s.kind != metal::TextureKind::Texture2d
@@ -73,9 +73,9 @@ impl Presentation {
             || s.sample_count != 1
             || s.array_length != 1
         {
-            fail(OPERATION, ErrorKind::InvalidArgument, "presentation source must be a single-sample 2D RGBA8 texture")
+            Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation source must be a single-sample 2D RGBA8 texture"))
         } else if !s.usage.contains(&metal::TextureUsage::ShaderRead) {
-            fail(OPERATION, ErrorKind::InvalidArgument, "presentation source must be shader-readable")
+            Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation source must be shader-readable"))
         } else if t.kind != metal::TextureKind::Texture2d
             || t.format != metal::metal_format::Format::Bgra8Unorm
             || t.depth != 1
@@ -83,20 +83,20 @@ impl Presentation {
             || t.sample_count != 1
             || t.array_length != 1
         {
-            fail(OPERATION, ErrorKind::InvalidArgument, "presentation target must be a single-sample 2D BGRA8 texture")
+            Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation target must be a single-sample 2D BGRA8 texture"))
         } else if !t.usage.contains(&metal::TextureUsage::RenderTarget) {
-            fail(OPERATION, ErrorKind::InvalidArgument, "presentation target must be renderable")
+            Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation target must be renderable"))
         } else if s.width != t.width || s.height != t.height {
-            fail(OPERATION, ErrorKind::InvalidArgument, "presentation source and target extents differ")
+            Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation source and target extents differ"))
         } else {
             Ok(())
         }
     }
 
     /// Encodes the blit into `commands`; with `present`, also schedules that drawable.
-    pub fn encode(&self, commands: &metal::CommandBuffer, present: Option<&metal::Drawable>, source: &metal::Texture, target: &metal::Texture) -> R<()> {
+    pub fn encode(&self, commands: &metal::CommandBuffer, present: Option<&metal::Drawable>, source: &metal::Texture, target: &metal::Texture) -> Result<(), Error> {
         if commands.destroyed() {
-            return fail(OPERATION, ErrorKind::StaleHandle, "presentation command buffer is destroyed");
+            return Err(fail(OPERATION, ErrorKind::StaleHandle, "presentation command buffer is destroyed"));
         }
         self.validate_resources(commands.device(), source, target)?;
         let pass = RenderPassDescriptor::create(&self.device, target.descriptor().width as u64, target.descriptor().height as u64, 1).map_err(|e| metal_failure(&e))?;

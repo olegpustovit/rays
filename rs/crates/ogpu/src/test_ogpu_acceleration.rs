@@ -4,16 +4,13 @@ use crate::{
     handle,
 };
 
-fn ok<T>(result: Result<T, Error>) -> T {
-    match result {
-        Ok(value) => value,
-        Err(error) => panic!("{}", crate::error::to_string(&error)),
-    }
+fn die(error: Error) -> ! {
+    panic!("{}", crate::error::to_string(&error))
 }
 
-fn expect<T>(kind: ErrorKind, result: Result<T, Error>) {
+fn expect(kind: ErrorKind, result: Option<Error>) {
     match result {
-        Err(error) if error.kind == kind => {}
+        Some(error) if error.kind == kind => {}
         _ => panic!("unexpected acceleration result"),
     }
 }
@@ -66,26 +63,26 @@ fn acceleration_lifecycle_validation() {
     // One BLAS holds one geometry kind: Metal rejects a mix at sizing.
     expect(
         ErrorKind::InvalidArgument,
-        make(blas(vec![triangles(&range, 3), boxes(&range, 1), curves(&range, 4)], None)),
+        make(blas(vec![triangles(&range, 3), boxes(&range, 1), curves(&range, 4)], None)).err(),
     );
-    ok(make(blas(vec![boxes(&range, 1), boxes(&range, 2)], None)));
-    ok(make(blas(vec![curves(&range, 4)], None)));
+    make(blas(vec![boxes(&range, 1), boxes(&range, 2)], None)).unwrap_or_else(|failure| die(failure));
+    make(blas(vec![curves(&range, 4)], None)).unwrap_or_else(|failure| die(failure));
     let descriptor = blas(vec![triangles(&range, 3), triangles(&range, 6)], None);
-    expect(ErrorKind::Unsupported, acceleration::create(&d1, false, false, descriptor.clone()));
+    expect(ErrorKind::Unsupported, acceleration::create(&d1, false, false, descriptor.clone()).err());
     // Refit: only a built refittable primitive structure, from a descriptor of its shape.
-    let mut refittable = ok(acceleration::create(&d1, true, true, descriptor.clone()));
-    expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut refittable, descriptor.clone()));
-    ok(acceleration::build(&d1, &mut refittable));
-    ok(acceleration::refit(&d1, &mut refittable, descriptor.clone()));
-    ok(acceleration::refit(&d1, &mut refittable, descriptor.clone()));
+    let mut refittable = acceleration::create(&d1, true, true, descriptor.clone()).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut refittable, descriptor.clone()).err());
+    acceleration::build(&d1, &mut refittable).unwrap_or_else(|failure| die(failure));
+    acceleration::refit(&d1, &mut refittable, descriptor.clone()).unwrap_or_else(|failure| die(failure));
+    acceleration::refit(&d1, &mut refittable, descriptor.clone()).unwrap_or_else(|failure| die(failure));
     expect(
         ErrorKind::InvalidArgument,
-        acceleration::refit(&d1, &mut refittable, blas(vec![triangles(&range, 3)], None)),
+        acceleration::refit(&d1, &mut refittable, blas(vec![triangles(&range, 3)], None)).err(),
     );
-    expect(ErrorKind::CrossDevice, acceleration::refit(&d2, &mut refittable, descriptor.clone()));
-    let mut value = ok(make(descriptor.clone()));
-    ok(acceleration::build(&d1, &mut value));
-    expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut value, descriptor.clone()));
+    expect(ErrorKind::CrossDevice, acceleration::refit(&d2, &mut refittable, descriptor.clone()).err());
+    let mut value = make(descriptor.clone()).unwrap_or_else(|failure| die(failure));
+    acceleration::build(&d1, &mut value).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut value, descriptor.clone()).err());
     expect(
         ErrorKind::InvalidArgument,
         acceleration::create(
@@ -93,25 +90,25 @@ fn acceleration_lifecycle_validation() {
             true,
             true,
             Descriptor::Sized { size: 512, template: acceleration::handle(&value) },
-        ),
+        ).err(),
     );
-    expect(ErrorKind::CrossDevice, acceleration::compacted_size(&d2, &value));
-    let mut sized = ok(make(Descriptor::Sized { size: 512, template: acceleration::handle(&value) }));
-    expect(ErrorKind::InvalidState, acceleration::build(&d1, &mut sized));
-    ok(acceleration::compacted_size(&d1, &value));
-    ok(acceleration::compact_into(&d1, &mut value, &mut sized));
-    expect(ErrorKind::InvalidState, acceleration::compact_into(&d1, &mut value, &mut sized));
-    expect(ErrorKind::InvalidState, acceleration::compacted_size(&d1, &sized));
+    expect(ErrorKind::CrossDevice, acceleration::compacted_size(&d2, &value).err());
+    let mut sized = make(Descriptor::Sized { size: 512, template: acceleration::handle(&value) }).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, acceleration::build(&d1, &mut sized).err());
+    acceleration::compacted_size(&d1, &value).unwrap_or_else(|failure| die(failure));
+    acceleration::compact_into(&d1, &mut value, &mut sized).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, acceleration::compact_into(&d1, &mut value, &mut sized).err());
+    expect(ErrorKind::InvalidState, acceleration::compacted_size(&d1, &sized).err());
     // Motion: every keyframed range must match the keyframe count.
     let motion_triangles = |keyframes: Vec<BufferRange>| Geometry::MotionTriangles {
         keyframes,
         vertex_stride: 12,
         vertex_count: 3,
     };
-    ok(make(blas(vec![motion_triangles(vec![range.clone(), range.clone()])], Some(2))));
-    expect(ErrorKind::InvalidArgument, make(blas(vec![motion_triangles(vec![range.clone()])], Some(2))));
-    expect(ErrorKind::InvalidArgument, make(blas(vec![triangles(&range, 3)], Some(2))));
-    expect(ErrorKind::InvalidArgument, make(blas(vec![curves(&range, 5)], None)));
+    make(blas(vec![motion_triangles(vec![range.clone(), range.clone()])], Some(2))).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidArgument, make(blas(vec![motion_triangles(vec![range.clone()])], Some(2))).err());
+    expect(ErrorKind::InvalidArgument, make(blas(vec![triangles(&range, 3)], Some(2))).err());
+    expect(ErrorKind::InvalidArgument, make(blas(vec![curves(&range, 5)], None)).err());
     for vertices in [
         BufferRange { offset: -1, ..range.clone() },
         BufferRange { offset: 2, ..range.clone() },
@@ -122,14 +119,14 @@ fn acceleration_lifecycle_validation() {
             make(blas(
                 vec![Geometry::Triangles { vertices, vertex_stride: 12, vertex_count: 3 }],
                 None,
-            )),
+            )).err(),
         );
     }
-    expect(ErrorKind::InvalidArgument, make(tlas(&range, 67, InstanceKind::UserIdInstances, &value)));
-    ok(make(tlas(&range, 68, InstanceKind::UserIdInstances, &value)));
+    expect(ErrorKind::InvalidArgument, make(tlas(&range, 67, InstanceKind::UserIdInstances, &value)).err());
+    make(tlas(&range, 68, InstanceKind::UserIdInstances, &value)).unwrap_or_else(|failure| die(failure));
     // Each instance kind has its own minimum record size: 44-byte motion records are valid, user-id records need 68.
-    ok(make(tlas(&range, 44, InstanceKind::MotionInstances, &value)));
-    expect(ErrorKind::InvalidArgument, make(tlas(&range, 64, InstanceKind::UserIdInstances, &value)));
+    make(tlas(&range, 44, InstanceKind::MotionInstances, &value)).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidArgument, make(tlas(&range, 64, InstanceKind::UserIdInstances, &value)).err());
     // Packing follows the driver layout exactly.
     let layout = vec![68, 0, 48, 52, 60, 64, -1, -1, -1, -1, -1, -1];
     let packed = acceleration::pack_instances(

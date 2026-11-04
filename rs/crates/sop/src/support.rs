@@ -23,7 +23,7 @@ pub fn choice_kind(table: &[&str]) -> Kind {
 pub fn choice_index(table: &[&str], value: &Value) -> usize {
     match value {
         Value::Choice(label) => table.iter().position(|item| item == label).expect("choice label in table"),
-        _ => panic!("choice parameter received a non-choice value"),
+        _ => unreachable!("choice parameter received a non-choice value"),
     }
 }
 
@@ -1271,7 +1271,7 @@ pub fn resolve_transfer_group(
     geometry_value: &geometry::T,
 ) -> Result<Option<group::T>, Diagnostic> {
     match (exact, pattern) {
-        (Some(_), Some(_)) => panic!("sop/{operation}: exact and patterned {owner_name} groups are mutually exclusive"),
+        (Some(_), Some(_)) => unreachable!("sop/{operation}: exact and patterned {owner_name} groups are mutually exclusive"),
         (Some(name), None) => geometry::find_group(owner, name, geometry_value)
             .map(Some)
             .ok_or_else(|| group_missing(operation, owner_name, name)),

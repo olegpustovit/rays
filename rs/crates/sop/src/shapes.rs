@@ -61,7 +61,7 @@ pub mod switch {
     pub fn from_values(values: &[Value]) -> Parameters {
         match &values[0] {
             Value::Int(input) => Parameters { input: *input },
-            _ => panic!("switch: parameter record has the wrong shape"),
+            _ => unreachable!("switch: parameter record has the wrong shape"),
         }
     }
 
@@ -136,45 +136,45 @@ pub mod switch {
 // ---------------------------------------------------------------- shared helpers for the nodes below
 
 /// Positional reader over a schema-normalised value slice (`from_values` of the big records).
-struct Reader<'a> {
-    values: &'a [Value],
+struct Reader {
+    values: Vec<Value>,
     at: usize,
 }
 
-impl<'a> Reader<'a> {
-    fn new(values: &'a [Value]) -> Reader<'a> {
-        Reader { values, at: 0 }
+impl Reader {
+    fn new(values: &[Value]) -> Reader {
+        Reader { values: values.to_vec(), at: 0 }
     }
-    fn next(&mut self) -> &'a Value {
+    fn next(&mut self) -> Value {
         self.at += 1;
-        &self.values[self.at - 1]
+        self.values[self.at - 1].clone()
     }
     fn float(&mut self) -> f64 {
         match self.next() {
-            Value::Float(f) => *f,
-            _ => panic!("parameter record has the wrong shape"),
+            Value::Float(f) => f,
+            _ => unreachable!("parameter record has the wrong shape"),
         }
     }
     fn int(&mut self) -> i64 {
         match self.next() {
-            Value::Int(i) => *i,
-            _ => panic!("parameter record has the wrong shape"),
+            Value::Int(i) => i,
+            _ => unreachable!("parameter record has the wrong shape"),
         }
     }
     fn bool(&mut self) -> bool {
         match self.next() {
-            Value::Bool(b) => *b,
-            _ => panic!("parameter record has the wrong shape"),
+            Value::Bool(b) => b,
+            _ => unreachable!("parameter record has the wrong shape"),
         }
     }
     fn text(&mut self) -> String {
         match self.next() {
-            Value::Text(t) => String::from_utf8_lossy(t).into_owned(),
-            _ => panic!("parameter record has the wrong shape"),
+            Value::Text(t) => String::from_utf8_lossy(&t).into_owned(),
+            _ => unreachable!("parameter record has the wrong shape"),
         }
     }
     fn choice(&mut self, table: &[&str]) -> usize {
-        support::choice_index(table, self.next())
+        support::choice_index(table, &self.next())
     }
 }
 
@@ -264,7 +264,7 @@ pub mod clip {
     pub fn from_values(values: &[Value]) -> Parameters {
         let mut r = Reader::new(values);
         Parameters {
-            group_owner: support::element_owner_of_value(r.next()),
+            group_owner: support::element_owner_of_value(&r.next()),
             group: r.text(),
             keep: KEEP[r.choice(&KEEP_LABELS)],
             snapping_tolerance: r.float(),
@@ -607,7 +607,7 @@ pub mod soft_transform {
         let mut r = Reader::new(values);
         let triple = |r: &mut Reader| [r.float(), r.float(), r.float()];
         Parameters {
-            group_owner: support::element_owner_of_value(r.next()),
+            group_owner: support::element_owner_of_value(&r.next()),
             group: r.text(),
             order: ORDER[r.choice(&ORDER_LABELS)],
             rotation_order: ROTATION_ORDER[r.choice(&ROTATION_ORDER_LABELS)],
@@ -622,7 +622,7 @@ pub mod soft_transform {
             metric: METRIC[r.choice(&METRIC_LABELS)],
             metric_attribute: r.text(),
             apply_rolloff: r.bool(),
-            falloff: support::soft_falloff_of_value(r.next()),
+            falloff: support::soft_falloff_of_value(&r.next()),
             radius: r.float(),
             falloff_attribute: r.text(),
             recompute_normals: r.bool(),
@@ -891,7 +891,7 @@ pub mod ray {
     pub fn from_values(values: &[Value]) -> Parameters {
         let mut r = Reader::new(values);
         Parameters {
-            group_owner: support::element_owner_of_value(r.next()),
+            group_owner: support::element_owner_of_value(&r.next()),
             group: r.text(),
             collision_group: r.text(),
             method: METHOD[r.choice(&METHOD_LABELS)],

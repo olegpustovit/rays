@@ -16,13 +16,6 @@ fn session(bytes: i64) -> session::T {
     session::create(1, bytes).unwrap()
 }
 
-fn ok<T>(r: Result<T, rays_diagnostic::Diagnostic>) -> T {
-    match r {
-        Ok(v) => v,
-        Err(e) => panic!("{}", rays_diagnostic::error_to_string(&e)),
-    }
-}
-
 fn domains(n: i64) -> context::T {
     context::create(context::Options { domains: Some(n), grain: Some(17), ..Default::default() }).unwrap()
 }
@@ -47,13 +40,13 @@ fn picture(width: i64, height: i64) -> node::T {
 #[test]
 fn image_is_immutable_and_converts_exactly() {
     let source = [0.1, 0.2, 0.3, 1.0];
-    let image = ok(image::create(1, 1, &source));
+    let image = image::create(1, 1, &source).unwrap();
     assert_eq!(image::storage(&image), source.to_vec());
     let conversion = |n: i64| {
         let context = domains(n);
         let channels = [-1.0, 0.0, 0.5 / 255.0, 1.5 / 255.0, 2.5 / 255.0, 127.5 / 255.0, 254.5 / 255.0, 2.0];
         let rgba: Vec<f64> = (0..257 * 131 * 4).map(|i| channels[i % channels.len()]).collect();
-        let converted = ok(image::of_vec4(&context, 257, 131, &rgba));
+        let converted = image::of_vec4(&context, 257, 131, &rgba).unwrap();
         let node = build::make(
             build::Args { cook_mode: CookMode::Generator, ..build::args("image/conversion-test") },
             None,
@@ -63,9 +56,9 @@ fn image_is_immutable_and_converts_exactly() {
             },
         );
         let mut session = session(0);
-        let output = ok(session::cook(&mut session, None, &context, &node));
+        let output = session::cook(&mut session, None, &context, &node).unwrap();
         session::close(&mut session);
-        ok(payload::image(&output.payload))
+        payload::image(&output.payload).unwrap()
     };
     let (one, eight) = (conversion(1), conversion(8));
     let converted = image::rgba8(&one).unwrap().to_vec();
@@ -107,13 +100,13 @@ fn session_accounting_and_geometry_refusal() {
     let node = picture(32, 24);
     let mut one = session(65536);
     let mut eight = session(65536);
-    let first = ok(session::cook(&mut one, None, &ctx(1), &node));
-    let parallel = ok(session::cook(&mut eight, None, &ctx(8), &node));
-    let image = ok(payload::image(&first.payload));
+    let first = session::cook(&mut one, None, &ctx(1), &node).unwrap();
+    let parallel = session::cook(&mut eight, None, &ctx(8), &node).unwrap();
+    let image = payload::image(&first.payload).unwrap();
     let bytes = |i: &image::T| (image::width(i), image::height(i), image::storage(i));
-    assert_eq!(bytes(&image), bytes(&ok(payload::image(&parallel.payload))));
+    assert_eq!(bytes(&image), bytes(&payload::image(&parallel.payload).unwrap()));
     assert_eq!(session::stats(&one).retained_payload_bytes, 32 * 24 * 4 * 8);
-    let second = ok(session::cook(&mut one, None, &ctx(1), &node));
+    let second = session::cook(&mut one, None, &ctx(1), &node).unwrap();
     assert!(payload::ptr_eq(&second.payload, &first.payload));
     let stats = session::stats(&one);
     assert!(stats.hits == 1 && stats.cooks == 1);
@@ -125,12 +118,12 @@ fn session_accounting_and_geometry_refusal() {
     assert!(session::cached(&one, &ctx(1), &picture(5, 5)).is_none());
     let after = session::stats(&one);
     assert!(after.cooks == before.cooks && after.hits == before.hits && after.misses == before.misses);
-    ok(session::cook(&mut one, None, &ctx(1), &picture(8, 4)));
+    session::cook(&mut one, None, &ctx(1), &picture(8, 4)).unwrap();
     let stats = session::stats(&one);
     assert!(stats.retained_entries == 1 && stats.evictions == 1);
     // CLOCK protects the just-hit image once, dropping the newest entry.
     assert_eq!(stats.retained_payload_bytes, image::payload_bytes(&image));
-    ok(session::cook(&mut one, None, &ctx(1), &picture(4, 4)));
+    session::cook(&mut one, None, &ctx(1), &picture(4, 4)).unwrap();
     assert_eq!(session::stats(&one).retained_payload_bytes, 4 * 4 * 4 * 8);
     // a geometry consumer of an image input is refused with E_PAYLOAD before it cooks
     let consumer = build::make_geometry(
@@ -145,7 +138,7 @@ fn session_accounting_and_geometry_refusal() {
     session::close(&mut one);
     session::close(&mut eight);
     let mut tiny = session(1);
-    ok(session::cook(&mut tiny, None, &ctx(1), &node));
+    session::cook(&mut tiny, None, &ctx(1), &node).unwrap();
     let stats = session::stats(&tiny);
     assert!(stats.retained_entries == 0 && stats.retained_payload_bytes == 0);
     session::close(&mut tiny);
@@ -153,7 +146,7 @@ fn session_accounting_and_geometry_refusal() {
 
 #[test]
 fn packed_image_passes_through_unmaterialized() {
-    let image = ok(image::create(1, 1, &[0.1, 0.2, 0.3, 1.0]));
+    let image = image::create(1, 1, &[0.1, 0.2, 0.3, 1.0]).unwrap();
     let held = image.clone();
     let image_input = build::make(
         build::Args { cook_mode: CookMode::Generator, ..build::args("image/instances-test") },
@@ -168,7 +161,7 @@ fn packed_image_passes_through_unmaterialized() {
         Arc::new(|_, _, inputs| Ok(Cooked { payload: inputs[0].clone(), instances: None })),
     );
     let mut passing = session(65536);
-    let output = ok(session::cook(&mut passing, None, &ctx(1), &passthrough));
-    assert!(image::ptr_eq(&ok(payload::image(&output.payload)), &image));
+    let output = session::cook(&mut passing, None, &ctx(1), &passthrough).unwrap();
+    assert!(image::ptr_eq(&payload::image(&output.payload).unwrap(), &image));
     session::close(&mut passing);
 }

@@ -1,6 +1,7 @@
 //! Ogpu_metal.Library: a compiled Metal source library with a count of the pipelines made from it.
-use crate::device::{fail, native_of, Device, R};
+use crate::device::{fail, of_metal_error, Device};
 use ogpu_core::{
+    error::Error,
     error::ErrorKind,
     handle::{self, ResourceHandle},
     shader::{self, Shader},
@@ -18,21 +19,21 @@ struct LibraryInner {
 #[derive(Clone)]
 pub struct Library(Rc<LibraryInner>);
 
-pub fn compile_native(operation: &str, device: &Device, shader_value: &Shader) -> R<metal::Library> {
+pub fn compile_native(operation: &str, device: &Device, shader_value: &Shader) -> Result<metal::Library, Error> {
     if shader::backend(shader_value) != "metal" {
-        return fail(operation, ErrorKind::InvalidArgument, "shader backend is not metal");
+        return Err(fail(operation, ErrorKind::InvalidArgument, "shader backend is not metal"));
     }
     let source = match std::str::from_utf8(shader::bytes(shader_value)) {
         Ok(text) => text,
-        Err(_) => return fail(operation, ErrorKind::InvalidArgument, "shader source is not UTF-8"),
+        Err(_) => return Err(fail(operation, ErrorKind::InvalidArgument, "shader source is not UTF-8")),
     };
-    native_of(operation, metal::Library::compile_source(device.metal(), source, shader::label(shader_value)))
+    metal::Library::compile_source(device.metal(), source, shader::label(shader_value)).map_err(|value| of_metal_error(operation, &value))
 }
 
-pub fn create(device: &Device, shader_value: &Shader) -> R<Library> {
+pub fn create(device: &Device, shader_value: &Shader) -> Result<Library, Error> {
     let op = "Ogpu_metal.Library.create";
     if device.destroyed() {
-        return fail(op, ErrorKind::StaleHandle, "device is destroyed");
+        return Err(fail(op, ErrorKind::StaleHandle, "device is destroyed"));
     }
     let metal = compile_native(op, device, shader_value)?;
     device.attach_resource();
@@ -46,18 +47,18 @@ pub fn create(device: &Device, shader_value: &Shader) -> R<Library> {
 }
 
 impl Library {
-    pub fn validate(&self, device: &Device) -> R<()> {
+    pub fn validate(&self, device: &Device) -> Result<(), Error> {
         handle::validate_for("Ogpu_metal.Library.validate", device.handle(), &self.0.handle)
     }
 
-    pub fn destroy(&self) -> R<()> {
+    pub fn destroy(&self) -> Result<(), Error> {
         let op = "Ogpu_metal.Library.destroy";
         if self.0.dead.get() {
             Ok(())
         } else if self.0.pipelines.get() > 0 {
-            fail(op, ErrorKind::InvalidState, "library has live pipelines")
+            Err(fail(op, ErrorKind::InvalidState, "library has live pipelines"))
         } else {
-            native_of(op, self.0.metal.destroy())?;
+            self.0.metal.destroy().map_err(|value| of_metal_error(op, &value))?;
             self.0.dead.set(true);
             handle::destroy(&self.0.handle);
             self.0.device.detach_resource();

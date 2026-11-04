@@ -50,19 +50,19 @@ fn window_runtime_render() {
     let draw = prepared(state_.clone());
     for frame in 1..=600 {
         let draws = if frame == 2 { vec![draw.clone(), draw.clone()] } else { vec![draw.clone()] };
-        common::get(renderer::draw(None, &value, &draws));
+        renderer::draw(None, &value, &draws).unwrap();
         if [1, 2, 60, 600].contains(&frame) {
-            let facts = common::get(renderer::presentation_facts_of(&value));
-            let bytes = common::get(renderer::read_pixels(&value, facts.drawable_width * 4));
+            let facts = renderer::presentation_facts_of(&value).unwrap();
+            let bytes = renderer::read_pixels(&value, facts.drawable_width * 4).unwrap();
             assert!(bytes[0] == 64 && bytes[1] == 128 && bytes[2] == 191, "renderer exact pixel");
         }
     }
     let mut resized = None;
     Native::runtime_of_mut(&value, &mut |rt| resized = Some(runtime::resize(rt, 8, 8)));
-    common::get(resized.unwrap());
+    resized.unwrap().unwrap();
     let resized_state = state { viewport: (0, 0, 8, 8), scissor: (0, 0, 8, 8), ..state_ };
-    common::get(renderer::draw(None, &value, &[prepared(resized_state)]));
-    common::get(renderer::destroy(&value));
+    renderer::draw(None, &value, &[prepared(resized_state)]).unwrap();
+    renderer::destroy(&value).unwrap();
     assert_eq!(ogpu::impl_::live_handles().unwrap(), before, "renderer Vulkan live-handle delta");
     let _ = scene_execution::empty_bytes;
     println!("renderer: Vulkan frames 1/2/60/600 and resize, zero delta");

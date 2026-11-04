@@ -24,7 +24,7 @@ fn delete_part(
     compact_points: bool,
     selection: &group::T,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     deletion::delete(
         &deletion::DeleteParams {
             cancel: cancel_arc.clone(),
@@ -43,7 +43,7 @@ pub fn extract_primitive_part(
     selected: bool,
     primitives: &group::T,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let part = delete_part(cancel_arc, grain, !selected, true, primitives, geometry_value)?;
     if selected {
         split_disconnected_point_fans(cancel_arc.as_deref(), grain, &part)
@@ -56,7 +56,7 @@ pub fn free_point_part(
     cancel_arc: &Option<Arc<cancel::T>>,
     grain: Option<i64>,
     geometry_value: &geometry::T,
-) -> Res<Option<geometry::T>> {
+) -> Result<Option<geometry::T>, error::T> {
     let topology_view = topology::View::view(geometry::topology(geometry_value))?;
     let mut used = vec![0u8; topology_view.point_count as usize];
     for (vertex, &point) in topology_view.vertex_points.iter().enumerate() {
@@ -84,7 +84,7 @@ pub fn iterate(
     scheme: Scheme,
     iterations: i64,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let mut remaining = iterations;
     let mut edge_crease_override = options.edge_crease_override;
     let mut current = geometry_value.clone();
@@ -115,7 +115,7 @@ pub fn with_empty_edge_group(
     cancel_token: Option<&cancel::T>,
     name: &str,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let topology_value = geometry::topology(geometry_value);
     let index = topology_index::create(cancel_token, topology_value)?;
     let empty = edge_group::init(None, topology_value, &index, name, &|_| false)?;
@@ -132,7 +132,7 @@ pub fn automatic_boundary_holes(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     geometry_value: &geometry::T,
-) -> Res<Option<group::T>> {
+) -> Result<Option<group::T>, error::T> {
     let topology_value = geometry::topology(geometry_value);
     let topology_view = topology::View::view(topology_value)?;
     let index_value = topology_index::create(cancel_token, topology_value)?;
@@ -229,7 +229,7 @@ pub fn detail_overrides(geometry_value: &geometry::T) -> DetailOverrides {
     found
 }
 
-fn detail_int(name: &str, item: &attribute::T) -> Res<i64> {
+fn detail_int(name: &str, item: &attribute::T) -> Result<i64, error::T> {
     match attribute::View::storage(item)? {
         Storage::Int(values) if values.len() == 1 => Ok(values[0]),
         Storage::Int(_) => {
@@ -261,7 +261,7 @@ fn ocaml_quoted(value: &str) -> String {
     out
 }
 
-pub fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Res<Scheme> {
+pub fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Result<Scheme, error::T> {
     let Some(item) = found else {
         return Ok(default);
     };
@@ -296,7 +296,7 @@ pub fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Res<Sche
 pub fn resolve_boundary_interpolation(
     default: BoundaryInterpolation,
     found: Option<&attribute::T>,
-) -> Res<BoundaryInterpolation> {
+) -> Result<BoundaryInterpolation, error::T> {
     let Some(item) = found else {
         return Ok(default);
     };
@@ -313,7 +313,7 @@ pub fn resolve_boundary_interpolation(
 pub fn resolve_face_varying_interpolation(
     default: FaceVaryingInterpolation,
     found: Option<&attribute::T>,
-) -> Res<FaceVaryingInterpolation> {
+) -> Result<FaceVaryingInterpolation, error::T> {
     let Some(item) = found else {
         return Ok(default);
     };
@@ -333,7 +333,7 @@ pub fn resolve_face_varying_interpolation(
 pub fn resolve_creasing_method(
     default: CreasingMethod,
     found: Option<&attribute::T>,
-) -> Res<CreasingMethod> {
+) -> Result<CreasingMethod, error::T> {
     let Some(item) = found else {
         return Ok(default);
     };
@@ -349,7 +349,7 @@ pub fn resolve_creasing_method(
 pub fn resolve_triangle_subdivision(
     default: TrianglePolicy,
     found: Option<&attribute::T>,
-) -> Res<TrianglePolicy> {
+) -> Result<TrianglePolicy, error::T> {
     let Some(item) = found else {
         return Ok(default);
     };
@@ -411,7 +411,7 @@ impl Default for PolygonOptions {
     }
 }
 
-fn validate_iterations_and_bias(iterations: i64, cracks: CrackPolicy) -> Res<()> {
+fn validate_iterations_and_bias(iterations: i64, cracks: CrackPolicy) -> Result<(), error::T> {
     if iterations < 0 {
         return Err(invalid_arg(
             "Rdk_mesh.Subdivide.subdivide: iterations must be non-negative".to_owned(),
@@ -436,7 +436,7 @@ fn validate_crease_arguments(
     crease_weight: Option<f64>,
     generate_resulting_creases: bool,
     resulting_crease_group: &Option<String>,
-) -> Res<()> {
+) -> Result<(), error::T> {
     if creases.is_none() && crease_primitives.is_some() {
         return Err(failm("crease primitive selection requires a crease input"));
     }
@@ -461,7 +461,7 @@ pub fn subdivide_polygons(
     grain: Option<i64>,
     options: &PolygonOptions,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let cancel_token = cancel_arc.as_deref();
     validate_iterations_and_bias(options.iterations, options.cracks)?;
     cancel::check_opt(cancel_token)?;
@@ -738,7 +738,7 @@ pub fn subdivide_polygons(
     Ok(if generate_resulting_creases { output } else { without_resulting_creases(&output) })
 }
 
-pub fn primitive_kind_counts(geometry_value: &geometry::T) -> Res<(i64, i64)> {
+pub fn primitive_kind_counts(geometry_value: &geometry::T) -> Result<(i64, i64), error::T> {
     let topology_view = topology::View::view(geometry::topology(geometry_value))?;
     let mut polygons = 0_i64;
     let mut curves = 0_i64;
@@ -767,7 +767,7 @@ pub fn primitive_kind_group(
     grain: Option<i64>,
     polygon: bool,
     geometry_value: &geometry::T,
-) -> Res<group::T> {
+) -> Result<group::T, error::T> {
     let topology_view = topology::View::view(geometry::topology(geometry_value))?;
     group::init(
         grain,
@@ -783,7 +783,7 @@ pub fn extract_kind(
     grain: Option<i64>,
     polygon: bool,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let selection = primitive_kind_group(grain, polygon, geometry_value)?;
     delete_part(cancel_arc, grain, false, true, &selection, geometry_value)
 }
@@ -793,7 +793,7 @@ pub fn selection_for_kind(
     polygon: bool,
     selection: Option<&group::T>,
     geometry_value: &geometry::T,
-) -> Res<Option<group::T>> {
+) -> Result<Option<group::T>, error::T> {
     let Some(selection) = selection else {
         return Ok(None);
     };
@@ -818,9 +818,9 @@ pub fn refine_curves(
     scheme: Scheme,
     iterations: i64,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let cancel_token = cancel_arc.as_deref();
-    let refine = |source: &geometry::T| -> Res<geometry::T> {
+    let refine = |source: &geometry::T| -> Result<geometry::T, error::T> {
         let curve_scheme = match scheme {
             Scheme::CatmullClark => curve_subdivide::Scheme::CatmullClark,
             Scheme::Bilinear => curve_subdivide::Scheme::Bilinear,
@@ -880,7 +880,7 @@ pub struct Params {
 }
 
 /// OCaml's `Invalid_argument` caught inside the curve path becomes a plain failure message.
-fn invalid_argument_to_failure(result: Res<geometry::T>) -> Res<geometry::T> {
+fn invalid_argument_to_failure(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     match result {
         Err(failure) if error::code(&failure) == "invalid_argument" => {
             Err(fail(error::message(&failure).to_owned()))
@@ -894,7 +894,7 @@ fn mixed_subdivide(
     polygon_count: i64,
     curve_count: i64,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let cancel_arc = &params.cancel;
     let cancel_token = cancel_arc.as_deref();
     let grain = params.grain;
@@ -1076,7 +1076,7 @@ fn mixed_subdivide(
 }
 
 /// The `Error.guard ~operation:"subdivide" ~code:"invalid_topology"` boundary.
-fn guard(result: Res<geometry::T>) -> Result<geometry::T, error::T> {
+fn guard(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     match result {
         Ok(value) => Ok(value),
         Err(failure) => {
@@ -1100,7 +1100,7 @@ pub fn subdivide(
     params: &Params,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    let work = || -> Res<geometry::T> {
+    let work = || -> Result<geometry::T, error::T> {
         let had_point_normals =
             geometry::find_attribute(Owner::Point, "N", geometry_value).is_some();
         let (polygon_count, curve_count) = primitive_kind_counts(geometry_value)?;

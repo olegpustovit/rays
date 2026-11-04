@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::metal::{error, native, on_main, Buffer, CommandBuffer, Device, Error, ErrorKind, Lifetime};
+use crate::metal::{error, sys_error, enter_main, Buffer, CommandBuffer, Device, Error, ErrorKind, Lifetime};
 use metal_sys;
 
 
@@ -26,12 +26,12 @@ pub struct AccelerationStructure(Arc<AccelerationStructureInner>);
 impl AccelerationStructure {
     pub fn create(device: &Device, size: u64) -> Result<Self, Error> {
         const OP: &str = "Metal.Acceleration_structure.create";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             device.ensure_live(OP)?;
             if size == 0 {
                 return Err(error(OP, ErrorKind::InvalidArgument, "size must be positive"));
             }
-            let raw = native(OP, metal_sys::registry::acceleration_structure_create(device.raw(), size))?;
+            let raw = metal_sys::registry::acceleration_structure_create(device.raw(), size).map_err(|failure| sys_error(OP, failure))?;
             device.attach_child(OP)?;
             Ok(Self(Arc::new(AccelerationStructureInner {
                 raw,
@@ -40,7 +40,7 @@ impl AccelerationStructure {
                 size,
                 device_attached: AtomicBool::new(true),
             })))
-        })
+        })()
     }
 
     pub fn size(&self) -> u64 {
@@ -53,13 +53,13 @@ impl AccelerationStructure {
 
     pub fn destroy(&self) -> Result<(), Error> {
         const OP: &str = "Metal.Acceleration_structure.destroy";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.0.lifetime.destroy_parent(OP)?;
             if self.0.device_attached.swap(false, Ordering::AcqRel) {
                 self.0.device.detach_child();
             }
             Ok(())
-        })
+        })()
     }
 
     pub(crate) fn raw(&self) -> &metal_sys::Handle {
@@ -229,15 +229,10 @@ pub struct Sizes {
     pub refit_scratch_buffer_size: u64,
 }
 
-enum DescriptorData {
-    Primitive(metal_sys::native::acceleration::PrimitiveDescriptor),
-    Instances(metal_sys::native::acceleration::InstancesDescriptor),
-}
-
 pub struct BuildDescriptor {
     lifetime: Lifetime,
     device: Device,
-    data: DescriptorData,
+    data: metal_sys::native::acceleration::Descriptor,
     buffers: Vec<Buffer>,
     structures: Vec<AccelerationStructure>,
     instance_kind: Option<InstanceKind>,
@@ -259,7 +254,7 @@ impl BuildDescriptor {
         refit: bool,
     ) -> Result<Self, Error> {
         const OP: &str = "Metal.Acceleration_structure.Build.primitive";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             device.ensure_live(OP)?;
             if geometries.is_empty() {
                 return Err(error(OP, ErrorKind::InvalidArgument, "descriptor requires at least one geometry"));
@@ -305,7 +300,7 @@ impl BuildDescriptor {
             Ok(Self {
                 lifetime: Lifetime::new(),
                 device: device.clone(),
-                data: DescriptorData::Primitive(metal_sys::native::acceleration::PrimitiveDescriptor {
+                data: metal_sys::native::acceleration::Descriptor::Primitive(metal_sys::native::acceleration::PrimitiveDescriptor {
                     geometries: raw_geometries,
                     motion: native_motion,
                     refit,
@@ -316,7 +311,7 @@ impl BuildDescriptor {
                 instance_kind: None,
                 device_attached: AtomicBool::new(true),
             })
-        })
+        })()
     }
 
     pub fn instances(
@@ -329,12 +324,9 @@ impl BuildDescriptor {
         structures: &[AccelerationStructure],
     ) -> Result<Self, Error> {
         const OP: &str = "Metal.Acceleration_structure.Build.instances";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             device.ensure_live(OP)?;
-            let layout = InstanceLayout::from_native(native(
-                OP,
-                metal_sys::native::acceleration::instance_layout(kind.code()),
-            )?)?;
+            let layout = InstanceLayout::from_native(metal_sys::native::acceleration::instance_layout(kind.code()).map_err(|failure| sys_error(OP, failure))?)?;
             buffer.lifetime().ensure_live(OP)?;
             if !device.same(buffer.device()) {
                 return Err(error(OP, ErrorKind::DeviceMismatch, "instance buffer belongs to another device"));
@@ -381,7 +373,7 @@ impl BuildDescriptor {
             Ok(Self {
                 lifetime: Lifetime::new(),
                 device: device.clone(),
-                data: DescriptorData::Instances(metal_sys::native::acceleration::InstancesDescriptor {
+                data: metal_sys::native::acceleration::Descriptor::Instances(metal_sys::native::acceleration::InstancesDescriptor {
                     buffer: buffer.raw().clone(),
                     offset,
                     stride: layout.size,
@@ -396,31 +388,31 @@ impl BuildDescriptor {
                 instance_kind: Some(kind),
                 device_attached: AtomicBool::new(true),
             })
-        })
+        })()
     }
 
     pub fn instance_layout(kind: InstanceKind) -> Result<InstanceLayout, Error> {
         const OP: &str = "Metal.Acceleration_structure.Build.instance_layout";
-        on_main(OP, || {
-            let values = native(OP, metal_sys::native::acceleration::instance_layout(kind.code()))?;
+        (|| -> Result<_, Error> { enter_main(OP)?;
+            let values = metal_sys::native::acceleration::instance_layout(kind.code()).map_err(|failure| sys_error(OP, failure))?;
             InstanceLayout::from_native(values)
-        })
+        })()
     }
 
     pub fn sizes(&self, device: &Device) -> Result<Sizes, Error> {
         const OP: &str = "Metal.Acceleration_structure.Build.sizes";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.lifetime.ensure_live(OP)?;
             if !device.same(&self.device) {
                 return Err(error(OP, ErrorKind::DeviceMismatch, "descriptor belongs to another device"));
             }
-            let sizes = native(OP, metal_sys::native::acceleration::descriptor_sizes(device.raw(), &self.native_descriptor()))?;
+            let sizes = metal_sys::native::acceleration::descriptor_sizes(device.raw(), self.native_descriptor()).map_err(|failure| sys_error(OP, failure))?;
             Ok(Sizes {
                 acceleration_structure_size: sizes.acceleration_structure_size,
                 build_scratch_buffer_size: sizes.build_scratch_buffer_size,
                 refit_scratch_buffer_size: sizes.refit_scratch_buffer_size,
             })
-        })
+        })()
     }
 
     pub fn instance_kind(&self) -> Option<InstanceKind> {
@@ -429,20 +421,17 @@ impl BuildDescriptor {
 
     pub fn destroy(&self) -> Result<(), Error> {
         const OP: &str = "Metal.Acceleration_structure.Build.destroy";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.lifetime.destroy_parent(OP)?;
             if self.device_attached.swap(false, Ordering::AcqRel) {
                 self.device.detach_child();
             }
             Ok(())
-        })
+        })()
     }
 
-    fn native_descriptor(&self) -> metal_sys::native::acceleration::Descriptor<'_> {
-        match &self.data {
-            DescriptorData::Primitive(value) => metal_sys::native::acceleration::Descriptor::Primitive(value),
-            DescriptorData::Instances(value) => metal_sys::native::acceleration::Descriptor::Instances(value),
-        }
+    fn native_descriptor(&self) -> &metal_sys::native::acceleration::Descriptor {
+        &self.data
     }
 
     fn validate_resources(&self, operation: &str, device: &Device) -> Result<(), Error> {
@@ -490,23 +479,21 @@ fn validate_keyframes(
     name: &str,
     keyframes: &[Keyframe],
     motion: Option<Motion>,
-    check: impl Fn(&Keyframe) -> bool,
+    check: &dyn Fn(&Keyframe) -> bool,
 ) -> Result<(), Error> {
     let expected = motion.map_or(1, |value| value.keyframe_count);
     if keyframes.len() != expected {
         return Err(error(
-            operation,
-            ErrorKind::InvalidArgument,
-            format!("{name} keyframe count must match the descriptor's motion keyframes (or be one)"),
+            operation, ErrorKind::InvalidArgument, &format!("{name} keyframe count must match the descriptor's motion keyframes (or be one)"),
         ));
     }
     for keyframe in keyframes {
         keyframe.buffer.lifetime().ensure_live(operation)?;
         if !device.same(keyframe.buffer.device()) {
-            return Err(error(operation, ErrorKind::DeviceMismatch, format!("{name} buffer belongs to another device")));
+            return Err(error(operation, ErrorKind::DeviceMismatch, &format!("{name} buffer belongs to another device")));
         }
         if !check(keyframe) {
-            return Err(error(operation, ErrorKind::InvalidArgument, format!("{name} range exceeds its buffer")));
+            return Err(error(operation, ErrorKind::InvalidArgument, &format!("{name} range exceeds its buffer")));
         }
     }
     Ok(())
@@ -531,7 +518,7 @@ fn validate_geometry(operation: &str, device: &Device, geometry: &Geometry, moti
                 return Err(error(operation, ErrorKind::InvalidArgument, "triangle stride must be at least 12 and four-byte aligned with a positive count"));
             }
             let vertex_count = if index.is_none() { *triangle_count * 3 } else { 1 };
-            validate_keyframes(operation, device, "vertex", vertices, motion, |keyframe| {
+            validate_keyframes(operation, device, "vertex", vertices, motion, &|keyframe| {
                 range_fits(keyframe.buffer.length(), keyframe.offset, *vertex_stride, vertex_count, 12)
             })?;
             if let Some(index) = index {
@@ -542,7 +529,7 @@ fn validate_geometry(operation: &str, device: &Device, geometry: &Geometry, moti
             if *stride < 24 || *stride % 4 != 0 || *count == 0 {
                 return Err(error(operation, ErrorKind::InvalidArgument, "bounding box stride must be at least 24 and four-byte aligned with a positive count"));
             }
-            validate_keyframes(operation, device, "bounding box", boxes, motion, |keyframe| {
+            validate_keyframes(operation, device, "bounding box", boxes, motion, &|keyframe| {
                 range_fits(keyframe.buffer.length(), keyframe.offset, *stride, *count, 24)
             })?;
         }
@@ -563,10 +550,10 @@ fn validate_geometry(operation: &str, device: &Device, geometry: &Geometry, moti
             if radii.len() != control_points.len() {
                 return Err(error(operation, ErrorKind::InvalidArgument, "curve radius keyframes must match control point keyframes"));
             }
-            validate_keyframes(operation, device, "control point", control_points, motion, |keyframe| {
+            validate_keyframes(operation, device, "control point", control_points, motion, &|keyframe| {
                 range_fits(keyframe.buffer.length(), keyframe.offset, *control_stride, *control_point_count, 12)
             })?;
-            validate_keyframes(operation, device, "radius", radii, motion, |keyframe| {
+            validate_keyframes(operation, device, "radius", radii, motion, &|keyframe| {
                 range_fits(keyframe.buffer.length(), keyframe.offset, *radius_stride, *control_point_count, 4)
             })?;
             let index_count = segment_count
@@ -692,10 +679,10 @@ pub enum CompactedSizeType {
 impl AccelerationEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         const OP: &str = "Metal.Acceleration_encoder.create";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             command_buffer.lifetime().ensure_live(OP)?;
             command_buffer.ensure_recording(OP)?;
-            let raw = native(OP, metal_sys::registry::command_buffer_acceleration_encoder(command_buffer.raw()))?;
+            let raw = metal_sys::registry::command_buffer_acceleration_encoder(command_buffer.raw()).map_err(|failure| sys_error(OP, failure))?;
             command_buffer.lifetime().attach();
             Ok(Self(Arc::new(AccelerationEncoderInner {
                 raw,
@@ -703,7 +690,7 @@ impl AccelerationEncoder {
                 command_buffer: command_buffer.clone(),
                 command_buffer_attached: AtomicBool::new(true),
             })))
-        })
+        })()
     }
 
     pub fn build_with(
@@ -735,7 +722,7 @@ impl AccelerationEncoder {
         scratch_offset: u64,
         refit: bool,
     ) -> Result<(), Error> {
-        on_main(operation, || {
+        (|| -> Result<_, Error> { enter_main(operation)?;
             self.0.lifetime.ensure_live(operation)?;
             let device = self.0.command_buffer.device();
             descriptor.validate_resources(operation, device)?;
@@ -750,7 +737,7 @@ impl AccelerationEncoder {
             if scratch_offset > scratch.length() {
                 return Err(error(operation, ErrorKind::InvalidArgument, "scratch offset exceeds its buffer"));
             }
-            let sizes = native(operation, metal_sys::native::acceleration::descriptor_sizes(device.raw(), &descriptor.native_descriptor()))?;
+            let sizes = metal_sys::native::acceleration::descriptor_sizes(device.raw(), descriptor.native_descriptor()).map_err(|failure| sys_error(operation, failure))?;
             let scratch_needed = if refit { sizes.refit_scratch_buffer_size } else { sizes.build_scratch_buffer_size };
             if destination.size() < sizes.acceleration_structure_size {
                 return Err(error(operation, ErrorKind::InvalidArgument, "destination acceleration structure is too small"));
@@ -758,17 +745,14 @@ impl AccelerationEncoder {
             if scratch_needed > scratch.length() - scratch_offset {
                 return Err(error(operation, ErrorKind::InvalidArgument, "scratch range is too small"));
             }
-            native(
-                operation,
-                metal_sys::native::acceleration::encoder_build(
+            metal_sys::native::acceleration::encoder_build(
                     &self.0.raw,
                     destination.raw(),
-                    &descriptor.native_descriptor(),
+                    descriptor.native_descriptor(),
                     scratch.raw(),
                     scratch_offset,
                     refit,
-                ),
-            )?;
+                ).map_err(|failure| sys_error(operation, failure))?;
             self.0.command_buffer.retain_buffer(scratch);
             for buffer in &descriptor.buffers {
                 self.0.command_buffer.retain_buffer(buffer);
@@ -778,7 +762,7 @@ impl AccelerationEncoder {
                 self.0.command_buffer.retain_acceleration(structure);
             }
             Ok(())
-        })
+        })()
     }
 
     pub fn copy_and_compact(
@@ -787,20 +771,20 @@ impl AccelerationEncoder {
         destination: &AccelerationStructure,
     ) -> Result<(), Error> {
         const OP: &str = "Metal.Acceleration_encoder.copy_and_compact";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.0.lifetime.ensure_live(OP)?;
             let device = self.0.command_buffer.device();
             validate_structure(OP, device, source)?;
             validate_structure(OP, device, destination)?;
-            native(OP, metal_sys::registry::acceleration_encoder_copy_and_compact(
+            metal_sys::registry::acceleration_encoder_copy_and_compact(
                 &self.0.raw,
                 source.raw(),
                 destination.raw(),
-            ))?;
+            ).map_err(|failure| sys_error(OP, failure))?;
             self.0.command_buffer.retain_acceleration(source);
             self.0.command_buffer.retain_acceleration(destination);
             Ok(())
-        })
+        })()
     }
 
     pub fn write_compacted_size_typed(
@@ -811,7 +795,7 @@ impl AccelerationEncoder {
         size_type: CompactedSizeType,
     ) -> Result<(), Error> {
         const OP: &str = "Metal.Acceleration_encoder.write_compacted_size_typed";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.0.lifetime.ensure_live(OP)?;
             let device = self.0.command_buffer.device();
             validate_structure(OP, device, source)?;
@@ -826,30 +810,30 @@ impl AccelerationEncoder {
             if offset % bytes != 0 || offset > destination.length() || bytes > destination.length() - offset {
                 return Err(error(OP, ErrorKind::InvalidArgument, "compacted-size output range is invalid"));
             }
-            native(OP, metal_sys::native::acceleration::encoder_write_compacted_size(
+            metal_sys::native::acceleration::encoder_write_compacted_size(
                 &self.0.raw,
                 source.raw(),
                 destination.raw(),
                 offset,
                 uint64,
-            ))?;
+            ).map_err(|failure| sys_error(OP, failure))?;
             self.0.command_buffer.retain_acceleration(source);
             self.0.command_buffer.retain_buffer(destination);
             Ok(())
-        })
+        })()
     }
 
     pub fn end_encoding(&self) -> Result<(), Error> {
         const OP: &str = "Metal.Acceleration_encoder.end_encoding";
-        on_main(OP, || {
+        (|| -> Result<_, Error> { enter_main(OP)?;
             self.0.lifetime.ensure_live(OP)?;
-            native(OP, metal_sys::registry::acceleration_encoder_end(&self.0.raw))?;
+            metal_sys::registry::acceleration_encoder_end(&self.0.raw).map_err(|failure| sys_error(OP, failure))?;
             self.0.lifetime.destroyed.store(true, Ordering::Release);
             if self.0.command_buffer_attached.swap(false, Ordering::AcqRel) {
                 self.0.command_buffer.lifetime().detach();
             }
             Ok(())
-        })
+        })()
     }
 }
 

@@ -30,7 +30,6 @@ impl Error {
     pub fn message(&self) -> &str { &self.message }
 }
 
-pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,8 +39,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-fn error(operation: &str, kind: ErrorKind, message: impl Into<String>) -> Error {
-    Error { operation: operation.to_owned(), kind, message: message.into() }
+fn error(operation: &str, kind: ErrorKind, message: &str) -> Error {
+    Error { operation: operation.to_owned(), kind, message: message.to_string() }
 }
 
 fn version(number: i32) -> Version {
@@ -57,7 +56,7 @@ pub fn compiled_version() -> Version {
     version(sys::compiled_version())
 }
 
-pub fn check_version(release: bool) -> Result<()> {
+pub fn check_version(release: bool) -> std::result::Result<(), Error> {
     sdl3::validate_version_for("SDL3_mixer", compiled_version(), release, linked_version())
         .map_err(|source| error("SDL3_mixer.check_version", ErrorKind::IncompatibleVersion, source.message()))
 }
@@ -81,7 +80,7 @@ fn drain() {
     mixers.into_iter().for_each(sys::destroy_mixer);
 }
 
-fn require_main(operation: &str) -> Result<()> {
+fn require_main(operation: &str) -> std::result::Result<(), Error> {
     if !main_thread() {
         Err(error(operation, ErrorKind::WrongDomain, "SDL3_mixer operation must run on the initial thread and SDL main thread"))
     } else {
@@ -89,14 +88,10 @@ fn require_main(operation: &str) -> Result<()> {
     }
 }
 
-fn on_main<T>(operation: &str, callback: impl FnOnce() -> Result<T>) -> Result<T> {
+fn enter_main(operation: &str) -> std::result::Result<(), Error> {
     require_main(operation)?;
     drain();
-    callback()
-}
-
-fn mixer_result<T>(operation: &str, result: std::result::Result<T, String>) -> Result<T> {
-    result.map_err(|message| error(operation, ErrorKind::MixerError, message))
+    Ok(())
 }
 
 fn int(value: i64) -> i32 {
@@ -106,24 +101,24 @@ fn int(value: i64) -> i32 {
 pub mod init {
     use super::*;
 
-    pub fn init() -> Result<()> {
-        on_main("SDL3_mixer.Init.init", || {
+    pub fn init() -> std::result::Result<(), Error> {
+        enter_main("SDL3_mixer.Init.init")?;
             check_version(true)?;
-            mixer_result("SDL3_mixer.Init.init", sys::init())?;
+            sys::init().map_err(|message| error("SDL3_mixer.Init.init", ErrorKind::MixerError, &message))?;
             INIT_COUNT.fetch_add(1, Ordering::SeqCst);
             Ok(())
-        })
     }
 
-    pub fn initialized() -> Result<bool> {
-        on_main("SDL3_mixer.Init.initialized", || Ok(INIT_COUNT.load(Ordering::SeqCst) > 0))
+    pub fn initialized() -> std::result::Result<bool, Error> {
+        enter_main("SDL3_mixer.Init.initialized")?;
+        Ok(INIT_COUNT.load(Ordering::SeqCst) > 0)
     }
 
-    pub fn quit() -> Result<()> {
-        on_main("SDL3_mixer.Init.quit", || {
+    pub fn quit() -> std::result::Result<(), Error> {
+        enter_main("SDL3_mixer.Init.quit")?;
             let handles = LIVE_MIXERS.load(Ordering::SeqCst) + LIVE_AUDIOS.load(Ordering::SeqCst) + LIVE_TRACKS.load(Ordering::SeqCst);
             if handles != 0 {
-                Err(error("SDL3_mixer.Init.quit", ErrorKind::HandlesStillOpen, format!("{handles} mixer/audio/track handle(s) are still open")))
+                Err(error("SDL3_mixer.Init.quit", ErrorKind::HandlesStillOpen, &format!("{handles} mixer/audio/track handle(s) are still open")))
             } else if INIT_COUNT.load(Ordering::SeqCst) == 0 {
                 Ok(())
             } else {
@@ -131,11 +126,10 @@ pub mod init {
                 sys::quit();
                 Ok(())
             }
-        })
     }
 }
 
-fn require_initialized(operation: &str) -> Result<()> {
+fn require_initialized(operation: &str) -> std::result::Result<(), Error> {
     if init::initialized()? {
         Ok(())
     } else {
@@ -188,18 +182,17 @@ pub mod mixer {
     }
 
     impl Mixer {
-        pub(crate) fn live<T>(&self, operation: &str, callback: impl FnOnce(usize) -> Result<T>) -> Result<T> {
-            on_main(operation, || {
+        pub(crate) fn raw(&self, operation: &str) -> std::result::Result<usize, Error> {
+            enter_main(operation)?;
                 if self.inner.destroyed.load(Ordering::SeqCst) {
                     return Err(error(operation, ErrorKind::Destroyed, "mixer is destroyed"));
                 }
                 require_initialized(operation)?;
-                callback(self.inner.raw)
-            })
+                Ok(self.inner.raw)
         }
 
-        fn finish_create(operation: &str, mode: Mode, raw: std::result::Result<usize, String>) -> Result<Mixer> {
-            let raw = mixer_result(operation, raw)?;
+        fn finish_create(operation: &str, mode: Mode, raw: std::result::Result<usize, String>) -> std::result::Result<Mixer, Error> {
+            let raw = raw.map_err(|message| error(operation, ErrorKind::MixerError, &message))?;
             match sys::format(raw) {
                 Ok((_sample_rate, channels)) => {
                     LIVE_MIXERS.fetch_add(1, Ordering::SeqCst);
@@ -216,37 +209,35 @@ pub mod mixer {
                 }
                 Err(message) => {
                     sys::destroy_mixer(raw);
-                    Err(error(operation, ErrorKind::MixerError, message))
+                    Err(error(operation, ErrorKind::MixerError, &message))
                 }
             }
         }
 
-        pub fn create_device() -> Result<Mixer> {
+        pub fn create_device() -> std::result::Result<Mixer, Error> {
             let operation = "SDL3_mixer.Mixer.create_device";
-            on_main(operation, || {
+            enter_main(operation)?;
                 require_initialized(operation)?;
                 Mixer::finish_create(operation, Mode::Device, sys::create_device())
-            })
         }
 
-        pub fn create_memory(sample_rate: i64, channels: i64) -> Result<Mixer> {
+        pub fn create_memory(sample_rate: i64, channels: i64) -> std::result::Result<Mixer, Error> {
             let operation = "SDL3_mixer.Mixer.create_memory";
             if !(8_000..=384_000).contains(&sample_rate) {
                 Err(error(operation, ErrorKind::InvalidArgument, "sample rate must be in 8000..384000"))
             } else if channels <= 0 || channels > 8 {
                 Err(error(operation, ErrorKind::InvalidArgument, "channel count must be in 1..8"))
             } else {
-                on_main(operation, || {
+                enter_main(operation)?;
                     require_initialized(operation)?;
                     Mixer::finish_create(operation, Mode::Memory, sys::create_memory(sample_rate as i32, channels as i32))
-                })
             }
         }
 
         /// Generate exactly `frames` of interleaved native-endian float32 PCM from a memory
         /// mixer. `mixed_bytes` excludes silence appended after tracks finish, while `pcm_f32`
         /// always has the requested length.
-        pub fn generate(&self, frames: i64) -> Result<Generated> {
+        pub fn generate(&self, frames: i64) -> std::result::Result<Generated, Error> {
             let operation = "SDL3_mixer.Mixer.generate";
             let channels = self.inner.channels;
             if self.inner.mode != Mode::Memory {
@@ -256,16 +247,15 @@ pub mod mixer {
             } else if channels > i64::MAX / 4 || frames > i64::MAX / (channels * 4) {
                 Err(error(operation, ErrorKind::InvalidArgument, "generated PCM byte count overflows"))
             } else {
-                self.live(operation, |raw| {
+                let raw = self.raw(operation)?;
                     let mut pcm_f32 = vec![0u8; (frames * channels * 4) as usize];
-                    let mixed_bytes = mixer_result(operation, sys::generate(raw, &mut pcm_f32))?;
+                    let mixed_bytes = sys::generate(raw, &mut pcm_f32).map_err(|message| error(operation, ErrorKind::MixerError, &message))?;
                     Ok(Generated { mixed_bytes: mixed_bytes.into(), pcm_f32 })
-                })
             }
         }
 
-        pub fn destroy(&self) -> Result<()> {
-            on_main("SDL3_mixer.Mixer.destroy", || {
+        pub fn destroy(&self) -> std::result::Result<(), Error> {
+            enter_main("SDL3_mixer.Mixer.destroy")?;
                 if self.inner.destroyed.load(Ordering::SeqCst) {
                     return Ok(());
                 }
@@ -274,7 +264,7 @@ pub mod mixer {
                     Err(error(
                         "SDL3_mixer.Mixer.destroy",
                         ErrorKind::ParentHasDependents,
-                        format!("mixer still owns {tracks} track(s) and {audios} audio handle(s)"),
+                        &format!("mixer still owns {tracks} track(s) and {audios} audio handle(s)"),
                     ))
                 } else {
                     self.inner.destroyed.store(true, Ordering::SeqCst);
@@ -282,7 +272,6 @@ pub mod mixer {
                     sys::destroy_mixer(self.inner.raw);
                     Ok(())
                 }
-            })
         }
     }
 }
@@ -298,28 +287,26 @@ pub mod audio {
     }
 
     impl Audio {
-        pub fn load_bytes(mixer: &Mixer, bytes: &[u8]) -> Result<Audio> {
+        pub fn load_bytes(mixer: &Mixer, bytes: &[u8]) -> std::result::Result<Audio, Error> {
             let operation = "SDL3_mixer.Audio.load_bytes";
             if bytes.is_empty() {
                 return Err(error(operation, ErrorKind::InvalidArgument, "encoded audio buffer must be non-empty"));
             }
-            mixer.live(operation, |raw| {
-                let audio = mixer_result(operation, sys::load_bytes(raw, bytes))?;
+            let raw = mixer.raw(operation)?;
+                let audio = sys::load_bytes(raw, bytes).map_err(|message| error(operation, ErrorKind::MixerError, &message))?;
                 LIVE_AUDIOS.fetch_add(1, Ordering::SeqCst);
                 mixer.inner.audios.fetch_add(1, Ordering::SeqCst);
                 Ok(Audio { raw: audio, mixer: Arc::clone(&mixer.inner), destroyed: AtomicBool::new(false) })
-            })
         }
 
-        pub fn destroy(&self) -> Result<()> {
-            on_main("SDL3_mixer.Audio.destroy", || {
+        pub fn destroy(&self) -> std::result::Result<(), Error> {
+            enter_main("SDL3_mixer.Audio.destroy")?;
                 if !self.destroyed.swap(true, Ordering::SeqCst) {
                     LIVE_AUDIOS.fetch_sub(1, Ordering::SeqCst);
                     self.mixer.audios.fetch_sub(1, Ordering::SeqCst);
                     sys::destroy_audio(self.raw);
                 }
                 Ok(())
-            })
         }
     }
 
@@ -353,87 +340,86 @@ pub mod track {
     }
 
     impl Track {
-        fn live<T>(&self, operation: &str, callback: impl FnOnce(usize) -> Result<T>) -> Result<T> {
-            on_main(operation, || {
+        fn raw(&self, operation: &str) -> std::result::Result<usize, Error> {
+            enter_main(operation)?;
                 if self.destroyed.load(Ordering::SeqCst) {
                     Err(error(operation, ErrorKind::Destroyed, "track is destroyed"))
                 } else if self.mixer.destroyed.load(Ordering::SeqCst) {
                     Err(error(operation, ErrorKind::Destroyed, "track's mixer is destroyed"))
                 } else {
                     require_initialized(operation)?;
-                    callback(self.raw)
+                    Ok(self.raw)
                 }
-            })
         }
 
-        fn mutate(&self, operation: &str, call: impl FnOnce(usize) -> std::result::Result<(), String>) -> Result<()> {
-            self.live(operation, |raw| mixer_result(operation, call(raw)))
+        fn mutate(&self, operation: &str, call: &dyn Fn(usize) -> std::result::Result<(), String>) -> std::result::Result<(), Error> {
+            let raw = self.raw(operation)?;
+            call(raw).map_err(|message| error(operation, ErrorKind::MixerError, &message))
         }
 
-        pub fn create(mixer: &Mixer) -> Result<Track> {
+        pub fn create(mixer: &Mixer) -> std::result::Result<Track, Error> {
             let operation = "SDL3_mixer.Track.create";
-            mixer.live(operation, |raw| {
-                let track = mixer_result(operation, sys::create_track(raw))?;
+            let raw = mixer.raw(operation)?;
+                let track = sys::create_track(raw).map_err(|message| error(operation, ErrorKind::MixerError, &message))?;
                 LIVE_TRACKS.fetch_add(1, Ordering::SeqCst);
                 mixer.inner.tracks.fetch_add(1, Ordering::SeqCst);
                 Ok(Track { raw: track, mixer: Arc::clone(&mixer.inner), destroyed: AtomicBool::new(false) })
-            })
         }
 
-        pub fn set_audio(&self, audio: &Audio) -> Result<()> {
+        pub fn set_audio(&self, audio: &Audio) -> std::result::Result<(), Error> {
             let operation = "SDL3_mixer.Track.set_audio";
             if audio.destroyed.load(Ordering::SeqCst) {
                 Err(error(operation, ErrorKind::Destroyed, "audio handle is destroyed"))
             } else if !Arc::ptr_eq(&self.mixer, &audio.mixer) {
                 Err(error(operation, ErrorKind::InvalidArgument, "track and audio belong to different mixers"))
             } else {
-                self.mutate(operation, |raw| sys::set_track_audio(raw, audio.raw))
+                self.mutate(operation, &|raw| sys::set_track_audio(raw, audio.raw))
             }
         }
 
-        pub fn set_gain(&self, gain: f64) -> Result<()> {
+        pub fn set_gain(&self, gain: f64) -> std::result::Result<(), Error> {
             let operation = "SDL3_mixer.Track.set_gain";
             if !gain.is_finite() || gain < 0.0 {
                 Err(error(operation, ErrorKind::InvalidArgument, "track gain must be finite and non-negative"))
             } else {
-                self.mutate(operation, |raw| sys::set_track_gain(raw, gain))
+                self.mutate(operation, &|raw| sys::set_track_gain(raw, gain))
             }
         }
 
         /// `loops` is -1 (forever) or non-negative; `fade_in_ms` is non-negative.
-        pub fn play(&self, loops: i64, fade_in_ms: i64) -> Result<()> {
+        pub fn play(&self, loops: i64, fade_in_ms: i64) -> std::result::Result<(), Error> {
             let operation = "SDL3_mixer.Track.play";
             if loops < -1 {
                 Err(error(operation, ErrorKind::InvalidArgument, "loop count must be -1 or non-negative"))
             } else if fade_in_ms < 0 {
                 Err(error(operation, ErrorKind::InvalidArgument, "fade duration must be non-negative"))
             } else {
-                self.mutate(operation, |raw| sys::play_track(raw, int(loops), int(fade_in_ms)))
+                self.mutate(operation, &|raw| sys::play_track(raw, int(loops), int(fade_in_ms)))
             }
         }
 
-        pub fn stop(&self, fade_out_ms: i64) -> Result<()> {
+        pub fn stop(&self, fade_out_ms: i64) -> std::result::Result<(), Error> {
             let operation = "SDL3_mixer.Track.stop";
             if fade_out_ms < 0 {
                 Err(error(operation, ErrorKind::InvalidArgument, "fade duration must be non-negative"))
             } else {
-                self.mutate(operation, |raw| sys::stop_track(raw, int(fade_out_ms)))
+                self.mutate(operation, &|raw| sys::stop_track(raw, int(fade_out_ms)))
             }
         }
 
-        pub fn playing(&self) -> Result<bool> {
-            self.live("SDL3_mixer.Track.playing", |raw| Ok(sys::track_playing(raw)))
+        pub fn playing(&self) -> std::result::Result<bool, Error> {
+            let raw = self.raw("SDL3_mixer.Track.playing")?;
+            Ok(sys::track_playing(raw))
         }
 
-        pub fn destroy(&self) -> Result<()> {
-            on_main("SDL3_mixer.Track.destroy", || {
+        pub fn destroy(&self) -> std::result::Result<(), Error> {
+            enter_main("SDL3_mixer.Track.destroy")?;
                 if !self.destroyed.swap(true, Ordering::SeqCst) {
                     LIVE_TRACKS.fetch_sub(1, Ordering::SeqCst);
                     self.mixer.tracks.fetch_sub(1, Ordering::SeqCst);
                     sys::destroy_track(self.raw);
                 }
                 Ok(())
-            })
         }
     }
 
@@ -474,30 +460,31 @@ pub mod channels {
     }
 
     impl Channels {
-        fn live<T>(&self, name: &str, callback: impl FnOnce() -> Result<T>) -> Result<T> {
+        fn enter(&self, name: &str) -> std::result::Result<(), Error> {
             let op = operation(name);
             if self.destroyed.load(Ordering::SeqCst) {
                 Err(error(&op, ErrorKind::Destroyed, "channel pool is destroyed"))
             } else if self.mixer.inner.destroyed.load(Ordering::SeqCst) {
                 Err(error(&op, ErrorKind::Destroyed, "channel pool mixer is destroyed"))
             } else {
-                on_main(&op, callback)
+                enter_main(&op)
             }
         }
 
-        fn slot<T>(&self, name: &str, channel: Channel, callback: impl FnOnce(&Slot) -> Result<T>) -> Result<T> {
-            self.live(name, || match usize::try_from(channel).ok().and_then(|index| self.slots.get(index)) {
-                Some(slot) => callback(slot),
+        fn slot(&self, name: &str, channel: Channel) -> std::result::Result<&Slot, Error> {
+            self.enter(name)?;
+            match usize::try_from(channel).ok().and_then(|index| self.slots.get(index)) {
+                Some(slot) => Ok(slot),
                 None => Err(error(&operation(name), ErrorKind::InvalidArgument, "channel index is out of range")),
-            })
+            }
         }
 
-        pub fn create(mixer: &Mixer, count: i64) -> Result<Channels> {
+        pub fn create(mixer: &Mixer, count: i64) -> std::result::Result<Channels, Error> {
             let op = operation("create");
             if count <= 0 || count > 4096 {
                 return Err(error(&op, ErrorKind::InvalidArgument, "channel count must be in 1..4096"));
             }
-            mixer.live(&op, |_| {
+            let _raw = mixer.raw(&op)?;
                 let mut slots: Vec<Slot> = Vec::with_capacity(count as usize);
                 for _ in 0..count {
                     match Track::create(mixer) {
@@ -511,46 +498,42 @@ pub mod channels {
                     }
                 }
                 Ok(Channels { mixer: mixer.clone(), slots, destroyed: AtomicBool::new(false) })
-            })
         }
 
-        fn allocate(&self) -> Result<Channel> {
-            self.live("allocate", || {
+        fn allocate(&self) -> std::result::Result<Channel, Error> {
+            self.enter("allocate")?;
                 for (index, slot) in self.slots.iter().enumerate() {
                     if !slot.track.playing()? {
                         return Ok(index as Channel);
                     }
                 }
                 Err(error(&operation("allocate"), ErrorKind::MixerError, "no free channel"))
-            })
         }
 
-        pub fn play(&self, channel: Option<Channel>, loops: i64, fade_in_ms: i64, audio: &Audio) -> Result<Channel> {
+        pub fn play(&self, channel: Option<Channel>, loops: i64, fade_in_ms: i64, audio: &Audio) -> std::result::Result<Channel, Error> {
             let channel = match channel {
                 Some(channel) => channel,
                 None => self.allocate()?,
             };
-            self.slot("play", channel, |selected| {
+            let selected = self.slot("play", channel)?;
                 selected.track.set_audio(audio)?;
                 selected.track.set_gain(*selected.volume.lock().unwrap())?;
                 selected.track.play(loops, fade_in_ms)?;
                 Ok(channel)
-            })
         }
 
-        pub fn set_volume(&self, channel: Channel, volume: f64) -> Result<()> {
+        pub fn set_volume(&self, channel: Channel, volume: f64) -> std::result::Result<(), Error> {
             if !volume.is_finite() || volume < 0.0 {
                 return Err(error(&operation("set_volume"), ErrorKind::InvalidArgument, "channel volume must be finite and non-negative"));
             }
-            self.slot("set_volume", channel, |selected| {
+            let selected = self.slot("set_volume", channel)?;
                 selected.track.set_gain(volume)?;
                 *selected.volume.lock().unwrap() = volume;
                 Ok(())
-            })
         }
 
-        pub fn destroy(&self) -> Result<()> {
-            on_main(&operation("destroy"), || {
+        pub fn destroy(&self) -> std::result::Result<(), Error> {
+            enter_main(&operation("destroy"))?;
                 if self.destroyed.load(Ordering::SeqCst) {
                     return Ok(());
                 }
@@ -567,7 +550,6 @@ pub mod channels {
                         Ok(())
                     }
                 }
-            })
         }
     }
 }

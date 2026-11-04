@@ -3,7 +3,7 @@ use crate::error::{self, Error, ErrorKind};
 use crate::handle::Device;
 use crate::validation;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Vertex,
     Fragment,

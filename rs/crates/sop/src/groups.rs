@@ -76,7 +76,7 @@ pub mod group_transfer {
         let (Value::Bool(use_rules), Value::Text(rules), Value::Bool(create_empty), Value::Float(distance)) =
             (&values[0], &values[1], &values[3], &values[4])
         else {
-            panic!("group_transfer: parameter record has the wrong shape")
+            unreachable!("group_transfer: parameter record has the wrong shape")
         };
         Parameters {
             use_rules: *use_rules,

@@ -1,6 +1,6 @@
 use crate::error::{self, Error, ErrorKind};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Vertex,
     Fragment,
@@ -83,7 +83,7 @@ pub fn validate_bindings(bindings: &[Binding]) -> Result<(), Error> {
         if value.visibility.is_empty() {
             return Err(error("binding visibility is empty"));
         }
-        if value.visibility.windows(2).any(|pair| pair[0] >= pair[1]) {
+        if value.visibility.windows(2).any(|pair| pair[0] as u8 >= pair[1] as u8) {
             return Err(error("binding visibility must be sorted and unique"));
         }
         let key = (value.group, value.binding, index_space(value.kind));

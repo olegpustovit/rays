@@ -58,7 +58,7 @@ pub fn facet_vertex(value: &T, facet: i64, local: i64) -> i64 {
         0 => value.facet_a[facet as usize],
         1 => value.facet_b[facet as usize],
         2 => value.facet_c[facet as usize],
-        _ => panic!("Boolean complex facet corner must be 0, 1, or 2"),
+        _ => unreachable!("Boolean complex facet corner must be 0, 1, or 2"),
     }
 }
 
@@ -323,7 +323,7 @@ fn merge_orders(token_points: &[implicit_point::T], first: &[i64], second: &[i64
 
 type Key = [i64; 10];
 
-struct Assembly<'a> {
+struct Assembly {
     token_points: Vec<implicit_point::T>,
     next_token: i64,
     construction_tokens: HashMap<Key, i64>,
@@ -332,10 +332,9 @@ struct Assembly<'a> {
     raw_faces: Vec<i64>,
     raw_triangles: Vec<i64>,
     raw_orientations: Vec<u8>,
-    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl Assembly<'_> {
+impl Assembly {
     fn allocate_local(&mut self, point: implicit_point::T) -> i64 {
         let token = self.next_token;
         self.next_token += 1;
@@ -472,7 +471,6 @@ pub fn build(
         raw_faces: Vec::with_capacity(raw_count),
         raw_triangles: Vec::with_capacity(raw_count),
         raw_orientations: Vec::with_capacity(raw_count),
-        _marker: std::marker::PhantomData,
     };
     let mut append_side = |side: Side, face_count: i64| -> Result<(), error::T> {
         let triangle_point = |face: i64, local: i64| constraints_mod::View::triangle_point(constraints_ref, side, face, local);

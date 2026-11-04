@@ -73,16 +73,16 @@ fn run(density: i64) {
     let scene = old_scene(fill, stroke, accent, marker);
     let ui = new_batch(fill, stroke, accent, marker);
     let cfg = renderer::configuration { logical_width: 64, logical_height: 40, drawable_width: 64 * density, drawable_height: 40 * density, title: "ui-pipeline".into(), vsync: false, high_density: true };
-    let execution = common::get(renderer::create_offscreen(&cfg));
+    let execution = renderer::create_offscreen(&cfg).unwrap();
     let capture = |lower: &dyn Fn(&renderer::submission) -> Result<renderer::batch, ogpu::error::Error>| {
-        let submission = common::get(Native::begin_submission(&execution));
+        let submission = Native::begin_submission(&execution).unwrap();
         let result = (|| {
             let batch = lower(&submission)?;
             Native::step(Some((1.0, 1.0, 1.0, 1.0)), None, None, &submission, &[batch])?;
             renderer::capture(&execution)
         })();
         Native::cancel(&submission);
-        common::get(result)
+        result.unwrap()
     };
     let old = capture(&|s| Native::lower_scene2(s, density, &|_| None, &scene));
     let current = capture(&|s| Native::lower_ui(s, density, &|_| None, &ui));
@@ -95,7 +95,7 @@ fn run(density: i64) {
         panic!("UI pipeline differs from Scene2 at {density}x pixel ({x},{y})");
     }
     println!("UI pipeline matches Scene2 at {density}x");
-    common::get(renderer::destroy(&execution));
+    renderer::destroy(&execution).unwrap();
 }
 
 fn gpu_ui_pipeline_1x() {

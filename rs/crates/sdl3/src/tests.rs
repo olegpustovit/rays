@@ -1,9 +1,5 @@
 use crate::{ErrorKind, Version};
 
-fn get<T>(result: crate::Result<T>) -> T {
-    result.unwrap_or_else(|error| panic!("{error}"))
-}
-
 thread_local! {
     static MAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -90,33 +86,33 @@ fn sdl_calls_are_refused_from_worker_threads() {
 #[test]
 fn dummy_video_window_lifecycle_and_typed_errors() {
     claim_dummy_main();
-    get(crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
-    let mut window = get(crate::Window::create(
+    crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
+    let mut window = crate::Window::create(
         "SDL3 Rust ownership test", 96, 64, &[crate::WindowFlag::Hidden],
-    ));
-    assert_eq!(get(window.size()), (96, 64));
-    assert_eq!(get(window.title()), "SDL3 Rust ownership test");
-    assert_eq!(get(window.size_in_pixels()), (96, 64));
-    assert_eq!(get(window.pixel_density()), 1.0);
-    get(window.set_size(112, 72));
-    get(window.sync());
-    assert_eq!(get(window.size()), (112, 72));
-    assert_eq!(get(window.size_in_pixels()), (112, 72));
-    assert!(get(window.state()).hidden);
+    ).unwrap();
+    assert_eq!(window.size().unwrap(), (96, 64));
+    assert_eq!(window.title().unwrap(), "SDL3 Rust ownership test");
+    assert_eq!(window.size_in_pixels().unwrap(), (96, 64));
+    assert_eq!(window.pixel_density().unwrap(), 1.0);
+    window.set_size(112, 72).unwrap();
+    window.sync().unwrap();
+    assert_eq!(window.size().unwrap(), (112, 72));
+    assert_eq!(window.size_in_pixels().unwrap(), (112, 72));
+    assert!(window.state().unwrap().hidden);
     let resizable = window.set_resizable(false);
     assert!(resizable.is_ok() || matches!(resizable, Err(error) if error.kind == ErrorKind::SdlError));
     let resizable = window.set_resizable(true);
     assert!(resizable.is_ok() || matches!(resizable, Err(error) if error.kind == ErrorKind::SdlError));
-    get(window.start_text_input());
-    get(window.set_text_input_area(crate::Rect { x: 3, y: 4, width: 40, height: 16 }, 7));
-    get(window.stop_text_input());
-    get(crate::clipboard::set_text("Rays ž clipboard"));
-    assert_eq!(get(crate::clipboard::get_text()), "Rays ž clipboard");
-    get(crate::hint::control_click_is_right_click(true));
-    get(crate::hint::control_click_is_right_click(false));
-    get(window.set_background(0.1, 0.2, 0.3));
+    window.start_text_input().unwrap();
+    window.set_text_input_area(crate::Rect { x: 3, y: 4, width: 40, height: 16 }, 7).unwrap();
+    window.stop_text_input().unwrap();
+    crate::clipboard::set_text("Rays ž clipboard").unwrap();
+    assert_eq!(crate::clipboard::get_text().unwrap(), "Rays ž clipboard");
+    crate::hint::control_click_is_right_click(true).unwrap();
+    crate::hint::control_click_is_right_click(false).unwrap();
+    window.set_background(0.1, 0.2, 0.3).unwrap();
     match window.set_relative_mouse(true) {
-        Ok(()) => get(window.set_relative_mouse(false)),
+        Ok(()) => window.set_relative_mouse(false).unwrap(),
         Err(error) if matches!(error.kind, ErrorKind::SdlError | ErrorKind::Unsupported)
             && !error.message.is_empty() => {}
         Err(error) => panic!("untyped relative-mouse error: {error}"),
@@ -128,19 +124,19 @@ fn dummy_video_window_lifecycle_and_typed_errors() {
         match crate::Cursor::create(shape) {
             Err(error) => assert_eq!(error.kind, ErrorKind::Unsupported),
             Ok(mut cursor) => {
-                get(cursor.set());
-                get(cursor.destroy());
-                get(cursor.destroy());
+                cursor.set().unwrap();
+                cursor.destroy().unwrap();
+                cursor.destroy().unwrap();
                 assert_eq!(cursor.set().unwrap_err().kind, ErrorKind::Destroyed);
             }
         }
     }
-    get(window.show());
-    get(window.sync());
-    assert!(!get(window.state()).hidden);
-    get(window.hide());
-    get(window.sync());
-    assert!(get(window.state()).hidden);
+    window.show().unwrap();
+    window.sync().unwrap();
+    assert!(!window.state().unwrap().hidden);
+    window.hide().unwrap();
+    window.sync().unwrap();
+    assert!(window.state().unwrap().hidden);
     assert_eq!(window.set_size(0, 72).unwrap_err().kind, ErrorKind::InvalidArgument);
     assert_eq!(
         window.set_text_input_area(crate::Rect { x: 0, y: 0, width: 4, height: 4 }, -1)
@@ -170,19 +166,19 @@ fn dummy_video_window_lifecycle_and_typed_errors() {
         ErrorKind::InvalidArgument,
     );
     assert!(matches!(crate::MetalView::create(&window), Err(error) if error.kind == ErrorKind::SdlError));
-    get(window.destroy());
-    get(window.destroy());
+    window.destroy().unwrap();
+    window.destroy().unwrap();
     assert_eq!(window.size().unwrap_err().kind, ErrorKind::Destroyed);
-    get(crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
+    crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
 }
 
 #[test]
 fn typed_event_trace_and_async_dialog_outcomes_match_native_bridge() {
     claim_dummy_main();
-    get(crate::init::init(&[crate::init::Subsystem::Events]));
-    let _ = get(crate::event::poll_coalesced());
+    crate::init::init(&[crate::init::Subsystem::Events]).unwrap();
+    let _ = crate::event::poll_coalesced().unwrap();
     assert!(sdl3_sys::test_util::push_event_trace());
-    let events = get(crate::event::poll_coalesced());
+    let events = crate::event::poll_coalesced().unwrap();
     use crate::Key as K;
     use crate::KeyModifier as M;
     use crate::WindowChange as W;
@@ -236,7 +232,7 @@ fn typed_event_trace_and_async_dialog_outcomes_match_native_bridge() {
         crate::Event::Drop { change: crate::DropChange::File(path), .. } if path == "/tmp/žaba.png")));
 
     let outcomes = || -> Vec<(i32, crate::DialogOutcome)> {
-        get(crate::event::poll_coalesced()).into_iter().filter_map(|event| match event {
+        crate::event::poll_coalesced().unwrap().into_iter().filter_map(|event| match event {
             crate::Event::Dialog { id, outcome } => Some((id, outcome)),
             _ => None,
         }).collect()
@@ -270,7 +266,7 @@ fn typed_event_trace_and_async_dialog_outcomes_match_native_bridge() {
     assert_ne!(recovered, 0);
     sdl3_sys::test_util::dialog_abandon(recovered);
     assert!(sdl3_sys::test_util::push_resize_burst());
-    assert_eq!(get(crate::event::poll_coalesced()), vec![
+    assert_eq!(crate::event::poll_coalesced().unwrap(), vec![
         crate::Event::Window(W::Resized(800, 600)),
         crate::Event::Window(W::PixelSizeChanged(1280, 960)),
     ]);
@@ -278,43 +274,45 @@ fn typed_event_trace_and_async_dialog_outcomes_match_native_bridge() {
     let inside_pump = std::rc::Rc::new(std::cell::Cell::new(false));
     let observed_redraws = std::rc::Rc::clone(&redraws);
     let observed_pump = std::rc::Rc::clone(&inside_pump);
-    get(crate::event::set_live_resize_callback(Some(Box::new(move || {
+    crate::event::set_live_resize_callback(Some(Box::new(move || {
         observed_pump.set(sdl3_sys::test_util::polling_event_queue());
         observed_redraws.set(observed_redraws.get() + 1);
-    }))));
+        Ok(())
+    }))).unwrap();
     sdl3_sys::test_util::queue_resize_during_poll();
-    assert_eq!(get(crate::event::poll_coalesced()), vec![
+    assert_eq!(crate::event::poll_coalesced().unwrap(), vec![
         crate::Event::Window(W::PixelSizeChanged(640, 480)),
     ]);
     assert!(inside_pump.get(), "resize callback ran after the native pump returned");
     assert_eq!(redraws.get(), 1);
-    get(crate::event::set_live_resize_callback(None));
-    get(crate::init::quit_subsystems(&[crate::init::Subsystem::Events]));
+    crate::event::set_live_resize_callback(None).unwrap();
+    crate::init::quit_subsystems(&[crate::init::Subsystem::Events]).unwrap();
 
 }
 #[test]
 fn live_resize_callback_runs_during_the_window_event_pump() {
     claim_dummy_main();
-    get(crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
-    let window = std::rc::Rc::new(get(crate::Window::create(
+    crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
+    let window = std::rc::Rc::new(crate::Window::create(
         "SDL3 live resize callback test", 32, 24, &[crate::WindowFlag::Hidden],
-    )));
+    ).unwrap());
     let callback_window = std::rc::Rc::clone(&window);
     let callback_ran = std::rc::Rc::new(std::cell::Cell::new(false));
     let observed = std::rc::Rc::clone(&callback_ran);
-    get(crate::event::set_live_resize_callback(Some(Box::new(move || {
+    crate::event::set_live_resize_callback(Some(Box::new(move || {
         assert!(sdl3_sys::test_util::polling_event_queue());
-        let _ = get(callback_window.size());
+        callback_window.size()?;
         observed.set(true);
-    }))));
+        Ok(())
+    }))).unwrap();
     sdl3_sys::test_util::queue_resize_during_poll();
-    assert_eq!(get(crate::event::poll_coalesced()), vec![
+    assert_eq!(crate::event::poll_coalesced().unwrap(), vec![
         crate::Event::Window(crate::WindowChange::PixelSizeChanged(640, 480)),
     ]);
     assert!(callback_ran.get());
-    get(crate::event::set_live_resize_callback(None));
+    crate::event::set_live_resize_callback(None).unwrap();
     drop(window);
-    get(crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
+    crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
 }
 #[test]
 fn injected_video_startup_failure_is_captured_immediately() {
@@ -334,7 +332,7 @@ fn injected_video_startup_failure_child() {
         return;
     }
     claim_main();
-    get(crate::init::init(&[crate::init::Subsystem::Events]));
+    crate::init::init(&[crate::init::Subsystem::Events]).unwrap();
     let failure = match crate::Window::create("no video subsystem", 16, 16, &[]) {
         Err(error) if error.kind == ErrorKind::SdlError && !error.message.is_empty() => error,
         Err(_) => panic!("window creation returned the wrong error"),
@@ -343,7 +341,7 @@ fn injected_video_startup_failure_child() {
     let message = failure.message.clone();
     let _ = crate::linked_version();
     assert_eq!(failure.message, message);
-    get(crate::init::quit_subsystems(&[crate::init::Subsystem::Events]));
+    crate::init::quit_subsystems(&[crate::init::Subsystem::Events]).unwrap();
     assert_eq!(
         crate::init::init(&[crate::init::Subsystem::Video]).unwrap_err().kind,
         ErrorKind::SdlError,
@@ -358,30 +356,30 @@ fn cocoa_layer_ownership_and_trackpad_phases() {
         return;
     }
     claim_main();
-    get(crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
-    let mut window = get(crate::Window::create(
+    crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
+    let mut window = crate::Window::create(
         "SDL3 Rust Metal test", 64, 48,
         &[crate::WindowFlag::Hidden, crate::WindowFlag::HighPixelDensity, crate::WindowFlag::Metal],
-    ));
-    let (logical_width, logical_height) = get(window.size());
-    let (pixel_width, pixel_height) = get(window.size_in_pixels());
-    let density = get(window.pixel_density());
+    ).unwrap();
+    let (logical_width, logical_height) = window.size().unwrap();
+    let (pixel_width, pixel_height) = window.size_in_pixels().unwrap();
+    let density = window.pixel_density().unwrap();
     assert!(density > 0.0 && density.is_finite());
     assert!((pixel_width as f32 / logical_width as f32 - density).abs() < 0.01);
     assert!((pixel_height as f32 / logical_height as f32 - density).abs() < 0.01);
-    get(window.set_size(80, 60));
-    get(window.sync());
-    assert_eq!(get(window.size()), (80, 60));
-    get(window.set_background(0.95, 0.95, 0.93));
+    window.set_size(80, 60).unwrap();
+    window.sync().unwrap();
+    assert_eq!(window.size().unwrap(), (80, 60));
+    window.set_background(0.95, 0.95, 0.93).unwrap();
 
-    let _ = get(crate::event::poll_coalesced());
+    let _ = crate::event::poll_coalesced().unwrap();
     for (points, phase) in [(0, 1), (-7, 2), (0, 4)] {
         sdl3_sys::test_util::post_scroll(points, phase);
     }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut phases = Vec::new();
     while phases.len() < 3 && std::time::Instant::now() < deadline {
-        phases.extend(get(crate::event::poll_coalesced()).into_iter().filter_map(|event| {
+        phases.extend(crate::event::poll_coalesced().unwrap().into_iter().filter_map(|event| {
             if let crate::Event::Scroll { phase, y, .. } = event { Some((phase, y)) } else { None }
         }));
         if phases.len() < 3 { std::thread::sleep(std::time::Duration::from_millis(10)); }
@@ -392,24 +390,24 @@ fn cocoa_layer_ownership_and_trackpad_phases() {
         (crate::ScrollPhase::Ended, _),
     ] if y.abs() == 7.0));
 
-    let mut view = get(crate::MetalView::create(&window));
-    let token = get(view.layer());
-    let second = get(view.layer());
+    let mut view = crate::MetalView::create(&window).unwrap();
+    let token = view.layer().unwrap();
+    let second = view.layer().unwrap();
     assert!(token.alive());
     assert_eq!(token.owner_id(), second.owner_id());
     assert_eq!(token.generation(), second.generation());
     assert_eq!(window.destroy().unwrap_err().kind, ErrorKind::ParentHasDependents);
-    get(view.destroy());
-    get(view.destroy());
+    view.destroy().unwrap();
+    view.destroy().unwrap();
     assert!(!token.alive());
     match view.layer() {
         Err(error) => assert_eq!(error.kind, ErrorKind::Destroyed),
         Ok(_) => panic!("destroyed Metal view remained usable"),
     }
-    get(window.destroy());
+    window.destroy().unwrap();
     let mut native_window = sdl3_sys::Window::create(
         "SDL3 sys parent-retention test", 32, 24,
-        [sdl3_sys::WindowFlag::Hidden, sdl3_sys::WindowFlag::Metal],
+        &[sdl3_sys::WindowFlag::Hidden, sdl3_sys::WindowFlag::Metal],
     ).unwrap_or_else(|error| panic!("{}", error.message));
     let mut native_view = sdl3_sys::MetalView::create(&native_window)
         .unwrap_or_else(|error| panic!("{}", error.message));
@@ -423,7 +421,7 @@ fn cocoa_layer_ownership_and_trackpad_phases() {
     drop(native_window);
     native_view.destroy();
     assert!(token.borrow(owner, generation).is_none());
-    get(crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
+    crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
 }
 
 #[cfg(target_os = "windows")]
@@ -446,10 +444,10 @@ fn windows_sys_layer_token_child() {
         return;
     }
     claim_main();
-    get(crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
+    crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
     let mut window = sdl3_sys::Window::create(
         "SDL3 HWND token lifetime test", 32, 24,
-        [sdl3_sys::WindowFlag::Hidden, sdl3_sys::WindowFlag::Metal],
+        &[sdl3_sys::WindowFlag::Hidden, sdl3_sys::WindowFlag::Metal],
     ).unwrap_or_else(|error| panic!("{}", error.message));
     let mut view = sdl3_sys::MetalView::create(&window)
         .unwrap_or_else(|error| panic!("{}", error.message));
@@ -466,26 +464,26 @@ fn windows_sys_layer_token_child() {
     assert!(token.borrow(owner, generation).is_none());
     assert!(second_token.borrow(owner, second_generation).is_none());
     drop(view);
-    get(crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
+    crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
 }
 
 #[test]
 fn repeated_window_and_cursor_drop_releases_native_handles() {
     claim_dummy_main();
-    get(crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
+    crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
     for _ in 0..5_000 {
-        let window = get(crate::Window::create("SDL3 lifecycle stress", 16, 16, &[crate::WindowFlag::Hidden]));
-        assert_eq!(get(window.size()), (16, 16));
+        let window = crate::Window::create("SDL3 lifecycle stress", 16, 16, &[crate::WindowFlag::Hidden]).unwrap();
+        assert_eq!(window.size().unwrap(), (16, 16));
         drop(window);
     }
     for _ in 0..500 {
-        drop(get(crate::Window::create("SDL3 release stress", 8, 8, &[crate::WindowFlag::Hidden])));
+        drop(crate::Window::create("SDL3 release stress", 8, 8, &[crate::WindowFlag::Hidden]).unwrap());
         match crate::Cursor::create(crate::CursorShape::Text) {
             Ok(cursor) => drop(cursor),
             Err(error) if error.kind == ErrorKind::Unsupported => {}
             Err(error) => panic!("{error}"),
         }
     }
-    let _ = get(crate::event::poll_coalesced());
-    get(crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]));
+    let _ = crate::event::poll_coalesced().unwrap();
+    crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
 }

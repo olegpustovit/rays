@@ -5,7 +5,7 @@ use rdk_core::{cancel, geometry, packed, topology, topology_index};
 
 use crate::subdivide_refine::{
     checked_add, checked_mul, failm, fmax, fmin, gf, gi, run, AFloats, DividedBoundary,
-    InterfaceChains, PointWeld, PullPlan, Res, TriangleAppend,
+    InterfaceChains, PointWeld, PullPlan, TriangleAppend,
 };
 
 pub fn shared_edge_endpoint(index: &topology_index::View::View, left: i64, right: i64) -> i64 {
@@ -64,7 +64,7 @@ pub fn project_to_source_edge(
     }
 }
 
-fn ancestry_of(plan: &PullPlan, geometry_value: &geometry::T) -> Res<Vec<i64>> {
+fn ancestry_of(plan: &PullPlan, geometry_value: &geometry::T) -> Result<Vec<i64>, rdk_core::error::T> {
     match geometry::find_attribute(Owner::Vertex, &plan.ancestry_attribute, geometry_value) {
         Some(found) => match attribute::View::storage(&found)? {
             Storage::Int(values) => Ok(values.clone()),
@@ -79,7 +79,7 @@ pub fn pull_boundary_no_edge_division(
     grain: Option<i64>,
     plan: &PullPlan,
     geometry_value: &geometry::T,
-) -> Res<geometry::T> {
+) -> Result<geometry::T, rdk_core::error::T> {
     let ancestry = ancestry_of(plan, geometry_value)?;
     let topology_view = topology::View::view(geometry::topology(geometry_value))?;
     if ancestry.len() != topology_view.vertex_points.len() {
@@ -88,7 +88,7 @@ pub fn pull_boundary_no_edge_division(
     let source_index = topology_index::View::view(&plan.source_index);
     let mut first_edge = vec![-1_i64; topology_view.point_count as usize];
     let mut common_endpoint = vec![-1_i64; topology_view.point_count as usize];
-    let mut add_constraint = |point: i64, edge: i64| -> Res<()> {
+    let mut add_constraint = |point: i64, edge: i64| -> Result<(), rdk_core::error::T> {
         if edge < 0 || edge as usize >= source_index.edge_a.len() {
             return Err(failm("internal edge ancestry is out of range"));
         }
@@ -207,7 +207,7 @@ pub fn stitch_boundary_no_edge_division(
     unselected: &geometry::T,
     free_points: i64,
     refined: &geometry::T,
-) -> Res<TriangleAppend> {
+) -> Result<TriangleAppend, rdk_core::error::T> {
     let ancestry = ancestry_of(plan, refined)?;
     let refined_topology = topology::View::view(geometry::topology(refined))?;
     if ancestry.len() != refined_topology.vertex_points.len() {
@@ -411,7 +411,7 @@ pub fn stitch_boundary_divide_edges(
     free_points: i64,
     free_vertices: i64,
     refined: &geometry::T,
-) -> Res<TriangleAppend> {
+) -> Result<TriangleAppend, rdk_core::error::T> {
     let source_edges = chains.edge_offsets.len() as i64 - 1;
     let coarse_positions = packed::Float3::View::view(geometry::positions(&divided.geometry))?;
     let refined_positions = packed::Float3::View::view(geometry::positions(refined))?;
@@ -514,7 +514,7 @@ pub fn make_boundary_weld(
     free_points: i64,
     total_points: i64,
     refined: &geometry::T,
-) -> Res<PointWeld> {
+) -> Result<PointWeld, rdk_core::error::T> {
     let refined_point_offset = checked_add(
         "Pull Divide refined point offset",
         geometry::point_count(&divided.geometry),

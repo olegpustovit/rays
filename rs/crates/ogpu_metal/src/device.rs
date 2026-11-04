@@ -7,10 +7,8 @@ use ogpu_core::{
 };
 use std::{cell::Cell, rc::Rc};
 
-pub type R<T> = Result<T, Error>;
-
-pub fn fail<T>(operation: &str, kind: ErrorKind, message: &str) -> R<T> {
-    Err(error::make(operation, kind, message))
+pub fn fail(operation: &str, kind: ErrorKind, message: &str) -> Error {
+    error::make(operation, kind, message)
 }
 
 struct DeviceInner {
@@ -45,14 +43,11 @@ pub fn of_metal_error(operation: &str, value: &metal::Error) -> Error {
 }
 
 /// `Result.map_error (of_metal_error ~operation)`.
-pub fn native_of<T>(operation: &str, result: Result<T, metal::Error>) -> R<T> {
-    result.map_err(|value| of_metal_error(operation, &value))
-}
 
 impl Device {
-    pub fn system_default() -> R<Device> {
+    pub fn system_default() -> Result<Device, Error> {
         let operation = "Ogpu_metal.Device.system_default";
-        let metal = native_of(operation, metal::Device::system_default())?;
+        let metal = metal::Device::system_default().map_err(|value| of_metal_error(operation, &value))?;
         let info = match metal.info() {
             Ok(info) => info,
             Err(value) => {
@@ -118,14 +113,14 @@ impl Device {
         self.0.generation.get()
     }
 
-    pub fn destroy(&self) -> R<()> {
+    pub fn destroy(&self) -> Result<(), Error> {
         let operation = "Ogpu_metal.Device.destroy";
         if self.destroyed() {
             Ok(())
         } else if self.0.live_resources.get() != 0 {
-            fail(operation, ErrorKind::InvalidState, "device still owns live resources")
+            Err(fail(operation, ErrorKind::InvalidState, "device still owns live resources"))
         } else {
-            native_of(operation, self.0.metal.destroy())?;
+            self.0.metal.destroy().map_err(|value| of_metal_error(operation, &value))?;
             handle::destroy_device(&self.0.handle);
             self.0.generation.set(self.0.generation.get().wrapping_add(1));
             Ok(())

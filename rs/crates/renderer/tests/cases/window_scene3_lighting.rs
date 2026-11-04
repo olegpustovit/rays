@@ -1,6 +1,5 @@
 #![allow(non_camel_case_types)]
 use crate::common;
-use crate::common::get;
 use ogpu::error::ErrorKind;
 use ogpu::pipeline::Blend;
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
@@ -109,16 +108,16 @@ fn window_scene3_lighting() {
             },
         })
     };
-    let drawable_width = get(renderer::presentation_facts_of(&runtime)).drawable_width;
+    let drawable_width = renderer::presentation_facts_of(&runtime).unwrap().drawable_width;
     let check = |name: &str, uniforms: Vec<u8>, expected: (i64, i64, i64)| {
         let mut stable: Option<i64> = None;
         for _frame in [1, 2, 60, 600] {
-            get(renderer::draw(None, &runtime, &[entry(uniforms.clone())]));
-            let bytes = get(renderer::read_pixels(&runtime, drawable_width * 4));
+            renderer::draw(None, &runtime, &[entry(uniforms.clone())]).unwrap();
+            let bytes = renderer::read_pixels(&runtime, drawable_width * 4).unwrap();
             let actual = (bytes[0] as i64, bytes[1] as i64, bytes[2] as i64);
             let near = |a: (i64, i64, i64), b: (i64, i64, i64)| (a.0 - b.0).abs() <= 1 && (a.1 - b.1).abs() <= 1 && (a.2 - b.2).abs() <= 1;
             assert!(near(actual, expected), "{} pixel {},{},{}", name, actual.0, actual.1, actual.2);
-            let uploaded = get(renderer::stats(&runtime)).uploaded_bytes;
+            let uploaded = renderer::stats(&runtime).unwrap().uploaded_bytes;
             match stable {
                 None => stable = Some(uploaded),
                 Some(previous) => assert!(previous == uploaded, "{} reuploaded", name),
@@ -143,7 +142,7 @@ fn window_scene3_lighting() {
     // Positional lights depend on where pixel (0,0) lands: its centre is at world (x,y,0) with
     // x=-1+1/width; the expected channels follow the shader for that centre with the light at
     // (0,0,1), unit attenuation and normal +z (specular is black).
-    let facts = get(renderer::presentation_facts_of(&runtime));
+    let facts = renderer::presentation_facts_of(&runtime).unwrap();
     let x = -1.0 + 1.0 / facts.drawable_width as f64;
     let y = 1.0 - 1.0 / facts.drawable_height as f64;
     let byte = |value: f64| (255.0 * value.max(0.0).min(1.0)).round() as i64;
@@ -177,12 +176,12 @@ fn window_scene3_lighting() {
     check("area", area, (byte(area_diffuse), 0, 0));
     let mut too_many = uniform((1.0, 1.0, 1.0, 1.0), (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0, 1.0), None);
     set64(&mut too_many, 73, 65.0);
-    let before_reject = get(renderer::stats(&runtime)).uploaded_bytes;
+    let before_reject = renderer::stats(&runtime).unwrap().uploaded_bytes;
     match renderer::draw(None, &runtime, &[entry(too_many)]) {
-        Err(e) if e.kind == ErrorKind::InvalidArgument && get(renderer::stats(&runtime)).uploaded_bytes == before_reject => {}
+        Err(e) if e.kind == ErrorKind::InvalidArgument && renderer::stats(&runtime).unwrap().uploaded_bytes == before_reject => {}
         _ => panic!("65-light uniforms were not rejected before upload"),
     }
-    get(renderer::destroy(&runtime));
+    renderer::destroy(&runtime).unwrap();
     println!("runtime Scene3 lighting: ambient/directional frames1/2/60/600");
 }
 

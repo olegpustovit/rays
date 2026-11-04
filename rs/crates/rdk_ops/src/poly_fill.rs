@@ -530,43 +530,43 @@ fn map_float(
     output
 }
 
-struct RemapContext<'a> {
-    cancel_ref: Option<&'a cancel::T>,
+#[allow(clippy::too_many_arguments)]
+fn remap_attribute(
+    cancel_ref: Option<&cancel::T>,
     grain: i64,
-    point_map: &'a [i64],
-    point_centers: &'a CenterMap,
-    vertex_map: &'a [i64],
-    vertex_centers: &'a CenterMap,
-    primitive_map: &'a [i64],
-    loop_offsets: &'a [usize],
-    loop_points: &'a [usize],
-    loop_vertices: &'a [usize],
-}
-
-fn remap_attribute(context: &RemapContext, source: &attribute::T) -> Result<attribute::T, error::T> {
+    point_map: &[i64],
+    point_centers: &CenterMap,
+    vertex_map: &[i64],
+    vertex_centers: &CenterMap,
+    primitive_map: &[i64],
+    loop_offsets: &[usize],
+    loop_points: &[usize],
+    loop_vertices: &[usize],
+    source: &attribute::T,
+) -> Result<attribute::T, error::T> {
     let owner = attribute::owner(source);
-    if owner == attribute::Owner::Detail || (owner == attribute::Owner::Point && context.point_map.is_empty()) {
+    if owner == attribute::Owner::Detail || (owner == attribute::Owner::Point && point_map.is_empty()) {
         return Ok(source.clone());
     }
     let none = CenterMap::None;
     let (mapping, centers, center_sources): (&[i64], &CenterMap, &[usize]) = match owner {
-        attribute::Owner::Point => (context.point_map, context.point_centers, context.loop_points),
-        attribute::Owner::Vertex => (context.vertex_map, context.vertex_centers, context.loop_vertices),
-        attribute::Owner::Primitive => (context.primitive_map, &none, &[]),
+        attribute::Owner::Point => (point_map, point_centers, loop_points),
+        attribute::Owner::Vertex => (vertex_map, vertex_centers, loop_vertices),
+        attribute::Owner::Primitive => (primitive_map, &none, &[]),
         attribute::Owner::Detail => return Ok(source.clone()),
     };
-    let plane = |values: &[f64]| map_float(context.loop_offsets, center_sources, mapping, centers, values);
+    let plane = |values: &[f64]| map_float(loop_offsets, center_sources, mapping, centers, values);
     let storage = match attribute::View::storage(source)? {
         attribute::Storage::Float(values) => attribute::Storage::Float(plane(values)),
         attribute::Storage::Int(values) => {
             attribute::Storage::Int(mapping.iter().map(|&m| values[m as usize]).collect())
         }
         attribute::Storage::IntArray(values) => {
-            attribute::Storage::IntArray(ragged_ops::remap_int(context.cancel_ref, Some(context.grain), mapping, values)?)
+            attribute::Storage::IntArray(ragged_ops::remap_int(cancel_ref, Some(grain), mapping, values)?)
         }
         attribute::Storage::FloatArray(values) => attribute::Storage::FloatArray(ragged_ops::remap_float(
-            context.cancel_ref,
-            Some(context.grain),
+            cancel_ref,
+            Some(grain),
             mapping,
             values,
         )?),
@@ -958,21 +958,21 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         primitive_offsets,
         primitive_kinds,
     );
-    let context = RemapContext {
-        cancel_ref,
-        grain,
-        point_map: &point_map,
-        point_centers: &point_centers,
-        vertex_map: &vertex_map,
-        vertex_centers: &vertex_centers,
-        primitive_map: &primitive_map,
-        loop_offsets: &plan.loop_offsets,
-        loop_points: &plan.loop_points,
-        loop_vertices: &plan.loop_vertices,
-    };
     let mut attributes = Vec::new();
     for item in geometry::attributes(geometry_value) {
-        attributes.push(remap_attribute(&context, &item)?);
+        attributes.push(remap_attribute(
+            cancel_ref,
+            grain,
+            &point_map,
+            &point_centers,
+            &vertex_map,
+            &vertex_centers,
+            &primitive_map,
+            &plan.loop_offsets,
+            &plan.loop_points,
+            &plan.loop_vertices,
+            &item,
+        )?);
     }
     let mut groups = Vec::new();
     for item in geometry::groups(geometry_value) {

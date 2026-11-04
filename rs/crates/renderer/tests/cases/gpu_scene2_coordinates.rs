@@ -1,6 +1,5 @@
 //! Port of lib/renderer/test_scene2_coordinates.ml: 1x and 2x density as separate test fns.
 use crate::common;
-use crate::common::get;
 use renderer::renderer;
 use ::renderer::renderer::Native;
 use scene_command::render_ir::{self, Command, Geometry, Rect};
@@ -70,15 +69,15 @@ fn run(lw: i64, lh: i64, dw: i64, dh: i64, scale: i64) {
         return;
     }
     let cfg = renderer::configuration { logical_width: lw, logical_height: lh, drawable_width: dw, drawable_height: dh, title: "scene2-coordinates".into(), vsync: false, high_density: true };
-    let e = get(renderer::create_offscreen(&cfg));
-    let facts = get(renderer::presentation_facts_of(&e));
+    let e = renderer::create_offscreen(&cfg).unwrap();
+    let facts = renderer::presentation_facts_of(&e).unwrap();
     assert!(facts.logical_width == lw && facts.logical_height == lh && facts.drawable_width == dw && facts.drawable_height == dh, "offscreen logical/drawable facts");
     let render = |commands: Vec<Command>| {
         let ir = Rc::new(render_ir::create(commands).expect("scene2 coordinate IR"));
-        let s = get(Native::begin_submission(&e));
-        let batch = get(Native::lower_scene2(&s, scale, &|_| None, &ir));
-        get(Native::step(Some((0., 0., 0., 1.)), None, None, &s, &[batch]));
-        let pixels = get(renderer::capture(&e));
+        let s = Native::begin_submission(&e).unwrap();
+        let batch = Native::lower_scene2(&s, scale, &|_| None, &ir).unwrap();
+        Native::step(Some((0., 0., 0., 1.)), None, None, &s, &[batch]).unwrap();
+        let pixels = renderer::capture(&e).unwrap();
         assert_eq!(pixels.len() as i64, dw * dh * 4, "coordinate readback length");
         pixels
     };
@@ -109,7 +108,7 @@ fn run(lw: i64, lh: i64, dw: i64, dh: i64, scale: i64) {
     expect_square(&circle, dw, dh, 24 * scale, 8 * scale, 16 * scale, "logical circle bounds");
     assert!(filled(px(&circle, dw, 32 * scale, 16 * scale)), "circle center unfilled");
     assert!(!filled(px(&circle, dw, 24 * scale, 8 * scale)), "circle bounding-box corner filled");
-    get(renderer::destroy(&e));
+    renderer::destroy(&e).unwrap();
 }
 
 fn gpu_scene2_coordinates_1x() {

@@ -4,16 +4,13 @@ use crate::{
     surface::{self, AcquireResult, Configuration, Format, Frame, PresentMode},
 };
 
-fn ok<T>(result: Result<T, Error>) -> T {
-    match result {
-        Ok(value) => value,
-        Err(error) => panic!("{}", crate::error::to_string(&error)),
-    }
+fn die(error: Error) -> ! {
+    panic!("{}", crate::error::to_string(&error))
 }
 
-fn expect<T>(kind: ErrorKind, result: Result<T, Error>) {
+fn expect(kind: ErrorKind, result: Option<Error>) {
     match result {
-        Err(error) if error.kind == kind => {}
+        Some(error) if error.kind == kind => {}
         _ => panic!("unexpected surface error"),
     }
 }
@@ -41,19 +38,19 @@ fn frame(result: AcquireResult) -> Frame {
 #[test]
 fn surface_lifecycle_contract() {
     let device = handle::create_device();
-    expect(ErrorKind::InvalidArgument, surface::create(&device, Configuration { max_acquired: 0, ..config() }));
-    let target = ok(surface::create(&device, config()));
-    let first = frame(ok(surface::acquire(&target)));
-    let second = frame(ok(surface::acquire(&target)));
-    expect(ErrorKind::Capacity, surface::acquire(&target));
-    ok(surface::present(&target, &first));
-    expect(ErrorKind::InvalidState, surface::present(&target, &first));
-    ok(surface::discard(&target, &second));
-    expect(ErrorKind::InvalidState, surface::discard(&target, &second));
-    let other = ok(surface::create(&device, config()));
-    let foreign = frame(ok(surface::acquire(&other)));
-    expect(ErrorKind::CrossDevice, surface::present(&target, &foreign));
+    expect(ErrorKind::InvalidArgument, surface::create(&device, Configuration { max_acquired: 0, ..config() }).err());
+    let target = surface::create(&device, config()).unwrap_or_else(|failure| die(failure));
+    let first = frame(surface::acquire(&target).unwrap_or_else(|failure| die(failure)));
+    let second = frame(surface::acquire(&target).unwrap_or_else(|failure| die(failure)));
+    expect(ErrorKind::Capacity, surface::acquire(&target).err());
+    surface::present(&target, &first).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, surface::present(&target, &first).err());
+    surface::discard(&target, &second).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, surface::discard(&target, &second).err());
+    let other = surface::create(&device, config()).unwrap_or_else(|failure| die(failure));
+    let foreign = frame(surface::acquire(&other).unwrap_or_else(|failure| die(failure)));
+    expect(ErrorKind::CrossDevice, surface::present(&target, &foreign).err());
     surface::destroy(&target);
     surface::destroy(&target);
-    expect(ErrorKind::InvalidState, surface::acquire(&target));
+    expect(ErrorKind::InvalidState, surface::acquire(&target).err());
 }

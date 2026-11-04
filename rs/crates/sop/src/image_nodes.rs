@@ -36,7 +36,7 @@ fn from_values(values: &[Value]) -> Parameters {
             frequency: *frequency,
             seed: *seed,
         },
-        _ => panic!("image/noise: parameter record has the wrong shape"),
+        _ => unreachable!("image/noise: parameter record has the wrong shape"),
     }
 }
 

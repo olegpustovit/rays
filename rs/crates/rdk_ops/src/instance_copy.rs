@@ -14,7 +14,6 @@ const NAME: &str = "Rdk.Instance_copy.materialize_instances";
 const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
 const DEFAULT_GRAIN: i64 = 16_384;
 
-type R<V> = Result<V, error::T>;
 
 fn make(code: &str, message: String) -> error::T {
     error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
@@ -36,7 +35,7 @@ fn range_count(length: i64, grain: i64) -> usize {
     if length <= 0 { 0 } else { ((length - 1) / grain + 1) as usize }
 }
 
-fn build_i64(cancel_value: Option<&cancel::T>, grain: i64, length: i64, value: &(dyn Fn(i64) -> i64 + Sync)) -> R<Vec<i64>> {
+fn build_i64(cancel_value: Option<&cancel::T>, grain: i64, length: i64, value: &(dyn Fn(i64) -> i64 + Sync)) -> Result<Vec<i64>, error::T> {
     let slots: Vec<Mutex<Vec<i64>>> = (0..range_count(length, grain)).map(|_| Mutex::new(Vec::new())).collect();
     support::run_ranges(Some(grain), length, &|first, last| {
         cancel::check_opt(cancel_value)?;
@@ -53,7 +52,7 @@ fn build_i64(cancel_value: Option<&cancel::T>, grain: i64, length: i64, value: &
     Ok(output)
 }
 
-fn build_f64(cancel_value: Option<&cancel::T>, grain: i64, length: i64, value: &(dyn Fn(i64) -> f64 + Sync)) -> R<Vec<f64>> {
+fn build_f64(cancel_value: Option<&cancel::T>, grain: i64, length: i64, value: &(dyn Fn(i64) -> f64 + Sync)) -> Result<Vec<f64>, error::T> {
     let slots: Vec<Mutex<Vec<f64>>> = (0..range_count(length, grain)).map(|_| Mutex::new(Vec::new())).collect();
     support::run_ranges(Some(grain), length, &|first, last| {
         cancel::check_opt(cancel_value)?;
@@ -77,7 +76,7 @@ fn build_xyz(
     grain: i64,
     length: i64,
     value: &(dyn Fn(i64) -> (f64, f64, f64) + Sync),
-) -> R<Xyz> {
+) -> Result<Xyz, error::T> {
     let slots: Vec<Mutex<Xyz>> =
         (0..range_count(length, grain)).map(|_| Mutex::new((Vec::new(), Vec::new(), Vec::new()))).collect();
     support::run_ranges(Some(grain), length, &|first, last| {
@@ -104,7 +103,7 @@ fn build_xyz(
     Ok((x, y, z))
 }
 
-fn repeat_f64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source: &[f64]) -> R<Vec<f64>> {
+fn repeat_f64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source: &[f64]) -> Result<Vec<f64>, error::T> {
     let length = source.len() as i64;
     if copies == 0 || length == 0 {
         return Ok(Vec::new());
@@ -112,7 +111,7 @@ fn repeat_f64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source:
     build_f64(cancel_value, grain, copies * length, &|index| source[(index % length) as usize])
 }
 
-fn repeat_i64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source: &[i64]) -> R<Vec<i64>> {
+fn repeat_i64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source: &[i64]) -> Result<Vec<i64>, error::T> {
     let length = source.len() as i64;
     if copies == 0 || length == 0 {
         return Ok(Vec::new());
@@ -128,7 +127,7 @@ fn repeat_text(copies: i64, source: &[String]) -> Vec<String> {
     output
 }
 
-fn repeat_attribute(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, item: &attribute::T) -> R<attribute::T> {
+fn repeat_attribute(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, item: &attribute::T) -> Result<attribute::T, error::T> {
     use attribute::Storage;
     if attribute::owner(item) == attribute::Owner::Detail {
         return Ok(item.clone());
@@ -184,7 +183,7 @@ fn repeat_attribute(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, i
     attribute::create_owned(attribute::name(item), attribute::owner(item), storage).map_err(lift)
 }
 
-fn repeat_group(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source: &group::T) -> R<group::T> {
+fn repeat_group(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source: &group::T) -> Result<group::T, error::T> {
     let source_count = group::length(source);
     let cancelled = AtomicBool::new(false);
     let target = group::init(
@@ -236,7 +235,7 @@ fn normal_row(rows: &Rows, sx: f64, sy: f64, sz: f64) -> (f64, f64, f64) {
     if length > 1e-20 { (ox / length, oy / length, oz / length) } else { (0.0, 0.0, 0.0) }
 }
 
-fn typed_normal(item: &attribute::T) -> R<Option<packed::Float3::T>> {
+fn typed_normal(item: &attribute::T) -> Result<Option<packed::Float3::T>, error::T> {
     let owner = attribute::owner(item);
     if attribute::name(item) == "N" && (owner == attribute::Owner::Point || owner == attribute::Owner::Vertex) {
         match attribute::get(&attribute::normal(owner), item).map_err(lift)? {
@@ -253,7 +252,7 @@ fn transform_single_instance(
     grain: i64,
     matrix: &mat4::T,
     geometry_value: &geometry::T,
-) -> R<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let source = packed::Float3::View::view(geometry::positions(geometry_value)).map_err(lift)?;
     let count = source.x.len() as i64;
     let rows = mat4::to_rows(matrix);
@@ -300,7 +299,7 @@ fn transform_single_instance(
     Ok(output)
 }
 
-fn product(label: &str, total: i64, count: i64) -> R<i64> {
+fn product(label: &str, total: i64, count: i64) -> Result<i64, error::T> {
     if count != 0 && total > MAX_ARRAY_LENGTH / count {
         Err(fail(format!("{NAME}: {label} output exceeds array limits")))
     } else {
@@ -308,7 +307,7 @@ fn product(label: &str, total: i64, count: i64) -> R<i64> {
     }
 }
 
-fn materialize(transforms: &[mat4::T], geometry_value: &geometry::T) -> R<geometry::T> {
+fn materialize(transforms: &[mat4::T], geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value: Option<&cancel::T> = None;
     let grain = DEFAULT_GRAIN;
     let matrices = transforms;
@@ -434,7 +433,7 @@ fn materialize(transforms: &[mat4::T], geometry_value: &geometry::T) -> R<geomet
 }
 
 /// Materialize transform-major copies with exact topology and group ancestry.
-pub fn materialize_instances(transforms: &[mat4::T], geometry_value: &geometry::T) -> R<geometry::T> {
+pub fn materialize_instances(transforms: &[mat4::T], geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     materialize(transforms, geometry_value)
 }
 
@@ -447,34 +446,27 @@ mod tests {
 
     type P3 = (f64, f64, f64);
 
-    fn get<V>(value: R<V>) -> V {
-        match value {
-            Ok(value) => value,
-            Err(failure) => panic!("{}", error::to_string(&failure)),
-        }
-    }
-
     fn polyline(points: &[P3], closed: bool) -> geometry::T {
         let kind = if closed { PrimitiveKind::ClosedPolyline } else { PrimitiveKind::OpenPolyline };
         let topology_value =
-            get(topology::create_owned(points.len() as i64, (0..points.len() as i64).collect(), vec![0, points.len() as i64], vec![kind]));
+            topology::create_owned(points.len() as i64, (0..points.len() as i64).collect(), vec![0, points.len() as i64], vec![kind]).unwrap();
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
-        get(geometry::create(get(packed::Float3::View::of_owned_exn(x, y, z)), topology_value, None, None, None))
+        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
     }
 
     fn point_cloud(points: &[P3]) -> geometry::T {
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
-        get(geometry::create(
-            get(packed::Float3::View::of_owned_exn(x, y, z)),
-            get(topology::empty(points.len() as i64)),
+        geometry::create(
+            packed::Float3::View::of_owned_exn(x, y, z).unwrap(),
+            topology::empty(points.len() as i64).unwrap(),
             None,
             None,
             None,
-        ))
+        ).unwrap()
     }
 
     fn transforms(count: usize) -> Vec<mat4::T> {
@@ -500,7 +492,7 @@ mod tests {
         let x = moved.iter().map(|p| p.0).collect();
         let y = moved.iter().map(|p| p.1).collect();
         let z = moved.iter().map(|p| p.2).collect();
-        get(geometry::with_positions(get(packed::Float3::View::of_owned_exn(x, y, z)), source))
+        geometry::with_positions(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), source).unwrap()
     }
 
     fn same_positions_and_topology(left: &geometry::T, right: &geometry::T) -> bool {
@@ -521,7 +513,7 @@ mod tests {
     fn instance_materialization_cardinality() {
         let triangle = polyline(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.)], true);
         let scale_count = 100_000;
-        let scaled = get(materialize_instances(&vec![mat4::identity(); scale_count], &triangle));
+        let scaled = materialize_instances(&vec![mat4::identity(); scale_count], &triangle).unwrap();
         assert!(
             geometry::point_count(&scaled) == scale_count as i64 * 3
                 && geometry::vertex_count(&scaled) == scale_count as i64 * 3
@@ -534,21 +526,21 @@ mod tests {
     fn matches_merged_transformed_copies() {
         let source = polyline(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.)], false);
         let matrices = transforms(7);
-        let output = get(materialize_instances(&matrices, &source));
+        let output = materialize_instances(&matrices, &source).unwrap();
         let copies: Vec<geometry::T> = matrices.iter().map(|matrix| transformed(matrix, &source)).collect();
-        let merged = get(mesh_merge::run(
+        let merged = mesh_merge::run(
             &mesh_merge::RunParams { cancel: None, grain: Some(1), source_attribute: None, source_base: None },
             &copies,
-        ));
+        ).unwrap();
         assert!(same_positions_and_topology(&output, &merged), "legacy merge of transformed copies differs");
     }
 
     #[test]
     fn single_instance_and_errors() {
         let source = polyline(&[(0., 0., 0.), (1., 0., 0.)], false);
-        let same = get(materialize_instances(&[mat4::identity()], &source));
+        let same = materialize_instances(&[mat4::identity()], &source).unwrap();
         assert!(same_positions_and_topology(&same, &source), "identity single instance");
-        let moved = get(materialize_instances(&[mat4::translation(vec3::create(1.0, 2.0, 3.0))], &source));
+        let moved = materialize_instances(&[mat4::translation(vec3::create(1.0, 2.0, 3.0))], &source).unwrap();
         let view = packed::Float3::View::view(geometry::positions(&moved)).unwrap();
         assert!(view.x[..] == [1., 2.] && view.y[..] == [2., 2.] && view.z[..] == [3., 3.], "translated single instance");
         let bad = mat4::of_rows((f64::NAN, 0., 0., 0.), (0., 1., 0., 0.), (0., 0., 1., 0.), (0., 0., 0., 1.));
@@ -562,20 +554,20 @@ mod tests {
             }
             Ok(_) => panic!("expected error"),
         }
-        let empty = get(materialize_instances(&[], &source));
+        let empty = materialize_instances(&[], &source).unwrap();
         assert_eq!(geometry::point_count(&empty), 0);
     }
 
     #[test]
     fn payload_repeats_per_instance() {
         let source = polyline(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.)], true);
-        let weight = get(attribute::create_owned("weight", attribute::Owner::Point, attribute::Storage::Float(vec![1., 2., 3.])));
-        let detail = get(attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Int(vec![5])));
-        let ordered = get(group::ordered(group::Owner::Point, "pts", 3, &[2, 0]));
-        let mut source = get(geometry::with_attribute(weight, &source));
-        source = get(geometry::with_attribute(detail, &source));
-        source = get(geometry::with_group(ordered, &source));
-        let output = get(materialize_instances(&transforms(3), &source));
+        let weight = attribute::create_owned("weight", attribute::Owner::Point, attribute::Storage::Float(vec![1., 2., 3.])).unwrap();
+        let detail = attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Int(vec![5])).unwrap();
+        let ordered = group::ordered(group::Owner::Point, "pts", 3, &[2, 0]).unwrap();
+        let mut source = geometry::with_attribute(weight, &source).unwrap();
+        source = geometry::with_attribute(detail, &source).unwrap();
+        source = geometry::with_group(ordered, &source).unwrap();
+        let output = materialize_instances(&transforms(3), &source).unwrap();
         let weights = geometry::find_attribute(attribute::Owner::Point, "weight", &output).unwrap();
         match attribute::View::storage(&weights).unwrap() {
             attribute::Storage::Float(values) => assert_eq!(values[..], [1., 2., 3., 1., 2., 3., 1., 2., 3.]),
@@ -604,7 +596,7 @@ mod tests {
     fn parallel_exact() {
         let source = polyline(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.), (1., 1., 1.)], true);
         let matrices = transforms(5_000);
-        let (one, four) = one_and_four_domains(&|| get(materialize_instances(&matrices, &source)));
+        let (one, four) = one_and_four_domains(&|| materialize_instances(&matrices, &source).unwrap());
         assert!(same_positions_and_topology(&one, &four), "one/four-domain mismatch");
     }
 
@@ -613,41 +605,41 @@ mod tests {
     #[test]
     fn copy_to_points_fixtures_construct() {
         let float3 = |x: f64, y: f64, z: f64| {
-            attribute::Storage::Float3(get(packed::Float3::View::of_owned_exn(vec![x], vec![y], vec![z])))
+            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(vec![x], vec![y], vec![z]).unwrap())
         };
-        let target_n = get(attribute::create_owned(
+        let target_n = attribute::create_owned(
             "N",
             attribute::Owner::Point,
-            attribute::Storage::Float3(get(packed::Float3::View::of_owned_exn(vec![1., 0.], vec![0., 1.], vec![0., 0.]))),
-        ));
+            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(vec![1., 0.], vec![0., 1.], vec![0., 0.]).unwrap()),
+        ).unwrap();
         assert_eq!(attribute::length(&target_n), 2);
         let quarter_turn = 0.5_f64.sqrt();
-        let _rot = get(attribute::create_owned(
+        let _rot = attribute::create_owned(
             "rot",
             attribute::Owner::Point,
             attribute::Storage::Float4(
                 packed::Float4::of_owned(vec![0.], vec![0.], vec![quarter_turn], vec![quarter_turn]).map_err(lift).unwrap(),
             ),
-        ));
-        let _trans = get(attribute::create_owned("trans", attribute::Owner::Point, float3(3., 0., 0.)));
-        let _pivot = get(attribute::create_owned("pivot", attribute::Owner::Point, float3(1., 0., 0.)));
-        let restricted_source = get(mesh_merge::run(
+        ).unwrap();
+        let _trans = attribute::create_owned("trans", attribute::Owner::Point, float3(3., 0., 0.)).unwrap();
+        let _pivot = attribute::create_owned("pivot", attribute::Owner::Point, float3(1., 0., 0.)).unwrap();
+        let restricted_source = mesh_merge::run(
             &mesh_merge::RunParams { cancel: None, grain: None, source_attribute: None, source_base: None },
             &[polyline(&[(0., 0., 0.), (1., 0., 0.)], false), polyline(&[(10., 0., 0.), (12., 0., 0.)], false)],
-        ));
-        let source_second = get(group::ordered(group::Owner::Primitive, "source_second", 2, &[1]));
-        let restricted_source = get(geometry::with_group(source_second, &restricted_source));
+        ).unwrap();
+        let source_second = group::ordered(group::Owner::Primitive, "source_second", 2, &[1]).unwrap();
+        let restricted_source = geometry::with_group(source_second, &restricted_source).unwrap();
         let restricted_targets = point_cloud(&[(0., 0., 0.), (0., 10., 0.), (0., 20., 0.)]);
-        let scale = get(attribute::create_owned("pscale", attribute::Owner::Point, attribute::Storage::Float(vec![1., 9., 2.])));
-        let restricted_targets = get(geometry::with_attribute(scale, &restricted_targets));
+        let scale = attribute::create_owned("pscale", attribute::Owner::Point, attribute::Storage::Float(vec![1., 9., 2.])).unwrap();
+        let restricted_targets = geometry::with_attribute(scale, &restricted_targets).unwrap();
         assert!(geometry::payload_bytes(&restricted_source) > 0 && geometry::payload_bytes(&restricted_targets) > 0);
-        let profile = get(packed::FloatArray::create_owned(vec![0, 2, 4], vec![10., 20., 30., 40.]));
-        let profile = get(attribute::create_owned("profile", attribute::Owner::Point, attribute::Storage::FloatArray(profile)));
-        let transfer_source = get(geometry::with_attribute(profile, &polyline(&[(0., 0., 0.), (1., 0., 0.)], false)));
-        let transfer_source = get(geometry::with_group(
-            get(group::init(None, group::Owner::Point, "union_mask", 2, &|point| point == 0)),
+        let profile = packed::FloatArray::create_owned(vec![0, 2, 4], vec![10., 20., 30., 40.]).unwrap();
+        let profile = attribute::create_owned("profile", attribute::Owner::Point, attribute::Storage::FloatArray(profile)).unwrap();
+        let transfer_source = geometry::with_attribute(profile, &polyline(&[(0., 0., 0.), (1., 0., 0.)], false)).unwrap();
+        let transfer_source = geometry::with_group(
+            group::init(None, group::Owner::Point, "union_mask", 2, &|point| point == 0).unwrap(),
             &transfer_source,
-        ));
+        ).unwrap();
         assert!(geometry::payload_bytes(&transfer_source) > 0);
     }
 }

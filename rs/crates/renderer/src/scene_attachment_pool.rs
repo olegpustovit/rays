@@ -35,7 +35,7 @@ pub fn create(device: &Device, configuration: &Configuration, sample_counts: &[i
     unique.sort();
     unique.dedup();
     if sample_counts.is_empty() || sample_counts.iter().any(|samples| *samples <= 0) || unique.len() != sample_counts.len() {
-        panic!("Scene_attachment_pool.create: sample counts must be unique and positive");
+        unreachable!("Scene_attachment_pool.create: sample counts must be unique and positive");
     }
     t {
         device: device.clone(),

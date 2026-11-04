@@ -281,16 +281,14 @@ fn rebuild(entry: &Entry, compiled_inputs: &[Option<node::T>]) -> Result<node::T
     }
 }
 
-struct Compile<'a> {
-    value: &'a T,
-    previous: &'a BTreeMap<i64, CompiledEntry>,
+struct Compile {
     table: HashMap<i64, CompiledEntry>,
     visiting: HashSet<i64>,
     cycle_seen: bool,
 }
 
-impl Compile<'_> {
-    fn build(&mut self, id: i64) -> Result<node::T, String> {
+impl Compile {
+    fn build(&mut self, value: &T, previous: &BTreeMap<i64, CompiledEntry>, id: i64) -> Result<node::T, String> {
         if let Some(compiled) = self.table.get(&id) {
             return compiled.built.clone();
         }
@@ -298,7 +296,7 @@ impl Compile<'_> {
             self.cycle_seen = true;
             return Err(format!("editable graph contains a cycle through node #{id}"));
         }
-        let Some(entry) = self.value.0.entries.get(&id).cloned() else {
+        let Some(entry) = value.0.entries.get(&id).cloned() else {
             return Err(format!("editable graph references missing node #{id}"));
         };
         self.visiting.insert(id);
@@ -321,7 +319,7 @@ impl Compile<'_> {
                         break;
                     }
                 }
-                Some(input_id) => match self.build(input_id) {
+                Some(input_id) => match self.build(value, previous, input_id) {
                     Ok(input) => compiled_inputs[index] = Some(input),
                     Err(e) => {
                         outcome = Err(e);
@@ -330,7 +328,7 @@ impl Compile<'_> {
                 },
             }
         }
-        let built = outcome.and_then(|()| match self.previous.get(&id) {
+        let built = outcome.and_then(|()| match previous.get(&id) {
             Some(reused) if Arc::ptr_eq(&reused.source, &entry) && same_inputs(&reused.compiled_inputs, &compiled_inputs) => {
                 reused.built.clone()
             }
@@ -350,15 +348,14 @@ impl Compile<'_> {
 /// entry and compiled inputs are physically unchanged.
 pub fn compile_all(previous: Option<&Compiled>, value: &T) -> Compiled {
     let empty = BTreeMap::new();
+    let previous_map = previous.map_or(&empty, |c| &c.0);
     let mut state = Compile {
-        value,
-        previous: previous.map_or(&empty, |c| &c.0),
         table: HashMap::new(),
         visiting: HashSet::new(),
         cycle_seen: false,
     };
     for (id, source) in value.0.entries.iter() {
-        let built = state.build(*id);
+        let built = state.build(value, previous_map, *id);
         if !state.table.contains_key(id) {
             state.table.insert(*id, CompiledEntry { source: source.clone(), compiled_inputs: Vec::new(), built });
         }
@@ -378,8 +375,8 @@ pub fn compile_node(value: &T, node_id: i64) -> Result<node::T, String> {
         return Err(format!("editable graph has no node #{node_id}"));
     }
     let empty = BTreeMap::new();
-    let mut state = Compile { value, previous: &empty, table: HashMap::new(), visiting: HashSet::new(), cycle_seen: false };
-    state.build(node_id)
+    let mut state = Compile { table: HashMap::new(), visiting: HashSet::new(), cycle_seen: false };
+    state.build(value, &empty, node_id)
 }
 
 /// Compile the document root.
@@ -721,7 +718,7 @@ pub fn factory_facts(value: &Factory) -> &Facts {
             .collect();
         match (value.0.build)(&inputs) {
             Ok(n) => node::facts(&n).clone(),
-            Err(message) => panic!("Edit_graph factory defaults: {message}"),
+            Err(message) => unreachable!("Edit_graph factory defaults: {message}"),
         }
     })
 }

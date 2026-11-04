@@ -30,7 +30,6 @@ impl Error {
     pub fn message(&self) -> &str { &self.message }
 }
 
-pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,8 +39,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-fn error(operation: &'static str, kind: ErrorKind, message: impl Into<String>) -> Error {
-    Error { operation, kind, message: message.into() }
+fn error(operation: &'static str, kind: ErrorKind, message: &str) -> Error {
+    Error { operation, kind, message: message.to_string() }
 }
 
 fn version(number: i32) -> Version {
@@ -57,7 +56,7 @@ pub fn compiled_version() -> Version {
     version(sys::compiled_version())
 }
 
-pub fn check_version(release: bool) -> Result<()> {
+pub fn check_version(release: bool) -> std::result::Result<(), Error> {
     sdl3::validate_version_for("SDL3_ttf", compiled_version(), release, linked_version())
         .map_err(|source| error("SDL3_ttf.check_version", ErrorKind::IncompatibleVersion, source.message()))
 }
@@ -72,7 +71,7 @@ fn drain() {
     }
 }
 
-fn require_main(operation: &'static str) -> Result<()> {
+fn require_main(operation: &'static str) -> std::result::Result<(), Error> {
     if !main_thread() {
         Err(error(operation, ErrorKind::WrongDomain, "SDL3_ttf operation must run on the initial thread and SDL main thread"))
     } else {
@@ -80,14 +79,10 @@ fn require_main(operation: &'static str) -> Result<()> {
     }
 }
 
-fn on_main<T>(operation: &'static str, callback: impl FnOnce() -> Result<T>) -> Result<T> {
+fn enter_main(operation: &'static str) -> std::result::Result<(), Error> {
     require_main(operation)?;
     drain();
-    callback()
-}
-
-fn ttf_result<T>(operation: &'static str, result: std::result::Result<T, String>) -> Result<T> {
-    result.map_err(|message| error(operation, ErrorKind::TtfError, message))
+    Ok(())
 }
 
 static INIT_COUNT: AtomicI64 = AtomicI64::new(0);
@@ -96,24 +91,24 @@ static LIVE_FONTS: AtomicI64 = AtomicI64::new(0);
 pub mod init {
     use super::*;
 
-    pub fn init() -> Result<()> {
-        on_main("SDL3_ttf.Init.init", || {
+    pub fn init() -> std::result::Result<(), Error> {
+        enter_main("SDL3_ttf.Init.init")?;
             check_version(true)?;
-            ttf_result("SDL3_ttf.Init.init", sys::init())?;
+            sys::init().map_err(|message| error("SDL3_ttf.Init.init", ErrorKind::TtfError, &message))?;
             INIT_COUNT.fetch_add(1, Ordering::SeqCst);
             Ok(())
-        })
     }
 
-    pub fn initialized() -> Result<bool> {
-        on_main("SDL3_ttf.Init.initialized", || Ok(sys::was_init() > 0))
+    pub fn initialized() -> std::result::Result<bool, Error> {
+        enter_main("SDL3_ttf.Init.initialized")?;
+        Ok(sys::was_init() > 0)
     }
 
-    pub fn quit() -> Result<()> {
-        on_main("SDL3_ttf.Init.quit", || {
+    pub fn quit() -> std::result::Result<(), Error> {
+        enter_main("SDL3_ttf.Init.quit")?;
             let open_count = LIVE_FONTS.load(Ordering::SeqCst);
             if open_count != 0 {
-                Err(error("SDL3_ttf.Init.quit", ErrorKind::FontsStillOpen, format!("{open_count} font handle(s) are still open")))
+                Err(error("SDL3_ttf.Init.quit", ErrorKind::FontsStillOpen, &format!("{open_count} font handle(s) are still open")))
             } else if INIT_COUNT.load(Ordering::SeqCst) == 0 {
                 Ok(())
             } else {
@@ -121,7 +116,6 @@ pub mod init {
                 sys::quit();
                 Ok(())
             }
-        })
     }
 }
 
@@ -171,7 +165,7 @@ pub mod font {
     }
 
     // ponytail: Rust's &str is always valid UTF-8, so the OCaml validator has nothing left to check.
-    fn validate_text(operation: &'static str, text: &str) -> Result<()> {
+    fn validate_text(operation: &'static str, text: &str) -> std::result::Result<(), Error> {
         if text.contains('\0') {
             Err(error(operation, ErrorKind::InvalidArgument, "text contains a NUL byte"))
         } else {
@@ -193,7 +187,7 @@ pub mod font {
 
     /// Locate an installed UI font. `font` is authoritative when non-empty; otherwise the macOS
     /// system fonts are tried in stable order.
-    pub fn system_path(font: Option<&str>) -> Result<String> {
+    pub fn system_path(font: Option<&str>) -> std::result::Result<String, Error> {
         match font {
             Some(path) if !path.is_empty() => {
                 if std::path::Path::new(path).exists() {
@@ -202,7 +196,7 @@ pub mod font {
                     Err(error(
                         "SDL3_ttf.Font.system_path",
                         ErrorKind::FontNotFound,
-                        format!("font override does not name a readable font: {path}"),
+                        &format!("font override does not name a readable font: {path}"),
                     ))
                 }
             }
@@ -216,7 +210,7 @@ pub mod font {
         }
     }
 
-    fn require_initialized(operation: &'static str) -> Result<()> {
+    fn require_initialized(operation: &'static str) -> std::result::Result<(), Error> {
         if init::initialized()? {
             Ok(())
         } else {
@@ -233,40 +227,37 @@ pub mod font {
     }
 
     impl Font {
-        fn live<T>(&self, operation: &'static str, callback: impl FnOnce(usize) -> Result<T>) -> Result<T> {
-            on_main(operation, || {
+        fn raw(&self, operation: &'static str) -> std::result::Result<usize, Error> {
+            enter_main(operation)?;
                 if self.destroyed.load(Ordering::SeqCst) {
                     return Err(error(operation, ErrorKind::Destroyed, "font is destroyed"));
                 }
                 require_initialized(operation)?;
-                callback(self.raw)
-            })
+                Ok(self.raw)
         }
 
-        pub fn open_file(path: &str, size: f64) -> Result<Font> {
+        pub fn open_file(path: &str, size: f64) -> std::result::Result<Font, Error> {
             let operation = "SDL3_ttf.Font.open_file";
             if path.is_empty() || path.contains('\0') {
                 Err(error(operation, ErrorKind::InvalidArgument, "font path must be non-empty and NUL-free"))
             } else if !valid_size(size) {
                 Err(error(operation, ErrorKind::InvalidArgument, "font size must be finite and positive"))
             } else {
-                on_main(operation, || {
+                enter_main(operation)?;
                     require_initialized(operation)?;
-                    let raw = ttf_result(operation, sys::open_font(path, size))?;
+                    let raw = sys::open_font(path, size).map_err(|message| error(operation, ErrorKind::TtfError, &message))?;
                     LIVE_FONTS.fetch_add(1, Ordering::SeqCst);
                     Ok(Font { raw, destroyed: AtomicBool::new(false) })
-                })
             }
         }
 
-        pub fn metrics(&self) -> Result<Metrics> {
-            self.live("SDL3_ttf.Font.metrics", |raw| {
+        pub fn metrics(&self) -> std::result::Result<Metrics, Error> {
+            let raw = self.raw("SDL3_ttf.Font.metrics")?;
                 let (height, ascent, descent, line_skip) = sys::font_metrics(raw);
                 Ok(Metrics { height: height.into(), ascent: ascent.into(), descent: descent.into(), line_skip: line_skip.into() })
-            })
         }
 
-        pub fn set_size_dpi(&self, size: f64, horizontal: i64, vertical: i64) -> Result<()> {
+        pub fn set_size_dpi(&self, size: f64, horizontal: i64, vertical: i64) -> std::result::Result<(), Error> {
             let operation = "SDL3_ttf.Font.set_size_dpi";
             if !valid_size(size) {
                 Err(error(operation, ErrorKind::InvalidArgument, "font size must be finite and positive"))
@@ -274,11 +265,12 @@ pub mod font {
                 Err(error(operation, ErrorKind::InvalidArgument, "font DPI must be positive"))
             } else {
                 let (horizontal, vertical) = (horizontal.min(i32::MAX.into()) as i32, vertical.min(i32::MAX.into()) as i32);
-                self.live(operation, |raw| ttf_result(operation, sys::set_font_size_dpi(raw, size, horizontal, vertical)))
+                let raw = self.raw(operation)?;
+                sys::set_font_size_dpi(raw, size, horizontal, vertical).map_err(|message| error(operation, ErrorKind::TtfError, &message))
             }
         }
 
-        pub fn set_hinting(&self, hinting: Hinting) -> Result<()> {
+        pub fn set_hinting(&self, hinting: Hinting) -> std::result::Result<(), Error> {
             let code = match hinting {
                 Hinting::Normal => 0,
                 Hinting::Light => 1,
@@ -286,63 +278,57 @@ pub mod font {
                 Hinting::None => 3,
                 Hinting::LightSubpixel => 4,
             };
-            self.live("SDL3_ttf.Font.set_hinting", |raw| {
+            let raw = self.raw("SDL3_ttf.Font.set_hinting")?;
                 sys::set_font_hinting(raw, code);
                 Ok(())
-            })
         }
 
         /// Line alignment inside `render_blended_wrapped` output.
-        pub fn set_wrap_alignment(&self, alignment: Alignment) -> Result<()> {
+        pub fn set_wrap_alignment(&self, alignment: Alignment) -> std::result::Result<(), Error> {
             let code = match alignment {
                 Alignment::Left => 0,
                 Alignment::Center => 1,
                 Alignment::Right => 2,
             };
-            self.live("SDL3_ttf.Font.set_wrap_alignment", |raw| {
+            let raw = self.raw("SDL3_ttf.Font.set_wrap_alignment")?;
                 sys::set_font_wrap_alignment(raw, code);
                 Ok(())
-            })
         }
 
-        pub fn glyph_metrics(&self, codepoint: i64) -> Result<GlyphMetrics> {
+        pub fn glyph_metrics(&self, codepoint: i64) -> std::result::Result<GlyphMetrics, Error> {
             let operation = "SDL3_ttf.Font.glyph_metrics";
             if !valid_codepoint(codepoint) {
                 return Err(error(operation, ErrorKind::InvalidArgument, "codepoint is not a Unicode scalar value"));
             }
-            self.live(operation, |raw| {
-                let (min_x, max_x, min_y, max_y, advance) = ttf_result(operation, sys::glyph_metrics(raw, codepoint as u32))?;
+            let raw = self.raw(operation)?;
+                let (min_x, max_x, min_y, max_y, advance) = sys::glyph_metrics(raw, codepoint as u32).map_err(|message| error(operation, ErrorKind::TtfError, &message))?;
                 Ok(GlyphMetrics { min_x: min_x.into(), max_x: max_x.into(), min_y: min_y.into(), max_y: max_y.into(), advance: advance.into() })
-            })
         }
 
-        fn render(&self, operation: &'static str, color: (i64, i64, i64, i64), wrap_width: i64, text: &str) -> Result<Option<Rgba>> {
+        fn render(&self, operation: &'static str, color: (i64, i64, i64, i64), wrap_width: i64, text: &str) -> std::result::Result<Option<Rgba>, Error> {
             let (red, green, blue, alpha) = color;
             if !(valid_channel(red) && valid_channel(green) && valid_channel(blue) && valid_channel(alpha)) {
                 return Err(error(operation, ErrorKind::InvalidArgument, "RGBA channels must be in 0..255"));
             }
             validate_text(operation, text)?;
             if text.is_empty() {
-                return self.live(operation, |_| Ok(None));
+                self.raw(operation)?;
+                return Ok(None);
             }
             let wrap_width = wrap_width.min(i32::MAX.into()) as i32;
-            self.live(operation, |raw| {
-                let (width, height, pixels) = ttf_result(
-                    operation,
-                    sys::render_blended(raw, text, (red as i32, green as i32, blue as i32, alpha as i32), wrap_width),
-                )?;
+            let raw = self.raw(operation)?;
+                let (width, height, pixels) = sys::render_blended(raw, text, (red as i32, green as i32, blue as i32, alpha as i32), wrap_width).map_err(|message| error(operation, ErrorKind::TtfError, &message))?;
                 Ok(Some(Rgba { width, height, pixels }))
-            })
         }
 
         /// Render UTF-8 to tightly packed RGBA8 rows. Empty text is `Ok(None)`, preserving the
         /// high-level no-op contract instead of asking SDL_ttf for a 0-width bitmap. Color
         /// channels are straight RGBA values in [0,255].
-        pub fn render_blended(&self, color: (i64, i64, i64, i64), text: &str) -> Result<Option<Rgba>> {
+        pub fn render_blended(&self, color: (i64, i64, i64, i64), text: &str) -> std::result::Result<Option<Rgba>, Error> {
             self.render("SDL3_ttf.Font.render_blended", color, -1, text)
         }
 
-        pub fn render_blended_wrapped(&self, color: (i64, i64, i64, i64), wrap_width: i64, text: &str) -> Result<Option<Rgba>> {
+        pub fn render_blended_wrapped(&self, color: (i64, i64, i64, i64), wrap_width: i64, text: &str) -> std::result::Result<Option<Rgba>, Error> {
             let operation = "SDL3_ttf.Font.render_blended_wrapped";
             if wrap_width < 0 {
                 return Err(error(operation, ErrorKind::InvalidArgument, "wrap width must be non-negative"));
@@ -350,14 +336,13 @@ pub mod font {
             self.render(operation, color, wrap_width, text)
         }
 
-        pub fn destroy(&self) -> Result<()> {
-            on_main("SDL3_ttf.Font.destroy", || {
+        pub fn destroy(&self) -> std::result::Result<(), Error> {
+            enter_main("SDL3_ttf.Font.destroy")?;
                 if !self.destroyed.swap(true, Ordering::SeqCst) {
                     LIVE_FONTS.fetch_sub(1, Ordering::SeqCst);
                     sys::close_font(self.raw);
                 }
                 Ok(())
-            })
         }
     }
 

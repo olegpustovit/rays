@@ -15,20 +15,11 @@ pub fn run(tests: &[(&str, fn())]) {
         return;
     }
     let filters: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    let mut failed = 0;
     for (name, test) in tests {
         if !filters.is_empty() && !filters.iter().any(|f| f == name) {
             continue;
         }
-        match std::panic::catch_unwind(test) {
-            Ok(()) => println!("test {name} ... ok"),
-            Err(_) => {
-                println!("test {name} ... FAILED");
-                failed += 1;
-            }
-        }
-    }
-    if failed > 0 {
-        std::process::exit(101);
+        test();
+        println!("test {name} ... ok");
     }
 }

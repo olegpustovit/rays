@@ -22,7 +22,7 @@ pub struct BufferDescriptor {
     pub usage: Vec<BufferUsage>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextureUsage {
     TextureBinding,
     StorageBinding,

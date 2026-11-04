@@ -11,7 +11,6 @@ use scene_command::ui_batch::Table as Shapes;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-type R<A> = Result<A, Error>;
 
 pub fn default_state(viewport: (i64, i64, i64, i64), scissor: (i64, i64, i64, i64)) -> state {
     state {
@@ -108,7 +107,7 @@ pub fn mesh_of_geometry_run(number: i64, transform: &Transform, viewport: (i64, 
         .iter()
         .map(|command| match command {
             Command::Geometry(g) => g,
-            _ => panic!("mesh_of_geometry_run: not a geometry"),
+            _ => unreachable!("mesh_of_geometry_run: not a geometry"),
         })
         .collect();
     let vertex_count: usize = geometries.iter().map(|g| g.vertices.len() / 2).sum();
@@ -275,7 +274,7 @@ pub fn clear(value: &mut t) {
 
 pub fn find_ui_slot(value: &mut t, key: i64) -> ui_slot_ref {
     if let Some(item) = side_lru::find(&mut value.ui_slots, &TableKey::Int(key)) {
-        return item.downcast::<RefCell<ui_slot>>().unwrap_or_else(|_| panic!("ui slot table item"));
+        return item.downcast::<RefCell<ui_slot>>().unwrap_or_else(|_| unreachable!("ui slot table item"));
     }
     let slot: ui_slot_ref = Rc::new(RefCell::new(ui_slot {
         ui_vertices: empty_bytes(),
@@ -322,7 +321,7 @@ fn quad(
         framebuffer
     );
     if let Some(item) = side_lru::find(&mut state_.quad_cache, &TableKey::Str(quad_key.clone())) {
-        return item.downcast::<sampled_draw>().unwrap_or_else(|_| panic!("quad table item"));
+        return item.downcast::<sampled_draw>().unwrap_or_else(|_| unreachable!("quad table item"));
     }
     let payload_key = format!(
         "{}|{}|{:?}|{}",
@@ -333,7 +332,7 @@ fn quad(
     );
     let (vertices, indices, key) = match side_lru::find(&mut state_.quad_payload_cache, &TableKey::Str(payload_key.clone())) {
         Some(item) => {
-            let cached = item.downcast::<cached_quad_payload>().unwrap_or_else(|_| panic!("quad payload table item"));
+            let cached = item.downcast::<cached_quad_payload>().unwrap_or_else(|_| unreachable!("quad payload table item"));
             (cached.payload_vertices.clone(), cached.payload_indices.clone(), cached.payload_mesh_key.clone())
         }
         None => {
@@ -434,12 +433,12 @@ pub fn lower_scene2(
     state_: &mut t,
     facts: &presentation_facts,
     density: i64,
-    snapshot: &mut dyn FnMut(i64, resource) -> R<(i64, i64, Rc<sampled_texture>)>,
+    snapshot: &mut dyn FnMut(i64, resource) -> Result<(i64, i64, Rc<sampled_texture>), Error>,
     resolve_gpu: &dyn Fn(&Shapes) -> Result<Option<String>, String>,
     rollback: &dyn Fn(),
     resolve: &dyn Fn(i64) -> Option<resource>,
     commands: &[Command],
-) -> R<Vec<draw>> {
+) -> Result<Vec<draw>, Error> {
     let identity = Transform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 0.0, ty: 0.0 };
     let native_projection = Transform {
         xx: 2.0 / facts.logical_width as f64,

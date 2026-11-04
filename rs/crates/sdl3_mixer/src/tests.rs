@@ -4,14 +4,6 @@ use crate::mixer::Mixer;
 use crate::music::Music;
 use crate::{ErrorKind, check_version, compiled_version, init, linked_version};
 
-fn get<T>(result: crate::Result<T>) -> T {
-    result.unwrap_or_else(|error| panic!("{error}"))
-}
-
-fn kind<T>(result: crate::Result<T>) -> Option<ErrorKind> {
-    result.err().map(|error| error.kind())
-}
-
 /// Reads `(floor ...)` for `key` from packaging/sdl3.lock.
 fn lock_floor(key: &str) -> (i32, i32, i32) {
     let path = format!("{}/../../../packaging/sdl3.lock", env!("CARGO_MANIFEST_DIR"));
@@ -62,20 +54,20 @@ fn track_device_and_memory_conformance() {
     let triple = |v: sdl3::Version| (v.major, v.minor, v.patch);
     let floor = lock_floor("sdl3_mixer");
     assert!(triple(compiled_version()) >= floor && triple(linked_version()) >= floor, "installed SDL3_mixer is below the lock floor");
-    get(check_version(true));
-    assert_eq!(kind(Mixer::create_memory(48_000, 2)), Some(ErrorKind::NotInitialized), "pre-init mixer");
-    assert_eq!(kind(std::thread::spawn(init::init).join().unwrap()), Some(ErrorKind::WrongDomain));
-    get(init::init());
-    assert_eq!(kind(Mixer::create_memory(7_999, 2)), Some(ErrorKind::InvalidArgument), "invalid sample rate");
-    assert_eq!(kind(Mixer::create_memory(48_000, 0)), Some(ErrorKind::InvalidArgument), "invalid channels");
+    check_version(true).unwrap();
+    assert_eq!(Mixer::create_memory(48_000, 2).err().map(|failure| failure.kind()), Some(ErrorKind::NotInitialized), "pre-init mixer");
+    assert_eq!(std::thread::spawn(init::init).join().unwrap().err().map(|failure| failure.kind()), Some(ErrorKind::WrongDomain));
+    init::init().unwrap();
+    assert_eq!(Mixer::create_memory(7_999, 2).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "invalid sample rate");
+    assert_eq!(Mixer::create_memory(48_000, 0).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "invalid channels");
 
-    let mixer = get(Mixer::create_memory(48_000, 2));
+    let mixer = Mixer::create_memory(48_000, 2).unwrap();
 
     let mut encoded = tiny_wav();
-    let audio = get(Audio::load_bytes(&mixer, &encoded));
+    let audio = Audio::load_bytes(&mixer, &encoded).unwrap();
     // the audio owns a copy: scribbling on the source changes nothing
     encoded.fill(0);
-    assert_eq!(kind(Audio::load_bytes(&mixer, &[])), Some(ErrorKind::InvalidArgument), "empty audio bytes");
+    assert_eq!(Audio::load_bytes(&mixer, &[]).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "empty audio bytes");
     match Audio::load_bytes(&mixer, b"bad audio") {
         Err(captured) if captured.kind() == ErrorKind::MixerError && !captured.message().is_empty() => {
             let original = captured.message().to_owned();
@@ -84,63 +76,63 @@ fn track_device_and_memory_conformance() {
         }
         _ => panic!("malformed audio returned the wrong result"),
     }
-    let track = get(Music::create(&mixer));
-    get(track.set_audio(&audio));
-    get(track.play(1, 5));
-    let generated = get(mixer.generate(256));
+    let track = Music::create(&mixer).unwrap();
+    track.set_audio(&audio).unwrap();
+    track.play(1, 5).unwrap();
+    let generated = mixer.generate(256).unwrap();
     assert!(
         generated.pcm_f32.len() == 256 * 2 * 4 && generated.mixed_bytes > 0 && generated.pcm_f32.iter().any(|&byte| byte != 0),
         "memory mixer did not generate finite non-silent float32 PCM"
     );
-    get(track.stop(2));
+    track.stop(2).unwrap();
 
-    let channels = get(Channels::create(&mixer, 32));
-    let selected = get(channels.play(None, 1, 1, &audio));
-    get(channels.set_volume(selected, 0.4));
-    assert_eq!(kind(channels.set_volume(0, f64::NAN)), Some(ErrorKind::InvalidArgument), "NaN channel volume");
+    let channels = Channels::create(&mixer, 32).unwrap();
+    let selected = channels.play(None, 1, 1, &audio).unwrap();
+    channels.set_volume(selected, 0.4).unwrap();
+    assert_eq!(channels.set_volume(0, f64::NAN).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "NaN channel volume");
     let misuse = std::thread::scope(|scope| scope.spawn(|| channels.play(None, 0, 0, &audio)).join().unwrap());
-    assert_eq!(kind(misuse), Some(ErrorKind::WrongDomain), "concurrent channel misuse");
+    assert_eq!(misuse.err().map(|failure| failure.kind()), Some(ErrorKind::WrongDomain), "concurrent channel misuse");
     for index in 0..32 {
-        get(channels.play(Some(index), index & 1, 0, &audio));
+        channels.play(Some(index), index & 1, 0, &audio).unwrap();
     }
-    assert_eq!(kind(channels.play(None, 0, 0, &audio)), Some(ErrorKind::MixerError), "full channel bank");
-    get(channels.destroy());
-    get(channels.destroy());
+    assert_eq!(channels.play(None, 0, 0, &audio).err().map(|failure| failure.kind()), Some(ErrorKind::MixerError), "full channel bank");
+    channels.destroy().unwrap();
+    channels.destroy().unwrap();
 
     for _ in 0..1_000 {
-        let transient = get(Music::create(&mixer));
-        get(transient.destroy());
+        let transient = Music::create(&mixer).unwrap();
+        transient.destroy().unwrap();
     }
 
-    let other = get(Mixer::create_memory(48_000, 2));
-    let foreign = get(Music::create(&other));
-    assert_eq!(kind(foreign.set_audio(&audio)), Some(ErrorKind::InvalidArgument), "cross-mixer audio attachment");
-    get(foreign.destroy());
-    get(other.destroy());
+    let other = Mixer::create_memory(48_000, 2).unwrap();
+    let foreign = Music::create(&other).unwrap();
+    assert_eq!(foreign.set_audio(&audio).err().map(|failure| failure.kind()), Some(ErrorKind::InvalidArgument), "cross-mixer audio attachment");
+    foreign.destroy().unwrap();
+    other.destroy().unwrap();
 
-    assert_eq!(kind(mixer.destroy()), Some(ErrorKind::ParentHasDependents), "mixer teardown ignored child handles");
+    assert_eq!(mixer.destroy().err().map(|failure| failure.kind()), Some(ErrorKind::ParentHasDependents), "mixer teardown ignored child handles");
     let wrong = std::thread::scope(|scope| scope.spawn(|| mixer.generate(1)).join().unwrap());
-    assert_eq!(kind(wrong), Some(ErrorKind::WrongDomain), "wrong-domain mixer access");
-    get(track.destroy());
-    get(track.destroy());
-    get(audio.destroy());
-    assert_eq!(kind(track.stop(0)), Some(ErrorKind::Destroyed), "stale track access");
-    get(mixer.destroy());
-    get(mixer.destroy());
-    assert_eq!(kind(Music::create(&mixer)), Some(ErrorKind::Destroyed), "track used destroyed mixer");
+    assert_eq!(wrong.err().map(|failure| failure.kind()), Some(ErrorKind::WrongDomain), "wrong-domain mixer access");
+    track.destroy().unwrap();
+    track.destroy().unwrap();
+    audio.destroy().unwrap();
+    assert_eq!(track.stop(0).err().map(|failure| failure.kind()), Some(ErrorKind::Destroyed), "stale track access");
+    mixer.destroy().unwrap();
+    mixer.destroy().unwrap();
+    assert_eq!(Music::create(&mixer).err().map(|failure| failure.kind()), Some(ErrorKind::Destroyed), "track used destroyed mixer");
 
-    let device = get(Mixer::create_device());
-    let device_audio = get(Audio::load_bytes(&device, &tiny_wav()));
-    let device_track = get(Music::create(&device));
-    get(device_track.set_audio(&device_audio));
-    get(device_track.play(0, 0));
-    get(device_track.stop(0));
-    get(device_track.destroy());
-    get(device_audio.destroy());
-    get(device.destroy());
+    let device = Mixer::create_device().unwrap();
+    let device_audio = Audio::load_bytes(&device, &tiny_wav()).unwrap();
+    let device_track = Music::create(&device).unwrap();
+    device_track.set_audio(&device_audio).unwrap();
+    device_track.play(0, 0).unwrap();
+    device_track.stop(0).unwrap();
+    device_track.destroy().unwrap();
+    device_audio.destroy().unwrap();
+    device.destroy().unwrap();
 
-    get(init::quit());
-    get(init::quit());
+    init::quit().unwrap();
+    init::quit().unwrap();
 }
 
 /// Runs the body of `typed_device_failure` in a child process that names a missing audio driver.
@@ -164,16 +156,16 @@ fn typed_device_failure() {
         return;
     }
     claim_main();
-    get(init::init());
+    init::init().unwrap();
     match Mixer::create_device() {
         Err(error) if error.kind() == ErrorKind::MixerError && !error.message().is_empty() => {}
         Ok(mixer) => {
-            get(mixer.destroy());
+            mixer.destroy().unwrap();
             panic!("invalid SDL audio driver unexpectedly opened a device mixer");
         }
         Err(_) => panic!("device failure returned the wrong typed error"),
     }
-    get(init::quit());
+    init::quit().unwrap();
 }
 
 static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::new();

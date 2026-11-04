@@ -13,7 +13,6 @@ use rdk_core::{
 
 const OPERATION: &str = "merge";
 
-type R<V> = Result<V, error::T>;
 
 pub struct RunParams {
     pub cancel: Option<Arc<cancel::T>>,
@@ -73,7 +72,7 @@ fn find_matching_edge_group(template: &edge_group::T, geometry_value: &geometry:
     geometry::find_edge_group(edge_group::name(template), geometry_value)
 }
 
-fn empty_points() -> R<geometry::T> {
+fn empty_points() -> Result<geometry::T, error::T> {
     let positions = packed::Float3::View::of_owned_exn(Vec::new(), Vec::new(), Vec::new()).map_err(lift)?;
     geometry::create(positions, topology::empty(0).map_err(lift)?, None, None, None).map_err(lift)
 }
@@ -82,10 +81,10 @@ fn mismatch() -> error::T {
     fail("Rdk.Mesh_merge.merge: attribute schemas must match exactly")
 }
 
-fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -> R<attribute::T> {
+fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -> Result<attribute::T, error::T> {
     use attribute::Storage;
     let storages: Vec<&Storage> =
-        attributes.iter().map(|item| attribute::View::storage(item).map_err(lift)).collect::<R<Vec<_>>>()?;
+        attributes.iter().map(|item| attribute::View::storage(item).map_err(lift)).collect::<Result<Vec<_>, error::T>>()?;
     let storage = match attribute::View::storage(template).map_err(lift)? {
         Storage::Float(_) => {
             let mut out = Vec::new();
@@ -206,7 +205,7 @@ fn merge_plain(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     geometries: &[geometry::T],
-) -> R<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let grain = grain.unwrap_or(16_384);
     if grain <= 0 {
         return Err(make("invalid_argument", "Rdk.Mesh_merge.merge: grain must be positive".to_owned()));
@@ -270,7 +269,7 @@ fn merge_plain(
     let mut attributes = Vec::new();
     for template in &first_attributes {
         let values: Vec<attribute::T> =
-            geometries.iter().map(|item| find_matching(template, item).ok_or_else(mismatch)).collect::<R<_>>()?;
+            geometries.iter().map(|item| find_matching(template, item).ok_or_else(mismatch)).collect::<Result<_, error::T>>()?;
         attributes.push(concatenate_attribute(template, &values)?);
     }
     let mut merged_groups = Vec::new();
@@ -336,7 +335,7 @@ fn merge_plain(
 
 /// An input without `name` is tagged `base + its index`; one that has it keeps its values, so
 /// nested merges keep the innermost tag.
-fn tag_inputs(name: &str, base: i64, geometries: &[geometry::T]) -> R<Vec<geometry::T>> {
+fn tag_inputs(name: &str, base: i64, geometries: &[geometry::T]) -> Result<Vec<geometry::T>, error::T> {
     let owner = attribute::Owner::Primitive;
     let mut tagged = Vec::with_capacity(geometries.len());
     for (index, item) in geometries.iter().enumerate() {
@@ -352,7 +351,7 @@ fn tag_inputs(name: &str, base: i64, geometries: &[geometry::T]) -> R<Vec<geomet
 }
 
 /// `source_base + input index` per primitive, with `source_base` for input zero.
-fn source_values(count: i64, source_base: i64, geometries: &[geometry::T], cancel_value: Option<&cancel::T>) -> R<Vec<i64>> {
+fn source_values(count: i64, source_base: i64, geometries: &[geometry::T], cancel_value: Option<&cancel::T>) -> Result<Vec<i64>, error::T> {
     let mut values = vec![source_base; count as usize];
     let mut offset = 0_usize;
     for (index, item) in geometries.iter().enumerate() {
@@ -372,7 +371,7 @@ fn merge(
     source_attribute: Option<&str>,
     source_base: i64,
     geometries: &[geometry::T],
-) -> R<geometry::T> {
+) -> Result<geometry::T, error::T> {
     let owner = attribute::Owner::Primitive;
     match source_attribute {
         None => merge_plain(cancel_value, grain, geometries),
@@ -395,7 +394,7 @@ fn merge(
 }
 
 /// Concatenate geometries with matching attribute schemas (see the module notes).
-pub fn run(params: &RunParams, geometries: &[geometry::T]) -> R<geometry::T> {
+pub fn run(params: &RunParams, geometries: &[geometry::T]) -> Result<geometry::T, error::T> {
     merge(
         params.cancel.as_deref(),
         params.grain,
@@ -408,7 +407,7 @@ pub fn run(params: &RunParams, geometries: &[geometry::T]) -> R<geometry::T> {
 /// `run` plus the provenance attribute [`PROVENANCE_ATTRIBUTE`] numbered from `tag_base` (negative:
 /// none) beside an authored `source_attribute`/`source_base`. Without an authored attribute it is
 /// `run` with the provenance attribute and `source_base = tag_base`.
-pub fn run_tagged(params: &RunTaggedParams, geometries: &[geometry::T]) -> R<geometry::T> {
+pub fn run_tagged(params: &RunTaggedParams, geometries: &[geometry::T]) -> Result<geometry::T, error::T> {
     let authored = match &params.source_attribute {
         Some(name) if !name.trim().is_empty() => Some(name.trim().to_owned()),
         _ => None,
@@ -452,24 +451,17 @@ mod tests {
     use super::*;
     use rdk_core::topology::PrimitiveKind;
 
-    fn get<V>(value: R<V>) -> V {
-        match value {
-            Ok(value) => value,
-            Err(failure) => panic!("{}", error::to_string(&failure)),
-        }
-    }
-
     fn polyline(points: &[(f64, f64, f64)]) -> geometry::T {
-        let topology_value = get(topology::create_owned(
+        let topology_value = topology::create_owned(
             points.len() as i64,
             (0..points.len() as i64).collect(),
             vec![0, points.len() as i64],
             vec![PrimitiveKind::OpenPolyline],
-        ));
+        ).unwrap();
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
-        get(geometry::create(get(packed::Float3::View::of_owned_exn(x, y, z)), topology_value, None, None, None))
+        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
     }
 
     fn params(source_attribute: Option<&str>, source_base: Option<i64>) -> RunParams {
@@ -485,17 +477,17 @@ mod tests {
 
     fn pair() -> Vec<geometry::T> {
         let weight = |values: Vec<f64>| {
-            get(attribute::create_owned("weight", attribute::Owner::Point, attribute::Storage::Float(values)))
+            attribute::create_owned("weight", attribute::Owner::Point, attribute::Storage::Float(values)).unwrap()
         };
-        let a = get(geometry::with_attribute(weight(vec![0., 1.]), &polyline(&[(0., 0., 0.), (1., 0., 0.)])));
-        let b = get(geometry::with_attribute(weight(vec![10., 12.]), &polyline(&[(10., 0., 0.), (12., 0., 0.)])));
-        let ordered = get(group::ordered(group::Owner::Primitive, "second", 1, &[0]));
-        vec![a, get(geometry::with_group(ordered, &b))]
+        let a = geometry::with_attribute(weight(vec![0., 1.]), &polyline(&[(0., 0., 0.), (1., 0., 0.)])).unwrap();
+        let b = geometry::with_attribute(weight(vec![10., 12.]), &polyline(&[(10., 0., 0.), (12., 0., 0.)])).unwrap();
+        let ordered = group::ordered(group::Owner::Primitive, "second", 1, &[0]).unwrap();
+        vec![a, geometry::with_group(ordered, &b).unwrap()]
     }
 
     #[test]
     fn concatenates_payload_and_unions_groups() {
-        let merged = get(run(&params(None, None), &pair()));
+        let merged = run(&params(None, None), &pair()).unwrap();
         assert_eq!(geometry::point_count(&merged), 4);
         assert_eq!(geometry::primitive_count(&merged), 2);
         let topology_value = topology::View::view(geometry::topology(&merged)).unwrap();
@@ -512,10 +504,10 @@ mod tests {
 
     #[test]
     fn source_attribute_tags_inputs() {
-        let merged = get(run(&params(Some("src"), Some(5)), &pair()));
+        let merged = run(&params(Some("src"), Some(5)), &pair()).unwrap();
         assert_eq!(ints("src", attribute::Owner::Primitive, &merged), [5, 6]);
         let tagged = RunTaggedParams { cancel: None, grain: None, tag_base: 3, source_attribute: None, source_base: 0 };
-        let merged = get(run_tagged(&tagged, &pair()));
+        let merged = run_tagged(&tagged, &pair()).unwrap();
         assert_eq!(ints(PROVENANCE_ATTRIBUTE, attribute::Owner::Primitive, &merged), [3, 4]);
         let both = RunTaggedParams {
             cancel: None,
@@ -524,7 +516,7 @@ mod tests {
             source_attribute: Some("authored".to_owned()),
             source_base: 20,
         };
-        let merged = get(run_tagged(&both, &pair()));
+        let merged = run_tagged(&both, &pair()).unwrap();
         assert_eq!(ints(PROVENANCE_ATTRIBUTE, attribute::Owner::Primitive, &merged), [3, 4]);
         assert_eq!(ints("authored", attribute::Owner::Primitive, &merged), [20, 21]);
     }
@@ -540,7 +532,7 @@ mod tests {
             }
             Ok(_) => panic!("expected schema mismatch"),
         }
-        let empty = get(run(&params(None, None), &[]));
+        let empty = run(&params(None, None), &[]).unwrap();
         assert_eq!(geometry::point_count(&empty), 0);
     }
 }

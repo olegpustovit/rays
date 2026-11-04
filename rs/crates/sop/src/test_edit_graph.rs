@@ -12,10 +12,6 @@ fn check(ok: bool, message: &str) {
     assert!(ok, "{message}");
 }
 
-fn get<T>(r: Result<T, String>) -> T {
-    r.unwrap_or_else(|e| panic!("{e}"))
-}
-
 /// `merge_of`: a node over any number of inputs; its output is its first input's geometry.
 fn merge_of(inputs: Vec<node::T>) -> node::T {
     build::make_geometry(
@@ -33,8 +29,8 @@ fn nodes(list: &[Option<node::T>]) -> Vec<node::T> {
 fn editable_graph() {
     let source = snapshot(&fixture());
     let null = shapes::null::factory();
-    let middle = get(edit_graph::instantiate(&null, &[source.clone()]));
-    let output = get(edit_graph::instantiate(&null, &[middle.clone()]));
+    let middle = edit_graph::instantiate(&null, &[source.clone()]).unwrap();
+    let output = edit_graph::instantiate(&null, &[middle.clone()]).unwrap();
     let document = edit_graph::of_graph(&output);
     check(
         edit_graph::node_slot_names(&document, node::id(&middle)) == Some(vec!["in0".to_owned()])
@@ -42,39 +38,39 @@ fn editable_graph() {
         "editable entry did not expose canonical slots or reject a missing node",
     );
     check(
-        edit_graph::ptr_eq(&get(edit_graph::replace_node(&middle, &document)), &document)
-            && edit_graph::ptr_eq(&get(edit_graph::apply_parameters(&document, node::id(&middle), &[])).0, &document),
+        edit_graph::ptr_eq(&edit_graph::replace_node(&middle, &document).unwrap(), &document)
+            && edit_graph::ptr_eq(&edit_graph::apply_parameters(&document, node::id(&middle), &[]).unwrap().0, &document),
         "unchanged parameter writes rebuilt the editable graph",
     );
     check(
         edit_graph::root(&document) == Some(node::id(&output)) && edit_graph::inspect(&document).len() == 3,
         "editable graph did not import the compiled DAG",
     );
-    let disconnected = get(edit_graph::disconnect(node::id(&middle), 0, &document));
+    let disconnected = edit_graph::disconnect(node::id(&middle), 0, &document).unwrap();
     check(
         edit_graph::compile(&disconnected).is_err() && edit_graph::compile_node(&disconnected, node::id(&source)).is_ok(),
         "editable graph did not retain a cookable branch around a disconnected slot",
     );
-    let reconnected = get(edit_graph::connect(node::id(&source), node::id(&middle), 0, &disconnected));
+    let reconnected = edit_graph::connect(node::id(&source), node::id(&middle), 0, &disconnected).unwrap();
     check(edit_graph::compile(&reconnected).is_ok(), "editable graph did not compile after reconnecting its slot");
     check(
         edit_graph::connect(node::id(&middle), node::id(&middle), 0, &reconnected).is_err(),
         "editable graph accepted a self cycle",
     );
     let compiled = edit_graph::compile_all(None, &reconnected);
-    let node_of = |c: &edit_graph::Compiled, id: i64| get(edit_graph::compiled_node(c, id));
+    let node_of = |c: &edit_graph::Compiled, id: i64| edit_graph::compiled_node(c, id).unwrap();
     let again = edit_graph::compile_all(Some(&compiled), &reconnected);
     check(
         node::ptr_eq(&node_of(&again, node::id(&output)), &node_of(&compiled, node::id(&output)))
-            && node::id(&node_of(&again, node::id(&output))) == node::id(&get(edit_graph::compile(&reconnected))),
+            && node::id(&node_of(&again, node::id(&output))) == node::id(&edit_graph::compile(&reconnected).unwrap()),
         "incremental compile rebuilt an unchanged document",
     );
-    let rewired = get(edit_graph::disconnect(node::id(&middle), 0, &reconnected));
+    let rewired = edit_graph::disconnect(node::id(&middle), 0, &reconnected).unwrap();
     check(
         edit_graph::compiled_node(&edit_graph::compile_all(Some(&compiled), &rewired), node::id(&output)).is_err(),
         "incremental compile reused a node across a disconnected input",
     );
-    let rewired = get(edit_graph::connect(node::id(&source), node::id(&middle), 0, &rewired));
+    let rewired = edit_graph::connect(node::id(&source), node::id(&middle), 0, &rewired).unwrap();
     let recompiled = edit_graph::compile_all(Some(&compiled), &rewired);
     check(
         node::ptr_eq(&node_of(&recompiled, node::id(&source)), &node_of(&compiled, node::id(&source)))
@@ -102,8 +98,8 @@ fn editable_graph() {
         edit_graph::factory_slot_names(&null) == ["in0"],
         "unnamed factory inputs did not use canonical port names",
     );
-    let loose_null = get(edit_graph::instantiate_optional(&null, &[None]));
-    let loose_document = get(edit_graph::add_node(Some(&[None]), None, &loose_null, &document));
+    let loose_null = edit_graph::instantiate_optional(&null, &[None]).unwrap();
+    let loose_document = edit_graph::add_node(Some(&[None]), None, &loose_null, &document).unwrap();
     check(
         edit_graph::inputs(&loose_document, node::id(&loose_null)) == Some(vec![None]),
         "factory could not create a node with a disconnected input",
@@ -124,10 +120,10 @@ fn editable_graph() {
         edit_graph::factory_slot_names(&match_size_factory) == ["input", "target"],
         "optional factory did not retain named input slots",
     );
-    let loose_match = get(edit_graph::instantiate_optional(&match_size_factory, &[None, None]));
-    let optional_document = get(edit_graph::add_node(Some(&[None, None]), Some(&match_size_factory), &loose_match, &document));
-    let optional_document = get(edit_graph::connect(node::id(&source), node::id(&loose_match), 0, &optional_document));
-    let without_target = get(edit_graph::compile_node(&optional_document, node::id(&loose_match)));
+    let loose_match = edit_graph::instantiate_optional(&match_size_factory, &[None, None]).unwrap();
+    let optional_document = edit_graph::add_node(Some(&[None, None]), Some(&match_size_factory), &loose_match, &document).unwrap();
+    let optional_document = edit_graph::connect(node::id(&source), node::id(&loose_match), 0, &optional_document).unwrap();
+    let without_target = edit_graph::compile_node(&optional_document, node::id(&loose_match)).unwrap();
     check(
         edit_graph::node_slot_names(&optional_document, node::id(&loose_match)) == Some(vec!["input".to_owned(), "target".to_owned()]),
         "editable entry lost its factory's named slots",
@@ -136,14 +132,14 @@ fn editable_graph() {
         node::inputs(&without_target).len() == 1 && edit_graph::factory_inputs(&match_size_factory) == [Required, Optional],
         "optional factory slot was treated as a disconnected required input",
     );
-    let optional_document = get(edit_graph::connect(node::id(&middle), node::id(&loose_match), 1, &optional_document));
-    let with_target = get(edit_graph::compile_node(&optional_document, node::id(&loose_match)));
+    let optional_document = edit_graph::connect(node::id(&middle), node::id(&loose_match), 1, &optional_document).unwrap();
+    let with_target = edit_graph::compile_node(&optional_document, node::id(&loose_match)).unwrap();
     check(
         node::id(&with_target) == node::id(&loose_match) && node::inputs(&with_target).len() == 2,
         "connecting an optional slot did not rebuild the physical SOP inputs",
     );
-    let optional_document = get(edit_graph::disconnect(node::id(&loose_match), 1, &optional_document));
-    let without_again = get(edit_graph::compile_node(&optional_document, node::id(&loose_match)));
+    let optional_document = edit_graph::disconnect(node::id(&loose_match), 1, &optional_document).unwrap();
+    let without_again = edit_graph::compile_node(&optional_document, node::id(&loose_match)).unwrap();
     check(
         node::id(&without_again) == node::id(&loose_match) && node::inputs(&without_again).len() == 1,
         "disconnecting an optional slot did not restore the unary SOP",
@@ -163,29 +159,29 @@ fn editable_graph() {
 ,
         "rest slot arity or position was not validated",
     );
-    let rest_node = get(edit_graph::instantiate_optional(&rest_factory, &[Some(source.clone())]));
-    let rest_document = get(edit_graph::add_node(Some(&[None]), Some(&rest_factory), &rest_node, &document));
+    let rest_node = edit_graph::instantiate_optional(&rest_factory, &[Some(source.clone())]).unwrap();
+    let rest_document = edit_graph::add_node(Some(&[None]), Some(&rest_factory), &rest_node, &document).unwrap();
     let grow = |index: i64, source_node: &node::T, d: &edit_graph::T| {
         edit_graph::connect(node::id(source_node), node::id(&rest_node), index, d)
     };
-    let rest_document = get(grow(0, &source, &rest_document));
-    let rest_document = get(grow(1, &middle, &rest_document));
-    let rest_document = get(grow(2, &source, &rest_document));
+    let rest_document = grow(0, &source, &rest_document).unwrap();
+    let rest_document = grow(1, &middle, &rest_document).unwrap();
+    let rest_document = grow(2, &source, &rest_document).unwrap();
     check(
         edit_graph::node_slot_names(&rest_document, node::id(&rest_node))
             == Some(vec!["input".to_owned(), "input_2".to_owned(), "input_3".to_owned()])
             && grow(4, &source, &rest_document).is_err()
-            && node::inputs(&get(edit_graph::compile_node(&rest_document, node::id(&rest_node)))).len() == 3,
+            && node::inputs(&edit_graph::compile_node(&rest_document, node::id(&rest_node)).unwrap()).len() == 3,
         "rest slot did not grow, name its extras or rebuild through the factory",
     );
     let stored_rest = edit_graph::find(&rest_document, node::id(&rest_node)).unwrap();
     check(
-        node::ptr_eq(&get(edit_graph::compile_node(&rest_document, node::id(&rest_node))), &stored_rest),
+        node::ptr_eq(&edit_graph::compile_node(&rest_document, node::id(&rest_node)).unwrap(), &stored_rest),
         "compiling unchanged connected rest inputs rebuilt the stored node",
     );
-    let rest_document = get(edit_graph::disconnect(node::id(&rest_node), 1, &rest_document));
+    let rest_document = edit_graph::disconnect(node::id(&rest_node), 1, &rest_document).unwrap();
     check(
-        node::inputs(&get(edit_graph::compile_node(&rest_document, node::id(&rest_node)))).len() == 2,
+        node::inputs(&edit_graph::compile_node(&rest_document, node::id(&rest_node)).unwrap()).len() == 2,
         "a disconnected rest input was not skipped",
     );
     let optional_rest_factory = edit_graph::factory_slots(
@@ -202,24 +198,24 @@ fn editable_graph() {
             && edit_graph::instantiate_optional(&optional_rest_factory, &[Some(source.clone()), None, None]).is_ok(),
         "optional rest validates the fixed prefix and permits zero extras",
     );
-    let optional_rest_node = get(edit_graph::instantiate_optional(&optional_rest_factory, &[Some(source.clone()), None]));
-    let doc = get(edit_graph::add_node(
+    let optional_rest_node = edit_graph::instantiate_optional(&optional_rest_factory, &[Some(source.clone()), None]).unwrap();
+    let doc = edit_graph::add_node(
         Some(&[Some(node::id(&source)), None]),
         Some(&optional_rest_factory),
         &optional_rest_node,
         &document,
-    ));
-    let doc = get(edit_graph::connect(node::id(&middle), node::id(&optional_rest_node), 2, &doc));
-    let doc = get(edit_graph::connect(node::id(&source), node::id(&optional_rest_node), 3, &doc));
+    ).unwrap();
+    let doc = edit_graph::connect(node::id(&middle), node::id(&optional_rest_node), 2, &doc).unwrap();
+    let doc = edit_graph::connect(node::id(&source), node::id(&optional_rest_node), 3, &doc).unwrap();
     check(
         edit_graph::node_slot_names(&doc, node::id(&optional_rest_node))
             == Some(["base", "fixed", "extras", "extras_2"].iter().map(|s| (*s).to_owned()).collect())
-            && node::inputs(&get(edit_graph::compile_node(&doc, node::id(&optional_rest_node)))).len() == 3,
+            && node::inputs(&edit_graph::compile_node(&doc, node::id(&optional_rest_node)).unwrap()).len() == 3,
         "optional rest grows after a disconnected fixed slot",
     );
-    let doc = get(edit_graph::disconnect(node::id(&optional_rest_node), 2, &doc));
-    let doc = get(edit_graph::disconnect(node::id(&optional_rest_node), 3, &doc));
-    let compiled_rest = get(edit_graph::compile_node(&doc, node::id(&optional_rest_node)));
+    let doc = edit_graph::disconnect(node::id(&optional_rest_node), 2, &doc).unwrap();
+    let doc = edit_graph::disconnect(node::id(&optional_rest_node), 3, &doc).unwrap();
+    let compiled_rest = edit_graph::compile_node(&doc, node::id(&optional_rest_node)).unwrap();
     check(
         node::id(&compiled_rest) == node::id(&optional_rest_node) && node::inputs(&compiled_rest).len() == 1,
         "optional rest disconnect preserves identity and the fixed prefix",

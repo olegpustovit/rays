@@ -1,10 +1,6 @@
 mod common;
 use runtime::*;
 
-fn get<A>(result: Result<A, ogpu::error::Error>) -> A {
-    result.unwrap_or_else(|e| panic!("{}", ogpu::error::to_string(&e)))
-}
-
 // Needs SDL_VIDEODRIVER=dummy (or a display) and the initial thread; a missing window is a skip,
 // as in the OCaml test.
 fn window_runtime_visibility() {
@@ -15,20 +11,20 @@ fn window_runtime_visibility() {
             return;
         }
     };
-    get(set_text_input(&mut runtime, Some(((1, 2, 20, 12), 7))));
-    get(set_text_input(&mut runtime, None));
-    get(set_text_input(&mut runtime, None));
-    assert!(!get(visible(&mut runtime)), "native window was not initially hidden");
-    get(show(&mut runtime));
-    assert!(get(visible(&mut runtime)), "show did not set visible flag");
+    set_text_input(&mut runtime, Some(((1, 2, 20, 12), 7))).unwrap();
+    set_text_input(&mut runtime, None).unwrap();
+    set_text_input(&mut runtime, None).unwrap();
+    assert!(!visible(&mut runtime).unwrap(), "native window was not initially hidden");
+    show(&mut runtime).unwrap();
+    assert!(visible(&mut runtime).unwrap(), "show did not set visible flag");
     // a window target hands out a surface configuration with a layer and tracks resize
-    let configuration = get(surface_configuration(&mut runtime));
+    let configuration = surface_configuration(&mut runtime).unwrap();
     assert!(configuration.layer.is_some() && configuration.logical_width > 0);
-    get(resize(&mut runtime, 40, 30));
+    resize(&mut runtime, 40, 30).unwrap();
     assert_eq!(frame_facts(&runtime).logical_width, 40);
-    get(set_cursor(&mut runtime, cursor_shape::Text));
-    get(set_cursor(&mut runtime, cursor_shape::Text));
-    get(destroy(&mut runtime));
+    set_cursor(&mut runtime, cursor_shape::Text).unwrap();
+    set_cursor(&mut runtime, cursor_shape::Text).unwrap();
+    destroy(&mut runtime).unwrap();
     assert!(show(&mut runtime).is_err());
     println!("runtime visibility: hidden/show flags passed");
 }

@@ -48,7 +48,7 @@ pub fn triangle_point(value: &T, triangle: i64, local: i64) -> i64 {
         0 => value.triangle_a[triangle as usize],
         1 => value.triangle_b[triangle as usize],
         2 => value.triangle_c[triangle as usize],
-        _ => panic!("Boolean face CDT local corner must be 0, 1, or 2"),
+        _ => unreachable!("Boolean face CDT local corner must be 0, 1, or 2"),
     }
 }
 

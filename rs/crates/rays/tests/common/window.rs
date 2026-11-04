@@ -15,22 +15,14 @@ pub fn run(tests: &[(&str, fn())]) {
         return;
     }
     let filters: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    let mut failed = 0;
     for (name, test) in tests {
         if !filters.is_empty() && !filters.iter().any(|f| f == name) {
             continue;
         }
         let started = std::time::Instant::now();
-        match std::panic::catch_unwind(test) {
-            Ok(()) => println!("test {name} ... ok ({:.2}s)", started.elapsed().as_secs_f64()),
-            Err(_) => {
-                println!("test {name} ... FAILED");
-                failed += 1;
-            }
-        }
+        // A failing test panics and ends the process with the panic message and exit code 101.
+        test();
+        println!("test {name} ... ok ({:.2}s)", started.elapsed().as_secs_f64());
     }
     super::release_keepalive();
-    if failed > 0 {
-        std::process::exit(101);
-    }
 }

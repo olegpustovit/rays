@@ -3,7 +3,6 @@
 //! Not ported: the canvas wrong-execution-context checks (OCaml Domain/Thread based) and the
 //! allocation (`Gc`) ceilings.
 use crate::common;
-use crate::common::get;
 use rays::camera;
 use rays::canvas;
 use rays::material;
@@ -332,23 +331,23 @@ fn gpu_rays_float32_attribute_stream() {
             drawable_height: 128,
             ..rr::default_configuration()
         };
-        let runtime = get(rr::create_offscreen(&configuration));
+        let runtime = rr::create_offscreen(&configuration).unwrap();
         let draw = |entry: &se::sampled_draw| {
             rr::prepared_draw(entry.family, Some(entry.blend), entry.texture.clone(), entry.auxiliary.clone(), entry.vertex_attributes.clone(), Some(entry.samples), entry.draw.clone())
         };
         let render_entry = |entry: &se::sampled_draw| {
-            get(rr::draw(Some((0., 0., 0., 1.)), &runtime, &[draw(entry)]));
-            get(rr::read_pixels(&runtime, 512))
+            rr::draw(Some((0., 0., 0., 1.)), &runtime, &[draw(entry)]).unwrap();
+            rr::read_pixels(&runtime, 512).unwrap()
         };
         let current = render_entry(&first);
-        let before = get(rr::stats(&runtime)).uploaded_bytes;
+        let before = rr::stats(&runtime).unwrap().uploaded_bytes;
         let changed = render_entry(&second);
-        let uploaded = get(rr::stats(&runtime)).uploaded_bytes - before;
+        let uploaded = rr::stats(&runtime).unwrap().uploaded_bytes - before;
         assert!(changed != current, "recolour did not change visible triangle pixels");
         assert!(uploaded == 36, "color edit reuploaded geometry ({uploaded} bytes)");
         let many: Vec<_> = (0..65).map(|_| draw(&second)).collect();
-        get(rr::draw(Some((0., 0., 0., 1.)), &runtime, &many));
-        let combined = get(rr::read_pixels(&runtime, 512));
+        rr::draw(Some((0., 0., 0., 1.)), &runtime, &many).unwrap();
+        let combined = rr::read_pixels(&runtime, 512).unwrap();
         assert!(combined == changed, "coalescing lost the float32 attribute stream");
         let _ = rr::destroy(&runtime);
         done = true;
