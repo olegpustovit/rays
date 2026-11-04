@@ -1,0 +1,14 @@
+[package]
+name = "editor_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+input = { path = "../input" }
+rays = { path = "../rays" }
+rays_math = { path = "../rays_math" }
+rays_diagnostic = { path = "../rays_diagnostic" }
+flow_syntax = { path = "../flow_syntax" }
+runtime_resources = { path = "../runtime_resources" }
+cfmt = { path = "../cfmt" }

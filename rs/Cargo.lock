@@ -31,6 +31,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "editor_core"
+version = "0.1.0"
+dependencies = [
+ "cfmt",
+ "flow_syntax",
+ "input",
+ "rays",
+ "rays_diagnostic",
+ "rays_math",
+ "runtime_resources",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -56,6 +69,38 @@ dependencies = [
  "input",
  "param",
  "rays_diagnostic",
+]
+
+[[package]]
+name = "flow_graph"
+version = "0.1.0"
+dependencies = [
+ "cfmt",
+ "flow_check",
+ "flow_eval",
+ "flow_syntax",
+ "input",
+ "param",
+ "rays_diagnostic",
+ "rays_math",
+]
+
+[[package]]
+name = "flow_ir"
+version = "0.1.0"
+dependencies = [
+ "cfmt",
+ "flow_check",
+ "flow_eval",
+ "flow_syntax",
+ "input",
+ "lru",
+ "mem",
+ "parallel",
+ "param",
+ "rays_diagnostic",
+ "rays_math",
+ "scene_command",
 ]
 
 [[package]]
@@ -143,6 +188,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ogpu_metal"
+version = "0.1.0"
+dependencies = [
+ "metal",
+ "native_layer_token",
+ "ogpu",
+ "ogpu_core",
+]
+
+[[package]]
 name = "ogpu_mock"
 version = "0.1.0"
 dependencies = [
@@ -174,6 +229,43 @@ dependencies = [
 [[package]]
 name = "port"
 version = "0.1.0"
+
+[[package]]
+name = "pxui"
+version = "0.1.0"
+dependencies = [
+ "cfmt",
+ "input",
+ "mem",
+ "ocaml_int",
+ "param",
+ "rays",
+ "rays_math",
+ "scene_command",
+]
+
+[[package]]
+name = "rays"
+version = "0.1.0"
+dependencies = [
+ "cfmt",
+ "input",
+ "lru",
+ "mem",
+ "ocaml_int",
+ "ogpu",
+ "ogpu_core",
+ "ogpu_mock",
+ "ogpu_vulkan",
+ "parallel",
+ "rays_math",
+ "renderer",
+ "runtime",
+ "runtime_input",
+ "runtime_resources",
+ "scene_command",
+ "sdl3",
+]
 
 [[package]]
 name = "rays-t"
@@ -210,6 +302,28 @@ name = "rays_math_sys"
 version = "0.1.0"
 
 [[package]]
+name = "rdk"
+version = "0.1.0"
+dependencies = [
+ "rdk_boolean",
+ "rdk_core",
+ "rdk_geom",
+ "rdk_ops",
+]
+
+[[package]]
+name = "rdk_boolean"
+version = "0.1.0"
+dependencies = [
+ "cfmt",
+ "parallel",
+ "rays_math",
+ "rdk_core",
+ "rdk_geom",
+ "rdk_ops",
+]
+
+[[package]]
 name = "rdk_core"
 version = "0.1.0"
 dependencies = [
@@ -238,9 +352,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdk_rays"
+version = "0.1.0"
+dependencies = [
+ "param",
+ "rays",
+ "rays_math",
+ "rdk_core",
+ "rdk_geom",
+ "rdk_ops",
+]
+
+[[package]]
 name = "renderer"
 version = "0.1.0"
 dependencies = [
+ "cfmt",
  "lru",
  "mem",
  "ogpu",
@@ -251,6 +378,7 @@ dependencies = [
  "runtime",
  "runtime_resources",
  "scene_command",
+ "sdl3",
 ]
 
 [[package]]
@@ -352,6 +480,21 @@ name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
+name = "sop"
+version = "0.1.0"
+dependencies = [
+ "cfmt",
+ "input",
+ "lru",
+ "mem",
+ "parallel",
+ "param",
+ "rays_diagnostic",
+ "rays_math",
+ "rdk",
+]
 
 [[package]]
 name = "vulkan"

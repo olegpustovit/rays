@@ -1,0 +1,13 @@
+[package]
+name = "rdk_rays"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rdk_core = { path = "../rdk_core" }
+rdk_geom = { path = "../rdk_geom" }
+rdk_ops = { path = "../rdk_ops" }
+rays = { path = "../rays" }
+rays_math = { path = "../rays_math" }
+param = { path = "../param" }
