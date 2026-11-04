@@ -136,7 +136,7 @@ fn reads_material(n: &p::Node, graph: &str) -> bool {
 }
 
 fn list(items: Vec<Syntax>) -> Syntax {
-    s::make(Node::List(items))
+    s::make(Node::List(items.into()))
 }
 
 /// A material put on a SOP graph as a whole: its result node when that is a material node, else a

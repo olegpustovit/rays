@@ -10,7 +10,7 @@ fn sym(name: &str) -> Syntax {
 fn call(head: &str, args: Vec<Syntax>) -> Syntax {
     let mut items = vec![sym(head)];
     items.extend(args);
-    s::make(Node::List(items))
+    s::make(Node::List(items.into()))
 }
 
 /// The first graph of the workspace `source` whose `:context` is `context`.

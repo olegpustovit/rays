@@ -172,7 +172,7 @@ fn patch_source(source: &[S], before: &S, after: &S) -> (Vec<S>, HashMap<i64, S>
                     at = form.span.finish + 1;
                     out.push(form);
                 }
-                Node::Vec(out)
+                Node::Vec(out.into())
             }
             (_, node) => node.clone(),
         };
@@ -194,7 +194,7 @@ fn patch_source(source: &[S], before: &S, after: &S) -> (Vec<S>, HashMap<i64, S>
                 Node::List(items) => Node::List(items.iter().map(|i| go(forms, shift, before, after, i)).collect()),
                 Node::Vec(items) => Node::Vec(items.iter().map(|i| go(forms, shift, before, after, i)).collect()),
                 Node::Map(items) => Node::Map(items.iter().map(|i| go(forms, shift, before, after, i)).collect()),
-                Node::Quote(kind, item) => Node::Quote(*kind, Box::new(go(forms, shift, before, after, item))),
+                Node::Quote(kind, item) => Node::Quote(*kind, std::sync::Arc::new(go(forms, shift, before, after, item))),
                 node => node.clone(),
             };
             S { node, span: shift(&form.span), ..form.clone() }

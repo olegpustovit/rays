@@ -98,7 +98,7 @@ fn document_boundary_validation_dump_preset_gpu() {
     let directory = std::env::temp_dir().join(format!("rays-document-contract-{}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("temp dir");
     let dir = directory.to_string_lossy().into_owned();
-    let saved = preset::save(&dir, "round", &doc, &s::make(Node::Map(Vec::new()))).expect("save");
+    let saved = preset::save(&dir, "round", &doc, &s::make(Node::Map(Vec::new().into()))).expect("save");
     let loaded = preset::load(Some(gpu), &saved, Some(&factories()), &doc.settings).expect("load");
     assert!(
         workspace_doc::to_text(&loaded.doc.workspace.ws) == workspace_doc::to_text(&workspace) && loaded.doc.networks.len() == doc.networks.len(),

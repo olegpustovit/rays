@@ -56,7 +56,7 @@ fn map(pairs: Vec<(&str, Syntax)>) -> Syntax {
         items.push(kw(k));
         items.push(v);
     }
-    make_node(Node::Map(items))
+    make_node(Node::Map(items.into()))
 }
 
 fn print(form: &Syntax) -> String {
@@ -166,7 +166,7 @@ pub mod settings {
             Value::Choice(v) => make_node(Node::List(vec![
                 make_node(Node::Sym("choice".into())),
                 make_node(Node::Str(v.clone().into_bytes())),
-            ])),
+            ].into())),
             Value::Pair(x, y) => vec_of_numbers(&[*x, *y]),
         }
     }
@@ -267,7 +267,7 @@ pub mod settings {
             items.push(kw(name));
             items.push(encode(value));
         }
-        let form = make_node(Node::List(items));
+        let form = make_node(Node::List(items.into()));
         write_text(filename, &print(&form))
     }
 

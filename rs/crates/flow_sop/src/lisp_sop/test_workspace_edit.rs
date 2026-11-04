@@ -69,7 +69,7 @@ fn sym(t: &str) -> Syntax {
 }
 
 fn call(items: Vec<Syntax>) -> Syntax {
-    s::make(Node::List(items))
+    s::make(Node::List(items.into()))
 }
 
 fn node(l: &[&str]) -> Vec<String> {
@@ -415,7 +415,7 @@ fn part7_functions_and_macros() {
         ]
         .concat(),
     );
-    let lits = e::literals(&call(vec![sym("sop/transform"), sym("a"), s::make(Node::Kw("translate".into())), s::make(Node::Vec(vec![num("1"), num("2"), num("3")]))]));
+    let lits = e::literals(&call(vec![sym("sop/transform"), sym("a"), s::make(Node::Kw("translate".into())), s::make(Node::Vec(vec![num("1"), num("2"), num("3")].into()))]));
     assert_eq!(lits.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>(), vec![vec![3, 0], vec![3, 1], vec![3, 2]], "literals of an expression");
     refused("", "macro name taken", &base(), Op::MakeMacro { nodes: vec![node(&["b"])], name: "range".into(), holes: vec![] });
     // several bindings: their own names become fresh names in the template

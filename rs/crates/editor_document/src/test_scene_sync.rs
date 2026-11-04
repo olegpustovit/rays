@@ -211,7 +211,7 @@ fn sym(name: &str) -> Syntax {
 fn call(head: &str, args: Vec<Syntax>) -> Syntax {
     let mut items = vec![sym(head)];
     items.extend(args);
-    mk(Node::List(items))
+    mk(Node::List(items.into()))
 }
 
 fn edit_ws(doc: &Doc, op: &Op) -> Result<workspace_doc::T, String> {

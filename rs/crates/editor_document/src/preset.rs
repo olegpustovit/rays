@@ -81,7 +81,7 @@ pub fn save(directory: &str, name: &str, doc: &document::T, view: &S) -> Result<
         return Err("viewport contains nonfinite values".to_owned());
     }
     let body = text(doc);
-    let view_text = lisp::print(&[s::make(Node::List(vec![s::make(Node::Sym("view".to_owned())), view.clone()]))]).0;
+    let view_text = lisp::print(&[s::make(Node::List(vec![s::make(Node::Sym("view".to_owned())), view.clone()].into()))]).0;
     let target = path(directory, name);
     editor_core::store::write_text(&target, &format!("{body}\n{view_text}"))?;
     Ok(target)
@@ -122,7 +122,7 @@ pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::Gpu::Config>, ops: Vec<FlowOp
     let view = match forms.iter().find(|f| matches!(&f.node, Node::List(items) if matches!(items.first().map(|h| &h.node), Some(Node::Sym(h)) if h == "view"))) {
         Some(S { node: Node::List(items), .. }) if items.len() == 2 => items[1].clone(),
         Some(_) => return Err("view: expected one value".to_owned()),
-        None => s::make(Node::Map(Vec::new())),
+        None => s::make(Node::Map(Vec::new().into())),
     };
     let doc = lowering::of_workspace(&lowering::Options { factories: Some(factories_v), gpu, ..Default::default() }, &workspace).map_err(|d| rays_diagnostic::to_string(&d))?;
     document::validate(&doc)?;

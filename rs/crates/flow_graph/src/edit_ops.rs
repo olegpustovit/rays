@@ -197,7 +197,7 @@ fn add_arm(src: &[S], node: &[String], after: i64, fallback: &Option<S>) -> R<Ve
         let mut items = vec![sym(&h)];
         items.extend(prefix.iter().cloned());
         items.extend(flat_pairs(&insert_at(&arms, after + 1, &[(test, fb)])));
-        set_node(sx, &leaf, with_node(&e, Node::List(items)))
+        set_node(sx, &leaf, with_node(&e, Node::List(items.into())))
     })
 }
 
@@ -212,7 +212,7 @@ fn delete_arm(src: &[S], node: &[String], index: i64) -> R<Vec<S>> {
         let mut items = vec![sym(&h)];
         items.extend(prefix.iter().cloned());
         items.extend(flat_pairs(&kept));
-        set_node(sx, &leaf, with_node(&e, Node::List(items)))
+        set_node(sx, &leaf, with_node(&e, Node::List(items.into())))
     })
 }
 
@@ -322,7 +322,7 @@ fn set_input_default(src: &[S], form: &str, input: &str, value: &S) -> R<Vec<S>>
                             .map(|d| match &d.node {
                                 Node::List(l) if l.len() >= 3 && sym_of(&l[0]) == Some(input) => {
                                     hit = true;
-                                    with_node(d, Node::List(vec![l[0].clone(), l[1].clone(), l[2].clone(), value.clone()]))
+                                    with_node(d, Node::List(vec![l[0].clone(), l[1].clone(), l[2].clone(), value.clone()].into()))
                                 }
                                 _ => d.clone(),
                             })
@@ -640,7 +640,7 @@ fn make_macro(src: &[S], nodes: &[Path], name: &str, holes: &[(Vec<i64>, String)
         }
         let mut params = names.clone();
         params.extend(free_n.iter().cloned());
-        defn = Some(call("defmacro", vec![sym(name), vec(params.iter().map(|p| sym(p)).collect()), mk(Node::Quote(QuoteKind::Quasi, Box::new(body)))]));
+        defn = Some(call("defmacro", vec![sym(name), vec(params.iter().map(|p| sym(p)).collect()), mk(Node::Quote(QuoteKind::Quasi, std::sync::Arc::new(body)))]));
         let mut args = hole_vals.clone();
         args.extend(free_n.iter().map(|f| sym(f)));
         let added = vec![(x.out().0.clone(), call(name, args))];
@@ -679,7 +679,7 @@ fn make_defn(src: &[S], nodes: &[Path], name: &str, context: &str, params: &[(St
         let mut typed = Vec::new();
         for n in &outer {
             let ty = params.iter().find(|p| &p.0 == n).map(|p| p.1.clone()).ok_or_else(|| fail("The edit failed: Not_found"))?;
-            typed.push(mk(Node::List(vec![sym(n), sym(":"), sym(&ty)])));
+            typed.push(mk(Node::List(vec![sym(n), sym(":"), sym(&ty)].into())));
         }
         defn = Some(call("defn", vec![sym(name), kwf("context"), sym(context), vec(typed), body_of(&x)]));
         let added = vec![(x.out().0.clone(), call(name, outer.iter().map(|n| sym(n)).collect()))];
@@ -947,7 +947,7 @@ fn move_item(src: &[S], node: &[String], pos: i64) -> R<Vec<S>> {
                 };
                 let mut items = vec![l[0].clone()];
                 items.extend(out);
-                set_node(sx, &leaf, with_node(&e, Node::List(items)))
+                set_node(sx, &leaf, with_node(&e, Node::List(items.into())))
             }
             _ => Err(fail(&format!("There is no item {} to move up.", pos))),
         }
@@ -1094,7 +1094,7 @@ fn rename_graph(src: &[S], name: &str, to: &str) -> R<Vec<S>> {
                     Node::List(l) if l.len() >= 2 => {
                         let mut out = vec![l[0].clone(), with_node(&l[1], Node::Sym(to.to_owned()))];
                         out.extend(l[2..].iter().cloned());
-                        with_node(&item, Node::List(out))
+                        with_node(&item, Node::List(out.into()))
                     }
                     _ => item,
                 }

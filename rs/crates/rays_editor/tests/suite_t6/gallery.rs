@@ -72,7 +72,7 @@ fn fixtures() -> Vec<Fixture> {
         )
     };
     let mesh_body = match &graph(&forms, "geom_meshes").node {
-        Node::List(xs) if xs.len() == 3 => S::make(Node::List(vec![xs[0].clone(), xs[1].clone(), sym("extruded")])),
+        Node::List(xs) if xs.len() == 3 => S::make(Node::List(vec![xs[0].clone(), xs[1].clone(), sym("extruded")].into())),
         _ => panic!("geom_meshes shape"),
     };
     let reference_star = flow_sop::lisp_sop::node(&[("source".to_owned(), flow_sop::lisp_sop::snapshot(&star))], "(sop/poly_extrude (sop/ext_source) :distance 0.65)");

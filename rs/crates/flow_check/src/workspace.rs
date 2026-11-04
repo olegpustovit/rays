@@ -1195,8 +1195,8 @@ impl Checker {
      let is_acc = matches!(kind, LoopKind::Fold | LoopKind::Scan);
      let even = |xs: &Vec<Syntax>| xs.len() % 2 == 0;
      let shape: Option<(Vec<Syntax>, Vec<Syntax>, &Syntax, Vec<Vec<usize>>)> = match args {
-         [Syntax { node: SNode::Vec(a), .. }, Syntax { node: SNode::Vec(i), .. }, b] if is_acc && even(a) && even(i) => Some((a.clone(), i.clone(), b, Vec::new())),
-         [Syntax { node: SNode::Vec(i), .. }, b] if !is_acc && even(i) => Some((Vec::new(), i.clone(), b, Vec::new())),
+         [Syntax { node: SNode::Vec(a), .. }, Syntax { node: SNode::Vec(i), .. }, b] if is_acc && even(a) && even(i) => Some((a.to_vec(), i.to_vec(), b, Vec::new())),
+         [Syntax { node: SNode::Vec(i), .. }, b] if !is_acc && even(i) => Some((Vec::new(), i.to_vec(), b, Vec::new())),
          [Syntax { node: SNode::Vec(i), .. }, Syntax { node: SNode::Kw(k), .. }, sk, b] if k == "skip" && name == "for" && even(i) => {
              let skip = match skip_tuples(sk) {
                  Some(t) => t,
@@ -1205,7 +1205,7 @@ impl Checker {
                      Vec::new()
                  }
              };
-             Some((Vec::new(), i.clone(), b, skip))
+             Some((Vec::new(), i.to_vec(), b, skip))
          }
          _ => None,
      };

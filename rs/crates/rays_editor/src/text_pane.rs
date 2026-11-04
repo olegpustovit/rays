@@ -778,9 +778,9 @@ fn closure(root: &S, top: &str) -> Option<S> {
         base,
         Node::List(vec![
             form(base + 1, Node::Sym("let*".to_owned())),
-            form(base + 2, Node::Vec(vec_items)),
+            form(base + 2, Node::Vec(vec_items.into())),
             form(base + 3, Node::Sym(top.to_owned())),
-        ]),
+        ].into()),
     );
     out.notes = vec![
         note,
@@ -853,11 +853,11 @@ fn selection_form(source: &[S], path: &[String], form: &S) -> Result<S, Diagnost
         .collect();
     let kids = s::children(body);
     let vec_form = S { node: Node::Vec(bindings.into_iter().flat_map(|(p, v)| [p, v]).collect()), ..kids[1].clone() };
-    let new_body = S { node: Node::List(vec![kids[0].clone(), vec_form, res.clone()]), ..body.clone() };
+    let new_body = S { node: Node::List(vec![kids[0].clone(), vec_form, res.clone()].into()), ..body.clone() };
     let mut root_kids: Vec<S> = s::children(root).into_iter().cloned().collect();
     root_kids.pop();
     root_kids.push(new_body);
-    Ok(S { node: Node::List(root_kids), ..root.clone() })
+    Ok(S { node: Node::List(root_kids.into()), ..root.clone() })
 }
 
 /// The `Set_graph` of the graph form a Graph tab holds, or (with `selection`, the shown binding's
@@ -1353,22 +1353,22 @@ fn merge_forms(b: &S, m: &S, t: &S) -> Option<S> {
             let (bv, mv, tv) = (pair_entries(bv)?, pair_entries(mv)?, pair_entries(tv)?);
             let bindings = merge_keyed(&bv, &mv, &tv)?;
             let rest = merge_seq(&bl[2..], &ml[2..], &tl[2..])?;
-            let mut kids = vec![ml[0].clone(), S { node: Node::Vec(bindings), ..ml[1].clone() }];
+            let mut kids = vec![ml[0].clone(), S { node: Node::Vec(bindings.into()), ..ml[1].clone() }];
             kids.extend(rest);
-            Some(node(Node::List(kids)))
+            Some(node(Node::List(kids.into())))
         }
         (Node::List(bl), Node::List(ml), Node::List(tl)) if matches!(bl.first().map(|f| &f.node), Some(Node::Sym(h)) if h == "workspace") => {
-            Some(node(Node::List(merge_keyed(&entries(bl), &entries(ml), &entries(tl))?)))
+            Some(node(Node::List(merge_keyed(&entries(bl), &entries(ml), &entries(tl))?.into())))
         }
         (Node::List(bl), Node::List(ml), Node::List(tl)) => {
             let kids = match merge_seq(bl, ml, tl) {
                 Some(k) => Some(k),
                 None => merge_call(bl, ml, tl),
             };
-            Some(node(Node::List(kids?)))
+            Some(node(Node::List(kids?.into())))
         }
-        (Node::Vec(bl), Node::Vec(ml), Node::Vec(tl)) => Some(node(Node::Vec(merge_seq(bl, ml, tl)?))),
-        (Node::Map(bl), Node::Map(ml), Node::Map(tl)) => Some(node(Node::Map(merge_seq(bl, ml, tl)?))),
+        (Node::Vec(bl), Node::Vec(ml), Node::Vec(tl)) => Some(node(Node::Vec(merge_seq(bl, ml, tl)?.into()))),
+        (Node::Map(bl), Node::Map(ml), Node::Map(tl)) => Some(node(Node::Map(merge_seq(bl, ml, tl)?.into()))),
         _ => None,
     }
 }

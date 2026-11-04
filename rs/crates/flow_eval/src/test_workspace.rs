@@ -680,7 +680,7 @@ fn check_cjs_notes_and_metadata() {
     // setNote edits and removes notes
     fn set_notes(key: &str, notes: &[String], y: &Syntax) -> Syntax {
         let map = |l: &Vec<Syntax>| l.iter().map(|c| set_notes(key, notes, c)).collect::<Vec<_>>();
-        let node = match &y.node { SN::List(l) => SN::List(map(l)), SN::Vec(l) => SN::Vec(map(l)), SN::Map(l) => SN::Map(map(l)), n => n.clone() };
+        let node = match &y.node { SN::List(l) => SN::List(map(l).into()), SN::Vec(l) => SN::Vec(map(l).into()), SN::Map(l) => SN::Map(map(l).into()), n => n.clone() };
         let mut out = y.clone();
         out.node = node;
         if matches!(&y.node, SN::Sym(k) if k == key) { out.notes = notes.to_vec(); }

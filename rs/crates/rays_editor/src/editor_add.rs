@@ -140,9 +140,9 @@ pub fn value_expression(ops: &[op::Op], wire: Option<(String, Ty)>, context: &Co
     match o {
         "number" => (num("1.0"), "value".to_owned()),
         "t" => (sym("t"), "time".to_owned()),
-        "vec3" => (mk(SNode::Vec(vec![num("0.0"), num("0.0"), num("0.0")])), "vector".to_owned()),
+        "vec3" => (mk(SNode::Vec(vec![num("0.0"), num("0.0"), num("0.0")].into())), "vector".to_owned()),
         "text" => (mk(SNode::Str(b"text".to_vec())), "text".to_owned()),
-        "str" => (mk(SNode::List(vec![sym("str"), mk(SNode::Str(b"text".to_vec()))])), "text".to_owned()),
+        "str" => (mk(SNode::List(vec![sym("str"), mk(SNode::Str(b"text".to_vec()))].into())), "text".to_owned()),
         "array/index_of" => (parse_one("(array/index_of (array/int 0) (array/int 0))"), "matched".to_owned()),
         "array/scatter_add" => (parse_one("(array/scatter_add (array/int 0) (array/float 0) 0)"), "added".to_owned()),
         "sop/with_attr" => (
@@ -186,7 +186,7 @@ pub fn value_expression(ops: &[op::Op], wire: Option<(String, Ty)>, context: &Co
                         }
                         (_, Some(d)) => d,
                         (_, None) => match ty {
-                            Ty::List(_) => mk(SNode::List(vec![sym("range"), num("4")])),
+                            Ty::List(_) => mk(SNode::List(vec![sym("range"), num("4")].into())),
                             _ => num("0.5"),
                         },
                     };
@@ -195,7 +195,7 @@ pub fn value_expression(ops: &[op::Op], wire: Option<(String, Ty)>, context: &Co
             }
             let mut items = vec![sym(o)];
             items.extend(args);
-            (mk(SNode::List(items)), fe::value_base(o))
+            (mk(SNode::List(items.into())), fe::value_base(o))
         }
     }
 }
@@ -239,7 +239,7 @@ pub fn scope_add(value: &t, key: &str) -> Vec<change> {
         return if selected.len() >= 2 {
             vec![change::Syntax_edit(fe::Op::GroupMerge { nodes: selected, name })]
         } else {
-            vec![change::Syntax_edit(fe::Op::AddNode { scope: vec![graph], name, expr: mk(SNode::List(vec![sym("scene/merge")])) })]
+            vec![change::Syntax_edit(fe::Op::AddNode { scope: vec![graph], name, expr: mk(SNode::List(vec![sym("scene/merge")].into())) })]
         };
     }
     let is_value = key.starts_with('=');
@@ -304,7 +304,7 @@ pub fn scope_add(value: &t, key: &str) -> Vec<change> {
     } else {
         let head = sym(&format!("{}/{}", w::context_name(&context), if material_of { "material" } else { key }));
         let geometry: Vec<S> = match (&context, key, ws.checked.graphs.iter().find(|g| g.context == context::sop())) {
-            (c, "geometry", Some(g)) if *c == context::scene() => vec![mk(SNode::List(vec![sym("ref"), sym(&g.name)]))],
+            (c, "geometry", Some(g)) if *c == context::scene() => vec![mk(SNode::List(vec![sym("ref"), sym(&g.name)].into()))],
             _ => Vec::new(),
         };
         let mut positional = geometry.clone();
@@ -343,9 +343,9 @@ pub fn scope_add(value: &t, key: &str) -> Vec<change> {
         items.extend(defaults);
         if material_of {
             items.push(mk(SNode::Kw("material".to_owned())));
-            items.push(mk(SNode::List(vec![sym("ref"), sym(&key[12..])])));
+            items.push(mk(SNode::List(vec![sym("ref"), sym(&key[12..])].into())));
         }
-        (mk(SNode::List(items)), if material_of { "material".to_owned() } else { key.to_owned() })
+        (mk(SNode::List(items.into())), if material_of { "material".to_owned() } else { key.to_owned() })
     };
     let mut name = fe::fresh_name(&ws.source, &graph, &base);
     if let Some((_, h)) = &hoisted {

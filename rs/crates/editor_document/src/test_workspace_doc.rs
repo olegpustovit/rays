@@ -303,7 +303,7 @@ fn part_contexts() {
     let directory = std::env::temp_dir().join(format!("rays-contexts-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     let dir = directory.to_string_lossy().into_owned();
-    let path = crate::preset::save(&dir, "bloom", &d, &s::make(Node::Map(Vec::new()))).unwrap();
+    let path = crate::preset::save(&dir, "bloom", &d, &s::make(Node::Map(Vec::new().into()))).unwrap();
     assert!(!has(&std::fs::read_to_string(&path).unwrap(), "(settings :"), "settings owned by a graph are not written a second time");
     let loaded = crate::preset::load(None, &path, Some(&factories()), &settings::none()).unwrap();
     assert!(shape(&loaded.doc) == shape(&d), "the preset round trips scene, World and settings");

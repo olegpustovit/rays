@@ -49,7 +49,7 @@ fn string(text: &str) -> S {
     s::make(SNode::Str(text.as_bytes().to_vec()))
 }
 fn list(items: Vec<S>) -> S {
-    s::make(SNode::List(items))
+    s::make(SNode::List(items.into()))
 }
 fn call(head: &str, args: Vec<S>) -> S {
     let mut items = vec![sym(head)];

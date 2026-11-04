@@ -180,11 +180,11 @@ fn strip(e: &S, removed: &mut Vec<String>) -> R<Option<S>> {
             } else {
                 let mut v = vec![items[0].clone()];
                 v.extend(cells);
-                Ok(Some(S { node: Node::List(v), ..e.clone() }))
+                Ok(Some(S { node: Node::List(v.into()), ..e.clone() }))
             }
         }
         Node::List(items) if items.len() == 2 && matches!(&items[0].node, Node::Sym(h) if h == "ui/floating" || h == "ui/workspace") => {
-            Ok(strip(&items[1], removed)?.map(|child| S { node: Node::List(vec![items[0].clone(), child]), ..e.clone() }))
+            Ok(strip(&items[1], removed)?.map(|child| S { node: Node::List(vec![items[0].clone(), child].into()), ..e.clone() }))
         }
         Node::List(items) if matches!(items.first().map(|h| &h.node), Some(Node::Sym(h)) if h == "ui/switch") => {
             let mut v = vec![items[0].clone()];
@@ -194,7 +194,7 @@ fn strip(e: &S, removed: &mut Vec<String>) -> R<Option<S>> {
                     None => return Err(fail("Keep at least one panel in every layout.")),
                 }
             }
-            Ok(Some(S { node: Node::List(v), ..e.clone() }))
+            Ok(Some(S { node: Node::List(v.into()), ..e.clone() }))
         }
         _ => Ok(Some(e.clone())),
     }

@@ -369,7 +369,7 @@ pub fn declaration_key(checked: &Workspace, d: &NodeDefinition) -> String {
 
 
 fn empty_form() -> Syntax {
-    syntax::make(SNode::List(Vec::new()))
+    syntax::make(SNode::List(Vec::new().into()))
 }
 
 /// An inlined Lisp call's parameters take the node path: the call's changes over the schema

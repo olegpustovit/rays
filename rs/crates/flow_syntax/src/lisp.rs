@@ -714,7 +714,7 @@ mod tests {
         let a = Syntax { node: Node::Num("1234".into()), ..number.clone() };
         let b = Syntax { node: Node::Str("λ\n\"".as_bytes().to_vec()), ..string.clone() };
         let patched = patch_atoms(&(text.clone(), spans.clone()), &[b.clone(), a.clone()]).unwrap();
-        let expected_root = Syntax { node: Node::Vec(vec![a.clone(), b.clone(), kids[2].clone(), kids[3].clone()]), ..root.clone() };
+        let expected_root = Syntax { node: Node::Vec(vec![a.clone(), b.clone(), kids[2].clone(), kids[3].clone()].into()), ..root.clone() };
         let (canonical, expected_spans) = print(&[expected_root]);
         assert_eq!(patched, (canonical, expected_spans));
         assert!(patch_atoms(&(text.clone(), spans.clone()), &[a.clone(), a.clone()]).is_none());

@@ -85,7 +85,7 @@ fn string(text: &str) -> S {
     mk(Node::Str(text.as_bytes().to_vec()))
 }
 fn list(items: Vec<S>) -> S {
-    mk(Node::List(items))
+    mk(Node::List(items.into()))
 }
 fn diag(d: &rays_diagnostic::Diagnostic) -> String {
     rays_diagnostic::to_string(d)
@@ -644,7 +644,7 @@ fn let_star(bindings: &[(String, S)], result: S) -> S {
         vs.push(sym(n));
         vs.push(e.clone());
     }
-    list(vec![sym("let*"), mk(Node::Vec(vs)), result])
+    list(vec![sym("let*"), mk(Node::Vec(vs.into())), result])
 }
 
 fn default_label(node: &g::Node) -> String {

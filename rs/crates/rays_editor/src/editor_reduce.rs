@@ -1510,7 +1510,7 @@ pub fn idle_input(value: &t, actions: &[action], frame_: &frame::t) -> Frame_inp
     Frame_input {
         carry_changed: false,
         all_ui_visible: false,
-        view_state: Rc::new(|_| s::make(SNode::Map(Vec::new()))),
+        view_state: Rc::new(|_| s::make(SNode::Map(Vec::new().into()))),
         carrying: value.carry.is_some(),
         held_keys: value.held_keys.clone(),
         leader: value.leader.clone(),

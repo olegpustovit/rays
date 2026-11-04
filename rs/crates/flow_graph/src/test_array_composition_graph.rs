@@ -50,7 +50,7 @@ fn typed_composition() {
             }
         }
         let default = default_for(&Ty::Array(Box::new(ty.clone())), "source", None).unwrap();
-        let expression = s::make(Node::List(vec![s::make(Node::Sym("array/concat".into())), default.clone(), default]));
+        let expression = s::make(Node::List(vec![s::make(Node::Sym("array/concat".into())), default.clone(), default].into()));
         let source = parse("(workspace menu (graph g :context host (array/int 0)))");
         let (_, added) = apply_checked(&catalog(), &source, &Op::AddNode { scope: path(&["g"]), name: "joined".into(), expr: expression }).unwrap();
         assert_eq!(card(&added, &["g", "joined"]).ty, Ty::Array(Box::new(ty.clone())));

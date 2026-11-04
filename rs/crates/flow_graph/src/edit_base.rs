@@ -90,18 +90,18 @@ pub fn kwf(name: &str) -> S {
     mk(Node::Kw(name.to_owned()))
 }
 pub fn vec(items: Vec<S>) -> S {
-    mk(Node::Vec(items))
+    mk(Node::Vec(items.into()))
 }
 pub fn call(head: &str, args: Vec<S>) -> S {
     let mut items = vec![sym(head)];
     items.extend(args);
-    mk(Node::List(items))
+    mk(Node::List(items.into()))
 }
 pub fn num(n: i64) -> S {
     mk(Node::Num(n.to_string()))
 }
 pub fn unquote(x: S) -> S {
-    mk(Node::Quote(QuoteKind::Unquote, Box::new(x)))
+    mk(Node::Quote(QuoteKind::Unquote, std::sync::Arc::new(x)))
 }
 pub fn text(x: &str) -> S {
     mk(Node::Str(x.as_bytes().to_vec()))
@@ -140,7 +140,7 @@ pub fn map_children(f: &mut dyn FnMut(&S) -> S, e: &S) -> S {
         Node::List(l) => Node::List(l.iter().map(&mut *f).collect()),
         Node::Vec(l) => Node::Vec(l.iter().map(&mut *f).collect()),
         Node::Map(l) => Node::Map(l.iter().map(&mut *f).collect()),
-        Node::Quote(k, x) => Node::Quote(*k, Box::new(f(x))),
+        Node::Quote(k, x) => Node::Quote(*k, std::sync::Arc::new(f(x))),
         n => n.clone(),
     };
     with_node(e, node)
@@ -148,10 +148,10 @@ pub fn map_children(f: &mut dyn FnMut(&S) -> S, e: &S) -> S {
 
 pub fn try_map_children(f: &mut dyn FnMut(&S) -> R<S>, e: &S) -> R<S> {
     let node = match &e.node {
-        Node::List(l) => Node::List(l.iter().map(&mut *f).collect::<R<Vec<S>>>()?),
-        Node::Vec(l) => Node::Vec(l.iter().map(&mut *f).collect::<R<Vec<S>>>()?),
-        Node::Map(l) => Node::Map(l.iter().map(&mut *f).collect::<R<Vec<S>>>()?),
-        Node::Quote(k, x) => Node::Quote(*k, Box::new(f(x)?)),
+        Node::List(l) => Node::List(l.iter().map(&mut *f).collect::<R<Vec<S>>>()?.into()),
+        Node::Vec(l) => Node::Vec(l.iter().map(&mut *f).collect::<R<Vec<S>>>()?.into()),
+        Node::Map(l) => Node::Map(l.iter().map(&mut *f).collect::<R<Vec<S>>>()?.into()),
+        Node::Quote(k, x) => Node::Quote(*k, std::sync::Arc::new(f(x)?)),
         n => n.clone(),
     };
     Ok(with_node(e, node))
@@ -232,7 +232,7 @@ pub fn rename_place(old: &str, nw: &str, e: &S) -> S {
                     i += 1;
                 }
             }
-            with_node(e, Node::List(out))
+            with_node(e, Node::List(out.into()))
         }
         _ => rename_ref(old, nw, e),
     }
@@ -244,7 +244,7 @@ pub fn rename_graph_ref(old: &str, nw: &str, e: &S) -> S {
         if l.len() >= 2 && sym_of(&l[0]) == Some("ref") && sym_of(&l[1]) == Some(old) {
             let mut out = vec![l[0].clone(), with_node(&l[1], Node::Sym(nw.to_owned()))];
             out.extend(l[2..].iter().map(|c| rename_graph_ref(old, nw, c)));
-            return with_node(e, Node::List(out));
+            return with_node(e, Node::List(out.into()));
         }
     }
     map_children(&mut |c| rename_graph_ref(old, nw, c), e)
@@ -348,10 +348,10 @@ pub fn nth_child(e: &S, i: i64) -> Option<S> {
 
 pub fn set_child(e: &S, i: i64, v: S) -> R<S> {
     let node = match &e.node {
-        Node::List(l) if i >= 0 && (i as usize) < l.len() => Node::List(replace_at(l, i as usize, v)),
-        Node::Vec(l) if i >= 0 && (i as usize) < l.len() => Node::Vec(replace_at(l, i as usize, v)),
-        Node::Map(l) if i >= 0 && (i as usize) < l.len() => Node::Map(replace_at(l, i as usize, v)),
-        Node::Quote(k, _) if i == 0 => Node::Quote(*k, Box::new(v)),
+        Node::List(l) if i >= 0 && (i as usize) < l.len() => Node::List(replace_at(l, i as usize, v).into()),
+        Node::Vec(l) if i >= 0 && (i as usize) < l.len() => Node::Vec(replace_at(l, i as usize, v).into()),
+        Node::Map(l) if i >= 0 && (i as usize) < l.len() => Node::Map(replace_at(l, i as usize, v).into()),
+        Node::Quote(k, _) if i == 0 => Node::Quote(*k, std::sync::Arc::new(v)),
         _ => return Err(fail(&format!("This form has no part {}.", i))),
     };
     Ok(with_node(e, node))
@@ -672,7 +672,7 @@ pub fn arg_set(e: &S, key: &ArgKey, v: Option<S>) -> R<S> {
             let h = sym_of(&l[0]).unwrap();
             let mut items = vec![l[0].clone()];
             items.extend(s::attribute_args(h, &l[1..]));
-            with_node(e, Node::List(items))
+            with_node(e, Node::List(items.into()))
         }
         _ => e.clone(),
     };
@@ -689,11 +689,11 @@ pub fn arg_set(e: &S, key: &ArgKey, v: Option<S>) -> R<S> {
             Ok(with_node(&e, Node::Vec(out)))
         }
         (ArgKey::Cell(_), _, None) => Err(fail("A vector cell cannot be removed.")),
-        (ArgKey::Field(k), Node::Map(l), v) => Ok(with_node(&e, Node::Map(flat_pairs(&set_pair(&pairs(l), k, v))))),
+        (ArgKey::Field(k), Node::Map(l), v) => Ok(with_node(&e, Node::Map(flat_pairs(&set_pair(&pairs(l), k, v)).into()))),
         (ArgKey::Pos(i), Node::List(l), None) if !l.is_empty() && sym_of(&l[0]) == Some("scene/merge") => {
             let mut items = vec![l[0].clone()];
             items.extend(skip_after_removal(&with_pos(&l[1..], *i, None), &[*i]));
-            Ok(with_node(&e, Node::List(items)))
+            Ok(with_node(&e, Node::List(items.into())))
         }
         (ArgKey::Kw(k), Node::List(l), Some(v))
             if k == "skip" && !l.is_empty() && sym_of(&l[0]) == Some("for") && kw_get(&l[1..], "skip").is_none() =>
@@ -710,22 +710,22 @@ pub fn arg_set(e: &S, key: &ArgKey, v: Option<S>) -> R<S> {
             } else {
                 return Err(fail("The edit failed: Invalid_argument(\"List.nth\")"));
             }
-            Ok(with_node(&e, Node::List(items)))
+            Ok(with_node(&e, Node::List(items.into())))
         }
         (ArgKey::Pos(i), Node::List(l), v) if !l.is_empty() => {
             let mut items = vec![l[0].clone()];
             items.extend(with_pos(&l[1..], *i, v));
-            Ok(with_node(&e, Node::List(items)))
+            Ok(with_node(&e, Node::List(items.into())))
         }
         (ArgKey::Kw(k), Node::List(l), v) if !l.is_empty() && sym_of(&l[0]) == Some("scene/root") => {
             let mut items = vec![l[0].clone()];
             items.extend(root_order(&with_kw(&l[1..], k, v)));
-            Ok(with_node(&e, Node::List(items)))
+            Ok(with_node(&e, Node::List(items.into())))
         }
         (ArgKey::Kw(k), Node::List(l), v) if !l.is_empty() => {
             let mut items = vec![l[0].clone()];
             items.extend(with_kw(&l[1..], k, v));
-            Ok(with_node(&e, Node::List(items)))
+            Ok(with_node(&e, Node::List(items.into())))
         }
         _ => Err(fail("This form has no such input.")),
     }
@@ -764,7 +764,7 @@ pub fn ensure(e: &S) -> Scope {
         Some(sc) => sc,
         None => {
             let v = vec(Vec::new());
-            Scope { form: mk(Node::List(vec![sym("let*"), v.clone(), e.clone()])), vec: v, ps: Vec::new(), res: e.clone() }
+            Scope { form: mk(Node::List(vec![sym("let*"), v.clone(), e.clone()].into())), vec: v, ps: Vec::new(), res: e.clone() }
         }
     }
 }
@@ -773,7 +773,7 @@ pub fn rebuild(sc: &Scope, ps: &[(S, S)], res: S) -> S {
     match &sc.form.node {
         Node::List(l) if l.len() == 3 => with_node(
             &sc.form,
-            Node::List(vec![l[0].clone(), with_node(&sc.vec, Node::Vec(flat_pairs(ps))), res]),
+            Node::List(vec![l[0].clone(), with_node(&sc.vec, Node::Vec(flat_pairs(ps).into())), res].into()),
         ),
         _ => sc.form.clone(),
     }
@@ -901,7 +901,7 @@ pub fn set_last(e: &S, v: S) -> S {
     if let Some(last) = l.last_mut() {
         *last = v;
     }
-    with_node(e, Node::List(l))
+    with_node(e, Node::List(l.into()))
 }
 
 // the scope inside a binding value: a let* itself, or a zone's body
@@ -1017,7 +1017,7 @@ pub fn map_items(src: &[S], f: &mut dyn FnMut(Vec<S>) -> R<Vec<S>>) -> R<Vec<S>>
             if l.len() >= 2 {
                 let mut items = vec![l[0].clone(), l[1].clone()];
                 items.extend(f(l[2..].to_vec())?);
-                let mut out = vec![with_node(ws, Node::List(items))];
+                let mut out = vec![with_node(ws, Node::List(items.into()))];
                 out.extend(src[1..].iter().cloned());
                 return Ok(out);
             }
@@ -1317,7 +1317,7 @@ pub fn branch_default(t: &Ty) -> Option<S> {
                 out.push(kwf(name));
                 out.push(value);
             }
-            Some(mk(Node::Map(out)))
+            Some(mk(Node::Map(out.into())))
         }
         _ => default_for(t, "value", None),
     }
@@ -1593,7 +1593,7 @@ pub fn detach(name: &str, below: &Option<S>, e: &S) -> R<S> {
             let kept: Vec<S> = args.iter().filter(|c| c.node != Node::Sym(name.to_owned())).cloned().collect();
             let mut items = vec![kids[0].clone()];
             items.extend(skip_after_removal(&kept, &gone));
-            Ok(with_node(&e, Node::List(items)))
+            Ok(with_node(&e, Node::List(items.into())))
         }
         Some(h) if h.starts_with("world/") => match arg_get(&e, &ArgKey::Pos(0)) {
             Some(a) if matches!(&a.node, Node::Sym(n) if n == name) => match below {

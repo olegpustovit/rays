@@ -52,7 +52,7 @@ pub fn run() {
     assert!(document::validate(&bad_camera).is_err(), "an active camera that is not a camera object was accepted");
     assert!(document::dump(&doc) == document::dump(&doc) && document::dump(&doc).contains("object "), "the document dump is not deterministic or lost an object");
     // the preset text is the workspace text: it loads back to the same document
-    let view = flow_syntax::syntax::make(flow_syntax::syntax::Node::Map(vec![]));
+    let view = flow_syntax::syntax::make(flow_syntax::syntax::Node::Map(vec![].into()));
     let saved = preset::save(&directory, "round", &doc, &view).unwrap();
     let loaded = preset::load(Some(gpu.clone()), &saved, None, &doc.settings).unwrap();
     assert!(workspace_doc::to_text(&loaded.doc.workspace.ws) == workspace_doc::to_text(&workspace) && loaded.doc.networks.len() == doc.networks.len(), "a saved preset did not load back");

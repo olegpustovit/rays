@@ -221,9 +221,9 @@ fn part_preset() {
         let corrupt = preset::path(directory, "corrupt");
         std::fs::write(&corrupt, "(workspace").unwrap();
         assert!(preset::load(None, &corrupt, None, &settings::none()).is_err(), "corrupt text is an error");
-        let nonfinite = syn::make(Node::Map(vec![syn::make(Node::Kw("zoom".into())), syn::make(Node::Num("inf".into()))]));
+        let nonfinite = syn::make(Node::Map(vec![syn::make(Node::Kw("zoom".into())), syn::make(Node::Num("inf".into()))].into()));
         assert!(preset::save(directory, "x", &loaded.doc, &nonfinite).is_err(), "a nonfinite view is refused");
-        assert!(preset::save(directory, "", &loaded.doc, &syn::make(Node::Map(vec![]))).is_err(), "an empty name is refused");
+        assert!(preset::save(directory, "", &loaded.doc, &syn::make(Node::Map(vec![].into()))).is_err(), "an empty name is refused");
         Editor::close(&e);
     });
 }

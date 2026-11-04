@@ -149,7 +149,7 @@ pub fn run_restore() {
     }
     check(r.source() == before && panes_graph(&r.e) > 0, "a refused edit keeps the layout");
     // a valid one that leaves only an outline: nothing to edit the layout with
-    let bricked = Editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "shell"]), key: ArgKey::Pos(0), sub: vec![], value: s::make(Node::List(vec![s::make(Node::Sym("ui/outline".into()))])) }).expect("bricked");
+    let bricked = Editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "shell"]), key: ArgKey::Pos(0), sub: vec![], value: s::make(Node::List(vec![s::make(Node::Sym("ui/outline".into()))].into())) }).expect("bricked");
     r.e = bricked.clone();
     r.step(m, vec![]);
     check(panes_graph(&r.e) == 0, "the bricked shell has no graph panel");

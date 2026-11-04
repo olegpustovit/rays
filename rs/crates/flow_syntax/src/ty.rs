@@ -70,9 +70,9 @@ fn descriptors() -> Vec<Descriptor> {
                 form(Node::Sym("image/noise".into())),
                 form(Node::Kw("width".into())), form(Node::Num("1".into())),
                 form(Node::Kw("height".into())), form(Node::Num("1".into())),
-            ]))),
+            ].into()))),
         },
-        Descriptor { name: "drawing", shape: true, color: ColorKind::Output, default: Some(form(Node::List(vec![form(Node::Sym("draw/merge".into()))]))) },
+        Descriptor { name: "drawing", shape: true, color: ColorKind::Output, default: Some(form(Node::List(vec![form(Node::Sym("draw/merge".into()))].into()))) },
         Descriptor { name: "scene", shape: true, color: ColorKind::Output, default: None },
         Descriptor { name: "world", shape: true, color: ColorKind::Output, default: None },
         Descriptor { name: "settings", shape: false, color: ColorKind::Output, default: None },
@@ -363,8 +363,8 @@ mod tests {
     #[test]
     fn syntax_signatures_vectors_and_nominals() {
         let sym = |name: &str| syntax::make(syntax::Node::Sym(name.into()));
-        let params = syntax::make(syntax::Node::Vec(vec![sym("vec3"), sym("text")]));
-        let form = syntax::make(syntax::Node::List(vec![sym("fn"), params, sym("float")]));
+        let params = syntax::make(syntax::Node::Vec(vec![sym("vec3"), sym("text")].into()));
+        let form = syntax::make(syntax::Node::List(vec![sym("fn"), params, sym("float")].into()));
         assert_eq!(of_syntax(&form), Some(Ty::Fn(Some(Box::new(FnSignature { params: vec![Ty::Vec3, Ty::Text], result: Ty::Float })))));
         assert!(has_fn(&Ty::List(Box::new(Ty::Fn(None)))));
         assert!(has_fn(&Ty::Record(vec![("f".into(), Ty::Fn(None))])));

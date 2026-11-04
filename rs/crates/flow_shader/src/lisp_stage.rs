@@ -26,7 +26,7 @@ pub fn parameters(forms: &[Syntax], entry: &str) -> Result<Vec<(String, Ty)>, Di
                 if let (Node::Sym(head), Node::Sym(name)) = (&first.node, &second.node) {
                     if head == "defn" && name == entry {
                         return rest.iter().find_map(|x| match &x.node {
-                            Node::Vec(params) => Some(params.clone()),
+                            Node::Vec(params) => Some(params.to_vec()),
                             _ => None,
                         });
                     }

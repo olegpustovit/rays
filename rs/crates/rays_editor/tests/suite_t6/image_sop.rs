@@ -67,7 +67,7 @@ pub fn image_sop() {
     for gesture in [
         Op::Connect { node: result.clone(), key: ArgKey::Pos(1), src: "picture".into(), iter: false },
         Op::SetArg { node: result.clone(), key: ArgKey::Kw("channel".into()), sub: Vec::new(), value: S::make(Node::Str(b"b".to_vec())) },
-        Op::Disconnect { node: result.clone(), key: ArgKey::Pos(1), fallback: Some(S::make(Node::List(vec![S::make(Node::Sym("ref".into())), S::make(Node::Sym("img".into()))]))) },
+        Op::Disconnect { node: result.clone(), key: ArgKey::Pos(1), fallback: Some(S::make(Node::List(vec![S::make(Node::Sym("ref".into())), S::make(Node::Sym("img".into()))].into()))) },
     ] {
         wd::edit(&catalog, &document, &gesture).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     }

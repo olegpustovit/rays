@@ -279,9 +279,9 @@ fn expand_template(
         }
         Node::Quote(QuoteKind::Splice, _) => return Err(fail(form, "E_MACRO_UNQUOTE", &format!("Macro {name}: ~@ splices into a list."))),
         Node::Quote(_, _) => return Err(fail(form, "E_MACRO_TEMPLATE", &format!("Macro {name}: nested quoting is not supported."))),
-        Node::List(forms) => Node::List(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?),
-        Node::Vec(forms) => Node::Vec(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?),
-        Node::Map(forms) => Node::Map(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?),
+        Node::List(forms) => Node::List(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?.into()),
+        Node::Vec(forms) => Node::Vec(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?.into()),
+        Node::Map(forms) => Node::Map(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?.into()),
     };
     Ok(with_node(form, node, call.span.clone()))
 }
@@ -326,17 +326,17 @@ fn expand_children(state: &mut State, macros: &[Syntax], depth: usize, form: &Sy
         Node::List(forms) => {
             let mut expanded = Vec::with_capacity(forms.len());
             for child in forms { expanded.push(expand_at(state, macros, depth, child)?); }
-            Node::List(expanded)
+            Node::List(expanded.into())
         }
         Node::Vec(forms) => {
             let mut expanded = Vec::with_capacity(forms.len());
             for child in forms { expanded.push(expand_at(state, macros, depth, child)?); }
-            Node::Vec(expanded)
+            Node::Vec(expanded.into())
         }
         Node::Map(forms) => {
             let mut expanded = Vec::with_capacity(forms.len());
             for child in forms { expanded.push(expand_at(state, macros, depth, child)?); }
-            Node::Map(expanded)
+            Node::Map(expanded.into())
         }
         Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_) | Node::Quote(_, _) => return Ok(form.clone()),
     };
@@ -380,17 +380,17 @@ fn expand_once_at(
         Node::List(forms) => {
             let mut expanded = Vec::with_capacity(forms.len());
             for child in forms { expanded.push(expand_once_at(state, macros, finished, child)?); }
-            Node::List(expanded)
+            Node::List(expanded.into())
         }
         Node::Vec(forms) => {
             let mut expanded = Vec::with_capacity(forms.len());
             for child in forms { expanded.push(expand_once_at(state, macros, finished, child)?); }
-            Node::Vec(expanded)
+            Node::Vec(expanded.into())
         }
         Node::Map(forms) => {
             let mut expanded = Vec::with_capacity(forms.len());
             for child in forms { expanded.push(expand_once_at(state, macros, finished, child)?); }
-            Node::Map(expanded)
+            Node::Map(expanded.into())
         }
         Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_) | Node::Quote(_, _) => return Ok(form.clone()),
     };

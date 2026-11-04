@@ -84,7 +84,7 @@ fn sym(text: &str) -> Syntax {
     mk(Node::Sym(text.to_owned()))
 }
 fn vec(l: Vec<Syntax>) -> Syntax {
-    mk(Node::Vec(l))
+    mk(Node::Vec(l.into()))
 }
 fn bool_(b: bool) -> Syntax {
     sym(if b { "true" } else { "false" })
@@ -123,7 +123,7 @@ pub fn to_syntax(t: &T) -> Syntax {
             items.push(kw(k));
             items.push(bool_(*v));
         }
-        nodes.entry(p.clone()).or_default().push((kw("rows"), mk(Node::Map(items))));
+        nodes.entry(p.clone()).or_default().push((kw("rows"), mk(Node::Map(items.into()))));
     }
     let node_forms: Vec<Syntax> = nodes
         .iter()
@@ -133,16 +133,16 @@ pub fn to_syntax(t: &T) -> Syntax {
                 items.push(k.clone());
                 items.push(v.clone());
             }
-            mk(Node::List(items))
+            mk(Node::List(items.into()))
         })
         .collect();
     let mut frames = Vec::new();
     for (p, fs) in &t.frames {
         for f in fs {
-            frames.push(mk(Node::List(vec![sym("frame"), path_form(p), str(&f.title), kw("at"), pair(f.at), kw("size"), pair(f.size)])));
+            frames.push(mk(Node::List(vec![sym("frame"), path_form(p), str(&f.title), kw("at"), pair(f.at), kw("size"), pair(f.size)].into())));
         }
     }
-    let editor: Vec<Syntax> = t.editor.iter().map(|name| mk(Node::List(vec![sym("editor"), str(name)]))).collect();
+    let editor: Vec<Syntax> = t.editor.iter().map(|name| mk(Node::List(vec![sym("editor"), str(name)].into()))).collect();
     let panel_forms: Vec<Syntax> = t
         .panels
         .iter()
@@ -152,7 +152,7 @@ pub fn to_syntax(t: &T) -> Syntax {
                 items.push(kw("window"));
                 items.push(vec([x, y, w, h].iter().map(|n| number(*n as f64)).collect()));
             }
-            mk(Node::List(items))
+            mk(Node::List(items.into()))
         })
         .collect();
     let mut items = vec![sym("layout")];
@@ -160,7 +160,7 @@ pub fn to_syntax(t: &T) -> Syntax {
     items.extend(panel_forms);
     items.extend(node_forms);
     items.extend(frames);
-    mk(Node::List(items))
+    mk(Node::List(items.into()))
 }
 
 fn fail<V>(message: String) -> Result<V, String> {

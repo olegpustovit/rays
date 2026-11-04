@@ -21,16 +21,76 @@ pub struct Syntax {
     pub tail: Vec<String>,
 }
 
+/// The children of a list, vector or map form: one shared run, so cloning a `Syntax` is O(1).
+/// Reads go through `Deref` as a `Vec`; a write (`DerefMut`) copies the run first when it is shared.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Children(std::sync::Arc<Vec<Syntax>>);
+
+impl Children {
+    pub fn new(items: Vec<Syntax>) -> Self {
+        Children(std::sync::Arc::new(items))
+    }
+    /// Whether two children share one run (cheap identity).
+    pub fn ptr_eq(a: &Children, b: &Children) -> bool {
+        std::sync::Arc::ptr_eq(&a.0, &b.0)
+    }
+}
+impl std::ops::Deref for Children {
+    type Target = Vec<Syntax>;
+    fn deref(&self) -> &Vec<Syntax> {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for Children {
+    fn deref_mut(&mut self) -> &mut Vec<Syntax> {
+        std::sync::Arc::make_mut(&mut self.0)
+    }
+}
+impl std::fmt::Debug for Children {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&*self.0, f)
+    }
+}
+impl From<Vec<Syntax>> for Children {
+    fn from(items: Vec<Syntax>) -> Self {
+        Children::new(items)
+    }
+}
+impl From<&[Syntax]> for Children {
+    fn from(items: &[Syntax]) -> Self {
+        Children::new(items.to_vec())
+    }
+}
+impl FromIterator<Syntax> for Children {
+    fn from_iter<I: IntoIterator<Item = Syntax>>(iter: I) -> Self {
+        Children::new(iter.into_iter().collect())
+    }
+}
+impl IntoIterator for Children {
+    type Item = Syntax;
+    type IntoIter = std::vec::IntoIter<Syntax>;
+    fn into_iter(self) -> Self::IntoIter {
+        std::sync::Arc::try_unwrap(self.0).unwrap_or_else(|shared| (*shared).clone()).into_iter()
+    }
+}
+impl<'a> IntoIterator for &'a Children {
+    type Item = &'a Syntax;
+    type IntoIter = std::slice::Iter<'a, Syntax>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Node {
     Sym(String),
     Kw(String),
     Num(String),
     Str(Vec<u8>),
-    List(Vec<Syntax>),
-    Vec(Vec<Syntax>),
-    Map(Vec<Syntax>),
-    Quote(QuoteKind, Box<Syntax>),
+    List(Children),
+    Vec(Children),
+    Map(Children),
+    Quote(QuoteKind, std::sync::Arc<Syntax>),
 }
 
 use crate::text_lexer;
@@ -193,7 +253,7 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
                 Ok(Syntax {
                     id,
                     span: Span { start: token.span.start, finish: inner.span.finish },
-                    node: Node::Quote(kind, Box::new(inner)),
+                    node: Node::Quote(kind, std::sync::Arc::new(inner)),
                     notes,
                     meta: Vec::new(),
                     tail: Vec::new(),
@@ -236,9 +296,9 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
                     let span = Span { start: opening.start, finish: closing.span.finish };
                     let tail = leading;
                     let node = match delimiter {
-                        '(' => Node::List(items),
-                        '[' => Node::Vec(items),
-                        _ => Node::Map(items),
+                        '(' => Node::List(items.into()),
+                        '[' => Node::Vec(items.into()),
+                        _ => Node::Map(items.into()),
                     };
                     let whole = Syntax { id, node, span: span.clone(), notes: notes.clone(), meta: Vec::new(), tail: tail.clone() };
                     return match &whole.node {
@@ -267,7 +327,7 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
                                     next_parts.push(result);
                                     next_parts.extend_from_slice(&parts[1..]);
                                     result = step.clone();
-                                    result.node = Node::List(next_parts);
+                                    result.node = Node::List(next_parts.into());
                                     if index + 1 == steps.len() {
                                         result.id = id;
                                         result.notes = [notes.clone(), result.notes].concat();
@@ -359,7 +419,7 @@ pub fn renumber(first: Id, form: &Syntax) -> (Syntax, Id) {
             Node::List(forms) => Node::List(forms.iter().map(|form| go(next, form)).collect()),
             Node::Vec(forms) => Node::Vec(forms.iter().map(|form| go(next, form)).collect()),
             Node::Map(forms) => Node::Map(forms.iter().map(|form| go(next, form)).collect()),
-            Node::Quote(kind, child) => Node::Quote(*kind, Box::new(go(next, child))),
+            Node::Quote(kind, child) => Node::Quote(*kind, std::sync::Arc::new(go(next, child))),
         };
         let mut result = form.clone();
         result.id = id;

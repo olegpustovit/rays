@@ -167,7 +167,7 @@ fn authored_source(t: &T) -> Vec<S> {
             Node::List(items) if items.len() >= 2 => {
                 let mut v = vec![items[0].clone(), items[1].clone()];
                 v.extend(items[2..].iter().filter(|f| second_name(f).map_or(true, |n| !names.contains(&n))).cloned());
-                S { node: Node::List(v), ..ws.clone() }
+                S { node: Node::List(v.into()), ..ws.clone() }
             }
             _ => ws.clone(),
         })
@@ -193,7 +193,7 @@ fn settings_form(st: &settings::T) -> Option<S> {
         items.push(s::make(Node::Kw(f.name.clone())));
         items.push(value(&f.current));
     }
-    Some(s::make(Node::List(items)))
+    Some(s::make(Node::List(items.into())))
 }
 
 fn read_settings(base: &settings::T, form: &S) -> Result<settings::T, String> {
@@ -377,7 +377,7 @@ pub fn check_text(options: &TextOptions, catalog: &Catalog, text: &str) -> Resul
     let forms: Vec<S> = if fragment {
         let mut items = vec![s::make(Node::Sym("workspace".to_owned())), s::make(Node::Sym("library".to_owned()))];
         items.extend(forms);
-        vec![s::make(Node::List(items))]
+        vec![s::make(Node::List(items.into()))]
     } else {
         forms
     };
@@ -395,7 +395,7 @@ pub fn check_text(options: &TextOptions, catalog: &Catalog, text: &str) -> Resul
             let mut v = vec![items[0].clone(), items[1].clone()];
             v.extend(loaded.iter().flat_map(|(_, c)| c.iter().cloned()));
             v.extend(items[2..].iter().cloned());
-            S { node: Node::List(v), ..ws.clone() }
+            S { node: Node::List(v.into()), ..ws.clone() }
         }
         _ => ws.clone(),
     };
