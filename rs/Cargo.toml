@@ -20,6 +20,8 @@ overflow-checks = true
 opt-level = 1
 [profile.dev.package.rdk_ops]
 opt-level = 1
+[profile.dev.package.rdk_boolean]
+opt-level = 1
 
 [profile.release]
 codegen-units = 16
