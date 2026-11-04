@@ -151,24 +151,31 @@ extern "C" int32_t rays_metal_render_pass_set_actions(MetalHandle *pass_handle, 
     int32_t color_store, int32_t depth_load, int32_t depth_store, double clear_depth,
     int32_t stencil_load, int32_t stencil_store, uint32_t clear_stencil, const char **message) {
   if (message) *message = nullptr;
-  if (color_load < 0 || color_load > 2 || color_store < 0 || color_store > 3 || depth_load < 0 || depth_load > 2 || depth_store < 0 || depth_store > 1 || stencil_load < 0 || stencil_load > 2 || stencil_store < 0 || stencil_store > 1 || !std::isfinite(clear_depth) || clear_depth < 0 || clear_depth > 1 || clear_stencil > 255) return rays_metal_set_error(message, "invalid render-pass actions");
+  // -1 (and clear_depth -1.0, clear_stencil UINT32_MAX) leave that field as it is: the single-attachment wrappers below must not reset the others.
+  const bool keep_depth = clear_depth == -1.0, keep_stencil = clear_stencil == UINT32_MAX;
+  if (color_load < -1 || color_load > 2 || color_store < -1 || color_store > 3 || depth_load < -1 || depth_load > 2 || depth_store < -1 || depth_store > 1 || stencil_load < -1 || stencil_load > 2 || stencil_store < -1 || stencil_store > 1 || (!keep_depth && (!std::isfinite(clear_depth) || clear_depth < 0 || clear_depth > 1)) || (!keep_stencil && clear_stencil > 255)) return rays_metal_set_error(message, "invalid render-pass actions");
   @try { @autoreleasepool {
     MTLRenderPassDescriptor *pass = (__bridge MTLRenderPassDescriptor *)rays_metal_handle_object(pass_handle, KIND_RENDER_PASS_DESCRIPTOR);
     if (!pass) return rays_metal_set_error(message, "invalid render-pass handle");
-    pass.colorAttachments[0].loadAction = static_cast<MTLLoadAction>(color_load); pass.colorAttachments[0].storeAction = static_cast<MTLStoreAction>(color_store);
-    pass.depthAttachment.loadAction = static_cast<MTLLoadAction>(depth_load); pass.depthAttachment.storeAction = static_cast<MTLStoreAction>(depth_store); pass.depthAttachment.clearDepth = clear_depth;
-    pass.stencilAttachment.loadAction = static_cast<MTLLoadAction>(stencil_load); pass.stencilAttachment.storeAction = static_cast<MTLStoreAction>(stencil_store); pass.stencilAttachment.clearStencil = clear_stencil;
+    if (color_load >= 0) pass.colorAttachments[0].loadAction = static_cast<MTLLoadAction>(color_load);
+    if (color_store >= 0) pass.colorAttachments[0].storeAction = static_cast<MTLStoreAction>(color_store);
+    if (depth_load >= 0) pass.depthAttachment.loadAction = static_cast<MTLLoadAction>(depth_load);
+    if (depth_store >= 0) pass.depthAttachment.storeAction = static_cast<MTLStoreAction>(depth_store);
+    if (!keep_depth) pass.depthAttachment.clearDepth = clear_depth;
+    if (stencil_load >= 0) pass.stencilAttachment.loadAction = static_cast<MTLLoadAction>(stencil_load);
+    if (stencil_store >= 0) pass.stencilAttachment.storeAction = static_cast<MTLStoreAction>(stencil_store);
+    if (!keep_stencil) pass.stencilAttachment.clearStencil = clear_stencil;
     return 0;
   }} @catch (NSException *exception) { return rays_metal_set_error(message, exception.reason.UTF8String); }
 }
 extern "C" int32_t caml_rays_metal_render_pass_color_store_action(MetalHandle *pass, int32_t action, const char **message) {
-  return rays_metal_render_pass_set_actions(pass, MTLLoadActionDontCare, action, MTLLoadActionDontCare, MTLStoreActionDontCare, 1.0, MTLLoadActionDontCare, MTLStoreActionDontCare, 0, message);
+  return rays_metal_render_pass_set_actions(pass, -1, action, -1, -1, -1.0, -1, -1, UINT32_MAX, message);
 }
 extern "C" int32_t caml_rays_metal_render_pass_color_load_action(MetalHandle *pass, int32_t action, const char **message) {
-  return rays_metal_render_pass_set_actions(pass, action, MTLStoreActionDontCare, MTLLoadActionDontCare, MTLStoreActionDontCare, 1.0, MTLLoadActionDontCare, MTLStoreActionDontCare, 0, message);
+  return rays_metal_render_pass_set_actions(pass, action, -1, -1, -1, -1.0, -1, -1, UINT32_MAX, message);
 }
 extern "C" int32_t caml_rays_metal_render_pass_depth_stencil_actions(MetalHandle *pass, int32_t depth_load, int32_t depth_store, double clear_depth, int32_t stencil_load, int32_t stencil_store, uint32_t clear_stencil, const char **message) {
-  return rays_metal_render_pass_set_actions(pass, MTLLoadActionDontCare, MTLStoreActionDontCare, depth_load, depth_store, clear_depth, stencil_load, stencil_store, clear_stencil, message);
+  return rays_metal_render_pass_set_actions(pass, -1, -1, depth_load, depth_store, clear_depth, stencil_load, stencil_store, clear_stencil, message);
 }
 
 // ogpu_metal: the multisample resolve target of colour attachment 0 (nullptr clears it).

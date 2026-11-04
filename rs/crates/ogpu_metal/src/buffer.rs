@@ -1,0 +1,156 @@
+//! Ogpu_metal.Buffer
+use crate::device::{fail, native_of, Device, R};
+use ogpu_core::{
+    error::ErrorKind,
+    handle::{self, ResourceHandle},
+    types::{BufferDescriptor, BufferUsage},
+    validation,
+};
+use std::{
+    cell::Cell,
+    rc::Rc,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Memory {
+    DeviceLocal,
+    Shared,
+    Upload,
+    Readback,
+}
+
+struct BufferInner {
+    metal: metal::Buffer,
+    handle: ResourceHandle,
+    device: Device,
+    descriptor: BufferDescriptor,
+    submission_uses: Cell<i64>,
+    destroy_requested: Cell<bool>,
+    /// Last command buffer that retained it.
+    retained_by: Cell<i64>,
+}
+
+#[derive(Clone)]
+pub struct Buffer(Rc<BufferInner>);
+
+fn validate_memory(descriptor: &BufferDescriptor, memory: Memory) -> R<()> {
+    match memory {
+        Memory::DeviceLocal | Memory::Shared | Memory::Upload => Ok(()),
+        Memory::Readback => {
+            if descriptor.usage.contains(&BufferUsage::CopyDst) {
+                Ok(())
+            } else {
+                fail("Ogpu_metal.Buffer.create", ErrorKind::InvalidArgument, "readback buffers require Copy_dst usage")
+            }
+        }
+    }
+}
+
+fn wrap(device: &Device, descriptor: &BufferDescriptor, metal: metal::Buffer) -> Buffer {
+    device.attach_resource();
+    Buffer(Rc::new(BufferInner {
+        metal,
+        handle: handle::create(device.handle()),
+        device: device.clone(),
+        descriptor: descriptor.clone(),
+        submission_uses: Cell::new(0),
+        destroy_requested: Cell::new(false),
+        retained_by: Cell::new(0),
+    }))
+}
+
+pub fn create(device: &Device, memory: Memory, descriptor: &BufferDescriptor) -> R<Buffer> {
+    let operation = "Ogpu_metal.Buffer.create";
+    if device.destroyed() {
+        return fail(operation, ErrorKind::StaleHandle, "device is destroyed");
+    }
+    validation::validate_buffer(&device.capabilities(), descriptor)?;
+    validate_memory(descriptor, memory)?;
+    let (storage, cache) = match memory {
+        Memory::DeviceLocal => (metal::StorageMode::Private, metal::CpuCacheMode::DefaultCache),
+        Memory::Shared | Memory::Readback => (metal::StorageMode::Shared, metal::CpuCacheMode::DefaultCache),
+        Memory::Upload => (metal::StorageMode::Shared, metal::CpuCacheMode::WriteCombined),
+    };
+    let native = native_of(
+        operation,
+        metal::Buffer::create(device.metal(), descriptor.size as u64, storage, cache, descriptor.label.as_deref()),
+    )?;
+    Ok(wrap(device, descriptor, native))
+}
+
+impl Buffer {
+    pub fn destroyed(&self) -> bool {
+        handle::destroyed(&self.0.handle)
+    }
+
+    fn validate(&self, operation: &str, device: &Device) -> R<()> {
+        handle::validate_for(operation, device.handle(), &self.0.handle)
+    }
+
+    pub fn descriptor(&self, device: &Device) -> R<BufferDescriptor> {
+        self.validate("Ogpu_metal.Buffer.descriptor", device)?;
+        Ok(self.0.descriptor.clone())
+    }
+
+    pub fn write_bytes(&self, device: &Device, dst_offset: i64, bytes: &[u8]) -> R<()> {
+        let operation = "Ogpu_metal.Buffer.write_bytes";
+        self.validate(operation, device)?;
+        native_of(operation, self.0.metal.write_bytes(dst_offset as u64, bytes))
+    }
+
+    pub fn read_bytes(&self, device: &Device, offset: i64, length: i64) -> R<Vec<u8>> {
+        let operation = "Ogpu_metal.Buffer.read_bytes";
+        self.validate(operation, device)?;
+        if length < 0 {
+            return fail(operation, ErrorKind::InvalidArgument, "read length is negative");
+        }
+        native_of(operation, self.0.metal.read_bytes(offset as u64, length as usize))
+    }
+
+    pub fn destroy(&self) -> R<()> {
+        let operation = "Ogpu_metal.Buffer.destroy";
+        if self.destroyed() {
+            Ok(())
+        } else if self.0.submission_uses.get() > 0 {
+            handle::destroy(&self.0.handle);
+            self.0.destroy_requested.set(true);
+            Ok(())
+        } else {
+            native_of(operation, self.0.metal.destroy())?;
+            handle::destroy(&self.0.handle);
+            self.0.device.detach_resource();
+            Ok(())
+        }
+    }
+
+    pub fn metal(&self) -> &metal::Buffer {
+        &self.0.metal
+    }
+
+    pub fn retain_submission(&self) -> R<()> {
+        if self.destroyed() {
+            return fail("Ogpu_metal.Buffer.retain_submission", ErrorKind::StaleHandle, "buffer is destroyed");
+        }
+        self.0.submission_uses.set(self.0.submission_uses.get() + 1);
+        Ok(())
+    }
+
+    /// Retains once per command buffer; `Ok(false)` when `commands` already holds it.
+    pub fn retain_for(&self, commands: i64) -> R<bool> {
+        if self.0.retained_by.get() == commands && !self.destroyed() {
+            Ok(false)
+        } else {
+            self.retain_submission()?;
+            self.0.retained_by.set(commands);
+            Ok(true)
+        }
+    }
+
+    pub fn release_submission(&self) {
+        self.0.submission_uses.set(self.0.submission_uses.get() - 1);
+        if self.0.submission_uses.get() == 0 && self.0.destroy_requested.get() && self.0.metal.destroy().is_ok() {
+            self.0.device.detach_resource();
+        }
+    }
+}
+

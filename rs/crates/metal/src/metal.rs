@@ -737,6 +737,7 @@ impl CommandBuffer {
     pub fn destroy(&self) -> Result<(), Error> {
         on_main("Metal.Command_buffer.destroy", || {
             self.0.lifetime.destroy_parent("Metal.Command_buffer.destroy")?;
+            self.0.resources.borrow_mut().clear(); // a destroyed command buffer retains nothing (ogpu_metal abandons uncommitted work this way)
             if self.0.queue_attached.swap(false, Ordering::AcqRel) { self.0.queue.0.lifetime.dependents.fetch_sub(1, Ordering::AcqRel); }
             Ok(())
         })

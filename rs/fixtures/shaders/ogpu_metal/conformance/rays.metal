@@ -1,0 +1,7 @@
+#include <metal_stdlib>
+#include <metal_raytracing>
+using namespace metal;
+using namespace raytracing;
+struct Hit { uint hit; uint primitive; uint instance; float t; float2 barycentrics; };
+kernel void trace(primitive_acceleration_structure scene [[buffer(0)]], device const float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], uint i [[thread_position_in_grid]]) { ray r(rays[i*2].xyz, rays[i*2+1].xyz, 0.001f, 100.0f); intersector<triangle_data> isect; isect.assume_geometry_type(geometry_type::triangle); auto h = isect.intersect(r, scene); bool hit = h.type == intersection_type::triangle; hits[i].hit = hit ? 1u : 0u; hits[i].primitive = hit ? h.primitive_id : 0u; hits[i].instance = 0u; hits[i].t = hit ? h.distance : 0.0f; hits[i].barycentrics = hit ? h.triangle_barycentric_coord : float2(0.0f); }
+kernel void trace_instances(instance_acceleration_structure scene [[buffer(0)]], device const float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], uint i [[thread_position_in_grid]]) { ray r(rays[i*2].xyz, rays[i*2+1].xyz, 0.001f, 100.0f); intersector<triangle_data, instancing> isect; isect.assume_geometry_type(geometry_type::triangle); auto h = isect.intersect(r, scene); bool hit = h.type == intersection_type::triangle; hits[i].hit = hit ? 1u : 0u; hits[i].primitive = hit ? h.primitive_id : 0u; hits[i].instance = hit ? h.instance_id : 0u; hits[i].t = hit ? h.distance : 0.0f; hits[i].barycentrics = hit ? h.triangle_barycentric_coord : float2(0.0f); }
