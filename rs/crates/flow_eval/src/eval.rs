@@ -1538,6 +1538,9 @@ fn apply_op_in(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &m
 fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let workspace=a.workspace.clone();let graph=workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?;if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=Arc::new(site(c));cx.base=Arc::new(vec![format!("def:{}",name)]);cx.route = Route(None);cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone().into()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};if a.record&&cx.record{let mut p=(*cx.base).clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());}env.bind(intern(a,n),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
 fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Result<Value, Diagnostic> {
     if let Some(result) = call_compiled(a, c, id, values, body) { return result; }
+    call_fn_walked(a, c, id, values, body)
+}
+fn call_fn_walked(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Result<Value, Diagnostic> {
     match get_fn(a, id)? {
         Function::Closure(closure) => {
             if closure.params.len() != values.len() {
@@ -1775,6 +1778,7 @@ fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, 
     result
 }
 fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, sources: &[Term], packed: bool, saved_steps: usize, iter: &mut usize, progress: &mut MapProgress) -> Result<Value, Diagnostic> {
+    let mut caller = Caller::new(a, c);
     let mut lists = Vec::with_capacity(sources.len());
     for (index, source) in sources.iter().enumerate() { lists.push(eval_sequence(a, c, env, source, Seg::Index("l", index))?); }
     let count = if lists.is_empty() { 0 } else { lists.iter().map(|(_, count)| *count).min().unwrap_or(0) };
@@ -1818,7 +1822,7 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
     for index in 0..walked {
         check_packed_block(a, iter, packed, saved_steps)?;
         let args = lists.iter().map(|(values, _)| sequence_item(values, index)).collect::<Result<Vec<_>, _>>()?;
-        let value = call_fn(a, c, function, &args, None)?;
+        let value = call_in(&mut caller, a, c, function, &args)?;
         output.push(concrete(a, value)?);
         if index < MAX_ITERATIONS { progress.head += 1; } else { progress.tail += 1; }
     }
@@ -1843,7 +1847,7 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
         for index in walked..count {
             check_packed_block(a, iter, packed, saved_steps)?;
             let args = lists.iter().map(|(values, _)| sequence_item(values, index)).collect::<Result<Vec<_>, _>>()?;
-            let value = call_fn(a, c, function, &args, None)?;
+            let value = call_in(&mut caller, a, c, function, &args)?;
             output.push(concrete(a, value)?);
             progress.tail += 1;
         }
@@ -1853,6 +1857,7 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
     Ok(result)
 }
 fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::HofKind, function: FnId, rest: &[Term], packed: bool, saved_steps: usize) -> Result<Value, Diagnostic> {
+    let mut caller = Caller::new(a, c);
     let mut iter = 0usize;
     match kind {
         W::HofKind::Map => eval_map(a, c, env, term, function, rest, packed, saved_steps, &mut iter),
@@ -1863,7 +1868,7 @@ fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::H
             for index in 0..count {
                 check_packed_block(a, &mut iter, packed, saved_steps)?;
                 let value = sequence_item(&values, index)?;
-                let selected = call_fn(a, c, function, &[value.clone()], None)?;
+                let selected = call_in(&mut caller, a, c, function, &[value.clone()])?;
                 if truth(&concrete(a, selected)?)? { output.push(value); }
             }
             if matches!(&term.ty, Ty::Array(_)) { pack(&term.ty, output) } else { Ok(join_list(output)) }
@@ -1875,7 +1880,7 @@ fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::H
             for index in 0..count {
                 check_packed_block(a, &mut iter, packed, saved_steps)?;
                 let value = sequence_item(&values, index)?;
-                let result = call_fn(a, c, function, &[value.clone()], None)?;
+                let result = call_in(&mut caller, a, c, function, &[value.clone()])?;
                 keyed.push((num(&concrete(a, result)?)?, index, value));
             }
             keyed.sort_by(|left, right| left.0.total_cmp(&right.0).then(left.1.cmp(&right.1)));
@@ -1889,7 +1894,7 @@ fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::H
             for index in 0..count {
                 check_packed_block(a, &mut iter, packed, saved_steps)?;
                 let value = sequence_item(&values, index)?;
-                let next = call_fn(a, c, function, &[accumulator.clone(), value], None)?;
+                let next = call_in(&mut caller, a, c, function, &[accumulator.clone(), value])?;
                 accumulator = widen_like(a, &accumulator, &next)?;
             }
             Ok(accumulator)
@@ -1904,9 +1909,9 @@ fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::H
             } else { None };
             for _ in 0..count {
                 check_packed_block(a, &mut iter, packed, saved_steps)?;
-                let next = call_fn(a, c, function, &[accumulator.clone()], None)?;
+                let next = call_in(&mut caller, a, c, function, &[accumulator.clone()])?;
                 if let Some(stop) = stop {
-                    let finished = call_fn(a, c, stop, &[accumulator.clone(), next.clone()], None)?;
+                    let finished = call_in(&mut caller, a, c, stop, &[accumulator.clone(), next.clone()])?;
                     if truth(&concrete(a, finished)?)? { accumulator = next; break; }
                 }
                 accumulator = next;
@@ -3598,20 +3603,38 @@ impl Run {
 }
 // `call_fn` of a closure whose body compiles, run compiled (None: call it walking).
 fn call_compiled(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Option<Result<Value, Diagnostic>> {
-    if a.record && c.record { return None; }
-    let body = body.map(|body| shared_term(a, body));
-    let mut run = Run {
-        workspace: a.workspace.0.clone(), frames: vec![CallFrame { slots: Vec::new(), env: Env::empty(), root: Root::Ctx(c.clone()) }],
-        steps: 0, base: a.step_count, depth: c.depth, notes: Vec::new(), record: false, undo: Vec::new(), context: c.context.clone(),
-    };
-    match run.call(a, Value::Fn(id), values.to_vec(), body.as_ref()) {
-        Ok(value) => {
-            a.step_count += run.steps;
-            EVAL_STEPS.fetch_add(run.steps as u64, Ordering::Relaxed);
-            Some(Ok(value))
-        }
-        Err(Abandon) => { run.undo_into(a); None }
+    let mut caller = Caller::new(a, c);
+    caller.call(a, id, values, body)
+}
+// Calls of closures from a walked loop (map, filter, sort-by, reduce, iterate): one compiled caller for the whole loop.
+struct Caller { run: Option<Run> }
+impl Caller {
+    fn new(a: &Arena, c: &ExecCtx) -> Caller {
+        if a.record && c.record { return Caller { run: None }; }
+        Caller { run: Some(Run {
+            workspace: a.workspace.0.clone(), frames: vec![CallFrame { slots: Vec::new(), env: Env::empty(), root: Root::Ctx(c.clone()) }],
+            steps: 0, base: a.step_count, depth: c.depth, notes: Vec::new(), record: false, undo: Vec::new(), context: c.context.clone(),
+        }) }
     }
+    fn call(&mut self, a: &mut Arena, id: FnId, values: &[Value], body: Option<&Term>) -> Option<Result<Value, Diagnostic>> {
+        let run = self.run.as_mut()?;
+        let body = body.map(|body| shared_term(a, body));
+        run.base = a.step_count;
+        run.steps = 0;
+        match run.call(a, Value::Fn(id), values.to_vec(), body.as_ref()) {
+            Ok(value) => {
+                a.step_count += run.steps;
+                EVAL_STEPS.fetch_add(run.steps as u64, Ordering::Relaxed);
+                run.undo.clear();
+                Some(Ok(value))
+            }
+            Err(Abandon) => { run.undo_into(a); None }
+        }
+    }
+}
+// `call_fn` through a loop's caller.
+fn call_in(caller: &mut Caller, a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value]) -> Result<Value, Diagnostic> {
+    match caller.call(a, id, values, None) { Some(result) => result, None => call_fn_walked(a, c, id, values, None) }
 }
 // The walker's evaluation of `t`, run compiled when `t` is a pure subtree (None: walk it).
 fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Result<Value, Diagnostic>> {
